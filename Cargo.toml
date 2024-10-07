@@ -1,0 +1,19 @@
+[package]
+name = "my-little-proxy"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1.0"
+bytes = "1.7"
+clap = "4.5"
+config = "0.14"
+serde = "1.0"
+serde_json = "1.0"
+thiserror = "1.0"
+tokio = { version = "1.33.0", features = ["full"] }
+tracing = "0.1"
+tracing-subscriber = "0.3"
+
+[dev-dependencies]
+tokio-postgres = { version = "0.7", features = ["with-serde_json-1"] }
