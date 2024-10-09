@@ -1,10 +1,8 @@
 mod postgresql;
-mod sqlserver;
 
 use bytes::BytesMut;
 use postgresql::PostgreSQL;
 use serde::{Deserialize, Serialize};
-use sqlserver::SQLServer;
 use std::mem;
 use std::sync::Once;
 use thiserror::Error;
@@ -110,56 +108,23 @@ async fn handle(client: &mut TcpStream) -> Result<(), Error> {
     let (mut client_reader, mut client_writer) = client.split();
     let (mut server_reader, mut server_writer) = server.split();
 
-    // let mut pg = PostgreSQL::new(client_reader);
-    // let mut sqlserver = SQLServer::new(client_reader);
-
-    // let client_to_server = async {
-    //     loop {
-    //         // let bytes = pg.read().await?;
-    //         let bytes = sqlserver.read().await?;
-    //         debug!("[client_to_server]");
-    //         debug!("bytes: {bytes:?}");
-
-    //         server_writer.write_all(&bytes).await?;
-    //         debug!("write complete");
-    //     }
-    //     Ok::<(), Error>(())
-    // };
-
-    // let server_to_client = async {
-    //     io::copy(&mut server_reader, &mut client_writer).await?;
-    //     Ok::<(), Error>(())
-    // };
+    let mut pg = PostgreSQL::new(client_reader);
 
     let client_to_server = async {
         loop {
-            let mut buffer = vec![0; 1024];
-            let n = client_reader.read(&mut buffer).await?;
-            if n == 0 {
-                break;
-            }
-            debug!("[server_to_client] Read from server");
-            debug!("bytes: {:?}", &buffer[..n]);
+            let bytes = pg.read().await?;
 
-            server_writer.write_all(&buffer[..n]).await?;
-            debug!("[server_to_client] Written to client");
+            debug!("[client_to_server]");
+            debug!("bytes: {bytes:?}");
+
+            server_writer.write_all(&bytes).await?;
+            debug!("write complete");
         }
         Ok::<(), Error>(())
     };
 
     let server_to_client = async {
-        loop {
-            let mut buffer = vec![0; 1024];
-            let n = server_reader.read(&mut buffer).await?;
-            if n == 0 {
-                break;
-            }
-            debug!("[server_to_client] Read from server");
-            debug!("bytes: {:?}", &buffer[..n]);
-
-            client_writer.write_all(&buffer[..n]).await?;
-            debug!("[server_to_client] Written to client");
-        }
+        io::copy(&mut server_reader, &mut client_writer).await?;
         Ok::<(), Error>(())
     };
 
