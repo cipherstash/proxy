@@ -1,10 +1,8 @@
+use super::{BytesMutReadString, FormatCode, NULL};
+use crate::{Error, ProtocolError, SIZE_I16, SIZE_I32};
 use bytes::{Buf, BufMut, BytesMut};
 use std::io::Cursor;
 use std::{convert::TryFrom, ffi::CString};
-
-use crate::{Error, ProtocolError, SIZE_I16, SIZE_I32};
-
-use super::{BytesMutReadString, FormatCode, NULL};
 
 /// Bind (B) message.
 /// See: <https://www.postgresql.org/docs/current/protocol-message-formats.html>

@@ -89,3 +89,25 @@ cargo test -- --nocapture
 
 
 
+
+
+### Sql Server
+
+Server=localhost,1433;Database=master;User Id=SA;Password=Password1;
+
+my-little-proxy
+Server=localhost,6433;Database=master;User Id=SA;Password=Password1;
+
+
+```sql
+docker run -e "ACCEPT_EULA=Y" -e "MSSQL_SA_PASSWORD=Password1" \
+   -p 1433:1433 --name sql2022 --hostname sql2022 \
+   -d \
+   mcr.microsoft.com/mssql/server:2022-latest
+```
+
+
+
+IF  EXISTS (SELECT * FROM sys.objects WHERE object_id = OBJECT_ID(N'[dbo].[blah]') AND type in (N'U'))
+DROP TABLE [dbo].[blah]
+GO

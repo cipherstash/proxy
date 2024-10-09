@@ -3,7 +3,7 @@ mod format_code;
 mod parse;
 mod query;
 
-use crate::{Error, ProtocolError};
+use crate::{Error, ProtocolError, SIZE_I32, SIZE_U8};
 
 pub(crate) use bind::{Bind, BindParam};
 pub(crate) use format_code::FormatCode;
@@ -14,15 +14,9 @@ use bytes::{BufMut, BytesMut};
 use serde::{Deserialize, Serialize};
 use std::io::{BufRead, Cursor};
 use std::mem;
-
 use tokio::io::{self, AsyncRead, AsyncReadExt, AsyncWriteExt};
-
 use tokio::time::{timeout, Duration};
 use tracing::{debug, error, info, warn};
-
-const SIZE_U8: usize = mem::size_of::<u8>();
-const SIZE_I16: usize = mem::size_of::<i16>();
-const SIZE_I32: usize = mem::size_of::<i32>();
 
 // 1 minute
 const CONNECTION_TIMEOUT: Duration = Duration::from_millis(1000 * 1);
@@ -155,8 +149,8 @@ where
     }
 
     async fn read_message(&mut self) -> Result<Message, Error> {
-        let code = self.client.read_u8().await.map_err(map_io_error)?;
-        let len = self.client.read_i32().await.map_err(map_io_error)?;
+        let code = self.client.read_u8().await?;
+        let len = self.client.read_i32().await?;
 
         debug!("[read_message]");
         debug!("code: {}", code as char);
@@ -179,16 +173,13 @@ where
         bytes.put_u8(code);
         bytes.put_i32(len);
 
+        let slice_start = bytes.len();
+
         // Capacity and len are not the same!!
         // resize populates the buffer with 0s
         bytes.resize(capacity, b'0');
 
-        let slice_start = SIZE_U8 + SIZE_I32;
-
-        self.client
-            .read_exact(&mut bytes[slice_start..])
-            .await
-            .map_err(map_io_error)?;
+        self.client.read_exact(&mut bytes[slice_start..]).await?;
 
         let message = Message { code, bytes };
 
@@ -275,20 +266,4 @@ fn encrypt_bind_param(bytes: &[u8]) -> Option<BytesMut> {
             None
         }
     }
-}
-
-fn map_io_error(e: io::Error) -> Error {
-    match e.kind() {
-        io::ErrorKind::UnexpectedEof => Error::ConnectionClosed,
-        _ => e.into(),
-    }
-}
-
-pub trait Read {
-    // fn read<'a>(
-    //     &'a mut self,
-    // ) -> Pin<Box<dyn Future<Output = Result<BytesMut, anyhow::Error>> + Send + 'a>>;
-    // async fn read(&mut self) -> Result<BytesMut, anyhow::Error>;
-    fn read(&mut self)
-        -> impl std::future::Future<Output = Result<BytesMut, anyhow::Error>> + Send;
 }

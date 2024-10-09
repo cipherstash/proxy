@@ -1,9 +1,10 @@
 mod postgresql;
+mod sqlserver;
 
 use bytes::BytesMut;
-
 use postgresql::PostgreSQL;
 use serde::{Deserialize, Serialize};
+use sqlserver::SQLServer;
 use std::mem;
 use std::sync::Once;
 use thiserror::Error;
@@ -19,25 +20,25 @@ const SIZE_U8: usize = mem::size_of::<u8>();
 const SIZE_I16: usize = mem::size_of::<i16>();
 const SIZE_I32: usize = mem::size_of::<i32>();
 
-// 1 minute
-const CONNECTION_TIMEOUT: Duration = Duration::from_millis(1000 * 1);
+// const URL: &str = "127.0.0.1:6432";
+// const DOWNSTREAM: &str = "127.0.0.1:5432";
 
-// Used in the StartupMessage to indicate regular handshake.
-const PROTOCOL_VERSION_NUMBER: i32 = 196608;
+const URL: &str = "127.0.0.1:6433";
+const DOWNSTREAM: &str = "127.0.0.1:1433";
 
 #[derive(Error, Debug)]
 pub enum Error {
     #[error("Connection closed by client")]
     ConnectionClosed,
 
+    #[error("Connection timed out")]
+    ConnectionTimeout(#[from] Elapsed),
+
     #[error(transparent)]
-    Io(#[from] std::io::Error),
+    Io(io::Error),
 
     #[error(transparent)]
     Protocol(#[from] ProtocolError),
-
-    #[error("Connection timed out")]
-    Timeout(#[from] Elapsed),
 }
 
 #[derive(Error, Debug)]
@@ -55,12 +56,25 @@ pub enum ProtocolError {
     UnexpectedNull,
 }
 
+impl From<io::Error> for Error {
+    fn from(e: io::Error) -> Self {
+        match e.kind() {
+            io::ErrorKind::UnexpectedEof => Error::ConnectionClosed,
+            _ => Error::Io(e),
+        }
+    }
+}
+
+pub trait Read {
+    fn read(&mut self) -> impl std::future::Future<Output = Result<BytesMut, Error>> + Send;
+}
+
 #[tokio::main]
 async fn main() {
     trace();
 
-    let listener = TcpListener::bind("127.0.0.1:6432").await.unwrap();
-    println!("Server listening on 127.0.0.1:6432");
+    let listener = TcpListener::bind(URL).await.unwrap();
+    info!(url = URL, "Server listening");
 
     loop {
         let (mut socket, _) = listener.accept().await.unwrap();
@@ -73,7 +87,7 @@ async fn main() {
                             Error::ConnectionClosed => {
                                 info!("Connection closed by client");
                             }
-                            Error::Timeout(_) => {
+                            Error::ConnectionTimeout(_) => {
                                 warn!("Connection timeout");
                             }
                             _ => {
@@ -89,26 +103,63 @@ async fn main() {
 }
 
 async fn handle(client: &mut TcpStream) -> Result<(), Error> {
-    let mut server = TcpStream::connect("127.0.0.1:5432").await?;
+    let mut server = TcpStream::connect(DOWNSTREAM).await?;
 
-    let (client_reader, mut client_writer) = client.split();
+    info!(database = DOWNSTREAM, "Connected");
+
+    let (mut client_reader, mut client_writer) = client.split();
     let (mut server_reader, mut server_writer) = server.split();
 
-    let mut pg = PostgreSQL::new(client_reader);
+    // let mut pg = PostgreSQL::new(client_reader);
+    // let mut sqlserver = SQLServer::new(client_reader);
+
+    // let client_to_server = async {
+    //     loop {
+    //         // let bytes = pg.read().await?;
+    //         let bytes = sqlserver.read().await?;
+    //         debug!("[client_to_server]");
+    //         debug!("bytes: {bytes:?}");
+
+    //         server_writer.write_all(&bytes).await?;
+    //         debug!("write complete");
+    //     }
+    //     Ok::<(), Error>(())
+    // };
+
+    // let server_to_client = async {
+    //     io::copy(&mut server_reader, &mut client_writer).await?;
+    //     Ok::<(), Error>(())
+    // };
 
     let client_to_server = async {
         loop {
-            let bytes = pg.read().await?;
-            debug!("[handle]");
-            debug!("bytes: {bytes:?}");
+            let mut buffer = vec![0; 1024];
+            let n = client_reader.read(&mut buffer).await?;
+            if n == 0 {
+                break;
+            }
+            debug!("[server_to_client] Read from server");
+            debug!("bytes: {:?}", &buffer[..n]);
 
-            server_writer.write_all(&bytes).await?;
+            server_writer.write_all(&buffer[..n]).await?;
+            debug!("[server_to_client] Written to client");
         }
         Ok::<(), Error>(())
     };
 
     let server_to_client = async {
-        io::copy(&mut server_reader, &mut client_writer).await?;
+        loop {
+            let mut buffer = vec![0; 1024];
+            let n = server_reader.read(&mut buffer).await?;
+            if n == 0 {
+                break;
+            }
+            debug!("[server_to_client] Read from server");
+            debug!("bytes: {:?}", &buffer[..n]);
+
+            client_writer.write_all(&buffer[..n]).await?;
+            debug!("[server_to_client] Written to client");
+        }
         Ok::<(), Error>(())
     };
 
@@ -130,13 +181,4 @@ fn trace() {
         tracing::subscriber::set_global_default(subscriber)
             .expect("setting default subscriber failed");
     });
-}
-
-pub trait Read {
-    // fn read<'a>(
-    //     &'a mut self,
-    // ) -> Pin<Box<dyn Future<Output = Result<BytesMut, anyhow::Error>> + Send + 'a>>;
-    // async fn read(&mut self) -> Result<BytesMut, anyhow::Error>;
-    fn read(&mut self)
-        -> impl std::future::Future<Output = Result<BytesMut, anyhow::Error>> + Send;
 }
