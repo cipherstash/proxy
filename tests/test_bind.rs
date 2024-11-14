@@ -54,15 +54,20 @@ async fn rewrite_bind_on_insert() {
     let res = client.query(sql, &[&t, &j, &vtha]).await;
 
     println!("{:?}", res);
+
+    let sql = "SELECT * FROM blah";
+    let res = client.query(sql, &[]).await;
+
+    println!("{:?}", res);
 }
 
-#[tokio::test]
-async fn timeout() {
-    let client = connect().await.unwrap();
+// #[tokio::test]
+// async fn timeout() {
+//     let client = connect().await.unwrap();
 
-    // sleep for 10 seconds using tokio::time::sleep
-    sleep(Duration::from_secs(10)).await;
-}
+//     // sleep for 10 seconds using tokio::time::sleep
+//     sleep(Duration::from_secs(10)).await;
+// }
 
 // #[tokio::test]
 // async fn simple_query() {

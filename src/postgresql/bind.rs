@@ -1,8 +1,11 @@
 use super::{BytesMutReadString, FormatCode, NULL};
-use crate::{Error, ProtocolError, SIZE_I16, SIZE_I32};
+use crate::eql;
+use crate::error::ProtocolError;
+use crate::{Error, SIZE_I16, SIZE_I32};
 use bytes::{Buf, BufMut, BytesMut};
 use std::io::Cursor;
 use std::{convert::TryFrom, ffi::CString};
+use tracing::{debug, info};
 
 /// Bind (B) message.
 /// See: <https://www.postgresql.org/docs/current/protocol-message-formats.html>
@@ -49,12 +52,6 @@ impl BindParam {
         self.bytes.len()
     }
 
-    // jsonb header byte is always 1
-    pub fn maybe_jsonb(&self) -> bool {
-        let header = self.bytes.as_ref()[0];
-        header == 1
-    }
-
     pub fn rewrite(&mut self, bytes: &[u8]) {
         self.bytes.clear();
         self.bytes.extend_from_slice(bytes);
@@ -64,12 +61,82 @@ impl BindParam {
     pub fn rewrite_required(&self) -> bool {
         self.dirty
     }
+
+    pub fn to_plaintext(&self) -> Option<eql::Plaintext> {
+        if !self.maybe_plaintext() {
+            return None;
+        }
+
+        let bytes = self.json_bytes();
+        let s = std::str::from_utf8(bytes).unwrap_or("");
+
+        match serde_json::from_str(&s) {
+            Ok(pt) => Some(pt),
+            Err(e) => {
+                debug!(
+                    param = s,
+                    error = e.to_string(),
+                    "Failed to parse parameter"
+                );
+                None
+            }
+        }
+    }
+
+    fn maybe_plaintext(&self) -> bool {
+        self.is_text() && self.maybe_json() || self.is_binary() && self.maybe_jsonb()
+    }
+
+    fn is_text(&self) -> bool {
+        self.format_code == FormatCode::Text
+    }
+
+    fn is_binary(&self) -> bool {
+        self.format_code == FormatCode::Binary
+    }
+
+    ///
+    /// If the text foprmat is binary, returns a reference to the bytes without the jsonb header byte
+    ///
+    fn json_bytes(&self) -> &[u8] {
+        if self.is_binary() {
+            &self.bytes[1..]
+        } else {
+            &self.bytes[0..]
+        }
+    }
+
+    ///
+    /// Peaks at the first byte char.
+    /// Assumes that a leading `{` may be a JSON value
+    /// The Plaintext Payload is always a JSON object so this is a pretty naive approach
+    /// We are not worried about an exhaustive check here
+    ///
+    fn maybe_json(&self) -> bool {
+        let b = self.bytes.as_ref()[0];
+        b == b'{'
+    }
+
+    ///
+    /// Postgres binary json is regular json with a leading header byte
+    /// The header byte is always 1
+    ///
+    fn maybe_jsonb(&self) -> bool {
+        let header = self.bytes.as_ref()[0];
+        let first = self.bytes.as_ref()[1];
+        header == 1 && first == b'{'
+    }
 }
 
-// The number of parameter format codes that follow (denoted C below).
-// This can be zero to indicate that there are no parameters or that the parameters all use the default format (text);
-// or one, in which case the specified format code is applied to all parameters;
-// or it can equal the actual number of parameters.
+impl Bind {
+    pub fn to_plaintext(&self) -> Result<Vec<Option<eql::Plaintext>>, Error> {
+        Ok(self
+            .param_values
+            .iter()
+            .map(|param| param.to_plaintext())
+            .collect())
+    }
+}
 
 impl TryFrom<&BytesMut> for Bind {
     type Error = Error;

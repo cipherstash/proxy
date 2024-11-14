@@ -1,15 +1,17 @@
+mod config;
+mod encrypt;
+mod eql;
+mod error;
 mod postgresql;
 
-use bytes::BytesMut;
-use postgresql::PostgreSQL;
-use serde::{Deserialize, Serialize};
+use config::TandemConfig;
+use encrypt::Encrypt;
+use error::Error;
 use std::mem;
-use std::sync::Once;
+use std::sync::{Arc, Once};
 use thiserror::Error;
-use tokio::io::{self, AsyncRead, AsyncReadExt, AsyncWriteExt};
+use tokio::io::AsyncWriteExt;
 use tokio::net::{TcpListener, TcpStream};
-use tokio::time::error::Elapsed;
-use tokio::time::{timeout, Duration};
 use tracing::{debug, error, info, warn};
 
 static INIT: Once = Once::new();
@@ -18,67 +20,48 @@ const SIZE_U8: usize = mem::size_of::<u8>();
 const SIZE_I16: usize = mem::size_of::<i16>();
 const SIZE_I32: usize = mem::size_of::<i32>();
 
-// const URL: &str = "127.0.0.1:6432";
-// const DOWNSTREAM: &str = "127.0.0.1:5432";
+const URL: &str = "127.0.0.1:6432";
 
-const URL: &str = "127.0.0.1:6433";
-const DOWNSTREAM: &str = "127.0.0.1:1433";
+// const URL: &str = "127.0.0.1:6433";
+// const DOWNSTREAM: &str = "127.0.0.1:1433";
 
-#[derive(Error, Debug)]
-pub enum Error {
-    #[error("Connection closed by client")]
-    ConnectionClosed,
-
-    #[error("Connection timed out")]
-    ConnectionTimeout(#[from] Elapsed),
-
-    #[error(transparent)]
-    Io(io::Error),
-
-    #[error(transparent)]
-    Protocol(#[from] ProtocolError),
-}
-
-#[derive(Error, Debug)]
-pub enum ProtocolError {
-    #[error("Expected {expected} parameter format codes, received {received}")]
-    ParameterFormatCodesMismatch { expected: usize, received: usize },
-
-    #[error("Expected {expected} parameter format codes, received {received}")]
-    ParameterResultFormatCodesMismatch { expected: usize, received: usize },
-
-    #[error("Unexpected message length {len} for code {code}")]
-    UnexpectedMessageLength { code: u8, len: usize },
-
-    #[error("Unexpected null in string")]
-    UnexpectedNull,
-}
-
-impl From<io::Error> for Error {
-    fn from(e: io::Error) -> Self {
-        match e.kind() {
-            io::ErrorKind::UnexpectedEof => Error::ConnectionClosed,
-            _ => Error::Io(e),
-        }
-    }
-}
-
-pub trait Read {
-    fn read(&mut self) -> impl std::future::Future<Output = Result<BytesMut, Error>> + Send;
-}
+// TODO: Accept command line arguments for config file path
 
 #[tokio::main]
 async fn main() {
+    let config_file = "cipherstash-proxy.toml";
+
     trace();
+
+    let config = match TandemConfig::load(config_file) {
+        Ok(config) => config,
+        Err(err) => {
+            error!("Configuration Error: {}", err);
+            std::process::exit(exitcode::CONFIG);
+        }
+    };
+
+    startup(&config).await;
+
+    info!("config: {:?}", config);
+
+    let encrypt = match Encrypt::init(config).await {
+        Ok(encrypt) => encrypt,
+        Err(err) => {
+            error!("Failed to initialise : {}", err);
+            std::process::exit(exitcode::UNAVAILABLE);
+        }
+    };
 
     let listener = TcpListener::bind(URL).await.unwrap();
     info!(url = URL, "Server listening");
 
     loop {
         let (mut socket, _) = listener.accept().await.unwrap();
+        let encrypt = encrypt.clone();
         tokio::spawn(async move {
             loop {
-                match handle(&mut socket).await {
+                match handle(encrypt.clone(), &mut socket).await {
                     Ok(_) => (),
                     Err(e) => {
                         match e {
@@ -100,31 +83,50 @@ async fn main() {
     }
 }
 
-async fn handle(client: &mut TcpStream) -> Result<(), Error> {
-    let mut server = TcpStream::connect(DOWNSTREAM).await?;
+async fn startup(config: &TandemConfig) {
+    if config.encrypt.dataset_id.is_none() {
+        info!("Encrypt: using default dataset");
+    }
+}
 
-    info!(database = DOWNSTREAM, "Connected");
+async fn handle(encrypt: Encrypt, client: &mut TcpStream) -> Result<(), Error> {
+    let mut server = TcpStream::connect(&encrypt.config.connect.database).await?;
 
-    let (mut client_reader, mut client_writer) = client.split();
-    let (mut server_reader, mut server_writer) = server.split();
+    info!(database = encrypt.config.connect.database, "Connected");
 
-    let mut pg = PostgreSQL::new(client_reader);
+    let (client_reader, mut client_writer) = client.split();
+    let (server_reader, mut server_writer) = server.split();
 
     let client_to_server = async {
+        let mut fe = postgresql::Frontend::new(client_reader, server_writer);
         loop {
-            let bytes = pg.read().await?;
+            let bytes = fe.read().await?;
 
             debug!("[client_to_server]");
             debug!("bytes: {bytes:?}");
 
-            server_writer.write_all(&bytes).await?;
+            fe.write(bytes).await?;
             debug!("write complete");
         }
+
+        // Unreachable, but helps the compiler understand the return type
+        // TODO: extract into a function
         Ok::<(), Error>(())
     };
 
     let server_to_client = async {
-        io::copy(&mut server_reader, &mut client_writer).await?;
+        let mut be = postgresql::Backend::new(server_reader);
+
+        loop {
+            let bytes = be.read().await?;
+
+            debug!("[client_to_server]");
+            debug!("bytes: {bytes:?}");
+
+            client_writer.write_all(&bytes).await?;
+            debug!("write complete");
+        }
+
         Ok::<(), Error>(())
     };
 

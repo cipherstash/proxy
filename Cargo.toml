@@ -4,16 +4,23 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+cipherstash-client = { path = "/Users/tobyhede/src/cipherstash-suite/packages/cipherstash-client/", features = [
+    "tokio",
+] }
+cipherstash-stats = { path = "/Users/tobyhede/src/cipherstash-suite/packages/cipherstash-stats/" }
+
 anyhow = "1.0"
-bytes = "1.7"
+bytes = "1.8"
 clap = "4.5"
 config = "0.14"
+exitcode = "1.1.2"
 serde = "1.0"
 serde_json = "1.0"
-thiserror = "1.0"
-tokio = { version = "1.33.0", features = ["full"] }
+thiserror = "2.0"
+tokio = { version = "1.41.1", features = ["full"] }
 tracing = "0.1"
 tracing-subscriber = "0.3"
+uuid = { version = "1.11.0", features = ["v4", "v5", "serde"] }
 
 [dev-dependencies]
 tokio-postgres = { version = "0.7", features = ["with-serde_json-1"] }

@@ -1,0 +1,11 @@
+[auth]
+workspace_id = "5482b7bc-9460-4e0d-afdf-d157f6843d57"
+client_access_key = "e0ef15b0-7826-4e33-a434-1535080f95ca"
+
+[encrypt]
+dataset_id = "dataset_id"
+client_id = "fca99ab9-5e17-42cb-9374-b0cbbe16dd59"
+client_key = "25298d9f5b114ed1ba43f0e744b35a4a5f1bf176e5494438b495740a1f655b05f8f56aa0904943f08f9f68da234247a4"
+
+[connect]
+database = "127.0.0.1:5432"
