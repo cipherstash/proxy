@@ -6,9 +6,9 @@ mod parse;
 mod protocol;
 mod query;
 
-use crate::eql;
-use crate::error::ProtocolError;
-use crate::{Error, SIZE_I32, SIZE_U8};
+use crate::error::{Error, ProtocolError};
+use crate::{SIZE_I32, SIZE_U8};
+
 use bytes::{BufMut, BytesMut};
 use serde::{Deserialize, Serialize};
 use std::io::{BufRead, Cursor};
@@ -16,10 +16,10 @@ use tokio::io::{self, AsyncRead, AsyncReadExt, AsyncWriteExt};
 use tokio::time::{timeout, Duration};
 use tracing::{debug, error, info, warn};
 
-pub(crate) use backend::Backend;
-pub(crate) use bind::{Bind, BindParam};
-pub(crate) use format_code::FormatCode;
-pub(crate) use frontend::Frontend;
+pub use backend::Backend;
+pub use bind::{Bind, BindParam};
+pub use format_code::FormatCode;
+pub use frontend::Frontend;
 
 // 1 minute
 const CONNECTION_TIMEOUT: Duration = Duration::from_millis(1000 * 1);

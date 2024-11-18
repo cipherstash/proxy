@@ -3,7 +3,11 @@ name = "my-little-proxy"
 version = "0.1.0"
 edition = "2021"
 
+[profile.dev]
+incremental = true
+
 [dependencies]
+cipherstash-config = { path = "/Users/tobyhede/src/cipherstash-suite/packages/cipherstash-config/" }
 cipherstash-client = { path = "/Users/tobyhede/src/cipherstash-suite/packages/cipherstash-client/", features = [
     "tokio",
 ] }
@@ -18,9 +22,8 @@ serde = "1.0"
 serde_json = "1.0"
 thiserror = "2.0"
 tokio = { version = "1.41.1", features = ["full"] }
+tokio-postgres = { version = "0.7", features = ["with-serde_json-1"] }
 tracing = "0.1"
 tracing-subscriber = "0.3"
 uuid = { version = "1.11.0", features = ["v4", "v5", "serde"] }
-
-[dev-dependencies]
-tokio-postgres = { version = "0.7", features = ["with-serde_json-1"] }
+url = { version = "2.5.3", features = ["serde"] }

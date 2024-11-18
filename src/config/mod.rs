@@ -1,112 +1,82 @@
-use crate::error::Error;
-use config::{Config, Environment};
-use serde::Deserialize;
-use std::path::PathBuf;
-use tracing::{debug, error};
-use uuid::Uuid;
+mod dataset;
+// mod dataset_manager;
+mod tandem;
+
+pub use dataset::JsonDatasetConfig;
+pub use tandem::TandemConfig;
+
+use crate::error::{ConfigError, Error};
+use cipherstash_config::DatasetConfig;
+use tokio_postgres::{Client, NoTls, SimpleQueryMessage, SimpleQueryRow};
+use tracing::{error, warn};
 
 pub const CS_PREFIX: &str = "CS";
 pub const DEFAULT_CONFIG_FILE_PATH: &str = "cipherstash-proxy.toml";
 
-#[derive(Clone, Debug, Deserialize)]
-pub struct TandemConfig {
-    pub connect: ConnectionConfig,
-    pub auth: AuthConfig,
-    pub encrypt: EncryptConfig,
-}
+const ENCRYPT_DATASET_CONFIG_QUERY: &'static str = include_str!("./sql/select_config.sql");
 
-#[derive(Clone, Debug, Deserialize)]
-pub struct ConnectionConfig {
-    pub database: String,
-}
+pub async fn connect(connection_string: String) -> Result<Client, tokio_postgres::Error> {
+    let (client, connection) = tokio_postgres::connect(&connection_string, NoTls).await?;
 
-#[derive(Clone, Debug, Deserialize)]
-pub struct AuthConfig {
-    pub workspace_id: String,
-    pub client_access_key: String,
-}
-
-// TODO: Use Paranoid from the primitives crate when that lands
-#[derive(Debug, Deserialize, Clone, PartialEq)]
-pub struct EncryptConfig {
-    pub client_id: String,
-    pub client_key: String,
-    pub dataset_id: Option<Uuid>,
-}
-
-/// Config defaults to a file called `tandem` in the current directory.
-/// Supports TOML, JSON, YAML
-/// Variable names should match the struct field names.
-///
-/// ENV vars can be used to override file settings.
-///
-/// ENV vars must be prefixed with `CS_`.
-///
-impl TandemConfig {
-    pub fn default_path() -> String {
-        DEFAULT_CONFIG_FILE_PATH.to_string()
-    }
-
-    pub fn load(path: &str) -> Result<TandemConfig, Error> {
-        TandemConfig::build_with_path(path)
-    }
-
-    pub fn build_with_path(path: &str) -> Result<Self, Error> {
-        // Log a warning to user that config file is missing
-        if !PathBuf::from(path).exists() {
-            println!("Config file not found: {path}");
-            println!("Loading config values only from environment variables.");
+    tokio::spawn(async move {
+        if let Err(e) = connection.await {
+            eprintln!("connection error: {}", e);
         }
+    });
 
-        // For parsing top-level values such as CS_HOST, CS_PORT
-        // and for parsing nested env values such as CS_DATABASE__HOST, CS_DATABASE__PORT
-        let cs_env_source = Environment::with_prefix(CS_PREFIX)
-            .try_parsing(true)
-            .separator("__")
-            .prefix_separator("_");
-
-        let config: Self = Config::builder()
-            .add_source(config::File::with_name(path).required(false))
-            .add_source(cs_env_source)
-            .build()?
-            .try_deserialize()
-            .map_err(|err| {
-                match err {
-                    config::ConfigError::Message(ref s) => {
-                        if s.contains("UUID parsing failed") {
-                            error!("Invalid Dataset ID. Expected a UUID.");
-                            debug!("{s}");
-                        }
-                    }
-                    _ => {}
-                };
-                err
-            })?;
-
-        Ok(config)
-    }
+    Ok(client)
 }
 
-#[cfg(test)]
-mod tests {
-    use tracing::info;
-    use uuid::Uuid;
+pub async fn load_dataset(config: &TandemConfig) -> Result<DatasetConfig, Error> {
+    let client = connect(config.connect.to_connection_string()).await?;
+    let result = client.simple_query(ENCRYPT_DATASET_CONFIG_QUERY).await;
 
-    use crate::{config::TandemConfig, error::Error, trace};
+    warn!("result: {:?}", result);
 
-    #[test]
-    fn test_dataset_as_uuid() {
-        trace();
+    let rows = match result {
+        Ok(rows) => rows
+            .into_iter()
+            .filter_map(|row| match row {
+                SimpleQueryMessage::Row(row) => Some(row),
+                _ => None,
+            })
+            .collect::<Vec<SimpleQueryRow>>(),
+        Err(e) => {
+            if configuration_table_not_found(&e) {
+                error!("No Encrypt configuration table in database.");
+                warn!("Encrypt requires the Encrypt Query Language (EQL) to be installed in the target database");
+                warn!("See https://github.com/cipherstash/encrypt-query-language");
 
-        let config = TandemConfig::load("tests/cipherstash-proxy.toml").unwrap();
-        assert_eq!(
-            config.encrypt.dataset_id,
-            Some(Uuid::parse_str("484cd205-99e8-41ca-acfe-55a7e25a8ec2").unwrap())
-        );
+                return Err(ConfigError::MissingEncryptConfigTable.into());
+            }
 
-        let config = TandemConfig::load("tests/cipherstash-proxy-bad-dataset.toml");
+            error!("Error loading Encrypt configuration");
+            return Err(ConfigError::Database(e).into());
+        }
+    };
 
-        assert!(config.is_err());
-        assert!(matches!(config.unwrap_err(), Error::Config(_)));
-    }
+    if rows.is_empty() {
+        error!("No active Encrypt configuration");
+        return Err(ConfigError::MissingActiveEncryptConfig.into());
+    };
+
+    let data = rows
+        .first()
+        .ok_or_else(|| ConfigError::MissingActiveEncryptConfig)
+        .and_then(|row| row.try_get(0).map_err(|e| ConfigError::Database(e)))
+        .and_then(|opt_str: Option<&str>| {
+            opt_str.ok_or_else(|| ConfigError::MissingActiveEncryptConfig)
+        })?;
+
+    let config: JsonDatasetConfig =
+        serde_json::from_str(&data).map_err(|e| ConfigError::Parse(e))?;
+
+    let dataset_config = config.try_into().map_err(|e| ConfigError::Dataset(e))?;
+
+    Ok(dataset_config)
+}
+
+fn configuration_table_not_found(e: &tokio_postgres::Error) -> bool {
+    let msg = e.to_string();
+    msg.contains("cs_configuration_v1") && msg.contains("does not exist")
 }

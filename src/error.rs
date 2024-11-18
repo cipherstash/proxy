@@ -9,7 +9,7 @@ pub enum Error {
     Client(#[from] cipherstash_client::config::errors::ConfigError),
 
     #[error(transparent)]
-    Config(#[from] config::ConfigError),
+    Config(#[from] ConfigError),
 
     #[error("Connection closed by client")]
     ConnectionClosed,
@@ -27,6 +27,27 @@ pub enum Error {
 
     #[error(transparent)]
     ZeroKMS(#[from] cipherstash_client::zerokms::Error),
+}
+
+#[derive(Error, Debug)]
+pub enum ConfigError {
+    #[error(transparent)]
+    Config(#[from] config::ConfigError),
+
+    #[error(transparent)]
+    Dataset(#[from] cipherstash_config::errors::ConfigError),
+
+    #[error(transparent)]
+    Database(#[from] tokio_postgres::Error),
+
+    #[error(transparent)]
+    Parse(#[from] serde_json::Error),
+
+    #[error("Expected an active Encrypt configuration")]
+    MissingActiveEncryptConfig,
+
+    #[error("Expected an Encrypt configuration table")]
+    MissingEncryptConfigTable,
 }
 
 #[derive(Error, Debug)]
@@ -56,5 +77,17 @@ impl From<io::Error> for Error {
             io::ErrorKind::UnexpectedEof => Error::ConnectionClosed,
             _ => Error::Io(e),
         }
+    }
+}
+
+impl From<config::ConfigError> for Error {
+    fn from(e: config::ConfigError) -> Self {
+        Error::Config(ConfigError::Config(e))
+    }
+}
+
+impl From<tokio_postgres::Error> for Error {
+    fn from(e: tokio_postgres::Error) -> Self {
+        Error::Config(ConfigError::Database(e))
     }
 }

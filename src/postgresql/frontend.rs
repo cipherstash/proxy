@@ -4,8 +4,9 @@ use tokio::time::timeout;
 use tracing::debug;
 
 use super::Message;
+use crate::error::Error;
 use crate::postgresql::{read_message, Bind, CONNECTION_TIMEOUT, PROTOCOL_VERSION_NUMBER};
-use crate::{Error, SIZE_I32};
+use crate::SIZE_I32;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Code {

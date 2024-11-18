@@ -1,3 +1,5 @@
+// mod config;
+
 use crate::{config::TandemConfig, eql, error::Error};
 use cipherstash_client::{
     credentials::{auto_refresh::AutoRefresh, service_credentials::ServiceCredentials},

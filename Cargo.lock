@@ -1604,6 +1604,7 @@ dependencies = [
  "anyhow",
  "bytes",
  "cipherstash-client",
+ "cipherstash-config",
  "cipherstash-stats",
  "clap",
  "config",
@@ -1615,6 +1616,7 @@ dependencies = [
  "tokio-postgres",
  "tracing",
  "tracing-subscriber",
+ "url",
  "uuid",
 ]
 
@@ -3192,6 +3194,7 @@ dependencies = [
  "form_urlencoded",
  "idna",
  "percent-encoding",
+ "serde",
 ]
 
 [[package]]

@@ -1,32 +1,15 @@
-mod config;
-mod encrypt;
-mod eql;
-mod error;
-mod postgresql;
-
-use config::TandemConfig;
-use encrypt::Encrypt;
-use error::Error;
-use std::mem;
-use std::sync::{Arc, Once};
-use thiserror::Error;
+use my_little_proxy::config::TandemConfig;
+use my_little_proxy::encrypt::Encrypt;
+use my_little_proxy::error::Error;
+use my_little_proxy::{postgresql, trace};
 use tokio::io::AsyncWriteExt;
 use tokio::net::{TcpListener, TcpStream};
 use tracing::{debug, error, info, warn};
 
-static INIT: Once = Once::new();
-
-const SIZE_U8: usize = mem::size_of::<u8>();
-const SIZE_I16: usize = mem::size_of::<i16>();
-const SIZE_I32: usize = mem::size_of::<i32>();
-
+// TODO Add to config
 const URL: &str = "127.0.0.1:6432";
 
-// const URL: &str = "127.0.0.1:6433";
-// const DOWNSTREAM: &str = "127.0.0.1:1433";
-
 // TODO: Accept command line arguments for config file path
-
 #[tokio::main]
 async fn main() {
     let config_file = "cipherstash-proxy.toml";
@@ -90,9 +73,12 @@ async fn startup(config: &TandemConfig) {
 }
 
 async fn handle(encrypt: Encrypt, client: &mut TcpStream) -> Result<(), Error> {
-    let mut server = TcpStream::connect(&encrypt.config.connect.database).await?;
+    let mut server = TcpStream::connect(&encrypt.config.connect.to_socket_address()).await?;
 
-    info!(database = encrypt.config.connect.database, "Connected");
+    info!(
+        database = encrypt.config.connect.to_socket_address(),
+        "Connected"
+    );
 
     let (client_reader, mut client_writer) = client.split();
     let (server_reader, mut server_writer) = server.split();
@@ -133,19 +119,4 @@ async fn handle(encrypt: Encrypt, client: &mut TcpStream) -> Result<(), Error> {
     tokio::try_join!(client_to_server, server_to_client)?;
 
     Ok(())
-}
-
-fn trace() {
-    INIT.call_once(|| {
-        use tracing_subscriber::FmtSubscriber;
-
-        let subscriber = FmtSubscriber::builder()
-            .with_max_level(tracing::Level::DEBUG) // Set the maximum level of tracing events that should be logged.
-            .with_line_number(true)
-            .with_target(true)
-            .finish();
-
-        tracing::subscriber::set_global_default(subscriber)
-            .expect("setting default subscriber failed");
-    });
 }

@@ -1,5 +1,6 @@
+use crate::error::Error;
 use crate::postgresql::{read_message, CONNECTION_TIMEOUT};
-use crate::Error;
+
 use bytes::BytesMut;
 use tokio::io::{self, AsyncRead};
 use tokio::time::{timeout, Duration};
