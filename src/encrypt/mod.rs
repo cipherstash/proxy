@@ -1,10 +1,9 @@
 // mod config;
 
 use crate::{
-    config::TandemConfig,
+    config::{DatasetManager, TandemConfig},
     eql,
     error::{EncryptError, Error},
-    load_dataset_config,
 };
 use cipherstash_client::{
     credentials::{auto_refresh::AutoRefresh, service_credentials::ServiceCredentials},
@@ -18,27 +17,18 @@ use std::{sync::Arc, vec};
 
 type ScopedCipher = encryption::ScopedCipher<AutoRefresh<ServiceCredentials>>;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Encrypt {
     pub config: TandemConfig,
     cipher: Arc<ScopedCipher>,
-    dataset: DatasetConfig,
-}
-
-impl Clone for Encrypt {
-    fn clone(&self) -> Self {
-        Encrypt {
-            config: self.config.clone(),
-            cipher: self.cipher.clone(),
-            dataset: self.dataset.clone(),
-        }
-    }
+    dataset: DatasetManager,
 }
 
 impl Encrypt {
     pub async fn init(config: TandemConfig) -> Result<Encrypt, Error> {
         let cipher = Arc::new(init_cipher(&config).await?);
-        let dataset = load_dataset_config(&config).await?;
+        let dataset = DatasetManager::init(&config.connect).await?;
+
         Ok(Encrypt {
             config,
             cipher,
@@ -100,9 +90,10 @@ impl Encrypt {
     }
 
     fn column_config(&self, pt: &eql::Plaintext) -> Result<ColumnConfig, Error> {
+        let dataset = self.dataset.load();
+
         // TODO dataset config is inconsistent with input param types for get_table and get_column
-        let table_config = self
-            .dataset
+        let table_config = dataset
             .get_table(&pt.identifier.table.as_str())
             .ok_or_else(|| EncryptError::UnknownTable {
                 table: pt.identifier.table.to_owned(),

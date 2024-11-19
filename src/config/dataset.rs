@@ -6,8 +6,6 @@ use cipherstash_config::{
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-use crate::error::{ConfigError, Error};
-
 pub type TableName = String;
 pub type ColumnName = String;
 pub type Tables = HashMap<TableName, Table>;
