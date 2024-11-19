@@ -59,8 +59,8 @@ async fn read_message<C: AsyncRead + Unpin>(mut client: C) -> Result<Message, Er
     let code = client.read_u8().await?;
     let len = client.read_i32().await?;
 
-    debug!("[read_message]");
-    debug!("code: {}", code as char);
+    // debug!("[read_message]");
+    // debug!("code: {}", code as char);
     // debug!("len: {len}");
 
     // Detect unexpected message len and avoid panic on read_exact
@@ -91,14 +91,4 @@ async fn read_message<C: AsyncRead + Unpin>(mut client: C) -> Result<Message, Er
     let message = Message { code, bytes };
 
     Ok(message)
-}
-
-///
-/// Binary jsonb adds a version byte to the front of the encoded json byte string.
-///
-fn json_to_binary_format(bytes: BytesMut) -> BytesMut {
-    let mut jsonb = BytesMut::with_capacity(1 + bytes.len());
-    jsonb.put_u8(1);
-    jsonb.put_slice(&bytes);
-    jsonb
 }

@@ -1,11 +1,19 @@
 // mod config;
 
-use crate::{config::TandemConfig, eql, error::Error};
+use crate::{
+    config::TandemConfig,
+    eql,
+    error::{EncryptError, Error},
+    load_dataset_config,
+};
 use cipherstash_client::{
     credentials::{auto_refresh::AutoRefresh, service_credentials::ServiceCredentials},
-    encryption::{self, PlaintextTarget, ReferencedPendingPipeline},
+    encryption::{
+        self, Encrypted, IndexTerm, Plaintext, PlaintextTarget, ReferencedPendingPipeline,
+    },
     ConsoleConfig, CtsConfig, ZeroKMS, ZeroKMSConfig,
 };
+use cipherstash_config::{ColumnConfig, DatasetConfig};
 use std::{sync::Arc, vec};
 
 type ScopedCipher = encryption::ScopedCipher<AutoRefresh<ServiceCredentials>>;
@@ -14,6 +22,7 @@ type ScopedCipher = encryption::ScopedCipher<AutoRefresh<ServiceCredentials>>;
 pub struct Encrypt {
     pub config: TandemConfig,
     cipher: Arc<ScopedCipher>,
+    dataset: DatasetConfig,
 }
 
 impl Clone for Encrypt {
@@ -21,6 +30,7 @@ impl Clone for Encrypt {
         Encrypt {
             config: self.config.clone(),
             cipher: self.cipher.clone(),
+            dataset: self.dataset.clone(),
         }
     }
 }
@@ -28,23 +38,84 @@ impl Clone for Encrypt {
 impl Encrypt {
     pub async fn init(config: TandemConfig) -> Result<Encrypt, Error> {
         let cipher = Arc::new(init_cipher(&config).await?);
-        Ok(Encrypt { config, cipher })
+        let dataset = load_dataset_config(&config).await?;
+        Ok(Encrypt {
+            config,
+            cipher,
+            dataset,
+        })
     }
 
-    pub fn encrypt(
+    pub async fn encrypt(
         &self,
-        pt: Vec<Option<eql::Plaintext>>,
-    ) -> Result<Vec<Option<eql::Encrypted>>, Error> {
+        plaintexts: Vec<Option<eql::Plaintext>>,
+    ) -> Result<Vec<Option<eql::Ciphertext>>, Error> {
         let mut pipeline = ReferencedPendingPipeline::new(self.cipher.clone());
 
-        // let encryptable = PlaintextTarget::new(plaintext, column_config.clone(), None);
-        // pipeline.add_with_ref::<PlaintextTarget>(encryptable, idx)?;
+        for (idx, pt) in plaintexts.iter().enumerate() {
+            match pt {
+                Some(pt) => {
+                    let column_config = self.column_config(&pt)?;
 
+                    let pt = Plaintext::Utf8Str(Some(pt.plaintext.to_owned()));
+                    let encryptable = PlaintextTarget::new(pt, column_config.clone(), None);
+                    pipeline.add_with_ref::<PlaintextTarget>(encryptable, idx)?;
+                }
+                None => {}
+            }
+        }
+
+        let mut encrypted_eql = vec![];
+        if !pipeline.is_empty() {
+            let mut result = pipeline.encrypt().await?;
+
+            for (idx, pt) in plaintexts.iter().enumerate() {
+                match pt {
+                    Some(pt) => {
+                        let maybe_encrypted = result.remove(idx);
+                        match maybe_encrypted {
+                            Some(encrypted) => {
+                                let ct = to_eql_encrypted(encrypted, pt)?;
+                                encrypted_eql.push(Some(ct));
+                            }
+                            None => {
+                                return Err(EncryptError::ColumnNotEncrypted {
+                                    table: pt.identifier.table.to_owned(),
+                                    column: pt.identifier.column.to_owned(),
+                                }
+                                .into());
+                            }
+                        }
+                    }
+                    None => encrypted_eql.push(None),
+                }
+            }
+        }
+
+        Ok(encrypted_eql)
+    }
+
+    pub fn decrypt(&self, pt: Vec<eql::Ciphertext>) -> Result<Vec<eql::Plaintext>, Error> {
         Ok(vec![])
     }
 
-    pub fn decrypt(&self, pt: Vec<eql::Encrypted>) -> Result<Vec<eql::Plaintext>, Error> {
-        Ok(vec![])
+    fn column_config(&self, pt: &eql::Plaintext) -> Result<ColumnConfig, Error> {
+        // TODO dataset config is inconsistent with input param types for get_table and get_column
+        let table_config = self
+            .dataset
+            .get_table(&pt.identifier.table.as_str())
+            .ok_or_else(|| EncryptError::UnknownTable {
+                table: pt.identifier.table.to_owned(),
+            })?;
+
+        let column_config = table_config
+            .get_column(&pt.identifier.column)?
+            .ok_or_else(|| EncryptError::UnknownColumn {
+                table: pt.identifier.table.to_owned(),
+                column: pt.identifier.column.to_owned(),
+            })?;
+
+        Ok(column_config.clone())
     }
 }
 
@@ -73,4 +144,37 @@ async fn init_cipher(config: &TandemConfig) -> Result<ScopedCipher, Error> {
     );
 
     Ok(ScopedCipher::init(Arc::new(zerokms_client), config.encrypt.dataset_id).await?)
+}
+
+fn to_eql_encrypted(encrypted: Encrypted, pt: &eql::Plaintext) -> Result<eql::Ciphertext, Error> {
+    struct Indexes {
+        ore_index: Option<String>,
+        match_index: Option<Vec<u16>>,
+        unique_index: Option<String>,
+    }
+
+    // TODO INDEXES
+    // let mut indexes = Indexes {
+    //     ore_index: None,
+    //     match_index: None,
+    //     unique_index: None,
+    // };
+
+    match encrypted {
+        Encrypted::Record(ciphertext, _terms) => {
+            // TODO INDEXES
+            let ct = eql::Ciphertext {
+                ciphertext,
+                identifier: pt.identifier.clone(),
+                version: 1,
+                ore_index: None,
+                match_index: None,
+                unique_index: None,
+            };
+            Ok(ct)
+        }
+        Encrypted::SteVec(_ste_vec_index) => {
+            todo!("Encrypted::SteVec");
+        }
+    }
 }

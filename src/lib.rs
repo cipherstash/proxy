@@ -4,7 +4,7 @@ pub mod eql;
 pub mod error;
 pub mod postgresql;
 
-pub use crate::config::{load_dataset, TandemConfig};
+pub use crate::config::{load_dataset_config, TandemConfig};
 
 use std::{mem, sync::Once};
 

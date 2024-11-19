@@ -1,4 +1,4 @@
-use cipherstash_client::zerokms;
+use cipherstash_client::encryption;
 use std::io;
 use thiserror::Error;
 use tokio::time::error::Elapsed;
@@ -17,8 +17,9 @@ pub enum Error {
     #[error("Connection timed out")]
     ConnectionTimeout(#[from] Elapsed),
 
-    // #[error(transparent)]
-    // Eql(#[from] EqlError),
+    #[error(transparent)]
+    Encrypt(#[from] EncryptError),
+
     #[error(transparent)]
     Io(io::Error),
 
@@ -51,9 +52,21 @@ pub enum ConfigError {
 }
 
 #[derive(Error, Debug)]
-pub enum EqlError {
+pub enum EncryptError {
+    #[error("Table {table} has no Encrypt configuration")]
+    UnknownTable { table: String },
+
+    #[error("Column {column} in table {table} has no Encrypt configuration")]
+    UnknownColumn { table: String, column: String },
+
+    #[error("Column {column} in table {table} was not encrypted")]
+    ColumnNotEncrypted { table: String, column: String },
+
     #[error(transparent)]
-    Parse(#[from] serde_json::Error),
+    Pipeline(#[from] encryption::EncryptionError),
+
+    #[error(transparent)]
+    CiphertextCouldNotBeEncoded(#[from] serde_json::Error),
 }
 
 #[derive(Error, Debug)]
@@ -82,12 +95,30 @@ impl From<io::Error> for Error {
 
 impl From<config::ConfigError> for Error {
     fn from(e: config::ConfigError) -> Self {
-        Error::Config(ConfigError::Config(e))
+        Error::Config(e.into())
     }
 }
 
 impl From<tokio_postgres::Error> for Error {
     fn from(e: tokio_postgres::Error) -> Self {
-        Error::Config(ConfigError::Database(e))
+        Error::Config(e.into())
+    }
+}
+
+impl From<cipherstash_config::errors::ConfigError> for Error {
+    fn from(e: cipherstash_config::errors::ConfigError) -> Self {
+        Error::Config(e.into())
+    }
+}
+
+impl From<encryption::EncryptionError> for Error {
+    fn from(e: encryption::EncryptionError) -> Self {
+        Error::Encrypt(e.into())
+    }
+}
+
+impl From<serde_json::Error> for Error {
+    fn from(e: serde_json::Error) -> Self {
+        Error::Encrypt(e.into())
     }
 }

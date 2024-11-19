@@ -24,17 +24,7 @@ async fn main() {
         }
     };
 
-    startup(&config).await;
-
-    info!("config: {:?}", config);
-
-    let encrypt = match Encrypt::init(config).await {
-        Ok(encrypt) => encrypt,
-        Err(err) => {
-            error!("Failed to initialise : {}", err);
-            std::process::exit(exitcode::UNAVAILABLE);
-        }
-    };
+    let encrypt = startup(config).await;
 
     let listener = TcpListener::bind(URL).await.unwrap();
     info!(url = URL, "Server listening");
@@ -66,9 +56,17 @@ async fn main() {
     }
 }
 
-async fn startup(config: &TandemConfig) {
+async fn startup(config: TandemConfig) -> Encrypt {
     if config.encrypt.dataset_id.is_none() {
         info!("Encrypt: using default dataset");
+    }
+
+    match Encrypt::init(config).await {
+        Ok(encrypt) => encrypt,
+        Err(err) => {
+            error!("Failed to initialise : {}", err);
+            std::process::exit(exitcode::UNAVAILABLE);
+        }
     }
 }
 
@@ -84,15 +82,15 @@ async fn handle(encrypt: Encrypt, client: &mut TcpStream) -> Result<(), Error> {
     let (server_reader, mut server_writer) = server.split();
 
     let client_to_server = async {
-        let mut fe = postgresql::Frontend::new(client_reader, server_writer);
+        let mut fe = postgresql::Frontend::new(client_reader, server_writer, encrypt);
         loop {
             let bytes = fe.read().await?;
 
-            debug!("[client_to_server]");
-            debug!("bytes: {bytes:?}");
+            // debug!("[client_to_server]");
+            // debug!("bytes: {bytes:?}");
 
             fe.write(bytes).await?;
-            debug!("write complete");
+            // debug!("write complete");
         }
 
         // Unreachable, but helps the compiler understand the return type
@@ -106,11 +104,11 @@ async fn handle(encrypt: Encrypt, client: &mut TcpStream) -> Result<(), Error> {
         loop {
             let bytes = be.read().await?;
 
-            debug!("[client_to_server]");
-            debug!("bytes: {bytes:?}");
+            // debug!("[client_to_server]");
+            // debug!("bytes: {bytes:?}");
 
             client_writer.write_all(&bytes).await?;
-            debug!("write complete");
+            // debug!("write complete");
         }
 
         Ok::<(), Error>(())

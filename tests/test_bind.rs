@@ -1,5 +1,6 @@
 use std::time::Duration;
 
+use my_little_proxy::eql::{Identifier, Plaintext};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tokio::time::sleep;
@@ -28,30 +29,27 @@ pub async fn connect() -> Result<Client, tokio_postgres::Error> {
     Ok(client)
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
-struct Encrypted {
-    v: usize,
-    cfg: usize,
-    knd: String,
-}
-
 #[tokio::test]
 async fn rewrite_bind_on_insert() {
     let client = connect().await.unwrap();
 
-    let sql = "INSERT INTO blah (t, j, vtha) VALUES ($1, $2, $3)";
+    let sql = "INSERT INTO blah (vtha) VALUES ($1)";
 
-    let t = "blahvtha";
-    let j = json!({"a": 1, "b": 2, "c": 3});
-
-    let e = Encrypted {
-        v: 1,
-        cfg: 1,
-        knd: "pt".to_string(),
+    let identifier = Identifier {
+        table: "blah".to_string(),
+        column: "vtha".to_string(),
     };
-    let vtha = serde_json::to_value(e).unwrap();
 
-    let res = client.query(sql, &[&t, &j, &vtha]).await;
+    let pt = Plaintext {
+        plaintext: "hello".to_string(),
+        identifier,
+        version: 1,
+        for_query: None,
+    };
+
+    let vtha = serde_json::to_value(pt).unwrap();
+
+    let res = client.query(sql, &[&vtha]).await;
 
     println!("{:?}", res);
 

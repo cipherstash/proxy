@@ -1,9 +1,10 @@
 use bytes::{BufMut, BytesMut};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::time::timeout;
-use tracing::debug;
+use tracing::{debug, error, info};
 
 use super::Message;
+use crate::encrypt::Encrypt;
 use crate::error::Error;
 use crate::postgresql::{read_message, Bind, CONNECTION_TIMEOUT, PROTOCOL_VERSION_NUMBER};
 use crate::SIZE_I32;
@@ -23,6 +24,7 @@ where
 {
     client: C,
     server: S,
+    encrypt: Encrypt,
     startup_complete: bool,
 }
 
@@ -31,22 +33,23 @@ where
     C: AsyncRead + Unpin,
     S: AsyncWriteExt + Unpin,
 {
-    pub fn new(client: C, server: S) -> Self {
+    pub fn new(client: C, server: S, encrypt: Encrypt) -> Self {
         Frontend {
             client,
             server,
+            encrypt,
             startup_complete: false,
         }
     }
 
     pub async fn write(&mut self, bytes: BytesMut) -> Result<(), Error> {
-        debug!("[frontend.write]");
+        // debug!("[frontend.write]");
         self.server.write_all(&bytes).await?;
         Ok(())
     }
 
     pub async fn read(&mut self) -> Result<BytesMut, Error> {
-        debug!("[frontend.read]");
+        // debug!("[frontend.read]");
 
         if !self.startup_complete {
             let bytes = self.read_start_up_message().await?;
@@ -57,49 +60,37 @@ where
 
         match message.code.into() {
             Code::Query => {
-                debug!("Query");
+                // debug!("Query");
                 // let query = Query::try_from(&message.bytes.clone())?;
                 // debug!("{query:?}");
             }
             Code::Parse => {
-                debug!("Parse");
+                // debug!("Parse");
                 // let parse = Parse::try_from(&message.bytes)?;
                 // debug!("{parse:?}");
             }
             Code::Bind => {
-                if let Some(bytes) = self.bind_handler(&message)? {
+                if let Some(bytes) = self.bind_handler(&message).await? {
                     message.bytes = bytes;
                 }
             }
             code => {
-                debug!("Code {code:?}");
+                // debug!("Code {code:?}");
             }
         }
 
         Ok(message.bytes)
     }
 
-    fn bind_handler(&mut self, message: &Message) -> Result<Option<BytesMut>, Error> {
+    async fn bind_handler(&mut self, message: &Message) -> Result<Option<BytesMut>, Error> {
         let mut bind = Bind::try_from(&message.bytes)?;
-        debug!("[frontend.bind_handler] {bind:?}");
 
-        // for param in bind.param_values.iter_mut() {
-        //     if let Some(bytes) = intercept_bind_param(param) {
-        //         param.rewrite(&bytes);
-        //     }
-        // }
-        // match serde_json::from_str::<Encrypted>(&s)
         let params = bind.to_plaintext()?;
+        let encrypted = self.encrypt.encrypt(params).await?;
 
-        // ======================
+        bind.from_ciphertext(encrypted)?;
 
-        // ======================
-
-        if bind
-            .param_values
-            .iter()
-            .any(|param| param.rewrite_required())
-        {
+        if bind.should_rewrite() {
             let bytes = BytesMut::try_from(bind)?;
             Ok(Some(bytes))
         } else {

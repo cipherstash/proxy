@@ -31,6 +31,34 @@ pub struct BindParam {
     dirty: bool,
 }
 
+impl Bind {
+    pub fn should_rewrite(&self) -> bool {
+        self.param_values.iter().any(|param| param.should_rewrite())
+    }
+
+    pub fn to_plaintext(&self) -> Result<Vec<Option<eql::Plaintext>>, Error> {
+        Ok(self.param_values.iter().map(|param| param.into()).collect())
+    }
+
+    pub fn from_ciphertext(
+        &mut self,
+        encrypted: Vec<Option<eql::Ciphertext>>,
+    ) -> Result<(), Error> {
+        for (idx, ct) in encrypted.iter().enumerate() {
+            match ct {
+                Some(ct) => {
+                    let json = serde_json::to_value(ct)?;
+                    // convert json to bytes
+                    let bytes = json.to_string().into_bytes();
+                    self.param_values[idx].rewrite(&bytes);
+                }
+                None => {}
+            }
+        }
+        Ok(())
+    }
+}
+
 impl BindParam {
     pub fn new(format_code: FormatCode, bytes: BytesMut) -> Self {
         Self {
@@ -54,37 +82,32 @@ impl BindParam {
 
     pub fn rewrite(&mut self, bytes: &[u8]) {
         self.bytes.clear();
+
+        if self.is_binary() {
+            self.bytes.put_u8(1);
+        }
+
         self.bytes.extend_from_slice(bytes);
         self.dirty = true;
     }
 
-    pub fn rewrite_required(&self) -> bool {
+    pub fn should_rewrite(&self) -> bool {
         self.dirty
     }
 
-    pub fn to_plaintext(&self) -> Option<eql::Plaintext> {
-        if !self.maybe_plaintext() {
-            return None;
-        }
-
-        let bytes = self.json_bytes();
-        let s = std::str::from_utf8(bytes).unwrap_or("");
-
-        match serde_json::from_str(&s) {
-            Ok(pt) => Some(pt),
-            Err(e) => {
-                debug!(
-                    param = s,
-                    error = e.to_string(),
-                    "Failed to parse parameter"
-                );
-                None
-            }
-        }
+    pub fn maybe_plaintext(&self) -> bool {
+        self.is_text() && self.maybe_json() || self.is_binary() && self.maybe_jsonb()
     }
 
-    fn maybe_plaintext(&self) -> bool {
-        self.is_text() && self.maybe_json() || self.is_binary() && self.maybe_jsonb()
+    ///
+    /// If the text foprmat is binary, returns a reference to the bytes without the jsonb header byte
+    ///
+    pub fn json_bytes(&self) -> &[u8] {
+        if self.is_binary() {
+            &self.bytes[1..]
+        } else {
+            &self.bytes[0..]
+        }
     }
 
     fn is_text(&self) -> bool {
@@ -93,17 +116,6 @@ impl BindParam {
 
     fn is_binary(&self) -> bool {
         self.format_code == FormatCode::Binary
-    }
-
-    ///
-    /// If the text foprmat is binary, returns a reference to the bytes without the jsonb header byte
-    ///
-    fn json_bytes(&self) -> &[u8] {
-        if self.is_binary() {
-            &self.bytes[1..]
-        } else {
-            &self.bytes[0..]
-        }
     }
 
     ///
@@ -128,13 +140,30 @@ impl BindParam {
     }
 }
 
-impl Bind {
-    pub fn to_plaintext(&self) -> Result<Vec<Option<eql::Plaintext>>, Error> {
-        Ok(self
-            .param_values
-            .iter()
-            .map(|param| param.to_plaintext())
-            .collect())
+impl From<&BindParam> for Option<eql::Plaintext> {
+    fn from(bind_param: &BindParam) -> Self {
+        debug!("maybe_plaintext: {:?}", bind_param.maybe_plaintext());
+
+        if !bind_param.maybe_plaintext() {
+            return None;
+        }
+
+        let bytes = bind_param.json_bytes();
+        let s = std::str::from_utf8(bytes).unwrap_or("");
+
+        debug!("s: {:?}", s);
+
+        match serde_json::from_str(&s) {
+            Ok(pt) => Some(pt),
+            Err(e) => {
+                debug!(
+                    param = s,
+                    error = e.to_string(),
+                    "Failed to parse parameter"
+                );
+                None
+            }
+        }
     }
 }
 
@@ -272,3 +301,13 @@ impl TryFrom<Bind> for BytesMut {
         Ok(bytes)
     }
 }
+
+// ///
+// /// Binary jsonb adds a version byte to the front of the encoded json byte string.
+// ///
+// fn json_to_binary_format(bytes: BytesMut) -> BytesMut {
+//     let mut jsonb = BytesMut::with_capacity(1 + bytes.len());
+//     jsonb.put_u8(1);
+//     jsonb.put_slice(&bytes);
+//     jsonb
+// }

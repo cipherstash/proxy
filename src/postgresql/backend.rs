@@ -53,16 +53,16 @@ where
 
         match message.code.into() {
             Code::DataRow => {
-                debug!("DataRow");
+                // debug!("DataRow");
             }
             Code::ErrorResponse => {
-                debug!("ErrorResponse");
+                // debug!("ErrorResponse");
             }
             Code::RowDescription => {
-                debug!("RowDescription");
+                // debug!("RowDescription");
             }
             code => {
-                debug!("Backend {code:?}");
+                // debug!("Backend {code:?}");
             }
         }
 

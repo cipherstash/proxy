@@ -27,7 +27,7 @@ pub async fn connect(connection_string: String) -> Result<Client, tokio_postgres
     Ok(client)
 }
 
-pub async fn load_dataset(config: &TandemConfig) -> Result<DatasetConfig, Error> {
+pub async fn load_dataset_config(config: &TandemConfig) -> Result<DatasetConfig, Error> {
     let client = connect(config.connect.to_connection_string()).await?;
     let result = client.simple_query(ENCRYPT_DATASET_CONFIG_QUERY).await;
 
