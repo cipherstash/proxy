@@ -1,4 +1,5 @@
-use super::{BytesMutReadString, FormatCode, NULL};
+use super::protocol::BytesMutReadString;
+use super::{FormatCode, NULL};
 use crate::eql;
 use crate::error::{Error, ProtocolError};
 use crate::{SIZE_I16, SIZE_I32};
@@ -301,13 +302,3 @@ impl TryFrom<Bind> for BytesMut {
         Ok(bytes)
     }
 }
-
-// ///
-// /// Binary jsonb adds a version byte to the front of the encoded json byte string.
-// ///
-// fn json_to_binary_format(bytes: BytesMut) -> BytesMut {
-//     let mut jsonb = BytesMut::with_capacity(1 + bytes.len());
-//     jsonb.put_u8(1);
-//     jsonb.put_slice(&bytes);
-//     jsonb
-// }

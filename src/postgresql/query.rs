@@ -3,7 +3,8 @@ use bytes::{Buf, BytesMut};
 use std::convert::TryFrom;
 use std::io::Cursor;
 
-use super::{BytesMutReadString, QUERY};
+use super::protocol::BytesMutReadString;
+use super::QUERY;
 
 #[derive(Debug, Clone)]
 pub(crate) struct Query {

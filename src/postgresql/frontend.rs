@@ -1,12 +1,12 @@
 use bytes::{BufMut, BytesMut};
-use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
 use tokio::time::timeout;
-use tracing::{debug, error, info};
+use tracing::debug;
 
-use super::Message;
+use super::protocol::{self};
 use crate::encrypt::Encrypt;
 use crate::error::Error;
-use crate::postgresql::{read_message, Bind, CONNECTION_TIMEOUT, PROTOCOL_VERSION_NUMBER};
+use crate::postgresql::{Bind, CONNECTION_TIMEOUT, PROTOCOL_VERSION_NUMBER};
 use crate::SIZE_I32;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -49,14 +49,14 @@ where
     }
 
     pub async fn read(&mut self) -> Result<BytesMut, Error> {
-        // debug!("[frontend.read]");
-
         if !self.startup_complete {
             let bytes = self.read_start_up_message().await?;
             return Ok(bytes);
         }
 
-        let mut message = timeout(CONNECTION_TIMEOUT, read_message(&mut self.client)).await??;
+        debug!("[frontend.read]");
+        let mut message =
+            timeout(CONNECTION_TIMEOUT, protocol::read_message(&mut self.client)).await??;
 
         match message.code.into() {
             Code::Query => {
@@ -82,7 +82,10 @@ where
         Ok(message.bytes)
     }
 
-    async fn bind_handler(&mut self, message: &Message) -> Result<Option<BytesMut>, Error> {
+    async fn bind_handler(
+        &mut self,
+        message: &protocol::Message,
+    ) -> Result<Option<BytesMut>, Error> {
         let mut bind = Bind::try_from(&message.bytes)?;
 
         let params = bind.to_plaintext()?;
