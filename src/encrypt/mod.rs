@@ -154,14 +154,7 @@ fn to_eql_encrypted(encrypted: Encrypted, pt: &eql::Plaintext) -> Result<eql::Ci
     match encrypted {
         Encrypted::Record(ciphertext, _terms) => {
             // TODO INDEXES
-            let ct = eql::Ciphertext {
-                ciphertext,
-                identifier: pt.identifier.clone(),
-                version: 1,
-                ore_index: None,
-                match_index: None,
-                unique_index: None,
-            };
+            let ct = eql::Ciphertext::new(ciphertext, pt.identifier.clone());
             Ok(ct)
         }
         Encrypted::SteVec(_ste_vec_index) => {
