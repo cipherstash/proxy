@@ -22,6 +22,7 @@ pub fn trace() {
 
         let subscriber = FmtSubscriber::builder()
             .with_max_level(tracing::Level::DEBUG) // Set the maximum level of tracing events that should be logged.
+            .with_file(true)
             .with_line_number(true)
             .with_target(true)
             .finish();

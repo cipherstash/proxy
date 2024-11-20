@@ -1,11 +1,12 @@
-use crate::error::Error;
+use crate::error::{Error, ProtocolError};
 use crate::postgresql::protocol::{self};
 use crate::postgresql::CONNECTION_TIMEOUT;
-
-use bytes::BytesMut;
-use tokio::io::{self, AsyncRead};
-use tokio::time::{timeout, Duration};
+use bytes::{BufMut, BytesMut};
+use tokio::io::{AsyncRead, AsyncReadExt};
+use tokio::time::timeout;
 use tracing::{debug, error, info, warn};
+
+const IS_SSL_REQUEST: bool = true;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Code {
@@ -37,6 +38,7 @@ where
     C: AsyncRead + Unpin,
 {
     client: C,
+    ssl_complete: bool,
 }
 
 impl<C> Backend<C>
@@ -44,19 +46,39 @@ where
     C: AsyncRead + Unpin,
 {
     pub fn new(client: C) -> Self {
-        Backend { client }
+        Backend {
+            client,
+            ssl_complete: false,
+        }
     }
 
+    ///
+    /// Startup sequence:
+    ///     Client: SSL Request
+    ///     Server: SSL Response (single byte S or N)
+    ///
     pub async fn read(&mut self) -> Result<BytesMut, Error> {
         debug!("[backend.read]");
 
-        let message =
-            timeout(CONNECTION_TIMEOUT, protocol::read_message(&mut self.client)).await??;
+        let code = self.client.read_u8().await?;
 
-        debug!("message.code: {:?}", message.code as char);
-        debug!("message: {:?}", message);
+        if !self.ssl_complete {
+            if let Some(bytes) = self.ssl_request(code) {
+                return Ok(bytes);
+            }
+        }
+
+        let message = timeout(
+            CONNECTION_TIMEOUT,
+            protocol::read_message(&mut self.client, code),
+        )
+        .await??;
 
         match message.code.into() {
+            Code::Authentication => {
+                self.ssl_complete = true;
+            }
+
             Code::DataRow => {
                 // debug!("DataRow");
             }
@@ -71,9 +93,29 @@ where
             }
         }
 
-        debug!("[backend.read] complete");
         Ok(message.bytes)
     }
+
+    ///
+    /// Read the SSL Request message
+    /// Startup messages are sent by the client to the server to initiate a connection
+    ///
+    ///
+    fn ssl_request(&mut self, code: u8) -> Option<BytesMut> {
+        self.ssl_complete = true;
+        match is_ssl_request_response(code) {
+            IS_SSL_REQUEST => {
+                let mut bytes = BytesMut::with_capacity(1);
+                bytes.put_u8(code);
+                Some(bytes)
+            }
+            _ => None,
+        }
+    }
+}
+
+fn is_ssl_request_response(code: u8) -> bool {
+    code == b'S' || code == b'N'
 }
 
 impl From<u8> for Code {

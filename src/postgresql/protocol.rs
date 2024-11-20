@@ -28,15 +28,17 @@ impl BytesMutReadString for Cursor<&BytesMut> {
         }
     }
 }
-
-pub async fn read_message<C: AsyncRead + Unpin>(mut client: C) -> Result<Message, Error> {
+///
+/// Reads a Postgres message from client
+///
+/// The SSLRequest/Response sequence requires the Backend to inspect the first byte of the message
+/// Byte is then passed as `code` to this function to preserve the message structure
+///
+///
+pub async fn read_message<C: AsyncRead + Unpin>(mut client: C, code: u8) -> Result<Message, Error> {
     debug!("[read_message]");
 
-    let code = client.read_u8().await?;
-    debug!("code: {}", code as char);
-
     let len = client.read_i32().await?;
-    debug!("len: {len}");
 
     // Detect unexpected message len and avoid panic on read_exact
     // Len must be at least 4 bytes (4 bytes for len/i32)
@@ -66,4 +68,9 @@ pub async fn read_message<C: AsyncRead + Unpin>(mut client: C) -> Result<Message
     let message = Message { code, bytes };
 
     Ok(message)
+}
+
+pub async fn read_message_with_code<C: AsyncRead + Unpin>(mut client: C) -> Result<Message, Error> {
+    let code = client.read_u8().await?;
+    read_message(client, code).await
 }

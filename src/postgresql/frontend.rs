@@ -1,13 +1,12 @@
-use bytes::{BufMut, BytesMut};
-use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
-use tokio::time::timeout;
-use tracing::debug;
-
 use super::protocol::{self};
 use crate::encrypt::Encrypt;
 use crate::error::Error;
 use crate::postgresql::{Bind, CONNECTION_TIMEOUT, PROTOCOL_VERSION_NUMBER};
 use crate::SIZE_I32;
+use bytes::{BufMut, BytesMut};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
+use tokio::time::timeout;
+use tracing::debug;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Code {
@@ -50,13 +49,16 @@ where
 
     pub async fn read(&mut self) -> Result<BytesMut, Error> {
         if !self.startup_complete {
-            let bytes = self.read_start_up_message().await?;
+            let bytes = self.read_startup_message().await?;
             return Ok(bytes);
         }
 
         debug!("[frontend.read]");
-        let mut message =
-            timeout(CONNECTION_TIMEOUT, protocol::read_message(&mut self.client)).await??;
+        let mut message = timeout(
+            CONNECTION_TIMEOUT,
+            protocol::read_message_with_code(&mut self.client),
+        )
+        .await??;
 
         match message.code.into() {
             Code::Query => {
@@ -105,7 +107,7 @@ where
     /// Read the start up message from the client
     /// Startup messages are sent by the client to the server to initiate a connection
     ///
-    async fn read_start_up_message(&mut self) -> Result<BytesMut, Error> {
+    async fn read_startup_message(&mut self) -> Result<BytesMut, Error> {
         let len = self.client.read_i32().await?;
         debug!("[read_start_up_message]");
 
@@ -127,6 +129,7 @@ where
         ];
 
         let code = i32::from_be_bytes(code_bytes);
+
         if code == PROTOCOL_VERSION_NUMBER {
             self.startup_complete = true;
         }

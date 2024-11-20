@@ -2,7 +2,7 @@ use my_little_proxy::config::TandemConfig;
 use my_little_proxy::encrypt::Encrypt;
 use my_little_proxy::error::Error;
 use my_little_proxy::{postgresql, trace};
-use tokio::io::AsyncWriteExt;
+use tokio::io::{self, AsyncRead, AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tracing::{debug, error, info, warn};
 
@@ -58,13 +58,17 @@ async fn main() {
 
 async fn startup(config: TandemConfig) -> Encrypt {
     if config.encrypt.dataset_id.is_none() {
-        info!("Encrypt: using default dataset");
+        info!("Encrypt using default dataset");
     }
 
     match Encrypt::init(config).await {
-        Ok(encrypt) => encrypt,
+        Ok(encrypt) => {
+            info!("Encrypt connected");
+            encrypt
+        }
         Err(err) => {
-            error!("Failed to initialise : {}", err);
+            error!("Encrypt could not connect");
+            error!("{}", err);
             std::process::exit(exitcode::UNAVAILABLE);
         }
     }
@@ -78,15 +82,15 @@ async fn handle(encrypt: Encrypt, client: &mut TcpStream) -> Result<(), Error> {
         "Connected"
     );
 
-    let (client_reader, mut client_writer) = client.split();
-    let (server_reader, mut server_writer) = server.split();
+    let (mut client_reader, mut client_writer) = client.split();
+    let (mut server_reader, mut server_writer) = server.split();
 
     let client_to_server = async {
         let mut fe = postgresql::Frontend::new(client_reader, server_writer, encrypt);
         loop {
             let bytes = fe.read().await?;
 
-            // debug!("[client_to_server]");
+            // debug!("[client_to_server]");W
             // debug!("bytes: {bytes:?}");
 
             fe.write(bytes).await?;
@@ -104,8 +108,8 @@ async fn handle(encrypt: Encrypt, client: &mut TcpStream) -> Result<(), Error> {
         loop {
             let bytes = be.read().await?;
 
-            // debug!("[client_to_server]");
-            // debug!("bytes: {bytes:?}");
+            debug!("[server_to_client]");
+            debug!("bytes: {bytes:?}");
 
             client_writer.write_all(&bytes).await?;
             // debug!("write complete");
@@ -113,6 +117,17 @@ async fn handle(encrypt: Encrypt, client: &mut TcpStream) -> Result<(), Error> {
 
         Ok::<(), Error>(())
     };
+
+    // Direct connections, can be handy for debugging
+    // let client_to_server = async {
+    //     io::copy(&mut client_reader, &mut server_writer).await?;
+    //     Ok::<(), Error>(())
+    // };
+
+    // let server_to_client = async {
+    //     io::copy(&mut server_reader, &mut client_writer).await?;
+    //     Ok::<(), Error>(())
+    // };
 
     tokio::try_join!(client_to_server, server_to_client)?;
 
