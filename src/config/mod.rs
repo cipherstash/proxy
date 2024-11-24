@@ -4,7 +4,7 @@ mod tandem;
 
 pub use dataset::JsonDatasetConfig;
 pub use dataset_manager::DatasetManager;
-pub use tandem::{TandemConfig, TlsConfig};
+pub use tandem::{ServerConfig, TandemConfig, TlsConfig};
 
 pub const CS_PREFIX: &str = "CS";
 pub const DEFAULT_CONFIG_FILE_PATH: &str = "cipherstash-proxy.toml";

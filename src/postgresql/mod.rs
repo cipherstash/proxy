@@ -18,7 +18,7 @@ pub use bind::{Bind, BindParam};
 pub use format_code::FormatCode;
 pub use frontend::Frontend;
 pub use protocol::{read_message, read_startup_message, Message, StartupCode, StartupMessage};
-pub use startup::connect_server;
+pub use startup::{accept_tls, connect_database_with_tls, send_ssl_response};
 
 const CONNECTION_TIMEOUT: Duration = Duration::from_millis(1000 * 1 * 10);
 

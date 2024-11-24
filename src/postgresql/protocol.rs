@@ -13,7 +13,7 @@ use tracing::{debug, error};
 
 use super::{CANCEL_REQUEST, SSL_REQUEST};
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum StartupCode {
     ProtocolVersionNumber,
     CancelRequest,

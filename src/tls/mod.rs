@@ -1,7 +1,8 @@
 use crate::config::TlsConfig;
 use crate::error::Error;
-use rustls_pki_types::PrivateKeyDer;
+use rustls::client::danger::ServerCertVerifier;
 use rustls_pki_types::{pem::PemObject, CertificateDer};
+use rustls_pki_types::{PrivateKeyDer, ServerName};
 use std::sync::Arc;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpStream;

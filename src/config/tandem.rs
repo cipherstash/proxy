@@ -17,7 +17,7 @@ use super::{CS_PREFIX, DEFAULT_CONFIG_FILE_PATH};
 pub struct TandemConfig {
     #[serde(default)]
     pub server: ServerConfig,
-    pub connect: ConnectionConfig,
+    pub database: DatabaseConfig,
     pub auth: AuthConfig,
     pub encrypt: EncryptConfig,
     pub tls: Option<TlsConfig>,
@@ -36,18 +36,18 @@ pub struct ServerConfig {
 }
 
 #[derive(Clone, Debug, Deserialize)]
-pub struct ConnectionConfig {
-    #[serde(default = "ConnectionConfig::default_host")]
+pub struct DatabaseConfig {
+    #[serde(default = "DatabaseConfig::default_host")]
     pub host: String,
 
-    #[serde(default = "ConnectionConfig::default_port")]
+    #[serde(default = "DatabaseConfig::default_port")]
     pub port: u16,
 
     pub database: String,
     pub username: String,
     pub password: String,
 
-    #[serde(default = "ConnectionConfig::default_refresh_interval")]
+    #[serde(default = "DatabaseConfig::default_refresh_interval")]
     pub reload_interval: u64,
 }
 
@@ -135,11 +135,15 @@ impl Default for ServerConfig {
 
 impl ServerConfig {
     pub fn default_host() -> String {
-        "127.0.0.1".to_string()
+        "0.0.0.0".to_string()
     }
 
     pub fn default_port() -> u16 {
         6432
+    }
+
+    pub fn skip_tls(&self) -> bool {
+        !self.use_tls
     }
 
     pub fn server_name(&self) -> Result<ServerName, Error> {
@@ -156,7 +160,7 @@ impl ServerConfig {
     }
 }
 
-impl ConnectionConfig {
+impl DatabaseConfig {
     pub fn default_host() -> String {
         "127.0.0.1".to_string()
     }
@@ -215,7 +219,7 @@ mod tests {
 
         let config = TandemConfig::load("tests/config/cipherstash-proxy.toml").unwrap();
         assert_eq!(
-            config.connect.to_socket_address(),
+            config.database.to_socket_address(),
             "localhost:5432".to_string()
         );
     }

@@ -27,7 +27,7 @@ pub struct Encrypt {
 impl Encrypt {
     pub async fn init(config: TandemConfig) -> Result<Encrypt, Error> {
         let cipher = Arc::new(init_cipher(&config).await?);
-        let dataset = DatasetManager::init(&config.connect).await?;
+        let dataset = DatasetManager::init(&config.database).await?;
 
         Ok(Encrypt {
             config,

@@ -1,4 +1,4 @@
-use super::tandem::ConnectionConfig;
+use super::tandem::DatabaseConfig;
 use crate::{
     config::{JsonDatasetConfig, ENCRYPT_DATASET_CONFIG_QUERY},
     error::{ConfigError, Error},
@@ -17,7 +17,7 @@ pub struct DatasetManager {
 }
 
 impl DatasetManager {
-    pub async fn init(config: &ConnectionConfig) -> Result<Self, Error> {
+    pub async fn init(config: &DatabaseConfig) -> Result<Self, Error> {
         let config = config.clone();
         init_reloader(config).await
     }
@@ -27,7 +27,7 @@ impl DatasetManager {
     }
 }
 
-async fn init_reloader(config: ConnectionConfig) -> Result<DatasetManager, Error> {
+async fn init_reloader(config: DatabaseConfig) -> Result<DatasetManager, Error> {
     let dataset = load_dataset_with_retry(&config).await?;
     let dataset = Arc::new(ArcSwap::new(Arc::new(dataset)));
 
@@ -69,7 +69,7 @@ async fn init_reloader(config: ConnectionConfig) -> Result<DatasetManager, Error
 /// When databases and the proxy start up at the same time they might not be ready to accept connections before the
 /// proxy tries to query the schema. To give the proxy the best chance of initialising correctly this method will
 /// retry the query a few times before passing on the error.
-async fn load_dataset_with_retry(config: &ConnectionConfig) -> Result<DatasetConfig, Error> {
+async fn load_dataset_with_retry(config: &DatabaseConfig) -> Result<DatasetConfig, Error> {
     let mut retry_count = 0;
     let max_retry_count = 10;
     let max_backoff = Duration::from_secs(2);
@@ -95,7 +95,7 @@ async fn load_dataset_with_retry(config: &ConnectionConfig) -> Result<DatasetCon
     }
 }
 
-pub async fn load_dataset(config: &ConnectionConfig) -> Result<DatasetConfig, Error> {
+pub async fn load_dataset(config: &DatabaseConfig) -> Result<DatasetConfig, Error> {
     return Ok(DatasetConfig::init());
 
     let client = connect(config.to_connection_string()).await?;
