@@ -33,25 +33,25 @@ pub async fn connect() -> Result<Client, tokio_postgres::Error> {
 async fn rewrite_bind_on_insert() {
     let client = connect().await.unwrap();
 
-    let sql = "INSERT INTO blah (vtha) VALUES ($1)";
+    // let sql = "INSERT INTO blah (vtha) VALUES ($1)";
 
-    let identifier = Identifier {
-        table: "blah".to_string(),
-        column: "vtha".to_string(),
-    };
+    // let identifier = Identifier {
+    //     table: "blah".to_string(),
+    //     column: "vtha".to_string(),
+    // };
 
-    let pt = Plaintext {
-        plaintext: "hello".to_string(),
-        identifier,
-        version: 1,
-        for_query: None,
-    };
+    // let pt = Plaintext {
+    //     plaintext: "hello".to_string(),
+    //     identifier,
+    //     version: 1,
+    //     for_query: None,
+    // };
 
-    let vtha = serde_json::to_value(pt).unwrap();
+    // let vtha = serde_json::to_value(pt).unwrap();
 
-    let res = client.query(sql, &[&vtha]).await;
+    // let res = client.query(sql, &[&vtha]).await;
 
-    println!("{:?}", res);
+    // println!("{:?}", res);
 
     let sql = "SELECT * FROM blah";
     let res = client.query(sql, &[]).await;

@@ -1,5 +1,6 @@
+use super::format_code::FormatCode;
 use super::protocol::BytesMutReadString;
-use super::{FormatCode, NULL};
+use super::NULL;
 use crate::eql;
 use crate::error::{Error, ProtocolError};
 use crate::{SIZE_I16, SIZE_I32};
@@ -143,16 +144,12 @@ impl BindParam {
 
 impl From<&BindParam> for Option<eql::Plaintext> {
     fn from(bind_param: &BindParam) -> Self {
-        debug!("maybe_plaintext: {:?}", bind_param.maybe_plaintext());
-
         if !bind_param.maybe_plaintext() {
             return None;
         }
 
         let bytes = bind_param.json_bytes();
         let s = std::str::from_utf8(bytes).unwrap_or("");
-
-        debug!("s: {:?}", s);
 
         match serde_json::from_str(&s) {
             Ok(pt) => Some(pt),

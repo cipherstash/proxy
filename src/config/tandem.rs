@@ -1,25 +1,60 @@
-use crate::error::Error;
+use crate::error::{ConfigError, Error};
+// use cipherstash_client::config::errors::ConfigError;
 use config::{Config, Environment};
+use rustls::ServerConfig as TlsServerConfig;
+use rustls_pki_types::{pem::PemObject, CertificateDer};
+use rustls_pki_types::{PrivateKeyDer, ServerName};
 use serde::Deserialize;
 use std::path::PathBuf;
 use tracing::{debug, error};
-use url::Url;
+use tracing_subscriber::field::debug;
+
 use uuid::Uuid;
 
 use super::{CS_PREFIX, DEFAULT_CONFIG_FILE_PATH};
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct TandemConfig {
+    #[serde(default)]
+    pub server: ServerConfig,
     pub connect: ConnectionConfig,
     pub auth: AuthConfig,
     pub encrypt: EncryptConfig,
+    pub tls: Option<TlsConfig>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct ServerConfig {
+    #[serde(default = "ServerConfig::default_host")]
+    pub host: String,
+
+    #[serde(default = "ServerConfig::default_port")]
+    pub port: u16,
+
+    #[serde(default)]
+    pub use_tls: bool,
 }
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct ConnectionConfig {
-    pub database: Url,
+    #[serde(default = "ConnectionConfig::default_host")]
+    pub host: String,
+
+    #[serde(default = "ConnectionConfig::default_port")]
+    pub port: u16,
+
+    pub database: String,
+    pub username: String,
+    pub password: String,
+
     #[serde(default = "ConnectionConfig::default_refresh_interval")]
     pub reload_interval: u64,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct TlsConfig {
+    pub certificate: String,
+    pub private_key: String,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -50,16 +85,15 @@ impl TandemConfig {
     }
 
     pub fn load(path: &str) -> Result<TandemConfig, Error> {
-        TandemConfig::build_with_path(path)
-    }
-
-    pub fn build_with_path(path: &str) -> Result<Self, Error> {
         // Log a warning to user that config file is missing
         if !PathBuf::from(path).exists() {
             println!("Config file not found: {path}");
-            println!("Loading config values only from environment variables.");
+            println!("Loading config values from environment variables.");
         }
+        TandemConfig::build(path)
+    }
 
+    fn build(path: &str) -> Result<Self, Error> {
         // For parsing top-level values such as CS_HOST, CS_PORT
         // and for parsing nested env values such as CS_DATABASE__HOST, CS_DATABASE__PORT
         let cs_env_source = Environment::with_prefix(CS_PREFIX)
@@ -76,7 +110,7 @@ impl TandemConfig {
                 match err {
                     config::ConfigError::Message(ref s) => {
                         if s.contains("UUID parsing failed") {
-                            error!("Invalid Dataset ID. Expected a UUID.");
+                            error!("Invalid dataset id. The configured dataset id must be a valid UUID.");
                             debug!("{s}");
                         }
                     }
@@ -89,20 +123,83 @@ impl TandemConfig {
     }
 }
 
+impl Default for ServerConfig {
+    fn default() -> Self {
+        ServerConfig {
+            host: ServerConfig::default_host(),
+            port: ServerConfig::default_port(),
+            use_tls: false,
+        }
+    }
+}
+
+impl ServerConfig {
+    pub fn default_host() -> String {
+        "127.0.0.1".to_string()
+    }
+
+    pub fn default_port() -> u16 {
+        6432
+    }
+
+    pub fn server_name(&self) -> Result<ServerName, Error> {
+        let name = ServerName::try_from(self.host.as_str()).map_err(|_| {
+            ConfigError::InvalidServerName {
+                name: self.host.to_owned(),
+            }
+        })?;
+        Ok(name)
+    }
+
+    pub fn to_socket_address(&self) -> String {
+        format!("{}:{}", self.host, self.port)
+    }
+}
+
 impl ConnectionConfig {
+    pub fn default_host() -> String {
+        "127.0.0.1".to_string()
+    }
+
+    pub fn default_port() -> u16 {
+        5432
+    }
+
     pub fn default_refresh_interval() -> u64 {
         60
     }
 
     pub fn to_socket_address(&self) -> String {
-        let host = self.database.host_str().unwrap_or("localhost");
-        let port = self.database.port().unwrap_or(5432);
-
-        format!("{}:{}", host, port)
+        format!("{}:{}", self.host, self.port)
     }
 
     pub fn to_connection_string(&self) -> String {
-        self.database.to_string()
+        format!(
+            "postgres://{}:{}@{}:{}/{}",
+            self.username, self.password, self.host, self.port, self.database
+        )
+    }
+}
+
+impl TlsConfig {
+    pub fn cert_exists(&self) -> bool {
+        PathBuf::from(&self.certificate).exists()
+    }
+
+    pub fn private_key_exists(&self) -> bool {
+        PathBuf::from(&self.private_key).exists()
+    }
+
+    pub fn server_config(&self) -> Result<TlsServerConfig, Error> {
+        let certs =
+            CertificateDer::pem_file_iter(&self.certificate)?.collect::<Result<Vec<_>, _>>()?;
+        let key = PrivateKeyDer::from_pem_file(&self.private_key)?;
+
+        let config = TlsServerConfig::builder()
+            .with_no_client_auth()
+            .with_single_cert(certs, key)?;
+
+        Ok(config)
     }
 }
 
@@ -116,7 +213,7 @@ mod tests {
     fn test_database_as_url() {
         trace();
 
-        let config = TandemConfig::load("tests/cipherstash-proxy.toml").unwrap();
+        let config = TandemConfig::load("tests/config/cipherstash-proxy.toml").unwrap();
         assert_eq!(
             config.connect.to_socket_address(),
             "localhost:5432".to_string()
@@ -127,13 +224,13 @@ mod tests {
     fn test_dataset_as_uuid() {
         trace();
 
-        let config = TandemConfig::load("tests/cipherstash-proxy.toml").unwrap();
+        let config = TandemConfig::load("tests/config/cipherstash-proxy.toml").unwrap();
         assert_eq!(
             config.encrypt.dataset_id,
             Some(Uuid::parse_str("484cd205-99e8-41ca-acfe-55a7e25a8ec2").unwrap())
         );
 
-        let config = TandemConfig::load("tests/cipherstash-proxy-bad-dataset.toml");
+        let config = TandemConfig::load("tests/config/cipherstash-proxy-bad-dataset.toml");
 
         assert!(config.is_err());
         assert!(matches!(config.unwrap_err(), Error::Config(_)));

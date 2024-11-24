@@ -5,6 +5,9 @@ use tokio::time::error::Elapsed;
 
 #[derive(Error, Debug)]
 pub enum Error {
+    #[error("Connection closed after cancel request")]
+    CancelRequest,
+
     #[error(transparent)]
     Client(#[from] cipherstash_client::config::errors::ConfigError),
 
@@ -27,11 +30,20 @@ pub enum Error {
     Protocol(#[from] ProtocolError),
 
     #[error(transparent)]
+    Tls(#[from] rustls::Error),
+
+    #[error(transparent)]
     ZeroKMS(#[from] cipherstash_client::zerokms::Error),
+
+    #[error("Unknown error")]
+    Unknown,
 }
 
 #[derive(Error, Debug)]
 pub enum ConfigError {
+    #[error(transparent)]
+    Certificate(#[from] rustls_pki_types::pem::Error),
+
     #[error(transparent)]
     Config(#[from] config::ConfigError),
 
@@ -41,14 +53,17 @@ pub enum ConfigError {
     #[error(transparent)]
     Database(#[from] tokio_postgres::Error),
 
-    #[error(transparent)]
-    Parse(#[from] serde_json::Error),
-
     #[error("Expected an active Encrypt configuration")]
     MissingActiveEncryptConfig,
 
     #[error("Expected an Encrypt configuration table")]
     MissingEncryptConfigTable,
+
+    #[error(transparent)]
+    Parse(#[from] serde_json::Error),
+
+    #[error("Server host {name} is not a valid server name")]
+    InvalidServerName { name: String },
 }
 
 #[derive(Error, Debug)]
@@ -82,25 +97,22 @@ pub enum ProtocolError {
 
     #[error("Unexpected null in string")]
     UnexpectedNull,
-}
 
-impl From<io::Error> for Error {
-    fn from(e: io::Error) -> Self {
-        match e.kind() {
-            io::ErrorKind::UnexpectedEof => Error::ConnectionClosed,
-            _ => Error::Io(e),
-        }
-    }
+    #[error("Unexpected SSLRequest")]
+    UnexpectedSSLRequest,
+
+    #[error("Unexpected StartupMessage")]
+    UnexpectedStartupMessage,
+
+    #[error("Expected {expected} message code, received {received}")]
+    UnexpectedMessageCode { expected: char, received: char },
+
+    #[error("Expected a TLS connection")]
+    UnexpectedSSLResponse,
 }
 
 impl From<config::ConfigError> for Error {
     fn from(e: config::ConfigError) -> Self {
-        Error::Config(e.into())
-    }
-}
-
-impl From<tokio_postgres::Error> for Error {
-    fn from(e: tokio_postgres::Error) -> Self {
         Error::Config(e.into())
     }
 }
@@ -117,8 +129,29 @@ impl From<encryption::EncryptionError> for Error {
     }
 }
 
+impl From<io::Error> for Error {
+    fn from(e: io::Error) -> Self {
+        match e.kind() {
+            io::ErrorKind::UnexpectedEof => Error::ConnectionClosed,
+            _ => Error::Io(e),
+        }
+    }
+}
+
+impl From<rustls_pki_types::pem::Error> for Error {
+    fn from(e: rustls_pki_types::pem::Error) -> Self {
+        Error::Config(e.into())
+    }
+}
+
 impl From<serde_json::Error> for Error {
     fn from(e: serde_json::Error) -> Self {
         Error::Encrypt(e.into())
+    }
+}
+
+impl From<tokio_postgres::Error> for Error {
+    fn from(e: tokio_postgres::Error) -> Self {
+        Error::Config(e.into())
     }
 }

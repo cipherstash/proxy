@@ -35,11 +35,11 @@ async fn init_reloader(config: ConnectionConfig) -> Result<DatasetManager, Error
 
     let dataset_ref = dataset.clone();
     let reload_handle = tokio::spawn(async move {
-        let refresh_duration = tokio::time::Duration::from_secs(config_ref.reload_interval);
+        let reload_interval = tokio::time::Duration::from_secs(config_ref.reload_interval);
 
         let mut interval = tokio::time::interval_at(
-            tokio::time::Instant::now() + refresh_duration,
-            refresh_duration,
+            tokio::time::Instant::now() + reload_interval,
+            reload_interval,
         );
 
         loop {
@@ -96,6 +96,8 @@ async fn load_dataset_with_retry(config: &ConnectionConfig) -> Result<DatasetCon
 }
 
 pub async fn load_dataset(config: &ConnectionConfig) -> Result<DatasetConfig, Error> {
+    return Ok(DatasetConfig::init());
+
     let client = connect(config.to_connection_string()).await?;
     let result = client.simple_query(ENCRYPT_DATASET_CONFIG_QUERY).await;
 

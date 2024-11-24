@@ -111,3 +111,31 @@ docker run -e "ACCEPT_EULA=Y" -e "MSSQL_SA_PASSWORD=Password1" \
 IF  EXISTS (SELECT * FROM sys.objects WHERE object_id = OBJECT_ID(N'[dbo].[blah]') AND type in (N'U'))
 DROP TABLE [dbo].[blah]
 GO
+
+
+
+Assuming
+`mise use postgres`
+
+```
+pg_ctl start
+createdb my-little-proxy -U postgres
+
+CREATE DATABASE mlp;
+CREATE USER mlp WITH ENCRYPTED PASSWORD 'password';
+GRANT ALL PRIVILEGES ON DATABASE mlp TO mlp;
+
+-- REVOKE ALL PRIVILEGES ON DATABASE mlp FROM mlp;
+
+
+psql postgresql://mlp:password@127.0.0.1:5432/mlp
+
+
+
+-- check SSL in use
+SELECT datname,usename, ssl, client_addr
+  FROM pg_stat_ssl
+  JOIN pg_stat_activity
+    ON pg_stat_ssl.pid = pg_stat_activity.pid;
+
+```
