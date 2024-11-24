@@ -28,7 +28,6 @@ where
     client: C,
     server: S,
     encrypt: Encrypt,
-    startup_complete: bool,
 }
 
 impl<C, S> Frontend<C, S>
@@ -41,7 +40,6 @@ where
             client,
             server,
             encrypt,
-            startup_complete: false,
         }
     }
 
@@ -52,30 +50,11 @@ where
 
     pub async fn read(&mut self) -> Result<BytesMut, Error> {
         debug!("[frontend] read");
-        // if self.startup() {
-        //     let startup_message = read_startup_message(&mut self.client).await?;
-        //     info!("startup_message {:?}", startup_message);
-
-        //     match &startup_message.code {
-        //         StartupCode::SSLRequest => {
-        //             debug!("SSLRequest");
-        //             tls::accept_tls(&self.encrypt.config.tls, &mut self.client.as_ref()).await?;
-
-        //             return Ok(startup_message.bytes);
-        //         }
-        //         StartupCode::ProtocolVersionNumber => {
-        //             debug!("ProtocolVersionNumber");
-        //             self.startup_complete = true;
-        //             return Ok(startup_message.bytes);
-        //         }
-        //         StartupCode::CancelRequest => {
-        //             return Err(Error::CancelRequest);
-        //         }
-        //     }
-        // }
 
         let mut message =
             timeout(CONNECTION_TIMEOUT, protocol::read_message(&mut self.client)).await??;
+
+        debug!("message: {:?}", message);
 
         match message.code.into() {
             Code::Query => {
@@ -99,10 +78,6 @@ where
         }
 
         Ok(message.bytes)
-    }
-
-    fn startup(&self) -> bool {
-        !self.startup_complete
     }
 
     async fn bind_handler(&mut self, message: &Message) -> Result<Option<BytesMut>, Error> {
