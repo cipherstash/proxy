@@ -33,13 +33,21 @@ const SSL_RESPONSE_YES: u8 = b'S';
 const SSL_RESPONSE_NO: u8 = b'N';
 
 ///
-/// TODO This needs to be abstracted once design stabilises
 ///
-/// Keeping it here for now
-///  - mostly fits in my head so rapid iteration easier
-///  - the protocol flow and interaction with TLS is a bit wacky and  I am unsure of the target structure
+/// Startup flow
 ///
-/// async fn handle<T: AsyncRead + AsyncWrite + Unpin>(
+///     Connect to database with TLS if required
+///     First message is either:
+///         - SSLRequest
+///         - ProtocolVersionNumber
+///
+///     On SSLRequest
+///         Send SSLResponse
+///         Connect with TLS if configured
+///
+///         On TLS Connect
+///             Expect message containing ProtocolVersionNumber is sent
+///
 pub async fn handle(client_stream: AsyncStream, encrypt: Encrypt) -> Result<(), Error> {
     let mut client_stream = client_stream;
 
@@ -52,12 +60,9 @@ pub async fn handle(client_stream: AsyncStream, encrypt: Encrypt) -> Result<(), 
         "Database connected"
     );
 
-    // This is the client loop
-    // The database will already be connected with TLS if required
-    // We do not need to propagate the SSLRequest to the database
     loop {
         let startup_message = startup::read_message(&mut client_stream).await?;
-        info!("startup_message {:?}", startup_message);
+
         match &startup_message.code {
             StartupCode::SSLRequest => {
                 debug!("SSLRequest");
@@ -116,7 +121,6 @@ pub async fn handle(client_stream: AsyncStream, encrypt: Encrypt) -> Result<(), 
     };
 
     // Direct connections, can be handy for debugging
-
     // let client_to_server = async {
     //     io::copy(&mut client_reader, &mut server_writer).await?;
     //     Ok::<(), Error>(())
