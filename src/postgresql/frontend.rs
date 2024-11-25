@@ -1,14 +1,10 @@
 use super::bind::Bind;
-use super::protocol::{self};
-use super::Message;
+use super::protocol::{self, Message};
 use crate::encrypt::Encrypt;
 use crate::error::Error;
-use crate::postgresql::{
-    bind, read_startup_message, StartupCode, CONNECTION_TIMEOUT, PROTOCOL_VERSION_NUMBER,
-};
-use crate::{tls, SIZE_I32};
-use bytes::{BufMut, BytesMut};
-use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
+use crate::postgresql::CONNECTION_TIMEOUT;
+use bytes::BytesMut;
+use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use tokio::time::timeout;
 use tracing::{debug, info};
 
@@ -23,7 +19,7 @@ pub enum Code {
 pub struct Frontend<C, S>
 where
     C: AsyncRead + Unpin,
-    S: AsyncWriteExt + Unpin,
+    S: AsyncWrite + Unpin,
 {
     client: C,
     server: S,
@@ -33,7 +29,7 @@ where
 impl<C, S> Frontend<C, S>
 where
     C: AsyncRead + Unpin,
-    S: AsyncWriteExt + Unpin,
+    S: AsyncWrite + Unpin,
 {
     pub fn new(client: C, server: S, encrypt: Encrypt) -> Self {
         Frontend {

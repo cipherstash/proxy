@@ -59,48 +59,6 @@ impl BytesMutReadString for Cursor<&BytesMut> {
     }
 }
 
-// pub async fn ssl_request(mut client: TcpStream) -> Result<bool, Error> {
-//     Ok(true)
-// }
-
-///
-/// Read the start up message from the client
-/// Startup messages are sent by the client to the server to initiate a connection
-///
-///
-///
-pub async fn read_startup_message<C>(client: &mut C) -> Result<StartupMessage, Error>
-where
-    C: AsyncRead + Unpin,
-{
-    let len = client.read_i32().await?;
-    debug!("[read_start_up_message]");
-
-    let capacity = len as usize;
-
-    let mut bytes = BytesMut::with_capacity(capacity);
-    bytes.put_i32(len);
-    bytes.resize(capacity, b'0');
-
-    let slice_start = SIZE_I32;
-    client.read_exact(&mut bytes[slice_start..]).await?;
-
-    // code is the first 4 bytes after len
-    let code_bytes: [u8; 4] = [
-        bytes.as_ref()[4],
-        bytes.as_ref()[5],
-        bytes.as_ref()[6],
-        bytes.as_ref()[7],
-    ];
-
-    let code = i32::from_be_bytes(code_bytes);
-
-    Ok(StartupMessage {
-        code: code.into(),
-        bytes,
-    })
-}
-
 ///
 /// Reads a Postgres message from client
 ///

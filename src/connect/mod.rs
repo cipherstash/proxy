@@ -1,3 +1,6 @@
+mod async_stream;
+
+use crate::{config::ServerConfig, error::Error};
 use socket2::TcpKeepalive;
 use std::{
     pin::Pin,
@@ -5,84 +8,20 @@ use std::{
     time::Duration,
 };
 use tokio::{
-    io::{split, AsyncRead, AsyncWrite, ReadBuf, ReadHalf, WriteHalf},
+    io::{split, AsyncRead, AsyncWrite, ReadBuf},
     net::{TcpListener, TcpStream},
     time,
 };
 use tokio_rustls::TlsStream;
 use tracing::{debug, error, info, warn};
 
-use crate::{config::ServerConfig, error::Error};
+pub use async_stream::AsyncStream;
 
 const INTERVAL: Duration = Duration::from_secs(5);
 const TIME: Duration = Duration::from_secs(5);
 const RETRIES: u32 = 5;
-
 const MAX_BACKOFF: Duration = Duration::from_secs(2);
 const MAX_RETRY_COUNT: u32 = 3;
-
-#[derive(Debug)]
-pub enum AsyncStream {
-    Tcp(TcpStream),
-    Tls(TlsStream<TcpStream>),
-}
-
-impl AsyncStream {
-    pub async fn accept(listener: &TcpListener) -> Result<AsyncStream, Error> {
-        let (stream, _) = listener.accept().await?;
-        configure(&stream);
-        Ok(AsyncStream::Tcp(stream))
-    }
-
-    pub async fn split(
-        self,
-    ) -> (
-        tokio::io::ReadHalf<AsyncStream>,
-        tokio::io::WriteHalf<AsyncStream>,
-    ) {
-        split(self)
-    }
-}
-
-impl AsyncRead for AsyncStream {
-    fn poll_read(
-        mut self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-        buf: &mut ReadBuf<'_>,
-    ) -> Poll<std::io::Result<()>> {
-        match *self {
-            AsyncStream::Tcp(ref mut stream) => Pin::new(stream).poll_read(cx, buf),
-            AsyncStream::Tls(ref mut stream) => Pin::new(stream).poll_read(cx, buf),
-        }
-    }
-}
-
-impl AsyncWrite for AsyncStream {
-    fn poll_write(
-        mut self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-        buf: &[u8],
-    ) -> Poll<std::io::Result<usize>> {
-        match *self {
-            AsyncStream::Tcp(ref mut stream) => Pin::new(stream).poll_write(cx, buf),
-            AsyncStream::Tls(ref mut stream) => Pin::new(stream).poll_write(cx, buf),
-        }
-    }
-
-    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
-        match *self {
-            AsyncStream::Tcp(ref mut stream) => Pin::new(stream).poll_flush(cx),
-            AsyncStream::Tls(ref mut stream) => Pin::new(stream).poll_flush(cx),
-        }
-    }
-
-    fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
-        match *self {
-            AsyncStream::Tcp(ref mut stream) => Pin::new(stream).poll_shutdown(cx),
-            AsyncStream::Tls(ref mut stream) => Pin::new(stream).poll_shutdown(cx),
-        }
-    }
-}
 
 pub async fn bind_with_retry(server: &ServerConfig) -> TcpListener {
     let address = &server.to_socket_address();
@@ -174,34 +113,3 @@ pub fn configure(stream: &TcpStream) {
         }
     }
 }
-
-// pub fn configure_socket(stream: &TcpStream) {
-//     let sock_ref = SockRef::from(stream);
-//     let conf = get_config();
-
-//     #[cfg(target_os = "linux")]
-//     match sock_ref.set_tcp_user_timeout(Some(Duration::from_millis(conf.general.tcp_user_timeout)))
-//     {
-//         Ok(_) => (),
-//         Err(err) => error!("Could not configure tcp_user_timeout for socket: {}", err),
-//     }
-
-//     sock_ref.set_nodelay(true).unwrap_or_else(|err| {
-//         warn!("Could not configure nodelay for socket: {}", err);
-//     });
-
-//     match sock_ref.set_keepalive(true) {
-//         Ok(_) => {
-//             match sock_ref.set_tcp_keepalive(
-//                 &TcpKeepalive::new()
-//                     .with_interval(Duration::from_secs(conf.general.tcp_keepalives_interval))
-//                     .with_retries(conf.general.tcp_keepalives_count)
-//                     .with_time(Duration::from_secs(conf.general.tcp_keepalives_idle)),
-//             ) {
-//                 Ok(_) => (),
-//                 Err(err) => error!("Could not configure tcp_keepalive for socket: {}", err),
-//             }
-//         }
-//         Err(err) => error!("Could not configure socket: {}", err),
-//     }
-// }

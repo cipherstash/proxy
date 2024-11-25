@@ -1,9 +1,9 @@
 pub mod config;
+pub mod connect;
 pub mod encrypt;
 pub mod eql;
 pub mod error;
 pub mod postgresql;
-pub mod tcp;
 pub mod tls;
 
 pub use crate::config::TandemConfig;

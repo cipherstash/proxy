@@ -1,43 +1,37 @@
-use crate::config::TlsConfig;
-use crate::error::Error;
+use crate::{config::TlsConfig, encrypt::Encrypt, error::Error};
 use rustls::client::danger::ServerCertVerifier;
-use rustls_pki_types::{pem::PemObject, CertificateDer};
-use rustls_pki_types::{PrivateKeyDer, ServerName};
+use rustls::ClientConfig;
+use rustls_pki_types::{pem::PemObject, CertificateDer, PrivateKeyDer, ServerName};
 use std::sync::Arc;
-use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpStream;
-use tokio_rustls::server::TlsStream;
-use tracing::debug;
+use tokio_rustls::{TlsAcceptor, TlsConnector, TlsStream};
+use tracing::{debug, info};
 
-use tokio_rustls::TlsAcceptor;
+pub fn configure() -> ClientConfig {
+    let mut root_cert_store = rustls::RootCertStore::empty();
+    root_cert_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
 
-// pub async fn accept_tls(
-//     config: &TlsConfig,
-//     stream: &mut TcpStream,
-// ) -> Result<mut TcpStream, Error> {
-//     let certs =
-//         CertificateDer::pem_file_iter(&config.certificate)?.collect::<Result<Vec<_>, _>>()?;
-//     let key = PrivateKeyDer::from_pem_file(&config.private_key)?;
-//
-//     let config = rustls::ServerConfig::builder()
-//         .with_no_client_auth()
-//         .with_single_cert(certs, key)?;
-//
-//     let acceptor = TlsAcceptor::from(Arc::new(config));
-//     // let tls_stream = acceptor.accept(stream).await?;
-//     let tls_stream = acceptor.accept(stream).await?;
-//     debug!("TLS negotiation complete");
-//
-//     // Extract the underlying stream
-//     let stream = tls_stream.into_inner().0;
-//
-//     Ok(stream)
-// }
+    let mut config = rustls::ClientConfig::builder()
+        .with_root_certificates(root_cert_store)
+        .with_no_client_auth();
 
-pub async fn accept_tls_differently<T: AsyncRead + AsyncWrite + Unpin>(
-    config: &TlsConfig,
-    stream: T,
-) -> Result<TlsStream<T>, Error> {
+    let mut dangerous = config.dangerous();
+    dangerous.set_certificate_verifier(Arc::new(NoCertificateVerification {}));
+    config
+}
+
+pub async fn client(stream: TcpStream, encrypt: &Encrypt) -> Result<TlsStream<TcpStream>, Error> {
+    let config = configure();
+    info!("Connecting to database over TLS");
+
+    let connector = TlsConnector::from(Arc::new(config));
+    let domain = encrypt.config.server.server_name()?.to_owned();
+    let tls_stream = connector.connect(domain, stream).await?;
+
+    Ok(tls_stream.into())
+}
+
+pub async fn server(stream: TcpStream, config: &TlsConfig) -> Result<TlsStream<TcpStream>, Error> {
     let certs =
         CertificateDer::pem_file_iter(&config.certificate)?.collect::<Result<Vec<_>, _>>()?;
     let key = PrivateKeyDer::from_pem_file(&config.private_key)?;
@@ -47,10 +41,10 @@ pub async fn accept_tls_differently<T: AsyncRead + AsyncWrite + Unpin>(
         .with_single_cert(certs, key)?;
 
     let acceptor = TlsAcceptor::from(Arc::new(config));
+    // let tls_stream = acceptor.accept(stream).await?;
     let tls_stream = acceptor.accept(stream).await?;
     debug!("TLS negotiation complete");
-
-    Ok(tls_stream)
+    Ok(tls_stream.into())
 }
 
 #[derive(Clone, Debug)]

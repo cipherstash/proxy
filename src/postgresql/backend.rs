@@ -1,8 +1,9 @@
+use crate::encrypt::Encrypt;
 use crate::error::{Error, ProtocolError};
 use crate::postgresql::protocol::{self};
 use crate::postgresql::CONNECTION_TIMEOUT;
 use bytes::{BufMut, BytesMut};
-use tokio::io::{AsyncRead, AsyncReadExt};
+use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use tokio::time::timeout;
 use tracing::{debug, error, info, warn};
 
@@ -33,22 +34,26 @@ pub enum Code {
     Unknown(char),
 }
 
-pub struct Backend<C>
+pub struct Backend<C, S>
 where
-    C: AsyncRead + Unpin,
+    C: AsyncWrite + Unpin,
+    S: AsyncRead + Unpin,
 {
     client: C,
-    ssl_complete: bool,
+    server: S,
+    encrypt: Encrypt,
 }
 
-impl<C> Backend<C>
+impl<C, S> Backend<C, S>
 where
-    C: AsyncRead + Unpin,
+    C: AsyncWrite + Unpin,
+    S: AsyncRead + Unpin,
 {
-    pub fn new(client: C) -> Self {
+    pub fn new(client: C, server: S, encrypt: Encrypt) -> Self {
         Backend {
             client,
-            ssl_complete: false,
+            server,
+            encrypt,
         }
     }
 
@@ -66,12 +71,10 @@ where
         // }
         info!("[backend] read");
         let message =
-            timeout(CONNECTION_TIMEOUT, protocol::read_message(&mut self.client)).await??;
+            timeout(CONNECTION_TIMEOUT, protocol::read_message(&mut self.server)).await??;
 
         match message.code.into() {
-            Code::Authentication => {
-                self.ssl_complete = true;
-            }
+            Code::Authentication => {}
 
             Code::DataRow => {
                 // debug!("DataRow");
@@ -90,26 +93,10 @@ where
         Ok(message.bytes)
     }
 
-    ///
-    /// Read the SSL Request message
-    /// Startup messages are sent by the client to the server to initiate a connection
-    ///
-    ///
-    fn ssl_request(&mut self, code: u8) -> Option<BytesMut> {
-        self.ssl_complete = true;
-        match is_ssl_request_response(code) {
-            IS_SSL_REQUEST => {
-                let mut bytes = BytesMut::with_capacity(1);
-                bytes.put_u8(code);
-                Some(bytes)
-            }
-            _ => None,
-        }
+    pub async fn write(&mut self, bytes: BytesMut) -> Result<(), Error> {
+        self.client.write_all(&bytes).await?;
+        Ok(())
     }
-}
-
-fn is_ssl_request_response(code: u8) -> bool {
-    code == b'S' || code == b'N'
 }
 
 impl From<u8> for Code {
