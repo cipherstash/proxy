@@ -39,6 +39,12 @@ where
         }
     }
 
+    pub async fn rewrite(&mut self) -> Result<(), Error> {
+        let bytes = self.read().await?;
+        self.write(bytes).await?;
+        Ok(())
+    }
+
     pub async fn write(&mut self, bytes: BytesMut) -> Result<(), Error> {
         self.server.write_all(&bytes).await?;
         Ok(())

@@ -40,6 +40,7 @@ const SSL_RESPONSE_NO: u8 = b'N';
 ///     First message is either:
 ///         - SSLRequest
 ///         - ProtocolVersionNumber
+///         - CancelRequest
 ///
 ///     On SSLRequest
 ///         Send SSLResponse
@@ -48,6 +49,11 @@ const SSL_RESPONSE_NO: u8 = b'N';
 ///         On TLS Connect
 ///             Expect message containing ProtocolVersionNumber is sent
 ///
+///     On CancelRequest
+///         Propagate and disconnect
+///
+///     On ProtocolVersionNumber
+///         Propagate and continue
 pub async fn handle(client_stream: AsyncStream, encrypt: Encrypt) -> Result<(), Error> {
     let mut client_stream = client_stream;
 
@@ -80,16 +86,15 @@ pub async fn handle(client_stream: AsyncStream, encrypt: Encrypt) -> Result<(), 
                     }
                 }
             }
+            StartupCode::CancelRequest => {
+                debug!("CancelRequest");
+                database_stream.write_all(&startup_message.bytes).await?;
+                return Err(Error::CancelRequest);
+            }
             StartupCode::ProtocolVersionNumber => {
                 debug!("ProtocolVersionNumber");
                 database_stream.write_all(&startup_message.bytes).await?;
                 break;
-            }
-            StartupCode::CancelRequest => {
-                debug!("CancelRequest");
-                // propagate the cancel request to the server and end the connection
-                database_stream.write_all(&startup_message.bytes).await?;
-                return Err(Error::CancelRequest);
             }
         }
     }
@@ -102,21 +107,17 @@ pub async fn handle(client_stream: AsyncStream, encrypt: Encrypt) -> Result<(), 
 
     let client_to_server = async {
         loop {
-            let bytes = frontend.read().await?;
-            frontend.write(bytes).await?; // debug!("write complete");
+            frontend.rewrite().await?;
         }
-
         // Unreachable, but helps the compiler understand the return type
-        // TODO: extract into a function
+        // TODO: extract into a function or something with type
         Ok::<(), Error>(())
     };
 
     let server_to_client = async {
         loop {
-            let bytes = backend.read().await?;
-            backend.write(bytes).await?;
+            backend.rewrite().await?;
         }
-
         Ok::<(), Error>(())
     };
 

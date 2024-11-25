@@ -57,6 +57,12 @@ where
         }
     }
 
+    pub async fn rewrite(&mut self) -> Result<(), Error> {
+        let bytes = self.read().await?;
+        self.write(bytes).await?;
+        Ok(())
+    }
+
     ///
     /// Startup sequence:
     ///     Client: SSL Request
