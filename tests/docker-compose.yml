@@ -1,21 +1,15 @@
 services:
-  postgres:
-    image: postgres:17
-    container_name: pg-17-tls
+  postgres: &postgres
+    image: postgres:latest
+    container_name: pg
     environment:
-      PGPORT: 5517
+      PGPORT: 5532
+    ports:
+      - 5532:5532
+    volumes:
+      - ./pg/data-latest:/var/lib/postgresql/data
     env_file:
       - ./pg/common.env
-    ports:
-      - 5517:5517
-    # command: -c 'hba_file=/etc/postgresql/pg_hba.conf'
-    command: -c 'config_file=/etc/postgresql/postgresql.conf' -c 'hba_file=/etc/postgresql/pg_hba.conf'
-    volumes:
-      - ./pg/postgresql-tls.conf:/etc/postgresql/postgresql.conf
-      - ./pg/pg_hba-tls.conf:/etc/postgresql/pg_hba.conf
-      - ./tls/localhost-key.pem:/etc/postgresql/localhost-key.pem
-      - ./tls/localhost.pem:/etc/postgresql/localhost.pem
-      - ./pg/data17:/var/lib/postgresql/data
     networks:
       - postgres
     deploy:
@@ -29,6 +23,22 @@ services:
       interval: 1s
       timeout: 5s
       retries: 10
+
+  postgres-17-tls:
+    <<: *postgres
+    image: postgres:17
+    container_name: pg-17-tls
+    environment:
+      PGPORT: 5517
+    ports:
+      - 5517:5517
+    command: -c 'config_file=/etc/postgresql/postgresql.conf' -c 'hba_file=/etc/postgresql/pg_hba.conf'
+    volumes:
+      - ./pg/postgresql-tls.conf:/etc/postgresql/postgresql.conf
+      - ./pg/pg_hba-tls.conf:/etc/postgresql/pg_hba.conf
+      - ./tls/localhost-key.pem:/etc/postgresql/localhost-key.pem
+      - ./tls/localhost.pem:/etc/postgresql/localhost.pem
+      - ./pg/data-17:/var/lib/postgresql/data
 
 networks:
   postgres:

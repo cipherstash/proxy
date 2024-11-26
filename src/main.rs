@@ -1,5 +1,5 @@
 use my_little_proxy::config::TandemConfig;
-use my_little_proxy::connect::AsyncStream;
+use my_little_proxy::connect::{self, AsyncStream};
 use my_little_proxy::encrypt::Encrypt;
 use my_little_proxy::error::Error;
 use my_little_proxy::{postgresql as pg, trace};
@@ -21,13 +21,9 @@ async fn main() {
         }
     };
     let encrypt = init(config).await;
-    // let listener = tcp::bind_with_retry(&encrypt.config.server).await;
-    let listener = TcpListener::bind(&encrypt.config.server.to_socket_address())
-        .await
-        .unwrap();
+    let listener = connect::bind_with_retry(&encrypt.config.server).await;
 
     loop {
-        // let (stream, _) = listener.accept().await.unwrap();
         let client_stream = AsyncStream::accept(&listener).await.unwrap();
 
         let encrypt = encrypt.clone();
