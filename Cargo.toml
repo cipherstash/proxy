@@ -18,6 +18,10 @@ proc-macro2.opt-level = 3
 [profile.dev.build-override]
 opt-level = 3
 
+[profile.release]
+codegen-units = 1
+strip = "symbols"
+lto = true
 
 [dependencies]
 cipherstash-config = { path = "/Users/tobyhede/src/cipherstash-suite/packages/cipherstash-config/" }
@@ -28,12 +32,10 @@ cipherstash-client = { path = "/Users/tobyhede/src/cipherstash-suite/packages/ci
 
 
 arc-swap = "1.7.1"
-bytes = "1.8"
-# clap = "4.5"
+bytes = { version = "1.8", default-features = false }
 config = "0.14"
 exitcode = "1.1.2"
 rustls = "0.23.17"
-# rustls-native-certs = "0.8.1"
 rustls-pki-types = "1.10.0"
 serde = "1.0"
 serde_json = "1.0"
@@ -44,6 +46,6 @@ tokio-postgres = { version = "0.7", features = ["with-serde_json-1"] }
 tokio-rustls = "0.26.0"
 tracing = "0.1"
 tracing-subscriber = "0.3"
-uuid = { version = "1.11.0", features = ["v4", "v5", "serde"] }
+uuid = { version = "1.11.0", features = ["serde", "v4", "v5"] }
 # url = { version = "2.5.3", features = ["serde"] }
 webpki-roots = "0.26.7"

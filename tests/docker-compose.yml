@@ -1,0 +1,36 @@
+services:
+  postgres:
+    image: postgres:17
+    container_name: pg-17-tls
+    environment:
+      PGPORT: 5517
+    env_file:
+      - ./pg/common.env
+    ports:
+      - 5517:5517
+    # command: -c 'hba_file=/etc/postgresql/pg_hba.conf'
+    command: -c 'config_file=/etc/postgresql/postgresql.conf' -c 'hba_file=/etc/postgresql/pg_hba.conf'
+    volumes:
+      - ./pg/postgresql-tls.conf:/etc/postgresql/postgresql.conf
+      - ./pg/pg_hba-tls.conf:/etc/postgresql/pg_hba.conf
+      - ./tls/localhost-key.pem:/etc/postgresql/localhost-key.pem
+      - ./tls/localhost.pem:/etc/postgresql/localhost.pem
+      - ./pg/data17:/var/lib/postgresql/data
+    networks:
+      - postgres
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-4}"
+          memory: 2048mb
+    restart: always
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready"]
+      interval: 1s
+      timeout: 5s
+      retries: 10
+
+networks:
+  postgres:
+    driver: bridge
+
