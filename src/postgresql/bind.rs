@@ -1,6 +1,6 @@
 use super::format_code::FormatCode;
+use super::messages::NULL;
 use super::protocol::BytesMutReadString;
-use super::NULL;
 use crate::eql;
 use crate::error::{Error, ProtocolError};
 use crate::{SIZE_I16, SIZE_I32};
@@ -235,12 +235,10 @@ impl TryFrom<Bind> for BytesMut {
     fn try_from(bind: Bind) -> Result<BytesMut, Self::Error> {
         let mut bytes = BytesMut::new();
 
-        let portal_binding =
-            CString::new(bind.portal).map_err(|_| ProtocolError::UnexpectedNull)?;
+        let portal_binding = CString::new(bind.portal)?;
         let portal = portal_binding.as_bytes_with_nul();
 
-        let prepared_statement_binding =
-            CString::new(bind.prepared_statement).map_err(|_| ProtocolError::UnexpectedNull)?;
+        let prepared_statement_binding = CString::new(bind.prepared_statement)?;
         let prepared_statement = prepared_statement_binding.as_bytes_with_nul();
 
         if bind.num_param_format_codes != bind.param_format_codes.len() as i16 {

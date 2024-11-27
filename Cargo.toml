@@ -29,8 +29,11 @@ cipherstash-client = { path = "/Users/tobyhede/src/cipherstash-suite/packages/ci
     "tokio",
 ] }
 # cipherstash-stats = { path = "/Users/tobyhede/src/cipherstash-suite/packages/cipherstash-stats/" }
+sqlparser = { git = "https://github.com/cipherstash/sqlparser-rs", branch = "main", features = [
+    "bigdecimal",
+] }
 
-
+socket2 = "0.5.7"
 arc-swap = "1.7.1"
 bytes = { version = "1.8", default-features = false }
 config = "0.14"
@@ -39,7 +42,6 @@ rustls = "0.23.17"
 rustls-pki-types = "1.10.0"
 serde = "1.0"
 serde_json = "1.0"
-socket2 = "0.5.7"
 thiserror = "2.0"
 tokio = { version = "1.41.1", features = ["full"] }
 tokio-postgres = { version = "0.7", features = ["with-serde_json-1"] }
@@ -47,5 +49,4 @@ tokio-rustls = "0.26.0"
 tracing = "0.1"
 tracing-subscriber = "0.3"
 uuid = { version = "1.11.0", features = ["serde", "v4", "v5"] }
-# url = { version = "2.5.3", features = ["serde"] }
 webpki-roots = "0.26.7"

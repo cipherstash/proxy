@@ -69,13 +69,7 @@ where
     ///     Server: SSL Response (single byte S or N)
     ///
     pub async fn read(&mut self) -> Result<BytesMut, Error> {
-        // let code = self.client.read_u8().await?;
-        // if !self.ssl_complete {
-        //     if let Some(bytes) = self.ssl_request(code) {
-        //         return Ok(bytes);
-        //     }
-        // }
-        info!("[backend] read");
+        // info!("[backend] read");
         let message =
             timeout(CONNECTION_TIMEOUT, protocol::read_message(&mut self.server)).await??;
 

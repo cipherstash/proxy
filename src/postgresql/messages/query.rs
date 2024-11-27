@@ -1,12 +1,13 @@
 use crate::error::{Error, ProtocolError};
+use crate::postgresql::protocol::BytesMutReadString;
 use crate::SIZE_I32;
 
-use super::protocol::BytesMutReadString;
-use super::{frontend, QUERY};
 use bytes::{Buf, BufMut, BytesMut};
 use std::convert::TryFrom;
 use std::ffi::CString;
 use std::io::Cursor;
+
+use super::FrontendCode;
 
 #[derive(Debug, Clone)]
 pub(crate) struct Query {
@@ -20,9 +21,9 @@ impl TryFrom<&BytesMut> for Query {
         let mut cursor = Cursor::new(bytes);
         let code = cursor.get_u8();
 
-        if frontend::Code::from(code) != frontend::Code::Query {
+        if FrontendCode::from(code) != FrontendCode::Query {
             return Err(ProtocolError::UnexpectedMessageCode {
-                expected: QUERY as char,
+                expected: FrontendCode::Query.into(),
                 received: code as char,
             }
             .into());
@@ -46,7 +47,7 @@ impl TryFrom<Query> for BytesMut {
 
         let len = SIZE_I32 + statement_bytes.len(); // len of query
 
-        bytes.put_u8(frontend::Code::Query.into());
+        bytes.put_u8(FrontendCode::Query.into());
         bytes.put_i32(len as i32);
         bytes.put_slice(statement_bytes);
 

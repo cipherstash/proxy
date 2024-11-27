@@ -9,11 +9,13 @@ Experiments in Minimally Viable Proxying.
 
 
 
-
-
-
-
 ## Tests
+
+
+
+```
+  RUST_BACKTRACE=full cargo nextest run --no-fail-fast --nocapture test_ssl_response
+```
 
 Assumes a database called `my_little_proxy` and a `blah` table.
 

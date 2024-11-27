@@ -1,2 +1,16 @@
-[tools]
-postgres = "latest"
+
+#MISE description="Build the CLI"
+# [tasks.up]
+# run = "docker compose up --build --detach"
+#     # sanity check direct connection
+#     psql postgresql://mlp:password@localhost:5432/mlp
+
+#     # proxy connection
+#     psql postgresql://mlp:password@localhost:6432/mlp
+
+# up:
+#     #!/usr/bin/env bash
+#     docker compose up --build --detach
+
+# connect:
+#     #!/usr/bin/env bash

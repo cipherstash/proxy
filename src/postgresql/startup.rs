@@ -158,3 +158,33 @@ where
 
     Ok(())
 }
+
+use binrw::{
+    binrw,    // #[binrw] attribute
+    BinRead,  // trait for reading
+    BinWrite, // trait for writing
+};
+
+#[binrw]
+#[brw(little)]
+struct SSLResponse(u8);
+
+#[cfg(test)]
+mod tests {
+    use std::io::Cursor;
+
+    use binrw::BinWrite;
+
+    use crate::{postgresql::startup::SSLResponse, trace};
+
+    #[test]
+    fn test_ssl_response() {
+        trace();
+
+        let response = SSLResponse(b'S');
+
+        let mut writer = Cursor::new(Vec::new());
+        response.write(&mut writer).unwrap();
+        assert_eq!(writer.into_inner(), &[b'S']);
+    }
+}

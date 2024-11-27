@@ -1,20 +1,16 @@
+use std::io::Cursor;
+
 use super::bind::Bind;
+use super::messages::FrontendCode as Code;
 use super::protocol::{self, Message};
 use crate::encrypt::Encrypt;
 use crate::error::Error;
+use crate::postgresql::messages::parse::Parse;
 use crate::postgresql::CONNECTION_TIMEOUT;
 use bytes::BytesMut;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use tokio::time::timeout;
-use tracing::{debug, info};
-
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum Code {
-    Query,
-    Parse,
-    Bind,
-    Unknown(char),
-}
+use tracing::{debug, error, info};
 
 pub struct Frontend<C, S>
 where
@@ -51,23 +47,17 @@ where
     }
 
     pub async fn read(&mut self) -> Result<BytesMut, Error> {
-        debug!("[frontend] read");
+        // debug!("[frontend] read");
 
         let mut message =
             timeout(CONNECTION_TIMEOUT, protocol::read_message(&mut self.client)).await??;
 
-        debug!("message: {:?}", message);
-
         match message.code.into() {
-            Code::Query => {
-                // debug!("Query");
-                // let query = Query::try_from(&message.bytes.clone())?;
-                // debug!("{query:?}");
-            }
+            Code::Query => {}
             Code::Parse => {
-                // debug!("Parse");
-                // let parse = Parse::try_from(&message.bytes)?;
-                // debug!("{parse:?}");
+                if let Some(bytes) = self.parse_handler(&message).await? {
+                    message.bytes = bytes;
+                }
             }
             Code::Bind => {
                 if let Some(bytes) = self.bind_handler(&message).await? {
@@ -80,6 +70,20 @@ where
         }
 
         Ok(message.bytes)
+    }
+
+    async fn parse_handler(&mut self, message: &Message) -> Result<Option<BytesMut>, Error> {
+        debug!("Parse =====================");
+
+        let mut parse = Parse::try_from(&message.bytes)?;
+
+        debug!("AST =====================");
+
+        debug!("AST =====================");
+
+        let bytes = BytesMut::try_from(parse)?;
+
+        Ok(Some(bytes))
     }
 
     async fn bind_handler(&mut self, message: &Message) -> Result<Option<BytesMut>, Error> {
@@ -95,28 +99,6 @@ where
             Ok(Some(bytes))
         } else {
             Ok(None)
-        }
-    }
-}
-
-impl From<u8> for Code {
-    fn from(code: u8) -> Self {
-        match code as char {
-            'Q' => Code::Query,
-            'P' => Code::Parse,
-            'B' => Code::Bind,
-            _ => Code::Unknown(code as char),
-        }
-    }
-}
-
-impl From<Code> for u8 {
-    fn from(code: Code) -> Self {
-        match code {
-            Code::Bind => b'B',
-            Code::Parse => b'P',
-            Code::Query => b'Q',
-            Code::Unknown(c) => c as u8,
         }
     }
 }

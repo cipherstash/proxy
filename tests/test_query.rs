@@ -1,21 +1,11 @@
-use std::time::Duration;
-
 use my_little_proxy::eql::{Identifier, Plaintext};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use std::time::Duration;
 use tokio::time::sleep;
 use tokio_postgres::{Client, NoTls};
 
-const DATABASE_URL: &str = "postgresql://postgres:password@localhost:6432/my_little_proxy";
-// const DATABASE_URL: &str = "postgresql://postgres:password@localhost:5432/my_little_proxy";
-
-// CREATE TABLE blah (
-//     id bigint GENERATED ALWAYS AS IDENTITY,
-//     t TEXT,
-//     j JSONB,
-//     vtha JSONB,
-//     PRIMARY KEY(id)
-// );
+const DATABASE_URL: &str = "postgresql://mlp:password@localhost:6432/mlp";
 
 pub async fn connect() -> Result<Client, tokio_postgres::Error> {
     let (client, connection) = tokio_postgres::connect(DATABASE_URL, NoTls).await?;
@@ -27,6 +17,17 @@ pub async fn connect() -> Result<Client, tokio_postgres::Error> {
     });
 
     Ok(client)
+}
+
+#[tokio::test]
+async fn select() {
+    let client = connect().await.unwrap();
+
+    let sql = "SELECT * FROM blah WHERE vtha = $1";
+    let vtha = "vtha".to_string();
+    let res = client.query(sql, &[&vtha]).await;
+
+    println!("{:?}", res);
 }
 
 #[tokio::test]

@@ -138,6 +138,12 @@ impl From<io::Error> for Error {
     }
 }
 
+impl From<std::ffi::NulError> for Error {
+    fn from(e: std::ffi::NulError) -> Self {
+        Error::Protocol(ProtocolError::UnexpectedNull)
+    }
+}
+
 impl From<rustls_pki_types::pem::Error> for Error {
     fn from(e: rustls_pki_types::pem::Error) -> Self {
         Error::Config(e.into())

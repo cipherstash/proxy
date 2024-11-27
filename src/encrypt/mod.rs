@@ -7,12 +7,10 @@ use crate::{
 };
 use cipherstash_client::{
     credentials::{auto_refresh::AutoRefresh, service_credentials::ServiceCredentials},
-    encryption::{
-        self, Encrypted, IndexTerm, Plaintext, PlaintextTarget, ReferencedPendingPipeline,
-    },
+    encryption::{self, Encrypted, Plaintext, PlaintextTarget, ReferencedPendingPipeline},
     ConsoleConfig, CtsConfig, ZeroKMS, ZeroKMSConfig,
 };
-use cipherstash_config::{ColumnConfig, DatasetConfig};
+use cipherstash_config::ColumnConfig;
 use std::{sync::Arc, vec};
 
 type ScopedCipher = encryption::ScopedCipher<AutoRefresh<ServiceCredentials>>;

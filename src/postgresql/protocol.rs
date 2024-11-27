@@ -68,9 +68,9 @@ impl BytesMutReadString for Cursor<&BytesMut> {
 ///
 pub async fn read_message<C: AsyncRead + Unpin>(mut client: C) -> Result<Message, Error> {
     let code = client.read_u8().await?;
-    debug!("[read_message] code: {}", code as char);
+    // debug!("[read_message] code: {}", code as char);
     let len = client.read_i32().await?;
-    debug!("[read_message] len: {len}");
+    // debug!("[read_message] len: {len}");
     // debug!("[read_message] code: {code}, len: {len}");
 
     // Detect unexpected message len and avoid panic on read_exact

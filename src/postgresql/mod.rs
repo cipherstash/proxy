@@ -2,9 +2,8 @@ mod backend;
 mod bind;
 mod format_code;
 mod frontend;
-mod parse;
+mod messages;
 mod protocol;
-mod query;
 mod startup;
 
 use crate::{connect::AsyncStream, encrypt::Encrypt, error::Error, tls};
@@ -22,12 +21,6 @@ pub const PROTOCOL_VERSION_NUMBER: i32 = 196608;
 pub const SSL_REQUEST: i32 = 80877103;
 
 pub const CANCEL_REQUEST: i32 = 80877102;
-
-/// Protocol message codes.
-const BIND: u8 = b'B';
-const PARSE: u8 = b'P';
-const QUERY: u8 = b'Q';
-const NULL: i32 = -1;
 
 const SSL_RESPONSE_YES: u8 = b'S';
 const SSL_RESPONSE_NO: u8 = b'N';
