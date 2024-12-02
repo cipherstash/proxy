@@ -1,4 +1,4 @@
-# My Little Proxy
+# CipherStash Proxy
 
 
 Experiments in Minimally Viable Proxying.
