@@ -1,3 +1,4 @@
+pub mod bind;
 pub mod parse;
 pub mod query;
 
@@ -50,6 +51,29 @@ impl From<FrontendCode> for char {
             FrontendCode::Parse => 'P',
             FrontendCode::Query => 'Q',
             FrontendCode::Unknown(c) => c,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum Destination {
+    Named(String),
+    Unnamed,
+}
+
+impl Destination {
+    pub fn new(name: String) -> Destination {
+        if name.is_empty() {
+            Destination::Unnamed
+        } else {
+            Destination::Named(name)
+        }
+    }
+
+    pub fn as_str(&self) -> &str {
+        match self {
+            Destination::Named(name) => name,
+            Destination::Unnamed => "",
         }
     }
 }

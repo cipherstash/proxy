@@ -1,4 +1,4 @@
-use super::FrontendCode;
+use super::{Destination, FrontendCode};
 use crate::{
     error::{Error, ProtocolError},
     postgresql::protocol::BytesMutReadString,
@@ -11,23 +11,18 @@ use std::{ffi::CString, io::Cursor};
 pub struct Parse {
     pub code: char,
     pub len: i32,
-    pub name: String,
+    pub name: Destination,
     pub statement: String,
-
     pub num_params: i16,
-
     pub param_types: Vec<i32>,
+    dirty: bool,
 }
 
-// impl Parse {
-//     pub fn len(&self) -> i32 {
-//         (SIZE_I32 // len
-//                + self.name.len()
-//                + self.statement.len()
-//                + SIZE_I16 // num_params
-//                + SIZE_I32 * self.param_types.len()) as i32
-//     }
-// }
+impl Parse {
+    pub fn should_rewrite(&self) -> bool {
+        self.dirty
+    }
+}
 
 impl TryFrom<&BytesMut> for Parse {
     type Error = Error;
@@ -46,6 +41,8 @@ impl TryFrom<&BytesMut> for Parse {
 
         let len = cursor.get_i32();
         let name = cursor.read_string()?;
+        let name = Destination::new(name);
+
         let statement = cursor.read_string()?;
         let num_params = cursor.get_i16();
         let mut param_types = Vec::new();
@@ -61,6 +58,7 @@ impl TryFrom<&BytesMut> for Parse {
             statement,
             num_params,
             param_types,
+            dirty: false,
         })
     }
 }
@@ -71,7 +69,7 @@ impl TryFrom<Parse> for BytesMut {
     fn try_from(parse: Parse) -> Result<BytesMut, Error> {
         let mut bytes = BytesMut::new();
 
-        let name = CString::new(parse.name)?;
+        let name = CString::new(parse.name.as_str())?;
 
         let name = name.as_bytes_with_nul();
 
@@ -104,16 +102,20 @@ mod tests {
 
     use crate::{postgresql::messages::parse::Parse, trace};
 
+    use super::Destination;
+
     #[test]
-    fn test_parse() {
+    fn test_parse_destination() {
         trace();
 
-        // let response = Parse {
-        //     name: "".into(),
-        //     query: "".into(),
-        //     param_types: vec![1, 2, 3],
-        // };
+        let name = "test".to_string();
+        let destination = Destination::new(name);
 
-        // assert_eq!(writer.into_inner(), &[b'S']);
+        assert_eq!(destination.as_str(), "test");
+
+        let name = "".to_string();
+        let destination = Destination::new(name);
+
+        assert_eq!(destination.as_str(), "");
     }
 }

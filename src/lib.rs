@@ -1,6 +1,5 @@
 pub mod config;
 pub mod connect;
-pub mod context;
 pub mod encrypt;
 pub mod eql;
 pub mod error;

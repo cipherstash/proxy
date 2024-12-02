@@ -1,8 +1,8 @@
-use my_little_proxy::config::TandemConfig;
-use my_little_proxy::connect::{self, AsyncStream};
-use my_little_proxy::encrypt::Encrypt;
-use my_little_proxy::error::Error;
-use my_little_proxy::{postgresql as pg, trace};
+use cipherstash_proxy::config::TandemConfig;
+use cipherstash_proxy::connect::{self, AsyncStream};
+use cipherstash_proxy::encrypt::Encrypt;
+use cipherstash_proxy::error::Error;
+use cipherstash_proxy::{postgresql as pg, trace};
 use tokio::net::{tcp, TcpListener, TcpStream};
 use tracing::{error, info, warn};
 

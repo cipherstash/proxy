@@ -8,9 +8,10 @@ use tokio::{
     io::{split, AsyncRead, AsyncWrite, ReadBuf},
     net::{TcpListener, TcpStream},
 };
+
 use tokio_rustls::TlsStream;
 
-use super::configure;
+use super::{configure, connect_with_retry};
 
 #[derive(Debug)]
 pub enum AsyncStream {
@@ -26,7 +27,7 @@ impl AsyncStream {
     }
 
     pub async fn connect(addr: &str) -> Result<AsyncStream, Error> {
-        let mut stream = TcpStream::connect(addr).await?;
+        let mut stream = connect_with_retry(addr).await?;
         configure(&mut stream);
         Ok(AsyncStream::Tcp(stream))
     }

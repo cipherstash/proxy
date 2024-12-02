@@ -1,5 +1,5 @@
 mod backend;
-mod bind;
+mod context;
 mod format_code;
 mod frontend;
 mod messages;

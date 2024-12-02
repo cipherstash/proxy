@@ -1,13 +1,14 @@
-use super::format_code::FormatCode;
-use super::messages::NULL;
-use super::protocol::BytesMutReadString;
 use crate::eql;
 use crate::error::{Error, ProtocolError};
+use crate::postgresql::format_code::FormatCode;
+use crate::postgresql::protocol::BytesMutReadString;
 use crate::{SIZE_I16, SIZE_I32};
 use bytes::{Buf, BufMut, BytesMut};
 use std::io::Cursor;
 use std::{convert::TryFrom, ffi::CString};
 use tracing::debug;
+
+use super::{Destination, NULL};
 
 /// Bind (B) message.
 /// See: <https://www.postgresql.org/docs/current/protocol-message-formats.html>
@@ -16,8 +17,8 @@ pub struct Bind {
     pub code: char,
     #[allow(dead_code)]
     len: i64,
-    pub portal: String,
-    pub prepared_statement: String,
+    pub portal: Destination,
+    pub prepared_statement: Destination,
     pub num_param_format_codes: i16,
     pub param_format_codes: Vec<FormatCode>,
     pub num_param_values: i16,
@@ -172,8 +173,13 @@ impl TryFrom<&BytesMut> for Bind {
         let mut cursor = Cursor::new(buf);
         let code = cursor.get_u8() as char;
         let len = cursor.get_i32();
+
         let portal = cursor.read_string()?;
+        let portal = Destination::new(portal);
+
         let prepared_statement = cursor.read_string()?;
+        let prepared_statement = Destination::new(prepared_statement);
+
         let num_param_format_codes = cursor.get_i16();
         let mut param_format_codes = Vec::new();
 
@@ -235,10 +241,10 @@ impl TryFrom<Bind> for BytesMut {
     fn try_from(bind: Bind) -> Result<BytesMut, Self::Error> {
         let mut bytes = BytesMut::new();
 
-        let portal_binding = CString::new(bind.portal)?;
+        let portal_binding = CString::new(bind.portal.as_str())?;
         let portal = portal_binding.as_bytes_with_nul();
 
-        let prepared_statement_binding = CString::new(bind.prepared_statement)?;
+        let prepared_statement_binding = CString::new(bind.prepared_statement.as_str())?;
         let prepared_statement = prepared_statement_binding.as_bytes_with_nul();
 
         if bind.num_param_format_codes != bind.param_format_codes.len() as i16 {
@@ -295,5 +301,24 @@ impl TryFrom<Bind> for BytesMut {
         }
 
         Ok(bytes)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{postgresql::format_code::FormatCode, trace};
+
+    use super::BindParam;
+
+    #[test]
+    fn bind_should_rewrite() {
+        trace();
+
+        let bytes = "hello".into();
+        let mut param = BindParam::new(FormatCode::Text, bytes);
+
+        param.rewrite("world".as_bytes());
+
+        assert!(param.should_rewrite());
     }
 }

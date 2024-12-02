@@ -20,11 +20,17 @@ pub enum Error {
     #[error("Connection timed out")]
     ConnectionTimeout(#[from] Elapsed),
 
+    #[error("Error creating connection after {retries} retries")]
+    DatabaseConnection { retries: u32 },
+
     #[error(transparent)]
     Encrypt(#[from] EncryptError),
 
     #[error(transparent)]
     Io(io::Error),
+
+    #[error(transparent)]
+    Mapping(#[from] MappingError),
 
     #[error(transparent)]
     Protocol(#[from] ProtocolError),
@@ -37,6 +43,12 @@ pub enum Error {
 
     #[error("Unknown error")]
     Unknown,
+}
+
+#[derive(Error, Debug)]
+pub enum MappingError {
+    #[error(transparent)]
+    Parse(#[from] sqlparser::parser::ParserError),
 }
 
 #[derive(Error, Debug)]
@@ -138,12 +150,6 @@ impl From<io::Error> for Error {
     }
 }
 
-impl From<std::ffi::NulError> for Error {
-    fn from(e: std::ffi::NulError) -> Self {
-        Error::Protocol(ProtocolError::UnexpectedNull)
-    }
-}
-
 impl From<rustls_pki_types::pem::Error> for Error {
     fn from(e: rustls_pki_types::pem::Error) -> Self {
         Error::Config(e.into())
@@ -153,6 +159,18 @@ impl From<rustls_pki_types::pem::Error> for Error {
 impl From<serde_json::Error> for Error {
     fn from(e: serde_json::Error) -> Self {
         Error::Encrypt(e.into())
+    }
+}
+
+impl From<sqlparser::parser::ParserError> for Error {
+    fn from(e: sqlparser::parser::ParserError) -> Self {
+        Error::Mapping(e.into())
+    }
+}
+
+impl From<std::ffi::NulError> for Error {
+    fn from(e: std::ffi::NulError) -> Self {
+        Error::Protocol(ProtocolError::UnexpectedNull)
     }
 }
 

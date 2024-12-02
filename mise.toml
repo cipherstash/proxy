@@ -1,4 +1,12 @@
 
+
+
+[tasks.test]
+alias = 't'
+description = "All test"
+run = 'cargo nextest run --no-fail-fast --nocapture {{arg(name="test",default="")}}'
+
+
 #MISE description="Build the CLI"
 # [tasks.up]
 # run = "docker compose up --build --detach"

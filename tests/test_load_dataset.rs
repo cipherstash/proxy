@@ -1,4 +1,4 @@
-use my_little_proxy::{trace, TandemConfig};
+use cipherstash_proxy::{trace, TandemConfig};
 use tracing::info;
 
 #[tokio::test]
