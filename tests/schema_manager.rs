@@ -11,8 +11,9 @@ async fn load_schema() {
     let config = database_config();
     let manager = SchemaManager::init(&config).await.unwrap();
 
-    // info!("SchemaManager: {:?}", manager);
+    let schema = manager.load();
 
-    let tables = manager.schema.tables.clone();
-    info!("tables: {:?}", tables);
+    // info!("schema.tables: {:?}", schema.tables);
+
+    assert!(!schema.tables.is_empty());
 }

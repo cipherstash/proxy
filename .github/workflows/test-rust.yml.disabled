@@ -43,3 +43,12 @@ jobs:
       - name: clippy
         run: cargo clippy --all --no-deps --all-targets --all-features
 
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Install mise
+        run: curl https://mise.run | sh
+
+      - name: Start pg
+        run: sudo systemctl start postgresql.service
+

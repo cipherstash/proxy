@@ -84,11 +84,19 @@ where
 
         let parse = Parse::try_from(&message.bytes)?;
 
+        let param_types = parse.param_types.clone();
+
         let ast = Parser::new(&dialect)
             .try_with_sql(&parse.statement)?
             .parse_statement()?;
-        let param_types = parse.param_types.clone();
+
+        // Everything is called Statement and it is a bit annoying
+        // Statement contains the parsed ast
+        // Should be expanded to include the analyzed and rewritten statement/s
+        // etc
+
         let statement = Statement::new(ast, param_types);
+
         self.context.add(&parse.name, statement);
 
         if parse.should_rewrite() {

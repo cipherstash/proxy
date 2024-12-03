@@ -11,13 +11,17 @@ use tracing::{debug, error, info, trace, warn};
 #[derive(Clone, Debug)]
 pub struct SchemaManager {
     _reload_handle: Arc<JoinHandle<()>>,
-    pub schema: Arc<ArcSwap<Schema>>,
+    schema: Arc<ArcSwap<Schema>>,
 }
 
 impl SchemaManager {
     pub async fn init(config: &DatabaseConfig) -> Result<Self, Error> {
         let config = config.clone();
         init_reloader(config).await
+    }
+
+    pub fn load(&self) -> Arc<Schema> {
+        self.schema.load().clone()
     }
 }
 
@@ -115,6 +119,8 @@ pub async fn load_schema(config: &DatabaseConfig) -> Result<Schema, Error> {
         columns.iter().for_each(|col| {
             table.add_column(Arc::new(Column::new(Ident::new(col))), false);
         });
+
+        schema.add_table(table);
     }
 
     let aggregates = client.query(AGGREGATE_QUERY, &[]).await?;

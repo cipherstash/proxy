@@ -21,7 +21,6 @@ const AGGREGATE_QUERY: &'static str = include_str!("./sql/select_aggregates.sql"
 
 pub async fn connect(config: &DatabaseConfig) -> Result<Client, tokio_postgres::Error> {
     let connection_string = config.to_connection_string();
-    debug!("connection_string: {connection_string}");
 
     let (client, connection) = tokio_postgres::connect(&connection_string, NoTls).await?;
 

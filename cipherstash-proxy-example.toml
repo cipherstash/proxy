@@ -1,0 +1,20 @@
+[tls]
+certificate = "tests/tls/server.cert"
+private_key = "tests/tls/server.key"
+
+[database]
+database = "mlp"
+host = "localhost"
+port = 5532
+username = "mlp"
+password = "password"
+with_tls = true
+
+[auth]
+workspace_id = "workspace_id"
+client_access_key = "client_access_key"
+
+[encrypt]
+dataset_id = "dataset_id"
+client_id = "client_id"
+client_key = "client_key"
