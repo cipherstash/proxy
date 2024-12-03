@@ -1,4 +1,6 @@
-use crate::{config::TlsConfig, encrypt::Encrypt, error::Error};
+use crate::config::ServerConfig;
+use crate::{config::TlsConfig, error::Error};
+use crate::{DatabaseConfig, TandemConfig};
 use rustls::client::danger::ServerCertVerifier;
 use rustls::ClientConfig;
 use rustls_pki_types::{pem::PemObject, CertificateDer, PrivateKeyDer, ServerName};
@@ -7,25 +9,15 @@ use tokio::net::TcpStream;
 use tokio_rustls::{TlsAcceptor, TlsConnector, TlsStream};
 use tracing::{debug, info};
 
-pub fn configure() -> ClientConfig {
-    let mut root_cert_store = rustls::RootCertStore::empty();
-    root_cert_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
-
-    let mut config = rustls::ClientConfig::builder()
-        .with_root_certificates(root_cert_store)
-        .with_no_client_auth();
-
-    let mut dangerous = config.dangerous();
-    dangerous.set_certificate_verifier(Arc::new(NoCertificateVerification {}));
-    config
-}
-
-pub async fn client(stream: TcpStream, encrypt: &Encrypt) -> Result<TlsStream<TcpStream>, Error> {
-    let config = configure();
+pub async fn client(
+    stream: TcpStream,
+    config: &TandemConfig,
+) -> Result<TlsStream<TcpStream>, Error> {
+    let tls_config = configure_client_tls(&config.database);
     info!("Connecting to database over TLS");
 
-    let connector = TlsConnector::from(Arc::new(config));
-    let domain = encrypt.config.server.server_name()?.to_owned();
+    let connector = TlsConnector::from(Arc::new(tls_config));
+    let domain = config.server.server_name()?.to_owned();
     let tls_stream = connector.connect(domain, stream).await?;
 
     Ok(tls_stream.into())
@@ -45,6 +37,22 @@ pub async fn server(stream: TcpStream, config: &TlsConfig) -> Result<TlsStream<T
     let tls_stream = acceptor.accept(stream).await?;
     debug!("TLS negotiation complete");
     Ok(tls_stream.into())
+}
+
+pub fn configure_client_tls(config: &DatabaseConfig) -> ClientConfig {
+    let mut root_cert_store = rustls::RootCertStore::empty();
+    root_cert_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+
+    let mut tls_config = rustls::ClientConfig::builder()
+        .with_root_certificates(root_cert_store)
+        .with_no_client_auth();
+
+    if !config.with_tls_verification {
+        let mut dangerous = tls_config.dangerous();
+        dangerous.set_certificate_verifier(Arc::new(NoCertificateVerification {}));
+    }
+
+    tls_config
 }
 
 #[derive(Clone, Debug)]

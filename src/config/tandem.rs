@@ -1,5 +1,4 @@
 use crate::error::{ConfigError, Error};
-// use cipherstash_client::config::errors::ConfigError;
 use config::{Config, Environment};
 use rustls::ServerConfig as TlsServerConfig;
 use rustls_pki_types::{pem::PemObject, CertificateDer};
@@ -47,6 +46,9 @@ pub struct DatabaseConfig {
     #[serde(default)]
     pub with_tls: bool,
 
+    #[serde(default)]
+    pub with_tls_verification: bool,
+
     #[serde(default = "DatabaseConfig::default_config_reload_interval")]
     pub config_reload_interval: u64,
 
@@ -54,6 +56,10 @@ pub struct DatabaseConfig {
     pub schema_reload_interval: u64,
 }
 
+///
+/// Server TLS Configuration
+/// This is listener/inbound connection config
+///
 #[derive(Clone, Debug, Deserialize)]
 pub struct TlsConfig {
     pub certificate: String,

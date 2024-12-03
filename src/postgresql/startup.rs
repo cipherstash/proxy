@@ -27,7 +27,7 @@ pub async fn to_tls(stream: AsyncStream, encrypt: &Encrypt) -> Result<AsyncStrea
                 return Err(ProtocolError::UnexpectedSSLResponse.into());
             }
 
-            let tls_stream = tls::client(tcp_stream, encrypt).await?;
+            let tls_stream = tls::client(tcp_stream, &encrypt.config).await?;
             Ok(AsyncStream::Tls(tls_stream.into()))
         }
         AsyncStream::Tls(_) => {
