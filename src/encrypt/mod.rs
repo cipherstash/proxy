@@ -1,5 +1,5 @@
 use crate::{
-    config::{DatasetManager, TandemConfig},
+    config::{DatasetManager, SchemaManager, TandemConfig},
     eql,
     error::{EncryptError, Error},
 };
@@ -18,17 +18,20 @@ pub struct Encrypt {
     pub config: TandemConfig,
     cipher: Arc<ScopedCipher>,
     dataset: DatasetManager,
+    schema: SchemaManager,
 }
 
 impl Encrypt {
     pub async fn init(config: TandemConfig) -> Result<Encrypt, Error> {
         let cipher = Arc::new(init_cipher(&config).await?);
         let dataset = DatasetManager::init(&config.database).await?;
+        let schema = SchemaManager::init(&config.database).await?;
 
         Ok(Encrypt {
             config,
             cipher,
             dataset,
+            schema,
         })
     }
 
@@ -149,7 +152,6 @@ fn to_eql_encrypted(encrypted: Encrypted, pt: &eql::Plaintext) -> Result<eql::Ci
 
     match encrypted {
         Encrypted::Record(ciphertext, _terms) => {
-            // TODO INDEXES
             let ct = eql::Ciphertext::new(ciphertext, pt.identifier.clone());
             Ok(ct)
         }
