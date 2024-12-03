@@ -10,7 +10,7 @@ run = 'cargo nextest run --no-fail-fast --nocapture {{arg(name="test",default=""
 depends = ["install_eql"]
 alias = 's'
 description = "Installs EQL and applies schema to database"
-run = "psql postgresql://mlp:password@localhost:5532/mlp < tests/sql/schema.sql"
+run = "psql postgresql://cipherstash:password@localhost:5532/cipherstash < tests/sql/schema.sql"
 
 [tasks.up]
 alias = 'u'
@@ -24,5 +24,5 @@ description = "Install EQL"
 run = """
 #!/usr/bin/env bash
 curl -sLo tests/sql/cipherstash-encrypt.sql https://github.com/cipherstash/encrypt-query-language/releases/latest/download/cipherstash-encrypt.sql
-psql postgresql://mlp:password@localhost:5532/mlp < tests/sql/cipherstash-encrypt.sql
+psql postgresql://cipherstash:password@localhost:5532/cipherstash < tests/sql/cipherstash-encrypt.sql
 """

@@ -137,7 +137,7 @@ where
 
     // Application name
     bytes.put(&b"application_name\0"[..]);
-    bytes.put_slice(&b"my-little-proxy\0"[..]);
+    bytes.put_slice(&b"cipherstash-proxy\0"[..]);
 
     // Database
     bytes.put(&b"database\0"[..]);

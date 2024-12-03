@@ -7,8 +7,8 @@ pub fn database_config() -> DatabaseConfig {
     DatabaseConfig {
         host: "localhost".to_string(),
         port: PORT,
-        database: "mlp".to_string(),
-        username: "mlp".to_string(),
+        database: "cipherstash".to_string(),
+        username: "cipherstash".to_string(),
         password: "password".to_string(),
         config_reload_interval: 10,
         schema_reload_interval: 10,

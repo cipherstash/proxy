@@ -3,10 +3,10 @@ certificate = "tests/tls/server.cert"
 private_key = "tests/tls/server.key"
 
 [database]
-database = "mlp"
+database = "cipherstash"
 host = "localhost"
 port = 5532
-username = "mlp"
+username = "cipherstash"
 password = "password"
 with_tls = true
 

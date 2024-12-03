@@ -68,9 +68,9 @@ mise r u postgres
 All containers use the same credentials and database, defined in `pg/common.env`
 
 ```
-POSTGRES_DB="mlp"
-POSTGRES_USER="mlp"
-PGUSER="mlp"
+POSTGRES_DB="cipherstash"
+POSTGRES_USER="cipherstash"
+PGUSER="cipherstash"
 POSTGRES_PASSWORD="password"
 ```
 
@@ -136,7 +136,7 @@ docker compose up --build
 ```
 
 ```
-psql postgresql://mlp:password@localhost:5517/mlp
+psql postgresql://cipherstash:password@localhost:5517/cipherstash
 ```
 
 
