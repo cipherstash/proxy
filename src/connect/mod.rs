@@ -1,12 +1,14 @@
 mod async_stream;
 
-use crate::{config::ServerConfig, error::Error};
+use crate::{config::ServerConfig, error::Error, DatabaseConfig};
 use socket2::TcpKeepalive;
 use std::time::Duration;
+
 use tokio::{
     net::{TcpListener, TcpStream},
     time::{self},
 };
+use tokio_postgres::{Client, NoTls};
 use tracing::{debug, error, info, warn};
 
 pub use async_stream::AsyncStream;
@@ -17,6 +19,20 @@ const TCP_KEEPALIVE_RETRIES: u32 = 5;
 
 const MAX_RETRY_DELAY: Duration = Duration::from_secs(2);
 const MAX_RETRY_COUNT: u32 = 3;
+
+pub async fn database(config: &DatabaseConfig) -> Result<Client, tokio_postgres::Error> {
+    let connection_string = config.to_connection_string();
+
+    let (client, connection) = tokio_postgres::connect(&connection_string, NoTls).await?;
+
+    tokio::spawn(async move {
+        if let Err(e) = connection.await {
+            eprintln!("connection error: {}", e);
+        }
+    });
+
+    Ok(client)
+}
 
 pub async fn bind_with_retry(server: &ServerConfig) -> TcpListener {
     let address = &server.to_socket_address();

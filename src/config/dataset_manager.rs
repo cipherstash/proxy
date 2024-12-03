@@ -1,6 +1,7 @@
-use super::{connect, tandem::DatabaseConfig};
+use super::tandem::DatabaseConfig;
 use crate::{
     config::{JsonDatasetConfig, ENCRYPT_DATASET_CONFIG_QUERY},
+    connect,
     error::{ConfigError, Error},
 };
 use arc_swap::ArcSwap;
@@ -96,7 +97,7 @@ async fn load_dataset_with_retry(config: &DatabaseConfig) -> Result<DatasetConfi
 }
 
 pub async fn load_dataset(config: &DatabaseConfig) -> Result<DatasetConfig, Error> {
-    let client = connect(config).await?;
+    let client = connect::database(config).await?;
     let result = client.simple_query(ENCRYPT_DATASET_CONFIG_QUERY).await;
 
     let rows = match result {

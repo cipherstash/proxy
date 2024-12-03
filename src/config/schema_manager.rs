@@ -1,4 +1,5 @@
-use super::{connect, tandem::DatabaseConfig, AGGREGATE_QUERY, SCHEMA_QUERY};
+use super::{tandem::DatabaseConfig, AGGREGATE_QUERY, SCHEMA_QUERY};
+use crate::connect;
 use crate::error::{ConfigError, Error};
 use arc_swap::ArcSwap;
 use eql_mapper::{Column, Schema, Table};
@@ -95,7 +96,7 @@ async fn load_schema_with_retry(config: &DatabaseConfig) -> Result<Schema, Error
 }
 
 pub async fn load_schema(config: &DatabaseConfig) -> Result<Schema, Error> {
-    let client = connect(config).await?;
+    let client = connect::database(config).await?;
 
     let tables = client.query(SCHEMA_QUERY, &[]).await?;
 
