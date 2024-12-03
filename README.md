@@ -23,6 +23,14 @@ Uses [mise](https://mise.jdx.dev/) and  [Nextest](https://nexte.st/) for testing
 cargo binstall cargo-nextest --secure
 ```
 
+### Setup
+
+Assumes running docker postgres service with default credentials
+
+'''
+  mise run setup
+  mise r s
+'''
 
 ### Run all tests
 ```
@@ -33,8 +41,9 @@ cargo binstall cargo-nextest --secure
 ### Run a single test
 ```
   mise r t {TEST_NAME}
-  mise r t test_parse_destination
+  mise r t load_schema
 ```
+
 
 
 
