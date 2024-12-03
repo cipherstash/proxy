@@ -1,0 +1,18 @@
+name: Setup Rust
+
+runs:
+  using: composite
+  steps:
+
+    - name: Install
+      run: rustup toolchain install stable --profile minimal --no-self-update
+
+    - name: Setup Rust cache
+      uses: Swatinem/rust-cache@v2
+      with:
+       cache-provider: ${{ inputs.provider }}
+       shared-key: ${{ inputs.key }}
+
+    - name: Install cargo-expand
+      shell: /bin/bash -l {0}
+      run: cargo install cargo-expand
