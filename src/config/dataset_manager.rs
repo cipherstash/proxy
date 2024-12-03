@@ -1,4 +1,4 @@
-use super::tandem::DatabaseConfig;
+use super::{connect, tandem::DatabaseConfig};
 use crate::{
     config::{JsonDatasetConfig, ENCRYPT_DATASET_CONFIG_QUERY},
     error::{ConfigError, Error},
@@ -7,7 +7,7 @@ use arc_swap::ArcSwap;
 use cipherstash_config::DatasetConfig;
 use std::{sync::Arc, time::Duration};
 use tokio::{task::JoinHandle, time};
-use tokio_postgres::{Client, NoTls, SimpleQueryMessage, SimpleQueryRow};
+use tokio_postgres::{SimpleQueryMessage, SimpleQueryRow};
 use tracing::{debug, error, warn};
 
 #[derive(Clone, Debug)]
@@ -35,7 +35,7 @@ async fn init_reloader(config: DatabaseConfig) -> Result<DatasetManager, Error> 
 
     let dataset_ref = dataset.clone();
     let reload_handle = tokio::spawn(async move {
-        let reload_interval = tokio::time::Duration::from_secs(config_ref.reload_interval);
+        let reload_interval = tokio::time::Duration::from_secs(config_ref.config_reload_interval);
 
         let mut interval = tokio::time::interval_at(
             tokio::time::Instant::now() + reload_interval,
@@ -64,7 +64,7 @@ async fn init_reloader(config: DatabaseConfig) -> Result<DatasetManager, Error> 
     })
 }
 
-/// Fetch the schema and retry on any error
+/// Fetch the dataset and retry on any error
 ///
 /// When databases and the proxy start up at the same time they might not be ready to accept connections before the
 /// proxy tries to query the schema. To give the proxy the best chance of initialising correctly this method will
@@ -146,16 +146,4 @@ pub async fn load_dataset(config: &DatabaseConfig) -> Result<DatasetConfig, Erro
 fn configuration_table_not_found(e: &tokio_postgres::Error) -> bool {
     let msg = e.to_string();
     msg.contains("cs_configuration_v1") && msg.contains("does not exist")
-}
-
-pub async fn connect(connection_string: String) -> Result<Client, tokio_postgres::Error> {
-    let (client, connection) = tokio_postgres::connect(&connection_string, NoTls).await?;
-
-    tokio::spawn(async move {
-        if let Err(e) = connection.await {
-            eprintln!("connection error: {}", e);
-        }
-    });
-
-    Ok(client)
 }

@@ -72,7 +72,7 @@ async fn init(config: TandemConfig) -> Encrypt {
         }
     }
 
-    if config.server.skip_tls() {
+    if config.database.skip_tls() {
         warn!("Connecting to database without Transport Layer Security (TLS)");
     }
 
@@ -101,6 +101,7 @@ async fn init(config: TandemConfig) -> Encrypt {
         }
         None => {
             warn!("Transport Layer Security (TLS) is not configured");
+            warn!("Listening on an insecure connection");
         }
     }
 

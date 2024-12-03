@@ -6,6 +6,7 @@ pub mod error;
 pub mod postgresql;
 pub mod tls;
 
+pub use crate::config::DatabaseConfig;
 pub use crate::config::TandemConfig;
 
 use std::{mem, sync::Once};

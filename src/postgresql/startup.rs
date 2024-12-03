@@ -13,7 +13,7 @@ use crate::{
 use super::protocol::StartupMessage;
 
 pub async fn to_tls(stream: AsyncStream, encrypt: &Encrypt) -> Result<AsyncStream, Error> {
-    if encrypt.config.server.skip_tls() {
+    if encrypt.config.database.skip_tls() {
         debug!("Skip database TLS connection");
         return Ok(stream);
     }

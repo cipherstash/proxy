@@ -30,9 +30,6 @@ pub struct ServerConfig {
 
     #[serde(default = "ServerConfig::default_port")]
     pub port: u16,
-
-    #[serde(default)]
-    pub use_tls: bool,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -47,8 +44,14 @@ pub struct DatabaseConfig {
     pub username: String,
     pub password: String,
 
-    #[serde(default = "DatabaseConfig::default_refresh_interval")]
-    pub reload_interval: u64,
+    #[serde(default)]
+    pub with_tls: bool,
+
+    #[serde(default = "DatabaseConfig::default_config_reload_interval")]
+    pub config_reload_interval: u64,
+
+    #[serde(default = "DatabaseConfig::default_schema_reload_interval")]
+    pub schema_reload_interval: u64,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -128,7 +131,6 @@ impl Default for ServerConfig {
         ServerConfig {
             host: ServerConfig::default_host(),
             port: ServerConfig::default_port(),
-            use_tls: false,
         }
     }
 }
@@ -140,10 +142,6 @@ impl ServerConfig {
 
     pub fn default_port() -> u16 {
         6432
-    }
-
-    pub fn skip_tls(&self) -> bool {
-        !self.use_tls
     }
 
     pub fn server_name(&self) -> Result<ServerName, Error> {
@@ -169,8 +167,16 @@ impl DatabaseConfig {
         5432
     }
 
-    pub fn default_refresh_interval() -> u64 {
+    pub fn default_config_reload_interval() -> u64 {
         60
+    }
+
+    pub fn default_schema_reload_interval() -> u64 {
+        60
+    }
+
+    pub fn skip_tls(&self) -> bool {
+        !self.with_tls
     }
 
     pub fn to_socket_address(&self) -> String {
