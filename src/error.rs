@@ -65,6 +65,9 @@ pub enum ConfigError {
     #[error(transparent)]
     Database(#[from] tokio_postgres::Error),
 
+    #[error("Server host {name} is not a valid server name")]
+    InvalidServerName { name: String },
+
     #[error("Expected an active Encrypt configuration")]
     MissingActiveEncryptConfig,
 
@@ -74,8 +77,8 @@ pub enum ConfigError {
     #[error(transparent)]
     Parse(#[from] serde_json::Error),
 
-    #[error("Server host {name} is not a valid server name")]
-    InvalidServerName { name: String },
+    #[error("Database schema could not be loaded")]
+    SchemaCouldNotBeLoaded,
 }
 
 #[derive(Error, Debug)]
