@@ -44,6 +44,16 @@ Conventions for running multiple postgres versions
 
 The goal is to have as little to configure in local dev as possible.
 
+### Run all services
+```
+mise r u
+```
+
+### Run a specific service
+```
+mise r u postgres
+```
+
 ### common configuration
 
 All containers use the same credentials and database, defined in `pg/common.env`

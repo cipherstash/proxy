@@ -6,7 +6,6 @@ use sqltk::sqlparser::ast::Ident;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::{task::JoinHandle, time};
-
 use tracing::{debug, error, info, trace, warn};
 
 #[derive(Clone, Debug)]
