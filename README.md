@@ -1,13 +1,36 @@
 # CipherStash Proxy
 
-Your Proxy Pal Who's Fun to Be With!
+CipherStash Proxy keeps your sensitive data in PostgreSQL encrypted and searchable, without changing your SQL queries.
 
+Behind the scenes, it uses the [Encrypt Query Language](https://github.com/cipherstash/encrypt-query-language/) to index and search encrypted data.
 
+## Developing
 
-## Tl;DR
+You need to have this software installed:
 
-Assuming you have [Rust](https://www.rust-lang.org/), [mise](https://mise.jdx.dev/) and [Docker](https://www.docker.com/) installed
+- [Rust](https://www.rust-lang.org/)
+- [mise](https://mise.jdx.dev/)
+- [Docker](https://www.docker.com/)
 
+Local development is managed through [mise](https://mise.jdx.dev/).
+
+To install mise:
+
+- If you're on macOS, run `brew install mise`
+- If you're on another platform, check out the mise [installation methods documentation](https://mise.jdx.dev/installing-mise.html#installation-methods)
+
+### Building
+
+> [!IMPORTANT]
+> **Before you start:** ensure you have an SSH authentication key [added to your GitHub account](https://github.com/settings/keys).
+
+To build a binary for Proxy, run:
+
+```bash
+cargo build
+```
+
+## Dependencies
 
 Configure `Auth` and `Encrypt`
 
