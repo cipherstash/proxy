@@ -30,7 +30,7 @@ To build a binary for Proxy, run:
 cargo build
 ```
 
-## Dependencies
+### Dependencies
 
 Configure `Auth` and `Encrypt`
 
@@ -72,48 +72,54 @@ See `Docker Compose` below for details.
 
 
 
-## Tests
+### Tests
 
-Uses [Nextest](https://nexte.st/) for testing.
+> [!IMPORTANT]
+> **Before you start:** ensure you have [Nextest](https://nexte.st/) installed:
+> ```bash
+> cargo binstall cargo-nextest --secure
+> ```
 
+To set up your local development environment, run:
 
-
-### Setup
+```
+mise run setup
+```
 
 Assumes running docker postgres service with default credentials
 
-'''
-  mise run setup
-  mise r s
-'''
+To run all tests:
 
-### Run all tests
-```
-  mise run test
-  mise r t
+```bash
+mise run test
 ```
 
-### Run a single test
-```
-  mise r t {TEST_NAME}
-  mise r t load_schema
+To run a single test:
+
+```bash
+mise run test {TEST_NAME}
+mise run test load_schema
 ```
 
+> [!TIP]
+> Mise provides abbreviations for most of the commands above.
+> For example, `mise run setup` can be abbreviated to `mise r s`.
+> Check out `mise.toml` for all the task shortcuts we have defined.
 
-## Docker Compose
+### Docker Compose
 
 Conventions for running multiple postgres versions
 
 The goal is to have as little to configure in local dev as possible.
 
-### Run all services
-```
-mise r u
+To run all services:
+```bash
+mise run up
 ```
 
-### Run a specific service
-```
-mise r u postgres
+To run a specific service
+```bash
+mise run up postgres
 ```
 
 ### common configuration
@@ -198,6 +204,3 @@ docker compose up --build
 ```
 psql postgresql://cipherstash:password@localhost:5517/cipherstash
 ```
-
-
-
