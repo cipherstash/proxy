@@ -45,7 +45,7 @@ cipherstash-client = { git = "ssh://git@github.com/cipherstash/cipherstash-suite
 ] }
 eql-mapper = { git = "ssh://git@github.com/cipherstash/eql-mapper.git" }
 # cipherstash-stats = { path = "/Users/tobyhede/src/cipherstash-suite/packages/cipherstash-stats/" }
-sqltk = { version = "0.1.0" }
+sqltk = { version = "^0.1" }
 sqlparser = { version = "^0.52" }
 arc-swap = "1.7.1"
 bytes = { version = "1.9", default-features = false }
