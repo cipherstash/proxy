@@ -13,7 +13,17 @@ Databases are defined and configured in `tests/docker-compose.yml'
 
 See `Docker Compose` below for details.
 
+- [Bininstall](https://github.com/cargo-bins/cargo-binstall)
+- [Mise](https://github.com/jdxcode/mise)
+- [Nextest](https://nexte.st/)
+- [Docker](https://www.docker.com/)
+- [Docker Compose](https://docs.docker.com/compose/)
 
+Install the following which is a dependency of `sqltk`:
+
+```bash
+cargo install cargo-expand
+```
 
 ## Tests
 

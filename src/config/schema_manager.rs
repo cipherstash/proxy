@@ -2,7 +2,7 @@ use super::{connect, tandem::DatabaseConfig, AGGREGATE_QUERY, SCHEMA_QUERY};
 use crate::error::{ConfigError, Error};
 use arc_swap::ArcSwap;
 use eql_mapper::{Column, Schema, Table};
-use sqltk::sqlparser::ast::Ident;
+use sqlparser::ast::Ident;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::{task::JoinHandle, time};

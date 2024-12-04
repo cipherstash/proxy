@@ -45,12 +45,8 @@ cipherstash-client = { git = "ssh://git@github.com/cipherstash/cipherstash-suite
 ] }
 eql-mapper = { git = "ssh://git@github.com/cipherstash/eql-mapper.git" }
 # cipherstash-stats = { path = "/Users/tobyhede/src/cipherstash-suite/packages/cipherstash-stats/" }
-sqlparser = { git = "ssh://git@github.com/cipherstash/sqlparser-rs.git", branch = "main", features = [
-    "bigdecimal",
-] }
-sqltk = { git = "ssh://git@github.com/cipherstash/sqltk.git" }
-
-
+sqltk = { version = "0.1.0" }
+sqlparser = { version = "^0.52" }
 arc-swap = "1.7.1"
 bytes = { version = "1.9", default-features = false }
 config = { version = "0.14", features = [

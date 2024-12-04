@@ -440,6 +440,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "cargo_metadata"
+version = "0.19.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8769706aad5d996120af43197bf46ef6ad0fda35216b4505f926a365a232d924"
+dependencies = [
+ "camino",
+ "cargo-platform",
+ "semver",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.3",
+]
+
+[[package]]
 name = "cc"
 version = "1.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -676,8 +690,8 @@ dependencies = [
  "serde",
  "serde_json",
  "socket2",
- "sqlparser 0.50.0",
- "sqltk 0.1.0 (git+ssh://git@github.com/cipherstash/sqltk.git)",
+ "sqlparser",
+ "sqltk 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "thiserror 2.0.3",
  "tokio",
  "tokio-postgres",
@@ -991,7 +1005,7 @@ dependencies = [
  "cipherstash-client 0.13.0-pre.1 (git+ssh://git@github.com/cipherstash/cipherstash-suite.git?branch=main)",
  "cipherstash-config 0.2.3 (git+ssh://git@github.com/cipherstash/cipherstash-suite.git?branch=main)",
  "derive_more",
- "sqlparser 0.52.0",
+ "sqlparser",
  "sqltk 0.1.0 (git+ssh://git@github.com/cipherstash/sqltk.git?branch=main)",
  "thiserror 2.0.3",
 ]
@@ -2896,15 +2910,6 @@ checksum = "6980e8d7511241f8acf4aebddbb1ff938df5eebe98691418c4468d0b72a96a67"
 
 [[package]]
 name = "sqlparser"
-version = "0.50.0"
-source = "git+ssh://git@github.com/cipherstash/sqlparser-rs.git?branch=main#16406b4b23a0829ac9f7a119fecda912af147cc9"
-dependencies = [
- "bigdecimal",
- "log",
-]
-
-[[package]]
-name = "sqlparser"
 version = "0.52.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9a875d8cd437cc8a97e9aeaeea352ec9a19aea99c23e9effb17757291de80b08"
@@ -2916,21 +2921,27 @@ dependencies = [
 [[package]]
 name = "sqltk"
 version = "0.1.0"
-source = "git+ssh://git@github.com/cipherstash/sqltk.git?branch=main#f2443fc1dd8d042e0d1c8c313cbb97811444a6e3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a73dbe6db8f2a2a488b63104f52b993a9b629b6f758e0fb9b2d3bb85f35727a2"
 dependencies = [
+ "Inflector",
  "bigdecimal",
- "sqlparser 0.52.0",
- "sqltk-codegen 0.1.0 (git+ssh://git@github.com/cipherstash/sqltk.git?branch=main)",
+ "cargo_metadata 0.19.1",
+ "prettyplease",
+ "proc-macro2",
+ "quote",
+ "sqlparser",
+ "syn 2.0.90",
 ]
 
 [[package]]
 name = "sqltk"
 version = "0.1.0"
-source = "git+ssh://git@github.com/cipherstash/sqltk.git#f2443fc1dd8d042e0d1c8c313cbb97811444a6e3"
+source = "git+ssh://git@github.com/cipherstash/sqltk.git?branch=main#f2443fc1dd8d042e0d1c8c313cbb97811444a6e3"
 dependencies = [
  "bigdecimal",
- "sqlparser 0.52.0",
- "sqltk-codegen 0.1.0 (git+ssh://git@github.com/cipherstash/sqltk.git)",
+ "sqlparser",
+ "sqltk-codegen",
 ]
 
 [[package]]
@@ -2939,22 +2950,7 @@ version = "0.1.0"
 source = "git+ssh://git@github.com/cipherstash/sqltk.git?branch=main#f2443fc1dd8d042e0d1c8c313cbb97811444a6e3"
 dependencies = [
  "Inflector",
- "cargo_metadata",
- "indoc",
- "lazy-static-include",
- "prettyplease",
- "proc-macro2",
- "quote",
- "syn 2.0.90",
-]
-
-[[package]]
-name = "sqltk-codegen"
-version = "0.1.0"
-source = "git+ssh://git@github.com/cipherstash/sqltk.git#f2443fc1dd8d042e0d1c8c313cbb97811444a6e3"
-dependencies = [
- "Inflector",
- "cargo_metadata",
+ "cargo_metadata 0.18.1",
  "indoc",
  "lazy-static-include",
  "prettyplease",
