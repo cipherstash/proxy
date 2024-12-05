@@ -1,6 +1,9 @@
-[env]
-CS_DATABASE__PORT = "5532" # default postgres port using built in docker-compose setup
+[vars]
+database_port = "5532" # default postgres port using built in docker-compose setup
 
+[env]
+CS_DATABASE__PORT = "5532"
+PKG_CONFIG_PATH = "/opt/homebrew/opt/icu4c@76/lib/pkgconfig"
 
 [tasks.install]
 alias = 'i'
