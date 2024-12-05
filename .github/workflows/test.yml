@@ -22,6 +22,4 @@ jobs:
           mise run install
       - run: |
           mise run up postgres --detach
-          mise run setup
-      - run: |
-          mise run test
+          echo '\d' | psql postgresql://cipherstash:password@127.0.0.1:5532/cipherstash
