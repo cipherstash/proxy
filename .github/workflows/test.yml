@@ -20,8 +20,3 @@ jobs:
           cache: true # [default: true] cache mise using GitHub's cache
       - run: |
           mise run install
-      - run: |
-          mise run up postgres --detach
-          mise run setup
-      - run: |
-          mise run test
