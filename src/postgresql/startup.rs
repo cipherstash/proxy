@@ -12,26 +12,25 @@ use crate::{
 
 use super::protocol::StartupMessage;
 
-pub async fn to_tls(stream: AsyncStream, encrypt: &Encrypt) -> Result<AsyncStream, Error> {
-    if encrypt.config.database.skip_tls() {
-        debug!("Skip database TLS connection");
-        return Ok(stream);
-    }
-
+pub async fn with_tls(stream: AsyncStream, encrypt: &Encrypt) -> Result<AsyncStream, Error> {
     match stream {
         AsyncStream::Tcp(mut tcp_stream) => {
             let server_ssl = send_ssl_request(&mut tcp_stream).await?;
 
-            if !server_ssl {
-                error!("Database cannot connect over TLS");
-                return Err(ProtocolError::UnexpectedSSLResponse.into());
+            match server_ssl {
+                true => {
+                    let tls_stream = tls::client(tcp_stream, &encrypt.config).await?;
+                    Ok(AsyncStream::Tls(tls_stream.into()))
+                }
+                false => {
+                    warn!("Connecting to database without Transport Layer Security (TLS)");
+                    Ok(AsyncStream::Tcp(tcp_stream))
+                }
             }
-
-            let tls_stream = tls::client(tcp_stream, &encrypt.config).await?;
-            Ok(AsyncStream::Tls(tls_stream.into()))
         }
         AsyncStream::Tls(_) => {
-            warn!("Database already connected over TLS");
+            // Technically unreachable unless the server is misbehaving
+            warn!("Database already connected over Transport Layer Security (TLS)");
             Ok(stream)
         }
     }
@@ -48,7 +47,6 @@ where
     C: AsyncRead + Unpin,
 {
     let len = client.read_i32().await?;
-    debug!("[read_start_up_message]");
 
     let capacity = len as usize;
 
@@ -114,50 +112,7 @@ pub async fn send_ssl_response<T: AsyncWrite + Unpin>(
         None => b'N',
     };
 
-    debug!("Send SSLResponse: {}", response as char);
     stream.write_all(&[response]).await?;
 
     Ok(())
 }
-
-/// Send the startup packet the server. We're pretending we're a Pg client.
-/// This tells the server which user we are and what database we want.
-pub async fn send_startup<S>(stream: &mut S, username: &str, database: &str) -> Result<(), Error>
-where
-    S: AsyncWrite + Unpin,
-{
-    info!("send_startup {username}/{database}");
-
-    let mut bytes = BytesMut::with_capacity(25);
-    bytes.put_i32(PROTOCOL_VERSION_NUMBER);
-
-    bytes.put(&b"user\0"[..]);
-    bytes.put_slice(username.as_bytes());
-    bytes.put_u8(0);
-
-    // Application name
-    bytes.put(&b"application_name\0"[..]);
-    bytes.put_slice(&b"cipherstash-proxy\0"[..]);
-
-    // Database
-    bytes.put(&b"database\0"[..]);
-    bytes.put_slice(database.as_bytes());
-    bytes.put_u8(0);
-    bytes.put_u8(0); // Null terminator
-
-    let len = bytes.len() as i32 + 4i32;
-
-    let mut startup = BytesMut::with_capacity(len as usize);
-
-    startup.put_i32(len);
-    startup.put(bytes);
-
-    stream.write_all(&startup).await?;
-
-    info!("send_startup complete");
-
-    Ok(())
-}
-
-#[cfg(test)]
-mod tests {}

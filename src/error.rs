@@ -79,6 +79,9 @@ pub enum ConfigError {
 
     #[error("Database schema could not be loaded")]
     SchemaCouldNotBeLoaded,
+
+    #[error("TLS could not be established")]
+    TlsConnector,
 }
 
 #[derive(Error, Debug)]

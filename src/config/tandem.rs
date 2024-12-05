@@ -4,9 +4,9 @@ use rustls::ServerConfig as TlsServerConfig;
 use rustls_pki_types::{pem::PemObject, CertificateDer};
 use rustls_pki_types::{PrivateKeyDer, ServerName};
 use serde::Deserialize;
+use std::fmt::Display;
 use std::path::PathBuf;
 use tracing::{debug, error};
-use tracing_subscriber::field::debug;
 
 use uuid::Uuid;
 
@@ -42,9 +42,6 @@ pub struct DatabaseConfig {
     pub database: String,
     pub username: String,
     pub password: String,
-
-    #[serde(default)]
-    pub with_tls: bool,
 
     #[serde(default)]
     pub with_tls_verification: bool,
@@ -181,10 +178,6 @@ impl DatabaseConfig {
         60
     }
 
-    pub fn skip_tls(&self) -> bool {
-        !self.with_tls
-    }
-
     pub fn to_socket_address(&self) -> String {
         format!("{}:{}", self.host, self.port)
     }
@@ -193,6 +186,16 @@ impl DatabaseConfig {
         format!(
             "postgres://{}:{}@{}:{}/{}",
             self.username, self.password, self.host, self.port, self.database
+        )
+    }
+}
+
+impl Display for DatabaseConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}@{}:{}/{}",
+            self.username, self.host, self.port, self.database,
         )
     }
 }

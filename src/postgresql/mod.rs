@@ -12,7 +12,7 @@ use frontend::Frontend;
 use protocol::StartupCode;
 use std::time::Duration;
 use tokio::io::{split, AsyncWriteExt};
-use tracing::{debug, info};
+use tracing::info;
 
 pub const CONNECTION_TIMEOUT: Duration = Duration::from_millis(1000 * 1 * 10);
 
@@ -21,9 +21,6 @@ pub const PROTOCOL_VERSION_NUMBER: i32 = 196608;
 pub const SSL_REQUEST: i32 = 80877103;
 
 pub const CANCEL_REQUEST: i32 = 80877102;
-
-const SSL_RESPONSE_YES: u8 = b'S';
-const SSL_RESPONSE_NO: u8 = b'N';
 
 ///
 ///
@@ -52,10 +49,10 @@ pub async fn handle(client_stream: AsyncStream, encrypt: Encrypt) -> Result<(), 
 
     // Connect to the database server, using TLS if configured
     let stream = AsyncStream::connect(&encrypt.config.database.to_socket_address()).await?;
-    let mut database_stream = startup::to_tls(stream, &encrypt).await?;
+    // let mut database_stream = startup::with_tls(stream, &encrypt).await?;
+    let mut database_stream = stream;
     info!(
         database = encrypt.config.database.to_socket_address(),
-        tls = encrypt.config.database.with_tls,
         "Database connected"
     );
 
@@ -64,7 +61,6 @@ pub async fn handle(client_stream: AsyncStream, encrypt: Encrypt) -> Result<(), 
 
         match &startup_message.code {
             StartupCode::SSLRequest => {
-                debug!("SSLRequest");
                 startup::send_ssl_response(&encrypt, &mut client_stream).await?;
                 if let Some(ref tls) = encrypt.config.tls {
                     match client_stream {
@@ -80,12 +76,10 @@ pub async fn handle(client_stream: AsyncStream, encrypt: Encrypt) -> Result<(), 
                 }
             }
             StartupCode::CancelRequest => {
-                debug!("CancelRequest");
                 database_stream.write_all(&startup_message.bytes).await?;
                 return Err(Error::CancelRequest);
             }
             StartupCode::ProtocolVersionNumber => {
-                debug!("ProtocolVersionNumber");
                 database_stream.write_all(&startup_message.bytes).await?;
                 break;
             }

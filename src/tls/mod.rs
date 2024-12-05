@@ -7,14 +7,13 @@ use rustls_pki_types::{pem::PemObject, CertificateDer, PrivateKeyDer, ServerName
 use std::sync::Arc;
 use tokio::net::TcpStream;
 use tokio_rustls::{TlsAcceptor, TlsConnector, TlsStream};
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
 pub async fn client(
     stream: TcpStream,
     config: &TandemConfig,
 ) -> Result<TlsStream<TcpStream>, Error> {
-    let tls_config = configure_client_tls(&config.database);
-    info!("Connecting to database over TLS");
+    let tls_config = configure_client(&config.database);
 
     let connector = TlsConnector::from(Arc::new(tls_config));
     let domain = config.server.server_name()?.to_owned();
@@ -33,13 +32,11 @@ pub async fn server(stream: TcpStream, config: &TlsConfig) -> Result<TlsStream<T
         .with_single_cert(certs, key)?;
 
     let acceptor = TlsAcceptor::from(Arc::new(config));
-    // let tls_stream = acceptor.accept(stream).await?;
     let tls_stream = acceptor.accept(stream).await?;
-    debug!("TLS negotiation complete");
     Ok(tls_stream.into())
 }
 
-pub fn configure_client_tls(config: &DatabaseConfig) -> ClientConfig {
+pub fn configure_client(config: &DatabaseConfig) -> ClientConfig {
     let mut root_cert_store = rustls::RootCertStore::empty();
     root_cert_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
 
