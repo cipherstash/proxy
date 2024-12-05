@@ -9,25 +9,16 @@ opt-level = 1
 debug = 0
 split-debuginfo = "unpacked"
 
-# [profile.dev.package."*"]
-# opt-level = 3
-
-# [profile.dev.package]
-# aws-lc-sys.opt-level = 3
-# quote.opt-level = 3
-# proc-macro2.opt-level = 3
-# serde_derive.opt-level = 3
-# sqlparser.opt-level = 3
-# syn.opt-level = 3
+[profile.dev.package]
+aws-lc-sys.opt-level = 3
+proc-macro2.opt-level = 3
+quote.opt-level = 3
+serde_derive.opt-level = 3
+sqlparser.opt-level = 3
+syn.opt-level = 3
 
 [profile.dev.build-override]
 opt-level = 3
-
-# [profile.test.package."*"]
-# opt-level = 3
-
-# [profile.test.build-override]
-# opt-level = 3
 
 [profile.test]
 incremental = true
@@ -37,30 +28,27 @@ codegen-units = 1
 strip = "symbols"
 lto = true
 
-
 [dependencies]
-cipherstash-config = { git = "ssh://git@github.com/cipherstash/cipherstash-suite.git" }
-cipherstash-client = { git = "ssh://git@github.com/cipherstash/cipherstash-suite.git", features = [
-    "tokio",
-] }
-eql-mapper = { git = "ssh://git@github.com/cipherstash/eql-mapper.git" }
-# cipherstash-stats = { path = "/Users/tobyhede/src/cipherstash-suite/packages/cipherstash-stats/" }
-sqltk = "0.1.0"
-sqlparser = { version = "^0.52" }
 arc-swap = "1.7.1"
 bytes = { version = "1.9", default-features = false }
+cipherstash-client = { version = "0.12.5", features = ["tokio"] }
+cipherstash-config = "0.2.3"
 config = { version = "0.14", features = [
     "async",
     "convert-case",
     "json",
     "toml",
 ], default-features = false }
+eql-mapper = { git = "ssh://git@github.com/cipherstash/eql-mapper.git" }
 exitcode = "1.1.2"
+native-tls = "0.2.12"
 rustls = "0.23.17"
 rustls-pki-types = "1.10.0"
 serde = "1.0"
 serde_json = "1.0"
 socket2 = "0.5.7"
+sqlparser = { version = "^0.52" }
+sqltk = { version = "^0.1" }
 thiserror = "2.0"
 tokio = { version = "1.42.0", features = ["full"] }
 tokio-postgres = { version = "0.7", features = ["with-serde_json-1"] }
@@ -70,4 +58,3 @@ tracing = "0.1"
 tracing-subscriber = "0.3"
 uuid = { version = "1.11.0", features = ["serde", "v4", "v5"] }
 webpki-roots = "0.26.7"
-native-tls = "0.2.12"
