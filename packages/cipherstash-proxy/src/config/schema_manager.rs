@@ -116,11 +116,11 @@ pub async fn load_schema(config: &DatabaseConfig) -> Result<Schema, Error> {
 
         let mut table = Table::new(Ident::new(table_name));
         primary_keys.iter().for_each(|col| {
-            table.add_column(Arc::new(Column::native(Ident::new(col))), true);
+            table.add_column(Arc::new(Column::native(Ident::with_quote('"', col))), true);
         });
 
         columns.iter().for_each(|col| {
-            table.add_column(Arc::new(Column::native(Ident::new(col))), false);
+            table.add_column(Arc::new(Column::native(Ident::with_quote('"', col))), false);
         });
 
         schema.add_table(table);

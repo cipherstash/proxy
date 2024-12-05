@@ -2,7 +2,10 @@ use std::{any::TypeId, cell::RefCell, collections::HashMap, marker::PhantomData,
 
 use sqltk::{Semantic, Visitable};
 
-use crate::inference::{Def, Type, TypeError, TypeVar};
+use crate::inference::{
+    unifier::{Def, Type, TypeVar},
+    TypeError,
+};
 
 /// `TypeRegistry` maintains an association between `sqlparser` AST nodes and the node's inferred [`Type`].
 #[derive(Debug)]

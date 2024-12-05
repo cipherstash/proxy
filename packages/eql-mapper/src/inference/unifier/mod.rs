@@ -1,8 +1,14 @@
 use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
-use crate::{inference::TypeError, Def, Status, TypeVar};
+mod types;
 
-use super::{Constructor, ProjectionColumn, Type, TypeVarGenerator};
+use crate::{
+    inference::TypeError,
+};
+
+pub(crate) use types::*;
+
+use super::TypeVarGenerator;
 
 /// Implements the type unification algorithm and maintains an association of type variables with the type that they
 /// point to.
@@ -44,8 +50,8 @@ impl Unifier {
         left: Rc<RefCell<Type>>,
         right: Rc<RefCell<Type>>,
     ) -> Result<Rc<RefCell<Type>>, TypeError> {
-        use crate::Constructor::*;
-        use crate::Def::*;
+        use types::Constructor::*;
+        use types::Def::*;
 
         let (a, b) = (left.borrow(), right.borrow());
 
@@ -307,10 +313,10 @@ impl Unifier {
 
 #[cfg(test)]
 mod test {
-    use crate::inference::types::{
+    use crate::unifier::{
         Constructor::*, Def::*, ProjectionColumn, Scalar::*, Status, Type, TypeVar,
     };
-    use crate::Unifier;
+    use crate::unifier::Unifier;
     use std::{cell::RefCell, rc::Rc};
 
     #[test]

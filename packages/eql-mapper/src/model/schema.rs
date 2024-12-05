@@ -51,7 +51,7 @@ pub enum ColumnKind {
 /// Describes a reference to a table + column.
 #[derive(Clone, Debug, PartialEq, Eq, Display, Constructor)]
 #[display("{}.{}", table.name, column.name)]
-pub struct TableColumn {
+pub struct TableColumnRef {
     pub table: Arc<Table>,
     pub column: Arc<Column>,
 }
@@ -103,7 +103,7 @@ impl Schema {
     }
 
     /// Resolves a table by `SqlIdent`, which takes into account the SQL rules
-    /// of quoted and unquoted identifier matching.
+    /// of quoted and new identifier matching.
     pub fn resolve_table(&self, name: &Ident) -> Result<Arc<Table>, SchemaError> {
         let mut haystack = self.tables.iter();
         haystack
@@ -116,13 +116,13 @@ impl Schema {
         &self,
         table_name: &Ident,
         column_name: &Ident,
-    ) -> Result<TableColumn, SchemaError> {
+    ) -> Result<TableColumnRef, SchemaError> {
         let mut haystack = self.tables.iter();
         match haystack
             .find_unique(&|table| SqlIdent::from(&table.name) == SqlIdent::from(table_name))
         {
             Ok(table) => match table.get_column(column_name) {
-                Ok(column) => Ok(TableColumn::new(table.clone(), column.clone())),
+                Ok(column) => Ok(TableColumnRef::new(table.clone(), column.clone())),
                 Err(_) => Err(SchemaError::TableNotFound(column_name.to_string())),
             },
             Err(_) => Err(SchemaError::TableNotFound(table_name.to_string())),
@@ -207,7 +207,7 @@ macro_rules! make_schema {
         $schema.add_table(
             {
 
-                let mut $table = $crate::model::Table::new(::sqlparser::ast::Ident::unquoted(stringify!($table_name)));
+                let mut $table = $crate::model::Table::new(::sqlparser::ast::Ident::new(stringify!($table_name)));
                 make_schema!(@add_columns $table $($columns)*);
                 $table
             }
@@ -218,14 +218,14 @@ macro_rules! make_schema {
     };
     (@add_column $table:ident $column_name:ident (ENCRYPTED) ) => {
         $table.add_column(std::sync::Arc::new($crate::model::Column::eql(
-            ::sqlparser::ast::Ident::unquoted(stringify!($column_name))
+            ::sqlparser::ast::Ident::new(stringify!($column_name))
         )), false);
     };
     (@add_column $table:ident $column_name:ident (PK) ) => {
         $table.add_column(
             std::sync::Arc::new(
                 $crate::model::Column::native(
-                    ::sqlparser::ast::Ident::unquoted(stringify!($column_name))
+                    ::sqlparser::ast::Ident::new(stringify!($column_name))
                 )
             ),
             true
@@ -235,10 +235,10 @@ macro_rules! make_schema {
         $table.add_column(
             std::sync::Arc::new(
                 $crate::model::Column::new(
-                    ::sqlparser::ast::Ident::unquoted(stringify!($column_name)),
+                    ::sqlparser::ast::Ident::new(stringify!($column_name)),
                     $crate::constraints::Scalar::Native {
                         table: $table.name.clone(),
-                        column: ::sqlparser::ast::Ident::unquoted(stringify!($column_name))
+                        column: ::sqlparser::ast::Ident::new(stringify!($column_name))
                     }
                 )
             ),
@@ -249,7 +249,7 @@ macro_rules! make_schema {
         $table.add_column(
             std::sync::Arc::new(
                 $crate::model::Column::native(
-                    ::sqlparser::ast::Ident::unquoted(stringify!($column_name)),
+                    ::sqlparser::ast::Ident::new(stringify!($column_name)),
                 )
             ),
             false
@@ -280,7 +280,6 @@ macro_rules! make_schema {
     };
     { $($rest:tt)+ } => {
         {
-            use $crate::model::IdentExt;
             let schema_name = "public";
             let mut schema = make_schema!(@schema schema schema_name);
             make_schema!(@match_tables schema $($rest)* );

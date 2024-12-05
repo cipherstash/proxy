@@ -3,6 +3,7 @@ use cipherstash_config::{
     ColumnConfig, ColumnType,
 };
 use serde::{Deserialize, Serialize};
+use sqlparser::ast::Ident;
 use std::collections::HashMap;
 
 use crate::{
@@ -10,10 +11,33 @@ use crate::{
     error::{ConfigError, Error},
 };
 
-pub type TableName = String;
-pub type ColumnName = String;
-pub type Tables = HashMap<TableName, Table>;
-pub type Table = HashMap<ColumnName, Column>;
+#[derive(Debug, Deserialize, Serialize, Clone, Default)]
+pub struct Tables {
+    tables: HashMap<Ident, Table>
+}
+
+impl IntoIterator for Tables {
+    type Item = (Ident, Table);
+    type IntoIter = std::collections::hash_map::IntoIter<Ident, Table>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.tables.into_iter()
+    }
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, Default)]
+pub struct Table {
+    columns: HashMap<Ident, Column>
+}
+
+impl IntoIterator for Table {
+    type Item = (Ident, Column);
+    type IntoIter = std::collections::hash_map::IntoIter<Ident, Column>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.columns.into_iter()
+    }
+}
 
 #[derive(Debug, Deserialize, Serialize, Clone, Default)]
 pub struct EncryptConfig {
@@ -138,8 +162,8 @@ impl EncryptConfig {
 }
 
 impl Column {
-    pub fn to_column_config(self, name: &str) -> ColumnConfig {
-        let mut config = ColumnConfig::build(name).casts_as(self.cast_as.into());
+    pub fn to_column_config(self, name: &Ident) -> ColumnConfig {
+        let mut config = ColumnConfig::build(name.to_string()).casts_as(self.cast_as.into());
 
         if self.indexes.ore_index.is_some() {
             config = config.add_index(Index::new_ore());
@@ -171,7 +195,6 @@ impl Column {
 
 #[cfg(test)]
 mod tests {
-    use rustls::crypto::hash::Hash;
     use serde_json::json;
 
     use super::*;
@@ -359,10 +382,6 @@ mod tests {
         });
 
         let encrypt_config = parse(json);
-        let ident = &eql::Identifier {
-            table: "users".into(),
-            column: "email".into(),
-        };
         let ident = &eql::Identifier {
             table: "users".into(),
             column: "email".into(),

@@ -24,29 +24,6 @@ impl<'a> SqlIdent<'a> {
     }
 }
 
-/// Extends [`Ident`] with additional helpers for building quoted and unquoted identifiers.
-pub trait IdentExt {
-    fn quoted<S>(s: S) -> Ident
-    where
-        S: Into<String>,
-    {
-        let mut ident = Ident::new(s);
-        ident.quote_style = Some('"');
-        ident
-    }
-
-    fn unquoted<S>(s: S) -> Ident
-    where
-        S: Into<String>,
-    {
-        let mut ident = Ident::new(s);
-        ident.quote_style = None;
-        ident
-    }
-}
-
-impl IdentExt for Ident {}
-
 // This manual Hash implementation is required to prevent a clippy error:
 // "error: you are deriving `Hash` but have implemented `PartialEq` explicitly"
 impl Hash for SqlIdent<'_> {

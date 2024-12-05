@@ -1,5 +1,6 @@
 use cipherstash_client::zerokms::{encrypted_record, EncryptedRecord};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, Serializer};
+use sqlparser::ast::Ident;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Plaintext {
@@ -15,10 +16,43 @@ pub struct Plaintext {
 
 #[derive(Clone, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
 pub struct Identifier {
-    #[serde(rename = "t")]
-    pub table: String,
-    #[serde(rename = "c")]
-    pub column: String,
+    #[serde(
+        rename = "t",
+        deserialize_with = "ident_de",
+        serialize_with = "ident_se"
+    )]
+    pub table: Ident,
+    #[serde(
+        rename = "c",
+        deserialize_with = "ident_de",
+        serialize_with = "ident_se"
+    )]
+    pub column: Ident,
+}
+
+fn ident_de<'de, D>(deserializer: D) -> Result<Ident, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let s = String::deserialize(deserializer)?;
+    Ok(Ident::with_quote('"', s))
+}
+
+fn ident_se<S>(ident: &Ident, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+{
+    let s = ident.to_string();
+    serializer.serialize_str(&s)
+}
+
+impl From<(&Ident, &Ident)> for Identifier {
+    fn from((table, column): (&Ident, &Ident)) -> Self {
+        Self {
+            table: table.to_owned(),
+            column: column.to_owned(),
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize)]

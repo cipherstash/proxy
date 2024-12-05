@@ -161,7 +161,7 @@ impl From<BackendCode> for char {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Hash, Eq, PartialEq)]
 pub enum Destination {
     Named(String),
     Unnamed,

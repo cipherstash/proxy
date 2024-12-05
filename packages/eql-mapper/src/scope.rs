@@ -3,7 +3,7 @@ use sqlparser::ast::{Ident, ObjectName, Query, Statement};
 use sqltk::{into_control_flow, Break, Visitable, Visitor};
 
 use crate::inference::TypeError;
-use crate::inference::{Constructor, Def, ProjectionColumn, Status, Type};
+use crate::inference::unifier::{Constructor, Def, ProjectionColumn, Status, Type};
 use crate::iterator_ext::IteratorExt;
 use crate::model::SqlIdent;
 use std::cell::RefCell;

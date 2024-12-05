@@ -1,7 +1,7 @@
 use sqlparser::ast::{Expr, Select, SelectItem, WildcardAdditionalOptions};
 
 use crate::{
-    inference::type_error::TypeError, inference::InferType, inference::Type, TypeInferencer,
+    inference::type_error::TypeError, inference::InferType, inference::unifier::Type, TypeInferencer,
 };
 
 impl<'ast> InferType<'ast, Select> for TypeInferencer<'ast> {

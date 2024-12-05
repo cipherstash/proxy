@@ -1,6 +1,6 @@
 use crate::{
     model::schema::Table,
-    pub_types::{Projection, TableColumn},
+    Projection, TableColumn,
 };
 
 #[derive(Debug, Clone, Eq, PartialEq)]

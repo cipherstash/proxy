@@ -2,7 +2,7 @@ use std::{cell::RefCell, rc::Rc};
 
 use sqlparser::ast::Ident;
 
-use crate::inference::Type;
+use crate::inference::unifier::Type;
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub(crate) struct Relation {

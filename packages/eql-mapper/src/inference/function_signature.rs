@@ -1,6 +1,6 @@
 use sqlparser::ast::ObjectName;
 
-use super::{Def, Type, TypeVar};
+use super::unifier::{Def, Type, TypeVar};
 
 /// A description of the signature of a function.
 ///

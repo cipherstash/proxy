@@ -1,3 +1,4 @@
+use eql_mapper::{ProjectionColumn, Scalar};
 use sqlparser::ast;
 use std::collections::HashMap;
 
@@ -6,18 +7,30 @@ use super::messages::Destination;
 #[derive(Debug, Clone)]
 pub struct Statement {
     ast: ast::Statement,
-    param_types: Vec<i32>,
+    postgres_param_types: Vec<i32>,
+    eql_param_types: Vec<Scalar>,
+    eql_resultset_type: Option<Vec<ProjectionColumn>>,
 }
 
 impl Statement {
-    pub fn new(ast: ast::Statement, param_types: Vec<i32>) -> Statement {
-        Statement { ast, param_types }
+    pub fn new(
+        ast: ast::Statement,
+        postgres_param_types: Vec<i32>,
+        eql_param_types: Vec<Scalar>,
+        eql_resultset_type: Option<Vec<ProjectionColumn>>,
+    ) -> Statement {
+        Statement {
+            ast,
+            postgres_param_types,
+            eql_param_types,
+            eql_resultset_type,
+        }
     }
 }
 
 #[derive(Debug, Clone)]
 pub struct Context {
-    statements: HashMap<String, Statement>,
+    statements: HashMap<Destination, Statement>,
 }
 
 impl Context {
@@ -27,17 +40,15 @@ impl Context {
         }
     }
 
-    pub fn add(&mut self, name: &Destination, statement: Statement) {
-        let name = name.as_str().to_owned();
-        self.statements.insert(name, statement);
+    pub fn add(&mut self, key: Destination, statement: Statement) {
+        self.statements.insert(key, statement);
     }
 
-    pub fn get(&mut self, name: &Destination) -> Option<&Statement> {
-        let name = name.as_str();
-        self.statements.get(name)
+    pub fn get(&mut self, key: &Destination) -> Option<&Statement> {
+        self.statements.get(key)
     }
 
-    pub fn remove(&mut self, name: &str) -> Option<Statement> {
-        self.statements.remove(name)
+    pub fn remove(&mut self, key: &Destination) -> Option<Statement> {
+        self.statements.remove(key)
     }
 }

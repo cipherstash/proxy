@@ -6,9 +6,9 @@ use sqlparser::ast::{Expr, Statement, Value};
 use sqltk::{convert_control_flow, Break, Semantic, Transform, Transformable, Visitable, Visitor};
 
 use crate::{
-    inference::{self, TypeError, TypeInferencer},
-    pub_types::{Projection, ProjectionColumn, Scalar, Type},
-    Dep, DepMut, NodeKey, Schema, Scope, ScopeError, TypeRegistry,
+    inference::{unifier, TypeError, TypeInferencer},
+    Dep, DepMut, EqlColumn, NodeKey, Projection, ProjectionColumn, Scalar, Schema, Scope,
+    ScopeError, Type, TypeRegistry,
 };
 
 use super::importer::{ImportError, Importer};
@@ -63,10 +63,10 @@ pub struct TypedStatement<'ast> {
     pub statement: &'ast Statement,
 
     /// The types of all params discovered from [`Value::Placeholder`] nodes in the SQL statement.
-    pub params: HashMap<String, Scalar>,
+    pub params: Vec<Scalar>,
 
-    /// The literals (including their types) from the SQL statement.
-    pub literals: HashMap<NodeKey<'ast>, Scalar>,
+    /// The types and values of all literals from the SQL statement.
+    pub literals: Vec<(EqlColumn, &'ast Value)>,
 
     /// The types of all semantically interesting nodes with the AST.
     node_types: HashMap<NodeKey<'ast>, Type>,
@@ -87,11 +87,14 @@ pub enum EqlMapperError {
     #[error(transparent)]
     Type(#[from] TypeError),
 
-    #[error("Missing literals")]
-    LiteralNotFound,
+    #[error("Error during SQL transformation: {}", _0)]
+    Transform(String),
 
     #[error("Internal error: {}", _0)]
     InternalError(String),
+
+    #[error("Unsupported value variant: {}", _0)]
+    UnsupportedValueVariant(String),
 }
 
 /// `EqlMapper` can safely convert a SQL statement into an equivalent statement where all of the plaintext literals have
@@ -132,29 +135,46 @@ impl<'ast> EqlMapper<'ast> {
     }
 
     /// Asks the [`TypeInferencer`] for a hashmap of parameter types.
-    fn param_types(&self) -> Result<HashMap<String, Scalar>, EqlMapperError> {
+    fn param_types(&self) -> Result<Vec<Scalar>, EqlMapperError> {
         let param_types = self.inferencer.borrow().param_types()?;
 
-        param_types
+        let mut param_types: Vec<(i32, Scalar)> = param_types
             .iter()
-            .map(|(param, ty)| Scalar::try_from(ty).map(|ty| (param.clone(), ty)))
-            .collect::<Result<HashMap<_, _>, _>>()
+            .map(|(param, ty)| {
+                Scalar::try_from(ty).and_then(|ty| {
+                    param.parse().map(|idx| (idx, ty)).map_err(|_| {
+                        EqlMapperError::InternalError(format!(
+                            "failed to parse param placeholder '{}'",
+                            param
+                        ))
+                    })
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        param_types.sort_by(|(a, _), (b, _)| a.cmp(b));
+        Ok(param_types.into_iter().map(|(_, ty)| ty).collect())
     }
 
     /// Asks the [`TypeInferencer`] for a hashmap of literal types, validating that that are all `Scalar` types.
-    fn literal_types(&self) -> Result<HashMap<NodeKey<'ast>, Scalar>, EqlMapperError> {
+    fn literal_types(&self) -> Result<Vec<(EqlColumn, &'ast Value)>, EqlMapperError> {
         let inferencer = self.inferencer.borrow();
         let literal_nodes = inferencer.literal_nodes();
-        let literals: HashMap<NodeKey, Scalar> = literal_nodes
+        let literals: Vec<(EqlColumn, &'ast Value)> = literal_nodes
             .iter()
             .map(|node_key| match inferencer.get_type_by_node_key(node_key) {
                 Some(ty) => {
-                    if let inference::Type(
-                        inference::Def::Constructor(inference::Constructor::Scalar(scalar_ty)),
-                        inference::Status::Resolved,
+                    if let unifier::Type(
+                        unifier::Def::Constructor(unifier::Constructor::Scalar(scalar_ty)),
+                        unifier::Status::Resolved,
                     ) = &*ty.borrow()
                     {
-                        Ok((node_key.clone(), Scalar::try_from(&**scalar_ty)?))
+                        match node_key.get_as::<Value>() {
+                            Some(value) => Ok((EqlColumn::try_from(&**scalar_ty)?, value)),
+                            None => Err(EqlMapperError::InternalError(String::from(
+                                "could not resolve literal node",
+                            ))),
+                        }
                     } else {
                         Err(EqlMapperError::InternalError(
                             "literal is not a scalar type".to_string(),
@@ -165,7 +185,7 @@ impl<'ast> EqlMapper<'ast> {
                     "failed to get type of literal node",
                 ))),
             })
-            .collect::<Result<HashMap<_, _>, _>>()?;
+            .collect::<Result<Vec<_>, _>>()?;
 
         Ok(literals)
     }
@@ -184,7 +204,7 @@ impl<'ast> TypedStatement<'ast> {
             || self
                 .params
                 .iter()
-                .any(|(_, scalar_ty)| matches!(scalar_ty, Scalar::EqlColumn(_)))
+                .any(|scalar_ty| matches!(scalar_ty, Scalar::EqlColumn(_)))
     }
 
     /// Tries to get a [`Value`] (a literal) from `self`.
@@ -223,11 +243,11 @@ impl<'ast> TypedStatement<'ast> {
     /// Transforms the SQL statement by replacing all plaintext literals with EQL equivalents.
     pub fn transform(
         &self,
-        encrypted_literals: HashMap<NodeKey<'ast>, Value>,
+        encrypted_literals: HashMap<&'ast Value, Value>,
     ) -> Result<Statement, EqlMapperError> {
-        for (lit, _) in self.literals.iter() {
-            if !encrypted_literals.contains_key(lit) {
-                return Err(EqlMapperError::LiteralNotFound);
+        for (_, target) in self.literals.iter() {
+            if !encrypted_literals.contains_key(target) {
+                return Err(EqlMapperError::Transform(String::from("encrypted literals refers to a literal node which is not present in the SQL statement")));
             }
         }
 
@@ -238,11 +258,11 @@ impl<'ast> TypedStatement<'ast> {
 
 #[derive(Debug)]
 struct EncryptedStatement<'ast> {
-    encrypted_literals: HashMap<NodeKey<'ast>, Value>,
+    encrypted_literals: HashMap<&'ast Value, Value>,
 }
 
 impl<'ast> EncryptedStatement<'ast> {
-    fn new(encrypted_literals: HashMap<NodeKey<'ast>, Value>) -> Self {
+    fn new(encrypted_literals: HashMap<&'ast Value, Value>) -> Self {
         Self { encrypted_literals }
     }
 }
@@ -259,25 +279,26 @@ impl<'ast> Transform<'ast> for EncryptedStatement<'ast> {
         original_node: &'ast N,
         mut new_node: N,
     ) -> Result<N, Self::Error> {
-        if let Some(target_expr) = new_node.downcast_mut::<Expr>() {
-            match target_expr {
-                Expr::Value(Value::Placeholder(_)) => {
-                    return Err(EqlMapperError::InternalError(
-                        "attempt was made to update placeholder with literal".to_string(),
-                    ));
-                }
-
-                Expr::Value(target) => {
-                    if let Some(replacement) = self
-                        .encrypted_literals
-                        .remove(&NodeKey::new_from_visitable(original_node))
-                    {
-                        *target = replacement;
+        if let Some(target_value) = new_node.downcast_mut::<Value>() {
+            match original_node.downcast_ref::<Value>() {
+                Some(original_value) => match original_value {
+                    Value::Placeholder(_) => {
+                        return Err(EqlMapperError::InternalError(
+                            "attempt was made to update placeholder with literal".to_string(),
+                        ));
                     }
-                }
 
-                // Not an Expr::Value(_) - ignore it
-                _ => {}
+                    _ => {
+                        if let Some(replacement) = self.encrypted_literals.remove(original_value) {
+                            *target_value = replacement;
+                        }
+                    }
+                },
+                None => {
+                    return Err(EqlMapperError::Transform(String::from(
+                        "Could not resolve literal node",
+                    )));
+                }
             }
         }
 
@@ -317,7 +338,8 @@ mod test {
         parser::Parser,
     };
 
-    use crate::{make_schema, pub_types::*, type_check, Dep};
+    // use crate::{TableColumn, Dep, make_schema, type_check};
+    use crate::*;
 
     fn parse(statement: &'static str) -> Statement {
         Parser::parse_sql(&PostgreSqlDialect {}, statement).unwrap()[0].clone()
@@ -382,10 +404,10 @@ mod test {
         assert_eq!(
             typed.get_type(&statement),
             Some(&Type::Projection(Projection(vec![ProjectionColumn {
-                ty: ProjectionColumnType::Scalar(Scalar::EqlColumn(TableColumn {
+                ty: ProjectionColumnType::Scalar(Scalar::EqlColumn(EqlColumn(TableColumn {
                     table: id("users"),
                     column: id("email")
-                })),
+                }))),
                 alias: Some(id("email"))
             }])))
         )
@@ -452,10 +474,10 @@ mod test {
                     alias: Some(id("todo_list_item_id"))
                 },
                 ProjectionColumn {
-                    ty: ProjectionColumnType::Scalar(Scalar::EqlColumn(TableColumn {
+                    ty: ProjectionColumnType::Scalar(Scalar::EqlColumn(EqlColumn(TableColumn {
                         table: id("todo_list_items"),
                         column: id("description")
-                    })),
+                    }))),
                     alias: Some(id("todo_list_item_description"))
                 }
             ])))
@@ -504,10 +526,10 @@ mod test {
                     alias: None
                 },
                 ProjectionColumn {
-                    ty: ProjectionColumnType::Scalar(Scalar::EqlColumn(TableColumn {
+                    ty: ProjectionColumnType::Scalar(Scalar::EqlColumn(EqlColumn(TableColumn {
                         table: id("users"),
                         column: id("email")
-                    })),
+                    }))),
                     alias: None
                 },
                 ProjectionColumn {
@@ -518,10 +540,10 @@ mod test {
                     alias: None
                 },
                 ProjectionColumn {
-                    ty: ProjectionColumnType::Scalar(Scalar::EqlColumn(TableColumn {
+                    ty: ProjectionColumnType::Scalar(Scalar::EqlColumn(EqlColumn(TableColumn {
                         table: id("todo_lists"),
                         column: id("secret")
-                    })),
+                    }))),
                     alias: None
                 },
             ])))

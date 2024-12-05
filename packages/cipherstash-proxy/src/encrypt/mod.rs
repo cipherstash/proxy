@@ -18,8 +18,8 @@ type ScopedCipher = encryption::ScopedCipher<AutoRefresh<ServiceCredentials>>;
 pub struct Encrypt {
     pub config: TandemConfig,
     cipher: Arc<ScopedCipher>,
-    encrypt_config: EncryptConfigManager,
-    schema: SchemaManager,
+    pub encrypt_config: EncryptConfigManager,
+    pub schema: SchemaManager,
 }
 
 impl Encrypt {
@@ -34,6 +34,18 @@ impl Encrypt {
             encrypt_config,
             schema,
         })
+    }
+
+    pub async fn encrypt_mandatory(
+        &self,
+        plaintexts: Vec<eql::Plaintext>,
+    ) -> Result<Vec<eql::Ciphertext>, Error> {
+        Ok(self
+            .encrypt(plaintexts.into_iter().map(|pt| Some(pt)).collect())
+            .await?
+            .into_iter()
+            .flat_map(|ct| ct)
+            .collect::<Vec<_>>())
     }
 
     pub async fn encrypt(
@@ -70,8 +82,8 @@ impl Encrypt {
                             }
                             None => {
                                 return Err(EncryptError::ColumnNotEncrypted {
-                                    table: pt.identifier.table.to_owned(),
-                                    column: pt.identifier.column.to_owned(),
+                                    table: pt.identifier.table.to_string(),
+                                    column: pt.identifier.column.to_string(),
                                 }
                                 .into());
                             }
@@ -96,8 +108,8 @@ impl Encrypt {
             encrypt_config
                 .get(&pt.identifier)
                 .ok_or_else(|| EncryptError::UnknownColumn {
-                    table: pt.identifier.table.to_owned(),
-                    column: pt.identifier.column.to_owned(),
+                    table: pt.identifier.table.to_string(),
+                    column: pt.identifier.column.to_string(),
                 })?;
 
         Ok(column_config.clone())

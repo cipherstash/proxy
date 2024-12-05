@@ -1,4 +1,5 @@
 use cipherstash_client::encryption;
+use eql_mapper::EqlMapperError;
 use std::io;
 use thiserror::Error;
 use tokio::time::error::Elapsed;
@@ -40,6 +41,9 @@ pub enum Error {
 
     #[error(transparent)]
     ZeroKMS(#[from] cipherstash_client::zerokms::Error),
+
+    #[error(transparent)]
+    EqlMapper(#[from] EqlMapperError),
 
     #[error("Unknown error")]
     Unknown,

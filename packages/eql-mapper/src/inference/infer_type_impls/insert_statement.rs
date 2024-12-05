@@ -3,8 +3,9 @@ use std::{cell::RefCell, rc::Rc};
 use sqlparser::ast::{Ident, Insert};
 
 use crate::{
-    inference::{type_error::TypeError, Constructor, Def, InferType, Status, Type},
-    ColumnKind, Scalar, TypeInferencer,
+    inference::unifier::{Constructor, Def, Status, Type, Scalar},
+    inference::{type_error::TypeError, InferType},
+    ColumnKind, TypeInferencer,
 };
 
 impl<'ast> InferType<'ast, Insert> for TypeInferencer<'ast> {

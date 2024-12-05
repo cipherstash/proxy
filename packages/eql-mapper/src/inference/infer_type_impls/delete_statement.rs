@@ -1,7 +1,8 @@
 use sqlparser::ast::Delete;
 
 use crate::{
-    inference::{InferType, Type, TypeError},
+    inference::unifier::Type,
+    inference::{InferType, TypeError},
     TypeInferencer,
 };
 

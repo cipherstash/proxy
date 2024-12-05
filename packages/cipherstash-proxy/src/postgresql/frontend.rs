@@ -1,13 +1,18 @@
+use std::collections::HashMap;
+
 use super::context::Context;
-use super::context::Statement;
 use super::messages::bind::Bind;
 use super::messages::FrontendCode as Code;
 use super::protocol::{self, Message};
 use crate::encrypt::Encrypt;
+use crate::eql;
+use crate::eql::Identifier;
 use crate::error::Error;
 use crate::postgresql::messages::parse::Parse;
-use crate::postgresql::CONNECTION_TIMEOUT;
+use crate::postgresql::{context, CONNECTION_TIMEOUT};
 use bytes::BytesMut;
+use eql_mapper::{self, EqlColumn, EqlMapperError, TableColumn};
+use sqlparser::ast::Value;
 use sqlparser::dialect::PostgreSqlDialect;
 use sqlparser::parser::Parser;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
@@ -71,31 +76,42 @@ where
                     message.bytes = bytes;
                 }
             }
-            _ => {
-                // debug!("Code {code:?}");
-            }
+            _code => {}
         }
 
         Ok(message.bytes)
     }
 
     async fn parse_handler(&mut self, message: &Message) -> Result<Option<BytesMut>, Error> {
-        let parse = Parse::try_from(&message.bytes)?;
+        let mut parse = Parse::try_from(&message.bytes)?;
 
-        let param_types = parse.param_types.clone();
-
-        let ast = Parser::new(&DIALECT)
+        let statement = Parser::new(&DIALECT)
             .try_with_sql(&parse.statement)?
             .parse_statement()?;
 
-        // Everything is called Statement and it is a bit annoying
-        // Statement contains the parsed ast
-        // Should be expanded to include the analyzed and rewritten statement/s
-        // etc
+        let typed_statement = eql_mapper::type_check(self.encrypt.schema.load(), &statement)?;
 
-        let statement = Statement::new(ast, param_types);
+        let plaintext_literals: Vec<eql::Plaintext> =
+            convert_value_nodes_to_eql_plaintext(&typed_statement)?;
 
-        self.context.add(&parse.name, statement);
+        let replacement_literal_values = self.encrypt_literals(plaintext_literals).await?;
+
+        let original_values_and_replacements =
+            zip_with_original_value_ref(&typed_statement, replacement_literal_values);
+
+        let transformed_statement = typed_statement.transform(original_values_and_replacements)?;
+
+        parse.statement = transformed_statement.to_string().clone();
+
+        self.context.add(
+            crate::postgresql::messages::Destination::Unnamed,
+            context::Statement::new(
+                transformed_statement,
+                parse.param_types.clone(),
+                typed_statement.params.clone(),
+                typed_statement.get_projection_columns().map(Vec::from),
+            ),
+        );
 
         if parse.should_rewrite() {
             let bytes = BytesMut::try_from(parse)?;
@@ -103,6 +119,18 @@ where
         } else {
             Ok(None)
         }
+    }
+
+    async fn encrypt_literals(
+        &mut self,
+        plaintext_literals: Vec<eql::Plaintext>,
+    ) -> Result<Vec<Value>, Error> {
+        let encrypted = self.encrypt.encrypt_mandatory(plaintext_literals).await?;
+
+        Ok(encrypted
+            .into_iter()
+            .map(|ct| serde_json::to_string(&ct).map(|json| Value::SingleQuotedString(json)))
+            .collect::<Result<Vec<_>, _>>()?)
     }
 
     async fn bind_handler(&mut self, message: &Message) -> Result<Option<BytesMut>, Error> {
@@ -126,5 +154,54 @@ where
         } else {
             Ok(None)
         }
+    }
+}
+
+fn zip_with_original_value_ref<'ast>(
+    typed_statement: &eql_mapper::TypedStatement<'ast>,
+    encrypted_literals: Vec<Value>,
+) -> HashMap<&'ast Value, Value> {
+    (&typed_statement.literals)
+        .into_iter()
+        .map(|(_, original_node)| *original_node)
+        .zip(encrypted_literals.into_iter())
+        .collect::<HashMap<_, _>>()
+}
+
+fn convert_value_nodes_to_eql_plaintext(
+    typed_statement: &eql_mapper::TypedStatement<'_>,
+) -> Result<Vec<eql::Plaintext>, EqlMapperError> {
+    (&typed_statement.literals)
+        .iter()
+        .map(|(EqlColumn(TableColumn { table, column }), value)| {
+            if let Some(plaintext) = match value {
+                Value::Number(number, _) => Some(number.to_string()),
+                Value::SingleQuotedString(s) => Some(s.to_owned()),
+                Value::Boolean(b) => Some(b.to_string()),
+                Value::Null => None,
+                _ => None,
+            } {
+                Ok(eql::Plaintext {
+                    identifier: Identifier::from((table, column)),
+                    plaintext,
+                    version: 1,
+                    for_query: None,
+                })
+            } else {
+                Err(EqlMapperError::UnsupportedValueVariant(value.to_string()))
+            }
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::trace;
+
+    use super::Frontend;
+
+    #[test]
+    fn test_parse_handler() {
+        trace();
     }
 }

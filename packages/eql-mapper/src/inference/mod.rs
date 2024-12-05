@@ -4,8 +4,10 @@ mod infer_type_impls;
 mod registry;
 mod type_error;
 mod type_variables;
-mod types;
-mod unifier;
+
+pub mod unifier;
+
+use unifier::*;
 
 use std::{
     cell::RefCell,
@@ -30,9 +32,6 @@ pub(crate) use function_signature::*;
 pub(crate) use registry::*;
 pub(crate) use type_error::*;
 pub(crate) use type_variables::*;
-pub(crate) use unifier::*;
-
-pub(crate) use types::*;
 
 /// [`Visitor`] implementation that performs type inference on AST nodes.
 ///
@@ -59,10 +58,10 @@ pub struct TypeInferencer<'ast> {
     reg: Rc<RefCell<TypeRegistry<'ast>>>,
 
     /// Implements the type-unification algorithm.
-    unifier: RefCell<Unifier>,
+    unifier: RefCell<unifier::Unifier>,
 
     /// The types of all placeholder nodes
-    param_types: Vec<(String, Rc<RefCell<Type>>)>,
+    param_types: Vec<(String, Rc<RefCell<unifier::Type>>)>,
 
     /// References to all of the literal nodes.
     literal_nodes: HashSet<NodeKey<'ast>>,
@@ -81,7 +80,7 @@ impl<'ast> TypeInferencer<'ast> {
             schema: schema.into(),
             scope: scope.into(),
             reg: reg.into(),
-            unifier: RefCell::new(Unifier::new()),
+            unifier: RefCell::new(unifier::Unifier::new()),
             param_types: Vec::with_capacity(16),
             literal_nodes: HashSet::with_capacity(64),
             _ast: PhantomData,
@@ -89,15 +88,15 @@ impl<'ast> TypeInferencer<'ast> {
     }
 
     /// Shorthand for calling `self.reg.borrow_mut().get_type(node)` in [`InferType`] implementations for `TypeInferencer`.
-    pub(crate) fn get_type<N: Semantic>(&self, node: &'ast N) -> Rc<RefCell<Type>> {
+    pub(crate) fn get_type<N: Semantic>(&self, node: &'ast N) -> Rc<RefCell<unifier::Type>> {
         self.reg.borrow_mut().get_type(node)
     }
 
-    pub(crate) fn get_type_by_node_key(&self, key: &NodeKey<'ast>) -> Option<Rc<RefCell<Type>>> {
+    pub(crate) fn get_type_by_node_key(&self, key: &NodeKey<'ast>) -> Option<Rc<RefCell<unifier::Type>>> {
         self.reg.borrow_mut().get_type_by_node_key(key)
     }
 
-    pub(crate) fn node_types(&self) -> Result<HashMap<NodeKey<'ast>, Type>, TypeError> {
+    pub(crate) fn node_types(&self) -> Result<HashMap<NodeKey<'ast>, unifier::Type>, TypeError> {
         self.try_resolve_all_types().map(|types| {
             types
                 .iter()
@@ -106,21 +105,21 @@ impl<'ast> TypeInferencer<'ast> {
         })
     }
 
-    pub(crate) fn param_types(&self) -> Result<HashMap<String, Scalar>, TypeError> {
+    pub(crate) fn param_types(&self) -> Result<HashMap<String, unifier::Scalar>, TypeError> {
         // For every param node, unify its type with the other param nodes that refer to the same param.
         let unified_params = self
             .param_types
             .iter()
             .into_grouping_map_by(|&(param, _)| param.clone())
             .fold_with(
-                |_, _| Ok(Type::fresh_tvar()),
+                |_, _| Ok(unifier::Type::fresh_tvar()),
                 |acc_ty, _param, (_, param_ty)| {
                     acc_ty.and_then(|acc_ty| self.unify(acc_ty, param_ty.clone()))
                 },
             );
 
         // Filter down to the params that successfully unified
-        let verified_unified_params: HashMap<String, Type> = unified_params
+        let verified_unified_params: HashMap<String, unifier::Type> = unified_params
             .iter()
             .filter_map(|(param, ty)| {
                 ty.as_ref()
@@ -139,10 +138,10 @@ impl<'ast> TypeInferencer<'ast> {
         };
 
         // Check that every unified param type is a Scalar
-        let scalars: HashMap<String, Scalar> = verified_unified_params
+        let scalars: HashMap<String, unifier::Scalar> = verified_unified_params
             .into_iter()
             .map(|(param, ty)| {
-                if let Def::Constructor(Constructor::Scalar(scalar)) = &ty.0 {
+                if let unifier::Def::Constructor(unifier::Constructor::Scalar(scalar)) = &ty.0 {
                     Ok((param, (**scalar).clone()))
                 } else {
                     Err(TypeError::NonScalarParam(param, ty.to_string()))

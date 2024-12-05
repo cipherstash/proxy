@@ -1,8 +1,7 @@
 use sqlparser::ast::{FunctionArg, FunctionArgExpr, FunctionArgumentList, FunctionArguments};
 
 use crate::{
-    inference::InferType,
-    inference::{type_error::TypeError, Type},
+    inference::type_error::TypeError, inference::unifier::Type, inference::InferType,
     TypeInferencer,
 };
 

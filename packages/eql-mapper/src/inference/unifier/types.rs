@@ -179,7 +179,7 @@ pub(crate) enum Constructor {
     Array(Rc<RefCell<Type>>),
 
     /// A projection type that is parameterized by a list of projection column types.
-    #[display("Projection({})", crate::Unifier::render_projection(_0.clone()))]
+    #[display("Projection({})", crate::unifier::Unifier::render_projection(_0.clone()))]
     Projection(Rc<RefCell<Vec<ProjectionColumn>>>),
 
     /// An empty type - the only usecase for this type (so far) is for representing the type of subqueries that do not
