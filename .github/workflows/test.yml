@@ -27,3 +27,6 @@ jobs:
           mise run up postgres --extra-args "--detach --wait"
       - run: |
           mise run setup
+      - run: |
+          mise run test
+
