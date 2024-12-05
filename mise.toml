@@ -58,7 +58,7 @@ description = "Install EQL"
 run = """
   #!/usr/bin/env bash
   curl -sLo tests/sql/cipherstash-encrypt.sql https://github.com/cipherstash/encrypt-query-language/releases/latest/download/cipherstash-encrypt.sql
-  psql postgresql://cipherstash:password@localhost:{{vars.database_port}}/cipherstash < tests/sql/cipherstash-encrypt.sql
+  psql postgresql://cipherstash:password@pg:{{vars.database_port}}/cipherstash < tests/sql/cipherstash-encrypt.sql
 """
 
 # ====================================================================================================
