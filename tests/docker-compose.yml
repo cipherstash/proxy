@@ -15,7 +15,7 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "${CPU_LIMIT:-4}"
+          cpus: "${CPU_LIMIT:-2}"
           memory: 2048mb
     restart: always
     healthcheck:
