@@ -7,7 +7,7 @@ on:
     branches:
       - main
 jobs:
-  lint:
+  test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -18,3 +18,8 @@ jobs:
           cache: true # [default: true] cache mise using GitHub's cache
       - run: |
           mise run install
+      - run: |
+          mise run up postgres
+          mise run setup
+      - run: |
+          mise run test
