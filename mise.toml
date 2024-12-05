@@ -1,5 +1,28 @@
+[env]
+CS_DATABASE__PORT = "5532" # default postgres port
+
+# # I can't work out how to use env vars in tasks
+# [vars]
+# database_port = "5532" # default postgres port
 
 
+[tasks.install]
+alias = 'i'
+description = "Installs Rust dependencies"
+run = """
+  cargo install cargo-binstall
+  cargo binstall cargo-nextest --secure
+  cargo install cargo-sort
+  cargo install cargo-expand
+"""
+
+[tasks.proxy]
+alias = 'p'
+description = "Runs the proxy "
+run = 'cargo run'
+
+# ====================================================================================================
+# Test Tasks
 
 [tasks.test]
 alias = 't'
@@ -10,19 +33,33 @@ run = 'cargo nextest run --no-fail-fast --nocapture {{arg(name="test",default=""
 depends = ["install_eql"]
 alias = 's'
 description = "Installs EQL and applies schema to database"
-run = "psql postgresql://cipherstash:password@localhost:5532/cipherstash < tests/sql/schema.sql"
+run = "psql postgresql://cipherstash:password@localhost:{{vars.database_port}}/cipherstash < tests/sql/schema.sql"
 
 [tasks.up]
 alias = 'u'
 dir = "./tests"
 description = "docker compose up"
-run = 'docker compose up --build {{arg(name="service",default="")}}'
+run = 'docker compose up --build {{arg(name="service",default="")}} '
+
+[tasks.down]
+alias = 'd'
+dir = "./tests"
+description = "docker compose down"
+run = 'docker compose down'
+
+[tasks.destroy_data]
+alias = 'dd'
+dir = "./tests/pg"
+description = "Removes the local data directories"
+run = 'rm -rf data-*'
 
 [tasks.install_eql]
 alias = 'e'
 description = "Install EQL"
 run = """
-#!/usr/bin/env bash
-curl -sLo tests/sql/cipherstash-encrypt.sql https://github.com/cipherstash/encrypt-query-language/releases/latest/download/cipherstash-encrypt.sql
-psql postgresql://cipherstash:password@localhost:5532/cipherstash < tests/sql/cipherstash-encrypt.sql
+  #!/usr/bin/env bash
+  curl -sLo tests/sql/cipherstash-encrypt.sql https://github.com/cipherstash/encrypt-query-language/releases/latest/download/cipherstash-encrypt.sql
+  psql postgresql://cipherstash:password@localhost:{{vars.database_port}}/cipherstash < tests/sql/cipherstash-encrypt.sql
 """
+
+# ====================================================================================================

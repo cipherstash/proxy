@@ -4,8 +4,6 @@ private_key = "tests/tls/server.key"
 
 [database]
 database = "cipherstash"
-host = "localhost"
-port = 5532
 username = "cipherstash"
 password = "password"
 with_tls = true

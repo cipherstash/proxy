@@ -14,7 +14,6 @@ pub async fn client(
     config: &TandemConfig,
 ) -> Result<TlsStream<TcpStream>, Error> {
     let tls_config = configure_client(&config.database);
-
     let connector = TlsConnector::from(Arc::new(tls_config));
     let domain = config.server.server_name()?.to_owned();
     let tls_stream = connector.connect(domain, stream).await?;

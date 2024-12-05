@@ -1,16 +1,35 @@
 # CipherStash Proxy
 
-
-Experiments in Minimally Viable Proxying.
-
+Your Proxy Pal Who's Fun to Be With!
 
 
 
-## Dependencies
+## Tl;DR
+
+Assuming you have [Rust](https://www.rust-lang.org/), [mise](https://mise.jdx.dev/) and [Docker](https://www.docker.com/) installed
 
 
-Databases are defined and configured in `tests/docker-compose.yml'
+```shell
+# install nextest and other rust dependencies
+mise run install
 
+# run postgres on default port
+mise run up postgres
+
+# install latest eql into database
+mise run setup
+
+mise run proxy
+```
+
+## Prerequisites
+
+- [mise](https://mise.jdx.dev/)
+- [Docker](https://www.docker.com/)
+- [Rust](https://www.rust-lang.org/)
+- [PostgreSQL](https://www.postgresql.org/)
+
+PostgreSQL database configuration is defined in `tests/docker-compose.yml'
 See `Docker Compose` below for details.
 
 - [Bininstall](https://github.com/cargo-bins/cargo-binstall)
@@ -27,11 +46,9 @@ cargo install cargo-expand
 
 ## Tests
 
-Uses [mise](https://mise.jdx.dev/) and  [Nextest](https://nexte.st/) for testing.
+Uses [Nextest](https://nexte.st/) for testing.
 
-```
-cargo binstall cargo-nextest --secure
-```
+
 
 ### Setup
 
@@ -53,8 +70,6 @@ Assumes running docker postgres service with default credentials
   mise r t {TEST_NAME}
   mise r t load_schema
 ```
-
-
 
 
 ## Docker Compose
@@ -86,13 +101,20 @@ POSTGRES_PASSWORD="password"
 
 ### ports
 
-All ports start with `55` followed by the `version` number
+
+Vanilla connection ports start with `55` followed by the `version` number
+TLS connection ports start with `56` followed by the `version` number
+
 Postgres latest always runs on `5532`
 
 ```
     55{version}
 
+    # v17
     5517
+
+    # v17 with TLS
+    5617
 ```
 
 

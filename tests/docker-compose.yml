@@ -29,9 +29,9 @@ services:
     image: postgres:17
     container_name: pg-17-tls
     environment:
-      PGPORT: 5517
+      PGPORT: 5617
     ports:
-      - 5517:5517
+      - 5617:5617
     command: -c 'config_file=/etc/postgresql/postgresql.conf' -c 'hba_file=/etc/postgresql/pg_hba.conf'
     volumes:
       - ./pg/postgresql-tls.conf:/etc/postgresql/postgresql.conf
