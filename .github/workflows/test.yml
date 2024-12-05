@@ -11,6 +11,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Setup Rust cache
+        uses: Swatinem/rust-cache@v2
       - uses: jdx/mise-action@v2
         with:
           version: 2024.12.0 # [default: latest] mise version to install
