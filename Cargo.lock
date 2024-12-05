@@ -101,9 +101,9 @@ dependencies = [
 
 [[package]]
 name = "anyhow"
-version = "1.0.93"
+version = "1.0.94"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4c95c10ba0b00a02636238b814946408b1322d5ac4760326e6fb8ec956d85775"
+checksum = "c1fd03a028ef38ba2276dce7e33fcd6369c158a1bca17946c4b1b701891c1ff7"
 
 [[package]]
 name = "arc-swap"
@@ -261,7 +261,7 @@ dependencies = [
  "bitflags 2.6.0",
  "cexpr",
  "clang-sys",
- "itertools",
+ "itertools 0.12.1",
  "lazy_static",
  "lazycell",
  "log",
@@ -433,20 +433,6 @@ dependencies = [
 
 [[package]]
 name = "cargo_metadata"
-version = "0.18.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2d886547e41f740c616ae73108f6eb70afe6d940c7bc697cb30f13daec073037"
-dependencies = [
- "camino",
- "cargo-platform",
- "semver",
- "serde",
- "serde_json",
- "thiserror 1.0.69",
-]
-
-[[package]]
-name = "cargo_metadata"
 version = "0.19.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8769706aad5d996120af43197bf46ef6ad0fda35216b4505f926a365a232d924"
@@ -456,7 +442,7 @@ dependencies = [
  "semver",
  "serde",
  "serde_json",
- "thiserror 2.0.3",
+ "thiserror 2.0.4",
 ]
 
 [[package]]
@@ -526,7 +512,7 @@ dependencies = [
 [[package]]
 name = "cipherstash-client"
 version = "0.13.0-pre.1"
-source = "git+ssh://git@github.com/cipherstash/cipherstash-suite.git?branch=main#f8e6b0d87a3f9d610bc123ee367c7d3409620385"
+source = "git+ssh://git@github.com/cipherstash/cipherstash-suite.git#bf9cb4416835aecc071cfd9ea4571229f9f2ccd8"
 dependencies = [
  "aes-gcm-siv",
  "anyhow",
@@ -537,16 +523,16 @@ dependencies = [
  "blake3",
  "cfg-if",
  "chrono",
- "cipherstash-config 0.2.3 (git+ssh://git@github.com/cipherstash/cipherstash-suite.git?branch=main)",
- "cipherstash-core 0.1.2 (git+ssh://git@github.com/cipherstash/cipherstash-suite.git?branch=main)",
- "cipherstash-stats 0.1.1 (git+ssh://git@github.com/cipherstash/cipherstash-suite.git?branch=main)",
- "cllw-ore 0.1.0 (git+ssh://git@github.com/cipherstash/cipherstash-suite.git?branch=main)",
+ "cipherstash-config",
+ "cipherstash-core",
+ "cipherstash-stats",
+ "cllw-ore",
  "derive_more",
  "dirs",
  "futures",
  "hex",
  "hmac",
- "itertools",
+ "itertools 0.12.1",
  "lazy_static",
  "log",
  "miette",
@@ -556,62 +542,7 @@ dependencies = [
  "percent-encoding",
  "rand",
  "rand_chacha",
- "recipher 0.1.3 (git+ssh://git@github.com/cipherstash/cipherstash-suite.git?branch=main)",
- "reqwest",
- "reqwest-middleware",
- "reqwest-retry",
- "rmp-serde",
- "rust-stemmers",
- "rust_decimal",
- "serde",
- "serde_bytes",
- "serde_cbor",
- "serde_json",
- "sha2",
- "static_assertions",
- "thiserror 1.0.69",
- "tracing",
- "url",
- "uuid",
- "winnow",
- "zeroize",
- "zerokms-protocol 0.3.1 (git+ssh://git@github.com/cipherstash/cipherstash-suite.git?branch=main)",
-]
-
-[[package]]
-name = "cipherstash-client"
-version = "0.13.0-pre.1"
-source = "git+ssh://git@github.com/cipherstash/cipherstash-suite.git#f8e6b0d87a3f9d610bc123ee367c7d3409620385"
-dependencies = [
- "aes-gcm-siv",
- "anyhow",
- "async-mutex",
- "async-trait",
- "base64",
- "base85",
- "blake3",
- "cfg-if",
- "chrono",
- "cipherstash-config 0.2.3 (git+ssh://git@github.com/cipherstash/cipherstash-suite.git)",
- "cipherstash-core 0.1.2 (git+ssh://git@github.com/cipherstash/cipherstash-suite.git)",
- "cipherstash-stats 0.1.1 (git+ssh://git@github.com/cipherstash/cipherstash-suite.git)",
- "cllw-ore 0.1.0 (git+ssh://git@github.com/cipherstash/cipherstash-suite.git)",
- "derive_more",
- "dirs",
- "futures",
- "hex",
- "hmac",
- "itertools",
- "lazy_static",
- "log",
- "miette",
- "opaque-debug",
- "open",
- "ore-rs",
- "percent-encoding",
- "rand",
- "rand_chacha",
- "recipher 0.1.3 (git+ssh://git@github.com/cipherstash/cipherstash-suite.git)",
+ "recipher",
  "reqwest",
  "reqwest-middleware",
  "reqwest-retry",
@@ -631,22 +562,13 @@ dependencies = [
  "uuid",
  "winnow",
  "zeroize",
- "zerokms-protocol 0.3.1 (git+ssh://git@github.com/cipherstash/cipherstash-suite.git)",
+ "zerokms-protocol",
 ]
 
 [[package]]
 name = "cipherstash-config"
 version = "0.2.3"
-source = "git+ssh://git@github.com/cipherstash/cipherstash-suite.git?branch=main#f8e6b0d87a3f9d610bc123ee367c7d3409620385"
-dependencies = [
- "serde",
- "thiserror 1.0.69",
-]
-
-[[package]]
-name = "cipherstash-config"
-version = "0.2.3"
-source = "git+ssh://git@github.com/cipherstash/cipherstash-suite.git#f8e6b0d87a3f9d610bc123ee367c7d3409620385"
+source = "git+ssh://git@github.com/cipherstash/cipherstash-suite.git#bf9cb4416835aecc071cfd9ea4571229f9f2ccd8"
 dependencies = [
  "serde",
  "thiserror 1.0.69",
@@ -655,21 +577,7 @@ dependencies = [
 [[package]]
 name = "cipherstash-core"
 version = "0.1.2"
-source = "git+ssh://git@github.com/cipherstash/cipherstash-suite.git?branch=main#f8e6b0d87a3f9d610bc123ee367c7d3409620385"
-dependencies = [
- "hmac",
- "lazy_static",
- "num-bigint",
- "rand",
- "regex",
- "sha2",
- "thiserror 1.0.69",
-]
-
-[[package]]
-name = "cipherstash-core"
-version = "0.1.2"
-source = "git+ssh://git@github.com/cipherstash/cipherstash-suite.git#f8e6b0d87a3f9d610bc123ee367c7d3409620385"
+source = "git+ssh://git@github.com/cipherstash/cipherstash-suite.git#bf9cb4416835aecc071cfd9ea4571229f9f2ccd8"
 dependencies = [
  "hmac",
  "lazy_static",
@@ -686,8 +594,8 @@ version = "0.1.0"
 dependencies = [
  "arc-swap",
  "bytes",
- "cipherstash-client 0.13.0-pre.1 (git+ssh://git@github.com/cipherstash/cipherstash-suite.git)",
- "cipherstash-config 0.2.3 (git+ssh://git@github.com/cipherstash/cipherstash-suite.git)",
+ "cipherstash-client",
+ "cipherstash-config",
  "config",
  "eql-mapper",
  "exitcode",
@@ -698,8 +606,8 @@ dependencies = [
  "serde_json",
  "socket2",
  "sqlparser",
- "sqltk 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "thiserror 2.0.3",
+ "sqltk",
+ "thiserror 2.0.4",
  "tokio",
  "tokio-postgres",
  "tokio-postgres-rustls",
@@ -713,16 +621,7 @@ dependencies = [
 [[package]]
 name = "cipherstash-stats"
 version = "0.1.1"
-source = "git+ssh://git@github.com/cipherstash/cipherstash-suite.git?branch=main#f8e6b0d87a3f9d610bc123ee367c7d3409620385"
-dependencies = [
- "lazy_static",
- "prometheus",
-]
-
-[[package]]
-name = "cipherstash-stats"
-version = "0.1.1"
-source = "git+ssh://git@github.com/cipherstash/cipherstash-suite.git#f8e6b0d87a3f9d610bc123ee367c7d3409620385"
+source = "git+ssh://git@github.com/cipherstash/cipherstash-suite.git#bf9cb4416835aecc071cfd9ea4571229f9f2ccd8"
 dependencies = [
  "lazy_static",
  "prometheus",
@@ -742,24 +641,7 @@ dependencies = [
 [[package]]
 name = "cllw-ore"
 version = "0.1.0"
-source = "git+ssh://git@github.com/cipherstash/cipherstash-suite.git?branch=main#f8e6b0d87a3f9d610bc123ee367c7d3409620385"
-dependencies = [
- "bit-vec",
- "bitvec",
- "blake3",
- "postgres-derive",
- "postgres-types",
- "regex",
- "subtle",
- "thiserror 1.0.69",
- "unicode-normalization",
- "vitaminc",
-]
-
-[[package]]
-name = "cllw-ore"
-version = "0.1.0"
-source = "git+ssh://git@github.com/cipherstash/cipherstash-suite.git#f8e6b0d87a3f9d610bc123ee367c7d3409620385"
+source = "git+ssh://git@github.com/cipherstash/cipherstash-suite.git#bf9cb4416835aecc071cfd9ea4571229f9f2ccd8"
 dependencies = [
  "bit-vec",
  "bitvec",
@@ -955,7 +837,6 @@ version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cb7330aeadfbe296029522e6c40f315320aba36fc43a5b3632f3795348f3bd22"
 dependencies = [
- "convert_case",
  "proc-macro2",
  "quote",
  "syn 2.0.90",
@@ -1037,14 +918,13 @@ checksum = "60b1af1c220855b6ceac025d3f6ecdd2b7c4894bfe9cd9bda4fbb4bc7c0d4cf0"
 [[package]]
 name = "eql-mapper"
 version = "0.1.0"
-source = "git+ssh://git@github.com/cipherstash/eql-mapper.git#061dca76bba8fcba6039cc92eab975369f7c3336"
+source = "git+ssh://git@github.com/cipherstash/eql-mapper.git#9847cc4d11b7719499008ab4e5b3158e11ec5823"
 dependencies = [
- "cipherstash-client 0.13.0-pre.1 (git+ssh://git@github.com/cipherstash/cipherstash-suite.git?branch=main)",
- "cipherstash-config 0.2.3 (git+ssh://git@github.com/cipherstash/cipherstash-suite.git?branch=main)",
  "derive_more",
+ "itertools 0.13.0",
  "sqlparser",
- "sqltk 0.1.0 (git+ssh://git@github.com/cipherstash/sqltk.git?branch=main)",
- "thiserror 2.0.3",
+ "sqltk",
+ "thiserror 2.0.4",
 ]
 
 [[package]]
@@ -1339,9 +1219,9 @@ dependencies = [
 
 [[package]]
 name = "http"
-version = "1.1.0"
+version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "21b9ddb458710bc376481b842f5da65cdf31522de232c1ca8146abce2a358258"
+checksum = "f16ca2af56261c99fba8bac40a10251ce8188205a4c448fbb745a2e4daa76fea"
 dependencies = [
  "bytes",
  "fnv",
@@ -1610,12 +1490,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "indoc"
-version = "2.0.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b248f5224d1d606005e02c97f5aa4e88eeb230488bcc03bc9ca4d7991399f2b5"
-
-[[package]]
 name = "inout"
 version = "0.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1669,6 +1543,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "itertools"
+version = "0.13.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "413ee7dfc52ee1a4949ceeb7dbc8a33f2d6c088194d9f922fb8318faf1f01186"
+dependencies = [
+ "either",
+]
+
+[[package]]
 name = "itoa"
 version = "1.0.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1691,17 +1574,6 @@ checksum = "a865e038f7f6ed956f788f0d7d60c541fff74c7bd74272c5d4cf15c63743e705"
 dependencies = [
  "once_cell",
  "wasm-bindgen",
-]
-
-[[package]]
-name = "lazy-static-include"
-version = "3.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "67f771f5073e25401d245cf2bfca1e43574ecb1128556213f534a15d751763e3"
-dependencies = [
- "lazy_static",
- "manifest-dir-macros",
- "syn 2.0.90",
 ]
 
 [[package]]
@@ -1775,18 +1647,6 @@ name = "log"
 version = "0.4.22"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a7a70ba024b9dc04c27ea2f0c0548feb474ec5c54bba33a7f72f873a39d07b24"
-
-[[package]]
-name = "manifest-dir-macros"
-version = "0.1.18"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9c6d40de1ccdbf8bde2eaa0750595478a368f7b3a3f89c426e3454f64e29f593"
-dependencies = [
- "once_cell",
- "proc-macro2",
- "quote",
- "syn 2.0.90",
-]
 
 [[package]]
 name = "md-5"
@@ -2380,27 +2240,7 @@ dependencies = [
 [[package]]
 name = "recipher"
 version = "0.1.3"
-source = "git+ssh://git@github.com/cipherstash/cipherstash-suite.git?branch=main#f8e6b0d87a3f9d610bc123ee367c7d3409620385"
-dependencies = [
- "aes",
- "async-trait",
- "cmac",
- "hex",
- "hex-literal",
- "opaque-debug",
- "rand",
- "rand_chacha",
- "serde",
- "serde_cbor",
- "sha2",
- "thiserror 1.0.69",
- "zeroize",
-]
-
-[[package]]
-name = "recipher"
-version = "0.1.3"
-source = "git+ssh://git@github.com/cipherstash/cipherstash-suite.git#f8e6b0d87a3f9d610bc123ee367c7d3409620385"
+source = "git+ssh://git@github.com/cipherstash/cipherstash-suite.git#bf9cb4416835aecc071cfd9ea4571229f9f2ccd8"
 dependencies = [
  "aes",
  "async-trait",
@@ -2979,36 +2819,11 @@ checksum = "a73dbe6db8f2a2a488b63104f52b993a9b629b6f758e0fb9b2d3bb85f35727a2"
 dependencies = [
  "Inflector",
  "bigdecimal",
- "cargo_metadata 0.19.1",
+ "cargo_metadata",
  "prettyplease",
  "proc-macro2",
  "quote",
  "sqlparser",
- "syn 2.0.90",
-]
-
-[[package]]
-name = "sqltk"
-version = "0.1.0"
-source = "git+ssh://git@github.com/cipherstash/sqltk.git?branch=main#f2443fc1dd8d042e0d1c8c313cbb97811444a6e3"
-dependencies = [
- "bigdecimal",
- "sqlparser",
- "sqltk-codegen",
-]
-
-[[package]]
-name = "sqltk-codegen"
-version = "0.1.0"
-source = "git+ssh://git@github.com/cipherstash/sqltk.git?branch=main#f2443fc1dd8d042e0d1c8c313cbb97811444a6e3"
-dependencies = [
- "Inflector",
- "cargo_metadata 0.18.1",
- "indoc",
- "lazy-static-include",
- "prettyplease",
- "proc-macro2",
- "quote",
  "syn 2.0.90",
 ]
 
@@ -3168,11 +2983,11 @@ dependencies = [
 
 [[package]]
 name = "thiserror"
-version = "2.0.3"
+version = "2.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c006c85c7651b3cf2ada4584faa36773bd07bac24acfb39f3c431b36d7e667aa"
+checksum = "2f49a1853cf82743e3b7950f77e0f4d622ca36cf4317cba00c767838bac8d490"
 dependencies = [
- "thiserror-impl 2.0.3",
+ "thiserror-impl 2.0.4",
 ]
 
 [[package]]
@@ -3188,9 +3003,9 @@ dependencies = [
 
 [[package]]
 name = "thiserror-impl"
-version = "2.0.3"
+version = "2.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f077553d607adc1caf65430528a576c757a71ed73944b66ebb58ef2bbd243568"
+checksum = "8381894bb3efe0c4acac3ded651301ceee58a15d47c2e34885ed1908ad667061"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3346,9 +3161,9 @@ dependencies = [
 
 [[package]]
 name = "tokio-util"
-version = "0.7.12"
+version = "0.7.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "61e7c3654c13bcd040d4a03abee2c75b1d14a37b423cf5a813ceae1cc903ec6a"
+checksum = "d7fcaa8d55a2bdd6b83ace262b016eca0d79ee02818c5c1bcdf0305114081078"
 dependencies = [
  "bytes",
  "futures-core",
@@ -4103,29 +3918,11 @@ dependencies = [
 [[package]]
 name = "zerokms-protocol"
 version = "0.3.1"
-source = "git+ssh://git@github.com/cipherstash/cipherstash-suite.git?branch=main#f8e6b0d87a3f9d610bc123ee367c7d3409620385"
+source = "git+ssh://git@github.com/cipherstash/cipherstash-suite.git#bf9cb4416835aecc071cfd9ea4571229f9f2ccd8"
 dependencies = [
  "async-trait",
  "base64",
- "cipherstash-config 0.2.3 (git+ssh://git@github.com/cipherstash/cipherstash-suite.git?branch=main)",
- "fake",
- "opaque-debug",
- "rand",
- "serde",
- "static_assertions",
- "thiserror 1.0.69",
- "uuid",
- "zeroize",
-]
-
-[[package]]
-name = "zerokms-protocol"
-version = "0.3.1"
-source = "git+ssh://git@github.com/cipherstash/cipherstash-suite.git#f8e6b0d87a3f9d610bc123ee367c7d3409620385"
-dependencies = [
- "async-trait",
- "base64",
- "cipherstash-config 0.2.3 (git+ssh://git@github.com/cipherstash/cipherstash-suite.git)",
+ "cipherstash-config",
  "fake",
  "opaque-debug",
  "rand",
