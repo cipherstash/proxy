@@ -38,7 +38,7 @@ run = "psql postgresql://cipherstash:password@localhost:{{vars.database_port}}/c
 alias = 'u'
 dir = "./tests"
 description = "docker compose up"
-run = 'docker compose up --build {{arg(name="service",default="")}} {{arg(name="detach",default="")}}'
+run = 'docker compose up --build {{arg(name="service",default="")}} {{option(name="extra-args")}}'
 
 [tasks.down]
 alias = 'd'
