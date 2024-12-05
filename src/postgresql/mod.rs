@@ -22,7 +22,15 @@ pub const SSL_REQUEST: i32 = 80877103;
 
 pub const CANCEL_REQUEST: i32 = 80877102;
 
+pub const SSL_RESPONSE_NO: u8 = b'N';
+
+pub const SSL_RESPONSE_YES: u8 = b'S';
+
 ///
+///
+/// Entry point for handling postgres protocol connections
+/// Each inbound client connection is mapped to a database connection
+/// Hilarity ensues
 ///
 /// Startup flow
 ///
@@ -44,6 +52,8 @@ pub const CANCEL_REQUEST: i32 = 80877102;
 ///
 ///     On ProtocolVersionNumber
 ///         Propagate and continue
+///
+///
 pub async fn handle(client_stream: AsyncStream, encrypt: Encrypt) -> Result<(), Error> {
     let mut client_stream = client_stream;
 

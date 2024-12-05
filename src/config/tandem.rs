@@ -235,7 +235,7 @@ mod tests {
         let config = TandemConfig::load("tests/config/cipherstash-proxy.toml").unwrap();
         assert_eq!(
             config.database.to_socket_address(),
-            "localhost:5432".to_string()
+            "localhost:5532".to_string()
         );
     }
 

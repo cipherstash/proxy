@@ -1,43 +1,49 @@
 use super::tandem::DatabaseConfig;
 use crate::{
-    config::{JsonDatasetConfig, ENCRYPT_DATASET_CONFIG_QUERY},
+    config::{EncryptConfig, ENCRYPT_DATASET_CONFIG_QUERY},
     connect,
     error::{ConfigError, Error},
 };
 use arc_swap::ArcSwap;
-use cipherstash_config::DatasetConfig;
-use std::{sync::Arc, time::Duration};
+use cipherstash_config::ColumnConfig;
+use std::{collections::HashMap, sync::Arc, time::Duration};
 use tokio::{task::JoinHandle, time};
 use tokio_postgres::{SimpleQueryMessage, SimpleQueryRow};
 use tracing::{debug, error, info, warn};
 
+///
+/// Column configuration keyed by table name and column name
+///    - key: `{table_name}.{column_name}`
+///
+type EncryptConfigMap = HashMap<String, ColumnConfig>;
+
 #[derive(Clone, Debug)]
-pub struct DatasetManager {
+pub struct EncryptConfigManager {
     _reload_handle: Arc<JoinHandle<()>>,
-    dataset: Arc<ArcSwap<DatasetConfig>>,
+    config: Arc<ArcSwap<EncryptConfigMap>>,
 }
 
-impl DatasetManager {
+impl EncryptConfigManager {
     pub async fn init(config: &DatabaseConfig) -> Result<Self, Error> {
         let config = config.clone();
         init_reloader(config).await
     }
 
-    pub fn load(&self) -> Arc<DatasetConfig> {
-        self.dataset.load().clone()
+    pub fn load(&self) -> Arc<EncryptConfigMap> {
+        self.config.load().clone()
     }
 }
 
-async fn init_reloader(config: DatabaseConfig) -> Result<DatasetManager, Error> {
+async fn init_reloader(config: DatabaseConfig) -> Result<EncryptConfigManager, Error> {
     // Skip retries on startup as the likely failure mode is configuration
-    let dataset = load_dataset(&config).await?;
+    let encrypt_config = load_dataset(&config).await?;
     info!("Loaded Encrypt configuration");
 
-    let dataset = Arc::new(ArcSwap::new(Arc::new(dataset)));
+    let encrypt_config = Arc::new(ArcSwap::new(Arc::new(encrypt_config)));
 
     let config_ref = config.clone();
 
-    let dataset_ref = dataset.clone();
+    let dataset_ref = encrypt_config.clone();
     let reload_handle = tokio::spawn(async move {
         let reload_interval = tokio::time::Duration::from_secs(config_ref.config_reload_interval);
 
@@ -62,8 +68,8 @@ async fn init_reloader(config: DatabaseConfig) -> Result<DatasetManager, Error> 
         }
     });
 
-    Ok(DatasetManager {
-        dataset,
+    Ok(EncryptConfigManager {
+        config: encrypt_config,
         _reload_handle: Arc::new(reload_handle),
     })
 }
@@ -73,15 +79,15 @@ async fn init_reloader(config: DatabaseConfig) -> Result<DatasetManager, Error> 
 /// When databases and the proxy start up at the same time they might not be ready to accept connections before the
 /// proxy tries to query the schema. To give the proxy the best chance of initialising correctly this method will
 /// retry the query a few times before passing on the error.
-async fn load_dataset_with_retry(config: &DatabaseConfig) -> Result<DatasetConfig, Error> {
+async fn load_dataset_with_retry(config: &DatabaseConfig) -> Result<EncryptConfigMap, Error> {
     let mut retry_count = 0;
     let max_retry_count = 10;
     let max_backoff = Duration::from_secs(2);
 
     loop {
         match load_dataset(config).await {
-            Ok(dataset_config) => {
-                return Ok(dataset_config);
+            Ok(encrypt_config) => {
+                return Ok(encrypt_config);
             }
 
             Err(e) => {
@@ -99,7 +105,7 @@ async fn load_dataset_with_retry(config: &DatabaseConfig) -> Result<DatasetConfi
     }
 }
 
-pub async fn load_dataset(config: &DatabaseConfig) -> Result<DatasetConfig, Error> {
+pub async fn load_dataset(config: &DatabaseConfig) -> Result<EncryptConfigMap, Error> {
     let client = connect::database(config).await?;
 
     let result = client.simple_query(ENCRYPT_DATASET_CONFIG_QUERY).await;
@@ -138,12 +144,10 @@ pub async fn load_dataset(config: &DatabaseConfig) -> Result<DatasetConfig, Erro
             opt_str.ok_or_else(|| ConfigError::MissingActiveEncryptConfig)
         })?;
 
-    let config: JsonDatasetConfig =
-        serde_json::from_str(&data).map_err(|e| ConfigError::Parse(e))?;
+    let encrypt = EncryptConfig::from_str(&data)?;
+    let map = encrypt.to_config_map();
 
-    let dataset_config = config.try_into().map_err(|e| ConfigError::Dataset(e))?;
-
-    Ok(dataset_config)
+    Ok(map)
 }
 
 fn configuration_table_not_found(e: &tokio_postgres::Error) -> bool {

@@ -6,16 +6,18 @@ use cipherstash_config::{
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+use crate::error::{ConfigError, Error};
+
 pub type TableName = String;
 pub type ColumnName = String;
 pub type Tables = HashMap<TableName, Table>;
 pub type Table = HashMap<ColumnName, Column>;
 
 #[derive(Debug, Deserialize, Serialize, Clone, Default)]
-pub struct JsonDatasetConfig {
+pub struct EncryptConfig {
     #[serde(rename = "v")]
-    version: u32,
-    tables: Tables,
+    pub version: u32,
+    pub tables: Tables,
 }
 
 #[derive(Debug, Default, Deserialize, Serialize, Clone, PartialEq)]
@@ -95,54 +97,6 @@ pub struct UniqueIndexOpts {
     token_filters: Vec<TokenFilter>,
 }
 
-impl TryFrom<JsonDatasetConfig> for DatasetConfig {
-    type Error = DatasetConfigError;
-
-    fn try_from(value: JsonDatasetConfig) -> Result<Self, Self::Error> {
-        let mut dataset_config = DatasetConfig::init();
-
-        for (table_name, columns) in value.tables.into_iter() {
-            let mut table_config = TableConfig::new(table_name.as_str())?;
-
-            for (column_name, column) in columns.into_iter() {
-                let mut column_config =
-                    ColumnConfig::build(column_name).casts_as(column.cast_as.into());
-
-                if column.indexes.ore_index.is_some() {
-                    column_config = column_config.add_index(Index::new_ore());
-                }
-
-                if let Some(opts) = column.indexes.match_index {
-                    column_config = column_config.add_index(Index::new(IndexType::Match {
-                        tokenizer: opts.tokenizer,
-                        token_filters: opts.token_filters,
-                        k: opts.k,
-                        m: opts.m,
-                        include_original: opts.include_original,
-                    }));
-                }
-
-                if let Some(opts) = column.indexes.unique_index {
-                    column_config = column_config.add_index(Index::new(IndexType::Unique {
-                        token_filters: opts.token_filters,
-                    }))
-                }
-
-                if let Some(SteVecIndexOpts { prefix }) = column.indexes.ste_vec_index {
-                    column_config =
-                        column_config.add_index(Index::new(IndexType::SteVec { prefix }))
-                }
-
-                table_config = table_config.add_column(column_config)?;
-            }
-
-            dataset_config = dataset_config.add_table(table_config)?;
-        }
-
-        Ok(dataset_config)
-    }
-}
-
 impl From<CastAs> for ColumnType {
     fn from(value: CastAs) -> Self {
         match value {
@@ -158,46 +112,68 @@ impl From<CastAs> for ColumnType {
     }
 }
 
+impl EncryptConfig {
+    pub fn from_str(data: &str) -> Result<Self, Error> {
+        let config = serde_json::from_str(&data).map_err(|e| ConfigError::Parse(e))?;
+        Ok(config)
+    }
+
+    pub fn to_config_map(self) -> HashMap<String, ColumnConfig> {
+        let mut map = HashMap::new();
+        for (table_name, columns) in self.tables.into_iter() {
+            for (name, column) in columns.into_iter() {
+                let column_config = column.to_column_config(&name);
+                let key = format!("{}.{}", table_name, name);
+                map.insert(key, column_config);
+            }
+        }
+        map
+    }
+}
+
+impl Column {
+    pub fn to_column_config(self, name: &str) -> ColumnConfig {
+        let mut config = ColumnConfig::build(name).casts_as(self.cast_as.into());
+
+        if self.indexes.ore_index.is_some() {
+            config = config.add_index(Index::new_ore());
+        }
+
+        if let Some(opts) = self.indexes.match_index {
+            config = config.add_index(Index::new(IndexType::Match {
+                tokenizer: opts.tokenizer,
+                token_filters: opts.token_filters,
+                k: opts.k,
+                m: opts.m,
+                include_original: opts.include_original,
+            }));
+        }
+
+        if let Some(opts) = self.indexes.unique_index {
+            config = config.add_index(Index::new(IndexType::Unique {
+                token_filters: opts.token_filters,
+            }))
+        }
+
+        if let Some(SteVecIndexOpts { prefix }) = self.indexes.ste_vec_index {
+            config = config.add_index(Index::new(IndexType::SteVec { prefix }))
+        }
+
+        config
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use rustls::crypto::hash::Hash;
     use serde_json::json;
 
     use super::*;
 
-    fn parse(json: serde_json::Value) -> DatasetConfig {
-        serde_json::from_value::<JsonDatasetConfig>(json)
-            .expect("failed to convert JSON to PostgresEncryptConfig")
-            .try_into()
-            .expect("failed to convert PostgresEncryptConfig to DatasetConfig")
-    }
-
-    #[test]
-    fn can_parse_empty_tables() {
-        let json = json!({
-            "v": 1,
-            "tables": {}
-        });
-
-        let dataset_config = parse(json);
-
-        assert!(dataset_config.tables.is_empty());
-    }
-
-    #[test]
-    fn can_parse_table_with_empty_columns() {
-        let json = json!({
-            "v": 1,
-            "tables": {
-                "users": {}
-            }
-        });
-
-        let dataset_config = parse(json);
-
-        assert_eq!(dataset_config.tables.len(), 1);
-        assert_eq!(dataset_config.tables[0].path.as_string(), "users");
-
-        assert!(dataset_config.tables[0].fields.is_empty());
+    fn parse(json: serde_json::Value) -> HashMap<String, ColumnConfig> {
+        serde_json::from_value::<EncryptConfig>(json)
+            .map(|config| config.to_config_map())
+            .expect("ok")
     }
 
     #[test]
@@ -211,18 +187,12 @@ mod tests {
             }
         });
 
-        let dataset_config = parse(json);
+        let encrypt_config = parse(json);
 
-        assert_eq!(dataset_config.tables.len(), 1);
-        assert_eq!(dataset_config.tables[0].path.as_string(), "users");
+        let column = encrypt_config.get("users.email").expect("column exists");
 
-        assert_eq!(dataset_config.tables[0].fields.len(), 1);
-        assert_eq!(dataset_config.tables[0].fields[0].name, "email");
-        assert_eq!(
-            dataset_config.tables[0].fields[0].cast_type,
-            ColumnType::Utf8Str
-        );
-        assert!(dataset_config.tables[0].fields[0].indexes.is_empty());
+        assert_eq!(column.cast_type, ColumnType::Utf8Str);
+        assert!(column.indexes.is_empty());
     }
 
     #[test]
@@ -238,18 +208,15 @@ mod tests {
             }
         });
 
-        let dataset_config = parse(json);
+        let encrypt_config = parse(json);
 
-        assert_eq!(dataset_config.tables.len(), 1);
-        assert_eq!(dataset_config.tables[0].path.as_string(), "users");
+        let column = encrypt_config
+            .get("users.favourite_int")
+            .expect("column exists");
 
-        assert_eq!(dataset_config.tables[0].fields.len(), 1);
-        assert_eq!(dataset_config.tables[0].fields[0].name, "favourite_int");
-        assert_eq!(
-            dataset_config.tables[0].fields[0].cast_type,
-            ColumnType::Int
-        );
-        assert!(dataset_config.tables[0].fields[0].indexes.is_empty());
+        assert_eq!(column.cast_type, ColumnType::Int);
+        assert_eq!(column.name, "favourite_int");
+        assert!(column.indexes.is_empty());
     }
 
     #[test]
@@ -265,15 +232,10 @@ mod tests {
             }
         });
 
-        let dataset_config = parse(json);
+        let encrypt_config = parse(json);
+        let column = encrypt_config.get("users.email").expect("column exists");
 
-        assert_eq!(dataset_config.tables.len(), 1);
-        assert_eq!(dataset_config.tables[0].path.as_string(), "users");
-
-        assert_eq!(dataset_config.tables[0].fields.len(), 1);
-        assert_eq!(dataset_config.tables[0].fields[0].name, "email");
-
-        assert!(dataset_config.tables[0].fields[0].indexes.is_empty());
+        assert!(column.indexes.is_empty());
     }
 
     #[test]
@@ -291,19 +253,10 @@ mod tests {
             }
         });
 
-        let dataset_config = parse(json);
+        let encrypt_config = parse(json);
+        let column = encrypt_config.get("users.email").expect("column exists");
 
-        assert_eq!(dataset_config.tables.len(), 1);
-        assert_eq!(dataset_config.tables[0].path.as_string(), "users");
-        assert_eq!(dataset_config.tables[0].fields.len(), 1);
-
-        assert_eq!(dataset_config.tables[0].fields[0].indexes.len(), 1);
-        assert_eq!(dataset_config.tables[0].fields[0].name, "email");
-
-        assert_eq!(
-            dataset_config.tables[0].fields[0].indexes[0].index_type,
-            IndexType::Ore
-        );
+        assert_eq!(column.indexes[0].index_type, IndexType::Ore);
     }
 
     #[test]
@@ -321,17 +274,11 @@ mod tests {
             }
         });
 
-        let dataset_config = parse(json);
-
-        assert_eq!(dataset_config.tables.len(), 1);
-        assert_eq!(dataset_config.tables[0].path.as_string(), "users");
-        assert_eq!(dataset_config.tables[0].fields.len(), 1);
-
-        assert_eq!(dataset_config.tables[0].fields[0].indexes.len(), 1);
-        assert_eq!(dataset_config.tables[0].fields[0].name, "email");
+        let encrypt_config = parse(json);
+        let column = encrypt_config.get("users.email").expect("column exists");
 
         assert_eq!(
-            dataset_config.tables[0].fields[0].indexes[0].index_type,
+            column.indexes[0].index_type,
             IndexType::Unique {
                 token_filters: vec![]
             }
@@ -359,17 +306,11 @@ mod tests {
             }
         });
 
-        let dataset_config = parse(json);
-
-        assert_eq!(dataset_config.tables.len(), 1);
-        assert_eq!(dataset_config.tables[0].path.as_string(), "users");
-        assert_eq!(dataset_config.tables[0].fields.len(), 1);
-
-        assert_eq!(dataset_config.tables[0].fields[0].indexes.len(), 1);
-        assert_eq!(dataset_config.tables[0].fields[0].name, "email");
+        let encrypt_config = parse(json);
+        let column = encrypt_config.get("users.email").expect("column exists");
 
         assert_eq!(
-            dataset_config.tables[0].fields[0].indexes[0].index_type,
+            column.indexes[0].index_type,
             IndexType::Unique {
                 token_filters: vec![TokenFilter::Downcase]
             }
@@ -391,17 +332,11 @@ mod tests {
             }
         });
 
-        let dataset_config = parse(json);
-
-        assert_eq!(dataset_config.tables.len(), 1);
-        assert_eq!(dataset_config.tables[0].path.as_string(), "users");
-        assert_eq!(dataset_config.tables[0].fields.len(), 1);
-
-        assert_eq!(dataset_config.tables[0].fields[0].indexes.len(), 1);
-        assert_eq!(dataset_config.tables[0].fields[0].name, "email");
+        let encrypt_config = parse(json);
+        let column = encrypt_config.get("users.email").expect("column exists");
 
         assert_eq!(
-            dataset_config.tables[0].fields[0].indexes[0].index_type,
+            column.indexes[0].index_type,
             IndexType::Match {
                 tokenizer: Tokenizer::Standard,
                 token_filters: vec![],
@@ -440,17 +375,11 @@ mod tests {
             }
         });
 
-        let dataset_config = parse(json);
-
-        assert_eq!(dataset_config.tables.len(), 1);
-        assert_eq!(dataset_config.tables[0].path.as_string(), "users");
-        assert_eq!(dataset_config.tables[0].fields.len(), 1);
-
-        assert_eq!(dataset_config.tables[0].fields[0].indexes.len(), 1);
-        assert_eq!(dataset_config.tables[0].fields[0].name, "email");
+        let encrypt_config = parse(json);
+        let column = encrypt_config.get("users.email").expect("column exists");
 
         assert_eq!(
-            dataset_config.tables[0].fields[0].indexes[0].index_type,
+            column.indexes[0].index_type,
             IndexType::Match {
                 tokenizer: Tokenizer::Ngram { token_length: 3 },
                 token_filters: vec![TokenFilter::Downcase],
@@ -478,17 +407,13 @@ mod tests {
             }
         });
 
-        let dataset_config = parse(json);
-
-        assert_eq!(dataset_config.tables.len(), 1);
-        assert_eq!(dataset_config.tables[0].path.as_string(), "users");
-        assert_eq!(dataset_config.tables[0].fields.len(), 1);
-
-        assert_eq!(dataset_config.tables[0].fields[0].indexes.len(), 1);
-        assert_eq!(dataset_config.tables[0].fields[0].name, "event_data");
+        let encrypt_config = parse(json);
+        let column = encrypt_config
+            .get("users.event_data")
+            .expect("column exists");
 
         assert_eq!(
-            dataset_config.tables[0].fields[0].indexes[0].index_type,
+            column.indexes[0].index_type,
             IndexType::SteVec {
                 prefix: "event-data".into()
             },

@@ -13,7 +13,7 @@ pub fn database_config_with_port(port: u16) -> DatabaseConfig {
     DatabaseConfig {
         host: "localhost".to_string(),
         port: port,
-        database: "cipherstash".to_string(),
+        name: "cipherstash".to_string(),
         username: "cipherstash".to_string(),
         password: "password".to_string(),
         config_reload_interval: 10,

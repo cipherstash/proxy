@@ -1,5 +1,5 @@
 use crate::{
-    config::{DatasetManager, SchemaManager, TandemConfig},
+    config::{EncryptConfigManager, SchemaManager, TandemConfig},
     eql,
     error::{EncryptError, Error},
 };
@@ -18,20 +18,20 @@ type ScopedCipher = encryption::ScopedCipher<AutoRefresh<ServiceCredentials>>;
 pub struct Encrypt {
     pub config: TandemConfig,
     cipher: Arc<ScopedCipher>,
-    dataset: DatasetManager,
+    encrypt_config: EncryptConfigManager,
     schema: SchemaManager,
 }
 
 impl Encrypt {
     pub async fn init(config: TandemConfig) -> Result<Encrypt, Error> {
         let cipher = Arc::new(init_cipher(&config).await?);
-        let dataset = DatasetManager::init(&config.database).await?;
+        let encrypt_config = EncryptConfigManager::init(&config.database).await?;
         let schema = SchemaManager::init(&config.database).await?;
 
         Ok(Encrypt {
             config,
             cipher,
-            dataset,
+            encrypt_config,
             schema,
         })
     }
@@ -90,21 +90,16 @@ impl Encrypt {
     }
 
     fn column_config(&self, pt: &eql::Plaintext) -> Result<ColumnConfig, Error> {
-        let dataset = self.dataset.load();
+        let key = format!("{}.{}", pt.identifier.table, pt.identifier.column);
+        let encrypt_config = self.encrypt_config.load();
 
-        // TODO dataset config is inconsistent with input param types for get_table and get_column
-        let table_config = dataset
-            .get_table(&pt.identifier.table.as_str())
-            .ok_or_else(|| EncryptError::UnknownTable {
-                table: pt.identifier.table.to_owned(),
-            })?;
-
-        let column_config = table_config
-            .get_column(&pt.identifier.column)?
-            .ok_or_else(|| EncryptError::UnknownColumn {
-                table: pt.identifier.table.to_owned(),
-                column: pt.identifier.column.to_owned(),
-            })?;
+        let column_config =
+            encrypt_config
+                .get(&key)
+                .ok_or_else(|| EncryptError::UnknownColumn {
+                    table: pt.identifier.table.to_owned(),
+                    column: pt.identifier.column.to_owned(),
+                })?;
 
         Ok(column_config.clone())
     }

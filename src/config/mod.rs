@@ -1,10 +1,10 @@
-mod dataset;
-mod dataset_manager;
+mod config_manager;
+mod encrypt_config;
 mod schema_manager;
 mod tandem;
 
-pub use dataset::JsonDatasetConfig;
-pub use dataset_manager::DatasetManager;
+pub use config_manager::EncryptConfigManager;
+pub use encrypt_config::EncryptConfig;
 pub use schema_manager::SchemaManager;
 
 pub use tandem::{DatabaseConfig, ServerConfig, TandemConfig, TlsConfig};

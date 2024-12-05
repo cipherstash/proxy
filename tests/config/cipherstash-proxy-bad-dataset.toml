@@ -7,5 +7,9 @@ dataset_id = "dataset_id"
 client_id = "fca99ab9-5e17-42cb-9374-b0cbbe16dd59"
 client_key = "25298d9f5b114ed1ba43f0e744b35a4a5f1bf176e5494438b495740a1f655b05f8f56aa0904943f08f9f68da234247a4"
 
-[connect]
-database = "127.0.0.1:5432"
+[database]
+name = "cipherstash"
+host = "localhost"
+port = 5532
+username = "cipherstash"
+password = "password"
