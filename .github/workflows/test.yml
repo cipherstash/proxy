@@ -23,6 +23,5 @@ jobs:
       - run: |
           mise run up postgres --detach
       - run: |
-          (cd tests && docker compose ps)
-          docker ps
+          for i in $(seq 0 9); do (cd tests && docker compose ps) ; docker ps --format '{{ .Image }}, {{ .Ports }}, {{ .Status }}' ; sleep 1 ; done
           echo '\d' | psql postgresql://cipherstash:password@127.0.0.1:5532/cipherstash
