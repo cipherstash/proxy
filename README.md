@@ -9,6 +9,15 @@ Your Proxy Pal Who's Fun to Be With!
 Assuming you have [Rust](https://www.rust-lang.org/), [mise](https://mise.jdx.dev/) and [Docker](https://www.docker.com/) installed
 
 
+Configure `Auth` and `Encrypt`
+
+Using environment variables:
+Copy `mise.local.example.toml` to `mise.local.toml` and edit
+
+Using toml:
+Copy `cipherstash-proxy-example.toml` to `cipherstash-proxy.toml` and edit.
+
+
 ```shell
 # install nextest and other rust dependencies
 mise run install
@@ -38,11 +47,7 @@ See `Docker Compose` below for details.
 - [Docker](https://www.docker.com/)
 - [Docker Compose](https://docs.docker.com/compose/)
 
-Install the following which is a dependency of `sqltk`:
 
-```bash
-cargo install cargo-expand
-```
 
 ## Tests
 

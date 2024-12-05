@@ -3,7 +3,7 @@ certificate = "tests/tls/server.cert"
 private_key = "tests/tls/server.key"
 
 [database]
-database = "cipherstash"
+name = "cipherstash"
 username = "cipherstash"
 password = "password"
 with_tls = true

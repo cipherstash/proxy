@@ -1,0 +1,24 @@
+[env]
+CS_DATABASE__NAME = "cipherstash"
+CS_DATABASE__USERNAME = "cipherstash"
+CS_DATABASE__PASSWORD = "password"
+
+CS_DATABASE__HOST = "localhost" # optional
+CS_DATABASE__PORT = "5532"      # optional
+CS_DATABASE__WITH_TLS = false   # optional
+
+CS_AUTH__WORKSPACE_ID = "workspace_id"
+CS_AUTH__CLIENT_ACCESS_KEY = "client_access_key"
+
+CS_ENCRYPT__DATASET_ID = "dataset_id"
+CS_ENCRYPT__CLIENT_KEY = "client_key"
+CS_ENCRYPT__CLIENT_ID = "client_id"
+
+# optional, but both required if one is set
+CS_TLS__CERTIFICATE = "tests/tls/server.cert"
+CS_TLS__PRIVATE_KEY = "tests/tls/server.key"
+
+# Override the default port in mise.toml
+# I can't work out how to use env vars in tasks, so port is defined here again
+[vars]
+database_port = "5532"

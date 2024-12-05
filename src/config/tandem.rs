@@ -39,7 +39,7 @@ pub struct DatabaseConfig {
     #[serde(default = "DatabaseConfig::default_port")]
     pub port: u16,
 
-    pub database: String,
+    pub name: String,
     pub username: String,
     pub password: String,
 
@@ -185,7 +185,7 @@ impl DatabaseConfig {
     pub fn to_connection_string(&self) -> String {
         format!(
             "postgres://{}:{}@{}:{}/{}",
-            self.username, self.password, self.host, self.port, self.database
+            self.username, self.password, self.host, self.port, self.name
         )
     }
 }
@@ -195,7 +195,7 @@ impl Display for DatabaseConfig {
         write!(
             f,
             "{}@{}:{}/{}",
-            self.username, self.host, self.port, self.database,
+            self.username, self.host, self.port, self.name,
         )
     }
 }

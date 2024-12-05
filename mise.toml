@@ -1,9 +1,5 @@
 [env]
-CS_DATABASE__PORT = "5532" # default postgres port
-
-# # I can't work out how to use env vars in tasks
-# [vars]
-# database_port = "5532" # default postgres port
+CS_DATABASE__PORT = "5532" # default postgres port using built in docker-compose setup
 
 
 [tasks.install]
