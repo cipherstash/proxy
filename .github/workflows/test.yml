@@ -21,7 +21,7 @@ jobs:
       - run: |
           mise run install
       - run: |
-          mise run up postgres
+          mise run up postgres --detach
           mise run setup
       - run: |
           mise run test
