@@ -6,11 +6,11 @@ Behind the scenes, it uses the [Encrypt Query Language](https://github.com/ciphe
 
 ## Developing
 
-You need to have this software installed:
-
-- [Rust](https://www.rust-lang.org/)
-- [mise](https://mise.jdx.dev/)
-- [Docker](https://www.docker.com/)
+> [!IMPORTANT]
+> **Before you start:** you need to have this software installed:
+>  - [Rust](https://www.rust-lang.org/)
+>  - [mise](https://mise.jdx.dev/)
+>  - [Docker](https://www.docker.com/)
 
 Local development is managed through [mise](https://mise.jdx.dev/).
 
