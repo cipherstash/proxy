@@ -22,7 +22,7 @@ jobs:
           mise run install
       - run: |
           mise run up postgres --detach
-      - uses: iFaxity/wait-on-action
+      - uses: iFaxity/wait-on-action@v1.2.1
         with:
           resource: 127.0.0.1:5532
           timeout: 60
