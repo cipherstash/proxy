@@ -90,12 +90,11 @@ impl Encrypt {
     }
 
     fn column_config(&self, pt: &eql::Plaintext) -> Result<ColumnConfig, Error> {
-        let key = format!("{}.{}", pt.identifier.table, pt.identifier.column);
         let encrypt_config = self.encrypt_config.load();
 
         let column_config =
             encrypt_config
-                .get(&key)
+                .get(&pt.identifier)
                 .ok_or_else(|| EncryptError::UnknownColumn {
                     table: pt.identifier.table.to_owned(),
                     column: pt.identifier.column.to_owned(),

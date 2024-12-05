@@ -13,7 +13,7 @@ pub struct Plaintext {
     pub for_query: Option<ForQuery>,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
 pub struct Identifier {
     #[serde(rename = "t")]
     pub table: String,

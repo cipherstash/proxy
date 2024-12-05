@@ -6,7 +6,10 @@ use cipherstash_config::{
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-use crate::error::{ConfigError, Error};
+use crate::{
+    eql,
+    error::{ConfigError, Error},
+};
 
 pub type TableName = String;
 pub type ColumnName = String;
@@ -118,12 +121,16 @@ impl EncryptConfig {
         Ok(config)
     }
 
-    pub fn to_config_map(self) -> HashMap<String, ColumnConfig> {
+    pub fn to_config_map(self) -> HashMap<eql::Identifier, ColumnConfig> {
         let mut map = HashMap::new();
         for (table_name, columns) in self.tables.into_iter() {
             for (name, column) in columns.into_iter() {
                 let column_config = column.to_column_config(&name);
-                let key = format!("{}.{}", table_name, name);
+                // let key = format!("{}.{}", table_name, name);
+                let key = eql::Identifier {
+                    table: table_name.to_owned(),
+                    column: name.to_owned(),
+                };
                 map.insert(key, column_config);
             }
         }
@@ -170,7 +177,7 @@ mod tests {
 
     use super::*;
 
-    fn parse(json: serde_json::Value) -> HashMap<String, ColumnConfig> {
+    fn parse(json: serde_json::Value) -> HashMap<eql::Identifier, ColumnConfig> {
         serde_json::from_value::<EncryptConfig>(json)
             .map(|config| config.to_config_map())
             .expect("ok")
@@ -188,8 +195,11 @@ mod tests {
         });
 
         let encrypt_config = parse(json);
-
-        let column = encrypt_config.get("users.email").expect("column exists");
+        let ident = &eql::Identifier {
+            table: "users".into(),
+            column: "email".into(),
+        };
+        let column = encrypt_config.get(ident).expect("column exists");
 
         assert_eq!(column.cast_type, ColumnType::Utf8Str);
         assert!(column.indexes.is_empty());
@@ -209,10 +219,11 @@ mod tests {
         });
 
         let encrypt_config = parse(json);
-
-        let column = encrypt_config
-            .get("users.favourite_int")
-            .expect("column exists");
+        let ident = &eql::Identifier {
+            table: "users".into(),
+            column: "favourite_int".into(),
+        };
+        let column = encrypt_config.get(ident).expect("column exists");
 
         assert_eq!(column.cast_type, ColumnType::Int);
         assert_eq!(column.name, "favourite_int");
@@ -233,7 +244,11 @@ mod tests {
         });
 
         let encrypt_config = parse(json);
-        let column = encrypt_config.get("users.email").expect("column exists");
+        let ident = &eql::Identifier {
+            table: "users".into(),
+            column: "email".into(),
+        };
+        let column = encrypt_config.get(ident).expect("column exists");
 
         assert!(column.indexes.is_empty());
     }
@@ -254,7 +269,11 @@ mod tests {
         });
 
         let encrypt_config = parse(json);
-        let column = encrypt_config.get("users.email").expect("column exists");
+        let ident = &eql::Identifier {
+            table: "users".into(),
+            column: "email".into(),
+        };
+        let column = encrypt_config.get(ident).expect("column exists");
 
         assert_eq!(column.indexes[0].index_type, IndexType::Ore);
     }
@@ -275,7 +294,11 @@ mod tests {
         });
 
         let encrypt_config = parse(json);
-        let column = encrypt_config.get("users.email").expect("column exists");
+        let ident = &eql::Identifier {
+            table: "users".into(),
+            column: "email".into(),
+        };
+        let column = encrypt_config.get(ident).expect("column exists");
 
         assert_eq!(
             column.indexes[0].index_type,
@@ -307,7 +330,11 @@ mod tests {
         });
 
         let encrypt_config = parse(json);
-        let column = encrypt_config.get("users.email").expect("column exists");
+        let ident = &eql::Identifier {
+            table: "users".into(),
+            column: "email".into(),
+        };
+        let column = encrypt_config.get(ident).expect("column exists");
 
         assert_eq!(
             column.indexes[0].index_type,
@@ -333,7 +360,15 @@ mod tests {
         });
 
         let encrypt_config = parse(json);
-        let column = encrypt_config.get("users.email").expect("column exists");
+        let ident = &eql::Identifier {
+            table: "users".into(),
+            column: "email".into(),
+        };
+        let ident = &eql::Identifier {
+            table: "users".into(),
+            column: "email".into(),
+        };
+        let column = encrypt_config.get(ident).expect("column exists");
 
         assert_eq!(
             column.indexes[0].index_type,
@@ -376,7 +411,11 @@ mod tests {
         });
 
         let encrypt_config = parse(json);
-        let column = encrypt_config.get("users.email").expect("column exists");
+        let ident = &eql::Identifier {
+            table: "users".into(),
+            column: "email".into(),
+        };
+        let column = encrypt_config.get(ident).expect("column exists");
 
         assert_eq!(
             column.indexes[0].index_type,
@@ -408,9 +447,11 @@ mod tests {
         });
 
         let encrypt_config = parse(json);
-        let column = encrypt_config
-            .get("users.event_data")
-            .expect("column exists");
+        let ident = &eql::Identifier {
+            table: "users".into(),
+            column: "event_data".into(),
+        };
+        let column = encrypt_config.get(ident).expect("column exists");
 
         assert_eq!(
             column.indexes[0].index_type,

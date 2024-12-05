@@ -1,7 +1,7 @@
 use super::tandem::DatabaseConfig;
 use crate::{
     config::{EncryptConfig, ENCRYPT_DATASET_CONFIG_QUERY},
-    connect,
+    connect, eql,
     error::{ConfigError, Error},
 };
 use arc_swap::ArcSwap;
@@ -15,7 +15,7 @@ use tracing::{debug, error, info, warn};
 /// Column configuration keyed by table name and column name
 ///    - key: `{table_name}.{column_name}`
 ///
-type EncryptConfigMap = HashMap<String, ColumnConfig>;
+type EncryptConfigMap = HashMap<eql::Identifier, ColumnConfig>;
 
 #[derive(Clone, Debug)]
 pub struct EncryptConfigManager {
