@@ -9,7 +9,7 @@ use cipherstash_config::DatasetConfig;
 use std::{sync::Arc, time::Duration};
 use tokio::{task::JoinHandle, time};
 use tokio_postgres::{SimpleQueryMessage, SimpleQueryRow};
-use tracing::{debug, error, warn};
+use tracing::{debug, error, info, warn};
 
 #[derive(Clone, Debug)]
 pub struct DatasetManager {
@@ -29,7 +29,10 @@ impl DatasetManager {
 }
 
 async fn init_reloader(config: DatabaseConfig) -> Result<DatasetManager, Error> {
-    let dataset = load_dataset_with_retry(&config).await?;
+    // Skip retries on startup as the likely failure mode is configuration
+    let dataset = load_dataset(&config).await?;
+    info!("Loaded Encrypt configuration");
+
     let dataset = Arc::new(ArcSwap::new(Arc::new(dataset)));
 
     let config_ref = config.clone();
@@ -48,7 +51,7 @@ async fn init_reloader(config: DatabaseConfig) -> Result<DatasetManager, Error> 
 
             match load_dataset(&config_ref).await {
                 Ok(reloaded) => {
-                    debug!("Reloaded Encrypt configuration");
+                    // debug!("Reloaded Encrypt configuration");
                     dataset_ref.swap(Arc::new(reloaded));
                 }
                 Err(e) => {
@@ -98,6 +101,7 @@ async fn load_dataset_with_retry(config: &DatabaseConfig) -> Result<DatasetConfi
 
 pub async fn load_dataset(config: &DatabaseConfig) -> Result<DatasetConfig, Error> {
     let client = connect::database(config).await?;
+
     let result = client.simple_query(ENCRYPT_DATASET_CONFIG_QUERY).await;
 
     let rows = match result {

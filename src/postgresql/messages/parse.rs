@@ -70,7 +70,6 @@ impl TryFrom<Parse> for BytesMut {
         let mut bytes = BytesMut::new();
 
         let name = CString::new(parse.name.as_str())?;
-
         let name = name.as_bytes_with_nul();
 
         let statement = CString::new(parse.statement)?;

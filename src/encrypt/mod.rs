@@ -10,6 +10,7 @@ use cipherstash_client::{
 };
 use cipherstash_config::ColumnConfig;
 use std::{sync::Arc, vec};
+use tracing::debug;
 
 type ScopedCipher = encryption::ScopedCipher<AutoRefresh<ServiceCredentials>>;
 
@@ -24,6 +25,7 @@ pub struct Encrypt {
 impl Encrypt {
     pub async fn init(config: TandemConfig) -> Result<Encrypt, Error> {
         let cipher = Arc::new(init_cipher(&config).await?);
+
         let dataset = DatasetManager::init(&config.database).await?;
         let schema = SchemaManager::init(&config.database).await?;
 
@@ -133,7 +135,16 @@ async fn init_cipher(config: &TandemConfig) -> Result<ScopedCipher, Error> {
         zerokms_config.client_key(),
     );
 
-    Ok(ScopedCipher::init(Arc::new(zerokms_client), config.encrypt.dataset_id).await?)
+    match ScopedCipher::init(Arc::new(zerokms_client), config.encrypt.dataset_id).await {
+        Ok(cipher) => {
+            debug!("Initialized ZeroKMS ScopedCipher");
+            Ok(cipher)
+        }
+        Err(err) => {
+            debug!("Error initializing ZeroKMS ScopedCipher: {:?}", err);
+            Err(err.into())
+        }
+    }
 }
 
 fn to_eql_encrypted(encrypted: Encrypted, pt: &eql::Plaintext) -> Result<eql::Ciphertext, Error> {

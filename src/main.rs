@@ -4,7 +4,7 @@ use cipherstash_proxy::encrypt::Encrypt;
 use cipherstash_proxy::error::Error;
 use cipherstash_proxy::{postgresql as pg, trace};
 use tokio::net::{tcp, TcpListener, TcpStream};
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 
 // TODO: Accept command line arguments for config file path
 #[tokio::main]
@@ -33,23 +33,20 @@ async fn main() {
 
             match pg::handle(client_stream, encrypt).await {
                 Ok(_) => (),
-                Err(e) => {
-                    error!("Error {:?}", e);
-                    match e {
-                        Error::ConnectionClosed => {
-                            info!("Database connection closed by client");
-                        }
-                        Error::CancelRequest => {
-                            info!("Database connection closed after cancel request");
-                        }
-                        Error::ConnectionTimeout(_) => {
-                            warn!("Database connection timeout");
-                        }
-                        _ => {
-                            error!("Error {:?}", e);
-                        }
+                Err(e) => match e {
+                    Error::ConnectionClosed => {
+                        info!("Database connection closed by client");
                     }
-                }
+                    Error::CancelRequest => {
+                        info!("Database connection closed after cancel request");
+                    }
+                    Error::ConnectionTimeout(_) => {
+                        warn!("Database connection timeout");
+                    }
+                    _ => {
+                        error!("Error {:?}", e);
+                    }
+                },
             }
         });
     }
@@ -72,28 +69,34 @@ async fn init(config: TandemConfig) -> Encrypt {
         }
     }
 
-    if config.database.skip_tls() {
-        warn!("Connecting to database without Transport Layer Security (TLS)");
+    if !config.database.with_tls_verification {
+        warn!("Bypassing Transport Layer Security (TLS) verification for database connections");
     }
 
     match &config.tls {
         Some(tls) => {
             if !tls.cert_exists() {
-                println!("Certificate not found: {}", tls.certificate);
+                error!(
+                    "Transport Layer Security (TLS) Certificate not found: {}",
+                    tls.certificate
+                );
                 std::process::exit(exitcode::CONFIG);
             }
 
             if !tls.private_key_exists() {
-                println!("Private key not found: {}", tls.private_key);
+                error!(
+                    "Transport Layer Security (TLS) Private key not found: {}",
+                    tls.private_key
+                );
                 std::process::exit(exitcode::CONFIG);
             }
 
             match tls.server_config() {
                 Ok(_) => {
-                    info!("Transport Layer Security (TLS) configuration validated");
+                    info!("Server Transport Layer Security (TLS) configuration validated");
                 }
                 Err(err) => {
-                    error!("Transport Layer Security (TLS) configuration error");
+                    error!("Server Transport Layer Security (TLS) configuration error");
                     error!("{}", err);
                     std::process::exit(exitcode::CONFIG);
                 }
@@ -101,18 +104,19 @@ async fn init(config: TandemConfig) -> Encrypt {
         }
         None => {
             warn!("Transport Layer Security (TLS) is not configured");
-            warn!("Listening on an insecure connection");
+            warn!("Listening on an unsafe connection");
         }
     }
 
     match Encrypt::init(config).await {
         Ok(encrypt) => {
-            info!("Encrypt connected");
+            info!("Connected to CipherStash Encrypt");
+            info!("Connected to database: {}", encrypt.config.database);
             encrypt
         }
         Err(err) => {
-            error!("Encrypt could not connect");
-            error!("{}", err);
+            error!("Could not connect to CipherStash Encrypt");
+            debug!("{}", err);
             std::process::exit(exitcode::UNAVAILABLE);
         }
     }

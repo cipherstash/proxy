@@ -27,7 +27,9 @@ impl SchemaManager {
 }
 
 async fn init_reloader(config: DatabaseConfig) -> Result<SchemaManager, Error> {
-    let schema = load_schema_with_retry(&config).await?;
+    // Skip retries on startup as the likely failure mode is configuration
+    let schema = load_schema(&config).await?;
+    info!("Loaded database schema");
     let schema = Arc::new(ArcSwap::new(Arc::new(schema)));
 
     let config_ref = config.clone();
@@ -46,7 +48,7 @@ async fn init_reloader(config: DatabaseConfig) -> Result<SchemaManager, Error> {
 
             match load_schema(&config_ref).await {
                 Ok(reloaded) => {
-                    debug!("Reloaded Encrypt configuration");
+                    // debug!("Reloaded database schema");
                     schema_ref.swap(Arc::new(reloaded));
                 }
                 Err(e) => {

@@ -1,9 +1,16 @@
 mod async_stream;
 
-use crate::{config::ServerConfig, error::Error, DatabaseConfig};
+use crate::{
+    config::ServerConfig,
+    error::{ConfigError, Error},
+    tls, DatabaseConfig,
+};
+
+use config::Config;
+use native_tls::TlsConnector;
+
 use socket2::TcpKeepalive;
 use std::time::Duration;
-
 use tokio::{
     net::{TcpListener, TcpStream},
     time::{self},
@@ -20,17 +27,19 @@ const TCP_KEEPALIVE_RETRIES: u32 = 5;
 const MAX_RETRY_DELAY: Duration = Duration::from_secs(2);
 const MAX_RETRY_COUNT: u32 = 3;
 
-pub async fn database(config: &DatabaseConfig) -> Result<Client, tokio_postgres::Error> {
+pub async fn database(config: &DatabaseConfig) -> Result<Client, Error> {
     let connection_string = config.to_connection_string();
 
-    let (client, connection) = tokio_postgres::connect(&connection_string, NoTls).await?;
+    let tls_config = tls::configure_client(&config);
+    let tls = tokio_postgres_rustls::MakeRustlsConnect::new(tls_config);
+
+    let (client, connection) = tokio_postgres::connect(&connection_string, tls).await?;
 
     tokio::spawn(async move {
         if let Err(e) = connection.await {
-            eprintln!("connection error: {}", e);
+            error!("Connection error: {}", e);
         }
     });
-
     Ok(client)
 }
 
@@ -39,7 +48,6 @@ pub async fn bind_with_retry(server: &ServerConfig) -> TcpListener {
     let mut retry_count = 0;
 
     loop {
-        info!("Attempting to bind server connection {address}");
         match TcpListener::bind(address).await {
             Ok(listener) => {
                 info!(address = address, "Server connected");
@@ -72,7 +80,7 @@ pub async fn connect_with_retry(addr: &str) -> Result<TcpStream, Error> {
             }
             Err(err) => {
                 if retry_count > MAX_RETRY_COUNT {
-                    error!("{err}");
+                    debug!("Database connection error {err}");
                     return Err(Error::DatabaseConnection {
                         retries: MAX_RETRY_COUNT,
                     });
