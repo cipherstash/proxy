@@ -42,16 +42,43 @@ Copy `cipherstash-proxy-example.toml` to `cipherstash-proxy.toml` and edit.
 
 
 ```shell
-# install nextest and other rust dependencies
+# install development and testing dependencies
 mise run install
 
-# run postgres on default port
-mise run up postgres
+# start all postgres instances
+mise run up
 
 # install latest eql into database
 mise run setup
 
+# build and run the proxy
 mise run proxy
+```
+
+You can start PostgreSQL containers in a couple of different ways:
+
+```
+# Start all postgres instance in the foreground
+mise run up
+# exit by hitting ctrl + c
+
+# Start postgres instances individually in the foreground
+mise run up postgres
+mise run up postgres-17-tls
+
+# Start a postgres instance in the background
+mise run up postgres --extra-args "--detach --wait"
+```
+
+All the data directories for the Docker container live in `tests/pg/data-*`.
+
+They are ephemeral, and ignored in `.gitignore`.
+
+Sometimes the PostgreSQL instances get into an inconsistent state, and need to be reset.
+To wipe all PostgreSQL data directories:
+
+```
+mise run destroy_data
 ```
 
 ## Prerequisites
