@@ -45,6 +45,10 @@ docker compose up --build {{arg(name="service",default="")}} {{option(name="extr
 
 [tasks.down]
 alias = 'd'
+description = 'Tear down containers and destroy all data'
+depends = [ 'compose_down', 'destroy_data' ]
+
+[tasks.compose_down]
 dir = "./tests"
 description = "docker compose down"
 run = 'docker compose down'

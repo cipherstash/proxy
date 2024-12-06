@@ -68,6 +68,9 @@ mise run up postgres-17-tls
 
 # Start a postgres instance in the background
 mise run up postgres --extra-args "--detach --wait"
+
+# Stop and remove all containers, networks, and postgres data
+mise run down
 ```
 
 All the data directories for the Docker container live in `tests/pg/data-*`.
