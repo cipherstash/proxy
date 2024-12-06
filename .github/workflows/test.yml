@@ -32,3 +32,5 @@ jobs:
           cargo check
       - run: |
           cargo build
+      - run: |
+          mise run test
