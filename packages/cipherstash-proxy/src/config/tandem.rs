@@ -29,6 +29,9 @@ pub struct ServerConfig {
 
     #[serde(default = "ServerConfig::default_port")]
     pub port: u16,
+
+    #[serde(default)]
+    pub require_tls: bool,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -96,13 +99,13 @@ impl TandemConfig {
             println!("Config file not found: {path}");
             println!("Loading config values from environment variables.");
         }
-        TandemConfig::build(path)
+        TandemConfig::build(path, CS_PREFIX)
     }
 
-    fn build(path: &str) -> Result<Self, Error> {
+    fn build(path: &str, prefix: &str) -> Result<Self, Error> {
         // For parsing top-level values such as CS_HOST, CS_PORT
         // and for parsing nested env values such as CS_DATABASE__HOST, CS_DATABASE__PORT
-        let cs_env_source = Environment::with_prefix(CS_PREFIX)
+        let cs_env_source = Environment::with_prefix(prefix)
             .try_parsing(true)
             .separator("__")
             .prefix_separator("_");
@@ -134,6 +137,7 @@ impl Default for ServerConfig {
         ServerConfig {
             host: ServerConfig::default_host(),
             port: ServerConfig::default_port(),
+            require_tls: false,
         }
     }
 }
@@ -228,11 +232,13 @@ mod tests {
 
     use crate::{config::TandemConfig, error::Error, trace};
 
+    const CS_PREFIX: &str = "CS_TEST";
+
     #[test]
     fn test_database_as_url() {
         trace();
 
-        let config = TandemConfig::load("tests/config/cipherstash-proxy.toml").unwrap();
+        let config = TandemConfig::build("tests/config/cipherstash-proxy.toml", CS_PREFIX).unwrap();
         assert_eq!(
             config.database.to_socket_address(),
             "localhost:5532".to_string()
@@ -243,13 +249,14 @@ mod tests {
     fn test_dataset_as_uuid() {
         trace();
 
-        let config = TandemConfig::load("tests/config/cipherstash-proxy.toml").unwrap();
+        let config = TandemConfig::build("tests/config/cipherstash-proxy.toml", CS_PREFIX).unwrap();
         assert_eq!(
             config.encrypt.dataset_id,
             Some(Uuid::parse_str("484cd205-99e8-41ca-acfe-55a7e25a8ec2").unwrap())
         );
 
-        let config = TandemConfig::load("tests/config/cipherstash-proxy-bad-dataset.toml");
+        let config =
+            TandemConfig::build("tests/config/cipherstash-proxy-bad-dataset.toml", CS_PREFIX);
 
         assert!(config.is_err());
         assert!(matches!(config.unwrap_err(), Error::Config(_)));

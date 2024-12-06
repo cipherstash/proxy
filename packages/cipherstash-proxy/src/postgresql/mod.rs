@@ -59,8 +59,7 @@ pub async fn handle(client_stream: AsyncStream, encrypt: Encrypt) -> Result<(), 
 
     // Connect to the database server, using TLS if configured
     let stream = AsyncStream::connect(&encrypt.config.database.to_socket_address()).await?;
-    // let mut database_stream = startup::with_tls(stream, &encrypt).await?;
-    let mut database_stream = stream;
+    let mut database_stream = startup::with_tls(stream, &encrypt).await?;
     info!(
         database = encrypt.config.database.to_socket_address(),
         "Database connected"
