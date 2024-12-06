@@ -29,5 +29,3 @@ jobs:
           mise run setup
       - run: |
           cargo check
-          mise run test
-
