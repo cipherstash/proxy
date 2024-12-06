@@ -8,15 +8,9 @@ on:
       - main
 jobs:
   test:
-    strategy:
-      fail-fast: true
-      matrix:
-        runs-on: [ buildjet-2vcpu-ubuntu-2204-arm, buildjet-4vcpu-ubuntu-2204-arm, buildjet-8vcpu-ubuntu-2204-arm, buildjet-16vcpu-ubuntu-2204-arm ]
-    name: Test - ${{ matrix.runs-on }}
-    runs-on: ${{ matrix.runs-on }}
+    name: Test
+    runs-on: buildjet-16vcpu-ubuntu-2204
     steps:
-      - run: |
-          sudo apt install build-essential libreadline-dev
       - uses: actions/checkout@v4
       - name: Setup Rust cache
         uses: Swatinem/rust-cache@v2
