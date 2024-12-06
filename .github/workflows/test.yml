@@ -16,7 +16,7 @@ jobs:
     runs-on: ${{ matrix.runs-on }}
     steps:
       - run: |
-          sudo apt install build-essential
+          sudo apt install build-essential libreadline-dev
       - uses: actions/checkout@v4
       - name: Setup Rust cache
         uses: Swatinem/rust-cache@v2
