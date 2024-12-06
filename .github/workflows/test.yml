@@ -29,3 +29,5 @@ jobs:
           mise run setup
       - run: |
           cargo check
+      - run: |
+          cargo build
