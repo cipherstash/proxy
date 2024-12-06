@@ -1,0 +1,35 @@
+[package]
+name = "cipherstash-proxy"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+arc-swap = "1.7.1"
+bytes = { version = "1.9", default-features = false }
+cipherstash-client = { version = "0.13", features = ["tokio"] }
+cipherstash-config = "0.2.3"
+config = { version = "0.14", features = [
+    "async",
+    "convert-case",
+    "json",
+    "toml",
+], default-features = false }
+eql-mapper = { git = "ssh://git@github.com/cipherstash/eql-mapper.git" }
+exitcode = "1.1.2"
+native-tls = "0.2.12"
+rustls = "0.23.17"
+rustls-pki-types = "1.10.0"
+serde = "1.0"
+serde_json = "1.0"
+socket2 = "0.5.7"
+sqlparser = { version = "^0.52" }
+sqltk = { version = "^0.1" }
+thiserror = "2.0"
+tokio = { version = "1.42.0", features = ["full"] }
+tokio-postgres = { version = "0.7", features = ["with-serde_json-1"] }
+tokio-postgres-rustls = "0.13.0"
+tokio-rustls = "0.26.0"
+tracing = "0.1"
+tracing-subscriber = "0.3"
+uuid = { version = "1.11.0", features = ["serde", "v4", "v5"] }
+webpki-roots = "0.26.7"
