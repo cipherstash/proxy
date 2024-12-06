@@ -20,6 +20,8 @@ async fn connect_proxy_with_tls() {
 
     let result = client.simple_query("SELECT 1").await.expect("ok");
 
+    // assert!(!result.is_empty());
+
     // let client = connect_with_tls(&config).await;
 
     info!("{:?}", result);
