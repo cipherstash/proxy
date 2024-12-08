@@ -117,7 +117,7 @@ impl fmt::Display for ErrorResponse {
         for field in self.fields.iter() {
             let msg = match field.code {
                 ErrorResponseCode::Severity => "Severity",
-                ErrorResponseCode::SeverityLegacy => "Severity (Legacy)",
+                ErrorResponseCode::SeverityLegacy => continue, // skipped, always appears with `S` in versions we support
                 ErrorResponseCode::Code => "Code",
                 ErrorResponseCode::Message => "Message",
                 ErrorResponseCode::Detail => "Detail",

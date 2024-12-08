@@ -1,4 +1,3 @@
-pub mod auth;
 pub mod bind;
 pub mod error_response;
 pub mod parse;

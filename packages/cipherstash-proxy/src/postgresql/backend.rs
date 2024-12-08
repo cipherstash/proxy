@@ -1,3 +1,5 @@
+use core::error;
+
 use crate::encrypt::Encrypt;
 use crate::error::{Error, ProtocolError};
 use crate::postgresql::protocol::{self};
@@ -83,6 +85,7 @@ where
     fn error_response_handler(&mut self, message: &Message) -> Result<Option<BytesMut>, Error> {
         let error_response = ErrorResponse::try_from(&message.bytes)?;
         error!("{}", error_response);
+        warn!("Error response originates in the PostgreSQL database.");
         Ok(None)
     }
 }
