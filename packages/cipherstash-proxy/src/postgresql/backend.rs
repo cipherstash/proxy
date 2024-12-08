@@ -7,32 +7,9 @@ use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use tokio::time::timeout;
 use tracing::{debug, error, info, warn};
 
-const IS_SSL_REQUEST: bool = true;
-
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum Code {
-    Authentication,
-    BindComplete,
-    BackendKeyData,
-    CloseComplete,
-    CommandComplete,
-    CopyBothResponse,
-    CopyInResponse,
-    CopyOutResponse,
-    DataRow,
-    EmptyQueryResponse,
-    ErrorResponse,
-    NoData,
-    NoticeResponse,
-    NotificationResponse,
-    ParameterDescription,
-    ParameterStatus,
-    ParseComplete,
-    PortalSuspended,
-    ReadyForQuery,
-    RowDescription,
-    Unknown(char),
-}
+use super::messages::error_response::ErrorResponse;
+use super::messages::BackendCode;
+use super::protocol::Message;
 
 pub struct Backend<C, S>
 where
@@ -74,15 +51,15 @@ where
             timeout(CONNECTION_TIMEOUT, protocol::read_message(&mut self.server)).await??;
 
         match message.code.into() {
-            Code::Authentication => {}
+            BackendCode::Authentication => {}
 
-            Code::DataRow => {
+            BackendCode::DataRow => {
                 // debug!("DataRow");
             }
-            Code::ErrorResponse => {
-                // debug!("ErrorResponse");
+            BackendCode::ErrorResponse => {
+                let _ = self.error_response_handler(&message)?;
             }
-            Code::RowDescription => {
+            BackendCode::RowDescription => {
                 // debug!("RowDescription");
             }
             code => {
@@ -97,92 +74,15 @@ where
         self.client.write_all(&bytes).await?;
         Ok(())
     }
-}
 
-impl From<u8> for Code {
-    fn from(code: u8) -> Self {
-        match code as char {
-            'R' => Code::Authentication,
-            'K' => Code::BackendKeyData,
-            '2' => Code::BindComplete,
-            '3' => Code::CloseComplete,
-            'C' => Code::CommandComplete,
-            'W' => Code::CopyBothResponse,
-            'G' => Code::CopyInResponse,
-            'H' => Code::CopyOutResponse,
-            'D' => Code::DataRow,
-            'I' => Code::EmptyQueryResponse,
-            'E' => Code::ErrorResponse,
-            'n' => Code::NoData,
-            'N' => Code::NoticeResponse,
-            'A' => Code::NotificationResponse,
-            't' => Code::ParameterDescription,
-            'S' => Code::ParameterStatus,
-            '1' => Code::ParseComplete,
-            's' => Code::PortalSuspended,
-            'Z' => Code::ReadyForQuery,
-            'T' => Code::RowDescription,
-            _ => Code::Unknown(code as char),
-        }
+    ///
+    /// Handle error response messages
+    /// Error Responses are not rewritten, we log the error and return None
+    ///
+    ///
+    fn error_response_handler(&mut self, message: &Message) -> Result<Option<BytesMut>, Error> {
+        let error_response = ErrorResponse::try_from(&message.bytes)?;
+        error!("{}", error_response);
+        Ok(None)
     }
 }
-
-// /// Handle TLS connection negotiation.
-// pub async fn startup_tls(
-//     stream: TcpStream,
-//     client_server_map: ClientServerMap,
-//     shutdown: Receiver<()>,
-//     admin_only: bool,
-//     tandem: Tandem,
-// ) -> Result<Client<ReadHalf<TlsStream<TcpStream>>, WriteHalf<TlsStream<TcpStream>>>, Error> {
-//     // Negotiate TLS.
-//     let tls = Tls::new()?;
-//     let addr = match stream.peer_addr() {
-//         Ok(addr) => addr,
-//         Err(err) => {
-//             return Err(Error::SocketError(format!(
-//                 "Failed to get peer address: {:?}",
-//                 err
-//             )));
-//         }
-//     };
-
-//     let mut stream = match tls.acceptor.accept(stream).await {
-//         Ok(stream) => stream,
-
-//         // TLS negotiation failed.
-//         Err(err) => {
-//             error!("TLS negotiation failed: {:?}", err);
-//             return Err(Error::TlsError);
-//         }
-//     };
-
-//     // TLS negotiation successful.
-//     // Continue with regular startup using encrypted connection.
-//     match get_startup::<TlsStream<TcpStream>>(&mut stream).await {
-//         // Got good startup message, proceeding like normal except we
-//         // are encrypted now.
-//         Ok((ClientConnectionType::Startup, bytes)) => {
-//             let (read, write) = split(stream);
-
-//             Client::startup(
-//                 read,
-//                 write,
-//                 addr,
-//                 bytes,
-//                 client_server_map,
-//                 shutdown,
-//                 admin_only,
-//                 tandem,
-//             )
-//             .await
-//         }
-
-//         // Bad Postgres client.
-//         Ok((ClientConnectionType::Tls, _)) | Ok((ClientConnectionType::CancelQuery, _)) => {
-//             Err(Error::ProtocolSyncError("Bad postgres client (tls)".into()))
-//         }
-
-//         Err(err) => Err(err),
-//     }
-// }
