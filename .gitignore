@@ -1,6 +1,6 @@
 /target
 .DS_Store
-cipherstash-proxy.toml
+./cipherstash-proxy.toml
 mise.local.toml
 tests/pg/data**
 tests/sql/cipherstash-encrypt.sql
