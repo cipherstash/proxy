@@ -40,6 +40,7 @@ dir = "./tests"
 description = "docker compose up"
 run = """
 chmod 600 tls/*
+if [ -n "$CI" ]; then echo "Running in CI: setting file permissions for container" ; sudo chown 999:999 tls/localhost* ; else echo "Not running in CI: skip setting file permissions for container" ; fi
 docker compose up --build {{arg(name="service",default="")}} {{option(name="extra-args",default="")}}
 """
 
