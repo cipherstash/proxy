@@ -1,5 +1,5 @@
+use super::{configure, connect_with_retry};
 use crate::error::Error;
-use socket2::TcpKeepalive;
 use std::{
     pin::Pin,
     task::{Context, Poll},
@@ -8,10 +8,7 @@ use tokio::{
     io::{split, AsyncRead, AsyncWrite, ReadBuf},
     net::{TcpListener, TcpStream},
 };
-
 use tokio_rustls::TlsStream;
-
-use super::{configure, connect_with_retry};
 
 #[derive(Debug)]
 pub enum AsyncStream {

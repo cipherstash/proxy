@@ -97,9 +97,7 @@ impl TryFrom<Parse> for BytesMut {
 #[cfg(test)]
 mod tests {
 
-    use tracing::error;
-
-    use crate::{postgresql::messages::parse::Parse, trace};
+    use crate::trace;
 
     use super::Destination;
 

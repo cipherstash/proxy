@@ -1,21 +1,13 @@
 mod async_stream;
 
-use crate::{
-    config::ServerConfig,
-    error::{ConfigError, Error},
-    tls, DatabaseConfig,
-};
-
-use config::Config;
-use native_tls::TlsConnector;
-
+use crate::{config::ServerConfig, error::Error, tls, DatabaseConfig};
 use socket2::TcpKeepalive;
 use std::time::Duration;
 use tokio::{
     net::{TcpListener, TcpStream},
     time::{self},
 };
-use tokio_postgres::{Client, NoTls};
+use tokio_postgres::Client;
 use tracing::{debug, error, info, warn};
 
 pub use async_stream::AsyncStream;

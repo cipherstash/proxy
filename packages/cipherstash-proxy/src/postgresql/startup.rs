@@ -1,12 +1,12 @@
 use bytes::{BufMut, BytesMut};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
-use tracing::{debug, error, info, warn};
+use tracing::{error, warn};
 
 use crate::{
     connect::AsyncStream,
     encrypt::Encrypt,
     error::{Error, ProtocolError},
-    postgresql::{PROTOCOL_VERSION_NUMBER, SSL_REQUEST, SSL_RESPONSE_NO, SSL_RESPONSE_YES},
+    postgresql::{SSL_REQUEST, SSL_RESPONSE_NO, SSL_RESPONSE_YES},
     tls, SIZE_I32,
 };
 

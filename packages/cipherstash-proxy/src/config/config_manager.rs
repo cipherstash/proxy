@@ -9,7 +9,7 @@ use cipherstash_config::ColumnConfig;
 use std::{collections::HashMap, sync::Arc, time::Duration};
 use tokio::{task::JoinHandle, time};
 use tokio_postgres::{SimpleQueryMessage, SimpleQueryRow};
-use tracing::{debug, error, info, warn};
+use tracing::{error, info, warn};
 
 ///
 /// Column configuration keyed by table name and column name
@@ -55,7 +55,7 @@ async fn init_reloader(config: DatabaseConfig) -> Result<EncryptConfigManager, E
         loop {
             interval.tick().await;
 
-            match load_dataset(&config_ref).await {
+            match load_dataset_with_retry(&config_ref).await {
                 Ok(reloaded) => {
                     // debug!("Reloaded Encrypt configuration");
                     dataset_ref.swap(Arc::new(reloaded));

@@ -175,7 +175,7 @@ impl From<sqlparser::parser::ParserError> for Error {
 }
 
 impl From<std::ffi::NulError> for Error {
-    fn from(e: std::ffi::NulError) -> Self {
+    fn from(_: std::ffi::NulError) -> Self {
         Error::Protocol(ProtocolError::UnexpectedNull)
     }
 }

@@ -1,7 +1,6 @@
 use cipherstash_config::{
     column::{Index, IndexType, TokenFilter, Tokenizer},
-    errors::ConfigError as DatasetConfigError,
-    ColumnConfig, ColumnType, DatasetConfig, TableConfig,
+    ColumnConfig, ColumnType,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;

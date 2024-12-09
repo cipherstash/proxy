@@ -14,7 +14,7 @@ use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use tokio::time::timeout;
 use tracing::{debug, error, info};
 
-const dialect: PostgreSqlDialect = PostgreSqlDialect {};
+const DIALECT: PostgreSqlDialect = PostgreSqlDialect {};
 
 pub struct Frontend<C, S>
 where
@@ -71,7 +71,7 @@ where
                     message.bytes = bytes;
                 }
             }
-            code => {
+            _ => {
                 // debug!("Code {code:?}");
             }
         }
@@ -80,13 +80,11 @@ where
     }
 
     async fn parse_handler(&mut self, message: &Message) -> Result<Option<BytesMut>, Error> {
-        debug!("Parse =====================");
-
         let parse = Parse::try_from(&message.bytes)?;
 
         let param_types = parse.param_types.clone();
 
-        let ast = Parser::new(&dialect)
+        let ast = Parser::new(&DIALECT)
             .try_with_sql(&parse.statement)?
             .parse_statement()?;
 
@@ -128,17 +126,5 @@ where
         } else {
             Ok(None)
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use crate::trace;
-
-    use super::Frontend;
-
-    #[test]
-    fn test_parse_handler() {
-        trace();
     }
 }

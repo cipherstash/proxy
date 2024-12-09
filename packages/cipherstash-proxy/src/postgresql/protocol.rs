@@ -5,11 +5,8 @@ use crate::{
 };
 use bytes::{BufMut, BytesMut};
 use std::io::{BufRead, Cursor};
-use tokio::{
-    io::{AsyncRead, AsyncReadExt},
-    net::TcpStream,
-};
-use tracing::{debug, error};
+use tokio::io::{AsyncRead, AsyncReadExt};
+use tracing::error;
 
 use super::{CANCEL_REQUEST, SSL_REQUEST};
 

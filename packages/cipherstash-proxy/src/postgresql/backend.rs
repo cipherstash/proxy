@@ -1,13 +1,11 @@
-use core::error;
-
 use crate::encrypt::Encrypt;
-use crate::error::{Error, ProtocolError};
+use crate::error::Error;
 use crate::postgresql::protocol::{self};
 use crate::postgresql::CONNECTION_TIMEOUT;
-use bytes::{BufMut, BytesMut};
+use bytes::BytesMut;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use tokio::time::timeout;
-use tracing::{debug, error, info, warn};
+use tracing::{error, warn};
 
 use super::messages::error_response::ErrorResponse;
 use super::messages::BackendCode;
@@ -64,7 +62,7 @@ where
             BackendCode::RowDescription => {
                 // debug!("RowDescription");
             }
-            code => {
+            _ => {
                 // debug!("Backend {code:?}");
             }
         }

@@ -85,7 +85,7 @@ impl Encrypt {
         Ok(encrypted_eql)
     }
 
-    pub fn decrypt(&self, pt: Vec<eql::Ciphertext>) -> Result<Vec<eql::Plaintext>, Error> {
+    pub fn decrypt(&self, _ct: Vec<eql::Ciphertext>) -> Result<Vec<eql::Plaintext>, Error> {
         Ok(vec![])
     }
 
@@ -141,19 +141,6 @@ async fn init_cipher(config: &TandemConfig) -> Result<ScopedCipher, Error> {
 }
 
 fn to_eql_encrypted(encrypted: Encrypted, pt: &eql::Plaintext) -> Result<eql::Ciphertext, Error> {
-    struct Indexes {
-        ore_index: Option<String>,
-        match_index: Option<Vec<u16>>,
-        unique_index: Option<String>,
-    }
-
-    // TODO INDEXES
-    // let mut indexes = Indexes {
-    //     ore_index: None,
-    //     match_index: None,
-    //     unique_index: None,
-    // };
-
     match encrypted {
         Encrypted::Record(ciphertext, _terms) => {
             let ct = eql::Ciphertext::new(ciphertext, pt.identifier.clone());

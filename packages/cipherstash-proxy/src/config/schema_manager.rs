@@ -7,7 +7,7 @@ use sqlparser::ast::Ident;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::{task::JoinHandle, time};
-use tracing::{debug, error, info, trace, warn};
+use tracing::{debug, error, info, warn};
 
 #[derive(Clone, Debug)]
 pub struct SchemaManager {
@@ -46,7 +46,7 @@ async fn init_reloader(config: DatabaseConfig) -> Result<SchemaManager, Error> {
         loop {
             interval.tick().await;
 
-            match load_schema(&config_ref).await {
+            match load_schema_with_retry(&config_ref).await {
                 Ok(reloaded) => {
                     // debug!("Reloaded database schema");
                     schema_ref.swap(Arc::new(reloaded));

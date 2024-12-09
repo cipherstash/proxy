@@ -3,10 +3,6 @@ pub mod error_response;
 pub mod parse;
 pub mod query;
 
-/// Protocol message codes.
-// pub const BIND: u8 = b'B';
-pub const PARSE: u8 = b'P';
-// pub const QUERY: u8 = b'Q';
 pub const NULL: i32 = -1;
 
 #[derive(Clone, Copy, Debug, PartialEq)]

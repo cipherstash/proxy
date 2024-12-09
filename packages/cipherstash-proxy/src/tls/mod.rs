@@ -1,4 +1,3 @@
-use crate::config::ServerConfig;
 use crate::{config::TlsConfig, error::Error};
 use crate::{DatabaseConfig, TandemConfig};
 use rustls::client::danger::ServerCertVerifier;
@@ -7,7 +6,6 @@ use rustls_pki_types::{pem::PemObject, CertificateDer, PrivateKeyDer, ServerName
 use std::sync::Arc;
 use tokio::net::TcpStream;
 use tokio_rustls::{TlsAcceptor, TlsConnector, TlsStream};
-use tracing::{debug, info, warn};
 
 pub async fn client(
     stream: TcpStream,

@@ -3,7 +3,6 @@ use cipherstash_proxy::connect::{self, AsyncStream};
 use cipherstash_proxy::encrypt::Encrypt;
 use cipherstash_proxy::error::Error;
 use cipherstash_proxy::{postgresql as pg, trace};
-use tokio::net::{tcp, TcpListener, TcpStream};
 use tracing::{debug, error, info, warn};
 
 // TODO: Accept command line arguments for config file path
