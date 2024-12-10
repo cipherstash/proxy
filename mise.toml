@@ -112,4 +112,22 @@ if [ ! -e "cipherstash-eql.sql" ]; then curl -sLo cipherstash-eql.sql https://gi
 docker build . --tag cipherstash/proxy:latest --file proxy.Dockerfile
 """
 
+[tasks.release]
+description = "Publish release artifacts"
+depends = ["release:docker"]
+
+[tasks."release:docker"]
+description = "Release a Docker image for cipherstash-proxy"
+run = """
+if [ -z "$DOCKER_HUB_USERNAME" ] || [ -z "$DOCKER_HUB_PERSONAL_ACCESS_TOKEN" ]; then
+  echo "error: no Docker Hub credentials provided"
+  echo "error: please set DOCKER_HUB_USERNAME and DOCKER_HUB_PERSONAL_ACCESS_TOKEN"
+  exit 2
+fi
+echo "Logging in to Docker Hub..."
+echo $DOCKER_HUB_PERSONAL_ACCESS_TOKEN | docker login --username $DOCKER_HUB_USERNAME --password-stdin
+docker tag cipherstash/proxy:latest cipherstash/proxy:latest
+docker push cipherstash/proxy:latest
+"""
+
 # ====================================================================================================
