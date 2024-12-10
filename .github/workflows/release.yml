@@ -28,3 +28,5 @@ jobs:
         with:
           name: cipherstash-proxy
           path: cipherstash-proxy
+      - run: |
+          mise run release
