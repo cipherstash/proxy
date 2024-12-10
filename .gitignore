@@ -5,4 +5,7 @@ mise.local.toml
 tests/pg/data**
 tests/sql/cipherstash-encrypt.sql
 .vscode
+
+# release artifacts
 /cipherstash-proxy
+/cipherstash-eql.sql
