@@ -5,15 +5,10 @@ database_port = "5532" # default postgres port using built in docker-compose set
 CS_DATABASE__PORT = "5532"
 PKG_CONFIG_PATH = "/opt/homebrew/opt/icu4c@76/lib/pkgconfig"
 
-[tasks.install]
-alias = 'i'
-description = "Installs Rust dependencies"
-run = """
-  cargo install cargo-binstall
-  cargo binstall cargo-nextest --secure
-  cargo install cargo-sort
-  cargo install cargo-expand
-"""
+[tools]
+"cargo:cargo-expand" = "latest"
+"cargo:cargo-nextest" = "latest"
+"cargo:cargo-sort" = "latest"
 
 [tasks.proxy]
 alias = 'p'
