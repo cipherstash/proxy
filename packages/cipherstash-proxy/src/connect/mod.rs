@@ -22,7 +22,7 @@ const MAX_RETRY_COUNT: u32 = 3;
 pub async fn database(config: &DatabaseConfig) -> Result<Client, Error> {
     let connection_string = config.to_connection_string();
 
-    let tls_config = tls::configure_client(&config);
+    let tls_config = tls::configure_client(config);
     let tls = tokio_postgres_rustls::MakeRustlsConnect::new(tls_config);
 
     let (client, connection) = tokio_postgres::connect(&connection_string, tls).await?;

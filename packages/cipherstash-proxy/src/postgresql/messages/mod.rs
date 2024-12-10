@@ -50,7 +50,7 @@ impl From<char> for FrontendCode {
             'Q' => FrontendCode::Query,
             'P' => FrontendCode::Parse,
             'B' => FrontendCode::Bind,
-            _ => FrontendCode::Unknown(code as char),
+            _ => FrontendCode::Unknown(code),
         }
     }
 }

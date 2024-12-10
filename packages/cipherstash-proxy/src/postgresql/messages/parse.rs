@@ -34,7 +34,7 @@ impl TryFrom<&BytesMut> for Parse {
         if FrontendCode::from(code) != FrontendCode::Parse {
             return Err(ProtocolError::UnexpectedMessageCode {
                 expected: FrontendCode::Parse.into(),
-                received: code as char,
+                received: code,
             }
             .into());
         }

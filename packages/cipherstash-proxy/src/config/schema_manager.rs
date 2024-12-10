@@ -1,13 +1,13 @@
 use super::{tandem::DatabaseConfig, AGGREGATE_QUERY, SCHEMA_QUERY};
 use crate::connect;
-use crate::error::{ConfigError, Error};
+use crate::error::Error;
 use arc_swap::ArcSwap;
 use eql_mapper::{Column, Schema, Table};
 use sqlparser::ast::Ident;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::{task::JoinHandle, time};
-use tracing::{debug, error, info, warn};
+use tracing::{debug, info, warn};
 
 #[derive(Clone, Debug)]
 pub struct SchemaManager {

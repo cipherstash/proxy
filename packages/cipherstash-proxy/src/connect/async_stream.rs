@@ -24,8 +24,8 @@ impl AsyncStream {
     }
 
     pub async fn connect(addr: &str) -> Result<AsyncStream, Error> {
-        let mut stream = connect_with_retry(addr).await?;
-        configure(&mut stream);
+        let stream = connect_with_retry(addr).await?;
+        configure(&stream);
         Ok(AsyncStream::Tcp(stream))
     }
 

@@ -41,10 +41,10 @@ impl Encrypt {
         plaintexts: Vec<eql::Plaintext>,
     ) -> Result<Vec<eql::Ciphertext>, Error> {
         Ok(self
-            .encrypt(plaintexts.into_iter().map(|pt| Some(pt)).collect())
+            .encrypt(plaintexts.into_iter().map(Some).collect())
             .await?
             .into_iter()
-            .flat_map(|ct| ct)
+            .flatten()
             .collect::<Vec<_>>())
     }
 
@@ -55,15 +55,12 @@ impl Encrypt {
         let mut pipeline = ReferencedPendingPipeline::new(self.cipher.clone());
 
         for (idx, pt) in plaintexts.iter().enumerate() {
-            match pt {
-                Some(pt) => {
-                    let column_config = self.column_config(&pt)?;
+            if let Some(pt) = pt {
+                let column_config = self.column_config(pt)?;
 
-                    let pt = Plaintext::Utf8Str(Some(pt.plaintext.to_owned()));
-                    let encryptable = PlaintextTarget::new(pt, column_config.clone(), None);
-                    pipeline.add_with_ref::<PlaintextTarget>(encryptable, idx)?;
-                }
-                None => {}
+                let pt = Plaintext::Utf8Str(Some(pt.plaintext.to_owned()));
+                let encryptable = PlaintextTarget::new(pt, column_config.clone(), None);
+                pipeline.add_with_ref::<PlaintextTarget>(encryptable, idx)?;
             }
         }
 

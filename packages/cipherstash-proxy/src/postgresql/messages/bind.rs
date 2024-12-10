@@ -43,19 +43,16 @@ impl Bind {
         Ok(self.param_values.iter().map(|param| param.into()).collect())
     }
 
-    pub fn from_ciphertext(
+    pub fn update_from_ciphertext(
         &mut self,
         encrypted: Vec<Option<eql::Ciphertext>>,
     ) -> Result<(), Error> {
         for (idx, ct) in encrypted.iter().enumerate() {
-            match ct {
-                Some(ct) => {
-                    let json = serde_json::to_value(ct)?;
-                    // convert json to bytes
-                    let bytes = json.to_string().into_bytes();
-                    self.param_values[idx].rewrite(&bytes);
-                }
-                None => {}
+            if let Some(ct) = ct {
+                let json = serde_json::to_value(ct)?;
+                // convert json to bytes
+                let bytes = json.to_string().into_bytes();
+                self.param_values[idx].rewrite(&bytes);
             }
         }
         Ok(())
@@ -152,7 +149,7 @@ impl From<&BindParam> for Option<eql::Plaintext> {
         let bytes = bind_param.json_bytes();
         let s = std::str::from_utf8(bytes).unwrap_or("");
 
-        match serde_json::from_str(&s) {
+        match serde_json::from_str(s) {
             Ok(pt) => Some(pt),
             Err(e) => {
                 debug!(

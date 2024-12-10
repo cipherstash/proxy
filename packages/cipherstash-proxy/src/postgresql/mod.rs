@@ -14,7 +14,7 @@ use std::time::Duration;
 use tokio::io::{split, AsyncWriteExt};
 use tracing::info;
 
-pub const CONNECTION_TIMEOUT: Duration = Duration::from_millis(1000 * 1 * 10);
+pub const CONNECTION_TIMEOUT: Duration = Duration::from_millis(1000 * 10);
 
 pub const PROTOCOL_VERSION_NUMBER: i32 = 196608;
 
@@ -101,6 +101,7 @@ pub async fn handle(client_stream: AsyncStream, encrypt: Encrypt) -> Result<(), 
     let mut frontend = Frontend::new(client_reader, server_writer, encrypt.clone());
     let mut backend = Backend::new(client_writer, server_reader, encrypt.clone());
 
+    #[allow(unreachable_code)]
     let client_to_server = async {
         loop {
             frontend.rewrite().await?;
@@ -110,6 +111,7 @@ pub async fn handle(client_stream: AsyncStream, encrypt: Encrypt) -> Result<(), 
         Ok::<(), Error>(())
     };
 
+    #[allow(unreachable_code)]
     let server_to_client = async {
         loop {
             backend.rewrite().await?;

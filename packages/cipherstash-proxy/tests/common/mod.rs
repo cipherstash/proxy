@@ -12,7 +12,7 @@ pub fn database_config() -> DatabaseConfig {
 pub fn database_config_with_port(port: u16) -> DatabaseConfig {
     DatabaseConfig {
         host: "localhost".to_string(),
-        port: port,
+        port,
         name: "cipherstash".to_string(),
         username: "cipherstash".to_string(),
         password: "password".to_string(),
@@ -23,7 +23,7 @@ pub fn database_config_with_port(port: u16) -> DatabaseConfig {
 }
 
 pub async fn connect_with_tls(config: &DatabaseConfig) -> Client {
-    let tls_config = tls::configure_client(&config);
+    let tls_config = tls::configure_client(config);
     let tls = tokio_postgres_rustls::MakeRustlsConnect::new(tls_config);
 
     let connection_string = config.to_connection_string();

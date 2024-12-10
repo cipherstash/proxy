@@ -10,6 +10,7 @@ use std::{collections::HashMap, sync::Arc, time::Duration};
 use tokio::{task::JoinHandle, time};
 use tokio_postgres::{SimpleQueryMessage, SimpleQueryRow};
 use tracing::{error, info, warn};
+use std::str::FromStr;
 
 ///
 /// Column configuration keyed by table name and column name
@@ -139,12 +140,12 @@ pub async fn load_dataset(config: &DatabaseConfig) -> Result<EncryptConfigMap, E
     let data = rows
         .first()
         .ok_or_else(|| ConfigError::MissingActiveEncryptConfig)
-        .and_then(|row| row.try_get(0).map_err(|e| ConfigError::Database(e)))
+        .and_then(|row| row.try_get(0).map_err(ConfigError::Database))
         .and_then(|opt_str: Option<&str>| {
             opt_str.ok_or_else(|| ConfigError::MissingActiveEncryptConfig)
         })?;
 
-    let encrypt = EncryptConfig::from_str(&data)?;
+    let encrypt = EncryptConfig::from_str(data)?;
     let map = encrypt.to_config_map();
 
     Ok(map)

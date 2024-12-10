@@ -12,8 +12,8 @@ pub use tandem::{DatabaseConfig, ServerConfig, TandemConfig, TlsConfig};
 pub const CS_PREFIX: &str = "CS";
 pub const DEFAULT_CONFIG_FILE_PATH: &str = "cipherstash-proxy.toml";
 
-const ENCRYPT_DATASET_CONFIG_QUERY: &'static str = include_str!("./sql/select_config.sql");
+const ENCRYPT_DATASET_CONFIG_QUERY: &str = include_str!("./sql/select_config.sql");
 
-const SCHEMA_QUERY: &'static str = include_str!("./sql/select_table_schemas.sql");
+const SCHEMA_QUERY: &str = include_str!("./sql/select_table_schemas.sql");
 
-const AGGREGATE_QUERY: &'static str = include_str!("./sql/select_aggregates.sql");
+const AGGREGATE_QUERY: &str = include_str!("./sql/select_aggregates.sql");

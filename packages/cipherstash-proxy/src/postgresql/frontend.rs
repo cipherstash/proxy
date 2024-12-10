@@ -17,7 +17,7 @@ use sqlparser::dialect::PostgreSqlDialect;
 use sqlparser::parser::Parser;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use tokio::time::timeout;
-use tracing::{debug, error, info};
+use tracing::{error, info};
 
 const DIALECT: PostgreSqlDialect = PostgreSqlDialect {};
 
@@ -129,7 +129,7 @@ where
 
         Ok(encrypted
             .into_iter()
-            .map(|ct| serde_json::to_string(&ct).map(|json| Value::SingleQuotedString(json)))
+            .map(|ct| serde_json::to_string(&ct).map(Value::SingleQuotedString))
             .collect::<Result<Vec<_>, _>>()?)
     }
 
@@ -146,7 +146,7 @@ where
         let params = bind.to_plaintext()?;
         let encrypted = self.encrypt.encrypt(params).await?;
 
-        bind.from_ciphertext(encrypted)?;
+        bind.update_from_ciphertext(encrypted)?;
 
         if bind.should_rewrite() {
             let bytes = BytesMut::try_from(bind)?;
@@ -161,17 +161,17 @@ fn zip_with_original_value_ref<'ast>(
     typed_statement: &eql_mapper::TypedStatement<'ast>,
     encrypted_literals: Vec<Value>,
 ) -> HashMap<&'ast Value, Value> {
-    (&typed_statement.literals)
-        .into_iter()
+    typed_statement.literals
+        .iter()
         .map(|(_, original_node)| *original_node)
-        .zip(encrypted_literals.into_iter())
+        .zip(encrypted_literals)
         .collect::<HashMap<_, _>>()
 }
 
 fn convert_value_nodes_to_eql_plaintext(
     typed_statement: &eql_mapper::TypedStatement<'_>,
 ) -> Result<Vec<eql::Plaintext>, EqlMapperError> {
-    (&typed_statement.literals)
+    typed_statement.literals
         .iter()
         .map(|(EqlColumn(TableColumn { table, column }), value)| {
             if let Some(plaintext) = match value {
@@ -198,7 +198,7 @@ fn convert_value_nodes_to_eql_plaintext(
 mod tests {
     use crate::trace;
 
-    use super::Frontend;
+
 
     #[test]
     fn test_parse_handler() {

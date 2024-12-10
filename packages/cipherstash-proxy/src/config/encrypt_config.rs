@@ -4,7 +4,7 @@ use cipherstash_config::{
 };
 use serde::{Deserialize, Serialize};
 use sqlparser::ast::Ident;
-use std::collections::HashMap;
+use std::{collections::HashMap, str::FromStr};
 
 use crate::{
     eql,
@@ -134,17 +134,21 @@ impl From<CastAs> for ColumnType {
     }
 }
 
-impl EncryptConfig {
-    pub fn from_str(data: &str) -> Result<Self, Error> {
-        let config = serde_json::from_str(&data).map_err(|e| ConfigError::Parse(e))?;
+impl FromStr for EncryptConfig {
+    type Err = Error;
+
+    fn from_str(data: &str) -> Result<Self, Self::Err> {
+        let config = serde_json::from_str(data).map_err(ConfigError::Parse)?;
         Ok(config)
     }
+}
 
+impl EncryptConfig {
     pub fn to_config_map(self) -> HashMap<eql::Identifier, ColumnConfig> {
         let mut map = HashMap::new();
         for (table_name, columns) in self.tables.into_iter() {
             for (name, column) in columns.into_iter() {
-                let column_config = column.to_column_config(&Ident::with_quote('"', &name));
+                let column_config = column.into_column_config(&Ident::with_quote('"', &name));
                 let key = eql::Identifier {
                     table: Ident::with_quote('"', &table_name),
                     column: Ident::with_quote('"', &name),
@@ -157,7 +161,7 @@ impl EncryptConfig {
 }
 
 impl Column {
-    pub fn to_column_config(self, name: &Ident) -> ColumnConfig {
+    pub fn into_column_config(self, name: &Ident) -> ColumnConfig {
         let mut config = ColumnConfig::build(name.to_string()).casts_as(self.cast_as.into());
 
         if self.indexes.ore_index.is_some() {

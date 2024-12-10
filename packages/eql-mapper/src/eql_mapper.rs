@@ -232,10 +232,8 @@ impl<'ast> TypedStatement<'ast> {
     /// Not all statments have a projection, so the result is wrapped in an [`Option`].
     pub fn get_projection_columns(&self) -> Option<&[ProjectionColumn]> {
         match self.node_types.get(&NodeKey::new(self.statement)) {
-            Some(ty) => match ty {
-                Type::Projection(Projection(columns)) => Some(columns.as_slice()),
-                _ => None,
-            },
+            Some(Type::Projection(Projection(columns))) => Some(columns.as_slice()),
+            Some(_) => None,
             None => None,
         }
     }

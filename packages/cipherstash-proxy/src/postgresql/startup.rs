@@ -20,7 +20,7 @@ pub async fn with_tls(stream: AsyncStream, encrypt: &Encrypt) -> Result<AsyncStr
             match server_ssl {
                 true => {
                     let tls_stream = tls::client(tcp_stream, &encrypt.config).await?;
-                    Ok(AsyncStream::Tls(tls_stream.into()))
+                    Ok(AsyncStream::Tls(tls_stream))
                 }
                 false => {
                     warn!("Connecting to database without Transport Layer Security (TLS)");
@@ -92,7 +92,7 @@ pub async fn send_ssl_request<T: AsyncRead + AsyncWrite + Unpin>(
         SSL_RESPONSE_NO => Ok(false),
         code => {
             error!("Unexpected startup message: {}", code as char);
-            return Err(ProtocolError::UnexpectedStartupMessage.into());
+            Err(ProtocolError::UnexpectedStartupMessage.into())
         }
     }
 }
