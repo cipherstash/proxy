@@ -1,7 +1,9 @@
+#![allow(dead_code)]
+
 mod common;
 
 use cipherstash_proxy::trace;
-use common::{connect, connect_with_tls, database_config_with_port, PG_v17_TLS, PROXY};
+use common::{connect, connect_with_tls, database_config_with_port, PG_V17_TLS, PROXY};
 use tracing::info;
 
 ///
@@ -34,7 +36,7 @@ async fn connect_proxy_with_tls() {
 async fn sanity_check_database_with_tls() {
     trace();
 
-    let config = database_config_with_port(PG_v17_TLS);
+    let config = database_config_with_port(PG_V17_TLS);
 
     let client = connect_with_tls(&config).await;
 

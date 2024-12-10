@@ -3,7 +3,7 @@ mod common;
 use cipherstash_proxy::{config::SchemaManager, trace};
 use common::database_config;
 
-// #[tokio::test]
+#[tokio::test]
 async fn load_schema() {
     trace();
 

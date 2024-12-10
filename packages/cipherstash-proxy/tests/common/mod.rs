@@ -1,9 +1,11 @@
+#![allow(dead_code)]
+
 use cipherstash_proxy::{config::DatabaseConfig, tls};
 use tokio_postgres::{Client, NoTls};
 
 pub const PROXY: u16 = 6432;
 pub const PG_LATEST: u16 = 5532;
-pub const PG_v17_TLS: u16 = 5617;
+pub const PG_V17_TLS: u16 = 5617;
 
 pub fn database_config() -> DatabaseConfig {
     database_config_with_port(PG_LATEST)
