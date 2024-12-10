@@ -102,12 +102,12 @@ pub async fn load_schema(config: &DatabaseConfig) -> Result<Schema, Error> {
 
     let tables = client.query(SCHEMA_QUERY, &[]).await?;
 
-    if tables.is_empty() {
-        error!("Database schema contains no tables");
-        return Err(ConfigError::SchemaCouldNotBeLoaded.into());
-    };
-
     let mut schema = Schema::new("public");
+
+    if tables.is_empty() {
+        warn!("Database schema contains no tables");
+        return Ok(schema);
+    };
 
     for table in tables {
         let table_name: String = table.get("table_name");
