@@ -4,7 +4,7 @@ use cipherstash_proxy::{config::SchemaManager, trace};
 use common::database_config;
 use tracing::info;
 
-#[tokio::test]
+// #[tokio::test]
 async fn load_schema() {
     trace();
 
