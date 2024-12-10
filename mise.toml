@@ -91,11 +91,25 @@ run = """
   cat sql/cipherstash-encrypt.sql | docker exec -i postgres psql postgresql://cipherstash:password@localhost:{{vars.database_port}}/cipherstash -f-
 """
 
-[tasks.release]
-description = "Build a releasable binary"
+[tasks.build]
+description = "Build releasable artifacts"
+run = """
+mise run build:binary
+mise run build:docker
+"""
+
+[tasks."build:binary"]
+description = "Build a releasable binary for cipherstash-proxy"
 run = """
 cargo build --locked --release --package cipherstash-proxy
 cp -v target/release/cipherstash-proxy .
+"""
+
+[tasks."build:docker"]
+description = "Build a Docker image for cipherstash-proxy"
+run = """
+if [ ! -e "cipherstash-eql.sql" ]; then curl -sLo cipherstash-eql.sql https://github.com/cipherstash/encrypt-query-language/releases/latest/download/cipherstash-encrypt.sql ; fi
+docker build . --tag cipherstash/proxy:latest --file proxy.Dockerfile
 """
 
 # ====================================================================================================
