@@ -1,9 +1,7 @@
 mod common;
 
 use cipherstash_proxy::trace;
-use common::{
-    connect, connect_with_tls, database_config_with_port, PG_v17_TLS, PROXY,
-};
+use common::{connect, connect_with_tls, database_config_with_port, PG_v17_TLS, PROXY};
 use tracing::info;
 
 ///

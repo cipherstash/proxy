@@ -118,7 +118,9 @@ impl TandemConfig {
             .map_err(|err| {
                 if let config::ConfigError::Message(ref s) = err {
                     if s.contains("UUID parsing failed") {
-                        error!("Invalid dataset id. The configured dataset id must be a valid UUID.");
+                        error!(
+                            "Invalid dataset id. The configured dataset id must be a valid UUID."
+                        );
                         debug!("{s}");
                     }
                 };

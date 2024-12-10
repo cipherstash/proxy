@@ -6,11 +6,11 @@ use crate::{
 };
 use arc_swap::ArcSwap;
 use cipherstash_config::ColumnConfig;
+use std::str::FromStr;
 use std::{collections::HashMap, sync::Arc, time::Duration};
 use tokio::{task::JoinHandle, time};
 use tokio_postgres::{SimpleQueryMessage, SimpleQueryRow};
 use tracing::{error, info, warn};
-use std::str::FromStr;
 
 ///
 /// Column configuration keyed by table name and column name

@@ -161,7 +161,8 @@ fn zip_with_original_value_ref<'ast>(
     typed_statement: &eql_mapper::TypedStatement<'ast>,
     encrypted_literals: Vec<Value>,
 ) -> HashMap<&'ast Value, Value> {
-    typed_statement.literals
+    typed_statement
+        .literals
         .iter()
         .map(|(_, original_node)| *original_node)
         .zip(encrypted_literals)
@@ -171,7 +172,8 @@ fn zip_with_original_value_ref<'ast>(
 fn convert_value_nodes_to_eql_plaintext(
     typed_statement: &eql_mapper::TypedStatement<'_>,
 ) -> Result<Vec<eql::Plaintext>, EqlMapperError> {
-    typed_statement.literals
+    typed_statement
+        .literals
         .iter()
         .map(|(EqlColumn(TableColumn { table, column }), value)| {
             if let Some(plaintext) = match value {
@@ -197,8 +199,6 @@ fn convert_value_nodes_to_eql_plaintext(
 #[cfg(test)]
 mod tests {
     use crate::trace;
-
-
 
     #[test]
     fn test_parse_handler() {

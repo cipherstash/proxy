@@ -262,7 +262,9 @@ impl TryFrom<&unifier::Scalar> for EqlColumn {
                 table: table.clone(),
                 column: column.clone(),
             })),
-            unifier::Scalar::AnonymousNative => Err(Self::Error::InternalError("cannot create EQL column from native column".to_string())),
+            unifier::Scalar::AnonymousNative => Err(Self::Error::InternalError(
+                "cannot create EQL column from native column".to_string(),
+            )),
         }
     }
 }
