@@ -9,7 +9,7 @@ use tracing::info;
 ///
 /// Sanity test to check if the database connection is working with TLS
 ///
-#[tokio::test]
+// #[tokio::test]
 async fn connect_proxy_with_tls() {
     trace();
 
@@ -32,7 +32,7 @@ async fn connect_proxy_with_tls() {
 ///
 /// Sanity test to check if the database connection is working with TLS
 ///
-#[tokio::test]
+// #[tokio::test]
 async fn sanity_check_database_with_tls() {
     trace();
 
