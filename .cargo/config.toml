@@ -1,2 +1,2 @@
 [build]
-rustflags = ["-Z", "threads=4"]
+rustflags = []
