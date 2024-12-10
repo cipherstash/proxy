@@ -485,7 +485,6 @@ mod test {
     }
 
     #[test]
-    #[ignore]
     fn wildcard_expansion() {
         let schema = Dep::new(make_schema! {
             tables: {
@@ -495,6 +494,7 @@ mod test {
                 }
                 todo_lists: {
                     id,
+                    owner_id,
                     secret (ENCRYPTED),
                 }
             }
@@ -511,8 +511,9 @@ mod test {
             "#,
         );
 
-        let Ok(typed) = type_check(&schema, &statement) else {
-            panic!("type check failed")
+        let typed = match type_check(&schema, &statement) {
+            Ok(typed) => typed,
+            Err(err) => panic!("type check failed: {:#?}", err),
         };
 
         assert_eq!(
@@ -523,28 +524,35 @@ mod test {
                         table: id("users"),
                         column: id("id")
                     }))),
-                    alias: None
+                    alias: Some(id("id"))
                 },
                 ProjectionColumn {
                     ty: ProjectionColumnType::Scalar(Scalar::EqlColumn(EqlColumn(TableColumn {
                         table: id("users"),
                         column: id("email")
                     }))),
-                    alias: None
+                    alias: Some(id("email"))
                 },
                 ProjectionColumn {
                     ty: ProjectionColumnType::Scalar(Scalar::Native(Some(TableColumn {
                         table: id("todo_lists"),
                         column: id("id")
                     }))),
-                    alias: None
+                    alias: Some(id("id"))
+                },
+                ProjectionColumn {
+                    ty: ProjectionColumnType::Scalar(Scalar::Native(Some(TableColumn {
+                        table: id("todo_lists"),
+                        column: id("owner_id")
+                    }))),
+                    alias: Some(id("owner_id"))
                 },
                 ProjectionColumn {
                     ty: ProjectionColumnType::Scalar(Scalar::EqlColumn(EqlColumn(TableColumn {
                         table: id("todo_lists"),
                         column: id("secret")
                     }))),
-                    alias: None
+                    alias: Some(id("secret"))
                 },
             ])))
         );

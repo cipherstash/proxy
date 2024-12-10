@@ -45,7 +45,7 @@ impl Unifier {
     /// Returns `Ok(ty)` if successful, or `Err(TypeError)` on failure.
     ///
     /// After successful unification, `left` and `right` will refer to the same allocation.
-    pub fn unify(
+    pub(crate) fn unify(
         &mut self,
         left: Rc<RefCell<Type>>,
         right: Rc<RefCell<Type>>,
@@ -220,8 +220,8 @@ impl Unifier {
         right: Rc<RefCell<Vec<ProjectionColumn>>>,
     ) -> Result<Rc<RefCell<Vec<ProjectionColumn>>>, TypeError> {
         {
-            Self::flatten_projection(left.clone());
-            Self::flatten_projection(right.clone());
+            ProjectionColumn::flatten(left.clone());
+            ProjectionColumn::flatten(right.clone());
 
             let cols_left_mut = &mut *left.borrow_mut();
             let cols_right_mut = &mut *right.borrow_mut();
@@ -242,25 +242,6 @@ impl Unifier {
             Self::render_projection(left.clone()),
             Self::render_projection(right.clone())
         )))
-    }
-
-    fn flatten_projection(projection: Rc<RefCell<Vec<ProjectionColumn>>>) {
-        let cols = projection.borrow();
-        let mut flattened: Vec<ProjectionColumn> = Vec::with_capacity(cols.len());
-
-        for idx in 0..cols.len() {
-            let col = &cols[idx];
-            match &*col.ty.borrow() {
-                Type(Def::Constructor(Constructor::Projection(inner_cols)), _) => {
-                    Self::flatten_projection(inner_cols.clone());
-                    flattened.extend(inner_cols.borrow().iter().cloned());
-                }
-                _ => flattened.push(col.clone()),
-            }
-        }
-
-        drop(cols);
-        *projection.borrow_mut() = flattened;
     }
 
     /// Unifies a `left` and  `right` [`ProjectionColumn`].
@@ -464,8 +445,7 @@ mod test {
         .wrap();
 
         // The RHS is a single projection that contains a projection column that contains a projection with two
-        // projection columns.  This is how wildcard expansions is represented at the type level. Unification should
-        // flatten a nested projection.
+        // projection columns.  This is how wildcard expansions is represented at the type level.
         let right = Type(
             Constructor(Projection(Rc::new(RefCell::new(vec![ProjectionColumn {
                 ty: Type(

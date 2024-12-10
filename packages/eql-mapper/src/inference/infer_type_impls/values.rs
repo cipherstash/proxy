@@ -1,6 +1,9 @@
 use sqlparser::ast::Values;
 
-use crate::{inference::type_error::TypeError, inference::InferType, inference::unifier::Type, TypeInferencer};
+use crate::{
+    inference::type_error::TypeError, inference::unifier::Type, inference::InferType,
+    TypeInferencer,
+};
 
 impl<'ast> InferType<'ast, Values> for TypeInferencer<'ast> {
     fn infer_exit(&mut self, values: &'ast Values) -> Result<(), TypeError> {

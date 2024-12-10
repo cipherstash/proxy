@@ -1,7 +1,11 @@
+use std::{cell::RefCell, rc::Rc};
+
 use sqlparser::ast::{Expr, Select, SelectItem, WildcardAdditionalOptions};
 
 use crate::{
-    inference::type_error::TypeError, inference::InferType, inference::unifier::Type, TypeInferencer,
+    inference::{type_error::TypeError, unifier::Type, InferType},
+    unifier::{Constructor, Def, ProjectionColumn, Status},
+    TypeInferencer,
 };
 
 impl<'ast> InferType<'ast, Select> for TypeInferencer<'ast> {
@@ -71,7 +75,15 @@ impl<'ast> InferType<'ast, Select> for TypeInferencer<'ast> {
             }
         }
 
-        self.unify(self.get_type(select), Type::projection(&projection_columns))?;
+        self.unify(
+            self.get_type(select),
+            Rc::new(RefCell::new(Type(
+                Def::Constructor(Constructor::Projection(ProjectionColumn::vec_of(
+                    &projection_columns,
+                ))),
+                Status::Partial,
+            ))),
+        )?;
 
         Ok(())
     }

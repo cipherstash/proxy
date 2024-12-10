@@ -296,11 +296,45 @@ impl ProjectionColumn {
         Self { ty, alias }
     }
 
+    pub(crate) fn vec_of(
+        columns: &[(Rc<RefCell<Type>>, Option<Ident>)],
+    ) -> Rc<RefCell<Vec<ProjectionColumn>>> {
+        Self::flatten(Rc::new(RefCell::new(
+            columns
+                .iter()
+                .map(|(c, n)| ProjectionColumn::new(c.clone(), n.clone()))
+                .collect(),
+        )))
+    }
+
     fn render_alias(&self) -> String {
         match &self.alias {
             Some(name) => name.to_string(),
             None => String::from("(no-alias)"),
         }
+    }
+
+    pub(crate) fn flatten(
+        projection: Rc<RefCell<Vec<ProjectionColumn>>>,
+    ) -> Rc<RefCell<Vec<ProjectionColumn>>> {
+        let cols = projection.borrow();
+        let mut flattened: Vec<ProjectionColumn> = Vec::with_capacity(cols.len());
+
+        for idx in 0..cols.len() {
+            let col = &cols[idx];
+            match &*col.ty.borrow() {
+                Type(Def::Constructor(Constructor::Projection(inner_cols)), _) => {
+                    Self::flatten(inner_cols.clone());
+                    flattened.extend(inner_cols.borrow().iter().cloned());
+                }
+                _ => flattened.push(col.clone()),
+            }
+        }
+
+        drop(cols);
+        *projection.borrow_mut() = flattened;
+
+        projection
     }
 }
 
