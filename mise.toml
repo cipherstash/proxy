@@ -6,6 +6,7 @@ CS_DATABASE__PORT = "5532"
 PKG_CONFIG_PATH = "/opt/homebrew/opt/icu4c@76/lib/pkgconfig"
 
 [tools]
+"cargo:cargo-binstall" = "latest"
 "cargo:cargo-expand" = "latest"
 "cargo:cargo-nextest" = "latest"
 "cargo:cargo-sort" = "latest"

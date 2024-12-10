@@ -19,9 +19,8 @@ To install mise:
 - If you're on macOS, run `brew install mise`
 - If you're on another platform, check out the mise [installation methods documentation](https://mise.jdx.dev/installing-mise.html#installation-methods)
 
-For faster install times for tools installed via mise and Cargo, make sure to install [`cargo-binstall`](https://github.com/cargo-bins/cargo-binstall?tab=readme-ov-file#installation).
-If `cargo-binstall` is available locally, mise will use it to install tools that support it.
-See: https://mise.jdx.dev/tips-and-tricks.html#cargo-binstall.
+We use [`cargo-binstall`](https://github.com/cargo-bins/cargo-binstall) for faster installation of tools installed via `mise` and Cargo.
+We install `cargo-binstall` via `mise` when installing development and testing dependencies.
 
 ### Building
 
@@ -46,7 +45,7 @@ Copy `cipherstash-proxy-example.toml` to `cipherstash-proxy.toml` and edit.
 
 
 ```shell
-# install development and testing dependencies
+# install development and testing dependencies (including cargo-binstall)
 mise install
 
 # start all postgres instances
