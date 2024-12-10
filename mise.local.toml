@@ -1,5 +1,0 @@
-[env]
-CS_DATABASE__PORT = "5532"
-
-[vars]
-database_port = "5532"
