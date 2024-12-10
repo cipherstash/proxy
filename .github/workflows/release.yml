@@ -9,7 +9,14 @@ on:
 jobs:
   build:
     name: 🏗️ Build binaries + Docker images
-    runs-on: buildjet-16vcpu-ubuntu-2204
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - buildjet-16vcpu-ubuntu-2204
+          - buildjet-16vcpu-ubuntu-2204-arm
+          - ubuntu-latest-m
+    runs-on: ${{matrix.os}}
     steps:
       - uses: actions/checkout@v4
       - name: Setup Rust cache
