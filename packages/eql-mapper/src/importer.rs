@@ -4,9 +4,9 @@ use sqlparser::ast::{Cte, Ident, Insert, TableAlias, TableFactor};
 use sqltk::{Break, Visitable, Visitor};
 
 use crate::{
+    inference::unifier::{Constructor, Def, ProjectionColumn, Status, Type},
     inference::TypeError,
     inference::TypeRegistry,
-    inference::unifier::{Constructor, Def, ProjectionColumn, Status, Type},
     model::{Relation, Schema, SchemaError},
     Scope, ScopeError,
 };

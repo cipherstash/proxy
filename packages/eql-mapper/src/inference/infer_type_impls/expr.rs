@@ -1,6 +1,6 @@
 use sqlparser::ast::{BinaryOperator, Expr};
 
-use crate::{inference::InferType, inference::unifier::Type, inference::TypeError, TypeInferencer};
+use crate::{inference::unifier::Type, inference::InferType, inference::TypeError, TypeInferencer};
 
 impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
     fn infer_enter(&mut self, this_expr: &'ast Expr) -> Result<(), TypeError> {

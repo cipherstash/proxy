@@ -3,7 +3,7 @@ use std::{cell::RefCell, rc::Rc};
 use sqlparser::ast::{Ident, Insert};
 
 use crate::{
-    inference::unifier::{Constructor, Def, Status, Type, Scalar},
+    inference::unifier::{Constructor, Def, Scalar, Status, Type},
     inference::{type_error::TypeError, InferType},
     ColumnKind, TypeInferencer,
 };

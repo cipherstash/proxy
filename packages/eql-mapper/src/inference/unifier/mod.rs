@@ -2,9 +2,7 @@ use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
 mod types;
 
-use crate::{
-    inference::TypeError,
-};
+use crate::inference::TypeError;
 
 pub(crate) use types::*;
 
@@ -294,10 +292,10 @@ impl Unifier {
 
 #[cfg(test)]
 mod test {
+    use crate::unifier::Unifier;
     use crate::unifier::{
         Constructor::*, Def::*, ProjectionColumn, Scalar::*, Status, Type, TypeVar,
     };
-    use crate::unifier::Unifier;
     use std::{cell::RefCell, rc::Rc};
 
     #[test]

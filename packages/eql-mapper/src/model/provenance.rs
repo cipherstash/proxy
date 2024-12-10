@@ -1,7 +1,4 @@
-use crate::{
-    model::schema::Table,
-    Projection, TableColumn,
-};
+use crate::{model::schema::Table, Projection, TableColumn};
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum Provenance {

@@ -92,7 +92,10 @@ impl<'ast> TypeInferencer<'ast> {
         self.reg.borrow_mut().get_type(node)
     }
 
-    pub(crate) fn get_type_by_node_key(&self, key: &NodeKey<'ast>) -> Option<Rc<RefCell<unifier::Type>>> {
+    pub(crate) fn get_type_by_node_key(
+        &self,
+        key: &NodeKey<'ast>,
+    ) -> Option<Rc<RefCell<unifier::Type>>> {
         self.reg.borrow_mut().get_type_by_node_key(key)
     }
 
