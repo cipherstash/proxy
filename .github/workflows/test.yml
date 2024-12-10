@@ -23,8 +23,6 @@ jobs:
           install: true # [default: true] run `mise install`
           cache: true # [default: true] cache mise using GitHub's cache
       - run: |
-          mise run install
-      - run: |
           mise run up --extra-args "--detach --wait"
       - run: |
           mise run setup
