@@ -26,7 +26,28 @@ run = 'cargo run'
 [tasks.test]
 alias = 't'
 description = "Runs test/s"
+run = """
+  mise run test:nextest
+  mise run test:format
+  mise run test:check
+  mise run test:clippy
+"""
+
+[tasks."test:nextest"]
+description = "Runs cargo nextest"
 run = 'cargo nextest run --no-fail-fast --nocapture {{arg(name="test",default="")}}'
+
+[tasks."test:format"]
+description = "Runs cargo fmt"
+run = 'cargo fmt --all -- --check'
+
+[tasks."test:check"]
+description = "Runs cargo check"
+run = 'cargo check'
+
+[tasks."test:clippy"]
+description = "Runs clippy"
+run = 'cargo clippy --all --no-deps --all-targets --all-features'
 
 [tasks.setup]
 depends = ["install_eql"]
