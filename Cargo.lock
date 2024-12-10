@@ -695,8 +695,8 @@ dependencies = [
  "serde_json",
  "socket2",
  "sqlparser",
- "sqltk",
- "thiserror 2.0.11",
+ "sqltk 0.2.2",
+ "thiserror 2.0.4",
  "tokio",
  "tokio-postgres",
  "tokio-postgres-rustls",
@@ -1048,8 +1048,8 @@ dependencies = [
  "itertools 0.13.0",
  "pretty_assertions",
  "sqlparser",
- "sqltk",
- "thiserror 2.0.11",
+ "sqltk 0.1.0",
+ "thiserror 2.0.4",
 ]
 
 [[package]]
@@ -3083,6 +3083,16 @@ dependencies = [
  "quote",
  "sqlparser",
  "syn 2.0.98",
+]
+
+[[package]]
+name = "sqltk"
+version = "0.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3e3209ca9f03a47a7c285ee4b119210b10561f765b44195b13b4e495615dc65f"
+dependencies = [
+ "bigdecimal",
+ "sqlparser",
 ]
 
 [[package]]
