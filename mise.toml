@@ -28,8 +28,8 @@ alias = 't'
 description = "Runs test/s"
 run = """
   mise run test:nextest {{arg(name="test",default="")}}
-  mise run test:format
   mise run test:check
+  mise run test:format
   mise run test:clippy
 """
 
