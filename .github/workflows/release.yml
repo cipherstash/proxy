@@ -28,5 +28,8 @@ jobs:
         with:
           name: cipherstash-proxy
           path: cipherstash-proxy
-      - run: |
+      - env:
+          DOCKER_HUB_USERNAME: ${{ secrets.DOCKER_HUB_USERNAME }}
+          DOCKER_HUB_PERSONAL_ACCESS_TOKEN: ${{ secrets.DOCKER_HUB_PERSONAL_ACCESS_TOKEN }}
+        run: |
           mise run release
