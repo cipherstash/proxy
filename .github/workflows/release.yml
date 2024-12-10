@@ -24,3 +24,7 @@ jobs:
           cache: true # [default: true] cache mise using GitHub's cache
       - run: |
           mise run build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cipherstash-proxy
+          path: cipherstash-proxy
