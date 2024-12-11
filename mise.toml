@@ -94,8 +94,9 @@ run = """
 [tasks.build]
 description = "Build releasable artifacts"
 run = """
+{% set default_platform = "linux/" ~ arch() | replace(from="x86_64", to="amd64") %}
 mise run build:binary
-mise run build:docker
+mise run build:docker --platform {{option(name="platform",default=default_platform)}} \
 """
 
 [tasks."build:binary"]
@@ -106,10 +107,25 @@ cp -v target/release/cipherstash-proxy .
 """
 
 [tasks."build:docker"]
+depends = [ "build:docker:fetch_eql" ]
 description = "Build a Docker image for cipherstash-proxy"
 run = """
-if [ ! -e "cipherstash-eql.sql" ]; then curl -sLo cipherstash-eql.sql https://github.com/cipherstash/encrypt-query-language/releases/latest/download/cipherstash-encrypt.sql ; fi
-docker build . --tag cipherstash/proxy:latest --file proxy.Dockerfile
+{% set default_platform = "linux/" ~ arch() | replace(from="x86_64", to="amd64") %}
+docker build . \
+  --tag cipherstash/proxy:latest \
+  --file proxy.Dockerfile \
+  --platform {{option(name="platform",default=default_platform)}} \
+"""
+
+[tasks."build:docker:fetch_eql"]
+description = "Fetch the EQL installation script"
+run = """
+if [ ! -e "cipherstash-eql.sql" ]; then
+  echo "Fetching: cipherstash-eql.sql"
+  curl -sLo cipherstash-eql.sql https://github.com/cipherstash/encrypt-query-language/releases/latest/download/cipherstash-encrypt.sql
+else
+  echo "Prefetched: cipherstash-eql.sql"
+fi
 """
 
 [tasks.release]
