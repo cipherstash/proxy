@@ -75,13 +75,23 @@ impl<'ast> InferType<'ast, Select> for TypeInferencer<'ast> {
             }
         }
 
-        self.unify(
+        let status = if projection_columns
+            .iter()
+            .all(|col| col.0.borrow().status() == Status::Resolved)
+        {
+            Status::Resolved
+        } else {
+            Status::Partial
+        };
+
+        self.unify_and_log(
+            select,
             self.get_type(select),
             Rc::new(RefCell::new(Type(
                 Def::Constructor(Constructor::Projection(ProjectionColumn::vec_of(
                     &projection_columns,
                 ))),
-                Status::Partial,
+                status,
             ))),
         )?;
 

@@ -1127,6 +1127,8 @@ dependencies = [
  "sqlparser",
  "sqltk 0.1.0",
  "thiserror 2.0.4",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]

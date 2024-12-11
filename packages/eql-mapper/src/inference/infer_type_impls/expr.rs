@@ -3,17 +3,39 @@ use sqlparser::ast::{BinaryOperator, Expr};
 use crate::{inference::unifier::Type, inference::InferType, inference::TypeError, TypeInferencer};
 
 impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
-    fn infer_enter(&mut self, this_expr: &'ast Expr) -> Result<(), TypeError> {
+    fn infer_exit(&mut self, this_expr: &'ast Expr) -> Result<(), TypeError> {
         match this_expr {
-            // At this stage there is no available information with which to constrain identifiers or wildcards.
-            Expr::Identifier(_) | Expr::CompoundIdentifier(_) => {
-                self.unify(self.get_type(this_expr), Type::fresh_tvar())?;
+            Expr::Identifier(ident) => {
+                self.unify_and_log(
+                    this_expr,
+                    self.get_type(this_expr),
+                    self.scope.borrow().resolve_ident(ident)?,
+                )?;
             }
 
-            Expr::Wildcard | Expr::QualifiedWildcard(_) => {
-                self.unify(
+            Expr::CompoundIdentifier(idents) => {
+                self.unify_and_log(
+                    this_expr,
                     self.get_type(this_expr),
-                    Type::projection(&[(Type::fresh_tvar(), None)]),
+                    self.scope.borrow().resolve_compound_ident(idents)?,
+                )?;
+            }
+
+            Expr::Wildcard => {
+                self.unify_and_log(
+                    this_expr,
+                    self.get_type(this_expr),
+                    self.scope.borrow().resolve_wildcard()?,
+                )?;
+            }
+
+            Expr::QualifiedWildcard(object_name) => {
+                self.unify_and_log(
+                    this_expr,
+                    self.get_type(this_expr),
+                    self.scope
+                        .borrow()
+                        .resolve_qualified_wildcard(&object_name.0)?,
                 )?;
             }
 
@@ -32,14 +54,23 @@ impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
             | Expr::IsNotNull(expr)
             | Expr::IsUnknown(expr)
             | Expr::IsNotUnknown(expr) => {
-                self.unify(self.get_type(this_expr), Type::anonymous_native())?;
-                self.unify(self.get_type(&**expr), Type::anonymous_native())?;
+                self.unify_and_log(
+                    this_expr,
+                    self.get_type(this_expr),
+                    Type::anonymous_native(),
+                )?;
+                self.unify_and_log(this_expr, self.get_type(&**expr), Type::anonymous_native())?;
             }
 
             Expr::IsDistinctFrom(a, b) | Expr::IsNotDistinctFrom(a, b) => {
-                self.unify(self.get_type(this_expr), Type::anonymous_native())?;
-                self.unify(
-                    self.unify(self.get_type(&**a), self.get_type(&**b))?,
+                self.unify_and_log(
+                    this_expr,
+                    self.get_type(this_expr),
+                    Type::anonymous_native(),
+                )?;
+                self.unify_and_log(
+                    this_expr,
+                    self.unify_and_log(this_expr, self.get_type(&**a), self.get_type(&**b))?,
                     Type::fresh_tvar(),
                 )?;
             }
@@ -49,11 +80,16 @@ impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
                 list,
                 negated: _,
             } => {
-                self.unify(self.get_type(this_expr), Type::anonymous_native())?;
-                self.unify(
+                self.unify_and_log(
+                    this_expr,
+                    self.get_type(this_expr),
+                    Type::anonymous_native(),
+                )?;
+                self.unify_and_log(
+                    this_expr,
                     self.get_type(&**expr),
                     list.iter().try_fold(self.get_type(&**expr), |a, b| {
-                        self.unify(a, self.get_type(b))
+                        self.unify_and_log(this_expr, a, self.get_type(b))
                     })?,
                 )?;
             }
@@ -63,9 +99,14 @@ impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
                 subquery,
                 negated: _,
             } => {
-                self.unify(self.get_type(this_expr), Type::anonymous_native())?;
-                self.unify(self.get_type(&**expr), Type::fresh_tvar())?;
-                self.unify(
+                self.unify_and_log(
+                    this_expr,
+                    self.get_type(this_expr),
+                    Type::anonymous_native(),
+                )?;
+                self.unify_and_log(this_expr, self.get_type(&**expr), Type::fresh_tvar())?;
+                self.unify_and_log(
+                    this_expr,
                     self.get_type(&**subquery),
                     Type::projection(&[(self.get_type(&**expr), None)]),
                 )?;
@@ -81,9 +122,14 @@ impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
                 low,
                 high,
             } => {
-                self.unify(self.get_type(this_expr), Type::anonymous_native())?;
-                self.unify(
-                    self.unify(self.get_type(&**expr), self.get_type(&**low))?,
+                self.unify_and_log(
+                    this_expr,
+                    self.get_type(this_expr),
+                    Type::anonymous_native(),
+                )?;
+                self.unify_and_log(
+                    this_expr,
+                    self.unify_and_log(this_expr, self.get_type(&**expr), self.get_type(&**low))?,
                     self.get_type(&**high),
                 )?;
             }
@@ -127,7 +173,11 @@ impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
                     | BinaryOperator::PGNotILikeMatch
                     | BinaryOperator::PGStartsWith
                     | BinaryOperator::PGCustomBinaryOperator(_) => {
-                        self.unify(self.get_type(this_expr), Type::anonymous_native())?;
+                        self.unify_and_log(
+                            this_expr,
+                            self.get_type(this_expr),
+                            self.unify(self.get_type(&**left), self.get_type(&**right))?,
+                        )?;
                     }
 
                     // JSON(B) operators.
@@ -142,13 +192,29 @@ impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
                     | BinaryOperator::Question
                     | BinaryOperator::QuestionAnd
                     | BinaryOperator::QuestionPipe => {
-                        self.unify(self.get_type(this_expr), Type::anonymous_native())?;
+                        self.unify_and_log(
+                            this_expr,
+                            self.get_type(this_expr),
+                            self.unify_and_log(
+                                left,
+                                self.get_type(&**left),
+                                self.get_type(&**right),
+                            )?,
+                        )?;
                     }
 
                     // JSON(B)/Array containment operators (@> and <@)
                     // Both sides must unify to the same type.
                     BinaryOperator::AtArrow | BinaryOperator::ArrowAt => {
-                        self.unify(self.get_type(&**left), self.get_type(&**right))?;
+                        self.unify_and_log(
+                            this_expr,
+                            self.get_type(this_expr),
+                            self.unify_and_log(
+                                left,
+                                self.get_type(&**left),
+                                self.get_type(&**right),
+                            )?,
+                        )?;
                     }
                 }
             }
@@ -167,8 +233,12 @@ impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
                 escape_char: _,
                 any: false,
             } => {
-                self.unify(self.get_type(this_expr), Type::anonymous_native())?;
-                self.unify(self.get_type(&**expr), self.get_type(&**pattern))?;
+                self.unify_and_log(
+                    this_expr,
+                    self.get_type(this_expr),
+                    Type::anonymous_native(),
+                )?;
+                self.unify_and_log(this_expr, self.get_type(&**expr), self.get_type(&**pattern))?;
             }
 
             Expr::Like { any: true, .. } | Expr::ILike { any: true, .. } => {
@@ -183,9 +253,18 @@ impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
                 pattern,
                 escape_char: _,
             } => {
-                self.unify(self.get_type(this_expr), Type::anonymous_native())?;
-                self.unify(
-                    self.unify(self.get_type(&**expr), self.get_type(&**pattern))?,
+                self.unify_and_log(
+                    this_expr,
+                    self.get_type(this_expr),
+                    Type::anonymous_native(),
+                )?;
+                self.unify_and_log(
+                    this_expr,
+                    self.unify_and_log(
+                        this_expr,
+                        self.get_type(&**expr),
+                        self.get_type(&**pattern),
+                    )?,
                     Type::anonymous_native(),
                 )?;
             }
@@ -205,8 +284,12 @@ impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
                 compare_op: _,
                 right,
             } => {
-                self.unify(self.get_type(this_expr), Type::anonymous_native())?;
-                self.unify(self.get_type(&**left), self.get_type(&**right))?;
+                self.unify_and_log(
+                    this_expr,
+                    self.get_type(this_expr),
+                    Type::anonymous_native(),
+                )?;
+                self.unify_and_log(this_expr, self.get_type(&**left), self.get_type(&**right))?;
             }
 
             Expr::Ceil { expr, .. }
@@ -214,17 +297,33 @@ impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
             | Expr::UnaryOp { expr, .. }
             | Expr::Convert { expr, .. }
             | Expr::Cast { expr, .. } => {
-                self.unify(self.get_type(this_expr), Type::anonymous_native())?;
-                self.unify(self.get_type(&**expr), Type::anonymous_native())?;
+                self.unify_and_log(
+                    this_expr,
+                    self.get_type(this_expr),
+                    Type::anonymous_native(),
+                )?;
+                self.unify_and_log(this_expr, self.get_type(&**expr), Type::anonymous_native())?;
             }
 
             Expr::AtTimeZone {
                 timestamp,
                 time_zone,
             } => {
-                self.unify(self.get_type(this_expr), Type::anonymous_native())?;
-                self.unify(self.get_type(&**time_zone), Type::anonymous_native())?;
-                self.unify(self.get_type(&**timestamp), Type::anonymous_native())?;
+                self.unify_and_log(
+                    this_expr,
+                    self.get_type(this_expr),
+                    Type::anonymous_native(),
+                )?;
+                self.unify_and_log(
+                    this_expr,
+                    self.get_type(&**time_zone),
+                    Type::anonymous_native(),
+                )?;
+                self.unify_and_log(
+                    this_expr,
+                    self.get_type(&**timestamp),
+                    Type::anonymous_native(),
+                )?;
             }
 
             Expr::Extract {
@@ -232,14 +331,23 @@ impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
                 syntax: _,
                 expr,
             } => {
-                self.unify(self.get_type(this_expr), Type::anonymous_native())?;
-                self.unify(self.get_type(&**expr), Type::anonymous_native())?;
+                self.unify_and_log(
+                    this_expr,
+                    self.get_type(this_expr),
+                    Type::anonymous_native(),
+                )?;
+                self.unify_and_log(this_expr, self.get_type(&**expr), Type::anonymous_native())?;
             }
 
             Expr::Position { expr, r#in } => {
-                self.unify(self.get_type(this_expr), Type::anonymous_native())?;
-                self.unify(
-                    self.unify(self.get_type(&**expr), self.get_type(&**r#in))?,
+                self.unify_and_log(
+                    this_expr,
+                    self.get_type(this_expr),
+                    Type::anonymous_native(),
+                )?;
+                self.unify_and_log(
+                    this_expr,
+                    self.unify_and_log(this_expr, self.get_type(&**expr), self.get_type(&**r#in))?,
                     Type::anonymous_native(),
                 )?;
             }
@@ -250,13 +358,25 @@ impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
                 substring_for,
                 special: _,
             } => {
-                self.unify(self.get_type(&**expr), Type::anonymous_native())?;
-                self.unify(self.get_type(this_expr), Type::anonymous_native())?;
+                self.unify_and_log(this_expr, self.get_type(&**expr), Type::anonymous_native())?;
+                self.unify_and_log(
+                    this_expr,
+                    self.get_type(this_expr),
+                    Type::anonymous_native(),
+                )?;
                 if let Some(expr) = substring_from {
-                    self.unify(self.get_type(&**expr), Type::anonymous_native())?;
+                    self.unify_and_log(
+                        this_expr,
+                        self.get_type(&**expr),
+                        Type::anonymous_native(),
+                    )?;
                 }
                 if let Some(expr) = substring_for {
-                    self.unify(self.get_type(&**expr), Type::anonymous_native())?;
+                    self.unify_and_log(
+                        this_expr,
+                        self.get_type(&**expr),
+                        Type::anonymous_native(),
+                    )?;
                 }
             }
 
@@ -268,19 +388,31 @@ impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
                 trim_what,
                 trim_characters,
             } => {
-                self.unify(self.get_type(this_expr), Type::anonymous_native())?;
-                self.unify(self.get_type(&**expr), Type::anonymous_native())?;
+                self.unify_and_log(
+                    this_expr,
+                    self.get_type(this_expr),
+                    Type::anonymous_native(),
+                )?;
+                self.unify_and_log(this_expr, self.get_type(&**expr), Type::anonymous_native())?;
                 if let Some(trim_where) = trim_where {
-                    self.unify(self.get_type(trim_where), Type::anonymous_native())?;
+                    self.unify_and_log(
+                        this_expr,
+                        self.get_type(trim_where),
+                        Type::anonymous_native(),
+                    )?;
                 }
                 if let Some(trim_what) = trim_what {
-                    self.unify(self.get_type(&**trim_what), Type::anonymous_native())?;
+                    self.unify_and_log(
+                        this_expr,
+                        self.get_type(&**trim_what),
+                        Type::anonymous_native(),
+                    )?;
                 }
                 if let Some(trim_characters) = trim_characters {
                     trim_characters
                         .iter()
                         .try_fold(Type::anonymous_native(), |a, b| {
-                            self.unify(a, self.get_type(b))
+                            self.unify_and_log(this_expr, a, self.get_type(b))
                         })?;
                 }
             }
@@ -291,28 +423,49 @@ impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
                 overlay_from,
                 overlay_for,
             } => {
-                self.unify(self.get_type(this_expr), Type::anonymous_native())?;
-                self.unify(self.get_type(&**expr), Type::anonymous_native())?;
-                self.unify(self.get_type(&**overlay_what), Type::anonymous_native())?;
-                self.unify(self.get_type(&**overlay_from), Type::anonymous_native())?;
+                self.unify_and_log(
+                    this_expr,
+                    self.get_type(this_expr),
+                    Type::anonymous_native(),
+                )?;
+                self.unify_and_log(this_expr, self.get_type(&**expr), Type::anonymous_native())?;
+                self.unify_and_log(
+                    this_expr,
+                    self.get_type(&**overlay_what),
+                    Type::anonymous_native(),
+                )?;
+                self.unify_and_log(
+                    this_expr,
+                    self.get_type(&**overlay_from),
+                    Type::anonymous_native(),
+                )?;
                 if let Some(overlay_for) = overlay_for {
-                    self.unify(self.get_type(&**overlay_for), Type::anonymous_native())?;
+                    self.unify_and_log(
+                        this_expr,
+                        self.get_type(&**overlay_for),
+                        Type::anonymous_native(),
+                    )?;
                 }
             }
 
             Expr::Collate { expr, collation: _ } => {
-                self.unify(self.get_type(this_expr), Type::anonymous_native())?;
-                self.unify(self.get_type(&**expr), Type::anonymous_native())?;
+                self.unify_and_log(
+                    this_expr,
+                    self.get_type(this_expr),
+                    Type::anonymous_native(),
+                )?;
+                self.unify_and_log(this_expr, self.get_type(&**expr), Type::anonymous_native())?;
             }
 
             // The current `Expr` shares the same type hole as the sub-expression
             Expr::Nested(expr) => {
-                self.unify(self.get_type(this_expr), self.get_type(&**expr))?;
+                self.unify_and_log(this_expr, self.get_type(this_expr), self.get_type(&**expr))?;
             }
 
             // The current `Expr` shares the same type hole as the `Value`.
-            Expr::Value(value) => {
-                self.unify(self.get_type(this_expr), self.get_type(value))?;
+            Expr::Value(_) => {
+                // self.unify_and_log(this_expr, self.get_type(this_expr), self.get_type(value))?;
+                self.get_type(this_expr);
             }
 
             Expr::IntroducedString { .. } => Err(TypeError::UnsupportedSqlFeature(
@@ -323,7 +476,11 @@ impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
                 data_type: _,
                 value: _,
             } => {
-                self.unify(self.get_type(this_expr), Type::anonymous_native())?;
+                self.unify_and_log(
+                    this_expr,
+                    self.get_type(this_expr),
+                    Type::anonymous_native(),
+                )?;
             }
 
             Expr::MapAccess { column: _, keys: _ } => Err(TypeError::UnsupportedSqlFeature(
@@ -332,7 +489,7 @@ impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
 
             // The return type of this function and the return type of this statement must be the same type.
             Expr::Function(function) => {
-                self.unify(self.get_type(this_expr), self.get_type(function))?;
+                self.unify_and_log(this_expr, self.get_type(this_expr), self.get_type(function))?;
             }
 
             // When operand is Some(operand), all conditions must be of type expr and expr must support equality
@@ -348,45 +505,59 @@ impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
                 match operand {
                     Some(operand) => {
                         let condition_ty = Type::fresh_tvar();
-                        self.unify(
+                        self.unify_and_log(
+                            this_expr,
                             self.get_type(&**operand),
-                            conditions
-                                .iter()
-                                .try_fold(condition_ty, |a, b| self.unify(a, self.get_type(b)))?,
+                            conditions.iter().try_fold(condition_ty, |a, b| {
+                                self.unify_and_log(this_expr, a, self.get_type(b))
+                            })?,
                         )?;
                     }
                     None => {
-                        self.unify(
+                        self.unify_and_log(
+                            this_expr,
                             Type::anonymous_native(),
                             conditions
                                 .iter()
                                 .try_fold(Type::anonymous_native(), |a, b| {
-                                    self.unify(a, self.get_type(b))
+                                    self.unify_and_log(this_expr, a, self.get_type(b))
                                 })?,
                         )?;
                     }
                 }
 
-                let results_type = results
-                    .iter()
-                    .try_fold(Type::fresh_tvar(), |a, b| self.unify(a, self.get_type(b)))?;
+                let results_type = results.iter().try_fold(Type::fresh_tvar(), |a, b| {
+                    self.unify_and_log(this_expr, a, self.get_type(b))
+                })?;
 
                 if let Some(else_result) = else_result {
-                    self.unify(results_type.clone(), self.get_type(&**else_result))?;
+                    self.unify_and_log(
+                        this_expr,
+                        results_type.clone(),
+                        self.get_type(&**else_result),
+                    )?;
                 };
 
-                self.unify(self.get_type(this_expr), results_type)?;
+                self.unify_and_log(this_expr, self.get_type(this_expr), results_type)?;
             }
 
             Expr::Exists {
                 subquery: _,
                 negated: _,
             } => {
-                self.unify(self.get_type(this_expr), Type::anonymous_native())?;
+                self.unify_and_log(
+                    this_expr,
+                    self.get_type(this_expr),
+                    Type::anonymous_native(),
+                )?;
             }
 
             Expr::Subquery(subquery) => {
-                self.unify(self.get_type(this_expr), self.get_type(&**subquery))?;
+                self.unify_and_log(
+                    this_expr,
+                    self.get_type(this_expr),
+                    self.get_type(&**subquery),
+                )?;
             }
 
             // unsupported SQL features
@@ -421,25 +592,36 @@ impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
             // `self.get_type(this_expr)` must be the same as the array element type
             Expr::Subscript { expr, subscript: _ } => {
                 let elem_type = Type::fresh_tvar();
-                self.unify(self.get_type(&**expr), Type::array(elem_type.clone()))?;
-                self.unify(self.get_type(this_expr), elem_type)?;
+                self.unify_and_log(
+                    this_expr,
+                    self.get_type(&**expr),
+                    Type::array(elem_type.clone()),
+                )?;
+                self.unify_and_log(this_expr, self.get_type(this_expr), elem_type)?;
             }
 
             Expr::Array(array) => {
                 let array_ty = Type::array(
                     // Constrain all elements of the array to be the same type.
-                    array
-                        .elem
-                        .iter()
-                        .try_fold(Type::fresh_tvar(), |a, b| self.unify(a, self.get_type(b)))?,
+                    array.elem.iter().try_fold(Type::fresh_tvar(), |a, b| {
+                        self.unify_and_log(this_expr, a, self.get_type(b))
+                    })?,
                 );
-                self.unify(self.get_type(this_expr), array_ty)?;
+                self.unify_and_log(this_expr, self.get_type(this_expr), array_ty)?;
             }
 
             // interval is unmapped, value is unmapped
             Expr::Interval(interval) => {
-                self.unify(self.get_type(this_expr), Type::anonymous_native())?;
-                self.unify(self.get_type(&*interval.value), Type::anonymous_native())?;
+                self.unify_and_log(
+                    this_expr,
+                    self.get_type(this_expr),
+                    Type::anonymous_native(),
+                )?;
+                self.unify_and_log(
+                    this_expr,
+                    self.get_type(&*interval.value),
+                    Type::anonymous_native(),
+                )?;
             }
 
             // mysql specific
@@ -462,48 +644,6 @@ impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
             Expr::Lambda(_) => Err(TypeError::UnsupportedSqlFeature(
                 "Unsupported SQL feature: lambda functions".into(),
             ))?,
-        }
-
-        Ok(())
-    }
-
-    fn infer_exit(&mut self, this_expr: &'ast Expr) -> Result<(), TypeError> {
-        // The variants that are explicitly matched are the only variants that can resolve
-        // to any type other than ScalarType::Native.
-        //
-        // The default case ensures that the current Expr is resolved as ScalarType::Native.
-        match this_expr {
-            Expr::Identifier(ident) => {
-                self.unify(
-                    self.get_type(this_expr),
-                    self.scope.borrow().resolve_ident(ident)?,
-                )?;
-            }
-
-            Expr::CompoundIdentifier(idents) => {
-                self.unify(
-                    self.get_type(this_expr),
-                    self.scope.borrow().resolve_compound_ident(idents)?,
-                )?;
-            }
-
-            Expr::Wildcard => {
-                self.unify(
-                    self.get_type(this_expr),
-                    self.scope.borrow().resolve_wildcard()?,
-                )?;
-            }
-
-            Expr::QualifiedWildcard(object_name) => {
-                self.unify(
-                    self.get_type(this_expr),
-                    self.scope
-                        .borrow()
-                        .resolve_qualified_wildcard(&object_name.0)?,
-                )?;
-            }
-
-            _ => {}
         }
 
         Ok(())

@@ -103,12 +103,13 @@ impl ProjectionColumn {
 }
 
 impl Type {
+    #[cfg(test)]
     pub(crate) fn projection(
         cols: &[impl Into<(ProjectionColumnType, Option<Ident>)> + Clone],
     ) -> Self {
         Type::Projection(Projection(
-            cols.to_vec()
-                .into_iter()
+            cols.iter()
+                .cloned()
                 .map(|col| {
                     let (ty, alias): (ProjectionColumnType, Option<Ident>) = col.into();
                     ProjectionColumn { ty, alias }

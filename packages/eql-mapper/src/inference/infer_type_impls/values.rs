@@ -32,7 +32,8 @@ impl<'ast> InferType<'ast, Values> for TypeInferencer<'ast> {
             }
         }
 
-        self.unify(
+        self.unify_and_log(
+            values,
             self.get_type(values),
             Type::projection(
                 &column_types

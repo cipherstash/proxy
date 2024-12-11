@@ -2,6 +2,7 @@ use std::collections::HashSet;
 
 use crate::{SchemaError, ScopeError};
 
+
 #[derive(PartialEq, Eq, Clone, Debug, thiserror::Error)]
 pub enum TypeError {
     #[error("SQL feature {} is not supported", _0)]
@@ -13,8 +14,8 @@ pub enum TypeError {
     #[error("{}", _0)]
     Conflict(String),
 
-    #[error("unified type contains unresolved type variables")]
-    Incomplete,
+    #[error("unified type contains unresolved type variable: {}", _0)]
+    Incomplete(String),
 
     #[error(transparent)]
     ScopeError(#[from] ScopeError),

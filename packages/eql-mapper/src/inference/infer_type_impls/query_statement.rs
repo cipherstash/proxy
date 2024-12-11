@@ -6,7 +6,7 @@ impl<'ast> InferType<'ast, Query> for TypeInferencer<'ast> {
     fn infer_exit(&mut self, query: &'ast Query) -> Result<(), TypeError> {
         let Query { body, .. } = query;
 
-        self.unify(self.get_type(query), self.get_type(&**body))?;
+        self.unify_and_log(query, self.get_type(query), self.get_type(&**body))?;
 
         Ok(())
     }

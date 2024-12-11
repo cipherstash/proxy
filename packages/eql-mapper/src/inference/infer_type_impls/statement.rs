@@ -8,15 +8,15 @@ impl<'ast> InferType<'ast, Statement> for TypeInferencer<'ast> {
     fn infer_exit(&mut self, statement: &'ast Statement) -> Result<(), TypeError> {
         match statement {
             Statement::Query(query) => {
-                self.unify(self.get_type(statement), self.get_type(&**query))?;
+                self.unify_and_log(statement, self.get_type(statement), self.get_type(&**query))?;
             }
 
             Statement::Insert(insert) => {
-                self.unify(self.get_type(statement), self.get_type(insert))?;
+                self.unify_and_log(statement, self.get_type(statement), self.get_type(insert))?;
             }
 
             Statement::Delete(delete) => {
-                self.unify(self.get_type(statement), self.get_type(delete))?;
+                self.unify_and_log(statement, self.get_type(statement), self.get_type(delete))?;
             }
 
             Statement::Update {
@@ -34,7 +34,7 @@ impl<'ast> InferType<'ast, Statement> for TypeInferencer<'ast> {
                                 .borrow()
                                 .resolve_ident(object_name.0.last().unwrap())?;
 
-                            self.unify(ty, self.get_type(&assignment.value))?;
+                            self.unify_and_log(assignment, ty, self.get_type(&assignment.value))?;
                         }
 
                         AssignmentTarget::Tuple(_) => {
@@ -47,10 +47,14 @@ impl<'ast> InferType<'ast, Statement> for TypeInferencer<'ast> {
 
                 match returning {
                     Some(returning) => {
-                        self.unify(self.get_type(statement), self.get_type(returning))?;
+                        self.unify_and_log(
+                            statement,
+                            self.get_type(statement),
+                            self.get_type(returning),
+                        )?;
                     }
                     None => {
-                        self.unify(self.get_type(statement), Type::empty())?;
+                        self.unify_and_log(statement, self.get_type(statement), Type::empty())?;
                     }
                 }
             }

@@ -49,7 +49,14 @@ pub fn type_check<'ast>(
                 node_types: mapper.node_types()?,
             })
         }
-        ControlFlow::Break(Break::Err(err)) => Err(err),
+        ControlFlow::Break(Break::Err(err)) => {
+            #[cfg(test)]
+            {
+                mapper.inferencer.borrow().dump_registry(statement);
+            }
+
+            Err(err)
+        }
         ControlFlow::Break(_) => Err(EqlMapperError::InternalError(String::from(
             "unexpected Break value in type_check",
         ))),
@@ -66,7 +73,7 @@ pub struct TypedStatement<'ast> {
     pub params: Vec<Scalar>,
 
     /// The types and values of all literals from the SQL statement.
-    pub literals: Vec<(EqlColumn, &'ast Value)>,
+    pub literals: Vec<(EqlColumn, &'ast Expr)>,
 
     /// The types of all semantically interesting nodes with the AST.
     node_types: HashMap<NodeKey<'ast>, Type>,
@@ -157,10 +164,10 @@ impl<'ast> EqlMapper<'ast> {
     }
 
     /// Asks the [`TypeInferencer`] for a hashmap of literal types, validating that that are all `Scalar` types.
-    fn literal_types(&self) -> Result<Vec<(EqlColumn, &'ast Value)>, EqlMapperError> {
+    fn literal_types(&self) -> Result<Vec<(EqlColumn, &'ast Expr)>, EqlMapperError> {
         let inferencer = self.inferencer.borrow();
         let literal_nodes = inferencer.literal_nodes();
-        let literals: Vec<(EqlColumn, &'ast Value)> = literal_nodes
+        let literals: Vec<(EqlColumn, &'ast Expr)> = literal_nodes
             .iter()
             .map(|node_key| match inferencer.get_type_by_node_key(node_key) {
                 Some(ty) => {
@@ -169,8 +176,8 @@ impl<'ast> EqlMapper<'ast> {
                         unifier::Status::Resolved,
                     ) = &*ty.borrow()
                     {
-                        match node_key.get_as::<Value>() {
-                            Some(value) => Ok((EqlColumn::try_from(&**scalar_ty)?, value)),
+                        match node_key.get_as::<Expr>() {
+                            Some(expr) => Ok((EqlColumn::try_from(&**scalar_ty)?, expr)),
                             None => Err(EqlMapperError::InternalError(String::from(
                                 "could not resolve literal node",
                             ))),
@@ -241,7 +248,7 @@ impl<'ast> TypedStatement<'ast> {
     /// Transforms the SQL statement by replacing all plaintext literals with EQL equivalents.
     pub fn transform(
         &self,
-        encrypted_literals: HashMap<&'ast Value, Value>,
+        encrypted_literals: HashMap<&'ast Expr, Expr>,
     ) -> Result<Statement, EqlMapperError> {
         for (_, target) in self.literals.iter() {
             if !encrypted_literals.contains_key(target) {
@@ -256,11 +263,11 @@ impl<'ast> TypedStatement<'ast> {
 
 #[derive(Debug)]
 struct EncryptedStatement<'ast> {
-    encrypted_literals: HashMap<&'ast Value, Value>,
+    encrypted_literals: HashMap<&'ast Expr, Expr>,
 }
 
 impl<'ast> EncryptedStatement<'ast> {
-    fn new(encrypted_literals: HashMap<&'ast Value, Value>) -> Self {
+    fn new(encrypted_literals: HashMap<&'ast Expr, Expr>) -> Self {
         Self { encrypted_literals }
     }
 }
@@ -277,10 +284,10 @@ impl<'ast> Transform<'ast> for EncryptedStatement<'ast> {
         original_node: &'ast N,
         mut new_node: N,
     ) -> Result<N, Self::Error> {
-        if let Some(target_value) = new_node.downcast_mut::<Value>() {
-            match original_node.downcast_ref::<Value>() {
+        if let Some(target_value) = new_node.downcast_mut::<Expr>() {
+            match original_node.downcast_ref::<Expr>() {
                 Some(original_value) => match original_value {
-                    Value::Placeholder(_) => {
+                    Expr::Value(Value::Placeholder(_)) => {
                         return Err(EqlMapperError::InternalError(
                             "attempt was made to update placeholder with literal".to_string(),
                         ));
@@ -329,6 +336,8 @@ impl<'ast> Visitor<'ast> for EqlMapper<'ast> {
 #[cfg(test)]
 mod test {
     use pretty_assertions::assert_eq;
+    
+    
 
     use sqlparser::{
         ast::{Ident, Statement},
@@ -380,7 +389,8 @@ mod test {
 
         ((EQL($table:ident . $column:ident))) => {
             (
-                Scalar::EqlColumn::from((stringify!($table), stringify!($column))).into(),
+                Scalar::EqlColumn(EqlColumn::from((stringify!($table), stringify!($column))))
+                    .into(),
                 None,
             )
         };
@@ -555,6 +565,49 @@ mod test {
                 (NATIVE(todo_lists.id) as id),
                 (NATIVE(todo_lists.owner_id) as owner_id),
                 (EQL(todo_lists.secret) as secret)
+            ])
+        );
+    }
+
+    #[test]
+    fn correlated_subquery() {
+        tracing_subscriber::fmt::init();
+
+        let schema = Dep::new(make_schema! {
+            tables: {
+                employees: {
+                    id,
+                    first_name,
+                    last_name,
+                    salary (ENCRYPTED),
+                }
+            }
+        });
+
+        let statement = parse(
+            r#"
+                select
+                    first_name,
+                    last_name,
+                    salary
+                from
+                    employees
+                where
+                    salary > (select salary from employees where first_name = 'Alice')
+            "#,
+        );
+
+        let typed = match type_check(&schema, &statement) {
+            Ok(typed) => typed,
+            Err(err) => panic!("type check failed: {:#?}", err),
+        };
+
+        assert_eq!(
+            typed.get_type(&statement),
+            Some(&projection![
+                (NATIVE(employees.first_name) as first_name),
+                (NATIVE(employees.last_name) as last_name),
+                (EQL(employees.salary) as salary)
             ])
         );
     }

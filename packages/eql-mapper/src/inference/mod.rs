@@ -7,11 +7,13 @@ mod type_variables;
 
 pub mod unifier;
 
+use tracing::info;
 use unifier::*;
 
 use std::{
     cell::RefCell,
     collections::{HashMap, HashSet},
+    fmt::{Debug, Display},
     marker::PhantomData,
     ops::ControlFlow,
     rc::Rc,
@@ -168,6 +170,17 @@ impl<'ast> TypeInferencer<'ast> {
         self.unifier.borrow_mut().unify(left, right)
     }
 
+    fn unify_and_log<N: Debug + Display>(
+        &self,
+        node: &'ast N,
+        left: Rc<RefCell<Type>>,
+        right: Rc<RefCell<Type>>,
+    ) -> Result<Rc<RefCell<Type>>, TypeError> {
+        info!("NODE (Display): {}", node);
+        info!("NODE (Debug): {:?}", node);
+        self.unifier.borrow_mut().unify(left, right)
+    }
+
     /// Shorthand for calling `self.reg.borrow().try_resolve_all_types()` in [`InferType`] implementations for `TypeInferencer`.
     pub(crate) fn try_resolve_all_types(
         &self,
@@ -235,13 +248,13 @@ impl<'ast> Visitor<'ast> for TypeInferencer<'ast> {
 
     fn exit<N: Visitable>(&mut self, node: &'ast N) -> ControlFlow<Break<Self::Error>> {
         if let Some(node) = node.downcast_ref::<Statement>() {
-            into_control_flow(self.infer_exit(node))?;
-            {
-                let ty = self.get_type(node);
-                let ty_mut = &mut *ty.borrow_mut();
-                into_control_flow(ty_mut.try_resolve())?;
-            }
-            into_control_flow(self.try_resolve_all_types())?
+            into_control_flow(self.infer_exit(node))?
+            // {
+            //     let ty = self.get_type(node);
+            //     let ty_mut = &mut *ty.borrow_mut();
+            //     into_control_flow(ty_mut.try_resolve())?;
+            // }
+            // into_control_flow(self.try_resolve_all_types())?
         }
 
         if let Some(node) = node.downcast_ref::<Query>() {

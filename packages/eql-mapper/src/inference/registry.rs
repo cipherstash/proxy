@@ -125,7 +125,7 @@ pub(crate) mod test_util {
         Delete, Expr, Function, FunctionArguments, Insert, Query, Select, SetExpr, Statement,
     };
     use sqltk::{Break, Visitable, Visitor};
-    use std::{convert::Infallible, ops::ControlFlow};
+    use std::{convert::Infallible, fmt::Debug, ops::ControlFlow};
 
     use super::{NodeKey, TypeRegistry};
 
@@ -135,14 +135,14 @@ pub(crate) mod test_util {
         /// Dumps the type information for a specific AST node to STDERR.
         ///
         /// Useful when debugging tests.
-        pub(crate) fn dump_node<N: Display + Visitable>(&self, node: &N) {
+        pub(crate) fn dump_node<N: Display + Visitable + Debug>(&self, node: &N) {
             let key = NodeKey::new_from_visitable(node);
             if let Some(ty) = self.node_types.get(&key) {
                 eprintln!(
-                    "{}\n   {}\n   {}\n\n",
+                    "START\n{}\n{}\n{}\nEND\n",
                     std::any::type_name::<N>(),
                     node,
-                    *ty.borrow()
+                    *ty.borrow(),
                 );
             };
         }

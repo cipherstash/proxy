@@ -9,7 +9,7 @@ use crate::{
 };
 
 impl<'ast> InferType<'ast, Function> for TypeInferencer<'ast> {
-    fn infer_enter(&mut self, function: &'ast Function) -> Result<(), TypeError> {
+    fn infer_exit(&mut self, function: &'ast Function) -> Result<(), TypeError> {
         if !matches!(function.parameters, FunctionArguments::None) {
             return Err(TypeError::UnsupportedSqlFeature(
                 "Clickhouse-style function parameters".into(),

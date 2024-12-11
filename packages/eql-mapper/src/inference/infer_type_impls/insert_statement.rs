@@ -57,16 +57,16 @@ impl<'ast> InferType<'ast, Insert> for TypeInferencer<'ast> {
                     .collect::<Vec<_>>(),
             );
 
-            self.unify(target_columns, self.get_type(&**source))?;
+            self.unify_and_log(source, target_columns, self.get_type(&**source))?;
         }
 
         match returning {
             Some(returning) => {
-                self.unify(self.get_type(insert), self.get_type(returning))?;
+                self.unify_and_log(insert, self.get_type(insert), self.get_type(returning))?;
             }
 
             None => {
-                self.unify(self.get_type(insert), Type::empty())?;
+                self.unify_and_log(insert, self.get_type(insert), Type::empty())?;
             }
         }
 

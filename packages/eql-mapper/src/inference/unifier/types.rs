@@ -61,9 +61,10 @@ impl Type {
                         .borrow()
                         .iter()
                         .map(|col| match &*col.ty.borrow() {
-                            Type(Def::Constructor(Constructor::Projection(_)), _) => {
-                                Status::Partial
-                            }
+                            Type(
+                                Def::Constructor(Constructor::Projection(_)),
+                                projection_status,
+                            ) => *projection_status,
                             Type(_, status) => *status,
                         })
                         .all(|s| s == Status::Resolved)
@@ -149,7 +150,7 @@ impl Type {
                 Ok(())
             }
 
-            Def::Var(_) => Err(TypeError::Incomplete),
+            Def::Var(tvar) => Err(TypeError::Incomplete(tvar.to_string())),
         }
     }
 }
@@ -239,7 +240,9 @@ impl Constructor {
 
             Constructor::Array(element_ty) => {
                 let ty = &mut *element_ty.borrow_mut();
-                ty.try_resolve()
+                ty.try_resolve()?;
+                ty.1 = Status::Resolved;
+                Ok(())
             }
 
             Constructor::Projection(columns) => {
@@ -247,6 +250,7 @@ impl Constructor {
                 for column in columns {
                     let ty = &mut *column.ty.borrow_mut();
                     ty.try_resolve()?;
+                    ty.1 = Status::Resolved;
                 }
                 Ok(())
             }

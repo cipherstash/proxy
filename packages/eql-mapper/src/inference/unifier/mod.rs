@@ -7,6 +7,7 @@ use crate::inference::TypeError;
 pub(crate) use types::*;
 
 use super::TypeVarGenerator;
+use tracing::info;
 
 /// Implements the type unification algorithm and maintains an association of type variables with the type that they
 /// point to.
@@ -15,6 +16,7 @@ pub struct Unifier {
     /// A map of type variable substitutions.
     subs: HashMap<u32, Rc<RefCell<Type>>>,
     tvar_gen: TypeVarGenerator,
+    depth: usize,
 }
 
 impl Default for Unifier {
@@ -29,6 +31,7 @@ impl Unifier {
         Self {
             subs: HashMap::new(),
             tvar_gen: TypeVarGenerator::new(),
+            depth: 0,
         }
     }
 
@@ -51,9 +54,19 @@ impl Unifier {
         use types::Constructor::*;
         use types::Def::*;
 
+        self.depth += 1;
+
         let (a, b) = (left.borrow(), right.borrow());
 
-        match (&*a, &*b) {
+        info!(
+            "UNIFY:{:indent$}  {} + {}",
+            "",
+            a,
+            b,
+            indent = (self.depth - 1) * 4
+        );
+
+        let unification = match (&*a, &*b) {
             // Two projections unify if they have the same number of columns and all of the paired column types also
             // unify.
             (
@@ -76,38 +89,6 @@ impl Unifier {
                 *right.borrow_mut() = left.borrow().clone();
 
                 Ok(left.clone())
-            }
-
-            // For types that are resolved, in order to successfully unify they must either be:
-            // - equal (according to the Eq trait), or
-            // - both be native
-            (Type(body_a, Status::Resolved), Type(body_b, Status::Resolved)) => {
-                if body_a == body_b {
-                    Ok(left.clone())
-                } else {
-                    match (body_a, body_b) {
-                        // Constructor::AnonymousNative and Constructor::Scalar(Scalar::Native{ .. }) will unify
-                        // to Constructor::Scalar(Scalar::Native{ .. }) to preserve information.
-                        (Def::Constructor(ctor_a), Def::Constructor(ctor_b))
-                            if ctor_a.is_native() && ctor_b.is_native() =>
-                        {
-                            if let Scalar(_) = ctor_a {
-                                return Ok(left.clone());
-                            }
-
-                            if let Scalar(_) = ctor_b {
-                                return Ok(right.clone());
-                            }
-
-                            Ok(left.clone())
-                        }
-
-                        _ => Err(TypeError::Conflict(format!(
-                            "expected resolved types {} and {} to unify",
-                            a, b
-                        ))),
-                    }
-                }
             }
 
             // If a type is a fresh type variable then assign it a unique identifier before continuing.
@@ -156,6 +137,141 @@ impl Unifier {
                 Ok(left.clone())
             }
 
+            // A scalar will unify with a single column projection
+            (Type(Constructor(Scalar(_)), _), Type(Constructor(Projection(columns)), _)) => {
+                let len = columns.borrow().len();
+                if len == 1 {
+                    let column = &columns.borrow()[0].clone();
+                    let ty = self.unify(left.clone(), column.ty.clone())?;
+
+                    drop(a);
+                    drop(b);
+
+                    let unified = ty.borrow().clone();
+
+                    {
+                        *left.borrow_mut() = unified.clone();
+                    }
+                    {
+                        *right.borrow_mut() = unified;
+                    }
+
+                    Ok(ty)
+                } else {
+                    // TODO: error message
+                    Err(TypeError::Conflict("cannot unify scalar type with projection of more than one column".to_string()))
+                }
+            }
+
+            // A scalar will unify with a single column projection
+            (Type(Constructor(Projection(columns)), _), Type(Constructor(Scalar(_)), _)) => {
+                let len = columns.borrow().len();
+                if len == 1 {
+                    let column = &columns.borrow()[0].clone();
+                    let ty = self.unify(left.clone(), column.ty.clone())?;
+
+                    drop(a);
+                    drop(b);
+
+                    let unified = ty.borrow().clone();
+
+                    {
+                        *left.borrow_mut() = unified.clone();
+                    }
+                    {
+                        *right.borrow_mut() = unified;
+                    }
+
+                    Ok(ty)
+                } else {
+                    // TODO: error message
+                    Err(TypeError::Conflict("cannot unify scalar type with projection of more than one column".to_string()))
+                }
+            }
+
+            // An array will unify with a single column projection
+            (Type(Constructor(Array(_)), _), Type(Constructor(Projection(columns)), _)) => {
+                let len = columns.borrow().len();
+                if len == 1 {
+                    let column = &columns.borrow()[0].clone();
+                    let ty = self.unify(left.clone(), column.ty.clone())?;
+
+                    drop(a);
+                    drop(b);
+
+                    let unified = ty.borrow().clone();
+
+                    {
+                        *left.borrow_mut() = unified.clone();
+                    }
+                    {
+                        *right.borrow_mut() = unified;
+                    }
+
+                    Ok(ty)
+                } else {
+                    // TODO: error message
+                    Err(TypeError::Conflict("cannot unify scalar type with projection of more than one column".to_string()))
+                }
+            }
+
+            // An array will unify with a single column projection
+            (Type(Constructor(Projection(columns)), _), Type(Constructor(Array(_)), _)) => {
+                let len = columns.borrow().len();
+                if len == 1 {
+                    let column = &columns.borrow()[0].clone();
+                    let ty = self.unify(left.clone(), column.ty.clone())?;
+
+                    drop(a);
+                    drop(b);
+
+                    let unified = ty.borrow().clone();
+
+                    {
+                        *left.borrow_mut() = unified.clone();
+                    }
+                    {
+                        *right.borrow_mut() = unified;
+                    }
+
+                    Ok(ty)
+                } else {
+                    // TODO: error message
+                    Err(TypeError::Conflict("cannot unify scalar type with projection of more than one column".to_string()))
+                }
+            }
+
+            // For types that are resolved, in order to successfully unify they must either be:
+            // - equal (according to the Eq trait), or
+            // - both be native
+            (Type(body_a, Status::Resolved), Type(body_b, Status::Resolved)) => {
+                if body_a == body_b {
+                    Ok(left.clone())
+                } else {
+                    match (body_a, body_b) {
+                        // Constructor::AnonymousNative and Constructor::Scalar(Scalar::Native{ .. }) will unify
+                        // to Constructor::Scalar(Scalar::Native{ .. }) to preserve information.
+                        (Def::Constructor(ctor_a), Def::Constructor(ctor_b))
+                            if ctor_a.is_native() && ctor_b.is_native() =>
+                        {
+                            if let Scalar(_) = ctor_a {
+                                return Ok(left.clone());
+                            }
+
+                            if let Scalar(_) = ctor_b {
+                                return Ok(right.clone());
+                            }
+
+                            Ok(left.clone())
+                        }
+
+                        _ => Err(TypeError::Conflict(format!(
+                            "expected resolved types {} and {} to unify",
+                            a, b
+                        ))),
+                    }
+                }
+            }
             // A constructor resolves with a type variable if either:
             // 1. the type variable does not already refer to a constructor (transitively), or
             // 2. it does refer to a constructor and the two constructors unify
@@ -181,7 +297,20 @@ impl Unifier {
                 "type {} cannot be unified with {}",
                 left_ty, right_ty
             ))),
+        };
+
+        if let Ok(unification) = &unification {
+            info!(
+                "RESULT:{:indent$} {}",
+                "",
+                &*unification.borrow(),
+                indent = (self.depth - 1) * 4
+            );
         }
+
+        self.depth -= 1;
+
+        unification
     }
 
     /// Unifies a type with a type variable.
@@ -199,9 +328,9 @@ impl Unifier {
             self.unify(ty_rc.clone(), sub_ty)?;
         }
 
-        self.subs.insert(tvar, ty_rc.clone());
-
         *tvar_rc.borrow_mut() = ty_rc.borrow().clone();
+
+        self.subs.insert(tvar, ty_rc.clone());
 
         Ok(ty_rc.clone())
     }

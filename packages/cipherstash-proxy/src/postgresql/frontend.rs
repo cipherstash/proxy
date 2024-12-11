@@ -10,7 +10,7 @@ use crate::error::Error;
 use crate::log::DEVELOPMENT;
 use bytes::BytesMut;
 use eql_mapper::{self, EqlColumn, EqlMapperError, TableColumn};
-use sqlparser::ast::Value;
+use sqlparser::ast::{CastKind, DataType, Expr, Value};
 use sqlparser::dialect::PostgreSqlDialect;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use tracing::warn;
@@ -88,12 +88,19 @@ where
     async fn encrypt_literals(
         &mut self,
         plaintext_literals: Vec<eql::Plaintext>,
-    ) -> Result<Vec<Value>, Error> {
+    ) -> Result<Vec<Expr>, Error> {
         let encrypted = self.encrypt.encrypt_mandatory(plaintext_literals).await?;
 
         Ok(encrypted
             .into_iter()
-            .map(|ct| serde_json::to_string(&ct).map(Value::SingleQuotedString))
+            .map(|ct| {
+                serde_json::to_string(&ct).map(|ct| Expr::Cast {
+                    kind: CastKind::DoubleColon,
+                    expr: Box::new(Expr::Value(Value::SingleQuotedString(ct))),
+                    data_type: DataType::JSONB,
+                    format: None,
+                })
+            })
             .collect::<Result<Vec<_>, _>>()?)
     }
 
@@ -104,8 +111,8 @@ where
 
 fn zip_with_original_value_ref<'ast>(
     typed_statement: &eql_mapper::TypedStatement<'ast>,
-    encrypted_literals: Vec<Value>,
-) -> HashMap<&'ast Value, Value> {
+    encrypted_literals: Vec<Expr>,
+) -> HashMap<&'ast Expr, Expr> {
     typed_statement
         .literals
         .iter()
@@ -120,12 +127,12 @@ fn convert_value_nodes_to_eql_plaintext(
     typed_statement
         .literals
         .iter()
-        .map(|(EqlColumn(TableColumn { table, column }), value)| {
-            if let Some(plaintext) = match value {
-                Value::Number(number, _) => Some(number.to_string()),
-                Value::SingleQuotedString(s) => Some(s.to_owned()),
-                Value::Boolean(b) => Some(b.to_string()),
-                Value::Null => None,
+        .map(|(EqlColumn(TableColumn { table, column }), expr)| {
+            if let Some(plaintext) = match expr {
+                Expr::Value(Value::Number(number, _)) => Some(number.to_string()),
+                Expr::Value(Value::SingleQuotedString(s)) => Some(s.to_owned()),
+                Expr::Value(Value::Boolean(b)) => Some(b.to_string()),
+                Expr::Value(Value::Null) => None,
                 _ => None,
             } {
                 Ok(eql::Plaintext {
@@ -135,7 +142,7 @@ fn convert_value_nodes_to_eql_plaintext(
                     for_query: None,
                 })
             } else {
-                Err(EqlMapperError::UnsupportedValueVariant(value.to_string()))
+                Err(EqlMapperError::UnsupportedValueVariant(expr.to_string()))
             }
         })
         .collect()
