@@ -347,6 +347,57 @@ mod test {
         Ident::from(ident)
     }
 
+    macro_rules! col {
+        ((NATIVE)) => {
+            (Scalar::Native(None).into(), None)
+        };
+
+        ((NATIVE as $alias:ident)) => {
+            (Scalar::Native(None).into(), Some(id(stringify!($alias))))
+        };
+
+        ((NATIVE($table:ident . $column:ident))) => {
+            (
+                Scalar::Native(Some(TableColumn {
+                    table: id(stringify!($table)),
+                    column: id(stringify!($column)),
+                }))
+                .into(),
+                None,
+            )
+        };
+
+        ((NATIVE($table:ident . $column:ident) as $alias:ident)) => {
+            (
+                Scalar::Native(Some(TableColumn {
+                    table: id(stringify!($table)),
+                    column: id(stringify!($column)),
+                }))
+                .into(),
+                Some(id(stringify!($alias))),
+            )
+        };
+
+        ((EQL($table:ident . $column:ident))) => {
+            (
+                Scalar::EqlColumn::from((stringify!($table), stringify!($column))).into(),
+                None,
+            )
+        };
+
+        ((EQL($table:ident . $column:ident) as $alias:ident)) => {
+            (
+                Scalar::EqlColumn(EqlColumn::from((stringify!($table), stringify!($column))))
+                    .into(),
+                Some(id(stringify!($alias))),
+            )
+        };
+    }
+
+    macro_rules! projection {
+        [$($column:tt),*] => { Type::projection(&[$(col!($column)),*]) };
+    }
+
     #[test]
     fn basic() {
         let schema = Dep::new(make_schema! {
@@ -401,13 +452,7 @@ mod test {
 
         assert_eq!(
             typed.get_type(&statement),
-            Some(&Type::Projection(Projection(vec![ProjectionColumn {
-                ty: ProjectionColumnType::Scalar(Scalar::EqlColumn(EqlColumn(TableColumn {
-                    table: id("users"),
-                    column: id("email")
-                }))),
-                alias: Some(id("email"))
-            }])))
+            Some(&projection![(EQL(users.email) as email)])
         )
     }
 
@@ -462,23 +507,11 @@ mod test {
 
         assert_eq!(
             typed.get_type(&statement),
-            Some(&Type::Projection(Projection(vec![
-                ProjectionColumn {
-                    ty: ProjectionColumnType::Scalar(Scalar::Native(None)),
-                    alias: Some(id("user_id"))
-                },
-                ProjectionColumn {
-                    ty: ProjectionColumnType::Scalar(Scalar::Native(None)),
-                    alias: Some(id("todo_list_item_id"))
-                },
-                ProjectionColumn {
-                    ty: ProjectionColumnType::Scalar(Scalar::EqlColumn(EqlColumn(TableColumn {
-                        table: id("todo_list_items"),
-                        column: id("description")
-                    }))),
-                    alias: Some(id("todo_list_item_description"))
-                }
-            ])))
+            Some(&projection![
+                (NATIVE as user_id),
+                (NATIVE as todo_list_item_id),
+                (EQL(todo_list_items.description) as todo_list_item_description)
+            ])
         );
     }
 
@@ -516,43 +549,13 @@ mod test {
 
         assert_eq!(
             typed.get_type(&statement),
-            Some(&Type::Projection(Projection(vec![
-                ProjectionColumn {
-                    ty: ProjectionColumnType::Scalar(Scalar::Native(Some(TableColumn {
-                        table: id("users"),
-                        column: id("id")
-                    }))),
-                    alias: Some(id("id"))
-                },
-                ProjectionColumn {
-                    ty: ProjectionColumnType::Scalar(Scalar::EqlColumn(EqlColumn(TableColumn {
-                        table: id("users"),
-                        column: id("email")
-                    }))),
-                    alias: Some(id("email"))
-                },
-                ProjectionColumn {
-                    ty: ProjectionColumnType::Scalar(Scalar::Native(Some(TableColumn {
-                        table: id("todo_lists"),
-                        column: id("id")
-                    }))),
-                    alias: Some(id("id"))
-                },
-                ProjectionColumn {
-                    ty: ProjectionColumnType::Scalar(Scalar::Native(Some(TableColumn {
-                        table: id("todo_lists"),
-                        column: id("owner_id")
-                    }))),
-                    alias: Some(id("owner_id"))
-                },
-                ProjectionColumn {
-                    ty: ProjectionColumnType::Scalar(Scalar::EqlColumn(EqlColumn(TableColumn {
-                        table: id("todo_lists"),
-                        column: id("secret")
-                    }))),
-                    alias: Some(id("secret"))
-                },
-            ])))
+            Some(&projection![
+                (NATIVE(users.id) as id),
+                (EQL(users.email) as email),
+                (NATIVE(todo_lists.id) as id),
+                (NATIVE(todo_lists.owner_id) as owner_id),
+                (EQL(todo_lists.secret) as secret)
+            ])
         );
     }
 }

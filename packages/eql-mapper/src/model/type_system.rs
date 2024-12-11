@@ -102,6 +102,43 @@ impl ProjectionColumn {
     }
 }
 
+impl Type {
+    pub(crate) fn projection(
+        cols: &[impl Into<(ProjectionColumnType, Option<Ident>)> + Clone],
+    ) -> Self {
+        Type::Projection(Projection(
+            cols.to_vec()
+                .into_iter()
+                .map(|col| {
+                    let (ty, alias): (ProjectionColumnType, Option<Ident>) = col.into();
+                    ProjectionColumn { ty, alias }
+                })
+                .collect(),
+        ))
+    }
+}
+
+impl From<EqlColumn> for ProjectionColumnType {
+    fn from(value: EqlColumn) -> Self {
+        ProjectionColumnType::Scalar(Scalar::EqlColumn(value))
+    }
+}
+
+impl From<Scalar> for ProjectionColumnType {
+    fn from(value: Scalar) -> Self {
+        ProjectionColumnType::Scalar(value)
+    }
+}
+
+impl From<(&str, &str)> for EqlColumn {
+    fn from(value: (&str, &str)) -> Self {
+        EqlColumn(TableColumn {
+            table: Ident::new(value.0),
+            column: Ident::new(value.1),
+        })
+    }
+}
+
 impl TryFrom<&unifier::Type> for Type {
     type Error = crate::EqlMapperError;
 
