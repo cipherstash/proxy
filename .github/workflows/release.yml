@@ -12,10 +12,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os:
-          - buildjet-16vcpu-ubuntu-2204
-          - buildjet-16vcpu-ubuntu-2204-arm
-    runs-on: ${{matrix.os}}
+        build:
+          - { os: buildjet-16vcpu-ubuntu-2204,     arch: linux/amd64 }
+          - { os: buildjet-16vcpu-ubuntu-2204-arm, arch: linux/arm64 }
+    runs-on: ${{matrix.build.os}}
     steps:
       - uses: actions/checkout@v4
       - name: Setup Rust cache
@@ -29,7 +29,7 @@ jobs:
           install: true # [default: true] run `mise install`
           cache: true # [default: true] cache mise using GitHub's cache
       - run: |
-          mise run build
+          mise run build --platform ${{matrix.build.arch}}
       - uses: actions/upload-artifact@v4
         with:
           name: cipherstash-proxy-${{matrix.build.arch == 'linux/amd64' && 'linux_amd64' || 'linux_arm64'}}
@@ -38,4 +38,4 @@ jobs:
           DOCKER_HUB_USERNAME: ${{ secrets.DOCKER_HUB_USERNAME }}
           DOCKER_HUB_PERSONAL_ACCESS_TOKEN: ${{ secrets.DOCKER_HUB_PERSONAL_ACCESS_TOKEN }}
         run: |
-          mise run release
+          mise run release --platform ${{matrix.build.arch}}
