@@ -656,9 +656,50 @@ mod test {
         );
     }
 
-    /*
-   SELECT sum(salary) OVER w, avg(salary) OVER w
-  FROM empsalary
-  WINDOW w AS (PARTITION BY depname ORDER BY salary DESC);
-     */
+    #[test]
+    fn window_function_with_forward_reference() {
+        tracing_subscriber::fmt::init();
+
+        let schema = Dep::new(schema! {
+            tables: {
+                employees: {
+                    id,
+                    first_name,
+                    last_name,
+                    department_name,
+                    salary (EQL),
+                }
+            }
+        });
+
+        let statement = parse(
+            r#"
+                select
+                    first_name,
+                    last_name,
+                    department_name,
+                    salary,
+                    rank() over w
+                from
+                   employees
+                window w AS (partition BY department_name order by salary desc);
+            "#,
+        );
+
+        let typed = match type_check(&schema, &statement) {
+            Ok(typed) => typed,
+            Err(err) => panic!("type check failed: {:#?}", err),
+        };
+
+        assert_eq!(
+            typed.get_type(&statement),
+            Some(&projection![
+                (NATIVE(employees.first_name) as first_name),
+                (NATIVE(employees.last_name) as last_name),
+                (NATIVE(employees.department_name) as department_name),
+                (EQL(employees.salary) as salary),
+                (NATIVE as rank)
+            ])
+        );
+    }
 }
