@@ -944,4 +944,76 @@ mod test {
             ])
         );
     }
+
+    #[test]
+    fn delete() {
+        let _ = tracing_subscriber::fmt::try_init();
+
+        let schema = Dep::new(schema! {
+            tables: {
+                employees: {
+                    id,
+                    name,
+                    department,
+                    age,
+                    salary (EQL),
+                }
+            }
+        });
+
+        let statement = parse(
+            r#"
+                delete from employees where salary > 200000
+            "#,
+        );
+
+        let typed = match type_check(&schema, &statement) {
+            Ok(typed) => typed,
+            Err(err) => panic!("type check failed: {:#?}", err),
+        };
+
+        assert_eq!(
+            typed.get_type(&statement),
+            Ok(&Type::Empty)
+        );
+    }
+
+    #[test]
+    fn delete_with_returning_clause() {
+        let _ = tracing_subscriber::fmt::try_init();
+
+        let schema = Dep::new(schema! {
+            tables: {
+                employees: {
+                    id,
+                    name,
+                    department,
+                    age,
+                    salary (EQL),
+                }
+            }
+        });
+
+        let statement = parse(
+            r#"
+                delete from employees where salary > 200000 returning *
+            "#,
+        );
+
+        let typed = match type_check(&schema, &statement) {
+            Ok(typed) => typed,
+            Err(err) => panic!("type check failed: {:#?}", err),
+        };
+
+        assert_eq!(
+            typed.get_type(&statement),
+            Ok(&projection![
+                (NATIVE(employees.id) as id),
+                (NATIVE(employees.name) as name),
+                (NATIVE(employees.department) as department),
+                (NATIVE(employees.age) as age),
+                (EQL(employees.salary) as salary)
+            ])
+        );
+    }
 }
