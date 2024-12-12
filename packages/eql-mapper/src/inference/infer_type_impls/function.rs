@@ -18,9 +18,7 @@ impl<'ast> InferType<'ast, Function> for TypeInferencer<'ast> {
 
         let fn_name: Vec<_> = name.0.iter().map(SqlIdent).collect();
 
-        if &fn_name == &[SqlIdent(&Ident::new("min"))]
-            || &fn_name == &[SqlIdent(&Ident::new("max"))]
-        {
+        if fn_name == [SqlIdent(&Ident::new("min"))] || fn_name == [SqlIdent(&Ident::new("max"))] {
             // 1. There MUST be one unnamed argument (it CAN come from a subquery)
             // 2. The return type is the same as the argument type
 
@@ -54,8 +52,12 @@ impl<'ast> InferType<'ast, Function> for TypeInferencer<'ast> {
 
                             FunctionArg::Unnamed(function_arg_expr) => match function_arg_expr {
                                 FunctionArgExpr::Expr(expr) => {
-                                    self.unify_and_log(function, self.get_type(function), self.get_type(expr))?;
-                                },
+                                    self.unify_and_log(
+                                        function,
+                                        self.get_type(function),
+                                        self.get_type(expr),
+                                    )?;
+                                }
 
                                 FunctionArgExpr::QualifiedWildcard(_)
                                 | FunctionArgExpr::Wildcard => {

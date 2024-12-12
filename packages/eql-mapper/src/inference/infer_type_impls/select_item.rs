@@ -91,7 +91,9 @@ impl<'ast> InferType<'ast, SelectItem> for TypeInferencer<'ast> {
             select_item,
             self.get_type(select_item),
             Rc::new(RefCell::new(Type(
-                Def::Constructor(Constructor::Projection(Rc::new(RefCell::new(vec![projection_column])))),
+                Def::Constructor(Constructor::Projection(Rc::new(RefCell::new(vec![
+                    projection_column,
+                ])))),
                 status,
             ))),
         )?;

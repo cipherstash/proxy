@@ -125,8 +125,8 @@ pub(crate) mod test_util {
         Delete, Expr, Function, FunctionArguments, Insert, Query, Select, SetExpr, Statement,
     };
     use sqltk::{Break, Visitable, Visitor};
-    use tracing::info;
     use std::{convert::Infallible, fmt::Debug, ops::ControlFlow};
+    use tracing::info;
 
     use super::{NodeKey, TypeRegistry};
 

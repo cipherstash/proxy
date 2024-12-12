@@ -4,6 +4,7 @@ mod select;
 mod select_item;
 mod set_expr;
 mod values;
+mod vec_of_select_item;
 
 mod delete_statement;
 mod insert_statement;

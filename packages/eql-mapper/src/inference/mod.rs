@@ -45,6 +45,7 @@ pub(crate) use type_variables::*;
 /// - [`SetExpr`]
 /// - [`Select`]
 /// - [`SelectItem`]
+/// - [`Vec<SelectItem>`]
 /// - [`Function`]
 /// - [`Values`]
 #[derive(Debug)]
@@ -237,6 +238,10 @@ impl<'ast> Visitor<'ast> for TypeInferencer<'ast> {
             into_control_flow(self.infer_enter(node))?
         }
 
+        if let Some(node) = node.downcast_ref::<Vec<SelectItem>>() {
+            into_control_flow(self.infer_enter(node))?
+        }
+
         if let Some(node) = node.downcast_ref::<Function>() {
             into_control_flow(self.infer_enter(node))?
         }
@@ -278,6 +283,10 @@ impl<'ast> Visitor<'ast> for TypeInferencer<'ast> {
         }
 
         if let Some(node) = node.downcast_ref::<SelectItem>() {
+            into_control_flow(self.infer_exit(node))?
+        }
+
+        if let Some(node) = node.downcast_ref::<Vec<SelectItem>>() {
             into_control_flow(self.infer_exit(node))?
         }
 

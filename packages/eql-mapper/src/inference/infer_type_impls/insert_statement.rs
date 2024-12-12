@@ -18,7 +18,6 @@ impl<'ast> InferType<'ast, Insert> for TypeInferencer<'ast> {
             table_alias,
             columns,
             source,
-            returning,
             ..
         } = insert;
 
@@ -67,10 +66,7 @@ impl<'ast> InferType<'ast, Insert> for TypeInferencer<'ast> {
     }
 
     fn infer_exit(&mut self, insert: &'ast Insert) -> Result<(), TypeError> {
-        let Insert {
-            returning,
-            ..
-        } = insert;
+        let Insert { returning, .. } = insert;
 
         match returning {
             Some(returning) => {

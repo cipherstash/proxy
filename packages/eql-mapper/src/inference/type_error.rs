@@ -2,7 +2,6 @@ use std::collections::HashSet;
 
 use crate::{SchemaError, ScopeError};
 
-
 #[derive(PartialEq, Eq, Clone, Debug, thiserror::Error)]
 pub enum TypeError {
     #[error("SQL feature {} is not supported", _0)]
@@ -36,5 +35,5 @@ pub enum TypeError {
     ParamCount(usize, usize),
 
     #[error("{}", _0)]
-    FunctionCall(String)
+    FunctionCall(String),
 }

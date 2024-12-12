@@ -1,5 +1,6 @@
 use std::{
-    cell::RefCell, collections::HashMap, marker::PhantomData, ops::ControlFlow, rc::Rc, sync::Arc,
+    cell::RefCell, collections::HashMap, fmt::Display, marker::PhantomData, ops::ControlFlow,
+    rc::Rc, sync::Arc,
 };
 
 use sqlparser::ast::{Expr, Statement, Value};
@@ -188,9 +189,10 @@ impl<'ast> EqlMapper<'ast> {
                             ))),
                         }
                     } else {
-                        Err(EqlMapperError::InternalError(
-                            format!("literal type {} is not a scalar type", &*ty.borrow())
-                        ))
+                        Err(EqlMapperError::InternalError(format!(
+                            "literal type {} is not a scalar type",
+                            &*ty.borrow()
+                        )))
                     }
                 }
                 None => Err(EqlMapperError::InternalError(String::from(
@@ -235,8 +237,13 @@ impl<'ast> TypedStatement<'ast> {
     }
 
     /// Gets the [`Type`] associated with a semantically-interesting AST node.
-    pub fn get_type<N: Semantic>(&self, node: &'ast N) -> Option<&Type> {
-        self.node_types.get(&NodeKey::new(node))
+    pub fn get_type<N: Semantic + Display>(&self, node: &'ast N) -> Result<&Type, TypeError> {
+        self.node_types
+            .get(&NodeKey::new(node))
+            .ok_or(TypeError::InternalError(format!(
+                "missing type for node {}",
+                node
+            )))
     }
 
     /// Gets the projection associated with a SQL statement.
@@ -342,16 +349,13 @@ impl<'ast> Visitor<'ast> for EqlMapper<'ast> {
 mod test {
     use pretty_assertions::assert_eq;
 
+    use crate::*;
     use sqlparser::{
         ast::{Ident, Statement},
         dialect::PostgreSqlDialect,
         parser::Parser,
     };
     use tracing::instrument;
-    use tracing_subscriber::fmt::format::FmtSpan;
-
-    // use crate::{TableColumn, Dep, make_schema, type_check};
-    use crate::*;
 
     fn parse(statement: &'static str) -> Statement {
         Parser::parse_sql(&PostgreSqlDialect {}, statement).unwrap()[0].clone()
@@ -415,6 +419,7 @@ mod test {
 
     #[test]
     fn basic() {
+        let _ = tracing_subscriber::fmt::try_init();
         let schema = Dep::new(schema! {
             tables: {
                 users: {
@@ -432,6 +437,7 @@ mod test {
 
     #[test]
     fn select_columns_from_multiple_tables() {
+        let _ = tracing_subscriber::fmt::try_init();
         let schema = Dep::new(schema! {
             tables: {
                 users: {
@@ -467,12 +473,13 @@ mod test {
 
         assert_eq!(
             typed.get_type(&statement),
-            Some(&projection![(EQL(users.email) as email)])
+            Ok(&projection![(EQL(users.email) as email)])
         )
     }
 
     #[test]
     fn select_columns_from_subquery() {
+        let _ = tracing_subscriber::fmt::try_init();
         let schema = Dep::new(schema! {
             tables: {
                 users: {
@@ -522,7 +529,7 @@ mod test {
 
         assert_eq!(
             typed.get_type(&statement),
-            Some(&projection![
+            Ok(&projection![
                 (NATIVE as user_id),
                 (NATIVE as todo_list_item_id),
                 (EQL(todo_list_items.description) as todo_list_item_description)
@@ -532,6 +539,7 @@ mod test {
 
     #[test]
     fn wildcard_expansion() {
+        let _ = tracing_subscriber::fmt::try_init();
         let schema = Dep::new(schema! {
             tables: {
                 users: {
@@ -564,7 +572,7 @@ mod test {
 
         assert_eq!(
             typed.get_type(&statement),
-            Some(&projection![
+            Ok(&projection![
                 (NATIVE(users.id) as id),
                 (EQL(users.email) as email),
                 (NATIVE(todo_lists.id) as id),
@@ -607,7 +615,7 @@ mod test {
 
         assert_eq!(
             typed.get_type(&statement),
-            Some(&projection![
+            Ok(&projection![
                 (NATIVE(employees.first_name) as first_name),
                 (NATIVE(employees.last_name) as last_name),
                 (EQL(employees.salary) as salary)
@@ -617,7 +625,7 @@ mod test {
 
     #[test]
     fn window_function() {
-        tracing_subscriber::fmt::init();
+        let _ = tracing_subscriber::fmt::try_init();
 
         let schema = Dep::new(schema! {
             tables: {
@@ -651,7 +659,7 @@ mod test {
 
         assert_eq!(
             typed.get_type(&statement),
-            Some(&projection![
+            Ok(&projection![
                 (NATIVE(employees.first_name) as first_name),
                 (NATIVE(employees.last_name) as last_name),
                 (NATIVE(employees.department_name) as department_name),
@@ -663,7 +671,7 @@ mod test {
 
     #[test]
     fn window_function_with_forward_reference() {
-        tracing_subscriber::fmt::init();
+        let _ = tracing_subscriber::fmt::try_init();
 
         let schema = Dep::new(schema! {
             tables: {
@@ -698,7 +706,7 @@ mod test {
 
         assert_eq!(
             typed.get_type(&statement),
-            Some(&projection![
+            Ok(&projection![
                 (NATIVE(employees.first_name) as first_name),
                 (NATIVE(employees.last_name) as last_name),
                 (NATIVE(employees.department_name) as department_name),
@@ -710,7 +718,7 @@ mod test {
 
     #[test]
     fn common_table_expressions() {
-        tracing_subscriber::fmt::init();
+        let _ = tracing_subscriber::fmt::try_init();
 
         let schema = Dep::new(schema! {
             tables: {
@@ -748,7 +756,7 @@ mod test {
 
         assert_eq!(
             typed.get_type(&statement),
-            Some(&projection![
+            Ok(&projection![
                 (NATIVE(employees.first_name) as first_name),
                 (NATIVE(employees.last_name) as last_name),
                 (NATIVE(employees.department_name) as department_name),
@@ -760,7 +768,7 @@ mod test {
 
     #[test]
     fn aggregates() {
-        tracing_subscriber::fmt::init();
+        let _ = tracing_subscriber::fmt::try_init();
 
         let schema = Dep::new(schema! {
             tables: {
@@ -790,7 +798,7 @@ mod test {
 
         assert_eq!(
             typed.get_type(&statement),
-            Some(&projection![
+            Ok(&projection![
                 (NATIVE(employees.age) as max),
                 (EQL(employees.salary) as min)
             ])
@@ -800,13 +808,7 @@ mod test {
     #[instrument]
     #[test]
     fn insert() {
-        tracing_subscriber::fmt()
-            .with_span_events(FmtSpan::FULL)
-            .with_line_number(true)
-            .without_time()
-            .with_level(false)
-            .with_file(true)
-            .init();
+        let _ = tracing_subscriber::fmt::try_init();
 
         let schema = Dep::new(schema! {
             tables: {
@@ -832,6 +834,6 @@ mod test {
             Err(err) => panic!("type check failed: {:#?}", err),
         };
 
-        assert_eq!(typed.get_type(&statement), None);
+        assert_eq!(typed.get_type(&statement), Ok(&Type::Empty));
     }
 }

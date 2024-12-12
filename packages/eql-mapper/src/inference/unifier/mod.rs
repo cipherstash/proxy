@@ -54,6 +54,12 @@ impl Unifier {
         use types::Constructor::*;
         use types::Def::*;
 
+        if left.as_ptr() == right.as_ptr() {
+            return Ok(left.clone());
+        }
+
+        info!("UNIFY 0");
+
         let span = span!(
             Level::DEBUG,
             "unify",
@@ -89,14 +95,21 @@ impl Unifier {
                 drop(a);
                 drop(b);
 
-                let resolved = projection_columns
-                    .borrow()
-                    .iter()
-                    .fold(Status::Resolved, |acc, col| col.ty.borrow().status() + acc);
+                let resolved = {
+                    projection_columns
+                        .borrow()
+                        .iter()
+                        .fold(Status::Resolved, |acc, col| col.ty.borrow().status() + acc)
+                };
 
-                *left.borrow_mut() = Type(Constructor(Projection(projection_columns)), resolved);
+                {
+                    *left.borrow_mut() =
+                        Type(Constructor(Projection(projection_columns)), resolved);
+                }
 
-                *right.borrow_mut() = left.borrow().clone();
+                {
+                    *right.borrow_mut() = left.borrow().clone();
+                }
 
                 Ok(left.clone())
             }
@@ -106,10 +119,12 @@ impl Unifier {
                 drop(a);
                 drop(b);
 
-                *left.borrow_mut() = Type(
-                    Def::Var(TypeVar::Assigned(self.tvar_gen.next_tvar())),
-                    Status::Partial,
-                );
+                {
+                    *left.borrow_mut() = Type(
+                        Def::Var(TypeVar::Assigned(self.tvar_gen.next_tvar())),
+                        Status::Partial,
+                    )
+                }
 
                 Ok(self.unify(left, right)?)
             }
@@ -119,10 +134,12 @@ impl Unifier {
                 drop(a);
                 drop(b);
 
-                *right.borrow_mut() = Type(
-                    Def::Var(TypeVar::Assigned(self.tvar_gen.next_tvar())),
-                    Status::Partial,
-                );
+                {
+                    *right.borrow_mut() = Type(
+                        Def::Var(TypeVar::Assigned(self.tvar_gen.next_tvar())),
+                        Status::Partial,
+                    );
+                }
 
                 Ok(self.unify(left, right)?)
             }
@@ -137,12 +154,16 @@ impl Unifier {
                 drop(a);
                 drop(b);
 
-                *left.borrow_mut() = Type(
-                    Constructor(Array(element_ty.clone())),
-                    element_ty.borrow().status(),
-                );
+                {
+                    *left.borrow_mut() = Type(
+                        Constructor(Array(element_ty.clone())),
+                        element_ty.borrow().status(),
+                    );
+                }
 
-                *right.borrow_mut() = left.borrow().clone();
+                {
+                    *right.borrow_mut() = left.borrow().clone();
+                }
 
                 Ok(left.clone())
             }
@@ -157,7 +178,7 @@ impl Unifier {
                     drop(a);
                     drop(b);
 
-                    let unified = ty.borrow().clone();
+                    let unified = { ty.borrow() }.clone();
 
                     {
                         *left.borrow_mut() = unified.clone();
@@ -186,7 +207,7 @@ impl Unifier {
                     drop(a);
                     drop(b);
 
-                    let unified = ty.borrow().clone();
+                    let unified = { ty.borrow() }.clone();
 
                     {
                         *left.borrow_mut() = unified.clone();
@@ -215,7 +236,7 @@ impl Unifier {
                     drop(a);
                     drop(b);
 
-                    let unified = ty.borrow().clone();
+                    let unified = { ty.borrow() }.clone();
 
                     {
                         *left.borrow_mut() = unified.clone();
@@ -244,7 +265,7 @@ impl Unifier {
                     drop(a);
                     drop(b);
 
-                    let unified = ty.borrow().clone();
+                    let unified = { ty.borrow() }.clone();
 
                     {
                         *left.borrow_mut() = unified.clone();
