@@ -1,4 +1,3 @@
-mod function_signature;
 mod infer_type;
 mod infer_type_impls;
 mod registry;
@@ -30,7 +29,6 @@ use sqltk::{into_control_flow, Break, Semantic, Visitable, Visitor};
 
 use crate::{Schema, Scope};
 
-pub(crate) use function_signature::*;
 pub(crate) use registry::*;
 pub(crate) use type_error::*;
 pub(crate) use type_variables::*;
@@ -47,7 +45,6 @@ pub(crate) use type_variables::*;
 /// - [`SetExpr`]
 /// - [`Select`]
 /// - [`Function`]
-/// - [`FunctionArguments`]
 #[derive(Debug)]
 pub struct TypeInferencer<'ast> {
     /// A snapshot of the the database schema - used by `TypeInferencer`'s [`InferType`] impls.
@@ -239,10 +236,6 @@ impl<'ast> Visitor<'ast> for TypeInferencer<'ast> {
             into_control_flow(self.infer_enter(node))?
         }
 
-        if let Some(node) = node.downcast_ref::<FunctionArguments>() {
-            into_control_flow(self.infer_enter(node))?
-        }
-
         ControlFlow::Continue(())
     }
 
@@ -282,10 +275,6 @@ impl<'ast> Visitor<'ast> for TypeInferencer<'ast> {
         }
 
         if let Some(node) = node.downcast_ref::<Function>() {
-            into_control_flow(self.infer_exit(node))?
-        }
-
-        if let Some(node) = node.downcast_ref::<FunctionArguments>() {
             into_control_flow(self.infer_exit(node))?
         }
 

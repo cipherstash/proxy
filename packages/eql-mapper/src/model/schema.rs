@@ -176,7 +176,7 @@ impl Table {
 /// A DSL to create a [`Schema`] for testing purposes.
 // #[cfg(test)]
 #[macro_export]
-macro_rules! make_schema {
+macro_rules! schema {
     (@name $schema_name:literal) => {
         stringify!($schema_name)
     };
@@ -194,8 +194,8 @@ macro_rules! make_schema {
         $(,$($rest:tt)*)?
     ) => {
         {
-            $( make_schema!(@add_table $schema $table_name table $column_defs); )*
-            $( make_schema!(@add_aggregates $schema $($rest)*); )?
+            $( schema!(@add_table $schema $table_name table $column_defs); )*
+            $( schema!(@add_aggregates $schema $($rest)*); )?
         }
     };
     (@add_aggregates $schema:ident [ $($aggregate_name:ident),* ]) => {
@@ -208,15 +208,15 @@ macro_rules! make_schema {
             {
 
                 let mut $table = $crate::model::Table::new(::sqlparser::ast::Ident::new(stringify!($table_name)));
-                make_schema!(@add_columns $table $($columns)*);
+                schema!(@add_columns $table $($columns)*);
                 $table
             }
         );
     };
     (@add_columns $table:ident $( $column_name:ident $(($($options:tt)+))? , )* ) => {
-        $( make_schema!(@add_column $table $column_name $(($($options)*))? ); )*
+        $( schema!(@add_column $table $column_name $(($($options)*))? ); )*
     };
-    (@add_column $table:ident $column_name:ident (ENCRYPTED) ) => {
+    (@add_column $table:ident $column_name:ident (EQL) ) => {
         $table.add_column(std::sync::Arc::new($crate::model::Column::eql(
             ::sqlparser::ast::Ident::new(stringify!($column_name))
         )), false);
@@ -262,8 +262,8 @@ macro_rules! make_schema {
     } => {
         {
             let schema_name = stringify!($schema_name);
-            let mut schema = make_schema!(@schema schema schema_name);
-            $( make_schema!(@match_tables schema $($rest)* ); )?
+            let mut schema = schema!(@schema schema schema_name);
+            $( schema!(@match_tables schema $($rest)* ); )?
             schema
         }
     };
@@ -273,16 +273,16 @@ macro_rules! make_schema {
     } => {
         {
             let schema_name = $schema_name;
-            let schema = make_schema!(@schema schema schema_name);
-            $( make_schema!(@match_tables schema $($rest)* ); )?
+            let schema = schema!(@schema schema schema_name);
+            $( schema!(@match_tables schema $($rest)* ); )?
             schema
         }
     };
     { $($rest:tt)+ } => {
         {
             let schema_name = "public";
-            let mut schema = make_schema!(@schema schema schema_name);
-            make_schema!(@match_tables schema $($rest)* );
+            let mut schema = schema!(@schema schema schema_name);
+            schema!(@match_tables schema $($rest)* );
             schema
         }
     };

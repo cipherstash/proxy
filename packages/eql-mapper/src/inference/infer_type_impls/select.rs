@@ -1,6 +1,6 @@
 use std::{cell::RefCell, rc::Rc};
 
-use sqlparser::ast::{Expr, Select, SelectItem, WildcardAdditionalOptions};
+use sqlparser::ast::{Expr, Function, Select, SelectItem, WildcardAdditionalOptions};
 
 use crate::{
     inference::{type_error::TypeError, unifier::Type, InferType},
@@ -27,7 +27,14 @@ impl<'ast> InferType<'ast, Select> for TypeInferencer<'ast> {
                 }
 
                 SelectItem::UnnamedExpr(expr) => {
-                    projection_columns.push((self.get_type(expr), None))
+                    match expr {
+                        Expr::Function(Function { name, .. }) => {
+                            projection_columns.push((self.get_type(expr), Some(name.0.last().unwrap().clone())))
+                        }
+                        _ => {
+                            projection_columns.push((self.get_type(expr), None))
+                        }
+                    }
                 }
 
                 SelectItem::ExprWithAlias { expr, alias } => {

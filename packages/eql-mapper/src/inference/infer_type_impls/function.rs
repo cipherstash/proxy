@@ -1,11 +1,9 @@
-#![allow(unused)]
-
-use sqlparser::ast::{Function, FunctionArguments};
+use sqlparser::ast::{Function, FunctionArg, FunctionArgExpr, FunctionArguments, Ident};
 
 use crate::{
-    inference::InferType,
-    inference::{metadata_for_function, type_error::TypeError, FunctionSig, ReturnType},
-    TypeInferencer,
+    inference::{type_error::TypeError, InferType},
+    unifier::Type,
+    SqlIdent, TypeInferencer,
 };
 
 impl<'ast> InferType<'ast, Function> for TypeInferencer<'ast> {
@@ -16,47 +14,73 @@ impl<'ast> InferType<'ast, Function> for TypeInferencer<'ast> {
             ));
         }
 
-        let this_type = self.get_type(function);
-
         let Function { name, args, .. } = function;
 
-        let args_type = self.get_type(args);
+        let fn_name: Vec<_> = name.0.iter().map(SqlIdent).collect();
 
-        // match metadata_for_function(self.new_tvar(), name) {
-        //     FunctionSig::OneArg(expr_type_constraint, ReturnType::IsSameAsArgType)
-        //         if args_type_hole.len() == 1 =>
-        //     {
-        //         let arg_type_hole = &mut args_type_hole[0];
-        //         if let Some(expr_type_constraint) = expr_type_constraint {
-        //             arg_type_hole.constrain(expr_type_constraint)?;
-        //         }
-        //         this_type_hole.unify(arg_type_hole)?;
-        //     }
+        if &fn_name == &[SqlIdent(&Ident::new("min"))]
+            || &fn_name == &[SqlIdent(&Ident::new("max"))]
+        {
+            // 1. There MUST be one unnamed argument (it CAN come from a subquery)
+            // 2. The return type is the same as the argument type
 
-        //     FunctionSig::OneArg(expr_type_constraint, ReturnType::Native)
-        //         if args_type_hole.len() == 1 =>
-        //     {
-        //         let arg_type_hole = &mut args_type_hole[0];
-        //         if let Some(expr_type_constraint) = expr_type_constraint {
-        //             arg_type_hole.constrain(expr_type_constraint)?;
-        //         }
-        //         this_type_hole.finalize(ConcreteType::Native)?;
-        //     }
+            match args {
+                FunctionArguments::None => {
+                    return Err(TypeError::FunctionCall(format!(
+                        "{} should be called with 1 argument, got 0",
+                        fn_name.last().unwrap()
+                    )))
+                }
 
-        //     FunctionSig::OneArg(_, _) => {
-        //         return Err(TypeError::Conflict(format!(
-        //             "expected function {} to have 1 argument",
-        //             name
-        //         )))
-        //     }
+                FunctionArguments::Subquery(query) => {
+                    // The query must return a single column projection which has the same type as the result of the
+                    // call to min/max.
+                    self.unify_and_log(
+                        query,
+                        self.get_type(&**query),
+                        Type::projection(&[(self.get_type(function), None)]),
+                    )?;
+                }
 
-        //     FunctionSig::ZeroOrManyArgs => {
-        //         for mut arg in args_type_hole {
-        //             arg.finalize(ConcreteType::Native)?;
-        //         }
-        //         this_type_hole.finalize(ConcreteType::Native)?;
-        //     }
-        // }
+                FunctionArguments::List(args_list) => {
+                    if args_list.args.len() == 1 {
+                        match &args_list.args[0] {
+                            FunctionArg::Named { .. } => {
+                                return Err(TypeError::FunctionCall(format!(
+                                    "{} cannot be called with named arguments",
+                                    fn_name.last().unwrap(),
+                                )))
+                            }
+
+                            FunctionArg::Unnamed(function_arg_expr) => match function_arg_expr {
+                                FunctionArgExpr::Expr(expr) => {
+                                    self.unify_and_log(function, self.get_type(function), self.get_type(expr))?;
+                                },
+
+                                FunctionArgExpr::QualifiedWildcard(_)
+                                | FunctionArgExpr::Wildcard => {
+                                    return Err(TypeError::FunctionCall(format!(
+                                        "{} cannot be called with wildcard arguments",
+                                        fn_name.last().unwrap(),
+                                    )))
+                                }
+                            },
+                        }
+                    } else {
+                        return Err(TypeError::FunctionCall(format!(
+                            "{} should be called with 1 argument, got {}",
+                            fn_name.last().unwrap(),
+                            args_list.args.len()
+                        )));
+                    }
+                }
+            }
+        } else {
+            // All other functions:
+            // 1. no constraints are imposed on their arguments (they can be any type) (TODO: do we need a "do not care" type)
+            // 2. the return type is always native.
+            self.unify_and_log(function, self.get_type(function), Type::anonymous_native())?;
+        }
 
         Ok(())
     }

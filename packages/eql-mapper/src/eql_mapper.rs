@@ -336,8 +336,8 @@ impl<'ast> Visitor<'ast> for EqlMapper<'ast> {
 #[cfg(test)]
 mod test {
     use pretty_assertions::assert_eq;
-    
-    
+
+
 
     use sqlparser::{
         ast::{Ident, Statement},
@@ -410,7 +410,7 @@ mod test {
 
     #[test]
     fn basic() {
-        let schema = Dep::new(make_schema! {
+        let schema = Dep::new(schema! {
             tables: {
                 users: {
                     id (PK),
@@ -427,11 +427,11 @@ mod test {
 
     #[test]
     fn select_columns_from_multiple_tables() {
-        let schema = Dep::new(make_schema! {
+        let schema = Dep::new(schema! {
             tables: {
                 users: {
                     id (PK),
-                    email (ENCRYPTED),
+                    email (EQL),
                     first_name,
                 }
                 todo_lists: {
@@ -468,7 +468,7 @@ mod test {
 
     #[test]
     fn select_columns_from_subquery() {
-        let schema = Dep::new(make_schema! {
+        let schema = Dep::new(schema! {
             tables: {
                 users: {
                     id,
@@ -484,7 +484,7 @@ mod test {
                 }
                 todo_list_items: {
                     id,
-                    description (ENCRYPTED),
+                    description (EQL),
                     owner_id,
                     created_at,
                     updated_at,
@@ -527,16 +527,16 @@ mod test {
 
     #[test]
     fn wildcard_expansion() {
-        let schema = Dep::new(make_schema! {
+        let schema = Dep::new(schema! {
             tables: {
                 users: {
                     id,
-                    email (ENCRYPTED),
+                    email (EQL),
                 }
                 todo_lists: {
                     id,
                     owner_id,
-                    secret (ENCRYPTED),
+                    secret (EQL),
                 }
             }
         });
@@ -571,15 +571,13 @@ mod test {
 
     #[test]
     fn correlated_subquery() {
-        tracing_subscriber::fmt::init();
-
-        let schema = Dep::new(make_schema! {
+        let schema = Dep::new(schema! {
             tables: {
                 employees: {
                     id,
                     first_name,
                     last_name,
-                    salary (ENCRYPTED),
+                    salary (EQL),
                 }
             }
         });
@@ -611,4 +609,56 @@ mod test {
             ])
         );
     }
+
+    #[test]
+    fn window_function() {
+        tracing_subscriber::fmt::init();
+
+        let schema = Dep::new(schema! {
+            tables: {
+                employees: {
+                    id,
+                    first_name,
+                    last_name,
+                    department_name,
+                    salary (EQL),
+                }
+            }
+        });
+
+        let statement = parse(
+            r#"
+                select
+                    first_name,
+                    last_name,
+                    department_name,
+                    salary,
+                    rank() over (partition by department_name order by salary desc)
+                from
+                   employees
+            "#,
+        );
+
+        let typed = match type_check(&schema, &statement) {
+            Ok(typed) => typed,
+            Err(err) => panic!("type check failed: {:#?}", err),
+        };
+
+        assert_eq!(
+            typed.get_type(&statement),
+            Some(&projection![
+                (NATIVE(employees.first_name) as first_name),
+                (NATIVE(employees.last_name) as last_name),
+                (NATIVE(employees.department_name) as department_name),
+                (EQL(employees.salary) as salary),
+                (NATIVE as rank)
+            ])
+        );
+    }
+
+    /*
+   SELECT sum(salary) OVER w, avg(salary) OVER w
+  FROM empsalary
+  WINDOW w AS (PARTITION BY depname ORDER BY salary DESC);
+     */
 }

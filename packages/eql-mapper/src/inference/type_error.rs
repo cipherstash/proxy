@@ -34,4 +34,7 @@ pub enum TypeError {
 
     #[error("Expected param count to be {}, but got {}", _0, _1)]
     ParamCount(usize, usize),
+
+    #[error("{}", _0)]
+    FunctionCall(String)
 }
