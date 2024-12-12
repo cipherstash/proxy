@@ -355,7 +355,6 @@ mod test {
         dialect::PostgreSqlDialect,
         parser::Parser,
     };
-    use tracing::instrument;
 
     fn parse(statement: &'static str) -> Statement {
         Parser::parse_sql(&PostgreSqlDialect {}, statement).unwrap()[0].clone()
@@ -805,7 +804,6 @@ mod test {
         );
     }
 
-    #[instrument]
     #[test]
     fn insert() {
         let _ = tracing_subscriber::fmt::try_init();
@@ -835,5 +833,115 @@ mod test {
         };
 
         assert_eq!(typed.get_type(&statement), Ok(&Type::Empty));
+    }
+
+    #[test]
+    fn insert_with_returning_clause() {
+        let _ = tracing_subscriber::fmt::try_init();
+
+        let schema = Dep::new(schema! {
+            tables: {
+                employees: {
+                    id,
+                    name,
+                    department,
+                    age,
+                    salary (EQL),
+                }
+            }
+        });
+
+        let statement = parse(
+            r#"
+                insert into employees (name, department, age, salary)
+                    values ('Alice', 'Engineering', 28, 180000)
+                    returning *
+            "#,
+        );
+
+        let typed = match type_check(&schema, &statement) {
+            Ok(typed) => typed,
+            Err(err) => panic!("type check failed: {:#?}", err),
+        };
+
+        assert_eq!(
+            typed.get_type(&statement),
+            Ok(&projection![
+                (NATIVE(employees.id) as id),
+                (NATIVE(employees.name) as name),
+                (NATIVE(employees.department) as department),
+                (NATIVE(employees.age) as age),
+                (EQL(employees.salary) as salary)
+            ])
+        );
+    }
+
+    #[test]
+    fn update() {
+        let _ = tracing_subscriber::fmt::try_init();
+
+        let schema = Dep::new(schema! {
+            tables: {
+                employees: {
+                    id,
+                    name,
+                    department,
+                    age,
+                    salary (EQL),
+                }
+            }
+        });
+
+        let statement = parse(
+            r#"
+                update employees set name = 'Alice', salary = 18000 where id = 123
+            "#,
+        );
+
+        let typed = match type_check(&schema, &statement) {
+            Ok(typed) => typed,
+            Err(err) => panic!("type check failed: {:#?}", err),
+        };
+
+        assert_eq!(typed.get_type(&statement), Ok(&Type::Empty));
+    }
+
+    #[test]
+    fn update_with_returning_clause() {
+        let _ = tracing_subscriber::fmt::try_init();
+
+        let schema = Dep::new(schema! {
+            tables: {
+                employees: {
+                    id,
+                    name,
+                    department,
+                    age,
+                    salary (EQL),
+                }
+            }
+        });
+
+        let statement = parse(
+            r#"
+                update employees set name = 'Alice', salary = 18000 where id = 123 returning *
+            "#,
+        );
+
+        let typed = match type_check(&schema, &statement) {
+            Ok(typed) => typed,
+            Err(err) => panic!("type check failed: {:#?}", err),
+        };
+
+        assert_eq!(
+            typed.get_type(&statement),
+            Ok(&projection![
+                (NATIVE(employees.id) as id),
+                (NATIVE(employees.name) as name),
+                (NATIVE(employees.department) as department),
+                (NATIVE(employees.age) as age),
+                (EQL(employees.salary) as salary)
+            ])
+        );
     }
 }
