@@ -7,7 +7,7 @@ use crate::inference::TypeError;
 pub(crate) use types::*;
 
 use super::TypeVarGenerator;
-use tracing::info;
+use tracing::{info, span, Level};
 
 /// Implements the type unification algorithm and maintains an association of type variables with the type that they
 /// point to.
@@ -54,12 +54,22 @@ impl Unifier {
         use types::Constructor::*;
         use types::Def::*;
 
+        let span = span!(
+            Level::DEBUG,
+            "unify",
+            depth = self.depth,
+            left = &*left.borrow().to_string(),
+            right = &*right.borrow().to_string()
+        );
+
+        let _guard = span.enter();
+
         self.depth += 1;
 
         let (a, b) = (left.borrow(), right.borrow());
 
         info!(
-            "UNIFY:{:indent$}  {} + {}",
+            "{:indent$}  {} UNIFY {}",
             "",
             a,
             b,
@@ -159,7 +169,10 @@ impl Unifier {
                     Ok(ty)
                 } else {
                     // TODO: error message
-                    Err(TypeError::Conflict("cannot unify scalar type with projection of more than one column".to_string()))
+                    Err(TypeError::Conflict(
+                        "cannot unify scalar type with projection of more than one column"
+                            .to_string(),
+                    ))
                 }
             }
 
@@ -185,7 +198,10 @@ impl Unifier {
                     Ok(ty)
                 } else {
                     // TODO: error message
-                    Err(TypeError::Conflict("cannot unify scalar type with projection of more than one column".to_string()))
+                    Err(TypeError::Conflict(
+                        "cannot unify scalar type with projection of more than one column"
+                            .to_string(),
+                    ))
                 }
             }
 
@@ -211,7 +227,10 @@ impl Unifier {
                     Ok(ty)
                 } else {
                     // TODO: error message
-                    Err(TypeError::Conflict("cannot unify scalar type with projection of more than one column".to_string()))
+                    Err(TypeError::Conflict(
+                        "cannot unify scalar type with projection of more than one column"
+                            .to_string(),
+                    ))
                 }
             }
 
@@ -237,7 +256,10 @@ impl Unifier {
                     Ok(ty)
                 } else {
                     // TODO: error message
-                    Err(TypeError::Conflict("cannot unify scalar type with projection of more than one column".to_string()))
+                    Err(TypeError::Conflict(
+                        "cannot unify scalar type with projection of more than one column"
+                            .to_string(),
+                    ))
                 }
             }
 
@@ -301,7 +323,7 @@ impl Unifier {
 
         if let Ok(unification) = &unification {
             info!(
-                "RESULT:{:indent$} {}",
+                "= {:indent$} {}",
                 "",
                 &*unification.borrow(),
                 indent = (self.depth - 1) * 4

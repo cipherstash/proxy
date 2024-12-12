@@ -153,6 +153,35 @@ impl Type {
             Def::Var(tvar) => Err(TypeError::Incomplete(tvar.to_string())),
         }
     }
+
+    /// Given a `Vec` of `Type`s assert that every type is a projection and flatten one level to return a single `Type`
+    /// containing a projection.  If any of the types in `projection_tys` is *not* a projection then return an internal
+    /// error because this would be a bug.
+    pub(crate) fn flatten_projections(
+        projection_tys: Vec<Rc<RefCell<Type>>>,
+    ) -> Result<Rc<RefCell<Type>>, TypeError> {
+        let mut output_columns: Vec<ProjectionColumn> = Vec::new();
+
+        for ty in projection_tys {
+            let Type(Def::Constructor(Constructor::Projection(columns)), _) = &*ty.borrow()
+            else {
+                return Err(TypeError::InternalError(
+                    String::from("flatten_projection: expected projection"),
+                ));
+            };
+            output_columns.extend(columns.borrow().iter().cloned());
+        }
+
+        let status = if output_columns.iter().all(|c| c.ty.borrow().status() == Status::Resolved) {
+            Status::Resolved
+        } else {
+            Status::Partial
+        };
+
+        Ok(Rc::new(RefCell::new(Type(Def::Constructor(
+            Constructor::Projection(Rc::new(RefCell::new(output_columns))),
+        ), status))))
+    }
 }
 
 /// A `Def` is either a [`Constructor`] (fully or partially known type) or a [`TypeVar`] (a placeholder for an unknown type).
@@ -298,17 +327,6 @@ pub(crate) struct ProjectionColumn {
 impl ProjectionColumn {
     pub(crate) fn new(ty: Rc<RefCell<Type>>, alias: Option<Ident>) -> Self {
         Self { ty, alias }
-    }
-
-    pub(crate) fn vec_of(
-        columns: &[(Rc<RefCell<Type>>, Option<Ident>)],
-    ) -> Rc<RefCell<Vec<ProjectionColumn>>> {
-        Self::flatten(Rc::new(RefCell::new(
-            columns
-                .iter()
-                .map(|(c, n)| ProjectionColumn::new(c.clone(), n.clone()))
-                .collect(),
-        )))
     }
 
     fn render_alias(&self) -> String {

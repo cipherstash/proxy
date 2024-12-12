@@ -125,6 +125,7 @@ pub(crate) mod test_util {
         Delete, Expr, Function, FunctionArguments, Insert, Query, Select, SetExpr, Statement,
     };
     use sqltk::{Break, Visitable, Visitor};
+    use tracing::info;
     use std::{convert::Infallible, fmt::Debug, ops::ControlFlow};
 
     use super::{NodeKey, TypeRegistry};
@@ -138,8 +139,8 @@ pub(crate) mod test_util {
         pub(crate) fn dump_node<N: Display + Visitable + Debug>(&self, node: &N) {
             let key = NodeKey::new_from_visitable(node);
             if let Some(ty) = self.node_types.get(&key) {
-                eprintln!(
-                    "START\n{}\n{}\n{}\nEND\n",
+                info!(
+                    "TYPE<\nast: {}\nsyn: {}\nty: {}\n>",
                     std::any::type_name::<N>(),
                     node,
                     *ty.borrow(),

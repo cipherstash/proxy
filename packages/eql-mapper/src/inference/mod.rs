@@ -23,7 +23,7 @@ use itertools::Itertools;
 
 use infer_type::InferType;
 use sqlparser::ast::{
-    Delete, Expr, Function, FunctionArguments, Insert, Query, Select, SetExpr, Statement, Value,
+    Delete, Expr, Function, Insert, Query, Select, SelectItem, SetExpr, Statement, Value, Values,
 };
 use sqltk::{into_control_flow, Break, Semantic, Visitable, Visitor};
 
@@ -44,7 +44,9 @@ pub(crate) use type_variables::*;
 /// - [`Expr`]
 /// - [`SetExpr`]
 /// - [`Select`]
+/// - [`SelectItem`]
 /// - [`Function`]
+/// - [`Values`]
 #[derive(Debug)]
 pub struct TypeInferencer<'ast> {
     /// A snapshot of the the database schema - used by `TypeInferencer`'s [`InferType`] impls.
@@ -173,8 +175,7 @@ impl<'ast> TypeInferencer<'ast> {
         left: Rc<RefCell<Type>>,
         right: Rc<RefCell<Type>>,
     ) -> Result<Rc<RefCell<Type>>, TypeError> {
-        info!("NODE (Display): {}", node);
-        info!("NODE (Debug): {:?}", node);
+        info!("DISP  : {}\nDEBUG: {:?}", node, node);
         self.unifier.borrow_mut().unify(left, right)
     }
 
@@ -232,7 +233,15 @@ impl<'ast> Visitor<'ast> for TypeInferencer<'ast> {
             into_control_flow(self.infer_enter(node))?
         }
 
+        if let Some(node) = node.downcast_ref::<SelectItem>() {
+            into_control_flow(self.infer_enter(node))?
+        }
+
         if let Some(node) = node.downcast_ref::<Function>() {
+            into_control_flow(self.infer_enter(node))?
+        }
+
+        if let Some(node) = node.downcast_ref::<Values>() {
             into_control_flow(self.infer_enter(node))?
         }
 
@@ -242,12 +251,6 @@ impl<'ast> Visitor<'ast> for TypeInferencer<'ast> {
     fn exit<N: Visitable>(&mut self, node: &'ast N) -> ControlFlow<Break<Self::Error>> {
         if let Some(node) = node.downcast_ref::<Statement>() {
             into_control_flow(self.infer_exit(node))?
-            // {
-            //     let ty = self.get_type(node);
-            //     let ty_mut = &mut *ty.borrow_mut();
-            //     into_control_flow(ty_mut.try_resolve())?;
-            // }
-            // into_control_flow(self.try_resolve_all_types())?
         }
 
         if let Some(node) = node.downcast_ref::<Query>() {
@@ -274,7 +277,15 @@ impl<'ast> Visitor<'ast> for TypeInferencer<'ast> {
             into_control_flow(self.infer_exit(node))?
         }
 
+        if let Some(node) = node.downcast_ref::<SelectItem>() {
+            into_control_flow(self.infer_exit(node))?
+        }
+
         if let Some(node) = node.downcast_ref::<Function>() {
+            into_control_flow(self.infer_exit(node))?
+        }
+
+        if let Some(node) = node.downcast_ref::<Values>() {
             into_control_flow(self.infer_exit(node))?
         }
 

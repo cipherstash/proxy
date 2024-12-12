@@ -40,7 +40,12 @@ pub fn type_check<'ast>(
     match statement.accept(&mut mapper) {
         ControlFlow::Continue(()) => {
             // Ensures that there are no unresolved types.
-            mapper.inferencer.borrow().try_resolve_all_types()?;
+            if let Err(err) = mapper.inferencer.borrow().try_resolve_all_types() {
+                #[cfg(test)]
+                mapper.inferencer.borrow().dump_registry(statement);
+
+                Err(err)?
+            };
 
             Ok(TypedStatement {
                 statement,
@@ -184,7 +189,7 @@ impl<'ast> EqlMapper<'ast> {
                         }
                     } else {
                         Err(EqlMapperError::InternalError(
-                            "literal is not a scalar type".to_string(),
+                            format!("literal type {} is not a scalar type", &*ty.borrow())
                         ))
                     }
                 }
@@ -337,13 +342,13 @@ impl<'ast> Visitor<'ast> for EqlMapper<'ast> {
 mod test {
     use pretty_assertions::assert_eq;
 
-
-
     use sqlparser::{
         ast::{Ident, Statement},
         dialect::PostgreSqlDialect,
         parser::Parser,
     };
+    use tracing::instrument;
+    use tracing_subscriber::fmt::format::FmtSpan;
 
     // use crate::{TableColumn, Dep, make_schema, type_check};
     use crate::*;
@@ -751,5 +756,82 @@ mod test {
                 (NATIVE as rank)
             ])
         );
+    }
+
+    #[test]
+    fn aggregates() {
+        tracing_subscriber::fmt::init();
+
+        let schema = Dep::new(schema! {
+            tables: {
+                employees: {
+                    id,
+                    department,
+                    age,
+                    salary (EQL),
+                }
+            }
+        });
+
+        let statement = parse(
+            r#"
+                select
+                    max(age),
+                    min(salary)
+                from employees
+                group by department
+            "#,
+        );
+
+        let typed = match type_check(&schema, &statement) {
+            Ok(typed) => typed,
+            Err(err) => panic!("type check failed: {:#?}", err),
+        };
+
+        assert_eq!(
+            typed.get_type(&statement),
+            Some(&projection![
+                (NATIVE(employees.age) as max),
+                (EQL(employees.salary) as min)
+            ])
+        );
+    }
+
+    #[instrument]
+    #[test]
+    fn insert() {
+        tracing_subscriber::fmt()
+            .with_span_events(FmtSpan::FULL)
+            .with_line_number(true)
+            .without_time()
+            .with_level(false)
+            .with_file(true)
+            .init();
+
+        let schema = Dep::new(schema! {
+            tables: {
+                employees: {
+                    id,
+                    name,
+                    department,
+                    age,
+                    salary (EQL),
+                }
+            }
+        });
+
+        let statement = parse(
+            r#"
+                insert into employees (name, department, age, salary)
+                    values ('Alice', 'Engineering', 28, 180000)
+            "#,
+        );
+
+        let typed = match type_check(&schema, &statement) {
+            Ok(typed) => typed,
+            Err(err) => panic!("type check failed: {:#?}", err),
+        };
+
+        assert_eq!(typed.get_type(&statement), None);
     }
 }

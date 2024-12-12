@@ -3,8 +3,11 @@ use std::{cell::RefCell, rc::Rc};
 use sqlparser::ast::{Ident, Insert};
 
 use crate::{
-    inference::unifier::{Constructor, Def, Scalar, Status, Type},
-    inference::{type_error::TypeError, InferType},
+    inference::{
+        type_error::TypeError,
+        unifier::{Constructor, Def, Scalar, Status, Type},
+        InferType,
+    },
     ColumnKind, TypeInferencer,
 };
 
@@ -30,35 +33,44 @@ impl<'ast> InferType<'ast, Insert> for TypeInferencer<'ast> {
             .map(|c| self.schema.resolve_table_column(table_name, c))
             .collect::<Result<Vec<_>, _>>()?;
 
-        if let Some(source) = source {
-            let target_columns = Type::projection(
-                &table_columns
-                    .into_iter()
-                    .map(|tc| {
-                        let scalar_ty = if tc.column.kind == ColumnKind::Native {
-                            Scalar::Native {
-                                table: tc.table.name.clone(),
-                                column: tc.column.name.clone(),
-                            }
-                        } else {
-                            Scalar::Encrypted {
-                                table: tc.table.name.clone(),
-                                column: tc.column.name.clone(),
-                            }
-                        };
-                        (
-                            Rc::new(RefCell::new(Type(
-                                Def::Constructor(Constructor::Scalar(Rc::new(scalar_ty))),
-                                Status::Resolved,
-                            ))),
-                            Some(tc.column.name.clone()),
-                        )
-                    })
-                    .collect::<Vec<_>>(),
-            );
+        let target_columns = Type::projection(
+            &table_columns
+                .into_iter()
+                .map(|tc| {
+                    let scalar_ty = if tc.column.kind == ColumnKind::Native {
+                        Scalar::Native {
+                            table: tc.table.name.clone(),
+                            column: tc.column.name.clone(),
+                        }
+                    } else {
+                        Scalar::Encrypted {
+                            table: tc.table.name.clone(),
+                            column: tc.column.name.clone(),
+                        }
+                    };
+                    (
+                        Rc::new(RefCell::new(Type(
+                            Def::Constructor(Constructor::Scalar(Rc::new(scalar_ty))),
+                            Status::Resolved,
+                        ))),
+                        Some(tc.column.name.clone()),
+                    )
+                })
+                .collect::<Vec<_>>(),
+        );
 
+        if let Some(source) = source {
             self.unify_and_log(source, target_columns, self.get_type(&**source))?;
         }
+
+        Ok(())
+    }
+
+    fn infer_exit(&mut self, insert: &'ast Insert) -> Result<(), TypeError> {
+        let Insert {
+            returning,
+            ..
+        } = insert;
 
         match returning {
             Some(returning) => {

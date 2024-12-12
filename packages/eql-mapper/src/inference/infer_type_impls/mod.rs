@@ -1,6 +1,7 @@
 mod expr;
 mod function;
 mod select;
+mod select_item;
 mod set_expr;
 mod values;
 
