@@ -347,11 +347,13 @@ impl<'ast> Visitor<'ast> for EqlMapper<'ast> {
 
 #[cfg(test)]
 mod test {
+    use std::collections::HashMap;
+
     use pretty_assertions::assert_eq;
 
     use crate::*;
     use sqlparser::{
-        ast::{Ident, Statement},
+        ast::{Expr, Ident, Statement, Value},
         dialect::PostgreSqlDialect,
         parser::Parser,
     };
@@ -972,10 +974,7 @@ mod test {
             Err(err) => panic!("type check failed: {:#?}", err),
         };
 
-        assert_eq!(
-            typed.get_type(&statement),
-            Ok(&Type::Empty)
-        );
+        assert_eq!(typed.get_type(&statement), Ok(&Type::Empty));
     }
 
     #[test]
@@ -1015,5 +1014,63 @@ mod test {
                 (EQL(employees.salary) as salary)
             ])
         );
+    }
+
+    #[test]
+    fn select_with_literal_subsitution() {
+        let _ = tracing_subscriber::fmt::try_init();
+
+        let schema = Dep::new(schema! {
+            tables: {
+                employees: {
+                    id,
+                    name,
+                    department,
+                    age,
+                    salary (EQL),
+                }
+            }
+        });
+
+        let statement = parse(
+            r#"
+                select * from employees where salary > 200000
+            "#,
+        );
+
+        let typed = match type_check(&schema, &statement) {
+            Ok(typed) => typed,
+            Err(err) => panic!("type check failed: {:#?}", err),
+        };
+
+        assert!(typed.literals.contains(&(
+            EqlColumn(TableColumn {
+                table: id("employees"),
+                column: id("salary")
+            }),
+            &Expr::Value(Value::Number(200000.into(), false))
+        )));
+
+        let transformed_statement = match typed.transform(HashMap::from_iter([(
+            &Expr::Value(Value::Number(200000.into(), false)),
+            Expr::Value(Value::SingleQuotedString("ENCRYPTED".into())),
+        )].into_iter())) {
+            Ok(transformed_statement) => transformed_statement,
+            Err(err) => panic!("statement transformation failed: {}", err)
+        };
+
+        // This type checks the transformed statement so we can get hold of the encrypted literal.
+        let typed = match type_check(&schema, &transformed_statement) {
+            Ok(typed) => typed,
+            Err(err) => panic!("type check failed: {:#?}", err),
+        };
+
+        assert!(typed.literals.contains(&(
+            EqlColumn(TableColumn {
+                table: id("employees"),
+                column: id("salary")
+            }),
+            &Expr::Value(Value::SingleQuotedString("ENCRYPTED".into())),
+        )));
     }
 }
