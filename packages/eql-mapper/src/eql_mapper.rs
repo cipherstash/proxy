@@ -1076,4 +1076,50 @@ mod test {
             &Expr::Value(Value::SingleQuotedString("ENCRYPTED".into())),
         )));
     }
+
+    #[test]
+    fn pathologically_complex_sql_statement() {
+        let _ = tracing_subscriber::fmt::try_init();
+
+        let schema = Dep::new(schema! {
+            tables: {
+                employees: {
+                    id,
+                    department_id,
+                    name,
+                    salary (EQL),
+                }
+            }
+        });
+
+        let statement = parse(
+            r#"
+                select * from
+                (select min(salary) as min_salary from employees) as x
+                inner join (
+                    (select salary as y from employees where salary < (select min(foo) from (select salary as foo from employees)))
+                    union
+                    (select salary as y from employees where salary >= (select min(max(foo)) from (select salary as foo from employees)))
+                ) as holy_joins_batman on x.min_salary = holy_joins_batman.y
+                inner join employees as e on (e.salary = holy_joins_batman.y)
+            "#,
+        );
+
+        let typed = match type_check(&schema, &statement) {
+            Ok(typed) => typed,
+            Err(err) => panic!("type check failed: {:#?}", err),
+        };
+
+        assert_eq!(
+            typed.get_type(&statement),
+            Ok(&projection![
+                (EQL(employees.salary) as min_salary),
+                (EQL(employees.salary) as y),
+                (NATIVE(employees.id) as id),
+                (NATIVE(employees.department_id) as department_id),
+                (NATIVE(employees.name) as name),
+                (EQL(employees.salary) as salary)
+            ])
+        );
+    }
 }
