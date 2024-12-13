@@ -1051,12 +1051,15 @@ mod test {
             &Expr::Value(Value::Number(200000.into(), false))
         )));
 
-        let transformed_statement = match typed.transform(HashMap::from_iter([(
-            &Expr::Value(Value::Number(200000.into(), false)),
-            Expr::Value(Value::SingleQuotedString("ENCRYPTED".into())),
-        )].into_iter())) {
+        let transformed_statement = match typed.transform(HashMap::from_iter(
+            [(
+                &Expr::Value(Value::Number(200000.into(), false)),
+                Expr::Value(Value::SingleQuotedString("ENCRYPTED".into())),
+            )]
+            .into_iter(),
+        )) {
             Ok(transformed_statement) => transformed_statement,
-            Err(err) => panic!("statement transformation failed: {}", err)
+            Err(err) => panic!("statement transformation failed: {}", err),
         };
 
         // This type checks the transformed statement so we can get hold of the encrypted literal.
