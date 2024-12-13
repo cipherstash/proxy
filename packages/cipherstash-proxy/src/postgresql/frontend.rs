@@ -1,23 +1,19 @@
 use std::collections::HashMap;
 
 use super::context::Context;
-use super::messages::bind::Bind;
 use super::messages::FrontendCode as Code;
 use super::protocol::{self, Message};
 use crate::encrypt::Encrypt;
 use crate::eql;
 use crate::eql::Identifier;
 use crate::error::Error;
-use crate::postgresql::messages::parse::Parse;
-use crate::postgresql::{context, CONNECTION_TIMEOUT};
+use crate::postgresql::CONNECTION_TIMEOUT;
 use bytes::BytesMut;
 use eql_mapper::{self, EqlColumn, EqlMapperError, TableColumn};
 use sqlparser::ast::Value;
 use sqlparser::dialect::PostgreSqlDialect;
-use sqlparser::parser::Parser;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use tokio::time::timeout;
-use tracing::{error, info};
 
 const DIALECT: PostgreSqlDialect = PostgreSqlDialect {};
 
@@ -82,43 +78,8 @@ where
         Ok(message.bytes)
     }
 
-    async fn parse_handler(&mut self, message: &Message) -> Result<Option<BytesMut>, Error> {
-        let mut parse = Parse::try_from(&message.bytes)?;
-
-        let statement = Parser::new(&DIALECT)
-            .try_with_sql(&parse.statement)?
-            .parse_statement()?;
-
-        let typed_statement = eql_mapper::type_check(self.encrypt.schema.load(), &statement)?;
-
-        let plaintext_literals: Vec<eql::Plaintext> =
-            convert_value_nodes_to_eql_plaintext(&typed_statement)?;
-
-        let replacement_literal_values = self.encrypt_literals(plaintext_literals).await?;
-
-        let original_values_and_replacements =
-            zip_with_original_value_ref(&typed_statement, replacement_literal_values);
-
-        let transformed_statement = typed_statement.transform(original_values_and_replacements)?;
-
-        parse.statement = transformed_statement.to_string().clone();
-
-        self.context.add(
-            crate::postgresql::messages::Destination::Unnamed,
-            context::Statement::new(
-                transformed_statement,
-                parse.param_types.clone(),
-                typed_statement.params.clone(),
-                typed_statement.get_projection_columns().map(Vec::from),
-            ),
-        );
-
-        if parse.should_rewrite() {
-            let bytes = BytesMut::try_from(parse)?;
-            Ok(Some(bytes))
-        } else {
-            Ok(None)
-        }
+    async fn parse_handler(&mut self, _message: &Message) -> Result<Option<BytesMut>, Error> {
+        Ok(None)
     }
 
     async fn encrypt_literals(
@@ -133,27 +94,8 @@ where
             .collect::<Result<Vec<_>, _>>()?)
     }
 
-    async fn bind_handler(&mut self, message: &Message) -> Result<Option<BytesMut>, Error> {
-        let mut bind = Bind::try_from(&message.bytes)?;
-
-        if let Some(statement) = self.context.get(&bind.prepared_statement) {
-            info!("Statement {statement:?}");
-        } else {
-            error!("No statement {:?} exists", &bind.prepared_statement);
-            // return Ok(None);
-        }
-
-        let params = bind.to_plaintext()?;
-        let encrypted = self.encrypt.encrypt(params).await?;
-
-        bind.update_from_ciphertext(encrypted)?;
-
-        if bind.should_rewrite() {
-            let bytes = BytesMut::try_from(bind)?;
-            Ok(Some(bytes))
-        } else {
-            Ok(None)
-        }
+    async fn bind_handler(&mut self, _message: &Message) -> Result<Option<BytesMut>, Error> {
+        Ok(None)
     }
 }
 
