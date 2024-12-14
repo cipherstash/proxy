@@ -133,8 +133,7 @@ pub async fn load_dataset(config: &DatabaseConfig) -> Result<EncryptConfigMap, E
     };
 
     if rows.is_empty() {
-        error!("No active Encrypt configuration");
-        return Err(ConfigError::MissingActiveEncryptConfig.into());
+        warn!("No active Encrypt configuration");
     };
 
     let data = rows
