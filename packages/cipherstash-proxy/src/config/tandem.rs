@@ -1,10 +1,11 @@
 use crate::error::{ConfigError, Error};
 use config::{Config, Environment};
+use regex::Regex;
 use rustls_pki_types::ServerName;
 use serde::Deserialize;
 use std::fmt::Display;
 use std::path::PathBuf;
-use tracing::{debug, error, warn};
+use tracing::warn;
 
 use uuid::Uuid;
 
@@ -104,16 +105,16 @@ impl TandemConfig {
     pub fn load(path: &str) -> Result<TandemConfig, Error> {
         // Log a warning to user that config file is missing
         if !PathBuf::from(path).exists() {
-            warn!("Config file not found: {path}");
+            warn!("Configuration file was not found: {path}");
             warn!("Loading config values from environment variables.");
         }
-        TandemConfig::build(path, CS_PREFIX)
+        TandemConfig::build(path)
     }
 
-    fn build(path: &str, prefix: &str) -> Result<Self, Error> {
+    fn build(path: &str) -> Result<Self, Error> {
         // For parsing top-level values such as CS_HOST, CS_PORT
         // and for parsing nested env values such as CS_DATABASE__HOST, CS_DATABASE__PORT
-        let cs_env_source = Environment::with_prefix(prefix)
+        let cs_env_source = Environment::with_prefix(CS_PREFIX)
             .try_parsing(true)
             .separator("__")
             .prefix_separator("_");
@@ -123,16 +124,21 @@ impl TandemConfig {
             .add_source(cs_env_source)
             .build()?
             .try_deserialize()
-            .map_err(|err| {
-                if let config::ConfigError::Message(ref s) = err {
-                    if s.contains("UUID parsing failed") {
-                        error!(
-                            "Invalid dataset id. The configured dataset id must be a valid UUID."
-                        );
-                        debug!("{s}");
+            .map_err(|err| match err {
+                config::ConfigError::Message(ref s) => match s {
+                    s if s.contains("UUID parsing failed") => ConfigError::InvalidDatasetId,
+                    s if s.contains("missing field") => {
+                        let mut name = extract_field_name(s).map_or("unknown".to_string(), |s| s);
+
+                        if name == "name" {
+                            name = "database.name".to_string();
+                        }
+
+                        ConfigError::MissingParameter { name }
                     }
-                };
-                err
+                    _ => err.into(),
+                },
+                _ => err.into(),
             })?;
 
         Ok(config)
@@ -151,6 +157,12 @@ impl TandemConfig {
             None => false,
         }
     }
+}
+
+fn extract_field_name(input: &str) -> Option<String> {
+    let re = Regex::new(r"`(\w+)`").unwrap();
+    re.captures(input)
+        .and_then(|caps| caps.get(1).map(|m| m.as_str().to_string()))
 }
 
 impl Default for ServerConfig {
@@ -245,8 +257,7 @@ mod tests {
 
     #[test]
     fn test_database_as_url() {
-        let config =
-            TandemConfig::build("tests/config/cipherstash-proxy-test.toml", CS_PREFIX).unwrap();
+        let config = TandemConfig::build("tests/config/cipherstash-proxy-test.toml").unwrap();
         assert_eq!(
             config.database.to_socket_address(),
             "localhost:5532".to_string()
@@ -255,15 +266,13 @@ mod tests {
 
     #[test]
     fn test_dataset_as_uuid() {
-        let config =
-            TandemConfig::build("tests/config/cipherstash-proxy-test.toml", CS_PREFIX).unwrap();
+        let config = TandemConfig::build("tests/config/cipherstash-proxy-test.toml").unwrap();
         assert_eq!(
             config.encrypt.dataset_id,
             Some(Uuid::parse_str("484cd205-99e8-41ca-acfe-55a7e25a8ec2").unwrap())
         );
 
-        let config =
-            TandemConfig::build("tests/config/cipherstash-proxy-bad-dataset.toml", CS_PREFIX);
+        let config = TandemConfig::build("tests/config/cipherstash-proxy-bad-dataset.toml");
 
         assert!(config.is_err());
         assert!(matches!(config.unwrap_err(), Error::Config(_)));

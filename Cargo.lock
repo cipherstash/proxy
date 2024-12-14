@@ -732,6 +732,7 @@ dependencies = [
  "oid-registry",
  "postgres-protocol",
  "rand",
+ "regex",
  "ring",
  "rustls",
  "rustls-pki-types",

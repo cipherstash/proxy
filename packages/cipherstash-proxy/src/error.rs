@@ -61,16 +61,22 @@ pub enum ConfigError {
     Certificate(#[from] rustls_pki_types::pem::Error),
 
     #[error(transparent)]
-    Dataset(#[from] cipherstash_config::errors::ConfigError),
+    EncryptConfig(#[from] cipherstash_config::errors::ConfigError),
 
     #[error(transparent)]
     Database(#[from] tokio_postgres::Error),
+
+    #[error("Dataset id is not a valid UUID.")]
+    InvalidDatasetId,
 
     #[error("Server host {name} is not a valid server name")]
     InvalidServerName { name: String },
 
     #[error("Expected an active Encrypt configuration")]
     MissingActiveEncryptConfig,
+
+    #[error("Missing field {name} from configuration file or environment")]
+    MissingParameter { name: String },
 
     #[error("Expected an Encrypt configuration table")]
     MissingEncryptConfigTable,
@@ -88,7 +94,7 @@ pub enum ConfigError {
     TlsRequired,
 
     #[error(transparent)]
-    Variable(#[from] config::ConfigError),
+    FileOrEnvironment(#[from] config::ConfigError),
 }
 
 #[derive(Error, Debug)]
