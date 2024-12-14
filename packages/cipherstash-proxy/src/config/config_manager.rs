@@ -6,10 +6,9 @@ use crate::{
 };
 use arc_swap::ArcSwap;
 use cipherstash_config::ColumnConfig;
-use std::str::FromStr;
+use serde_json::Value;
 use std::{collections::HashMap, sync::Arc, time::Duration};
 use tokio::{task::JoinHandle, time};
-use tokio_postgres::{SimpleQueryMessage, SimpleQueryRow};
 use tracing::{error, info, warn};
 
 ///
@@ -109,18 +108,21 @@ async fn load_dataset_with_retry(config: &DatabaseConfig) -> Result<EncryptConfi
 pub async fn load_dataset(config: &DatabaseConfig) -> Result<EncryptConfigMap, Error> {
     let client = connect::database(config).await?;
 
-    let result = client.simple_query(ENCRYPT_DATASET_CONFIG_QUERY).await;
+    match client.query(ENCRYPT_DATASET_CONFIG_QUERY, &[]).await {
+        Ok(rows) => {
+            if rows.is_empty() {
+                warn!("No active Encrypt configuration");
+                return Ok(EncryptConfigMap::new());
+            };
+            // We know there is at least one row
+            let row = rows.get(0).unwrap();
 
-    let rows = match result {
-        Ok(rows) => rows
-            .into_iter()
-            .filter_map(|row| match row {
-                SimpleQueryMessage::Row(row) => Some(row),
-                _ => None,
-            })
-            .collect::<Vec<SimpleQueryRow>>(),
-        Err(e) => {
-            if configuration_table_not_found(&e) {
+            let json_value: Value = row.get("data");
+            let encrypt_config: EncryptConfig = serde_json::from_value(json_value)?;
+            Ok(encrypt_config.to_config_map())
+        }
+        Err(err) => {
+            if configuration_table_not_found(&err) {
                 error!("No Encrypt configuration table in database.");
                 warn!("Encrypt requires the Encrypt Query Language (EQL) to be installed in the target database");
                 warn!("See https://github.com/cipherstash/encrypt-query-language");
@@ -128,26 +130,9 @@ pub async fn load_dataset(config: &DatabaseConfig) -> Result<EncryptConfigMap, E
                 return Err(ConfigError::MissingEncryptConfigTable.into());
             }
             error!("Error loading Encrypt configuration");
-            return Err(ConfigError::Database(e).into());
+            Err(ConfigError::Database(err).into())
         }
-    };
-
-    if rows.is_empty() {
-        warn!("No active Encrypt configuration");
-    };
-
-    let data = rows
-        .first()
-        .ok_or_else(|| ConfigError::MissingActiveEncryptConfig)
-        .and_then(|row| row.try_get(0).map_err(ConfigError::Database))
-        .and_then(|opt_str: Option<&str>| {
-            opt_str.ok_or_else(|| ConfigError::MissingActiveEncryptConfig)
-        })?;
-
-    let encrypt = EncryptConfig::from_str(data)?;
-    let map = encrypt.to_config_map();
-
-    Ok(map)
+    }
 }
 
 fn configuration_table_not_found(e: &tokio_postgres::Error) -> bool {
