@@ -3,7 +3,7 @@
 //! Column type information is unused currently.
 
 use core::fmt::Debug;
-use derive_more::{Constructor, Display};
+use derive_more::Display;
 use sqlparser::ast::Ident;
 use std::sync::Arc;
 use thiserror::Error;
@@ -25,7 +25,7 @@ pub struct Schema {
 /// A table (or view).
 ///
 /// It has a name and some columns
-#[derive(Debug, Clone, PartialEq, Eq, Display)]
+#[derive(Debug, Clone, PartialEq, Eq, Display, Hash)]
 #[display("Table<{}>", name)]
 pub struct Table {
     pub name: Ident,
@@ -35,25 +35,17 @@ pub struct Table {
 }
 
 /// A column.
-#[derive(Debug, Clone, PartialEq, Eq, Display)]
+#[derive(Debug, Clone, PartialEq, Eq, Display, Hash)]
 #[display("Column<{}: {}>", name, kind)]
 pub struct Column {
     pub name: Ident,
     pub kind: ColumnKind,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Display)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Display, Hash)]
 pub enum ColumnKind {
     Native,
     Eql,
-}
-
-/// Describes a reference to a table + column.
-#[derive(Clone, Debug, PartialEq, Eq, Display, Constructor)]
-#[display("{}.{}", table.name, column.name)]
-pub struct TableColumnRef {
-    pub table: Arc<Table>,
-    pub column: Arc<Column>,
 }
 
 impl Column {
@@ -70,6 +62,14 @@ impl Column {
             kind: ColumnKind::Native,
         }
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Display)]
+#[display("{}.{}", table, column)]
+pub struct SchemaTableColumn {
+    pub table: Ident,
+    pub column: Ident,
+    pub kind: ColumnKind,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
@@ -116,13 +116,17 @@ impl Schema {
         &self,
         table_name: &Ident,
         column_name: &Ident,
-    ) -> Result<TableColumnRef, SchemaError> {
+    ) -> Result<SchemaTableColumn, SchemaError> {
         let mut haystack = self.tables.iter();
         match haystack
             .find_unique(&|table| SqlIdent::from(&table.name) == SqlIdent::from(table_name))
         {
             Ok(table) => match table.get_column(column_name) {
-                Ok(column) => Ok(TableColumnRef::new(table.clone(), column.clone())),
+                Ok(column) => Ok(SchemaTableColumn {
+                    table: table.name.clone(),
+                    column: column.name.clone(),
+                    kind: column.kind,
+                }),
                 Err(_) => Err(SchemaError::TableNotFound(column_name.to_string())),
             },
             Err(_) => Err(SchemaError::TableNotFound(table_name.to_string())),

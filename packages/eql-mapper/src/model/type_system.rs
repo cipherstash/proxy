@@ -5,29 +5,41 @@
 //! `eql_mapper`'s internal representation of the type system contains additional implementation details which would not
 //! be pleasant for public consumption.
 
-use crate::inference::unifier;
+use crate::{
+    inference::unifier,
+    unifier::{EqlValue, NativeValue, ProjectionColumns},
+};
 use derive_more::Display;
 use sqlparser::ast::Ident;
 
 /// The resolved type of a [`sqlparser::ast::Expr`] node.
 #[derive(Debug, Clone, PartialEq, Eq, Display)]
 pub enum Type {
-    /// A [`Scalar`] type; either an encrypted column from the database schema or some native (plaintext) database type.
-    #[display("Scalar({_0})")]
-    Scalar(Scalar),
-
-    /// An array type that is parameterized by an element type.
-    #[display("Array({})", _0)]
-    Array(Box<Type>),
+    /// A value type (an EQL type, native database type or an array type)
+    Value(Value),
 
     /// A projection type that is parameterized by a list of projection column types.
     #[display("Projection({})", ProjectionColumn::render_projection(_0.0.as_slice()))]
     Projection(Projection),
+}
 
-    /// An empty type - the only use case for this type (so far) is for representing the type of subqueries that do not
-    /// return a projection.
-    #[display("Empty")]
-    Empty,
+/// A value type (an EQL type, native database type or an array type)
+#[derive(Debug, Clone, Eq, Display)]
+pub enum Value {
+    /// An encrypted type from a particular table-column in the schema.
+    ///
+    /// An encrypted column never shares a type with another encrypted column - which is why it is sufficient to
+    /// identify the type by its table & column names.
+    #[display("Eql({})", _0.to_string())]
+    Eql(EqlValue),
+
+    /// A native database type.
+    #[display("Native")]
+    Native(NativeValue),
+
+    /// An array type that is parameterized by an element type.
+    #[display("Array({})", _0)]
+    Array(Box<Type>),
 }
 
 /// A projection type that is parameterized by a list of projection column types.
@@ -35,57 +47,15 @@ pub enum Type {
 #[display("Projection{}", ProjectionColumn::render_projection(_0))]
 pub struct Projection(pub Vec<ProjectionColumn>);
 
-/// The type of an encrypted column or a native (plaintext) database types.
-///
-/// Native database types are not distinguished in this type system and the [`PartialEq`] impl for `Scalar` ignores the
-/// optional [`TableColumn`].
-#[derive(Debug, Clone, Eq, Display)]
-pub enum Scalar {
-    /// An encrypted type from a particular table-column in the schema.
-    ///
-    /// An encrypted column never shares a type with another encrypted column - which is why it is sufficient to
-    /// identify the type by its table & column names.
-    #[display("Eql({})", _0.to_string())]
-    EqlColumn(EqlColumn),
-
-    /// A native database type.
-    #[display("Native")]
-    Native(Option<TableColumn>),
-}
-
-/// A reference to an EQL column with the [`crate::Schema`].
-#[derive(Debug, Clone, PartialEq, Eq, Display)]
-#[display("{}", _0)]
-pub struct EqlColumn(pub TableColumn);
-
-/// A reference to a table and a column. This can be used to resolve type information in a [`crate::Schema`].
-#[derive(Debug, Clone, Eq, PartialEq, Display)]
-#[display("{}.{}", table.to_string(), column.to_string())]
-pub struct TableColumn {
-    pub table: Ident,
-    pub column: Ident,
-}
-
 /// A column from a projection which has a type and an optional alias.
 #[derive(Debug, PartialEq, Eq, Clone, Display)]
 #[display("{} {}", ty, self.render_alias())]
 pub struct ProjectionColumn {
-    /// The type of the column
-    pub ty: ProjectionColumnType,
+    /// The value type of the column
+    pub ty: Value,
 
     /// The columm alias
     pub alias: Option<Ident>,
-}
-
-/// The type of a projection column. Projections produced from wildcards have been flattened, so projections cannot
-/// contain projections.  The only possible kinds of types for columns are arrays and scalars.
-#[derive(Debug, PartialEq, Eq, Clone, Display)]
-pub enum ProjectionColumnType {
-    #[display("{}", _0)]
-    Scalar(Scalar),
-
-    #[display("{}", _0)]
-    Array(Box<ProjectionColumnType>),
 }
 
 impl ProjectionColumn {
@@ -102,41 +72,59 @@ impl ProjectionColumn {
     }
 }
 
-impl Type {
-    #[cfg(test)]
-    pub(crate) fn projection(
-        cols: &[impl Into<(ProjectionColumnType, Option<Ident>)> + Clone],
-    ) -> Self {
-        Type::Projection(Projection(
-            cols.iter()
-                .cloned()
-                .map(|col| {
-                    let (ty, alias): (ProjectionColumnType, Option<Ident>) = col.into();
-                    ProjectionColumn { ty, alias }
-                })
-                .collect(),
-        ))
+impl TryFrom<&unifier::ProjectionColumns> for Type {
+    type Error = crate::EqlMapperError;
+
+    fn try_from(columns: &unifier::ProjectionColumns) -> Result<Self, Self::Error> {
+        let mut pub_columns: Vec<ProjectionColumn> = Vec::with_capacity(columns.len());
+
+        for unifier::ProjectionColumn { ty, alias } in columns.0.iter() {
+            let pub_column: ProjectionColumn = match ty {
+                unifier::Type::Constructor(unifier::Constructor::Value(value)) => {
+                    ProjectionColumn {
+                        ty: value.try_into()?,
+                        alias: alias.clone(),
+                    }
+                }
+
+                unexpected => Err(crate::EqlMapperError::InternalError(format!(
+                    "unexpected type {} in projection column",
+                    unexpected
+                )))?,
+            };
+
+            pub_columns.push(pub_column);
+        }
+
+        Ok(Type::Projection(Projection(pub_columns)))
     }
 }
 
-impl From<EqlColumn> for ProjectionColumnType {
-    fn from(value: EqlColumn) -> Self {
-        ProjectionColumnType::Scalar(Scalar::EqlColumn(value))
+impl TryFrom<&unifier::Value> for EqlValue {
+    type Error = crate::EqlMapperError;
+
+    fn try_from(value: &unifier::Value) -> Result<Self, Self::Error> {
+        match value {
+            unifier::Value::Eql(eql_value) => Ok(EqlValue(eql_value.0.clone())),
+            other => Err(crate::EqlMapperError::InternalError(format!(
+                "cannot convert {} into Value",
+                other
+            ))),
+        }
     }
 }
 
-impl From<Scalar> for ProjectionColumnType {
-    fn from(value: Scalar) -> Self {
-        ProjectionColumnType::Scalar(value)
-    }
-}
+impl TryFrom<&unifier::Value> for Value {
+    type Error = crate::EqlMapperError;
 
-impl From<(&str, &str)> for EqlColumn {
-    fn from(value: (&str, &str)) -> Self {
-        EqlColumn(TableColumn {
-            table: Ident::new(value.0),
-            column: Ident::new(value.1),
-        })
+    fn try_from(value: &unifier::Value) -> Result<Self, Self::Error> {
+        match value {
+            unifier::Value::Eql(eql_value) => Ok(Value::Eql(eql_value.clone())),
+            unifier::Value::Native(native_value) => Ok(Value::Native(native_value.clone())),
+            unifier::Value::Array(element_ty) => {
+                Ok(Value::Array(Box::new((&**element_ty).try_into()?)))
+            }
+        }
     }
 }
 
@@ -144,9 +132,7 @@ impl TryFrom<&unifier::Type> for Type {
     type Error = crate::EqlMapperError;
 
     fn try_from(value: &unifier::Type) -> Result<Self, Self::Error> {
-        let unifier::Type(unifier::Def::Constructor(constructor), unifier::Status::Resolved) =
-            value
-        else {
+        let unifier::Type::Constructor(constructor) = value else {
             return Err(crate::EqlMapperError::InternalError(format!(
                 "expected type {} to be resolved",
                 value
@@ -154,31 +140,19 @@ impl TryFrom<&unifier::Type> for Type {
         };
 
         match constructor {
-            unifier::Constructor::Scalar(ty) => (&**ty).try_into(),
+            unifier::Constructor::Value(value) => Ok(Type::Value(value.try_into()?)),
 
-            unifier::Constructor::Array(ty) => (&*ty.borrow()).try_into(),
-
-            unifier::Constructor::Projection(ty) => {
-                let columns = &*ty.borrow();
+            unifier::Constructor::Projection(ProjectionColumns(columns)) => {
                 let mut pub_columns: Vec<ProjectionColumn> = Vec::with_capacity(columns.len());
 
                 for unifier::ProjectionColumn { ty, alias } in columns.iter() {
-                    let pub_column: ProjectionColumn = match &*ty.borrow() {
-                        unifier::Type(
-                            unifier::Def::Constructor(unifier::Constructor::Scalar(ty)),
-                            _,
-                        ) => ProjectionColumn {
-                            ty: (&**ty).try_into()?,
-                            alias: alias.clone(),
-                        },
-
-                        unifier::Type(
-                            unifier::Def::Constructor(unifier::Constructor::Array(ty)),
-                            _,
-                        ) => ProjectionColumn {
-                            ty: (&*ty.borrow()).try_into()?,
-                            alias: alias.clone(),
-                        },
+                    let pub_column: ProjectionColumn = match ty {
+                        unifier::Type::Constructor(unifier::Constructor::Value(ty)) => {
+                            ProjectionColumn {
+                                ty: ty.try_into()?,
+                                alias: alias.clone(),
+                            }
+                        }
 
                         unexpected => Err(crate::EqlMapperError::InternalError(format!(
                             "unexpected type {} in projection column",
@@ -192,127 +166,31 @@ impl TryFrom<&unifier::Type> for Type {
                 Ok(Type::Projection(Projection(pub_columns)))
             }
 
-            unifier::Constructor::Empty => Ok(Type::Empty),
-        }
-    }
-}
-
-impl TryFrom<&unifier::Scalar> for Type {
-    type Error = crate::EqlMapperError;
-
-    fn try_from(scalar: &unifier::Scalar) -> Result<Self, Self::Error> {
-        match scalar {
-            unifier::Scalar::Encrypted { table, column } => {
-                Ok(Self::Scalar(Scalar::EqlColumn(EqlColumn(TableColumn {
-                    table: (*table).clone(),
-                    column: (*column).clone(),
-                }))))
-            }
-            unifier::Scalar::Native { table, column } => {
-                Ok(Self::Scalar(Scalar::Native(Some(TableColumn {
-                    table: (*table).clone(),
-                    column: (*column).clone(),
-                }))))
-            }
-            unifier::Scalar::AnonymousNative => Ok(Self::Scalar(Scalar::Native(None))),
-        }
-    }
-}
-
-impl TryFrom<&unifier::Scalar> for ProjectionColumnType {
-    type Error = crate::EqlMapperError;
-
-    fn try_from(scalar: &unifier::Scalar) -> Result<Self, Self::Error> {
-        match scalar {
-            unifier::Scalar::Encrypted { table, column } => {
-                Ok(Self::Scalar(Scalar::EqlColumn(EqlColumn(TableColumn {
-                    table: (*table).clone(),
-                    column: (*column).clone(),
-                }))))
-            }
-            unifier::Scalar::Native { table, column } => {
-                Ok(Self::Scalar(Scalar::Native(Some(TableColumn {
-                    table: (*table).clone(),
-                    column: (*column).clone(),
-                }))))
-            }
-            unifier::Scalar::AnonymousNative => Ok(Self::Scalar(Scalar::Native(None))),
-        }
-    }
-}
-
-impl TryFrom<&unifier::Type> for ProjectionColumnType {
-    type Error = crate::EqlMapperError;
-
-    fn try_from(value: &unifier::Type) -> Result<Self, Self::Error> {
-        let unifier::Type(unifier::Def::Constructor(constructor), unifier::Status::Resolved) =
-            value
-        else {
-            return Err(crate::EqlMapperError::InternalError(format!(
-                "expected type {} to be resolved",
-                value
-            )));
-        };
-
-        match constructor {
-            unifier::Constructor::Scalar(ty) => (&**ty).try_into(),
-
-            unifier::Constructor::Array(ty) => (&*ty.borrow()).try_into(),
-
-            unexpected => Err(crate::EqlMapperError::InternalError(format!(
-                "expected projection column type {} to be a scalar or an array",
-                unexpected
+            unifier::Constructor::Empty => Err(crate::EqlMapperError::InternalError(String::from(
+                "cannot convert Type::Empty",
             ))),
         }
     }
 }
 
-impl TryFrom<&unifier::Scalar> for Scalar {
+impl TryFrom<&unifier::Value> for ProjectionColumn {
     type Error = crate::EqlMapperError;
 
-    fn try_from(scalar: &unifier::Scalar) -> Result<Self, Self::Error> {
-        match scalar {
-            unifier::Scalar::Encrypted { table, column } => {
-                Ok(Scalar::EqlColumn(EqlColumn(TableColumn {
-                    table: table.clone(),
-                    column: column.clone(),
-                })))
-            }
-            unifier::Scalar::Native { table, column } => Ok(Scalar::Native(Some(TableColumn {
-                table: table.clone(),
-                column: column.clone(),
-            }))),
-            unifier::Scalar::AnonymousNative => Ok(Scalar::Native(None)),
-        }
+    fn try_from(value: &unifier::Value) -> Result<Self, Self::Error> {
+        Ok(ProjectionColumn {
+            ty: value.try_into()?,
+            alias: None,
+        })
     }
 }
 
-impl TryFrom<&unifier::Scalar> for EqlColumn {
-    type Error = crate::EqlMapperError;
-
-    fn try_from(scalar: &unifier::Scalar) -> Result<Self, Self::Error> {
-        match scalar {
-            unifier::Scalar::Encrypted { table, column } => Ok(EqlColumn(TableColumn {
-                table: table.clone(),
-                column: column.clone(),
-            })),
-            unifier::Scalar::Native { table, column } => Ok(EqlColumn(TableColumn {
-                table: table.clone(),
-                column: column.clone(),
-            })),
-            unifier::Scalar::AnonymousNative => Err(Self::Error::InternalError(
-                "cannot create EQL column from native column".to_string(),
-            )),
-        }
-    }
-}
-
-impl PartialEq for Scalar {
+impl PartialEq for Value {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
-            (Scalar::EqlColumn(left), Scalar::EqlColumn(right)) => left == right,
-            (Scalar::Native(_), Scalar::Native(_)) => true,
-            _ => false,
+            (Value::Eql(lhs), Value::Eql(rhs)) => lhs == rhs,
+            (Value::Native(_), Value::Native(_)) => true,
+            (Value::Array(lhs), Value::Array(rhs)) => lhs == rhs,
+            (_, _) => false,
         }
     }
 }

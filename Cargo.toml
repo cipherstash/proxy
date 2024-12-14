@@ -10,9 +10,9 @@ edition = "2021"
 
 [profile.dev]
 incremental = true
-opt-level = 1
-debug = 0
-split-debuginfo = "unpacked"
+# opt-level = 1
+# debug = 0
+# split-debuginfo = "unpacked"
 
 [profile.dev.package]
 aws-lc-sys.opt-level = 3

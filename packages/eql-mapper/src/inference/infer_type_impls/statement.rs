@@ -8,15 +8,15 @@ impl<'ast> InferType<'ast, Statement> for TypeInferencer<'ast> {
     fn infer_exit(&mut self, statement: &'ast Statement) -> Result<(), TypeError> {
         match statement {
             Statement::Query(query) => {
-                self.unify_and_log(statement, self.get_type(statement), self.get_type(&**query))?;
+                self.unify_nodes(statement, &**query)?;
             }
 
             Statement::Insert(insert) => {
-                self.unify_and_log(statement, self.get_type(statement), self.get_type(insert))?;
+                self.unify_nodes(statement, insert)?;
             }
 
             Statement::Delete(delete) => {
-                self.unify_and_log(statement, self.get_type(statement), self.get_type(delete))?;
+                self.unify_nodes(statement, delete)?;
             }
 
             Statement::Update {
@@ -29,12 +29,13 @@ impl<'ast> InferType<'ast, Statement> for TypeInferencer<'ast> {
                 for assignment in assignments.iter() {
                     match &assignment.target {
                         AssignmentTarget::ColumnName(object_name) => {
-                            let ty = self
-                                .scope
-                                .borrow()
-                                .resolve_ident(object_name.0.last().unwrap())?;
-
-                            self.unify_and_log(assignment, ty, self.get_type(&assignment.value))?;
+                            self.unify_node_with_type(
+                                &assignment.value,
+                                &self
+                                    .scope_tracker
+                                    .borrow()
+                                    .resolve_ident(object_name.0.last().unwrap())?,
+                            )?;
                         }
 
                         AssignmentTarget::Tuple(_) => {
@@ -47,14 +48,10 @@ impl<'ast> InferType<'ast, Statement> for TypeInferencer<'ast> {
 
                 match returning {
                     Some(returning) => {
-                        self.unify_and_log(
-                            statement,
-                            self.get_type(statement),
-                            self.get_type(returning),
-                        )?;
+                        self.unify_nodes(statement, returning)?;
                     }
                     None => {
-                        self.unify_and_log(statement, self.get_type(statement), Type::empty())?;
+                        self.unify_node_with_type(statement, &Type::empty())?;
                     }
                 }
             }

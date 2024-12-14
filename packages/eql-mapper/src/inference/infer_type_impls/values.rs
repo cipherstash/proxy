@@ -1,5 +1,4 @@
 use sqlparser::ast::Values;
-use tracing::info;
 
 use crate::{
     inference::type_error::TypeError, inference::unifier::Type, inference::InferType,
@@ -27,27 +26,21 @@ impl<'ast> InferType<'ast, Values> for TypeInferencer<'ast> {
             .map(|val| self.get_type(val))
             .collect::<Vec<_>>();
 
-        info!("WAT 0");
         for row in values.rows.iter() {
             for (idx, val) in row.iter().enumerate() {
-                self.unify(self.get_type(val), column_types[idx].clone())?;
+                self.unify(&self.get_type(val), &column_types[idx])?;
             }
         }
 
-        info!("WAT 0.1");
-
-        self.unify_and_log(
+        self.unify_node_with_type(
             values,
-            self.get_type(values),
-            Type::projection(
+            &Type::projection(
                 &column_types
                     .iter()
                     .map(|ty| (ty.clone(), None))
                     .collect::<Vec<_>>(),
             ),
         )?;
-
-        info!("WAT 1");
 
         Ok(())
     }

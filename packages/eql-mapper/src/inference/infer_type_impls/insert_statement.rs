@@ -1,14 +1,13 @@
-use std::{cell::RefCell, rc::Rc};
-
 use sqlparser::ast::{Ident, Insert};
 
 use crate::{
     inference::{
         type_error::TypeError,
-        unifier::{Constructor, Def, Scalar, Status, Type},
+        unifier::{Constructor, Type},
         InferType,
     },
-    ColumnKind, TypeInferencer,
+    unifier::{EqlValue, NativeValue, Value},
+    ColumnKind, TableColumn, TypeInferencer,
 };
 
 impl<'ast> InferType<'ast, Insert> for TypeInferencer<'ast> {
@@ -35,31 +34,28 @@ impl<'ast> InferType<'ast, Insert> for TypeInferencer<'ast> {
         let target_columns = Type::projection(
             &table_columns
                 .into_iter()
-                .map(|tc| {
-                    let scalar_ty = if tc.column.kind == ColumnKind::Native {
-                        Scalar::Native {
-                            table: tc.table.name.clone(),
-                            column: tc.column.name.clone(),
-                        }
-                    } else {
-                        Scalar::Encrypted {
-                            table: tc.table.name.clone(),
-                            column: tc.column.name.clone(),
-                        }
+                .map(|stc| {
+                    let tc = TableColumn {
+                        table: stc.table.clone(),
+                        column: stc.column.clone(),
                     };
+
+                    let value_ty = if stc.kind == ColumnKind::Native {
+                        Value::Native(NativeValue(Some(tc.clone())))
+                    } else {
+                        Value::Eql(EqlValue(tc.clone()))
+                    };
+
                     (
-                        Rc::new(RefCell::new(Type(
-                            Def::Constructor(Constructor::Scalar(Rc::new(scalar_ty))),
-                            Status::Resolved,
-                        ))),
-                        Some(tc.column.name.clone()),
+                        Type::Constructor(Constructor::Value(value_ty)),
+                        Some(tc.column.clone()),
                     )
                 })
                 .collect::<Vec<_>>(),
         );
 
         if let Some(source) = source {
-            self.unify_and_log(source, target_columns, self.get_type(&**source))?;
+            self.unify_node_with_type(&**source, &target_columns)?;
         }
 
         Ok(())
@@ -70,11 +66,11 @@ impl<'ast> InferType<'ast, Insert> for TypeInferencer<'ast> {
 
         match returning {
             Some(returning) => {
-                self.unify_and_log(insert, self.get_type(insert), self.get_type(returning))?;
+                self.unify_nodes(insert, returning)?;
             }
 
             None => {
-                self.unify_and_log(insert, self.get_type(insert), Type::empty())?;
+                self.unify_node_with_type(insert, &Type::empty())?;
             }
         }
 

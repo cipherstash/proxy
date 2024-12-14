@@ -1,26 +1,102 @@
-use std::{cell::RefCell, ops::Add, rc::Rc};
+use std::{ops::Add, sync::Arc};
 
 use derive_more::Display;
 use sqlparser::ast::Ident;
 
 use crate::{inference::TypeError, ColumnKind, Table};
 
-/// The inferred type of either:
+use super::TypeRegistry;
+
+/// The type of an expression in a SQL statement or the type of a table column from the database schema.
 ///
-/// - an `Expr` node, or
-/// - any SQL statement or subquery that produces a projection
-/// - a table-column from the database schema
+/// An expression can be:
 ///
-/// A `Type` has a [`Def`] and a [`Status`]. The `Def` contains the inferred details of the type.  The `Status` captures
-/// whether the type is fully resolved or partial (may contain unsubstituted type variables).
+/// - a [`sqlparser::ast::Expr`] node
+/// - a [`sqlparser::ast::Statement`] or any other SQL AST node that produces a projection.
+///
+/// A `Type` is either a [`Constructor`] (fully or partially known type) or a [`TypeVar`] (a placeholder for an unknown type).
 ///
 #[derive(Debug, PartialEq, Eq, Clone, Display)]
-#[display("Type({_0}, {_1})")]
-pub(crate) struct Type(pub(crate) Def, pub(crate) Status);
+#[display("{self}")]
+pub enum Type {
+    /// A specific type constructor with zero or more generic parameters.
+    #[display("Constructor({_0})")]
+    Constructor(Constructor),
+
+    /// A type variable representing a placeholder for an unknown type.
+    #[display("Var({})", _0)]
+    Var(TypeVar),
+    // TODO: consider including `Error` as a variant
+}
+
+/// A `Constructor` is what is known about a [`Type`].
+#[derive(Debug, Clone, PartialEq, Eq, Display)]
+pub enum Constructor {
+    #[display("Value({})", _0)]
+    Value(Value),
+
+    /// A projection type that is parameterized by a list of projection column types.
+    #[display("Projection({})", crate::unifier::Unifier::render_projection(_0))]
+    Projection(ProjectionColumns),
+
+    /// An empty type - the only usecase for this type (so far) is for representing the type of subqueries that do not
+    /// return a projection.
+    #[display("Empty")]
+    Empty,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Display)]
+pub enum Value {
+    /// An encrypted type from a particular table-column in the schema.
+    ///
+    /// An encrypted column never shares a type with another encrypted column - which is why it is sufficient to
+    /// identify the type by its table & column names.
+    #[display("EQL({_0})")]
+    Eql(EqlValue),
+
+    /// A native database type that carries its table & column name.  `Native` & `AnonymousNative` are will successfully
+    /// unify with each other - they are the same type as far as the type system is concerned. `Native` just carries more
+    /// information which makes testing & debugging easier.
+    #[display("Native")]
+    Native(NativeValue),
+
+    /// An array type that is parameterized by an element type.
+    #[display("Array({})", _0)]
+    Array(Box<Type>),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Display)]
+#[display("{}.{}", table, column)]
+pub struct TableColumn {
+    pub table: Ident,
+    pub column: Ident,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Display)]
+pub struct EqlValue(pub TableColumn);
+
+#[derive(Debug, Clone, PartialEq, Eq, Display)]
+#[display("Native({})", _0.as_ref().map(|tc| tc.to_string()).unwrap_or(String::from("?")))]
+pub struct NativeValue(pub Option<TableColumn>);
+
+/// A column from a projection.
+#[derive(Debug, PartialEq, Eq, Clone, Display)]
+#[display("{} {}", ty, self.render_alias())]
+pub struct ProjectionColumn {
+    /// The type of the column
+    pub ty: Type,
+
+    /// The columm alias
+    pub alias: Option<Ident>,
+}
+
+/// A placeholder for an unknown type.
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, Display, Default)]
+pub struct TypeVar(pub u32);
 
 /// A `Status` represents the "completeness" of a [`Type`].
 #[derive(Debug, PartialEq, Eq, Copy, Clone, Display)]
-pub(crate) enum Status {
+pub enum Status {
     /// The type is completely known.
     ///
     /// There are no type variables (i.e. `Constructor::Var` values) contained within the type or any type it references.
@@ -38,6 +114,32 @@ pub(crate) enum Status {
     Partial,
 }
 
+impl TypeVar {
+    pub(crate) fn try_resolve(&self, registry: &TypeRegistry<'_>) -> Result<Type, TypeError> {
+        let mut tvar = *self;
+        loop {
+            match registry.get_substitution(tvar) {
+                Some((ty @ Type::Constructor(_), Status::Resolved)) => return Ok(ty.clone()),
+                Some((ty @ Type::Constructor(_), Status::Partial)) => {
+                    return ty.try_resolve(registry)
+                }
+                Some((ty @ Type::Var(_), Status::Resolved)) => return ty.try_resolve(registry),
+                Some((Type::Var(found), Status::Partial)) => tvar = found,
+                None => {
+                    return Err(TypeError::Incomplete(format!(
+                        "{} has no inferred substitution",
+                        tvar
+                    )))
+                }
+            }
+        }
+    }
+
+    pub(crate) fn is_fully_resolved(&self, registry: &TypeRegistry<'_>) -> bool {
+        self.try_resolve(registry).is_ok()
+    }
+}
+
 impl Add for Status {
     type Output = Self;
 
@@ -51,217 +153,58 @@ impl Add for Status {
 }
 
 impl Type {
-    pub(crate) fn new(def: Def) -> Self {
-        let status = match &def {
-            Def::Constructor(constructor) => match constructor {
-                Constructor::Scalar(_) => Status::Resolved,
-                Constructor::Array(element_ty) => element_ty.borrow().status(),
-                Constructor::Projection(columns) => {
-                    if columns
-                        .borrow()
-                        .iter()
-                        .map(|col| match &*col.ty.borrow() {
-                            Type(
-                                Def::Constructor(Constructor::Projection(_)),
-                                projection_status,
-                            ) => *projection_status,
-                            Type(_, status) => *status,
-                        })
-                        .all(|s| s == Status::Resolved)
-                    {
-                        Status::Resolved
-                    } else {
-                        Status::Partial
-                    }
-                }
-                Constructor::Empty => Status::Resolved,
-            },
-            Def::Var(_) => Status::Partial,
-        };
-
-        Self(def, status)
+    /// Creates an `Type` containing a `Constructor::Empty`.
+    pub(crate) fn empty() -> Self {
+        Type::Constructor(Constructor::Empty)
     }
 
-    /// Creates an `Rc<RefCell<Type>>` containing a `Constructor::Empty`.
-    pub(crate) fn empty() -> Rc<RefCell<Self>> {
-        Self::new(Def::Constructor(Constructor::Empty)).wrap()
+    /// Creates an `Type` containing a `Constructor::Scalar(Scalar::Native(None))`.
+    pub(crate) fn any_native() -> Self {
+        Type::Constructor(Constructor::Value(Value::Native(NativeValue(None))))
     }
 
-    /// Creates an `Rc<RefCell<Type>>` containing a `Constructor::Scalar(Arc::new(Scalar::AnonymousNative))`.
-    pub(crate) fn anonymous_native() -> Rc<RefCell<Self>> {
-        Self::new(Def::Constructor(Constructor::Scalar(Rc::new(
-            Scalar::AnonymousNative,
-        ))))
-        .wrap()
+    /// Creates an `Type` containing a `Constructor::Projection`.
+    pub(crate) fn projection(columns: &[(Type, Option<Ident>)]) -> Self {
+        Type::Constructor(Constructor::Projection(ProjectionColumns(
+            columns
+                .iter()
+                .map(|(c, n)| ProjectionColumn::new(c.clone(), n.clone()))
+                .collect(),
+        )))
     }
 
-    /// Creates an `Rc<RefCell<Type>>` containing a `TypeVar::Fresh`.
-    pub(crate) fn fresh_tvar() -> Rc<RefCell<Self>> {
-        Self::new(Def::Var(TypeVar::Fresh)).wrap()
-    }
-
-    /// Creates an `Rc<RefCell<Type>>` containing a `Constructor::Projection`.
-    pub(crate) fn projection(columns: &[(Rc<RefCell<Type>>, Option<Ident>)]) -> Rc<RefCell<Self>> {
-        Self::new(Def::Constructor(Constructor::Projection(Rc::new(
-            RefCell::new(
-                columns
-                    .iter()
-                    .map(|(c, n)| ProjectionColumn::new(c.clone(), n.clone()))
-                    .collect(),
-            ),
-        ))))
-        .wrap()
-    }
-
-    /// Creates an `Rc<RefCell<Type>>` containing a `Constructor::Array`.
-    pub(crate) fn array(element_ty: Rc<RefCell<Type>>) -> Rc<RefCell<Self>> {
-        Self::new(Def::Constructor(Constructor::Array(element_ty))).wrap()
-    }
-
-    /// Wraps `self` in an `Rc<RefCell<_>>`.
-    ///
-    /// Convenience to avoid boilerplate.
-    pub(crate) fn wrap(self) -> Rc<RefCell<Self>> {
-        Rc::new(RefCell::new(self))
-    }
-
-    /// Checks if this type is fully resolved (contains no type variables),
-    pub(crate) fn is_resolved(&self) -> bool {
-        self.1 == Status::Resolved
+    /// Creates an `Type` containing a `Constructor::Array`.
+    pub(crate) fn array(element_ty: Type) -> Self {
+        Type::Constructor(Constructor::Value(Value::Array(element_ty.into())))
     }
 
     /// Gets the status of this type.
-    pub(crate) fn status(&self) -> Status {
-        self.1
+    pub(crate) fn is_fully_resolved(&self, registry: &TypeRegistry<'_>) -> bool {
+        match self {
+            Type::Constructor(constructor) => constructor.is_fully_resolved(registry),
+            Type::Var(tvar) => tvar.is_fully_resolved(registry),
+        }
+    }
+
+    pub(crate) fn status(&self, registry: &TypeRegistry<'_>) -> Status {
+        if self.is_fully_resolved(registry) {
+            Status::Resolved
+        } else {
+            Status::Partial
+        }
     }
 
     /// Tries to resolve this type.
     ///
     /// See [`Status::Partial`] for an explanation of why this method is required.
-    pub(crate) fn try_resolve(&mut self) -> Result<(), TypeError> {
-        if self.is_resolved() {
-            return Ok(());
+    pub(crate) fn try_resolve(&self, registry: &TypeRegistry) -> Result<Type, TypeError> {
+        match &self {
+            Self::Constructor(constructor) => Ok(Type::Constructor(
+                constructor.try_resolve(registry)?.clone(),
+            )),
+
+            Self::Var(tvar) => Ok(tvar.try_resolve(registry)?),
         }
-
-        match &mut self.0 {
-            Def::Constructor(constructor) => {
-                constructor.try_resolve()?;
-                self.1 = Status::Resolved;
-                Ok(())
-            }
-
-            Def::Var(tvar) => Err(TypeError::Incomplete(tvar.to_string())),
-        }
-    }
-
-    /// Given a `Vec` of `Type`s assert that every type is a projection and flatten to return a single `Type` containing
-    /// a projection.  If any of the types in `projection_tys` is *not* a projection then return an internal error
-    /// because this would be a bug.
-    pub(crate) fn flatten_projections(
-        projection_tys: Vec<Rc<RefCell<Type>>>,
-    ) -> Result<Rc<RefCell<Type>>, TypeError> {
-        let mut output_columns: Vec<ProjectionColumn> = Vec::new();
-
-        for ty in projection_tys {
-            let Type(Def::Constructor(Constructor::Projection(columns)), _) = &*ty.borrow() else {
-                return Err(TypeError::InternalError(String::from(
-                    "flatten_projection: expected projection",
-                )));
-            };
-            let columns = ProjectionColumn::flatten(columns.clone());
-            output_columns.extend(columns.borrow().iter().cloned());
-        }
-
-        let status = if output_columns
-            .iter()
-            .all(|c| c.ty.borrow().status() == Status::Resolved)
-        {
-            Status::Resolved
-        } else {
-            Status::Partial
-        };
-
-        Ok(Rc::new(RefCell::new(Type(
-            Def::Constructor(Constructor::Projection(Rc::new(RefCell::new(
-                output_columns,
-            )))),
-            status,
-        ))))
-    }
-}
-
-/// A `Def` is either a [`Constructor`] (fully or partially known type) or a [`TypeVar`] (a placeholder for an unknown type).
-#[derive(Debug, PartialEq, Eq, Clone, Display)]
-#[display("{self}")]
-pub(crate) enum Def {
-    /// A specific type constructor with zero or more generic parameters.
-    #[display("Constructor({_0})")]
-    Constructor(Constructor),
-
-    /// A type variable representing a placeholder for an unknown type.
-    #[display("Var({_0})")]
-    Var(TypeVar),
-}
-
-/// A `Constructor` is what is known about a [`Type`].
-#[derive(Debug, Clone, PartialEq, Eq, Display)]
-pub(crate) enum Constructor {
-    /// A [`Scalar`] type; either an encrypted column from the database schema or some native (plaintext) database type.
-    #[display("Scalar({_0})")]
-    Scalar(Rc<Scalar>),
-
-    /// An array type that is parameterized by an element type.
-    #[display("Array({})", _0.borrow())]
-    Array(Rc<RefCell<Type>>),
-
-    /// A projection type that is parameterized by a list of projection column types.
-    #[display("Projection({})", crate::unifier::Unifier::render_projection(_0.clone()))]
-    Projection(Rc<RefCell<Vec<ProjectionColumn>>>),
-
-    /// An empty type - the only usecase for this type (so far) is for representing the type of subqueries that do not
-    /// return a projection.
-    #[display("Empty")]
-    Empty,
-}
-
-impl Constructor {
-    pub(crate) fn is_native(&self) -> bool {
-        match self {
-            Constructor::Scalar(s) => {
-                matches!(&**s, Scalar::Native { .. } | Scalar::AnonymousNative)
-            }
-            _ => false,
-        }
-    }
-}
-
-impl From<&Table> for Vec<ProjectionColumn> {
-    fn from(table: &Table) -> Self {
-        table
-            .columns
-            .iter()
-            .map(|col| {
-                let scalar_ty = if col.kind == ColumnKind::Native {
-                    Scalar::Native {
-                        table: table.name.clone(),
-                        column: col.name.clone(),
-                    }
-                } else {
-                    Scalar::Encrypted {
-                        table: table.name.clone(),
-                        column: col.name.clone(),
-                    }
-                };
-                ProjectionColumn::new(
-                    Type(
-                        Def::Constructor(Constructor::Scalar(Rc::new(scalar_ty))),
-                        Status::Resolved,
-                    )
-                    .wrap(),
-                    Some(col.name.clone()),
-                )
-            })
-            .collect()
     }
 }
 
@@ -269,69 +212,94 @@ impl Constructor {
     /// Tries to resolve all type variables recursively referenced by this type.
     ///
     /// See [`Status::Partial`] for a complete explanation of why this is required.
-    fn try_resolve(&self) -> Result<(), TypeError> {
+    fn try_resolve(&self, registry: &TypeRegistry<'_>) -> Result<Self, TypeError> {
         match self {
-            Constructor::Scalar(_) => Ok(()),
+            Constructor::Value(Value::Array(element_ty)) => Ok(Constructor::Value(Value::Array(
+                element_ty.try_resolve(registry)?.into(),
+            ))),
 
-            Constructor::Array(element_ty) => {
-                let ty = &mut *element_ty.borrow_mut();
-                ty.try_resolve()?;
-                ty.1 = Status::Resolved;
-                Ok(())
+            Constructor::Value(_) => Ok(self.clone()),
+
+            Constructor::Projection(ProjectionColumns(cols)) => {
+                Ok(Constructor::Projection(ProjectionColumns(
+                    cols.iter()
+                        .map(|col| col.try_resolve(registry))
+                        .collect::<Result<Vec<_>, _>>()?,
+                )))
             }
 
-            Constructor::Projection(columns) => {
-                let columns = &*columns.borrow();
-                for column in columns {
-                    let ty = &mut *column.ty.borrow_mut();
-                    ty.try_resolve()?;
-                    ty.1 = Status::Resolved;
-                }
-                Ok(())
-            }
+            Constructor::Empty => Ok(Constructor::Empty),
+        }
+    }
 
-            Constructor::Empty => Ok(()),
+    fn is_fully_resolved(&self, registry: &TypeRegistry<'_>) -> bool {
+        match self {
+            Constructor::Value(Value::Array(element_ty)) => element_ty.is_fully_resolved(registry),
+            Constructor::Value(_) => true,
+            Constructor::Projection(ProjectionColumns(cols)) => {
+                cols.iter().all(|col| col.ty.is_fully_resolved(registry))
+            }
+            Constructor::Empty => true,
         }
     }
 }
 
-/// The type of an encrypted column or a native (plaintext) database types.
-///
-/// Native database types are not distinguished in this type system. Valid usage of native types is best determined by
-/// the database.
-#[derive(Debug, Clone, Eq, PartialEq, PartialOrd, Ord, Display, Hash)]
-pub(crate) enum Scalar {
-    /// An encrypted type from a particular table-column in the schema.
-    ///
-    /// An encrypted column never shares a type with another encrypted column - which is why it is sufficient to
-    /// identify the type by its table & column names.
-    #[display("Encrypted({table}.{column})")]
-    Encrypted { table: Ident, column: Ident },
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProjectionColumns(pub(crate) Vec<ProjectionColumn>);
 
-    /// A native database type that carries its table & column name.  `Native` & `AnonymousNative` are will successfully
-    /// unify with each other - they are the same type as far as the type system is concerned. `Native` just carries more
-    /// information which makes testing & debugging easier.
-    #[display("Native")]
-    Native { table: Ident, column: Ident },
+impl ProjectionColumns {
+    pub(crate) fn len(&self) -> usize {
+        self.0.len()
+    }
 
-    /// Any other type, such as a native plaintext database type
-    #[display("AnonymousNative")]
-    AnonymousNative,
+    pub(crate) fn flatten(self) -> Self {
+        let output: Vec<ProjectionColumn> = Vec::with_capacity(self.len());
+        ProjectionColumns(Self::flatten_impl(self, output))
+    }
+
+    fn flatten_impl(self, mut output: Vec<ProjectionColumn>) -> Vec<ProjectionColumn> {
+        for ProjectionColumn { ty, alias } in self.0 {
+            match ty {
+                Type::Constructor(Constructor::Projection(nested)) => {
+                    output = Self::flatten_impl(nested, output);
+                }
+                other => output.push(ProjectionColumn { ty: other, alias }),
+            }
+        }
+        output
+    }
 }
 
-/// A column from a projection.
-#[derive(Debug, PartialEq, Eq, Clone, Display)]
-#[display("{} {}", ty.borrow(), self.render_alias())]
-pub(crate) struct ProjectionColumn {
-    /// The type of the column
-    pub ty: Rc<RefCell<Type>>,
+impl From<Arc<Table>> for ProjectionColumns {
+    fn from(table: Arc<Table>) -> Self {
+        ProjectionColumns(
+            table
+                .columns
+                .iter()
+                .map(|col| {
+                    let tc = TableColumn {
+                        table: table.name.clone(),
+                        column: col.name.clone(),
+                    };
 
-    /// The columm alias
-    pub alias: Option<Ident>,
+                    let value_ty = if col.kind == ColumnKind::Native {
+                        Value::Native(NativeValue(Some(tc)))
+                    } else {
+                        Value::Eql(EqlValue(tc))
+                    };
+
+                    ProjectionColumn::new(
+                        Type::Constructor(Constructor::Value(value_ty)),
+                        Some(col.name.clone()),
+                    )
+                })
+                .collect(),
+        )
+    }
 }
 
 impl ProjectionColumn {
-    pub(crate) fn new(ty: Rc<RefCell<Type>>, alias: Option<Ident>) -> Self {
+    pub(crate) fn new(ty: Type, alias: Option<Ident>) -> Self {
         Self { ty, alias }
     }
 
@@ -342,36 +310,10 @@ impl ProjectionColumn {
         }
     }
 
-    pub(crate) fn flatten(
-        projection: Rc<RefCell<Vec<ProjectionColumn>>>,
-    ) -> Rc<RefCell<Vec<ProjectionColumn>>> {
-        let cols = projection.borrow();
-        let mut flattened: Vec<ProjectionColumn> = Vec::with_capacity(cols.len());
-
-        for idx in 0..cols.len() {
-            let col = &cols[idx];
-            match &*col.ty.borrow() {
-                Type(Def::Constructor(Constructor::Projection(inner_cols)), _) => {
-                    Self::flatten(inner_cols.clone());
-                    flattened.extend(inner_cols.borrow().iter().cloned());
-                }
-                _ => flattened.push(col.clone()),
-            }
-        }
-
-        drop(cols);
-        *projection.borrow_mut() = flattened;
-
-        projection
+    fn try_resolve(&self, registry: &TypeRegistry<'_>) -> Result<ProjectionColumn, TypeError> {
+        Ok(ProjectionColumn {
+            ty: self.ty.try_resolve(registry)?,
+            alias: self.alias.clone(),
+        })
     }
-}
-
-/// A placeholder for an unknown type.
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, Display)]
-pub(crate) enum TypeVar {
-    /// A type variable that has not yet been assigned a unique identifier.
-    Fresh,
-
-    /// A type variable with an identifier.
-    Assigned(u32),
 }

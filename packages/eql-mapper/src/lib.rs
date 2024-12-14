@@ -14,6 +14,7 @@ pub use importer::*;
 pub use inference::*;
 pub use model::*;
 pub use scope_tracker::*;
+pub use unifier::{EqlValue, NativeValue, TableColumn};
 
 /// A shared dependency of type `T`, convertible to an `Rc<RefCell<T>>`.
 ///

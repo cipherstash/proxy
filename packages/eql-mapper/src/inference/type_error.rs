@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use crate::{SchemaError, ScopeError};
+use crate::{unifier::Type, SchemaError, ScopeError};
 
 #[derive(Debug, PartialEq, Eq, thiserror::Error)]
 pub enum TypeError {
@@ -36,4 +36,15 @@ pub enum TypeError {
 
     #[error("{}", _0)]
     SchemaError(#[from] SchemaError),
+
+    #[error("Cannot unify node types for nodes:\n 1. node: {} type: {}\n 2. node: {} type: {}\n error: {}", _1, _2, _3, _4, _0)]
+    OnNodes(Box<TypeError>, String, Type, String, Type),
+
+    #[error(
+        "Cannot unify node with type:\n node: {}\n type: {} error: {}",
+        _1,
+        _2,
+        _0
+    )]
+    OnNode(Box<TypeError>, Type, String),
 }

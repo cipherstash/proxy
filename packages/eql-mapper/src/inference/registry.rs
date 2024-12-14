@@ -1,15 +1,19 @@
-use std::{any::TypeId, cell::RefCell, collections::HashMap, marker::PhantomData, rc::Rc};
+use std::{cell::RefCell, collections::HashMap, marker::PhantomData, rc::Rc};
 
-use sqltk::{Semantic, Visitable};
+use sqltk::Semantic;
 
 use crate::inference::{
-    unifier::{Def, Type, TypeVar},
+    unifier::{Type, TypeVar},
     TypeError,
 };
+
+use super::{NodeKey, Status, TypeVarGenerator};
 
 /// `TypeRegistry` maintains an association between `sqlparser` AST nodes and the node's inferred [`Type`].
 #[derive(Debug)]
 pub struct TypeRegistry<'ast> {
+    tvar_gen: TypeVarGenerator,
+    substitutions: HashMap<TypeVar, (Rc<RefCell<Type>>, Status)>,
     node_types: HashMap<NodeKey<'ast>, Rc<RefCell<Type>>>,
     _ast: PhantomData<&'ast ()>,
 }
@@ -20,67 +24,46 @@ impl Default for TypeRegistry<'_> {
     }
 }
 
-/// Acts as the key type for a [`HashMap`] so that a [`Semantic`] value of any concrete type can be used as a key in
-/// the same `HashMap`.
-///
-/// It works by capturing the address of an AST node in addition to its [`TypeId`]. Both are required to uniquely
-/// identify a node because different node values can have the same address (e.g. the address of a struct and the
-/// address of its first field will be equal but the struct and the field are different values).
-#[derive(Debug, Hash, Eq, PartialEq, Clone)]
-pub struct NodeKey<'ast> {
-    node_addr: usize,
-    node_type: TypeId,
-    _ast: PhantomData<&'ast ()>,
-}
-
-impl<'ast, N: Semantic> From<&'ast N> for NodeKey<'ast> {
-    fn from(value: &'ast N) -> Self {
-        NodeKey::new(value)
-    }
-}
-
-impl<'ast> NodeKey<'ast> {
-    /// Creates a `NodeKey` from an AST node reference (a [`Semantic`] impl).
-    ///
-    /// This method prevents mistakes like accidental annotation of a `Box<Expr>` instead of on the `Expr`.
-    pub fn new<N: Semantic>(node: &'ast N) -> Self {
-        Self {
-            node_addr: node as *const N as usize,
-            node_type: TypeId::of::<N>(),
-            _ast: PhantomData,
-        }
-    }
-
-    pub(crate) fn new_from_visitable<N: Visitable>(node: &'ast N) -> Self {
-        Self {
-            node_addr: node as *const N as usize,
-            node_type: TypeId::of::<N>(),
-            _ast: PhantomData,
-        }
-    }
-
-    /// Creates a `Vec<NodeKey>` from a slice of AST node references.
-    pub fn from_slice<N: Semantic>(nodes: &'ast [N]) -> Vec<Self> {
-        nodes.iter().map(|n| Self::new(n)).collect()
-    }
-
-    pub fn get_as<N: Visitable>(&self) -> Option<&'ast N> {
-        if self.node_type == TypeId::of::<N>() {
-            // SAFETY: we have verified that `N` is of the correct type to permit the cast and because 'ast outlives
-            // `self` we know that the node has not been dropped.
-            unsafe { (self.node_addr as *const N).as_ref() }
-        } else {
-            None
-        }
-    }
-}
-
 impl<'ast> TypeRegistry<'ast> {
     /// Creates a new, empty `TypeRegistry`.
     pub fn new() -> Self {
         Self {
+            tvar_gen: TypeVarGenerator::new(),
+            substitutions: HashMap::new(),
             node_types: HashMap::new(),
             _ast: PhantomData,
+        }
+    }
+
+    pub(crate) fn get_substitution(&self, tvar: TypeVar) -> Option<(Type, Status)> {
+        self.substitutions
+            .get(&tvar)
+            .map(|(ty, status)| ((*ty).borrow().clone(), *status))
+    }
+
+    pub(crate) fn substitute(&mut self, tvar: TypeVar, sub: Type) {
+        let status = sub.status(self);
+
+        self.substitutions
+            .entry(tvar)
+            .and_modify(|value| {
+                *value.0.borrow_mut() = sub.clone();
+            })
+            .or_insert((Rc::new(RefCell::new(sub)), status));
+    }
+
+    pub(crate) fn set_node_type<N: Semantic>(&mut self, node: &'ast N, ty: Type) -> Type {
+        match self.node_types.get(&NodeKey::new(node)) {
+            Some(existing_ty) => {
+                *existing_ty.borrow_mut() = ty;
+                existing_ty.borrow().clone()
+            }
+            None => {
+                let ty = Rc::new(RefCell::new(ty));
+                self.node_types.insert(NodeKey::new(node), ty.clone());
+                let ty = &*ty.borrow();
+                ty.clone()
+            }
         }
     }
 
@@ -89,32 +72,39 @@ impl<'ast> TypeRegistry<'ast> {
     /// `Type(Def::Var(TypeVar::Fresh))` will be associated with the node and returned.
     ///
     /// This method is idempotent and further calls will return the same type.
-    pub(crate) fn get_type<N: Semantic>(&mut self, node: &'ast N) -> Rc<RefCell<Type>> {
-        let ty = Type::new(Def::Var(TypeVar::Fresh)).wrap();
-
-        let ty = &*self
+    pub(crate) fn get_type<N: Semantic>(&mut self, node: &'ast N) -> Type {
+        let tvar = self.fresh_tvar();
+        let ty = self
             .node_types
             .entry(NodeKey::new(node))
-            .or_insert(ty.clone());
-
-        ty.clone()
+            .or_insert(Rc::new(RefCell::new(tvar)));
+        (*ty).borrow().clone()
     }
 
-    pub(crate) fn get_type_by_node_key(&self, key: &NodeKey) -> Option<Rc<RefCell<Type>>> {
-        self.node_types.get(key).cloned()
+    pub(crate) fn get_type_by_node_key(&self, key: &NodeKey) -> Option<Type> {
+        self.node_types.get(key).map(|ty| (*ty).borrow().clone())
     }
 
     /// Tries to resolve all types in `self`.
     ///
-    /// If successful, returns `Ok(HashMap<NodeKey, Rc<RefCell<Type>>>)` else `Err(TypeError)`.
+    /// If successful, returns `Ok(HashMap<NodeKey, Type>)` else `Err(TypeError)`.
     pub(crate) fn try_resolve_all_types(
-        &self,
-    ) -> Result<HashMap<NodeKey<'ast>, Rc<RefCell<Type>>>, TypeError> {
-        for ty in self.node_types.values() {
-            ty.borrow_mut().try_resolve()?;
-        }
+        &mut self,
+    ) -> Result<HashMap<NodeKey<'ast>, Type>, TypeError> {
+        let node_types = self.node_types.clone();
+        let node_types: HashMap<_, _> = node_types
+            .iter()
+            .map(|(node_key, ty)| {
+                let ty = (*ty).borrow().clone();
+                ty.try_resolve(self).map(|ty| (node_key.clone(), ty))
+            })
+            .collect::<Result<HashMap<_, _>, _>>()?;
 
-        Ok(self.node_types.clone())
+        Ok(node_types)
+    }
+
+    pub(crate) fn fresh_tvar(&mut self) -> Type {
+        Type::Var(TypeVar(self.tvar_gen.next_tvar()))
     }
 }
 
@@ -142,7 +132,7 @@ pub(crate) mod test_util {
                     "TYPE<\nast: {}\nsyn: {}\nty: {}\n>",
                     std::any::type_name::<N>(),
                     node,
-                    *ty.borrow(),
+                    &*ty.borrow(),
                 );
             };
         }

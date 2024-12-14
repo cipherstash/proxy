@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
-use super::context::Context;
+use super::context::{self, Context};
+use super::messages::parse::Parse;
 use super::messages::FrontendCode as Code;
 use super::protocol::{self, Message};
 use crate::encrypt::Encrypt;
@@ -9,9 +10,10 @@ use crate::eql::Identifier;
 use crate::error::Error;
 use crate::log::DEVELOPMENT;
 use bytes::BytesMut;
-use eql_mapper::{self, EqlColumn, EqlMapperError, TableColumn};
+use eql_mapper::{self, EqlMapperError, EqlValue, TableColumn};
 use sqlparser::ast::{CastKind, DataType, Expr, Value};
 use sqlparser::dialect::PostgreSqlDialect;
+use sqlparser::parser::Parser;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use tracing::warn;
 
@@ -81,8 +83,43 @@ where
         Ok(message.bytes)
     }
 
-    async fn parse_handler(&mut self, _message: &Message) -> Result<Option<BytesMut>, Error> {
-        Ok(None)
+    async fn parse_handler(&mut self, message: &Message) -> Result<Option<BytesMut>, Error> {
+        let mut parse = Parse::try_from(&message.bytes)?;
+
+        let statement = Parser::new(&DIALECT)
+            .try_with_sql(&parse.statement)?
+            .parse_statement()?;
+
+        let typed_statement = eql_mapper::type_check(self.encrypt.schema.load(), &statement)?;
+
+        let plaintext_literals: Vec<eql::Plaintext> =
+            convert_value_nodes_to_eql_plaintext(&typed_statement)?;
+
+        let replacement_literal_values = self.encrypt_literals(plaintext_literals).await?;
+
+        let original_values_and_replacements =
+            zip_with_original_value_ref(&typed_statement, replacement_literal_values);
+
+        let transformed_statement = typed_statement.transform(original_values_and_replacements)?;
+
+        parse.statement = transformed_statement.to_string().clone();
+
+        self.context.add(
+            crate::postgresql::messages::Destination::Unnamed,
+            context::Statement::new(
+                transformed_statement,
+                parse.param_types.clone(),
+                typed_statement.params.clone(),
+                typed_statement.statement_type.clone(),
+            ),
+        );
+
+        if parse.should_rewrite() {
+            let bytes = BytesMut::try_from(parse)?;
+            Ok(Some(bytes))
+        } else {
+            Ok(None)
+        }
     }
 
     async fn encrypt_literals(
@@ -127,7 +164,7 @@ fn convert_value_nodes_to_eql_plaintext(
     typed_statement
         .literals
         .iter()
-        .map(|(EqlColumn(TableColumn { table, column }), expr)| {
+        .map(|(EqlValue(TableColumn { table, column }), expr)| {
             if let Some(plaintext) = match expr {
                 Expr::Value(Value::Number(number, _)) => Some(number.to_string()),
                 Expr::Value(Value::SingleQuotedString(s)) => Some(s.to_owned()),

@@ -1,4 +1,4 @@
-use eql_mapper::{ProjectionColumn, Scalar};
+use eql_mapper::{Projection, Value};
 use sqlparser::ast;
 use std::collections::HashMap;
 
@@ -8,16 +8,16 @@ use super::messages::Destination;
 pub struct Statement {
     ast: ast::Statement,
     postgres_param_types: Vec<i32>,
-    eql_param_types: Vec<Scalar>,
-    eql_resultset_type: Option<Vec<ProjectionColumn>>,
+    eql_param_types: Vec<Value>,
+    eql_resultset_type: Option<Projection>,
 }
 
 impl Statement {
     pub fn new(
         ast: ast::Statement,
         postgres_param_types: Vec<i32>,
-        eql_param_types: Vec<Scalar>,
-        eql_resultset_type: Option<Vec<ProjectionColumn>>,
+        eql_param_types: Vec<Value>,
+        eql_resultset_type: Option<Projection>,
     ) -> Statement {
         Statement {
             ast,

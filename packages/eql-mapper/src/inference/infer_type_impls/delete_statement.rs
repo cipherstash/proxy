@@ -12,11 +12,11 @@ impl<'ast> InferType<'ast, Delete> for TypeInferencer<'ast> {
 
         match returning {
             Some(select_items) => {
-                self.unify_and_log(delete, self.get_type(delete), self.get_type(select_items))?;
+                self.unify_nodes(delete, select_items)?;
             }
 
             None => {
-                self.unify_and_log(delete, self.get_type(delete), Type::empty())?;
+                self.unify_node_with_type(delete, &Type::empty())?;
             }
         }
 

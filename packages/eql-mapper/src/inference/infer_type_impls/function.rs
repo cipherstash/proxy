@@ -33,10 +33,9 @@ impl<'ast> InferType<'ast, Function> for TypeInferencer<'ast> {
                 FunctionArguments::Subquery(query) => {
                     // The query must return a single column projection which has the same type as the result of the
                     // call to min/max.
-                    self.unify_and_log(
-                        query,
-                        self.get_type(&**query),
-                        Type::projection(&[(self.get_type(function), None)]),
+                    self.unify_node_with_type(
+                        &**query,
+                        &Type::projection(&[(self.get_type(function), None)]),
                     )?;
                 }
 
@@ -52,11 +51,7 @@ impl<'ast> InferType<'ast, Function> for TypeInferencer<'ast> {
 
                             FunctionArg::Unnamed(function_arg_expr) => match function_arg_expr {
                                 FunctionArgExpr::Expr(expr) => {
-                                    self.unify_and_log(
-                                        function,
-                                        self.get_type(function),
-                                        self.get_type(expr),
-                                    )?;
+                                    self.unify_nodes(function, expr)?;
                                 }
 
                                 FunctionArgExpr::QualifiedWildcard(_)
@@ -81,7 +76,7 @@ impl<'ast> InferType<'ast, Function> for TypeInferencer<'ast> {
             // All other functions:
             // 1. no constraints are imposed on their arguments (they can be any type) (TODO: do we need a "do not care" type)
             // 2. the return type is always native.
-            self.unify_and_log(function, self.get_type(function), Type::anonymous_native())?;
+            self.unify_node_with_type(function, &Type::any_native())?;
         }
 
         Ok(())

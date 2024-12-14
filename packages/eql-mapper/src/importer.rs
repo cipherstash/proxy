@@ -5,9 +5,13 @@ use sqltk::{Break, Visitable, Visitor};
 use tracing::info;
 
 use crate::{
-    inference::{unifier::{Constructor, Def, ProjectionColumn, Status, Type}, TypeError, TypeRegistry},
-    model::{Relation, Schema, SchemaError},
-    ScopeError, ScopeTracker,
+    inference::{
+        unifier::{Constructor, Type},
+        TypeError, TypeRegistry,
+    },
+    model::{Schema, SchemaError},
+    unifier::ProjectionColumns,
+    Relation, ScopeError, ScopeTracker,
 };
 
 /// `Importer` is a [`Visitor`] implementation that brings projections (from "FROM" clauses and subqueries) into lexical scope.
@@ -44,15 +48,9 @@ impl<'ast> Importer<'ast> {
 
         self.scope_tracker.borrow_mut().add_relation(Relation {
             name: table_alias.clone(),
-            projection_type: Type(
-                Def::Constructor(Constructor::Projection(Rc::new(RefCell::new(Vec::<
-                    ProjectionColumn,
-                >::from(
-                    &*table
-                ))))),
-                Status::Resolved,
-            )
-            .wrap(),
+            projection_type: Type::Constructor(Constructor::Projection(ProjectionColumns::from(
+                table.clone(),
+            ))),
         })?;
 
         Ok(())
@@ -111,13 +109,9 @@ impl<'ast> Importer<'ast> {
 
                     scope_tracker.add_relation(Relation {
                         name: record_as.cloned().ok(),
-                        projection_type: Type(
-                            Def::Constructor(Constructor::Projection(Rc::new(RefCell::new(
-                                Vec::<ProjectionColumn>::from(&*table),
-                            )))),
-                            Status::Resolved,
-                        )
-                        .wrap(),
+                        projection_type: Type::Constructor(Constructor::Projection(
+                            ProjectionColumns::from(table.clone()),
+                        )),
                     })?;
                 }
             }

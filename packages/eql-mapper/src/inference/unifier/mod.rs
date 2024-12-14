@@ -1,36 +1,30 @@
-use std::{cell::RefCell, collections::HashMap, rc::Rc};
+use std::{cell::RefCell, cmp::max, rc::Rc};
 
 mod types;
 
 use crate::inference::TypeError;
 
+use sqlparser::ast::Ident;
 pub(crate) use types::*;
 
-use super::TypeVarGenerator;
+pub use types::{EqlValue, NativeValue, TableColumn};
+
+use super::TypeRegistry;
 use tracing::{info, span, Level};
 
 /// Implements the type unification algorithm and maintains an association of type variables with the type that they
 /// point to.
 #[derive(Debug)]
-pub struct Unifier {
-    /// A map of type variable substitutions.
-    subs: HashMap<u32, Rc<RefCell<Type>>>,
-    tvar_gen: TypeVarGenerator,
+pub struct Unifier<'ast> {
+    registry: Rc<RefCell<TypeRegistry<'ast>>>,
     depth: usize,
 }
 
-impl Default for Unifier {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl Unifier {
+impl<'ast> Unifier<'ast> {
     /// Creates a new `Unifier`.
-    pub fn new() -> Self {
+    pub fn new(reg: impl Into<Rc<RefCell<TypeRegistry<'ast>>>>) -> Self {
         Self {
-            subs: HashMap::new(),
-            tvar_gen: TypeVarGenerator::new(),
+            registry: reg.into(),
             depth: 0,
         }
     }
@@ -44,17 +38,12 @@ impl Unifier {
     /// dangling type variables).
     ///
     /// Returns `Ok(ty)` if successful, or `Err(TypeError)` on failure.
-    ///
-    /// After successful unification, `left` and `right` will refer to the same allocation.
-    pub(crate) fn unify(
-        &mut self,
-        left: Rc<RefCell<Type>>,
-        right: Rc<RefCell<Type>>,
-    ) -> Result<Rc<RefCell<Type>>, TypeError> {
+    pub(crate) fn unify(&mut self, left: &Type, right: &Type) -> Result<Type, TypeError> {
         use types::Constructor::*;
-        use types::Def::*;
+        use types::Value::*;
 
-        if left.as_ptr() == right.as_ptr() {
+        // If left & right are equal we can short circuit unification.
+        if left == right {
             return Ok(left.clone());
         }
 
@@ -62,289 +51,97 @@ impl Unifier {
             Level::DEBUG,
             "unify",
             depth = self.depth,
-            left = &*left.borrow().to_string(),
-            right = &*right.borrow().to_string()
+            left = &*left.to_string(),
+            right = &*right.to_string()
         );
 
         let _guard = span.enter();
 
         self.depth += 1;
 
-        let (a, b) = (left.borrow(), right.borrow());
-
         info!(
             "{:indent$}  {} UNIFY {}",
-            "",
-            a,
-            b,
+            " ",
+            left,
+            right,
             indent = (self.depth - 1) * 4
         );
 
-        let unification = match (&*a, &*b) {
+        let unification = match (left, right) {
             // Two projections unify if they have the same number of columns and all of the paired column types also
             // unify.
             (
-                Type(Constructor(Projection(cols_left)), _),
-                Type(Constructor(Projection(cols_right)), _),
-            ) => {
-                let projection_columns =
-                    self.unify_projection(cols_left.clone(), cols_right.clone())?;
+                Type::Constructor(Projection(cols_left)),
+                Type::Constructor(Projection(cols_right)),
+            ) => Ok(Type::Constructor(Projection(ProjectionColumns(
+                self.unify_projections(&cols_left.0[..], &cols_right.0[..])?,
+            )))),
 
-                drop(a);
-                drop(b);
-
-                let resolved = {
-                    projection_columns
-                        .borrow()
-                        .iter()
-                        .fold(Status::Resolved, |acc, col| col.ty.borrow().status() + acc)
-                };
-
-                {
-                    *left.borrow_mut() =
-                        Type(Constructor(Projection(projection_columns)), resolved);
-                }
-
-                {
-                    *right.borrow_mut() = left.borrow().clone();
-                }
-
-                Ok(left.clone())
-            }
-
-            // If a type is a fresh type variable then assign it a unique identifier before continuing.
-            (&Type(Var(TypeVar::Fresh), _), _) => {
-                drop(a);
-                drop(b);
-
-                {
-                    *left.borrow_mut() = Type(
-                        Def::Var(TypeVar::Assigned(self.tvar_gen.next_tvar())),
-                        Status::Partial,
-                    )
-                }
-
-                Ok(self.unify(left, right)?)
-            }
-
-            // If a type is a fresh type variable then assign it a unique identifier before continuing.
-            (_, &Type(Var(TypeVar::Fresh), _)) => {
-                drop(a);
-                drop(b);
-
-                {
-                    *right.borrow_mut() = Type(
-                        Def::Var(TypeVar::Assigned(self.tvar_gen.next_tvar())),
-                        Status::Partial,
-                    );
-                }
-
-                Ok(self.unify(left, right)?)
-            }
-
-            // Two arrays unify if the types of their elements unify.
+            // Two arrays unify if the types of their element types unify.
             (
-                Type(Constructor(Array(element_ty_left)), _),
-                Type(Constructor(Array(element_ty_right)), _),
+                Type::Constructor(Value(Array(element_ty_left))),
+                Type::Constructor(Value(Array(element_ty_right))),
             ) => {
-                let element_ty = self.unify(element_ty_left.clone(), element_ty_right.clone())?;
+                let element_ty = self.unify(element_ty_left, element_ty_right)?;
 
-                drop(a);
-                drop(b);
+                Ok(Type::Constructor(Value(Array(element_ty.into()))))
+            }
 
-                {
-                    *left.borrow_mut() = Type(
-                        Constructor(Array(element_ty.clone())),
-                        element_ty.borrow().status(),
-                    );
+            // A Value can unify with a single column projection
+            (Type::Constructor(Value(value)), Type::Constructor(Projection(columns)))
+            | (Type::Constructor(Projection(columns)), Type::Constructor(Value(value))) => {
+                let len = columns.0.len();
+                if len == 1 {
+                    Ok(self.unify_value_with_single_column_projection(value, &columns.0[0].ty)?)
+                } else {
+                    Err(TypeError::Conflict(
+                        "cannot unify value type with projection of more than one column"
+                            .to_string(),
+                    ))
                 }
+            }
 
-                {
-                    *right.borrow_mut() = left.borrow().clone();
-                }
-
+            (Type::Constructor(Value(Native(_))), Type::Constructor(Value(Native(_)))) => {
                 Ok(left.clone())
             }
 
-            // A scalar will unify with a single column projection
-            (Type(Constructor(Scalar(_)), _), Type(Constructor(Projection(columns)), _)) => {
-                let len = columns.borrow().len();
-                if len == 1 {
-                    let column = &columns.borrow()[0].clone();
-                    let ty = self.unify(left.clone(), column.ty.clone())?;
-
-                    drop(a);
-                    drop(b);
-
-                    let unified = { ty.borrow() }.clone();
-
-                    {
-                        *left.borrow_mut() = unified.clone();
-                    }
-                    {
-                        *right.borrow_mut() = unified;
-                    }
-
-                    Ok(ty)
-                } else {
-                    // TODO: error message
-                    Err(TypeError::Conflict(
-                        "cannot unify scalar type with projection of more than one column"
-                            .to_string(),
-                    ))
-                }
-            }
-
-            // A scalar will unify with a single column projection
-            (Type(Constructor(Projection(columns)), _), Type(Constructor(Scalar(_)), _)) => {
-                let len = columns.borrow().len();
-                if len == 1 {
-                    let column = &columns.borrow()[0].clone();
-                    let ty = self.unify(left.clone(), column.ty.clone())?;
-
-                    drop(a);
-                    drop(b);
-
-                    let unified = { ty.borrow() }.clone();
-
-                    {
-                        *left.borrow_mut() = unified.clone();
-                    }
-                    {
-                        *right.borrow_mut() = unified;
-                    }
-
-                    Ok(ty)
-                } else {
-                    // TODO: error message
-                    Err(TypeError::Conflict(
-                        "cannot unify scalar type with projection of more than one column"
-                            .to_string(),
-                    ))
-                }
-            }
-
-            // An array will unify with a single column projection
-            (Type(Constructor(Array(_)), _), Type(Constructor(Projection(columns)), _)) => {
-                let len = columns.borrow().len();
-                if len == 1 {
-                    let column = &columns.borrow()[0].clone();
-                    let ty = self.unify(left.clone(), column.ty.clone())?;
-
-                    drop(a);
-                    drop(b);
-
-                    let unified = { ty.borrow() }.clone();
-
-                    {
-                        *left.borrow_mut() = unified.clone();
-                    }
-                    {
-                        *right.borrow_mut() = unified;
-                    }
-
-                    Ok(ty)
-                } else {
-                    // TODO: error message
-                    Err(TypeError::Conflict(
-                        "cannot unify scalar type with projection of more than one column"
-                            .to_string(),
-                    ))
-                }
-            }
-
-            // An array will unify with a single column projection
-            (Type(Constructor(Projection(columns)), _), Type(Constructor(Array(_)), _)) => {
-                let len = columns.borrow().len();
-                if len == 1 {
-                    let column = &columns.borrow()[0].clone();
-                    let ty = self.unify(left.clone(), column.ty.clone())?;
-
-                    drop(a);
-                    drop(b);
-
-                    let unified = { ty.borrow() }.clone();
-
-                    {
-                        *left.borrow_mut() = unified.clone();
-                    }
-                    {
-                        *right.borrow_mut() = unified;
-                    }
-
-                    Ok(ty)
-                } else {
-                    // TODO: error message
-                    Err(TypeError::Conflict(
-                        "cannot unify scalar type with projection of more than one column"
-                            .to_string(),
-                    ))
-                }
-            }
-
-            // For types that are resolved, in order to successfully unify they must either be:
-            // - equal (according to the Eq trait), or
-            // - both be native
-            (Type(body_a, Status::Resolved), Type(body_b, Status::Resolved)) => {
-                if body_a == body_b {
+            (Type::Constructor(Value(Eql(lhs))), Type::Constructor(Value(Eql(rhs)))) => {
+                if lhs == rhs {
                     Ok(left.clone())
                 } else {
-                    match (body_a, body_b) {
-                        // Constructor::AnonymousNative and Constructor::Scalar(Scalar::Native{ .. }) will unify
-                        // to Constructor::Scalar(Scalar::Native{ .. }) to preserve information.
-                        (Def::Constructor(ctor_a), Def::Constructor(ctor_b))
-                            if ctor_a.is_native() && ctor_b.is_native() =>
-                        {
-                            if let Scalar(_) = ctor_a {
-                                return Ok(left.clone());
-                            }
-
-                            if let Scalar(_) = ctor_b {
-                                return Ok(right.clone());
-                            }
-
-                            Ok(left.clone())
-                        }
-
-                        _ => Err(TypeError::Conflict(format!(
-                            "expected resolved types {} and {} to unify",
-                            a, b
-                        ))),
-                    }
+                    Err(TypeError::Conflict(format!(
+                        "cannot unify different EQL types: {} and {}",
+                        lhs, rhs
+                    )))
                 }
             }
-            // A constructor resolves with a type variable if either:
-            // 1. the type variable does not already refer to a constructor (transitively), or
-            // 2. it does refer to a constructor and the two constructors unify
-            (Type(_, _), &Type(Var(TypeVar::Assigned(tvar)), _)) => {
-                drop(a);
-                drop(b);
-
-                Ok(self.unify_with_type_var(left, right, tvar)?)
-            }
 
             // A constructor resolves with a type variable if either:
             // 1. the type variable does not already refer to a constructor (transitively), or
             // 2. it does refer to a constructor and the two constructors unify
-            (&Type(Var(TypeVar::Assigned(tvar)), _), Type(_, _)) => {
-                drop(a);
-                drop(b);
-
-                Ok(self.unify_with_type_var(right, left, tvar)?)
+            (ty, Type::Var(tvar)) | (Type::Var(tvar), ty) => {
+                Ok(self.unify_with_type_var(ty, *tvar)?)
             }
 
             // Any other combination of types is a type error.
-            (left_ty, right_ty) => Err(TypeError::Conflict(format!(
+            (lhs, rhs) => Err(TypeError::Conflict(format!(
                 "type {} cannot be unified with {}",
-                left_ty, right_ty
+                lhs, rhs
             ))),
+        };
+
+        let unification = match unification {
+            Ok(Type::Constructor(Constructor::Projection(cols))) => {
+                Ok(Type::Constructor(Constructor::Projection(cols.flatten())))
+            }
+            other => other,
         };
 
         if let Ok(unification) = &unification {
             info!(
                 "= {:indent$} {}",
                 "",
-                &*unification.borrow(),
+                unification,
                 indent = (self.depth - 1) * 4
             );
         }
@@ -359,90 +156,167 @@ impl Unifier {
     /// Attempts to unify the type with whatever the type variable is pointing to.
     ///
     /// After successful unification `ty_rc` and `tvar_rc` will refer to the same allocation.
-    fn unify_with_type_var(
-        &mut self,
-        ty_rc: Rc<RefCell<Type>>,
-        tvar_rc: Rc<RefCell<Type>>,
-        tvar: u32,
-    ) -> Result<Rc<RefCell<Type>>, TypeError> {
-        if let Some(sub_ty) = self.subs.get(&tvar).cloned() {
-            self.unify(ty_rc.clone(), sub_ty)?;
-        }
+    fn unify_with_type_var(&mut self, ty: &Type, tvar: TypeVar) -> Result<Type, TypeError> {
+        let sub = {
+            let reg = &*self.registry.borrow();
+            reg.get_substitution(tvar)
+        };
 
-        *tvar_rc.borrow_mut() = ty_rc.borrow().clone();
+        let ty = match sub {
+            Some((sub_ty, _)) => self.unify(ty, &sub_ty)?,
+            None => ty.clone(),
+        };
 
-        self.subs.insert(tvar, ty_rc.clone());
+        self.registry.borrow_mut().substitute(tvar, ty.clone());
 
-        Ok(ty_rc.clone())
+        Ok(ty)
     }
 
-    /// Unifies two `Vec`s of [`ProjectionColumn`].
+    /// Unifies two slices of [`ProjectionColumn`]s.
     ///
-    /// The same number of columns must be present in `left` and `right` (after flattening out nested projections due to
-    /// use of wildcards) and all corresponding pairs of columns must unify.
-    ///
-    /// After successfull unification `left` and `right` will refer to the same allocation.
-    fn unify_projection(
+    /// Wildcard selections are represented in the type system as nested projections. That means `left` & `right` could
+    /// have different numbers of `ProjectionColumn`s yet could still successfully unify.
+    fn unify_projections(
         &mut self,
-        left: Rc<RefCell<Vec<ProjectionColumn>>>,
-        right: Rc<RefCell<Vec<ProjectionColumn>>>,
-    ) -> Result<Rc<RefCell<Vec<ProjectionColumn>>>, TypeError> {
-        {
-            ProjectionColumn::flatten(left.clone());
-            ProjectionColumn::flatten(right.clone());
+        left: &[ProjectionColumn],
+        right: &[ProjectionColumn],
+    ) -> Result<Vec<ProjectionColumn>, TypeError> {
+        let output: Vec<ProjectionColumn> = Vec::with_capacity(max(left.len(), right.len()));
+        self.unify_projections_recursive(left, right, output)
+    }
 
-            let cols_left_mut = &mut *left.borrow_mut();
-            let cols_right_mut = &mut *right.borrow_mut();
+    /// Unifies two projections, storing the unified version in `output`.
+    ///
+    /// The algorithm works by unifying the first columns of left and right and the proceeding to recursively unifying
+    /// the rest of each slice (again, from the front).
+    ///
+    /// The trickiness occurs when one of the columns itself contains a projection (because wildcards).
+    fn unify_projections_recursive(
+        &mut self,
+        left: &[ProjectionColumn],
+        right: &[ProjectionColumn],
+        mut output: Vec<ProjectionColumn>,
+    ) -> Result<Vec<ProjectionColumn>, TypeError> {
+        match (&left.first(), &right.first()) {
+            // Nothing left to do
+            (None, None) => Ok(output),
 
-            if cols_left_mut.len() == cols_right_mut.len() {
-                for (col_a, col_b) in cols_left_mut.iter_mut().zip(cols_right_mut.iter_mut()) {
-                    *col_a = self.unify_projection_columns(col_a, col_b)?;
+            // One side has nothing left to match but the other side has unmatched columns.
+            // This is an error.
+            (None, Some(unmatched)) | (Some(unmatched), None) => Err(TypeError::Conflict(format!(
+                "projections {:?} and {:?} could not be unified due to unmatched columns: {:?}",
+                left, right, unmatched
+            ))),
+
+            (
+                Some(ProjectionColumn {
+                    ty: Type::Constructor(left_ctor),
+                    alias: left_alias,
+                }),
+                Some(ProjectionColumn {
+                    ty: Type::Constructor(right_ctor),
+                    alias: right_alias,
+                }),
+            ) => match (
+                left_ctor,
+                right_ctor,
+                self.unify_alias(left_alias, right_alias)?,
+            ) {
+                (
+                    Constructor::Value(Value::Array(lhs)),
+                    Constructor::Value(Value::Array(rhs)),
+                    alias,
+                ) => {
+                    let unified = self.unify(lhs, rhs)?;
+                    output.push(ProjectionColumn { ty: unified, alias });
+                    self.unify_projections_recursive(&left[1..], &right[1..], output)
                 }
 
-                *cols_right_mut = cols_left_mut.clone();
+                (Constructor::Value(lhs), Constructor::Value(rhs), alias) if lhs == rhs => {
+                    output.push(ProjectionColumn {
+                        ty: Type::Constructor(left_ctor.clone()),
+                        alias,
+                    });
+                    self.unify_projections_recursive(&left[1..], &right[1..], output)
+                }
 
-                return Ok(left.clone());
+                (Constructor::Projection(left_cols), Constructor::Projection(right_cols), _) => {
+                    output = self.unify_projections_recursive(
+                        &left_cols.0[..],
+                        &right_cols.0[..],
+                        output,
+                    )?;
+                    self.unify_projections_recursive(&left[1..], &right[1..], output)
+                }
+
+                (Constructor::Empty, Constructor::Empty, _) => {
+                    self.unify_projections_recursive(&left[1..], &right[1..], output)
+                }
+
+                (Constructor::Value(_), Constructor::Projection(right_proj), _) => {
+                    output = self.unify_projections_recursive(left, &right_proj.0[..], output)?;
+                    self.unify_projections_recursive(&left[1..], &right[1..], output)
+                }
+
+                (Constructor::Projection(left_proj), Constructor::Value(_), _) => {
+                    output = self.unify_projections_recursive(&left_proj.0[..], right, output)?;
+                    self.unify_projections_recursive(&left[1..], &right[1..], output)
+                }
+
+                (lhs, rhs, _) => Err(TypeError::Conflict(format!(
+                    "types {:?} and {:?} could not be unified",
+                    lhs, rhs
+                ))),
+            },
+
+            (
+                Some(ProjectionColumn {
+                    ty: Type::Var(tvar),
+                    alias: left_alias,
+                }),
+                Some(ProjectionColumn {
+                    ty,
+                    alias: right_alias,
+                }),
+            ) => {
+                let unified = self.unify_with_type_var(ty, *tvar)?;
+                output.push(ProjectionColumn {
+                    ty: unified,
+                    alias: self.unify_alias(left_alias, right_alias)?,
+                });
+                self.unify_projections_recursive(&left[1..], &right[1..], output)
+            }
+
+            (
+                Some(ProjectionColumn {
+                    ty,
+                    alias: left_alias,
+                }),
+                Some(ProjectionColumn {
+                    ty: Type::Var(tvar),
+                    alias: right_alias,
+                }),
+            ) => {
+                let unified = self.unify_with_type_var(ty, *tvar)?;
+                output.push(ProjectionColumn {
+                    ty: unified,
+                    alias: self.unify_alias(left_alias, right_alias)?,
+                });
+                self.unify_projections_recursive(&left[1..], &right[1..], output)
             }
         }
-
-        Err(TypeError::Conflict(format!(
-            "cannot unify projections because column counts are different:\n{}\n{}",
-            Self::render_projection(left.clone()),
-            Self::render_projection(right.clone())
-        )))
     }
 
-    /// Unifies a `left` and  `right` [`ProjectionColumn`].
-    ///
-    /// In order to unified the `ty` of each `ProjectionColumn` must unify and their `alias` must also unify.  Aliases
-    /// unify if either both aliases are `None`, one of the aliases is `Some(_)` or both are `Some(_)` and equal.
-    ///
-    /// After successful unification, the `ty` of `left` and `right` will refer to the same allocation.
-    fn unify_projection_columns(
-        &mut self,
-        left: &ProjectionColumn,
-        right: &ProjectionColumn,
-    ) -> Result<ProjectionColumn, TypeError> {
-        let ty = self.unify(left.ty.clone(), right.ty.clone())?;
-
-        match (&left.alias, &right.alias) {
-            (None, None) => Ok(ProjectionColumn { ty, alias: None }),
-
-            (None, Some(alias)) => Ok(ProjectionColumn {
-                ty,
-                alias: Some(alias.clone()),
-            }),
-
-            (Some(alias), None) => Ok(ProjectionColumn {
-                ty,
-                alias: Some(alias.clone()),
-            }),
-
-            (Some(a), Some(b)) if a == b => Ok(ProjectionColumn {
-                ty,
-                alias: Some(a.clone()),
-            }),
-
+    fn unify_alias(
+        &self,
+        left: &Option<Ident>,
+        right: &Option<Ident>,
+    ) -> Result<Option<Ident>, TypeError> {
+        match (left, right) {
+            (None, None) => Ok(None),
+            (None, Some(alias)) => Ok(Some(alias.clone())),
+            (Some(alias), None) => Ok(Some(alias.clone())),
+            (Some(a), Some(b)) if a == b => Ok(Some(a.clone())),
             (Some(a), Some(b)) => Err(TypeError::Conflict(format!(
                 "projection column aliases are not equal: {} and {}",
                 a, b
@@ -450,142 +324,135 @@ impl Unifier {
         }
     }
 
-    pub(crate) fn render_projection(projection: Rc<RefCell<Vec<ProjectionColumn>>>) -> String {
-        let projection = &*projection.borrow();
-        let ty_strings: Vec<String> = projection
-            .iter()
-            .map(|col| col.ty.borrow().to_string())
-            .collect();
+    pub(crate) fn render_projection(columns: &ProjectionColumns) -> String {
+        let ty_strings: Vec<String> = columns.0.iter().map(|col| col.ty.to_string()).collect();
         format!("[{}]", ty_strings.join(", "))
+    }
+
+    fn unify_value_with_single_column_projection(
+        &mut self,
+        value: &Value,
+        ty: &Type,
+    ) -> Result<Type, TypeError> {
+        match (value, ty) {
+            (Value::Eql(left), Type::Constructor(Constructor::Value(Value::Eql(right))))
+                if left == right =>
+            {
+                Ok(ty.clone())
+            }
+            (Value::Native(_), Type::Constructor(Constructor::Value(Value::Native(_)))) => {
+                Ok(ty.clone())
+            }
+            (Value::Array(left), Type::Constructor(Constructor::Value(Value::Array(right)))) => {
+                self.unify(left, right)
+            }
+            (Value::Eql(left), tvar @ Type::Var(_)) => self.unify(
+                &Type::Constructor(Constructor::Value(Value::Eql(left.clone()))),
+                tvar,
+            ),
+            (Value::Native(left), tvar @ Type::Var(_)) => self.unify(
+                &Type::Constructor(Constructor::Value(Value::Native(left.clone()))),
+                tvar,
+            ),
+            (Value::Array(left), tvar @ Type::Var(_)) => self.unify(
+                &Type::Constructor(Constructor::Value(Value::Array(left.clone()))),
+                tvar,
+            ),
+            _ => Err(TypeError::Conflict(format!(
+                "value type {} cannot be unified with single column projection of {}",
+                value, ty
+            ))),
+        }
     }
 }
 
 #[cfg(test)]
 mod test {
-    use crate::unifier::Unifier;
-    use crate::unifier::{
-        Constructor::*, Def::*, ProjectionColumn, Scalar::*, Status, Type, TypeVar,
-    };
-    use std::{cell::RefCell, rc::Rc};
+    use crate::unifier::{Constructor::*, NativeValue, ProjectionColumn, Type, TypeVar, Value::*};
+    use crate::unifier::{ProjectionColumns, Unifier};
+    use crate::{DepMut, TypeRegistry};
 
     #[test]
     fn eq_native() {
-        let left = Type(
-            Constructor(Scalar(Rc::new(AnonymousNative))),
-            Status::Resolved,
-        )
-        .wrap();
-        let right = Type(
-            Constructor(Scalar(Rc::new(AnonymousNative))),
-            Status::Resolved,
-        )
-        .wrap();
+        let left = Type::Constructor(Value(Native(NativeValue(None))));
+        let right = Type::Constructor(Value(Native(NativeValue(None))));
 
-        let mut unifier = Unifier::new();
+        let mut unifier = Unifier::new(DepMut::new(TypeRegistry::new()));
 
-        assert_eq!(unifier.unify(left.clone(), right.clone()), Ok(left.clone()));
+        assert_eq!(unifier.unify(&left, &right), Ok(left.clone()));
     }
 
     #[test]
     fn eq_never() {
-        let left = Type(Constructor(Empty), Status::Resolved).wrap();
-        let right = Type(Constructor(Empty), Status::Resolved).wrap();
+        let left = Type::Constructor(Empty);
+        let right = Type::Constructor(Empty);
 
-        let mut unifier = Unifier::new();
+        let mut unifier = Unifier::new(DepMut::new(TypeRegistry::new()));
 
-        assert_eq!(unifier.unify(left.clone(), right.clone()), Ok(left.clone()));
+        assert_eq!(unifier.unify(&left, &right), Ok(left.clone()));
     }
 
     #[test]
     fn constructor_with_var() {
-        let left = Type(
-            Constructor(Scalar(Rc::new(AnonymousNative))),
-            Status::Resolved,
-        )
-        .wrap();
-        let right = Type(Var(TypeVar::Fresh), Status::Partial).wrap();
+        let left = Type::Constructor(Value(Native(NativeValue(None))));
+        let right = Type::Var(TypeVar(0));
 
-        let mut unifier = Unifier::new();
+        let mut unifier = Unifier::new(DepMut::new(TypeRegistry::new()));
+        let unified = unifier.unify(&left, &right).unwrap();
 
-        assert_eq!(unifier.unify(left.clone(), right.clone()), Ok(left.clone()));
-        assert_eq!(right, left);
-        assert_eq!(right.borrow().status(), Status::Resolved);
+        assert_eq!(unified, left);
     }
 
     #[test]
     fn var_with_constructor() {
-        let left = Type(Var(TypeVar::Fresh), Status::Partial).wrap();
-        let right = Type(
-            Constructor(Scalar(Rc::new(AnonymousNative))),
-            Status::Resolved,
-        )
-        .wrap();
+        let left = Type::Var(TypeVar(0));
+        let right = Type::Constructor(Value(Native(NativeValue(None))));
 
-        let mut unifier = Unifier::new();
+        let mut unifier = Unifier::new(DepMut::new(TypeRegistry::new()));
+        let unified = unifier.unify(&left, &right).unwrap();
 
-        assert_eq!(unifier.unify(left.clone(), right.clone()), Ok(left.clone()));
-        assert_eq!(right, left);
-        assert_eq!(left.borrow().status(), Status::Resolved);
+        assert_eq!(unified, left);
     }
 
     #[test]
     fn projections_without_wildcards() {
-        let left = Type(
-            Constructor(Projection(Rc::new(RefCell::new(vec![
-                ProjectionColumn {
-                    ty: Type(
-                        Constructor(Scalar(Rc::new(AnonymousNative))),
-                        Status::Resolved,
-                    )
-                    .wrap(),
-                    alias: None,
-                },
-                ProjectionColumn {
-                    ty: Type(Var(TypeVar::Fresh), Status::Partial).wrap(),
-                    alias: None,
-                },
-            ])))),
-            Status::Partial,
-        )
-        .wrap();
+        let left = Type::Constructor(Projection(ProjectionColumns(vec![
+            ProjectionColumn {
+                ty: Type::Constructor(Value(Native(NativeValue(None)))),
+                alias: None,
+            },
+            ProjectionColumn {
+                ty: Type::Var(TypeVar(0)),
+                alias: None,
+            },
+        ])));
 
-        let right = Type(
-            Constructor(Projection(Rc::new(RefCell::new(vec![
-                ProjectionColumn {
-                    ty: Type(Var(TypeVar::Fresh), Status::Partial).wrap(),
-                    alias: None,
-                },
-                ProjectionColumn {
-                    ty: Type(Constructor(Empty), Status::Resolved).wrap(),
-                    alias: None,
-                },
-            ])))),
-            Status::Partial,
-        )
-        .wrap();
+        let right = Type::Constructor(Projection(ProjectionColumns(vec![
+            ProjectionColumn {
+                ty: Type::Var(TypeVar(1)),
+                alias: None,
+            },
+            ProjectionColumn {
+                ty: Type::Constructor(Empty),
+                alias: None,
+            },
+        ])));
 
-        let mut unifier = Unifier::new();
+        let mut unifier = Unifier::new(DepMut::new(TypeRegistry::new()));
+        let unified = unifier.unify(&left, &right).unwrap();
 
         assert_eq!(
-            unifier.unify(left.clone(), right.clone()),
-            Ok(Type(
-                Constructor(Projection(Rc::new(RefCell::new(vec![
-                    ProjectionColumn {
-                        ty: Type(
-                            Constructor(Scalar(Rc::new(AnonymousNative))),
-                            Status::Resolved
-                        )
-                        .wrap(),
-                        alias: None
-                    },
-                    ProjectionColumn {
-                        ty: Type(Constructor(Empty), Status::Resolved).wrap(),
-                        alias: None
-                    },
-                ])))),
-                Status::Resolved
-            )
-            .wrap())
+            unified,
+            Type::Constructor(Projection(ProjectionColumns(vec![
+                ProjectionColumn {
+                    ty: Type::Constructor(Value(Native(NativeValue(None)))),
+                    alias: None
+                },
+                ProjectionColumn {
+                    ty: Type::Constructor(Empty),
+                    alias: None
+                },
+            ])))
         );
 
         assert_eq!(right, left);
@@ -593,75 +460,48 @@ mod test {
 
     #[test]
     fn projections_with_wildcards() {
-        let left = Type(
-            Constructor(Projection(Rc::new(RefCell::new(vec![
-                ProjectionColumn {
-                    ty: Type(
-                        Constructor(Scalar(Rc::new(AnonymousNative))),
-                        Status::Resolved,
-                    )
-                    .wrap(),
-                    alias: None,
-                },
-                ProjectionColumn {
-                    ty: Type(Constructor(Empty), Status::Resolved).wrap(),
-                    alias: None,
-                },
-            ])))),
-            Status::Resolved,
-        )
-        .wrap();
+        let left = Type::Constructor(Projection(ProjectionColumns(vec![
+            ProjectionColumn {
+                ty: Type::Constructor(Value(Native(NativeValue(None)))),
+                alias: None,
+            },
+            ProjectionColumn {
+                ty: Type::Constructor(Empty),
+                alias: None,
+            },
+        ])));
 
         // The RHS is a single projection that contains a projection column that contains a projection with two
         // projection columns.  This is how wildcard expansions is represented at the type level.
-        let right = Type(
-            Constructor(Projection(Rc::new(RefCell::new(vec![ProjectionColumn {
-                ty: Type(
-                    Constructor(Projection(Rc::new(RefCell::new(vec![
-                        ProjectionColumn {
-                            ty: Type(
-                                Constructor(Scalar(Rc::new(AnonymousNative))),
-                                Status::Resolved,
-                            )
-                            .wrap(),
-                            alias: None,
-                        },
-                        ProjectionColumn {
-                            ty: Type(Constructor(Empty), Status::Resolved).wrap(),
-                            alias: None,
-                        },
-                    ])))),
-                    Status::Resolved,
-                )
-                .wrap(),
-                alias: None,
-            }])))),
-            Status::Resolved,
-        )
-        .wrap();
+        let right = Type::Constructor(Projection(ProjectionColumns(vec![ProjectionColumn {
+            ty: Type::Constructor(Projection(ProjectionColumns(vec![
+                ProjectionColumn {
+                    ty: Type::Constructor(Value(Native(NativeValue(None)))),
+                    alias: None,
+                },
+                ProjectionColumn {
+                    ty: Type::Constructor(Empty),
+                    alias: None,
+                },
+            ]))),
+            alias: None,
+        }])));
 
-        let mut unifier = Unifier::new();
+        let mut unifier = Unifier::new(DepMut::new(TypeRegistry::new()));
+        let unified = unifier.unify(&left, &right).unwrap();
 
         assert_eq!(
-            unifier.unify(left.clone(), right.clone()),
-            Ok(Type(
-                Constructor(Projection(Rc::new(RefCell::new(vec![
-                    ProjectionColumn {
-                        ty: Type(
-                            Constructor(Scalar(Rc::new(AnonymousNative))),
-                            Status::Resolved
-                        )
-                        .wrap(),
-                        alias: None
-                    },
-                    ProjectionColumn {
-                        ty: Type(Constructor(Empty), Status::Resolved).wrap(),
-                        alias: None
-                    },
-                ])))),
-                Status::Resolved
-            )
-            .wrap())
+            unified,
+            Type::Constructor(Projection(ProjectionColumns(vec![
+                ProjectionColumn {
+                    ty: Type::Constructor(Value(Native(NativeValue(None)))),
+                    alias: None
+                },
+                ProjectionColumn {
+                    ty: Type::Constructor(Empty),
+                    alias: None
+                },
+            ])))
         );
 
         assert_eq!(right, left);

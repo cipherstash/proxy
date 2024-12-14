@@ -3,18 +3,17 @@ use sqlparser::ast::{Ident, ObjectName, Query, Statement};
 use sqltk::{into_control_flow, Break, Visitable, Visitor};
 use tracing::info;
 
-use crate::inference::unifier::{Constructor, Def, ProjectionColumn, Status, Type};
+use crate::inference::unifier::{Constructor, ProjectionColumn, Type};
 use crate::inference::TypeError;
 use crate::iterator_ext::IteratorExt;
 use crate::model::SqlIdent;
-use crate::NodeKey;
+use crate::unifier::ProjectionColumns;
+use crate::{NodeKey, Relation};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::ops::ControlFlow;
 use std::rc::Rc;
-
-use super::Relation;
 
 /// [`Visitor`] implementation that manages creation of lexical [`Scope`]s and the current active lexical scope.
 #[derive(Debug)]
@@ -23,7 +22,13 @@ pub struct ScopeTracker<'ast> {
     node_scopes: HashMap<NodeKey<'ast>, Rc<RefCell<Scope>>>,
 }
 
-impl<'ast> ScopeTracker<'ast> {
+impl Default for ScopeTracker<'_> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl ScopeTracker<'_> {
     pub fn new() -> Self {
         Self {
             node_scopes: HashMap::new(),
@@ -32,33 +37,26 @@ impl<'ast> ScopeTracker<'ast> {
     }
 
     fn current_scope(&self) -> Result<Rc<RefCell<Scope>>, ScopeError> {
-        self.stack.last()
-            .cloned()
-            .ok_or(ScopeError::NoCurrentScope)
+        self.stack.last().cloned().ok_or(ScopeError::NoCurrentScope)
     }
 
     /// Resolves an unqualified wildcard. Resolution occurs in the current scope only  (i.e. does not look into parent
     /// scopes).
-    pub(crate) fn resolve_wildcard(&self) -> Result<Rc<RefCell<Type>>, ScopeError> {
+    pub(crate) fn resolve_wildcard(&self) -> Result<Type, ScopeError> {
         self.current_scope()?.borrow().resolve_wildcard()
     }
 
     /// Resolves a qualified wildcard. Resolution occurs in the current scope only (i.e. does not look into parent
     /// scopes).
-    pub(crate) fn resolve_qualified_wildcard(
-        &self,
-        idents: &[Ident],
-    ) -> Result<Rc<RefCell<Type>>, ScopeError> {
+    pub(crate) fn resolve_qualified_wildcard(&self, idents: &[Ident]) -> Result<Type, ScopeError> {
         self.current_scope()?
             .borrow()
             .resolve_qualified_wildcard(idents)
     }
 
-    fn try_match_projection(
-        ty: Rc<RefCell<Type>>,
-    ) -> Result<Rc<RefCell<Vec<ProjectionColumn>>>, TypeError> {
-        match &*ty.borrow() {
-            Type(Def::Constructor(Constructor::Projection(columns)), _) => Ok(columns.clone()),
+    fn try_match_projection(ty: &Type) -> Result<ProjectionColumns, TypeError> {
+        match ty {
+            Type::Constructor(Constructor::Projection(columns)) => Ok(columns.clone()),
             other => Err(TypeError::Expected(format!(
                 "expected projection but got: {other}"
             ))),
@@ -66,7 +64,7 @@ impl<'ast> ScopeTracker<'ast> {
     }
 
     /// Uniquely resolves an identifier against all relations that are in scope.
-    pub(crate) fn resolve_ident(&self, ident: &Ident) -> Result<Rc<RefCell<Type>>, ScopeError> {
+    pub(crate) fn resolve_ident(&self, ident: &Ident) -> Result<Type, ScopeError> {
         self.current_scope()?.borrow().resolve_ident(ident)
     }
 
@@ -74,17 +72,14 @@ impl<'ast> ScopeTracker<'ast> {
     ///
     /// Note that currently only compound identifier of length 2 are supported
     /// and resolution will fail if the identifier has more than two parts.
-    pub(crate) fn resolve_compound_ident(
-        &self,
-        idents: &[Ident],
-    ) -> Result<Rc<RefCell<Type>>, ScopeError> {
+    pub(crate) fn resolve_compound_ident(&self, idents: &[Ident]) -> Result<Type, ScopeError> {
         self.current_scope()?
             .borrow()
             .resolve_compound_ident(idents)
     }
 
     /// Add a table/view/subquery to the current scope.
-    pub(crate) fn add_relation(&mut self, relation: Relation) -> Result<Rc<Relation>, ScopeError> {
+    pub(crate) fn add_relation(&mut self, relation: Relation) -> Result<(), ScopeError> {
         self.current_scope()?.borrow_mut().add_relation(relation)
     }
 
@@ -123,7 +118,7 @@ impl Scope {
         }))
     }
 
-    fn resolve_wildcard(&self) -> Result<Rc<RefCell<Type>>, ScopeError> {
+    fn resolve_wildcard(&self) -> Result<Type, ScopeError> {
         if self.relations.is_empty() {
             match &self.parent {
                 Some(parent) => parent.borrow().resolve_wildcard(),
@@ -136,24 +131,13 @@ impl Scope {
                 .map(|r| ProjectionColumn::new(r.projection_type.clone(), None))
                 .collect();
 
-            let resolved = wildcard_ty
-                .iter()
-                .map(|col| col.ty.borrow().status())
-                .fold(Status::Resolved, |acc, status| acc + status);
-
-            Ok(Rc::new(RefCell::new(Type(
-                Def::Constructor(Constructor::Projection(ProjectionColumn::flatten(Rc::new(
-                    RefCell::new(wildcard_ty),
-                )))),
-                resolved,
-            ))))
+            Ok(Type::Constructor(Constructor::Projection(
+                ProjectionColumns(wildcard_ty),
+            )))
         }
     }
 
-    fn resolve_qualified_wildcard(
-        &self,
-        idents: &[Ident],
-    ) -> Result<Rc<RefCell<Type>>, ScopeError> {
+    fn resolve_qualified_wildcard(&self, idents: &[Ident]) -> Result<Type, ScopeError> {
         if idents.len() > 1 {
             return Err(ScopeError::UnsupportedCompoundIdentifierLength(
                 idents
@@ -181,7 +165,7 @@ impl Scope {
         }
     }
 
-    fn resolve_ident(&self, ident: &Ident) -> Result<Rc<RefCell<Type>>, ScopeError> {
+    fn resolve_ident(&self, ident: &Ident) -> Result<Type, ScopeError> {
         if self.relations.is_empty() {
             match &self.parent {
                 Some(parent) => parent.borrow().resolve_ident(ident),
@@ -193,15 +177,13 @@ impl Scope {
             let mut all_columns = self
                 .relations
                 .iter()
-                .map(|relation| {
-                    ScopeTracker::try_match_projection(relation.projection_type.clone())
-                })
+                .map(|relation| ScopeTracker::try_match_projection(&relation.projection_type))
                 .try_fold(
                     Vec::<ProjectionColumn>::with_capacity(16),
                     |mut acc, columns| {
                         columns
                             .map(|columns| {
-                                acc.extend(columns.borrow().iter().cloned());
+                                acc.extend(columns.0.iter().cloned());
                                 acc
                             })
                             .map_err(|err| ScopeError::TypeError(Box::new(err)))
@@ -212,7 +194,7 @@ impl Scope {
             match all_columns
                 .try_find_unique(&|col| col.alias.as_ref().map(SqlIdent::from) == sql_ident)
             {
-                Ok(Some(col)) => Ok(col.ty.clone()),
+                Ok(Some(col)) => Ok(col.ty),
                 Err(_) => Err(ScopeError::AmbiguousMatch(ident.to_string())),
                 Ok(None) => match &self.parent {
                     Some(parent) => parent.borrow().resolve_ident(ident),
@@ -225,7 +207,7 @@ impl Scope {
         }
     }
 
-    fn resolve_compound_ident(&self, idents: &[Ident]) -> Result<Rc<RefCell<Type>>, ScopeError> {
+    fn resolve_compound_ident(&self, idents: &[Ident]) -> Result<Type, ScopeError> {
         if idents.len() != 2 {
             return Err(ScopeError::InvariantFailed(
                 "Unsupported compound identifier length (max = 2)".to_string(),
@@ -242,42 +224,34 @@ impl Scope {
         }) {
             Ok(Some(named_relation)) => {
                 let columns =
-                    ScopeTracker::try_match_projection(named_relation.projection_type.clone())
+                    ScopeTracker::try_match_projection(&named_relation.projection_type.clone())
                         .map_err(|err| ScopeError::TypeError(Box::new(err)))?;
-                let columns = columns.borrow();
-                let mut columns = columns.iter();
+                let mut columns = columns.0.iter();
 
                 match columns.try_find_unique(&|column| {
                     column.alias.as_ref().map(SqlIdent::from).as_ref() == Some(&second_ident)
                 }) {
-                    Ok(Some(projection_column)) => {
-                        return Ok(projection_column.ty.clone());
-                    }
-                    Ok(None) | Err(_) => {
-                        return Err(ScopeError::NoMatch(format!(
-                            "{}.{}",
-                            first_ident, second_ident
-                        )))
-                    }
+                    Ok(Some(projection_column)) => Ok(projection_column.ty.clone()),
+                    Ok(None) | Err(_) => Err(ScopeError::NoMatch(format!(
+                        "{}.{}",
+                        first_ident, second_ident
+                    ))),
                 }
             }
             Ok(None) | Err(_) => match &self.parent {
                 Some(parent) => parent.borrow().resolve_compound_ident(idents),
-                None => {
-                    return Err(ScopeError::NoMatch(format!(
-                        "{}.{}",
-                        first_ident, second_ident
-                    )));
-                }
+                None => Err(ScopeError::NoMatch(format!(
+                    "{}.{}",
+                    first_ident, second_ident
+                ))),
             },
         }
     }
 
-    fn add_relation(&mut self, relation: Relation) -> Result<Rc<Relation>, ScopeError> {
+    fn add_relation(&mut self, relation: Relation) -> Result<(), ScopeError> {
         info!("Scope::add_relation: {:#?}", self);
-        let relation = Rc::new(relation);
-        self.relations.push(relation.clone());
-        Ok(relation)
+        self.relations.push(Rc::new(relation));
+        Ok(())
     }
 
     fn resolve_relation(&self, name: &ObjectName) -> Result<Rc<Relation>, ScopeError> {
@@ -298,9 +272,9 @@ impl Scope {
             Ok(Some(found)) => Ok(found.clone()),
             Ok(None) => match &self.parent {
                 Some(parent) => Ok(parent.borrow().resolve_relation(name)?),
-                None => return Err(ScopeError::NoMatch(ident.to_string())),
+                None => Err(ScopeError::NoMatch(ident.to_string())),
             },
-            Err(_) => return Err(ScopeError::NoMatch(ident.to_string())),
+            Err(_) => Err(ScopeError::NoMatch(ident.to_string())),
         }
     }
 }
@@ -337,20 +311,21 @@ impl<'ast> Visitor<'ast> for ScopeTracker<'ast> {
 
         let node_key = NodeKey::new_from_visitable(node);
         if let Some(current_scope) = self.stack.last() {
-            self.node_scopes.insert(node_key.clone(), current_scope.clone());
+            self.node_scopes
+                .insert(node_key.clone(), current_scope.clone());
         }
 
-        if let Some(_) = node.downcast_ref::<Statement>() {
+        if node.downcast_ref::<Statement>().is_some() {
             let root = Scope::new_root();
             self.stack.push(root.clone());
             self.node_scopes.insert(node_key, root);
             return ControlFlow::Continue(());
         }
 
-        if let Some(_) = node.downcast_ref::<Query>() {
+        if node.downcast_ref::<Query>().is_some() {
             match self.stack.last() {
                 Some(scope) => {
-                    let child = Scope::new_child(&scope);
+                    let child = Scope::new_child(scope);
                     self.stack.push(child.clone());
                     self.node_scopes.insert(node_key, child);
                     return ControlFlow::Continue(());
@@ -364,18 +339,17 @@ impl<'ast> Visitor<'ast> for ScopeTracker<'ast> {
             self.node_scopes.insert(node_key, current_scope.clone());
         }
 
-
         ControlFlow::Continue(())
     }
 
     fn exit<N: Visitable>(&mut self, node: &'ast N) -> ControlFlow<Break<Self::Error>> {
         info!("ScopeTracker stack depth: EXIT {}", self.stack.len());
 
-        if let Some(_) = node.downcast_ref::<Statement>() {
+        if node.downcast_ref::<Statement>().is_some() {
             return into_control_flow(self.stack.pop().ok_or(ScopeError::NoCurrentScope));
         }
 
-        if let Some(_) = node.downcast_ref::<Query>() {
+        if node.downcast_ref::<Query>().is_some() {
             return into_control_flow(self.stack.pop().ok_or(ScopeError::NoCurrentScope));
         }
 
