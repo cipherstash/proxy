@@ -2,13 +2,12 @@ use std::{cell::RefCell, fmt::Debug, marker::PhantomData, ops::ControlFlow, rc::
 
 use sqlparser::ast::{Cte, Ident, Insert, TableAlias, TableFactor};
 use sqltk::{Break, Visitable, Visitor};
+use tracing::info;
 
 use crate::{
-    inference::unifier::{Constructor, Def, ProjectionColumn, Status, Type},
-    inference::TypeError,
-    inference::TypeRegistry,
+    inference::{unifier::{Constructor, Def, ProjectionColumn, Status, Type}, TypeError, TypeRegistry},
     model::{Relation, Schema, SchemaError},
-    Scope, ScopeError,
+    ScopeError, ScopeTracker,
 };
 
 /// `Importer` is a [`Visitor`] implementation that brings projections (from "FROM" clauses and subqueries) into lexical scope.
@@ -16,7 +15,7 @@ use crate::{
 pub struct Importer<'ast> {
     schema: Arc<Schema>,
     reg: Rc<RefCell<TypeRegistry<'ast>>>,
-    scope: Rc<RefCell<Scope>>,
+    scope_tracker: Rc<RefCell<ScopeTracker<'ast>>>,
     _ast: PhantomData<&'ast ()>,
 }
 
@@ -24,12 +23,12 @@ impl<'ast> Importer<'ast> {
     pub fn new(
         schema: impl Into<Arc<Schema>>,
         reg: impl Into<Rc<RefCell<TypeRegistry<'ast>>>>,
-        scope: impl Into<Rc<RefCell<Scope>>>,
+        scope: impl Into<Rc<RefCell<ScopeTracker<'ast>>>>,
     ) -> Self {
         Self {
             reg: reg.into(),
             schema: schema.into(),
-            scope: scope.into(),
+            scope_tracker: scope.into(),
             _ast: PhantomData,
         }
     }
@@ -43,7 +42,7 @@ impl<'ast> Importer<'ast> {
 
         let table = self.schema.resolve_table(table_name.0.last().unwrap())?;
 
-        self.scope.borrow_mut().add_relation(Relation {
+        self.scope_tracker.borrow_mut().add_relation(Relation {
             name: table_alias.clone(),
             projection_type: Type(
                 Def::Constructor(Constructor::Projection(Rc::new(RefCell::new(Vec::<
@@ -60,6 +59,8 @@ impl<'ast> Importer<'ast> {
     }
 
     fn update_scope_for_cte(&mut self, cte: &'ast Cte) -> Result<(), ImportError> {
+        info!("update_scope_for_cte");
+
         let Cte {
             alias: TableAlias {
                 name: alias,
@@ -76,7 +77,7 @@ impl<'ast> Importer<'ast> {
         let mut reg = self.reg.borrow_mut();
         let projection_type = reg.get_type(&**query);
 
-        self.scope.borrow_mut().add_relation(Relation {
+        self.scope_tracker.borrow_mut().add_relation(Relation {
             name: Some(alias.clone()),
             projection_type,
         })?;
@@ -88,6 +89,8 @@ impl<'ast> Importer<'ast> {
         &mut self,
         table_factor: &'ast TableFactor,
     ) -> Result<(), ImportError> {
+        info!("update_scope_for_table_factor");
+
         match table_factor {
             TableFactor::Table {
                 name,
@@ -101,12 +104,12 @@ impl<'ast> Importer<'ast> {
                     None => Ok(name.0.last().unwrap()),
                 };
 
-                let mut scope = self.scope.borrow_mut();
+                let mut scope_tracker = self.scope_tracker.borrow_mut();
 
-                if scope.resolve_relation(name).is_err() {
+                if scope_tracker.resolve_relation(name).is_err() {
                     let table = self.schema.resolve_table(name.0.last().unwrap())?;
 
-                    scope.add_relation(Relation {
+                    scope_tracker.add_relation(Relation {
                         name: record_as.cloned().ok(),
                         projection_type: Type(
                             Def::Constructor(Constructor::Projection(Rc::new(RefCell::new(
@@ -152,7 +155,7 @@ impl<'ast> Importer<'ast> {
             } => {
                 let projection_type = self.reg.borrow_mut().get_type(&*subquery.body);
 
-                self.scope.borrow_mut().add_relation(Relation {
+                self.scope_tracker.borrow_mut().add_relation(Relation {
                     name: alias.clone().map(|a| a.name.clone()),
                     projection_type,
                 })?;
@@ -324,12 +327,14 @@ impl<'ast> Visitor<'ast> for Importer<'ast> {
 
     fn exit<N: Visitable>(&mut self, node: &'ast N) -> ControlFlow<Break<Self::Error>> {
         if let Some(cte) = node.downcast_ref::<Cte>() {
+            info!("CTE {}", cte);
             if let Err(err) = self.update_scope_for_cte(cte) {
                 return ControlFlow::Break(Break::Err(err));
             }
         };
 
         if let Some(table_factor) = node.downcast_ref::<TableFactor>() {
+            info!("TableFactor {}", table_factor);
             if let Err(err) = self.update_scope_for_table_factor(table_factor) {
                 return ControlFlow::Break(Break::Err(err));
             }

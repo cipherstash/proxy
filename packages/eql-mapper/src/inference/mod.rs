@@ -27,7 +27,7 @@ use sqlparser::ast::{
 };
 use sqltk::{into_control_flow, Break, Semantic, Visitable, Visitor};
 
-use crate::{Schema, Scope};
+use crate::{Schema, ScopeTracker};
 
 pub(crate) use registry::*;
 pub(crate) use type_error::*;
@@ -54,7 +54,7 @@ pub struct TypeInferencer<'ast> {
     schema: Arc<Schema>,
 
     // The lexical scope - used for resolving identifiers & wildcard expansions in `TypeInferencer`'s [`InferType`] impls.
-    scope: Rc<RefCell<Scope>>,
+    scope: Rc<RefCell<ScopeTracker<'ast>>>,
 
     /// Associates types with AST nodes.
     reg: Rc<RefCell<TypeRegistry<'ast>>>,
@@ -75,7 +75,7 @@ impl<'ast> TypeInferencer<'ast> {
     /// Create a new `TypeInferencer`.
     pub fn new(
         schema: impl Into<Arc<Schema>>,
-        scope: impl Into<Rc<RefCell<Scope>>>,
+        scope: impl Into<Rc<RefCell<ScopeTracker<'ast>>>>,
         reg: impl Into<Rc<RefCell<TypeRegistry<'ast>>>>,
     ) -> Self {
         Self {

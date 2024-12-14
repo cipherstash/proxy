@@ -5,7 +5,7 @@ mod importer;
 mod inference;
 mod iterator_ext;
 mod model;
-mod scope;
+mod scope_tracker;
 
 use std::{cell::RefCell, rc::Rc, sync::Arc};
 
@@ -13,7 +13,7 @@ pub use eql_mapper::*;
 pub use importer::*;
 pub use inference::*;
 pub use model::*;
-pub use scope::*;
+pub use scope_tracker::*;
 
 /// A shared dependency of type `T`, convertible to an `Rc<RefCell<T>>`.
 ///

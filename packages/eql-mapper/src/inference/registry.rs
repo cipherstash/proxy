@@ -51,7 +51,6 @@ impl<'ast> NodeKey<'ast> {
         }
     }
 
-    #[cfg(test)]
     pub(crate) fn new_from_visitable<N: Visitable>(node: &'ast N) -> Self {
         Self {
             node_addr: node as *const N as usize,

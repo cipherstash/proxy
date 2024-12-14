@@ -58,8 +58,6 @@ impl Unifier {
             return Ok(left.clone());
         }
 
-        info!("UNIFY 0");
-
         let span = span!(
             Level::DEBUG,
             "unify",

@@ -8,8 +8,8 @@ use sqltk::{convert_control_flow, Break, Semantic, Transform, Transformable, Vis
 
 use crate::{
     inference::{unifier, TypeError, TypeInferencer},
-    Dep, DepMut, EqlColumn, NodeKey, Projection, ProjectionColumn, Scalar, Schema, Scope,
-    ScopeError, Type, TypeRegistry,
+    Dep, DepMut, EqlColumn, NodeKey, Projection, ProjectionColumn, Scalar, Schema, ScopeError,
+    ScopeTracker, Type, TypeRegistry,
 };
 
 use super::importer::{ImportError, Importer};
@@ -86,8 +86,17 @@ pub struct TypedStatement<'ast> {
 }
 
 /// The error type returned by various functions in the `eql_mapper` crate.
-#[derive(Debug, thiserror::Error, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, thiserror::Error)]
 pub enum EqlMapperError {
+    #[error("Error during SQL transformation: {}", _0)]
+    Transform(String),
+
+    #[error("Internal error: {}", _0)]
+    InternalError(String),
+
+    #[error("Unsupported value variant: {}", _0)]
+    UnsupportedValueVariant(String),
+
     /// A lexical scope error
     #[error(transparent)]
     Scope(#[from] ScopeError),
@@ -100,21 +109,13 @@ pub enum EqlMapperError {
     #[error(transparent)]
     Type(#[from] TypeError),
 
-    #[error("Error during SQL transformation: {}", _0)]
-    Transform(String),
-
-    #[error("Internal error: {}", _0)]
-    InternalError(String),
-
-    #[error("Unsupported value variant: {}", _0)]
-    UnsupportedValueVariant(String),
 }
 
 /// `EqlMapper` can safely convert a SQL statement into an equivalent statement where all of the plaintext literals have
 /// been converted to EQL payloads containing the encrypted literal and/or encrypted representations of those literals.
 #[derive(Debug)]
 struct EqlMapper<'ast> {
-    scope: Rc<RefCell<Scope>>,
+    scope: Rc<RefCell<ScopeTracker<'ast>>>,
     importer: Rc<RefCell<Importer<'ast>>>,
     inferencer: Rc<RefCell<TypeInferencer<'ast>>>,
     _ast: PhantomData<&'ast ()>,
@@ -124,7 +125,7 @@ impl<'ast> EqlMapper<'ast> {
     /// Build an `EqlMapper`, initialising all the other visitor implementations that it depends on.
     fn new_from_schema(schema: impl Into<Arc<Schema>>) -> Self {
         let schema = Dep::from(schema.into());
-        let scope = DepMut::new(Scope::new());
+        let scope = DepMut::new(ScopeTracker::new());
         let registry = DepMut::new(TypeRegistry::new());
         let importer = DepMut::new(Importer::new(&schema, &registry, &scope));
         let inferencer = DepMut::new(TypeInferencer::new(&schema, &scope, &registry));
@@ -752,7 +753,10 @@ mod test {
 
         let typed = match type_check(&schema, &statement) {
             Ok(typed) => typed,
-            Err(err) => panic!("type check failed: {:#?}", err),
+            Err(err) => {
+                // eprintln!("Error: {}", err, err.source());
+                panic!("type check failed: {:#?}", err)
+            }
         };
 
         assert_eq!(
@@ -1097,9 +1101,21 @@ mod test {
                 select * from
                 (select min(salary) as min_salary from employees) as x
                 inner join (
-                    (select salary as y from employees where salary < (select min(foo) from (select salary as foo from employees)))
+                    (
+                        select salary as y from employees
+                            where salary < (select min(foo) from (
+                                select salary as foo from employees
+                            )
+                        )
+                    )
                     union
-                    (select salary as y from employees where salary >= (select min(max(foo)) from (select salary as foo from employees)))
+                    (
+                        select salary as y from employees
+                            where salary >= (select min(max(foo)) from (
+                                select salary as foo from employees
+                            )
+                        )
+                    )
                 ) as holy_joins_batman on x.min_salary = holy_joins_batman.y
                 inner join employees as e on (e.salary = holy_joins_batman.y)
             "#,
