@@ -22,6 +22,7 @@ async fn main() {
     };
 
     let encrypt = init(config).await;
+
     let listener = connect::bind_with_retry(&encrypt.config.server).await;
 
     loop {

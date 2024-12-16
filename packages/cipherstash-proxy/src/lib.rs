@@ -9,8 +9,10 @@ pub mod log;
 pub mod postgresql;
 pub mod tls;
 
-pub use crate::config::DatabaseConfig;
-pub use crate::config::TandemConfig;
+pub use crate::config::{DatabaseConfig, ServerConfig, TandemConfig, TlsConfig};
+pub use crate::encrypt::Encrypt;
+pub use crate::eql::{Ciphertext, ForQuery, Identifier, Plaintext};
+pub use crate::log::init;
 
 use std::mem;
 
