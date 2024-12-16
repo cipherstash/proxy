@@ -19,6 +19,16 @@ To install mise:
 - If you're on macOS, run `brew install mise`
 - If you're on another platform, check out the mise [installation methods documentation](https://mise.jdx.dev/installing-mise.html#installation-methods)
 
+Then add mise to your shell:
+
+```
+# If you're running Bash
+echo 'eval "$(~/.local/bin/mise activate bash)"' >> ~/.bashrc
+
+# If you're running Zsh
+echo 'eval "$(~/.local/bin/mise activate zsh)"' >> ~/.zshrc
+```
+
 We use [`cargo-binstall`](https://github.com/cargo-bins/cargo-binstall) for faster installation of tools installed via `mise` and Cargo.
 We install `cargo-binstall` via `mise` when installing development and testing dependencies.
 
