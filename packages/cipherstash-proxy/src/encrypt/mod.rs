@@ -14,6 +14,9 @@ use tracing::debug;
 
 type ScopedCipher = encryption::ScopedCipher<AutoRefresh<ServiceCredentials>>;
 
+///
+/// All of the things required for Encrypt-as-a-Product
+///
 #[derive(Debug, Clone)]
 pub struct Encrypt {
     pub config: TandemConfig,
@@ -25,8 +28,8 @@ pub struct Encrypt {
 impl Encrypt {
     pub async fn init(config: TandemConfig) -> Result<Encrypt, Error> {
         let cipher = Arc::new(init_cipher(&config).await?);
-        let encrypt_config = EncryptConfigManager::init(&config.database).await?;
         let schema = SchemaManager::init(&config.database).await?;
+        let encrypt_config = EncryptConfigManager::init(&config.database).await?;
 
         Ok(Encrypt {
             config,

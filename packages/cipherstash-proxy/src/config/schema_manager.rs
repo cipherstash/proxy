@@ -7,7 +7,7 @@ use sqlparser::ast::Ident;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::{task::JoinHandle, time};
-use tracing::{debug, info, warn};
+use tracing::{info, warn};
 
 #[derive(Clone, Debug)]
 pub struct SchemaManager {
@@ -30,6 +30,7 @@ async fn init_reloader(config: DatabaseConfig) -> Result<SchemaManager, Error> {
     // Skip retries on startup as the likely failure mode is configuration
     let schema = load_schema(&config).await?;
     info!("Loaded database schema");
+
     let schema = Arc::new(ArcSwap::new(Arc::new(schema)));
 
     let config_ref = config.clone();
@@ -76,7 +77,6 @@ async fn load_schema_with_retry(config: &DatabaseConfig) -> Result<Schema, Error
     let max_backoff = Duration::from_secs(2);
 
     loop {
-        debug!("Loading schema");
         match load_schema(config).await {
             Ok(schema) => {
                 return Ok(schema);

@@ -25,7 +25,14 @@ pub async fn database(config: &DatabaseConfig) -> Result<Client, Error> {
     let tls_config = tls::configure_client(config);
     let tls = tokio_postgres_rustls::MakeRustlsConnect::new(tls_config);
 
-    let (client, connection) = tokio_postgres::connect(&connection_string, tls).await?;
+    let (client, connection) = match tokio_postgres::connect(&connection_string, tls).await {
+        Ok((client, connection)) => (client, connection),
+        Err(e) => {
+            error!("Could not connect to database: {config}");
+            error!("Confirm that the database configuration is correct");
+            return Err(Error::Config(e.into()));
+        }
+    };
 
     tokio::spawn(async move {
         if let Err(e) = connection.await {

@@ -7,6 +7,10 @@ use std::sync::Arc;
 use tokio::net::TcpStream;
 use tokio_rustls::{TlsAcceptor, TlsConnector, TlsStream};
 
+///
+/// Create a Server TLS connection
+/// The returned type is the higher-level TlsStream that wraps both Client & Server variants
+///
 pub async fn client(
     stream: TcpStream,
     config: &TandemConfig,
@@ -19,20 +23,39 @@ pub async fn client(
     Ok(tls_stream.into())
 }
 
+///
+/// Create a Server TLS connection
+/// The returned type is the higher-level TlsStream that wraps both Client & Server variants
+///
 pub async fn server(stream: TcpStream, config: &TlsConfig) -> Result<TlsStream<TcpStream>, Error> {
+    let server_config = configure_server(config)?;
+    let acceptor = TlsAcceptor::from(Arc::new(server_config));
+    let tls_stream = acceptor.accept(stream).await?;
+
+    Ok(tls_stream.into())
+}
+
+///
+/// Configure the server TLS settings
+/// These are the settings for the listener
+///
+pub fn configure_server(config: &TlsConfig) -> Result<rustls::ServerConfig, Error> {
     let certs =
         CertificateDer::pem_file_iter(&config.certificate)?.collect::<Result<Vec<_>, _>>()?;
     let key = PrivateKeyDer::from_pem_file(&config.private_key)?;
 
-    let config = rustls::ServerConfig::builder()
+    let server_config = rustls::ServerConfig::builder()
         .with_no_client_auth()
         .with_single_cert(certs, key)?;
 
-    let acceptor = TlsAcceptor::from(Arc::new(config));
-    let tls_stream = acceptor.accept(stream).await?;
-    Ok(tls_stream.into())
+    Ok(server_config)
 }
 
+///
+/// Configure the client TLS settings
+/// These are the settings for connecting to the database with TLS
+/// The client will use the system root certificates
+///
 pub fn configure_client(config: &DatabaseConfig) -> ClientConfig {
     let mut root_cert_store = rustls::RootCertStore::empty();
     root_cert_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());

@@ -10,7 +10,6 @@ use std::{ffi::CString, io::Cursor};
 #[derive(Debug, Clone)]
 pub struct Parse {
     pub code: char,
-    pub len: i32,
     pub name: Destination,
     pub statement: String,
     pub num_params: i16,
@@ -39,7 +38,7 @@ impl TryFrom<&BytesMut> for Parse {
             .into());
         }
 
-        let len = cursor.get_i32();
+        let _len = cursor.get_i32();
         let name = cursor.read_string()?;
         let name = Destination::new(name);
 
@@ -53,7 +52,6 @@ impl TryFrom<&BytesMut> for Parse {
 
         Ok(Parse {
             code,
-            len,
             name,
             statement,
             num_params,
@@ -97,13 +95,13 @@ impl TryFrom<Parse> for BytesMut {
 #[cfg(test)]
 mod tests {
 
-    use crate::trace;
+    use crate::log;
 
     use super::Destination;
 
     #[test]
     fn test_parse_destination() {
-        trace();
+        log::init();
 
         let name = "test".to_string();
         let destination = Destination::new(name);

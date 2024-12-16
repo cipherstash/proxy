@@ -2,7 +2,8 @@ use cipherstash_proxy::config::TandemConfig;
 use cipherstash_proxy::connect::{self, AsyncStream};
 use cipherstash_proxy::encrypt::Encrypt;
 use cipherstash_proxy::error::Error;
-use cipherstash_proxy::{postgresql as pg, trace};
+use cipherstash_proxy::{log, postgresql as pg, tls};
+use tokio::signal::unix::{signal, SignalKind};
 use tracing::{debug, error, info, warn};
 
 // TODO: Accept command line arguments for config file path
@@ -10,7 +11,7 @@ use tracing::{debug, error, info, warn};
 async fn main() {
     let config_file = "cipherstash-proxy.toml";
 
-    trace();
+    log::init();
 
     let config = match TandemConfig::load(config_file) {
         Ok(config) => config,
@@ -19,35 +20,53 @@ async fn main() {
             std::process::exit(exitcode::CONFIG);
         }
     };
+
     let encrypt = init(config).await;
     let listener = connect::bind_with_retry(&encrypt.config.server).await;
 
     loop {
-        let client_stream = AsyncStream::accept(&listener).await.unwrap();
+        tokio::select! {
+            _ = sigint() => {
+                info!("Received SIGINT");
+                break;
+            },
+            _ = sighup() => {
+                info!("Received SIGHUP");
+                break;
+            },
+            _ = sigterm() => {
+                info!("Received SIGTERM");
+                break;
+            },
+            Ok(client_stream) = AsyncStream::accept(&listener) => {
 
-        let encrypt = encrypt.clone();
+                let encrypt = encrypt.clone();
 
-        tokio::spawn(async move {
-            let encrypt = encrypt.clone();
+                tokio::spawn(async move {
+                    let encrypt = encrypt.clone();
 
-            match pg::handle(client_stream, encrypt).await {
-                Ok(_) => (),
-                Err(e) => match e {
-                    Error::ConnectionClosed => {
-                        info!("Database connection closed by client");
+                    match pg::handler(client_stream, encrypt).await {
+                        Ok(_) => (),
+                        Err(e) => match e {
+                            Error::ConnectionClosed => {
+                                info!("Database connection closed by client");
+                            }
+                            Error::CancelRequest => {
+                                info!("Database connection closed after cancel request");
+                            }
+                            Error::ConnectionTimeout(_) => {
+                                warn!("Database connection timeout");
+                            }
+                            _ => {
+                                error!("Error {:?}", e);
+                            }
+                        },
                     }
-                    Error::CancelRequest => {
-                        info!("Database connection closed after cancel request");
-                    }
-                    Error::ConnectionTimeout(_) => {
-                        warn!("Database connection timeout");
-                    }
-                    _ => {
-                        error!("Error {:?}", e);
-                    }
-                },
-            }
-        });
+                });
+            },
+        }
+
+        info!("Shutting down CipherStash Proxy");
     }
 }
 
@@ -55,7 +74,7 @@ async fn main() {
 /// Validate various configuration options and
 /// Init the Encrypt service
 ///
-async fn init(config: TandemConfig) -> Encrypt {
+async fn init(mut config: TandemConfig) -> Encrypt {
     if config.encrypt.dataset_id.is_none() {
         info!("Encrypt using default dataset");
     }
@@ -72,8 +91,8 @@ async fn init(config: TandemConfig) -> Encrypt {
         warn!("Bypassing Transport Layer Security (TLS) verification for database connections");
     }
 
-    match &config.tls {
-        Some(tls) => {
+    match config.tls {
+        Some(ref mut tls) => {
             if !tls.cert_exists() {
                 error!(
                     "Transport Layer Security (TLS) Certificate not found: {}",
@@ -88,9 +107,9 @@ async fn init(config: TandemConfig) -> Encrypt {
                     tls.private_key
                 );
                 std::process::exit(exitcode::CONFIG);
-            }
+            };
 
-            match tls.server_config() {
+            match tls::configure_server(tls) {
                 Ok(_) => {
                     info!("Server Transport Layer Security (TLS) configuration validated");
                 }
@@ -114,9 +133,24 @@ async fn init(config: TandemConfig) -> Encrypt {
             encrypt
         }
         Err(err) => {
-            error!("Could not connect to CipherStash Encrypt");
+            error!("Could not start CipherStash proxy");
             debug!("{}", err);
             std::process::exit(exitcode::UNAVAILABLE);
         }
     }
+}
+
+async fn sigint() -> std::io::Result<()> {
+    signal(SignalKind::interrupt())?.recv().await;
+    Ok(())
+}
+
+async fn sigterm() -> std::io::Result<()> {
+    signal(SignalKind::terminate())?.recv().await;
+    Ok(())
+}
+
+async fn sighup() -> std::io::Result<()> {
+    signal(SignalKind::hangup())?.recv().await;
+    Ok(())
 }

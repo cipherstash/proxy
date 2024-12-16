@@ -1,15 +1,13 @@
-use crate::encrypt::Encrypt;
-use crate::error::Error;
-use crate::postgresql::protocol::{self};
-use crate::postgresql::CONNECTION_TIMEOUT;
-use bytes::BytesMut;
-use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
-use tokio::time::timeout;
-use tracing::{error, warn};
-
 use super::messages::error_response::ErrorResponse;
 use super::messages::BackendCode;
 use super::protocol::Message;
+use crate::encrypt::Encrypt;
+use crate::error::Error;
+use crate::log::DEVELOPMENT;
+use crate::postgresql::protocol::{self};
+use bytes::BytesMut;
+use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
+use tracing::{error, warn};
 
 pub struct Backend<C, S>
 where
@@ -35,6 +33,10 @@ where
     }
 
     pub async fn rewrite(&mut self) -> Result<(), Error> {
+        if self.encrypt.config.disable_mapping() {
+            warn!(DEVELOPMENT, "Mapping is not enabled");
+            return Ok(());
+        }
         let bytes = self.read().await?;
         self.write(bytes).await?;
         Ok(())
@@ -47,8 +49,7 @@ where
     ///
     pub async fn read(&mut self) -> Result<BytesMut, Error> {
         // info!("[backend] read");
-        let message =
-            timeout(CONNECTION_TIMEOUT, protocol::read_message(&mut self.server)).await??;
+        let message = protocol::read_message_with_timeout(&mut self.server).await?;
 
         match message.code.into() {
             BackendCode::Authentication => {}

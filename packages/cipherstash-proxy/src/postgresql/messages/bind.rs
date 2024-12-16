@@ -303,13 +303,13 @@ impl TryFrom<Bind> for BytesMut {
 
 #[cfg(test)]
 mod tests {
-    use crate::{postgresql::format_code::FormatCode, trace};
+    use crate::{log, postgresql::format_code::FormatCode};
 
     use super::BindParam;
 
     #[test]
     fn bind_should_rewrite() {
-        trace();
+        log::init();
 
         let bytes = "hello".into();
         let mut param = BindParam::new(FormatCode::Text, bytes);

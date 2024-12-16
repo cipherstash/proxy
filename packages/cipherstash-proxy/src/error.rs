@@ -61,9 +61,6 @@ pub enum ConfigError {
     Certificate(#[from] rustls_pki_types::pem::Error),
 
     #[error(transparent)]
-    Config(#[from] config::ConfigError),
-
-    #[error(transparent)]
     Dataset(#[from] cipherstash_config::errors::ConfigError),
 
     #[error(transparent)]
@@ -78,14 +75,20 @@ pub enum ConfigError {
     #[error("Expected an Encrypt configuration table")]
     MissingEncryptConfigTable,
 
+    #[error("Missing Transport Layer Security (TLS) certificate")]
+    MissingCertificate,
+
     #[error(transparent)]
     Parse(#[from] serde_json::Error),
 
     #[error("Database schema could not be loaded")]
     SchemaCouldNotBeLoaded,
 
-    #[error("TLS could not be established")]
-    TlsConnector,
+    #[error("Client must connect with Transport Layer Security (TLS)")]
+    TlsRequired,
+
+    #[error(transparent)]
+    Variable(#[from] config::ConfigError),
 }
 
 #[derive(Error, Debug)]
@@ -108,11 +111,20 @@ pub enum EncryptError {
 
 #[derive(Error, Debug)]
 pub enum ProtocolError {
+    #[error("AuthenticationFailed")]
+    AuthenticationFailed,
+
     #[error("Expected {expected} parameter format codes, received {received}")]
     ParameterFormatCodesMismatch { expected: usize, received: usize },
 
     #[error("Expected {expected} parameter format codes, received {received}")]
     ParameterResultFormatCodesMismatch { expected: usize, received: usize },
+
+    #[error("Expected a {expected} message, received message code {received}")]
+    UnexpectedAuthenticationResponse { expected: String, received: i32 },
+
+    #[error("Expected {expected} message code, received {received}")]
+    UnexpectedMessageCode { expected: char, received: char },
 
     #[error("Unexpected message length {len} for code {code}")]
     UnexpectedMessageLength { code: u8, len: usize },
@@ -120,17 +132,20 @@ pub enum ProtocolError {
     #[error("Unexpected null in string")]
     UnexpectedNull,
 
+    #[error("Unexpected SASL authentication method {method}")]
+    UnexpectedSaslAuthenticationMethod { method: String },
+
     #[error("Unexpected SSLRequest")]
     UnexpectedSSLRequest,
+
+    #[error("Expected a TLS connection")]
+    UnexpectedSSLResponse,
 
     #[error("Unexpected StartupMessage")]
     UnexpectedStartupMessage,
 
-    #[error("Expected {expected} message code, received {received}")]
-    UnexpectedMessageCode { expected: char, received: char },
-
-    #[error("Expected a TLS connection")]
-    UnexpectedSSLResponse,
+    #[error("Unsupported authentication method {method_code}")]
+    UnsupportedAuthentication { method_code: i32 },
 }
 
 impl From<config::ConfigError> for Error {

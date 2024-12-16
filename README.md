@@ -244,6 +244,55 @@ Connect to pg 17 over TLS
 docker compose up --build
 ```
 
+
+
+
+## Integration Tests
+
+Integration tests require a running proxy, which requires a running PostgreSQL database.
+
+Integration tests should be named in the form `integration_{test_name}` because I could not work out another way of filtering.
+
+### psql connection tests
+
+Connecting to the proxy via psql is handled via mise environments and files tasks.
+
+Running mise from the test directory will prioritise config in the test directory, and mise will load a specified environment using the `--env` arg.
+
+```shell
+cd tests/
+
+# run the proxy in background
+mise --env tcp run proxy &
+
+# run psql tcp connection tests
+mise --env tcp r test:psql-tcp
 ```
-psql postgresql://cipherstash:password@localhost:5517/cipherstash
-```
+
+Task files:
+
+ - `tests/tasks/test/psql-tcp.sh`
+ - `tests/tasks/test/psql-tls.sh`
+
+Environment files:
+ - `test/mise.toml`
+ - `test/mise.tcp.toml`
+ - `test/mise.tls.toml`
+
+
+### `test/mise.toml`
+Database credentials, assumes the default credentials used by the `docker-compose` services.
+
+Note: does not include a database port. The port is defined in the named environment files.
+
+
+### `test/mise.tcp.toml`
+
+Points to the latest PostgreSQL service at `5532`.
+
+
+### `test/mise.tls.toml`
+
+Points to the PostgreSQL 17 with TLS Service at `5617`.
+
+Configures the TLS certificate, private key and ensures the server requires tls.

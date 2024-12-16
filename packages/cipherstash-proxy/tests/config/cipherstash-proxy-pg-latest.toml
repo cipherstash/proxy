@@ -1,0 +1,6 @@
+[database]
+name = "cipherstash"
+host = "localhost"
+port = 5532
+username = "cipherstash"
+password = "password"

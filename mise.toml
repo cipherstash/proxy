@@ -1,3 +1,15 @@
+[settings]
+# Config for test environments
+# Can be invoked with: mise --env tcp run <task>
+trusted_config_paths = [
+  "./tests/mise.toml",
+  "./tests/mise.tcp.toml",
+  "./tests/mise.tls.toml",
+]
+
+[task_config]
+includes = ["tests/tasks"]
+
 [vars]
 database_port = "5532" # default postgres port using built in docker-compose setup
 
@@ -13,25 +25,82 @@ PKG_CONFIG_PATH = "/opt/homebrew/opt/icu4c@76/lib/pkgconfig"
 
 [tasks.proxy]
 alias = 'p'
-description = "Runs the proxy "
-run = 'cargo run'
+description = "Runs the proxy"
+run = 'pwd && env | grep CS_ && cargo run'
+
+[tasks.kill]
+alias = 'k'
+description = "Kills running proxy "
+run = """
+  killall cipherstash-proxy -s SIGINT
+  exit 0
+"""
 
 # ====================================================================================================
 # Test Tasks
 
-[tasks.test]
-alias = 't'
+[tasks."test:unit"]
+alias = ['t', 'test']
+description = "Runs tests"
+run = "mise run test:nextest {{arg(name='test',default='')}}"
+
+[tasks."test:ci"]
+alias = "ci"
 description = "Runs test/s"
 run = """
-  mise run test:nextest {{arg(name="test",default="")}}
   mise run test:check
   mise run test:format
   mise run test:clippy
+  mise run test:unit
+  mise run test:integration
+"""
+
+[tasks."test:wait_for_tcp_port"]
+run = """
+{% set default_host = get_env(name="CS_DATABASE__HOST",default="localhost") %}
+{% set default_port = get_env(name="CS_DATABASE__PORT",default=5432) %}
+  host={{option(name="host",default=default_host)}}
+  port={{option(name="port",default=default_port)}}
+  max_retries=10
+  attempt=1
+  until nc -z $host $port
+  do
+    if [ $attempt -lt $max_retries ]; then
+      echo "Waiting for ${host}:${port}"
+      sleep 0.5
+      attempt=$(expr $attempt + 1)
+    else
+      echo "Unable to connect to ${host}:${port} after ${max_retries} attempts"
+      exit 64
+    fi
+  done
+  echo "Connected to ${host}:${port} after ${attempt} attempts"
+"""
+
+[tasks."test:integration"]
+alias = "i"
+dir = "./tests"
+description = "Runs integration test/s"
+run = """
+  mise --env tcp run proxy &
+  mise --env tcp run test:wait_for_tcp_port --port 6432
+  mise --env tcp run test:psql-tcp
+  mise run kill
+
+  # mise --env tls run proxy &
+  # mise --env tls run test:wait_for_tcp_port --port 6432
+  # mise --env tls run test:psql-tls
+  # mise run kill
+
+  # mise --env tls run proxy &
+  # mise --env tls run test:wait_for_tcp_port --port 6432
+  # cargo nextest run --no-fail-fast --nocapture -E 'test(~integration)'
+  # mise run kill
 """
 
 [tasks."test:nextest"]
-description = "Runs cargo nextest"
-run = 'cargo nextest run --no-fail-fast --nocapture {{arg(name="test",default="")}}'
+description = "Runs cargo nextest, skipping integration tests"
+run = 'cargo nextest run --no-fail-fast --nocapture -E "not test(~integration)" {{arg(name="test",default="")}}'
 
 [tasks."test:format"]
 description = "Runs cargo fmt"
@@ -59,7 +128,7 @@ description = "docker compose up"
 run = """
 chmod 600 tls/*
 if [ -n "$CI" ]; then echo "Running in CI: setting file permissions for container" ; sudo chown 999:999 tls/localhost* ; else echo "Not running in CI: skip setting file permissions for container" ; fi
-docker compose up --build {{arg(name="service",default="")}} {{option(name="extra-args",default="")}}
+echo docker compose up --build {{arg(name="service",default="")}} {{option(name="extra-args",default="")}} | bash
 """
 
 [tasks.down]
@@ -107,7 +176,7 @@ cp -v target/release/cipherstash-proxy .
 """
 
 [tasks."build:docker"]
-depends = [ "build:docker:fetch_eql" ]
+depends = ["build:docker:fetch_eql"]
 description = "Build a Docker image for cipherstash-proxy"
 run = """
 {% set default_platform = "linux/" ~ arch() | replace(from="x86_64", to="amd64") %}

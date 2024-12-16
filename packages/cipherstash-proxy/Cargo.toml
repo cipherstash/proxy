@@ -16,20 +16,32 @@ config = { version = "0.14", features = [
 ], default-features = false }
 eql-mapper = { path = "../eql-mapper" }
 exitcode = "1.1.2"
+md-5 = "0.10.6"
 native-tls = "0.2.12"
-rustls = "0.23.17"
+oid-registry = "0.7.1"
+postgres-protocol = "0.6.7"
+rand = "0.8.5"
+ring = { version = "0.17", default-features = false }
+rustls = { version = "0.23.20", default-features = false, features = ["std"] }
 rustls-pki-types = "1.10.0"
 serde = "1.0"
 serde_json = "1.0"
 socket2 = "0.5.7"
-sqlparser = { version = "^0.52", features = ["serde"]}
+sqlparser = { version = "^0.52", features = ["serde"] }
 sqltk = { version = "^0.2.2" }
 thiserror = "2.0"
 tokio = { version = "1.42.0", features = ["full"] }
 tokio-postgres = { version = "0.7", features = ["with-serde_json-1"] }
 tokio-postgres-rustls = "0.13.0"
 tokio-rustls = "0.26.0"
+tokio-util = "0.7.13"
 tracing = "0.1"
-tracing-subscriber = "0.3"
+tracing-subscriber = { version = "0.3", features = [
+    "ansi",
+    "json",
+    "env-filter",
+    "std",
+] }
 uuid = { version = "1.11.0", features = ["serde", "v4", "v5"] }
 webpki-roots = "0.26.7"
+x509-parser = "0.16.0"

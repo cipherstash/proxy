@@ -1,6 +1,6 @@
-use super::tandem::DatabaseConfig;
+use super::{tandem::DatabaseConfig, EncryptConfig};
 use crate::{
-    config::{EncryptConfig, ENCRYPT_DATASET_CONFIG_QUERY},
+    config::ENCRYPT_CONFIG_QUERY,
     connect, eql,
     error::{ConfigError, Error},
 };
@@ -36,7 +36,7 @@ impl EncryptConfigManager {
 
 async fn init_reloader(config: DatabaseConfig) -> Result<EncryptConfigManager, Error> {
     // Skip retries on startup as the likely failure mode is configuration
-    let encrypt_config = load_dataset(&config).await?;
+    let encrypt_config = load_encrypt_config(&config).await?;
     info!("Loaded Encrypt configuration");
 
     let encrypt_config = Arc::new(ArcSwap::new(Arc::new(encrypt_config)));
@@ -55,7 +55,7 @@ async fn init_reloader(config: DatabaseConfig) -> Result<EncryptConfigManager, E
         loop {
             interval.tick().await;
 
-            match load_dataset_with_retry(&config_ref).await {
+            match load_encrypt_config_with_retry(&config_ref).await {
                 Ok(reloaded) => {
                     // debug!("Reloaded Encrypt configuration");
                     dataset_ref.swap(Arc::new(reloaded));
@@ -79,13 +79,15 @@ async fn init_reloader(config: DatabaseConfig) -> Result<EncryptConfigManager, E
 /// When databases and the proxy start up at the same time they might not be ready to accept connections before the
 /// proxy tries to query the schema. To give the proxy the best chance of initialising correctly this method will
 /// retry the query a few times before passing on the error.
-async fn load_dataset_with_retry(config: &DatabaseConfig) -> Result<EncryptConfigMap, Error> {
+async fn load_encrypt_config_with_retry(
+    config: &DatabaseConfig,
+) -> Result<EncryptConfigMap, Error> {
     let mut retry_count = 0;
     let max_retry_count = 10;
     let max_backoff = Duration::from_secs(2);
 
     loop {
-        match load_dataset(config).await {
+        match load_encrypt_config(config).await {
             Ok(encrypt_config) => {
                 return Ok(encrypt_config);
             }
@@ -105,17 +107,17 @@ async fn load_dataset_with_retry(config: &DatabaseConfig) -> Result<EncryptConfi
     }
 }
 
-pub async fn load_dataset(config: &DatabaseConfig) -> Result<EncryptConfigMap, Error> {
+pub async fn load_encrypt_config(config: &DatabaseConfig) -> Result<EncryptConfigMap, Error> {
     let client = connect::database(config).await?;
 
-    match client.query(ENCRYPT_DATASET_CONFIG_QUERY, &[]).await {
+    match client.query(ENCRYPT_CONFIG_QUERY, &[]).await {
         Ok(rows) => {
             if rows.is_empty() {
                 warn!("No active Encrypt configuration");
                 return Ok(EncryptConfigMap::new());
             };
             // We know there is at least one row
-            let row = rows.get(0).unwrap();
+            let row = rows.first().unwrap();
 
             let json_value: Value = row.get("data");
             let encrypt_config: EncryptConfig = serde_json::from_value(json_value)?;

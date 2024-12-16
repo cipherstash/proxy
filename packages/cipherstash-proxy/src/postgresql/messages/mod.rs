@@ -1,3 +1,4 @@
+pub mod authentication;
 pub mod bind;
 pub mod error_response;
 pub mod parse;
@@ -7,9 +8,12 @@ pub const NULL: i32 = -1;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum FrontendCode {
-    Query,
-    Parse,
     Bind,
+    Parse,
+    PasswordMessage,
+    Query,
+    SASLInitialResponse,
+    SASLResponse,
     Unknown(char),
 }
 
@@ -47,9 +51,15 @@ impl From<u8> for FrontendCode {
 impl From<char> for FrontendCode {
     fn from(code: char) -> Self {
         match code {
-            'Q' => FrontendCode::Query,
-            'P' => FrontendCode::Parse,
             'B' => FrontendCode::Bind,
+            'p' => FrontendCode::PasswordMessage,
+            'P' => FrontendCode::Parse,
+            'Q' => FrontendCode::Query,
+            #[allow(unreachable_patterns)]
+            'p' => FrontendCode::SASLInitialResponse, // Uses same char, here for completeness
+            #[allow(unreachable_patterns)]
+            'p' => FrontendCode::SASLResponse, // Uses same char, here for completeness
+            // 'p' => FrontendCode::SASLResponse,
             _ => FrontendCode::Unknown(code),
         }
     }
@@ -60,7 +70,10 @@ impl From<FrontendCode> for u8 {
         match code {
             FrontendCode::Bind => b'B',
             FrontendCode::Parse => b'P',
+            FrontendCode::PasswordMessage => b'p',
             FrontendCode::Query => b'Q',
+            FrontendCode::SASLInitialResponse => b'p',
+            FrontendCode::SASLResponse => b'p',
             FrontendCode::Unknown(c) => c as u8,
         }
     }
@@ -71,7 +84,10 @@ impl From<FrontendCode> for char {
         match code {
             FrontendCode::Bind => 'B',
             FrontendCode::Parse => 'P',
+            FrontendCode::PasswordMessage => 'p',
             FrontendCode::Query => 'Q',
+            FrontendCode::SASLInitialResponse => 'p',
+            FrontendCode::SASLResponse => 'p',
             FrontendCode::Unknown(c) => c,
         }
     }

@@ -1,14 +1,20 @@
 use crate::{
     error::{Error, ProtocolError},
+    log::PROTOCOL,
     postgresql::PROTOCOL_VERSION_NUMBER,
     SIZE_I32, SIZE_U8,
 };
 use bytes::{BufMut, BytesMut};
 use std::io::{BufRead, Cursor};
-use tokio::io::{AsyncRead, AsyncReadExt};
-use tracing::error;
+use tokio::{
+    io::{AsyncRead, AsyncReadExt},
+    time::timeout,
+};
+use tracing::{debug, error};
 
-use super::{CANCEL_REQUEST, SSL_REQUEST};
+use super::{
+    messages::authentication::Authentication, CANCEL_REQUEST, CONNECTION_TIMEOUT, SSL_REQUEST,
+};
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum StartupCode {
@@ -56,6 +62,18 @@ impl BytesMutReadString for Cursor<&BytesMut> {
     }
 }
 
+pub async fn read_auth_message<S: AsyncRead + Unpin>(
+    mut stream: S,
+) -> Result<Authentication, Error> {
+    let message = read_message_with_timeout(&mut stream).await?;
+    Authentication::try_from(&message.bytes)
+}
+
+pub async fn read_message_with_timeout<S: AsyncRead + Unpin>(
+    mut stream: S,
+) -> Result<Message, Error> {
+    timeout(CONNECTION_TIMEOUT, read_message(&mut stream)).await?
+}
 ///
 /// Reads a Postgres message from client
 ///
@@ -63,10 +81,10 @@ impl BytesMutReadString for Cursor<&BytesMut> {
 /// Byte is then passed as `code` to this function to preserve the message structure
 ///
 ///
-pub async fn read_message<C: AsyncRead + Unpin>(mut client: C) -> Result<Message, Error> {
-    let code = client.read_u8().await?;
+pub async fn read_message<S: AsyncRead + Unpin>(mut stream: S) -> Result<Message, Error> {
+    let code = stream.read_u8().await?;
     // debug!("[read_message] code: {}", code as char);
-    let len = client.read_i32().await?;
+    let len = stream.read_i32().await?;
     // debug!("[read_message] len: {len}");
     // debug!("[read_message] code: {code}, len: {len}");
 
@@ -93,9 +111,11 @@ pub async fn read_message<C: AsyncRead + Unpin>(mut client: C) -> Result<Message
     // resize populates the buffer with 0s
     bytes.resize(capacity, b'0');
 
-    client.read_exact(&mut bytes[slice_start..]).await?;
+    stream.read_exact(&mut bytes[slice_start..]).await?;
 
     let message = Message { code, bytes };
+
+    debug!(PROTOCOL, "{message:?}");
 
     Ok(message)
 }

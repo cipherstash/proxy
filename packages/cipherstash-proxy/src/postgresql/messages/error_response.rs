@@ -1,11 +1,11 @@
+use super::BackendCode;
 use crate::error::{Error, ProtocolError};
 use crate::postgresql::protocol::BytesMutReadString;
+use crate::SIZE_I32;
 use bytes::{Buf, BufMut, BytesMut};
 use core::fmt;
 use std::io::Cursor;
 use std::{convert::TryFrom, ffi::CString};
-
-use super::BackendCode;
 
 ///
 /// ErrorResponse (B)
@@ -13,7 +13,6 @@ use super::BackendCode;
 ///
 #[derive(Debug, Clone)]
 pub struct ErrorResponse {
-    pub len: i32,
     pub fields: Vec<Field>,
 }
 
@@ -48,6 +47,54 @@ pub enum ErrorResponseCode {
     Unknown(char),
 }
 
+impl ErrorResponse {
+    pub fn invalid_password(username: &str) -> Self {
+        Self {
+            fields: vec![
+                Field {
+                    code: ErrorResponseCode::Severity,
+                    value: "FATAL".to_string(),
+                },
+                Field {
+                    code: ErrorResponseCode::SeverityLegacy,
+                    value: "FATAL".to_string(),
+                },
+                Field {
+                    code: ErrorResponseCode::Code,
+                    value: "28P01".to_string(),
+                },
+                Field {
+                    code: ErrorResponseCode::Message,
+                    value: format!("password authentication failed for user \"{}\"", username),
+                },
+            ],
+        }
+    }
+
+    pub fn tls_required() -> Self {
+        Self {
+            fields: vec![
+                Field {
+                    code: ErrorResponseCode::Severity,
+                    value: "FATAL".to_string(),
+                },
+                Field {
+                    code: ErrorResponseCode::SeverityLegacy,
+                    value: "FATAL".to_string(),
+                },
+                Field {
+                    code: ErrorResponseCode::Code,
+                    value: "08001".to_string(),
+                },
+                Field {
+                    code: ErrorResponseCode::Message,
+                    value: "Transport Layer Security (TLS) connection is required".to_string(),
+                },
+            ],
+        }
+    }
+}
+
 impl TryFrom<&BytesMut> for ErrorResponse {
     type Error = Error;
 
@@ -63,7 +110,7 @@ impl TryFrom<&BytesMut> for ErrorResponse {
             .into());
         }
 
-        let len = cursor.get_i32();
+        let _len = cursor.get_i32();
 
         // The message body consists of one or more identified fields, followed by a zero byte as a terminator.
         let mut fields = Vec::new();
@@ -84,7 +131,7 @@ impl TryFrom<&BytesMut> for ErrorResponse {
             fields.push(field);
         }
 
-        Ok(ErrorResponse { len, fields })
+        Ok(ErrorResponse { fields })
     }
 }
 
@@ -92,21 +139,24 @@ impl TryFrom<ErrorResponse> for BytesMut {
     type Error = Error;
 
     fn try_from(error_response: ErrorResponse) -> Result<BytesMut, Error> {
-        let mut bytes = BytesMut::new();
-
-        bytes.put_u8(BackendCode::ErrorResponse.into());
-        bytes.put_i32(error_response.len);
+        let mut field_bytes = BytesMut::new();
 
         for field in error_response.fields {
             let value = CString::new(field.value)?;
             let value = value.as_bytes_with_nul();
 
-            bytes.put_u8(field.code.into());
-            bytes.put_slice(value);
+            field_bytes.put_u8(field.code.into());
+            field_bytes.put_slice(value);
         }
+        field_bytes.put_u8(0); // field terminator
 
-        // zero byte terminator
-        bytes.put_u8(0);
+        let mut bytes = BytesMut::new();
+
+        let len = SIZE_I32 + field_bytes.len(); // len + fields
+
+        bytes.put_u8(BackendCode::ErrorResponse.into());
+        bytes.put_i32(len as i32);
+        bytes.put_slice(&field_bytes);
 
         Ok(bytes)
     }

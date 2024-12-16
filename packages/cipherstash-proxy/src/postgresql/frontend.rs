@@ -7,13 +7,13 @@ use crate::encrypt::Encrypt;
 use crate::eql;
 use crate::eql::Identifier;
 use crate::error::Error;
-use crate::postgresql::CONNECTION_TIMEOUT;
+use crate::log::DEVELOPMENT;
 use bytes::BytesMut;
 use eql_mapper::{self, EqlColumn, EqlMapperError, TableColumn};
 use sqlparser::ast::Value;
 use sqlparser::dialect::PostgreSqlDialect;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
-use tokio::time::timeout;
+use tracing::warn;
 
 const DIALECT: PostgreSqlDialect = PostgreSqlDialect {};
 
@@ -44,6 +44,10 @@ where
     }
 
     pub async fn rewrite(&mut self) -> Result<(), Error> {
+        if self.encrypt.config.disable_mapping() {
+            warn!(DEVELOPMENT, "Mapping is not enabled");
+            return Ok(());
+        }
         let bytes = self.read().await?;
         self.write(bytes).await?;
         Ok(())
@@ -57,8 +61,7 @@ where
     pub async fn read(&mut self) -> Result<BytesMut, Error> {
         // debug!("[frontend] read");
 
-        let mut message =
-            timeout(CONNECTION_TIMEOUT, protocol::read_message(&mut self.client)).await??;
+        let mut message = protocol::read_message_with_timeout(&mut self.client).await?;
 
         match message.code.into() {
             Code::Query => {}
@@ -136,14 +139,4 @@ fn convert_value_nodes_to_eql_plaintext(
             }
         })
         .collect()
-}
-
-#[cfg(test)]
-mod tests {
-    use crate::trace;
-
-    #[test]
-    fn test_parse_handler() {
-        trace();
-    }
 }

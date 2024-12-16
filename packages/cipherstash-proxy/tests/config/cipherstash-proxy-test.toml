@@ -13,7 +13,6 @@ password = "password"
 workspace_id = "workspace_id"
 client_access_key = "client_access_key"
 
-
 [encrypt]
 dataset_id = "484cd205-99e8-41ca-acfe-55a7e25a8ec2" # generated guid for validation
 client_id = "5912717c-2c3b-4fb6-a051-0a8e71cd9e37"  # generated guid for validation

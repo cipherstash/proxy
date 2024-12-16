@@ -2,21 +2,21 @@
 
 mod common;
 
-use cipherstash_proxy::trace;
+use cipherstash_proxy::log;
 use common::{connect, connect_with_tls, database_config_with_port, PG_V17_TLS, PROXY};
 use tracing::info;
 
 ///
 /// Sanity test to check if the database connection is working with TLS
 ///
-// #[tokio::test]
-async fn connect_proxy_with_tls() {
-    trace();
+#[tokio::test]
+async fn integration_connect_proxy_with_tls() {
+    log::init();
 
     let config = database_config_with_port(PROXY);
 
     // Connect to proxy without TLS
-    let client = connect(&config).await;
+    let client = connect_with_tls(&config).await;
 
     let result = client.simple_query("SELECT 1").await.expect("ok");
 
@@ -33,8 +33,8 @@ async fn connect_proxy_with_tls() {
 /// Sanity test to check if the database connection is working with TLS
 ///
 // #[tokio::test]
-async fn sanity_check_database_with_tls() {
-    trace();
+async fn integration_sanity_check_database_with_tls() {
+    log::init();
 
     let config = database_config_with_port(PG_V17_TLS);
 
@@ -48,5 +48,5 @@ async fn sanity_check_database_with_tls() {
 
     info!("Connected to database");
 
-    let client = connect(&config).await;
+    let _client = connect(&config).await;
 }

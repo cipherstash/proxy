@@ -1,4 +1,0 @@
-#!/usr/bin/env bash
-#MISE description="Run tests"
-#USAGE arg "[test_name]" help="Test to run"
-RUST_BACKTRACE=full cargo nextest run --no-fail-fast --nocapture $usage_test_name

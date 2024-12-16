@@ -1,12 +1,10 @@
 use crate::error::{ConfigError, Error};
 use config::{Config, Environment};
-use rustls::ServerConfig as TlsServerConfig;
-use rustls_pki_types::{pem::PemObject, CertificateDer};
-use rustls_pki_types::{PrivateKeyDer, ServerName};
+use rustls_pki_types::ServerName;
 use serde::Deserialize;
 use std::fmt::Display;
 use std::path::PathBuf;
-use tracing::{debug, error};
+use tracing::{debug, error, warn};
 
 use uuid::Uuid;
 
@@ -20,6 +18,7 @@ pub struct TandemConfig {
     pub auth: AuthConfig,
     pub encrypt: EncryptConfig,
     pub tls: Option<TlsConfig>,
+    pub development: Option<DevelopmentConfig>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -80,6 +79,15 @@ pub struct EncryptConfig {
     pub dataset_id: Option<Uuid>,
 }
 
+#[derive(Clone, Debug, Deserialize)]
+pub struct DevelopmentConfig {
+    #[serde(default)]
+    pub disable_mapping: bool,
+
+    #[serde(default)]
+    pub disable_database_tls: bool,
+}
+
 /// Config defaults to a file called `tandem` in the current directory.
 /// Supports TOML, JSON, YAML
 /// Variable names should match the struct field names.
@@ -96,8 +104,8 @@ impl TandemConfig {
     pub fn load(path: &str) -> Result<TandemConfig, Error> {
         // Log a warning to user that config file is missing
         if !PathBuf::from(path).exists() {
-            println!("Config file not found: {path}");
-            println!("Loading config values from environment variables.");
+            warn!("Config file not found: {path}");
+            warn!("Loading config values from environment variables.");
         }
         TandemConfig::build(path, CS_PREFIX)
     }
@@ -128,6 +136,20 @@ impl TandemConfig {
             })?;
 
         Ok(config)
+    }
+
+    pub fn disable_database_tls(&self) -> bool {
+        match &self.development {
+            Some(dev) => dev.disable_database_tls,
+            None => false,
+        }
+    }
+
+    pub fn disable_mapping(&self) -> bool {
+        match &self.development {
+            Some(dev) => dev.disable_mapping,
+            None => false,
+        }
     }
 }
 
@@ -211,33 +233,20 @@ impl TlsConfig {
     pub fn private_key_exists(&self) -> bool {
         PathBuf::from(&self.private_key).exists()
     }
-
-    pub fn server_config(&self) -> Result<TlsServerConfig, Error> {
-        let certs =
-            CertificateDer::pem_file_iter(&self.certificate)?.collect::<Result<Vec<_>, _>>()?;
-        let key = PrivateKeyDer::from_pem_file(&self.private_key)?;
-
-        let config = TlsServerConfig::builder()
-            .with_no_client_auth()
-            .with_single_cert(certs, key)?;
-
-        Ok(config)
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use uuid::Uuid;
 
-    use crate::{config::TandemConfig, error::Error, trace};
+    use crate::{config::TandemConfig, error::Error};
 
     const CS_PREFIX: &str = "CS_TEST";
 
     #[test]
     fn test_database_as_url() {
-        trace();
-
-        let config = TandemConfig::build("tests/config/cipherstash-proxy.toml", CS_PREFIX).unwrap();
+        let config =
+            TandemConfig::build("tests/config/cipherstash-proxy-test.toml", CS_PREFIX).unwrap();
         assert_eq!(
             config.database.to_socket_address(),
             "localhost:5532".to_string()
@@ -246,9 +255,8 @@ mod tests {
 
     #[test]
     fn test_dataset_as_uuid() {
-        trace();
-
-        let config = TandemConfig::build("tests/config/cipherstash-proxy.toml", CS_PREFIX).unwrap();
+        let config =
+            TandemConfig::build("tests/config/cipherstash-proxy-test.toml", CS_PREFIX).unwrap();
         assert_eq!(
             config.encrypt.dataset_id,
             Some(Uuid::parse_str("484cd205-99e8-41ca-acfe-55a7e25a8ec2").unwrap())
