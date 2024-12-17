@@ -266,15 +266,17 @@ mod tests {
 
     #[test]
     fn test_dataset_as_uuid() {
-        let config = TandemConfig::build("tests/config/cipherstash-proxy-test.toml").unwrap();
-        assert_eq!(
-            config.encrypt.dataset_id,
-            Some(Uuid::parse_str("484cd205-99e8-41ca-acfe-55a7e25a8ec2").unwrap())
-        );
+        temp_env::with_vars_unset(["CS_ENCRYPT__DATASET_ID"], || {
+            let config = TandemConfig::build("tests/config/cipherstash-proxy-test.toml").unwrap();
+            assert_eq!(
+                config.encrypt.dataset_id,
+                Some(Uuid::parse_str("484cd205-99e8-41ca-acfe-55a7e25a8ec2").unwrap())
+            );
 
-        let config = TandemConfig::build("tests/config/cipherstash-proxy-bad-dataset.toml");
+            let config = TandemConfig::build("tests/config/cipherstash-proxy-bad-dataset.toml");
 
-        assert!(config.is_err());
-        assert!(matches!(config.unwrap_err(), Error::Config(_)));
+            assert!(config.is_err());
+            assert!(matches!(config.unwrap_err(), Error::Config(_)));
+        });
     }
 }
