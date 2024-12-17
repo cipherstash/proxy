@@ -6,11 +6,72 @@ Behind the scenes, it uses the [Encrypt Query Language](https://github.com/ciphe
 
 ## Developing
 
+Local development quickstart:
+
+```shell
+# Clone the repo
+git clone https://github.com/cipherstash/proxy
+cd proxy
+
+# Install dependencies
+mise install
+
+# Start all postgres instances
+mise run postgres:up
+
+# Install latest eql into database
+mise run setup
+
+# Build and run Proxy
+mise run proxy
+
+# Run tests
+mise run test
+```
+
+### How this project is organised
+
+Development is managed through [mise](https://mise.jdx.dev/), both locally and [in CI](https://github.com/cipherstash/proxy/actions).
+
+mise has tasks for:
+
+- Starting and stopping PostgreSQL containers (`postgres:up`, `postgres:down`)
+- Running hygiene tests (`test:check`, `test:clippy`, `test:format`)
+- Running unit tests (`test:unit`)
+- Running integration tests (`test:integration`, `test:integration:*`)
+- Running tests in CI (`test:ci`)
+- Building binaries (`build:binary`) and Docker images (`build:docker`)
+- Publishing release artifacts (`release`)
+
+These are the important files in the repo:
+
+```
+.
+├── mise.toml              <-- the main config file for mise
+├── mise.local.toml        <-- optional overrides for local customisation of mise
+├── mise.local.toml        <-- optional overrides for local customisation of mise
+├── proxy.Dockerfile       <-- Dockerfile for building CipherStash Proxy image
+├── packages/              <-- Rust packages used to make CipherStash Proxy
+├── target/                <-- Rust build artifacts
+└── tests/                 <-- integration tests
+    ├── docker-compose.yml <-- Docker configuration for running PostgreSQL instances
+    ├── mise*.toml         <-- environment variables used by integration tests
+    ├── pg/                <-- data and configuration for PostgreSQL instances
+    ├── sql/               <-- SQL used to initialise PostgreSQL instances
+    ├── tasks/             <-- mise file tasks, used for integration tests
+    └── tls/               <-- key material for testing TLS with PostgreSQL
+```
+
 > [!IMPORTANT]
-> **Before you start:** you need to have this software installed:
+> **Before you start developing:** you need to have this software installed:
 >  - [Rust](https://www.rust-lang.org/)
 >  - [mise](https://mise.jdx.dev/)
 >  - [Docker](https://www.docker.com/)
+
+### Installing mise
+
+> [!IMPORTANT]
+> You must complete this step to set up a local development environment.
 
 Local development is managed through [mise](https://mise.jdx.dev/).
 
@@ -32,37 +93,41 @@ echo 'eval "$(~/.local/bin/mise activate zsh)"' >> ~/.zshrc
 We use [`cargo-binstall`](https://github.com/cargo-bins/cargo-binstall) for faster installation of tools installed via `mise` and Cargo.
 We install `cargo-binstall` via `mise` when installing development and testing dependencies.
 
-### Building
+> [!TIP]
+> We provide abbreviations for most of the commands that follow.
+> For example, `mise run setup` can be abbreviated to `mise r s`.
+> Run `mise tasks --extended` to see the task shortcuts.
 
-To build a binary for Proxy, run:
+### Rust dependencies
 
-```bash
-cargo build
-```
+> [!IMPORTANT]
+> You must complete this step to set up a local development environment.
 
-### Dependencies
-
-Configure `Auth` and `Encrypt`
-
-Using environment variables:
-Copy `mise.local.example.toml` to `mise.local.toml` and edit
-
-Using toml:
-Copy `cipherstash-proxy-example.toml` to `cipherstash-proxy.toml` and edit.
-
+Install development and testing dependencies (including `cargo-binstall`):
 
 ```shell
-# install development and testing dependencies (including cargo-binstall)
 mise install
+```
 
-# start all postgres instances
+### PostgreSQL
+
+> [!IMPORTANT]
+> You must complete this step to set up a local development environment.
+
+We ship containers for running PostgreSQL in different configurations.
+The goal is to minimise the amount of configuration you have to do in local dev.
+
+To start all PostgreSQL instances:
+
+```shell
 mise run up
+```
 
+Then set up the schema and functions:
+
+```shell
 # install latest eql into database
 mise run setup
-
-# build and run the proxy
-mise run proxy
 ```
 
 You can start PostgreSQL containers in a couple of different ways:
@@ -83,8 +148,9 @@ mise run up postgres --extra-args "--detach --wait"
 mise run down
 ```
 
-All the data directories for the Docker container live in `tests/pg/data-*`.
+Configuration for starting PostgreSQL instances is in `tests/docker-compose.yml`
 
+All the data directories for the Docker container live in `tests/pg/data-*`.
 They are ephemeral, and ignored in `.gitignore`.
 
 Sometimes the PostgreSQL instances get into an inconsistent state, and need to be reset.
@@ -94,32 +160,51 @@ To wipe all PostgreSQL data directories:
 mise run destroy_data
 ```
 
-## Prerequisites
+### Proxy configuration
 
-- [mise](https://mise.jdx.dev/)
-- [Docker](https://www.docker.com/)
-- [Rust](https://www.rust-lang.org/)
-- [PostgreSQL](https://www.postgresql.org/)
+> [!IMPORTANT]
+> You must complete this step to set up a local development environment.
 
-PostgreSQL database configuration is defined in `tests/docker-compose.yml'
-See `Docker Compose` below for details.
+There are two ways to configure Proxy:
 
-- [Bininstall](https://github.com/cargo-bins/cargo-binstall)
-- [Mise](https://github.com/jdxcode/mise)
-- [Nextest](https://nexte.st/)
-- [Docker](https://www.docker.com/)
-- [Docker Compose](https://docs.docker.com/compose/)
+- Environment variables that Proxy looks up on startup
+- TOML file that Proxy reads on startup
 
+To configure Proxy with environment variables:
 
+```
+cp mise.local.example.toml mise.local.toml
+$EDITOR mise.local.toml
+```
+
+Configure `Auth` and `Encrypt`
+
+To configure Proxy with a TOML file:
+
+```
+cp cipherstash-proxy-example.toml cipherstash-proxy.toml
+$EDITOR cipherstash-proxy.toml
+```
+
+Configure `Auth` and `Encrypt`
+
+### Building and running
+
+Build and run Proxy locally:
+
+```shell
+mise run proxy
+```
+
+Build a standalone releasable binary for Proxy:
+
+```bash
+mise run build:binary
+```
 
 ### Tests
 
-To set up your local development environment, run:
-
-```
-mise run setup
-```
-
+FIXME: document docker + integration tests
 Assumes running docker postgres service with default credentials
 
 To run all tests:
@@ -128,33 +213,38 @@ To run all tests:
 mise run test
 ```
 
-To run a single test:
+To run a single unit test:
 
 ```bash
-mise run test {TEST_NAME}
-mise run test load_schema
+mise run test:unit <TEST_NAME>
+
+# For example:
+mise run test:unit test_database_as_url
 ```
 
-> [!TIP]
-> Mise provides abbreviations for most of the commands above.
-> For example, `mise run setup` can be abbreviated to `mise r s`.
-> Check out `mise.toml` for all the task shortcuts we have defined.
+There are individual hygiene tests you can run:
 
-### Docker Compose
+```shell
+# check everything compiles
+mise run test:check
 
-Conventions for running multiple postgres versions
+# run clippy lints
+mise run test:clippy
 
-The goal is to have as little to configure in local dev as possible.
-
-To run all services:
-```bash
-mise run up
+# check rust is formatted correctly
+mise run test:format
 ```
 
-To run a specific service
-```bash
-mise run up postgres
+To run integration tests:
+
 ```
+mise run test:integration
+```
+
+The integration tests have several runtime dependencies:
+
+- Running PostgreSQL instances
+- Credentials for CipherStash ZeroKMS
 
 ### common configuration
 
@@ -167,33 +257,37 @@ PGUSER="cipherstash"
 POSTGRES_PASSWORD="password"
 ```
 
-### ports
+### Conventions
+
+#### PostgreSQL Ports
+
+PostgreSQL port numbers are 4 digits:
+
+- The first two digits denote non-TLS (`55`) or non-TLS (`56`)
+- The last two digits denote the version of PostgreSQL
+
+PostgreSQL latest always runs on `5532`.
+
+These are the Postgres instances and ports currently provided:
+
+| Port   | Description                    |
+|--------|--------------------------------|
+| `5617` | TLS, PostgreSQL version 17     |
+| `5532` | non-TLS, Postgres latest       |
 
 
-Vanilla connection ports start with `55` followed by the `version` number
-TLS connection ports start with `56` followed by the `version` number
+### PostgreSQL container names
 
-Postgres latest always runs on `5532`
+Container names are in the format:
 
-```
-    55{version}
+> `postgres-<version>[-tls]`
 
-    # v17
-    5517
+These are the Postgres instances and names currently provided:
 
-    # v17 with TLS
-    5617
-```
-
-
-### container_name
-```
-    pg-{version}
-    pg-{version}-tls
-
-    pg-17
-    pg-17-tls
-```
+| Name              | Description                    |
+|-------------------|--------------------------------|
+| `postgres-17-tls` | TLS, PostgreSQL version 17     |
+| `postgres`        | non-TLS, Postgres latest       |
 
 
 ### config files
