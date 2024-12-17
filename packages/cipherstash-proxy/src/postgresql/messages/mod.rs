@@ -1,5 +1,6 @@
 pub mod authentication;
 pub mod bind;
+pub mod data_row;
 pub mod error_response;
 pub mod parse;
 pub mod query;

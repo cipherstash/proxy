@@ -270,3 +270,29 @@ impl From<u8> for ErrorResponseCode {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::postgresql::messages::error_response::ErrorResponse;
+
+    use bytes::BytesMut;
+
+    fn to_message(s: &[u8]) -> BytesMut {
+        BytesMut::from(s)
+    }
+
+    #[test]
+    pub fn parse_error_response_message() {
+        let message = to_message(b"E\0\0\0kSERROR\0VERROR\0C26000\0Mprepared statement \"a37\" does not exist\0Fprepare.c\0L454\0RFetchPreparedStatement\0\0Z\0\0\0\x05I");
+
+        let error_response = ErrorResponse::try_from(&message).expect("ok");
+        assert_eq!(error_response.fields.len(), 7);
+
+        // let next = cursor.get_u8() as char;
+        // assert_eq!(next, 'Z');
+
+        let bytes = BytesMut::try_from(error_response).expect("ok");
+        let message = to_message(b"E\0\0\0kSERROR\0VERROR\0C26000\0Mprepared statement \"a37\" does not exist\0Fprepare.c\0L454\0RFetchPreparedStatement\0\0");
+        assert_eq!(bytes, message);
+    }
+}
