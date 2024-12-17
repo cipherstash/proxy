@@ -4,6 +4,7 @@ pub mod data_row;
 pub mod error_response;
 pub mod parse;
 pub mod query;
+pub mod row_description;
 
 pub const NULL: i32 = -1;
 
