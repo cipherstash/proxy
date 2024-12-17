@@ -34,9 +34,6 @@ We install `cargo-binstall` via `mise` when installing development and testing d
 
 ### Building
 
-> [!IMPORTANT]
-> **Before you start:** ensure you have an SSH authentication key [added to your GitHub account](https://github.com/settings/keys).
-
 To build a binary for Proxy, run:
 
 ```bash
@@ -116,12 +113,6 @@ See `Docker Compose` below for details.
 
 
 ### Tests
-
-> [!IMPORTANT]
-> **Before you start:** ensure you have [Nextest](https://nexte.st/) installed:
-> ```bash
-> cargo binstall cargo-nextest --secure
-> ```
 
 To set up your local development environment, run:
 
