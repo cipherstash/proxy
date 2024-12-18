@@ -29,6 +29,37 @@ mise run postgres:up --extra-args "--detach --wait"
 # Install latest eql into database
 mise run setup
 
+# If this is your first time using CipherStash:
+#  - install stash CLI
+#  - `stash signup`
+
+# If you have used CipherStash before:
+#  - `stash login`
+
+# Create minimal mise.local.toml
+# CS_AUTH__WORKSPACE_ID
+# CS_AUTH__CLIENT_ACCESS_KEY
+# CS_ENCRYPT__DATASET_ID
+# CS_ENCRYPT__CLIENT_KEY
+# CS_ENCRYPT__CLIENT_ID
+
+# Get the workspace ID
+stash workspaces
+# add to CS_AUTH__WORKSPACE_ID
+
+# Create an access key
+stash access-keys create proxy
+# add to CS_AUTH__CLIENT_ACCESS_KEY
+
+# Create a dataset
+stash datasets create proxy
+# add to CS_ENCRYPT__DATASET_ID
+
+# Create a client
+stash clients create --dataset-id $DATASET_ID proxy
+# add to CS_ENCRYPT__CLIENT_ID
+# add to CS_ENCRYPT__CLIENT_KEY
+
 # Build and run Proxy
 mise run proxy
 
