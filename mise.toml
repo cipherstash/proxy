@@ -23,7 +23,6 @@ CS_DATABASE__PORT = "5532"
 
 [tools]
 "cargo:cargo-binstall" = "latest"
-"cargo:cargo-expand" = "latest"
 "cargo:cargo-nextest" = "latest"
 "cargo:cargo-sort" = "latest"
 
