@@ -24,7 +24,7 @@ mise trust --yes
 mise install
 
 # Start all postgres instances
-mise run postgres:up
+mise run postgres:up --extra-args "--detach --wait"
 
 # Install latest eql into database
 mise run setup
