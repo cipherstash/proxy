@@ -1,3 +1,5 @@
+use bytes::BytesMut;
+
 pub mod authentication;
 pub mod bind;
 pub mod data_row;
@@ -200,4 +202,25 @@ impl Destination {
             Destination::Unnamed => "",
         }
     }
+}
+
+///
+/// Peaks at the first byte char.
+/// Assumes that a leading `{` may be a JSON value
+/// The Plaintext Payload is always a JSON object so this is a pretty naive approach
+/// We are not worried about an exhaustive check here
+///
+pub fn maybe_json(bytes: &BytesMut) -> bool {
+    let b = bytes.as_ref()[0];
+    b == b'{'
+}
+
+///
+/// Postgres binary json is regular json with a leading header byte
+/// The header byte is always 1
+///
+pub fn maybe_jsonb(bytes: &BytesMut) -> bool {
+    let header = bytes.as_ref()[0];
+    let first = bytes.as_ref()[1];
+    header == 1 && first == b'{'
 }

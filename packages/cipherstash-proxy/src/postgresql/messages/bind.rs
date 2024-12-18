@@ -8,7 +8,7 @@ use std::io::Cursor;
 use std::{convert::TryFrom, ffi::CString};
 use tracing::debug;
 
-use super::{Destination, NULL};
+use super::{maybe_json, maybe_jsonb, Destination, NULL};
 
 /// Bind (B) message.
 /// See: <https://www.postgresql.org/docs/current/protocol-message-formats.html>
@@ -96,11 +96,11 @@ impl BindParam {
     }
 
     pub fn maybe_plaintext(&self) -> bool {
-        self.is_text() && self.maybe_json() || self.is_binary() && self.maybe_jsonb()
+        self.is_text() && maybe_json(&self.bytes) || self.is_binary() && maybe_jsonb(&self.bytes)
     }
 
     ///
-    /// If the text foprmat is binary, returns a reference to the bytes without the jsonb header byte
+    /// If the text format is binary, returns a reference to the bytes without the jsonb header byte
     ///
     pub fn json_bytes(&self) -> &[u8] {
         if self.is_binary() {
@@ -116,27 +116,6 @@ impl BindParam {
 
     fn is_binary(&self) -> bool {
         self.format_code == FormatCode::Binary
-    }
-
-    ///
-    /// Peaks at the first byte char.
-    /// Assumes that a leading `{` may be a JSON value
-    /// The Plaintext Payload is always a JSON object so this is a pretty naive approach
-    /// We are not worried about an exhaustive check here
-    ///
-    fn maybe_json(&self) -> bool {
-        let b = self.bytes.as_ref()[0];
-        b == b'{'
-    }
-
-    ///
-    /// Postgres binary json is regular json with a leading header byte
-    /// The header byte is always 1
-    ///
-    fn maybe_jsonb(&self) -> bool {
-        let header = self.bytes.as_ref()[0];
-        let first = self.bytes.as_ref()[1];
-        header == 1 && first == b'{'
     }
 }
 
