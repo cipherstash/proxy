@@ -20,9 +20,8 @@ git clone https://github.com/cipherstash/proxy
 cd proxy
 
 # Install dependencies
+mise trust --yes
 mise install
-
-# NOTE: mise install will prompt you to trust some config in the repo - you must accept
 
 # Start all postgres instances
 mise run postgres:up
