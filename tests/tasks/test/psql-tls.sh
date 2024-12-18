@@ -3,29 +3,27 @@
 
 #!/bin/bash
 
-# set -o xtrace
+set -e
+set -x
 
 # sanity check direct connections
-psql postgresql://cipherstash:password@localhost:5617/cipherstash <<-EOF
-SELECT 1;
-EOF
-
-psql postgresql://cipherstash:password@localhost:5532/cipherstash <<-EOF
+docker exec -i postgres${CONTAINER_SUFFIX} psql postgresql://${CS_DATABASE__USERNAME}:${CS_DATABASE__PASSWORD}@${CS_DATABASE__HOST}:${CS_DATABASE__PORT}/cipherstash <<-EOF
 SELECT 1;
 EOF
 
 # Connect to the proxy
-psql 'postgresql://cipherstash:password@localhost:6432/cipherstash' <<-EOF
+docker exec -i postgres psql 'postgresql://cipherstash:password@localhost:6432/cipherstash' <<-EOF
 SELECT 1;
 EOF
 
 # Connect to the proxy forcing TLS
-psql 'postgresql://cipherstash:password@localhost:6432/cipherstash?sslmode=require' <<-EOF
+docker exec -i postgres psql 'postgresql://cipherstash:password@localhost:6432/cipherstash?sslmode=require' <<-EOF
 SELECT 1;
 EOF
 
 # Connect without TLS
-psql 'postgresql://cipherstash:password@localhost:6432/cipherstash?sslmode=disable' <<-EOF
+set +e
+docker exec -i postgres psql 'postgresql://cipherstash:password@localhost:6432/cipherstash?sslmode=disable' <<-EOF
 SELECT 1;
 EOF
 if [ $? -eq 0 ]; then
@@ -34,7 +32,7 @@ if [ $? -eq 0 ]; then
 fi
 
 # Attempt with an invalid password
-psql postgresql://cipherstash:not-the-password@localhost:6432/cipherstash <<-EOF
+docker exec -i postgres psql postgresql://cipherstash:not-the-password@localhost:6432/cipherstash <<-EOF
 SELECT 1;
 EOF
 
@@ -42,6 +40,8 @@ if [ $? -eq 0 ]; then
     echo "PSQL connected with an invalid password"
     exit 1
 fi
+
+set -e
 
 echo "----------------------------------"
 echo "PSQL TLS connection tests complete"

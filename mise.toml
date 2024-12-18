@@ -121,8 +121,11 @@ run = 'cargo clippy --all --no-deps --all-targets --all-features'
 depends = ["install_eql"]
 alias = 's'
 description = "Installs EQL and applies schema to database"
-dir = "./tests"
-run = "cat sql/schema.sql | docker exec -i postgres psql postgresql://cipherstash:password@localhost:{{vars.database_port}}/cipherstash -f-"
+run = """
+  #!/bin/bash
+  cd tests
+  cat sql/schema.sql | docker exec -i postgres${CONTAINER_SUFFIX} psql postgresql://${CS_DATABASE__USERNAME}:${CS_DATABASE__PASSWORD}@${CS_DATABASE__HOST}:${CS_DATABASE__PORT}/cipherstash -f-
+"""
 
 [tasks."postgres:up"]
 alias = 'u'
@@ -156,11 +159,11 @@ run = 'rm -rf data-*'
 [tasks.install_eql]
 alias = 'e'
 description = "Install EQL"
-dir = "./tests"
 run = """
   #!/usr/bin/env bash
+  cd tests
   curl -sLo sql/cipherstash-encrypt.sql https://github.com/cipherstash/encrypt-query-language/releases/latest/download/cipherstash-encrypt.sql
-  cat sql/cipherstash-encrypt.sql | docker exec -i postgres psql postgresql://cipherstash:password@localhost:{{vars.database_port}}/cipherstash -f-
+  cat sql/cipherstash-encrypt.sql | docker exec -i postgres${CONTAINER_SUFFIX} psql postgresql://${CS_DATABASE__USERNAME}:${CS_DATABASE__PASSWORD}@${CS_DATABASE__HOST}:${CS_DATABASE__PORT}/cipherstash -f-
 """
 
 [tasks.build]
