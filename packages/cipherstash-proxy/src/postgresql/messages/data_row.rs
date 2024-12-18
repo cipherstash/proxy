@@ -1,7 +1,11 @@
-use super::{BackendCode, NULL};
-use crate::error::{Error, ProtocolError};
+use super::{maybe_json, maybe_jsonb, BackendCode, NULL};
+use crate::{
+    eql,
+    error::{Error, ProtocolError},
+};
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use std::io::Cursor;
+use tracing::debug;
 
 #[derive(Debug, Clone)]
 pub struct DataRow {
@@ -10,19 +14,37 @@ pub struct DataRow {
 
 #[derive(Debug, Clone)]
 pub struct DataColumn {
-    pub data: Option<Bytes>,
+    pub bytes: Option<BytesMut>,
 }
 
 impl DataRow {
+    pub fn to_ciphertext(&self) -> Result<Vec<Option<eql::Ciphertext>>, Error> {
+        Ok(self.columns.iter().map(|col| col.into()).collect())
+    }
+
     fn len_of_columns(&self) -> usize {
         let column_len_size = size_of::<i32>(); // len of column len
 
         self.columns
             .iter()
-            .map(|col| column_len_size + col.data.as_ref().map(|b| b.len()).unwrap_or(0))
+            .map(|col| column_len_size + col.bytes.as_ref().map(|b| b.len()).unwrap_or(0))
             .sum()
     }
 }
+
+impl DataColumn {
+    pub fn get_data(&self) -> Option<Vec<u8>> {
+        self.bytes.as_ref().map(|b| b.to_vec())
+    }
+
+    pub fn maybe_ciphertext(&self) -> bool {
+        self.bytes
+            .as_ref()
+            .map(|b| maybe_json(&b) || maybe_jsonb(&b))
+            .unwrap_or(false)
+    }
+}
+
 impl TryFrom<&BytesMut> for DataRow {
     type Error = Error;
 
@@ -48,10 +70,14 @@ impl TryFrom<&BytesMut> for DataRow {
             let len = cursor.get_i32();
 
             if len == NULL {
-                columns.push(DataColumn { data: None });
+                columns.push(DataColumn { bytes: None });
             } else {
-                let data = cursor.copy_to_bytes(len as usize);
-                columns.push(DataColumn { data: Some(data) });
+                let len = len as usize;
+                let mut bytes = BytesMut::with_capacity(len);
+                bytes.resize(len, 0);
+                cursor.copy_to_slice(&mut bytes);
+                // let data = cursor.copy_to_bytes(len as usize);
+                columns.push(DataColumn { bytes: Some(bytes) });
             }
         }
 
@@ -88,7 +114,7 @@ impl TryFrom<DataColumn> for BytesMut {
     fn try_from(data_column: DataColumn) -> Result<BytesMut, Error> {
         let mut bytes = BytesMut::new();
 
-        if let Some(data) = data_column.data {
+        if let Some(data) = data_column.bytes {
             bytes.put_i32(data.len() as i32);
             bytes.put_slice(&data);
         } else {
@@ -96,6 +122,27 @@ impl TryFrom<DataColumn> for BytesMut {
         }
 
         Ok(bytes)
+    }
+}
+
+impl From<&DataColumn> for Option<eql::Ciphertext> {
+    fn from(col: &DataColumn) -> Self {
+        match &col.bytes {
+            Some(bytes) => {
+                if !col.maybe_ciphertext() {
+                    return None;
+                }
+
+                match serde_json::from_slice(bytes) {
+                    Ok(ct) => Some(ct),
+                    Err(e) => {
+                        debug!(error = e.to_string(), "Failed to parse parameter");
+                        None
+                    }
+                }
+            }
+            None => None,
+        }
     }
 }
 
@@ -112,21 +159,21 @@ mod tests {
 
     #[test]
     pub fn data_row_column_len() {
-        let column = DataColumn { data: None };
+        let column = DataColumn { bytes: None };
         let data_row = DataRow {
             columns: vec![column],
         };
         assert_eq!(data_row.len_of_columns(), 4);
 
-        let data = Bytes::from("");
-        let column = DataColumn { data: Some(data) };
+        let data = BytesMut::from("");
+        let column = DataColumn { bytes: Some(data) };
         let data_row = DataRow {
             columns: vec![column],
         };
         assert_eq!(data_row.len_of_columns(), 4);
 
-        let data = Bytes::from("blah");
-        let column = DataColumn { data: Some(data) };
+        let data = BytesMut::from("blah");
+        let column = DataColumn { bytes: Some(data) };
         let data_row = DataRow {
             columns: vec![column],
         };
@@ -134,8 +181,8 @@ mod tests {
 
         let mut columns = Vec::new();
         for _ in 1..5 {
-            let data = Bytes::from("blah");
-            let column = DataColumn { data: Some(data) };
+            let data = BytesMut::from("blah");
+            let column = DataColumn { bytes: Some(data) };
             columns.push(column);
         }
         let data_row = DataRow { columns };
@@ -151,7 +198,7 @@ mod tests {
 
         let data_col = data_row.columns.first().unwrap();
 
-        let mut buf: &[u8] = data_col.data.as_ref().unwrap();
+        let mut buf: &[u8] = data_col.bytes.as_ref().unwrap();
         let value = buf.get_i32();
         assert_eq!(value, 7842);
 
@@ -169,7 +216,7 @@ mod tests {
 
         let data_col = data_row.columns.first().unwrap();
 
-        let buf: &[u8] = data_col.data.as_ref().unwrap();
+        let buf: &[u8] = data_col.bytes.as_ref().unwrap();
         let value = String::from_utf8_lossy(buf).to_string();
         assert_eq!(value, "blahvtha");
     }
@@ -182,6 +229,6 @@ mod tests {
 
         let data_col = data_row.columns.first().unwrap();
 
-        assert_eq!(data_col.data, None);
+        assert_eq!(data_col.bytes, None);
     }
 }
