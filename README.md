@@ -22,6 +22,8 @@ cd proxy
 # Install dependencies
 mise install
 
+# NOTE: mise install will prompt you to trust some config in the repo - you must accept
+
 # Start all postgres instances
 mise run postgres:up
 
