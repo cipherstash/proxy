@@ -14,6 +14,11 @@ includes = ["tests/tasks"]
 database_port = "5532" # default postgres port using built in docker-compose setup
 
 [env]
+# Default configuration for running cipherstash-proxy out of the box
+CS_DATABASE__NAME = "cipherstash"
+CS_DATABASE__USERNAME = "cipherstash"
+CS_DATABASE__PASSWORD = "password"
+CS_DATABASE__HOST = "localhost"
 CS_DATABASE__PORT = "5532"
 PKG_CONFIG_PATH = "/opt/homebrew/opt/icu4c@76/lib/pkgconfig"
 
