@@ -20,7 +20,6 @@ CS_DATABASE__USERNAME = "cipherstash"
 CS_DATABASE__PASSWORD = "password"
 CS_DATABASE__HOST = "localhost"
 CS_DATABASE__PORT = "5532"
-PKG_CONFIG_PATH = "/opt/homebrew/opt/icu4c@76/lib/pkgconfig"
 
 [tools]
 "cargo:cargo-binstall" = "latest"
