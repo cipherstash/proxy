@@ -144,6 +144,10 @@ impl FromStr for EncryptConfig {
 }
 
 impl EncryptConfig {
+    pub fn is_empty(&self) -> bool {
+        self.tables.0.is_empty()
+    }
+
     pub fn to_config_map(self) -> HashMap<eql::Identifier, ColumnConfig> {
         let mut map = HashMap::new();
         for (table_name, columns) in self.tables.into_iter() {

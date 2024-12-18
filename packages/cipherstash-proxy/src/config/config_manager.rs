@@ -3,13 +3,14 @@ use crate::{
     config::ENCRYPT_CONFIG_QUERY,
     connect, eql,
     error::{ConfigError, Error},
+    log::DEVELOPMENT,
 };
 use arc_swap::ArcSwap;
 use cipherstash_config::ColumnConfig;
 use serde_json::Value;
 use std::{collections::HashMap, sync::Arc, time::Duration};
 use tokio::{task::JoinHandle, time};
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 
 ///
 /// Column configuration keyed by table name and column name
@@ -36,8 +37,28 @@ impl EncryptConfigManager {
 
 async fn init_reloader(config: DatabaseConfig) -> Result<EncryptConfigManager, Error> {
     // Skip retries on startup as the likely failure mode is configuration
-    let encrypt_config = load_encrypt_config(&config).await?;
+    // Only warn on startup, otherwise warning on every reload
+    let encrypt_config = match load_encrypt_config(&config).await {
+        Ok(encrypt_config) => encrypt_config,
+        Err(err) => {
+            match err {
+                Error::Config(ConfigError::MissingEncryptConfigTable) => {
+                    error!("No Encrypt configuration table in database.");
+                    warn!("Encrypt requires the Encrypt Query Language (EQL) to be installed in the target database");
+                    warn!("See https://github.com/cipherstash/encrypt-query-language");
+                }
+                _ => {
+                    error!("Error loading Encrypt configuration");
+                }
+            }
+            return Err(err);
+        }
+    };
+
     info!("Loaded Encrypt configuration");
+    if encrypt_config.is_empty() {
+        warn!("Encrypt configuration is currently empty");
+    }
 
     let encrypt_config = Arc::new(ArcSwap::new(Arc::new(encrypt_config)));
 
@@ -57,7 +78,7 @@ async fn init_reloader(config: DatabaseConfig) -> Result<EncryptConfigManager, E
 
             match load_encrypt_config_with_retry(&config_ref).await {
                 Ok(reloaded) => {
-                    // debug!("Reloaded Encrypt configuration");
+                    debug!(DEVELOPMENT, "Reloaded Encrypt config");
                     dataset_ref.swap(Arc::new(reloaded));
                 }
                 Err(e) => {
@@ -94,6 +115,10 @@ async fn load_encrypt_config_with_retry(
 
             Err(e) => {
                 if retry_count >= max_retry_count {
+                    debug!(
+                        DEVELOPMENT,
+                        "Encrypt config not loaded after {retry_count} retries"
+                    );
                     return Err(e);
                 }
             }
@@ -113,11 +138,11 @@ pub async fn load_encrypt_config(config: &DatabaseConfig) -> Result<EncryptConfi
     match client.query(ENCRYPT_CONFIG_QUERY, &[]).await {
         Ok(rows) => {
             if rows.is_empty() {
-                warn!("No active Encrypt configuration");
                 return Ok(EncryptConfigMap::new());
             };
+
             // We know there is at least one row
-            let row = rows.first().unwrap();
+            let row = rows.get(0).unwrap();
 
             let json_value: Value = row.get("data");
             let encrypt_config: EncryptConfig = serde_json::from_value(json_value)?;
@@ -125,13 +150,8 @@ pub async fn load_encrypt_config(config: &DatabaseConfig) -> Result<EncryptConfi
         }
         Err(err) => {
             if configuration_table_not_found(&err) {
-                error!("No Encrypt configuration table in database.");
-                warn!("Encrypt requires the Encrypt Query Language (EQL) to be installed in the target database");
-                warn!("See https://github.com/cipherstash/encrypt-query-language");
-
                 return Err(ConfigError::MissingEncryptConfigTable.into());
             }
-            error!("Error loading Encrypt configuration");
             Err(ConfigError::Database(err).into())
         }
     }
