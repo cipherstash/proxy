@@ -121,7 +121,7 @@ description = "Installs EQL and applies schema to database"
 dir = "./tests"
 run = "cat sql/schema.sql | docker exec -i postgres psql postgresql://cipherstash:password@localhost:{{vars.database_port}}/cipherstash -f-"
 
-[tasks.up]
+[tasks."postgres:up"]
 alias = 'u'
 dir = "./tests"
 description = "docker compose up"
@@ -131,20 +131,20 @@ if [ -n "$CI" ]; then echo "Running in CI: setting file permissions for containe
 echo docker compose up --build {{arg(name="service",default="")}} {{option(name="extra-args",default="")}} | bash
 """
 
-[tasks.down]
+[tasks."postgres:down"]
 alias = 'd'
 description = 'Tear down containers and destroy all data'
 run = """
-  mise run compose_down
-  mise run destroy_data
+  mise run postgres:compose_down
+  mise run postgres:destroy_data
 """
 
-[tasks.compose_down]
+[tasks."postgres:compose_down"]
 dir = "./tests"
 description = "docker compose down"
 run = 'docker compose down'
 
-[tasks.destroy_data]
+[tasks."postgres:destroy_data"]
 alias = 'dd'
 dir = "./tests/pg"
 description = "Removes the local data directories"
