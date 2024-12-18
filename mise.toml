@@ -85,20 +85,26 @@ alias = "i"
 dir = "./tests"
 description = "Runs integration test/s"
 run = """
+  # Ensure proxy is not running
+  mise run kill
+
+  mise --env tcp run setup
   mise --env tcp run proxy &
   mise --env tcp run test:wait_for_tcp_port --port 6432
   mise --env tcp run test:psql-tcp
   mise run kill
 
-  # mise --env tls run proxy &
-  # mise --env tls run test:wait_for_tcp_port --port 6432
-  # mise --env tls run test:psql-tls
-  # mise run kill
+  mise --env tls run setup
+  mise --env tls run proxy &
+  mise --env tls run test:wait_for_tcp_port --port 6432
+  mise --env tls run test:psql-tls
+  mise run kill
 
-  # mise --env tls run proxy &
-  # mise --env tls run test:wait_for_tcp_port --port 6432
-  # cargo nextest run --no-fail-fast --nocapture -E 'test(~integration)'
-  # mise run kill
+  mise --env tls run setup
+  mise --env tls run proxy &
+  mise --env tls run test:wait_for_tcp_port --port 6432
+  cargo nextest run --no-fail-fast --nocapture -E 'test(~integration)'
+  mise run kill
 """
 
 [tasks."test:nextest"]
