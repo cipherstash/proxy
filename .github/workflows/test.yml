@@ -28,7 +28,7 @@ jobs:
       - run: |
           mise run postgres:up --extra-args "--detach --wait"
       - run: |
-          mise run setup
+          mise run postgres:setup
       - name: ci
         env:
           CS_AUTH__WORKSPACE_ID: ${{ secrets.CS_AUTH__WORKSPACE_ID }}

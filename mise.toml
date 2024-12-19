@@ -123,8 +123,8 @@ run = 'cargo check'
 description = "Runs clippy"
 run = 'cargo clippy --all --no-deps --all-targets --all-features'
 
-[tasks.setup]
-depends = ["install_eql"]
+[tasks."postgres:setup"]
+depends = ["postgres:install_eql"]
 alias = 's'
 description = "Installs EQL and applies schema to database"
 run = """
@@ -162,7 +162,7 @@ dir = "./tests/pg"
 description = "Removes the local data directories"
 run = 'rm -rf data-*'
 
-[tasks.install_eql]
+[tasks."postgres:install_eql"]
 alias = 'e'
 description = "Install EQL"
 run = """

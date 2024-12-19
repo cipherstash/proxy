@@ -27,7 +27,7 @@ mise install
 mise run postgres:up --extra-args "--detach --wait"
 
 # Install latest eql into database
-mise run setup
+mise run postgres:setup
 
 # If this is your first time using CipherStash:
 #  - install stash CLI
@@ -133,7 +133,7 @@ We install `cargo-binstall` via `mise` when installing development and testing d
 
 > [!TIP]
 > We provide abbreviations for most of the commands that follow.
-> For example, `mise run setup` can be abbreviated to `mise r s`.
+> For example, `mise run postgres:setup` can be abbreviated to `mise r s`.
 > Run `mise tasks --extended` to see the task shortcuts.
 
 ### Rust dependencies
@@ -165,7 +165,7 @@ Then set up the schema and functions:
 
 ```shell
 # install latest eql into database
-mise run setup
+mise run postgres:setup
 ```
 
 You can start PostgreSQL containers in a couple of different ways:
