@@ -6,14 +6,34 @@ use super::messages::Destination;
 
 #[derive(Debug, Clone)]
 pub struct Statement {
+    /// A SQL statement. This will have been transformed if the statement received by the front-end
+    /// required type-checking and it was transformed to perform EQL conversion.
     ast: ast::Statement,
     postgres_param_types: Vec<i32>,
+    /// If this was a type-checked statement, then `eql_metadata` will be `Some(_)`, else `None`.
+    eql_metadata: Option<EqlMetadata>,
+}
+
+/// Metadata for a [`ast::Statement`] type that could only be safely handled after processing by [`eql_mapper`].
+#[derive(Debug, Clone)]
+pub struct EqlMetadata {
     eql_param_types: Vec<Value>,
     eql_resultset_type: Option<Projection>,
 }
 
 impl Statement {
-    pub fn new(
+    pub fn new_unmapped(
+        ast: ast::Statement,
+        postgres_param_types: Vec<i32>,
+    ) -> Statement {
+        Statement {
+            ast,
+            postgres_param_types,
+            eql_metadata: None,
+        }
+    }
+
+    pub fn new_mapped(
         ast: ast::Statement,
         postgres_param_types: Vec<i32>,
         eql_param_types: Vec<Value>,
@@ -22,8 +42,10 @@ impl Statement {
         Statement {
             ast,
             postgres_param_types,
-            eql_param_types,
-            eql_resultset_type,
+            eql_metadata: Some(EqlMetadata {
+                eql_param_types,
+                eql_resultset_type,
+            }),
         }
     }
 }

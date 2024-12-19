@@ -90,29 +90,37 @@ where
             .try_with_sql(&parse.statement)?
             .parse_statement()?;
 
-        let typed_statement = eql_mapper::type_check(self.encrypt.schema.load(), &statement)?;
+        if eql_mapper::requires_type_check(&statement) {
+            let typed_statement = eql_mapper::type_check(self.encrypt.schema.load(), &statement)?;
 
-        let plaintext_literals: Vec<eql::Plaintext> =
-            convert_value_nodes_to_eql_plaintext(&typed_statement)?;
+            let plaintext_literals: Vec<eql::Plaintext> =
+                convert_value_nodes_to_eql_plaintext(&typed_statement)?;
 
-        let replacement_literal_values = self.encrypt_literals(plaintext_literals).await?;
+            let replacement_literal_values = self.encrypt_literals(plaintext_literals).await?;
 
-        let original_values_and_replacements =
-            zip_with_original_value_ref(&typed_statement, replacement_literal_values);
+            let original_values_and_replacements =
+                zip_with_original_value_ref(&typed_statement, replacement_literal_values);
 
-        let transformed_statement = typed_statement.transform(original_values_and_replacements)?;
+            let transformed_statement =
+                typed_statement.transform(original_values_and_replacements)?;
 
-        parse.statement = transformed_statement.to_string().clone();
+            parse.statement = transformed_statement.to_string().clone();
 
-        self.context.add(
-            crate::postgresql::messages::Destination::Unnamed,
-            context::Statement::new(
-                transformed_statement,
-                parse.param_types.clone(),
-                typed_statement.params.clone(),
-                typed_statement.statement_type.clone(),
-            ),
-        );
+            self.context.add(
+                crate::postgresql::messages::Destination::Unnamed,
+                context::Statement::new_mapped(
+                    transformed_statement,
+                    parse.param_types.clone(),
+                    typed_statement.params.clone(),
+                    typed_statement.statement_type.clone(),
+                ),
+            );
+        } else {
+            self.context.add(
+                crate::postgresql::messages::Destination::Unnamed,
+                context::Statement::new_unmapped(statement, parse.param_types.clone()),
+            );
+        }
 
         if parse.should_rewrite() {
             let bytes = BytesMut::try_from(parse)?;

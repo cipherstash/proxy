@@ -2,7 +2,7 @@ use std::{
     cell::RefCell, collections::HashMap, marker::PhantomData, ops::ControlFlow, rc::Rc, sync::Arc,
 };
 
-use sqlparser::ast::{self as ast};
+use sqlparser::ast::{self as ast, Statement};
 use sqltk::{convert_control_flow, Break, Transform, Transformable, Visitable, Visitor};
 
 use crate::{
@@ -35,7 +35,7 @@ use super::importer::{ImportError, Importer};
 /// An [`EqlMapperError`] is returned if type checking fails.
 pub fn type_check<'ast>(
     schema: impl Into<Arc<Schema>>,
-    statement: &'ast ast::Statement,
+    statement: &'ast Statement,
 ) -> Result<TypedStatement<'ast>, EqlMapperError> {
     let mut mapper = EqlMapper::<'ast>::new_from_schema(schema);
     match statement.accept(&mut mapper) {
@@ -69,11 +69,35 @@ pub fn type_check<'ast>(
     }
 }
 
+/// Returns whether the [`Statement`] requires type-checking to be performed.
+///
+/// Statements that do not require type-checking are presumed to be safe to transmit to the database unmodified.
+///
+/// This function returns `true` for `MERGE` and `PREPARE` statements even though support for those is not yet
+/// implemented in the mapper. Type checking will fail on those statements.
+///
+/// It is acceptable for `MERGE` because it is rarely used, but when it is used we want a type check to fail.
+///
+/// It is acceptable for `PREPARE` because we believe that most ORMs do not make direct use of it.
+///
+/// In any case, support for those statements is coming soon!
+pub fn requires_type_check<'ast>(statement: &'ast Statement) -> bool {
+    match statement {
+        Statement::Query(_)
+        | Statement::Insert(_)
+        | Statement::Update { .. }
+        | Statement::Delete(_)
+        | Statement::Merge { .. }
+        | Statement::Prepare { .. } => true, // not
+        _ => false,
+    }
+}
+
 /// The result returned from a successful call to [`type_check`].
 #[derive(Debug)]
 pub struct TypedStatement<'ast> {
     /// The SQL statement which was type-checked against the schema.
-    pub statement: &'ast ast::Statement,
+    pub statement: &'ast Statement,
 
     /// The SQL statement which was type-checked against the schema.
     pub statement_type: Option<Projection>,
@@ -148,7 +172,7 @@ impl<'ast> EqlMapper<'ast> {
     /// Asks the [`TypeInferencer`] for a hashmap of node types.
     fn statement_type(
         &self,
-        statement: &'ast ast::Statement,
+        statement: &'ast Statement,
     ) -> Result<Option<Projection>, EqlMapperError> {
         let node_types = self.inferencer.borrow().node_types()?;
 
@@ -261,7 +285,7 @@ impl<'ast> TypedStatement<'ast> {
     pub fn transform(
         &self,
         encrypted_literals: HashMap<&'ast ast::Expr, ast::Expr>,
-    ) -> Result<ast::Statement, EqlMapperError> {
+    ) -> Result<Statement, EqlMapperError> {
         for (_, target) in self.literals.iter() {
             if !encrypted_literals.contains_key(target) {
                 return Err(EqlMapperError::Transform(String::from("encrypted literals refers to a literal node which is not present in the SQL statement")));
@@ -356,14 +380,14 @@ mod test {
     };
 
     use sqlparser::{
-        ast::{self as ast},
+        ast::{self as ast, Statement},
         dialect::PostgreSqlDialect,
         parser::Parser,
     };
 
     use super::type_check;
 
-    fn parse(statement: &'static str) -> ast::Statement {
+    fn parse(statement: &'static str) -> Statement {
         Parser::parse_sql(&PostgreSqlDialect {}, statement).unwrap()[0].clone()
     }
 

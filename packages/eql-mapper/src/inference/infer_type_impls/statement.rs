@@ -63,7 +63,19 @@ impl<'ast> InferType<'ast, Statement> for TypeInferencer<'ast> {
                 on: _,
                 clauses: _,
             } => {
-                todo!()
+                return Err(TypeError::UnsupportedSqlFeature(
+                    "MERGE is not yet supported".into(),
+                ))
+            }
+
+            Statement::Prepare {
+                name: _,
+                data_types: _,
+                statement: _,
+            } => {
+                return Err(TypeError::UnsupportedSqlFeature(
+                    "PREPARE is not yet supported".into(),
+                ))
             }
 
             _ => {}
