@@ -123,8 +123,19 @@ run = 'cargo check'
 description = "Runs clippy"
 run = 'cargo clippy --all --no-deps --all-targets --all-features'
 
+[tasks."postgres:fail_if_not_running"]
+description = "Check if postgres containers are running, and fail if not"
+run = """
+containers=$(docker ps --filter "name=postgres${CONTAINER_SUFFIX}" --quiet)
+if [ -z "${containers}" ]; then
+  echo "error: Docker containers for PostgreSQL are not running"
+  echo "error: Try running 'mise run postgres:up' to start the containers"
+  exit 65
+fi
+"""
+
 [tasks."postgres:setup"]
-depends = ["postgres:install_eql"]
+depends = ["postgres:fail_if_not_running", "postgres:install_eql"]
 alias = 's'
 description = "Installs EQL and applies schema to database"
 run = """
