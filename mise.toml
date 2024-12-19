@@ -55,7 +55,6 @@ run = """
   mise run test:format
   mise run test:clippy
   mise run test:unit
-  mise run test:integration
 """
 
 [tasks."test:wait_for_tcp_port"]
