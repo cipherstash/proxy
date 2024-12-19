@@ -257,24 +257,6 @@ impl<'ast> TypedStatement<'ast> {
                 .any(|value_ty| matches!(value_ty, Value::Eql(_)))
     }
 
-    /// Tries to get a [`Value`] (a literal) from `self`.
-    ///
-    /// This method can fail because it cannot be proven at the type-level that [`NodeKey`] refers to a `Value`.
-    pub fn try_get_literal(
-        &self,
-        node_key: &NodeKey<'ast>,
-    ) -> Result<&'ast ast::Value, EqlMapperError> {
-        match node_key.get_as::<ast::Expr>() {
-            Some(ast::Expr::Value(value)) => Ok(value),
-            Some(_) => Err(EqlMapperError::InternalError(
-                "try_get_literal: wrong expression type".to_string(),
-            )),
-            None => Err(EqlMapperError::InternalError(
-                "try_get_literal: failed to get literal".to_string(),
-            )),
-        }
-    }
-
     /// Transforms the SQL statement by replacing all plaintext literals with EQL equivalents.
     pub fn transform(
         &self,

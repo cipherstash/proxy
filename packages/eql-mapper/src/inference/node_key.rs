@@ -41,11 +41,6 @@ impl<'ast> NodeKey<'ast> {
         }
     }
 
-    /// Creates a `Vec<NodeKey>` from a slice of AST node references.
-    pub fn from_slice<N: Semantic>(nodes: &'ast [N]) -> Vec<Self> {
-        nodes.iter().map(|n| Self::new(n)).collect()
-    }
-
     pub fn get_as<N: Visitable>(&self) -> Option<&'ast N> {
         if self.node_type == TypeId::of::<N>() {
             // SAFETY: we have verified that `N` is of the correct type to permit the cast and because 'ast outlives
