@@ -244,7 +244,8 @@ impl Constructor {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Display)]
+#[display("[{}]", _0.iter().map(|pc| pc.to_string()).collect::<Vec<_>>().join(", "))]
 pub struct ProjectionColumns(pub(crate) Vec<ProjectionColumn>);
 
 impl ProjectionColumns {
@@ -252,18 +253,21 @@ impl ProjectionColumns {
         self.0.len()
     }
 
-    pub(crate) fn flatten(self) -> Self {
+    pub(crate) fn flatten(&self) -> Self {
         let output: Vec<ProjectionColumn> = Vec::with_capacity(self.len());
         ProjectionColumns(Self::flatten_impl(self, output))
     }
 
-    fn flatten_impl(self, mut output: Vec<ProjectionColumn>) -> Vec<ProjectionColumn> {
-        for ProjectionColumn { ty, alias } in self.0 {
-            match ty {
+    fn flatten_impl(&self, mut output: Vec<ProjectionColumn>) -> Vec<ProjectionColumn> {
+        for ProjectionColumn { ty, alias } in &self.0 {
+            match &ty {
                 Type::Constructor(Constructor::Projection(nested)) => {
                     output = Self::flatten_impl(nested, output);
                 }
-                other => output.push(ProjectionColumn { ty: other, alias }),
+                other => output.push(ProjectionColumn {
+                    ty: (*other).clone(),
+                    alias: alias.clone(),
+                }),
             }
         }
         output
