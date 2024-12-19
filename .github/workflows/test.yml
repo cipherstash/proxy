@@ -26,7 +26,7 @@ jobs:
           install: true # [default: true] run `mise install`
           cache: true # [default: true] cache mise using GitHub's cache
       - run: |
-          mise run up --extra-args "--detach --wait"
+          mise run postgres:up --extra-args "--detach --wait"
       - run: |
           mise run setup
       - name: ci
