@@ -83,6 +83,7 @@ pub async fn read_message_with_timeout<S: AsyncRead + Unpin>(
 ) -> Result<Message, Error> {
     timeout(connection_timeout, read_message(&mut stream)).await?
 }
+
 ///
 /// Reads a Postgres message from client
 ///
@@ -118,13 +119,13 @@ pub async fn read_message<S: AsyncRead + Unpin>(mut stream: S) -> Result<Message
 
     // Capacity and len are not the same!!
     // resize populates the buffer with 0s
-    bytes.resize(capacity, b'0');
+    bytes.resize(capacity, 0);
 
     stream.read_exact(&mut bytes[slice_start..]).await?;
 
     let message = Message { code, bytes };
 
-    debug!(PROTOCOL, "{message:?}");
+    debug!(target: PROTOCOL, "{message:?}");
 
     Ok(message)
 }

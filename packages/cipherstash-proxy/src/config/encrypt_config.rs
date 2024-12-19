@@ -5,10 +5,12 @@ use cipherstash_config::{
 use serde::{Deserialize, Serialize};
 use sqlparser::ast::Ident;
 use std::{collections::HashMap, str::FromStr};
+use tracing::debug;
 
 use crate::{
     eql,
     error::{ConfigError, Error},
+    log::KEYSET,
 };
 
 #[derive(Debug, Deserialize, Serialize, Clone, Default)]
@@ -151,12 +153,11 @@ impl EncryptConfig {
     pub fn to_config_map(self) -> HashMap<eql::Identifier, ColumnConfig> {
         let mut map = HashMap::new();
         for (table_name, columns) in self.tables.into_iter() {
-            for (name, column) in columns.into_iter() {
-                let column_config = column.into_column_config(&Ident::with_quote('"', &name));
-                let key = eql::Identifier {
-                    table: Ident::with_quote('"', &table_name),
-                    column: Ident::with_quote('"', &name),
-                };
+            debug!(target: KEYSET, "Configured table: {table_name}");
+
+            for (col_name, column) in columns.into_iter() {
+                let column_config = column.into_column_config(&Ident::with_quote('"', &col_name));
+                let key = eql::Identifier::new(&table_name, &col_name);
                 map.insert(key, column_config);
             }
         }

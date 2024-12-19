@@ -133,13 +133,13 @@ pub async fn handler(client_stream: AsyncStream, encrypt: Encrypt) -> Result<(),
 
         if hash == password_message.password {
             let message = Authentication::authentication_ok();
-            debug!(AUTHENTICATION, "Client AuthenticationOk");
+            debug!(target: AUTHENTICATION, "Client AuthenticationOk");
             let bytes = BytesMut::try_from(message)?;
             client_stream.write_all(&bytes).await?;
         } else {
             let message = ErrorResponse::invalid_password(&encrypt.config.database.username);
             debug!(
-                AUTHENTICATION,
+                target: AUTHENTICATION,
                 "Client authenticaion failed: invalid password"
             );
             let bytes = BytesMut::try_from(message)?;
@@ -162,17 +162,17 @@ pub async fn handler(client_stream: AsyncStream, encrypt: Encrypt) -> Result<(),
 
     match &auth.method {
         AuthenticationMethod::AuthenticationOk => {
-            debug!(AUTHENTICATION, "AuthenticationOk");
+            debug!(target: AUTHENTICATION, "AuthenticationOk");
         }
         AuthenticationMethod::AuthenticationCleartextPassword => {
-            debug!(AUTHENTICATION, "AuthenticationCleartextPassword");
+            debug!(target: AUTHENTICATION, "AuthenticationCleartextPassword");
             let password = encrypt.config.database.password.to_owned();
             let message = PasswordMessage::new(password);
             let bytes = BytesMut::try_from(message)?;
             database_stream.write_all(&bytes).await?;
         }
         AuthenticationMethod::Md5Password { salt } => {
-            debug!(AUTHENTICATION, "Md5Password");
+            debug!(target: AUTHENTICATION, "Md5Password");
             let username = encrypt.config.database.username.as_bytes();
             let password = encrypt.config.database.password.as_bytes();
 
@@ -182,7 +182,7 @@ pub async fn handler(client_stream: AsyncStream, encrypt: Encrypt) -> Result<(),
             database_stream.write_all(&bytes).await?;
         }
         AuthenticationMethod::Sasl { .. } => {
-            debug!(AUTHENTICATION, "Sasl");
+            debug!(target: AUTHENTICATION, "Sasl");
             let mechanism = auth.sasl_mechanism()?;
 
             sanity_check_sasl_mechanism(&mechanism, &client_stream);
@@ -196,15 +196,15 @@ pub async fn handler(client_stream: AsyncStream, encrypt: Encrypt) -> Result<(),
                 .await?;
         }
         AuthenticationMethod::Other { method_code, .. } => {
-            debug!(AUTHENTICATION, "UnsupportedAuthentication");
+            debug!(target: AUTHENTICATION, "UnsupportedAuthentication");
             return Err(ProtocolError::UnsupportedAuthentication {
                 method_code: *method_code,
             }
             .into());
         }
         method => {
-            debug!(AUTHENTICATION, "UnexpectedStartupMessage");
-            debug!(AUTHENTICATION, "AuthencticationMethod {method:?}");
+            debug!(target: AUTHENTICATION, "UnexpectedStartupMessage");
+            debug!(target: AUTHENTICATION, "AuthencticationMethod {method:?}");
             return Err(ProtocolError::UnexpectedStartupMessage.into());
         }
     }
@@ -293,28 +293,25 @@ async fn scram_sha_256_plus_handler<S: AsyncRead + AsyncWrite + Unpin>(
     password: &[u8],
     channel_binding: ChannelBinding,
 ) -> Result<(), Error> {
-    debug!("SCRAM_SHA_256_PLUS");
-
     let mut scram = ScramSha256::new(password, channel_binding);
     let bytes = scram.message().to_vec();
-    debug!("SASLInitialResponse");
+    // debug!("SASLInitialResponse");
     let sasl_initial_response = SASLInitialResponse::new(mechanism, bytes);
     let bytes = BytesMut::try_from(sasl_initial_response)?;
     stream.write_all(&bytes).await?;
 
-    debug!("SASLContinue");
+    // debug!("SASLContinue");
     let auth = protocol::read_auth_message(&mut stream).await?;
-    debug!("{auth:?}");
 
     let bytes = auth.sasl_continue()?;
     scram.update(bytes)?;
 
     let sasl_response = SASLResponse::new(scram.message().to_vec());
-    debug!("sasl_response {sasl_response:?}");
+    // debug!("sasl_response {sasl_response:?}");
     let bytes = BytesMut::try_from(sasl_response)?;
     stream.write_all(&bytes).await?;
 
-    debug!("SASLFinal");
+    // debug!("SASLFinal");
     let auth = protocol::read_auth_message(&mut stream).await?;
     let bytes = auth.sasl_final()?;
     scram.finish(bytes)?;
@@ -322,7 +319,7 @@ async fn scram_sha_256_plus_handler<S: AsyncRead + AsyncWrite + Unpin>(
     let auth = protocol::read_auth_message(&mut stream).await?;
 
     if auth.is_ok() {
-        info!("Database authentication successful");
+        debug!(target: AUTHENTICATION, "SASL authentication successful");
         Ok(())
     } else {
         Err(ProtocolError::AuthenticationFailed.into())

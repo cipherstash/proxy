@@ -28,9 +28,9 @@ pub async fn with_tls(stream: AsyncStream, config: &TandemConfig) -> Result<Asyn
     }
     match stream {
         AsyncStream::Tcp(mut tcp_stream) => {
-            let server_ssl = send_ssl_request(&mut tcp_stream).await?;
+            let server_supports_ssl = send_ssl_request(&mut tcp_stream).await?;
 
-            match server_ssl {
+            match server_supports_ssl {
                 true => {
                     let tls_stream = tls::client(tcp_stream, config).await?;
                     Ok(AsyncStream::Tls(tls_stream))
@@ -94,7 +94,7 @@ where
         code: code.into(),
         bytes,
     };
-    debug!(PROTOCOL, "StartupMessage {:?}", message);
+    debug!(target: PROTOCOL, "StartupMessage {:?}", message);
 
     Ok(message)
 }
@@ -122,7 +122,7 @@ pub async fn send_ssl_request<T: AsyncRead + AsyncWrite + Unpin>(
         }
     };
 
-    debug!(PROTOCOL, "Received SSLResponse {response}");
+    debug!(target: PROTOCOL, "Received SSLResponse {response}");
     Ok(response)
 }
 
@@ -141,7 +141,7 @@ pub async fn send_ssl_response<T: AsyncWrite + Unpin>(
         None => b'N',
     };
 
-    debug!(PROTOCOL, "Send SSLResponse {response}");
+    debug!(target: PROTOCOL, "Send SSLResponse {response}");
 
     stream.write_all(&[response]).await?;
 

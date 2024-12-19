@@ -1,3 +1,4 @@
+use std::fmt::Display;
 use std::sync::Once;
 use tracing_subscriber::filter::{Directive, EnvFilter};
 use tracing_subscriber::FmtSubscriber;
@@ -11,6 +12,20 @@ pub const DEVELOPMENT: &str = "development";
 
 pub const PROTOCOL: &str = "protocol";
 
+pub const KEYSET: &str = "keyset";
+
+pub enum Target {
+    Protocol,
+}
+
+impl Display for Target {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Target::Protocol => write!(f, "protocol"),
+        }
+    }
+}
+
 pub fn init() {
     INIT.call_once(|| {
         // TODO: assign level from args
@@ -18,10 +33,13 @@ pub fn init() {
 
         let mut filter = EnvFilter::from_default_env().add_directive(log_level.to_owned());
 
-        let directive = format!("{}={log_level}", DEVELOPMENT).parse().expect("ok");
+        let directive = format!("{}=info", DEVELOPMENT).parse().expect("ok");
         filter = filter.add_directive(directive);
 
-        let directive = format!("{}={log_level}", PROTOCOL).parse().expect("ok");
+        let directive = format!("{}=info", PROTOCOL).parse().expect("ok");
+        filter = filter.add_directive(directive);
+
+        let directive = format!("{}={log_level}", KEYSET).parse().expect("ok");
         filter = filter.add_directive(directive);
 
         let directive = format!("{}={log_level}", AUTHENTICATION)
