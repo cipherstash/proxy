@@ -22,10 +22,7 @@ pub struct EqlMetadata {
 }
 
 impl Statement {
-    pub fn new_unmapped(
-        ast: ast::Statement,
-        postgres_param_types: Vec<i32>,
-    ) -> Statement {
+    pub fn new_unmapped(ast: ast::Statement, postgres_param_types: Vec<i32>) -> Statement {
         Statement {
             ast,
             postgres_param_types,
