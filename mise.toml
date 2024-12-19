@@ -35,6 +35,7 @@ run = 'pwd && env | grep CS_ && cargo run'
 alias = 'k'
 description = "Kills running proxy "
 run = """
+  set +e
   killall cipherstash-proxy -s SIGINT
   exit 0
 """
