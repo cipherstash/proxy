@@ -158,7 +158,7 @@ The goal is to minimise the amount of configuration you have to do in local dev.
 To start all PostgreSQL instances:
 
 ```shell
-mise run up
+mise run postgres:up
 ```
 
 Then set up the schema and functions:
@@ -172,18 +172,18 @@ You can start PostgreSQL containers in a couple of different ways:
 
 ```
 # Start all postgres instance in the foreground
-mise run up
+mise run postgres:up
 # exit by hitting ctrl + c
 
 # Start postgres instances individually in the foreground
-mise run up postgres
-mise run up postgres-17-tls
+mise run postgres:up postgres
+mise run postgres:up postgres-17-tls
 
 # Start a postgres instance in the background
-mise run up postgres --extra-args "--detach --wait"
+mise run postgres:up postgres --extra-args "--detach --wait"
 
 # Stop and remove all containers, networks, and postgres data
-mise run down
+mise run postgres:down
 ```
 
 Configuration for starting PostgreSQL instances is in `tests/docker-compose.yml`
@@ -195,7 +195,7 @@ Sometimes the PostgreSQL instances get into an inconsistent state, and need to b
 To wipe all PostgreSQL data directories:
 
 ```
-mise run destroy_data
+mise run postgres:destroy_data
 ```
 
 ### Proxy configuration
