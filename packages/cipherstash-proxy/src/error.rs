@@ -112,7 +112,10 @@ pub enum EncryptError {
     Pipeline(#[from] encryption::EncryptionError),
 
     #[error(transparent)]
-    CiphertextCouldNotBeEncoded(#[from] serde_json::Error),
+    CiphertextCouldNotBeSerialised(#[from] serde_json::Error),
+
+    #[error(transparent)]
+    PlaintextCouldNotBeDecoded(#[from] cipherstash_client::encryption::TypeParseError),
 }
 
 #[derive(Error, Debug)]
@@ -163,6 +166,12 @@ impl From<config::ConfigError> for Error {
 impl From<cipherstash_config::errors::ConfigError> for Error {
     fn from(e: cipherstash_config::errors::ConfigError) -> Self {
         Error::Config(e.into())
+    }
+}
+
+impl From<cipherstash_client::encryption::TypeParseError> for Error {
+    fn from(e: cipherstash_client::encryption::TypeParseError) -> Self {
+        Error::Encrypt(e.into())
     }
 }
 
