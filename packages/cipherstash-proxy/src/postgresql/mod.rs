@@ -3,6 +3,7 @@ mod context;
 mod format_code;
 mod frontend;
 mod handler;
+mod message_buffer;
 mod messages;
 mod protocol;
 mod startup;
