@@ -91,6 +91,10 @@ async fn init(mut config: TandemConfig) -> Encrypt {
         warn!("Bypassing Transport Layer Security (TLS) verification for database connections");
     }
 
+    if config.disable_mapping() {
+        warn!("Mapping is not enabled");
+    }
+
     match config.tls {
         Some(ref mut tls) => {
             if !tls.cert_exists() {
