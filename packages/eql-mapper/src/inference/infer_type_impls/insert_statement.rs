@@ -70,7 +70,7 @@ impl<'ast> InferType<'ast, Insert> for TypeInferencer<'ast> {
             }
 
             None => {
-                self.unify_node_with_type(insert, &Type::empty())?;
+                self.unify_node_with_type(insert, &Type::empty_projection())?;
             }
         }
 

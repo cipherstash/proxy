@@ -81,7 +81,7 @@ pub fn type_check<'ast>(
 /// It is acceptable for `PREPARE` because we believe that most ORMs do not make direct use of it.
 ///
 /// In any case, support for those statements is coming soon!
-pub fn requires_type_check<'ast>(statement: &'ast Statement) -> bool {
+pub fn requires_type_check(statement: &Statement) -> bool {
     match statement {
         Statement::Query(_)
         | Statement::Insert(_)
@@ -178,26 +178,27 @@ impl<'ast> EqlMapper<'ast> {
 
         match node_types.get(&NodeKey::new(statement)) {
             Some(ty) => match ty {
-                unifier::Type::Constructor(unifier::Constructor::Projection(cols)) => {
-                    Ok(Some(Projection(
-                        cols.0
-                            .iter()
-                            .map(|col| match &col.ty {
-                                unifier::Type::Constructor(unifier::Constructor::Value(value)) => {
-                                    Ok(ProjectionColumn {
-                                        ty: value.try_into()?,
-                                        alias: col.alias.clone(),
-                                    })
-                                }
-                                ty => Err(EqlMapperError::InternalError(format!(
-                                    "unexpected type {} in projection column",
-                                    ty
-                                ))),
-                            })
-                            .collect::<Result<Vec<_>, _>>()?,
-                    )))
-                }
-                unifier::Type::Constructor(unifier::Constructor::Empty) => Ok(None),
+                unifier::Type::Constructor(unifier::Constructor::Projection(
+                    unifier::Projection::WithColumns(unifier::ProjectionColumns(cols)),
+                )) => Ok(Some(Projection::WithColumns(
+                    cols.iter()
+                        .map(|col| match &col.ty {
+                            unifier::Type::Constructor(unifier::Constructor::Value(value)) => {
+                                Ok(ProjectionColumn {
+                                    ty: value.try_into()?,
+                                    alias: col.alias.clone(),
+                                })
+                            }
+                            ty => Err(EqlMapperError::InternalError(format!(
+                                "unexpected type {} in projection column",
+                                ty
+                            ))),
+                        })
+                        .collect::<Result<Vec<_>, _>>()?,
+                ))),
+                unifier::Type::Constructor(unifier::Constructor::Projection(
+                    unifier::Projection::Empty,
+                )) => Ok(Some(Projection::Empty)),
                 _ => Err(EqlMapperError::InternalError(String::from(
                     "resolved type for statement was not a resolved projection or empty",
                 ))),
@@ -449,7 +450,7 @@ mod test {
     }
 
     macro_rules! projection {
-        [$($column:tt),*] => { Projection(Vec::from_iter((&[$(col!($column)),*]).iter().cloned())) };
+        [$($column:tt),*] => { Projection::new(vec![$(col!($column)),*]) };
     }
 
     #[test]
@@ -880,7 +881,7 @@ mod test {
             Err(err) => panic!("type check failed: {:#?}", err),
         };
 
-        assert_eq!(typed.statement_type, None);
+        assert_eq!(typed.statement_type, Some(Projection::Empty));
     }
 
     #[test]
@@ -951,7 +952,7 @@ mod test {
             Err(err) => panic!("type check failed: {:#?}", err),
         };
 
-        assert_eq!(typed.statement_type, None);
+        assert_eq!(typed.statement_type, Some(Projection::Empty));
     }
 
     #[test]
@@ -1020,7 +1021,7 @@ mod test {
             Err(err) => panic!("type check failed: {:#?}", err),
         };
 
-        assert_eq!(typed.statement_type, None);
+        assert_eq!(typed.statement_type, Some(Projection::Empty));
     }
 
     #[test]

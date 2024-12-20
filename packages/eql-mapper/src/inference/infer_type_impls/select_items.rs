@@ -2,7 +2,7 @@ use sqlparser::ast::{Expr, Function, SelectItem, WildcardAdditionalOptions};
 
 use crate::{
     inference::{type_error::TypeError, unifier::Type, InferType},
-    unifier::{Constructor, ProjectionColumn, ProjectionColumns},
+    unifier::{Constructor, Projection, ProjectionColumn},
     TypeInferencer,
 };
 
@@ -92,9 +92,7 @@ impl<'ast> InferType<'ast, Vec<SelectItem>> for TypeInferencer<'ast> {
 
         self.unify_node_with_type(
             select_items,
-            &Type::Constructor(Constructor::Projection(ProjectionColumns(
-                projection_columns,
-            ))),
+            &Type::Constructor(Constructor::Projection(Projection::new(projection_columns))),
         )?;
 
         Ok(())

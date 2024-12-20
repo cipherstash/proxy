@@ -19,7 +19,7 @@ pub enum Type {
     Value(Value),
 
     /// A projection type that is parameterized by a list of projection column types.
-    #[display("Projection({})", ProjectionColumn::render_projection(_0.0.as_slice()))]
+    #[display("Projection({})", _0)]
     Projection(Projection),
 }
 
@@ -44,8 +44,23 @@ pub enum Value {
 
 /// A projection type that is parameterized by a list of projection column types.
 #[derive(Debug, Clone, PartialEq, Eq, Display)]
-#[display("Projection{}", ProjectionColumn::render_projection(_0))]
-pub struct Projection(pub Vec<ProjectionColumn>);
+pub enum Projection {
+    #[display("Projection::WithColumns({})", ProjectionColumn::render_projection(_0))]
+    WithColumns(Vec<ProjectionColumn>),
+
+    #[display("Projection::Empty")]
+    Empty,
+}
+
+impl Projection {
+    pub fn new(columns: Vec<ProjectionColumn>) -> Self {
+        if columns.is_empty() {
+            Projection::Empty
+        } else {
+            Projection::WithColumns(columns)
+        }
+    }
+}
 
 /// A column from a projection which has a type and an optional alias.
 #[derive(Debug, PartialEq, Eq, Clone, Display)]
@@ -96,7 +111,7 @@ impl TryFrom<&unifier::ProjectionColumns> for Type {
             pub_columns.push(pub_column);
         }
 
-        Ok(Type::Projection(Projection(pub_columns)))
+        Ok(Type::Projection(Projection::new(pub_columns)))
     }
 }
 
@@ -142,7 +157,9 @@ impl TryFrom<&unifier::Type> for Type {
         match constructor {
             unifier::Constructor::Value(value) => Ok(Type::Value(value.try_into()?)),
 
-            unifier::Constructor::Projection(ProjectionColumns(columns)) => {
+            unifier::Constructor::Projection(unifier::Projection::WithColumns(
+                ProjectionColumns(columns),
+            )) => {
                 let mut pub_columns: Vec<ProjectionColumn> = Vec::with_capacity(columns.len());
 
                 for unifier::ProjectionColumn { ty, alias } in columns.iter() {
@@ -163,12 +180,12 @@ impl TryFrom<&unifier::Type> for Type {
                     pub_columns.push(pub_column);
                 }
 
-                Ok(Type::Projection(Projection(pub_columns)))
+                Ok(Type::Projection(Projection::new(pub_columns)))
             }
 
-            unifier::Constructor::Empty => Err(crate::EqlMapperError::InternalError(String::from(
-                "cannot convert Type::Empty",
-            ))),
+            unifier::Constructor::Projection(unifier::Projection::Empty) => {
+                Ok(Type::Projection(Projection::Empty))
+            }
         }
     }
 }

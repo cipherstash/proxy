@@ -51,7 +51,7 @@ impl<'ast> InferType<'ast, Statement> for TypeInferencer<'ast> {
                         self.unify_nodes(statement, returning)?;
                     }
                     None => {
-                        self.unify_node_with_type(statement, &Type::empty())?;
+                        self.unify_node_with_type(statement, &Type::empty_projection())?;
                     }
                 }
             }

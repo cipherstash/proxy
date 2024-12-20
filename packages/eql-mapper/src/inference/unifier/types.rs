@@ -1,4 +1,7 @@
-use std::{ops::Add, sync::Arc};
+use std::{
+    ops::{Add, Index},
+    sync::Arc,
+};
 
 use derive_more::Display;
 use sqlparser::ast::Ident;
@@ -36,13 +39,8 @@ pub enum Constructor {
     Value(Value),
 
     /// A projection type that is parameterized by a list of projection column types.
-    #[display("Projection({})", crate::unifier::Unifier::render_projection(_0))]
-    Projection(ProjectionColumns),
-
-    /// An empty type - the only usecase for this type (so far) is for representing the type of subqueries that do not
-    /// return a projection.
-    #[display("Empty")]
-    Empty,
+    #[display("Projection({})", _0)]
+    Projection(Projection),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Display)]
@@ -153,9 +151,9 @@ impl Add for Status {
 }
 
 impl Type {
-    /// Creates an `Type` containing a `Constructor::Empty`.
-    pub(crate) fn empty() -> Self {
-        Type::Constructor(Constructor::Empty)
+    /// Creates an `Type` containing an empty projection
+    pub(crate) fn empty_projection() -> Self {
+        Type::Constructor(Constructor::Projection(Projection::Empty))
     }
 
     /// Creates an `Type` containing a `Constructor::Scalar(Scalar::Native(None))`.
@@ -165,12 +163,18 @@ impl Type {
 
     /// Creates an `Type` containing a `Constructor::Projection`.
     pub(crate) fn projection(columns: &[(Type, Option<Ident>)]) -> Self {
-        Type::Constructor(Constructor::Projection(ProjectionColumns(
-            columns
-                .iter()
-                .map(|(c, n)| ProjectionColumn::new(c.clone(), n.clone()))
-                .collect(),
-        )))
+        if columns.is_empty() {
+            Type::Constructor(Constructor::Projection(Projection::Empty))
+        } else {
+            Type::Constructor(Constructor::Projection(Projection::WithColumns(
+                ProjectionColumns(
+                    columns
+                        .iter()
+                        .map(|(c, n)| ProjectionColumn::new(c.clone(), n.clone()))
+                        .collect(),
+                ),
+            )))
+        }
     }
 
     /// Creates an `Type` containing a `Constructor::Array`.
@@ -220,15 +224,17 @@ impl Constructor {
 
             Constructor::Value(_) => Ok(self.clone()),
 
-            Constructor::Projection(ProjectionColumns(cols)) => {
-                Ok(Constructor::Projection(ProjectionColumns(
+            Constructor::Projection(Projection::WithColumns(ProjectionColumns(cols))) => Ok(
+                Constructor::Projection(Projection::WithColumns(ProjectionColumns(
                     cols.iter()
                         .map(|col| col.try_resolve(registry))
                         .collect::<Result<Vec<_>, _>>()?,
-                )))
-            }
+                ))),
+            ),
 
-            Constructor::Empty => Ok(Constructor::Empty),
+            Constructor::Projection(Projection::Empty) => {
+                Ok(Constructor::Projection(Projection::Empty))
+            }
         }
     }
 
@@ -236,10 +242,10 @@ impl Constructor {
         match self {
             Constructor::Value(Value::Array(element_ty)) => element_ty.is_fully_resolved(registry),
             Constructor::Value(_) => true,
-            Constructor::Projection(ProjectionColumns(cols)) => {
+            Constructor::Projection(Projection::WithColumns(ProjectionColumns(cols))) => {
                 cols.iter().all(|col| col.ty.is_fully_resolved(registry))
             }
-            Constructor::Empty => true,
+            Constructor::Projection(Projection::Empty) => true,
         }
     }
 }
@@ -247,6 +253,69 @@ impl Constructor {
 #[derive(Debug, Clone, PartialEq, Eq, Display)]
 #[display("[{}]", _0.iter().map(|pc| pc.to_string()).collect::<Vec<_>>().join(", "))]
 pub struct ProjectionColumns(pub(crate) Vec<ProjectionColumn>);
+
+/// The type of an [`sqlparser::ast::Expr`] or [`sqlparser::ast::Statement`] that returns a projection.
+///
+/// It represents an ordered list of zero or more optionally aliased columns types.
+#[derive(Debug, Clone, PartialEq, Eq, Display)]
+pub enum Projection {
+    /// A projection with columns
+    #[display("Projection::Columns({})", _0)]
+    WithColumns(ProjectionColumns),
+
+    /// A projection without columns.
+    ///
+    /// An `INSERT`, `UPDATE` or `DELETE` statement without a `RETURNING` clause will have an empty projection.
+    ///
+    /// Also statements such as `SELECT FROM users` where there are no selected columns or wildcards will have an empty
+    /// projection.
+    #[display("Projection::Empty")]
+    Empty,
+}
+
+impl Projection {
+    pub fn new(columns: Vec<ProjectionColumn>) -> Self {
+        if columns.is_empty() {
+            Projection::Empty
+        } else {
+            Projection::WithColumns(ProjectionColumns(Vec::from_iter(columns.iter().cloned())))
+        }
+    }
+
+    pub(crate) fn flatten(&self) -> Self {
+        match self {
+            Projection::WithColumns(projection_columns) => {
+                Projection::WithColumns(projection_columns.flatten())
+            }
+            Projection::Empty => Projection::Empty,
+        }
+    }
+
+    pub(crate) fn len(&self) -> usize {
+        match self {
+            Projection::WithColumns(projection_columns) => projection_columns.len(),
+            Projection::Empty => 0,
+        }
+    }
+
+    pub(crate) fn columns(&self) -> &[ProjectionColumn] {
+        match self {
+            Projection::WithColumns(projection_columns) => projection_columns.0.as_slice(),
+            Projection::Empty => &[],
+        }
+    }
+}
+
+impl Index<usize> for Projection {
+    type Output = ProjectionColumn;
+
+    fn index(&self, index: usize) -> &Self::Output {
+        match self {
+            Projection::WithColumns(projection_columns) => &projection_columns.0[index],
+            Projection::Empty => panic!("cannot index into an empty projection"),
+        }
+    }
+}
 
 impl ProjectionColumns {
     pub(crate) fn len(&self) -> usize {
@@ -261,7 +330,7 @@ impl ProjectionColumns {
     fn flatten_impl(&self, mut output: Vec<ProjectionColumn>) -> Vec<ProjectionColumn> {
         for ProjectionColumn { ty, alias } in &self.0 {
             match &ty {
-                Type::Constructor(Constructor::Projection(nested)) => {
+                Type::Constructor(Constructor::Projection(Projection::WithColumns(nested))) => {
                     output = Self::flatten_impl(nested, output);
                 }
                 other => output.push(ProjectionColumn {

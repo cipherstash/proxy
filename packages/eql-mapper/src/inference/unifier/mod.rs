@@ -71,11 +71,11 @@ impl<'ast> Unifier<'ast> {
             // Two projections unify if they have the same number of columns and all of the paired column types also
             // unify.
             (
-                Type::Constructor(Projection(cols_left)),
-                Type::Constructor(Projection(cols_right)),
-            ) => Ok(Type::Constructor(Projection(ProjectionColumns(
-                self.unify_projections(cols_left, cols_right)?,
-            )))),
+                Type::Constructor(Projection(lhs_projection)),
+                Type::Constructor(Projection(rhs_projection)),
+            ) => Ok(Type::Constructor(Projection(
+                self.unify_projections(lhs_projection, rhs_projection)?,
+            ))),
 
             // Two arrays unify if the types of their element types unify.
             (
@@ -88,11 +88,11 @@ impl<'ast> Unifier<'ast> {
             }
 
             // A Value can unify with a single column projection
-            (Type::Constructor(Value(value)), Type::Constructor(Projection(columns)))
-            | (Type::Constructor(Projection(columns)), Type::Constructor(Value(value))) => {
-                let len = columns.0.len();
+            (Type::Constructor(Value(value)), Type::Constructor(Projection(projection)))
+            | (Type::Constructor(Projection(projection)), Type::Constructor(Value(value))) => {
+                let len = projection.len();
                 if len == 1 {
-                    Ok(self.unify_value_with_type(value, &columns.0[0].ty)?)
+                    Ok(self.unify_value_with_type(value, &projection[0].ty)?)
                 } else {
                     Err(TypeError::Conflict(
                         "cannot unify value type with projection of more than one column"
@@ -178,17 +178,17 @@ impl<'ast> Unifier<'ast> {
     /// have different numbers of `ProjectionColumn`s yet could still successfully unify.
     fn unify_projections(
         &mut self,
-        left: &ProjectionColumns,
-        right: &ProjectionColumns,
-    ) -> Result<Vec<ProjectionColumn>, TypeError> {
+        left: &Projection,
+        right: &Projection,
+    ) -> Result<Projection, TypeError> {
         let left = left.flatten();
         let right = right.flatten();
 
         if left.len() == right.len() {
             let unified: Vec<ProjectionColumn> = left
-                .0
-                .into_iter()
-                .zip(right.0.into_iter())
+                .columns()
+                .iter()
+                .zip(right.columns().iter())
                 .map(|(lhs, rhs)| {
                     self.unify(&lhs.ty, &rhs.ty).and_then(|ty| {
                         self.unify_alias(&lhs.alias, &rhs.alias)
@@ -197,7 +197,7 @@ impl<'ast> Unifier<'ast> {
                 })
                 .collect::<Result<Vec<_>, _>>()?;
 
-            Ok(unified)
+            Ok(Projection::new(unified))
         } else {
             Err(TypeError::Conflict(format!(
                 "cannot unify projections {} and {} because they have different numbers of columns",
@@ -221,11 +221,6 @@ impl<'ast> Unifier<'ast> {
                 a, b
             ))),
         }
-    }
-
-    pub(crate) fn render_projection(columns: &ProjectionColumns) -> String {
-        let ty_strings: Vec<String> = columns.0.iter().map(|col| col.ty.to_string()).collect();
-        format!("[{}]", ty_strings.join(", "))
     }
 
     fn unify_value_with_type(&mut self, value: &Value, ty: &Type) -> Result<Type, TypeError> {
@@ -279,8 +274,8 @@ mod test {
 
     #[test]
     fn eq_never() {
-        let left = Type::Constructor(Empty);
-        let right = Type::Constructor(Empty);
+        let left = Type::Constructor(Projection(crate::unifier::Projection::Empty));
+        let right = Type::Constructor(Projection(crate::unifier::Projection::Empty));
 
         let mut unifier = Unifier::new(DepMut::new(TypeRegistry::new()));
 
@@ -311,90 +306,104 @@ mod test {
 
     #[test]
     fn projections_without_wildcards() {
-        let left = Type::Constructor(Projection(ProjectionColumns(vec![
-            ProjectionColumn {
-                ty: Type::Constructor(Value(Native(NativeValue(None)))),
-                alias: None,
-            },
-            ProjectionColumn {
-                ty: Type::Var(TypeVar(0)),
-                alias: None,
-            },
-        ])));
+        let left = Type::Constructor(Projection(crate::unifier::Projection::WithColumns(
+            ProjectionColumns(vec![
+                ProjectionColumn {
+                    ty: Type::Constructor(Value(Native(NativeValue(None)))),
+                    alias: None,
+                },
+                ProjectionColumn {
+                    ty: Type::Var(TypeVar(0)),
+                    alias: None,
+                },
+            ]),
+        )));
 
-        let right = Type::Constructor(Projection(ProjectionColumns(vec![
-            ProjectionColumn {
-                ty: Type::Var(TypeVar(1)),
-                alias: None,
-            },
-            ProjectionColumn {
-                ty: Type::Constructor(Value(Native(NativeValue(None)))),
-                alias: None,
-            },
-        ])));
+        let right = Type::Constructor(Projection(crate::unifier::Projection::WithColumns(
+            ProjectionColumns(vec![
+                ProjectionColumn {
+                    ty: Type::Var(TypeVar(1)),
+                    alias: None,
+                },
+                ProjectionColumn {
+                    ty: Type::Constructor(Value(Native(NativeValue(None)))),
+                    alias: None,
+                },
+            ]),
+        )));
 
         let mut unifier = Unifier::new(DepMut::new(TypeRegistry::new()));
         let unified = unifier.unify(&left, &right).unwrap();
 
         assert_eq!(
             unified,
-            Type::Constructor(Projection(ProjectionColumns(vec![
-                ProjectionColumn {
-                    ty: Type::Constructor(Value(Native(NativeValue(None)))),
-                    alias: None
-                },
-                ProjectionColumn {
-                    ty: Type::Constructor(Value(Native(NativeValue(None)))),
-                    alias: None
-                },
-            ])))
+            Type::Constructor(Projection(crate::unifier::Projection::WithColumns(
+                ProjectionColumns(vec![
+                    ProjectionColumn {
+                        ty: Type::Constructor(Value(Native(NativeValue(None)))),
+                        alias: None
+                    },
+                    ProjectionColumn {
+                        ty: Type::Constructor(Value(Native(NativeValue(None)))),
+                        alias: None
+                    },
+                ])
+            )))
         );
     }
 
     #[test]
     fn projections_with_wildcards() {
-        let left = Type::Constructor(Projection(ProjectionColumns(vec![
-            ProjectionColumn {
-                ty: Type::Constructor(Value(Native(NativeValue(None)))),
-                alias: None,
-            },
-            ProjectionColumn {
-                ty: Type::Constructor(Value(Native(NativeValue(None)))),
-                alias: None,
-            },
-        ])));
+        let left = Type::Constructor(Projection(crate::unifier::Projection::WithColumns(
+            ProjectionColumns(vec![
+                ProjectionColumn {
+                    ty: Type::Constructor(Value(Native(NativeValue(None)))),
+                    alias: None,
+                },
+                ProjectionColumn {
+                    ty: Type::Constructor(Value(Native(NativeValue(None)))),
+                    alias: None,
+                },
+            ]),
+        )));
 
         // The RHS is a single projection that contains a projection column that contains a projection with two
         // projection columns.  This is how wildcard expansions is represented at the type level.
-        let right = Type::Constructor(Projection(ProjectionColumns(vec![ProjectionColumn {
-            ty: Type::Constructor(Projection(ProjectionColumns(vec![
-                ProjectionColumn {
-                    ty: Type::Constructor(Value(Native(NativeValue(None)))),
-                    alias: None,
-                },
-                ProjectionColumn {
-                    ty: Type::Constructor(Value(Native(NativeValue(None)))),
-                    alias: None,
-                },
-            ]))),
-            alias: None,
-        }])));
+        let right = Type::Constructor(Projection(crate::unifier::Projection::WithColumns(
+            ProjectionColumns(vec![ProjectionColumn {
+                ty: Type::Constructor(Projection(crate::unifier::Projection::WithColumns(
+                    ProjectionColumns(vec![
+                        ProjectionColumn {
+                            ty: Type::Constructor(Value(Native(NativeValue(None)))),
+                            alias: None,
+                        },
+                        ProjectionColumn {
+                            ty: Type::Constructor(Value(Native(NativeValue(None)))),
+                            alias: None,
+                        },
+                    ]),
+                ))),
+                alias: None,
+            }]),
+        )));
 
         let mut unifier = Unifier::new(DepMut::new(TypeRegistry::new()));
         let unified = unifier.unify(&left, &right).unwrap();
 
         assert_eq!(
             unified,
-            Type::Constructor(Projection(ProjectionColumns(vec![
-                ProjectionColumn {
-                    ty: Type::Constructor(Value(Native(NativeValue(None)))),
-                    alias: None
-                },
-                ProjectionColumn {
-                    ty: Type::Constructor(Value(Native(NativeValue(None)))),
-                    alias: None
-                },
-            ])))
+            Type::Constructor(Projection(crate::unifier::Projection::WithColumns(
+                ProjectionColumns(vec![
+                    ProjectionColumn {
+                        ty: Type::Constructor(Value(Native(NativeValue(None)))),
+                        alias: None
+                    },
+                    ProjectionColumn {
+                        ty: Type::Constructor(Value(Native(NativeValue(None)))),
+                        alias: None
+                    },
+                ])
+            )))
         );
     }
 }

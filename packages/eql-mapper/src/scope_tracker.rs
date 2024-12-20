@@ -7,7 +7,7 @@ use crate::inference::unifier::{Constructor, ProjectionColumn, Type};
 use crate::inference::TypeError;
 use crate::iterator_ext::IteratorExt;
 use crate::model::SqlIdent;
-use crate::unifier::ProjectionColumns;
+use crate::unifier::{Projection, ProjectionColumns};
 use crate::{NodeKey, Relation};
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -56,7 +56,9 @@ impl ScopeTracker<'_> {
 
     fn try_match_projection(ty: &Type) -> Result<ProjectionColumns, TypeError> {
         match ty {
-            Type::Constructor(Constructor::Projection(columns)) => Ok(columns.clone()),
+            Type::Constructor(Constructor::Projection(projection)) => Ok(ProjectionColumns(
+                Vec::from_iter(projection.columns().iter().cloned()),
+            )),
             other => Err(TypeError::Expected(format!(
                 "expected projection but got: {other}"
             ))),
@@ -125,15 +127,15 @@ impl Scope {
                 None => Err(ScopeError::NoMatch(String::from("empty scope"))),
             }
         } else {
-            let wildcard_ty: Vec<ProjectionColumn> = self
+            let columns: Vec<ProjectionColumn> = self
                 .relations
                 .iter()
                 .map(|r| ProjectionColumn::new(r.projection_type.clone(), None))
                 .collect();
 
-            Ok(Type::Constructor(Constructor::Projection(
-                ProjectionColumns(wildcard_ty),
-            )))
+            Ok(Type::Constructor(Constructor::Projection(Projection::new(
+                columns,
+            ))))
         }
     }
 

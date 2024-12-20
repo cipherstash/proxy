@@ -10,7 +10,7 @@ use crate::{
         TypeError, TypeRegistry,
     },
     model::{Schema, SchemaError},
-    unifier::ProjectionColumns,
+    unifier::{Projection, ProjectionColumns},
     Relation, ScopeError, ScopeTracker,
 };
 
@@ -48,8 +48,8 @@ impl<'ast> Importer<'ast> {
 
         self.scope_tracker.borrow_mut().add_relation(Relation {
             name: table_alias.clone(),
-            projection_type: Type::Constructor(Constructor::Projection(ProjectionColumns::from(
-                table.clone(),
+            projection_type: Type::Constructor(Constructor::Projection(Projection::WithColumns(
+                ProjectionColumns::from(table.clone()),
             ))),
         })?;
 
@@ -110,7 +110,7 @@ impl<'ast> Importer<'ast> {
                     scope_tracker.add_relation(Relation {
                         name: record_as.cloned().ok(),
                         projection_type: Type::Constructor(Constructor::Projection(
-                            ProjectionColumns::from(table.clone()),
+                            Projection::WithColumns(ProjectionColumns::from(table.clone())),
                         )),
                     })?;
                 }
