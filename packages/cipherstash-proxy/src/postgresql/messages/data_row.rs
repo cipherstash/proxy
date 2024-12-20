@@ -5,7 +5,7 @@ use crate::{
 };
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use std::io::Cursor;
-use tracing::debug;
+use tracing::{debug, info, warn};
 
 #[derive(Debug, Clone)]
 pub struct DataRow {
@@ -14,12 +14,16 @@ pub struct DataRow {
 
 #[derive(Debug, Clone)]
 pub struct DataColumn {
-    pub bytes: Option<BytesMut>,
+    bytes: Option<BytesMut>,
 }
 
 impl DataRow {
     pub fn to_ciphertext(&self) -> Result<Vec<Option<eql::Ciphertext>>, Error> {
         Ok(self.columns.iter().map(|col| col.into()).collect())
+    }
+
+    pub fn column_count(&self) -> usize {
+        self.columns.len()
     }
 
     fn len_of_columns(&self) -> usize {
@@ -29,6 +33,19 @@ impl DataRow {
             .iter()
             .map(|col| column_len_size + col.bytes.as_ref().map(|b| b.len()).unwrap_or(0))
             .sum()
+    }
+
+    pub fn update_from_ciphertext(
+        &mut self,
+        plaintexts: &[Option<eql::Plaintext>],
+    ) -> Result<(), Error> {
+        for (idx, pt) in plaintexts.iter().enumerate() {
+            if let Some(pt) = pt {
+                let bytes = pt.plaintext.as_bytes().to_vec();
+                self.columns[idx].rewrite(&bytes);
+            }
+        }
+        Ok(())
     }
 }
 
@@ -40,8 +57,31 @@ impl DataColumn {
     pub fn maybe_ciphertext(&self) -> bool {
         self.bytes
             .as_ref()
-            .map(|b| maybe_json(&b) || maybe_jsonb(&b))
-            .unwrap_or(false)
+            .map_or(false, |b| maybe_jsonb(&b) || maybe_json(&b))
+    }
+
+    pub fn rewrite(&mut self, b: &[u8]) {
+        if let Some(ref mut bytes) = self.bytes {
+            bytes.clear();
+
+            bytes.extend_from_slice(b);
+        }
+        // self.dirty = true;
+    }
+
+    ///
+    /// If the json format looks binary, returns a reference to the bytes without the jsonb header byte
+    ///
+    pub fn json_bytes(&self) -> Option<&[u8]> {
+        self.bytes.as_ref().map_or(None, |b| {
+            if maybe_jsonb(&b) {
+                Some(&b[1..])
+            } else if maybe_json(&b) {
+                Some(&b[0..])
+            } else {
+                None
+            }
+        })
     }
 }
 
@@ -127,20 +167,14 @@ impl TryFrom<DataColumn> for BytesMut {
 
 impl From<&DataColumn> for Option<eql::Ciphertext> {
     fn from(col: &DataColumn) -> Self {
-        match &col.bytes {
-            Some(bytes) => {
-                if !col.maybe_ciphertext() {
-                    return None;
+        match col.json_bytes() {
+            Some(bytes) => match serde_json::from_slice(bytes) {
+                Ok(ct) => Some(ct),
+                Err(e) => {
+                    debug!(error = e.to_string(), "Failed to parse parameter");
+                    None
                 }
-
-                match serde_json::from_slice(bytes) {
-                    Ok(ct) => Some(ct),
-                    Err(e) => {
-                        debug!(error = e.to_string(), "Failed to parse parameter");
-                        None
-                    }
-                }
-            }
+            },
             None => None,
         }
     }
