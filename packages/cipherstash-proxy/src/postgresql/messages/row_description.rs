@@ -24,6 +24,24 @@ pub struct RowDescriptionField {
     pub type_size: i16,
     pub type_modifier: i32,
     pub format_code: FormatCode,
+    dirty: bool,
+}
+
+impl RowDescription {
+    pub fn should_rewrite(&self) -> bool {
+        self.fields.iter().any(|f| f.should_rewrite())
+    }
+}
+
+impl RowDescriptionField {
+    pub fn rewrite_type_oid(&mut self, type_oid: postgres_types::Type) {
+        self.type_oid = type_oid;
+        self.dirty = true;
+    }
+
+    pub fn should_rewrite(&self) -> bool {
+        self.dirty
+    }
 }
 
 impl TryFrom<&BytesMut> for RowDescription {
@@ -91,7 +109,6 @@ impl TryFrom<&BytesMut> for RowDescriptionField {
         let mut cursor = Cursor::new(bytes);
 
         let name = cursor.read_string()?;
-        info!("name {}", name);
 
         let table_oid = cursor.get_i32();
         let table_column = cursor.get_i16();
@@ -112,6 +129,7 @@ impl TryFrom<&BytesMut> for RowDescriptionField {
             type_size,
             type_modifier,
             format_code,
+            dirty: false,
         })
     }
 }
