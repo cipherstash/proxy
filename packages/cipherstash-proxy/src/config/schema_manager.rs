@@ -116,6 +116,11 @@ pub async fn load_schema(config: &DatabaseConfig) -> Result<Schema, Error> {
         let _types: Vec<Option<String>> = table.get("column_types");
         let domains: Vec<Option<String>> = table.get("column_domains");
 
+        let columns: Vec<String> = columns
+            .into_iter()
+            .filter(|col| !primary_keys.contains(col))
+            .collect();
+
         let mut table = Table::new(Ident::new(table_name));
 
         columns.iter().zip(domains).for_each(|(col, domain)| {
