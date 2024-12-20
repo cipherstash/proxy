@@ -14,24 +14,15 @@ pub const PROTOCOL: &str = "protocol";
 
 pub const KEYSET: &str = "keyset";
 
-pub enum Target {
-    Protocol,
-}
-
-impl Display for Target {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Target::Protocol => write!(f, "protocol"),
-        }
-    }
-}
-
 pub fn init() {
     INIT.call_once(|| {
         // TODO: assign level from args
         let log_level: Directive = tracing::Level::DEBUG.into();
 
         let mut filter = EnvFilter::from_default_env().add_directive(log_level.to_owned());
+
+        let directive = format!("eql_mapper=error").parse().expect("ok");
+        filter = filter.add_directive(directive);
 
         let directive = format!("{}=info", DEVELOPMENT).parse().expect("ok");
         filter = filter.add_directive(directive);
