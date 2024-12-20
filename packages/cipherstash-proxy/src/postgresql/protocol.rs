@@ -73,14 +73,14 @@ pub async fn read_auth_message<S: AsyncRead + Unpin>(
     mut stream: S,
 ) -> Result<Authentication, Error> {
     let connection_timeout = Duration::from_millis(1000 * 10);
-    let message = read_message_with_timeout(&mut stream, connection_timeout).await?;
-    Authentication::try_from(&message.bytes)
+    let (_code, bytes) = read_message_with_timeout(&mut stream).await?;
+    Authentication::try_from(&bytes)
 }
 
 pub async fn read_message_with_timeout<S: AsyncRead + Unpin>(
     mut stream: S,
     connection_timeout: Duration,
-) -> Result<Message, Error> {
+) -> Result<(Code, BytesMut), Error> {
     timeout(connection_timeout, read_message(&mut stream)).await?
 }
 
@@ -91,12 +91,9 @@ pub async fn read_message_with_timeout<S: AsyncRead + Unpin>(
 /// Byte is then passed as `code` to this function to preserve the message structure
 ///
 ///
-pub async fn read_message<S: AsyncRead + Unpin>(mut stream: S) -> Result<Message, Error> {
+pub async fn read_message<S: AsyncRead + Unpin>(mut stream: S) -> Result<(Code, BytesMut), Error> {
     let code = stream.read_u8().await?;
-    // debug!("[read_message] code: {}", code as char);
     let len = stream.read_i32().await?;
-    // debug!("[read_message] len: {len}");
-    // debug!("[read_message] code: {code}, len: {len}");
 
     // Detect unexpected message len and avoid panic on read_exact
     // Len must be at least 4 bytes (4 bytes for len/i32)
@@ -123,9 +120,7 @@ pub async fn read_message<S: AsyncRead + Unpin>(mut stream: S) -> Result<Message
 
     stream.read_exact(&mut bytes[slice_start..]).await?;
 
-    let message = Message { code, bytes };
+    debug!(target: PROTOCOL, "Code[{}] {bytes:?}", code as char);
 
-    debug!(target: PROTOCOL, "{message:?}");
-
-    Ok(message)
+    Ok((code, bytes))
 }

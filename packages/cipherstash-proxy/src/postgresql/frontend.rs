@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use super::context::{self, Context};
+use super::messages::bind::Bind;
 use super::messages::parse::Parse;
 use super::messages::FrontendCode as Code;
 use super::protocol::{self, Message};
@@ -47,10 +48,6 @@ where
     }
 
     pub async fn rewrite(&mut self) -> Result<(), Error> {
-        if self.encrypt.config.disable_mapping() {
-            warn!(DEVELOPMENT, "Mapping is not enabled");
-            return Ok(());
-        }
         let bytes = self.read().await?;
         self.write(bytes).await?;
         Ok(())
@@ -63,14 +60,14 @@ where
 
     pub async fn read(&mut self) -> Result<BytesMut, Error> {
         let connection_timeout = self.encrypt.config.database.connection_timeout();
-        let mut message =
+        let (code, mut bytes) =
             protocol::read_message_with_timeout(&mut self.client, connection_timeout).await?;
 
-        match message.code.into() {
+        match code.into() {
             Code::Query => {}
             Code::Parse => {
-                match self.parse_handler(&message).await {
-                    Ok(Some(bytes)) => message.bytes = bytes,
+                match self.parse_handler(&bytes).await {
+                    Ok(Some(b)) => bytes = b,
                     Ok(None) => (),
                     Err(e) => {
                         debug!("error parsing query: {}", e);
@@ -80,28 +77,32 @@ where
                         let content =
                             format!("DO $$ begin raise exception {quoted_error}; END; $$;");
                         let query = Query { statement: content };
-                        message.bytes = BytesMut::try_from(query)?;
+                        bytes = BytesMut::try_from(query)?;
                         debug!(
                             "frontend sending an exception-raising message: {:?}",
-                            &message.bytes
+                            &bytes
                         );
                         // TODO: should some errors be bubbled up with `Err(e)?`
                     }
                 }
             }
             Code::Bind => {
-                if let Some(bytes) = self.bind_handler(&message).await? {
-                    message.bytes = bytes;
+                if let Some(b) = self.bind_handler(&bytes).await? {
+                    bytes = b;
                 }
             }
             _code => {}
         }
 
-        Ok(message.bytes)
+        Ok(bytes)
     }
 
-    async fn parse_handler(&mut self, message: &Message) -> Result<Option<BytesMut>, Error> {
-        let mut parse = Parse::try_from(&message.bytes)?;
+    async fn parse_handler(&mut self, bytes: &BytesMut) -> Result<Option<BytesMut>, Error> {
+        if self.encrypt.config.disable_mapping() {
+            return Ok(None);
+        }
+
+        let mut parse = Parse::try_from(bytes)?;
 
         let statement = Parser::new(&DIALECT)
             .try_with_sql(&parse.statement)?
@@ -166,8 +167,20 @@ where
             .collect::<Result<Vec<_>, _>>()?)
     }
 
-    async fn bind_handler(&mut self, _message: &Message) -> Result<Option<BytesMut>, Error> {
-        Ok(None)
+    async fn bind_handler(&mut self, bytes: &BytesMut) -> Result<Option<BytesMut>, Error> {
+        let mut bind = Bind::try_from(bytes)?;
+
+        let params = bind.to_plaintext()?;
+        let encrypted = self.encrypt.encrypt(params).await?;
+
+        bind.update_from_ciphertext(encrypted)?;
+
+        if bind.should_rewrite() {
+            let bytes = BytesMut::try_from(bind)?;
+            Ok(Some(bytes))
+        } else {
+            Ok(None)
+        }
     }
 }
 
