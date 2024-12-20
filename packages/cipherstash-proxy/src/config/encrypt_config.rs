@@ -153,11 +153,11 @@ impl EncryptConfig {
     pub fn to_config_map(self) -> HashMap<eql::Identifier, ColumnConfig> {
         let mut map = HashMap::new();
         for (table_name, columns) in self.tables.into_iter() {
-            debug!(target: KEYSET, "Configured table: {table_name}");
-
-            for (col_name, column) in columns.into_iter() {
-                let column_config = column.into_column_config(&Ident::with_quote('"', &col_name));
-                let key = eql::Identifier::new(&table_name, &col_name);
+            for (column_name, column) in columns.into_iter() {
+                debug!(target: KEYSET, "Configured column: {table_name}.{column_name}");
+                let column_config =
+                    column.into_column_config(&Ident::with_quote('"', &column_name));
+                let key = eql::Identifier::new(&table_name, &column_name);
                 map.insert(key, column_config);
             }
         }
