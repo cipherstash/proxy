@@ -199,6 +199,7 @@ impl Column {
 
 #[cfg(test)]
 mod tests {
+    use eql::Identifier;
     use serde_json::json;
 
     use super::*;
@@ -221,11 +222,10 @@ mod tests {
         });
 
         let encrypt_config = parse(json);
-        let ident = &eql::Identifier {
-            table: Ident::with_quote('"', "users"),
-            column: Ident::with_quote('"', "email"),
-        };
-        let column = encrypt_config.get(ident).expect("column exists");
+
+        let ident = Identifier::new("users", "email");
+
+        let column = encrypt_config.get(&ident).expect("column exists");
 
         assert_eq!(column.cast_type, ColumnType::Utf8Str);
         assert!(column.indexes.is_empty());
@@ -245,11 +245,10 @@ mod tests {
         });
 
         let encrypt_config = parse(json);
-        let ident = &eql::Identifier {
-            table: Ident::with_quote('"', "users"),
-            column: Ident::with_quote('"', "favourite_int"),
-        };
-        let column = encrypt_config.get(ident).expect("column exists");
+
+        let ident = Identifier::new("users", "favourite_int");
+
+        let column = encrypt_config.get(&ident).expect("column exists");
 
         assert_eq!(column.cast_type, ColumnType::Int);
         assert_eq!(column.name, "\"favourite_int\"");
@@ -270,11 +269,10 @@ mod tests {
         });
 
         let encrypt_config = parse(json);
-        let ident = &eql::Identifier {
-            table: Ident::with_quote('"', "users"),
-            column: Ident::with_quote('"', "email"),
-        };
-        let column = encrypt_config.get(ident).expect("column exists");
+
+        let ident = Identifier::new("users", "email");
+
+        let column = encrypt_config.get(&ident).expect("column exists");
 
         assert!(column.indexes.is_empty());
     }
@@ -295,11 +293,10 @@ mod tests {
         });
 
         let encrypt_config = parse(json);
-        let ident = &eql::Identifier {
-            table: Ident::with_quote('"', "users"),
-            column: Ident::with_quote('"', "email"),
-        };
-        let column = encrypt_config.get(ident).expect("column exists");
+
+        let ident = Identifier::new("users", "email");
+
+        let column = encrypt_config.get(&ident).expect("column exists");
 
         assert_eq!(column.indexes[0].index_type, IndexType::Ore);
     }
@@ -320,11 +317,10 @@ mod tests {
         });
 
         let encrypt_config = parse(json);
-        let ident = &eql::Identifier {
-            table: Ident::with_quote('"', "users"),
-            column: Ident::with_quote('"', "email"),
-        };
-        let column = encrypt_config.get(ident).expect("column exists");
+
+        let ident = Identifier::new("users", "email");
+
+        let column = encrypt_config.get(&ident).expect("column exists");
 
         assert_eq!(
             column.indexes[0].index_type,
@@ -356,11 +352,10 @@ mod tests {
         });
 
         let encrypt_config = parse(json);
-        let ident = &eql::Identifier {
-            table: Ident::with_quote('"', "users"),
-            column: Ident::with_quote('"', "email"),
-        };
-        let column = encrypt_config.get(ident).expect("column exists");
+
+        let ident = Identifier::new("users", "email");
+
+        let column = encrypt_config.get(&ident).expect("column exists");
 
         assert_eq!(
             column.indexes[0].index_type,
@@ -386,11 +381,10 @@ mod tests {
         });
 
         let encrypt_config = parse(json);
-        let ident = &eql::Identifier {
-            table: Ident::with_quote('"', "users"),
-            column: Ident::with_quote('"', "email"),
-        };
-        let column = encrypt_config.get(ident).expect("column exists");
+
+        let ident = Identifier::new("users", "email");
+
+        let column = encrypt_config.get(&ident).expect("column exists");
 
         assert_eq!(
             column.indexes[0].index_type,
@@ -433,11 +427,10 @@ mod tests {
         });
 
         let encrypt_config = parse(json);
-        let ident = &eql::Identifier {
-            table: Ident::with_quote('"', "users"),
-            column: Ident::with_quote('"', "email"),
-        };
-        let column = encrypt_config.get(ident).expect("column exists");
+
+        let ident = Identifier::new("users", "email");
+
+        let column = encrypt_config.get(&ident).expect("column exists");
 
         assert_eq!(
             column.indexes[0].index_type,
@@ -469,11 +462,10 @@ mod tests {
         });
 
         let encrypt_config = parse(json);
-        let ident = &eql::Identifier {
-            table: Ident::with_quote('"', "users"),
-            column: Ident::with_quote('"', "event_data"),
-        };
-        let column = encrypt_config.get(ident).expect("column exists");
+
+        let ident = Identifier::new("users", "event_data");
+
+        let column = encrypt_config.get(&ident).expect("column exists");
 
         assert_eq!(
             column.indexes[0].index_type,

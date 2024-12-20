@@ -13,47 +13,69 @@ pub struct Plaintext {
     #[serde(rename = "q")]
     pub for_query: Option<ForQuery>,
 }
-
 #[derive(Clone, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
 pub struct Identifier {
-    #[serde(
-        rename = "t",
-        deserialize_with = "ident_de",
-        serialize_with = "ident_se"
-    )]
-    pub table: Ident,
-    #[serde(
-        rename = "c",
-        deserialize_with = "ident_de",
-        serialize_with = "ident_se"
-    )]
-    pub column: Ident,
+    pub table: String,
+    pub column: String,
 }
 
-fn ident_de<'de, D>(deserializer: D) -> Result<Ident, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    let s = String::deserialize(deserializer)?;
-    Ok(Ident::with_quote('"', s))
-}
+impl Identifier {
+    pub fn new<S>(table: S, column: S) -> Self
+    where
+        S: Into<String>,
+    {
+        let table = table.into();
+        let column = column.into();
 
-fn ident_se<S>(ident: &Ident, serializer: S) -> Result<S::Ok, S::Error>
-where
-    S: Serializer,
-{
-    let s = ident.to_string();
-    serializer.serialize_str(&s)
+        Self { table, column }
+    }
 }
 
 impl From<(&Ident, &Ident)> for Identifier {
     fn from((table, column): (&Ident, &Ident)) -> Self {
         Self {
-            table: table.to_owned(),
-            column: column.to_owned(),
+            table: table.to_string(),
+            column: column.to_string(),
         }
     }
 }
+
+// #[derive(Clone, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
+// pub struct Identifier {
+//     #[serde(
+//         rename = "t",
+//         deserialize_with = "ident_de",
+//         serialize_with = "ident_se"
+//     )]
+//     pub table: Ident,
+//     #[serde(
+//         rename = "c",
+//         deserialize_with = "ident_de",
+//         serialize_with = "ident_se"
+//     )]
+//     pub column: Ident,
+// }
+
+// impl Identifier {
+//     pub fn new<S>(table: S, column: S) -> Self
+//     where
+//         S: Into<String>,
+//     {
+//         let table = Ident::with_quote('"', table);
+//         let column = Ident::with_quote('"', column);
+
+//         Self { table, column }
+//     }
+// }
+
+// impl From<(&Ident, &Ident)> for Identifier {
+//     fn from((table, column): (&Ident, &Ident)) -> Self {
+//         Self {
+//             table: table.to_owned(),
+//             column: column.to_owned(),
+//         }
+//     }
+// }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -101,4 +123,20 @@ impl Ciphertext {
     pub fn default_kind() -> String {
         "ct".to_string()
     }
+}
+
+fn ident_de<'de, D>(deserializer: D) -> Result<Ident, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let s = String::deserialize(deserializer)?;
+    Ok(Ident::with_quote('"', s))
+}
+
+fn ident_se<S>(ident: &Ident, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+{
+    let s = ident.to_string();
+    serializer.serialize_str(&s)
 }
