@@ -1,3 +1,4 @@
+use super::context::Context;
 use super::messages::error_response::ErrorResponse;
 use super::messages::BackendCode;
 use super::protocol::Message;
@@ -17,6 +18,7 @@ where
     client: C,
     server: S,
     encrypt: Encrypt,
+    context: Context,
 }
 
 impl<C, S> Backend<C, S>
@@ -24,11 +26,13 @@ where
     C: AsyncWrite + Unpin,
     S: AsyncRead + Unpin,
 {
-    pub fn new(client: C, server: S, encrypt: Encrypt) -> Self {
+    pub fn new(client: C, server: S, encrypt: Encrypt, context: Context) -> Self {
+        let buffer = MessageBuffer::new();
         Backend {
             client,
             server,
             encrypt,
+            context,
         }
     }
 

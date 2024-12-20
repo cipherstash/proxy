@@ -1,6 +1,9 @@
 use eql_mapper::{Projection, Value};
 use sqlparser::ast;
-use std::collections::HashMap;
+use std::{
+    collections::HashMap,
+    sync::{Arc, RwLock},
+};
 
 use super::messages::Destination;
 
@@ -49,25 +52,30 @@ impl Statement {
 
 #[derive(Debug, Clone)]
 pub struct Context {
-    statements: HashMap<Destination, Statement>,
+    statements: Arc<RwLock<HashMap<Destination, Statement>>>,
 }
 
 impl Context {
     pub fn new() -> Context {
         Context {
-            statements: HashMap::new(),
+            statements: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
     pub fn add(&mut self, key: Destination, statement: Statement) {
-        self.statements.insert(key, statement);
+        let mut lock = self.statements.write().unwrap();
+        lock.insert(key, statement);
     }
 
-    pub fn get(&mut self, key: &Destination) -> Option<&Statement> {
-        self.statements.get(key)
+    // TODO Remove cloning
+    // We can probably do work INSIDE the context
+    pub fn get(&mut self, key: &Destination) -> Option<Statement> {
+        let lock = self.statements.read().unwrap();
+        lock.get(key).cloned()
     }
 
     pub fn remove(&mut self, key: &Destination) -> Option<Statement> {
-        self.statements.remove(key)
+        let mut lock = self.statements.write().unwrap();
+        lock.remove(key)
     }
 }

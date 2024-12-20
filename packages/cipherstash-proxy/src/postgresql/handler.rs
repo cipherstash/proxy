@@ -212,8 +212,20 @@ pub async fn handler(client_stream: AsyncStream, encrypt: Encrypt) -> Result<(),
     let (client_reader, client_writer) = split(client_stream);
     let (server_reader, server_writer) = split(database_stream);
 
-    let mut frontend = Frontend::new(client_reader, server_writer, encrypt.clone());
-    let mut backend = Backend::new(client_writer, server_reader, encrypt.clone());
+    let context = Context::new();
+
+    let mut frontend = Frontend::new(
+        client_reader,
+        server_writer,
+        encrypt.clone(),
+        context.clone(),
+    );
+    let mut backend = Backend::new(
+        client_writer,
+        server_reader,
+        encrypt.clone(),
+        context.clone(),
+    );
 
     let client_to_server = async {
         loop {

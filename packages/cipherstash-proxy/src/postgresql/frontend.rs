@@ -37,8 +37,7 @@ where
     C: AsyncRead + Unpin,
     S: AsyncWrite + Unpin,
 {
-    pub fn new(client: C, server: S, encrypt: Encrypt) -> Self {
-        let context = Context::new();
+    pub fn new(client: C, server: S, encrypt: Encrypt, context: Context) -> Self {
         Frontend {
             client,
             server,
