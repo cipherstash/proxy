@@ -4,6 +4,7 @@ use std::{
 
 use sqlparser::ast::{self as ast, Statement};
 use sqltk::{convert_control_flow, Break, Transform, Transformable, Visitable, Visitor};
+use tracing::info;
 
 use crate::{
     inference::{unifier, TypeError, TypeInferencer},
@@ -217,12 +218,16 @@ impl<'ast> EqlMapper<'ast> {
             .iter()
             .map(|(param, ty)| {
                 Value::try_from(ty).and_then(|ty| {
-                    param.parse().map(|idx| (idx, ty)).map_err(|_| {
-                        EqlMapperError::InternalError(format!(
-                            "failed to parse param placeholder '{}'",
-                            param
-                        ))
-                    })
+                    param
+                        .replace("$", "")
+                        .parse()
+                        .map(|idx| (idx, ty))
+                        .map_err(|_| {
+                            EqlMapperError::InternalError(format!(
+                                "failed to parse param placeholder '{}'",
+                                param
+                            ))
+                        })
                 })
             })
             .collect::<Result<Vec<_>, _>>()?;
@@ -375,6 +380,7 @@ mod test {
     use std::collections::HashMap;
 
     use pretty_assertions::assert_eq;
+    use tracing::info;
 
     use crate::{
         schema, Dep, EqlValue, NativeValue, Projection, ProjectionColumn, TableColumn, Value,
@@ -474,6 +480,122 @@ mod test {
                     typed.statement_type,
                     Some(projection![(NATIVE(users.email) as email)])
                 )
+            }
+            Err(err) => panic!("type check failed: {err}"),
+        }
+    }
+
+    #[test]
+    fn basic_with_placeholder() {
+        let _ = tracing_subscriber::fmt::try_init();
+        let schema = Dep::new(schema! {
+            tables: {
+                users: {
+                    id (PK),
+                    email,
+                    first_name,
+                }
+            }
+        });
+
+        let statement = parse("select email from users WHERE id = $1");
+
+        match type_check(&schema, &statement) {
+            Ok(typed) => {
+                let v = Value::Native(NativeValue(Some(TableColumn {
+                    table: id("users"),
+                    column: id("id"),
+                })));
+
+                let param = typed.params.get(0).unwrap();
+
+                assert_eq!(param, &v);
+
+                assert_eq!(
+                    typed.statement_type,
+                    Some(projection![(NATIVE(users.email) as email)])
+                );
+            }
+            Err(err) => panic!("type check failed: {err}"),
+        }
+    }
+
+    #[test]
+    fn select_with_multiple_placeholder() {
+        let _ = tracing_subscriber::fmt::try_init();
+        let schema = Dep::new(schema! {
+            tables: {
+                users: {
+                    id (PK),
+                    email,
+                    first_name,
+                }
+            }
+        });
+
+        let statement =
+            parse("select id, email, first_name from users WHERE email = $1 AND first_name = $2");
+
+        match type_check(&schema, &statement) {
+            Ok(typed) => {
+                let a = Value::Native(NativeValue(Some(TableColumn {
+                    table: id("users"),
+                    column: id("email"),
+                })));
+
+                let b = Value::Native(NativeValue(Some(TableColumn {
+                    table: id("users"),
+                    column: id("first_name"),
+                })));
+
+                assert_eq!(typed.params, vec![a, b]);
+
+                assert_eq!(
+                    typed.statement_type,
+                    Some(projection![
+                        (NATIVE(users.id) as id),
+                        (NATIVE(users.email) as email),
+                        (NATIVE(users.first_name) as first_name)
+                    ])
+                );
+            }
+            Err(err) => panic!("type check failed: {err}"),
+        }
+    }
+
+    #[test]
+    fn select_with_multiple_instances_of_placeholder() {
+        let _ = tracing_subscriber::fmt::try_init();
+        let schema = Dep::new(schema! {
+            tables: {
+                users: {
+                    id (PK),
+                    email,
+                    first_name,
+                }
+            }
+        });
+
+        let statement =
+            parse("select id, email, first_name from users WHERE email = $1 OR first_name = $1");
+
+        match type_check(&schema, &statement) {
+            Ok(typed) => {
+                let a = Value::Native(NativeValue(Some(TableColumn {
+                    table: id("users"),
+                    column: id("email"),
+                })));
+
+                assert_eq!(typed.params, vec![a]);
+
+                assert_eq!(
+                    typed.statement_type,
+                    Some(projection![
+                        (NATIVE(users.id) as id),
+                        (NATIVE(users.email) as email),
+                        (NATIVE(users.first_name) as first_name)
+                    ])
+                );
             }
             Err(err) => panic!("type check failed: {err}"),
         }
