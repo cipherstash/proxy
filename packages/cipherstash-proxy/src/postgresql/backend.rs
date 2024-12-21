@@ -1,14 +1,20 @@
 use super::context::Context;
+use super::message_buffer::MessageBuffer;
 use super::messages::error_response::ErrorResponse;
+use super::messages::row_description::RowDescription;
 use super::messages::BackendCode;
 use super::protocol::Message;
 use crate::encrypt::Encrypt;
+use crate::eql::Ciphertext;
 use crate::error::Error;
 use crate::log::DEVELOPMENT;
+use crate::postgresql::messages::data_row::DataRow;
 use crate::postgresql::protocol::{self};
 use bytes::BytesMut;
+use itertools::Itertools;
+use std::collections;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
-use tracing::{error, warn};
+use tracing::{debug, error, info, warn};
 
 pub struct Backend<C, S>
 where
@@ -19,6 +25,7 @@ where
     server: S,
     encrypt: Encrypt,
     context: Context,
+    buffer: MessageBuffer,
 }
 
 impl<C, S> Backend<C, S>
@@ -33,6 +40,7 @@ where
             server,
             encrypt,
             context,
+            buffer,
         }
     }
 
@@ -54,43 +62,121 @@ where
     pub async fn read(&mut self) -> Result<BytesMut, Error> {
         // info!("[backend] read");
         let connection_timeout = self.encrypt.config.database.connection_timeout();
-        let message =
+
+        let (code, bytes) =
             protocol::read_message_with_timeout(&mut self.server, connection_timeout).await?;
 
-        match message.code.into() {
-            BackendCode::Authentication => {}
-
+        match code.into() {
             BackendCode::DataRow => {
-                // debug!("DataRow");
+                let data_row = DataRow::try_from(&bytes)?;
+                self.buffer(data_row).await?;
             }
             BackendCode::ErrorResponse => {
-                let _ = self.error_response_handler(&message)?;
+                self.error_response_handler(&bytes)?;
+                self.write(bytes).await?;
             }
             BackendCode::RowDescription => {
-                // debug!("RowDescription");
+                if let Some(bytes) = self.row_description_handler(&bytes).await? {
+                    self.write(bytes).await?;
+                } else {
+                    self.write(bytes).await?;
+                }
             }
             _ => {
-                // debug!("Backend {code:?}");
+                self.write(bytes).await?;
             }
         }
 
-        Ok(message.bytes)
-    }
-
-    pub async fn write(&mut self, bytes: BytesMut) -> Result<(), Error> {
-        self.client.write_all(&bytes).await?;
         Ok(())
     }
 
     ///
     /// Handle error response messages
-    /// Error Responses are not rewritten, we log the error and return None
+    /// Error Responses are not rewritten, we log the error for ease of use
     ///
-    ///
-    fn error_response_handler(&mut self, message: &Message) -> Result<Option<BytesMut>, Error> {
-        let error_response = ErrorResponse::try_from(&message.bytes)?;
+    fn error_response_handler(&mut self, bytes: &BytesMut) -> Result<(), Error> {
+        let error_response = ErrorResponse::try_from(bytes)?;
         error!("{}", error_response);
         warn!("Error response originates in the PostgreSQL database.");
-        Ok(None)
+        Ok(())
+    }
+
+    ///
+    /// DataRows are buffered so that Decryption can be batched
+    /// Decryption will occur
+    ///  - on direct call to flush()
+    ///  - when the buffer is full
+    ///  - when any other message type is written
+    ///
+    async fn buffer(&mut self, data_row: DataRow) -> Result<(), Error> {
+        self.buffer.push(data_row).await;
+        if self.buffer.at_capacity().await {
+            debug!(target: DEVELOPMENT, "Flush message buffer");
+            self.flush().await?;
+        }
+        Ok(())
+    }
+
+    ///
+    /// Write a message to the client
+    ///
+    /// Flushes any nessages in the buffer before writing the message
+    ///
+    pub async fn write(&mut self, bytes: BytesMut) -> Result<(), Error> {
+        self.flush().await?;
+        self.client.write_all(&bytes).await?;
+
+        Ok(())
+    }
+
+    ///
+    /// Flush all buffered DataRow messages
+    ///
+    /// Decrypts any configured column values and writes the decrypted values to the client
+    ///
+    async fn flush(&mut self) -> Result<(), Error> {
+        let rows: Vec<DataRow> = self.buffer.drain().await.into_iter().collect();
+
+        let row_len = match rows.first() {
+            Some(row) => row.column_count(),
+            None => return Ok(()),
+        };
+
+        let ciphertexts: Vec<Option<Ciphertext>> = rows
+            .iter()
+            .map(|row| row.to_ciphertext())
+            .flatten_ok()
+            .collect::<Result<Vec<_>, _>>()?;
+
+        let plaintexts = self.encrypt.decrypt(ciphertexts).await?;
+
+        let rows = plaintexts.chunks(row_len).into_iter().zip(rows);
+        for (chunk, mut row) in rows {
+            row.update_from_ciphertext(chunk)?;
+
+            let bytes = BytesMut::try_from(row)?;
+            self.client.write_all(&bytes).await?;
+        }
+
+        Ok(())
+    }
+
+    async fn row_description_handler(&self, bytes: &BytesMut) -> Result<Option<BytesMut>, Error> {
+        let mut row_description = RowDescription::try_from(bytes)?;
+
+        debug!("RowDescription: {:?}", row_description);
+
+        row_description.fields.iter_mut().for_each(|field| {
+            if field.name == "email" {
+                field.rewrite_type_oid(postgres_types::Type::TEXT);
+            }
+        });
+
+        if row_description.should_rewrite() {
+            let bytes = BytesMut::try_from(row_description)?;
+            Ok(Some(bytes))
+        } else {
+            Ok(None)
+        }
     }
 }

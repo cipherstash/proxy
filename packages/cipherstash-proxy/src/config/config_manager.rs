@@ -78,7 +78,7 @@ async fn init_reloader(config: DatabaseConfig) -> Result<EncryptConfigManager, E
 
             match load_encrypt_config_with_retry(&config_ref).await {
                 Ok(reloaded) => {
-                    debug!(DEVELOPMENT, "Reloaded Encrypt config");
+                    debug!(target = DEVELOPMENT, "Reloaded Encrypt config");
                     dataset_ref.swap(Arc::new(reloaded));
                 }
                 Err(e) => {

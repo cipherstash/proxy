@@ -5,7 +5,7 @@ use common::database_config;
 use sqlparser::ast::Ident;
 
 #[tokio::test]
-async fn integration_load_schema() {
+async fn integrate_load_schema() {
     log::init();
 
     let config = database_config();

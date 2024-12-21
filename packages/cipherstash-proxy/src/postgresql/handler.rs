@@ -3,6 +3,7 @@ use super::frontend::Frontend;
 use super::protocol::StartupCode;
 use crate::error::ConfigError;
 use crate::log::{AUTHENTICATION, PROTOCOL};
+use crate::postgresql::context::Context;
 use crate::postgresql::messages::authentication::auth::{AuthenticationMethod, SaslMechanism};
 use crate::postgresql::messages::authentication::sasl::SASLResponse;
 use crate::postgresql::messages::authentication::{
@@ -20,7 +21,6 @@ use bytes::BytesMut;
 use md5::{Digest, Md5};
 use postgres_protocol::authentication::sasl::{ChannelBinding, ScramSha256};
 use rand::Rng;
-
 use tokio::io::{split, AsyncRead, AsyncWrite, AsyncWriteExt};
 use tracing::{debug, error, info};
 
@@ -126,10 +126,10 @@ pub async fn handler(client_stream: AsyncStream, encrypt: Encrypt) -> Result<(),
         client_stream.write_all(&bytes).await?;
 
         let connection_timeout = encrypt.config.database.connection_timeout();
-        let message =
+        let (_code, bytes) =
             protocol::read_message_with_timeout(&mut client_stream, connection_timeout).await?;
 
-        let password_message = PasswordMessage::try_from(&message.bytes)?;
+        let password_message = PasswordMessage::try_from(&bytes)?;
 
         if hash == password_message.password {
             let message = Authentication::authentication_ok();

@@ -10,9 +10,9 @@ pub const AUTHENTICATION: &str = "authentication";
 // Messages related to the various hidden "development mode" messages
 pub const DEVELOPMENT: &str = "development";
 
-pub const PROTOCOL: &str = "protocol";
-
 pub const KEYSET: &str = "keyset";
+pub const PROTOCOL: &str = "protocol";
+pub const MAPPER: &str = "mapper";
 
 pub fn init() {
     INIT.call_once(|| {
@@ -21,21 +21,26 @@ pub fn init() {
 
         let mut filter = EnvFilter::from_default_env().add_directive(log_level.to_owned());
 
-        let directive = format!("eql_mapper=error").parse().expect("ok");
-        filter = filter.add_directive(directive);
-
-        let directive = format!("{}=info", DEVELOPMENT).parse().expect("ok");
-        filter = filter.add_directive(directive);
-
-        let directive = format!("{}=info", PROTOCOL).parse().expect("ok");
-        filter = filter.add_directive(directive);
-
-        let directive = format!("{}={log_level}", KEYSET).parse().expect("ok");
+        let directive = format!("eql_mapper={log_level}").parse().expect("ok");
         filter = filter.add_directive(directive);
 
         let directive = format!("{}={log_level}", AUTHENTICATION)
             .parse()
             .expect("ok");
+        filter = filter.add_directive(directive);
+
+        let log_level: Directive = tracing::Level::INFO.into();
+        let directive = format!("{}={log_level}", DEVELOPMENT).parse().expect("ok");
+        filter = filter.add_directive(directive);
+
+        let directive = format!("{}={log_level}", KEYSET).parse().expect("ok");
+        filter = filter.add_directive(directive);
+
+        let directive = format!("{}={log_level}", MAPPER).parse().expect("ok");
+        filter = filter.add_directive(directive);
+
+        let log_level: Directive = tracing::Level::INFO.into();
+        let directive = format!("{}={log_level}", PROTOCOL).parse().expect("ok");
         filter = filter.add_directive(directive);
 
         let subscriber = FmtSubscriber::builder()

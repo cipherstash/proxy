@@ -10,7 +10,7 @@ use tracing::info;
 /// Sanity test to check if the database connection is working with TLS
 ///
 #[tokio::test]
-async fn integration_connect_proxy_with_tls() {
+async fn integrate_connect_proxy_with_tls() {
     log::init();
 
     let config = database_config_with_port(PROXY);
@@ -33,7 +33,7 @@ async fn integration_connect_proxy_with_tls() {
 /// Sanity test to check if the database connection is working with TLS
 ///
 // #[tokio::test]
-async fn integration_sanity_check_database_with_tls() {
+async fn integrate_sanity_check_database_with_tls() {
     log::init();
 
     let config = database_config_with_port(PG_V17_TLS);

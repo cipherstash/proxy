@@ -116,7 +116,6 @@ impl TryFrom<&BytesMut> for DataRow {
                 let mut bytes = BytesMut::with_capacity(len);
                 bytes.resize(len, 0);
                 cursor.copy_to_slice(&mut bytes);
-                // let data = cursor.copy_to_bytes(len as usize);
                 columns.push(DataColumn { bytes: Some(bytes) });
             }
         }
@@ -182,46 +181,79 @@ impl From<&DataColumn> for Option<eql::Ciphertext> {
 
 #[cfg(test)]
 mod tests {
-    use crate::postgresql::messages::data_row::DataColumn;
+    use crate::{
+        eql::{Identifier, Plaintext},
+        log,
+        postgresql::messages::data_row::DataColumn,
+    };
 
     use super::DataRow;
-    use bytes::{Buf, Bytes, BytesMut};
+    use bytes::{Buf, BytesMut};
+    use cipherstash_client::zerokms::EncryptedRecord;
+    use recipher::key::Iv;
+    use sqlparser::ast::Ident;
+    use tracing::info;
+    use uuid::Uuid;
 
     fn to_message(s: &[u8]) -> BytesMut {
         BytesMut::from(s)
     }
+    fn record() -> EncryptedRecord {
+        EncryptedRecord {
+            iv: Iv::default(),
+            ciphertext: vec![1; 32],
+            tag: vec![1; 16],
+            descriptor: "users/name".to_string(),
+            dataset_id: Some(Uuid::new_v4()),
+        }
+    }
 
     #[test]
-    pub fn data_row_column_len() {
-        let column = DataColumn { bytes: None };
-        let data_row = DataRow {
-            columns: vec![column],
-        };
-        assert_eq!(data_row.len_of_columns(), 4);
+    pub fn data_row_to_ciphertext() {
+        log::init();
 
-        let data = BytesMut::from("");
-        let column = DataColumn { bytes: Some(data) };
-        let data_row = DataRow {
-            columns: vec![column],
-        };
-        assert_eq!(data_row.len_of_columns(), 4);
+        let record = record();
 
-        let data = BytesMut::from("blah");
-        let column = DataColumn { bytes: Some(data) };
-        let data_row = DataRow {
-            columns: vec![column],
-        };
-        assert_eq!(data_row.len_of_columns(), 8);
+        let s = record.to_mp_base85().expect("ok");
+        info!("{:?}", s);
 
-        let mut columns = Vec::new();
-        for _ in 1..5 {
-            let data = BytesMut::from("blah");
-            let column = DataColumn { bytes: Some(data) };
-            columns.push(column);
-        }
-        let data_row = DataRow { columns };
-        assert_eq!(data_row.len_of_columns(), 32);
+        // "{\"c\": \"mBbKx=EbyVyx>mNt9E<k5A&(S8?o+de4F^|i^}7e3l4YE2r(f|W`0Und}s4|#2_A>;-h3xf8wDrq~v|IvQ=jXYG!u4Uu9SI)@Q+xmSd+PWo=<;Y$Ct\",\"k\": \"ct\",\"i\": {\"t\": \"\"users\"\",\"c\": \"\"email\"\"},\"v\": 1}";
+
+        let bytes = to_message(b"D\0\0\0i\0\x01\0\0\0_\x01{\"c\": \"mBbKx=EbyVyx>mNt9E<k5A&(S8?o+de4F^|i^}7e3l4YE2r(f|W`0Und}s4|#2_A>;-h3xf8wDrq~v|IvQ=jXYG!u4Uu9SI)@Q+xmSd+PWo=<;Y$Ct\",\"k\": \"ct\",\"i\": {\"t\": \"\"users\"\",\"c\": \"\"email\"\"},\"v\": 1}");
+        // let expected = bytes.clone();
+
+        let data_row = DataRow::try_from(&bytes).expect("ok");
+
+        // let ciphertext = data_row.to_ciphertext().expect("ok");
+
+        // let ct = ciphertext.first();
+        // assert!(ct.is_some());
+
+        // info!("{:?}", ciphertext.first());
+
+        // let column = ciphertext.first().unwrap().as_ref().unwrap();
+
+        // assert_eq!(column.kind, "ct");
     }
+
+    // #[test]
+    // pub fn data_column_to_json_bytes() {
+    //     log::init();
+    //     let bytes = to_message(b"D\0\0\0i\0\x01\0\0\0_\x01{\"c\": \"51b72947dc25481880175ef53a35af34\", \"i\": {\"c\": \"name\", \"t\": \"users\"}, \"k\": \"ct\", \"v\": 1}");
+    //     // let expected = bytes.clone();
+
+    //     let data_row = DataRow::try_from(&bytes).expect("ok");
+
+    //     let ciphertext = data_row.to_ciphertext().expect("ok");
+
+    //     info!("{:?}", data_row);
+
+    //     // info!("{:?}", ciphertext.first());
+
+    //     // let column = ciphertext.first().unwrap().as_ref().unwrap();
+
+    //     // assert_eq!(column.kind, "ct");
+    // }
 
     #[test]
     pub fn parse_data_row() {
@@ -264,5 +296,37 @@ mod tests {
         let data_col = data_row.columns.first().unwrap();
 
         assert_eq!(data_col.bytes, None);
+    }
+
+    #[test]
+    pub fn data_row_column_len() {
+        let column = DataColumn { bytes: None };
+        let data_row = DataRow {
+            columns: vec![column],
+        };
+        assert_eq!(data_row.len_of_columns(), 4);
+
+        let data = BytesMut::from("");
+        let column = DataColumn { bytes: Some(data) };
+        let data_row = DataRow {
+            columns: vec![column],
+        };
+        assert_eq!(data_row.len_of_columns(), 4);
+
+        let data = BytesMut::from("blah");
+        let column = DataColumn { bytes: Some(data) };
+        let data_row = DataRow {
+            columns: vec![column],
+        };
+        assert_eq!(data_row.len_of_columns(), 8);
+
+        let mut columns = Vec::new();
+        for _ in 1..5 {
+            let data = BytesMut::from("blah");
+            let column = DataColumn { bytes: Some(data) };
+            columns.push(column);
+        }
+        let data_row = DataRow { columns };
+        assert_eq!(data_row.len_of_columns(), 32);
     }
 }

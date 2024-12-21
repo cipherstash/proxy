@@ -10,7 +10,7 @@ use cipherstash_client::{
 };
 use cipherstash_config::ColumnConfig;
 use std::{sync::Arc, vec};
-use tracing::debug;
+use tracing::{debug, error, info};
 
 type ScopedCipher = encryption::ScopedCipher<AutoRefresh<ServiceCredentials>>;
 
@@ -59,7 +59,13 @@ impl Encrypt {
 
         for (idx, pt) in plaintexts.iter().enumerate() {
             if let Some(pt) = pt {
-                let column_config = self.column_config(pt)?;
+                // let column_config = self.column_config(pt)?;
+                let column_config = self.get_column_config(&pt.identifier).ok_or_else(|| {
+                    EncryptError::UnknownColumn {
+                        table: pt.identifier.table.to_string(),
+                        column: pt.identifier.column.to_string(),
+                    }
+                })?;
 
                 let pt = Plaintext::Utf8Str(Some(pt.plaintext.to_owned()));
                 let encryptable = PlaintextTarget::new(pt, column_config.clone(), None);
@@ -97,22 +103,61 @@ impl Encrypt {
         Ok(encrypted_eql)
     }
 
-    pub fn decrypt(&self, _ct: Vec<eql::Ciphertext>) -> Result<Vec<eql::Plaintext>, Error> {
-        Ok(vec![])
+    pub async fn decrypt(
+        &self,
+        ciphertexts: Vec<Option<eql::Ciphertext>>,
+    ) -> Result<Vec<Option<eql::Plaintext>>, Error> {
+        // Create a mutable vector to hold the decrypted results
+        let mut results = vec![None; ciphertexts.len()];
+
+        // Collect the index and ciphertext details for every Some(ciphertext)
+        let (indices, encrypted): (Vec<_>, Vec<_>) = ciphertexts
+            .into_iter()
+            .enumerate()
+            .filter_map(|(idx, opt)| {
+                opt.map(|ct| ((idx, ct.identifier, ct.version), ct.ciphertext))
+            })
+            .unzip();
+
+        // Decrypt the ciphertexts
+        let decrypted = self.cipher.decrypt(encrypted).await?;
+
+        // Merge the decrypted values as plaintext into their original indexed positions
+        for ((idx, identifier, version), decrypted) in indices.into_iter().zip(decrypted) {
+            let plaintext = Plaintext::from_slice(&decrypted[..])?;
+
+            let plaintext = match &plaintext {
+                Plaintext::Utf8Str(Some(s)) => s.to_owned(),
+                _ => todo!(),
+                // Plaintext::BigInt(_) => todo!(),
+                // Plaintext::BigUInt(_) => todo!(),
+                // Plaintext::Boolean(_) => todo!(),
+                // Plaintext::Decimal(decimal) => todo!(),
+                // Plaintext::Float(_) => todo!(),
+                // Plaintext::Int(_) => todo!(),
+                // Plaintext::NaiveDate(naive_date) => todo!(),
+                // Plaintext::SmallInt(_) => todo!(),
+                // Plaintext::Timestamp(date_time) => todo!(),
+                // Plaintext::JsonB(value) => todo!(),
+            };
+            results[idx] = Some(eql::Plaintext {
+                plaintext,
+                identifier,
+                version,
+                for_query: None,
+            });
+        }
+
+        Ok(results)
     }
 
-    fn column_config(&self, pt: &eql::Plaintext) -> Result<ColumnConfig, Error> {
+    pub fn get_column_config(&self, identifier: &eql::Identifier) -> Option<ColumnConfig> {
         let encrypt_config = self.encrypt_config.load();
 
-        let column_config =
-            encrypt_config
-                .get(&pt.identifier)
-                .ok_or_else(|| EncryptError::UnknownColumn {
-                    table: pt.identifier.table.to_string(),
-                    column: pt.identifier.column.to_string(),
-                })?;
-
-        Ok(column_config.clone())
+        match encrypt_config.get(identifier) {
+            Some(c) => Some(c.clone()),
+            None => None,
+        }
     }
 }
 
@@ -155,7 +200,7 @@ async fn init_cipher(config: &TandemConfig) -> Result<ScopedCipher, Error> {
 fn to_eql_encrypted(encrypted: Encrypted, pt: &eql::Plaintext) -> Result<eql::Ciphertext, Error> {
     match encrypted {
         Encrypted::Record(ciphertext, _terms) => {
-            let ct = eql::Ciphertext::new(ciphertext, pt.identifier.clone());
+            let ct = eql::Ciphertext::new(ciphertext, pt.identifier.to_owned());
             Ok(ct)
         }
         Encrypted::SteVec(_ste_vec_index) => {
