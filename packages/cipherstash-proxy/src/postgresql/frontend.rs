@@ -121,10 +121,12 @@ where
             .try_with_sql(&parse.statement)?
             .parse_statement()?;
 
+        warn!("cfg {:?}", self.encrypt.encrypt_config);
+
         if eql_mapper::requires_type_check(&statement) {
             let typed_statement = eql_mapper::type_check(self.encrypt.schema.load(), &statement)?;
 
-            let param_type_mapping = typed_statement
+            let param_types = typed_statement
                 .params
                 .iter()
                 .map(|param| match param {
@@ -133,49 +135,59 @@ where
                     {
                         let identifier = Identifier::from((table, column));
 
-                        error!(target = MAPPER, "Identifier {:?}", identifier);
+                        error!(target = MAPPER, "Param Identifier {:?}", identifier);
 
                         match self.encrypt.get_column_config(&identifier) {
                             Some(config) => {
-                                debug!(target = MAPPER, "Configured parameter {:?}", identifier);
+                                debug!(target = MAPPER, "Configured param {:?}", identifier);
                                 let oid = column_type_to_oid(&config.cast_type);
                                 Some(oid)
                             }
                             None => None,
                         }
                     }
-                    p => None,
+                    _ => None,
                 })
                 .collect::<Vec<_>>();
 
-            warn!("cfg {:?}", self.encrypt.encrypt_config);
-            warn!("p {:?}", typed_statement.params);
-            warn!("{:?}", param_type_mapping);
+            let projection_types = match typed_statement.projection {
+                Some(projection) => match projection {
+                    eql_mapper::Projection::WithColumns(columns) => columns
+                        .iter()
+                        .map(|col| match col {
+                            eql_mapper::ProjectionColumn { ty, .. } => match ty {
+                                eql_mapper::Value::Eql(EqlValue(TableColumn { table, column }))
+                                | eql_mapper::Value::Native(NativeValue(Some(TableColumn {
+                                    table,
+                                    column,
+                                }))) => {
+                                    let identifier = Identifier::from((table, column));
 
-            // let plaintext_literals: Vec<eql::Plaintext> =
-            //     convert_value_nodes_to_eql_plaintext(&typed_statement)?;
+                                    error!(
+                                        target = MAPPER,
+                                        "Projection identifier {:?}", identifier
+                                    );
 
-            // info!("==============================");
-            // info!("{:?}", plaintext_literals);
-
-            // let replacement_literal_values = self.encrypt_literals(plaintext_literals).await?;
-
-            // info!("==============================");
-            // info!("{:?}", replacement_literal_values);
-
-            // let original_values_and_replacements =
-            //     zip_with_original_value_ref(&typed_statement, replacement_literal_values);
-
-            // info!("==============================");
-            // info!("{:?}", original_values_and_replacements);
-
-            // warn!("==============================");
-            // warn!("==============================");
-
-            // let transformed_statement =
-            //     typed_statement.transform(original_values_and_replacements)?;
-
-            // parse.statement = transformed_statement.to_string().clone();
+                                    match self.encrypt.get_column_config(&identifier) {
+                                        Some(config) => {
+                                            debug!(
+                                                target = MAPPER,
+                                                "Configured projection {:?}", identifier
+                                            );
+                                            let oid = column_type_to_oid(&config.cast_type);
+                                            Some(oid)
+                                        }
+                                        None => None,
+                                    }
+                                }
+                                _ => None,
+                            },
+                        })
+                        .collect::<Vec<_>>(),
+                    eql_mapper::Projection::Empty => vec![],
+                },
+                None => vec![],
+            };
 
             debug!(
                 target = MAPPER,
@@ -187,9 +199,8 @@ where
                 context::Statement::mapped(
                     typed_statement.statement.clone(),
                     parse.param_types.clone(),
-                    param_type_mapping.clone(),
-                    typed_statement.params.clone(),
-                    typed_statement.statement_type.clone(),
+                    param_types.clone(),
+                    projection_types.clone(),
                 ),
             );
         } else {
@@ -248,45 +259,6 @@ where
             Ok(None)
         }
     }
-}
-
-fn zip_with_original_value_ref<'ast>(
-    typed_statement: &eql_mapper::TypedStatement<'ast>,
-    encrypted_literals: Vec<Expr>,
-) -> HashMap<&'ast Expr, Expr> {
-    typed_statement
-        .literals
-        .iter()
-        .map(|(_, original_node)| *original_node)
-        .zip(encrypted_literals)
-        .collect::<HashMap<_, _>>()
-}
-
-fn convert_value_nodes_to_eql_plaintext(
-    typed_statement: &eql_mapper::TypedStatement<'_>,
-) -> Result<Vec<eql::Plaintext>, EqlMapperError> {
-    typed_statement
-        .literals
-        .iter()
-        .map(|(EqlValue(TableColumn { table, column }), expr)| {
-            if let Some(plaintext) = match expr {
-                Expr::Value(Value::Number(number, _)) => Some(number.to_string()),
-                Expr::Value(Value::SingleQuotedString(s)) => Some(s.to_owned()),
-                Expr::Value(Value::Boolean(b)) => Some(b.to_string()),
-                Expr::Value(Value::Null) => None,
-                _ => None,
-            } {
-                Ok(eql::Plaintext {
-                    identifier: Identifier::from((table, column)),
-                    plaintext,
-                    version: 1,
-                    for_query: None,
-                })
-            } else {
-                Err(EqlMapperError::UnsupportedValueVariant(expr.to_string()))
-            }
-        })
-        .collect()
 }
 
 fn column_type_to_oid(col_type: &ColumnType) -> postgres_types::Type {

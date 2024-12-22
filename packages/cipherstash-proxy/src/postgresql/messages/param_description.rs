@@ -31,7 +31,7 @@ pub struct ParamDescription {
 }
 
 impl ParamDescription {
-    pub fn map_types(&mut self, mapped_types: &Vec<Option<postgres_types::Type>>) {
+    pub fn map_types(&mut self, mapped_types: &[Option<postgres_types::Type>]) {
         for (idx, t) in mapped_types.iter().enumerate() {
             if let Some(t) = t {
                 self.types[idx] = t.clone();
@@ -140,20 +140,19 @@ mod tests {
     #[test]
     pub fn parse_parameter_description() {
         log::init();
-        // let bytes = to_message(
-        //     b"T\0\0\0!\0\x01TimeZone\0\0\0\0\0\0\0\0\0\0\x19\xff\xff\xff\xff\xff\xff\0\0",
-        // );
+        let bytes = to_message(b"t\0\0\0\x0e\0\x02\0\0\0\x14\0\0\x0e\xda");
 
-        // let expected = bytes.clone();
+        let expected = bytes.clone();
 
-        // let row_description = RowDescription::try_from(&bytes).expect("ok");
+        let description = ParamDescription::try_from(&bytes).expect("ok");
 
-        // info!("{:?}", row_description);
+        info!("{:?}", description);
 
-        // assert_eq!(row_description.fields.len(), 1);
-        // assert_eq!(row_description.fields[0].name, "TimeZone");
+        assert_eq!(description.types.len(), 2);
+        assert_eq!(description.types[0], postgres_types::Type::INT8);
+        assert_eq!(description.types[1], postgres_types::Type::JSONB);
 
-        // let bytes = BytesMut::try_from(row_description).expect("ok");
-        // assert_eq!(bytes, expected);
+        let bytes = BytesMut::try_from(description).expect("ok");
+        assert_eq!(bytes, expected);
     }
 }

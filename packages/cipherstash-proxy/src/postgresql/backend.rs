@@ -3,7 +3,6 @@ use super::message_buffer::MessageBuffer;
 use super::messages::error_response::ErrorResponse;
 use super::messages::row_description::RowDescription;
 use super::messages::BackendCode;
-use super::protocol::Message;
 use crate::encrypt::Encrypt;
 use crate::eql::Ciphertext;
 use crate::error::Error;
@@ -177,53 +176,69 @@ where
         let mut description = ParamDescription::try_from(bytes)?;
 
         warn!("PARAMETER_DESCRIPTION ==============================");
-        // debug!("{:?}", description);
-        // debug!("{:?}", self.context);
+        debug!("{:?}", bytes);
 
-        let describe = self.context.describe.load();
-        let describe = describe.as_ref();
+        // let describe = self.context.describe.load();
+        // let describe = describe.as_ref();
 
-        if let Some(describe) = describe {
-            debug!("{:?}", describe);
-            if let Some(param_types) = self.context.get_param_types(&describe.name) {
-                debug!("{:?}", param_types);
-                description.map_types(&param_types);
-            }
+        // if let Some(describe) = describe {
+        //     debug!("{:?}", describe);
+        //     if let Some(param_types) = self.context.get_param_types(&describe.name) {
+        //         debug!("{:?}", param_types);
+        //         description.map_types(&param_types);
+        //     }
+        // }
+
+        if let Some(param_types) = self.context.get_param_types_for_describe() {
+            debug!("{:?}", param_types);
+            description.map_types(&param_types);
         }
 
-        debug!("Mapped {:?}", description);
-
-        warn!("/PARAMETER_DESCRIPTION ==============================");
+        // debug!("Mapped {:?}", description);
+        // warn!("/PARAMETER_DESCRIPTION ==============================");
         Ok(None)
     }
 
-    async fn row_description_handler(&self, bytes: &BytesMut) -> Result<Option<BytesMut>, Error> {
-        let mut row_description = RowDescription::try_from(bytes)?;
+    async fn row_description_handler(
+        &mut self,
+        bytes: &BytesMut,
+    ) -> Result<Option<BytesMut>, Error> {
+        let mut description = RowDescription::try_from(bytes)?;
 
         warn!("ROWDESCRIPTION ==============================");
         // warn!("{:?}", self.context);
         debug!("{:?}", self.context.describe);
-        debug!("RowDescription: {:?}", row_description);
+        debug!("RowDescription: {:?}", description);
 
-        // if let Some(statement) = self.context.get(&bind.prepared_statement) {
-        //     warn!("==============================");
-        //     warn!("{:?}", statement);
-        //     warn!("==============================");
-
-        //     // bind.params.iter().zip()
-        //     // let config = self.encrypt.column_config()
+        // let describe = self.context.describe.load();
+        // let describe = describe.as_ref();
+        // if let Some(describe) = describe {
+        //     debug!("{:?}", describe);
+        //     if let Some(projection_types) = self.context.get_projection_types(&describe.name) {
+        //         debug!("{:?}", projection_types);
+        //         description.map_types(&projection_types);
+        //     }
         // }
+
+        if let Some(projection_types) = self.context.get_projection_types_for_describe() {
+            debug!("{:?}", projection_types);
+            description.map_types(&projection_types);
+        }
+
+        self.context.describe_complete();
+
+        debug!("Mapped {:?}", description);
 
         warn!("/ ROWDESCRIPTION ==============================");
 
-        row_description.fields.iter_mut().for_each(|field| {
-            if field.name == "email" {
-                field.rewrite_type_oid(postgres_types::Type::TEXT);
-            }
-        });
+        // description.fields.iter_mut().for_each(|field| {
+        //     if field.name == "email" {
+        //         field.rewrite_type_oid(postgres_types::Type::TEXT);
+        //     }
+        // });
 
-        if row_description.should_rewrite() {
-            let bytes = BytesMut::try_from(row_description)?;
+        if description.should_rewrite() {
+            let bytes = BytesMut::try_from(description)?;
             Ok(Some(bytes))
         } else {
             Ok(None)

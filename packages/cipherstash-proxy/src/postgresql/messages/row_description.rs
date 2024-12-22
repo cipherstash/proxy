@@ -1,7 +1,7 @@
 use std::{ffi::CString, io::Cursor};
 
 use bytes::{Buf, BufMut, BytesMut};
-use tracing::info;
+use tracing::{error, field, info};
 
 use crate::{
     error::{Error, ProtocolError},
@@ -32,6 +32,15 @@ impl RowDescription {
     pub fn should_rewrite(&self) -> bool {
         self.fields.iter().any(|f| f.should_rewrite())
     }
+
+    pub fn map_types(&mut self, projection_types: &[Option<postgres_types::Type>]) {
+        for (idx, t) in projection_types.iter().enumerate() {
+            if let Some(t) = t {
+                let field = &mut self.fields[idx];
+                field.type_oid = t.clone();
+            }
+        }
+    }
 }
 
 impl RowDescriptionField {
@@ -50,6 +59,7 @@ impl TryFrom<&BytesMut> for RowDescription {
 
     fn try_from(bytes: &BytesMut) -> Result<RowDescription, Error> {
         let mut cursor = Cursor::new(bytes);
+        error!("RowDescription bytes: {:?}", bytes);
 
         let code = cursor.get_u8();
 
@@ -62,12 +72,10 @@ impl TryFrom<&BytesMut> for RowDescription {
         }
 
         let _len = cursor.get_i32(); // move the cursor
-        let field_count = cursor.get_i16() as usize;
+        let num_fields = cursor.get_i16() as usize;
 
-        let bytes = cursor.copy_to_bytes(cursor.remaining()).into();
-
-        let fields = std::iter::repeat_with(|| RowDescriptionField::try_from(&bytes))
-            .take(field_count)
+        let fields = std::iter::repeat_with(|| RowDescriptionField::try_from(&mut cursor))
+            .take(num_fields)
             .collect::<Result<_, _>>()?;
 
         Ok(RowDescription { fields })
@@ -104,12 +112,11 @@ impl TryFrom<RowDescription> for BytesMut {
     }
 }
 
-impl TryFrom<&BytesMut> for RowDescriptionField {
+// impl TryFrom<&BytesMut> for RowDescriptionField {
+impl TryFrom<&mut Cursor<&BytesMut>> for RowDescriptionField {
     type Error = Error;
 
-    fn try_from(bytes: &BytesMut) -> Result<RowDescriptionField, Self::Error> {
-        let mut cursor = Cursor::new(bytes);
-
+    fn try_from(cursor: &mut Cursor<&BytesMut>) -> Result<RowDescriptionField, Self::Error> {
         let name = cursor.read_string()?;
 
         let table_oid = cursor.get_i32();
@@ -170,6 +177,35 @@ mod tests {
     }
 
     #[test]
+    pub fn map_projection_types() {
+        log::init();
+
+        // let mut pd = RowDescription {
+        //     types: vec![
+        //         postgres_types::Type::TEXT,
+        //         postgres_types::Type::INT4,
+        //         postgres_types::Type::INT8,
+        //     ],
+        // };
+
+        // let mapped_types = vec![
+        //     Some(postgres_types::Type::TEXT),
+        //     None,
+        //     Some(postgres_types::Type::TEXT),
+        // ];
+
+        // pd.map_types(&mapped_types);
+
+        // let expected = vec![
+        //     postgres_types::Type::TEXT,
+        //     postgres_types::Type::INT4,
+        //     postgres_types::Type::TEXT,
+        // ];
+
+        // assert_eq!(pd.types, expected);
+    }
+
+    #[test]
     pub fn parse_row_description() {
         log::init();
         let bytes = to_message(
@@ -184,6 +220,26 @@ mod tests {
 
         assert_eq!(row_description.fields.len(), 1);
         assert_eq!(row_description.fields[0].name, "TimeZone");
+
+        let bytes = BytesMut::try_from(row_description).expect("ok");
+        assert_eq!(bytes, expected);
+    }
+
+    #[test]
+    pub fn parse_row_description_with_many_fields() {
+        log::init();
+        let bytes = to_message(
+             b"T\0\0\0J\0\x03id\0\0\0h,\0\x01\0\0\0\x14\0\x08\xff\xff\xff\xff\0\0name\0\0\0h,\0\x02\0\0\0\x19\xff\xff\xff\xff\xff\xff\0\0email\0\0\0h,\0\x03\0\0\x0e\xda\xff\xff\xff\xff\xff\xff\0\0"
+        );
+
+        let expected = bytes.clone();
+
+        let row_description = RowDescription::try_from(&bytes).expect("ok");
+
+        assert_eq!(row_description.fields.len(), 3);
+        assert_eq!(row_description.fields[0].name, "id");
+        assert_eq!(row_description.fields[1].name, "name");
+        assert_eq!(row_description.fields[2].name, "email");
 
         let bytes = BytesMut::try_from(row_description).expect("ok");
         assert_eq!(bytes, expected);

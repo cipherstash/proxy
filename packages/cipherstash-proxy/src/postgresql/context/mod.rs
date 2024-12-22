@@ -1,12 +1,14 @@
 use arc_swap::ArcSwapOption;
-use eql_mapper::{Projection, Value};
 use sqlparser::ast;
 use std::{
     collections::HashMap,
     sync::{Arc, RwLock},
 };
 
-use super::messages::{describe::Describe, Destination};
+use super::messages::{
+    describe::{self, Describe},
+    Destination,
+};
 
 #[derive(Debug, Clone)]
 pub struct Context {
@@ -20,16 +22,8 @@ pub struct Statement {
     /// required type-checking and it was transformed to perform EQL conversion.
     ast: ast::Statement,
     pub postgres_param_types: Vec<i32>,
-    pub param_type_mapping: Vec<Option<postgres_types::Type>>,
-    /// If this was a type-checked statement, then `eql_metadata` will be `Some(_)`, else `None`.
-    metadata: Option<Metadata>,
-}
-
-/// Metadata for a [`ast::Statement`] type that could only be safely handled after processing by [`eql_mapper`].
-#[derive(Debug, Clone)]
-pub struct Metadata {
-    param_types: Vec<Value>,
-    result_projection: Option<Projection>,
+    pub param_types: Vec<Option<postgres_types::Type>>,
+    pub projection_types: Vec<Option<postgres_types::Type>>,
 }
 
 impl Context {
@@ -44,29 +38,59 @@ impl Context {
         self.describe.swap(Some(Arc::new(describe)));
     }
 
+    pub fn describe_complete(&mut self) {
+        self.describe.swap(None);
+    }
+
     pub fn add(&mut self, key: Destination, statement: Statement) {
-        let mut lock = self.statements.write().unwrap();
-        lock.insert(key, statement);
+        let mut statment_write = self.statements.write().unwrap();
+        statment_write.insert(key, statement);
     }
 
     // TODO Remove cloning
     // We can probably do work INSIDE the context
     pub fn get(&self, key: &Destination) -> Option<Statement> {
-        let lock = self.statements.read().unwrap();
-        lock.get(key).cloned()
+        let statment_read = self.statements.read().unwrap();
+        statment_read.get(key).cloned()
+    }
+
+    pub fn get_param_types_for_describe(&self) -> Option<Vec<Option<postgres_types::Type>>> {
+        let guard = self.describe.load();
+        match guard.as_ref() {
+            Some(describe) => self.get_param_types(&describe.name),
+            None => None,
+        }
+    }
+    pub fn get_projection_types_for_describe(&self) -> Option<Vec<Option<postgres_types::Type>>> {
+        let guard = self.describe.load();
+        match guard.as_ref() {
+            Some(describe) => self.get_projection_types(&describe.name),
+            None => None,
+        }
     }
 
     pub fn get_param_types(&self, key: &Destination) -> Option<Vec<Option<postgres_types::Type>>> {
-        let lock = self.statements.read().unwrap();
-        match lock.get(key) {
-            Some(statement) => Some(statement.param_type_mapping.clone()),
+        let statment_read = self.statements.read().unwrap();
+        match statment_read.get(key) {
+            Some(statement) => Some(statement.param_types.clone()),
+            None => None,
+        }
+    }
+
+    pub fn get_projection_types(
+        &self,
+        key: &Destination,
+    ) -> Option<Vec<Option<postgres_types::Type>>> {
+        let statment_read = self.statements.read().unwrap();
+        match statment_read.get(key) {
+            Some(statement) => Some(statement.projection_types.clone()),
             None => None,
         }
     }
 
     pub fn remove(&mut self, key: &Destination) -> Option<Statement> {
-        let mut lock = self.statements.write().unwrap();
-        lock.remove(key)
+        let mut statment_write = self.statements.write().unwrap();
+        statment_write.remove(key)
     }
 }
 
@@ -75,26 +99,22 @@ impl Statement {
         Statement {
             ast,
             postgres_param_types,
-            metadata: None,
-            param_type_mapping: vec![],
+            param_types: vec![],
+            projection_types: vec![],
         }
     }
 
     pub fn mapped(
         ast: ast::Statement,
         postgres_param_types: Vec<i32>,
-        param_type_mapping: Vec<Option<postgres_types::Type>>,
-        eql_param_types: Vec<Value>,
-        eql_resultset_type: Option<Projection>,
+        param_types: Vec<Option<postgres_types::Type>>,
+        projection_types: Vec<Option<postgres_types::Type>>,
     ) -> Statement {
         Statement {
             ast,
             postgres_param_types,
-            param_type_mapping,
-            metadata: Some(Metadata {
-                param_types: eql_param_types,
-                result_projection: eql_resultset_type,
-            }),
+            param_types,
+            projection_types,
         }
     }
 }
