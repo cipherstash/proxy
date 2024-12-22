@@ -1,8 +1,6 @@
 [workspace]
 resolver = "2"
-members = [
-  "packages/*"
-]
+members = ["packages/*"]
 
 [workspace.package]
 version = "0.1.0"
@@ -29,3 +27,17 @@ incremental = true
 codegen-units = 1
 strip = "symbols"
 lto = true
+
+[workspace.dependencies]
+sqlparser = { git = "https://github.com/cipherstash/datafusion-sqlparser-rs", branch = "main", features = [
+  "serde",
+  "bigdecimal",
+] }
+thiserror = "2.0.9"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = [
+  "ansi",
+  "json",
+  "env-filter",
+  "std",
+] }
