@@ -3,7 +3,9 @@ use bytes::BytesMut;
 pub mod authentication;
 pub mod bind;
 pub mod data_row;
+pub mod describe;
 pub mod error_response;
+pub mod param_description;
 pub mod parse;
 pub mod query;
 pub mod row_description;
@@ -13,6 +15,7 @@ pub const NULL: i32 = -1;
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum FrontendCode {
     Bind,
+    Describe,
     Parse,
     PasswordMessage,
     Query,
@@ -56,6 +59,7 @@ impl From<char> for FrontendCode {
     fn from(code: char) -> Self {
         match code {
             'B' => FrontendCode::Bind,
+            'D' => FrontendCode::Describe,
             'p' => FrontendCode::PasswordMessage,
             'P' => FrontendCode::Parse,
             'Q' => FrontendCode::Query,
@@ -73,6 +77,7 @@ impl From<FrontendCode> for u8 {
     fn from(code: FrontendCode) -> Self {
         match code {
             FrontendCode::Bind => b'B',
+            FrontendCode::Describe => b'D',
             FrontendCode::Parse => b'P',
             FrontendCode::PasswordMessage => b'p',
             FrontendCode::Query => b'Q',
@@ -87,6 +92,7 @@ impl From<FrontendCode> for char {
     fn from(code: FrontendCode) -> Self {
         match code {
             FrontendCode::Bind => 'B',
+            FrontendCode::Describe => 'D',
             FrontendCode::Parse => 'P',
             FrontendCode::PasswordMessage => 'p',
             FrontendCode::Query => 'Q',

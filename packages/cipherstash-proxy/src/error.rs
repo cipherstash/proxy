@@ -141,6 +141,9 @@ pub enum ProtocolError {
     #[error("Unexpected null in string")]
     UnexpectedNull,
 
+    #[error("Unexpected target {target}")]
+    UnexpectedDescribeTarget { target: char },
+
     #[error("Unexpected SASL authentication method {method}")]
     UnexpectedSaslAuthenticationMethod { method: String },
 

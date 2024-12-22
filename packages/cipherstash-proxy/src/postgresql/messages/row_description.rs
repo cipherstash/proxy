@@ -6,6 +6,7 @@ use tracing::info;
 use crate::{
     error::{Error, ProtocolError},
     postgresql::{format_code::FormatCode, protocol::BytesMutReadString},
+    SIZE_I16, SIZE_I32,
 };
 
 use super::BackendCode;
@@ -79,6 +80,7 @@ impl TryFrom<RowDescription> for BytesMut {
     fn try_from(row_description: RowDescription) -> Result<BytesMut, Error> {
         let mut bytes = BytesMut::new();
 
+        // Convert each field to bytes
         let fields = row_description
             .fields
             .into_iter()
@@ -88,7 +90,7 @@ impl TryFrom<RowDescription> for BytesMut {
         let field_count = fields.len();
         let field_size = fields.iter().map(|x| x.len()).sum::<usize>();
 
-        let len = size_of::<i32>() + size_of::<i16>() + field_size;
+        let len = SIZE_I32 + SIZE_I16 + field_size;
 
         bytes.put_u8(BackendCode::RowDescription.into());
         bytes.put_i32(len as i32);
