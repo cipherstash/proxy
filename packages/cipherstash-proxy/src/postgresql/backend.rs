@@ -9,10 +9,10 @@ use crate::eql::Ciphertext;
 use crate::error::Error;
 use crate::log::DEVELOPMENT;
 use crate::postgresql::messages::data_row::DataRow;
+use crate::postgresql::messages::param_description::ParamDescription;
 use crate::postgresql::protocol::{self};
 use bytes::BytesMut;
 use itertools::Itertools;
-use std::collections;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use tracing::{debug, error, info, warn};
 
@@ -74,6 +74,15 @@ where
             BackendCode::ErrorResponse => {
                 self.error_response_handler(&bytes)?;
                 self.write(bytes).await?;
+            }
+            BackendCode::ParameterDescription => {
+                info!("ParameterDescription");
+
+                if let Some(bytes) = self.parameter_description_handler(&bytes).await? {
+                    self.write(bytes).await?;
+                } else {
+                    self.write(bytes).await?;
+                }
             }
             BackendCode::RowDescription => {
                 if let Some(bytes) = self.row_description_handler(&bytes).await? {
@@ -161,10 +170,51 @@ where
         Ok(())
     }
 
+    async fn parameter_description_handler(
+        &self,
+        bytes: &BytesMut,
+    ) -> Result<Option<BytesMut>, Error> {
+        let mut description = ParamDescription::try_from(bytes)?;
+
+        warn!("PARAMETER_DESCRIPTION ==============================");
+        // debug!("{:?}", description);
+        // debug!("{:?}", self.context);
+
+        let describe = self.context.describe.load();
+        let describe = describe.as_ref();
+
+        if let Some(describe) = describe {
+            debug!("{:?}", describe);
+            if let Some(param_types) = self.context.get_param_types(&describe.name) {
+                debug!("{:?}", param_types);
+                description.map_types(&param_types);
+            }
+        }
+
+        debug!("Mapped {:?}", description);
+
+        warn!("/PARAMETER_DESCRIPTION ==============================");
+        Ok(None)
+    }
+
     async fn row_description_handler(&self, bytes: &BytesMut) -> Result<Option<BytesMut>, Error> {
         let mut row_description = RowDescription::try_from(bytes)?;
 
+        warn!("ROWDESCRIPTION ==============================");
+        // warn!("{:?}", self.context);
+        debug!("{:?}", self.context.describe);
         debug!("RowDescription: {:?}", row_description);
+
+        // if let Some(statement) = self.context.get(&bind.prepared_statement) {
+        //     warn!("==============================");
+        //     warn!("{:?}", statement);
+        //     warn!("==============================");
+
+        //     // bind.params.iter().zip()
+        //     // let config = self.encrypt.column_config()
+        // }
+
+        warn!("/ ROWDESCRIPTION ==============================");
 
         row_description.fields.iter_mut().for_each(|field| {
             if field.name == "email" {

@@ -34,8 +34,8 @@ impl Identifier {
 impl From<(&Ident, &Ident)> for Identifier {
     fn from((table, column): (&Ident, &Ident)) -> Self {
         Self {
-            table: table.to_string(),
-            column: column.to_string(),
+            table: table.value.to_owned(),
+            column: column.value.to_owned(),
         }
     }
 }
