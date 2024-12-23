@@ -180,7 +180,7 @@ if [ '{{os()}}' = 'macos' ]; then
 fi
 
 # Start the containers
-echo docker compose up --build {{arg(name="service",default="")}} {{option(name="extra-args",default="")}} | bash
+echo docker compose up --build {{arg(name="service",default="postgres postgres-17-tls")}} {{option(name="extra-args",default="")}} | bash
 """
 
 [tasks."postgres:down"]
