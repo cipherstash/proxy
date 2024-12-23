@@ -1,4 +1,4 @@
-use sqlparser::ast::{BinaryOperator, Expr};
+use sqlparser::ast::{helpers::attached_token, BinaryOperator, Expr};
 
 use crate::{inference::unifier::Type, inference::InferType, inference::TypeError, TypeInferencer};
 
@@ -19,14 +19,16 @@ impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
                 )?;
             }
 
-            Expr::Wildcard => {
+            #[allow(unused_variables)]
+            Expr::Wildcard(attached_token) => {
                 self.unify_node_with_type(
                     this_expr,
                     &self.scope_tracker.borrow().resolve_wildcard()?,
                 )?;
             }
 
-            Expr::QualifiedWildcard(object_name) => {
+            #[allow(unused_variables)]
+            Expr::QualifiedWildcard(object_name, attached_token) => {
                 self.unify_node_with_type(
                     this_expr,
                     &self
@@ -457,6 +459,10 @@ impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
 
             Expr::Lambda(_) => Err(TypeError::UnsupportedSqlFeature(
                 "Unsupported SQL feature: lambda functions".into(),
+            ))?,
+
+            Expr::Method(_) => Err(TypeError::UnsupportedSqlFeature(
+                "Unsupported SQL feature: expression methods".into(),
             ))?,
         }
 

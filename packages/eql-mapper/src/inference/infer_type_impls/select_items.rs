@@ -44,6 +44,7 @@ impl<'ast> InferType<'ast, Vec<SelectItem>> for TypeInferencer<'ast> {
                         alias: Some(alias.clone()),
                     }),
 
+                    #[allow(unused_variables)]
                     SelectItem::QualifiedWildcard(object_name, options) => {
                         let WildcardAdditionalOptions {
                             opt_ilike: None,
@@ -51,6 +52,7 @@ impl<'ast> InferType<'ast, Vec<SelectItem>> for TypeInferencer<'ast> {
                             opt_except: None,
                             opt_replace: None,
                             opt_rename: None,
+                            wildcard_token,
                         } = options
                         else {
                             return Err(TypeError::UnsupportedSqlFeature(
@@ -74,6 +76,7 @@ impl<'ast> InferType<'ast, Vec<SelectItem>> for TypeInferencer<'ast> {
                             opt_except: None,
                             opt_replace: None,
                             opt_rename: None,
+                            wildcard_token: _,
                         } = options
                         else {
                             return Err(TypeError::UnsupportedSqlFeature(

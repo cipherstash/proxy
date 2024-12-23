@@ -261,6 +261,18 @@ impl<'ast> Importer<'ast> {
                     "MATCH_RECOGNIZE".to_owned(),
                 ))
             }
+
+            #[allow(unused_variables)]
+            TableFactor::OpenJsonTable {
+                json_expr,
+                json_path,
+                columns,
+                alias,
+            } => {
+                return Err(ImportError::UnsupportedTableFactorVariant(
+                    "OpenJsonTable".to_owned(),
+                ))
+            }
         }
 
         Ok(())
