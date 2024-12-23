@@ -26,6 +26,8 @@ CS_DATABASE__PORT = "5532"
 "cargo:cargo-nextest" = "latest"
 "cargo:cargo-sort" = "latest"
 
+# ====================================================================================================
+# Proxy Tasks
 [tasks.proxy]
 alias = 'p'
 description = "Run the proxy (with `cargo run`)"
@@ -39,6 +41,39 @@ run = """
   killall cipherstash-proxy -s SIGINT
   exit 0
 """
+
+[tasks."proxy:up"]
+description = "Run Proxy instance with docker compose"
+dir = "{{config_root}}/tests"
+run = """
+{% set target = arch() ~ "-unknown-linux-gnu" | replace(from="arm64", to="aarch64") %}
+{% set toolchain = "stable-" ~ arch() ~ "-unknown-linux-gnu" | replace(from="arm64", to="aarch64") %}
+
+{% if os() == "macos" %}
+if ! which aarch64-unknown-linux-gnu ; then
+  brew install MaterializeInc/crosstools/aarch64-unknown-linux-gnu
+fi
+{% endif %}
+
+# cross-compile
+#rustup toolchain install stable-aarch64-apple-darwin
+
+
+rustup target add --toolchain stable {{ target }}
+
+export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-unknown-linux-gnu-gcc
+export TARGET_CC=aarch64-unknown-linux-gnu-gcc
+
+cargo build --locked --target {{ target }} --release --package cipherstash-proxy
+
+# run the container
+echo docker compose up --build proxy {{option(name="extra-args",default="")}} | bash
+"""
+
+[tasks."proxy:down"]
+dir = "./tests"
+description = "Tear down Proxy containers"
+run = "docker compose down proxy"
 
 # ====================================================================================================
 # Test Tasks
