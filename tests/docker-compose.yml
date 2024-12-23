@@ -39,6 +39,11 @@ services:
       - ./tls/localhost-key.pem:/etc/postgresql/localhost-key.pem
       - ./tls/localhost.pem:/etc/postgresql/localhost.pem
       - ./pg/data-17:/var/lib/postgresql/data
+  proxy:
+    image: cipherstash/proxy:latest
+    container_name: proxy
+    ports:
+      - 6432:6432
 
 networks:
   postgres:

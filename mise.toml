@@ -127,22 +127,22 @@ run = """
   mise run proxy:kill
 
   mise --env tcp run postgres:setup
-  mise --env tcp exec -- ../cipherstash-proxy &
+  mise --env tcp run proxy:up --extra-args "--detach --wait"
   mise --env tcp run test:wait_for_tcp_port --port 6432
   mise --env tcp run test:psql-tcp
-  mise run proxy:kill
+  mise --env tcp run proxy:down
 
   mise --env tls run postgres:setup
-  mise --env tls exec -- ../cipherstash-proxy &
+  mise --env tcp run proxy:up --extra-args "--detach --wait"
   mise --env tls run test:wait_for_tcp_port --port 6432
   mise --env tls run test:psql-tls
-  mise run proxy:kill
+  mise --env tls run proxy:down
 
   mise --env tls run postgres:setup
-  mise --env tls exec -- ../cipherstash-proxy &
+  mise --env tcp run proxy:up --extra-args "--detach --wait"
   mise --env tls run test:wait_for_tcp_port --port 6432
   cargo nextest run --no-fail-fast --nocapture -E 'test(~integration)'
-  mise run proxy:kill
+  mise --env tls run proxy:down
 """
 
 [tasks."test:nextest"]
