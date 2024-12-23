@@ -150,7 +150,7 @@ run = """
 [tasks."postgres:up"]
 alias = 'u'
 dir = "{{config_root}}/tests"
-description = "docker compose up"
+description = "Run Postgres instances with docker compose"
 run = """
 set -e
 set -u
