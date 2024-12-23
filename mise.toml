@@ -28,12 +28,12 @@ CS_DATABASE__PORT = "5532"
 
 [tasks.proxy]
 alias = 'p'
-description = "Runs the proxy"
+description = "Run the proxy (with `cargo run`)"
 run = 'pwd && env | grep CS_ && cargo run'
 
-[tasks.kill]
+[tasks."proxy:kill"]
 alias = 'k'
-description = "Kills running proxy "
+description = "Kill running cipherstash-proxy processes"
 run = """
   set +e
   killall cipherstash-proxy -s SIGINT
@@ -89,25 +89,25 @@ run = """
   mise run build:binary
 
   # Ensure proxy is not running
-  mise run kill
+  mise run proxy:kill
 
   mise --env tcp run postgres:setup
   mise --env tcp exec -- ../cipherstash-proxy &
   mise --env tcp run test:wait_for_tcp_port --port 6432
   mise --env tcp run test:psql-tcp
-  mise run kill
+  mise run proxy:kill
 
   mise --env tls run postgres:setup
   mise --env tls exec -- ../cipherstash-proxy &
   mise --env tls run test:wait_for_tcp_port --port 6432
   mise --env tls run test:psql-tls
-  mise run kill
+  mise run proxy:kill
 
   mise --env tls run postgres:setup
   mise --env tls exec -- ../cipherstash-proxy &
   mise --env tls run test:wait_for_tcp_port --port 6432
   cargo nextest run --no-fail-fast --nocapture -E 'test(~integration)'
-  mise run kill
+  mise run proxy:kill
 """
 
 [tasks."test:nextest"]

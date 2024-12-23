@@ -284,6 +284,13 @@ The integration tests have several runtime dependencies:
 - Running PostgreSQL instances
 - Credentials for CipherStash ZeroKMS
 
+Sometimes when you are making changes, the integration tests will fail, and leave a copy of cipherstash-proxy running in the background.
+You can clean it up by running:
+
+```bash
+mise run proxy:kill
+```
+
 ### common configuration
 
 All containers use the same credentials and database, defined in `pg/common.env`
