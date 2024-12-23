@@ -61,9 +61,9 @@ where
     }
 
     pub async fn read(&mut self) -> Result<BytesMut, Error> {
-        // debug!("[frontend] read");
-
-        let mut message = protocol::read_message_with_timeout(&mut self.client).await?;
+        let connection_timeout = self.encrypt.config.database.connection_timeout();
+        let mut message =
+            protocol::read_message_with_timeout(&mut self.client, connection_timeout).await?;
 
         match message.code.into() {
             Code::Query => {}

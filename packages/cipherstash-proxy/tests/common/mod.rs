@@ -21,6 +21,7 @@ pub fn database_config_with_port(port: u16) -> DatabaseConfig {
         config_reload_interval: 10,
         schema_reload_interval: 10,
         with_tls_verification: false,
+        connection_timeout: 1000 * 60,
     }
 }
 

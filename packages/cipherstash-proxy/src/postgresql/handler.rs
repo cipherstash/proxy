@@ -64,7 +64,11 @@ pub async fn handler(client_stream: AsyncStream, encrypt: Encrypt) -> Result<(),
     );
 
     loop {
-        let startup_message = startup::read_message_with_timeout(&mut client_stream).await?;
+        let startup_message = startup::read_message_with_timeout(
+            &mut client_stream,
+            encrypt.config.database.connection_timeout(),
+        )
+        .await?;
 
         match &startup_message.code {
             StartupCode::SSLRequest => {
@@ -121,7 +125,9 @@ pub async fn handler(client_stream: AsyncStream, encrypt: Encrypt) -> Result<(),
         let bytes = BytesMut::try_from(message)?;
         client_stream.write_all(&bytes).await?;
 
-        let message = protocol::read_message_with_timeout(&mut client_stream).await?;
+        let connection_timeout = encrypt.config.database.connection_timeout();
+        let message =
+            protocol::read_message_with_timeout(&mut client_stream, connection_timeout).await?;
 
         let password_message = PasswordMessage::try_from(&message.bytes)?;
 
@@ -151,6 +157,7 @@ pub async fn handler(client_stream: AsyncStream, encrypt: Encrypt) -> Result<(),
     //
 
     // First message should always be Auth
+
     let auth = protocol::read_auth_message(&mut database_stream).await?;
 
     match &auth.method {

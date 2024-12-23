@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use bytes::{BufMut, BytesMut};
 use tokio::{
     io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt},
@@ -14,7 +16,7 @@ use crate::{
     tls, TandemConfig, SIZE_I32,
 };
 
-use super::{protocol::StartupMessage, CONNECTION_TIMEOUT};
+use super::protocol::StartupMessage;
 
 pub async fn with_tls(stream: AsyncStream, config: &TandemConfig) -> Result<AsyncStream, Error> {
     if config.disable_database_tls() {
@@ -47,11 +49,14 @@ pub async fn with_tls(stream: AsyncStream, config: &TandemConfig) -> Result<Asyn
     }
 }
 
-pub async fn read_message_with_timeout<C>(client: &mut C) -> Result<StartupMessage, Error>
+pub async fn read_message_with_timeout<C>(
+    client: &mut C,
+    connection_timeout: Duration,
+) -> Result<StartupMessage, Error>
 where
     C: AsyncRead + Unpin,
 {
-    timeout(CONNECTION_TIMEOUT, read_message(client)).await?
+    timeout(connection_timeout, read_message(client)).await?
 }
 
 ///

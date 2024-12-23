@@ -3,8 +3,8 @@ use config::{Config, Environment};
 use regex::Regex;
 use rustls_pki_types::ServerName;
 use serde::Deserialize;
-use std::fmt::Display;
 use std::path::PathBuf;
+use std::{fmt::Display, time::Duration};
 use tracing::warn;
 
 use uuid::Uuid;
@@ -45,6 +45,9 @@ pub struct DatabaseConfig {
     pub name: String,
     pub username: String,
     pub password: String,
+
+    #[serde(default = "DatabaseConfig::default_connection_timeout")]
+    pub connection_timeout: u64,
 
     #[serde(default)]
     pub with_tls_verification: bool,
@@ -207,6 +210,10 @@ impl DatabaseConfig {
         5432
     }
 
+    pub fn default_connection_timeout() -> u64 {
+        1000 * 60
+    }
+
     pub fn default_config_reload_interval() -> u64 {
         60
     }
@@ -224,6 +231,10 @@ impl DatabaseConfig {
             "postgres://{}:{}@{}:{}/{}",
             self.username, self.password, self.host, self.port, self.name
         )
+    }
+
+    pub fn connection_timeout(&self) -> Duration {
+        Duration::from_millis(self.connection_timeout)
     }
 }
 

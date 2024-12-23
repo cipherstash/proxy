@@ -49,7 +49,9 @@ where
     ///
     pub async fn read(&mut self) -> Result<BytesMut, Error> {
         // info!("[backend] read");
-        let message = protocol::read_message_with_timeout(&mut self.server).await?;
+        let connection_timeout = self.encrypt.config.database.connection_timeout();
+        let message =
+            protocol::read_message_with_timeout(&mut self.server, connection_timeout).await?;
 
         match message.code.into() {
             BackendCode::Authentication => {}

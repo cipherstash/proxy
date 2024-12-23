@@ -7,11 +7,7 @@ mod messages;
 mod protocol;
 mod startup;
 
-use std::time::Duration;
-
 pub use handler::handler;
-
-pub const CONNECTION_TIMEOUT: Duration = Duration::from_millis(1000 * 10);
 
 pub const PROTOCOL_VERSION_NUMBER: i32 = 196608;
 

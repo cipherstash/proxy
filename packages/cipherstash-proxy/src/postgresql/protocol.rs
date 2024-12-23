@@ -1,3 +1,4 @@
+use super::{messages::authentication::Authentication, CANCEL_REQUEST, SSL_REQUEST};
 use crate::{
     error::{Error, ProtocolError},
     log::PROTOCOL,
@@ -5,16 +6,15 @@ use crate::{
     SIZE_I32, SIZE_U8,
 };
 use bytes::{BufMut, BytesMut};
-use std::io::{BufRead, Cursor};
+use std::{
+    io::{BufRead, Cursor},
+    time::Duration,
+};
 use tokio::{
     io::{AsyncRead, AsyncReadExt},
     time::timeout,
 };
 use tracing::{debug, error};
-
-use super::{
-    messages::authentication::Authentication, CANCEL_REQUEST, CONNECTION_TIMEOUT, SSL_REQUEST,
-};
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum StartupCode {
@@ -62,17 +62,26 @@ impl BytesMutReadString for Cursor<&BytesMut> {
     }
 }
 
+///
+/// Reads an Auth Message from Stream
+///
+/// Does not use the default connection timeout as the auth message is expected to be sent immediately
+/// 10 seconds is a reasonable timeout for the auth message
+///
+///
 pub async fn read_auth_message<S: AsyncRead + Unpin>(
     mut stream: S,
 ) -> Result<Authentication, Error> {
-    let message = read_message_with_timeout(&mut stream).await?;
+    let connection_timeout = Duration::from_millis(1000 * 10);
+    let message = read_message_with_timeout(&mut stream, connection_timeout).await?;
     Authentication::try_from(&message.bytes)
 }
 
 pub async fn read_message_with_timeout<S: AsyncRead + Unpin>(
     mut stream: S,
+    connection_timeout: Duration,
 ) -> Result<Message, Error> {
-    timeout(CONNECTION_TIMEOUT, read_message(&mut stream)).await?
+    timeout(connection_timeout, read_message(&mut stream)).await?
 }
 ///
 /// Reads a Postgres message from client
