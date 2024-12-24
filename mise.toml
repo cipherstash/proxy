@@ -46,7 +46,7 @@ run = """
 description = "Run Proxy instance with docker compose"
 dir = "{{config_root}}/tests"
 run = """
-{% set target = arch() ~ "-unknown-linux-gnu" | replace(from="arm64", to="aarch64") %}
+{% set target = arch() ~ "-unknown-linux-gnu" | replace(from="arm64", to="aarch64") | replace(from="x64", to="x86_64") %}
 
 {# If we are on macos, cross-compile for Linux, so we can run the binary in a Docker container. #}
 {# Only supports Apple Silicon. #}
