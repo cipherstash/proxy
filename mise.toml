@@ -50,7 +50,7 @@ run = """
 {% set toolchain = "stable-" ~ arch() ~ "-unknown-linux-gnu" | replace(from="arm64", to="aarch64") %}
 
 {% if os() == "macos" %}
-if ! which aarch64-unknown-linux-gnu ; then
+if which aarch64-unknown-linux-gnu ; then
   brew install MaterializeInc/crosstools/aarch64-unknown-linux-gnu
 fi
 {% endif %}
