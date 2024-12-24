@@ -62,6 +62,11 @@ export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-unknown-linux-gnu-g
 
 cargo build --locked --target {{ target }} --release --package cipherstash-proxy
 
+cp {{config_root}}/target/aarch64-unknown-linux-gnu/release/cipherstash-proxy {{config_root}}/
+
+# build a new container
+mise run build:docker
+
 # run the container
 echo docker compose up --build proxy {{option(name="extra-args",default="")}} | bash
 """
