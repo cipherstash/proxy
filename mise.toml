@@ -142,8 +142,8 @@ set -u
 
 # For Ubuntu 24.04
 if [ '{{os()}}' = 'linux' ]; then
-  target_uid=999
-  target_mode=600
+  target_uid=999 # the uid of the postgres user inside the postgres containers
+  target_mode=600 # the file mode postgres needs to read certs and key material
   for f in {{config_root}}/tests/tls/*; do
     current_uid="$(stat --format='%u' ${f})"
     if [ "${current_uid}" != "${target_uid}" ]; then
