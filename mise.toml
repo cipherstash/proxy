@@ -153,13 +153,14 @@ if [ '{{os()}}' = 'linux' ]; then
     current_mode="$(stat --format='%a' ${f})"
     if [ "${current_mode}" != "${target_mode}" ]; then
       echo "Changing file permissions from ${current_mode} to ${target_mode}: ${f}"
-      sudo chmod 600 $f
+      sudo chmod $target_mode $f
     fi
   done
 fi
 # For macOS 14.7
 if [ '{{os()}}' = 'macos' ]; then
-  chmod 600 tls/*
+  target_mode=600 # the file mode postgres needs to read certs and key material
+  chmod $target_mode tls/*
 fi
 echo docker compose up --build {{arg(name="service",default="")}} {{option(name="extra-args",default="")}} | bash
 """
