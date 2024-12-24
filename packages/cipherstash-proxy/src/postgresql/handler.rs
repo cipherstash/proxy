@@ -22,7 +22,7 @@ use postgres_protocol::authentication::sasl::{ChannelBinding, ScramSha256};
 use rand::Rng;
 
 use tokio::io::{split, AsyncRead, AsyncWrite, AsyncWriteExt};
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 
 ///
 ///
@@ -217,7 +217,13 @@ pub async fn handler(client_stream: AsyncStream, encrypt: Encrypt) -> Result<(),
 
     let client_to_server = async {
         loop {
-            frontend.rewrite().await?;
+            match frontend.rewrite().await {
+                Ok(_) => (),
+                Err(Error::EqlMapper(e)) => {
+                    warn!("EqlMapper error: {}, moving on with the loop", e);
+                }
+                e => e?,
+            }
         }
         // Unreachable, but helps the compiler understand the return type
         // TODO: extract into a function or something with type
