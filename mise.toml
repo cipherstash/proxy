@@ -56,13 +56,9 @@ fi
 {% endif %}
 
 # cross-compile
-#rustup toolchain install stable-aarch64-apple-darwin
-
-
 rustup target add --toolchain stable {{ target }}
 
 export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-unknown-linux-gnu-gcc
-export TARGET_CC=aarch64-unknown-linux-gnu-gcc
 
 cargo build --locked --target {{ target }} --release --package cipherstash-proxy
 
