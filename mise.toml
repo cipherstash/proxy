@@ -186,16 +186,22 @@ alias = 'dd'
 dir = "{{config_root}}"
 description = "Removes the local data directories"
 run = """
+{% if os() == "linux" %}
+{% set stat_cmd = "stat --format='%u'" %}
+{% else %}
+{% set stat_cmd = "stat -f '%Uu'" %}
+{% endif %}
   set -e
   set -u
   if test -z "$(find tests/pg -maxdepth 1 -name 'data-*' -print -quit)"; then
     echo "no data directories to clean up - skipping"
     exit 0
   fi
+
   uid=$(id -u)
   for d in tests/pg/data-*; do
     sudo=""
-    if [ "$(stat --format='%u' ${d})" != "${uid}" ]; then
+    if [ "$({{stat_cmd}} ${d})" != "${uid}" ]; then
       sudo="sudo"
     fi
     echo "removing data directory ${d}"
