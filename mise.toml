@@ -121,12 +121,6 @@ alias = "i"
 dir = "./tests"
 description = "Runs integration test/s"
 run = """
-  # Build a binary once
-  mise run build:binary
-
-  # Ensure proxy is not running
-  mise run proxy:kill
-
   mise --env tcp run postgres:setup
   mise --env tcp run proxy:up --extra-args "--detach --wait"
   mise --env tcp run test:wait_for_tcp_port --port 6432
