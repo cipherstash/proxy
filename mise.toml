@@ -47,7 +47,6 @@ description = "Run Proxy instance with docker compose"
 dir = "{{config_root}}/tests"
 run = """
 {% set target = arch() ~ "-unknown-linux-gnu" | replace(from="arm64", to="aarch64") %}
-{% set toolchain = "stable-" ~ arch() ~ "-unknown-linux-gnu" | replace(from="arm64", to="aarch64") %}
 
 {% if os() == "macos" %}
 if which aarch64-unknown-linux-gnu ; then
