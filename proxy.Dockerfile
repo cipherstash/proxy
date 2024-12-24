@@ -1,4 +1,4 @@
-FROM debian:bookworm-slim AS runtime
+FROM ubuntu:latest
 
 # Install TLS/SSL certs for https support, and PostgreSQL client (psql)
 RUN apt update && apt install -y ca-certificates postgresql-client
