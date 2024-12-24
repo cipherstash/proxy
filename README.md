@@ -61,6 +61,7 @@ stash clients create --dataset-id $DATASET_ID proxy
 
 # Build and run Proxy
 mise run proxy
+# exit by hitting ctrl + c
 
 # Run tests
 mise run test
