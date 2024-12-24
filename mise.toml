@@ -157,9 +157,25 @@ run = 'docker compose down'
 
 [tasks."postgres:destroy_data"]
 alias = 'dd'
-dir = "./tests/pg"
+dir = "{{config_root}}"
 description = "Removes the local data directories"
-run = 'rm -rf data-*'
+run = """
+  set -e
+  set -u
+  if test -z "$(find tests/pg -maxdepth 1 -name 'data-*' -print -quit)"; then
+    echo "no data directories to clean up - skipping"
+    exit 0
+  fi
+  uid=$(id -u)
+  for d in tests/pg/data-*; do
+    sudo=""
+    if [ "$(stat --format='%u' ${d})" != "${uid}" ]; then
+      sudo="sudo"
+    fi
+    echo "removing data directory ${d}"
+    ${sudo} rm -rf ${d}
+  done
+"""
 
 [tasks."postgres:install_eql"]
 alias = 'e'
