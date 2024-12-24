@@ -134,11 +134,33 @@ run = """
 
 [tasks."postgres:up"]
 alias = 'u'
-dir = "./tests"
+dir = "{{config_root}}/tests"
 description = "docker compose up"
 run = """
-chmod 600 tls/*
-if [ -n "$CI" ]; then echo "Running in CI: setting file permissions for container" ; sudo chown 999:999 tls/localhost* ; else echo "Not running in CI: skip setting file permissions for container" ; fi
+set -e
+set -u
+
+# For Ubuntu 24.04
+if [ '{{os()}}' = 'linux' ]; then
+  target_uid=999
+  target_mode=600
+  for f in {{config_root}}/tests/tls/*; do
+    current_uid="$(stat --format='%u' ${f})"
+    if [ "${current_uid}" != "${target_uid}" ]; then
+      echo "Changing file owner from ${current_uid} to ${target_uid}: ${f}"
+      sudo chown ${target_uid}:${target_uid} ${f}
+    fi
+    current_mode="$(stat --format='%a' ${f})"
+    if [ "${current_mode}" != "${target_mode}" ]; then
+      echo "Changing file permissions from ${current_mode} to ${target_mode}: ${f}"
+      sudo chmod 600 $f
+    fi
+  done
+fi
+# For macOS 14.7
+if [ '{{os()}}' = 'macos' ]; then
+  chmod 600 tls/*
+fi
 echo docker compose up --build {{arg(name="service",default="")}} {{option(name="extra-args",default="")}} | bash
 """
 
