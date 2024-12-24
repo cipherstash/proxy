@@ -8,9 +8,8 @@ Behind the scenes, it uses the [Encrypt Query Language](https://github.com/ciphe
 
 > [!IMPORTANT]
 > **Before you quickstart** you need to have this software installed:
->  - [Rust](https://www.rust-lang.org/)
->  - [mise](https://mise.jdx.dev/) - see the [installing mise](#installing-mise) instructions
->  - [Docker](https://www.docker.com/)
+>  - [mise](https://mise.jdx.dev/) — see the [installing mise](#installing-mise) instructions
+>  - [Docker](https://www.docker.com/) — see Docker's [documentation for installing](https://docs.docker.com/get-started/get-docker/)
 
 Local development quickstart:
 
