@@ -20,6 +20,7 @@ cd proxy
 
 # Install dependencies
 mise trust --yes
+mise trust --yes tests
 mise install
 
 # Start all postgres instances
