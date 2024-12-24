@@ -157,11 +157,14 @@ if [ '{{os()}}' = 'linux' ]; then
     fi
   done
 fi
+
 # For macOS 14.7
 if [ '{{os()}}' = 'macos' ]; then
   target_mode=600 # the file mode postgres needs to read certs and key material
   chmod $target_mode tls/*
 fi
+
+# Start the containers
 echo docker compose up --build {{arg(name="service",default="")}} {{option(name="extra-args",default="")}} | bash
 """
 
