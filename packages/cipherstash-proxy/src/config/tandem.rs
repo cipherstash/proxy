@@ -210,8 +210,9 @@ impl DatabaseConfig {
         5432
     }
 
+    // 5 minutes
     pub fn default_connection_timeout() -> u64 {
-        1000 * 60
+        1000 * 60 * 5
     }
 
     pub fn default_config_reload_interval() -> u64 {
