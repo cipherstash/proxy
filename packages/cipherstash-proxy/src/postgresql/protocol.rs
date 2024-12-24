@@ -16,6 +16,8 @@ use tokio::{
 };
 use tracing::{debug, error};
 
+type Code = u8;
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum StartupCode {
     ProtocolVersionNumber,
@@ -73,10 +75,16 @@ pub async fn read_auth_message<S: AsyncRead + Unpin>(
     mut stream: S,
 ) -> Result<Authentication, Error> {
     let connection_timeout = Duration::from_millis(1000 * 10);
-    let (_code, bytes) = read_message_with_timeout(&mut stream).await?;
+    let (_code, bytes) = read_message_with_timeout(&mut stream, connection_timeout).await?;
     Authentication::try_from(&bytes)
 }
 
+///
+/// Reads a Postgres message from client with a timeout
+///
+/// Timeout values are in config
+///
+///
 pub async fn read_message_with_timeout<S: AsyncRead + Unpin>(
     mut stream: S,
     connection_timeout: Duration,

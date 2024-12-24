@@ -1,22 +1,19 @@
+use super::{maybe_json, maybe_jsonb, Destination, NULL};
 use crate::eql;
 use crate::error::{Error, ProtocolError};
 use crate::postgresql::format_code::FormatCode;
 use crate::postgresql::protocol::BytesMutReadString;
 use crate::{SIZE_I16, SIZE_I32};
 use bytes::{Buf, BufMut, BytesMut};
-use std::io::Cursor;
+use std::io::{BufRead, Cursor};
 use std::{convert::TryFrom, ffi::CString};
 use tracing::debug;
-
-use super::{maybe_json, maybe_jsonb, Destination, NULL};
 
 /// Bind (B) message.
 /// See: <https://www.postgresql.org/docs/current/protocol-message-formats.html>
 #[derive(Clone, Debug)]
 pub struct Bind {
     pub code: char,
-    #[allow(dead_code)]
-    len: i64,
     pub portal: Destination,
     pub prepared_statement: Destination,
     pub num_param_format_codes: i16,
@@ -76,6 +73,15 @@ impl BindParam {
         }
     }
 
+    pub fn as_string(&self) -> Result<String, Error> {
+        let mut cursor = Cursor::new(&self.bytes);
+        let mut buf = Vec::with_capacity(512);
+        match cursor.read_until(b'\0', &mut buf) {
+            Ok(_) => Ok(String::from_utf8_lossy(&buf[..buf.len() - 1]).to_string()),
+            Err(err) => Err(err.into()),
+        }
+    }
+
     pub fn len(&self) -> usize {
         self.bytes.len()
     }
@@ -110,11 +116,15 @@ impl BindParam {
         }
     }
 
-    fn is_text(&self) -> bool {
+    pub fn is_null(&self) -> bool {
+        self.bytes.is_empty()
+    }
+
+    pub fn is_text(&self) -> bool {
         self.format_code == FormatCode::Text
     }
 
-    fn is_binary(&self) -> bool {
+    pub fn is_binary(&self) -> bool {
         self.format_code == FormatCode::Binary
     }
 }
@@ -148,7 +158,7 @@ impl TryFrom<&BytesMut> for Bind {
     fn try_from(buf: &BytesMut) -> Result<Bind, Self::Error> {
         let mut cursor = Cursor::new(buf);
         let code = cursor.get_u8() as char;
-        let len = cursor.get_i32();
+        let _len = cursor.get_i32();
 
         let portal = cursor.read_string()?;
         let portal = Destination::new(portal);
@@ -198,7 +208,6 @@ impl TryFrom<&BytesMut> for Bind {
 
         Ok(Bind {
             code,
-            len: len as i64,
             portal,
             prepared_statement,
             num_param_format_codes,

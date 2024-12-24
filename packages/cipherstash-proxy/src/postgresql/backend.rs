@@ -6,12 +6,13 @@ use super::messages::BackendCode;
 use crate::encrypt::Encrypt;
 use crate::eql::Ciphertext;
 use crate::error::Error;
-use crate::log::DEVELOPMENT;
+use crate::log::{DEVELOPMENT, MAPPER};
 use crate::postgresql::messages::data_row::DataRow;
 use crate::postgresql::messages::param_description::ParamDescription;
 use crate::postgresql::protocol::{self};
 use bytes::BytesMut;
 use itertools::Itertools;
+use sqlparser::keywords::MAP;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use tracing::{debug, error, info, warn};
 
@@ -43,6 +44,8 @@ where
         }
     }
 
+    ///
+    /// TODO: fix the structure once implementation stabilizes
     pub async fn rewrite(&mut self) -> Result<(), Error> {
         if self.encrypt.config.disable_mapping() {
             warn!(DEVELOPMENT, "Mapping is not enabled");
@@ -75,9 +78,8 @@ where
                 self.write(bytes).await?;
             }
             BackendCode::ParameterDescription => {
-                info!("ParameterDescription");
-
                 if let Some(bytes) = self.parameter_description_handler(&bytes).await? {
+                    debug!(target: MAPPER, "Rewrite ParamDescription");
                     self.write(bytes).await?;
                 } else {
                     self.write(bytes).await?;
@@ -85,6 +87,7 @@ where
             }
             BackendCode::RowDescription => {
                 if let Some(bytes) = self.row_description_handler(&bytes).await? {
+                    debug!(target: MAPPER, "Rewrite ParamDescription");
                     self.write(bytes).await?;
                 } else {
                     self.write(bytes).await?;
@@ -95,6 +98,7 @@ where
             }
         }
 
+        self.flush().await?;
         Ok(())
     }
 
@@ -175,28 +179,27 @@ where
     ) -> Result<Option<BytesMut>, Error> {
         let mut description = ParamDescription::try_from(bytes)?;
 
-        warn!("PARAMETER_DESCRIPTION ==============================");
-        debug!("{:?}", bytes);
+        // warn!("PARAMETER_DESCRIPTION ==============================");
+        // debug!("{:?}", bytes);
 
-        // let describe = self.context.describe.load();
-        // let describe = describe.as_ref();
-
-        // if let Some(describe) = describe {
-        //     debug!("{:?}", describe);
-        //     if let Some(param_types) = self.context.get_param_types(&describe.name) {
-        //         debug!("{:?}", param_types);
-        //         description.map_types(&param_types);
-        //     }
-        // }
-
-        if let Some(param_types) = self.context.get_param_types_for_describe() {
-            debug!("{:?}", param_types);
+        if let Some(param_columns) = self.context.get_param_columns_for_describe() {
+            debug!("{:?}", param_columns);
+            let param_types = param_columns
+                .iter()
+                .map(|col| col.as_ref().map(|col| col.postgres_type.clone()))
+                .collect::<Vec<_>>();
             description.map_types(&param_types);
+            debug!(target: MAPPER, "Mapped ParamDescription {description:?}");
         }
 
         // debug!("Mapped {:?}", description);
         // warn!("/PARAMETER_DESCRIPTION ==============================");
-        Ok(None)
+        if description.should_rewrite() {
+            let bytes = BytesMut::try_from(description)?;
+            Ok(Some(bytes))
+        } else {
+            Ok(None)
+        }
     }
 
     async fn row_description_handler(
@@ -205,31 +208,23 @@ where
     ) -> Result<Option<BytesMut>, Error> {
         let mut description = RowDescription::try_from(bytes)?;
 
-        warn!("ROWDESCRIPTION ==============================");
-        // warn!("{:?}", self.context);
-        debug!("{:?}", self.context.describe);
-        debug!("RowDescription: {:?}", description);
+        // warn!("ROWDESCRIPTION ==============================");
+        // // warn!("{:?}", self.context);
+        // debug!("{:?}", self.context.describe);
+        // debug!("RowDescription: {:?}", description);
 
-        // let describe = self.context.describe.load();
-        // let describe = describe.as_ref();
-        // if let Some(describe) = describe {
-        //     debug!("{:?}", describe);
-        //     if let Some(projection_types) = self.context.get_projection_types(&describe.name) {
-        //         debug!("{:?}", projection_types);
-        //         description.map_types(&projection_types);
-        //     }
-        // }
-
-        if let Some(projection_types) = self.context.get_projection_types_for_describe() {
-            debug!("{:?}", projection_types);
+        if let Some(projection_cols) = self.context.get_projection_columns_for_describe() {
+            let projection_types = projection_cols
+                .iter()
+                .map(|col| col.as_ref().map(|col| col.postgres_type.clone()))
+                .collect::<Vec<_>>();
             description.map_types(&projection_types);
+            debug!(target: MAPPER, "Mapped RowDescription {description:?}");
         }
 
         self.context.describe_complete();
 
-        debug!("Mapped {:?}", description);
-
-        warn!("/ ROWDESCRIPTION ==============================");
+        // warn!("/ ROWDESCRIPTION ==============================");
 
         // description.fields.iter_mut().for_each(|field| {
         //     if field.name == "email" {

@@ -4,6 +4,7 @@ use crate::{
     SIZE_I16, SIZE_I32,
 };
 use bytes::{Buf, BufMut, BytesMut};
+use postgres_types::Type;
 use std::io::Cursor;
 
 ///
@@ -28,15 +29,21 @@ use std::io::Cursor;
 #[derive(Debug)]
 pub struct ParamDescription {
     pub types: Vec<postgres_types::Type>,
+    dirty: bool,
 }
 
 impl ParamDescription {
-    pub fn map_types(&mut self, mapped_types: &[Option<postgres_types::Type>]) {
+    pub fn map_types(&mut self, mapped_types: &[Option<Type>]) {
         for (idx, t) in mapped_types.iter().enumerate() {
             if let Some(t) = t {
                 self.types[idx] = t.clone();
+                self.dirty = true;
             }
         }
+    }
+
+    pub fn should_rewrite(&self) -> bool {
+        self.dirty
     }
 }
 
@@ -67,7 +74,10 @@ impl TryFrom<&BytesMut> for ParamDescription {
             types.push(type_oid)
         }
 
-        Ok(ParamDescription { types })
+        Ok(ParamDescription {
+            types,
+            dirty: false,
+        })
     }
 }
 
@@ -100,7 +110,7 @@ mod tests {
     use bytes::BytesMut;
     use tracing::info;
 
-    use crate::{log, postgresql::messages::row_description::RowDescription};
+    use crate::log;
 
     use super::ParamDescription;
 
@@ -118,15 +128,21 @@ mod tests {
                 postgres_types::Type::INT4,
                 postgres_types::Type::INT8,
             ],
+            dirty: false,
         };
+
+        // No types to map, should not rewrite
+        let mapped_types = vec![None, None, None];
+        pd.map_types(&mapped_types);
+        assert!(!pd.should_rewrite());
 
         let mapped_types = vec![
             Some(postgres_types::Type::TEXT),
             None,
             Some(postgres_types::Type::TEXT),
         ];
-
         pd.map_types(&mapped_types);
+        assert!(pd.should_rewrite());
 
         let expected = vec![
             postgres_types::Type::TEXT,

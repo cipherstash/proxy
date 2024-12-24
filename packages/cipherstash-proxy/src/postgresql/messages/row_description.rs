@@ -1,6 +1,7 @@
 use std::{ffi::CString, io::Cursor};
 
 use bytes::{Buf, BufMut, BytesMut};
+use postgres_types::Type;
 use tracing::{error, field, info};
 
 use crate::{
@@ -33,13 +34,15 @@ impl RowDescription {
         self.fields.iter().any(|f| f.should_rewrite())
     }
 
-    pub fn map_types(&mut self, projection_types: &[Option<postgres_types::Type>]) {
-        for (idx, t) in projection_types.iter().enumerate() {
-            if let Some(t) = t {
-                let field = &mut self.fields[idx];
-                field.type_oid = t.clone();
-            }
-        }
+    pub fn map_types(&mut self, projection_types: &[Option<Type>]) {
+        self.fields
+            .iter_mut()
+            .zip(projection_types.iter())
+            .for_each(|(field, t)| {
+                if let Some(t) = t {
+                    field.rewrite_type_oid(t.clone());
+                }
+            });
     }
 }
 
@@ -59,7 +62,6 @@ impl TryFrom<&BytesMut> for RowDescription {
 
     fn try_from(bytes: &BytesMut) -> Result<RowDescription, Error> {
         let mut cursor = Cursor::new(bytes);
-        error!("RowDescription bytes: {:?}", bytes);
 
         let code = cursor.get_u8();
 

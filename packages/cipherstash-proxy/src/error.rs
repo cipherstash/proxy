@@ -53,6 +53,12 @@ pub enum Error {
 pub enum MappingError {
     #[error(transparent)]
     Parse(#[from] sqlparser::parser::ParserError),
+
+    #[error("Encryption of PostgreSQL {name} ({oid}) types is not currently supported")]
+    UnsupportedParameterType { name: String, oid: i32 },
+
+    #[error("Invalid parameter data for PostgreSQL {name} ({oid}) type")]
+    InvalidParameter { name: String, oid: i32 },
 }
 
 #[derive(Error, Debug)]

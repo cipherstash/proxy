@@ -513,9 +513,9 @@ dependencies = [
 
 [[package]]
 name = "cipherstash-client"
-version = "0.13.0"
+version = "0.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1174c44f19452a8266e6d5a0186642982996dc5ca09439719fdd4f40dd6f4c15"
+checksum = "d364f613279c464d4854b06c49a6e57cc58802cd7a5ff4c0f6f8c7aae447cd18"
 dependencies = [
  "aes-gcm-siv",
  "anyhow",
@@ -685,12 +685,15 @@ dependencies = [
  "config",
  "eql-mapper",
  "exitcode",
+ "itertools 0.13.0",
  "md-5",
  "native-tls",
  "oid-registry",
  "pg_escape",
  "postgres-protocol",
- "rand 0.8.5",
+ "postgres-types",
+ "rand",
+ "recipher",
  "regex",
  "ring",
  "rustls",
@@ -801,17 +804,17 @@ dependencies = [
 
 [[package]]
 name = "config"
-version = "0.14.1"
+version = "0.15.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "68578f196d2a33ff61b27fae256c3164f65e36382648e30666dde05b8cc9dfdf"
+checksum = "3d84f8d224ac58107d53d3ec2b9ad39fd8c8c4e285d3c9cb35485ffd2ca88cb3"
 dependencies = [
  "async-trait",
  "convert_case",
- "nom",
  "pathdiff",
  "serde",
  "serde_json",
  "toml",
+ "winnow",
 ]
 
 [[package]]

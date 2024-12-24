@@ -19,13 +19,19 @@ async fn integrate_decrypt() {
     let config = database_config_with_port(PROXY);
     let client = connect_with_tls(&config).await;
 
+    let id: i64 = 1;
+    let email = "hello@cipherstash.com";
+
+    // let sql = "SELECT id, name, email FROM users";
+    // let rows = client.query(sql, &[]).await.expect("ok");
+
     // let sql = "SELECT id, name, email FROM users WHERE id = $1";
     // let rows = client.query(sql, &[&id]).await.expect("ok");
 
-    let id: i64 = 1;
-    let email = "hello@cipherstash.com";
-    let sql = "SELECT id, name, email FROM users WHERE email = $1";
-    // let sql = "SELECT id, name, email FROM users WHERE id = $1 AND email = $2";
+    // let sql = "SELECT id, name, email FROM users WHERE email = $1";
+    // let rows = client.query(sql, &[&email]).await.expect("ok");
+
+    let sql = "SELECT id, name, email FROM users WHERE id = $1 OR email = $2";
     let rows = client.query(sql, &[&id, &email]).await.expect("ok");
 
     for row in rows {
