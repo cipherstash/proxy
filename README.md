@@ -121,10 +121,10 @@ Then add mise to your shell:
 
 ```
 # If you're running Bash
-echo 'eval "$(~/.local/bin/mise activate bash)"' >> ~/.bashrc
+echo 'eval "$(mise activate bash)"' >> ~/.bashrc
 
 # If you're running Zsh
-echo 'eval "$(~/.local/bin/mise activate zsh)"' >> ~/.zshrc
+echo 'eval "$(mise activate zsh)"' >> ~/.zshrc
 ```
 
 We use [`cargo-binstall`](https://github.com/cargo-bins/cargo-binstall) for faster installation of tools installed via `mise` and Cargo.
