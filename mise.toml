@@ -69,7 +69,7 @@ cp {{config_root}}/target/{{ target }}/release/cipherstash-proxy {{config_root}}
 mise run build:docker --platform {{docker_platform}}
 
 # run the container
-echo docker compose up --build proxy {{option(name="extra-args",default="")}} | bash
+echo docker compose up proxy {{option(name="extra-args",default="")}} | bash
 """
 
 [tasks."proxy:down"]
