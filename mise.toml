@@ -69,16 +69,16 @@ cp {{config_root}}/target/{{ target }}/release/cipherstash-proxy {{config_root}}
 mise run build:docker --platform {{docker_platform}}
 
 # run the container
-echo docker compose up proxy {{option(name="extra-args",default="")}} | bash
+echo docker compose up {{arg(name="service",default="proxy")}} {{option(name="extra-args",default="")}} | bash
 """
 
 [tasks."proxy:down"]
 dir = "{{config_root}}/tests"
 description = "Tear down Proxy containers"
-# Only stop the proxy.
 # `docker compose down` works differently on Linux and macOS.
 # Depending on the operating system and version, services sometimes can't be named.
-run = "docker compose stop proxy"
+# Run `docker compose rm` directly, to emulate what `docker compose down` does.
+run = "docker compose rm --stop --force proxy proxy-tls"
 
 # ====================================================================================================
 # Test Tasks
@@ -134,7 +134,7 @@ run = """
   mise --env tcp run proxy:down
 
   mise --env tls run postgres:setup
-  mise --env tls run proxy:up --extra-args "--detach --wait"
+  mise --env tls run proxy:up proxy-tls --extra-args "--detach --wait"
   mise --env tls run test:wait_for_tcp_port --port 6432
   sleep 10
   mise --env tls run test:psql-tls

@@ -1,2 +1,3 @@
 [env]
+CS_DATABASE__HOST = "postgres"
 CS_DATABASE__PORT = "5532"

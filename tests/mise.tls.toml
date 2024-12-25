@@ -1,6 +1,7 @@
 [env]
+CS_DATABASE__HOST = "postgres-17-tls"
 CONTAINER_SUFFIX = "-17-tls"
 CS_DATABASE__PORT = "5617"
-CS_TLS__CERTIFICATE = "tests/tls/server.cert"
-CS_TLS__PRIVATE_KEY = "tests/tls/server.key"
+CS_TLS__CERTIFICATE = "/etc/cipherstash-proxy/server.cert"
+CS_TLS__PRIVATE_KEY = "/etc/cipherstash-proxy/server.key"
 CS_SERVER__REQUIRE_TLS = "true"
