@@ -131,14 +131,14 @@ run = """
   mise --env tcp run proxy:down
 
   mise --env tls run postgres:setup
-  mise --env tcp run proxy:up --extra-args "--detach --wait"
+  mise --env tls run proxy:up --extra-args "--detach --wait"
   mise --env tls run test:wait_for_tcp_port --port 6432
   sleep 10
   mise --env tls run test:psql-tls
   mise --env tls run proxy:down
 
   mise --env tls run postgres:setup
-  mise --env tcp run proxy:up --extra-args "--detach --wait"
+  mise --env tls run proxy:up --extra-args "--detach --wait"
   mise --env tls run test:wait_for_tcp_port --port 6432
   sleep 10
   cargo nextest run --no-fail-fast --nocapture -E 'test(~integration)'
