@@ -126,6 +126,9 @@ alias = "i"
 dir = "./tests"
 description = "Runs integration test/s"
 run = """
+  # ensure all proxy services are stopped before we start
+  mise --env tcp run proxy:down
+
   mise --env tcp run postgres:setup
   mise --env tcp run proxy:up proxy --extra-args "--detach --wait"
   mise --env tcp run test:wait_for_tcp_port --port 6432
