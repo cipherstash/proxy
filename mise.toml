@@ -73,7 +73,7 @@ echo docker compose up proxy {{option(name="extra-args",default="")}} | bash
 """
 
 [tasks."proxy:down"]
-dir = "./tests"
+dir = "{{config_root}}/tests"
 description = "Tear down Proxy containers"
 run = "docker compose down proxy"
 
