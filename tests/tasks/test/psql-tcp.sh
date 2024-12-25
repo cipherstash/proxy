@@ -11,7 +11,8 @@ docker exec -i postgres${CONTAINER_SUFFIX} psql postgresql://${CS_DATABASE__USER
 SELECT 1;
 EOF
 
-docker exec -i postgres psql postgresql://cipherstash:password@localhost:5532/cipherstash <<-EOF
+# Connect to the proxy
+docker exec -i postgres psql postgresql://cipherstash:password@proxy:6432/cipherstash <<-EOF
 SELECT 1;
 EOF
 
