@@ -126,24 +126,41 @@ alias = "i"
 dir = "./tests"
 description = "Runs integration test/s"
 run = """
-  # ensure all proxy services are stopped before we start
+  ###############################################
+  # Setup
+  ###############################################
+
+  # Ensure all Proxy services are stopped before we start the tests
   mise --env tcp run proxy:down
 
+  # Ensure EQL is set up before we try and start Proxy
   mise --env tcp run postgres:setup
+  mise --env tls run postgres:setup
+
+  ###############################################
+  # Test: non-TLS
+  ###############################################
+
   mise --env tcp run proxy:up proxy --extra-args "--detach --wait"
   mise --env tcp run test:wait_for_tcp_port --port 6432
   sleep 10
   mise --env tcp run test:psql-tcp
   mise --env tcp run proxy:down
 
-  mise --env tls run postgres:setup
+  ###############################################
+  # Test: TLS
+  ###############################################
+
   mise --env tls run proxy:up proxy-tls --extra-args "--detach --wait"
   mise --env tls run test:wait_for_tcp_port --port 6432
   sleep 10
   mise --env tls run test:psql-tls
   mise --env tls run proxy:down
 
-  mise --env tls run postgres:setup
+  ###############################################
+  # Test: integration
+  ###############################################
+
   mise --env tls run proxy:up proxy-tls --extra-args "--detach --wait"
   mise --env tls run test:wait_for_tcp_port --port 6432
   sleep 10
