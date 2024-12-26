@@ -289,6 +289,9 @@ When you have Proxy containers running in the background, you can stop them with
 mise run proxy:down
 ```
 
+Running Proxy in a container cross-compiles a binary for Linux and the current architecture (`amd64`, `arm64`), then copies the binary into the container.
+We cross-compile binary outside the container because it's generally faster, due to packages already being cached, and slower network and disk IO in Docker.
+
 ### Building
 
 Build a standalone releasable binary for Proxy:
