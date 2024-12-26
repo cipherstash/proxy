@@ -294,10 +294,28 @@ We cross-compile binary outside the container because it's generally faster, due
 
 ### Building
 
-Build a standalone releasable binary for Proxy:
+Build a binary and Docker image:
 
-```bash
+```shell
+mise run build
+```
+
+You can also do those two steps individually.
+
+Build a standalone releasable binary for Proxy, for the current architecture and operating system:
+
+```shell
 mise run build:binary
+```
+
+Build a Docker image using the binary produced from running `mise run build:binary`:
+
+```shell
+# build an image for the current architecture and operating system
+mise run build:docker
+
+# build an image for a specific architecure and operating system
+mise run build:docker --platform linux/arm64
 ```
 
 ### Tests
