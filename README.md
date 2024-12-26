@@ -75,6 +75,7 @@ Development is managed through [mise](https://mise.jdx.dev/), both locally and [
 mise has tasks for:
 
 - Starting and stopping PostgreSQL containers (`postgres:up`, `postgres:down`)
+- Starting and stopping Proxy as a process or container (`proxy`, `proxy:up`, `proxy:down`)
 - Running hygiene tests (`test:check`, `test:clippy`, `test:format`)
 - Running unit tests (`test:unit`)
 - Running integration tests (`test:integration`, `test:integration:*`)
@@ -227,13 +228,68 @@ $EDITOR cipherstash-proxy.toml
 
 Configure `Auth` and `Encrypt`
 
-### Building and running
+### Running Proxy locally
 
-Build and run Proxy locally:
+There are two ways to run Proxy locally:
+
+1. **As a process**, most useful for local development
+1. **In a container**, used for integration tests
+
+#### Running Proxy locally as a process
+
+Build and run Proxy as a process on your local machine:
 
 ```shell
 mise run proxy
+# exit by hitting ctrl + c
 ```
+
+Kill any Proxy processes running in the background:
+
+```shell
+mise run proxy:kill
+```
+
+#### Running Proxy locally in a container
+
+To run Proxy in a container on your local machine:
+
+```shell
+mise run proxy:up
+# exit by hitting ctrl + c
+```
+
+There are two different Proxy containers you can run:
+
+1. One with TLS (`proxy-tls`)
+1. One without TLS (`proxy`)
+
+```shell
+# Default `proxy:up` behaviour starts the TLS-less Proxy container
+mise run proxy:up
+
+# Explicitly starting the TLS-less Proxy container
+mise run proxy:up proxy
+
+# Start the Proxy container with TLS
+mise run proxy:up proxy-tls
+```
+
+You can pass extra arguments to `proxy:up`, to run the Proxy container in the background:
+
+```shell
+mise run proxy:up --extra-args "--detach --wait"
+```
+
+Any options you pass via `--extra-args` will be passed to `docker compose up` behind the scenes.
+
+When you have Proxy containers running in the background, you can stop them with this:
+
+```shell
+mise run proxy:down
+```
+
+### Building
 
 Build a standalone releasable binary for Proxy:
 
