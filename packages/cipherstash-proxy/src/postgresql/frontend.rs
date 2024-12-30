@@ -9,14 +9,15 @@ use crate::eql;
 use crate::eql::Identifier;
 use crate::error::Error;
 use crate::log::DEVELOPMENT;
-use bytes::{BufMut, BytesMut};
+use crate::postgresql::messages::query::Query;
+use bytes::BytesMut;
 use eql_mapper::{self, EqlMapperError, EqlValue, TableColumn};
 use pg_escape::quote_literal;
 use sqlparser::ast::{CastKind, DataType, Expr, Value};
 use sqlparser::dialect::PostgreSqlDialect;
 use sqlparser::parser::Parser;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
-use tracing::warn;
+use tracing::{debug, warn};
 
 const DIALECT: PostgreSqlDialect = PostgreSqlDialect {};
 
@@ -73,22 +74,20 @@ where
                     Ok(Some(bytes)) => message.bytes = bytes,
                     Ok(None) => (),
                     Err(e) => {
-                        warn!("error parsing query: {}", e);
-                        let code: u8 = b'Q';
+                        debug!("error parsing query: {}", e);
                         // This *should* be sufficient for escaping error messages as we're only
-                        // using the string literal, and nothing else like identifiers
+                        // using the string literal, and not identifiers
                         let quoted_error = quote_literal(format!("[CipherStash] {}", e).as_str());
-                        let content = format!("DO $$ begin raise exception {quoted_error}; END; $$;\0");
-                        let len: usize = content.len();
-                        let total_len = size_of::<i32>() as usize + len;
-                        let mut query_bytes = BytesMut::with_capacity(total_len);
-                        query_bytes.put_u8(code);
-                        query_bytes.put_i32(total_len as i32);
-                        query_bytes.put_slice(content.as_bytes());
-                        message.bytes = query_bytes;
-                        warn!("frontend: writing: {:?}", &message.bytes);
+                        let content =
+                            format!("DO $$ begin raise exception {quoted_error}; END; $$;");
+                        let query = Query { statement: content };
+                        message.bytes = BytesMut::try_from(query)?;
+                        debug!(
+                            "frontend sending an exception-raising message: {:?}",
+                            &message.bytes
+                        );
                         // TODO: should some errors be bubbled up with `Err(e)?`
-                    },
+                    }
                 }
             }
             Code::Bind => {
@@ -99,7 +98,6 @@ where
             _code => {}
         }
 
-        warn!("sending-this: {:?}", message.bytes);
         Ok(message.bytes)
     }
 

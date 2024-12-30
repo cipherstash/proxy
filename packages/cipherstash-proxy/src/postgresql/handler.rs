@@ -16,14 +16,13 @@ use crate::{
     error::{Error, ProtocolError},
     tls,
 };
-use bytes::{BufMut, BytesMut};
+use bytes::BytesMut;
 use md5::{Digest, Md5};
 use postgres_protocol::authentication::sasl::{ChannelBinding, ScramSha256};
 use rand::Rng;
 
 use tokio::io::{split, AsyncRead, AsyncWrite, AsyncWriteExt};
-use tokio::sync::mpsc;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info};
 
 ///
 ///
@@ -216,34 +215,9 @@ pub async fn handler(client_stream: AsyncStream, encrypt: Encrypt) -> Result<(),
     let mut frontend = Frontend::new(client_reader, server_writer, encrypt.clone());
     let mut backend = Backend::new(client_writer, server_reader, encrypt.clone());
 
-    // when there is an error in eql-mapper, instead of talking to the server,
-    // we need to notify the client
-    // TODO: Somehow ensure the server aborts transactions
-    // TODO: what's the appropriate size for the buffer for us?
-    let (sender, mut receiver) = mpsc::channel::<Error>(100);
-
     let client_to_server = async {
         loop {
-            match frontend.rewrite().await {
-                Ok(_) => (),
-                Err(Error::EqlMapper(e)) => {
-                    warn!("client_to_server: EqlMapper error: {}, moving on with the loop", e);
-                    match sender.send(Error::EqlMapper(e)).await {
-                        Ok(()) => (),
-                        Err(send_err) => error!("client_to_server: Sending EqlMapper error to channel failed: {}", send_err),
-                    }
-                    ()
-                },
-                Err(Error::Mapping(e)) => {
-                    warn!("client_to_server: Mapping error: {}, moving on with the loop", e);
-                    match sender.send(Error::Mapping(e)).await {
-                        Ok(()) => (),
-                        Err(send_err) => error!("client_to_server: Sending Mapping error to channel failed: {}", send_err),
-                    }
-                    ()
-                },
-                e => e?,
-            }
+            frontend.rewrite().await?;
         }
         // Unreachable, but helps the compiler understand the return type
         // TODO: extract into a function or something with type
@@ -253,33 +227,7 @@ pub async fn handler(client_stream: AsyncStream, encrypt: Encrypt) -> Result<(),
 
     let server_to_client = async {
         loop {
-            tokio::select! {
-                rewritten = backend.rewrite() =>  {
-                    rewritten?
-                },
-                received = receiver.recv() => {
-                    match received {
-                        Some(e) => {
-                            warn!("server_to_client: received error: {}", e);
-                            let code: u8 = b'E';
-                            let content = format!("SERROR\0VERROR\0CP0001\0M{}\0\0", e); 
-                            let byte_content = content.as_bytes();
-                            let len: usize = content.len();
-                            let total_len = size_of::<i32>() as usize + len;
-                            let mut bytes = BytesMut::with_capacity(total_len);
-                            bytes.put_u8(code);
-                            bytes.put_i32(total_len as i32);
-                            bytes.put(&byte_content[..]);
-                            warn!("server_to_client writing back: {:?}", &bytes);
-                            backend.write(bytes).await?;
-                            warn!("server_to_client done writing back");
-                        },
-                        None => {
-                            warn!("server_to_client: channerl message received but no error (None) received.")
-                        }
-                    }
-                }
-            }
+            backend.rewrite().await?;
         }
         #[allow(unreachable_code)]
         Ok::<(), Error>(())
