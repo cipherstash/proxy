@@ -11,6 +11,7 @@ use crate::error::Error;
 use crate::log::DEVELOPMENT;
 use bytes::{BufMut, BytesMut};
 use eql_mapper::{self, EqlMapperError, EqlValue, TableColumn};
+use pg_escape::quote_literal;
 use sqlparser::ast::{CastKind, DataType, Expr, Value};
 use sqlparser::dialect::PostgreSqlDialect;
 use sqlparser::parser::Parser;
@@ -68,29 +69,25 @@ where
         match message.code.into() {
             Code::Query => {}
             Code::Parse => {
-                // Can I handle error here?
-                println!("byets: {:?}", message.bytes);
                 match self.parse_handler(&message).await {
                     Ok(Some(bytes)) => message.bytes = bytes,
                     Ok(None) => (),
-                    // TODO: should some errors be bubbled up with `e?``
                     Err(e) => {
                         warn!("error parsing query: {}", e);
                         let code: u8 = b'Q';
-                        // TODO: print error message with escaped string
-                        let content = "DO $$ begin raise exception 'EQL Mapper error'; END; $$;\0";
-                        // let content = "\0DO $$ begin raise exception 'EQL Mapper error'; END; $$;\0\0\0";
-                        // let content = "foo\0select select selct select select\0\0\0";
+                        // This *should* be sufficient for escaping error messages as we're only
+                        // using the string literal, and nothing else like identifiers
+                        let quoted_error = quote_literal(format!("[CipherStash] {}", e).as_str());
+                        let content = format!("DO $$ begin raise exception {quoted_error}; END; $$;\0");
                         let len: usize = content.len();
                         let total_len = size_of::<i32>() as usize + len;
-                        warn!("total_len: {}", total_len);
-                        let mut raise_query_bytes = BytesMut::with_capacity(total_len);
-                        raise_query_bytes.put_u8(code);
-                        raise_query_bytes.put_i32(total_len as i32);
-                        raise_query_bytes.put_slice(content.as_bytes());
-                        message.bytes = raise_query_bytes;
+                        let mut query_bytes = BytesMut::with_capacity(total_len);
+                        query_bytes.put_u8(code);
+                        query_bytes.put_i32(total_len as i32);
+                        query_bytes.put_slice(content.as_bytes());
+                        message.bytes = query_bytes;
                         warn!("frontend: writing: {:?}", &message.bytes);
-                        // Err(e)?
+                        // TODO: should some errors be bubbled up with `Err(e)?`
                     },
                 }
             }
