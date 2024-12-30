@@ -9,7 +9,7 @@ use crate::eql;
 use crate::eql::Identifier;
 use crate::error::Error;
 use crate::log::DEVELOPMENT;
-use bytes::BytesMut;
+use bytes::{BufMut, BytesMut};
 use eql_mapper::{self, EqlMapperError, EqlValue, TableColumn};
 use sqlparser::ast::{CastKind, DataType, Expr, Value};
 use sqlparser::dialect::PostgreSqlDialect;
@@ -68,8 +68,30 @@ where
         match message.code.into() {
             Code::Query => {}
             Code::Parse => {
-                if let Some(bytes) = self.parse_handler(&message).await? {
-                    message.bytes = bytes;
+                // Can I handle error here?
+                println!("byets: {:?}", message.bytes);
+                match self.parse_handler(&message).await {
+                    Ok(Some(bytes)) => message.bytes = bytes,
+                    Ok(None) => (),
+                    // TODO: should some errors be bubbled up with `e?``
+                    Err(e) => {
+                        warn!("error parsing query: {}", e);
+                        let code: u8 = b'Q';
+                        // TODO: print error message with escaped string
+                        let content = "DO $$ begin raise exception 'EQL Mapper error'; END; $$;\0";
+                        // let content = "\0DO $$ begin raise exception 'EQL Mapper error'; END; $$;\0\0\0";
+                        // let content = "foo\0select select selct select select\0\0\0";
+                        let len: usize = content.len();
+                        let total_len = size_of::<i32>() as usize + len;
+                        warn!("total_len: {}", total_len);
+                        let mut raise_query_bytes = BytesMut::with_capacity(total_len);
+                        raise_query_bytes.put_u8(code);
+                        raise_query_bytes.put_i32(total_len as i32);
+                        raise_query_bytes.put_slice(content.as_bytes());
+                        message.bytes = raise_query_bytes;
+                        warn!("frontend: writing: {:?}", &message.bytes);
+                        // Err(e)?
+                    },
                 }
             }
             Code::Bind => {
@@ -80,6 +102,7 @@ where
             _code => {}
         }
 
+        warn!("sending-this: {:?}", message.bytes);
         Ok(message.bytes)
     }
 

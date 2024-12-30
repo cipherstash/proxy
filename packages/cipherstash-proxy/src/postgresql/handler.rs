@@ -230,7 +230,15 @@ pub async fn handler(client_stream: AsyncStream, encrypt: Encrypt) -> Result<(),
                     warn!("client_to_server: EqlMapper error: {}, moving on with the loop", e);
                     match sender.send(Error::EqlMapper(e)).await {
                         Ok(()) => (),
-                        Err(e) => error!("client_to_server: Sending EqlMapper error to channel failed: {}", e),
+                        Err(send_err) => error!("client_to_server: Sending EqlMapper error to channel failed: {}", send_err),
+                    }
+                    ()
+                },
+                Err(Error::Mapping(e)) => {
+                    warn!("client_to_server: Mapping error: {}, moving on with the loop", e);
+                    match sender.send(Error::Mapping(e)).await {
+                        Ok(()) => (),
+                        Err(send_err) => error!("client_to_server: Sending Mapping error to channel failed: {}", send_err),
                     }
                     ()
                 },
@@ -263,7 +271,8 @@ pub async fn handler(client_stream: AsyncStream, encrypt: Encrypt) -> Result<(),
                             bytes.put_i32(total_len as i32);
                             bytes.put(&byte_content[..]);
                             warn!("server_to_client writing back: {:?}", &bytes);
-                            backend.write(bytes).await?
+                            backend.write(bytes).await?;
+                            warn!("server_to_client done writing back");
                         },
                         None => {
                             warn!("server_to_client: channerl message received but no error (None) received.")
