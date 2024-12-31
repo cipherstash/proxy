@@ -35,5 +35,6 @@ jobs:
           CS_ENCRYPT__DATASET_ID: ${{ secrets.CS_ENCRYPT__DATASET_ID }}
           CS_ENCRYPT__CLIENT_ID: ${{ secrets.CS_ENCRYPT__CLIENT_ID }}
           CS_ENCRYPT__CLIENT_KEY: ${{ secrets.CS_ENCRYPT__CLIENT_KEY }}
+          RUST_BACKTRACE: "1"
         run: |
           mise run ci
