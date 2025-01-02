@@ -122,6 +122,29 @@ done
 echo "Connected to ${host}:${port} after ${attempt} attempts"
 """
 
+[tasks."test:integration:preflight"]
+description = "Ensure dependencies are ready for running the integration tests"
+run = '''
+set -u
+set +e
+
+# 5532: non-TLS, Postgres latest
+# 5617: TLS, PostgreSQL version 17
+ports="5532 5617"
+
+for i in ${ports}; do
+  mise run test:wait_for_tcp_port --port ${i} --max-retries 4
+  if [ $? -ne 0 ]; then
+    echo "error: Postgres not running on port ${i}"
+    echo "error: Try running 'mise run postgres:up' to start the containers"
+    exit 66
+  fi
+done
+
+# Ensure all Proxy services are stopped before we start the tests
+mise --env tcp run proxy:down
+'''
+
 [tasks."test:integration"]
 alias = "i"
 dir = "./tests"
@@ -132,11 +155,7 @@ run = """
 ###############################################
 
 # Ensure Postgres instances are running
-mise run test:wait_for_tcp_port --port 5532 --max-retries 4 # non-TLS, Postgres latest
-mise run test:wait_for_tcp_port --port 5617 --max-retries 4 # TLS, PostgreSQL version 17
-
-# Ensure all Proxy services are stopped before we start the tests
-mise --env tcp run proxy:down
+mise run test:integration:preflight
 
 # Ensure EQL is set up before we try and start Proxy
 mise --env tcp run postgres:setup
