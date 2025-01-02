@@ -196,11 +196,12 @@ fi
 """
 
 [tasks."postgres:setup"]
-depends = ["postgres:fail_if_not_running", "postgres:install_eql"]
 alias = 's'
 description = "Installs EQL and applies schema to database"
 run = """
 #!/bin/bash
+mise run postgres:fail_if_not_running
+mise run postgres:install_eql
 cd tests
 cat sql/schema.sql | docker exec -i postgres${CONTAINER_SUFFIX} psql postgresql://${CS_DATABASE__USERNAME}:${CS_DATABASE__PASSWORD}@${CS_DATABASE__HOST}:${CS_DATABASE__PORT}/cipherstash -f-
 """
