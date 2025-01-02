@@ -113,15 +113,46 @@ mise run test:unit
 """
 
 [tasks."test:wait_for_tcp_port"]
+dir = "{{config_root}}"
 run = """
 {% set default_host = get_env(name="CS_DATABASE__HOST",default="localhost") %}
 {% set default_port = get_env(name="CS_DATABASE__PORT",default=5432) %}
 host={{option(name="host",default=default_host)}}
 port={{option(name="port",default=default_port)}}
-max_retries={{option(name="max-retries",default="10")}}
+tls={{flag(name="tls")}}
+max_retries={{option(name="max-retries",default="4")}}
 interval={{option(name="interval",default="0.5")}}
 attempt=1
-until echo QUIT | nc -w 1 $host $port
+echo "Testing presence of Postgres at ${host}:${port} with a maximum of ${max_retries} retries"
+
+postgres_ready () {
+  # tls test
+  if [ "$1" = "true" ]; then
+    response="$(echo | openssl s_client -starttls postgres -connect $host:$port -state -no_ign_eof 2>&1)"
+    success=$?
+    if [ -n "${DEBUG}" ]; then
+      echo "response: ${response}"
+    fi
+    return $success
+  else
+    # plaintext test
+    response=$(cat tests/pg/startup_message.bin | nc -v -w 1 $host $port)
+    if [ -n "${DEBUG}" ]; then
+      echo "response: ${response}"
+      echo "response: \\"${response}\\""
+      echo -n ${response} | od -c
+      echo -n ${response} | wc -c
+      echo -n "\n" | od -c
+    fi
+    # FIXME(lindsay): also detect if we see TLS failures
+    if [ -n "${response}" ]; then
+      return 0
+    fi
+    return 1
+  fi
+}
+
+until postgres_ready $tls
 do
   if [ $attempt -lt $max_retries ]; then
     echo "Waiting for ${host}:${port}"
