@@ -105,13 +105,14 @@ run = """
 {% set default_port = get_env(name="CS_DATABASE__PORT",default=5432) %}
 host={{option(name="host",default=default_host)}}
 port={{option(name="port",default=default_port)}}
-max_retries=10
+max_retries={{option(name="max-retries",default="10")}}
+interval={{option(name="interval",default="0.5")}}
 attempt=1
 until nc -z $host $port
 do
   if [ $attempt -lt $max_retries ]; then
     echo "Waiting for ${host}:${port}"
-    sleep 0.5
+    sleep $interval
     attempt=$(expr $attempt + 1)
   else
     echo "Unable to connect to ${host}:${port} after ${max_retries} attempts"
