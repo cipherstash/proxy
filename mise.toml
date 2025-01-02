@@ -108,7 +108,7 @@ port={{option(name="port",default=default_port)}}
 max_retries={{option(name="max-retries",default="10")}}
 interval={{option(name="interval",default="0.5")}}
 attempt=1
-until nc -z $host $port
+until echo QUIT | nc -w 1 $host $port
 do
   if [ $attempt -lt $max_retries ]; then
     echo "Waiting for ${host}:${port}"
