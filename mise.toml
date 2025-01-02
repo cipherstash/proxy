@@ -131,6 +131,10 @@ run = """
 # Setup
 ###############################################
 
+# Ensure Postgres instances are running
+mise run test:wait_for_tcp_port --port 5532 --max-retries 4 # non-TLS, Postgres latest
+mise run test:wait_for_tcp_port --port 5617 --max-retries 4 # TLS, PostgreSQL version 17
+
 # Ensure all Proxy services are stopped before we start the tests
 mise --env tcp run proxy:down
 
