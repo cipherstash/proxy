@@ -267,9 +267,10 @@ alias = 's'
 description = "Installs EQL and applies schema to database"
 run = """
 #!/bin/bash
-mise run postgres:fail_if_not_running
-mise run postgres:eql:install
 cd tests
+mise run postgres:fail_if_not_running
+mise run postgres:eql:download
+cat sql/cipherstash-encrypt.sql | docker exec -i postgres${CONTAINER_SUFFIX} psql postgresql://${CS_DATABASE__USERNAME}:${CS_DATABASE__PASSWORD}@${CS_DATABASE__HOST}:${CS_DATABASE__PORT}/cipherstash -f-
 cat sql/schema.sql | docker exec -i postgres${CONTAINER_SUFFIX} psql postgresql://${CS_DATABASE__USERNAME}:${CS_DATABASE__PASSWORD}@${CS_DATABASE__HOST}:${CS_DATABASE__PORT}/cipherstash -f-
 """
 
@@ -355,20 +356,7 @@ alias = 'e'
 description = "Download latest EQL release"
 dir = "{{config_root}}/tests"
 outputs = ["{{config_root}}/tests/sql/cipherstash-encrypt.sql"]
-run = """
-#!/usr/bin/env bash
-curl -sLo sql/cipherstash-encrypt.sql https://github.com/cipherstash/encrypt-query-language/releases/latest/download/cipherstash-encrypt.sql
-"""
-
-[tasks."postgres:eql:install"]
-alias = 'e'
-description = "Install EQL"
-dir = "{{config_root}}/tests"
-run = """
-#!/usr/bin/env bash
-mise run postgres:eql:download
-cat sql/cipherstash-encrypt.sql | docker exec -i postgres${CONTAINER_SUFFIX} psql postgresql://${CS_DATABASE__USERNAME}:${CS_DATABASE__PASSWORD}@${CS_DATABASE__HOST}:${CS_DATABASE__PORT}/cipherstash -f-
-"""
+run = "curl -sLo sql/cipherstash-encrypt.sql https://github.com/cipherstash/encrypt-query-language/releases/latest/download/cipherstash-encrypt.sql"
 
 [tasks.build]
 description = "Build releasable artifacts"
