@@ -92,33 +92,33 @@ run = "mise run test:nextest {{arg(name='test',default='')}}"
 alias = "ci"
 description = "Runs test/s"
 run = """
-  mise run test:integration
-  mise run test:check
-  mise run test:format
-  mise run test:clippy
-  mise run test:unit
+mise run test:integration
+mise run test:check
+mise run test:format
+mise run test:clippy
+mise run test:unit
 """
 
 [tasks."test:wait_for_tcp_port"]
 run = """
 {% set default_host = get_env(name="CS_DATABASE__HOST",default="localhost") %}
 {% set default_port = get_env(name="CS_DATABASE__PORT",default=5432) %}
-  host={{option(name="host",default=default_host)}}
-  port={{option(name="port",default=default_port)}}
-  max_retries=10
-  attempt=1
-  until nc -z $host $port
-  do
-    if [ $attempt -lt $max_retries ]; then
-      echo "Waiting for ${host}:${port}"
-      sleep 0.5
-      attempt=$(expr $attempt + 1)
-    else
-      echo "Unable to connect to ${host}:${port} after ${max_retries} attempts"
-      exit 64
-    fi
-  done
-  echo "Connected to ${host}:${port} after ${attempt} attempts"
+host={{option(name="host",default=default_host)}}
+port={{option(name="port",default=default_port)}}
+max_retries=10
+attempt=1
+until nc -z $host $port
+do
+  if [ $attempt -lt $max_retries ]; then
+    echo "Waiting for ${host}:${port}"
+    sleep 0.5
+    attempt=$(expr $attempt + 1)
+  else
+    echo "Unable to connect to ${host}:${port} after ${max_retries} attempts"
+    exit 64
+  fi
+done
+echo "Connected to ${host}:${port} after ${attempt} attempts"
 """
 
 [tasks."test:integration"]
@@ -126,46 +126,46 @@ alias = "i"
 dir = "./tests"
 description = "Runs integration test/s"
 run = """
-  ###############################################
-  # Setup
-  ###############################################
+###############################################
+# Setup
+###############################################
 
-  # Ensure all Proxy services are stopped before we start the tests
-  mise --env tcp run proxy:down
+# Ensure all Proxy services are stopped before we start the tests
+mise --env tcp run proxy:down
 
-  # Ensure EQL is set up before we try and start Proxy
-  mise --env tcp run postgres:setup
-  mise --env tls run postgres:setup
+# Ensure EQL is set up before we try and start Proxy
+mise --env tcp run postgres:setup
+mise --env tls run postgres:setup
 
-  ###############################################
-  # Test: non-TLS
-  ###############################################
+###############################################
+# Test: non-TLS
+###############################################
 
-  mise --env tcp run proxy:up proxy --extra-args "--detach --wait"
-  mise --env tcp run test:wait_for_tcp_port --port 6432
-  sleep 10
-  mise --env tcp run test:psql-tcp
-  mise --env tcp run proxy:down
+mise --env tcp run proxy:up proxy --extra-args "--detach --wait"
+mise --env tcp run test:wait_for_tcp_port --port 6432
+sleep 10
+mise --env tcp run test:psql-tcp
+mise --env tcp run proxy:down
 
-  ###############################################
-  # Test: TLS
-  ###############################################
+###############################################
+# Test: TLS
+###############################################
 
-  mise --env tls run proxy:up proxy-tls --extra-args "--detach --wait"
-  mise --env tls run test:wait_for_tcp_port --port 6432
-  sleep 10
-  mise --env tls run test:psql-tls
-  mise --env tls run proxy:down
+mise --env tls run proxy:up proxy-tls --extra-args "--detach --wait"
+mise --env tls run test:wait_for_tcp_port --port 6432
+sleep 10
+mise --env tls run test:psql-tls
+mise --env tls run proxy:down
 
-  ###############################################
-  # Test: integration
-  ###############################################
+###############################################
+# Test: integration
+###############################################
 
-  mise --env tls run proxy:up proxy-tls --extra-args "--detach --wait"
-  mise --env tls run test:wait_for_tcp_port --port 6432
-  sleep 10
-  cargo nextest run --no-fail-fast --nocapture -E 'test(~integration)'
-  mise --env tls run proxy:down
+mise --env tls run proxy:up proxy-tls --extra-args "--detach --wait"
+mise --env tls run test:wait_for_tcp_port --port 6432
+sleep 10
+cargo nextest run --no-fail-fast --nocapture -E 'test(~integration)'
+mise --env tls run proxy:down
 """
 
 [tasks."test:nextest"]
@@ -200,9 +200,9 @@ depends = ["postgres:fail_if_not_running", "postgres:install_eql"]
 alias = 's'
 description = "Installs EQL and applies schema to database"
 run = """
-  #!/bin/bash
-  cd tests
-  cat sql/schema.sql | docker exec -i postgres${CONTAINER_SUFFIX} psql postgresql://${CS_DATABASE__USERNAME}:${CS_DATABASE__PASSWORD}@${CS_DATABASE__HOST}:${CS_DATABASE__PORT}/cipherstash -f-
+#!/bin/bash
+cd tests
+cat sql/schema.sql | docker exec -i postgres${CONTAINER_SUFFIX} psql postgresql://${CS_DATABASE__USERNAME}:${CS_DATABASE__PASSWORD}@${CS_DATABASE__HOST}:${CS_DATABASE__PORT}/cipherstash -f-
 """
 
 [tasks."postgres:up"]
@@ -264,32 +264,32 @@ run = """
 {% else %}
 {% set stat_cmd = "stat -f '%Uu'" %}
 {% endif %}
-  set -e
-  set -u
-  if test -z "$(find tests/pg -maxdepth 1 -name 'data-*' -print -quit)"; then
-    echo "no data directories to clean up - skipping"
-    exit 0
-  fi
+set -e
+set -u
+if test -z "$(find tests/pg -maxdepth 1 -name 'data-*' -print -quit)"; then
+  echo "no data directories to clean up - skipping"
+  exit 0
+fi
 
-  uid=$(id -u)
-  for d in tests/pg/data-*; do
-    sudo=""
-    if [ "$({{stat_cmd}} ${d})" != "${uid}" ]; then
-      sudo="sudo"
-    fi
-    echo "removing data directory ${d}"
-    ${sudo} rm -rf ${d}
-  done
+uid=$(id -u)
+for d in tests/pg/data-*; do
+  sudo=""
+  if [ "$({{stat_cmd}} ${d})" != "${uid}" ]; then
+    sudo="sudo"
+  fi
+  echo "removing data directory ${d}"
+  ${sudo} rm -rf ${d}
+done
 """
 
 [tasks."postgres:install_eql"]
 alias = 'e'
 description = "Install EQL"
 run = """
-  #!/usr/bin/env bash
-  cd tests
-  curl -sLo sql/cipherstash-encrypt.sql https://github.com/cipherstash/encrypt-query-language/releases/latest/download/cipherstash-encrypt.sql
-  cat sql/cipherstash-encrypt.sql | docker exec -i postgres${CONTAINER_SUFFIX} psql postgresql://${CS_DATABASE__USERNAME}:${CS_DATABASE__PASSWORD}@${CS_DATABASE__HOST}:${CS_DATABASE__PORT}/cipherstash -f-
+#!/usr/bin/env bash
+cd tests
+curl -sLo sql/cipherstash-encrypt.sql https://github.com/cipherstash/encrypt-query-language/releases/latest/download/cipherstash-encrypt.sql
+cat sql/cipherstash-encrypt.sql | docker exec -i postgres${CONTAINER_SUFFIX} psql postgresql://${CS_DATABASE__USERNAME}:${CS_DATABASE__PASSWORD}@${CS_DATABASE__HOST}:${CS_DATABASE__PORT}/cipherstash -f-
 """
 
 [tasks.build]
