@@ -2,12 +2,15 @@
 
 set -e
 
+MISSING=0
+
 check_mise () {
   set +e
   mise_path="$(which mise)"
   retval=$?
   set -e
   if [ $retval -ne 0 ]; then
+    MISSING=$(expr $MISSING + 1)
     echo "❌ mise is not installed"
     echo
     echo "   Follow the install instructions at https://github.com/jdx/mise#quickstart"
@@ -23,6 +26,7 @@ check_docker () {
   retval=$?
   set -e
   if [ $retval -ne 0 ]; then
+    MISSING=$(expr $MISSING + 1)
     echo "❌ docker is not installed"
     echo
     echo "   Follow the install instructions for your platform: "
@@ -41,6 +45,7 @@ check_rust () {
   retval=$?
   set -e
   if [ $retval -ne 0 ]; then
+    MISSING=$(expr $MISSING + 1)
     echo "❌ rust is not installed"
     echo
     echo "   Install with: "
@@ -58,6 +63,7 @@ check_cargo_binstall () {
   retval=$?
   set -e
   if [ $retval -ne 0 ]; then
+    MISSING=$(expr $MISSING + 1)
     echo "❌ cargo-binstall is not installed"
     echo
     echo "   Install with: "
@@ -76,7 +82,13 @@ main () {
   check_rust
   check_cargo_binstall
   echo
-  echo "Looks like you are good to go!"
+  if [ $MISSING -gt 0 ]; then
+    echo "❌ Looks like you have ${MISSING} missing dependencies."
+    echo
+    echo "Follow the install instructions above, and re-run this script to re-check."
+  else
+    echo "Looks like you are good to go!"
+  fi
   echo
 }
 
