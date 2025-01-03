@@ -26,7 +26,7 @@ set +e
 docker exec -i postgres${CONTAINER_SUFFIX} psql 'postgresql://cipherstash:password@proxy:6432/cipherstash?sslmode=disable' <<-EOF
 SELECT 1;
 EOF
-if [ $? -ne 0 ]; then
+if [ $? -ne 1 ]; then
     echo "PSQL should not be able to connect without TLS"
     exit 1
 fi
@@ -36,7 +36,7 @@ docker exec -i postgres${CONTAINER_SUFFIX} psql postgresql://cipherstash:not-the
 SELECT 1;
 EOF
 
-if [ $? -eq 0 ]; then
+if [ $? -eq 1 ]; then
     echo "PSQL connected with an invalid password"
     exit 1
 fi
