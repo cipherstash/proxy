@@ -18,6 +18,9 @@ Local development quickstart:
 git clone https://github.com/cipherstash/proxy
 cd proxy
 
+# Double check you have all the development dependencies
+sh preflight.sh
+
 # Install dependencies
 mise trust --yes
 mise trust --yes tests
