@@ -129,7 +129,7 @@ mise run test:clippy
 mise run test:unit
 """
 
-[tasks."test:wait_for_tcp_port"]
+[tasks."test:wait_for_postgres_to_quack"]
 dir = "{{config_root}}"
 run = """
 {% set default_host = get_env(name="CS_DATABASE__HOST",default="localhost") %}
@@ -194,7 +194,7 @@ set +e
 ports="5532 5617"
 
 for i in ${ports}; do
-  mise run test:wait_for_tcp_port --port ${i} --max-retries 20
+  mise run test:wait_for_postgres_to_quack --port ${i} --max-retries 20
   if [ $? -ne 0 ]; then
     echo "error: Postgres not running on port ${i}"
     echo "error: Try running 'mise run postgres:up' to start the containers"
@@ -229,7 +229,7 @@ mise --env tls run postgres:setup
 ###############################################
 
 mise --env tcp run proxy:up proxy --extra-args "--detach --wait"
-mise --env tcp run test:wait_for_tcp_port --port 6432 --max-retries 20
+mise --env tcp run test:wait_for_postgres_to_quack --port 6432 --max-retries 20
 mise --env tcp run test:psql-tcp
 mise --env tcp run proxy:down
 
@@ -238,7 +238,7 @@ mise --env tcp run proxy:down
 ###############################################
 
 mise --env tls run proxy:up proxy-tls --extra-args "--detach --wait"
-mise --env tls run test:wait_for_tcp_port --port 6432 --max-retries 20 --tls
+mise --env tls run test:wait_for_postgres_to_quack --port 6432 --max-retries 20 --tls
 mise --env tls run test:psql-tls
 mise --env tls run proxy:down
 
@@ -247,7 +247,7 @@ mise --env tls run proxy:down
 ###############################################
 
 mise --env tls run proxy:up proxy-tls --extra-args "--detach --wait"
-mise --env tls run test:wait_for_tcp_port --port 6432 --max-retries 20 --tls
+mise --env tls run test:wait_for_postgres_to_quack --port 6432 --max-retries 20 --tls
 cargo nextest run --no-fail-fast --nocapture -E 'test(~integration)'
 mise --env tls run proxy:down
 """
