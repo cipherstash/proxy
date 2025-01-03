@@ -122,11 +122,11 @@ run = "mise run test:nextest {{arg(name='test',default='')}}"
 alias = "ci"
 description = "Runs test/s"
 run = """
-mise run test:integration
 mise run test:check
 mise run test:format
 mise run test:clippy
 mise run test:unit
+mise run test:integration
 """
 
 [tasks."test:wait_for_postgres_to_quack"]
