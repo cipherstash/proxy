@@ -81,6 +81,23 @@ if [[ "{{arg(name="service",default="proxy")}}" =~ "proxy-tls" ]]; then
   fi
 fi
 
+# Make the default invocation with `mise run proxy:up` work.
+# The default mise environment configuration works for Proxy running as a process, connecting via a port forward.
+# Try detecting a running postgres, and use it
+if [ "${CS_DATABASE__HOST}" == "localhost" ]; then
+  {% raw %}
+  running_postgres="$(docker ps --filter "name=postgres" --filter "health=healthy" --format "{{.Names}};{{.Ports}}" | grep ${CS_DATABASE__PORT})"
+  {% endraw %}
+  if [ -z "${running_postgres}" ]; then
+    echo "error: Could not detect a running, healthy postgres container with port ${CS_DATABASE__PORT}"
+    echo "error: Try running 'mise run postgres:up' to start a container"
+    exit 68
+  fi
+  echo $running_postgres
+  export CS_DATABASE__HOST=$(echo $running_postgres | cut -d ';' -f 1)
+  echo "Using postgres running in container: ${CS_DATABASE__HOST}"
+fi
+
 # run the container
 echo docker compose up {{arg(name="service",default="proxy")}} {{option(name="extra-args",default="")}} | bash
 """
