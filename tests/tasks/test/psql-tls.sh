@@ -4,7 +4,6 @@
 #!/bin/bash
 
 set -e
-set -x
 
 # sanity check direct connections
 docker exec -i postgres${CONTAINER_SUFFIX} psql postgresql://${CS_DATABASE__USERNAME}:${CS_DATABASE__PASSWORD}@${CS_DATABASE__HOST}:${CS_DATABASE__PORT}/cipherstash <<-EOF
