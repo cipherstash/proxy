@@ -297,32 +297,6 @@ dir = "{{config_root}}/tests"
 description = "Run Postgres instances with docker compose"
 run = """
 set -e
-set -u
-
-# For Ubuntu 24.04
-if [ '{{os()}}' = 'linux' ]; then
-  target_uid=999 # the uid of the postgres user inside the postgres containers
-  target_mode=600 # the file mode postgres needs to read certs and key material
-  for f in {{config_root}}/tests/tls/localhost*.pem; do
-    current_uid="$(stat --format='%u' ${f})"
-    if [ "${current_uid}" != "${target_uid}" ]; then
-      echo "Changing file owner from ${current_uid} to ${target_uid}: ${f}"
-      sudo chown ${target_uid}:${target_uid} ${f}
-    fi
-    current_mode="$(stat --format='%a' ${f})"
-    if [ "${current_mode}" != "${target_mode}" ]; then
-      echo "Changing file permissions from ${current_mode} to ${target_mode}: ${f}"
-      sudo chmod $target_mode $f
-    fi
-  done
-fi
-
-# For macOS 14.7
-if [ '{{os()}}' = 'macos' ]; then
-  target_mode=600 # the file mode postgres needs to read certs and key material
-  chmod $target_mode tls/*
-fi
-
 # Start the containers
 echo docker compose up --build {{arg(name="service",default="postgres postgres-17-tls")}} {{option(name="extra-args",default="")}} | bash
 """

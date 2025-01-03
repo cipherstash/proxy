@@ -32,9 +32,9 @@ services:
       PGPORT: 5617
     ports:
       - 5617:5617
-    command: -c 'config_file=/etc/postgresql/postgresql.conf' -c 'hba_file=/etc/postgresql/pg_hba.conf'
+    command: |
+      sh -c 'chown postgres:postgres /etc/postgresql/localhost*.pem && chmod 0600 /etc/postgresql/localhost*.pem && exec docker-entrypoint.sh -c ssl=on -c ssl_cert_file=/etc/postgresql/localhost.pem -c ssl_key_file=/etc/postgresql/localhost-key.pem -c hba_file=/etc/postgresql/pg_hba.conf'
     volumes:
-      - ./pg/postgresql-tls.conf:/etc/postgresql/postgresql.conf
       - ./pg/pg_hba-tls.conf:/etc/postgresql/pg_hba.conf
       - ./tls/localhost-key.pem:/etc/postgresql/localhost-key.pem
       - ./tls/localhost.pem:/etc/postgresql/localhost.pem
