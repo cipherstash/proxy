@@ -27,8 +27,6 @@ jobs:
           cache: true # [default: true] cache mise using GitHub's cache
       - run: |
           mise run postgres:up --extra-args "--detach --wait"
-      - run: |
-          mise run postgres:setup
       - env:
           CS_AUTH__WORKSPACE_ID: ${{ secrets.CS_AUTH__WORKSPACE_ID }}
           CS_AUTH__CLIENT_ACCESS_KEY: ${{ secrets.CS_AUTH__CLIENT_ACCESS_KEY }}
