@@ -113,14 +113,9 @@ run = "docker compose rm --stop --force proxy proxy-tls"
 # ====================================================================================================
 # Test Tasks
 
-[tasks."test:unit"]
-alias = ['t', 'test']
-description = "Runs tests"
-run = "mise run test:nextest {{arg(name='test',default='')}}"
-
-[tasks."test:ci"]
-alias = "ci"
-description = "Runs test/s"
+[tasks.test]
+alias = [ 't', 'ci' ]
+description = "Runs all tests (hygiene, unit, integration)"
 run = """
 mise run test:check
 mise run test:format
@@ -128,6 +123,11 @@ mise run test:clippy
 mise run test:unit
 mise run test:integration
 """
+
+[tasks."test:unit"]
+description = "Runs test/s"
+run = "mise run test:nextest {{arg(name='test',default='')}}"
+
 
 [tasks."test:wait_for_postgres_to_quack"]
 dir = "{{config_root}}"

@@ -35,4 +35,4 @@ jobs:
           CS_ENCRYPT__CLIENT_KEY: ${{ secrets.CS_ENCRYPT__CLIENT_KEY }}
           RUST_BACKTRACE: "1"
         run: |
-          mise run --output prefix ci
+          mise run --output prefix test

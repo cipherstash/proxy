@@ -82,7 +82,6 @@ mise has tasks for:
 - Running hygiene tests (`test:check`, `test:clippy`, `test:format`)
 - Running unit tests (`test:unit`)
 - Running integration tests (`test:integration`, `test:integration:*`)
-- Running tests in CI (`test:ci`)
 - Building binaries (`build:binary`) and Docker images (`build:docker`)
 - Publishing release artifacts (`release`)
 
@@ -329,14 +328,11 @@ There is a wide range of tests for Proxy:
 - Unit tests (`test:unit`)
 - Integration tests (`test:integration`, `test:integration:*`)
 
-To run unit tests:
+To run all tests:
 
-```bash
-# run all unit tests
+```shell
+# run the full test suite
 mise run test
-
-# run a single unit test
-mise run test:unit test_database_as_url
 ```
 
 To run hygiene tests:
@@ -350,6 +346,16 @@ mise run test:clippy
 
 # check rust is formatted correctly
 mise run test:format
+```
+
+To run unit tests:
+
+```shell
+# run all unit tests
+mise run test:unit
+
+# run a single unit test
+mise run test:unit test_database_as_url
 ```
 
 To run integration tests:
