@@ -230,7 +230,7 @@ mise --env tls run postgres:setup
 
 mise --env tcp run proxy:up proxy --extra-args "--detach --wait"
 mise --env tcp run test:wait_for_postgres_to_quack --port 6432 --max-retries 20
-mise --env tcp run test:psql-tcp
+mise --env tcp run test:integration:psql-tcp
 mise --env tcp run proxy:down
 
 ###############################################
@@ -239,7 +239,7 @@ mise --env tcp run proxy:down
 
 mise --env tls run proxy:up proxy-tls --extra-args "--detach --wait"
 mise --env tls run test:wait_for_postgres_to_quack --port 6432 --max-retries 20 --tls
-mise --env tls run test:psql-tls
+mise --env tls run test:integration:psql-tls
 mise --env tls run proxy:down
 
 ###############################################
