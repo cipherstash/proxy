@@ -50,7 +50,7 @@ pub fn type_check<'ast>(
 
             Ok(TypedStatement {
                 statement,
-                statement_type: mapper.statement_type(statement)?,
+                projection: mapper.statement_type(statement)?,
                 params: mapper.param_types()?,
                 literals: mapper.literal_types()?,
             })
@@ -100,7 +100,7 @@ pub struct TypedStatement<'ast> {
     pub statement: &'ast Statement,
 
     /// The SQL statement which was type-checked against the schema.
-    pub statement_type: Option<Projection>,
+    pub projection: Option<Projection>,
 
     /// The types of all params discovered from [`Value::Placeholder`] nodes in the SQL statement.
     pub params: Vec<Value>,
@@ -475,7 +475,7 @@ mod test {
         match type_check(&schema, &statement) {
             Ok(typed) => {
                 assert_eq!(
-                    typed.statement_type,
+                    typed.projection,
                     Some(projection![(NATIVE(users.email) as email)])
                 )
             }
@@ -510,7 +510,7 @@ mod test {
                 assert_eq!(param, &v);
 
                 assert_eq!(
-                    typed.statement_type,
+                    typed.projection,
                     Some(projection![(NATIVE(users.email) as email)])
                 );
             }
@@ -549,7 +549,7 @@ mod test {
                 assert_eq!(typed.params, vec![a, b]);
 
                 assert_eq!(
-                    typed.statement_type,
+                    typed.projection,
                     Some(projection![
                         (NATIVE(users.id) as id),
                         (NATIVE(users.email) as email),
@@ -587,7 +587,7 @@ mod test {
                 assert_eq!(typed.params, vec![a]);
 
                 assert_eq!(
-                    typed.statement_type,
+                    typed.projection,
                     Some(projection![
                         (NATIVE(users.id) as id),
                         (NATIVE(users.email) as email),
@@ -634,7 +634,7 @@ mod test {
         match type_check(&schema, &statement) {
             Ok(typed) => {
                 assert_eq!(
-                    typed.statement_type,
+                    typed.projection,
                     Some(projection![(EQL(users.email) as email)])
                 )
             }
@@ -693,7 +693,7 @@ mod test {
         };
 
         assert_eq!(
-            typed.statement_type,
+            typed.projection,
             Some(projection![
                 (NATIVE as user_id),
                 (NATIVE as todo_list_item_id),
@@ -736,7 +736,7 @@ mod test {
         };
 
         assert_eq!(
-            typed.statement_type,
+            typed.projection,
             Some(projection![
                 (NATIVE(users.id) as id),
                 (EQL(users.email) as email),
@@ -779,7 +779,7 @@ mod test {
         };
 
         assert_eq!(
-            typed.statement_type,
+            typed.projection,
             Some(projection![
                 (NATIVE(employees.first_name) as first_name),
                 (NATIVE(employees.last_name) as last_name),
@@ -823,7 +823,7 @@ mod test {
         };
 
         assert_eq!(
-            typed.statement_type,
+            typed.projection,
             Some(projection![
                 (NATIVE(employees.first_name) as first_name),
                 (NATIVE(employees.last_name) as last_name),
@@ -870,7 +870,7 @@ mod test {
         };
 
         assert_eq!(
-            typed.statement_type,
+            typed.projection,
             Some(projection![
                 (NATIVE(employees.first_name) as first_name),
                 (NATIVE(employees.last_name) as last_name),
@@ -923,7 +923,7 @@ mod test {
         };
 
         assert_eq!(
-            typed.statement_type,
+            typed.projection,
             Some(projection![
                 (NATIVE(employees.first_name) as first_name),
                 (NATIVE(employees.last_name) as last_name),
@@ -965,7 +965,7 @@ mod test {
         };
 
         assert_eq!(
-            typed.statement_type,
+            typed.projection,
             Some(projection![
                 (NATIVE(employees.age) as max),
                 (EQL(employees.salary) as min)
@@ -1001,7 +1001,7 @@ mod test {
             Err(err) => panic!("type check failed: {:#?}", err),
         };
 
-        assert_eq!(typed.statement_type, Some(Projection::Empty));
+        assert_eq!(typed.projection, Some(Projection::Empty));
     }
 
     #[test]
@@ -1034,7 +1034,7 @@ mod test {
         };
 
         assert_eq!(
-            typed.statement_type,
+            typed.projection,
             Some(projection![
                 (NATIVE(employees.id) as id),
                 (NATIVE(employees.name) as name),
@@ -1072,7 +1072,7 @@ mod test {
             Err(err) => panic!("type check failed: {:#?}", err),
         };
 
-        assert_eq!(typed.statement_type, Some(Projection::Empty));
+        assert_eq!(typed.projection, Some(Projection::Empty));
     }
 
     #[test]
@@ -1103,7 +1103,7 @@ mod test {
         };
 
         assert_eq!(
-            typed.statement_type,
+            typed.projection,
             Some(projection![
                 (NATIVE(employees.id) as id),
                 (NATIVE(employees.name) as name),
@@ -1141,7 +1141,7 @@ mod test {
             Err(err) => panic!("type check failed: {:#?}", err),
         };
 
-        assert_eq!(typed.statement_type, Some(Projection::Empty));
+        assert_eq!(typed.projection, Some(Projection::Empty));
     }
 
     #[test]
@@ -1172,7 +1172,7 @@ mod test {
         };
 
         assert_eq!(
-            typed.statement_type,
+            typed.projection,
             Some(projection![
                 (NATIVE(employees.id) as id),
                 (NATIVE(employees.name) as name),
@@ -1287,7 +1287,7 @@ mod test {
         };
 
         assert_eq!(
-            typed.statement_type,
+            typed.projection,
             Some(projection![
                 (EQL(employees.salary) as min_salary),
                 (EQL(employees.salary) as y),

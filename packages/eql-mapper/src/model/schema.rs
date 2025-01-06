@@ -7,6 +7,7 @@ use derive_more::Display;
 use sqlparser::ast::Ident;
 use std::sync::Arc;
 use thiserror::Error;
+use tracing::debug;
 
 use super::sql_ident::*;
 
@@ -77,8 +78,8 @@ pub enum SchemaError {
     #[error("Table not found: {}", _0)]
     TableNotFound(String),
 
-    #[error("Column not found: {}", _0)]
-    ColumnNotFound(String),
+    #[error("Column: {} not found for table: {}", _0, _1)]
+    ColumnNotFound(String, String),
 }
 
 impl Schema {
@@ -127,7 +128,10 @@ impl Schema {
                     column: column.name.clone(),
                     kind: column.kind,
                 }),
-                Err(_) => Err(SchemaError::TableNotFound(column_name.to_string())),
+                Err(_) => Err(SchemaError::ColumnNotFound(
+                    table_name.to_string(),
+                    column_name.to_string(),
+                )),
             },
             Err(_) => Err(SchemaError::TableNotFound(table_name.to_string())),
         }
@@ -164,7 +168,7 @@ impl Table {
         haystack
             .find_unique(&|column| SqlIdent::from(&column.name) == SqlIdent::from(name))
             .cloned()
-            .map_err(|_| SchemaError::ColumnNotFound(name.to_string()))
+            .map_err(|_| SchemaError::ColumnNotFound(self.name.to_string(), name.to_string()))
     }
 
     /// Gets all the primary key columns in the table.

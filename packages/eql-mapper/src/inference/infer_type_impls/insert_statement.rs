@@ -1,4 +1,5 @@
 use sqlparser::ast::{Ident, Insert};
+use tracing::debug;
 
 use crate::{
     inference::{

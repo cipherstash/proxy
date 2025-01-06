@@ -333,14 +333,14 @@ impl<'ast> Visitor<'ast> for Importer<'ast> {
 
     fn exit<N: Visitable>(&mut self, node: &'ast N) -> ControlFlow<Break<Self::Error>> {
         if let Some(cte) = node.downcast_ref::<Cte>() {
-            info!("CTE {}", cte);
+            // info!("CTE {}", cte);
             if let Err(err) = self.update_scope_for_cte(cte) {
                 return ControlFlow::Break(Break::Err(err));
             }
         };
 
         if let Some(table_factor) = node.downcast_ref::<TableFactor>() {
-            info!("TableFactor {}", table_factor);
+            // info!("TableFactor {}", table_factor);
             if let Err(err) = self.update_scope_for_table_factor(table_factor) {
                 return ControlFlow::Break(Break::Err(err));
             }

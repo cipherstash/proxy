@@ -248,13 +248,13 @@ mise --env tls run proxy:down
 
 mise --env tls run proxy:up proxy-tls --extra-args "--detach --wait"
 mise --env tls run test:wait_for_postgres_to_quack --port 6432 --max-retries 20 --tls
-cargo nextest run --no-fail-fast --nocapture -E 'test(~integration)'
+cargo nextest run --no-fail-fast --nocapture -E 'package(cipherstash-proxy-integration)'
 mise --env tls run proxy:down
 """
 
 [tasks."test:nextest"]
 description = "Runs cargo nextest, skipping integration tests"
-run = 'cargo nextest run --no-fail-fast --nocapture -E "not test(~integration)" {{arg(name="test",default="")}}'
+run = 'cargo nextest run --no-fail-fast --nocapture -E "not package(cipherstash-proxy-integration)" {{arg(name="test",default="")}}'
 
 [tasks."test:format"]
 description = "Runs cargo fmt"

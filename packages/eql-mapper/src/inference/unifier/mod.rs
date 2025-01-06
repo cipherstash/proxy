@@ -53,13 +53,13 @@ impl<'ast> Unifier<'ast> {
 
         self.depth += 1;
 
-        info!(
-            "{:indent$}  {} UNIFY {}",
-            " ",
-            left,
-            right,
-            indent = (self.depth - 1) * 4
-        );
+        // info!(
+        //     "{:indent$}  {} UNIFY {}",
+        //     " ",
+        //     left,
+        //     right,
+        //     indent = (self.depth - 1) * 4
+        // );
 
         // If left & right are equal we can short circuit unification.
         if left == right {
@@ -136,14 +136,14 @@ impl<'ast> Unifier<'ast> {
             other => other,
         };
 
-        if let Ok(unification) = &unification {
-            info!(
-                "= {:indent$} {}",
-                "",
-                unification,
-                indent = (self.depth - 1) * 4
-            );
-        }
+        // if let Ok(unification) = &unification {
+        //     info!(
+        //         "= {:indent$} {}",
+        //         "",
+        //         unification,
+        //         indent = (self.depth - 1) * 4
+        //     );
+        // }
 
         self.depth -= 1;
 

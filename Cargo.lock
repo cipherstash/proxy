@@ -718,6 +718,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "cipherstash-proxy-integration"
+version = "0.1.0"
+dependencies = [
+ "cipherstash-proxy",
+ "rand",
+ "recipher",
+ "temp-env",
+ "tokio",
+ "tokio-postgres",
+ "tokio-postgres-rustls",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "cipherstash-stats"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"

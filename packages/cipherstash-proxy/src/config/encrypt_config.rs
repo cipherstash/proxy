@@ -252,7 +252,7 @@ mod tests {
         let column = encrypt_config.get(&ident).expect("column exists");
 
         assert_eq!(column.cast_type, ColumnType::Int);
-        assert_eq!(column.name, "\"favourite_int\"");
+        assert_eq!(column.name, "favourite_int");
         assert!(column.indexes.is_empty());
     }
 
