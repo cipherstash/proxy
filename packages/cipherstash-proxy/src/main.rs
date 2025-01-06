@@ -66,9 +66,8 @@ async fn main() {
                 });
             },
         }
-
-        info!("Shutting down CipherStash Proxy");
     }
+    info!("Shutting down CipherStash Proxy");
 }
 
 ///
