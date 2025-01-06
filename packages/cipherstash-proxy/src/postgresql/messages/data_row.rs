@@ -4,6 +4,7 @@ use crate::{
     error::{Error, ProtocolError},
 };
 use bytes::{Buf, BufMut, Bytes, BytesMut};
+use cipherstash_client::encryption::Plaintext;
 use std::io::Cursor;
 use tracing::{debug, info, warn};
 
@@ -35,13 +36,9 @@ impl DataRow {
             .sum()
     }
 
-    pub fn update_from_ciphertext(
-        &mut self,
-        plaintexts: &[Option<eql::Plaintext>],
-    ) -> Result<(), Error> {
+    pub fn rewrite(&mut self, plaintexts: &[Option<BytesMut>]) -> Result<(), Error> {
         for (idx, pt) in plaintexts.iter().enumerate() {
-            if let Some(pt) = pt {
-                let bytes = pt.plaintext.as_bytes().to_vec();
+            if let Some(bytes) = pt {
                 self.columns[idx].rewrite(&bytes);
             }
         }
@@ -63,10 +60,8 @@ impl DataColumn {
     pub fn rewrite(&mut self, b: &[u8]) {
         if let Some(ref mut bytes) = self.bytes {
             bytes.clear();
-
             bytes.extend_from_slice(b);
         }
-        // self.dirty = true;
     }
 
     ///

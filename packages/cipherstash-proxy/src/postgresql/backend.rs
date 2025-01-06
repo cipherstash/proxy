@@ -5,14 +5,17 @@ use super::messages::row_description::RowDescription;
 use super::messages::BackendCode;
 use crate::encrypt::Encrypt;
 use crate::eql::Ciphertext;
-use crate::error::Error;
+use crate::error::{EncryptError, Error};
 use crate::log::{DEVELOPMENT, MAPPER};
+use crate::postgresql::format_code::FormatCode;
 use crate::postgresql::messages::data_row::DataRow;
 use crate::postgresql::messages::param_description::ParamDescription;
 use crate::postgresql::protocol::{self};
 use bytes::BytesMut;
+use cipherstash_client::encryption::Plaintext;
 use itertools::Itertools;
-use sqlparser::keywords::MAP;
+use postgres_types::{ToSql, Type};
+
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use tracing::{debug, error, info, warn};
 
@@ -46,23 +49,13 @@ where
 
     ///
     /// TODO: fix the structure once implementation stabilizes
+    ///
     pub async fn rewrite(&mut self) -> Result<(), Error> {
         if self.encrypt.config.disable_mapping() {
             warn!(DEVELOPMENT, "Mapping is not enabled");
             return Ok(());
         }
-        let bytes = self.read().await?;
-        self.write(bytes).await?;
-        Ok(())
-    }
 
-    ///
-    /// Startup sequence:
-    ///     Client: SSL Request
-    ///     Server: SSL Response (single byte S or N)
-    ///
-    pub async fn read(&mut self) -> Result<BytesMut, Error> {
-        // info!("[backend] read");
         let connection_timeout = self.encrypt.config.database.connection_timeout();
 
         let (code, bytes) =
@@ -154,6 +147,29 @@ where
             None => return Ok(()),
         };
 
+        // FormatCodes should not be None at this point
+        // FormatCodes will be:
+        //  - empty, in which case assume Text
+        //  - single value, in which case use this for all columns
+        //  - multiple values, in which case use the value for each column
+        let format_codes = match self.context.get_result_format_codes_for_execute() {
+            Some(format_codes) => {
+                let format_code = match format_codes.first() {
+                    Some(code) => *code,
+                    None => FormatCode::Text,
+                };
+
+                if format_codes.len() != row_len {
+                    vec![format_code; row_len]
+                } else {
+                    format_codes
+                }
+            }
+            None => vec![FormatCode::Text; row_len],
+        };
+
+        error!(target: MAPPER, "Result format_codes {format_codes:?}");
+
         let ciphertexts: Vec<Option<Ciphertext>> = rows
             .iter()
             .map(|row| row.to_ciphertext())
@@ -163,12 +179,30 @@ where
         let plaintexts = self.encrypt.decrypt(ciphertexts).await?;
 
         let rows = plaintexts.chunks(row_len).into_iter().zip(rows);
+
         for (chunk, mut row) in rows {
-            row.update_from_ciphertext(chunk)?;
+            let data = chunk
+                .iter()
+                .zip(format_codes.iter())
+                .map(|(plaintext, format_code)| {
+                    debug!(target: MAPPER, "format_code: {format_code:?}");
+                    match plaintext {
+                        Some(plaintext) => plaintext_to_bytes(plaintext, format_code),
+                        None => Ok(None),
+                    }
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+
+            // debug!(target: MAPPER, "Data: {data:?}");
+
+            row.rewrite(&data)?;
 
             let bytes = BytesMut::try_from(row)?;
             self.client.write_all(&bytes).await?;
         }
+
+        // I think this goes here
+        self.context.execute_complete();
 
         Ok(())
     }
@@ -238,5 +272,59 @@ where
         } else {
             Ok(None)
         }
+    }
+}
+
+fn plaintext_to_bytes(
+    plaintext: &Plaintext,
+    format_code: &FormatCode,
+) -> Result<Option<BytesMut>, Error> {
+    let bytes = match format_code {
+        FormatCode::Text => plaintext_to_text(plaintext)?,
+        FormatCode::Binary => plaintext_to_binary(plaintext)?,
+    };
+
+    Ok(Some(bytes))
+}
+
+fn plaintext_to_text(plaintext: &Plaintext) -> Result<BytesMut, Error> {
+    let s = match &plaintext {
+        Plaintext::Utf8Str(Some(x)) => x.to_string(),
+        Plaintext::Int(Some(x)) => x.to_string(),
+        Plaintext::BigInt(Some(x)) => x.to_string(),
+        Plaintext::BigUInt(Some(x)) => x.to_string(),
+        Plaintext::Boolean(Some(x)) => x.to_string(),
+        Plaintext::Decimal(Some(x)) => x.to_string(),
+        Plaintext::Float(Some(x)) => x.to_string(),
+        Plaintext::NaiveDate(Some(x)) => x.to_string(),
+        Plaintext::SmallInt(Some(x)) => x.to_string(),
+        Plaintext::Timestamp(Some(x)) => x.to_string(),
+        _ => todo!(),
+    };
+
+    Ok(BytesMut::from(s.as_bytes()))
+}
+
+fn plaintext_to_binary(plaintext: &Plaintext) -> Result<BytesMut, Error> {
+    let mut bytes = BytesMut::new();
+
+    let result = match &plaintext {
+        Plaintext::BigInt(x) => x.to_sql_checked(&Type::INT8, &mut bytes),
+        Plaintext::Boolean(x) => x.to_sql_checked(&Type::BOOL, &mut bytes),
+        Plaintext::Float(x) => x.to_sql_checked(&Type::FLOAT8, &mut bytes),
+        Plaintext::Int(x) => x.to_sql_checked(&Type::INT4, &mut bytes),
+        Plaintext::NaiveDate(x) => x.to_sql_checked(&Type::DATE, &mut bytes),
+        Plaintext::SmallInt(x) => x.to_sql_checked(&Type::INT2, &mut bytes),
+        Plaintext::Timestamp(x) => x.to_sql_checked(&Type::TIMESTAMPTZ, &mut bytes),
+        Plaintext::Utf8Str(x) => x.to_sql_checked(&Type::TEXT, &mut bytes),
+        Plaintext::JsonB(x) => x.to_sql_checked(&Type::JSONB, &mut bytes),
+        // TODO: Implement these
+        Plaintext::Decimal(_x) => unimplemented!(),
+        Plaintext::BigUInt(_x) => unimplemented!(),
+    };
+
+    match result {
+        Ok(_) => Ok(bytes),
+        Err(_e) => Err(EncryptError::PlaintextCouldNotBeEncoded.into()),
     }
 }

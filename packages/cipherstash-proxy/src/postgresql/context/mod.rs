@@ -1,4 +1,7 @@
-use super::messages::{describe::Describe, Destination};
+use super::{
+    format_code::{self, FormatCode},
+    messages::{describe::Describe, execute::Execute, Destination},
+};
 use crate::Identifier;
 use arc_swap::ArcSwapOption;
 use cipherstash_config::ColumnConfig;
@@ -12,8 +15,9 @@ use std::{
 #[derive(Debug, Clone)]
 pub struct Context {
     pub statements: Arc<RwLock<HashMap<Destination, Statement>>>,
-    // pub statements: HashMap<Destination, Statement>,
+    pub portals: Arc<RwLock<HashMap<Destination, Portal>>>,
     pub describe: Arc<ArcSwapOption<Describe>>,
+    pub execute: Arc<ArcSwapOption<Execute>>,
 }
 
 #[derive(Debug, Clone)]
@@ -33,12 +37,19 @@ pub struct Statement {
     pub projection_columns: Vec<Option<Column>>,
 }
 
+#[derive(Debug, Clone)]
+pub struct Portal {
+    pub format_codes: Vec<FormatCode>,
+    pub statement: Statement,
+}
+
 impl Context {
     pub fn new() -> Context {
         Context {
             statements: Arc::new(RwLock::new(HashMap::new())),
-            // statements: HashMap::new(),
+            portals: Arc::new(RwLock::new(HashMap::new())),
             describe: Arc::new(ArcSwapOption::from(None)),
+            execute: Arc::new(ArcSwapOption::from(None)),
         }
     }
 
@@ -50,9 +61,22 @@ impl Context {
         self.describe.swap(None);
     }
 
+    pub fn execute(&mut self, execute: Execute) {
+        self.execute.swap(Some(Arc::new(execute)));
+    }
+
+    pub fn execute_complete(&mut self) {
+        self.execute.swap(None);
+    }
+
     pub fn add(&mut self, key: Destination, statement: Statement) {
         let mut statment_write = self.statements.write().unwrap();
         statment_write.insert(key, statement);
+    }
+
+    pub fn add_portal(&mut self, key: Destination, portal: Portal) {
+        let mut portal_write = self.portals.write().unwrap();
+        portal_write.insert(key, portal);
     }
 
     // TODO Remove cloning
@@ -69,6 +93,7 @@ impl Context {
             None => None,
         }
     }
+
     pub fn get_projection_columns_for_describe(&self) -> Option<Vec<Option<Column>>> {
         let guard = self.describe.load();
         match guard.as_ref() {
@@ -93,6 +118,22 @@ impl Context {
         }
     }
 
+    pub fn get_result_format_codes_for_execute(&self) -> Option<Vec<FormatCode>> {
+        let guard = self.execute.load();
+        match guard.as_ref() {
+            Some(execute) => self.get_result_format_codes_for_portal(&execute.portal),
+            None => None,
+        }
+    }
+
+    pub fn get_result_format_codes_for_portal(&self, key: &Destination) -> Option<Vec<FormatCode>> {
+        let portal_read = self.portals.read().unwrap();
+        match portal_read.get(key) {
+            Some(portal) => Some(portal.format_codes.clone()),
+            None => None,
+        }
+    }
+
     pub fn remove(&mut self, key: &Destination) -> Option<Statement> {
         let mut statment_write = self.statements.write().unwrap();
         statment_write.remove(key)
@@ -111,6 +152,15 @@ impl Statement {
             postgres_param_types,
             param_columns,
             projection_columns,
+        }
+    }
+}
+
+impl Portal {
+    pub fn new(statement: Statement, format_codes: Vec<FormatCode>) -> Portal {
+        Portal {
+            statement,
+            format_codes,
         }
     }
 }

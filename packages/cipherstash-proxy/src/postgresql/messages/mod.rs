@@ -5,6 +5,7 @@ pub mod bind;
 pub mod data_row;
 pub mod describe;
 pub mod error_response;
+pub mod execute;
 pub mod param_description;
 pub mod parse;
 pub mod query;
@@ -16,6 +17,7 @@ pub const NULL: i32 = -1;
 pub enum FrontendCode {
     Bind,
     Describe,
+    Execute,
     Parse,
     PasswordMessage,
     Query,
@@ -60,6 +62,7 @@ impl From<char> for FrontendCode {
         match code {
             'B' => FrontendCode::Bind,
             'D' => FrontendCode::Describe,
+            'E' => FrontendCode::Execute,
             'p' => FrontendCode::PasswordMessage,
             'P' => FrontendCode::Parse,
             'Q' => FrontendCode::Query,
@@ -78,6 +81,7 @@ impl From<FrontendCode> for u8 {
         match code {
             FrontendCode::Bind => b'B',
             FrontendCode::Describe => b'D',
+            FrontendCode::Execute => b'E',
             FrontendCode::Parse => b'P',
             FrontendCode::PasswordMessage => b'p',
             FrontendCode::Query => b'Q',
@@ -93,6 +97,7 @@ impl From<FrontendCode> for char {
         match code {
             FrontendCode::Bind => 'B',
             FrontendCode::Describe => 'D',
+            FrontendCode::Execute => 'E',
             FrontendCode::Parse => 'P',
             FrontendCode::PasswordMessage => 'p',
             FrontendCode::Query => 'Q',

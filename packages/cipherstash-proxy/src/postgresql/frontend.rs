@@ -10,6 +10,7 @@ use crate::eql::Identifier;
 use crate::error::{Error, MappingError};
 use crate::log::MAPPER;
 use crate::postgresql::context::Column;
+use crate::postgresql::messages::execute::Execute;
 use crate::postgresql::messages::query::Query;
 use bytes::BytesMut;
 use cipherstash_client::encryption::Plaintext;
@@ -69,9 +70,10 @@ where
         match code.into() {
             Code::Query => {}
             Code::Describe => {
-                if let Some(b) = self.describe_handler(&bytes).await? {
-                    bytes = b;
-                }
+                self.describe_handler(&bytes).await?;
+            }
+            Code::Execute => {
+                self.execute_handler(&bytes).await?;
             }
             Code::Parse => {
                 match self.parse_handler(&bytes).await {
@@ -105,12 +107,20 @@ where
         Ok(bytes)
     }
 
-    async fn describe_handler(&mut self, bytes: &BytesMut) -> Result<Option<BytesMut>, Error> {
+    async fn describe_handler(&mut self, bytes: &BytesMut) -> Result<(), Error> {
         let describe = Describe::try_from(bytes)?;
-        info!("Describe{:?}", describe);
+        info!(target = MAPPER, "Describe {:?}", describe);
         self.context.describe(describe);
-        Ok(None)
+        Ok(())
     }
+
+    async fn execute_handler(&mut self, bytes: &BytesMut) -> Result<(), Error> {
+        let execute = Execute::try_from(bytes)?;
+        info!(target = MAPPER, "Execute {:?}", execute);
+        self.context.execute(execute);
+        Ok(())
+    }
+
     async fn parse_handler(&mut self, bytes: &BytesMut) -> Result<Option<BytesMut>, Error> {
         if self.encrypt.config.disable_mapping() {
             return Ok(None);
@@ -135,6 +145,8 @@ where
                     | eql_mapper::Value::Native(NativeValue(Some(TableColumn { table, column }))) =>
                     {
                         let identifier = Identifier::from((table, column));
+
+                        debug!(target = MAPPER, "Identifier {:?}", identifier);
 
                         match self.encrypt.get_column_config(&identifier) {
                             Some(config) => {
@@ -243,28 +255,33 @@ where
         warn!("bind.prepared_statement {:?}", &bind.prepared_statement);
 
         if let Some(statement) = self.context.get(&bind.prepared_statement) {
-            if let Some(param_cols) = self.context.get_param_columns(&bind.prepared_statement) {
-                let plaintexts = bind
-                    .param_values
-                    .iter_mut()
-                    .zip(param_cols.iter())
-                    .map(|(param, col)| match col {
-                        Some(col) => {
-                            debug!(target = MAPPER, "Mapping param: {col:?}");
-                            to_plaintext(&param, &col)
-                        }
-                        None => Ok(None),
-                    })
-                    .collect::<Result<Vec<_>, _>>()?;
+            // if let Some(param_cols) = self.context.get_param_columns(&bind.prepared_statement) {
+            let param_columns = statement.param_columns.clone();
+            let plaintexts = bind
+                .param_values
+                .iter_mut()
+                .zip(param_columns.iter())
+                .map(|(param, col)| match col {
+                    Some(col) => {
+                        debug!(target = MAPPER, "Mapping param: {col:?}");
+                        to_plaintext(&param, &col)
+                    }
+                    None => Ok(None),
+                })
+                .collect::<Result<Vec<_>, _>>()?;
 
-                debug!(target = MAPPER, "Mapping params: {plaintexts:?}");
-                let encrypted = self.encrypt.encrypt(plaintexts, param_cols).await?;
+            debug!(target = MAPPER, "Mapping params: {plaintexts:?}");
+            let encrypted = self.encrypt.encrypt(plaintexts, param_columns).await?;
 
-                warn!("//////////////////////////////////");
-                debug!(target = MAPPER, "Encrypted: {encrypted:?}");
+            warn!("//////////////////////////////////");
+            debug!(target = MAPPER, "Encrypted: {encrypted:?}");
 
-                bind.update_from_ciphertext(encrypted)?;
-            }
+            bind.update_from_ciphertext(encrypted)?;
+
+            self.context.add_portal(
+                bind.portal.to_owned(),
+                context::Portal::new(statement.clone(), bind.result_columns_format_codes.clone()),
+            );
         }
 
         warn!("/BIND ==============================");

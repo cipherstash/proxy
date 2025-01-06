@@ -55,6 +55,15 @@ use tracing::{debug, error, info};
 pub async fn handler(client_stream: AsyncStream, encrypt: Encrypt) -> Result<(), Error> {
     let mut client_stream = client_stream;
 
+    if encrypt.config.server.require_tls && !client_stream.is_tls() {
+        let message = ErrorResponse::tls_required();
+        let bytes = BytesMut::try_from(message)?;
+        client_stream.write_all(&bytes).await?;
+
+        error!("Client must connect with Transport Layer Security (TLS)");
+        return Err(ConfigError::TlsRequired.into());
+    }
+
     // Connect to the database server, using TLS if configured
     let stream = AsyncStream::connect(&encrypt.config.database.to_socket_address()).await?;
     let mut database_stream = startup::with_tls(stream, &encrypt.config).await?;
@@ -95,15 +104,6 @@ pub async fn handler(client_stream: AsyncStream, encrypt: Encrypt) -> Result<(),
                 break;
             }
         }
-    }
-
-    if encrypt.config.server.require_tls && !client_stream.is_tls() {
-        let message = ErrorResponse::tls_required();
-        let bytes = BytesMut::try_from(message)?;
-        client_stream.write_all(&bytes).await?;
-
-        error!("Client must connect with Transport Layer Security (TLS)");
-        return Err(ConfigError::TlsRequired.into());
     }
 
     // Proxy -> Client Authentication

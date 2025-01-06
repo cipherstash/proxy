@@ -48,6 +48,8 @@ impl Encrypt {
     ) -> Result<Vec<Option<eql::Ciphertext>>, Error> {
         let mut pipeline = ReferencedPendingPipeline::new(self.cipher.clone());
 
+        // Zip the plaintexts and columns together
+        // For each plaintex/column pair, create a new PlaintextTarget
         plaintexts
             .into_iter()
             .zip(columns.clone())
@@ -100,7 +102,7 @@ impl Encrypt {
     pub async fn decrypt(
         &self,
         ciphertexts: Vec<Option<eql::Ciphertext>>,
-    ) -> Result<Vec<Option<eql::Plaintext>>, Error> {
+    ) -> Result<Vec<Option<Plaintext>>, Error> {
         // Create a mutable vector to hold the decrypted results
         let mut results = vec![None; ciphertexts.len()];
 
@@ -118,28 +120,8 @@ impl Encrypt {
 
         // Merge the decrypted values as plaintext into their original indexed positions
         for ((idx, identifier, version), decrypted) in indices.into_iter().zip(decrypted) {
-            let plaintext = Plaintext::from_slice(&decrypted[..])?;
-
-            let plaintext = match &plaintext {
-                Plaintext::Utf8Str(Some(s)) => s.to_owned(),
-                _ => todo!(),
-                // Plaintext::BigInt(_) => todo!(),
-                // Plaintext::BigUInt(_) => todo!(),
-                // Plaintext::Boolean(_) => todo!(),
-                // Plaintext::Decimal(decimal) => todo!(),
-                // Plaintext::Float(_) => todo!(),
-                // Plaintext::Int(_) => todo!(),
-                // Plaintext::NaiveDate(naive_date) => todo!(),
-                // Plaintext::SmallInt(_) => todo!(),
-                // Plaintext::Timestamp(date_time) => todo!(),
-                // Plaintext::JsonB(value) => todo!(),
-            };
-            results[idx] = Some(eql::Plaintext {
-                plaintext,
-                identifier,
-                version,
-                for_query: None,
-            });
+            let plaintext = Plaintext::from_slice(&decrypted)?;
+            results[idx] = Some(plaintext);
         }
 
         Ok(results)

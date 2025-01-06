@@ -33,13 +33,15 @@ pub fn init() {
         let directive = format!("{}={log_level}", DEVELOPMENT).parse().expect("ok");
         filter = filter.add_directive(directive);
 
+        let log_level: Directive = tracing::Level::DEBUG.into();
         let directive = format!("{}={log_level}", KEYSET).parse().expect("ok");
         filter = filter.add_directive(directive);
 
+        let log_level: Directive = tracing::Level::DEBUG.into();
         let directive = format!("{}={log_level}", MAPPER).parse().expect("ok");
         filter = filter.add_directive(directive);
 
-        let log_level: Directive = tracing::Level::INFO.into();
+        let log_level: Directive = tracing::Level::DEBUG.into();
         let directive = format!("{}={log_level}", PROTOCOL).parse().expect("ok");
         filter = filter.add_directive(directive);
 

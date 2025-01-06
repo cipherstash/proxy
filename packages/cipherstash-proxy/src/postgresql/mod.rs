@@ -8,6 +8,7 @@ mod messages;
 mod protocol;
 mod startup;
 
+pub use context::Column;
 pub use handler::handler;
 
 pub const PROTOCOL_VERSION_NUMBER: i32 = 196608;

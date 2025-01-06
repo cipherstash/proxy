@@ -114,6 +114,9 @@ pub enum EncryptError {
     #[error("Column {column} in table {table} was not encrypted")]
     ColumnNotEncrypted { table: String, column: String },
 
+    #[error("Decrypted column could not be encoded as the expected type")]
+    PlaintextCouldNotBeEncoded,
+
     #[error(transparent)]
     Pipeline(#[from] encryption::EncryptionError),
 
