@@ -77,6 +77,7 @@ services:
       - CS_ENCRYPT__CLIENT_ID=${CS_ENCRYPT__CLIENT_ID}
       - CS_TLS__CERTIFICATE=${CS_TLS__CERTIFICATE}
       - CS_TLS__PRIVATE_KEY=${CS_TLS__PRIVATE_KEY}
+      - CS_SERVER__REQUIRE_TLS=${CS_SERVER__REQUIRE_TLS}
     volumes:
       - ./tls/server.cert:/etc/cipherstash-proxy/server.cert
       - ./tls/server.key:/etc/cipherstash-proxy/server.key
