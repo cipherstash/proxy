@@ -91,7 +91,6 @@ These are the important files in the repo:
 .
 ├── mise.toml              <-- the main config file for mise
 ├── mise.local.toml        <-- optional overrides for local customisation of mise
-├── mise.local.toml        <-- optional overrides for local customisation of mise
 ├── proxy.Dockerfile       <-- Dockerfile for building CipherStash Proxy image
 ├── packages/              <-- Rust packages used to make CipherStash Proxy
 ├── target/                <-- Rust build artifacts

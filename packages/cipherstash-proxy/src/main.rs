@@ -3,6 +3,7 @@ use cipherstash_proxy::connect::{self, AsyncStream};
 use cipherstash_proxy::encrypt::Encrypt;
 use cipherstash_proxy::error::Error;
 use cipherstash_proxy::{log, postgresql as pg, tls};
+use tokio::net::TcpListener;
 use tokio::signal::unix::{signal, SignalKind};
 use tracing::{debug, error, info, warn};
 
@@ -23,7 +24,7 @@ async fn main() {
 
     let encrypt = init(config).await;
 
-    let listener = connect::bind_with_retry(&encrypt.config.server).await;
+    let mut listener = connect::bind_with_retry(&encrypt.config.server).await;
 
     loop {
         tokio::select! {
@@ -32,8 +33,9 @@ async fn main() {
                 break;
             },
             _ = sighup() => {
-                info!("Received SIGHUP");
-                break;
+                info!("Received SIGHUP. Reloading configuration");
+                listener = reload_config(listener, config_file).await;
+                info!("Finished reloading configuration");
             },
             _ = sigterm() => {
                 info!("Received SIGTERM");
@@ -158,4 +160,20 @@ async fn sigterm() -> std::io::Result<()> {
 async fn sighup() -> std::io::Result<()> {
     signal(SignalKind::hangup())?.recv().await;
     Ok(())
+}
+
+async fn reload_config(listener: TcpListener, config_file: &str) -> TcpListener {
+    let new_config = match TandemConfig::load(config_file) {
+        Ok(config) => config,
+        Err(err) => {
+            warn!("Not reloading configuration due to the error: {}", err);
+            return listener;
+        }
+    };
+
+    let encrypt = init(new_config).await;
+
+    std::mem::drop(listener);
+
+    connect::bind_with_retry(&encrypt.config.server).await
 }
