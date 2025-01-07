@@ -1,17 +1,15 @@
-use cipherstash_config::{
-    column::{Index, IndexType, TokenFilter, Tokenizer},
-    ColumnConfig, ColumnType,
-};
-use serde::{Deserialize, Serialize};
-use sqlparser::ast::Ident;
-use std::{collections::HashMap, str::FromStr};
-use tracing::debug;
-
 use crate::{
     eql,
     error::{ConfigError, Error},
     log::KEYSET,
 };
+use cipherstash_config::{
+    column::{Index, IndexType, TokenFilter, Tokenizer},
+    ColumnConfig, ColumnType,
+};
+use serde::{Deserialize, Serialize};
+use std::{collections::HashMap, str::FromStr};
+use tracing::debug;
 
 #[derive(Debug, Deserialize, Serialize, Clone, Default)]
 pub struct Tables(HashMap<String, Table>);

@@ -15,14 +15,13 @@ use crate::postgresql::messages::query::Query;
 use bytes::BytesMut;
 use cipherstash_client::encryption::Plaintext;
 use cipherstash_config::ColumnType;
-use eql_mapper::{self, EqlMapperError, EqlValue, NativeValue, TableColumn};
+use eql_mapper::{self, EqlValue, NativeValue, TableColumn};
 use pg_escape::quote_literal;
 use postgres_types::{FromSql, Type};
-use sqlparser::ast::{CastKind, DataType, Expr, Value};
 use sqlparser::dialect::PostgreSqlDialect;
 use sqlparser::parser::Parser;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
-use tracing::{debug, error, info, warn};
+use tracing::{debug, info, warn};
 
 const DIALECT: PostgreSqlDialect = PostgreSqlDialect {};
 

@@ -1,5 +1,4 @@
 use super::messages::data_row::DataRow;
-use tokio::sync::RwLock;
 
 pub struct MessageBuffer {
     // buffer: RwLock<Vec<DataRow>>,
@@ -10,33 +9,6 @@ impl MessageBuffer {
     /// Default number of rows to keep in the buffer.
     /// Larger rows will require more memory.
     const DEFAULT_RESPONSE_BUFFER_SIZE: usize = 4096;
-
-    // pub fn new() -> Self {
-    //     Self {
-    //         buffer: RwLock::new(Vec::with_capacity(Self::DEFAULT_RESPONSE_BUFFER_SIZE)),
-    //     }
-    // }
-
-    // pub async fn push(&self, row: DataRow) {
-    //     self.buffer.write().await.push(row);
-    // }
-
-    // pub async fn drain(&self) -> Vec<DataRow> {
-    //     self.buffer.write().await.drain(..).collect()
-    // }
-
-    // pub async fn clear(&self) {
-    //     self.buffer.write().await.clear();
-    // }
-
-    // pub async fn len(&self) -> usize {
-    //     self.buffer.read().await.len()
-    // }
-
-    // // TODO: Consider treating capacity as the number of columns or memory used
-    // pub async fn at_capacity(&self) -> bool {
-    //     self.buffer.read().await.len() >= Self::DEFAULT_RESPONSE_BUFFER_SIZE
-    // }
 
     pub fn new() -> Self {
         Self {

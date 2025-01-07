@@ -1,18 +1,15 @@
-use std::{
-    cell::RefCell, collections::HashMap, marker::PhantomData, ops::ControlFlow, rc::Rc, sync::Arc,
-};
-
-use sqlparser::ast::{self as ast, Statement};
-use sqltk::{convert_control_flow, Break, Transform, Transformable, Visitable, Visitor};
-
+use super::importer::{ImportError, Importer};
 use crate::{
     inference::{unifier, TypeError, TypeInferencer},
     unifier::{EqlValue, Unifier},
     Dep, DepMut, NodeKey, Projection, ProjectionColumn, Schema, ScopeError, ScopeTracker,
     TypeRegistry, Value,
 };
-
-use super::importer::{ImportError, Importer};
+use sqlparser::ast::{self as ast, Statement};
+use sqltk::{convert_control_flow, Break, Transform, Transformable, Visitable, Visitor};
+use std::{
+    cell::RefCell, collections::HashMap, marker::PhantomData, ops::ControlFlow, rc::Rc, sync::Arc,
+};
 
 /// Validates that a SQL statement is well-typed with respect to a database schema that contains zero or more columns with
 /// EQL types.

@@ -110,16 +110,14 @@ impl Encrypt {
         let (indices, encrypted): (Vec<_>, Vec<_>) = ciphertexts
             .into_iter()
             .enumerate()
-            .filter_map(|(idx, opt)| {
-                opt.map(|ct| ((idx, ct.identifier, ct.version), ct.ciphertext))
-            })
+            .filter_map(|(idx, opt)| opt.map(|ct| (idx, ct.ciphertext)))
             .unzip();
 
         // Decrypt the ciphertexts
         let decrypted = self.cipher.decrypt(encrypted).await?;
 
         // Merge the decrypted values as plaintext into their original indexed positions
-        for ((idx, identifier, version), decrypted) in indices.into_iter().zip(decrypted) {
+        for (idx, decrypted) in indices.into_iter().zip(decrypted) {
             let plaintext = Plaintext::from_slice(&decrypted)?;
             results[idx] = Some(plaintext);
         }

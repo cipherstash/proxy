@@ -1,6 +1,3 @@
-use sqlparser::ast::{Ident, Insert};
-use tracing::debug;
-
 use crate::{
     inference::{
         type_error::TypeError,
@@ -10,6 +7,7 @@ use crate::{
     unifier::{EqlValue, NativeValue, Value},
     ColumnKind, TableColumn, TypeInferencer,
 };
+use sqlparser::ast::{Ident, Insert};
 
 impl<'ast> InferType<'ast, Insert> for TypeInferencer<'ast> {
     fn infer_enter(&mut self, insert: &'ast Insert) -> Result<(), TypeError> {

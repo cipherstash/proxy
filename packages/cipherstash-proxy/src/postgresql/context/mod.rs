@@ -1,5 +1,5 @@
 use super::{
-    format_code::{self, FormatCode},
+    format_code::FormatCode,
     messages::{describe::Describe, execute::Execute, Destination},
 };
 use crate::Identifier;

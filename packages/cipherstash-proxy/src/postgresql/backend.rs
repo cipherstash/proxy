@@ -15,9 +15,8 @@ use bytes::BytesMut;
 use cipherstash_client::encryption::Plaintext;
 use itertools::Itertools;
 use postgres_types::{ToSql, Type};
-
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, warn};
 
 pub struct Backend<C, S>
 where

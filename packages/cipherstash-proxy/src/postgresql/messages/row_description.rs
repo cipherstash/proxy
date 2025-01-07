@@ -2,7 +2,6 @@ use std::{ffi::CString, io::Cursor};
 
 use bytes::{Buf, BufMut, BytesMut};
 use postgres_types::Type;
-use tracing::{error, field, info};
 
 use crate::{
     error::{Error, ProtocolError},

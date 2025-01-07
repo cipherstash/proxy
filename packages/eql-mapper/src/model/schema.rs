@@ -2,16 +2,13 @@
 //!
 //! Column type information is unused currently.
 
+use super::sql_ident::*;
+use crate::iterator_ext::IteratorExt;
 use core::fmt::Debug;
 use derive_more::Display;
 use sqlparser::ast::Ident;
 use std::sync::Arc;
 use thiserror::Error;
-use tracing::debug;
-
-use super::sql_ident::*;
-
-use crate::iterator_ext::IteratorExt;
 
 /// A database schema.
 ///

@@ -1,4 +1,3 @@
-use std::fmt::Display;
 use std::sync::Once;
 use tracing_subscriber::filter::{Directive, EnvFilter};
 use tracing_subscriber::FmtSubscriber;

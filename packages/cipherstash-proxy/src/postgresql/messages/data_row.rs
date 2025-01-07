@@ -3,10 +3,9 @@ use crate::{
     eql,
     error::{Error, ProtocolError},
 };
-use bytes::{Buf, BufMut, Bytes, BytesMut};
-use cipherstash_client::encryption::Plaintext;
+use bytes::{Buf, BufMut, BytesMut};
 use std::io::Cursor;
-use tracing::{debug, info, warn};
+use tracing::debug;
 
 #[derive(Debug, Clone)]
 pub struct DataRow {
