@@ -113,14 +113,25 @@ pub async fn load_schema(config: &DatabaseConfig) -> Result<Schema, Error> {
         let table_name: String = table.get("table_name");
         let primary_keys: Vec<String> = table.get("primary_keys");
         let columns: Vec<String> = table.get("columns");
+        let _types: Vec<String> = table.get("column_types");
+        let domains: Vec<String> = table.get("column_domains");
+
+        let columns: Vec<String> = columns
+            .into_iter()
+            .filter(|col| !primary_keys.contains(col))
+            .collect();
 
         let mut table = Table::new(Ident::new(table_name));
-        primary_keys.iter().for_each(|col| {
-            table.add_column(Arc::new(Column::native(Ident::with_quote('"', col))), true);
-        });
+        columns.iter().zip(domains).for_each(|(col, domain)| {
+            let is_primary_key = primary_keys.contains(col);
 
-        columns.iter().for_each(|col| {
-            table.add_column(Arc::new(Column::native(Ident::with_quote('"', col))), false);
+            let column = if domain ==  "cs_encrypted_v1" {
+                Column::eql(Ident::with_quote('"', col))
+            } else {
+                Column::native(Ident::with_quote('"', col))
+            };
+
+            table.add_column(Arc::new(column), is_primary_key);
         });
 
         schema.add_table(table);

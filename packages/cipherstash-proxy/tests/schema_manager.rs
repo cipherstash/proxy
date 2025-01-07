@@ -2,6 +2,7 @@ mod common;
 
 use cipherstash_proxy::{config::SchemaManager, log};
 use common::database_config;
+use sqlparser::ast::Ident;
 
 #[tokio::test]
 async fn integration_load_schema() {
@@ -12,7 +13,12 @@ async fn integration_load_schema() {
 
     let schema = manager.load();
 
-    // info!("schema.tables: {:?}", schema.tables);
-
     assert!(!schema.tables.is_empty());
+
+    assert!(schema
+        .resolve_table_column(
+            &Ident::with_quote('"', "pg_database"),
+            &Ident::with_quote('"', "datname")
+        )
+        .is_ok());
 }

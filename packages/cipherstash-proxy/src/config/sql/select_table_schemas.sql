@@ -2,7 +2,9 @@ SELECT
     t.table_schema,
     t.table_name,
     array_agg(distinct k.column_name)::text[] AS primary_keys,
-    array_agg(distinct c.column_name)::text[] AS columns
+    array_agg(c.column_name)::text[] AS columns,
+    array_agg(c.data_type)::text[] AS column_types,
+    array_agg(c.domain_name)::text[] AS column_domains
 FROM
     information_schema.tables t
 LEFT JOIN
