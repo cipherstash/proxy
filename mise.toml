@@ -53,7 +53,7 @@ run = """
 {# If we are on macos, cross-compile for Linux, so we can run the binary in a Docker container. #}
 {# Only supports Apple Silicon. #}
 {% if os() == "macos" %}
-if which aarch64-unknown-linux-gnu ; then
+if ! which aarch64-unknown-linux-gnu-gcc ; then
   brew install MaterializeInc/crosstools/aarch64-unknown-linux-gnu
 fi
 export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER={{ target }}-gcc
