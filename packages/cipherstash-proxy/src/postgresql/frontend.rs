@@ -92,7 +92,6 @@ where
                             "frontend sending an exception-raising message: {:?}",
                             &bytes
                         );
-                        // TODO: should some errors be bubbled up with `Err(e)?`
                     }
                 }
             }

@@ -40,43 +40,6 @@ impl From<(&Ident, &Ident)> for Identifier {
     }
 }
 
-// #[derive(Clone, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
-// pub struct Identifier {
-//     #[serde(
-//         rename = "t",
-//         deserialize_with = "ident_de",
-//         serialize_with = "ident_se"
-//     )]
-//     pub table: Ident,
-//     #[serde(
-//         rename = "c",
-//         deserialize_with = "ident_de",
-//         serialize_with = "ident_se"
-//     )]
-//     pub column: Ident,
-// }
-
-// impl Identifier {
-//     pub fn new<S>(table: S, column: S) -> Self
-//     where
-//         S: Into<String>,
-//     {
-//         let table = Ident::with_quote('"', table);
-//         let column = Ident::with_quote('"', column);
-
-//         Self { table, column }
-//     }
-// }
-
-// impl From<(&Ident, &Ident)> for Identifier {
-//     fn from((table, column): (&Ident, &Ident)) -> Self {
-//         Self {
-//             table: table.to_owned(),
-//             column: column.to_owned(),
-//         }
-//     }
-// }
-
 #[derive(Clone, Copy, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ForQuery {
