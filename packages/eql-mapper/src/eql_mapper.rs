@@ -4,7 +4,6 @@ use std::{
 
 use sqlparser::ast::{self as ast, Statement};
 use sqltk::{convert_control_flow, Break, Transform, Transformable, Visitable, Visitor};
-use tracing::info;
 
 use crate::{
     inference::{unifier, TypeError, TypeInferencer},
@@ -380,7 +379,6 @@ mod test {
     use std::collections::HashMap;
 
     use pretty_assertions::assert_eq;
-    use tracing::info;
 
     use crate::{
         schema, Dep, EqlValue, NativeValue, Projection, ProjectionColumn, TableColumn, Value,
@@ -507,7 +505,7 @@ mod test {
                     column: id("id"),
                 })));
 
-                let param = typed.params.get(0).unwrap();
+                let param = typed.params.first().unwrap();
 
                 assert_eq!(param, &v);
 
