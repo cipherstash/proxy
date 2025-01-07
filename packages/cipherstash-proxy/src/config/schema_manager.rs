@@ -7,7 +7,7 @@ use sqlparser::ast::Ident;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::{task::JoinHandle, time};
-use tracing::{debug, info, warn};
+use tracing::{info, warn};
 
 #[derive(Clone, Debug)]
 pub struct SchemaManager {

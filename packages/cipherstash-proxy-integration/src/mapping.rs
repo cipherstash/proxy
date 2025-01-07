@@ -1,10 +1,4 @@
-use crate::common::{connect_with_tls, database_config_with_port, PG_LATEST, PROXY};
-use cipherstash_proxy::{
-    eql::{Ciphertext, Plaintext},
-    log,
-};
 use rand::Rng;
-use tracing::info;
 
 fn id() -> i64 {
     let mut rng = rand::thread_rng();
