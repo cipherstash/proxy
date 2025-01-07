@@ -17,8 +17,7 @@ LEFT JOIN
     information_schema.columns c ON c.table_schema = t.table_schema
                                             AND c.table_name = t.table_name
 WHERE
-    t.table_schema NOT IN ('information_schema', 'pg_catalog')  -- Exclude system schemas
-    AND t.table_type = 'BASE TABLE'
+    t.table_type = 'BASE TABLE'
 GROUP BY
     t.table_schema, t.table_name
 ORDER BY
