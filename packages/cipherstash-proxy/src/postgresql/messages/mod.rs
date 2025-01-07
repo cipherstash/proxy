@@ -231,7 +231,15 @@ pub fn maybe_json(bytes: &BytesMut) -> bool {
 /// The header byte is always 1
 ///
 pub fn maybe_jsonb(bytes: &BytesMut) -> bool {
-    let header = bytes.as_ref()[0];
-    let first = bytes.as_ref()[1];
+    // Empty JSONB is at least 3 bytes
+    // `1{}``
+    if bytes.len() <= 3 {
+        return false;
+    }
+
+    let b = bytes.as_ref();
+
+    let header = b[0];
+    let first = b[1];
     header == 1 && first == b'{'
 }
