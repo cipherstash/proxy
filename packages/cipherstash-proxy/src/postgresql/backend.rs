@@ -167,7 +167,7 @@ where
             None => vec![FormatCode::Text; row_len],
         };
 
-        error!(target: MAPPER, "Result format_codes {format_codes:?}");
+        // error!(target: MAPPER, "Result format_codes {format_codes:?}");
 
         let ciphertexts: Vec<Option<Ciphertext>> = rows
             .iter()
@@ -184,7 +184,7 @@ where
                 .iter()
                 .zip(format_codes.iter())
                 .map(|(plaintext, format_code)| {
-                    debug!(target: MAPPER, "format_code: {format_code:?}");
+                    // debug!(target: MAPPER, "format_code: {format_code:?}");
                     match plaintext {
                         Some(plaintext) => plaintext_to_bytes(plaintext, format_code),
                         None => Ok(None),
@@ -212,9 +212,6 @@ where
     ) -> Result<Option<BytesMut>, Error> {
         let mut description = ParamDescription::try_from(bytes)?;
 
-        // warn!("PARAMETER_DESCRIPTION ==============================");
-        // debug!("{:?}", bytes);
-
         if let Some(param_columns) = self.context.get_param_columns_for_describe() {
             debug!("{:?}", param_columns);
             let param_types = param_columns
@@ -225,8 +222,6 @@ where
             debug!(target: MAPPER, "Mapped ParamDescription {description:?}");
         }
 
-        // debug!("Mapped {:?}", description);
-        // warn!("/PARAMETER_DESCRIPTION ==============================");
         if description.should_rewrite() {
             let bytes = BytesMut::try_from(description)?;
             Ok(Some(bytes))
@@ -240,12 +235,6 @@ where
         bytes: &BytesMut,
     ) -> Result<Option<BytesMut>, Error> {
         let mut description = RowDescription::try_from(bytes)?;
-
-        // warn!("ROWDESCRIPTION ==============================");
-        // // warn!("{:?}", self.context);
-        // debug!("{:?}", self.context.describe);
-        // debug!("RowDescription: {:?}", description);
-
         if let Some(projection_cols) = self.context.get_projection_columns_for_describe() {
             let projection_types = projection_cols
                 .iter()
@@ -256,14 +245,6 @@ where
         }
 
         self.context.describe_complete();
-
-        // warn!("/ ROWDESCRIPTION ==============================");
-
-        // description.fields.iter_mut().for_each(|field| {
-        //     if field.name == "email" {
-        //         field.rewrite_type_oid(postgres_types::Type::TEXT);
-        //     }
-        // });
 
         if description.should_rewrite() {
             let bytes = BytesMut::try_from(description)?;
