@@ -1,14 +1,12 @@
 //! Types for representing and maintaining a lexical scope during AST traversal.
-use sqlparser::ast::{Ident, ObjectName, Query, Statement};
-use sqltk::{into_control_flow, Break, Visitable, Visitor};
-use tracing::info;
-
 use crate::inference::unifier::{Constructor, ProjectionColumn, Type};
 use crate::inference::TypeError;
 use crate::iterator_ext::IteratorExt;
 use crate::model::SqlIdent;
 use crate::unifier::{Projection, ProjectionColumns};
 use crate::{NodeKey, Relation};
+use sqlparser::ast::{Ident, ObjectName, Query, Statement};
+use sqltk::{into_control_flow, Break, Visitable, Visitor};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fmt::Debug;
@@ -251,20 +249,16 @@ impl Scope {
     }
 
     fn add_relation(&mut self, relation: Relation) -> Result<(), ScopeError> {
-        // info!("Scope::add_relation: {:#?}", self);
         self.relations.push(Rc::new(relation));
         Ok(())
     }
 
     fn resolve_relation(&self, name: &ObjectName) -> Result<Rc<Relation>, ScopeError> {
-        // info!("Scope::resolve_relation: {:#?}", self);
-
         if name.0.len() > 1 {
             return Err(ScopeError::UnsupportedSqlFeature(
                 "Tried to resolve a relation using a compound identifier".into(),
             ));
         }
-        // info!("resolve_relation {}", name.0.last().unwrap().to_string());
 
         let ident = &SqlIdent::from(name.0.last().unwrap());
 
@@ -309,8 +303,6 @@ impl<'ast> Visitor<'ast> for ScopeTracker<'ast> {
     type Error = ScopeError;
 
     fn enter<N: Visitable>(&mut self, node: &'ast N) -> ControlFlow<Break<Self::Error>> {
-        // info!("ScopeTracker stack depth: ENTER {}", self.stack.len());
-
         let node_key = NodeKey::new_from_visitable(node);
         if let Some(current_scope) = self.stack.last() {
             self.node_scopes
@@ -345,8 +337,6 @@ impl<'ast> Visitor<'ast> for ScopeTracker<'ast> {
     }
 
     fn exit<N: Visitable>(&mut self, node: &'ast N) -> ControlFlow<Break<Self::Error>> {
-        // info!("ScopeTracker stack depth: EXIT {}", self.stack.len());
-
         if node.downcast_ref::<Statement>().is_some() {
             return into_control_flow(self.stack.pop().ok_or(ScopeError::NoCurrentScope));
         }

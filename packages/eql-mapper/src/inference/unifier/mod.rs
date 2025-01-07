@@ -9,7 +9,7 @@ pub(crate) use types::*;
 pub use types::{EqlValue, NativeValue, TableColumn};
 
 use super::TypeRegistry;
-use tracing::{info, span, Level};
+use tracing::{span, Level};
 
 /// Implements the type unification algorithm and maintains an association of type variables with the type that they
 /// point to.
@@ -52,14 +52,6 @@ impl<'ast> Unifier<'ast> {
         let _guard = span.enter();
 
         self.depth += 1;
-
-        // info!(
-        //     "{:indent$}  {} UNIFY {}",
-        //     " ",
-        //     left,
-        //     right,
-        //     indent = (self.depth - 1) * 4
-        // );
 
         // If left & right are equal we can short circuit unification.
         if left == right {
@@ -135,15 +127,6 @@ impl<'ast> Unifier<'ast> {
             }
             other => other,
         };
-
-        // if let Ok(unification) = &unification {
-        //     info!(
-        //         "= {:indent$} {}",
-        //         "",
-        //         unification,
-        //         indent = (self.depth - 1) * 4
-        //     );
-        // }
 
         self.depth -= 1;
 
