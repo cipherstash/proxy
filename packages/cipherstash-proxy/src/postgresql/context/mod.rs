@@ -103,19 +103,17 @@ impl Context {
     }
 
     pub fn get_param_columns(&self, key: &Destination) -> Option<Vec<Option<Column>>> {
-        let statment_read = self.statements.read().unwrap();
-        match statment_read.get(key) {
-            Some(statement) => Some(statement.param_columns.clone()),
-            None => None,
-        }
+        let statement_read = self.statements.read().unwrap();
+        statement_read
+            .get(key)
+            .map(|statement| statement.param_columns.clone())
     }
 
     pub fn get_projection_columns(&self, key: &Destination) -> Option<Vec<Option<Column>>> {
-        let statment_read = self.statements.read().unwrap();
-        match statment_read.get(key) {
-            Some(statement) => Some(statement.projection_columns.clone()),
-            None => None,
-        }
+        let statement_read = self.statements.read().unwrap();
+        statement_read
+            .get(key)
+            .map(|statement| statement.projection_columns.clone())
     }
 
     pub fn get_result_format_codes_for_execute(&self) -> Option<Vec<FormatCode>> {
@@ -128,10 +126,9 @@ impl Context {
 
     pub fn get_result_format_codes_for_portal(&self, key: &Destination) -> Option<Vec<FormatCode>> {
         let portal_read = self.portals.read().unwrap();
-        match portal_read.get(key) {
-            Some(portal) => Some(portal.format_codes.clone()),
-            None => None,
-        }
+        portal_read
+            .get(key)
+            .map(|portal| portal.format_codes.clone())
     }
 
     pub fn remove(&mut self, key: &Destination) -> Option<Statement> {

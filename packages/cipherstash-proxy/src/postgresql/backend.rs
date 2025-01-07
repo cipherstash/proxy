@@ -177,7 +177,7 @@ where
 
         let plaintexts = self.encrypt.decrypt(ciphertexts).await?;
 
-        let rows = plaintexts.chunks(row_len).into_iter().zip(rows);
+        let rows = plaintexts.chunks(row_len).zip(rows);
 
         for (chunk, mut row) in rows {
             let data = chunk

@@ -67,7 +67,7 @@ impl TryFrom<&BytesMut> for ParamDescription {
         let count = cursor.get_i16() as usize;
 
         let mut types = vec![];
-        for _idx in 0..count as usize {
+        for _idx in 0..count {
             let type_oid = cursor.get_i32();
             let type_oid = postgres_types::Type::from_oid(type_oid as u32)
                 .unwrap_or(postgres_types::Type::UNKNOWN);

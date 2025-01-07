@@ -38,7 +38,7 @@ impl DataRow {
     pub fn rewrite(&mut self, plaintexts: &[Option<BytesMut>]) -> Result<(), Error> {
         for (idx, pt) in plaintexts.iter().enumerate() {
             if let Some(bytes) = pt {
-                self.columns[idx].rewrite(&bytes);
+                self.columns[idx].rewrite(bytes);
             }
         }
         Ok(())
@@ -53,7 +53,7 @@ impl DataColumn {
     pub fn maybe_ciphertext(&self) -> bool {
         self.bytes
             .as_ref()
-            .map_or(false, |b| maybe_jsonb(&b) || maybe_json(&b))
+            .map_or(false, |b| maybe_jsonb(b) || maybe_json(b))
     }
 
     pub fn rewrite(&mut self, b: &[u8]) {
@@ -67,10 +67,10 @@ impl DataColumn {
     /// If the json format looks binary, returns a reference to the bytes without the jsonb header byte
     ///
     pub fn json_bytes(&self) -> Option<&[u8]> {
-        self.bytes.as_ref().map_or(None, |b| {
-            if maybe_jsonb(&b) {
+        self.bytes.as_ref().and_then(|b| {
+            if maybe_jsonb(b) {
                 Some(&b[1..])
-            } else if maybe_json(&b) {
+            } else if maybe_json(b) {
                 Some(&b[0..])
             } else {
                 None
@@ -175,23 +175,18 @@ impl From<&DataColumn> for Option<eql::Ciphertext> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{
-        eql::{Identifier, Plaintext},
-        log,
-        postgresql::messages::data_row::DataColumn,
-    };
-
     use super::DataRow;
+    use crate::{log, postgresql::messages::data_row::DataColumn};
     use bytes::{Buf, BytesMut};
     use cipherstash_client::zerokms::EncryptedRecord;
     use recipher::key::Iv;
-    use sqlparser::ast::Ident;
     use tracing::info;
     use uuid::Uuid;
 
     fn to_message(s: &[u8]) -> BytesMut {
         BytesMut::from(s)
     }
+
     fn record() -> EncryptedRecord {
         EncryptedRecord {
             iv: Iv::default(),
@@ -216,7 +211,7 @@ mod tests {
         let bytes = to_message(b"D\0\0\0i\0\x01\0\0\0_\x01{\"c\": \"mBbKx=EbyVyx>mNt9E<k5A&(S8?o+de4F^|i^}7e3l4YE2r(f|W`0Und}s4|#2_A>;-h3xf8wDrq~v|IvQ=jXYG!u4Uu9SI)@Q+xmSd+PWo=<;Y$Ct\",\"k\": \"ct\",\"i\": {\"t\": \"\"users\"\",\"c\": \"\"email\"\"},\"v\": 1}");
         // let expected = bytes.clone();
 
-        let data_row = DataRow::try_from(&bytes).expect("ok");
+        let _data_row = DataRow::try_from(&bytes).expect("ok");
 
         // let ciphertext = data_row.to_ciphertext().expect("ok");
 

@@ -142,7 +142,7 @@ pub async fn load_encrypt_config(config: &DatabaseConfig) -> Result<EncryptConfi
             };
 
             // We know there is at least one row
-            let row = rows.get(0).unwrap();
+            let row = rows.first().unwrap();
 
             let json_value: Value = row.get("data");
             let encrypt_config: EncryptConfig = serde_json::from_value(json_value)?;

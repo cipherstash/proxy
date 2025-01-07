@@ -170,8 +170,9 @@ where
                 Some(projection) => match projection {
                     eql_mapper::Projection::WithColumns(columns) => columns
                         .iter()
-                        .map(|col| match col {
-                            eql_mapper::ProjectionColumn { ty, .. } => match ty {
+                        .map(|col| {
+                            let eql_mapper::ProjectionColumn { ty, .. } = col;
+                            match ty {
                                 eql_mapper::Value::Eql(EqlValue(TableColumn { table, column }))
                                 | eql_mapper::Value::Native(NativeValue(Some(TableColumn {
                                     table,
@@ -198,7 +199,7 @@ where
                                     }
                                 }
                                 _ => None,
-                            },
+                            }
                         })
                         .collect::<Vec<_>>(),
                     eql_mapper::Projection::Empty => vec![],
@@ -248,12 +249,8 @@ where
     ///
     async fn bind_handler(&mut self, bytes: &BytesMut) -> Result<Option<BytesMut>, Error> {
         let mut bind = Bind::try_from(bytes)?;
-        warn!("BIND ==============================");
-        warn!("bind.portal {:?}", &bind.portal);
-        warn!("bind.prepared_statement {:?}", &bind.prepared_statement);
 
         if let Some(statement) = self.context.get(&bind.prepared_statement) {
-            // if let Some(param_cols) = self.context.get_param_columns(&bind.prepared_statement) {
             let param_columns = statement.param_columns.clone();
             let plaintexts = bind
                 .param_values
@@ -262,16 +259,14 @@ where
                 .map(|(param, col)| match col {
                     Some(col) => {
                         debug!(target = MAPPER, "Mapping param: {col:?}");
-                        to_plaintext(&param, &col)
+                        to_plaintext(param, col)
                     }
                     None => Ok(None),
                 })
                 .collect::<Result<Vec<_>, _>>()?;
-
             debug!(target = MAPPER, "Mapping params: {plaintexts:?}");
-            let encrypted = self.encrypt.encrypt(plaintexts, param_columns).await?;
 
-            warn!("//////////////////////////////////");
+            let encrypted = self.encrypt.encrypt(plaintexts, param_columns).await?;
             debug!(target = MAPPER, "Encrypted: {encrypted:?}");
 
             bind.update_from_ciphertext(encrypted)?;
@@ -281,8 +276,6 @@ where
                 context::Portal::new(statement.clone(), bind.result_columns_format_codes.clone()),
             );
         }
-
-        warn!("/BIND ==============================");
 
         if bind.should_rewrite() {
             let bytes = BytesMut::try_from(bind)?;

@@ -373,21 +373,17 @@ impl<'ast> Visitor<'ast> for EqlMapper<'ast> {
 
 #[cfg(test)]
 mod test {
-    use std::collections::HashMap;
-
-    use pretty_assertions::assert_eq;
-
+    use super::type_check;
     use crate::{
         schema, Dep, EqlValue, NativeValue, Projection, ProjectionColumn, TableColumn, Value,
     };
-
+    use pretty_assertions::assert_eq;
     use sqlparser::{
         ast::{self as ast, Statement},
         dialect::PostgreSqlDialect,
         parser::Parser,
     };
-
-    use super::type_check;
+    use std::collections::HashMap;
 
     fn parse(statement: &'static str) -> Statement {
         Parser::parse_sql(&PostgreSqlDialect {}, statement).unwrap()[0].clone()

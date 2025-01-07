@@ -107,7 +107,7 @@ impl TryFrom<u8> for Target {
         match t as char {
             'S' => Ok(Target::PreparedStatement),
             'P' => Ok(Target::Portal),
-            t => return Err(ProtocolError::UnexpectedDescribeTarget { target: t }.into()),
+            t => Err(ProtocolError::UnexpectedDescribeTarget { target: t }.into()),
         }
     }
 }

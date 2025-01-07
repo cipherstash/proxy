@@ -127,11 +127,7 @@ impl Encrypt {
 
     pub fn get_column_config(&self, identifier: &eql::Identifier) -> Option<ColumnConfig> {
         let encrypt_config = self.encrypt_config.load();
-
-        match encrypt_config.get(identifier) {
-            Some(c) => Some(c.clone()),
-            None => None,
-        }
+        encrypt_config.get(identifier).cloned()
     }
 }
 
