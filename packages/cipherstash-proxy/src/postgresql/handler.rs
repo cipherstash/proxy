@@ -55,15 +55,6 @@ use tracing::{debug, error, info};
 pub async fn handler(client_stream: AsyncStream, encrypt: Encrypt) -> Result<(), Error> {
     let mut client_stream = client_stream;
 
-    if encrypt.config.server.require_tls && !client_stream.is_tls() {
-        let message = ErrorResponse::tls_required();
-        let bytes = BytesMut::try_from(message)?;
-        client_stream.write_all(&bytes).await?;
-
-        error!("Client must connect with Transport Layer Security (TLS)");
-        return Err(ConfigError::TlsRequired.into());
-    }
-
     // Connect to the database server, using TLS if configured
     let stream = AsyncStream::connect(&encrypt.config.database.to_socket_address()).await?;
     let mut database_stream = startup::with_tls(stream, &encrypt.config).await?;
@@ -209,6 +200,15 @@ pub async fn handler(client_stream: AsyncStream, encrypt: Encrypt) -> Result<(),
         }
     }
 
+    if encrypt.config.server.require_tls && !client_stream.is_tls() {
+        let message = ErrorResponse::tls_required();
+        let bytes = BytesMut::try_from(message)?;
+        client_stream.write_all(&bytes).await?;
+
+        error!("Client must connect with Transport Layer Security (TLS)");
+        return Err(ConfigError::TlsRequired.into());
+    }
+
     let (client_reader, client_writer) = split(client_stream);
     let (server_reader, server_writer) = split(database_stream);
 
@@ -244,16 +244,6 @@ pub async fn handler(client_stream: AsyncStream, encrypt: Encrypt) -> Result<(),
         #[allow(unreachable_code)]
         Ok::<(), Error>(())
     };
-
-    // Direct connections, can be handy for debugging
-    // let client_to_server = async {
-    //     io::copy(&mut client_reader, &mut server_writer).await?;
-    //     Ok::<(), Error>(())
-    // };
-    // let server_to_client = async {
-    //     io::copy(&mut server_reader, &mut client_writer).await?;
-    //     Ok::<(), Error>(())
-    // };
 
     tokio::try_join!(client_to_server, server_to_client)?;
 

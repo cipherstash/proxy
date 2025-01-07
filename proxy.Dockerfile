@@ -9,5 +9,4 @@ COPY cipherstash-proxy /usr/local/bin/cipherstash-proxy
 # Copy EQL install scripts
 COPY cipherstash-eql.sql /opt/cipherstash-eql.sql
 
-ENV CS_CONFIG_FILE=/etc/cipherstash-proxy.toml
 ENTRYPOINT ["cipherstash-proxy"]

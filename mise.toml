@@ -69,17 +69,17 @@ cp {{config_root}}/target/{{ target }}/release/cipherstash-proxy {{config_root}}
 # build a new container
 mise run build:docker --platform {{docker_platform}}
 
-if [[ "{{arg(name="service",default="proxy")}}" =~ "proxy-tls" ]]; then
-  if [ -z "${CS_TLS__CERTIFICATE}" ]; then
-    echo "error: CS_TLS__CERTIFICATE is not set, and you are trying to bring up the proxy-tls container"
-  fi
-  if [ -z "${CS_TLS__PRIVATE_KEY}" ]; then
-    echo "error: CS_TLS__PRIVATE_KEY is not set, and you are trying to bring up the proxy-tls container"
-  fi
-  if [ -z "${CS_TLS__CERTIFICATE}" ] || [ -z "${CS_TLS__CERTIFICATE}" ]; then
-    exit 67
-  fi
-fi
+# if [[ "{{arg(name="service",default="proxy")}}" =~ "proxy-tls" ]]; then
+#   if [ -z "${CS_TLS__CERTIFICATE}" ]; then
+#     echo "error: CS_TLS__CERTIFICATE is not set, and you are trying to bring up the proxy-tls container"
+#   fi
+#   if [ -z "${CS_TLS__PRIVATE_KEY}" ]; then
+#     echo "error: CS_TLS__PRIVATE_KEY is not set, and you are trying to bring up the proxy-tls container"
+#   fi
+#   if [ -z "${CS_TLS__CERTIFICATE}" ] || [ -z "${CS_TLS__CERTIFICATE}" ]; then
+#     exit 67
+#   fi
+# fi
 
 # Make the default invocation with `mise run proxy:up` work.
 # The default mise environment configuration works for Proxy running as a process, connecting via a port forward.
@@ -127,7 +127,7 @@ mise run test:integration
 [tasks."test:local"]
 alias = 'l'
 description = "Runs test/s"
-run = "cargo nextest run --no-fail-fast --nocapture -E"
+run = "cargo nextest run --no-fail-fast --nocapture"
 
 
 [tasks."test:unit"]
