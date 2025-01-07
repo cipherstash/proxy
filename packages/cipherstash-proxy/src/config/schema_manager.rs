@@ -111,24 +111,25 @@ pub async fn load_schema(config: &DatabaseConfig) -> Result<Schema, Error> {
 
     for table in tables {
         let table_name: String = table.get("table_name");
-        let primary_keys: Vec<String> = table.get("primary_keys");
+        let primary_keys: Vec<Option<String>> = table.get("primary_keys");
         let columns: Vec<String> = table.get("columns");
-        let _types: Vec<String> = table.get("column_types");
-        let domains: Vec<String> = table.get("column_domains");
-
-        let columns: Vec<String> = columns
-            .into_iter()
-            .filter(|col| !primary_keys.contains(col))
-            .collect();
+        let _types: Vec<Option<String>> = table.get("column_types");
+        let domains: Vec<Option<String>> = table.get("column_domains");
 
         let mut table = Table::new(Ident::new(table_name));
-        columns.iter().zip(domains).for_each(|(col, domain)| {
-            let is_primary_key = primary_keys.contains(col);
 
-            let column = if domain ==  "cs_encrypted_v1" {
-                Column::eql(Ident::with_quote('"', col))
-            } else {
-                Column::native(Ident::with_quote('"', col))
+        columns.iter().zip(domains).for_each(|(col, domain)| {
+            let is_primary_key = primary_keys.contains(&Some(col.to_string()));
+
+            let column = match domain {
+                Some(domain) => {
+                    if domain == "cs_encrypted_v1" {
+                        Column::eql(Ident::with_quote('"', col))
+                    } else {
+                        Column::native(Ident::with_quote('"', col))
+                    }
+                }
+                None => Column::native(Ident::with_quote('"', col)),
             };
 
             table.add_column(Arc::new(column), is_primary_key);
