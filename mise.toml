@@ -124,6 +124,12 @@ mise run test:unit
 mise run test:integration
 """
 
+[tasks."test:local"]
+alias = 'l'
+description = "Runs test/s"
+run = "cargo nextest run --no-fail-fast --nocapture -E"
+
+
 [tasks."test:unit"]
 description = "Runs test/s"
 run = "mise run test:nextest {{arg(name='test',default='')}}"
