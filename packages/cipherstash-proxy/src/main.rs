@@ -22,7 +22,7 @@ async fn main() {
         }
     };
 
-    let encrypt = init(config).await;
+    let mut encrypt = init(config).await;
 
     let mut listener = connect::bind_with_retry(&encrypt.config.server).await;
 
@@ -34,7 +34,7 @@ async fn main() {
             },
             _ = sighup() => {
                 info!("Received SIGHUP. Reloading configuration");
-                listener = reload_config(listener, config_file).await;
+                (listener, encrypt) = reload_config(listener, config_file, encrypt).await;
                 info!("Finished reloading configuration");
             },
             _ = sigterm() => {
@@ -162,18 +162,29 @@ async fn sighup() -> std::io::Result<()> {
     Ok(())
 }
 
-async fn reload_config(listener: TcpListener, config_file: &str) -> TcpListener {
+async fn reload_config(
+    listener: TcpListener,
+    config_file: &str,
+    encrypt: Encrypt,
+) -> (TcpListener, Encrypt) {
     let new_config = match TandemConfig::load(config_file) {
         Ok(config) => config,
         Err(err) => {
             warn!("Not reloading configuration due to the error: {}", err);
-            return listener;
+            return (listener, encrypt);
         }
     };
 
-    let encrypt = init(new_config).await;
+    let new_encrypt = init(new_config).await;
 
+    // TODO: if it is not too hard to implement PartialEq for Encrypt, it would be great to check for changes
+    // and skip reloading if nothing has changed
+
+    // Explicit drop needed here to free the network resources before binding if using the same address & port
     std::mem::drop(listener);
 
-    connect::bind_with_retry(&encrypt.config.server).await
+    (
+        connect::bind_with_retry(&new_encrypt.config.server).await,
+        new_encrypt,
+    )
 }
