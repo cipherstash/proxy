@@ -236,6 +236,7 @@ impl<'ast> EqlMapper<'ast> {
     fn literal_types(&self) -> Result<Vec<(EqlValue, &'ast ast::Expr)>, EqlMapperError> {
         let inferencer = self.inferencer.borrow();
         let literal_nodes = inferencer.literal_nodes();
+
         let literals: Vec<(EqlValue, &'ast ast::Expr)> = literal_nodes
             .iter()
             .map(|node_key| match inferencer.get_type_by_node_key(node_key) {
@@ -384,6 +385,7 @@ mod test {
         parser::Parser,
     };
     use std::collections::HashMap;
+    use tracing::info;
 
     fn parse(statement: &'static str) -> Statement {
         Parser::parse_sql(&PostgreSqlDialect {}, statement).unwrap()[0].clone()
@@ -471,6 +473,73 @@ mod test {
                     typed.projection,
                     Some(projection![(NATIVE(users.email) as email)])
                 )
+            }
+            Err(err) => panic!("type check failed: {err}"),
+        }
+    }
+
+    #[test]
+    fn basic_with_value() {
+        let _ = tracing_subscriber::fmt::try_init();
+        let schema = Dep::new(schema! {
+            tables: {
+                users: {
+                    id (PK),
+                    email (EQL),
+                    first_name,
+                }
+            }
+        });
+
+        let statement = parse("select email from users WHERE email = 'hello@cipherstash.com'");
+
+        match type_check(&schema, &statement) {
+            Ok(typed) => {
+                assert_eq!(
+                    typed.projection,
+                    Some(projection![(EQL(users.email) as email)])
+                );
+
+                assert!(typed.literals.contains(&(
+                    EqlValue(TableColumn {
+                        table: id("users"),
+                        column: id("email")
+                    }),
+                    &ast::Expr::Value(ast::Value::SingleQuotedString(
+                        "hello@cipherstash.com".into()
+                    ))
+                )));
+            }
+            Err(err) => panic!("type check failed: {err}"),
+        }
+    }
+
+    #[test]
+    fn insert_with_value() {
+        let _ = tracing_subscriber::fmt::try_init();
+        let schema = Dep::new(schema! {
+            tables: {
+                users: {
+                    id (PK),
+                    email (EQL),
+                    first_name,
+                }
+            }
+        });
+
+        let statement = parse("INSERT INTO users (id, email) VALUES (42, 'hello@cipherstash.com')");
+
+        match type_check(&schema, &statement) {
+            Ok(typed) => {
+                assert!(typed.literals.contains(&(
+                    EqlValue(TableColumn {
+                        table: id("users"),
+                        column: id("email")
+                    }),
+                    &ast::Expr::Value(ast::Value::SingleQuotedString(
+                        "hello@cipherstash.com".into()
+                    ))
+                )));
             }
             Err(err) => panic!("type check failed: {err}"),
         }
