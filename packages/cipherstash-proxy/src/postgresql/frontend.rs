@@ -134,7 +134,8 @@ where
             .parse_statement()?;
 
         if eql_mapper::requires_type_check(&statement) {
-            let typed_statement = eql_mapper::type_check(self.encrypt.schema.load(), &statement)?;
+            let typed_statement = eql_mapper::type_check(self.encrypt.schema.load(), &statement)
+                .map_err(|_e| MappingError::StatementCouldNotBeTypeChecked)?;
 
             let param_columns = self.get_param_columns(&typed_statement)?;
             let projection_columns = self.get_projection_columns(&typed_statement)?;
@@ -284,11 +285,13 @@ fn to_plaintext(param: &BindParam, col: &Column) -> Result<Option<Plaintext>, Er
         FormatCode::Text => text_to_plaintext(param, col),
         FormatCode::Binary => binary_to_plaintext(param, col),
     }
-    .map_err(|_| MappingError::InvalidParameter {
-        table: col.identifier.table.to_owned(),
-        column: col.identifier.table.to_owned(),
-        postgres_type: col.postgres_type.name().to_owned(),
-    })?;
+    .map_err(|_|  //     MappingError::InvalidParameter {
+                     //     table: col.identifier.table.to_owned(),
+                     //     column: col.identifier.table.to_owned(),
+                     //     postgres_type: col.postgres_type.name().to_owned(),
+                     // }
+
+        MappingError::CouldNotParseParameter)?;
 
     Ok(Some(pt))
 }
@@ -417,9 +420,8 @@ mod tests {
     use chrono::NaiveDate;
     use cipherstash_client::encryption::Plaintext;
     use cipherstash_config::{ColumnConfig, ColumnMode, ColumnType};
-    use postgres_types::{FromSql, ToSql, Type};
+    use postgres_types::{ToSql, Type};
     use std::ffi::CString;
-    use tracing::info;
 
     fn to_message(s: &[u8]) -> BytesMut {
         BytesMut::from(s)
@@ -497,7 +499,7 @@ mod tests {
         let val = NaiveDate::parse_from_str("2025-01-01", "%Y-%m-%d").unwrap();
 
         let mut bytes = BytesMut::new();
-        val.to_sql_checked(&Type::DATE, &mut bytes);
+        val.to_sql_checked(&Type::DATE, &mut bytes).unwrap();
 
         let param = BindParam::new(FormatCode::Binary, bytes);
 

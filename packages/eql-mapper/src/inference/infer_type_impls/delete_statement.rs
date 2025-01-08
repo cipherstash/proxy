@@ -16,7 +16,7 @@ impl<'ast> InferType<'ast, Delete> for TypeInferencer<'ast> {
             }
 
             None => {
-                self.unify_node_with_type(delete, &Type::empty_projection())?;
+                self.unify_node_with_type(delete, Type::empty_projection())?;
             }
         }
 

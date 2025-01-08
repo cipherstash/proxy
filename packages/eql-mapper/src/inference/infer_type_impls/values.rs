@@ -28,13 +28,13 @@ impl<'ast> InferType<'ast, Values> for TypeInferencer<'ast> {
 
         for row in values.rows.iter() {
             for (idx, val) in row.iter().enumerate() {
-                self.unify(&self.get_type(val), &column_types[idx])?;
+                self.unify(self.get_type(val), column_types[idx].clone())?;
             }
         }
 
         self.unify_node_with_type(
             values,
-            &Type::projection(
+            Type::projection(
                 &column_types
                     .iter()
                     .map(|ty| (ty.clone(), None))

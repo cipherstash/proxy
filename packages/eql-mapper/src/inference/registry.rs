@@ -1,20 +1,17 @@
-use std::{cell::RefCell, collections::HashMap, marker::PhantomData, rc::Rc};
+use std::{collections::HashMap, marker::PhantomData};
 
 use sqltk::Semantic;
 
-use crate::inference::{
-    unifier::{Type, TypeVar},
-    TypeError,
-};
+use crate::inference::unifier::{Type, TypeVar};
 
-use super::{NodeKey, Status, TypeVarGenerator};
+use super::{NodeKey, TypeCell, TypeVarGenerator};
 
 /// `TypeRegistry` maintains an association between `sqlparser` AST nodes and the node's inferred [`Type`].
 #[derive(Debug)]
 pub struct TypeRegistry<'ast> {
     tvar_gen: TypeVarGenerator,
-    substitutions: HashMap<TypeVar, (Rc<RefCell<Type>>, Status)>,
-    node_types: HashMap<NodeKey<'ast>, Rc<RefCell<Type>>>,
+    substitutions: HashMap<TypeVar, TypeCell>,
+    node_types: HashMap<NodeKey<'ast>, TypeCell>,
     _ast: PhantomData<&'ast ()>,
 }
 
@@ -35,36 +32,12 @@ impl<'ast> TypeRegistry<'ast> {
         }
     }
 
-    pub(crate) fn get_substitution(&self, tvar: TypeVar) -> Option<(Type, Status)> {
-        self.substitutions
-            .get(&tvar)
-            .map(|(ty, status)| ((*ty).borrow().clone(), *status))
+    pub(crate) fn get_substitution(&self, tvar: TypeVar) -> Option<TypeCell> {
+        self.substitutions.get(&tvar).cloned()
     }
 
-    pub(crate) fn substitute(&mut self, tvar: TypeVar, sub: Type) {
-        let status = sub.status(self);
-
-        self.substitutions
-            .entry(tvar)
-            .and_modify(|value| {
-                *value.0.borrow_mut() = sub.clone();
-            })
-            .or_insert((Rc::new(RefCell::new(sub)), status));
-    }
-
-    pub(crate) fn set_node_type<N: Semantic>(&mut self, node: &'ast N, ty: Type) -> Type {
-        match self.node_types.get(&NodeKey::new(node)) {
-            Some(existing_ty) => {
-                *existing_ty.borrow_mut() = ty;
-                existing_ty.borrow().clone()
-            }
-            None => {
-                let ty = Rc::new(RefCell::new(ty));
-                self.node_types.insert(NodeKey::new(node), ty.clone());
-                let ty = &*ty.borrow();
-                ty.clone()
-            }
-        }
+    pub(crate) fn substitute(&mut self, tvar: TypeVar, sub: TypeCell) {
+        self.substitutions.insert(tvar, sub);
     }
 
     /// Gets (and creates, if required) the [`Type`] associated with a node (which must be an AST node type that
@@ -72,50 +45,32 @@ impl<'ast> TypeRegistry<'ast> {
     /// `Type(Def::Var(TypeVar::Fresh))` will be associated with the node and returned.
     ///
     /// This method is idempotent and further calls will return the same type.
-    pub(crate) fn get_type<N: Semantic>(&mut self, node: &'ast N) -> Type {
+    pub(crate) fn get_type<N: Semantic>(&mut self, node: &'ast N) -> &TypeCell {
         let tvar = self.fresh_tvar();
-        let ty = self
-            .node_types
-            .entry(NodeKey::new(node))
-            .or_insert(Rc::new(RefCell::new(tvar)));
-        (*ty).borrow().clone()
+
+        self.node_types.entry(NodeKey::new(node)).or_insert(tvar)
     }
 
-    pub(crate) fn get_type_by_node_key(&self, key: &NodeKey) -> Option<Type> {
-        self.node_types.get(key).map(|ty| (*ty).borrow().clone())
+    pub(crate) fn get_type_by_node_key(&self, key: &NodeKey<'ast>) -> Option<&TypeCell> {
+        match self.node_types.get(key) {
+            Some(ty) => Some(ty),
+            None => None,
+        }
     }
 
-    /// Tries to resolve all types in `self`.
-    ///
-    /// If successful, returns `Ok(HashMap<NodeKey, Type>)` else `Err(TypeError)`.
-    pub(crate) fn try_resolve_all_types(
-        &mut self,
-    ) -> Result<HashMap<NodeKey<'ast>, Type>, TypeError> {
-        let node_types = self.node_types.clone();
-        let node_types: HashMap<_, _> = node_types
-            .iter()
-            .map(|(node_key, ty)| {
-                let ty = (*ty).borrow().clone();
-                ty.try_resolve(self).map(|ty| (node_key.clone(), ty))
-            })
-            .collect::<Result<HashMap<_, _>, _>>()?;
-
-        Ok(node_types)
-    }
-
-    pub(crate) fn fresh_tvar(&mut self) -> Type {
-        Type::Var(TypeVar(self.tvar_gen.next_tvar()))
+    pub(crate) fn fresh_tvar(&mut self) -> TypeCell {
+        Type::Var(TypeVar(self.tvar_gen.next_tvar())).into_type_cell()
     }
 }
 
 #[cfg(test)]
 pub(crate) mod test_util {
     use sqlparser::ast::{
-        Delete, Expr, Function, FunctionArguments, Insert, Query, Select, SetExpr, Statement,
+        Delete, Expr, Function, FunctionArguments, Insert, Query, Select, SelectItem, SetExpr,
+        Statement,
     };
     use sqltk::{Break, Visitable, Visitor};
     use std::{convert::Infallible, fmt::Debug, ops::ControlFlow};
-    use tracing::info;
 
     use super::{NodeKey, TypeRegistry};
 
@@ -128,11 +83,11 @@ pub(crate) mod test_util {
         pub(crate) fn dump_node<N: Display + Visitable + Debug>(&self, node: &N) {
             let key = NodeKey::new_from_visitable(node);
             if let Some(ty) = self.node_types.get(&key) {
-                info!(
+                eprintln!(
                     "TYPE<\nast: {}\nsyn: {}\nty: {}\n>",
                     std::any::type_name::<N>(),
                     node,
-                    &*ty.borrow(),
+                    &*ty.as_type(),
                 );
             };
         }
@@ -175,6 +130,10 @@ pub(crate) mod test_util {
                     }
 
                     if let Some(node) = node.downcast_ref::<Select>() {
+                        self.0.dump_node(node);
+                    }
+
+                    if let Some(node) = node.downcast_ref::<SelectItem>() {
                         self.0.dump_node(node);
                     }
 

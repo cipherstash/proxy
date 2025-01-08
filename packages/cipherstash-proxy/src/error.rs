@@ -1,5 +1,4 @@
 use cipherstash_client::encryption;
-use eql_mapper::EqlMapperError;
 use std::io;
 use thiserror::Error;
 use tokio::time::error::Elapsed;
@@ -42,29 +41,25 @@ pub enum Error {
     #[error(transparent)]
     ZeroKMS(#[from] cipherstash_client::zerokms::Error),
 
-    #[error(transparent)]
-    EqlMapper(#[from] EqlMapperError),
-
     #[error("Unknown error")]
     Unknown,
 }
 
 #[derive(Error, Debug)]
 pub enum MappingError {
+    #[error("Invalid parameter data for PostgreSQL {name} ({oid}) type")]
+    InvalidParameter { name: String, oid: i32 },
+
     #[error(transparent)]
     SqlParse(#[from] sqlparser::parser::ParserError),
 
     #[error("Encryption of PostgreSQL {name} ({oid}) types is not currently supported")]
     UnsupportedParameterType { name: String, oid: i32 },
 
-    #[error("Invalid {postgres_type} parameter for column {column} in table {table}.")]
-    InvalidParameter {
-        table: String,
-        column: String,
-        postgres_type: String,
-    },
+    #[error("Statement could not be type checked")]
+    StatementCouldNotBeTypeChecked,
 
-    #[error("Parameter could not be parsed")]
+    #[error("could not parse parameter")]
     CouldNotParseParameter,
 }
 

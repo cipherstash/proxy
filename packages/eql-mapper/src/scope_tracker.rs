@@ -3,7 +3,7 @@ use crate::inference::unifier::{Constructor, ProjectionColumn, Type};
 use crate::inference::TypeError;
 use crate::iterator_ext::IteratorExt;
 use crate::model::SqlIdent;
-use crate::unifier::{Projection, ProjectionColumns};
+use crate::unifier::{Projection, ProjectionColumns, TypeCell};
 use crate::{NodeKey, Relation};
 use sqlparser::ast::{Ident, ObjectName, Query, Statement};
 use sqltk::{into_control_flow, Break, Visitable, Visitor};
@@ -40,20 +40,23 @@ impl ScopeTracker<'_> {
 
     /// Resolves an unqualified wildcard. Resolution occurs in the current scope only  (i.e. does not look into parent
     /// scopes).
-    pub(crate) fn resolve_wildcard(&self) -> Result<Type, ScopeError> {
+    pub(crate) fn resolve_wildcard(&self) -> Result<TypeCell, ScopeError> {
         self.current_scope()?.borrow().resolve_wildcard()
     }
 
     /// Resolves a qualified wildcard. Resolution occurs in the current scope only (i.e. does not look into parent
     /// scopes).
-    pub(crate) fn resolve_qualified_wildcard(&self, idents: &[Ident]) -> Result<Type, ScopeError> {
+    pub(crate) fn resolve_qualified_wildcard(
+        &self,
+        idents: &[Ident],
+    ) -> Result<TypeCell, ScopeError> {
         self.current_scope()?
             .borrow()
             .resolve_qualified_wildcard(idents)
     }
 
-    fn try_match_projection(ty: &Type) -> Result<ProjectionColumns, TypeError> {
-        match ty {
+    fn try_match_projection(ty: TypeCell) -> Result<ProjectionColumns, TypeError> {
+        match &*ty.as_type() {
             Type::Constructor(Constructor::Projection(projection)) => Ok(ProjectionColumns(
                 Vec::from_iter(projection.columns().iter().cloned()),
             )),
@@ -64,7 +67,7 @@ impl ScopeTracker<'_> {
     }
 
     /// Uniquely resolves an identifier against all relations that are in scope.
-    pub(crate) fn resolve_ident(&self, ident: &Ident) -> Result<Type, ScopeError> {
+    pub(crate) fn resolve_ident(&self, ident: &Ident) -> Result<TypeCell, ScopeError> {
         self.current_scope()?.borrow().resolve_ident(ident)
     }
 
@@ -72,7 +75,7 @@ impl ScopeTracker<'_> {
     ///
     /// Note that currently only compound identifier of length 2 are supported
     /// and resolution will fail if the identifier has more than two parts.
-    pub(crate) fn resolve_compound_ident(&self, idents: &[Ident]) -> Result<Type, ScopeError> {
+    pub(crate) fn resolve_compound_ident(&self, idents: &[Ident]) -> Result<TypeCell, ScopeError> {
         self.current_scope()?
             .borrow()
             .resolve_compound_ident(idents)
@@ -118,7 +121,7 @@ impl Scope {
         }))
     }
 
-    fn resolve_wildcard(&self) -> Result<Type, ScopeError> {
+    fn resolve_wildcard(&self) -> Result<TypeCell, ScopeError> {
         if self.relations.is_empty() {
             match &self.parent {
                 Some(parent) => parent.borrow().resolve_wildcard(),
@@ -131,13 +134,14 @@ impl Scope {
                 .map(|r| ProjectionColumn::new(r.projection_type.clone(), None))
                 .collect();
 
-            Ok(Type::Constructor(Constructor::Projection(Projection::new(
-                columns,
-            ))))
+            Ok(
+                Type::Constructor(Constructor::Projection(Projection::new(columns)))
+                    .into_type_cell(),
+            )
         }
     }
 
-    fn resolve_qualified_wildcard(&self, idents: &[Ident]) -> Result<Type, ScopeError> {
+    fn resolve_qualified_wildcard(&self, idents: &[Ident]) -> Result<TypeCell, ScopeError> {
         if idents.len() > 1 {
             return Err(ScopeError::UnsupportedCompoundIdentifierLength(
                 idents
@@ -165,7 +169,7 @@ impl Scope {
         }
     }
 
-    fn resolve_ident(&self, ident: &Ident) -> Result<Type, ScopeError> {
+    fn resolve_ident(&self, ident: &Ident) -> Result<TypeCell, ScopeError> {
         if self.relations.is_empty() {
             match &self.parent {
                 Some(parent) => parent.borrow().resolve_ident(ident),
@@ -177,7 +181,9 @@ impl Scope {
             let mut all_columns = self
                 .relations
                 .iter()
-                .map(|relation| ScopeTracker::try_match_projection(&relation.projection_type))
+                .map(|relation| {
+                    ScopeTracker::try_match_projection(relation.projection_type.clone())
+                })
                 .try_fold(
                     Vec::<ProjectionColumn>::with_capacity(16),
                     |mut acc, columns| {
@@ -207,7 +213,7 @@ impl Scope {
         }
     }
 
-    fn resolve_compound_ident(&self, idents: &[Ident]) -> Result<Type, ScopeError> {
+    fn resolve_compound_ident(&self, idents: &[Ident]) -> Result<TypeCell, ScopeError> {
         if idents.len() != 2 {
             return Err(ScopeError::InvariantFailed(
                 "Unsupported compound identifier length (max = 2)".to_string(),
@@ -224,7 +230,7 @@ impl Scope {
         }) {
             Ok(Some(named_relation)) => {
                 let columns =
-                    ScopeTracker::try_match_projection(&named_relation.projection_type.clone())
+                    ScopeTracker::try_match_projection(named_relation.projection_type.clone())
                         .map_err(|err| ScopeError::TypeError(Box::new(err)))?;
                 let mut columns = columns.0.iter();
 

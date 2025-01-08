@@ -50,7 +50,8 @@ impl<'ast> Importer<'ast> {
             name: table_alias.clone(),
             projection_type: Type::Constructor(Constructor::Projection(Projection::WithColumns(
                 ProjectionColumns::from(table.clone()),
-            ))),
+            )))
+            .into_type_cell(),
         })?;
 
         Ok(())
@@ -73,7 +74,7 @@ impl<'ast> Importer<'ast> {
         }
 
         let mut reg = self.reg.borrow_mut();
-        let projection_type = reg.get_type(&**query);
+        let projection_type = reg.get_type(&**query).clone();
 
         self.scope_tracker.borrow_mut().add_relation(Relation {
             name: Some(alias.clone()),
@@ -111,7 +112,8 @@ impl<'ast> Importer<'ast> {
                         name: record_as.cloned().ok(),
                         projection_type: Type::Constructor(Constructor::Projection(
                             Projection::WithColumns(ProjectionColumns::from(table.clone())),
-                        )),
+                        ))
+                        .into_type_cell(),
                     })?;
                 }
             }
@@ -147,7 +149,7 @@ impl<'ast> Importer<'ast> {
                 subquery,
                 alias,
             } => {
-                let projection_type = self.reg.borrow_mut().get_type(&*subquery.body);
+                let projection_type = self.reg.borrow_mut().get_type(&*subquery.body).clone();
 
                 self.scope_tracker.borrow_mut().add_relation(Relation {
                     name: alias.clone().map(|a| a.name.clone()),

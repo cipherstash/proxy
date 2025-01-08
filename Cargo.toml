@@ -8,20 +8,22 @@ edition = "2021"
 
 [profile.dev]
 incremental = true
+debug = true
 
-[profile.dev.package]
-aws-lc-sys.opt-level = 3
-proc-macro2.opt-level = 3
-quote.opt-level = 3
-serde_derive.opt-level = 3
-sqlparser.opt-level = 3
-syn.opt-level = 3
+# [profile.dev.package]
+# aws-lc-sys.opt-level = 3
+# proc-macro2.opt-level = 3
+# quote.opt-level = 3
+# serde_derive.opt-level = 3
+# sqlparser.opt-level = 3
+# syn.opt-level = 3
 
-[profile.dev.build-override]
-opt-level = 3
+# [profile.dev.build-override]
+# opt-level = 3
 
 [profile.test]
 incremental = true
+debug = true
 
 [profile.release]
 codegen-units = 1

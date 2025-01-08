@@ -1,9 +1,9 @@
 use sqlparser::ast::Ident;
 
-use crate::inference::unifier::Type;
+use crate::unifier::TypeCell;
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub(crate) struct Relation {
-    pub(crate) projection_type: Type,
+    pub(crate) projection_type: TypeCell,
     pub(crate) name: Option<Ident>,
 }

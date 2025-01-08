@@ -7,7 +7,7 @@
 
 use crate::{
     inference::unifier,
-    unifier::{EqlValue, NativeValue, ProjectionColumns},
+    unifier::{EqlValue, NativeValue},
 };
 use derive_more::Display;
 use sqlparser::ast::Ident;
@@ -92,9 +92,10 @@ impl TryFrom<&unifier::ProjectionColumns> for Type {
 
     fn try_from(columns: &unifier::ProjectionColumns) -> Result<Self, Self::Error> {
         let mut pub_columns: Vec<ProjectionColumn> = Vec::with_capacity(columns.len());
+        let columns = columns.flatten();
 
         for unifier::ProjectionColumn { ty, alias } in columns.0.iter() {
-            let pub_column: ProjectionColumn = match ty {
+            let pub_column: ProjectionColumn = match &*ty.as_type() {
                 unifier::Type::Constructor(unifier::Constructor::Value(value)) => {
                     ProjectionColumn {
                         ty: value.try_into()?,
@@ -103,7 +104,7 @@ impl TryFrom<&unifier::ProjectionColumns> for Type {
                 }
 
                 unexpected => Err(crate::EqlMapperError::InternalError(format!(
-                    "unexpected type {} in projection column",
+                    "WAT2 unexpected type {} in projection column",
                     unexpected
                 )))?,
             };
@@ -137,7 +138,7 @@ impl TryFrom<&unifier::Value> for Value {
             unifier::Value::Eql(eql_value) => Ok(Value::Eql(eql_value.clone())),
             unifier::Value::Native(native_value) => Ok(Value::Native(native_value.clone())),
             unifier::Value::Array(element_ty) => {
-                Ok(Value::Array(Box::new((&**element_ty).try_into()?)))
+                Ok(Value::Array(Box::new((&*element_ty.as_type()).try_into()?)))
             }
         }
     }
@@ -157,13 +158,12 @@ impl TryFrom<&unifier::Type> for Type {
         match constructor {
             unifier::Constructor::Value(value) => Ok(Type::Value(value.try_into()?)),
 
-            unifier::Constructor::Projection(unifier::Projection::WithColumns(
-                ProjectionColumns(columns),
-            )) => {
+            unifier::Constructor::Projection(unifier::Projection::WithColumns(columns)) => {
                 let mut pub_columns: Vec<ProjectionColumn> = Vec::with_capacity(columns.len());
+                let columns = columns.flatten();
 
-                for unifier::ProjectionColumn { ty, alias } in columns.iter() {
-                    let pub_column: ProjectionColumn = match ty {
+                for unifier::ProjectionColumn { ty, alias } in columns.0.iter() {
+                    let pub_column: ProjectionColumn = match &*ty.as_type() {
                         unifier::Type::Constructor(unifier::Constructor::Value(ty)) => {
                             ProjectionColumn {
                                 ty: ty.try_into()?,
@@ -172,7 +172,7 @@ impl TryFrom<&unifier::Type> for Type {
                         }
 
                         unexpected => Err(crate::EqlMapperError::InternalError(format!(
-                            "unexpected type {} in projection column",
+                            "WAT3 unexpected type {} in projection column",
                             unexpected
                         )))?,
                     };

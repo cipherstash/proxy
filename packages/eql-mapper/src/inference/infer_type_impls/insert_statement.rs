@@ -46,7 +46,7 @@ impl<'ast> InferType<'ast, Insert> for TypeInferencer<'ast> {
                     };
 
                     (
-                        Type::Constructor(Constructor::Value(value_ty)),
+                        Type::Constructor(Constructor::Value(value_ty)).into_type_cell(),
                         Some(tc.column.clone()),
                     )
                 })
@@ -54,7 +54,7 @@ impl<'ast> InferType<'ast, Insert> for TypeInferencer<'ast> {
         );
 
         if let Some(source) = source {
-            self.unify_node_with_type(&**source, &target_columns)?;
+            self.unify_node_with_type(&**source, target_columns)?;
         }
 
         Ok(())
@@ -69,7 +69,7 @@ impl<'ast> InferType<'ast, Insert> for TypeInferencer<'ast> {
             }
 
             None => {
-                self.unify_node_with_type(insert, &Type::empty_projection())?;
+                self.unify_node_with_type(insert, Type::empty_projection())?;
             }
         }
 

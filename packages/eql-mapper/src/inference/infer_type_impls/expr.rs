@@ -7,14 +7,14 @@ impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
             Expr::Identifier(ident) => {
                 self.unify_node_with_type(
                     this_expr,
-                    &self.scope_tracker.borrow().resolve_ident(ident)?,
+                    self.scope_tracker.borrow().resolve_ident(ident)?,
                 )?;
             }
 
             Expr::CompoundIdentifier(idents) => {
                 self.unify_node_with_type(
                     this_expr,
-                    &self.scope_tracker.borrow().resolve_compound_ident(idents)?,
+                    self.scope_tracker.borrow().resolve_compound_ident(idents)?,
                 )?;
             }
 
@@ -22,7 +22,7 @@ impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
             Expr::Wildcard(attached_token) => {
                 self.unify_node_with_type(
                     this_expr,
-                    &self.scope_tracker.borrow().resolve_wildcard()?,
+                    self.scope_tracker.borrow().resolve_wildcard()?,
                 )?;
             }
 
@@ -30,8 +30,7 @@ impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
             Expr::QualifiedWildcard(object_name, attached_token) => {
                 self.unify_node_with_type(
                     this_expr,
-                    &self
-                        .scope_tracker
+                    self.scope_tracker
                         .borrow()
                         .resolve_qualified_wildcard(&object_name.0)?,
                 )?;
@@ -54,12 +53,12 @@ impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
             | Expr::IsNotUnknown(expr) => {
                 self.unify_node_with_type(
                     this_expr,
-                    &self.unify(&self.get_type(&**expr), &Type::any_native())?,
+                    self.unify(self.get_type(&**expr), Type::any_native())?,
                 )?;
             }
 
             Expr::IsDistinctFrom(a, b) | Expr::IsNotDistinctFrom(a, b) => {
-                self.unify_node_with_type(this_expr, &Type::any_native())?;
+                self.unify_node_with_type(this_expr, Type::any_native())?;
                 self.unify_nodes(&**a, &**b)?;
             }
 
@@ -68,11 +67,11 @@ impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
                 list,
                 negated: _,
             } => {
-                self.unify_node_with_type(this_expr, &Type::any_native())?;
+                self.unify_node_with_type(this_expr, Type::any_native())?;
                 self.unify_node_with_type(
                     &**expr,
-                    &list.iter().try_fold(self.get_type(&**expr), |a, b| {
-                        self.unify(&a, &self.get_type(b))
+                    list.iter().try_fold(self.get_type(&**expr), |a, b| {
+                        self.unify(a, self.get_type(b))
                     })?,
                 )?;
             }
@@ -82,10 +81,10 @@ impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
                 subquery,
                 negated: _,
             } => {
-                self.unify_node_with_type(this_expr, &Type::any_native())?;
+                self.unify_node_with_type(this_expr, Type::any_native())?;
                 self.unify_node_with_type(
                     &**subquery,
-                    &Type::projection(&[(self.get_type(&**expr), None)]),
+                    Type::projection(&[(self.get_type(&**expr), None)]),
                 )?;
             }
 
@@ -99,8 +98,8 @@ impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
                 low,
                 high,
             } => {
-                self.unify_node_with_type(this_expr, &Type::any_native())?;
-                self.unify_node_with_type(&**high, &self.unify_nodes(&**expr, &**low)?)?;
+                self.unify_node_with_type(this_expr, Type::any_native())?;
+                self.unify_node_with_type(&**high, self.unify_nodes(&**expr, &**low)?)?;
             }
 
             Expr::BinaryOp { left, op, right } => {
@@ -142,10 +141,7 @@ impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
                     | BinaryOperator::PGNotILikeMatch
                     | BinaryOperator::PGStartsWith
                     | BinaryOperator::PGCustomBinaryOperator(_) => {
-                        self.unify_node_with_type(
-                            this_expr,
-                            &self.unify_nodes(&**left, &**right)?,
-                        )?;
+                        self.unify_node_with_type(this_expr, self.unify_nodes(&**left, &**right)?)?;
                     }
 
                     // JSON(B) operators.
@@ -160,19 +156,13 @@ impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
                     | BinaryOperator::Question
                     | BinaryOperator::QuestionAnd
                     | BinaryOperator::QuestionPipe => {
-                        self.unify_node_with_type(
-                            this_expr,
-                            &self.unify_nodes(&**left, &**right)?,
-                        )?;
+                        self.unify_node_with_type(this_expr, self.unify_nodes(&**left, &**right)?)?;
                     }
 
                     // JSON(B)/Array containment operators (@> and <@)
                     // Both sides must unify to the same type.
                     BinaryOperator::AtArrow | BinaryOperator::ArrowAt => {
-                        self.unify_node_with_type(
-                            this_expr,
-                            &self.unify_nodes(&**left, &**right)?,
-                        )?;
+                        self.unify_node_with_type(this_expr, self.unify_nodes(&**left, &**right)?)?;
                     }
                 }
             }
@@ -191,7 +181,7 @@ impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
                 escape_char: _,
                 any: false,
             } => {
-                self.unify_node_with_type(this_expr, &Type::any_native())?;
+                self.unify_node_with_type(this_expr, Type::any_native())?;
                 self.unify_nodes(&**expr, &**pattern)?;
             }
 
@@ -207,8 +197,8 @@ impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
                 pattern,
                 escape_char: _,
             } => {
-                self.unify_node_with_type(this_expr, &Type::any_native())?;
-                self.unify_nodes_with_type(&**expr, &**pattern, &Type::any_native())?;
+                self.unify_node_with_type(this_expr, Type::any_native())?;
+                self.unify_nodes_with_type(&**expr, &**pattern, Type::any_native())?;
             }
 
             Expr::RLike { .. } => Err(TypeError::UnsupportedSqlFeature(
@@ -226,7 +216,7 @@ impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
                 compare_op: _,
                 right,
             } => {
-                self.unify_node_with_type(this_expr, &Type::any_native())?;
+                self.unify_node_with_type(this_expr, Type::any_native())?;
                 self.unify_nodes(&**left, &**right)?;
             }
 
@@ -235,16 +225,16 @@ impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
             | Expr::UnaryOp { expr, .. }
             | Expr::Convert { expr, .. }
             | Expr::Cast { expr, .. } => {
-                self.unify_nodes_with_type(this_expr, &**expr, &Type::any_native())?;
+                self.unify_nodes_with_type(this_expr, &**expr, Type::any_native())?;
             }
 
             Expr::AtTimeZone {
                 timestamp,
                 time_zone,
             } => {
-                self.unify_node_with_type(this_expr, &Type::any_native())?;
-                self.unify_node_with_type(&**timestamp, &Type::any_native())?;
-                self.unify_node_with_type(&**time_zone, &Type::any_native())?;
+                self.unify_node_with_type(this_expr, Type::any_native())?;
+                self.unify_node_with_type(&**timestamp, Type::any_native())?;
+                self.unify_node_with_type(&**time_zone, Type::any_native())?;
             }
 
             Expr::Extract {
@@ -252,13 +242,13 @@ impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
                 syntax: _,
                 expr,
             } => {
-                self.unify_node_with_type(this_expr, &Type::any_native())?;
-                self.unify_node_with_type(&**expr, &Type::any_native())?;
+                self.unify_node_with_type(this_expr, Type::any_native())?;
+                self.unify_node_with_type(&**expr, Type::any_native())?;
             }
 
             Expr::Position { expr, r#in } => {
-                self.unify_node_with_type(this_expr, &Type::any_native())?;
-                self.unify_nodes_with_type(&**expr, &**r#in, &Type::any_native())?;
+                self.unify_node_with_type(this_expr, Type::any_native())?;
+                self.unify_nodes_with_type(&**expr, &**r#in, Type::any_native())?;
             }
 
             Expr::Substring {
@@ -267,13 +257,13 @@ impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
                 substring_for,
                 special: _,
             } => {
-                self.unify_node_with_type(this_expr, &Type::any_native())?;
-                self.unify_node_with_type(&**expr, &Type::any_native())?;
+                self.unify_node_with_type(this_expr, Type::any_native())?;
+                self.unify_node_with_type(&**expr, Type::any_native())?;
                 if let Some(expr) = substring_from {
-                    self.unify_node_with_type(&**expr, &Type::any_native())?;
+                    self.unify_node_with_type(&**expr, Type::any_native())?;
                 }
                 if let Some(expr) = substring_for {
-                    self.unify_node_with_type(&**expr, &Type::any_native())?;
+                    self.unify_node_with_type(&**expr, Type::any_native())?;
                 }
             }
 
@@ -285,13 +275,13 @@ impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
                 trim_what,
                 trim_characters,
             } => {
-                self.unify_node_with_type(this_expr, &Type::any_native())?;
-                self.unify_node_with_type(&**expr, &Type::any_native())?;
+                self.unify_node_with_type(this_expr, Type::any_native())?;
+                self.unify_node_with_type(&**expr, Type::any_native())?;
                 if let Some(trim_where) = trim_where {
-                    self.unify_node_with_type(trim_where, &Type::any_native())?;
+                    self.unify_node_with_type(trim_where, Type::any_native())?;
                 }
                 if let Some(trim_what) = trim_what {
-                    self.unify_node_with_type(&**trim_what, &Type::any_native())?;
+                    self.unify_node_with_type(&**trim_what, Type::any_native())?;
                 }
                 if let Some(trim_characters) = trim_characters {
                     self.unify_all_with_type(trim_characters, Type::any_native())?;
@@ -304,18 +294,18 @@ impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
                 overlay_from,
                 overlay_for,
             } => {
-                self.unify_node_with_type(this_expr, &Type::any_native())?;
-                self.unify_node_with_type(&**expr, &Type::any_native())?;
-                self.unify_node_with_type(&**overlay_what, &Type::any_native())?;
-                self.unify_node_with_type(&**overlay_from, &Type::any_native())?;
+                self.unify_node_with_type(this_expr, Type::any_native())?;
+                self.unify_node_with_type(&**expr, Type::any_native())?;
+                self.unify_node_with_type(&**overlay_what, Type::any_native())?;
+                self.unify_node_with_type(&**overlay_from, Type::any_native())?;
                 if let Some(overlay_for) = overlay_for {
-                    self.unify_node_with_type(&**overlay_for, &Type::any_native())?;
+                    self.unify_node_with_type(&**overlay_for, Type::any_native())?;
                 }
             }
 
             Expr::Collate { expr, collation: _ } => {
-                self.unify_node_with_type(this_expr, &Type::any_native())?;
-                self.unify_node_with_type(&**expr, &Type::any_native())?;
+                self.unify_node_with_type(this_expr, Type::any_native())?;
+                self.unify_node_with_type(&**expr, Type::any_native())?;
             }
 
             // The current `Expr` shares the same type hole as the sub-expression
@@ -334,7 +324,7 @@ impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
                 data_type: _,
                 value: _,
             } => {
-                self.unify_node_with_type(this_expr, &Type::any_native())?;
+                self.unify_node_with_type(this_expr, Type::any_native())?;
             }
 
             Expr::MapAccess { column: _, keys: _ } => Err(TypeError::UnsupportedSqlFeature(
@@ -343,7 +333,7 @@ impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
 
             // The return type of this function and the return type of this expression must be the same type.
             Expr::Function(function) => {
-                self.unify_node_with_type(this_expr, &self.get_type(function))?;
+                self.unify_node_with_type(this_expr, self.get_type(function))?;
             }
 
             // When operand is Some(operand), all conditions must be of type expr and expr must support equality
@@ -361,7 +351,7 @@ impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
                         self.unify_nodes_with_type(
                             this_expr,
                             &**operand,
-                            &self.unify_all_with_type(conditions, self.fresh_tvar())?,
+                            self.unify_all_with_type(conditions, self.fresh_tvar())?,
                         )?;
                     }
                     None => {
@@ -382,7 +372,7 @@ impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
                 subquery: _,
                 negated: _,
             } => {
-                self.unify_node_with_type(this_expr, &Type::any_native())?;
+                self.unify_node_with_type(this_expr, Type::any_native())?;
             }
 
             Expr::Subquery(subquery) => {
@@ -421,22 +411,22 @@ impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
             // `self.get_type(this_expr)` must be the same as the array element type
             Expr::Subscript { expr, subscript: _ } => {
                 let elem_type = self.fresh_tvar();
-                self.unify_node_with_type(&**expr, &Type::array(elem_type.clone()))?;
-                self.unify_node_with_type(this_expr, &elem_type)?;
+                self.unify_node_with_type(&**expr, Type::array(elem_type.clone()))?;
+                self.unify_node_with_type(this_expr, elem_type)?;
             }
 
             Expr::Array(array) => {
                 // Constrain all elements of the array to be the same type.
                 self.unify_node_with_type(
                     this_expr,
-                    &Type::array(self.unify_all_with_type(&array.elem, self.fresh_tvar())?),
+                    Type::array(self.unify_all_with_type(&array.elem, self.fresh_tvar())?),
                 )?;
             }
 
             // interval is unmapped, value is unmapped
             Expr::Interval(interval) => {
-                self.unify_node_with_type(this_expr, &Type::any_native())?;
-                self.unify_node_with_type(&*interval.value, &Type::any_native())?;
+                self.unify_node_with_type(this_expr, Type::any_native())?;
+                self.unify_node_with_type(&*interval.value, Type::any_native())?;
             }
 
             // mysql specific

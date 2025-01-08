@@ -35,7 +35,7 @@ impl<'ast> InferType<'ast, Function> for TypeInferencer<'ast> {
                     // call to min/max.
                     self.unify_node_with_type(
                         &**query,
-                        &Type::projection(&[(self.get_type(function), None)]),
+                        Type::projection(&[(self.get_type(function), None)]),
                     )?;
                 }
 
@@ -85,7 +85,7 @@ impl<'ast> InferType<'ast, Function> for TypeInferencer<'ast> {
             // All other functions:
             // 1. no constraints are imposed on their arguments (they can be any type) (TODO: do we need a "do not care" type)
             // 2. the return type is always native.
-            self.unify_node_with_type(function, &Type::any_native())?;
+            self.unify_node_with_type(function, Type::any_native())?;
         }
 
         Ok(())

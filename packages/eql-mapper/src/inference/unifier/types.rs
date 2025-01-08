@@ -1,14 +1,11 @@
-use std::{
-    ops::{Add, Index},
-    sync::Arc,
-};
+use std::{ops::Index, sync::Arc};
 
 use derive_more::Display;
 use sqlparser::ast::Ident;
 
-use crate::{inference::TypeError, ColumnKind, Table};
+use crate::{ColumnKind, Table};
 
-use super::TypeRegistry;
+use super::TypeCell;
 
 /// The type of an expression in a SQL statement or the type of a table column from the database schema.
 ///
@@ -59,8 +56,8 @@ pub enum Value {
     Native(NativeValue),
 
     /// An array type that is parameterized by an element type.
-    #[display("Array({})", _0)]
-    Array(Box<Type>),
+    #[display("Array({})", *_0.as_type())]
+    Array(TypeCell),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Display)]
@@ -79,10 +76,10 @@ pub struct NativeValue(pub Option<TableColumn>);
 
 /// A column from a projection.
 #[derive(Debug, PartialEq, Eq, Clone, Display)]
-#[display("{} {}", ty, self.render_alias())]
+#[display("{} {}", *ty.as_type(), self.render_alias())]
 pub struct ProjectionColumn {
     /// The type of the column
-    pub ty: Type,
+    pub ty: TypeCell,
 
     /// The columm alias
     pub alias: Option<Ident>,
@@ -92,79 +89,25 @@ pub struct ProjectionColumn {
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, Display, Default)]
 pub struct TypeVar(pub u32);
 
-/// A `Status` represents the "completeness" of a [`Type`].
-#[derive(Debug, PartialEq, Eq, Copy, Clone, Display)]
-pub enum Status {
-    /// The type is completely known.
-    ///
-    /// There are no type variables (i.e. `Constructor::Var` values) contained within the type or any type it references.
-    Resolved,
-
-    /// There *might* be unresolved type variables (`Constructor::Var`) contained within the type.
-    ///
-    /// It is possible that all the types contained by a type have since been resolved but because the unification
-    /// algorithm works on a directed acyclic graph which permits multiple paths to a single type it is possible for all
-    /// child nodes of a type to become resolved without that information being propagated back to all types that
-    /// reference it.
-    ///
-    /// When a `Type` claims to be `Partial` but a fully resolved type is required, call [`Type::try_resolve`] to refresh
-    /// its status.
-    Partial,
-}
-
-impl TypeVar {
-    pub(crate) fn try_resolve(&self, registry: &TypeRegistry<'_>) -> Result<Type, TypeError> {
-        let mut tvar = *self;
-        loop {
-            match registry.get_substitution(tvar) {
-                Some((ty @ Type::Constructor(_), Status::Resolved)) => return Ok(ty.clone()),
-                Some((ty @ Type::Constructor(_), Status::Partial)) => {
-                    return ty.try_resolve(registry)
-                }
-                Some((ty @ Type::Var(_), Status::Resolved)) => return ty.try_resolve(registry),
-                Some((Type::Var(found), Status::Partial)) => tvar = found,
-                None => {
-                    return Err(TypeError::Incomplete(format!(
-                        "{} has no inferred substitution",
-                        tvar
-                    )))
-                }
-            }
-        }
-    }
-
-    pub(crate) fn is_fully_resolved(&self, registry: &TypeRegistry<'_>) -> bool {
-        self.try_resolve(registry).is_ok()
-    }
-}
-
-impl Add for Status {
-    type Output = Self;
-
-    fn add(self, rhs: Self) -> Self::Output {
-        if let (Self::Resolved, Self::Resolved) = (self, rhs) {
-            return Self::Resolved;
-        }
-
-        Self::Partial
-    }
-}
-
 impl Type {
+    pub(crate) fn into_type_cell(self) -> TypeCell {
+        TypeCell::new(self)
+    }
+
     /// Creates an `Type` containing an empty projection
-    pub(crate) fn empty_projection() -> Self {
-        Type::Constructor(Constructor::Projection(Projection::Empty))
+    pub(crate) fn empty_projection() -> TypeCell {
+        Type::Constructor(Constructor::Projection(Projection::Empty)).into_type_cell()
     }
 
     /// Creates an `Type` containing a `Constructor::Scalar(Scalar::Native(None))`.
-    pub(crate) fn any_native() -> Self {
-        Type::Constructor(Constructor::Value(Value::Native(NativeValue(None))))
+    pub(crate) fn any_native() -> TypeCell {
+        Type::Constructor(Constructor::Value(Value::Native(NativeValue(None)))).into_type_cell()
     }
 
     /// Creates an `Type` containing a `Constructor::Projection`.
-    pub(crate) fn projection(columns: &[(Type, Option<Ident>)]) -> Self {
+    pub(crate) fn projection(columns: &[(TypeCell, Option<Ident>)]) -> TypeCell {
         if columns.is_empty() {
-            Type::Constructor(Constructor::Projection(Projection::Empty))
+            Type::Constructor(Constructor::Projection(Projection::Empty)).into_type_cell()
         } else {
             Type::Constructor(Constructor::Projection(Projection::WithColumns(
                 ProjectionColumns(
@@ -174,79 +117,13 @@ impl Type {
                         .collect(),
                 ),
             )))
+            .into_type_cell()
         }
     }
 
     /// Creates an `Type` containing a `Constructor::Array`.
-    pub(crate) fn array(element_ty: Type) -> Self {
-        Type::Constructor(Constructor::Value(Value::Array(element_ty.into())))
-    }
-
-    /// Gets the status of this type.
-    pub(crate) fn is_fully_resolved(&self, registry: &TypeRegistry<'_>) -> bool {
-        match self {
-            Type::Constructor(constructor) => constructor.is_fully_resolved(registry),
-            Type::Var(tvar) => tvar.is_fully_resolved(registry),
-        }
-    }
-
-    pub(crate) fn status(&self, registry: &TypeRegistry<'_>) -> Status {
-        if self.is_fully_resolved(registry) {
-            Status::Resolved
-        } else {
-            Status::Partial
-        }
-    }
-
-    /// Tries to resolve this type.
-    ///
-    /// See [`Status::Partial`] for an explanation of why this method is required.
-    pub(crate) fn try_resolve(&self, registry: &TypeRegistry) -> Result<Type, TypeError> {
-        match &self {
-            Self::Constructor(constructor) => Ok(Type::Constructor(
-                constructor.try_resolve(registry)?.clone(),
-            )),
-
-            Self::Var(tvar) => Ok(tvar.try_resolve(registry)?),
-        }
-    }
-}
-
-impl Constructor {
-    /// Tries to resolve all type variables recursively referenced by this type.
-    ///
-    /// See [`Status::Partial`] for a complete explanation of why this is required.
-    fn try_resolve(&self, registry: &TypeRegistry<'_>) -> Result<Self, TypeError> {
-        match self {
-            Constructor::Value(Value::Array(element_ty)) => Ok(Constructor::Value(Value::Array(
-                element_ty.try_resolve(registry)?.into(),
-            ))),
-
-            Constructor::Value(_) => Ok(self.clone()),
-
-            Constructor::Projection(Projection::WithColumns(ProjectionColumns(cols))) => Ok(
-                Constructor::Projection(Projection::WithColumns(ProjectionColumns(
-                    cols.iter()
-                        .map(|col| col.try_resolve(registry))
-                        .collect::<Result<Vec<_>, _>>()?,
-                ))),
-            ),
-
-            Constructor::Projection(Projection::Empty) => {
-                Ok(Constructor::Projection(Projection::Empty))
-            }
-        }
-    }
-
-    fn is_fully_resolved(&self, registry: &TypeRegistry<'_>) -> bool {
-        match self {
-            Constructor::Value(Value::Array(element_ty)) => element_ty.is_fully_resolved(registry),
-            Constructor::Value(_) => true,
-            Constructor::Projection(Projection::WithColumns(ProjectionColumns(cols))) => {
-                cols.iter().all(|col| col.ty.is_fully_resolved(registry))
-            }
-            Constructor::Projection(Projection::Empty) => true,
-        }
+    pub(crate) fn array(element_ty: TypeCell) -> TypeCell {
+        Type::Constructor(Constructor::Value(Value::Array(element_ty))).into_type_cell()
     }
 }
 
@@ -323,18 +200,17 @@ impl ProjectionColumns {
     }
 
     pub(crate) fn flatten(&self) -> Self {
-        let output: Vec<ProjectionColumn> = Vec::with_capacity(self.len());
-        ProjectionColumns(Self::flatten_impl(self, output))
+        ProjectionColumns(self.flatten_impl(Vec::with_capacity(self.len())))
     }
 
     fn flatten_impl(&self, mut output: Vec<ProjectionColumn>) -> Vec<ProjectionColumn> {
         for ProjectionColumn { ty, alias } in &self.0 {
-            match &ty {
+            match &*ty.as_type() {
                 Type::Constructor(Constructor::Projection(Projection::WithColumns(nested))) => {
-                    output = Self::flatten_impl(nested, output);
+                    output = nested.flatten_impl(output);
                 }
-                other => output.push(ProjectionColumn {
-                    ty: (*other).clone(),
+                _ => output.push(ProjectionColumn {
+                    ty: ty.clone(),
                     alias: alias.clone(),
                 }),
             }
@@ -362,7 +238,7 @@ impl From<Arc<Table>> for ProjectionColumns {
                     };
 
                     ProjectionColumn::new(
-                        Type::Constructor(Constructor::Value(value_ty)),
+                        Type::Constructor(Constructor::Value(value_ty)).into_type_cell(),
                         Some(col.name.clone()),
                     )
                 })
@@ -372,7 +248,7 @@ impl From<Arc<Table>> for ProjectionColumns {
 }
 
 impl ProjectionColumn {
-    pub(crate) fn new(ty: Type, alias: Option<Ident>) -> Self {
+    pub(crate) fn new(ty: TypeCell, alias: Option<Ident>) -> Self {
         Self { ty, alias }
     }
 
@@ -381,12 +257,5 @@ impl ProjectionColumn {
             Some(name) => name.to_string(),
             None => String::from("(no-alias)"),
         }
-    }
-
-    fn try_resolve(&self, registry: &TypeRegistry<'_>) -> Result<ProjectionColumn, TypeError> {
-        Ok(ProjectionColumn {
-            ty: self.ty.try_resolve(registry)?,
-            alias: self.alias.clone(),
-        })
     }
 }

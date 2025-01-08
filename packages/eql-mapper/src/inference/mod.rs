@@ -63,7 +63,7 @@ pub struct TypeInferencer<'ast> {
     unifier: Rc<RefCell<unifier::Unifier<'ast>>>,
 
     /// The parameter identifiers & types of `Expr::Value(Value::Placeholder(_))` nodes found in a [`Statement`].
-    param_types: Vec<(String, unifier::Type)>,
+    param_types: Vec<(String, TypeCell)>,
 
     /// References to all of the `Expr::Value(_)` nodes found in a [`Statement`] - except for
     /// `Expr::Value(Value::Placeholder(_))` nodes.
@@ -92,17 +92,12 @@ impl<'ast> TypeInferencer<'ast> {
     }
 
     /// Shorthand for calling `self.reg.borrow_mut().get_type(node)` in [`InferType`] implementations for `TypeInferencer`.
-    pub(crate) fn get_type<N: Semantic>(&self, node: &'ast N) -> unifier::Type {
-        self.reg.borrow_mut().get_type(node)
+    pub(crate) fn get_type<N: Semantic>(&self, node: &'ast N) -> TypeCell {
+        self.reg.borrow_mut().get_type(node).clone()
     }
 
-    pub(crate) fn get_type_by_node_key(&self, key: &NodeKey<'ast>) -> Option<unifier::Type> {
-        self.reg.borrow_mut().get_type_by_node_key(key)
-    }
-
-    pub(crate) fn node_types(&self) -> Result<HashMap<NodeKey<'ast>, unifier::Type>, TypeError> {
-        self.try_resolve_all_types()
-            .map(|types| types.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
+    pub(crate) fn get_type_by_node_key(&self, key: &NodeKey<'ast>) -> Option<TypeCell> {
+        self.reg.borrow_mut().get_type_by_node_key(key).cloned()
     }
 
     pub(crate) fn param_types(&self) -> Result<HashMap<String, unifier::Value>, TypeError> {
@@ -114,12 +109,12 @@ impl<'ast> TypeInferencer<'ast> {
             .fold_with(
                 |_, _| Ok(self.fresh_tvar()),
                 |acc_ty, _param, (_, param_ty)| {
-                    acc_ty.and_then(|acc_ty| self.unify(&acc_ty, param_ty))
+                    acc_ty.and_then(|acc_ty| self.unify(acc_ty, param_ty.clone()))
                 },
             );
 
         // Filter down to the params that successfully unified
-        let verified_unified_params: HashMap<String, unifier::Type> = unified_params
+        let verified_unified_params: HashMap<String, TypeCell> = unified_params
             .iter()
             .filter_map(|(param, ty)| ty.as_ref().map(|ty| ((*param).clone(), ty.clone())).ok())
             .collect();
@@ -137,10 +132,12 @@ impl<'ast> TypeInferencer<'ast> {
         let scalars: HashMap<String, unifier::Value> = verified_unified_params
             .into_iter()
             .map(|(param, ty)| {
-                if let unifier::Type::Constructor(unifier::Constructor::Value(value)) = &ty {
+                if let unifier::Type::Constructor(unifier::Constructor::Value(value)) =
+                    &*ty.as_type()
+                {
                     Ok((param, value.clone()))
                 } else {
-                    Err(TypeError::NonScalarParam(param, ty.to_string()))
+                    Err(TypeError::NonScalarParam(param, ty.as_type().to_string()))
                 }
             })
             .collect::<Result<_, _>>()?;
@@ -155,35 +152,32 @@ impl<'ast> TypeInferencer<'ast> {
     /// Tries to unify two types but does not record the result.
     /// Recording the result is up to the caller.
     #[must_use = "the result of unify must ultimately be associated with an AST node"]
-    fn unify(&self, left: &Type, right: &Type) -> Result<Type, TypeError> {
+    fn unify(&self, left: TypeCell, right: TypeCell) -> Result<TypeCell, TypeError> {
         self.unifier.borrow_mut().unify(left, right)
     }
 
     /// Unifies the types of two nodes with a third type and records the unification result.
     /// After a successful unification both nodes will refer to the same type.
-    // TODO: take `ty` by value
     fn unify_nodes_with_type<N1: Semantic, N2: Semantic>(
         &self,
         left: &'ast N1,
         right: &'ast N2,
-        ty: &Type,
-    ) -> Result<Type, TypeError> {
+        ty: TypeCell,
+    ) -> Result<TypeCell, TypeError> {
         let unifier = &mut *self.unifier.borrow_mut();
-        let ty0 = unifier.unify(&self.get_type(left), &self.get_type(right))?;
-        let ty1 = unifier.unify(&ty0, ty)?;
-        Ok(self.set_node_type(left, self.set_node_type(right, ty1.clone())))
+        let ty0 = unifier.unify(self.get_type(left), self.get_type(right))?;
+        let ty1 = unifier.unify(ty0, ty)?;
+        Ok(ty1)
     }
 
     /// Unifies the type of a node with a second type and records the unification result.
-    // TODO: take `ty` by value
     fn unify_node_with_type<N: Semantic>(
         &self,
         node: &'ast N,
-        ty: &Type,
-    ) -> Result<Type, TypeError> {
+        ty: TypeCell,
+    ) -> Result<TypeCell, TypeError> {
         let unifier = &mut *self.unifier.borrow_mut();
-        let ty = unifier.unify(&self.get_type(node), ty)?;
-        Ok(self.set_node_type(node, ty.clone()))
+        unifier.unify(self.get_type(node), ty)
     }
 
     /// Unifies the types of two nodes with each other.
@@ -192,13 +186,13 @@ impl<'ast> TypeInferencer<'ast> {
         &self,
         left: &'ast N1,
         right: &'ast N2,
-    ) -> Result<Type, TypeError> {
+    ) -> Result<TypeCell, TypeError> {
         match self
             .unifier
             .borrow_mut()
-            .unify(&self.get_type(left), &self.get_type(right))
+            .unify(self.get_type(left), self.get_type(right))
         {
-            Ok(ty) => Ok(self.set_node_type(left, self.set_node_type(right, ty.clone()))),
+            Ok(ty) => Ok(ty),
             Err(err) => Err(TypeError::OnNodes(
                 Box::new(err),
                 format!("{:?}", left),
@@ -212,23 +206,14 @@ impl<'ast> TypeInferencer<'ast> {
     fn unify_all_with_type<N: Semantic + Debug>(
         &self,
         nodes: &'ast [N],
-        ty: Type,
-    ) -> Result<Type, TypeError> {
+        ty: TypeCell,
+    ) -> Result<TypeCell, TypeError> {
         nodes
             .iter()
-            .try_fold(ty, |ty, node| self.unify_node_with_type(node, &ty))
+            .try_fold(ty, |ty, node| self.unify_node_with_type(node, ty))
     }
 
-    pub(crate) fn set_node_type<N: Semantic>(&self, node: &'ast N, ty: Type) -> Type {
-        self.reg.borrow_mut().set_node_type(node, ty)
-    }
-
-    /// Shorthand for calling `self.reg.borrow().try_resolve_all_types()` in [`InferType`] implementations for `TypeInferencer`.
-    pub(crate) fn try_resolve_all_types(&self) -> Result<HashMap<NodeKey<'ast>, Type>, TypeError> {
-        self.reg.borrow_mut().try_resolve_all_types()
-    }
-
-    pub(crate) fn fresh_tvar(&self) -> Type {
+    pub(crate) fn fresh_tvar(&self) -> TypeCell {
         self.reg.borrow_mut().fresh_tvar()
     }
 }

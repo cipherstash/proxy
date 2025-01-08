@@ -22,7 +22,3 @@ tracing-subscriber = { workspace = true }
 
 [dev-dependencies]
 pretty_assertions = "^1.0"
-
-[profile.dev]
-incremental = true
-debug = true

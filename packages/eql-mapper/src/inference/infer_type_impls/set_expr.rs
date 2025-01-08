@@ -19,7 +19,7 @@ impl<'ast> InferType<'ast, SetExpr> for TypeInferencer<'ast> {
                 left,
                 right,
             } => {
-                self.unify_node_with_type(set_expr, &self.unify_nodes(&**left, &**right)?)?;
+                self.unify_node_with_type(set_expr, self.unify_nodes(&**left, &**right)?)?;
             }
 
             SetExpr::Values(values) => {
