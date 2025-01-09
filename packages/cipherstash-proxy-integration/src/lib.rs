@@ -1,2 +1,2 @@
 mod common;
-mod mapping;
+mod mapping_params;

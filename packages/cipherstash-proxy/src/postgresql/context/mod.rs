@@ -4,7 +4,7 @@ use super::{
 };
 use crate::Identifier;
 use arc_swap::ArcSwapOption;
-use cipherstash_config::ColumnConfig;
+use cipherstash_config::{ColumnConfig, ColumnType};
 use postgres_types::Type;
 use sqlparser::ast;
 use std::{
@@ -137,6 +137,17 @@ impl Context {
     }
 }
 
+impl Column {
+    pub fn new(identifier: Identifier, config: ColumnConfig) -> Column {
+        let postgres_type = column_type_to_postgres_type(&config.cast_type);
+        Column {
+            identifier,
+            config,
+            postgres_type,
+        }
+    }
+}
+
 impl Statement {
     pub fn mapped(
         ast: ast::Statement,
@@ -159,5 +170,21 @@ impl Portal {
             statement,
             format_codes,
         }
+    }
+}
+
+fn column_type_to_postgres_type(col_type: &ColumnType) -> postgres_types::Type {
+    match col_type {
+        ColumnType::Boolean => postgres_types::Type::BOOL,
+        ColumnType::BigInt => postgres_types::Type::INT8,
+        ColumnType::BigUInt => postgres_types::Type::INT8,
+        ColumnType::Date => postgres_types::Type::DATE,
+        ColumnType::Decimal => postgres_types::Type::NUMERIC,
+        ColumnType::Float => postgres_types::Type::FLOAT8,
+        ColumnType::Int => postgres_types::Type::INT4,
+        ColumnType::SmallInt => postgres_types::Type::INT2,
+        ColumnType::Timestamp => postgres_types::Type::TIMESTAMPTZ,
+        ColumnType::Utf8Str => postgres_types::Type::TEXT,
+        ColumnType::JsonB => postgres_types::Type::JSONB,
     }
 }

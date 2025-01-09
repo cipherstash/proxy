@@ -298,8 +298,8 @@ fn plaintext_to_binary(plaintext: &Plaintext) -> Result<BytesMut, Error> {
         Plaintext::Timestamp(x) => x.to_sql_checked(&Type::TIMESTAMPTZ, &mut bytes),
         Plaintext::Utf8Str(x) => x.to_sql_checked(&Type::TEXT, &mut bytes),
         Plaintext::JsonB(x) => x.to_sql_checked(&Type::JSONB, &mut bytes),
+        Plaintext::Decimal(x) => x.to_sql_checked(&Type::NUMERIC, &mut bytes),
         // TODO: Implement these
-        Plaintext::Decimal(_x) => unimplemented!(),
         Plaintext::BigUInt(_x) => unimplemented!(),
     };
 

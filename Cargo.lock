@@ -3,6 +3,16 @@
 version = 4
 
 [[package]]
+name = "Inflector"
+version = "0.11.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fe438c63458706e03479442743baae6c88256498e6431708f6dfc520a26515d3"
+dependencies = [
+ "lazy_static",
+ "regex",
+]
+
+[[package]]
 name = "addr2line"
 version = "0.24.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -448,6 +458,38 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f61dac84819c6588b558454b194026eb1f09c293b9036ae9b159e74e73ab6cf9"
 
 [[package]]
+name = "camino"
+version = "1.1.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8b96ec4966b5813e2c0507c1f86115c8c5abaadc3980879c3424042a02fd1ad3"
+dependencies = [
+ "serde",
+]
+
+[[package]]
+name = "cargo-platform"
+version = "0.1.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e35af189006b9c0f00a064685c727031e3ed2d8020f7ba284d78cc2671bd36ea"
+dependencies = [
+ "serde",
+]
+
+[[package]]
+name = "cargo_metadata"
+version = "0.19.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8769706aad5d996120af43197bf46ef6ad0fda35216b4505f926a365a232d924"
+dependencies = [
+ "camino",
+ "cargo-platform",
+ "semver",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.11",
+]
+
+[[package]]
 name = "cc"
 version = "1.2.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -487,8 +529,10 @@ checksum = "1a7964611d71df112cb1730f2ee67324fcf4d0fc6606acbbe9bfe06df124637c"
 dependencies = [
  "android-tzdata",
  "iana-time-zone",
+ "js-sys",
  "num-traits",
  "serde",
+ "wasm-bindgen",
  "windows-link",
 ]
 
@@ -680,7 +724,8 @@ version = "0.1.0"
 dependencies = [
  "arc-swap",
  "bytes",
- "cipherstash-client 0.13.0",
+ "chrono",
+ "cipherstash-client 0.14.0",
  "cipherstash-config 0.2.3 (registry+https://github.com/rust-lang/crates.io-index)",
  "config",
  "eql-mapper",
@@ -692,17 +737,18 @@ dependencies = [
  "pg_escape",
  "postgres-protocol",
  "postgres-types",
- "rand",
- "recipher",
+ "rand 0.8.5",
+ "recipher 0.1.3 (registry+https://github.com/rust-lang/crates.io-index)",
  "regex",
  "ring",
+ "rust_decimal",
  "rustls",
  "rustls-pki-types",
  "serde",
  "serde_json",
  "socket2",
  "sqlparser 0.53.0",
- "sqltk 0.2.2 (registry+https://github.com/rust-lang/crates.io-index)",
+ "sqltk 0.2.2",
  "temp-env",
  "thiserror 2.0.11",
  "tokio",
@@ -721,9 +767,10 @@ dependencies = [
 name = "cipherstash-proxy-integration"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "cipherstash-proxy",
- "rand",
- "recipher",
+ "rand 0.8.5",
+ "recipher 0.1.3 (registry+https://github.com/rust-lang/crates.io-index)",
  "temp-env",
  "tokio",
  "tokio-postgres",
@@ -819,9 +866,9 @@ dependencies = [
 
 [[package]]
 name = "config"
-version = "0.15.4"
+version = "0.15.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3d84f8d224ac58107d53d3ec2b9ad39fd8c8c4e285d3c9cb35485ffd2ca88cb3"
+checksum = "8cf9dc8d4ef88e27a8cb23e85cb116403dedd57f7971964dc4b18ccead548901"
 dependencies = [
  "async-trait",
  "convert_case",
@@ -829,7 +876,7 @@ dependencies = [
  "serde",
  "serde_json",
  "toml",
- "winnow",
+ "winnow 0.7.3",
 ]
 
 [[package]]
@@ -1102,8 +1149,8 @@ dependencies = [
  "itertools 0.13.0",
  "pretty_assertions",
  "sqlparser 0.53.0",
- "sqltk 0.2.2 (git+https://github.com/cipherstash/sqltk/?branch=CIP-1079%2Fupdate-sqlparser)",
- "thiserror 2.0.9",
+ "sqltk 0.4.7",
+ "thiserror 2.0.11",
  "tracing",
  "tracing-subscriber",
 ]
@@ -2310,7 +2357,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3c80231409c20246a13fddb31776fb942c38553c51e871f8cbd687a4cfb5843d"
 dependencies = [
  "phf_shared",
- "rand",
+ "rand 0.8.5",
 ]
 
 [[package]]
@@ -2323,7 +2370,7 @@ dependencies = [
  "phf_shared",
  "proc-macro2",
  "quote",
- "syn 2.0.90",
+ "syn 2.0.98",
 ]
 
 [[package]]
@@ -2906,6 +2953,7 @@ dependencies = [
  "borsh",
  "bytes",
  "num-traits",
+ "postgres-types",
  "rand 0.8.5",
  "rkyv",
  "serde",
@@ -3042,6 +3090,15 @@ checksum = "49db231d56a190491cb4aeda9527f1ad45345af50b0851622a7adb8c03b01c32"
 dependencies = [
  "core-foundation-sys",
  "libc",
+]
+
+[[package]]
+name = "semver"
+version = "1.0.25"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f79dfe2d285b0488816f30e700a7438c5a73d816b5b7d3ac72fbc48b0d185e03"
+dependencies = [
+ "serde",
 ]
 
 [[package]]
@@ -3223,6 +3280,16 @@ dependencies = [
 
 [[package]]
 name = "sqlparser"
+version = "0.50.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b2e5b515a2bd5168426033e9efbfd05500114833916f1d5c268f938b4ee130ac"
+dependencies = [
+ "bigdecimal",
+ "log",
+]
+
+[[package]]
+name = "sqlparser"
 version = "0.52.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9a875d8cd437cc8a97e9aeaeea352ec9a19aea99c23e9effb17757291de80b08"
@@ -3254,11 +3321,20 @@ dependencies = [
 
 [[package]]
 name = "sqltk"
-version = "0.2.2"
-source = "git+https://github.com/cipherstash/sqltk/?branch=CIP-1079%2Fupdate-sqlparser#bbc62060e3486da4fb48d951395c5e96003ebdcd"
+version = "0.4.7"
+source = "git+https://github.com/cipherstash/sqltk/#f3f4d114cc5a237690da190194bcf809872021c9"
 dependencies = [
+ "Inflector",
  "bigdecimal",
- "sqlparser 0.53.0",
+ "cargo_metadata",
+ "prettyplease",
+ "proc-macro2",
+ "quote",
+ "serde",
+ "serde_json",
+ "sqlparser 0.50.0",
+ "syn 2.0.98",
+ "tempfile",
 ]
 
 [[package]]

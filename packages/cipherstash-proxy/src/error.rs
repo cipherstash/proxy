@@ -52,13 +52,20 @@ pub enum Error {
 #[derive(Error, Debug)]
 pub enum MappingError {
     #[error(transparent)]
-    Parse(#[from] sqlparser::parser::ParserError),
+    SqlParse(#[from] sqlparser::parser::ParserError),
 
     #[error("Encryption of PostgreSQL {name} ({oid}) types is not currently supported")]
     UnsupportedParameterType { name: String, oid: i32 },
 
-    #[error("Invalid parameter data for PostgreSQL {name} ({oid}) type")]
-    InvalidParameter { name: String, oid: i32 },
+    #[error("Invalid {postgres_type} parameter for column {column} in table {table}.")]
+    InvalidParameter {
+        table: String,
+        column: String,
+        postgres_type: String,
+    },
+
+    #[error("Parameter could not be parsed")]
+    CouldNotParseParameter,
 }
 
 #[derive(Error, Debug)]
@@ -105,14 +112,14 @@ pub enum ConfigError {
 
 #[derive(Error, Debug)]
 pub enum EncryptError {
-    #[error("Table {table} has no Encrypt configuration")]
-    UnknownTable { table: String },
-
-    #[error("Column {column} in table {table} has no Encrypt configuration")]
-    UnknownColumn { table: String, column: String },
+    #[error(transparent)]
+    CiphertextCouldNotBeSerialised(#[from] serde_json::Error),
 
     #[error("Column {column} in table {table} was not encrypted")]
     ColumnNotEncrypted { table: String, column: String },
+
+    #[error("Expected {expected} columns, received {received}")]
+    EncryptedColumnMismatch { expected: usize, received: usize },
 
     #[error("Decrypted column could not be encoded as the expected type")]
     PlaintextCouldNotBeEncoded,
@@ -121,10 +128,13 @@ pub enum EncryptError {
     Pipeline(#[from] encryption::EncryptionError),
 
     #[error(transparent)]
-    CiphertextCouldNotBeSerialised(#[from] serde_json::Error),
-
-    #[error(transparent)]
     PlaintextCouldNotBeDecoded(#[from] cipherstash_client::encryption::TypeParseError),
+
+    #[error("Column {column} in table {table} has no Encrypt configuration")]
+    UnknownColumn { table: String, column: String },
+
+    #[error("Table {table} has no Encrypt configuration")]
+    UnknownTable { table: String },
 }
 
 #[derive(Error, Debug)]
@@ -229,5 +239,29 @@ impl From<std::ffi::NulError> for Error {
 impl From<tokio_postgres::Error> for Error {
     fn from(e: tokio_postgres::Error) -> Self {
         Error::Config(e.into())
+    }
+}
+
+impl From<std::num::ParseIntError> for Error {
+    fn from(_e: std::num::ParseIntError) -> Self {
+        MappingError::CouldNotParseParameter.into()
+    }
+}
+
+impl From<std::num::ParseFloatError> for Error {
+    fn from(_e: std::num::ParseFloatError) -> Self {
+        MappingError::CouldNotParseParameter.into()
+    }
+}
+
+impl From<rust_decimal::Error> for Error {
+    fn from(_e: rust_decimal::Error) -> Self {
+        MappingError::CouldNotParseParameter.into()
+    }
+}
+
+impl From<chrono::ParseError> for Error {
+    fn from(_e: chrono::ParseError) -> Self {
+        MappingError::CouldNotParseParameter.into()
     }
 }

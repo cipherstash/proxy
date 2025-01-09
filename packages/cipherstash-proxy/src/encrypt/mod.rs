@@ -50,24 +50,27 @@ impl Encrypt {
 
         // Zip the plaintexts and columns together
         // For each plaintex/column pair, create a new PlaintextTarget
-        plaintexts
-            .into_iter()
-            .zip(columns.clone())
-            .enumerate()
-            .for_each(|(idx, item)| match item {
+        let received = plaintexts.len();
+
+        for (idx, item) in plaintexts.into_iter().zip(columns.iter()).enumerate() {
+            match item {
                 (Some(plaintext), Some(column)) => {
-                    let encryptable = PlaintextTarget::new(plaintext, column.config, None);
-                    pipeline
-                        .add_with_ref::<PlaintextTarget>(encryptable, idx)
-                        .unwrap();
+                    let encryptable = PlaintextTarget::new(plaintext, column.config.clone(), None);
+                    pipeline.add_with_ref::<PlaintextTarget>(encryptable, idx)?;
                 }
-                (None, Some(_)) => todo!(),
-                (Some(_), None) => todo!(),
                 (None, None) => {
+                    // Parameter is not encryptable
                     // Do nothing
-                    // Parameter is not encrytptable
                 }
-            });
+                _ => {
+                    return Err(EncryptError::EncryptedColumnMismatch {
+                        expected: columns.len(),
+                        received,
+                    }
+                    .into());
+                }
+            }
+        }
 
         let mut encrypted_eql = vec![];
         if !pipeline.is_empty() {

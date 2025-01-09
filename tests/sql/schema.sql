@@ -3,12 +3,14 @@ TRUNCATE TABLE cs_configuration_v1;
 DROP TABLE IF EXISTS encrypted;
 CREATE TABLE encrypted (
     id bigint,
+    plaintext text,
     encrypted_text cs_encrypted_v1,
     encrypted_bool cs_encrypted_v1,
     encrypted_int2 cs_encrypted_v1,
     encrypted_int4 cs_encrypted_v1,
     encrypted_int8 cs_encrypted_v1,
     encrypted_float8 cs_encrypted_v1,
+    encrypted_date cs_encrypted_v1,
     PRIMARY KEY(id)
 );
 
@@ -47,12 +49,18 @@ SELECT cs_add_index_v1(
   'big_int'
 );
 
-
 SELECT cs_add_index_v1(
   'encrypted',
   'encrypted_float8',
   'unique',
   'double'
+);
+
+SELECT cs_add_index_v1(
+  'encrypted',
+  'encrypted_date',
+  'unique',
+  'date'
 );
 
 SELECT cs_encrypt_v1();

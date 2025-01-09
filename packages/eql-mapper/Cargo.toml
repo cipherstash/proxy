@@ -15,7 +15,7 @@ cipherstash-config = { git = "ssh://git@github.com/cipherstash/cipherstash-suite
 derive_more = { version = "^1.0", features = ["display", "constructor"] }
 itertools = "^0.13"
 sqlparser = { workspace = true }
-sqltk = { git = "https://github.com/cipherstash/sqltk/", branch = "CIP-1079/update-sqlparser" }
+sqltk = { git = "https://github.com/cipherstash/sqltk/" }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
