@@ -4,8 +4,7 @@ use super::{Constructor, Type, TypeError, TypeRegistry, Value};
 
 /// `TypeCell` is a shareable mutable container of a [`Type`].
 ///
-/// It used by [`super::Unifier`] to ensure that two successfully unified types share the same allocation
-/// and encapsulates the double-indirection logic that makes this possible.
+/// It used by [`super::Unifier`] to ensure that two successfully unified types share the same allocation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TypeCell {
     shared_ty: Rc<RefCell<SharedTypeMut>>,
@@ -62,7 +61,7 @@ impl TypeCell {
             .has_same_pointee(&other.shared_ty.borrow())
     }
 
-    /// Resolves the `Type` stored in `self`, returning it as a [`TypeRef`].
+    /// Resolves the `Type` stored in `self`, returning it as an [`Rc<Type>`].
     ///
     /// A resolved type is one in which all type variables have been resolved, recursively.
     ///
