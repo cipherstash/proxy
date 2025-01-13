@@ -159,13 +159,17 @@ postgres_ready () {
     return $success
   else
     # plaintext test
-    response=$(cat tests/pg/startup_message.bin | nc -v -w 1 $host $port)
+    # We blackhole stderr (2>/dev/null) below because nc is echoing to stderr,
+    # and that *sometimes* gets mise in a tizz. (There's some condition we're
+    # triggering in [at least] Mise v2025.1.6, and accordingly need to avoid
+    # echoing the raw response out to stdout or stderr without putting it
+    # through od or similar.)
+    response=$(cat tests/pg/startup_message.bin | nc -v -w 1 $host $port 2>/dev/null)
     if [ -n "${DEBUG}" ]; then
-      echo "response: ${response}"
-      echo "response: \\"${response}\\""
-      echo -n ${response} | od -c
-      echo -n ${response} | wc -c
-      echo -n "\n" | od -c
+      echo "response:"
+      printf "%s" "${response}" | od -c
+      echo "number of response bytes:"
+      printf "%s" "${response}" | wc -c
     fi
     # FIXME(lindsay): also detect if we see TLS failures
     if [ -n "${response}" ]; then
