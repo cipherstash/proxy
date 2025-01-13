@@ -193,25 +193,11 @@ impl From<BackendCode> for char {
 }
 
 #[derive(Debug, Clone, Hash, Eq, PartialEq)]
-pub enum Destination {
-    Named(String),
-    Unnamed,
-}
+pub struct Name(pub String);
 
-impl Destination {
-    pub fn new(name: String) -> Destination {
-        if name.is_empty() {
-            Destination::Unnamed
-        } else {
-            Destination::Named(name)
-        }
-    }
-
-    pub fn as_str(&self) -> &str {
-        match self {
-            Destination::Named(name) => name,
-            Destination::Unnamed => "",
-        }
+impl Name {
+    pub fn unnamed() -> Name {
+        Name("".to_string())
     }
 }
 

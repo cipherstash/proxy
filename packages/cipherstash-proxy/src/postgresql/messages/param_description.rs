@@ -42,7 +42,7 @@ impl ParamDescription {
         }
     }
 
-    pub fn should_rewrite(&self) -> bool {
+    pub fn requires_rewrite(&self) -> bool {
         self.dirty
     }
 }
@@ -134,7 +134,7 @@ mod tests {
         // No types to map, should not rewrite
         let mapped_types = vec![None, None, None];
         pd.map_types(&mapped_types);
-        assert!(!pd.should_rewrite());
+        assert!(!pd.requires_rewrite());
 
         let mapped_types = vec![
             Some(postgres_types::Type::TEXT),
@@ -142,7 +142,7 @@ mod tests {
             Some(postgres_types::Type::TEXT),
         ];
         pd.map_types(&mapped_types);
-        assert!(pd.should_rewrite());
+        assert!(pd.requires_rewrite());
 
         let expected = vec![
             postgres_types::Type::TEXT,

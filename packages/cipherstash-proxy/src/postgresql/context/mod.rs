@@ -1,46 +1,53 @@
 use super::{
     format_code::FormatCode,
-    messages::{describe::Describe, execute::Execute, Destination},
+    messages::{
+        describe::{Describe, Target},
+        Name,
+    },
 };
-use crate::Identifier;
-use arc_swap::ArcSwapOption;
+use crate::{log::CONTEXT, Identifier};
 use cipherstash_config::{ColumnConfig, ColumnType};
 use postgres_types::Type;
-use sqlparser::ast;
 use std::{
     collections::HashMap,
     sync::{Arc, RwLock},
 };
+use tracing::debug;
 
 #[derive(Debug, Clone)]
 pub struct Context {
-    pub statements: Arc<RwLock<HashMap<Destination, Statement>>>,
-    pub portals: Arc<RwLock<HashMap<Destination, Portal>>>,
-    pub describe: Arc<ArcSwapOption<Describe>>,
-    pub execute: Arc<ArcSwapOption<Execute>>,
+    pub statements: Arc<RwLock<HashMap<Name, Arc<Statement>>>>,
+    pub portals: Arc<RwLock<HashMap<Name, Arc<Portal>>>>,
+    pub describe: Arc<RwLock<Option<Describe>>>,
+    pub execute: Arc<RwLock<Name>>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Column {
     pub identifier: Identifier,
     pub config: ColumnConfig,
     pub postgres_type: Type,
 }
 
-#[derive(Debug, Clone)]
+///
+/// Type Analysed parameters and projection
+///
+#[derive(Debug, Clone, PartialEq)]
 pub struct Statement {
-    /// A SQL statement. This will have been transformed if the statement received by the front-end
-    /// required type-checking and it was transformed to perform EQL conversion.
-    ast: ast::Statement,
-    pub postgres_param_types: Vec<i32>,
     pub param_columns: Vec<Option<Column>>,
     pub projection_columns: Vec<Option<Column>>,
+    pub postgres_param_types: Vec<i32>,
 }
 
+///
+/// Portal is a Statement with Bound variables
+/// An Execute message will execute the statement with the variables associated during a Bind.
+///
 #[derive(Debug, Clone)]
 pub struct Portal {
+    // pub statement_name: Name,
     pub format_codes: Vec<FormatCode>,
-    pub statement: Statement,
+    pub statement: Arc<Statement>,
 }
 
 impl Context {
@@ -48,92 +55,86 @@ impl Context {
         Context {
             statements: Arc::new(RwLock::new(HashMap::new())),
             portals: Arc::new(RwLock::new(HashMap::new())),
-            describe: Arc::new(ArcSwapOption::from(None)),
-            execute: Arc::new(ArcSwapOption::from(None)),
+            describe: Arc::new(RwLock::from(None)),
+            execute: Arc::new(RwLock::from(Name::unnamed())),
         }
     }
 
     pub fn describe(&mut self, describe: Describe) {
-        self.describe.swap(Some(Arc::new(describe)));
+        debug!(target: CONTEXT, "Describe: {describe:?}");
+        let _ = self
+            .describe
+            .write()
+            .map(|mut guard| *guard = Some(describe));
     }
 
-    pub fn describe_complete(&mut self) {
-        self.describe.swap(None);
+    pub fn execute(&mut self, name: Name) {
+        debug!(target: CONTEXT, "Execute: {name:?}");
+        let _ = self.execute.write().map(|mut guard| *guard = name);
     }
 
-    pub fn execute(&mut self, execute: Execute) {
-        self.execute.swap(Some(Arc::new(execute)));
+    pub fn add_statement(&mut self, name: Name, statement: Statement) {
+        debug!(target: CONTEXT, "Statement: {name:?}");
+        let _ = self
+            .statements
+            .write()
+            .map(|mut guarded| guarded.insert(name, Arc::new(statement)));
     }
 
-    pub fn execute_complete(&mut self) {
-        self.execute.swap(None);
+    pub fn add_portal(&mut self, name: Name, portal: Portal) {
+        debug!(target: CONTEXT, "Portal: {name:?}");
+        let _ = self
+            .portals
+            .write()
+            .map(|mut guarded| guarded.insert(name, Arc::new(portal)));
     }
 
-    pub fn add(&mut self, key: Destination, statement: Statement) {
-        let mut statment_write = self.statements.write().unwrap();
-        statment_write.insert(key, statement);
+    pub fn get_statement(&self, name: &Name) -> Option<Arc<Statement>> {
+        debug!(target: CONTEXT, "Get Statement: {name:?}");
+        self.statements
+            .read()
+            .ok()
+            .map(|guard| guard.get(name).cloned())?
     }
 
-    pub fn add_portal(&mut self, key: Destination, portal: Portal) {
-        let mut portal_write = self.portals.write().unwrap();
-        portal_write.insert(key, portal);
+    pub fn get_statement_from_describe(&self) -> Option<Arc<Statement>> {
+        self.describe.read().ok().map(|describe| {
+            debug!(target: CONTEXT, "Describe: {describe:?}");
+            match *describe {
+                Some(Describe {
+                    ref name,
+                    target: Target::Portal,
+                }) => self.get_portal_statement(name),
+                Some(Describe {
+                    ref name,
+                    target: Target::PreparedStatement,
+                }) => self.get_statement(name),
+                _ => None,
+            }
+        })?
     }
 
-    // TODO Remove cloning
-    // We can probably do work INSIDE the context
-    pub fn get(&self, key: &Destination) -> Option<Statement> {
-        let statment_read = self.statements.read().unwrap();
-        statment_read.get(key).cloned()
+    pub fn get_portal(&self, name: &Name) -> Option<Arc<Portal>> {
+        debug!(target: CONTEXT, "Get Portal: {name:?}");
+        self.portals
+            .read()
+            .ok()
+            .map(|guard| guard.get(name).map(|portal| portal.clone()))?
     }
 
-    pub fn get_param_columns_for_describe(&self) -> Option<Vec<Option<Column>>> {
-        let guard = self.describe.load();
-        match guard.as_ref() {
-            Some(describe) => self.get_param_columns(&describe.name),
-            None => None,
-        }
+    pub fn get_portal_statement(&self, name: &Name) -> Option<Arc<Statement>> {
+        debug!(target: CONTEXT, "Get Portal: {name:?}");
+        self.portals
+            .read()
+            .ok()
+            .map(|guard| guard.get(name).map(|portal| portal.statement.clone()))?
     }
 
-    pub fn get_projection_columns_for_describe(&self) -> Option<Vec<Option<Column>>> {
-        let guard = self.describe.load();
-        match guard.as_ref() {
-            Some(describe) => self.get_projection_columns(&describe.name),
-            None => None,
-        }
-    }
-
-    pub fn get_param_columns(&self, key: &Destination) -> Option<Vec<Option<Column>>> {
-        let statement_read = self.statements.read().unwrap();
-        statement_read
-            .get(key)
-            .map(|statement| statement.param_columns.clone())
-    }
-
-    pub fn get_projection_columns(&self, key: &Destination) -> Option<Vec<Option<Column>>> {
-        let statement_read = self.statements.read().unwrap();
-        statement_read
-            .get(key)
-            .map(|statement| statement.projection_columns.clone())
-    }
-
-    pub fn get_result_format_codes_for_execute(&self) -> Option<Vec<FormatCode>> {
-        let guard = self.execute.load();
-        match guard.as_ref() {
-            Some(execute) => self.get_result_format_codes_for_portal(&execute.portal),
-            None => None,
-        }
-    }
-
-    pub fn get_result_format_codes_for_portal(&self, key: &Destination) -> Option<Vec<FormatCode>> {
-        let portal_read = self.portals.read().unwrap();
-        portal_read
-            .get(key)
-            .map(|portal| portal.format_codes.clone())
-    }
-
-    pub fn remove(&mut self, key: &Destination) -> Option<Statement> {
-        let mut statment_write = self.statements.write().unwrap();
-        statment_write.remove(key)
+    pub fn get_portal_from_execute(&self) -> Option<Arc<Portal>> {
+        self.execute.read().ok().map(|name| {
+            debug!(target: CONTEXT, "Execute: {name:?}");
+            self.get_portal(&name)
+        })?
     }
 }
 
@@ -149,26 +150,24 @@ impl Column {
 }
 
 impl Statement {
-    pub fn mapped(
-        ast: ast::Statement,
-        postgres_param_types: Vec<i32>,
+    pub fn new(
         param_columns: Vec<Option<Column>>,
         projection_columns: Vec<Option<Column>>,
+        postgres_param_types: Vec<i32>,
     ) -> Statement {
         Statement {
-            ast,
-            postgres_param_types,
             param_columns,
             projection_columns,
+            postgres_param_types,
         }
     }
 }
 
 impl Portal {
-    pub fn new(statement: Statement, format_codes: Vec<FormatCode>) -> Portal {
+    pub fn new(statement: Arc<Statement>, format_codes: Vec<FormatCode>) -> Portal {
         Portal {
-            statement,
             format_codes,
+            statement,
         }
     }
 }
@@ -186,5 +185,75 @@ fn column_type_to_postgres_type(col_type: &ColumnType) -> postgres_types::Type {
         ColumnType::Timestamp => postgres_types::Type::TIMESTAMPTZ,
         ColumnType::Utf8Str => postgres_types::Type::TEXT,
         ColumnType::JsonB => postgres_types::Type::JSONB,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Context, Describe, Portal, Statement};
+    use crate::{
+        log,
+        postgresql::messages::{describe::Target, Name},
+    };
+    use bytes::BytesMut;
+    use tracing::info;
+
+    impl Default for Statement {
+        fn default() -> Self {
+            Statement {
+                param_columns: vec![],
+                projection_columns: vec![],
+                postgres_param_types: vec![],
+            }
+        }
+    }
+
+    #[test]
+    pub fn test_get_statement_from_describe() {
+        log::init();
+        let mut context = Context::new();
+
+        let name = Name("name".to_string());
+
+        context.add_statement(name.clone(), Statement::default());
+
+        let statement = context.get_statement(&name).unwrap();
+
+        let describe = Describe {
+            name,
+            target: Target::PreparedStatement,
+        };
+        context.describe(describe);
+
+        let s = context.get_statement_from_describe().unwrap();
+
+        assert_eq!(s, statement)
+    }
+
+    #[test]
+    pub fn test_get_statement_from_execute() {
+        log::init();
+
+        let mut context = Context::new();
+
+        let statement_name = Name("statement".to_string());
+        let portal_name = Name("portal".to_string());
+
+        // Add statement to context
+        context.add_statement(statement_name.clone(), Statement::default());
+
+        // Get statement from context
+        let statement = context.get_statement(&statement_name).unwrap();
+
+        // Add portal pointing to statement to context
+        let portal = Portal::new(statement.clone(), vec![]);
+        context.add_portal(portal_name.clone(), portal);
+
+        // Add statement name to execute context
+        context.execute(portal_name);
+
+        // Portal statement should be the right statement
+        let portal = context.get_portal_from_execute().unwrap();
+        assert_eq!(statement, portal.statement)
     }
 }

@@ -29,8 +29,8 @@ pub struct RowDescriptionField {
 }
 
 impl RowDescription {
-    pub fn should_rewrite(&self) -> bool {
-        self.fields.iter().any(|f| f.should_rewrite())
+    pub fn requires_rewrite(&self) -> bool {
+        self.fields.iter().any(|f| f.requires_rewrite())
     }
 
     pub fn map_types(&mut self, projection_types: &[Option<Type>]) {
@@ -51,7 +51,7 @@ impl RowDescriptionField {
         self.dirty = true;
     }
 
-    pub fn should_rewrite(&self) -> bool {
+    pub fn requires_rewrite(&self) -> bool {
         self.dirty
     }
 }
@@ -168,10 +168,9 @@ impl TryFrom<RowDescriptionField> for BytesMut {
 #[cfg(test)]
 mod tests {
 
+    use crate::{log, postgresql::messages::row_description::RowDescription};
     use bytes::BytesMut;
     use tracing::info;
-
-    use crate::{log, postgresql::messages::row_description::RowDescription};
 
     fn to_message(s: &[u8]) -> BytesMut {
         BytesMut::from(s)

@@ -1,13 +1,13 @@
 use super::{tandem::DatabaseConfig, AGGREGATE_QUERY, SCHEMA_QUERY};
-use crate::connect;
 use crate::error::Error;
+use crate::{connect, log::SCHEMA};
 use arc_swap::ArcSwap;
 use eql_mapper::{Column, Schema, Table};
 use sqlparser::ast::Ident;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::{task::JoinHandle, time};
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 #[derive(Clone, Debug)]
 pub struct SchemaManager {
@@ -116,20 +116,19 @@ pub async fn load_schema(config: &DatabaseConfig) -> Result<Schema, Error> {
         let _types: Vec<Option<String>> = table.get("column_types");
         let domains: Vec<Option<String>> = table.get("column_domains");
 
-        let mut table = Table::new(Ident::new(table_name));
+        let mut table = Table::new(Ident::new(&table_name));
 
         columns.iter().zip(domains).for_each(|(col, domain)| {
             let is_primary_key = primary_keys.contains(&Some(col.to_string()));
 
-            let column = match domain {
-                Some(domain) => {
-                    if domain == "cs_encrypted_v1" {
-                        Column::eql(Ident::with_quote('"', col))
-                    } else {
-                        Column::native(Ident::with_quote('"', col))
-                    }
+            let ident = Ident::with_quote('"', col);
+
+            let column = match domain.as_deref() {
+                Some("cs_encrypted_v1") => {
+                    debug!(target: SCHEMA, "cs_encrypted_v1 column: {table_name}.{col}");
+                    Column::eql(ident)
                 }
-                None => Column::native(Ident::with_quote('"', col)),
+                _ => Column::native(ident),
             };
 
             table.add_column(Arc::new(column), is_primary_key);

@@ -1,4 +1,4 @@
-use super::{Destination, FrontendCode};
+use super::{FrontendCode, Name};
 use crate::error::{Error, ProtocolError};
 use crate::postgresql::protocol::BytesMutReadString;
 use bytes::{Buf, BytesMut};
@@ -7,7 +7,7 @@ use std::io::Cursor;
 
 #[derive(Debug, Clone)]
 pub(crate) struct Execute {
-    pub portal: Destination,
+    pub portal: Name,
     pub max_rows: i32,
 }
 
@@ -29,7 +29,7 @@ impl TryFrom<&BytesMut> for Execute {
         let _len = cursor.get_i32(); // read and progress cursor
 
         let portal = cursor.read_string()?;
-        let portal = Destination::new(portal);
+        let portal = Name(portal);
         let max_rows = cursor.get_i32();
 
         Ok(Execute { portal, max_rows })

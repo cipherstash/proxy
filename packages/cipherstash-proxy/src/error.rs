@@ -14,6 +14,9 @@ pub enum Error {
     #[error(transparent)]
     Config(#[from] ConfigError),
 
+    #[error(transparent)]
+    Context(#[from] ContextError),
+
     #[error("Connection closed by client")]
     ConnectionClosed,
 
@@ -46,15 +49,25 @@ pub enum Error {
 }
 
 #[derive(Error, Debug)]
+pub enum ContextError {
+    #[error("Portal could not be found in context")]
+    UnknownPortal,
+}
+
+#[derive(Error, Debug)]
 pub enum MappingError {
-    #[error("Invalid parameter data for PostgreSQL {name} ({oid}) type")]
-    InvalidParameter { name: String, oid: i32 },
+    #[error("Invalid parameter data for column {column} in table {table} (OID {oid})")]
+    InvalidParameter {
+        table: String,
+        column: String,
+        oid: u32,
+    },
 
     #[error(transparent)]
     SqlParse(#[from] sqlparser::parser::ParserError),
 
-    #[error("Encryption of PostgreSQL {name} ({oid}) types is not currently supported")]
-    UnsupportedParameterType { name: String, oid: i32 },
+    #[error("Encryption of PostgreSQL {name} (OID {oid}) types is not currently supported")]
+    UnsupportedParameterType { name: String, oid: u32 },
 
     #[error("Statement could not be type checked")]
     StatementCouldNotBeTypeChecked,

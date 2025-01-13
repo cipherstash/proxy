@@ -7,7 +7,7 @@ use std::convert::TryFrom;
 use std::ffi::CString;
 use std::io::Cursor;
 
-use super::{Destination, FrontendCode};
+use super::{FrontendCode, Name};
 
 ///
 /// Describe b'D' (Frontend) message.
@@ -29,7 +29,7 @@ use super::{Destination, FrontendCode};
 #[derive(Debug, Clone)]
 pub(crate) struct Describe {
     pub target: Target,
-    pub name: Destination,
+    pub name: Name,
 }
 
 ///
@@ -74,7 +74,7 @@ impl TryFrom<&BytesMut> for Describe {
         let target = cursor.get_u8();
         let target = Target::try_from(target)?;
         let name = cursor.read_string()?;
-        let name = Destination::new(name);
+        let name = Name(name);
 
         Ok(Describe { target, name })
     }
@@ -86,7 +86,7 @@ impl TryFrom<Describe> for BytesMut {
     fn try_from(describe: Describe) -> Result<BytesMut, Error> {
         let mut bytes = BytesMut::new();
 
-        let name = CString::new(describe.name.as_str())?;
+        let name = CString::new(describe.name.0.as_str())?;
         let name = name.as_bytes_with_nul();
 
         let len = SIZE_I32 + SIZE_U8 + name.len();

@@ -1,21 +1,27 @@
-use super::{maybe_json, maybe_jsonb, Destination, NULL};
+use super::{maybe_json, maybe_jsonb, Name, NULL};
 use crate::eql;
-use crate::error::{Error, ProtocolError};
+use crate::error::{Error, MappingError, ProtocolError};
+use crate::log::{DEVELOPMENT, MAPPER};
+use crate::postgresql::data::from_sql;
 use crate::postgresql::format_code::FormatCode;
 use crate::postgresql::protocol::BytesMutReadString;
+use crate::postgresql::Column;
 use crate::{SIZE_I16, SIZE_I32};
 use bytes::{Buf, BufMut, BytesMut};
-use std::io::{BufRead, Cursor};
+use cipherstash_client::encryption::Plaintext;
+use postgres_types::Type;
+use std::fmt::{self, Display, Formatter};
+use std::io::Cursor;
 use std::{convert::TryFrom, ffi::CString};
-use tracing::debug;
+use tracing::{debug, warn};
 
 /// Bind (B) message.
 /// See: <https://www.postgresql.org/docs/current/protocol-message-formats.html>
 #[derive(Clone, Debug)]
 pub struct Bind {
     pub code: char,
-    pub portal: Destination,
-    pub prepared_statement: Destination,
+    pub portal: Name,
+    pub prepared_statement: Name,
     pub num_param_format_codes: i16,
     pub param_format_codes: Vec<FormatCode>,
     pub num_param_values: i16,
@@ -32,12 +38,42 @@ pub struct BindParam {
 }
 
 impl Bind {
-    pub fn should_rewrite(&self) -> bool {
-        self.param_values.iter().any(|param| param.should_rewrite())
+    pub fn requires_rewrite(&self) -> bool {
+        self.param_values
+            .iter()
+            .any(|param| param.requires_rewrite())
     }
 
-    pub fn to_plaintext(&self) -> Result<Vec<Option<eql::Plaintext>>, Error> {
-        Ok(self.param_values.iter().map(|param| param.into()).collect())
+    pub fn to_plaintext(
+        &self,
+        param_columns: &Vec<Option<Column>>,
+        param_types: &Vec<i32>,
+    ) -> Result<Vec<Option<Plaintext>>, Error> {
+        let plaintexts = self
+            .param_values
+            .iter()
+            .zip(param_columns.iter())
+            .enumerate()
+            .map(|(idx, (param, col))| match col {
+                Some(col) => {
+                    debug!(target = MAPPER, "Mapping param: {col:?}");
+                    let param_type = param_types
+                        .get(idx)
+                        .and_then(|oid| Type::from_oid(*oid as u32))
+                        .map_or(col.postgres_type.clone(), |t| t);
+
+                    debug!(target = MAPPER, "Param Type: {param_type:?}");
+
+                    from_sql(param, &param_type).map_err(|_| MappingError::InvalidParameter {
+                        table: col.identifier.table.to_owned(),
+                        column: col.identifier.table.to_owned(),
+                        oid: col.postgres_type.oid(),
+                    })
+                }
+                None => Ok(None),
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(plaintexts)
     }
 
     pub fn rewrite(&mut self, encrypted: Vec<Option<eql::Ciphertext>>) -> Result<(), Error> {
@@ -70,15 +106,6 @@ impl BindParam {
         }
     }
 
-    pub fn as_string(&self) -> Result<String, Error> {
-        let mut cursor = Cursor::new(&self.bytes);
-        let mut buf = Vec::with_capacity(512);
-        match cursor.read_until(b'\0', &mut buf) {
-            Ok(_) => Ok(String::from_utf8_lossy(&buf[..buf.len() - 1]).to_string()),
-            Err(err) => Err(err.into()),
-        }
-    }
-
     pub fn len(&self) -> usize {
         self.bytes.len()
     }
@@ -94,7 +121,7 @@ impl BindParam {
         self.dirty = true;
     }
 
-    pub fn should_rewrite(&self) -> bool {
+    pub fn requires_rewrite(&self) -> bool {
         self.dirty
     }
 
@@ -123,6 +150,13 @@ impl BindParam {
 
     pub fn is_binary(&self) -> bool {
         self.format_code == FormatCode::Binary
+    }
+}
+
+impl Display for BindParam {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        let s = String::from_utf8_lossy(&self.bytes).to_string();
+        write!(f, "{}", s)
     }
 }
 
@@ -158,10 +192,10 @@ impl TryFrom<&BytesMut> for Bind {
         let _len = cursor.get_i32();
 
         let portal = cursor.read_string()?;
-        let portal = Destination::new(portal);
+        let portal = Name(portal);
 
         let prepared_statement = cursor.read_string()?;
-        let prepared_statement = Destination::new(prepared_statement);
+        let prepared_statement = Name(prepared_statement);
 
         let num_param_format_codes = cursor.get_i16();
         let mut param_format_codes = Vec::new();
@@ -223,10 +257,10 @@ impl TryFrom<Bind> for BytesMut {
     fn try_from(bind: Bind) -> Result<BytesMut, Self::Error> {
         let mut bytes = BytesMut::new();
 
-        let portal_binding = CString::new(bind.portal.as_str())?;
+        let portal_binding = CString::new(bind.portal.0.as_str())?;
         let portal = portal_binding.as_bytes_with_nul();
 
-        let prepared_statement_binding = CString::new(bind.prepared_statement.as_str())?;
+        let prepared_statement_binding = CString::new(bind.prepared_statement.0.as_str())?;
         let prepared_statement = prepared_statement_binding.as_bytes_with_nul();
 
         if bind.num_param_format_codes != bind.param_format_codes.len() as i16 {
@@ -288,9 +322,37 @@ impl TryFrom<Bind> for BytesMut {
 
 #[cfg(test)]
 mod tests {
-    use crate::{log, postgresql::format_code::FormatCode};
-
     use super::BindParam;
+    use crate::{
+        log,
+        postgresql::{format_code::FormatCode, messages::bind::Bind},
+    };
+    use bytes::BytesMut;
+    use tracing::info;
+
+    fn to_message(s: &[u8]) -> BytesMut {
+        BytesMut::from(s)
+    }
+
+    // #[test]
+    // pub fn parse_bind() {
+    //     log::init();
+
+    //     let s = "hello@cipherstash.com";
+    //     info!("len {:?}", s.len());
+
+    //     let expected = bytes.clone();
+
+    //     let bind = Bind::try_from(&bytes).expect("ok");
+
+    //     info!("{:?}", bind);
+
+    //     // assert_eq!(row_description.fields.len(), 1);
+    //     // assert_eq!(row_description.fields[0].name, "TimeZone");
+
+    //     let bytes = BytesMut::try_from(bind).expect("ok");
+    //     assert_eq!(bytes, expected);
+    // }
 
     #[test]
     fn bind_should_rewrite() {
@@ -301,6 +363,6 @@ mod tests {
 
         param.rewrite("world".as_bytes());
 
-        assert!(param.should_rewrite());
+        assert!(param.requires_rewrite());
     }
 }

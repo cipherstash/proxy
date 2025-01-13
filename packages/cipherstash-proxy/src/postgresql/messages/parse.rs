@@ -1,16 +1,17 @@
-use super::{Destination, FrontendCode};
+use super::{FrontendCode, Name};
 use crate::{
     error::{Error, ProtocolError},
-    postgresql::protocol::BytesMutReadString,
+    postgresql::{protocol::BytesMutReadString, Column},
     SIZE_I16, SIZE_I32,
 };
 use bytes::{Buf, BufMut, BytesMut};
+use postgres_types::Type;
 use std::{ffi::CString, io::Cursor};
 
 #[derive(Debug, Clone)]
 pub struct Parse {
     pub code: char,
-    pub name: Destination,
+    pub name: Name,
     pub statement: String,
     pub num_params: i16,
     pub param_types: Vec<i32>,
@@ -18,8 +19,19 @@ pub struct Parse {
 }
 
 impl Parse {
-    pub fn should_rewrite(&self) -> bool {
+    pub fn requires_rewrite(&self) -> bool {
         self.dirty
+    }
+
+    pub fn rewrite_param_types(&mut self, columns: &Vec<Option<Column>>) {
+        for (idx, col) in columns.iter().enumerate() {
+            if let Some(_) = self.param_types.get(idx) {
+                if let Some(_) = col {
+                    self.param_types[idx] = Type::JSONB.oid() as i32;
+                    self.dirty = true;
+                }
+            }
+        }
     }
 }
 
@@ -40,7 +52,7 @@ impl TryFrom<&BytesMut> for Parse {
 
         let _len = cursor.get_i32();
         let name = cursor.read_string()?;
-        let name = Destination::new(name);
+        let name = Name(name);
 
         let statement = cursor.read_string()?;
         let num_params = cursor.get_i16();
@@ -67,7 +79,7 @@ impl TryFrom<Parse> for BytesMut {
     fn try_from(parse: Parse) -> Result<BytesMut, Error> {
         let mut bytes = BytesMut::new();
 
-        let name = CString::new(parse.name.as_str())?;
+        let name = CString::new(parse.name.0.as_str())?;
         let name = name.as_bytes_with_nul();
 
         let statement = CString::new(parse.statement)?;
@@ -94,23 +106,56 @@ impl TryFrom<Parse> for BytesMut {
 
 #[cfg(test)]
 mod tests {
+    use crate::{
+        log,
+        postgresql::{
+            messages::{describe::Target, parse::Parse, Name},
+            Column,
+        },
+        Identifier,
+    };
+    use bytes::BytesMut;
+    use cipherstash_config::{ColumnConfig, ColumnType};
+    use tracing::{debug, info};
 
-    use crate::log;
-
-    use super::Destination;
+    fn to_message(s: &[u8]) -> BytesMut {
+        BytesMut::from(s)
+    }
 
     #[test]
-    fn test_parse_destination() {
+    pub fn test_parse() {
         log::init();
+        let bytes = to_message(
+             b"P\0\0\0J\0INSERT INTO encrypted (id, encrypted_int2) VALUES ($1, $2)\0\0\x02\0\0\0\x15\0\0\0\x15"
+        );
 
-        let name = "test".to_string();
-        let destination = Destination::new(name);
+        let expected = bytes.clone();
 
-        assert_eq!(destination.as_str(), "test");
+        let mut parse = Parse::try_from(&bytes).expect("ok");
 
-        let name = "".to_string();
-        let destination = Destination::new(name);
+        let bytes = BytesMut::try_from(parse).expect("ok");
+        assert_eq!(bytes, expected);
+    }
 
-        assert_eq!(destination.as_str(), "");
+    #[test]
+    pub fn test_parse_rewrite_param_types() {
+        log::init();
+        let bytes = to_message(
+             b"P\0\0\0J\0INSERT INTO encrypted (id, encrypted_int2) VALUES ($1, $2)\0\0\x02\0\0\0\x15\0\0\0\x15"
+        );
+
+        let expected = bytes.clone();
+
+        let mut parse = Parse::try_from(&bytes).expect("ok");
+
+        let identifier = Identifier::new("table", "column");
+
+        let config = ColumnConfig::build("column".to_string()).casts_as(ColumnType::SmallInt);
+
+        let column = Column::new(identifier, config);
+        let columns = vec![None, Some(column)];
+
+        parse.rewrite_param_types(&columns);
+        assert!(parse.requires_rewrite());
     }
 }

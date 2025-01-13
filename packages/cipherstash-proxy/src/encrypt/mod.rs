@@ -44,7 +44,7 @@ impl Encrypt {
     pub async fn encrypt(
         &self,
         plaintexts: Vec<Option<Plaintext>>,
-        columns: Vec<Option<Column>>,
+        columns: &Vec<Option<Column>>,
     ) -> Result<Vec<Option<eql::Ciphertext>>, Error> {
         let mut pipeline = ReferencedPendingPipeline::new(self.cipher.clone());
 
