@@ -1,14 +1,23 @@
-use crate::{inference::unifier::Type, inference::InferType, inference::TypeError, TypeInferencer};
-use sqlparser::ast::{BinaryOperator, Expr};
+use crate::{
+    inference::{unifier::Type, InferType, TypeError},
+    SqlIdent, TypeInferencer,
+};
+use sqlparser::ast::{BinaryOperator, Expr, Ident};
 
 impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
     fn infer_exit(&mut self, this_expr: &'ast Expr) -> Result<(), TypeError> {
         match this_expr {
+            // Resolve an identifier using the scope, except if it happens to to be the DEFAULT keyword
+            // in which case we resolve it to a fresh type variable.
             Expr::Identifier(ident) => {
-                self.unify_node_with_type(
-                    this_expr,
-                    self.scope_tracker.borrow().resolve_ident(ident)?,
-                )?;
+                // sqlparser treats the `DEFAULT` keyword in expression position as an identifier.
+                let ty = if SqlIdent(ident) == SqlIdent(&Ident::new("default")) {
+                    self.fresh_tvar()
+                } else {
+                    self.scope_tracker.borrow().resolve_ident(ident)?
+                };
+
+                self.unify_node_with_type(this_expr, ty)?;
             }
 
             Expr::CompoundIdentifier(idents) => {
