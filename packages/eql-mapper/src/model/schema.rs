@@ -100,7 +100,7 @@ impl Schema {
         self.tables.push(Arc::new(table));
     }
 
-    /// Resolves a table by `SqlIdent`, which takes into account the SQL rules
+    /// Resolves a table by `Ident`, which takes into account the SQL rules
     /// of quoted and new identifier matching.
     pub fn resolve_table(&self, name: &Ident) -> Result<Arc<Table>, SchemaError> {
         let mut haystack = self.tables.iter();
@@ -108,6 +108,22 @@ impl Schema {
             .find_unique(&|table| SqlIdent::from(&table.name) == SqlIdent::from(name))
             .cloned()
             .map_err(|_| SchemaError::TableNotFound(name.to_string()))
+    }
+
+    pub fn resolve_table_columns(
+        &self,
+        table_name: &Ident,
+    ) -> Result<Vec<SchemaTableColumn>, SchemaError> {
+        let table = self.resolve_table(table_name)?;
+        Ok(table
+            .columns
+            .iter()
+            .map(|col| SchemaTableColumn {
+                table: table.name.clone(),
+                column: col.name.clone(),
+                kind: col.kind,
+            })
+            .collect())
     }
 
     pub fn resolve_table_column(

@@ -127,6 +127,38 @@ mod test {
     }
 
     #[test]
+    fn insert_with_values_no_explicit_columns() {
+        let _ = tracing_subscriber::fmt::try_init();
+        let schema = Dep::new(schema! {
+            tables: {
+                users: {
+                    id (PK),
+                    email (EQL),
+                    first_name,
+                }
+            }
+        });
+
+        let statement = parse("INSERT INTO users VALUES (42, 'hello@cipherstash.com', 'James')");
+
+        match type_check(&schema, &statement) {
+            Ok(typed) => {
+                eprintln!("{:#?}", &typed.literals);
+                assert!(typed.literals.contains(&(
+                    EqlValue(TableColumn {
+                        table: id("users"),
+                        column: id("email")
+                    }),
+                    &ast::Expr::Value(ast::Value::SingleQuotedString(
+                        "hello@cipherstash.com".into()
+                    ))
+                )));
+            }
+            Err(err) => panic!("type check failed: {err}"),
+        }
+    }
+
+    #[test]
     fn basic_with_placeholder() {
         let _ = tracing_subscriber::fmt::try_init();
         let schema = Dep::new(schema! {
