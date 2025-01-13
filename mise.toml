@@ -200,7 +200,13 @@ set +e
 ports="5532 5617"
 
 for i in ${ports}; do
-  mise run test:wait_for_postgres_to_quack --port ${i} --max-retries 20
+  # 55xx ports are always non-TLS, 56xx ports are always TLS
+  TLS=""
+  if [ "$i" -gt 5600 ] && [ "$i" -le 5699 ]; then
+    TLS="--tls"
+  fi
+
+  mise run test:wait_for_postgres_to_quack --port ${i} --max-retries 20 ${TLS}
   if [ $? -ne 0 ]; then
     echo "error: Postgres not running on port ${i}"
     echo "error: Try running 'mise run postgres:up' to start the containers"
