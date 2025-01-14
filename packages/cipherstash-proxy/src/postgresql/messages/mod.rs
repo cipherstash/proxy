@@ -201,6 +201,14 @@ impl Name {
     }
 }
 
+impl std::ops::Deref for Name {
+    type Target = str;
+
+    fn deref(&self) -> &str {
+        self.0.as_str()
+    }
+}
+
 ///
 /// Peaks at the first byte char.
 /// Assumes that a leading `{` may be a JSON value

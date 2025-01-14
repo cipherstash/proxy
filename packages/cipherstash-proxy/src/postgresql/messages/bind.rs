@@ -257,10 +257,10 @@ impl TryFrom<Bind> for BytesMut {
     fn try_from(bind: Bind) -> Result<BytesMut, Self::Error> {
         let mut bytes = BytesMut::new();
 
-        let portal_binding = CString::new(bind.portal.0.as_str())?;
+        let portal_binding = CString::new(&*bind.portal)?;
         let portal = portal_binding.as_bytes_with_nul();
 
-        let prepared_statement_binding = CString::new(bind.prepared_statement.0.as_str())?;
+        let prepared_statement_binding = CString::new(&*bind.prepared_statement)?;
         let prepared_statement = prepared_statement_binding.as_bytes_with_nul();
 
         if bind.num_param_format_codes != bind.param_format_codes.len() as i16 {
@@ -334,25 +334,22 @@ mod tests {
         BytesMut::from(s)
     }
 
-    // #[test]
-    // pub fn parse_bind() {
-    //     log::init();
+    #[test]
+    pub fn parse_bind() {
+        log::init();
+        let bytes =
+            to_message(b"B\0\0\0\x18\0\0\0\x01\0\x01\0\x01\0\0\0\x04.\xbe\x8a\xd4\0\x01\0\x01");
 
-    //     let s = "hello@cipherstash.com";
-    //     info!("len {:?}", s.len());
+        let expected = bytes.clone();
 
-    //     let expected = bytes.clone();
+        let bind = Bind::try_from(&bytes).expect("ok");
 
-    //     let bind = Bind::try_from(&bytes).expect("ok");
+        assert_eq!(bind.param_values.len(), 1);
+        assert_eq!(bind.result_columns_format_codes[0], FormatCode::Binary);
 
-    //     info!("{:?}", bind);
-
-    //     // assert_eq!(row_description.fields.len(), 1);
-    //     // assert_eq!(row_description.fields[0].name, "TimeZone");
-
-    //     let bytes = BytesMut::try_from(bind).expect("ok");
-    //     assert_eq!(bytes, expected);
-    // }
+        let bytes = BytesMut::try_from(bind).expect("ok");
+        assert_eq!(bytes, expected);
+    }
 
     #[test]
     fn bind_should_rewrite() {
