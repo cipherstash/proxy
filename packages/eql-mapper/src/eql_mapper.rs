@@ -5,7 +5,7 @@ use crate::{
     Dep, DepMut, NodeKey, Projection, ProjectionColumn, Schema, ScopeError, ScopeTracker,
     TypeRegistry, Value,
 };
-use sqlparser::ast::{self as ast, Statement};
+use sqlparser::ast::{self as ast, ObjectType, Statement};
 use sqltk::{convert_control_flow, Break, Transform, Transformable, Visitable, Visitor};
 use std::{
     cell::RefCell, collections::HashMap, marker::PhantomData, ops::ControlFlow, rc::Rc, sync::Arc,
@@ -89,6 +89,28 @@ pub fn requires_type_check(statement: &Statement) -> bool {
         | Statement::Delete(_)
         | Statement::Merge { .. }
         | Statement::Prepare { .. } => true, // not
+        _ => false,
+    }
+}
+
+/// Returns whether the [`Statement`] requires type-checking to be performed.
+///
+/// Statements that do not require type-checking are presumed to be safe to transmit to the database unmodified.
+///
+pub fn changes_schema(statement: &Statement) -> bool {
+    match statement {
+        Statement::CreateView { .. }
+        | Statement::CreateTable(_)
+        | Statement::Drop {
+            object_type: ObjectType::Table,
+            ..
+        }
+        | Statement::Drop {
+            object_type: ObjectType::View,
+            ..
+        }
+        | Statement::AlterTable { .. }
+        | Statement::AlterView { .. } => true,
         _ => false,
     }
 }
