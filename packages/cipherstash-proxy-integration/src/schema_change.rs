@@ -1,13 +1,7 @@
 #[cfg(test)]
 mod tests {
-    use crate::common::{connect_with_tls, database_config_with_port, PROXY};
+    use crate::common::{connect_with_tls, database_config_with_port, id, PROXY};
     use cipherstash_proxy::log;
-
-    fn id() -> i64 {
-        use rand::Rng;
-        let mut rng = rand::thread_rng();
-        rng.gen_range(1..=i64::MAX)
-    }
 
     #[tokio::test]
     async fn schema_change_reloads_schema() {

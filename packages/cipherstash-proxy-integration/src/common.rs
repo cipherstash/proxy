@@ -7,6 +7,12 @@ pub const PROXY: u16 = 6432;
 pub const PG_LATEST: u16 = 5532;
 pub const PG_V17_TLS: u16 = 5617;
 
+pub fn id() -> i64 {
+    use rand::Rng;
+    let mut rng = rand::thread_rng();
+    rng.gen_range(1..=i64::MAX)
+}
+
 pub fn database_config() -> DatabaseConfig {
     database_config_with_port(PG_LATEST)
 }
