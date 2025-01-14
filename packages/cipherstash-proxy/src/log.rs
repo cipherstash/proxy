@@ -15,9 +15,9 @@ pub const PROTOCOL: &str = "protocol";
 pub const MAPPER: &str = "mapper";
 pub const SCHEMA: &str = "schema";
 
-fn subscriber_builder() -> SubscriberBuilder<DefaultFields, Format, EnvFilter> {
+fn subscriber_builder(default_level: tracing::Level) -> SubscriberBuilder<DefaultFields, Format, EnvFilter> {
     // TODO: assign level from args
-    let log_level: Directive = tracing::Level::DEBUG.into();
+    let log_level: Directive = default_level.into();
 
     let mut filter = EnvFilter::from_default_env().add_directive(log_level.to_owned());
 
@@ -29,27 +29,27 @@ fn subscriber_builder() -> SubscriberBuilder<DefaultFields, Format, EnvFilter> {
         .expect("ok");
     filter = filter.add_directive(directive);
 
-    let log_level: Directive = tracing::Level::DEBUG.into();
+    let log_level: Directive = default_level.into();
     let directive = format!("{}={log_level}", CONTEXT).parse().expect("ok");
     filter = filter.add_directive(directive);
 
-    let log_level: Directive = tracing::Level::DEBUG.into();
+    let log_level: Directive = default_level.into();
     let directive = format!("{}={log_level}", DEVELOPMENT).parse().expect("ok");
     filter = filter.add_directive(directive);
 
-    let log_level: Directive = tracing::Level::DEBUG.into();
+    let log_level: Directive = default_level.into();
     let directive = format!("{}={log_level}", KEYSET).parse().expect("ok");
     filter = filter.add_directive(directive);
 
-    let log_level: Directive = tracing::Level::DEBUG.into();
+    let log_level: Directive = default_level.into();
     let directive = format!("{}={log_level}", MAPPER).parse().expect("ok");
     filter = filter.add_directive(directive);
 
-    let log_level: Directive = tracing::Level::DEBUG.into();
+    let log_level: Directive = default_level.into();
     let directive = format!("{}={log_level}", PROTOCOL).parse().expect("ok");
     filter = filter.add_directive(directive);
 
-    let log_level: Directive = tracing::Level::DEBUG.into();
+    let log_level: Directive = default_level.into();
     let directive = format!("{}={log_level}", SCHEMA).parse().expect("ok");
     filter = filter.add_directive(directive);
 
@@ -62,7 +62,7 @@ fn subscriber_builder() -> SubscriberBuilder<DefaultFields, Format, EnvFilter> {
 
 pub fn init() {
     INIT.call_once(|| {
-        let subscriber = subscriber_builder().finish();
+        let subscriber = subscriber_builder(tracing::Level::DEBUG).finish();
 
         tracing::subscriber::set_global_default(subscriber)
             .expect("setting default subscriber failed");
@@ -79,7 +79,8 @@ mod tests {
     };
     use tracing_subscriber::fmt::MakeWriter;
     use tracing::dispatcher::set_default;
-    use tracing::info;
+    use tracing::{info, warn, error};
+    use tracing::Level;
 
     // Mock Writer for flexibly testing the logging behaviour, copy-pasted from
     // tracing_subscriber's internal test code (with JSON functionality deleted).
@@ -146,14 +147,30 @@ mod tests {
     #[test]
     fn test_simple_log() {
         let make_writer = MockMakeWriter::default();
-        let subscriber = subscriber_builder()
+        let subscriber = subscriber_builder(Level::INFO)
+            .with_writer(make_writer.clone())
+            .finish();
+        let _default = set_default(&subscriber.into());
+
+        error!("error message");
+
+        let log_contents = make_writer.get_string();
+        assert!(log_contents.contains("error message"));
+    }
+
+    #[test]
+    fn test_log_levels() {
+        let make_writer = MockMakeWriter::default();
+        let subscriber = subscriber_builder(Level::WARN)
             .with_writer(make_writer.clone())
             .finish();
         let _default = set_default(&subscriber.into());
 
         info!("info message");
+        warn!("warn message");
 
         let log_contents = make_writer.get_string();
-        assert!(log_contents.contains("info message"));
+        assert!(!log_contents.contains("info message"));
+        assert!(log_contents.contains("warn message"));
     }
 }
