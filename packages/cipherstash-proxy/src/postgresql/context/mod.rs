@@ -158,6 +158,18 @@ impl Column {
             postgres_type,
         }
     }
+
+    pub fn table_name(&self) -> String {
+        self.identifier.table.to_owned()
+    }
+
+    pub fn column_name(&self) -> String {
+        self.identifier.column.to_owned()
+    }
+
+    pub fn oid(&self) -> u32 {
+        self.postgres_type.oid()
+    }
 }
 
 impl Statement {

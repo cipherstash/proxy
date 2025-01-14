@@ -181,7 +181,7 @@ where
     async fn parse_handler(&mut self, bytes: &BytesMut) -> Result<Option<BytesMut>, Error> {
         let mut message = Parse::try_from(bytes)?;
 
-        warn!(target = MAPPER, "Parse: {:?}", message);
+        debug!(target = MAPPER, "Parse: {:?}", message);
 
         let statement = Parser::new(&DIALECT)
             .try_with_sql(&message.statement)?
@@ -247,6 +247,8 @@ where
             let param_columns = &statement.param_columns;
 
             let plaintexts = bind.to_plaintext(param_columns, &statement.postgres_param_types)?;
+
+            debug!(target: MAPPER, "Plaintexts {plaintexts:?}");
 
             let encrypted = self.encrypt.encrypt(plaintexts, param_columns).await?;
 

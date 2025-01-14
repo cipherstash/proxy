@@ -1,6 +1,5 @@
 use crate::{
     error::{Error, MappingError},
-    log::MAPPER,
     postgresql::{format_code::FormatCode, messages::bind::BindParam},
 };
 use bytes::BytesMut;
@@ -10,7 +9,6 @@ use postgres_types::FromSql;
 use postgres_types::Type;
 use rust_decimal::Decimal;
 use std::str::FromStr;
-use tracing::{debug, info};
 
 pub fn from_sql(param: &BindParam, postgres_type: &Type) -> Result<Option<Plaintext>, Error> {
     if param.is_null() {
@@ -95,13 +93,8 @@ fn binary_from_sql(bytes: &BytesMut, postgres_type: &Type) -> Result<Plaintext, 
             Ok(Plaintext::Float(Some(val)))
         }
         &Type::INT2 => {
-            debug!(target = MAPPER, "BINARY INT2");
-            debug!(target = MAPPER, "{bytes:?}");
-            let val = <i16>::from_sql(&Type::INT2, bytes);
-
-            info!(target = MAPPER, "{val:?}");
-
-            let val = val.map_err(|_| MappingError::CouldNotParseParameter)?;
+            let val = <i16>::from_sql(&Type::INT2, bytes)
+                .map_err(|_| MappingError::CouldNotParseParameter)?;
 
             Ok(Plaintext::SmallInt(Some(val)))
         }

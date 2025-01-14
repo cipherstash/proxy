@@ -2,7 +2,7 @@ use super::{maybe_json, maybe_jsonb, Name, NULL};
 use crate::eql;
 use crate::error::{Error, MappingError, ProtocolError};
 use crate::log::MAPPER;
-use crate::postgresql::data::from_sql;
+use crate::postgresql::data::{from_sql, to_type};
 use crate::postgresql::format_code::FormatCode;
 use crate::postgresql::protocol::BytesMutReadString;
 use crate::postgresql::Column;
@@ -56,23 +56,26 @@ impl Bind {
             .enumerate()
             .map(|(idx, (param, col))| match col {
                 Some(col) => {
-                    debug!(target = MAPPER, "Mapping param: {col:?}");
-                    let param_type = param_types
-                        .get(idx)
-                        .and_then(|oid| Type::from_oid(*oid as u32))
-                        .map_or(col.postgres_type.clone(), |t| t);
+                    let param_type = get_param_type(idx, &param_types, &col);
 
+                    debug!(target = MAPPER, "Mapping: {col:?}");
                     debug!(target = MAPPER, "Param Type: {param_type:?}");
 
-                    from_sql(param, &param_type).map_err(|_| MappingError::InvalidParameter {
-                        table: col.identifier.table.to_owned(),
-                        column: col.identifier.table.to_owned(),
-                        oid: col.postgres_type.oid(),
-                    })
+                    let plaintext = from_sql(param, &param_type)
+                        .map_err(|_| MappingError::InvalidParameter(col.to_owned()))?
+                        .map(|pt| {
+                            if param_type != col.postgres_type {
+                                to_type(pt, &col.postgres_type)
+                            } else {
+                                pt
+                            }
+                        });
+
+                    Ok(plaintext)
                 }
                 None => Ok(None),
             })
-            .collect::<Result<Vec<_>, _>>()?;
+            .collect::<Result<Vec<_>, Error>>()?;
         Ok(plaintexts)
     }
 
@@ -87,6 +90,13 @@ impl Bind {
         }
         Ok(())
     }
+}
+
+fn get_param_type(idx: usize, param_types: &[i32], col: &Column) -> Type {
+    param_types
+        .get(idx)
+        .and_then(|oid| Type::from_oid(*oid as u32))
+        .map_or_else(|| col.postgres_type.clone(), |t| t)
 }
 
 impl BindParam {

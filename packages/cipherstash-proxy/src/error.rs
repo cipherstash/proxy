@@ -3,6 +3,8 @@ use std::io;
 use thiserror::Error;
 use tokio::time::error::Elapsed;
 
+use crate::postgresql::Column;
+
 #[derive(Error, Debug)]
 pub enum Error {
     #[error("Connection closed after cancel request")]
@@ -56,12 +58,9 @@ pub enum ContextError {
 
 #[derive(Error, Debug)]
 pub enum MappingError {
-    #[error("Invalid parameter data for column {column} in table {table} (OID {oid})")]
-    InvalidParameter {
-        table: String,
-        column: String,
-        oid: u32,
-    },
+    #[error("Invalid parameter data for column {} in table {} (OID {})", _0.table_name(),
+    _0.column_name(), _0.oid())]
+    InvalidParameter(Column),
 
     #[error(transparent)]
     SqlParse(#[from] sqlparser::parser::ParserError),
@@ -168,11 +167,11 @@ pub enum ProtocolError {
     #[error("Unexpected null in string")]
     UnexpectedNull,
 
-    #[error("Unexpected target {target}")]
-    UnexpectedDescribeTarget { target: char },
+    #[error("Unexpected target {_0}")]
+    UnexpectedDescribeTarget(char),
 
-    #[error("Unexpected SASL authentication method {method}")]
-    UnexpectedSaslAuthenticationMethod { method: String },
+    #[error("Unexpected SASL authentication method {_0}")]
+    UnexpectedSaslAuthenticationMethod(String),
 
     #[error("Unexpected SSLRequest")]
     UnexpectedSSLRequest,

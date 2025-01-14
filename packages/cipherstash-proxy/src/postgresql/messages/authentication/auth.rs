@@ -79,10 +79,9 @@ impl Authentication {
 
         match mechanism {
             Some(m) => Ok(*m),
-            None => Err(ProtocolError::UnexpectedSaslAuthenticationMethod {
-                method: "None".to_string(),
+            None => {
+                Err(ProtocolError::UnexpectedSaslAuthenticationMethod("None".to_string()).into())
             }
-            .into()),
         }
     }
 
@@ -288,10 +287,7 @@ impl TryFrom<String> for SaslMechanism {
         match s.as_str() {
             SCRAM_SHA_256 => Ok(SaslMechanism::ScramSha256),
             SCRAM_SHA_256_PLUS => Ok(SaslMechanism::ScramSha256Plus),
-            s => Err(ProtocolError::UnexpectedSaslAuthenticationMethod {
-                method: s.to_owned(),
-            }
-            .into()),
+            s => Err(ProtocolError::UnexpectedSaslAuthenticationMethod(s.to_owned()).into()),
         }
     }
 }
