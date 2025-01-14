@@ -152,7 +152,6 @@ mod tests {
     use cipherstash_client::encryption::Plaintext;
     use cipherstash_config::{ColumnConfig, ColumnMode, ColumnType};
     use postgres_types::{ToSql, Type};
-    use std::ffi::CString;
 
     fn to_message(s: &[u8]) -> BytesMut {
         BytesMut::from(s)
@@ -228,7 +227,7 @@ mod tests {
     pub fn bind_param_to_plaintext_date() {
         log::init();
 
-        // Binary
+        // // Binary
         let val = NaiveDate::parse_from_str("2025-01-01", "%Y-%m-%d").unwrap();
 
         let mut bytes = BytesMut::new();
@@ -240,8 +239,7 @@ mod tests {
         assert_eq!(pt, Plaintext::NaiveDate(Some(val)));
 
         // Text
-        let s = CString::new("2025-01-01").unwrap();
-        let bytes = s.as_bytes_with_nul();
+        let bytes = "2025-01-01".as_bytes();
         let bytes = BytesMut::from(bytes);
 
         let param = BindParam::new(FormatCode::Text, bytes);
