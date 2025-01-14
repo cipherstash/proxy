@@ -1,4 +1,4 @@
-use super::context::{self, Column, Context};
+use super::context::{self, Context};
 use super::messages::bind::Bind;
 use super::messages::describe::Describe;
 use super::messages::execute::Execute;
@@ -10,6 +10,7 @@ use crate::encrypt::Encrypt;
 use crate::eql::Identifier;
 use crate::error::{EncryptError, Error, MappingError};
 use crate::log::MAPPER;
+use crate::postgresql::context::column::Column;
 use bytes::BytesMut;
 use eql_mapper::{self, EqlValue, TableColumn};
 use pg_escape::quote_literal;

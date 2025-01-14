@@ -1,3 +1,5 @@
+pub mod column;
+
 use super::{
     format_code::FormatCode,
     messages::{
@@ -5,9 +7,8 @@ use super::{
         Name,
     },
 };
-use crate::{log::CONTEXT, Identifier};
-use cipherstash_config::{ColumnConfig, ColumnType};
-use postgres_types::Type;
+use crate::log::CONTEXT;
+use column::Column;
 use std::{
     collections::HashMap,
     sync::{Arc, RwLock},
@@ -21,13 +22,6 @@ pub struct Context {
     pub describe: Arc<RwLock<Option<Describe>>>,
     pub execute: Arc<RwLock<Name>>,
     pub schema_changed: Arc<RwLock<bool>>,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct Column {
-    pub identifier: Identifier,
-    pub config: ColumnConfig,
-    pub postgres_type: Type,
 }
 
 ///
@@ -149,29 +143,6 @@ impl Context {
     }
 }
 
-impl Column {
-    pub fn new(identifier: Identifier, config: ColumnConfig) -> Column {
-        let postgres_type = column_type_to_postgres_type(&config.cast_type);
-        Column {
-            identifier,
-            config,
-            postgres_type,
-        }
-    }
-
-    pub fn table_name(&self) -> String {
-        self.identifier.table.to_owned()
-    }
-
-    pub fn column_name(&self) -> String {
-        self.identifier.column.to_owned()
-    }
-
-    pub fn oid(&self) -> u32 {
-        self.postgres_type.oid()
-    }
-}
-
 impl Statement {
     pub fn new(
         param_columns: Vec<Option<Column>>,
@@ -211,22 +182,6 @@ impl Portal {
             }
             _ => self.format_codes.clone(),
         }
-    }
-}
-
-fn column_type_to_postgres_type(col_type: &ColumnType) -> postgres_types::Type {
-    match col_type {
-        ColumnType::Boolean => postgres_types::Type::BOOL,
-        ColumnType::BigInt => postgres_types::Type::INT8,
-        ColumnType::BigUInt => postgres_types::Type::INT8,
-        ColumnType::Date => postgres_types::Type::DATE,
-        ColumnType::Decimal => postgres_types::Type::NUMERIC,
-        ColumnType::Float => postgres_types::Type::FLOAT8,
-        ColumnType::Int => postgres_types::Type::INT4,
-        ColumnType::SmallInt => postgres_types::Type::INT2,
-        ColumnType::Timestamp => postgres_types::Type::TIMESTAMPTZ,
-        ColumnType::Utf8Str => postgres_types::Type::TEXT,
-        ColumnType::JsonB => postgres_types::Type::JSONB,
     }
 }
 

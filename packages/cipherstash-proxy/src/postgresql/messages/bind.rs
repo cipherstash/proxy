@@ -2,10 +2,10 @@ use super::{maybe_json, maybe_jsonb, Name, NULL};
 use crate::eql;
 use crate::error::{Error, MappingError, ProtocolError};
 use crate::log::MAPPER;
+use crate::postgresql::context::column::Column;
 use crate::postgresql::data::{from_sql, to_type};
 use crate::postgresql::format_code::FormatCode;
 use crate::postgresql::protocol::BytesMutReadString;
-use crate::postgresql::Column;
 use crate::{SIZE_I16, SIZE_I32};
 use bytes::{Buf, BufMut, BytesMut};
 use cipherstash_client::encryption::Plaintext;
@@ -61,13 +61,15 @@ impl Bind {
                     debug!(target = MAPPER, "Mapping: {col:?}");
                     debug!(target = MAPPER, "Param Type: {param_type:?}");
 
+                    // Convert param bytes into a Plaintext wrapping a Value
+                    // If the param type is different, convert to the correct Plaintext variant
                     let plaintext = from_sql(param, &param_type)
                         .map_err(|_| MappingError::InvalidParameter(col.to_owned()))?
                         .map(|pt| {
-                            if param_type != col.postgres_type {
-                                to_type(pt, &col.postgres_type)
-                            } else {
+                            if col.is_param_type(&param_type) {
                                 pt
+                            } else {
+                                to_type(pt, &col.postgres_type)
                             }
                         });
 
@@ -92,6 +94,10 @@ impl Bind {
     }
 }
 
+///
+/// Param type is either provided with Parse message or the column type
+/// Column type is the cast of the encrypted column
+///
 fn get_param_type(idx: usize, param_types: &[i32], col: &Column) -> Type {
     param_types
         .get(idx)

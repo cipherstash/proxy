@@ -1,7 +1,7 @@
 use super::{FrontendCode, Name};
 use crate::{
     error::{Error, ProtocolError},
-    postgresql::{protocol::BytesMutReadString, Column},
+    postgresql::{context::column::Column, protocol::BytesMutReadString},
     SIZE_I16, SIZE_I32,
 };
 use bytes::{Buf, BufMut, BytesMut};

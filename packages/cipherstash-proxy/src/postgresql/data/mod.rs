@@ -1,7 +1,7 @@
 mod from_sql;
 mod to_sql;
 
-use crate::{error::Error, log::MAPPER};
+use crate::log::MAPPER;
 use cipherstash_client::encryption::Plaintext;
 pub use from_sql::from_sql;
 use postgres_types::Type;
