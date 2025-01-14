@@ -23,6 +23,7 @@ pub enum FrontendCode {
     Query,
     SASLInitialResponse,
     SASLResponse,
+    Sync,
     Unknown(char),
 }
 
@@ -70,7 +71,7 @@ impl From<char> for FrontendCode {
             'p' => FrontendCode::SASLInitialResponse, // Uses same char, here for completeness
             #[allow(unreachable_patterns)]
             'p' => FrontendCode::SASLResponse, // Uses same char, here for completeness
-            // 'p' => FrontendCode::SASLResponse,
+            'S' => FrontendCode::Sync,
             _ => FrontendCode::Unknown(code),
         }
     }
@@ -87,6 +88,7 @@ impl From<FrontendCode> for u8 {
             FrontendCode::Query => b'Q',
             FrontendCode::SASLInitialResponse => b'p',
             FrontendCode::SASLResponse => b'p',
+            FrontendCode::Sync => b'S',
             FrontendCode::Unknown(c) => c as u8,
         }
     }
@@ -103,6 +105,7 @@ impl From<FrontendCode> for char {
             FrontendCode::Query => 'Q',
             FrontendCode::SASLInitialResponse => 'p',
             FrontendCode::SASLResponse => 'p',
+            FrontendCode::Sync => 'S',
             FrontendCode::Unknown(c) => c,
         }
     }

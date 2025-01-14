@@ -132,6 +132,10 @@ impl Encrypt {
         let encrypt_config = self.encrypt_config.load();
         encrypt_config.get(identifier).cloned()
     }
+
+    pub async fn reload_schema(&self) {
+        self.schema.reload().await
+    }
 }
 
 async fn init_cipher(config: &TandemConfig) -> Result<ScopedCipher, Error> {

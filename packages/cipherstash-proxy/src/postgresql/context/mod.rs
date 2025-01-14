@@ -20,6 +20,7 @@ pub struct Context {
     pub portals: Arc<RwLock<HashMap<Name, Arc<Portal>>>>,
     pub describe: Arc<RwLock<Option<Describe>>>,
     pub execute: Arc<RwLock<Name>>,
+    pub schema_changed: Arc<RwLock<bool>>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -57,6 +58,7 @@ impl Context {
             portals: Arc::new(RwLock::new(HashMap::new())),
             describe: Arc::new(RwLock::from(None)),
             execute: Arc::new(RwLock::from(Name::unnamed())),
+            schema_changed: Arc::new(RwLock::from(false)),
         }
     }
 
@@ -135,6 +137,15 @@ impl Context {
             debug!(target: CONTEXT, "Execute: {name:?}");
             self.get_portal(&name)
         })?
+    }
+
+    pub fn set_schema_changed(&self) {
+        debug!(target: CONTEXT, "Schema changed");
+        let _ = self.schema_changed.write().map(|mut guard| *guard = true);
+    }
+
+    pub fn schema_changed(&self) -> bool {
+        self.schema_changed.read().ok().map_or(false, |s| *s)
     }
 }
 

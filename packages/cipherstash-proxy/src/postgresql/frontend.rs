@@ -100,6 +100,11 @@ where
                     bytes = b;
                 }
             }
+            Code::Sync => {
+                if self.context.schema_changed() {
+                    self.encrypt.reload_schema().await;
+                }
+            }
             _code => {}
         }
 
@@ -127,15 +132,19 @@ where
             .try_with_sql(&query.statement)?
             .parse_statement()?;
 
-        info!(target = MAPPER, "Statement {:?}", statement);
+        if eql_mapper::changes_schema(&statement) {
+            debug!(target: MAPPER, "Changing schema");
+            self.context.set_schema_changed();
+        }
 
+        // info!(target = MAPPER, "Statement {:?}", statement);
         // if eql_mapper::requires_type_check(&statement) {
         //     let typed_statement = eql_mapper::type_check(self.encrypt.schema.load(), &statement)
         //         .map_err(|e| {
         //             info!("{e:?}");
         //             MappingError::StatementCouldNotBeTypeChecked
         //         })?;
-
+        //
         //     info!(target = MAPPER, "typed_statement {:?}", typed_statement);
         //     info!(target = MAPPER, "Literals {:?}", typed_statement.literals);
         // }
@@ -177,6 +186,11 @@ where
         let statement = Parser::new(&DIALECT)
             .try_with_sql(&message.statement)?
             .parse_statement()?;
+
+        if eql_mapper::changes_schema(&statement) {
+            debug!(target: MAPPER, "Changing schema");
+            self.context.set_schema_changed();
+        }
 
         if eql_mapper::requires_type_check(&statement) {
             let typed_statement = eql_mapper::type_check(self.encrypt.schema.load(), &statement)

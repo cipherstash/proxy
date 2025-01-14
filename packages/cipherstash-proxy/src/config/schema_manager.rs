@@ -11,8 +11,9 @@ use tracing::{debug, info, warn};
 
 #[derive(Clone, Debug)]
 pub struct SchemaManager {
-    _reload_handle: Arc<JoinHandle<()>>,
+    config: DatabaseConfig,
     schema: Arc<ArcSwap<Schema>>,
+    _reload_handle: Arc<JoinHandle<()>>,
 }
 
 impl SchemaManager {
@@ -23,6 +24,19 @@ impl SchemaManager {
 
     pub fn load(&self) -> Arc<Schema> {
         self.schema.load().clone()
+    }
+
+    pub async fn reload(&self) {
+        match load_schema_with_retry(&self.config).await {
+            Ok(reloaded) => {
+                debug!(target = SCHEMA, "Reloaded database schema");
+                self.schema.swap(Arc::new(reloaded));
+            }
+            Err(e) => {
+                warn!("Error reloading Encrypt configuration");
+                warn!("{e}");
+            }
+        };
     }
 }
 
@@ -61,6 +75,7 @@ async fn init_reloader(config: DatabaseConfig) -> Result<SchemaManager, Error> {
     });
 
     Ok(SchemaManager {
+        config,
         schema,
         _reload_handle: Arc::new(reload_handle),
     })

@@ -70,7 +70,6 @@ where
             }
             BackendCode::ParameterDescription => {
                 if let Some(bytes) = self.parameter_description_handler(&bytes).await? {
-                    debug!(target: MAPPER, "Rewrite ParamDescription");
                     self.write(bytes).await?;
                 } else {
                     self.write(bytes).await?;
@@ -78,7 +77,6 @@ where
             }
             BackendCode::RowDescription => {
                 if let Some(bytes) = self.row_description_handler(&bytes).await? {
-                    debug!(target: MAPPER, "Rewrite ParamDescription");
                     self.write(bytes).await?;
                 } else {
                     self.write(bytes).await?;
@@ -140,32 +138,44 @@ where
     async fn flush(&mut self) -> Result<(), Error> {
         let rows: Vec<DataRow> = self.buffer.drain().await.into_iter().collect();
 
-        let row_len = match rows.first() {
+        // row_len
+        let result_column_count = match rows.first() {
             Some(row) => row.column_count(),
             None => return Ok(()),
         };
 
-        let format_codes = self
+        // Result Column Format Codes are passed with the Bind message
+        // Bind is turned into a Portal
+        // We pull the format codes from the portal
+        // If no portal, assume Text for all columns
+        let result_column_format_codes = self
             .context
             .get_portal_from_execute()
-            .map_or(vec![FormatCode::Text; row_len], |p| p.format_codes(row_len));
+            .map_or(vec![FormatCode::Text; result_column_count], |p| {
+                p.format_codes(result_column_count)
+            });
 
+        // Each row is converted into Vec<Option<CipherText>>
         let ciphertexts: Vec<Option<Ciphertext>> = rows
             .iter()
             .map(|row| row.to_ciphertext())
             .flatten_ok()
             .collect::<Result<Vec<_>, _>>()?;
 
+        // Vec<Option<CipherText>> -> Vec<Option<Plaintext>>
         let plaintexts = self.encrypt.decrypt(ciphertexts).await?;
 
-        debug!(target: MAPPER, "Plaintexts: {plaintexts:?}");
+        // debug!(target: MAPPER, "Plaintexts: {plaintexts:?}");
 
-        let rows = plaintexts.chunks(row_len).zip(rows);
+        // Chunk rows into sets of columns
+        let rows = plaintexts.chunks(result_column_count).zip(rows);
 
+        // Stitch Plaintext back into Rows encoded with the appropriate Format Code
+        // Each chunk is written to the client
         for (chunk, mut row) in rows {
             let data = chunk
                 .iter()
-                .zip(format_codes.iter())
+                .zip(result_column_format_codes.iter())
                 .map(|(plaintext, format_code)| match plaintext {
                     Some(plaintext) => to_sql(plaintext, format_code),
                     None => Ok(None),
@@ -231,6 +241,7 @@ where
 
         if description.requires_rewrite() {
             debug!(target: MAPPER, "Rewrite RowDescription");
+            debug!(target: MAPPER, "{description:?}");
             let bytes = BytesMut::try_from(description)?;
             Ok(Some(bytes))
         } else {
