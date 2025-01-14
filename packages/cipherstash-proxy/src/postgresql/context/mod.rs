@@ -170,6 +170,25 @@ impl Portal {
             statement,
         }
     }
+
+    // FormatCodes should not be None at this point
+    // FormatCodes will be:
+    //  - empty, in which case assume Text
+    //  - single value, in which case use this for all columns
+    //  - multiple values, in which case use the value for each column
+    pub fn format_codes(&self, row_len: usize) -> Vec<FormatCode> {
+        match self.format_codes.len() {
+            0 => vec![FormatCode::Text; row_len],
+            1 => {
+                let format_code = match self.format_codes.first() {
+                    Some(code) => *code,
+                    None => FormatCode::Text,
+                };
+                vec![format_code; row_len]
+            }
+            _ => self.format_codes.clone(),
+        }
+    }
 }
 
 fn column_type_to_postgres_type(col_type: &ColumnType) -> postgres_types::Type {

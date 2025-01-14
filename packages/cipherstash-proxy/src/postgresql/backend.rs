@@ -6,7 +6,7 @@ use super::messages::row_description::RowDescription;
 use super::messages::BackendCode;
 use crate::encrypt::Encrypt;
 use crate::eql::Ciphertext;
-use crate::error::{ContextError, Error};
+use crate::error::Error;
 use crate::log::{DEVELOPMENT, MAPPER};
 use crate::postgresql::format_code::FormatCode;
 use crate::postgresql::messages::data_row::DataRow;
@@ -145,27 +145,10 @@ where
             None => return Ok(()),
         };
 
-        let portal = self
+        let format_codes = self
             .context
             .get_portal_from_execute()
-            .ok_or(ContextError::UnknownPortal)?;
-
-        // FormatCodes should not be None at this point
-        // FormatCodes will be:
-        //  - empty, in which case assume Text
-        //  - single value, in which case use this for all columns
-        //  - multiple values, in which case use the value for each column
-        let format_codes = match portal.format_codes.len() {
-            0 => &vec![FormatCode::Text; row_len],
-            1 => {
-                let format_code = match portal.format_codes.first() {
-                    Some(code) => *code,
-                    None => FormatCode::Text,
-                };
-                &vec![format_code; row_len]
-            }
-            _ => &portal.format_codes,
-        };
+            .map_or(vec![FormatCode::Text; row_len], |p| p.format_codes(row_len));
 
         let ciphertexts: Vec<Option<Ciphertext>> = rows
             .iter()
@@ -183,12 +166,9 @@ where
             let data = chunk
                 .iter()
                 .zip(format_codes.iter())
-                .map(|(plaintext, format_code)| {
-                    // debug!(target: MAPPER, "format_code: {format_code:?}");
-                    match plaintext {
-                        Some(plaintext) => to_sql(plaintext, format_code),
-                        None => Ok(None),
-                    }
+                .map(|(plaintext, format_code)| match plaintext {
+                    Some(plaintext) => to_sql(plaintext, format_code),
+                    None => Ok(None),
                 })
                 .collect::<Result<Vec<_>, _>>()?;
 
