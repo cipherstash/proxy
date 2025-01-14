@@ -53,7 +53,7 @@ impl DataColumn {
     pub fn maybe_ciphertext(&self) -> bool {
         self.bytes
             .as_ref()
-            .map_or(false, |b| maybe_jsonb(b) || maybe_json(b))
+            .is_some_and(|b| maybe_jsonb(b) || maybe_json(b))
     }
 
     pub fn rewrite(&mut self, b: &[u8]) {

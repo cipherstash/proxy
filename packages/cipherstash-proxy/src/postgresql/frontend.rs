@@ -228,9 +228,10 @@ where
 
         if let Some(statement) = self.context.get_statement(&bind.prepared_statement) {
             let param_columns = &statement.param_columns;
-            let plaintexts = bind.to_plaintext(&param_columns, &statement.postgres_param_types)?;
 
-            let encrypted = self.encrypt.encrypt(plaintexts, &param_columns).await?;
+            let plaintexts = bind.to_plaintext(param_columns, &statement.postgres_param_types)?;
+
+            let encrypted = self.encrypt.encrypt(plaintexts, param_columns).await?;
 
             bind.rewrite(encrypted)?;
 

@@ -1,7 +1,7 @@
 use crate::{
     error::{Error, MappingError},
     log::MAPPER,
-    postgresql::{format_code::FormatCode, messages::bind::BindParam, Column},
+    postgresql::{format_code::FormatCode, messages::bind::BindParam},
 };
 use bytes::BytesMut;
 use chrono::NaiveDate;
@@ -36,7 +36,7 @@ fn text_from_sql(val: &str, postgres_type: &Type) -> Result<Plaintext, Error> {
             Ok(Plaintext::Boolean(Some(val)))
         }
         &Type::DATE => {
-            let val = NaiveDate::parse_from_str(&val, "%Y-%m-%d")?;
+            let val = NaiveDate::parse_from_str(val, "%Y-%m-%d")?;
             Ok(Plaintext::NaiveDate(Some(val)))
         }
         &Type::FLOAT8 => {
@@ -56,7 +56,7 @@ fn text_from_sql(val: &str, postgres_type: &Type) -> Result<Plaintext, Error> {
             Ok(Plaintext::BigInt(Some(val)))
         }
         &Type::NUMERIC => {
-            let val = Decimal::from_str(&val)?;
+            let val = Decimal::from_str(val)?;
             Ok(Plaintext::Decimal(Some(val)))
         }
         &Type::TEXT => {
@@ -151,9 +151,8 @@ mod tests {
     use chrono::NaiveDate;
     use cipherstash_client::encryption::Plaintext;
     use cipherstash_config::{ColumnConfig, ColumnMode, ColumnType};
-    use postgres_types::{FromSql, ToSql, Type};
+    use postgres_types::{ToSql, Type};
     use std::ffi::CString;
-    use tracing::debug;
 
     fn to_message(s: &[u8]) -> BytesMut {
         BytesMut::from(s)

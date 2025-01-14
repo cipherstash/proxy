@@ -1,7 +1,7 @@
 use super::{maybe_json, maybe_jsonb, Name, NULL};
 use crate::eql;
 use crate::error::{Error, MappingError, ProtocolError};
-use crate::log::{DEVELOPMENT, MAPPER};
+use crate::log::MAPPER;
 use crate::postgresql::data::from_sql;
 use crate::postgresql::format_code::FormatCode;
 use crate::postgresql::protocol::BytesMutReadString;
@@ -13,7 +13,7 @@ use postgres_types::Type;
 use std::fmt::{self, Display, Formatter};
 use std::io::Cursor;
 use std::{convert::TryFrom, ffi::CString};
-use tracing::{debug, warn};
+use tracing::debug;
 
 /// Bind (B) message.
 /// See: <https://www.postgresql.org/docs/current/protocol-message-formats.html>
@@ -46,8 +46,8 @@ impl Bind {
 
     pub fn to_plaintext(
         &self,
-        param_columns: &Vec<Option<Column>>,
-        param_types: &Vec<i32>,
+        param_columns: &[Option<Column>],
+        param_types: &[i32],
     ) -> Result<Vec<Option<Plaintext>>, Error> {
         let plaintexts = self
             .param_values
@@ -328,7 +328,6 @@ mod tests {
         postgresql::{format_code::FormatCode, messages::bind::Bind},
     };
     use bytes::BytesMut;
-    use tracing::info;
 
     fn to_message(s: &[u8]) -> BytesMut {
         BytesMut::from(s)

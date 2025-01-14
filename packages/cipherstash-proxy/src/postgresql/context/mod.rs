@@ -119,7 +119,7 @@ impl Context {
         self.portals
             .read()
             .ok()
-            .map(|guard| guard.get(name).map(|portal| portal.clone()))?
+            .map(|guard| guard.get(name).cloned())?
     }
 
     pub fn get_portal_statement(&self, name: &Name) -> Option<Arc<Statement>> {
@@ -195,16 +195,12 @@ mod tests {
         log,
         postgresql::messages::{describe::Target, Name},
     };
-    use bytes::BytesMut;
-    use tracing::info;
 
-    impl Default for Statement {
-        fn default() -> Self {
-            Statement {
-                param_columns: vec![],
-                projection_columns: vec![],
-                postgres_param_types: vec![],
-            }
+    fn statement() -> Statement {
+        Statement {
+            param_columns: vec![],
+            projection_columns: vec![],
+            postgres_param_types: vec![],
         }
     }
 
@@ -215,7 +211,7 @@ mod tests {
 
         let name = Name("name".to_string());
 
-        context.add_statement(name.clone(), Statement::default());
+        context.add_statement(name.clone(), statement());
 
         let statement = context.get_statement(&name).unwrap();
 
@@ -240,7 +236,7 @@ mod tests {
         let portal_name = Name("portal".to_string());
 
         // Add statement to context
-        context.add_statement(statement_name.clone(), Statement::default());
+        context.add_statement(statement_name.clone(), statement());
 
         // Get statement from context
         let statement = context.get_statement(&statement_name).unwrap();

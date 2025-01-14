@@ -23,13 +23,11 @@ impl Parse {
         self.dirty
     }
 
-    pub fn rewrite_param_types(&mut self, columns: &Vec<Option<Column>>) {
+    pub fn rewrite_param_types(&mut self, columns: &[Option<Column>]) {
         for (idx, col) in columns.iter().enumerate() {
-            if let Some(_) = self.param_types.get(idx) {
-                if let Some(_) = col {
-                    self.param_types[idx] = Type::JSONB.oid() as i32;
-                    self.dirty = true;
-                }
+            if self.param_types.get(idx).is_some() && col.is_some() {
+                self.param_types[idx] = Type::JSONB.oid() as i32;
+                self.dirty = true;
             }
         }
     }
@@ -108,15 +106,11 @@ impl TryFrom<Parse> for BytesMut {
 mod tests {
     use crate::{
         log,
-        postgresql::{
-            messages::{describe::Target, parse::Parse, Name},
-            Column,
-        },
+        postgresql::{messages::parse::Parse, Column},
         Identifier,
     };
     use bytes::BytesMut;
     use cipherstash_config::{ColumnConfig, ColumnType};
-    use tracing::{debug, info};
 
     fn to_message(s: &[u8]) -> BytesMut {
         BytesMut::from(s)
@@ -131,7 +125,7 @@ mod tests {
 
         let expected = bytes.clone();
 
-        let mut parse = Parse::try_from(&bytes).expect("ok");
+        let parse = Parse::try_from(&bytes).expect("ok");
 
         let bytes = BytesMut::try_from(parse).expect("ok");
         assert_eq!(bytes, expected);
@@ -143,8 +137,6 @@ mod tests {
         let bytes = to_message(
              b"P\0\0\0J\0INSERT INTO encrypted (id, encrypted_int2) VALUES ($1, $2)\0\0\x02\0\0\0\x15\0\0\0\x15"
         );
-
-        let expected = bytes.clone();
 
         let mut parse = Parse::try_from(&bytes).expect("ok");
 
