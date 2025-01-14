@@ -129,13 +129,16 @@ where
 
         info!(target = MAPPER, "Statement {:?}", statement);
 
-        if eql_mapper::requires_type_check(&statement) {
-            let typed_statement = eql_mapper::type_check(self.encrypt.schema.load(), &statement)
-                .map_err(|_| MappingError::StatementCouldNotBeTypeChecked)?;
+        // if eql_mapper::requires_type_check(&statement) {
+        //     let typed_statement = eql_mapper::type_check(self.encrypt.schema.load(), &statement)
+        //         .map_err(|e| {
+        //             info!("{e:?}");
+        //             MappingError::StatementCouldNotBeTypeChecked
+        //         })?;
 
-            info!(target = MAPPER, "typed_statement {:?}", typed_statement);
-            info!(target = MAPPER, "Literals {:?}", typed_statement.literals);
-        }
+        //     info!(target = MAPPER, "typed_statement {:?}", typed_statement);
+        //     info!(target = MAPPER, "Literals {:?}", typed_statement.literals);
+        // }
 
         Ok(())
     }
