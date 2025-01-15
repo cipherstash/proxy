@@ -6,9 +6,10 @@ use super::{
         describe::{Describe, Target},
         Name,
     },
+    Column,
 };
 use crate::log::CONTEXT;
-use column::Column;
+use eql_mapper::{Schema, TableResolver};
 use std::{
     collections::HashMap,
     sync::{Arc, RwLock},
@@ -22,6 +23,7 @@ pub struct Context {
     pub describe: Arc<RwLock<Option<Describe>>>,
     pub execute: Arc<RwLock<Name>>,
     pub schema_changed: Arc<RwLock<bool>>,
+    pub table_resolver: Arc<TableResolver>,
 }
 
 ///
@@ -46,13 +48,14 @@ pub struct Portal {
 }
 
 impl Context {
-    pub fn new() -> Context {
+    pub fn new(schema: Arc<Schema>) -> Context {
         Context {
             statements: Arc::new(RwLock::new(HashMap::new())),
             portals: Arc::new(RwLock::new(HashMap::new())),
             describe: Arc::new(RwLock::from(None)),
             execute: Arc::new(RwLock::from(Name::unnamed())),
             schema_changed: Arc::new(RwLock::from(false)),
+            table_resolver: Arc::new(TableResolver::new_editable(schema)),
         }
     }
 
@@ -187,6 +190,10 @@ impl Portal {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
+    use eql_mapper::Schema;
+
     use super::{Context, Describe, Portal, Statement};
     use crate::{
         log,
@@ -204,7 +211,10 @@ mod tests {
     #[test]
     pub fn test_get_statement_from_describe() {
         log::init();
-        let mut context = Context::new();
+
+        let schema = Arc::new(Schema::new("public"));
+
+        let mut context = Context::new(schema);
 
         let name = Name("name".to_string());
 
@@ -227,7 +237,9 @@ mod tests {
     pub fn test_get_statement_from_execute() {
         log::init();
 
-        let mut context = Context::new();
+        let schema = Arc::new(Schema::new("public"));
+
+        let mut context = Context::new(schema);
 
         let statement_name = Name("statement".to_string());
         let portal_name = Name("portal".to_string());

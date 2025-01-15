@@ -27,11 +27,11 @@ impl<'ast> InferType<'ast, Insert> for TypeInferencer<'ast> {
 
         let table_columns = if columns.is_empty() {
             // When no columns are specified, the source must unify with a projection of ALL table columns.
-            self.schema.resolve_table_columns(table_name)?
+            self.table_resolver.resolve_table_columns(table_name)?
         } else {
             columns
                 .iter()
-                .map(|c| self.schema.resolve_table_column(table_name, c))
+                .map(|c| self.table_resolver.resolve_table_column(table_name, c))
                 .collect::<Result<Vec<_>, _>>()?
         };
 

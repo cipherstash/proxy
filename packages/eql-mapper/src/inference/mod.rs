@@ -27,7 +27,7 @@ use sqlparser::ast::{
 };
 use sqltk::{into_control_flow, Break, Semantic, Visitable, Visitor};
 
-use crate::{Schema, ScopeTracker};
+use crate::{ScopeTracker, TableResolver};
 
 pub(crate) use node_key::*;
 pub(crate) use registry::*;
@@ -51,7 +51,7 @@ pub(crate) use type_variables::*;
 #[derive(Debug)]
 pub struct TypeInferencer<'ast> {
     /// A snapshot of the the database schema - used by `TypeInferencer`'s [`InferType`] impls.
-    schema: Arc<Schema>,
+    table_resolver: Arc<TableResolver>,
 
     // The lexical scope - for resolving projection columns & expanding wildcards.
     scope_tracker: Rc<RefCell<ScopeTracker<'ast>>>,
@@ -75,13 +75,13 @@ pub struct TypeInferencer<'ast> {
 impl<'ast> TypeInferencer<'ast> {
     /// Create a new `TypeInferencer`.
     pub fn new(
-        schema: impl Into<Arc<Schema>>,
+        table_resolver: impl Into<Arc<TableResolver>>,
         scope: impl Into<Rc<RefCell<ScopeTracker<'ast>>>>,
         reg: impl Into<Rc<RefCell<TypeRegistry<'ast>>>>,
         unifier: impl Into<Rc<RefCell<unifier::Unifier<'ast>>>>,
     ) -> Self {
         Self {
-            schema: schema.into(),
+            table_resolver: table_resolver.into(),
             scope_tracker: scope.into(),
             reg: reg.into(),
             unifier: unifier.into(),

@@ -56,7 +56,7 @@ impl Bind {
             .enumerate()
             .map(|(idx, (param, col))| match col {
                 Some(col) => {
-                    let param_type = get_param_type(idx, &param_types, &col);
+                    let param_type = get_param_type(idx, param_types, col);
 
                     debug!(target = MAPPER, "Mapping: {col:?}");
                     debug!(target = MAPPER, "Param Type: {param_type:?}");

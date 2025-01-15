@@ -25,17 +25,22 @@ mod test {
     use super::type_check;
     use crate::col;
     use crate::projection;
-    use crate::{
-        schema, Dep, EqlValue, NativeValue, Projection, ProjectionColumn, TableColumn, Value,
-    };
+    use crate::Schema;
+    use crate::TableResolver;
+    use crate::{schema, EqlValue, NativeValue, Projection, ProjectionColumn, TableColumn, Value};
     use pretty_assertions::assert_eq;
     use sqlparser::ast::{self as ast};
     use std::collections::HashMap;
+    use std::sync::Arc;
+
+    fn resolver(schema: Schema) -> Arc<TableResolver> {
+        Arc::new(TableResolver::new_fixed(schema.into()))
+    }
 
     #[test]
     fn basic() {
         let _ = tracing_subscriber::fmt::try_init();
-        let schema = Dep::new(schema! {
+        let schema = resolver(schema! {
             tables: {
                 users: {
                     id (PK),
@@ -47,7 +52,7 @@ mod test {
 
         let statement = parse("select email from users");
 
-        match type_check(&schema, &statement) {
+        match type_check(schema, &statement) {
             Ok(typed) => {
                 assert_eq!(
                     typed.projection,
@@ -61,7 +66,7 @@ mod test {
     #[test]
     fn basic_with_value() {
         let _ = tracing_subscriber::fmt::try_init();
-        let schema = Dep::new(schema! {
+        let schema = resolver(schema! {
             tables: {
                 users: {
                     id (PK),
@@ -73,7 +78,7 @@ mod test {
 
         let statement = parse("select email from users WHERE email = 'hello@cipherstash.com'");
 
-        match type_check(&schema, &statement) {
+        match type_check(schema, &statement) {
             Ok(typed) => {
                 assert_eq!(
                     typed.projection,
@@ -97,7 +102,7 @@ mod test {
     #[test]
     fn insert_with_value() {
         let _ = tracing_subscriber::fmt::try_init();
-        let schema = Dep::new(schema! {
+        let schema = resolver(schema! {
             tables: {
                 users: {
                     id (PK),
@@ -109,7 +114,7 @@ mod test {
 
         let statement = parse("INSERT INTO users (id, email) VALUES (42, 'hello@cipherstash.com')");
 
-        match type_check(&schema, &statement) {
+        match type_check(schema, &statement) {
             Ok(typed) => {
                 eprintln!("{:#?}", &typed.literals);
                 assert!(typed.literals.contains(&(
@@ -129,7 +134,7 @@ mod test {
     #[test]
     fn insert_with_values_no_explicit_columns() {
         let _ = tracing_subscriber::fmt::try_init();
-        let schema = Dep::new(schema! {
+        let schema = resolver(schema! {
             tables: {
                 users: {
                     id (PK),
@@ -141,7 +146,7 @@ mod test {
 
         let statement = parse("INSERT INTO users VALUES (42, 'hello@cipherstash.com', 'James')");
 
-        match type_check(&schema, &statement) {
+        match type_check(schema, &statement) {
             Ok(typed) => {
                 eprintln!("{:#?}", &typed.literals);
                 assert!(typed.literals.contains(&(
@@ -161,7 +166,7 @@ mod test {
     #[test]
     fn insert_with_values_no_explicit_columns_but_has_default() {
         let _ = tracing_subscriber::fmt::try_init();
-        let schema = Dep::new(schema! {
+        let schema = resolver(schema! {
             tables: {
                 users: {
                     id (PK),
@@ -174,7 +179,7 @@ mod test {
         let statement =
             parse("INSERT INTO users VALUES (default, 'hello@cipherstash.com', 'James')");
 
-        match type_check(&schema, &statement) {
+        match type_check(schema, &statement) {
             Ok(typed) => {
                 eprintln!("{:#?}", &typed.literals);
                 assert!(typed.literals.contains(&(
@@ -194,7 +199,7 @@ mod test {
     #[test]
     fn basic_with_placeholder() {
         let _ = tracing_subscriber::fmt::try_init();
-        let schema = Dep::new(schema! {
+        let schema = resolver(schema! {
             tables: {
                 users: {
                     id (PK),
@@ -206,7 +211,7 @@ mod test {
 
         let statement = parse("select email from users WHERE id = $1");
 
-        match type_check(&schema, &statement) {
+        match type_check(schema, &statement) {
             Ok(typed) => {
                 let v = Value::Native(NativeValue(Some(TableColumn {
                     table: id("users"),
@@ -229,7 +234,7 @@ mod test {
     #[test]
     fn select_with_multiple_placeholder() {
         let _ = tracing_subscriber::fmt::try_init();
-        let schema = Dep::new(schema! {
+        let schema = resolver(schema! {
             tables: {
                 users: {
                     id (PK),
@@ -242,7 +247,7 @@ mod test {
         let statement =
             parse("select id, email, first_name from users WHERE email = $1 AND first_name = $2");
 
-        match type_check(&schema, &statement) {
+        match type_check(schema, &statement) {
             Ok(typed) => {
                 let a = Value::Native(NativeValue(Some(TableColumn {
                     table: id("users"),
@@ -272,7 +277,7 @@ mod test {
     #[test]
     fn select_with_multiple_instances_of_placeholder() {
         let _ = tracing_subscriber::fmt::try_init();
-        let schema = Dep::new(schema! {
+        let schema = resolver(schema! {
             tables: {
                 users: {
                     id (PK),
@@ -285,7 +290,7 @@ mod test {
         let statement =
             parse("select id, email, first_name from users WHERE email = $1 OR first_name = $1");
 
-        match type_check(&schema, &statement) {
+        match type_check(schema, &statement) {
             Ok(typed) => {
                 let a = Value::Native(NativeValue(Some(TableColumn {
                     table: id("users"),
@@ -310,7 +315,7 @@ mod test {
     #[test]
     fn select_columns_from_multiple_tables() {
         let _ = tracing_subscriber::fmt::try_init();
-        let schema = Dep::new(schema! {
+        let schema = resolver(schema! {
             tables: {
                 users: {
                     id (PK),
@@ -339,7 +344,7 @@ mod test {
             "#,
         );
 
-        match type_check(&schema, &statement) {
+        match type_check(schema, &statement) {
             Ok(typed) => {
                 assert_eq!(
                     typed.projection,
@@ -353,7 +358,7 @@ mod test {
     #[test]
     fn select_columns_from_subquery() {
         let _ = tracing_subscriber::fmt::try_init();
-        let schema = Dep::new(schema! {
+        let schema = resolver(schema! {
             tables: {
                 users: {
                     id,
@@ -396,7 +401,7 @@ mod test {
             "#,
         );
 
-        let typed = match type_check(&schema, &statement) {
+        let typed = match type_check(schema, &statement) {
             Ok(typed) => typed,
             Err(err) => panic!("{}", err),
         };
@@ -414,7 +419,7 @@ mod test {
     #[test]
     fn wildcard_expansion() {
         let _ = tracing_subscriber::fmt::try_init();
-        let schema = Dep::new(schema! {
+        let schema = resolver(schema! {
             tables: {
                 users: {
                     id,
@@ -439,7 +444,7 @@ mod test {
             "#,
         );
 
-        let typed = match type_check(&schema, &statement) {
+        let typed = match type_check(schema, &statement) {
             Ok(typed) => typed,
             Err(err) => panic!("type check failed: {:#?}", err),
         };
@@ -458,7 +463,7 @@ mod test {
 
     #[test]
     fn correlated_subquery() {
-        let schema = Dep::new(schema! {
+        let schema = resolver(schema! {
             tables: {
                 employees: {
                     id,
@@ -482,7 +487,7 @@ mod test {
             "#,
         );
 
-        let typed = match type_check(&schema, &statement) {
+        let typed = match type_check(schema, &statement) {
             Ok(typed) => typed,
             Err(err) => panic!("type check failed: {:#?}", err),
         };
@@ -501,7 +506,7 @@ mod test {
     fn window_function() {
         let _ = tracing_subscriber::fmt::try_init();
 
-        let schema = Dep::new(schema! {
+        let schema = resolver(schema! {
             tables: {
                 employees: {
                     id,
@@ -526,7 +531,7 @@ mod test {
             "#,
         );
 
-        let typed = match type_check(&schema, &statement) {
+        let typed = match type_check(schema, &statement) {
             Ok(typed) => typed,
             Err(err) => panic!("type check failed: {:#?}", err),
         };
@@ -547,7 +552,7 @@ mod test {
     fn window_function_with_forward_reference() {
         let _ = tracing_subscriber::fmt::try_init();
 
-        let schema = Dep::new(schema! {
+        let schema = resolver(schema! {
             tables: {
                 employees: {
                     id,
@@ -573,7 +578,7 @@ mod test {
             "#,
         );
 
-        let typed = match type_check(&schema, &statement) {
+        let typed = match type_check(schema, &statement) {
             Ok(typed) => typed,
             Err(err) => panic!("type check failed: {:#?}", err),
         };
@@ -594,7 +599,7 @@ mod test {
     fn common_table_expressions() {
         let _ = tracing_subscriber::fmt::try_init();
 
-        let schema = Dep::new(schema! {
+        let schema = resolver(schema! {
             tables: {
                 employees: {
                     id,
@@ -623,7 +628,7 @@ mod test {
             "#,
         );
 
-        let typed = match type_check(&schema, &statement) {
+        let typed = match type_check(schema, &statement) {
             Ok(typed) => typed,
             Err(err) => {
                 // eprintln!("Error: {}", err, err.source());
@@ -647,7 +652,7 @@ mod test {
     fn aggregates() {
         let _ = tracing_subscriber::fmt::try_init();
 
-        let schema = Dep::new(schema! {
+        let schema = resolver(schema! {
             tables: {
                 employees: {
                     id,
@@ -668,7 +673,7 @@ mod test {
             "#,
         );
 
-        let typed = match type_check(&schema, &statement) {
+        let typed = match type_check(schema, &statement) {
             Ok(typed) => typed,
             Err(err) => panic!("type check failed: {:#?}", err),
         };
@@ -686,7 +691,7 @@ mod test {
     fn insert() {
         let _ = tracing_subscriber::fmt::try_init();
 
-        let schema = Dep::new(schema! {
+        let schema = resolver(schema! {
             tables: {
                 employees: {
                     id,
@@ -705,7 +710,7 @@ mod test {
             "#,
         );
 
-        let typed = match type_check(&schema, &statement) {
+        let typed = match type_check(schema, &statement) {
             Ok(typed) => typed,
             Err(err) => panic!("type check failed: {:#?}", err),
         };
@@ -717,7 +722,7 @@ mod test {
     fn insert_with_returning_clause() {
         let _ = tracing_subscriber::fmt::try_init();
 
-        let schema = Dep::new(schema! {
+        let schema = resolver(schema! {
             tables: {
                 employees: {
                     id,
@@ -737,7 +742,7 @@ mod test {
             "#,
         );
 
-        let typed = match type_check(&schema, &statement) {
+        let typed = match type_check(schema, &statement) {
             Ok(typed) => typed,
             Err(err) => panic!("type check failed: {:#?}", err),
         };
@@ -758,7 +763,7 @@ mod test {
     fn update() {
         let _ = tracing_subscriber::fmt::try_init();
 
-        let schema = Dep::new(schema! {
+        let schema = resolver(schema! {
             tables: {
                 employees: {
                     id,
@@ -776,7 +781,7 @@ mod test {
             "#,
         );
 
-        let typed = match type_check(&schema, &statement) {
+        let typed = match type_check(schema, &statement) {
             Ok(typed) => typed,
             Err(err) => panic!("type check failed: {:#?}", err),
         };
@@ -788,7 +793,7 @@ mod test {
     fn update_with_returning_clause() {
         let _ = tracing_subscriber::fmt::try_init();
 
-        let schema = Dep::new(schema! {
+        let schema = resolver(schema! {
             tables: {
                 employees: {
                     id,
@@ -806,7 +811,7 @@ mod test {
             "#,
         );
 
-        let typed = match type_check(&schema, &statement) {
+        let typed = match type_check(schema, &statement) {
             Ok(typed) => typed,
             Err(err) => panic!("type check failed: {:#?}", err),
         };
@@ -827,7 +832,7 @@ mod test {
     fn delete() {
         let _ = tracing_subscriber::fmt::try_init();
 
-        let schema = Dep::new(schema! {
+        let schema = resolver(schema! {
             tables: {
                 employees: {
                     id,
@@ -845,7 +850,7 @@ mod test {
             "#,
         );
 
-        let typed = match type_check(&schema, &statement) {
+        let typed = match type_check(schema, &statement) {
             Ok(typed) => typed,
             Err(err) => panic!("type check failed: {:#?}", err),
         };
@@ -857,7 +862,7 @@ mod test {
     fn delete_with_returning_clause() {
         let _ = tracing_subscriber::fmt::try_init();
 
-        let schema = Dep::new(schema! {
+        let schema = resolver(schema! {
             tables: {
                 employees: {
                     id,
@@ -875,7 +880,7 @@ mod test {
             "#,
         );
 
-        let typed = match type_check(&schema, &statement) {
+        let typed = match type_check(schema, &statement) {
             Ok(typed) => typed,
             Err(err) => panic!("type check failed: {:#?}", err),
         };
@@ -896,7 +901,7 @@ mod test {
     fn select_with_literal_subsitution() {
         let _ = tracing_subscriber::fmt::try_init();
 
-        let schema = Dep::new(schema! {
+        let schema = resolver(schema! {
             tables: {
                 employees: {
                     id,
@@ -914,7 +919,7 @@ mod test {
             "#,
         );
 
-        let typed = match type_check(&schema, &statement) {
+        let typed = match type_check(schema.clone(), &statement) {
             Ok(typed) => typed,
             Err(err) => panic!("type check failed: {:#?}", err),
         };
@@ -936,7 +941,7 @@ mod test {
         };
 
         // This type checks the transformed statement so we can get hold of the encrypted literal.
-        let typed = match type_check(&schema, &transformed_statement) {
+        let typed = match type_check(schema, &transformed_statement) {
             Ok(typed) => typed,
             Err(err) => panic!("type check failed: {:#?}", err),
         };
@@ -954,7 +959,7 @@ mod test {
     fn pathologically_complex_sql_statement() {
         let _ = tracing_subscriber::fmt::try_init();
 
-        let schema = Dep::new(schema! {
+        let schema = resolver(schema! {
             tables: {
                 employees: {
                     id,
@@ -990,7 +995,7 @@ mod test {
             "#,
         );
 
-        let typed = match type_check(&schema, &statement) {
+        let typed = match type_check(schema, &statement) {
             Ok(typed) => typed,
             Err(err) => panic!("type check failed: {:#?}", err),
         };

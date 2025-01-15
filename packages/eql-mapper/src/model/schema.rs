@@ -283,6 +283,7 @@ macro_rules! schema {
     } => {
         {
             let schema_name = stringify!($schema_name);
+            #[allow(unused_mut)]
             let mut schema = schema!(@schema schema schema_name);
             $( schema!(@match_tables schema $($rest)* ); )?
             schema
@@ -294,7 +295,8 @@ macro_rules! schema {
     } => {
         {
             let schema_name = $schema_name;
-            let schema = schema!(@schema schema schema_name);
+            #[allow(unused_mut)]
+            let mut schema = schema!(@schema schema schema_name);
             $( schema!(@match_tables schema $($rest)* ); )?
             schema
         }
@@ -302,6 +304,7 @@ macro_rules! schema {
     { $($rest:tt)+ } => {
         {
             let schema_name = "public";
+            #[allow(unused_mut)]
             let mut schema = schema!(@schema schema schema_name);
             schema!(@match_tables schema $($rest)* );
             schema

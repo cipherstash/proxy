@@ -24,6 +24,6 @@ mod tests {
         let sql = format!("SELECT id FROM table_{id}");
         let rows = client.query(&sql, &[]).await.expect("ok");
 
-        assert!(rows.len() == 0);
+        assert!(rows.is_empty());
     }
 }

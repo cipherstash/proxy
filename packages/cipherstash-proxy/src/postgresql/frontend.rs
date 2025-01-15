@@ -9,7 +9,7 @@ use super::protocol::{self};
 use crate::encrypt::Encrypt;
 use crate::eql::Identifier;
 use crate::error::{EncryptError, Error, MappingError};
-use crate::log::{DEVELOPMENT, MAPPER};
+use crate::log::MAPPER;
 use crate::postgresql::context::column::Column;
 use bytes::BytesMut;
 use eql_mapper::{self, EqlValue, TableColumn};
@@ -17,7 +17,7 @@ use pg_escape::quote_literal;
 use sqlparser::dialect::PostgreSqlDialect;
 use sqlparser::parser::Parser;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
-use tracing::{debug, info, warn};
+use tracing::{debug, info};
 
 const DIALECT: PostgreSqlDialect = PostgreSqlDialect {};
 
@@ -133,7 +133,10 @@ where
             .try_with_sql(&query.statement)?
             .parse_statement()?;
 
-        if eql_mapper::changes_schema(&statement) {
+        let schema_changed =
+            eql_mapper::collect_ddl(self.context.table_resolver.clone(), &statement);
+
+        if schema_changed {
             debug!(target: MAPPER, "Changing schema");
             self.context.set_schema_changed();
         }
@@ -188,14 +191,18 @@ where
             .try_with_sql(&message.statement)?
             .parse_statement()?;
 
-        if eql_mapper::changes_schema(&statement) {
+        let schema_changed =
+            eql_mapper::collect_ddl(self.context.table_resolver.clone(), &statement);
+
+        if schema_changed {
             debug!(target: MAPPER, "Changing schema");
             self.context.set_schema_changed();
         }
 
         if eql_mapper::requires_type_check(&statement) {
-            let typed_statement = eql_mapper::type_check(self.encrypt.schema.load(), &statement)
-                .map_err(|_e| MappingError::StatementCouldNotBeTypeChecked)?;
+            let typed_statement =
+                eql_mapper::type_check(self.context.table_resolver.clone(), &statement)
+                    .map_err(|_e| MappingError::StatementCouldNotBeTypeChecked)?;
 
             let param_columns = self.get_param_columns(&typed_statement)?;
             let projection_columns = self.get_projection_columns(&typed_statement)?;

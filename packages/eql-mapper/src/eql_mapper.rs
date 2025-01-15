@@ -2,10 +2,10 @@ use super::importer::{ImportError, Importer};
 use crate::{
     inference::{unifier, TypeError, TypeInferencer},
     unifier::{EqlValue, Unifier},
-    Dep, DepMut, NodeKey, Projection, ProjectionColumn, Schema, ScopeError, ScopeTracker,
+    DepMut, NodeKey, Projection, ProjectionColumn, ScopeError, ScopeTracker, TableResolver,
     TypeRegistry, Value,
 };
-use sqlparser::ast::{self as ast, ObjectType, Statement};
+use sqlparser::ast::{self as ast, Statement};
 use sqltk::{convert_control_flow, Break, Transform, Transformable, Visitable, Visitor};
 use std::{
     cell::RefCell, collections::HashMap, marker::PhantomData, ops::ControlFlow, rc::Rc, sync::Arc,
@@ -31,7 +31,7 @@ use std::{
 ///
 /// An [`EqlMapperError`] is returned if type checking fails.
 pub fn type_check<'ast>(
-    schema: impl Into<Arc<Schema>>,
+    schema: Arc<TableResolver>,
     statement: &'ast Statement,
 ) -> Result<TypedStatement<'ast>, EqlMapperError> {
     let mut mapper = EqlMapper::<'ast>::new_from_schema(schema);
@@ -93,28 +93,6 @@ pub fn requires_type_check(statement: &Statement) -> bool {
     }
 }
 
-/// Returns whether the [`Statement`] requires type-checking to be performed.
-///
-/// Statements that do not require type-checking are presumed to be safe to transmit to the database unmodified.
-///
-pub fn changes_schema(statement: &Statement) -> bool {
-    match statement {
-        Statement::CreateView { .. }
-        | Statement::CreateTable(_)
-        | Statement::Drop {
-            object_type: ObjectType::Table,
-            ..
-        }
-        | Statement::Drop {
-            object_type: ObjectType::View,
-            ..
-        }
-        | Statement::AlterTable { .. }
-        | Statement::AlterView { .. } => true,
-        _ => false,
-    }
-}
-
 /// The result returned from a successful call to [`type_check`].
 #[derive(Debug)]
 pub struct TypedStatement<'ast> {
@@ -169,14 +147,17 @@ struct EqlMapper<'ast> {
 
 impl<'ast> EqlMapper<'ast> {
     /// Build an `EqlMapper`, initialising all the other visitor implementations that it depends on.
-    fn new_from_schema(schema: impl Into<Arc<Schema>>) -> Self {
-        let schema = Dep::from(schema.into());
+    fn new_from_schema(table_resolver: Arc<TableResolver>) -> Self {
         let scope_tracker = DepMut::new(ScopeTracker::new());
         let registry = DepMut::new(TypeRegistry::new());
-        let importer = DepMut::new(Importer::new(&schema, &registry, &scope_tracker));
+        let importer = DepMut::new(Importer::new(
+            table_resolver.clone(),
+            &registry,
+            &scope_tracker,
+        ));
         let unifier = DepMut::new(Unifier::new(&registry));
         let inferencer = DepMut::new(TypeInferencer::new(
-            &schema,
+            table_resolver.clone(),
             &scope_tracker,
             &registry,
             &unifier,

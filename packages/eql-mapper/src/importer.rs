@@ -9,7 +9,7 @@ use crate::{
         unifier::{Constructor, Type},
         TypeError, TypeRegistry,
     },
-    model::{Schema, SchemaError},
+    model::{SchemaError, TableResolver},
     unifier::{Projection, ProjectionColumns},
     Relation, ScopeError, ScopeTracker,
 };
@@ -17,7 +17,7 @@ use crate::{
 /// `Importer` is a [`Visitor`] implementation that brings projections (from "FROM" clauses and subqueries) into lexical scope.
 #[derive(Debug)]
 pub struct Importer<'ast> {
-    schema: Arc<Schema>,
+    table_resolver: Arc<TableResolver>,
     reg: Rc<RefCell<TypeRegistry<'ast>>>,
     scope_tracker: Rc<RefCell<ScopeTracker<'ast>>>,
     _ast: PhantomData<&'ast ()>,
@@ -25,13 +25,13 @@ pub struct Importer<'ast> {
 
 impl<'ast> Importer<'ast> {
     pub fn new(
-        schema: impl Into<Arc<Schema>>,
+        table_resolver: impl Into<Arc<TableResolver>>,
         reg: impl Into<Rc<RefCell<TypeRegistry<'ast>>>>,
         scope: impl Into<Rc<RefCell<ScopeTracker<'ast>>>>,
     ) -> Self {
         Self {
             reg: reg.into(),
-            schema: schema.into(),
+            table_resolver: table_resolver.into(),
             scope_tracker: scope.into(),
             _ast: PhantomData,
         }
@@ -44,7 +44,9 @@ impl<'ast> Importer<'ast> {
             ..
         } = insert;
 
-        let table = self.schema.resolve_table(table_name.0.last().unwrap())?;
+        let table = self
+            .table_resolver
+            .resolve_table(table_name.0.last().unwrap())?;
 
         self.scope_tracker.borrow_mut().add_relation(Relation {
             name: table_alias.clone(),
@@ -106,7 +108,7 @@ impl<'ast> Importer<'ast> {
                 let mut scope_tracker = self.scope_tracker.borrow_mut();
 
                 if scope_tracker.resolve_relation(name).is_err() {
-                    let table = self.schema.resolve_table(name.0.last().unwrap())?;
+                    let table = self.table_resolver.resolve_table(name.0.last().unwrap())?;
 
                     scope_tracker.add_relation(Relation {
                         name: record_as.cloned().ok(),

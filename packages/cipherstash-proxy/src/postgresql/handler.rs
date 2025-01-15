@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use super::backend::Backend;
 use super::frontend::Frontend;
 use super::protocol::StartupCode;
@@ -18,6 +20,7 @@ use crate::{
     tls,
 };
 use bytes::BytesMut;
+use eql_mapper::Schema;
 use md5::{Digest, Md5};
 use postgres_protocol::authentication::sasl::{ChannelBinding, ScramSha256};
 use rand::Rng;
@@ -212,7 +215,9 @@ pub async fn handler(client_stream: AsyncStream, encrypt: Encrypt) -> Result<(),
     let (client_reader, client_writer) = split(client_stream);
     let (server_reader, server_writer) = split(database_stream);
 
-    let context = Context::new();
+    let schema = Arc::new(Schema::new("public"));
+
+    let context = Context::new(schema);
 
     let mut frontend = Frontend::new(
         client_reader,
