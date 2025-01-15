@@ -330,7 +330,7 @@ mod tests {
 
     #[test]
     pub fn parse_auth_message() {
-        log::init();
+        log::init(None);
 
         let bytes = to_message(b"R\0\0\0*\0\0\0\nSCRAM-SHA-256-PLUS\0SCRAM-SHA-256\0\0");
 
@@ -348,7 +348,7 @@ mod tests {
 
     #[test]
     pub fn is_scram_sha_256_plus() {
-        log::init();
+        log::init(None);
 
         let bytes = to_message(b"R\0\0\0*\0\0\0\nSCRAM-SHA-256-PLUS\0SCRAM-SHA-256\0\0");
         let auth = Authentication::try_from(&bytes).unwrap();

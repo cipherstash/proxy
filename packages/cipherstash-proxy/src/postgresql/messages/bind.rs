@@ -351,7 +351,7 @@ mod tests {
 
     #[test]
     pub fn parse_bind() {
-        log::init();
+        log::init(None);
         let bytes =
             to_message(b"B\0\0\0\x18\0\0\0\x01\0\x01\0\x01\0\0\0\x04.\xbe\x8a\xd4\0\x01\0\x01");
 
@@ -368,7 +368,7 @@ mod tests {
 
     #[test]
     fn bind_should_rewrite() {
-        log::init();
+        log::init(None);
 
         let bytes = "hello".into();
         let mut param = BindParam::new(FormatCode::Text, bytes);

@@ -20,6 +20,7 @@ pub struct TandemConfig {
     pub encrypt: EncryptConfig,
     pub tls: Option<TlsConfig>,
     pub development: Option<DevelopmentConfig>,
+    pub log: Option<LogConfig>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -90,6 +91,18 @@ pub struct DevelopmentConfig {
 
     #[serde(default)]
     pub disable_database_tls: bool,
+}
+
+#[derive(Debug, Deserialize, Clone, PartialEq)]
+pub struct LogConfig {
+    // TODO: Could these be non-String types
+    pub development_level: Option<String>,
+    pub authentication_level: Option<String>,
+    pub context_level: Option<String>,
+    pub keyset_level: Option<String>,
+    pub protocol_level: Option<String>,
+    pub mapper_level: Option<String>,
+    pub schema_level: Option<String>,
 }
 
 /// Config defaults to a file called `tandem` in the current directory.

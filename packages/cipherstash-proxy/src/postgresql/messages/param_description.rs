@@ -120,7 +120,7 @@ mod tests {
 
     #[test]
     pub fn map_parameter_types() {
-        log::init();
+        log::init(None);
 
         let mut pd = ParamDescription {
             types: vec![
@@ -155,7 +155,7 @@ mod tests {
 
     #[test]
     pub fn parse_parameter_description() {
-        log::init();
+        log::init(None);
         let bytes = to_message(b"t\0\0\0\x0e\0\x02\0\0\0\x14\0\0\x0e\xda");
 
         let expected = bytes.clone();

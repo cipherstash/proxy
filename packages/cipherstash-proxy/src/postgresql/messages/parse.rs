@@ -118,7 +118,7 @@ mod tests {
 
     #[test]
     pub fn test_parse() {
-        log::init();
+        log::init(None);
         let bytes = to_message(
              b"P\0\0\0J\0INSERT INTO encrypted (id, encrypted_int2) VALUES ($1, $2)\0\0\x02\0\0\0\x15\0\0\0\x15"
         );
@@ -133,7 +133,7 @@ mod tests {
 
     #[test]
     pub fn test_parse_rewrite_param_types() {
-        log::init();
+        log::init(None);
         let bytes = to_message(
              b"P\0\0\0J\0INSERT INTO encrypted (id, encrypted_int2) VALUES ($1, $2)\0\0\x02\0\0\0\x15\0\0\0\x15"
         );

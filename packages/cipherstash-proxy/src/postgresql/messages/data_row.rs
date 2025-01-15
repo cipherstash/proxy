@@ -199,7 +199,7 @@ mod tests {
 
     #[test]
     pub fn data_row_to_ciphertext() {
-        log::init();
+        log::init(None);
 
         let record = record();
 
@@ -227,7 +227,7 @@ mod tests {
 
     // #[test]
     // pub fn data_column_to_json_bytes() {
-    //     log::init();
+    //     log::init(&None);
     //     let bytes = to_message(b"D\0\0\0i\0\x01\0\0\0_\x01{\"c\": \"51b72947dc25481880175ef53a35af34\", \"i\": {\"c\": \"name\", \"t\": \"users\"}, \"k\": \"ct\", \"v\": 1}");
     //     // let expected = bytes.clone();
 

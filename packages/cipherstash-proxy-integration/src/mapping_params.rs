@@ -12,7 +12,7 @@ mod tests {
 
     #[tokio::test]
     async fn map_text() {
-        log::init();
+        log::init(None);
 
         let config = database_config_with_port(PROXY);
         let client = connect_with_tls(&config).await;
@@ -39,7 +39,7 @@ mod tests {
 
     #[tokio::test]
     async fn map_bool() {
-        log::init();
+        log::init(None);
 
         let config = database_config_with_port(PROXY);
         let client = connect_with_tls(&config).await;
@@ -69,7 +69,7 @@ mod tests {
 
     #[tokio::test]
     async fn map_int2() {
-        log::init();
+        log::init(None);
 
         let config = database_config_with_port(PROXY);
         let client = connect_with_tls(&config).await;
@@ -99,7 +99,7 @@ mod tests {
 
     #[tokio::test]
     async fn map_int4() {
-        log::init();
+        log::init(None);
 
         let config = database_config_with_port(PROXY);
         let client = connect_with_tls(&config).await;
@@ -129,7 +129,7 @@ mod tests {
 
     #[tokio::test]
     async fn map_int8() {
-        log::init();
+        log::init(None);
 
         let config = database_config_with_port(PROXY);
         let client = connect_with_tls(&config).await;
@@ -159,7 +159,7 @@ mod tests {
 
     #[tokio::test]
     async fn map_float8() {
-        log::init();
+        log::init(None);
 
         let config = database_config_with_port(PROXY);
         let client = connect_with_tls(&config).await;
@@ -189,7 +189,7 @@ mod tests {
 
     #[tokio::test]
     async fn map_date() {
-        log::init();
+        log::init(None);
 
         let config = database_config_with_port(PROXY);
         let client = connect_with_tls(&config).await;
@@ -219,7 +219,7 @@ mod tests {
 
     #[tokio::test]
     async fn map_plaintext() {
-        log::init();
+        log::init(None);
 
         let config = database_config_with_port(PROXY);
         let client = connect_with_tls(&config).await;
@@ -243,7 +243,7 @@ mod tests {
 
     #[tokio::test]
     async fn map_all_with_wildcard() {
-        log::init();
+        log::init(None);
 
         let config = database_config_with_port(PROXY);
         let client = connect_with_tls(&config).await;

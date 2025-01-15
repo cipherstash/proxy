@@ -7,7 +7,7 @@ pub use config_manager::EncryptConfigManager;
 pub use encrypt_config::EncryptConfig;
 pub use schema_manager::SchemaManager;
 
-pub use tandem::{DatabaseConfig, ServerConfig, TandemConfig, TlsConfig};
+pub use tandem::{DatabaseConfig, ServerConfig, TandemConfig, TlsConfig, LogConfig};
 
 pub const CS_PREFIX: &str = "CS";
 pub const DEFAULT_CONFIG_FILE_PATH: &str = "cipherstash-proxy.toml";

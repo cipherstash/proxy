@@ -12,15 +12,15 @@ use tracing::{debug, error, info, warn};
 async fn main() {
     let config_file = "cipherstash-proxy.toml";
 
-    log::init();
-
     let config = match TandemConfig::load(config_file) {
         Ok(config) => config,
         Err(err) => {
-            error!("Configuration Error: {}", err);
+            eprintln!("Configuration Error: {}", err);
             std::process::exit(exitcode::CONFIG);
         }
     };
+
+    log::init(config.log.clone());
 
     let mut encrypt = init(config).await;
 

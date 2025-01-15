@@ -210,7 +210,7 @@ mod tests {
 
     #[test]
     pub fn test_get_statement_from_describe() {
-        log::init();
+        log::init(None);
 
         let schema = Arc::new(Schema::new("public"));
 
@@ -235,7 +235,7 @@ mod tests {
 
     #[test]
     pub fn test_get_statement_from_execute() {
-        log::init();
+        log::init(None);
 
         let schema = Arc::new(Schema::new("public"));
 

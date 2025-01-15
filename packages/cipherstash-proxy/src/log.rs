@@ -3,6 +3,7 @@ use tracing_subscriber::filter::{Directive, EnvFilter};
 use tracing_subscriber::fmt::format::{DefaultFields, Format};
 use tracing_subscriber::fmt::SubscriberBuilder;
 use tracing_subscriber::FmtSubscriber;
+use crate::config::LogConfig;
 
 static INIT: Once = Once::new();
 // Messages related to the various hidden "development mode" messages
@@ -15,54 +16,38 @@ pub const PROTOCOL: &str = "protocol";
 pub const MAPPER: &str = "mapper";
 pub const SCHEMA: &str = "schema";
 
-fn subscriber_builder(default_level: tracing::Level) -> SubscriberBuilder<DefaultFields, Format, EnvFilter> {
-    // TODO: assign level from args
-    let log_level: Directive = default_level.into();
-
-    let mut filter = EnvFilter::from_default_env().add_directive(log_level.to_owned());
-
-    let directive = format!("eql_mapper={log_level}").parse().expect("ok");
-    filter = filter.add_directive(directive);
-
-    let directive = format!("{}={log_level}", AUTHENTICATION)
-        .parse()
-        .expect("ok");
-    filter = filter.add_directive(directive);
-
-    let log_level: Directive = default_level.into();
-    let directive = format!("{}={log_level}", CONTEXT).parse().expect("ok");
-    filter = filter.add_directive(directive);
-
-    let log_level: Directive = default_level.into();
-    let directive = format!("{}={log_level}", DEVELOPMENT).parse().expect("ok");
-    filter = filter.add_directive(directive);
-
-    let log_level: Directive = default_level.into();
-    let directive = format!("{}={log_level}", KEYSET).parse().expect("ok");
-    filter = filter.add_directive(directive);
-
-    let log_level: Directive = default_level.into();
-    let directive = format!("{}={log_level}", MAPPER).parse().expect("ok");
-    filter = filter.add_directive(directive);
-
-    let log_level: Directive = default_level.into();
-    let directive = format!("{}={log_level}", PROTOCOL).parse().expect("ok");
-    filter = filter.add_directive(directive);
-
-    let log_level: Directive = default_level.into();
-    let directive = format!("{}={log_level}", SCHEMA).parse().expect("ok");
-    filter = filter.add_directive(directive);
+fn subscriber_builder(default_log_level: &str, config: Option<LogConfig>) -> SubscriberBuilder<DefaultFields, Format, EnvFilter> {
+    let mut env_filter: EnvFilter = EnvFilter::builder().parse_lossy(default_log_level);
+    println!("config: {:?}", config);
+    for &target in [DEVELOPMENT, AUTHENTICATION, CONTEXT, KEYSET, PROTOCOL, MAPPER, SCHEMA].iter() {
+        if let Some(Some(level)) = config.as_ref().map(|c| {
+            match target {
+                DEVELOPMENT => &c.development_level,
+                AUTHENTICATION => &c.authentication_level,
+                CONTEXT => &c.context_level,
+                KEYSET => &c.keyset_level,
+                PROTOCOL => &c.protocol_level,
+                MAPPER => &c.mapper_level,
+                SCHEMA => &c.schema_level,
+                _ => &None,
+            }
+        }) {
+            println!("Adding {target} level: {level}");
+            env_filter = env_filter.add_directive(format!("{target}={level}").parse().unwrap());
+        }
+    };
 
     FmtSubscriber::builder()
-        .with_env_filter(filter)
+        .with_env_filter(env_filter)
         .with_file(true)
         .with_line_number(true)
         .with_target(true)
 }
 
-pub fn init() {
+pub fn init(config: Option<crate::config::LogConfig>) {
     INIT.call_once(|| {
-        let subscriber = subscriber_builder(tracing::Level::DEBUG).finish();
+        let log_level = std::env::var("RUST_LOG").unwrap_or("info".into());
+        let subscriber = subscriber_builder(log_level.as_str(), config).finish();
 
         tracing::subscriber::set_global_default(subscriber)
             .expect("setting default subscriber failed");
@@ -79,8 +64,7 @@ mod tests {
     };
     use tracing_subscriber::fmt::MakeWriter;
     use tracing::dispatcher::set_default;
-    use tracing::{info, warn, error};
-    use tracing::Level;
+    use tracing::{trace, debug, info, warn, error};
 
     // Mock Writer for flexibly testing the logging behaviour, copy-pasted from
     // tracing_subscriber's internal test code (with JSON functionality deleted).
@@ -147,7 +131,7 @@ mod tests {
     #[test]
     fn test_simple_log() {
         let make_writer = MockMakeWriter::default();
-        let subscriber = subscriber_builder(Level::INFO)
+        let subscriber = subscriber_builder("info", None)
             .with_writer(make_writer.clone())
             .finish();
         let _default = set_default(&subscriber.into());
@@ -161,16 +145,88 @@ mod tests {
     #[test]
     fn test_log_levels() {
         let make_writer = MockMakeWriter::default();
-        let subscriber = subscriber_builder(Level::WARN)
+        let subscriber = subscriber_builder("warn", None)
             .with_writer(make_writer.clone())
             .finish();
         let _default = set_default(&subscriber.into());
 
+        trace!("trace message");
+        debug!("debug message");
         info!("info message");
         warn!("warn message");
+        error!("error message");
 
         let log_contents = make_writer.get_string();
+        assert!(!log_contents.contains("trace message"));
+        assert!(!log_contents.contains("debug message"));
         assert!(!log_contents.contains("info message"));
         assert!(log_contents.contains("warn message"));
+        assert!(log_contents.contains("error message"));
+    }
+
+    // test info level with debug target and error target
+    #[test]
+    fn test_log_levels_with_targets() {
+        let config = Some(LogConfig {
+          development_level: Some("info".into()),
+          authentication_level: Some("debug".into()),
+          context_level: Some("error".into()),
+          keyset_level: Some("trace".into()),
+          protocol_level: Some("info".into()),
+          mapper_level: Some("info".into()),
+          schema_level: Some("info".into()),
+        });
+        let make_writer = MockMakeWriter::default();
+        let subscriber = subscriber_builder("warn", config)
+            .with_writer(make_writer.clone())
+            .finish();
+        let _default = set_default(&subscriber.into());
+
+        // with development level 'info', info should be logged but not debug
+        debug!(target: "development", "debug/development");
+        info!(target: "development", "info/development");
+        let log_contents = make_writer.get_string();
+        assert!(!log_contents.contains("debug/development"));
+        assert!(log_contents.contains("info/development"));
+
+        // with authentication level 'debug', debug should be logged but not trace
+        trace!(target: "authentication", "trace/authentication");
+        debug!(target: "authentication", "debug/authentication");
+        let log_contents = make_writer.get_string();
+        assert!(!log_contents.contains("trace/authentication"));
+        assert!(log_contents.contains("debug/authentication"));
+
+        // with context level 'error', error should be logged but not warn
+        warn!(target: "context", "warn/context");
+        error!(target: "context", "error/context");
+        let log_contents = make_writer.get_string();
+        assert!(!log_contents.contains("warn/context"));
+        assert!(log_contents.contains("error/context"));
+
+        // with keyset level 'trace', trace should be logged
+        trace!(target: "keyset", "trace/keyset");
+        let log_contents = make_writer.get_string();
+        assert!(log_contents.contains("trace/keyset"));
+
+        // with protocol level 'info', info should be logged but not debug
+        debug!(target: "protocol", "debug/protocol");
+        info!(target: "protocol", "info/protocol");
+        let log_contents = make_writer.get_string();
+        assert!(!log_contents.contains("debug/protocol"));
+        assert!(log_contents.contains("info/protocol"));
+
+        // with mapper level 'info', info should be logged but not debug
+        debug!(target: "mapper", "debug/mapper");
+        info!(target: "mapper", "info/mapper");
+        let log_contents = make_writer.get_string();
+        assert!(!log_contents.contains("debug/mapper"));
+        assert!(log_contents.contains("info/mapper"));
+
+        // with schema level 'info', info should be logged but not debug
+        debug!(target: "schema", "debug/schema");
+        info!(target: "schema", "info/schema");
+        let log_contents = make_writer.get_string();
+        assert!(!log_contents.contains("debug/schema"));
+        assert!(log_contents.contains("info/schema"));
     }
 }

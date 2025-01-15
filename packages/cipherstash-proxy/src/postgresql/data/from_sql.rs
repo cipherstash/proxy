@@ -166,7 +166,7 @@ mod tests {
 
     #[test]
     pub fn bind_param_to_plaintext_i64() {
-        log::init();
+        log::init(None);
 
         // Binary
         let val: i64 = 42;
@@ -192,7 +192,7 @@ mod tests {
 
     #[test]
     pub fn bind_param_to_plaintext_boolean() {
-        log::init();
+        log::init(None);
 
         // Binary
         let val = true;
@@ -218,7 +218,7 @@ mod tests {
 
     #[test]
     pub fn bind_param_to_plaintext_date() {
-        log::init();
+        log::init(None);
 
         // // Binary
         let val = NaiveDate::parse_from_str("2025-01-01", "%Y-%m-%d").unwrap();
