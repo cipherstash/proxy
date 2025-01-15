@@ -33,6 +33,8 @@ def test_map_text():
             with conn.transaction():
                 val = "hello@cipherstash.com";
 
+                assert(false)
+
                 execute(val, "encrypted_text")
 
                 execute(val, "encrypted_text", binary=True)
