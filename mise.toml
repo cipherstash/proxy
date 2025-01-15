@@ -127,7 +127,9 @@ mise run test:integration
 [tasks."test:local"]
 alias = 'l'
 description = "Runs test/s"
-run = "cargo nextest run --no-fail-fast --nocapture"
+# run = "cargo nextest run --no-fail-fast --nocapture -p cipherstash-proxy"
+run = "cargo nextest run --no-fail-fast --nocapture -p cipherstash-proxy-integration"
+# run = "cargo nextest run --no-fail-fast --nocapture -p eql-mapper"
 
 
 [tasks."test:unit"]
@@ -264,13 +266,26 @@ mise --env tls run test:wait_for_postgres_to_quack --port 6432 --max-retries 20 
 mise --env tls run test:integration:psql-tls
 mise --env tls run proxy:down
 
-###############################################
-# Test: integration
-###############################################
+echo
+echo '###############################################'
+echo '# Test: Integration'
+echo '###############################################'
+echo
 
 mise --env tls run proxy:up proxy-tls --extra-args "--detach --wait"
 mise --env tls run test:wait_for_postgres_to_quack --port 6432 --max-retries 20 --tls
 cargo nextest run --no-fail-fast --nocapture -E 'package(cipherstash-proxy-integration)'
+mise --env tls run proxy:down
+
+echo
+echo '###############################################'
+echo '# Test: Python'
+echo '###############################################'
+echo
+
+mise --env tls run proxy:up proxy-tls --extra-args "--detach --wait"
+mise --env tls run test:wait_for_postgres_to_quack --port 6432 --max-retries 20 --tls
+mise --env tls run python:test
 mise --env tls run proxy:down
 """
 
@@ -370,6 +385,15 @@ description = "Download latest EQL release"
 dir = "{{config_root}}/tests"
 outputs = ["{{config_root}}/tests/sql/cipherstash-encrypt.sql"]
 run = "curl -sLo sql/cipherstash-encrypt.sql https://github.com/cipherstash/encrypt-query-language/releases/latest/download/cipherstash-encrypt.sql"
+
+
+[tasks."python:test"]
+dir = "{{config_root}}/tests"
+description = "Runs python tests"
+run = """
+set -e
+echo docker compose up --build python {{option(name="extra-args",default="")}} | bash
+"""
 
 [tasks.build]
 description = "Build releasable artifacts"

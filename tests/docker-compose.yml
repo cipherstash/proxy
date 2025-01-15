@@ -85,6 +85,23 @@ services:
     networks:
       - postgres
 
+  python:
+    image: test/python
+    build:
+      context: ./python
+      dockerfile: Dockerfile
+      target: test
+    container_name: python-tests
+    environment:
+      - CS_DATABASE__NAME=${CS_DATABASE__NAME}
+      - CS_DATABASE__USERNAME=${CS_DATABASE__USERNAME}
+      - CS_DATABASE__PASSWORD=${CS_DATABASE__PASSWORD}
+      - CS_DATABASE__HOST=proxy-tls
+      - CS_DATABASE__PORT=6432
+    networks:
+      - postgres
+
+
 networks:
   postgres:
     driver: bridge

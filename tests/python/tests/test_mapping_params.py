@@ -14,10 +14,10 @@ import random
 
 username = os.environ.get("CS_DATABASE__USERNAME")
 password = os.environ.get("CS_DATABASE__PASSWORD")
+database = os.environ.get("CS_DATABASE__NAME")
 host = os.environ.get("CS_DATABASE__HOST")
 # port = os.environ.get("CS_DATABASE__PORT")
 port = 6432
-database = os.environ.get("CS_DATABASE__NAME")
 
 connection_str = "postgres://{}:{}@{}:{}/{}".format(username, password, host, port, database)
 print("Connection to Tandem with {}".format(connection_str))

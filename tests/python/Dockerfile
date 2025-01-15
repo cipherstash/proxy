@@ -1,4 +1,4 @@
-FROM python:3
+FROM python:3 as base
 
 SHELL ["/bin/bash", "-c"]
 
@@ -13,5 +13,12 @@ WORKDIR /src
 COPY . .
 
 RUN poetry install --no-root --no-interaction --no-ansi
+
+# ====================================
+FROM base as test
+
+WORKDIR /src
+
+COPY . .
 
 CMD poetry run pytest -rP
