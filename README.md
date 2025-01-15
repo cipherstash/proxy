@@ -229,6 +229,30 @@ $EDITOR cipherstash-proxy.toml
 
 Configure `Auth` and `Encrypt`
 
+#### Logging configuration
+
+Logging can be configured by setting appropriate environment variables.
+
+There are "levels" and "targets" in Proxy logging configuration.
+The levels set the verbosity. The possible values are:
+
+- trace
+- debug
+- info
+- warn
+- error
+
+A Proxy-wide default level is configured by setting the environment variable `RUST_LOG`.
+If this variable is not set, the default value set in the Proxy code will be used.
+
+There are different "log targets" in Proxy.
+They correspond to modules or functionalities.
+Set log levels for a specific log target to turn on or turn of more verbose logging.
+
+> [!IMPORTANT]
+> The application code must use the 'target' parameter for the per-target log level to work.
+> An example: `debug!(target: AUTHENTICATION, "SASL authentication successful");`
+
 ### Running Proxy locally
 
 There are two ways to run Proxy locally:
