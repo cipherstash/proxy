@@ -49,15 +49,15 @@ where
     /// TODO: fix the structure once implementation stabilizes
     ///
     pub async fn rewrite(&mut self) -> Result<(), Error> {
-        if self.encrypt.config.disable_mapping() {
-            warn!(DEVELOPMENT, "Mapping is not enabled");
-            return Ok(());
-        }
-
         let connection_timeout = self.encrypt.config.database.connection_timeout();
 
         let (code, bytes) =
             protocol::read_message_with_timeout(&mut self.server, connection_timeout).await?;
+
+        if self.encrypt.config.disable_mapping() {
+            self.write(bytes).await?;
+            return Ok(());
+        }
 
         match code.into() {
             BackendCode::DataRow => {

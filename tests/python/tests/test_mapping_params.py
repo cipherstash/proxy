@@ -7,16 +7,11 @@ from psycopg.types.range import Range, RangeInfo, register_range
 from psycopg.types.json import Json
 from psycopg.types.json import Jsonb
 import random
-# from helpers import *
-# from datetime import datetime
-# from decimal import Decimal, getcontext
-# from ipaddress import *
 
 username = os.environ.get("CS_DATABASE__USERNAME")
 password = os.environ.get("CS_DATABASE__PASSWORD")
 database = os.environ.get("CS_DATABASE__NAME")
 host = os.environ.get("CS_DATABASE__HOST")
-# port = os.environ.get("CS_DATABASE__PORT")
 port = 6432
 
 connection_str = "postgres://{}:{}@{}:{}/{}".format(username, password, host, port, database)
@@ -32,8 +27,6 @@ def test_map_text():
 
             with conn.transaction():
                 val = "hello@cipherstash.com";
-
-                assert(false)
 
                 execute(val, "encrypted_text")
 

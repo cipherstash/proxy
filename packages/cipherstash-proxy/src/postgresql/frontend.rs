@@ -9,7 +9,7 @@ use super::protocol::{self};
 use crate::encrypt::Encrypt;
 use crate::eql::Identifier;
 use crate::error::{EncryptError, Error, MappingError};
-use crate::log::MAPPER;
+use crate::log::{DEVELOPMENT, MAPPER};
 use crate::postgresql::context::column::Column;
 use bytes::BytesMut;
 use eql_mapper::{self, EqlValue, TableColumn};
@@ -47,10 +47,6 @@ where
     }
 
     pub async fn rewrite(&mut self) -> Result<(), Error> {
-        if self.encrypt.config.disable_mapping() {
-            return Ok(());
-        }
-
         let bytes = self.read().await?;
         self.write(bytes).await?;
         Ok(())
@@ -65,6 +61,10 @@ where
         let connection_timeout = self.encrypt.config.database.connection_timeout();
         let (code, mut bytes) =
             protocol::read_message_with_timeout(&mut self.client, connection_timeout).await?;
+
+        if self.encrypt.config.disable_mapping() {
+            return Ok(bytes);
+        }
 
         match code.into() {
             Code::Query => {

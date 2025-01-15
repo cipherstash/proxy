@@ -127,9 +127,7 @@ mise run test:integration
 [tasks."test:local"]
 alias = 'l'
 description = "Runs test/s"
-# run = "cargo nextest run --no-fail-fast --nocapture -p cipherstash-proxy"
-run = "cargo nextest run --no-fail-fast --nocapture -p cipherstash-proxy-integration"
-# run = "cargo nextest run --no-fail-fast --nocapture -p eql-mapper"
+run = "cargo nextest run --no-fail-fast --nocapture -p cipherstash-proxy"
 
 
 [tasks."test:unit"]
