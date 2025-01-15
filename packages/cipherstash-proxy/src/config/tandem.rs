@@ -5,7 +5,6 @@ use rustls_pki_types::ServerName;
 use serde::Deserialize;
 use std::path::PathBuf;
 use std::{fmt::Display, time::Duration};
-use tracing::warn;
 
 use uuid::Uuid;
 
@@ -121,8 +120,8 @@ impl TandemConfig {
     pub fn load(path: &str) -> Result<TandemConfig, Error> {
         // Log a warning to user that config file is missing
         if !PathBuf::from(path).exists() {
-            warn!("Configuration file was not found: {path}");
-            warn!("Loading config values from environment variables.");
+            println!("Configuration file was not found: {path}");
+            println!("Loading config values from environment variables.");
         }
         TandemConfig::build(path)
     }

@@ -1,9 +1,9 @@
+use crate::config::LogConfig;
 use std::sync::Once;
-use tracing_subscriber::filter::{Directive, EnvFilter};
+use tracing_subscriber::filter::EnvFilter;
 use tracing_subscriber::fmt::format::{DefaultFields, Format};
 use tracing_subscriber::fmt::SubscriberBuilder;
 use tracing_subscriber::FmtSubscriber;
-use crate::config::LogConfig;
 
 static INIT: Once = Once::new();
 // Messages related to the various hidden "development mode" messages
@@ -16,26 +16,35 @@ pub const PROTOCOL: &str = "protocol";
 pub const MAPPER: &str = "mapper";
 pub const SCHEMA: &str = "schema";
 
-fn subscriber_builder(default_log_level: &str, config: Option<LogConfig>) -> SubscriberBuilder<DefaultFields, Format, EnvFilter> {
+fn subscriber_builder(
+    default_log_level: &str,
+    config: Option<LogConfig>,
+) -> SubscriberBuilder<DefaultFields, Format, EnvFilter> {
     let mut env_filter: EnvFilter = EnvFilter::builder().parse_lossy(default_log_level);
-    println!("config: {:?}", config);
-    for &target in [DEVELOPMENT, AUTHENTICATION, CONTEXT, KEYSET, PROTOCOL, MAPPER, SCHEMA].iter() {
-        if let Some(Some(level)) = config.as_ref().map(|c| {
-            match target {
-                DEVELOPMENT => &c.development_level,
-                AUTHENTICATION => &c.authentication_level,
-                CONTEXT => &c.context_level,
-                KEYSET => &c.keyset_level,
-                PROTOCOL => &c.protocol_level,
-                MAPPER => &c.mapper_level,
-                SCHEMA => &c.schema_level,
-                _ => &None,
-            }
+    for &target in [
+        DEVELOPMENT,
+        AUTHENTICATION,
+        CONTEXT,
+        KEYSET,
+        PROTOCOL,
+        MAPPER,
+        SCHEMA,
+    ]
+    .iter()
+    {
+        if let Some(Some(level)) = config.as_ref().map(|c| match target {
+            DEVELOPMENT => &c.development_level,
+            AUTHENTICATION => &c.authentication_level,
+            CONTEXT => &c.context_level,
+            KEYSET => &c.keyset_level,
+            PROTOCOL => &c.protocol_level,
+            MAPPER => &c.mapper_level,
+            SCHEMA => &c.schema_level,
+            _ => &None,
         }) {
-            println!("Adding {target} level: {level}");
             env_filter = env_filter.add_directive(format!("{target}={level}").parse().unwrap());
         }
-    };
+    }
 
     FmtSubscriber::builder()
         .with_env_filter(env_filter)
@@ -62,9 +71,9 @@ mod tests {
         io,
         sync::{MutexGuard, TryLockError},
     };
-    use tracing_subscriber::fmt::MakeWriter;
     use tracing::dispatcher::set_default;
-    use tracing::{trace, debug, info, warn, error};
+    use tracing::{debug, error, info, trace, warn};
+    use tracing_subscriber::fmt::MakeWriter;
 
     // Mock Writer for flexibly testing the logging behaviour, copy-pasted from
     // tracing_subscriber's internal test code (with JSON functionality deleted).
@@ -168,13 +177,13 @@ mod tests {
     #[test]
     fn test_log_levels_with_targets() {
         let config = Some(LogConfig {
-          development_level: Some("info".into()),
-          authentication_level: Some("debug".into()),
-          context_level: Some("error".into()),
-          keyset_level: Some("trace".into()),
-          protocol_level: Some("info".into()),
-          mapper_level: Some("info".into()),
-          schema_level: Some("info".into()),
+            development_level: Some("info".into()),
+            authentication_level: Some("debug".into()),
+            context_level: Some("error".into()),
+            keyset_level: Some("trace".into()),
+            protocol_level: Some("info".into()),
+            mapper_level: Some("info".into()),
+            schema_level: Some("info".into()),
         });
         let make_writer = MockMakeWriter::default();
         let subscriber = subscriber_builder("warn", config)
