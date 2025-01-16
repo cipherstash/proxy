@@ -110,7 +110,7 @@ mod tests {
     use bytes::BytesMut;
     use tracing::info;
 
-    use crate::log;
+    use crate::{config::LogConfig, log};
 
     use super::ParamDescription;
 
@@ -120,7 +120,7 @@ mod tests {
 
     #[test]
     pub fn map_parameter_types() {
-        log::init(None);
+        log::init(LogConfig::default());
 
         let mut pd = ParamDescription {
             types: vec![
@@ -155,7 +155,7 @@ mod tests {
 
     #[test]
     pub fn parse_parameter_description() {
-        log::init(None);
+        log::init(LogConfig::default());
         let bytes = to_message(b"t\0\0\0\x0e\0\x02\0\0\0\x14\0\0\x0e\xda");
 
         let expected = bytes.clone();

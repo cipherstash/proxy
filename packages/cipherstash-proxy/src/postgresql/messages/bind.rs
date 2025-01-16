@@ -340,8 +340,7 @@ impl TryFrom<Bind> for BytesMut {
 mod tests {
     use super::BindParam;
     use crate::{
-        log,
-        postgresql::{format_code::FormatCode, messages::bind::Bind},
+        config::LogConfig, log, postgresql::{format_code::FormatCode, messages::bind::Bind}
     };
     use bytes::BytesMut;
 
@@ -351,7 +350,7 @@ mod tests {
 
     #[test]
     pub fn parse_bind() {
-        log::init(None);
+        log::init(LogConfig::default());
         let bytes =
             to_message(b"B\0\0\0\x18\0\0\0\x01\0\x01\0\x01\0\0\0\x04.\xbe\x8a\xd4\0\x01\0\x01");
 
@@ -368,7 +367,7 @@ mod tests {
 
     #[test]
     fn bind_should_rewrite() {
-        log::init(None);
+        log::init(LogConfig::default());
 
         let bytes = "hello".into();
         let mut param = BindParam::new(FormatCode::Text, bytes);

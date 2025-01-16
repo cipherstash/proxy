@@ -20,7 +20,8 @@ pub struct TandemConfig {
     pub encrypt: EncryptConfig,
     pub tls: Option<TlsConfig>,
     pub development: Option<DevelopmentConfig>,
-    pub log: Option<LogConfig>,
+    #[serde(default)]
+    pub log: LogConfig,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -93,7 +94,7 @@ pub struct DevelopmentConfig {
     pub disable_database_tls: bool,
 }
 
-#[derive(Debug, Deserialize, Clone, PartialEq)]
+#[derive(Debug, Deserialize, Clone, PartialEq, Default)]
 pub struct LogConfig {
     #[serde(default = "global_default_log_level")]
     pub development_level: String,

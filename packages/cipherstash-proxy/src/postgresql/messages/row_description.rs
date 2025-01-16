@@ -168,7 +168,7 @@ impl TryFrom<RowDescriptionField> for BytesMut {
 #[cfg(test)]
 mod tests {
 
-    use crate::{log, postgresql::messages::row_description::RowDescription};
+    use crate::{config::LogConfig, log, postgresql::messages::row_description::RowDescription};
     use bytes::BytesMut;
     use tracing::info;
 
@@ -178,7 +178,7 @@ mod tests {
 
     #[test]
     pub fn map_projection_types() {
-        log::init(None);
+        log::init(LogConfig::default());
 
         // let mut pd = RowDescription {
         //     types: vec![
@@ -207,7 +207,7 @@ mod tests {
 
     #[test]
     pub fn parse_row_description() {
-        log::init(None);
+        log::init(LogConfig::default());
         let bytes = to_message(
             b"T\0\0\0!\0\x01TimeZone\0\0\0\0\0\0\0\0\0\0\x19\xff\xff\xff\xff\xff\xff\0\0",
         );
@@ -227,7 +227,7 @@ mod tests {
 
     #[test]
     pub fn parse_row_description_with_many_fields() {
-        log::init(None);
+        log::init(LogConfig::default());
         let bytes = to_message(
              b"T\0\0\0J\0\x03id\0\0\0h,\0\x01\0\0\0\x14\0\x08\xff\xff\xff\xff\0\0name\0\0\0h,\0\x02\0\0\0\x19\xff\xff\xff\xff\xff\xff\0\0email\0\0\0h,\0\x03\0\0\x0e\xda\xff\xff\xff\xff\xff\xff\0\0"
         );

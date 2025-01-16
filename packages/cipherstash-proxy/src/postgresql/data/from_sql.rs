@@ -136,9 +136,7 @@ fn binary_from_sql(bytes: &BytesMut, postgres_type: &Type) -> Result<Plaintext, 
 mod tests {
 
     use crate::{
-        log,
-        postgresql::{data::from_sql, format_code::FormatCode, messages::bind::BindParam, Column},
-        Identifier,
+        config::LogConfig, log, postgresql::{data::from_sql, format_code::FormatCode, messages::bind::BindParam, Column}, Identifier
     };
     use bytes::{BufMut, BytesMut};
     use chrono::NaiveDate;
@@ -166,7 +164,7 @@ mod tests {
 
     #[test]
     pub fn bind_param_to_plaintext_i64() {
-        log::init(None);
+        log::init(LogConfig::default());
 
         // Binary
         let val: i64 = 42;
@@ -192,7 +190,7 @@ mod tests {
 
     #[test]
     pub fn bind_param_to_plaintext_boolean() {
-        log::init(None);
+        log::init(LogConfig::default());
 
         // Binary
         let val = true;
@@ -218,7 +216,7 @@ mod tests {
 
     #[test]
     pub fn bind_param_to_plaintext_date() {
-        log::init(None);
+        log::init(LogConfig::default());
 
         // // Binary
         let val = NaiveDate::parse_from_str("2025-01-01", "%Y-%m-%d").unwrap();

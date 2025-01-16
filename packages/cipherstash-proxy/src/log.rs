@@ -29,7 +29,7 @@ fn log_targets() -> Vec<&'static str> {
     ]
 }
 
-fn log_level_for<'a>(config: &'a LogConfig, target: &'a str, default: &'a str) -> &'a str {
+fn log_level_for<'a>(config: &'a LogConfig, target: &str, default: &'a str) -> &'a str {
     match target {
         DEVELOPMENT => &config.development_level,
         AUTHENTICATION => &config.authentication_level,
@@ -44,16 +44,12 @@ fn log_level_for<'a>(config: &'a LogConfig, target: &'a str, default: &'a str) -
 
 fn subscriber_builder(
     default_level: &str,
-    config: Option<LogConfig>,
+    config: LogConfig,
 ) -> SubscriberBuilder<DefaultFields, Format, EnvFilter> {
     let mut env_filter: EnvFilter = EnvFilter::builder().parse_lossy(default_level);
     for &target in log_targets().iter() {
-        if let Some(level) = config
-            .as_ref()
-            .map(|c| log_level_for(c, target, default_level))
-        {
-            env_filter = env_filter.add_directive(format!("{target}={level}").parse().unwrap());
-        }
+        let level = log_level_for(&config, target, default_level);
+        env_filter = env_filter.add_directive(format!("{target}={level}").parse().unwrap());
     }
 
     FmtSubscriber::builder()
@@ -67,7 +63,7 @@ pub fn global_default_log_level() -> String {
     std::env::var("RUST_LOG").unwrap_or("info".into())
 }
 
-pub fn init(config: Option<crate::config::LogConfig>) {
+pub fn init(config: crate::config::LogConfig) {
     INIT.call_once(|| {
         let log_level = global_default_log_level();
         let subscriber = subscriber_builder(log_level.as_str(), config).finish();
@@ -154,7 +150,7 @@ mod tests {
     #[test]
     fn test_simple_log() {
         let make_writer = MockMakeWriter::default();
-        let subscriber = subscriber_builder("info", None)
+        let subscriber = subscriber_builder("info", LogConfig::default())
             .with_writer(make_writer.clone())
             .finish();
         let _default = set_default(&subscriber.into());
@@ -168,7 +164,7 @@ mod tests {
     #[test]
     fn test_log_levels() {
         let make_writer = MockMakeWriter::default();
-        let subscriber = subscriber_builder("warn", None)
+        let subscriber = subscriber_builder("warn", LogConfig::default())
             .with_writer(make_writer.clone())
             .finish();
         let _default = set_default(&subscriber.into());
@@ -190,7 +186,7 @@ mod tests {
     // test info level with debug target and error target
     #[test]
     fn test_log_levels_with_targets() {
-        let config = Some(LogConfig {
+        let config = LogConfig {
             development_level: "info".into(),
             authentication_level: "debug".into(),
             context_level: "error".into(),
@@ -198,7 +194,7 @@ mod tests {
             protocol_level: "info".into(),
             mapper_level: "info".into(),
             schema_level: "info".into(),
-        });
+        };
         let make_writer = MockMakeWriter::default();
         let subscriber = subscriber_builder("warn", config)
             .with_writer(make_writer.clone())

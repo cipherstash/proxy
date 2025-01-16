@@ -176,7 +176,7 @@ impl From<&DataColumn> for Option<eql::Ciphertext> {
 #[cfg(test)]
 mod tests {
     use super::DataRow;
-    use crate::{log, postgresql::messages::data_row::DataColumn};
+    use crate::{config::LogConfig, log, postgresql::messages::data_row::DataColumn};
     use bytes::{Buf, BytesMut};
     use cipherstash_client::zerokms::EncryptedRecord;
     use recipher::key::Iv;
@@ -199,7 +199,7 @@ mod tests {
 
     #[test]
     pub fn data_row_to_ciphertext() {
-        log::init(None);
+        log::init(LogConfig::default());
 
         let record = record();
 

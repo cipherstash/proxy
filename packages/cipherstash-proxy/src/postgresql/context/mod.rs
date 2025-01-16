@@ -196,8 +196,7 @@ mod tests {
 
     use super::{Context, Describe, Portal, Statement};
     use crate::{
-        log,
-        postgresql::messages::{describe::Target, Name},
+        config::LogConfig, log, postgresql::messages::{describe::Target, Name}
     };
 
     fn statement() -> Statement {
@@ -210,7 +209,7 @@ mod tests {
 
     #[test]
     pub fn test_get_statement_from_describe() {
-        log::init(None);
+        log::init(LogConfig::default());
 
         let schema = Arc::new(Schema::new("public"));
 
@@ -235,7 +234,7 @@ mod tests {
 
     #[test]
     pub fn test_get_statement_from_execute() {
-        log::init(None);
+        log::init(LogConfig::default());
 
         let schema = Arc::new(Schema::new("public"));
 

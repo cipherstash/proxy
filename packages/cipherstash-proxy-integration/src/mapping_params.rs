@@ -2,7 +2,7 @@
 mod tests {
     use crate::common::{connect_with_tls, database_config_with_port, PROXY};
     use chrono::NaiveDate;
-    use cipherstash_proxy::log;
+    use cipherstash_proxy::{config::LogConfig, log};
 
     fn id() -> i64 {
         use rand::Rng;
@@ -12,7 +12,7 @@ mod tests {
 
     #[tokio::test]
     async fn map_text() {
-        log::init(None);
+        log::init(LogConfig::default());
 
         let config = database_config_with_port(PROXY);
         let client = connect_with_tls(&config).await;
@@ -39,7 +39,7 @@ mod tests {
 
     #[tokio::test]
     async fn map_bool() {
-        log::init(None);
+        log::init(LogConfig::default());
 
         let config = database_config_with_port(PROXY);
         let client = connect_with_tls(&config).await;
@@ -69,7 +69,7 @@ mod tests {
 
     #[tokio::test]
     async fn map_int2() {
-        log::init(None);
+        log::init(LogConfig::default());
 
         let config = database_config_with_port(PROXY);
         let client = connect_with_tls(&config).await;
@@ -99,7 +99,7 @@ mod tests {
 
     #[tokio::test]
     async fn map_int4() {
-        log::init(None);
+        log::init(LogConfig::default());
 
         let config = database_config_with_port(PROXY);
         let client = connect_with_tls(&config).await;
@@ -129,7 +129,7 @@ mod tests {
 
     #[tokio::test]
     async fn map_int8() {
-        log::init(None);
+        log::init(LogConfig::default());
 
         let config = database_config_with_port(PROXY);
         let client = connect_with_tls(&config).await;
@@ -159,7 +159,7 @@ mod tests {
 
     #[tokio::test]
     async fn map_float8() {
-        log::init(None);
+        log::init(LogConfig::default());
 
         let config = database_config_with_port(PROXY);
         let client = connect_with_tls(&config).await;
@@ -189,7 +189,7 @@ mod tests {
 
     #[tokio::test]
     async fn map_date() {
-        log::init(None);
+        log::init(LogConfig::default());
 
         let config = database_config_with_port(PROXY);
         let client = connect_with_tls(&config).await;
@@ -219,7 +219,7 @@ mod tests {
 
     #[tokio::test]
     async fn map_plaintext() {
-        log::init(None);
+        log::init(LogConfig::default());
 
         let config = database_config_with_port(PROXY);
         let client = connect_with_tls(&config).await;
@@ -243,7 +243,7 @@ mod tests {
 
     #[tokio::test]
     async fn map_all_with_wildcard() {
-        log::init(None);
+        log::init(LogConfig::default());
 
         let config = database_config_with_port(PROXY);
         let client = connect_with_tls(&config).await;
