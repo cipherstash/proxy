@@ -215,7 +215,7 @@ pub async fn handler(client_stream: AsyncStream, encrypt: Encrypt) -> Result<(),
     let (client_reader, client_writer) = split(client_stream);
     let (server_reader, server_writer) = split(database_stream);
 
-    let schema = Arc::new(Schema::new("public"));
+    let schema = encrypt.schema.load();
 
     let context = Context::new(schema);
 
