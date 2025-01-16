@@ -390,7 +390,7 @@ dir = "{{config_root}}/tests"
 description = "Runs python tests"
 run = """
 set -e
-echo docker compose up --build python {{option(name="extra-args",default="")}} | bash
+echo docker compose run --no-TTY --build python {{option(name="extra-args",default="")}} | bash
 """
 
 [tasks.build]
