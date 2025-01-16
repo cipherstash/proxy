@@ -63,9 +63,13 @@ fn subscriber_builder(
         .with_target(true)
 }
 
+pub fn global_default_log_level() -> String {
+    std::env::var("RUST_LOG").unwrap_or("info".into())
+}
+
 pub fn init(config: Option<crate::config::LogConfig>) {
     INIT.call_once(|| {
-        let log_level = std::env::var("RUST_LOG").unwrap_or("info".into());
+        let log_level = global_default_log_level();
         let subscriber = subscriber_builder(log_level.as_str(), config).finish();
 
         tracing::subscriber::set_global_default(subscriber)

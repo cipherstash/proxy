@@ -1,4 +1,5 @@
 use crate::error::{ConfigError, Error};
+use crate::log::global_default_log_level;
 use config::{Config, Environment};
 use regex::Regex;
 use rustls_pki_types::ServerName;
@@ -94,25 +95,20 @@ pub struct DevelopmentConfig {
 
 #[derive(Debug, Deserialize, Clone, PartialEq)]
 pub struct LogConfig {
-    #[serde(default = "default_log_level")]
+    #[serde(default = "global_default_log_level")]
     pub development_level: String,
-    #[serde(default = "default_log_level")]
+    #[serde(default = "global_default_log_level")]
     pub authentication_level: String,
-    #[serde(default = "default_log_level")]
+    #[serde(default = "global_default_log_level")]
     pub context_level: String,
-    #[serde(default = "default_log_level")]
+    #[serde(default = "global_default_log_level")]
     pub keyset_level: String,
-    #[serde(default = "default_log_level")]
+    #[serde(default = "global_default_log_level")]
     pub protocol_level: String,
-    #[serde(default = "default_log_level")]
+    #[serde(default = "global_default_log_level")]
     pub mapper_level: String,
-    #[serde(default = "default_log_level")]
+    #[serde(default = "global_default_log_level")]
     pub schema_level: String,
-}
-
-/// Returns the default log level based on RUST_LOG, and defaults to "error" if not provided
-fn default_log_level() -> String {
-    std::env::var("RUST_LOG").unwrap_or("error".into())
 }
 
 /// Config defaults to a file called `tandem` in the current directory.
