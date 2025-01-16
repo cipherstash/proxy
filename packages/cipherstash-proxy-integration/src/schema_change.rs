@@ -5,7 +5,7 @@ mod tests {
 
     #[tokio::test]
     async fn schema_change_reloads_schema() {
-        log::init();
+        log::init(None);
 
         let config = database_config_with_port(PROXY);
         let client = connect_with_tls(&config).await;
