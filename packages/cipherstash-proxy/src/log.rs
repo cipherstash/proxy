@@ -6,9 +6,10 @@ use tracing_subscriber::fmt::SubscriberBuilder;
 use tracing_subscriber::FmtSubscriber;
 
 static INIT: Once = Once::new();
-// Messages related to the various hidden "development mode" messages
-pub const DEVELOPMENT: &str = "development";
 
+// Log targets used in logs like `debug!(target: DEVELOPMENT, "Flush message buffer");`
+// If you add one, make sure `log_targets()` and `log_level_for()` functions are updated.
+pub const DEVELOPMENT: &str = "development"; // one for various hidden "development mode" messages
 pub const AUTHENTICATION: &str = "authentication";
 pub const CONTEXT: &str = "context";
 pub const KEYSET: &str = "keyset";
@@ -16,12 +17,8 @@ pub const PROTOCOL: &str = "protocol";
 pub const MAPPER: &str = "mapper";
 pub const SCHEMA: &str = "schema";
 
-fn subscriber_builder(
-    default_log_level: &str,
-    config: Option<LogConfig>,
-) -> SubscriberBuilder<DefaultFields, Format, EnvFilter> {
-    let mut env_filter: EnvFilter = EnvFilter::builder().parse_lossy(default_log_level);
-    for &target in [
+fn log_targets() -> Vec<&'static str> {
+    vec![
         DEVELOPMENT,
         AUTHENTICATION,
         CONTEXT,
@@ -30,18 +27,31 @@ fn subscriber_builder(
         MAPPER,
         SCHEMA,
     ]
-    .iter()
-    {
-        if let Some(level) = config.as_ref().map(|c| match target {
-            DEVELOPMENT => &c.development_level,
-            AUTHENTICATION => &c.authentication_level,
-            CONTEXT => &c.context_level,
-            KEYSET => &c.keyset_level,
-            PROTOCOL => &c.protocol_level,
-            MAPPER => &c.mapper_level,
-            SCHEMA => &c.schema_level,
-            _ => default_log_level,
-        }) {
+}
+
+fn log_level_for<'a>(config: &'a LogConfig, target: &'a str, default: &'a str) -> &'a str {
+    match target {
+        DEVELOPMENT => &config.development_level,
+        AUTHENTICATION => &config.authentication_level,
+        CONTEXT => &config.context_level,
+        KEYSET => &config.keyset_level,
+        PROTOCOL => &config.protocol_level,
+        MAPPER => &config.mapper_level,
+        SCHEMA => &config.schema_level,
+        _ => default,
+    }
+}
+
+fn subscriber_builder(
+    default_level: &str,
+    config: Option<LogConfig>,
+) -> SubscriberBuilder<DefaultFields, Format, EnvFilter> {
+    let mut env_filter: EnvFilter = EnvFilter::builder().parse_lossy(default_level);
+    for &target in log_targets().iter() {
+        if let Some(level) = config
+            .as_ref()
+            .map(|c| log_level_for(c, target, default_level))
+        {
             env_filter = env_filter.add_directive(format!("{target}={level}").parse().unwrap());
         }
     }

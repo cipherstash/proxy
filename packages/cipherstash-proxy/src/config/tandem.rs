@@ -110,7 +110,6 @@ pub struct LogConfig {
     pub schema_level: String,
 }
 
-
 /// Returns the default log level based on RUST_LOG, and defaults to "error" if not provided
 fn default_log_level() -> String {
     std::env::var("RUST_LOG").unwrap_or("error".into())
