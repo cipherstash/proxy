@@ -3,7 +3,7 @@ use crate::eql;
 use crate::error::{Error, MappingError, ProtocolError};
 use crate::log::MAPPER;
 use crate::postgresql::context::column::Column;
-use crate::postgresql::data::{from_sql, to_type};
+use crate::postgresql::data::{bind_param_from_sql, to_type};
 use crate::postgresql::format_code::FormatCode;
 use crate::postgresql::protocol::BytesMutReadString;
 use crate::{SIZE_I16, SIZE_I32};
@@ -63,7 +63,7 @@ impl Bind {
 
                     // Convert param bytes into a Plaintext wrapping a Value
                     // If the param type is different, convert to the correct Plaintext variant
-                    let plaintext = from_sql(param, &param_type)
+                    let plaintext = bind_param_from_sql(param, &param_type)
                         .map_err(|_| MappingError::InvalidParameter(col.to_owned()))?
                         .map(|pt| {
                             if col.is_param_type(&param_type) {

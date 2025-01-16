@@ -41,6 +41,11 @@ impl Encrypt {
         })
     }
 
+    ///
+    /// Does the encryption
+    /// Takes a Vec of Plaintext
+    ///         Vec of Columns (containing the config)
+    ///
     pub async fn encrypt(
         &self,
         plaintexts: Vec<Option<Plaintext>>,

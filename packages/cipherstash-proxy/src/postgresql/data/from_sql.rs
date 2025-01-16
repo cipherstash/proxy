@@ -10,7 +10,10 @@ use postgres_types::Type;
 use rust_decimal::Decimal;
 use std::str::FromStr;
 
-pub fn from_sql(param: &BindParam, postgres_type: &Type) -> Result<Option<Plaintext>, Error> {
+pub fn bind_param_from_sql(
+    param: &BindParam,
+    postgres_type: &Type,
+) -> Result<Option<Plaintext>, Error> {
     if param.is_null() {
         return Ok(None);
     }
@@ -20,6 +23,11 @@ pub fn from_sql(param: &BindParam, postgres_type: &Type) -> Result<Option<Plaint
         FormatCode::Binary => binary_from_sql(&param.bytes, postgres_type),
     }?;
 
+    Ok(Some(pt))
+}
+
+pub fn literal_from_sql(literal: String, postgres_type: &Type) -> Result<Option<Plaintext>, Error> {
+    let pt = text_from_sql(&literal, postgres_type)?;
     Ok(Some(pt))
 }
 
@@ -138,7 +146,9 @@ mod tests {
     use crate::{
         config::LogConfig,
         log,
-        postgresql::{data::from_sql, format_code::FormatCode, messages::bind::BindParam, Column},
+        postgresql::{
+            data::bind_param_from_sql, format_code::FormatCode, messages::bind::BindParam, Column,
+        },
         Identifier,
     };
     use bytes::{BufMut, BytesMut};
@@ -175,7 +185,7 @@ mod tests {
         bytes.put_i64(val);
         let param = BindParam::new(FormatCode::Binary, bytes);
 
-        let pt = from_sql(&param, &Type::INT8).unwrap().unwrap();
+        let pt = bind_param_from_sql(&param, &Type::INT8).unwrap().unwrap();
         assert_eq!(pt, Plaintext::BigInt(Some(val)));
 
         // Text
@@ -187,7 +197,7 @@ mod tests {
 
         let param = BindParam::new(FormatCode::Text, bytes);
 
-        let pt = from_sql(&param, &Type::INT8).unwrap().unwrap();
+        let pt = bind_param_from_sql(&param, &Type::INT8).unwrap().unwrap();
         assert_eq!(pt, Plaintext::BigInt(Some(val)));
     }
 
@@ -201,7 +211,7 @@ mod tests {
         bytes.put_u8(true as u8);
         let param = BindParam::new(FormatCode::Binary, bytes);
 
-        let pt = from_sql(&param, &Type::BOOL).unwrap().unwrap();
+        let pt = bind_param_from_sql(&param, &Type::BOOL).unwrap().unwrap();
         assert_eq!(pt, Plaintext::Boolean(Some(val)));
 
         // Text
@@ -213,7 +223,7 @@ mod tests {
 
         let param = BindParam::new(FormatCode::Text, bytes);
 
-        let pt = from_sql(&param, &Type::BOOL).unwrap().unwrap();
+        let pt = bind_param_from_sql(&param, &Type::BOOL).unwrap().unwrap();
         assert_eq!(pt, Plaintext::Boolean(Some(val)));
     }
 
@@ -229,7 +239,7 @@ mod tests {
 
         let param = BindParam::new(FormatCode::Binary, bytes);
 
-        let pt = from_sql(&param, &Type::DATE).unwrap().unwrap();
+        let pt = bind_param_from_sql(&param, &Type::DATE).unwrap().unwrap();
         assert_eq!(pt, Plaintext::NaiveDate(Some(val)));
 
         // Text
@@ -238,7 +248,7 @@ mod tests {
 
         let param = BindParam::new(FormatCode::Text, bytes);
 
-        let pt = from_sql(&param, &Type::DATE).unwrap().unwrap();
+        let pt = bind_param_from_sql(&param, &Type::DATE).unwrap().unwrap();
         assert_eq!(pt, Plaintext::NaiveDate(Some(val)));
     }
 }

@@ -3,12 +3,13 @@ mod to_sql;
 
 use crate::log::MAPPER;
 use cipherstash_client::encryption::Plaintext;
-pub use from_sql::from_sql;
+pub use from_sql::bind_param_from_sql;
 use postgres_types::Type;
 use rust_decimal::{prelude::FromPrimitive, Decimal};
-pub use to_sql::to_sql;
 use tracing::{debug, warn};
 
+pub use from_sql::literal_from_sql;
+pub use to_sql::to_sql;
 ///
 /// Fun fact: some clients can specify a parameter type with a parse message
 /// The parameter type will overide the underlying column type.

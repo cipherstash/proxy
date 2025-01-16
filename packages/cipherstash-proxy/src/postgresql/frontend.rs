@@ -11,6 +11,7 @@ use crate::eql::Identifier;
 use crate::error::{EncryptError, Error};
 use crate::log::{MAPPER, PROTOCOL};
 use crate::postgresql::context::column::Column;
+use crate::postgresql::data::{bind_param_from_sql, literal_from_sql};
 use bytes::BytesMut;
 use eql_mapper::{self, EqlValue, TableColumn};
 use pg_escape::quote_literal;
@@ -130,6 +131,13 @@ where
         Ok(())
     }
 
+    ///
+    /// Take the SQL Statement from the Query message
+    /// If it contains literal values that map to encrypted configured columns
+    /// Encrypt the values
+    /// Rewrite the statement
+    /// And send it on
+    ///
     async fn query_handler(&mut self, bytes: &BytesMut) -> Result<(), Error> {
         let query = Query::try_from(bytes)?;
 
@@ -145,12 +153,50 @@ where
             self.context.set_schema_changed();
         }
 
+        info!(target = MAPPER, "Statement {:?}", statement);
+        if eql_mapper::requires_type_check(&statement) {
+            let typed_statement = eql_mapper::type_check(self.encrypt.schema.load(), &statement)
+                .map_err(|e| {
+                    info!("{e:?}");
+                    MappingError::StatementCouldNotBeTypeChecked
+                })?;
+
+            info!(target = MAPPER, "typed_statement {:?}", typed_statement);
+
+            let literals = &typed_statement.literals;
+            let literal_columns = self.get_literal_columns(&typed_statement)?;
+
+            literals
+                .iter()
+                .zip(literal_columns)
+                .map(|((_, expr), column)| {
+                    if let Some(col) = column {
+                        match expr {
+                            sqlparser::ast::Expr::Value(value) => {
+                                literal_from_sql(value, &col.postgres_type)
+                            }
+                            _ => {}
+                        }
+                    }
+                });
+
+            // Convert to plaintext
+
+            // Encrypt
+
+            // Rewrite the Statement
+
+            // Rewrite the bytes/message
+
+            info!(target = MAPPER, "Literals {:?}", literals);
+        }
+
         Ok(())
     }
 
     ///
     /// Parse message handler
-    /// THIS ONE IS VER IMPORTANT
+    /// THIS ONE IS VERY IMPORTANT
     ///
     /// Parse messages contain the actual SQL Statement
     /// Handler handles
@@ -368,6 +414,24 @@ where
         } else {
             Ok(None)
         }
+    }
+
+    fn get_literal_columns(
+        &mut self,
+        typed_statement: &eql_mapper::TypedStatement<'_>,
+    ) -> Result<Vec<Option<Column>>, Error> {
+        let literal_columns = typed_statement
+            .literals
+            .iter()
+            .map(|(eql_value, _exp)| match eql_value {
+                EqlValue(TableColumn { table, column }) => {
+                    let identifier = Identifier::from((table, column));
+                    debug!(target = MAPPER, "Encrypted literal {:?}", identifier);
+                    self.get_column(identifier)
+                }
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(literal_columns)
     }
 
     fn get_column(&mut self, identifier: Identifier) -> Result<Option<Column>, Error> {
