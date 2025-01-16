@@ -32,7 +32,7 @@ fn subscriber_builder(
     ]
     .iter()
     {
-        if let Some(Some(level)) = config.as_ref().map(|c| match target {
+        if let Some(level) = config.as_ref().map(|c| match target {
             DEVELOPMENT => &c.development_level,
             AUTHENTICATION => &c.authentication_level,
             CONTEXT => &c.context_level,
@@ -40,7 +40,7 @@ fn subscriber_builder(
             PROTOCOL => &c.protocol_level,
             MAPPER => &c.mapper_level,
             SCHEMA => &c.schema_level,
-            _ => &None,
+            _ => default_log_level,
         }) {
             env_filter = env_filter.add_directive(format!("{target}={level}").parse().unwrap());
         }
@@ -177,13 +177,13 @@ mod tests {
     #[test]
     fn test_log_levels_with_targets() {
         let config = Some(LogConfig {
-            development_level: Some("info".into()),
-            authentication_level: Some("debug".into()),
-            context_level: Some("error".into()),
-            keyset_level: Some("trace".into()),
-            protocol_level: Some("info".into()),
-            mapper_level: Some("info".into()),
-            schema_level: Some("info".into()),
+            development_level: "info".into(),
+            authentication_level: "debug".into(),
+            context_level: "error".into(),
+            keyset_level: "trace".into(),
+            protocol_level: "info".into(),
+            mapper_level: "info".into(),
+            schema_level: "info".into(),
         });
         let make_writer = MockMakeWriter::default();
         let subscriber = subscriber_builder("warn", config)

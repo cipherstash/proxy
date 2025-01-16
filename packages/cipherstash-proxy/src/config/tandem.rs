@@ -94,14 +94,26 @@ pub struct DevelopmentConfig {
 
 #[derive(Debug, Deserialize, Clone, PartialEq)]
 pub struct LogConfig {
-    // TODO: Could these be non-String types
-    pub development_level: Option<String>,
-    pub authentication_level: Option<String>,
-    pub context_level: Option<String>,
-    pub keyset_level: Option<String>,
-    pub protocol_level: Option<String>,
-    pub mapper_level: Option<String>,
-    pub schema_level: Option<String>,
+    #[serde(default = "default_log_level")]
+    pub development_level: String,
+    #[serde(default = "default_log_level")]
+    pub authentication_level: String,
+    #[serde(default = "default_log_level")]
+    pub context_level: String,
+    #[serde(default = "default_log_level")]
+    pub keyset_level: String,
+    #[serde(default = "default_log_level")]
+    pub protocol_level: String,
+    #[serde(default = "default_log_level")]
+    pub mapper_level: String,
+    #[serde(default = "default_log_level")]
+    pub schema_level: String,
+}
+
+
+/// Returns the default log level based on RUST_LOG, and defaults to "error" if not provided
+fn default_log_level() -> String {
+    std::env::var("RUST_LOG").unwrap_or("error".into())
 }
 
 /// Config defaults to a file called `tandem` in the current directory.
