@@ -340,7 +340,9 @@ impl TryFrom<Bind> for BytesMut {
 mod tests {
     use super::BindParam;
     use crate::{
-        config::LogConfig, log, postgresql::{format_code::FormatCode, messages::bind::Bind}
+        config::LogConfig,
+        log,
+        postgresql::{format_code::FormatCode, messages::bind::Bind},
     };
     use bytes::BytesMut;
 

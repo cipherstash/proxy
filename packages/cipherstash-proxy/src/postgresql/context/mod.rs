@@ -196,7 +196,9 @@ mod tests {
 
     use super::{Context, Describe, Portal, Statement};
     use crate::{
-        config::LogConfig, log, postgresql::messages::{describe::Target, Name}
+        config::LogConfig,
+        log,
+        postgresql::messages::{describe::Target, Name},
     };
 
     fn statement() -> Statement {

@@ -105,7 +105,10 @@ impl TryFrom<Parse> for BytesMut {
 #[cfg(test)]
 mod tests {
     use crate::{
-        config::LogConfig, log, postgresql::{messages::parse::Parse, Column}, Identifier
+        config::LogConfig,
+        log,
+        postgresql::{messages::parse::Parse, Column},
+        Identifier,
     };
     use bytes::BytesMut;
     use cipherstash_config::{ColumnConfig, ColumnType};

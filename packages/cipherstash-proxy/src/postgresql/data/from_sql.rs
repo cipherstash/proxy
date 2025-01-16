@@ -136,7 +136,10 @@ fn binary_from_sql(bytes: &BytesMut, postgres_type: &Type) -> Result<Plaintext, 
 mod tests {
 
     use crate::{
-        config::LogConfig, log, postgresql::{data::from_sql, format_code::FormatCode, messages::bind::BindParam, Column}, Identifier
+        config::LogConfig,
+        log,
+        postgresql::{data::from_sql, format_code::FormatCode, messages::bind::BindParam, Column},
+        Identifier,
     };
     use bytes::{BufMut, BytesMut};
     use chrono::NaiveDate;
