@@ -24,6 +24,7 @@ pub struct Context {
     pub execute: Arc<RwLock<Name>>,
     pub schema_changed: Arc<RwLock<bool>>,
     pub table_resolver: Arc<TableResolver>,
+    pub client_id: i32,
 }
 
 ///
@@ -48,7 +49,7 @@ pub struct Portal {
 }
 
 impl Context {
-    pub fn new(schema: Arc<Schema>) -> Context {
+    pub fn new(client_id: i32, schema: Arc<Schema>) -> Context {
         Context {
             statements: Arc::new(RwLock::new(HashMap::new())),
             portals: Arc::new(RwLock::new(HashMap::new())),
@@ -56,11 +57,12 @@ impl Context {
             execute: Arc::new(RwLock::from(Name::unnamed())),
             schema_changed: Arc::new(RwLock::from(false)),
             table_resolver: Arc::new(TableResolver::new_editable(schema)),
+            client_id,
         }
     }
 
     pub fn describe(&mut self, describe: Describe) {
-        debug!(target: CONTEXT, "Describe: {describe:?}");
+        debug!(target: CONTEXT, client_id = self.client_id, "Describe: {describe:?}");
         let _ = self
             .describe
             .write()
@@ -68,12 +70,12 @@ impl Context {
     }
 
     pub fn execute(&mut self, name: Name) {
-        debug!(target: CONTEXT, "Execute: {name:?}");
+        debug!(target: CONTEXT, client_id = self.client_id, "Execute: {name:?}");
         let _ = self.execute.write().map(|mut guard| *guard = name);
     }
 
     pub fn add_statement(&mut self, name: Name, statement: Statement) {
-        debug!(target: CONTEXT, "Statement: {name:?}");
+        debug!(target: CONTEXT, client_id = self.client_id, "Statement: {name:?}");
         let _ = self
             .statements
             .write()
@@ -81,7 +83,7 @@ impl Context {
     }
 
     pub fn add_portal(&mut self, name: Name, portal: Portal) {
-        debug!(target: CONTEXT, "Portal: {name:?}");
+        debug!(target: CONTEXT, client_id = self.client_id, "Portal: {name:?}");
         let _ = self
             .portals
             .write()
@@ -89,7 +91,7 @@ impl Context {
     }
 
     pub fn get_statement(&self, name: &Name) -> Option<Arc<Statement>> {
-        debug!(target: CONTEXT, "Get Statement: {name:?}");
+        debug!(target: CONTEXT, client_id = self.client_id, "Get Statement: {name:?}");
         self.statements
             .read()
             .ok()
@@ -98,7 +100,7 @@ impl Context {
 
     pub fn get_statement_from_describe(&self) -> Option<Arc<Statement>> {
         self.describe.read().ok().map(|describe| {
-            debug!(target: CONTEXT, "Describe: {describe:?}");
+            debug!(target: CONTEXT, client_id = self.client_id, "Describe: {describe:?}");
             match *describe {
                 Some(Describe {
                     ref name,
@@ -114,7 +116,7 @@ impl Context {
     }
 
     pub fn get_portal(&self, name: &Name) -> Option<Arc<Portal>> {
-        debug!(target: CONTEXT, "Get Portal: {name:?}");
+        debug!(target: CONTEXT, client_id = self.client_id, "Get Portal: {name:?}");
         self.portals
             .read()
             .ok()
@@ -122,7 +124,7 @@ impl Context {
     }
 
     pub fn get_portal_statement(&self, name: &Name) -> Option<Arc<Statement>> {
-        debug!(target: CONTEXT, "Get Portal: {name:?}");
+        debug!(target: CONTEXT, client_id = self.client_id, "Get Portal: {name:?}");
         self.portals
             .read()
             .ok()
@@ -131,13 +133,13 @@ impl Context {
 
     pub fn get_portal_from_execute(&self) -> Option<Arc<Portal>> {
         self.execute.read().ok().map(|name| {
-            debug!(target: CONTEXT, "Execute: {name:?}");
+            debug!(target: CONTEXT, client_id = self.client_id, "Execute: {name:?}");
             self.get_portal(&name)
         })?
     }
 
     pub fn set_schema_changed(&self) {
-        debug!(target: CONTEXT, "Schema changed");
+        debug!(target: CONTEXT, client_id = self.client_id, "Schema changed");
         let _ = self.schema_changed.write().map(|mut guard| *guard = true);
     }
 
@@ -215,7 +217,7 @@ mod tests {
 
         let schema = Arc::new(Schema::new("public"));
 
-        let mut context = Context::new(schema);
+        let mut context = Context::new(1, schema);
 
         let name = Name("name".to_string());
 
@@ -240,7 +242,7 @@ mod tests {
 
         let schema = Arc::new(Schema::new("public"));
 
-        let mut context = Context::new(schema);
+        let mut context = Context::new(1, schema);
 
         let statement_name = Name("statement".to_string());
         let portal_name = Name("portal".to_string());

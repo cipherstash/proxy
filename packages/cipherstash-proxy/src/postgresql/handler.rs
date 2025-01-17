@@ -52,7 +52,11 @@ use tracing::{debug, error, info};
 ///         Propagate and continue
 ///
 ///
-pub async fn handler(client_stream: AsyncStream, encrypt: Encrypt) -> Result<(), Error> {
+pub async fn handler(
+    client_stream: AsyncStream,
+    encrypt: Encrypt,
+    client_id: i32,
+) -> Result<(), Error> {
     let mut client_stream = client_stream;
 
     // Connect to the database server, using TLS if configured
@@ -60,6 +64,7 @@ pub async fn handler(client_stream: AsyncStream, encrypt: Encrypt) -> Result<(),
     let mut database_stream = startup::with_tls(stream, &encrypt.config).await?;
     info!(
         database = encrypt.config.database.to_socket_address(),
+        client_id = client_id,
         "Database connected"
     );
 
@@ -214,7 +219,7 @@ pub async fn handler(client_stream: AsyncStream, encrypt: Encrypt) -> Result<(),
 
     let schema = encrypt.schema.load();
 
-    let context = Context::new(schema);
+    let context = Context::new(client_id, schema);
 
     let mut frontend = Frontend::new(
         client_reader,

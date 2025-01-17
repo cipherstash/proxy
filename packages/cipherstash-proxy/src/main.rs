@@ -26,6 +26,8 @@ async fn main() {
 
     let mut listener = connect::bind_with_retry(&encrypt.config.server).await;
 
+    let mut client_id = 0;
+
     loop {
         tokio::select! {
             _ = sigint() => {
@@ -45,11 +47,12 @@ async fn main() {
 
                 let encrypt = encrypt.clone();
 
+                client_id += 1;
 
                 tokio::spawn(async move {
                     let encrypt = encrypt.clone();
 
-                    match pg::handler(client_stream, encrypt).await {
+                    match pg::handler(client_stream, encrypt, client_id).await {
                         Ok(_) => (),
                         Err(e) => match e {
                             Error::ConnectionClosed => {
