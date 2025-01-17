@@ -47,16 +47,29 @@ fn subscriber_builder(
     config: LogConfig,
 ) -> SubscriberBuilder<DefaultFields, Format, EnvFilter> {
     let mut env_filter: EnvFilter = EnvFilter::builder().parse_lossy(default_level);
+
+    let mut debug = is_debug(default_level);
+
     for &target in log_targets().iter() {
         let level = log_level_for(&config, target, default_level);
+        if is_debug(level) {
+            debug = true;
+        }
         env_filter = env_filter.add_directive(format!("{target}={level}").parse().unwrap());
     }
 
-    FmtSubscriber::builder()
+    let mut builder = FmtSubscriber::builder()
         .with_env_filter(env_filter)
-        .with_file(true)
-        .with_line_number(true)
-        .with_target(true)
+        .with_ansi(!config.disable_ansi);
+
+    if debug {
+        builder = builder
+            .with_thread_ids(true)
+            .with_file(true)
+            .with_line_number(true);
+    };
+
+    builder
 }
 
 pub fn global_default_log_level() -> String {
@@ -71,6 +84,10 @@ pub fn init(config: crate::config::LogConfig) {
         tracing::subscriber::set_global_default(subscriber)
             .expect("setting default subscriber failed");
     });
+}
+
+fn is_debug(level: &str) -> bool {
+    level.to_uppercase() == "DEBUG" || level.to_uppercase() == "TRACE"
 }
 
 #[cfg(test)]
@@ -194,6 +211,7 @@ mod tests {
             protocol_level: "info".into(),
             mapper_level: "info".into(),
             schema_level: "info".into(),
+            disable_ansi: false,
         };
         let make_writer = MockMakeWriter::default();
         let subscriber = subscriber_builder("warn", config)

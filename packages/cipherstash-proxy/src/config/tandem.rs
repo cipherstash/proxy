@@ -96,6 +96,9 @@ pub struct DevelopmentConfig {
 
 #[derive(Debug, Deserialize, Clone, PartialEq, Default)]
 pub struct LogConfig {
+    #[serde(default)]
+    pub disable_ansi: bool,
+
     #[serde(default = "global_default_log_level")]
     pub development_level: String,
     #[serde(default = "global_default_log_level")]
