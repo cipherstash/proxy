@@ -34,6 +34,9 @@ pub struct ServerConfig {
 
     #[serde(default)]
     pub require_tls: bool,
+
+    #[serde(default = "ServerConfig::default_shutdown_timeout")]
+    pub shutdown_timeout: u64,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -197,6 +200,7 @@ impl Default for ServerConfig {
             host: ServerConfig::default_host(),
             port: ServerConfig::default_port(),
             require_tls: false,
+            shutdown_timeout: ServerConfig::default_shutdown_timeout(),
         }
     }
 }
@@ -210,6 +214,10 @@ impl ServerConfig {
         6432
     }
 
+    pub fn default_shutdown_timeout() -> u64 {
+        2000
+    }
+
     pub fn server_name(&self) -> Result<ServerName, Error> {
         let name = ServerName::try_from(self.host.as_str()).map_err(|_| {
             ConfigError::InvalidServerName {
@@ -221,6 +229,10 @@ impl ServerConfig {
 
     pub fn to_socket_address(&self) -> String {
         format!("{}:{}", self.host, self.port)
+    }
+
+    pub fn shutdown_timeout(&self) -> Duration {
+        Duration::from_millis(self.shutdown_timeout)
     }
 }
 

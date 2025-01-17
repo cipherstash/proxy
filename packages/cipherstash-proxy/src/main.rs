@@ -5,6 +5,7 @@ use cipherstash_proxy::error::Error;
 use cipherstash_proxy::{log, postgresql as pg, tls};
 use tokio::net::TcpListener;
 use tokio::signal::unix::{signal, SignalKind};
+use tokio_util::task::TaskTracker;
 use tracing::{debug, error, info, warn};
 
 // TODO: Accept command line arguments for config file path
@@ -22,9 +23,12 @@ async fn main() {
 
     log::init(config.log.clone());
 
+    let shutdown_timeout = &config.server.shutdown_timeout();
+
     let mut encrypt = init(config).await;
 
     let mut listener = connect::bind_with_retry(&encrypt.config.server).await;
+    let tracker = TaskTracker::new();
 
     let mut client_id = 0;
 
@@ -49,7 +53,7 @@ async fn main() {
 
                 client_id += 1;
 
-                tokio::spawn(async move {
+                tracker.spawn(async move {
                     let encrypt = encrypt.clone();
 
                     match pg::handler(client_stream, encrypt, client_id).await {
@@ -73,7 +77,19 @@ async fn main() {
             },
         }
     }
+
     info!("Shutting down CipherStash Proxy");
+
+    // Close the listener
+    drop(listener);
+
+    tracker.close();
+
+    info!("Waiting for clients");
+
+    if let Err(_) = tokio::time::timeout(*shutdown_timeout, tracker.wait()).await {
+        warn!("Terminated {} client connections", tracker.len());
+    }
 }
 
 ///
@@ -173,7 +189,7 @@ async fn reload_config(
     let new_config = match TandemConfig::load(config_file) {
         Ok(config) => config,
         Err(err) => {
-            warn!("Not reloading configuration due to the error: {}", err);
+            warn!("Configuration could not be reloaded: {}", err);
             return (listener, encrypt);
         }
     };
