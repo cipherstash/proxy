@@ -73,9 +73,11 @@ impl BytesMutReadString for Cursor<&BytesMut> {
 ///
 pub async fn read_auth_message<S: AsyncRead + Unpin>(
     mut stream: S,
+    client_id: i32,
 ) -> Result<Authentication, Error> {
     let connection_timeout = Duration::from_millis(1000 * 10);
-    let (_code, bytes) = read_message_with_timeout(&mut stream, connection_timeout).await?;
+    let (_code, bytes) =
+        read_message_with_timeout(&mut stream, client_id, connection_timeout).await?;
     Authentication::try_from(&bytes)
 }
 
@@ -87,9 +89,10 @@ pub async fn read_auth_message<S: AsyncRead + Unpin>(
 ///
 pub async fn read_message_with_timeout<S: AsyncRead + Unpin>(
     mut stream: S,
+    client_id: i32,
     connection_timeout: Duration,
 ) -> Result<(Code, BytesMut), Error> {
-    timeout(connection_timeout, read_message(&mut stream)).await?
+    timeout(connection_timeout, read_message(&mut stream, client_id)).await?
 }
 
 ///
@@ -99,7 +102,10 @@ pub async fn read_message_with_timeout<S: AsyncRead + Unpin>(
 /// Byte is then passed as `code` to this function to preserve the message structure
 ///
 ///
-pub async fn read_message<S: AsyncRead + Unpin>(mut stream: S) -> Result<(Code, BytesMut), Error> {
+pub async fn read_message<S: AsyncRead + Unpin>(
+    mut stream: S,
+    client_id: i32,
+) -> Result<(Code, BytesMut), Error> {
     let code = stream.read_u8().await?;
     let len = stream.read_i32().await?;
 
@@ -128,7 +134,7 @@ pub async fn read_message<S: AsyncRead + Unpin>(mut stream: S) -> Result<(Code, 
 
     stream.read_exact(&mut bytes[slice_start..]).await?;
 
-    debug!(target: PROTOCOL, "Code[{}] {bytes:?}", code as char);
+    debug!(target: PROTOCOL, client_id, "Code[{}] {bytes:?}", code as char);
 
     Ok((code, bytes))
 }

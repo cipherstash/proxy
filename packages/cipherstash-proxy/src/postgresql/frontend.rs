@@ -59,8 +59,12 @@ where
 
     pub async fn read(&mut self) -> Result<BytesMut, Error> {
         let connection_timeout = self.encrypt.config.database.connection_timeout();
-        let (code, mut bytes) =
-            protocol::read_message_with_timeout(&mut self.client, connection_timeout).await?;
+        let (code, mut bytes) = protocol::read_message_with_timeout(
+            &mut self.client,
+            self.context.client_id,
+            connection_timeout,
+        )
+        .await?;
 
         if self.encrypt.config.disable_mapping() {
             return Ok(bytes);
@@ -114,15 +118,15 @@ where
 
     async fn describe_handler(&mut self, bytes: &BytesMut) -> Result<(), Error> {
         let describe = Describe::try_from(bytes)?;
-        info!(target = PROTOCOL, "{:?}", describe);
-        self.context.describe(describe);
+        info!(target: PROTOCOL, "{:?}", describe);
+        self.context.set_describe(describe);
         Ok(())
     }
 
     async fn execute_handler(&mut self, bytes: &BytesMut) -> Result<(), Error> {
         let execute = Execute::try_from(bytes)?;
-        info!(target = PROTOCOL, "{:?}", execute);
-        self.context.execute(execute.portal.to_owned());
+        info!(target: PROTOCOL, "{:?}", execute);
+        self.context.set_execute(execute.portal.to_owned());
         Ok(())
     }
 
@@ -174,7 +178,7 @@ where
         let mut message = Parse::try_from(bytes)?;
 
         debug!(
-            target = PROTOCOL,
+            target: PROTOCOL,
             client_id = self.context.client_id,
             "Parse: {:?}",
             message
@@ -285,7 +289,7 @@ where
             debug!(target: MAPPER, client_id = self.context.client_id,"Rewrite Bind");
             let bytes = BytesMut::try_from(bind)?;
             debug!(
-                target = MAPPER,
+                target: MAPPER,
                 client_id = self.context.client_id,
                 "Mapped params {bytes:?}"
             );
@@ -311,7 +315,7 @@ where
                                 eql_mapper::Value::Eql(EqlValue(TableColumn { table, column })) => {
                                     let identifier: Identifier = Identifier::from((table, column));
                                     debug!(
-                                        target = MAPPER,
+                                        target: MAPPER,
                                         client_id = self.context.client_id,
                                         "Encrypted column{:?}",
                                         identifier
@@ -348,7 +352,7 @@ where
                 eql_mapper::Value::Eql(EqlValue(TableColumn { table, column })) => {
                     let identifier = Identifier::from((table, column));
                     debug!(
-                        target = MAPPER,
+                        target: MAPPER,
                         client_id = self.context.client_id,
                         "Encrypted parameter {:?}",
                         identifier
@@ -370,7 +374,7 @@ where
         match self.encrypt.get_column_config(&identifier) {
             Some(config) => {
                 debug!(
-                    target = MAPPER,
+                    target: MAPPER,
                     client_id = self.context.client_id,
                     "Configured column {:?}",
                     identifier

@@ -1,5 +1,5 @@
 use super::{configure, connect_with_retry};
-use crate::error::Error;
+use crate::{error::Error, log::AUTHENTICATION};
 use core::str;
 use oid_registry::{
     Oid, OID_HASH_SHA1, OID_NIST_HASH_SHA256, OID_NIST_HASH_SHA384, OID_NIST_HASH_SHA512,
@@ -58,10 +58,7 @@ impl AsyncStream {
 
     pub fn channel_binding(&self) -> ChannelBinding {
         match self {
-            AsyncStream::Tcp(_) => {
-                debug!("ChannelBinding is unsupported in TCP Connections");
-                ChannelBinding::unsupported()
-            }
+            AsyncStream::Tcp(_) => ChannelBinding::unsupported(),
             AsyncStream::Tls(stream) => {
                 let (_, session) = stream.get_ref();
                 let certs = session.peer_certificates();
@@ -77,7 +74,10 @@ impl AsyncStream {
                             })
                     }
                     _ => {
-                        debug!("Missing certificates, ChannelBinding is unsupported");
+                        debug!(
+                            target: AUTHENTICATION,
+                            "Missing certificates, ChannelBinding is unsupported"
+                        );
                         ChannelBinding::unsupported()
                     }
                 }

@@ -61,21 +61,21 @@ impl Context {
         }
     }
 
-    pub fn describe(&mut self, describe: Describe) {
-        debug!(target: CONTEXT, client_id = self.client_id, "Describe: {describe:?}");
+    pub fn set_describe(&mut self, describe: Describe) {
+        debug!(target: CONTEXT, client_id = self.client_id, "set_describe: {describe:?}");
         let _ = self
             .describe
             .write()
             .map(|mut guard| *guard = Some(describe));
     }
 
-    pub fn execute(&mut self, name: Name) {
-        debug!(target: CONTEXT, client_id = self.client_id, "Execute: {name:?}");
+    pub fn set_execute(&mut self, name: Name) {
+        debug!(target: CONTEXT, client_id = self.client_id, "set_execute: {name:?}");
         let _ = self.execute.write().map(|mut guard| *guard = name);
     }
 
     pub fn add_statement(&mut self, name: Name, statement: Statement) {
-        debug!(target: CONTEXT, client_id = self.client_id, "Statement: {name:?}");
+        debug!(target: CONTEXT, client_id = self.client_id, "add_statement: {name:?}");
         let _ = self
             .statements
             .write()
@@ -83,7 +83,7 @@ impl Context {
     }
 
     pub fn add_portal(&mut self, name: Name, portal: Portal) {
-        debug!(target: CONTEXT, client_id = self.client_id, "Portal: {name:?}");
+        debug!(target: CONTEXT, client_id = self.client_id, "add_portal: {name:?}");
         let _ = self
             .portals
             .write()
@@ -91,7 +91,7 @@ impl Context {
     }
 
     pub fn get_statement(&self, name: &Name) -> Option<Arc<Statement>> {
-        debug!(target: CONTEXT, client_id = self.client_id, "Get Statement: {name:?}");
+        debug!(target: CONTEXT, client_id = self.client_id, "get_statement: {name:?}");
         self.statements
             .read()
             .ok()
@@ -116,26 +116,27 @@ impl Context {
     }
 
     pub fn get_portal(&self, name: &Name) -> Option<Arc<Portal>> {
-        debug!(target: CONTEXT, client_id = self.client_id, "Get Portal: {name:?}");
-        self.portals
-            .read()
-            .ok()
-            .map(|guard| guard.get(name).cloned())?
+        self.portals.read().ok().map(|guard| {
+            let portal = guard.get(name);
+            debug!(target: CONTEXT, client_id = self.client_id, "get_portal: {portal:?}");
+            portal.cloned()
+        })?
     }
 
     pub fn get_portal_statement(&self, name: &Name) -> Option<Arc<Statement>> {
-        debug!(target: CONTEXT, client_id = self.client_id, "Get Portal: {name:?}");
-        self.portals
-            .read()
-            .ok()
-            .map(|guard| guard.get(name).map(|portal| portal.statement.clone()))?
+        self.portals.read().ok().map(|guard| {
+            guard.get(name).map(|portal| {
+                debug!(target: CONTEXT, client_id = self.client_id, "get_portal_statement: {portal:?}");
+                portal.statement.clone()
+            })
+        })?
     }
 
     pub fn get_portal_from_execute(&self) -> Option<Arc<Portal>> {
-        self.execute.read().ok().map(|name| {
-            debug!(target: CONTEXT, client_id = self.client_id, "Execute: {name:?}");
-            self.get_portal(&name)
-        })?
+        self.execute
+            .read()
+            .ok()
+            .map(|name| self.get_portal(&name))?
     }
 
     pub fn set_schema_changed(&self) {
@@ -229,7 +230,7 @@ mod tests {
             name,
             target: Target::PreparedStatement,
         };
-        context.describe(describe);
+        context.set_describe(describe);
 
         let s = context.get_statement_from_describe().unwrap();
 
@@ -258,7 +259,7 @@ mod tests {
         context.add_portal(portal_name.clone(), portal);
 
         // Add statement name to execute context
-        context.execute(portal_name);
+        context.set_execute(portal_name);
 
         // Portal statement should be the right statement
         let portal = context.get_portal_from_execute().unwrap();

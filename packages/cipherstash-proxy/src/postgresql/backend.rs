@@ -51,8 +51,12 @@ where
     pub async fn rewrite(&mut self) -> Result<(), Error> {
         let connection_timeout = self.encrypt.config.database.connection_timeout();
 
-        let (code, bytes) =
-            protocol::read_message_with_timeout(&mut self.server, connection_timeout).await?;
+        let (code, mut bytes) = protocol::read_message_with_timeout(
+            &mut self.server,
+            self.context.client_id,
+            connection_timeout,
+        )
+        .await?;
 
         if self.encrypt.config.disable_mapping() {
             self.write(bytes).await?;
@@ -60,42 +64,31 @@ where
         }
 
         match code.into() {
-            BackendCode::DataRow => match self.context.get_portal_from_execute() {
-                Some(_) => {
-                    let data_row = DataRow::try_from(&bytes)?;
-                    self.buffer(data_row).await?;
+            BackendCode::DataRow => {
+                // Encrypted DataRows are added to the buffer and we return early
+                // Otherwise, we write immediately
+                if self.data_row_handler(&bytes).await? {
+                    return Ok(());
                 }
-                None => {
-                    debug!(target: MAPPER,
-                        client_id = self.context.client_id,
-                        "Unencrypted DataRow");
-                    self.write(bytes).await?
-                }
-            },
+            }
             BackendCode::ErrorResponse => {
                 self.error_response_handler(&bytes)?;
-                self.write(bytes).await?;
             }
             BackendCode::ParameterDescription => {
-                if let Some(bytes) = self.parameter_description_handler(&bytes).await? {
-                    self.write(bytes).await?;
-                } else {
-                    self.write(bytes).await?;
-                }
+                self.parameter_description_handler(&bytes)
+                    .await?
+                    .map(|b| bytes = b);
             }
             BackendCode::RowDescription => {
-                if let Some(bytes) = self.row_description_handler(&bytes).await? {
-                    self.write(bytes).await?;
-                } else {
-                    self.write(bytes).await?;
-                }
+                self.row_description_handler(&bytes)
+                    .await?
+                    .map(|b| bytes = b);
             }
-            _ => {
-                self.write(bytes).await?;
-            }
+            _ => {}
         }
 
-        self.flush().await?;
+        self.write(bytes).await?;
+
         Ok(())
     }
 
@@ -120,7 +113,7 @@ where
     async fn buffer(&mut self, data_row: DataRow) -> Result<(), Error> {
         self.buffer.push(data_row).await;
         if self.buffer.at_capacity().await {
-            debug!(target: DEVELOPMENT, client_id = self.context.client_id,"Flush message buffer");
+            debug!(target: DEVELOPMENT, client_id = self.context.client_id, "Flush message buffer");
             self.flush().await?;
         }
         Ok(())
@@ -133,6 +126,7 @@ where
     ///
     pub async fn write(&mut self, bytes: BytesMut) -> Result<(), Error> {
         self.flush().await?;
+
         self.client.write_all(&bytes).await?;
 
         Ok(())
@@ -182,7 +176,7 @@ where
             .flatten_ok()
             .collect::<Result<Vec<_>, _>>()?;
 
-        // Vec<Option<CipherText>> -> Vec<Option<Plaintext>>
+        // Decrypt CipherText -> Plaintext
         let plaintexts = self.encrypt.decrypt(ciphertexts).await?;
 
         // debug!(target: MAPPER, "Plaintexts: {plaintexts:?}");
@@ -201,8 +195,6 @@ where
                     None => Ok(None),
                 })
                 .collect::<Result<Vec<_>, _>>()?;
-
-            debug!(target: MAPPER, client_id = self.context.client_id, "Data: {data:?}");
 
             row.rewrite(&data)?;
 
@@ -266,6 +258,26 @@ where
             Ok(Some(bytes))
         } else {
             Ok(None)
+        }
+    }
+
+    ///
+    /// Handle DataRow messages
+    /// If there is no associated Portal, the row does not require decryption and can be passed through
+    ///
+    async fn data_row_handler(&mut self, bytes: &BytesMut) -> Result<bool, Error> {
+        match self.context.get_portal_from_execute() {
+            Some(_) => {
+                let data_row = DataRow::try_from(bytes)?;
+                self.buffer(data_row).await?;
+                Ok(true)
+            }
+            None => {
+                debug!(target: MAPPER,
+                    client_id = self.context.client_id,
+                    "Passthrough DataRow");
+                Ok(false)
+            }
         }
     }
 }

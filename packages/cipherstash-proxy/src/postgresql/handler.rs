@@ -123,7 +123,8 @@ pub async fn handler(
 
         let connection_timeout = encrypt.config.database.connection_timeout();
         let (_code, bytes) =
-            protocol::read_message_with_timeout(&mut client_stream, connection_timeout).await?;
+            protocol::read_message_with_timeout(&mut client_stream, client_id, connection_timeout)
+                .await?;
 
         let password_message = PasswordMessage::try_from(&bytes)?;
 
@@ -154,7 +155,7 @@ pub async fn handler(
 
     // First message should always be Auth
 
-    let auth = protocol::read_auth_message(&mut database_stream).await?;
+    let auth = protocol::read_auth_message(&mut database_stream, client_id).await?;
 
     match &auth.method {
         AuthenticationMethod::AuthenticationOk => {
@@ -310,7 +311,7 @@ async fn scram_sha_256_plus_handler<S: AsyncRead + AsyncWrite + Unpin>(
     stream.write_all(&bytes).await?;
 
     // debug!("SASLContinue");
-    let auth = protocol::read_auth_message(&mut stream).await?;
+    let auth = protocol::read_auth_message(&mut stream, 1).await?;
 
     let bytes = auth.sasl_continue()?;
     scram.update(bytes)?;
@@ -321,11 +322,11 @@ async fn scram_sha_256_plus_handler<S: AsyncRead + AsyncWrite + Unpin>(
     stream.write_all(&bytes).await?;
 
     // debug!("SASLFinal");
-    let auth = protocol::read_auth_message(&mut stream).await?;
+    let auth = protocol::read_auth_message(&mut stream, 1).await?;
     let bytes = auth.sasl_final()?;
     scram.finish(bytes)?;
 
-    let auth = protocol::read_auth_message(&mut stream).await?;
+    let auth = protocol::read_auth_message(&mut stream, 1).await?;
 
     if auth.is_ok() {
         debug!(target: AUTHENTICATION, "SASL authentication successful");
