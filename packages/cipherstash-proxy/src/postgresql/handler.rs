@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use super::backend::Backend;
 use super::frontend::Frontend;
 use super::protocol::StartupCode;
@@ -20,7 +18,6 @@ use crate::{
     tls,
 };
 use bytes::BytesMut;
-use eql_mapper::Schema;
 use md5::{Digest, Md5};
 use postgres_protocol::authentication::sasl::{ChannelBinding, ScramSha256};
 use rand::Rng;

@@ -1,8 +1,12 @@
+use std::fmt::Debug;
+
 use sqlparser::{
     ast::{self as ast, Statement},
     dialect::PostgreSqlDialect,
     parser::Parser,
 };
+
+use crate::{Projection, ProjectionColumn};
 
 pub(crate) fn parse(statement: &'static str) -> Statement {
     Parser::parse_sql(&PostgreSqlDialect {}, statement).unwrap()[0].clone()
@@ -69,4 +73,32 @@ macro_rules! col {
 #[macro_export]
 macro_rules! projection {
     [$($column:tt),*] => { Projection::new(vec![$(col!($column)),*]) };
+}
+
+pub fn ignore_aliases(t: &Projection) -> Projection {
+    match t {
+        Projection::WithColumns(columns) => Projection::WithColumns(
+            columns
+                .iter()
+                .map(|pc| ProjectionColumn {
+                    ty: pc.ty.clone(),
+                    alias: None,
+                })
+                .collect(),
+        ),
+        Projection::Empty => t.clone(),
+    }
+}
+
+pub fn assert_transitive_eq<T: Eq + Debug>(items: &[T]) {
+    for window in items.windows(2) {
+        match &window {
+            &[a, b] => {
+                assert_eq!(a, b);
+            }
+            _ => {
+                panic!("assert_transitive_eq requires a minimum of two items");
+            }
+        }
+    }
 }

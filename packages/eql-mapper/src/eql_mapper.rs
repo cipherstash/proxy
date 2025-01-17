@@ -196,7 +196,7 @@ impl<'ast> EqlMapper<'ast> {
                                         alias: col.alias.clone(),
                                     }),
                                     ty => Err(EqlMapperError::InternalError(format!(
-                                        "WAT1 unexpected type {} in projection column",
+                                        "unexpected type {} in projection column",
                                         ty
                                     ))),
                                 })

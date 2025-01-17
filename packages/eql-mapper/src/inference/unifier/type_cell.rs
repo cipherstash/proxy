@@ -1,6 +1,6 @@
 use std::{cell::RefCell, rc::Rc};
 
-use super::{Constructor, Type, TypeError, TypeRegistry, Value};
+use super::{Constructor, NativeValue, Type, TypeError, TypeRegistry, Value};
 
 /// `TypeCell` is a shareable mutable container of a [`Type`].
 ///
@@ -83,10 +83,19 @@ impl TypeCell {
             },
             Type::Var(type_var) => match registry.get_substitution(*type_var) {
                 Some(ty_cell) => ty_cell.resolved(registry),
-                None => Err(TypeError::Incomplete(format!(
-                    "type {} contains unresolved type variables",
-                    *ty
-                ))),
+                None => {
+                    if !registry.value_expr_exists_with_type(self.clone()) {
+                        Err(TypeError::Incomplete(format!(
+                            "type {} contains unresolved type variables",
+                            *ty
+                        )))
+                    } else {
+                        let updated = self.join(&TypeCell::new(Type::Constructor(
+                            Constructor::Value(Value::Native(NativeValue(None))),
+                        )));
+                        Ok(updated.as_type())
+                    }
+                }
             },
         }
     }

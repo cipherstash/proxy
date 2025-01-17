@@ -29,6 +29,7 @@ mod test {
     use crate::TableResolver;
     use crate::{schema, EqlValue, NativeValue, Projection, ProjectionColumn, TableColumn, Value};
     use pretty_assertions::assert_eq;
+    use sqlparser::ast::Statement;
     use sqlparser::ast::{self as ast};
     use std::collections::HashMap;
     use std::sync::Arc;
@@ -1011,5 +1012,42 @@ mod test {
                 (EQL(employees.salary) as salary)
             ])
         );
+    }
+
+    #[test]
+    fn literals_or_param_placeholders_in_outermost_projection() {
+        let _ = tracing_subscriber::fmt::try_init();
+
+        let schema = resolver(schema! {
+            tables: { }
+        });
+
+        // PROBLEM: the literal `1` is not a value from a table column and it has not been used with a function or
+        // operator - which means its type has not been constrained, hence why its type is still an unresolved type
+        // variable.
+        //
+        // The rule: if any column of the outermost projection contains an unresolved type variable AND if that type
+        // variable is associated with a `Expr::Value(_)` then it is safe to resolve it to `NativeValue(None)`.
+
+        // All of these statements should have the same projection type (after flattening & ignoring aliases):
+        // e.g. `projection![(NATIVE)]`
+
+        let projection_type = |statement: &Statement| {
+            type_check(schema.clone(), statement)
+                .unwrap()
+                .projection
+                .as_ref()
+                .map(ignore_aliases)
+        };
+
+        assert_transitive_eq(&[
+            projection_type(&parse("select 1")),
+            projection_type(&parse("select t from (select 1 as t)")),
+            projection_type(&parse("select * from (select 1)")),
+            projection_type(&parse("select $1")),
+            projection_type(&parse("select t from (select $1 as t)")),
+            projection_type(&parse("select * from (select $1)")),
+            Some(projection![(NATIVE)]),
+        ]);
     }
 }

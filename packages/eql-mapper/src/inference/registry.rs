@@ -1,5 +1,6 @@
 use std::{collections::HashMap, marker::PhantomData};
 
+use sqlparser::ast::Expr;
 use sqltk::Semantic;
 
 use crate::inference::unifier::{Type, TypeVar};
@@ -60,6 +61,19 @@ impl<'ast> TypeRegistry<'ast> {
 
     pub(crate) fn fresh_tvar(&mut self) -> TypeCell {
         Type::Var(TypeVar(self.tvar_gen.next_tvar())).into_type_cell()
+    }
+
+    /// Checks if any node in the AST that has type `ty` is a literal.
+    pub(crate) fn value_expr_exists_with_type(&self, ty: TypeCell) -> bool {
+        for (node_key, node_ty) in self.node_types.iter() {
+            if ty == *node_ty {
+                if let Some(Expr::Value(_)) = node_key.get_as::<Expr>() {
+                    return true;
+                }
+            }
+        }
+
+        false
     }
 }
 
