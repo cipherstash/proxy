@@ -1,6 +1,7 @@
 #![allow(dead_code)]
 
 use cipherstash_proxy::{config::DatabaseConfig, tls};
+use rand::{distributions::Alphanumeric, Rng};
 use tokio_postgres::{Client, NoTls};
 
 pub const PROXY: u16 = 6432;
@@ -11,6 +12,14 @@ pub fn id() -> i64 {
     use rand::Rng;
     let mut rng = rand::thread_rng();
     rng.gen_range(1..=i64::MAX)
+}
+
+pub fn random_string() -> String {
+    rand::thread_rng()
+        .sample_iter(&Alphanumeric)
+        .take(10) // Length of string
+        .map(char::from)
+        .collect()
 }
 
 pub fn database_config() -> DatabaseConfig {

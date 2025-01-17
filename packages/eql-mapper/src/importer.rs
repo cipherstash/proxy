@@ -90,8 +90,6 @@ impl<'ast> Importer<'ast> {
         &mut self,
         table_factor: &'ast TableFactor,
     ) -> Result<(), ImportError> {
-        info!("update_scope_for_table_factor");
-
         match table_factor {
             TableFactor::Table {
                 name,

@@ -8,8 +8,8 @@ use super::messages::FrontendCode as Code;
 use super::protocol::{self};
 use crate::encrypt::Encrypt;
 use crate::eql::Identifier;
-use crate::error::{EncryptError, Error, MappingError};
-use crate::log::MAPPER;
+use crate::error::{EncryptError, Error};
+use crate::log::{MAPPER, PROTOCOL};
 use crate::postgresql::context::column::Column;
 use bytes::BytesMut;
 use eql_mapper::{self, EqlValue, TableColumn};
@@ -114,14 +114,14 @@ where
 
     async fn describe_handler(&mut self, bytes: &BytesMut) -> Result<(), Error> {
         let describe = Describe::try_from(bytes)?;
-        info!(target = MAPPER, "{:?}", describe);
+        info!(target = PROTOCOL, "{:?}", describe);
         self.context.describe(describe);
         Ok(())
     }
 
     async fn execute_handler(&mut self, bytes: &BytesMut) -> Result<(), Error> {
         let execute = Execute::try_from(bytes)?;
-        info!(target = MAPPER, "{:?}", execute);
+        info!(target = PROTOCOL, "{:?}", execute);
         self.context.execute(execute.portal.to_owned());
         Ok(())
     }
@@ -140,18 +140,6 @@ where
             debug!(target: MAPPER, "Changing schema");
             self.context.set_schema_changed();
         }
-
-        // info!(target = MAPPER, "Statement {:?}", statement);
-        // if eql_mapper::requires_type_check(&statement) {
-        //     let typed_statement = eql_mapper::type_check(self.encrypt.schema.load(), &statement)
-        //         .map_err(|e| {
-        //             info!("{e:?}");
-        //             MappingError::StatementCouldNotBeTypeChecked
-        //         })?;
-        //
-        //     info!(target = MAPPER, "typed_statement {:?}", typed_statement);
-        //     info!(target = MAPPER, "Literals {:?}", typed_statement.literals);
-        // }
 
         Ok(())
     }
@@ -185,7 +173,12 @@ where
     async fn parse_handler(&mut self, bytes: &BytesMut) -> Result<Option<BytesMut>, Error> {
         let mut message = Parse::try_from(bytes)?;
 
-        debug!(target = MAPPER, "Parse: {:?}", message);
+        debug!(
+            target = PROTOCOL,
+            client_id = self.context.client_id,
+            "Parse: {:?}",
+            message
+        );
 
         let statement = Parser::new(&DIALECT)
             .try_with_sql(&message.statement)?
@@ -195,35 +188,49 @@ where
             eql_mapper::collect_ddl(self.context.table_resolver.clone(), &statement);
 
         if schema_changed {
-            debug!(target: MAPPER, "Changing schema");
             self.context.set_schema_changed();
         }
 
         if eql_mapper::requires_type_check(&statement) {
-            let typed_statement =
+            if let Ok(typed_statement) =
                 eql_mapper::type_check(self.context.table_resolver.clone(), &statement)
-                    .map_err(|_e| MappingError::StatementCouldNotBeTypeChecked)?;
+            // .map_err(|_e| MappingError::StatementCouldNotBeTypeChecked)?;
+            {
+                let param_columns = self.get_param_columns(&typed_statement)?;
+                let projection_columns = self.get_projection_columns(&typed_statement)?;
 
-            let param_columns = self.get_param_columns(&typed_statement)?;
-            let projection_columns = self.get_projection_columns(&typed_statement)?;
+                // A statement is Encryptable if it has encrypted parameters or result columns
+                if param_columns.is_some() || projection_columns.is_some() {
+                    debug!(target: MAPPER,
+                        client_id = self.context.client_id,
+                        "Encryptable statement");
 
-            // Capture the current param_types
-            let param_types = message.param_types.clone();
+                    let param_columns = param_columns.unwrap_or(vec![]);
+                    let projection_columns = projection_columns.unwrap_or(vec![]);
 
-            message.rewrite_param_types(&param_columns);
+                    // Capture the parse message param_types
+                    // These override the underlying column type
+                    let param_types = message.param_types.clone();
 
-            self.context.add_statement(
-                message.name.to_owned(),
-                context::Statement::new(
-                    param_columns.clone(),
-                    projection_columns.clone(),
-                    param_types,
-                ),
-            );
+                    // Rewrite the type of any encrypted column
+                    message.rewrite_param_types(&param_columns);
+
+                    self.context.add_statement(
+                        message.name.to_owned(),
+                        context::Statement::new(
+                            param_columns.clone(),
+                            projection_columns.clone(),
+                            param_types,
+                        ),
+                    );
+                }
+            }
         }
 
         if message.requires_rewrite() {
-            debug!(target: MAPPER, "Rewrite Parse");
+            debug!(target: MAPPER,
+                client_id = self.context.client_id,
+                "Rewrite Parse");
             let bytes = BytesMut::try_from(message)?;
             Ok(Some(bytes))
         } else {
@@ -249,14 +256,17 @@ where
     ///
     async fn bind_handler(&mut self, bytes: &BytesMut) -> Result<Option<BytesMut>, Error> {
         let mut bind = Bind::try_from(bytes)?;
-        debug!(target: MAPPER, "Bind: {bind:?}");
+        debug!(target: PROTOCOL, client_id = self.context.client_id,"Bind: {bind:?}");
 
+        // Only encryptable statements are in the Context
         if let Some(statement) = self.context.get_statement(&bind.prepared_statement) {
             let param_columns = &statement.param_columns;
 
             let plaintexts = bind.to_plaintext(param_columns, &statement.postgres_param_types)?;
 
-            debug!(target: MAPPER, "Plaintexts {plaintexts:?}");
+            // TODO: THIS OUTPUTS SENSITIVE DATA
+            //       Great for debugging, but not great for production
+            debug!(target: MAPPER, client_id = self.context.client_id,"Plaintexts {plaintexts:?}");
 
             let encrypted = self.encrypt.encrypt(plaintexts, param_columns).await?;
 
@@ -272,9 +282,13 @@ where
         }
 
         if bind.requires_rewrite() {
-            debug!(target: MAPPER, "Rewrite Bind");
+            debug!(target: MAPPER, client_id = self.context.client_id,"Rewrite Bind");
             let bytes = BytesMut::try_from(bind)?;
-            debug!(target = MAPPER, "Mapped params {bytes:?}");
+            debug!(
+                target = MAPPER,
+                client_id = self.context.client_id,
+                "Mapped params {bytes:?}"
+            );
             Ok(Some(bytes))
         } else {
             Ok(None)
@@ -284,26 +298,40 @@ where
     fn get_projection_columns(
         &mut self,
         typed_statement: &eql_mapper::TypedStatement<'_>,
-    ) -> Result<Vec<Option<Column>>, Error> {
+    ) -> Result<Option<Vec<Option<Column>>>, Error> {
         let projection_columns = match &typed_statement.projection {
             Some(projection) => match projection {
-                eql_mapper::Projection::WithColumns(columns) => columns
-                    .iter()
-                    .map(|col| {
-                        let eql_mapper::ProjectionColumn { ty, .. } = col;
-                        match ty {
-                            eql_mapper::Value::Eql(EqlValue(TableColumn { table, column })) => {
-                                let identifier: Identifier = Identifier::from((table, column));
-                                debug!(target = MAPPER, "Encrypted column{:?}", identifier);
-                                self.get_column(identifier)
+                eql_mapper::Projection::WithColumns(columns) => {
+                    let mut encryptable = false;
+                    let projection_columns = columns
+                        .iter()
+                        .map(|col| {
+                            let eql_mapper::ProjectionColumn { ty, .. } = col;
+                            match ty {
+                                eql_mapper::Value::Eql(EqlValue(TableColumn { table, column })) => {
+                                    let identifier: Identifier = Identifier::from((table, column));
+                                    debug!(
+                                        target = MAPPER,
+                                        client_id = self.context.client_id,
+                                        "Encrypted column{:?}",
+                                        identifier
+                                    );
+                                    encryptable = true;
+                                    self.get_column(identifier)
+                                }
+                                _ => Ok(None),
                             }
-                            _ => Ok(None),
-                        }
-                    })
-                    .collect::<Result<Vec<_>, _>>()?,
-                eql_mapper::Projection::Empty => vec![],
+                        })
+                        .collect::<Result<Vec<_>, _>>()?;
+                    if encryptable {
+                        Some(projection_columns)
+                    } else {
+                        None
+                    }
+                }
+                eql_mapper::Projection::Empty => None,
             },
-            None => vec![],
+            None => None,
         };
         Ok(projection_columns)
     }
@@ -311,26 +339,42 @@ where
     fn get_param_columns(
         &mut self,
         typed_statement: &eql_mapper::TypedStatement<'_>,
-    ) -> Result<Vec<Option<Column>>, Error> {
+    ) -> Result<Option<Vec<Option<Column>>>, Error> {
+        let mut encryptable = false;
         let param_columns = typed_statement
             .params
             .iter()
             .map(|param| match param {
                 eql_mapper::Value::Eql(EqlValue(TableColumn { table, column })) => {
                     let identifier = Identifier::from((table, column));
-                    debug!(target = MAPPER, "Encrypted parameter {:?}", identifier);
+                    debug!(
+                        target = MAPPER,
+                        client_id = self.context.client_id,
+                        "Encrypted parameter {:?}",
+                        identifier
+                    );
+                    encryptable = true;
                     self.get_column(identifier)
                 }
                 _ => Ok(None),
             })
             .collect::<Result<Vec<_>, _>>()?;
-        Ok(param_columns)
+        if encryptable {
+            Ok(Some(param_columns))
+        } else {
+            Ok(None)
+        }
     }
 
     fn get_column(&mut self, identifier: Identifier) -> Result<Option<Column>, Error> {
         match self.encrypt.get_column_config(&identifier) {
             Some(config) => {
-                debug!(target = MAPPER, "Configured param {:?}", identifier);
+                debug!(
+                    target = MAPPER,
+                    client_id = self.context.client_id,
+                    "Configured column {:?}",
+                    identifier
+                );
                 Ok(Some(Column::new(identifier, config)))
             }
             None => Err(EncryptError::UnknownColumn {

@@ -23,6 +23,13 @@ impl Parse {
         self.dirty
     }
 
+    ///
+    /// Encrypted columns are the cs_encrypted_v1 Domain Type
+    /// cs_encrypted_v1 wraps JSONB
+    ///
+    /// Using JSONB to avoid the complexity of loading the OID of cs_encrypted_v1
+    /// PostgreSQL will coerce JSONB to cs_encrypted_v1 if it passes the constaint check
+    ///
     pub fn rewrite_param_types(&mut self, columns: &[Option<Column>]) {
         for (idx, col) in columns.iter().enumerate() {
             if self.param_types.get(idx).is_some() && col.is_some() {

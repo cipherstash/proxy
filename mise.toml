@@ -31,7 +31,7 @@ CS_DATABASE__PORT = "5532"
 [tasks.proxy]
 alias = 'p'
 description = "Run the proxy (with `cargo run`)"
-run = 'pwd && env | grep CS_ && cargo run'
+run = 'pwd && env | grep CS_ && cargo run {{option(name="extra-args",default="")}}'
 
 [tasks."proxy:kill"]
 alias = 'k'
@@ -124,11 +124,19 @@ mise run test:unit
 mise run test:integration
 """
 
-[tasks."test:local"]
-alias = 'l'
+[tasks."test:local:unit"]
+alias = 'lu'
 description = "Runs test/s"
-run = "cargo nextest run --no-fail-fast --nocapture -p cipherstash-proxy"
+run = """
+cargo nextest run --no-fail-fast --nocapture -p cipherstash-proxy
+"""
 
+[tasks."test:local:integration"]
+alias = 'li'
+description = "Runs test/s"
+run = """
+cargo nextest run --no-fail-fast --nocapture -p cipherstash-proxy-integration
+"""
 
 [tasks."test:unit"]
 description = "Runs test/s"

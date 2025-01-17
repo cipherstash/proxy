@@ -144,7 +144,7 @@ impl Context {
     }
 
     pub fn schema_changed(&self) -> bool {
-        self.schema_changed.read().ok().map_or(false, |s| *s)
+        self.schema_changed.read().ok().is_some_and(|s| *s)
     }
 }
 

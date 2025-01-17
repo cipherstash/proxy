@@ -60,10 +60,18 @@ where
         }
 
         match code.into() {
-            BackendCode::DataRow => {
-                let data_row = DataRow::try_from(&bytes)?;
-                self.buffer(data_row).await?;
-            }
+            BackendCode::DataRow => match self.context.get_portal_from_execute() {
+                Some(_) => {
+                    let data_row = DataRow::try_from(&bytes)?;
+                    self.buffer(data_row).await?;
+                }
+                None => {
+                    debug!(target: MAPPER,
+                        client_id = self.context.client_id,
+                        "Unencrypted DataRow");
+                    self.write(bytes).await?
+                }
+            },
             BackendCode::ErrorResponse => {
                 self.error_response_handler(&bytes)?;
                 self.write(bytes).await?;
@@ -112,7 +120,7 @@ where
     async fn buffer(&mut self, data_row: DataRow) -> Result<(), Error> {
         self.buffer.push(data_row).await;
         if self.buffer.at_capacity().await {
-            debug!(target: DEVELOPMENT, "Flush message buffer");
+            debug!(target: DEVELOPMENT, client_id = self.context.client_id,"Flush message buffer");
             self.flush().await?;
         }
         Ok(())
@@ -138,11 +146,23 @@ where
     async fn flush(&mut self) -> Result<(), Error> {
         let rows: Vec<DataRow> = self.buffer.drain().await.into_iter().collect();
 
-        // row_len
         let result_column_count = match rows.first() {
             Some(row) => row.column_count(),
             None => return Ok(()),
         };
+
+        let portal = self.context.get_portal_from_execute();
+
+        if portal.is_none() {
+            debug!(target: MAPPER, client_id = self.context.client_id, "Unencrypted statement: passthrough");
+            for row in rows {
+                let bytes = BytesMut::try_from(row)?;
+                self.client.write_all(&bytes).await?;
+            }
+            return Ok(());
+        }
+
+        debug!(target: MAPPER, client_id = self.context.client_id, "Decryptable statement");
 
         // Result Column Format Codes are passed with the Bind message
         // Bind is turned into a Portal
@@ -182,7 +202,7 @@ where
                 })
                 .collect::<Result<Vec<_>, _>>()?;
 
-            debug!(target: MAPPER, "Data: {data:?}");
+            debug!(target: MAPPER, client_id = self.context.client_id, "Data: {data:?}");
 
             row.rewrite(&data)?;
 
@@ -209,7 +229,7 @@ where
         }
 
         if description.requires_rewrite() {
-            debug!(target: MAPPER, "Rewrite ParamDescription");
+            debug!(target: MAPPER, client_id = self.context.client_id, "Rewrite ParamDescription");
             let bytes = BytesMut::try_from(description)?;
             Ok(Some(bytes))
         } else {

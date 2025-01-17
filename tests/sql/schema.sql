@@ -1,5 +1,14 @@
 TRUNCATE TABLE cs_configuration_v1;
 
+-- Regular old table
+DROP TABLE IF EXISTS plaintext;
+CREATE TABLE plaintext (
+    id bigint,
+    plaintext text,
+    PRIMARY KEY(id)
+);
+
+-- Exciting cipherstash table
 DROP TABLE IF EXISTS encrypted;
 CREATE TABLE encrypted (
     id bigint,
@@ -13,6 +22,7 @@ CREATE TABLE encrypted (
     encrypted_date cs_encrypted_v1,
     PRIMARY KEY(id)
 );
+
 
 SELECT cs_add_index_v1(
   'encrypted',
