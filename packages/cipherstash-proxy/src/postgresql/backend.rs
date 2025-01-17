@@ -75,14 +75,14 @@ where
                 self.error_response_handler(&bytes)?;
             }
             BackendCode::ParameterDescription => {
-                self.parameter_description_handler(&bytes)
-                    .await?
-                    .map(|b| bytes = b);
+                if let Some(b) = self.parameter_description_handler(&bytes).await? {
+                    bytes = b
+                }
             }
             BackendCode::RowDescription => {
-                self.row_description_handler(&bytes)
-                    .await?
-                    .map(|b| bytes = b);
+                if let Some(b) = self.row_description_handler(&bytes).await? {
+                    bytes = b
+                }
             }
             _ => {}
         }

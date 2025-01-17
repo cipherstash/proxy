@@ -1,20 +1,11 @@
 #[cfg(test)]
 mod tests {
-    use crate::common::{connect_with_tls, database_config_with_port, random_string, PROXY};
-    use cipherstash_proxy::{config::LogConfig, log};
+    use crate::common::{connect_with_tls, database_config_with_port, id, random_string, PROXY};
     use rand::Rng;
     use std::error::Error;
 
-    fn id() -> i64 {
-        use rand::Rng;
-        let mut rng = rand::thread_rng();
-        rng.gen_range(1..=i64::MAX)
-    }
-
     #[tokio::test]
     async fn passthrough_statement() {
-        log::init(LogConfig::default());
-
         let config = database_config_with_port(PROXY);
         let client = connect_with_tls(&config).await;
 
@@ -40,8 +31,6 @@ mod tests {
 
     #[tokio::test]
     async fn passthrough_invalid_statement() {
-        log::init(LogConfig::default());
-
         let config = database_config_with_port(PROXY);
         let client = connect_with_tls(&config).await;
 
@@ -59,16 +48,13 @@ mod tests {
                         "ERROR: relation \"blahvtha\" does not exist"
                     );
                 }
-                None => todo!(),
+                None => unreachable!(),
             },
         }
-        // message: "relation \"blahvtha\" does not exist",
     }
 
     #[tokio::test]
     async fn passthrough_statement_parallel() {
-        log::init(LogConfig::default());
-
         for _x in 1..100 {
             tokio::spawn(async move {
                 let config = database_config_with_port(PROXY);
@@ -91,7 +77,6 @@ mod tests {
 
                     for row in rows {
                         let result: String = row.get("plaintext");
-                        // info!("result: {}", result);
                         assert_eq!(encrypted_text, result);
                     }
                 }
