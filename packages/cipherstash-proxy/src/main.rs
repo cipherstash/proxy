@@ -87,7 +87,7 @@ async fn main() {
 
     info!("Waiting for clients");
 
-    if let Err(_) = tokio::time::timeout(*shutdown_timeout, tracker.wait()).await {
+    if (tokio::time::timeout(*shutdown_timeout, tracker.wait()).await).is_err() {
         warn!("Terminated {} client connections", tracker.len());
     }
 }

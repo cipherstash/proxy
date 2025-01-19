@@ -40,7 +40,7 @@ mod tests {
         assert!(result.is_err());
 
         match result {
-            Ok(_) => assert!(false),
+            Ok(_) => unreachable!(),
             Err(error) => match error.source() {
                 Some(db_error) => {
                     assert_eq!(

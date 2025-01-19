@@ -3,7 +3,7 @@ use std::io;
 use thiserror::Error;
 use tokio::time::error::Elapsed;
 
-use crate::postgresql::Column;
+use crate::{postgresql::Column, Identifier};
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -58,8 +58,8 @@ pub enum ContextError {
 
 #[derive(Error, Debug)]
 pub enum MappingError {
-    #[error("Invalid parameter data for column {} in table {} (OID {})", _0.table_name(),
-    _0.column_name(), _0.oid())]
+    #[error("Invalid parameter data for column {} in table {} (OID {})",
+    _0.column_name(), _0.table_name(), _0.oid())]
     InvalidParameter(Column),
 
     #[error(transparent)]
@@ -145,6 +145,9 @@ pub enum EncryptError {
 
     #[error("Table {table} has no Encrypt configuration")]
     UnknownTable { table: String },
+
+    #[error("Unknown Index Term for column {} in table {}", _0.column(), _0.table())]
+    UnknownIndexTerm(Identifier),
 }
 
 #[derive(Error, Debug)]

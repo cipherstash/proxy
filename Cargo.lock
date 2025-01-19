@@ -730,6 +730,7 @@ dependencies = [
  "config",
  "eql-mapper",
  "exitcode",
+ "hex",
  "itertools 0.14.0",
  "md-5",
  "native-tls",

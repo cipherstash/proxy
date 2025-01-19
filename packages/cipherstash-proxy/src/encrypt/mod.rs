@@ -2,12 +2,15 @@ use crate::{
     config::{EncryptConfigManager, SchemaManager, TandemConfig},
     eql,
     error::{EncryptError, Error},
+    log::DEVELOPMENT,
     postgresql::Column,
     Identifier,
 };
 use cipherstash_client::{
     credentials::{auto_refresh::AutoRefresh, service_credentials::ServiceCredentials},
-    encryption::{self, Encrypted, Plaintext, PlaintextTarget, ReferencedPendingPipeline},
+    encryption::{
+        self, Encrypted, IndexTerm, Plaintext, PlaintextTarget, ReferencedPendingPipeline,
+    },
     ConsoleConfig, CtsConfig, ZeroKMS, ZeroKMSConfig,
 };
 use cipherstash_config::ColumnConfig;
@@ -169,11 +172,11 @@ async fn init_cipher(config: &TandemConfig) -> Result<ScopedCipher, Error> {
 
     match ScopedCipher::init(Arc::new(zerokms_client), config.encrypt.dataset_id).await {
         Ok(cipher) => {
-            debug!("Initialized ZeroKMS ScopedCipher");
+            debug!(target: DEVELOPMENT, "Initialized ZeroKMS ScopedCipher");
             Ok(cipher)
         }
         Err(err) => {
-            debug!("Error initializing ZeroKMS ScopedCipher: {:?}", err);
+            debug!(target: DEVELOPMENT, "Error initializing ZeroKMS ScopedCipher: {:?}", err);
             Err(err.into())
         }
     }
@@ -184,12 +187,49 @@ fn to_eql_encrypted(
     identifier: &Identifier,
 ) -> Result<eql::Ciphertext, Error> {
     match encrypted {
-        Encrypted::Record(ciphertext, _terms) => {
-            let ct = eql::Ciphertext::new(ciphertext, identifier.to_owned());
-            Ok(ct)
+        Encrypted::Record(ciphertext, terms) => {
+            let mut ciphertext = eql::Ciphertext::new(ciphertext, identifier.to_owned());
+            for index_term in terms {
+                match index_term {
+                    IndexTerm::OreFull(bytes) => {
+                        ciphertext.ore_index = Some(format_index_term_ore_full(&bytes));
+                    }
+                    IndexTerm::BitMap(inner) => ciphertext.match_index = Some(inner),
+                    IndexTerm::Binary(bytes) => {
+                        ciphertext.unique_index = Some(format_index_term_binary(&bytes))
+                    }
+                    IndexTerm::OreArray(vec_of_bytes) => {
+                        ciphertext.ore_index = Some(format_index_term_ore_array(&vec_of_bytes));
+                    }
+                    _ => return Err(EncryptError::UnknownIndexTerm(identifier.to_owned()).into()),
+                };
+            }
+            Ok(ciphertext)
         }
         Encrypted::SteVec(_ste_vec_index) => {
             todo!("Encrypted::SteVec");
         }
     }
+}
+
+fn format_index_term_ore(bytes: &Vec<u8>) -> String {
+    format!(
+        "{}{}{}",
+        r#"""(\\""\\\\\\\\x"#,
+        hex::encode(bytes),
+        r#"\\"")"""#
+    )
+}
+
+fn format_index_term_ore_full(bytes: &Vec<u8>) -> String {
+    format!("{}{}{}", r#"("{"#, format_index_term_ore(bytes), r#"}")"#)
+}
+
+fn format_index_term_binary(bytes: &Vec<u8>) -> String {
+    hex::encode(bytes)
+}
+
+fn format_index_term_ore_array(vec_of_bytes: &[Vec<u8>]) -> String {
+    let inner: Vec<String> = vec_of_bytes.iter().map(format_index_term_ore).collect();
+    format!("{}{}{}", r#"("{"#, inner.join(", "), r#"}")"#)
 }
