@@ -1,18 +1,12 @@
 #[cfg(test)]
 mod tests {
-    use crate::common::{connect_with_tls, PROXY};
+    use crate::common::{connect_with_tls, id, trace, PROXY};
     use chrono::NaiveDate;
     use cipherstash_proxy::{config::LogConfig, log};
 
-    fn id() -> i64 {
-        use rand::Rng;
-        let mut rng = rand::thread_rng();
-        rng.gen_range(1..=i64::MAX)
-    }
-
     #[tokio::test]
     async fn map_text() {
-        log::init(LogConfig::default());
+        trace();
 
         let client = connect_with_tls(PROXY).await;
 
@@ -38,7 +32,7 @@ mod tests {
 
     #[tokio::test]
     async fn map_bool() {
-        log::init(LogConfig::default());
+        trace();
 
         let client = connect_with_tls(PROXY).await;
 
@@ -67,7 +61,7 @@ mod tests {
 
     #[tokio::test]
     async fn map_int2() {
-        log::init(LogConfig::default());
+        trace();
 
         let client = connect_with_tls(PROXY).await;
 
@@ -96,7 +90,7 @@ mod tests {
 
     #[tokio::test]
     async fn map_int4() {
-        log::init(LogConfig::default());
+        trace();
 
         let client = connect_with_tls(PROXY).await;
 
@@ -125,7 +119,7 @@ mod tests {
 
     #[tokio::test]
     async fn map_int8() {
-        log::init(LogConfig::default());
+        trace();
 
         let client = connect_with_tls(PROXY).await;
 
@@ -154,7 +148,7 @@ mod tests {
 
     #[tokio::test]
     async fn map_float8() {
-        log::init(LogConfig::default());
+        trace();
 
         let client = connect_with_tls(PROXY).await;
 
@@ -183,7 +177,7 @@ mod tests {
 
     #[tokio::test]
     async fn map_date() {
-        log::init(LogConfig::default());
+        trace();
 
         let client = connect_with_tls(PROXY).await;
 
@@ -212,7 +206,7 @@ mod tests {
 
     #[tokio::test]
     async fn map_plaintext() {
-        log::init(LogConfig::default());
+        trace();
 
         let client = connect_with_tls(PROXY).await;
 
@@ -235,7 +229,7 @@ mod tests {
 
     #[tokio::test]
     async fn map_all_with_wildcard() {
-        log::init(LogConfig::default());
+        trace();
 
         let client = connect_with_tls(PROXY).await;
 
