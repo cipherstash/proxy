@@ -1,14 +1,11 @@
 #[cfg(test)]
 mod tests {
-    use crate::common::{connect_with_tls, database_config_with_port, id, PROXY};
+    use crate::common::{connect_with_tls, id, PROXY};
     use cipherstash_proxy::{config::LogConfig, log};
 
     #[tokio::test]
     async fn schema_change_reloads_schema() {
-        log::init(LogConfig::default());
-
-        let config = database_config_with_port(PROXY);
-        let client = connect_with_tls(&config).await;
+        let client = connect_with_tls(PROXY).await;
 
         let id = id();
 

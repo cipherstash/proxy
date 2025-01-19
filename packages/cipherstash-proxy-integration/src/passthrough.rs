@@ -1,13 +1,12 @@
 #[cfg(test)]
 mod tests {
-    use crate::common::{connect_with_tls, database_config_with_port, id, random_string, PROXY};
+    use crate::common::{connect_with_tls, id, random_string, PROXY};
     use rand::Rng;
     use std::error::Error;
 
     #[tokio::test]
     async fn passthrough_statement() {
-        let config = database_config_with_port(PROXY);
-        let client = connect_with_tls(&config).await;
+        let client = connect_with_tls(PROXY).await;
 
         let id = id();
         let encrypted_text = "hello@cipherstash.com";
@@ -31,8 +30,7 @@ mod tests {
 
     #[tokio::test]
     async fn passthrough_invalid_statement() {
-        let config = database_config_with_port(PROXY);
-        let client = connect_with_tls(&config).await;
+        let client = connect_with_tls(PROXY).await;
 
         let sql = "SELECT * FROM blahvtha";
         let result = client.query(sql, &[]).await;
@@ -57,8 +55,7 @@ mod tests {
     async fn passthrough_statement_parallel() {
         for _x in 1..100 {
             tokio::spawn(async move {
-                let config = database_config_with_port(PROXY);
-                let client = connect_with_tls(&config).await;
+                let client = connect_with_tls(PROXY).await;
 
                 for _x in 1..10 {
                     let id = id();

@@ -1,6 +1,6 @@
 #[cfg(test)]
 mod tests {
-    use crate::common::{connect_with_tls, database_config_with_port, PROXY};
+    use crate::common::{connect_with_tls, PROXY};
     use chrono::NaiveDate;
     use cipherstash_proxy::{config::LogConfig, log};
 
@@ -14,8 +14,7 @@ mod tests {
     async fn map_text() {
         log::init(LogConfig::default());
 
-        let config = database_config_with_port(PROXY);
-        let client = connect_with_tls(&config).await;
+        let client = connect_with_tls(PROXY).await;
 
         let id = id();
         let encrypted_text = "hello@cipherstash.com";
@@ -41,8 +40,7 @@ mod tests {
     async fn map_bool() {
         log::init(LogConfig::default());
 
-        let config = database_config_with_port(PROXY);
-        let client = connect_with_tls(&config).await;
+        let client = connect_with_tls(PROXY).await;
 
         let id = id();
         let encrypted_bool: bool = true;
@@ -71,8 +69,7 @@ mod tests {
     async fn map_int2() {
         log::init(LogConfig::default());
 
-        let config = database_config_with_port(PROXY);
-        let client = connect_with_tls(&config).await;
+        let client = connect_with_tls(PROXY).await;
 
         let id = id();
         let encrypted_int2: i16 = 42;
@@ -101,8 +98,7 @@ mod tests {
     async fn map_int4() {
         log::init(LogConfig::default());
 
-        let config = database_config_with_port(PROXY);
-        let client = connect_with_tls(&config).await;
+        let client = connect_with_tls(PROXY).await;
 
         let id = id();
         let encrypted_int4: i32 = 42;
@@ -131,8 +127,7 @@ mod tests {
     async fn map_int8() {
         log::init(LogConfig::default());
 
-        let config = database_config_with_port(PROXY);
-        let client = connect_with_tls(&config).await;
+        let client = connect_with_tls(PROXY).await;
 
         let id = id();
         let encrypted_int8: i64 = 42;
@@ -161,8 +156,7 @@ mod tests {
     async fn map_float8() {
         log::init(LogConfig::default());
 
-        let config = database_config_with_port(PROXY);
-        let client = connect_with_tls(&config).await;
+        let client = connect_with_tls(PROXY).await;
 
         let id = id();
         let encrypted_float8: f64 = 42.00;
@@ -191,8 +185,7 @@ mod tests {
     async fn map_date() {
         log::init(LogConfig::default());
 
-        let config = database_config_with_port(PROXY);
-        let client = connect_with_tls(&config).await;
+        let client = connect_with_tls(PROXY).await;
 
         let id = id();
         let encrypted_date = NaiveDate::parse_from_str("2025-01-01", "%Y-%m-%d").unwrap();
@@ -221,8 +214,7 @@ mod tests {
     async fn map_plaintext() {
         log::init(LogConfig::default());
 
-        let config = database_config_with_port(PROXY);
-        let client = connect_with_tls(&config).await;
+        let client = connect_with_tls(PROXY).await;
 
         let id = id();
         let plaintext = "hello@cipherstash.com";
@@ -245,8 +237,7 @@ mod tests {
     async fn map_all_with_wildcard() {
         log::init(LogConfig::default());
 
-        let config = database_config_with_port(PROXY);
-        let client = connect_with_tls(&config).await;
+        let client = connect_with_tls(PROXY).await;
 
         let id = id();
         let plaintext = "hello@cipherstash.com";
