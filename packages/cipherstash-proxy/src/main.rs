@@ -2,6 +2,7 @@ use cipherstash_proxy::config::TandemConfig;
 use cipherstash_proxy::connect::{self, AsyncStream};
 use cipherstash_proxy::encrypt::Encrypt;
 use cipherstash_proxy::error::Error;
+use cipherstash_proxy::log::DEVELOPMENT;
 use cipherstash_proxy::{log, postgresql as pg, tls};
 use tokio::net::TcpListener;
 use tokio::signal::unix::{signal, SignalKind};
@@ -22,6 +23,8 @@ async fn main() {
     };
 
     log::init(config.log.clone());
+
+    debug!(target: DEVELOPMENT,"Log config {:?}", config.log);
 
     let shutdown_timeout = &config.server.shutdown_timeout();
 

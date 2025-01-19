@@ -322,37 +322,56 @@ where
         }
 
         if eql_mapper::requires_type_check(&statement) {
-            if let Ok(typed_statement) =
-                eql_mapper::type_check(self.context.table_resolver.clone(), &statement)
-            // .map_err(|_e| MappingError::StatementCouldNotBeTypeChecked)?;
-            {
-                let param_columns = self.get_param_columns(&typed_statement)?;
-                let projection_columns = self.get_projection_columns(&typed_statement)?;
+            match eql_mapper::type_check(self.context.table_resolver.clone(), &statement) {
+                Ok(typed_statement) => {
+                    let param_columns = self.get_param_columns(&typed_statement)?;
+                    let projection_columns = self.get_projection_columns(&typed_statement)?;
 
-                // A statement is Encryptable if it has encrypted parameters or result columns
-                if param_columns.is_some() || projection_columns.is_some() {
                     debug!(target: MAPPER,
                         client_id = self.context.client_id,
-                        "Encryptable statement");
-
-                    let param_columns = param_columns.unwrap_or(vec![]);
-                    let projection_columns = projection_columns.unwrap_or(vec![]);
-
-                    // Capture the parse message param_types
-                    // These override the underlying column type
-                    let param_types = message.param_types.clone();
-
-                    // Rewrite the type of any encrypted column
-                    message.rewrite_param_types(&param_columns);
-
-                    self.context.add_statement(
-                        message.name.to_owned(),
-                        context::Statement::new(
-                            param_columns.clone(),
-                            projection_columns.clone(),
-                            param_types,
-                        ),
+                        src = "parse_handler",
+                        param_columns = ?param_columns
                     );
+
+                    debug!(target: MAPPER,
+                        client_id = self.context.client_id,
+                        src = "parse_handler",
+                        projection_columns = ?projection_columns
+                    );
+
+                    // A statement is Encryptable if it has encrypted parameters or result columns
+                    if param_columns.is_some() || projection_columns.is_some() {
+                        debug!(target: MAPPER,
+                            client_id = self.context.client_id,
+                            "Encryptable statement");
+
+                        let param_columns = param_columns.unwrap_or(vec![]);
+                        let projection_columns = projection_columns.unwrap_or(vec![]);
+
+                        // Capture the parse message param_types
+                        // These override the underlying column type
+                        let param_types = message.param_types.clone();
+
+                        // Rewrite the type of any encrypted column
+                        message.rewrite_param_types(&param_columns);
+
+                        self.context.add_statement(
+                            message.name.to_owned(),
+                            context::Statement::new(
+                                param_columns.clone(),
+                                projection_columns.clone(),
+                                param_types,
+                            ),
+                        );
+                    }
+                }
+                Err(error) => {
+                    debug!(target: MAPPER,
+                        client_id = self.context.client_id,
+                        src = "parse_handler",
+                        error = ?error
+                    );
+                    return Err(MappingError::StatementCouldNotBeTypeChecked.into());
                 }
             }
         }

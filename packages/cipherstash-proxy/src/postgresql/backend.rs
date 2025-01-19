@@ -217,6 +217,9 @@ where
                 .iter()
                 .map(|col| col.as_ref().map(|col| col.postgres_type.clone()))
                 .collect::<Vec<_>>();
+
+            debug!(target: MAPPER, client_id = self.context.client_id, src = "parameter_description_handler", param_types = "{param_types:?}");
+
             description.map_types(&param_types);
         }
 
@@ -242,18 +245,22 @@ where
     ) -> Result<Option<BytesMut>, Error> {
         let mut description = RowDescription::try_from(bytes)?;
 
+        debug!(target: MAPPER, client_id = self.context.client_id, src = "row_description_handler");
+
         if let Some(statement) = self.context.get_statement_from_describe() {
             let projection_types = statement
                 .projection_columns
                 .iter()
                 .map(|col| col.as_ref().map(|col| col.postgres_type.clone()))
                 .collect::<Vec<_>>();
+
+            debug!(target: MAPPER, client_id = self.context.client_id, src = "row_description_handler", projection_types = ?projection_types);
+
             description.map_types(&projection_types);
         }
 
         if description.requires_rewrite() {
-            debug!(target: MAPPER, "Rewrite RowDescription");
-            debug!(target: MAPPER, "{description:?}");
+            debug!(target: MAPPER, client_id = self.context.client_id, src = "row_description_handler", "Rewrite RowDescription");
             let bytes = BytesMut::try_from(description)?;
             Ok(Some(bytes))
         } else {

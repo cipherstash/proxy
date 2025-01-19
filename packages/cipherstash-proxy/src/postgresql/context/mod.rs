@@ -75,7 +75,7 @@ impl Context {
     }
 
     pub fn add_statement(&mut self, name: Name, statement: Statement) {
-        debug!(target: CONTEXT, client_id = self.client_id, "add_statement: {name:?}");
+        debug!(target: CONTEXT, client_id = self.client_id, src = "add_statement",  statement = ?name);
         let _ = self
             .statements
             .write()
@@ -100,7 +100,7 @@ impl Context {
 
     pub fn get_statement_from_describe(&self) -> Option<Arc<Statement>> {
         self.describe.read().ok().map(|describe| {
-            debug!(target: CONTEXT, client_id = self.client_id, "Describe: {describe:?}");
+            debug!(target: CONTEXT, client_id = self.client_id, src = "get_statement_from_describe");
             match *describe {
                 Some(Describe {
                     ref name,

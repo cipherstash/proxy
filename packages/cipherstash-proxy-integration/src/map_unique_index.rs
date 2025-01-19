@@ -2,7 +2,6 @@
 mod tests {
     use crate::common::{connect_with_tls, id, trace, PROXY};
     use chrono::NaiveDate;
-    use cipherstash_proxy::{config::LogConfig, log};
 
     async fn clear() {
         let client = connect_with_tls(PROXY).await;
