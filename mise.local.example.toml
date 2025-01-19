@@ -18,6 +18,14 @@ CS_ENCRYPT__CLIENT_ID = "client_id"
 CS_TLS__CERTIFICATE = "tests/tls/server.cert"
 CS_TLS__PRIVATE_KEY = "tests/tls/server.key"
 
+CS_LOG__DEVELOPMENT_LEVEL = "info"
+CS_LOG__AUTHENTICATION_LEVEL = "info"
+CS_LOG__CONTEXT_LEVEL = "info"
+CS_LOG__KEYSET_LEVEL = "info"
+CS_LOG__PROTOCOL_LEVEL = "info"
+CS_LOG__MAPPER_LEVEL = "info"
+CS_LOG__SCHEMA_LEVEL = "info"
+
 # Override the default port in mise.toml
 # I can't work out how to use env vars in tasks, so port is defined here again
 [vars]
