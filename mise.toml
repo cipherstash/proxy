@@ -20,6 +20,8 @@ CS_DATABASE__USERNAME = "cipherstash"
 CS_DATABASE__PASSWORD = "password"
 CS_DATABASE__HOST = "localhost"
 CS_DATABASE__PORT = "5532"
+# Misc
+DOCKER_CLI_HINTS = "false" # Please don't show us What's Next.
 
 [tools]
 "cargo:cargo-binstall" = "latest"
