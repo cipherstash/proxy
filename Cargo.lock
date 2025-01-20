@@ -749,7 +749,6 @@ dependencies = [
  "serde_json",
  "socket2",
  "sqlparser 0.53.0",
- "sqltk 0.2.2",
  "temp-env",
  "thiserror 2.0.11",
  "tokio",
@@ -770,8 +769,8 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "cipherstash-proxy",
- "rand",
- "recipher",
+ "rand 0.8.5",
+ "recipher 0.1.3 (registry+https://github.com/rust-lang/crates.io-index)",
  "rustls",
  "temp-env",
  "tokio",
@@ -1153,7 +1152,7 @@ dependencies = [
  "itertools 0.13.0",
  "pretty_assertions",
  "sqlparser 0.53.0",
- "sqltk 0.4.7",
+ "sqltk",
  "thiserror 2.0.11",
  "tracing",
  "tracing-subscriber",
@@ -3300,16 +3299,6 @@ dependencies = [
 
 [[package]]
 name = "sqlparser"
-version = "0.52.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9a875d8cd437cc8a97e9aeaeea352ec9a19aea99c23e9effb17757291de80b08"
-dependencies = [
- "bigdecimal",
- "log",
-]
-
-[[package]]
-name = "sqlparser"
 version = "0.53.0"
 source = "git+https://github.com/cipherstash/datafusion-sqlparser-rs?branch=main#10664409c4b82853647f50f4178d0c914b73fc41"
 dependencies = [
@@ -3317,16 +3306,6 @@ dependencies = [
  "log",
  "recursive",
  "serde",
-]
-
-[[package]]
-name = "sqltk"
-version = "0.2.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3e3209ca9f03a47a7c285ee4b119210b10561f765b44195b13b4e495615dc65f"
-dependencies = [
- "bigdecimal",
- "sqlparser 0.52.0",
 ]
 
 [[package]]

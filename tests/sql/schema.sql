@@ -31,6 +31,14 @@ SELECT cs_add_index_v1(
   'text'
 );
 
+
+SELECT cs_add_index_v1(
+  'encrypted',
+  'encrypted_text',
+  'match',
+  'text'
+);
+
 SELECT cs_add_index_v1(
   'encrypted',
   'encrypted_bool',
@@ -47,8 +55,22 @@ SELECT cs_add_index_v1(
 
 SELECT cs_add_index_v1(
   'encrypted',
+  'encrypted_int2',
+  'ore',
+  'small_int'
+);
+
+SELECT cs_add_index_v1(
+  'encrypted',
   'encrypted_int4',
   'unique',
+  'int'
+);
+
+SELECT cs_add_index_v1(
+  'encrypted',
+  'encrypted_int4',
+  'ore',
   'int'
 );
 
@@ -61,6 +83,14 @@ SELECT cs_add_index_v1(
 
 SELECT cs_add_index_v1(
   'encrypted',
+  'encrypted_int8',
+  'ore',
+  'big_int'
+);
+
+
+SELECT cs_add_index_v1(
+  'encrypted',
   'encrypted_float8',
   'unique',
   'double'
@@ -68,8 +98,22 @@ SELECT cs_add_index_v1(
 
 SELECT cs_add_index_v1(
   'encrypted',
+  'encrypted_float8',
+  'ore',
+  'double'
+);
+
+SELECT cs_add_index_v1(
+  'encrypted',
   'encrypted_date',
   'unique',
+  'date'
+);
+
+SELECT cs_add_index_v1(
+  'encrypted',
+  'encrypted_date',
+  'ore',
   'date'
 );
 

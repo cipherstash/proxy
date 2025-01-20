@@ -12,6 +12,7 @@ static INIT: Once = Once::new();
 pub const DEVELOPMENT: &str = "development"; // one for various hidden "development mode" messages
 pub const AUTHENTICATION: &str = "authentication";
 pub const CONTEXT: &str = "context";
+pub const ENCRYPT: &str = "encrypt";
 pub const KEYSET: &str = "keyset";
 pub const PROTOCOL: &str = "protocol";
 pub const MAPPER: &str = "mapper";
@@ -22,6 +23,7 @@ fn log_targets() -> Vec<&'static str> {
         DEVELOPMENT,
         AUTHENTICATION,
         CONTEXT,
+        ENCRYPT,
         KEYSET,
         PROTOCOL,
         MAPPER,
@@ -34,6 +36,7 @@ fn log_level_for<'a>(config: &'a LogConfig, target: &str, default: &'a str) -> &
         DEVELOPMENT => &config.development_level,
         AUTHENTICATION => &config.authentication_level,
         CONTEXT => &config.context_level,
+        ENCRYPT => &config.encrypt_level,
         KEYSET => &config.keyset_level,
         PROTOCOL => &config.protocol_level,
         MAPPER => &config.mapper_level,
@@ -207,6 +210,7 @@ mod tests {
             development_level: "info".into(),
             authentication_level: "debug".into(),
             context_level: "error".into(),
+            encrypt_level: "error".into(),
             keyset_level: "trace".into(),
             protocol_level: "info".into(),
             mapper_level: "info".into(),

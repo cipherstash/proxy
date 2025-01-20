@@ -403,12 +403,20 @@ for d in tests/pg/data-*; do
 done
 """
 
+
 [tasks."postgres:eql:download"]
 alias = 'e'
 description = "Download latest EQL release"
 dir = "{{config_root}}/tests"
 outputs = ["{{config_root}}/tests/sql/cipherstash-encrypt.sql"]
-run = "curl -sLo sql/cipherstash-encrypt.sql https://github.com/cipherstash/encrypt-query-language/releases/latest/download/cipherstash-encrypt.sql"
+run = """
+if [ -z "$CS_EQL_PATH" ]; then
+  curl -sLo sql/cipherstash-encrypt.sql https://github.com/cipherstash/encrypt-query-language/releases/latest/download/cipherstash-encrypt.sql
+else
+  echo "Using EQL: ${CS_EQL_PATH}"
+  cp "$CS_EQL_PATH" sql/cipherstash-encrypt.sql
+fi
+"""
 
 
 [tasks."python:test"]

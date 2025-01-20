@@ -112,6 +112,8 @@ pub struct LogConfig {
     #[serde(default = "global_default_log_level")]
     pub context_level: String,
     #[serde(default = "global_default_log_level")]
+    pub encrypt_level: String,
+    #[serde(default = "global_default_log_level")]
     pub keyset_level: String,
     #[serde(default = "global_default_log_level")]
     pub protocol_level: String,

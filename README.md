@@ -398,6 +398,17 @@ The integration tests have several runtime dependencies:
 - Running PostgreSQL instances (that can be started with `mise run postgres:up`)
 - Credentials for CipherStash ZeroKMS (which can be found in the [quickstart](#developing) section)
 
+
+### Working with Encrypt Query Language (EQL)
+
+The [Encrypt Query Language (EQL)](https://github.com/cipherstash/encrypt-query-language/) is a set of abstractions for transmitting, storing, and interacting with encrypted data and indexes in PostgreSQL.
+
+EQL is a required dependency and the database setup uses the latest release.
+
+To use a different version of EQL, set the path to the desired EQL release file in the `CS_EQL_PATH` environment variable.
+
+
+
 #### Convention: PostgreSQL ports
 
 PostgreSQL port numbers are 4 digits:

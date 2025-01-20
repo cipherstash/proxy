@@ -2,7 +2,7 @@ use crate::{
     config::{EncryptConfigManager, SchemaManager, TandemConfig},
     eql,
     error::{EncryptError, Error},
-    log::DEVELOPMENT,
+    log::{DEVELOPMENT, ENCRYPT},
     postgresql::Column,
     Identifier,
 };
@@ -45,9 +45,8 @@ impl Encrypt {
     }
 
     ///
-    /// Does the encryption
-    /// Takes a Vec of Plaintext
-    ///         Vec of Columns (containing the config)
+    /// Encrypt `Plaintexts` using the `Column` configuration
+    ///
     ///
     pub async fn encrypt(
         &self,
@@ -110,6 +109,12 @@ impl Encrypt {
         Ok(encrypted_eql)
     }
 
+    ///
+    /// Decrypt eql::Ciphertext into Plaintext
+    ///
+    /// Database values are stored as `eql::Ciphertext`
+    ///
+    ///
     pub async fn decrypt(
         &self,
         ciphertexts: Vec<Option<eql::Ciphertext>>,
@@ -150,7 +155,8 @@ async fn init_cipher(config: &TandemConfig) -> Result<ScopedCipher, Error> {
     let console_config = ConsoleConfig::builder().with_env().build()?;
     let cts_config = CtsConfig::builder().with_env().build()?;
 
-    let builder = ZeroKMSConfig::builder().with_env();
+    // Not using with_env because the proxy config should take precedence
+    let builder = ZeroKMSConfig::builder(); //.with_env();
 
     let zerokms_config = builder
         .workspace_id(&config.auth.workspace_id)
@@ -161,8 +167,6 @@ async fn init_cipher(config: &TandemConfig) -> Result<ScopedCipher, Error> {
         .cts_config(&cts_config)
         .build_with_client_key()?;
 
-    // Build ZeroKMS client with client key manually
-    // because create_client() doesn't support AutoRefresh
     let zerokms_client = ZeroKMS::new_with_client_key(
         &zerokms_config.base_url(),
         AutoRefresh::new(zerokms_config.credentials()),
@@ -188,19 +192,27 @@ fn to_eql_encrypted(
 ) -> Result<eql::Ciphertext, Error> {
     match encrypted {
         Encrypted::Record(ciphertext, terms) => {
+            debug!(target: ENCRYPT, src = "to_eql_encrypted", ciphertext = ?ciphertext);
+            debug!(target: ENCRYPT, src = "to_eql_encrypted", terms = ?terms);
+
             let mut ciphertext = eql::Ciphertext::new(ciphertext, identifier.to_owned());
+
             for index_term in terms {
                 match index_term {
-                    IndexTerm::OreFull(bytes) => {
-                        ciphertext.ore_index = Some(format_index_term_ore_full(&bytes));
-                    }
-                    IndexTerm::BitMap(inner) => ciphertext.match_index = Some(inner),
                     IndexTerm::Binary(bytes) => {
                         ciphertext.unique_index = Some(format_index_term_binary(&bytes))
                     }
+                    IndexTerm::BitMap(inner) => ciphertext.match_index = Some(inner),
                     IndexTerm::OreArray(vec_of_bytes) => {
                         ciphertext.ore_index = Some(format_index_term_ore_array(&vec_of_bytes));
                     }
+                    IndexTerm::OreFull(bytes) => {
+                        ciphertext.ore_index = Some(format_index_term_ore_full(&bytes));
+                    }
+                    IndexTerm::OreLeft(bytes) => {
+                        ciphertext.ore_index = Some(format_index_term_ore_full(&bytes));
+                    }
+                    IndexTerm::Null => {}
                     _ => return Err(EncryptError::UnknownIndexTerm(identifier.to_owned()).into()),
                 };
             }

@@ -155,8 +155,7 @@ where
             .try_with_sql(&query.statement)?
             .parse_statement()?;
 
-        let schema_changed =
-            eql_mapper::collect_ddl(self.context.table_resolver.clone(), &statement);
+        let schema_changed = eql_mapper::collect_ddl(self.context.get_table_resolver(), &statement);
 
         if schema_changed {
             debug!(target: MAPPER, "Changing schema");
@@ -314,15 +313,14 @@ where
             .try_with_sql(&message.statement)?
             .parse_statement()?;
 
-        let schema_changed =
-            eql_mapper::collect_ddl(self.context.table_resolver.clone(), &statement);
+        let schema_changed = eql_mapper::collect_ddl(self.context.get_table_resolver(), &statement);
 
         if schema_changed {
             self.context.set_schema_changed();
         }
 
         if eql_mapper::requires_type_check(&statement) {
-            match eql_mapper::type_check(self.context.table_resolver.clone(), &statement) {
+            match eql_mapper::type_check(self.context.get_table_resolver(), &statement) {
                 Ok(typed_statement) => {
                     let param_columns = self.get_param_columns(&typed_statement)?;
                     let projection_columns = self.get_projection_columns(&typed_statement)?;

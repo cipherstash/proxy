@@ -43,7 +43,6 @@ pub struct Statement {
 ///
 #[derive(Debug, Clone)]
 pub struct Portal {
-    // pub statement_name: Name,
     pub format_codes: Vec<FormatCode>,
     pub statement: Arc<Statement>,
 }
@@ -146,6 +145,10 @@ impl Context {
 
     pub fn schema_changed(&self) -> bool {
         self.schema_changed.read().ok().is_some_and(|s| *s)
+    }
+
+    pub fn get_table_resolver(&self) -> Arc<TableResolver> {
+        self.table_resolver.clone()
     }
 }
 
