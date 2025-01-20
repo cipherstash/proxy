@@ -95,6 +95,9 @@ pub struct DevelopmentConfig {
 
     #[serde(default)]
     pub disable_database_tls: bool,
+
+    #[serde(default)]
+    pub enable_mapping_errors: bool,
 }
 
 #[derive(Debug, Deserialize, Clone, PartialEq, Default)]
@@ -183,6 +186,13 @@ impl TandemConfig {
     pub fn disable_mapping(&self) -> bool {
         match &self.development {
             Some(dev) => dev.disable_mapping,
+            None => false,
+        }
+    }
+
+    pub fn enable_mapping_errors(&self) -> bool {
+        match &self.development {
+            Some(dev) => dev.enable_mapping_errors,
             None => false,
         }
     }

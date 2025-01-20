@@ -371,7 +371,9 @@ where
                         src = "parse_handler",
                         error = ?error
                     );
-                    return Err(MappingError::StatementCouldNotBeTypeChecked.into());
+                    if self.encrypt.config.enable_mapping_errors() {
+                        return Err(MappingError::StatementCouldNotBeTypeChecked.into());
+                    }
                 }
             }
         }
