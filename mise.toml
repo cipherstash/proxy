@@ -20,6 +20,8 @@ CS_DATABASE__USERNAME = "cipherstash"
 CS_DATABASE__PASSWORD = "password"
 CS_DATABASE__HOST = "localhost"
 CS_DATABASE__PORT = "5532"
+# Default configuration for dev cipherstash-proxy run using 'mise run proxy:up'
+CS_PROXY__HOST = "proxy"
 # Misc
 DOCKER_CLI_HINTS = "false" # Please don't show us What's Next.
 
@@ -102,6 +104,13 @@ fi
 
 # run the container
 echo docker compose up {{arg(name="service",default="proxy")}} {{option(name="extra-args",default="")}} | bash
+"""
+
+[tasks."proxy:psql"]
+description="Run psql (interactively) against the proxy; assumes the proxy is already up"
+run = """
+set -eu
+docker exec -it postgres${CONTAINER_SUFFIX:-} psql "postgresql://${CS_DATABASE__USERNAME}:${CS_DATABASE__PASSWORD}@${CS_PROXY__HOST}:6432/${CS_DATABASE__NAME}"
 """
 
 [tasks."proxy:down"]
@@ -344,6 +353,13 @@ run = """
 set -e
 # Start the containers
 echo docker compose up --build {{arg(name="service",default="postgres postgres-17-tls")}} {{option(name="extra-args",default="")}} | bash
+"""
+
+[tasks."postgres:psql"]
+description="Run psql (interactively) against the Postgres instance; assumes Postgres is already up"
+run = """
+set -eu
+docker exec -it postgres${CONTAINER_SUFFIX:-} psql "postgresql://${CS_DATABASE__USERNAME}:${CS_DATABASE__PASSWORD}@${CS_DATABASE__HOST}:${CS_DATABASE__PORT}/${CS_DATABASE__NAME}"
 """
 
 [tasks."postgres:down"]
