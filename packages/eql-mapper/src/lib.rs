@@ -463,6 +463,90 @@ mod test {
     }
 
     #[test]
+    fn select_with_multiple_placeholder_and_wildcard_expansion() {
+        let _ = tracing_subscriber::fmt::try_init();
+        let schema = resolver(schema! {
+            tables: {
+                users: {
+                    id (PK),
+                    email (EQL),
+                    first_name (EQL),
+                }
+            }
+        });
+
+        let statement = parse("select * from users WHERE email = $1 AND first_name = $2");
+
+        match type_check(schema, &statement) {
+            Ok(typed) => {
+                let a = Value::Eql(EqlValue(TableColumn {
+                    table: id("users"),
+                    column: id("email"),
+                }));
+
+                let b = Value::Eql(EqlValue(TableColumn {
+                    table: id("users"),
+                    column: id("first_name"),
+                }));
+
+                assert_eq!(typed.params, vec![a, b]);
+
+                assert_eq!(
+                    typed.projection,
+                    Some(projection![
+                        (NATIVE(users.id) as id),
+                        (EQL(users.email) as email),
+                        (EQL(users.first_name) as first_name)
+                    ])
+                );
+            }
+            Err(err) => panic!("type check failed: {err}"),
+        }
+    }
+
+    #[test]
+    fn select_with_multiple_placeholder_boolean_operators_and_wildcard_expansion() {
+        let _ = tracing_subscriber::fmt::try_init();
+        let schema = resolver(schema! {
+            tables: {
+                users: {
+                    id (PK),
+                    salary (EQL),
+                    age (EQL),
+                }
+            }
+        });
+
+        let statement = parse("select * from users WHERE salary > $1 AND age <= $2");
+
+        match type_check(schema, &statement) {
+            Ok(typed) => {
+                let a = Value::Eql(EqlValue(TableColumn {
+                    table: id("users"),
+                    column: id("salary"),
+                }));
+
+                let b = Value::Eql(EqlValue(TableColumn {
+                    table: id("users"),
+                    column: id("age"),
+                }));
+
+                assert_eq!(typed.params, vec![a, b]);
+
+                assert_eq!(
+                    typed.projection,
+                    Some(projection![
+                        (NATIVE(users.id) as id),
+                        (EQL(users.salary) as salary),
+                        (EQL(users.age) as age)
+                    ])
+                );
+            }
+            Err(err) => panic!("type check failed: {err}"),
+        }
+    }
+
+    #[test]
     fn correlated_subquery() {
         let schema = resolver(schema! {
             tables: {

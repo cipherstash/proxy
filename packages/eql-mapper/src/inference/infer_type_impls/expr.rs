@@ -113,21 +113,26 @@ impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
 
             Expr::BinaryOp { left, op, right } => {
                 match op {
+                    // Operators resolve to boolean (native)
+                    // The left and right need to resolve to the same type
+                    BinaryOperator::And
+                    | BinaryOperator::Eq
+                    | BinaryOperator::Gt
+                    | BinaryOperator::GtEq
+                    | BinaryOperator::Lt
+                    | BinaryOperator::LtEq
+                    | BinaryOperator::NotEq
+                    | BinaryOperator::Or => {
+                        self.unify_node_with_type(this_expr, Type::any_native())?;
+                        self.unify_nodes(&**left, &**right)?;
+                    }
                     BinaryOperator::Plus
                     | BinaryOperator::Minus
                     | BinaryOperator::Multiply
                     | BinaryOperator::Divide
                     | BinaryOperator::Modulo
                     | BinaryOperator::StringConcat
-                    | BinaryOperator::Gt
-                    | BinaryOperator::Lt
-                    | BinaryOperator::GtEq
-                    | BinaryOperator::LtEq
                     | BinaryOperator::Spaceship
-                    | BinaryOperator::Eq
-                    | BinaryOperator::NotEq
-                    | BinaryOperator::And
-                    | BinaryOperator::Or
                     | BinaryOperator::Xor
                     | BinaryOperator::BitwiseOr
                     | BinaryOperator::BitwiseAnd
@@ -176,6 +181,7 @@ impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
                 }
             }
 
+            //customer_name LIKE 'A%';
             Expr::Like {
                 negated: _,
                 expr,
