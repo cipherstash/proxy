@@ -97,9 +97,7 @@ pub fn configure_client() -> ClientConfig {
     let mut root_cert_store = rustls::RootCertStore::empty();
     root_cert_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
 
-    let tls_config = rustls::ClientConfig::builder()
+    rustls::ClientConfig::builder()
         .with_root_certificates(root_cert_store)
-        .with_no_client_auth();
-
-    tls_config
+        .with_no_client_auth()
 }
