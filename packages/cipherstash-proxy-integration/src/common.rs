@@ -26,6 +26,13 @@ pub fn random_string() -> String {
         .collect()
 }
 
+pub async fn clear() {
+    let client = connect_with_tls(PROXY).await;
+
+    let sql = "TRUNCATE encrypted";
+    client.simple_query(sql).await.expect("ok");
+}
+
 pub fn trace() {
     INIT.call_once(|| {
         let log_level: Directive = tracing::Level::DEBUG.into();

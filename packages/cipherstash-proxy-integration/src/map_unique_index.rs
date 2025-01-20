@@ -1,14 +1,7 @@
 #[cfg(test)]
 mod tests {
-    use crate::common::{connect_with_tls, id, trace, PROXY};
+    use crate::common::{clear, connect_with_tls, id, trace, PROXY};
     use chrono::NaiveDate;
-
-    async fn clear() {
-        let client = connect_with_tls(PROXY).await;
-
-        let sql = "TRUNCATE encrypted";
-        client.simple_query(sql).await.expect("ok");
-    }
 
     #[tokio::test]
     async fn map_unique_index_text() {
