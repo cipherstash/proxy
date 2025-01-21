@@ -71,6 +71,9 @@ pub enum MappingError {
     #[error("Statement could not be type checked")]
     StatementCouldNotBeTypeChecked,
 
+    #[error("Statement could not be transformed")]
+    StatementCouldNotBeTransformed,
+
     #[error("could not parse parameter")]
     CouldNotParseParameter,
 }

@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use super::context::{self, Context};
 use super::messages::bind::Bind;
 use super::messages::describe::Describe;
@@ -12,9 +14,11 @@ use crate::error::{EncryptError, Error};
 use crate::log::{MAPPER, PROTOCOL};
 use crate::postgresql::context::column::Column;
 use crate::postgresql::data::{bind_param_from_sql, literal_from_sql};
+use crate::Plaintext;
 use bytes::BytesMut;
 use eql_mapper::{self, EqlValue, TableColumn};
 use pg_escape::quote_literal;
+use sqlparser::ast::{self, Value};
 use sqlparser::dialect::PostgreSqlDialect;
 use sqlparser::parser::Parser;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
@@ -73,7 +77,9 @@ where
 
         match code.into() {
             Code::Query => {
-                self.query_handler(&bytes).await?;
+                if let Some(b) = self.query_handler(&bytes).await? {
+                    bytes = b
+                }
             }
             Code::Describe => {
                 self.describe_handler(&bytes).await?;
@@ -103,7 +109,7 @@ where
             }
             Code::Bind => {
                 if let Some(b) = self.bind_handler(&bytes).await? {
-                    bytes = b;
+                    bytes = b
                 }
             }
             Code::Sync => {
@@ -138,8 +144,8 @@ where
     /// Rewrite the statement
     /// And send it on
     ///
-    async fn query_handler(&mut self, bytes: &BytesMut) -> Result<(), Error> {
-        let query = Query::try_from(bytes)?;
+    async fn query_handler(&mut self, bytes: &BytesMut) -> Result<Option<BytesMut>, Error> {
+        let mut query = Query::try_from(bytes)?;
 
         let statement = Parser::new(&DIALECT)
             .try_with_sql(&query.statement)?
@@ -153,32 +159,76 @@ where
             self.context.set_schema_changed();
         }
 
-        info!(target = MAPPER, "Statement {:?}", statement);
+        info!(target: MAPPER, "Statement {:?}", statement);
         if eql_mapper::requires_type_check(&statement) {
-            let typed_statement = eql_mapper::type_check(self.encrypt.schema.load(), &statement)
-                .map_err(|e| {
-                    info!("{e:?}");
-                    MappingError::StatementCouldNotBeTypeChecked
-                })?;
+            let typed_statement =
+                eql_mapper::type_check(self.context.table_resolver.clone(), &statement).map_err(
+                    |e| {
+                        info!("{e:?}");
+                        MappingError::StatementCouldNotBeTypeChecked
+                    },
+                )?;
 
-            info!(target = MAPPER, "typed_statement {:?}", typed_statement);
+            info!(target: MAPPER, "typed_statement {:?}", typed_statement);
 
             let literals = &typed_statement.literals;
             let literal_columns = self.get_literal_columns(&typed_statement)?;
 
-            literals
+            println!("literal: {:?}", literals);
+            println!("literal_columns: {:?}", literal_columns);
+
+            let lits: Vec<_> = literals
                 .iter()
-                .zip(literal_columns)
+                .zip(&literal_columns)
                 .map(|((_, expr), column)| {
                     if let Some(col) = column {
                         match expr {
                             sqlparser::ast::Expr::Value(value) => {
-                                literal_from_sql(value, &col.postgres_type)
+                                literal_from_sql(value.to_string(), &col.postgres_type)
                             }
-                            _ => {}
+                            _ => todo!(),
                         }
+                    } else {
+                        todo!(); // Ok(None::<Option<Plaintext>>)
                     }
-                });
+                })
+                .collect();
+
+            println!("lits: {:?}", lits);
+
+            let pts: Vec<_> = lits
+                .iter()
+                .map(|pt| match pt {
+                    Ok(Some(inner)) => Some(inner.clone()),
+                    _ => todo!(),
+                })
+                .collect();
+
+            let encrypted = self.encrypt.encrypt(pts, &literal_columns).await?;
+            println!("encrypted: {:?}", encrypted);
+            let encrypted_values = encrypted
+                .into_iter()
+                .map(|ct| {
+                    serde_json::to_string(&ct)
+                        .map(|json| ast::Expr::Value(Value::SingleQuotedString(json)))
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+
+            let original_values_and_replacements = (&typed_statement.literals)
+                .into_iter()
+                .map(|(_, original_node)| *original_node)
+                .zip(encrypted_values.into_iter())
+                .collect::<HashMap<_, _>>();
+
+            let transformed_statement = typed_statement
+                .transform(original_values_and_replacements)
+                .map_err(|_e| MappingError::StatementCouldNotBeTransformed)?;
+
+            query.statement = transformed_statement.to_string();
+
+            // got [Ok(Some(Utf8Str(Some("'hello@cipherstash.com'"))))]
+
+            println!("query: {:?}", query);
 
             // Convert to plaintext
 
@@ -188,10 +238,15 @@ where
 
             // Rewrite the bytes/message
 
-            info!(target = MAPPER, "Literals {:?}", literals);
+            // query.rewrite_literals(&mut encrypted);
+
+            info!(target: MAPPER, "Literals {:?}", literals);
         }
 
-        Ok(())
+        debug!(target: MAPPER, "Rewrite Query");
+        let bytes = BytesMut::try_from(query)?;
+
+        Ok(Some(bytes))
     }
 
     ///
