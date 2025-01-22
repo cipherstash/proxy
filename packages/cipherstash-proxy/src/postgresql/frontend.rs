@@ -10,11 +10,11 @@ use super::messages::FrontendCode as Code;
 use super::protocol::{self};
 use crate::encrypt::Encrypt;
 use crate::eql::Identifier;
-use crate::error::{EncryptError, Error};
+use crate::error::{EncryptError, Error, MappingError};
 use crate::log::{MAPPER, PROTOCOL};
 use crate::postgresql::context::column::Column;
-use crate::postgresql::data::{bind_param_from_sql, literal_from_sql};
-use crate::Plaintext;
+use crate::postgresql::data::literal_from_sql;
+use crate::postgresql::messages::Name;
 use bytes::BytesMut;
 use eql_mapper::{self, EqlValue, TableColumn};
 use pg_escape::quote_literal;
@@ -98,7 +98,7 @@ where
                         let quoted_error = quote_literal(format!("[CipherStash] {}", e).as_str());
                         let content =
                             format!("DO $$ begin raise exception {quoted_error}; END; $$;");
-                        let query = Query { statement: content };
+                        let query = Query { statement: content, portal: Name::unnamed() };
                         bytes = BytesMut::try_from(query)?;
                         debug!(
                             "frontend sending an exception-raising message: {:?}",
@@ -160,6 +160,7 @@ where
         }
 
         info!(target: MAPPER, "Statement {:?}", statement);
+        let mut requires_rewrite = false;
         if eql_mapper::requires_type_check(&statement) {
             let typed_statement =
                 eql_mapper::type_check(self.context.table_resolver.clone(), &statement).map_err(
@@ -173,9 +174,6 @@ where
 
             let literals = &typed_statement.literals;
             let literal_columns = self.get_literal_columns(&typed_statement)?;
-
-            println!("literal: {:?}", literals);
-            println!("literal_columns: {:?}", literal_columns);
 
             let lits: Vec<_> = literals
                 .iter()
@@ -194,8 +192,6 @@ where
                 })
                 .collect();
 
-            println!("lits: {:?}", lits);
-
             let pts: Vec<_> = lits
                 .iter()
                 .map(|pt| match pt {
@@ -205,7 +201,7 @@ where
                 .collect();
 
             let encrypted = self.encrypt.encrypt(pts, &literal_columns).await?;
-            println!("encrypted: {:?}", encrypted);
+            requires_rewrite = !encrypted.is_empty();
             let encrypted_values = encrypted
                 .into_iter()
                 .map(|ct| {
@@ -220,33 +216,37 @@ where
                 .zip(encrypted_values.into_iter())
                 .collect::<HashMap<_, _>>();
 
+            print!("original_values_and_replacements: {:?}", original_values_and_replacements);
+
             let transformed_statement = typed_statement
                 .transform(original_values_and_replacements)
                 .map_err(|_e| MappingError::StatementCouldNotBeTransformed)?;
 
             query.statement = transformed_statement.to_string();
 
-            // got [Ok(Some(Utf8Str(Some("'hello@cipherstash.com'"))))]
-
-            println!("query: {:?}", query);
-
-            // Convert to plaintext
-
-            // Encrypt
-
-            // Rewrite the Statement
-
-            // Rewrite the bytes/message
-
-            // query.rewrite_literals(&mut encrypted);
-
             info!(target: MAPPER, "Literals {:?}", literals);
+
+            self.context.add_portal(
+                query.portal.to_owned(),
+                context::Portal::new(
+                    context::Statement::new(vec![], vec![], vec![]).into(),
+                    vec![], // defaults to all Text if empty
+                ),
+            );
         }
 
-        debug!(target: MAPPER, "Rewrite Query");
-        let bytes = BytesMut::try_from(query)?;
-
-        Ok(Some(bytes))
+        if requires_rewrite {
+            debug!(target: MAPPER, "Rewrite Query");
+            let bytes = BytesMut::try_from(query)?;
+            debug!(
+                target: MAPPER,
+                client_id = self.context.client_id,
+                "Mapped params {bytes:?}"
+            );
+            Ok(Some(bytes))
+        } else {
+            Ok(None)
+        }
     }
 
     ///

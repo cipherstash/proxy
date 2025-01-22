@@ -1,13 +1,28 @@
 #[cfg(test)]
 mod tests {
-    use std::process::Command;
-
     use crate::common::{connect_with_tls, database_config_with_port, id, PROXY};
-    use tokio::runtime;
     use tokio_postgres::SimpleQueryMessage::{CommandComplete, Row, RowDescription};
 
     #[tokio::test]
-    async fn simple_text() {
+    async fn simple_text_without_encryption() {
+        let config = database_config_with_port(PROXY);
+        let client = connect_with_tls(&config).await;
+        let id = id();
+        let sql =
+            format!("INSERT INTO encrypted (id, plaintext) VALUES ({id}, 'plain')");
+        client.simple_query(&sql).await.expect("insert failed");
+
+        let sql = format!("SELECT id, plaintext FROM encrypted WHERE id = {id}");
+        let rows = client.simple_query(&sql).await.expect("ok");
+        if let Row(r) = &rows[1] {
+            assert_eq!(Some("plain"), r.get(1));
+        } else {
+            panic!("Unexpected query results: {:?}", rows);
+        }
+    }
+
+    #[tokio::test]
+    async fn simple_text_with_encryption() {
         let config = database_config_with_port(PROXY);
         let client = connect_with_tls(&config).await;
 

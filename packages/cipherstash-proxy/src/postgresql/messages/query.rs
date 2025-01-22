@@ -7,11 +7,12 @@ use std::convert::TryFrom;
 use std::ffi::CString;
 use std::io::Cursor;
 
-use super::FrontendCode;
+use super::{FrontendCode, Name};
 
 #[derive(Debug, Clone)]
 pub(crate) struct Query {
     pub statement: String,
+    pub portal: Name,
 }
 
 impl TryFrom<&BytesMut> for Query {
@@ -32,7 +33,7 @@ impl TryFrom<&BytesMut> for Query {
         let _len = cursor.get_i32(); // read and progress cursor
         let query = cursor.read_string()?;
 
-        Ok(Query { statement: query })
+        Ok(Query { statement: query, portal: Name::unnamed() })
     }
 }
 
