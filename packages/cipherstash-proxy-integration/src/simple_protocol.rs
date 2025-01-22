@@ -1,7 +1,7 @@
 #[cfg(test)]
 mod tests {
     use crate::common::{connect_with_tls, database_config_with_port, id, PROXY};
-    use tokio_postgres::SimpleQueryMessage::{CommandComplete, Row, RowDescription};
+    use tokio_postgres::SimpleQueryMessage::{CommandComplete, Row};
 
     #[tokio::test]
     async fn simple_text_without_encryption() {

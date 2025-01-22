@@ -33,7 +33,10 @@ impl TryFrom<&BytesMut> for Query {
         let _len = cursor.get_i32(); // read and progress cursor
         let query = cursor.read_string()?;
 
-        Ok(Query { statement: query, portal: Name::unnamed() })
+        Ok(Query {
+            statement: query,
+            portal: Name::unnamed(),
+        })
     }
 }
 

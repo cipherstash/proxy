@@ -16,9 +16,10 @@ use crate::postgresql::context::column::Column;
 use crate::postgresql::data::literal_from_sql;
 use crate::postgresql::messages::Name;
 use bytes::BytesMut;
+use cipherstash_client::encryption::Plaintext;
 use eql_mapper::{self, EqlValue, TableColumn};
 use pg_escape::quote_literal;
-use sqlparser::ast::{self, Value};
+use sqlparser::ast::{self, Expr, Value};
 use sqlparser::dialect::PostgreSqlDialect;
 use sqlparser::parser::Parser;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
@@ -98,7 +99,10 @@ where
                         let quoted_error = quote_literal(format!("[CipherStash] {}", e).as_str());
                         let content =
                             format!("DO $$ begin raise exception {quoted_error}; END; $$;");
-                        let query = Query { statement: content, portal: Name::unnamed() };
+                        let query = Query {
+                            statement: content,
+                            portal: Name::unnamed(),
+                        };
                         bytes = BytesMut::try_from(query)?;
                         debug!(
                             "frontend sending an exception-raising message: {:?}",
@@ -159,8 +163,8 @@ where
             self.context.set_schema_changed();
         }
 
-        info!(target: MAPPER, "Statement {:?}", statement);
         let mut requires_rewrite = false;
+        info!(target: MAPPER, "Statement {:?}", statement);
         if eql_mapper::requires_type_check(&statement) {
             let typed_statement =
                 eql_mapper::type_check(self.context.table_resolver.clone(), &statement).map_err(
@@ -173,35 +177,16 @@ where
             info!(target: MAPPER, "typed_statement {:?}", typed_statement);
 
             let literals = &typed_statement.literals;
+            info!(target: MAPPER, "Literals {:?}", literals);
+
             let literal_columns = self.get_literal_columns(&typed_statement)?;
 
-            let lits: Vec<_> = literals
-                .iter()
-                .zip(&literal_columns)
-                .map(|((_, expr), column)| {
-                    if let Some(col) = column {
-                        match expr {
-                            sqlparser::ast::Expr::Value(value) => {
-                                literal_from_sql(value.to_string(), &col.postgres_type)
-                            }
-                            _ => todo!(),
-                        }
-                    } else {
-                        todo!(); // Ok(None::<Option<Plaintext>>)
-                    }
-                })
-                .collect();
+            let plaintexts = Self::get_plaintexts(literals, &literal_columns);
 
-            let pts: Vec<_> = lits
-                .iter()
-                .map(|pt| match pt {
-                    Ok(Some(inner)) => Some(inner.clone()),
-                    _ => todo!(),
-                })
-                .collect();
+            let encrypted = self.encrypt.encrypt(plaintexts, &literal_columns).await?;
 
-            let encrypted = self.encrypt.encrypt(pts, &literal_columns).await?;
             requires_rewrite = !encrypted.is_empty();
+
             let encrypted_values = encrypted
                 .into_iter()
                 .map(|ct| {
@@ -211,20 +196,16 @@ where
                 .collect::<Result<Vec<_>, _>>()?;
 
             let original_values_and_replacements = (&typed_statement.literals)
-                .into_iter()
+                .iter()
                 .map(|(_, original_node)| *original_node)
                 .zip(encrypted_values.into_iter())
                 .collect::<HashMap<_, _>>();
-
-            print!("original_values_and_replacements: {:?}", original_values_and_replacements);
 
             let transformed_statement = typed_statement
                 .transform(original_values_and_replacements)
                 .map_err(|_e| MappingError::StatementCouldNotBeTransformed)?;
 
             query.statement = transformed_statement.to_string();
-
-            info!(target: MAPPER, "Literals {:?}", literals);
 
             self.context.add_portal(
                 query.portal.to_owned(),
@@ -247,6 +228,50 @@ where
         } else {
             Ok(None)
         }
+    }
+
+    fn get_plaintexts(
+        literals: &Vec<(EqlValue, &Expr)>,
+        literal_columns: &Vec<Option<Column>>,
+    ) -> Vec<Option<Plaintext>> {
+        literals
+            .iter()
+            .zip(literal_columns)
+            .map(|((_, expr), column)| {
+                if let Some(col) = column {
+                    match expr {
+                        sqlparser::ast::Expr::Value(value) => {
+                            literal_from_sql(value.to_string(), &col.postgres_type)
+                        }
+                        _ => Ok(None),
+                    }
+                } else {
+                    Ok(None)
+                }
+            })
+            .map(|pt| match pt {
+                Ok(Some(inner)) => Some(inner.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn get_literal_columns(
+        &mut self,
+        typed_statement: &eql_mapper::TypedStatement<'_>,
+    ) -> Result<Vec<Option<Column>>, Error> {
+        let literal_columns = typed_statement
+            .literals
+            .iter()
+            .map(|(eql_value, _exp)| match eql_value {
+                EqlValue(TableColumn { table, column }) => {
+                    let identifier = Identifier::from((table, column));
+                    debug!(target = MAPPER, "Encrypted literal {:?}", identifier);
+                    self.get_column(identifier)
+                }
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(literal_columns)
     }
 
     ///
@@ -469,24 +494,6 @@ where
         } else {
             Ok(None)
         }
-    }
-
-    fn get_literal_columns(
-        &mut self,
-        typed_statement: &eql_mapper::TypedStatement<'_>,
-    ) -> Result<Vec<Option<Column>>, Error> {
-        let literal_columns = typed_statement
-            .literals
-            .iter()
-            .map(|(eql_value, _exp)| match eql_value {
-                EqlValue(TableColumn { table, column }) => {
-                    let identifier = Identifier::from((table, column));
-                    debug!(target = MAPPER, "Encrypted literal {:?}", identifier);
-                    self.get_column(identifier)
-                }
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-        Ok(literal_columns)
     }
 
     fn get_column(&mut self, identifier: Identifier) -> Result<Option<Column>, Error> {
