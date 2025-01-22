@@ -8,12 +8,17 @@ mod tests {
         let config = database_config_with_port(PROXY);
         let client = connect_with_tls(&config).await;
         let id = id();
-        let sql =
-            format!("INSERT INTO encrypted (id, plaintext) VALUES ({id}, 'plain')");
-        client.simple_query(&sql).await.expect("insert failed");
+        let sql = format!("INSERT INTO encrypted (id, plaintext) VALUES ({id}, 'plain')");
+        client
+            .simple_query(&sql)
+            .await
+            .expect("INSERT query failed");
 
         let sql = format!("SELECT id, plaintext FROM encrypted WHERE id = {id}");
-        let rows = client.simple_query(&sql).await.expect("ok");
+        let rows = client
+            .simple_query(&sql)
+            .await
+            .expect("SELECT query failed");
         if let Row(r) = &rows[1] {
             assert_eq!(Some("plain"), r.get(1));
         } else {
@@ -31,7 +36,10 @@ mod tests {
 
         let sql =
             format!("INSERT INTO encrypted (id, encrypted_text) VALUES ({id}, '{encrypted_text}')");
-        let insert_result = client.simple_query(&sql).await.expect("ok");
+        let insert_result = client
+            .simple_query(&sql)
+            .await
+            .expect("INSERT query failed");
 
         // CmmandComplete does not implement PartialEq, so no equality check with ==
         match &insert_result[0] {
@@ -40,33 +48,22 @@ mod tests {
         }
 
         let sql = format!("SELECT id, encrypted_text FROM encrypted WHERE id = {id}");
-        let rows = client.simple_query(&sql).await.expect("ok");
+        let rows = client
+            .simple_query(&sql)
+            .await
+            .expect("SELECT query failed");
 
-        let mut complete_message_count = 0;
-        let mut row_description_count = 0;
-        let mut row_count = 0;
-        for row in rows {
-            match row {
-                // 1 row should be affected
-                CommandComplete(n) => {
-                    assert_eq!(n, 1);
-                    complete_message_count += 1;
-                }
-                RowDescription(_) => {
-                    row_description_count += 1;
-                }
-                Row(r) => {
-                    row_count += 1;
-                    let fetched_id = r.get(0);
-                    let fetched_text = r.get(1);
-                    assert_eq!(Some(id.to_string().as_str()), fetched_id);
-                    assert_eq!(Some("'hello@cipherstash.com'"), fetched_text);
-                }
-                unexpected => panic!("unexpected in rows: {:?}", unexpected),
-            }
+        if let Row(r) = &rows[1] {
+            assert_eq!(Some(id.to_string().as_str()), r.get(0));
+            assert_eq!(Some("'hello@cipherstash.com'"), r.get(1));
+        } else {
+            panic!("Row(row) expected but got: {:?}", &rows[1]);
         }
-        assert_eq!(1, complete_message_count);
-        assert_eq!(1, row_description_count);
-        assert_eq!(1, row_count);
+
+        if let CommandComplete(n) = &rows[2] {
+            assert_eq!(1, *n);
+        } else {
+            panic!("CommandComplete(1) expected but got: {:?}", &rows[2]);
+        }
     }
 }
