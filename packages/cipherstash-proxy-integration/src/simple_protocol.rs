@@ -1,12 +1,11 @@
 #[cfg(test)]
 mod tests {
-    use crate::common::{connect_with_tls, database_config_with_port, id, PROXY};
+    use crate::common::{connect_with_tls, id, PROXY};
     use tokio_postgres::SimpleQueryMessage::{CommandComplete, Row};
 
     #[tokio::test]
     async fn simple_text_without_encryption() {
-        let config = database_config_with_port(PROXY);
-        let client = connect_with_tls(&config).await;
+        let client = connect_with_tls(PROXY).await;
         let id = id();
         let sql = format!("INSERT INTO encrypted (id, plaintext) VALUES ({id}, 'plain')");
         client
@@ -28,8 +27,7 @@ mod tests {
 
     #[tokio::test]
     async fn simple_text_with_encryption() {
-        let config = database_config_with_port(PROXY);
-        let client = connect_with_tls(&config).await;
+        let client = connect_with_tls(PROXY).await;
 
         let id = id();
         let encrypted_text = "hello@cipherstash.com";

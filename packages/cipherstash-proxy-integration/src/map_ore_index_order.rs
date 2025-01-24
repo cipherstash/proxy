@@ -1,8 +1,6 @@
 #[cfg(test)]
 mod tests {
     use crate::common::{clear, connect_with_tls, id, trace, PROXY};
-    use chrono::NaiveDate;
-    use tracing::info;
 
     #[tokio::test]
     async fn map_ore_order_int2() {

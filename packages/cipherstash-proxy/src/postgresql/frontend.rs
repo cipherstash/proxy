@@ -194,7 +194,7 @@ where
                 })
                 .collect::<Result<Vec<_>, _>>()?;
 
-            let original_values_and_replacements = (&typed_statement.literals)
+            let original_values_and_replacements = (typed_statement.literals)
                 .iter()
                 .map(|(_, original_node)| *original_node)
                 .zip(encrypted_values.into_iter())
