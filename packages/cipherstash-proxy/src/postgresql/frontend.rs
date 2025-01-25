@@ -386,7 +386,9 @@ where
                         error = ?error
                     );
                     if self.encrypt.config.enable_mapping_errors() {
-                        Err(MappingError::StatementCouldNotBeTypeChecked(error.to_string()))?;
+                        Err(MappingError::StatementCouldNotBeTypeChecked(
+                            error.to_string(),
+                        ))?;
                     }
                 }
             }
