@@ -8,7 +8,7 @@ use crate::encrypt::Encrypt;
 use crate::eql::Ciphertext;
 use crate::error::Error;
 use crate::log::{DEVELOPMENT, MAPPER};
-use crate::postgresql::format_code::FormatCode;
+use crate::postgresql::context::Portal;
 use crate::postgresql::messages::data_row::DataRow;
 use crate::postgresql::messages::param_description::ParamDescription;
 use crate::postgresql::protocol::{self};
@@ -48,6 +48,27 @@ where
     ///
     /// TODO: fix the structure once implementation stabilizes
     ///
+    /// An Execute phase is always terminated by the appearance of exactly one of these messages:
+    ///     CommandComplete
+    ///     EmptyQueryResponse
+    ///     ErrorResponse
+    ///     PortalSuspended
+    ///
+    /// Describe Flow
+    ///     Describe => [D1, D2]
+    ///         Get -> D1
+    ///         Handle ParameterDescription and/or RowDescription
+    ///         Complete
+    ///     Describe => [D2]
+    ///
+    /// Execute Flow
+    ///     Execute [E1, E2]
+    ///        Get -> E1
+    ///        Handle DataRow
+    ///               DataRow
+    ///
+    ///
+    ///
     pub async fn rewrite(&mut self) -> Result<(), Error> {
         let connection_timeout = self.encrypt.config.database.connection_timeout();
 
@@ -65,24 +86,51 @@ where
 
         match code.into() {
             BackendCode::DataRow => {
+                // TODO: Not sure of the control flow here
                 // Encrypted DataRows are added to the buffer and we return early
-                // Otherwise, we write immediately
+                // Otherwise, continue and write
                 if self.data_row_handler(&bytes).await? {
                     return Ok(());
                 }
             }
+
+            // Execute phase is always terminated by the appearance of exactly one of these messages:
+            //      CommandComplete, EmptyQueryResponse (if the portal was created from an empty query string), ErrorResponse, or PortalSuspended.
+            BackendCode::CommandComplete
+            | BackendCode::EmptyQueryResponse
+            | BackendCode::PortalSuspended => {
+                debug!(target: DEVELOPMENT, client_id = self.context.client_id, src = "rewrite", "CommandComplete | EmptyQueryResponse | PortalSuspended");
+                self.flush().await?;
+                self.context.complete_execution();
+            }
             BackendCode::ErrorResponse => {
                 self.error_response_handler(&bytes)?;
+                self.flush().await?;
+                self.context.complete_execution();
             }
+            // Describe with Target:Statement
+            // Returns a ParameterDescription followed by RowDescription
+            // The Describe is complete after the RowDescription
             BackendCode::ParameterDescription => {
                 if let Some(b) = self.parameter_description_handler(&bytes).await? {
                     bytes = b
                 }
             }
+            // Describe with Target:Statement or Target::Portal
+            // Target:Statement returns a ParameterDescription before a RowDescription
+            // Target::Portal returns a RowDescription
+            // If no rows are returned, NoData is returned instead of a RowDescription
+            // Complete the Describe
             BackendCode::RowDescription => {
                 if let Some(b) = self.row_description_handler(&bytes).await? {
                     bytes = b
                 }
+                self.context.complete_describe();
+            }
+            // Describe with Target:Statement or Target::Portal
+            // If the statement returns no rows, NoData is returned instead of a RowDescription
+            BackendCode::NoData => {
+                self.context.complete_describe();
             }
             _ => {}
         }
@@ -103,6 +151,11 @@ where
         Ok(())
     }
 
+    // async fn complete_execution(&mut self) -> Result<(), Error> {
+    //     debug!(target: DEVELOPMENT, client_id = self.context.client_id, src = "complete_execution");
+    //     self.context.complete_execution();
+    // }
+
     ///
     /// DataRows are buffered so that Decryption can be batched
     /// Decryption will occur
@@ -111,8 +164,8 @@ where
     ///  - when any other message type is written
     ///
     async fn buffer(&mut self, data_row: DataRow) -> Result<(), Error> {
-        self.buffer.push(data_row).await;
-        if self.buffer.at_capacity().await {
+        self.buffer.push(data_row);
+        if self.buffer.at_capacity() {
             debug!(target: DEVELOPMENT, client_id = self.context.client_id, "Flush message buffer");
             self.flush().await?;
         }
@@ -125,10 +178,9 @@ where
     /// Flushes any nessages in the buffer before writing the message
     ///
     pub async fn write(&mut self, bytes: BytesMut) -> Result<(), Error> {
+        debug!(target: DEVELOPMENT, client_id = self.context.client_id, src = "write");
         self.flush().await?;
-
         self.client.write_all(&bytes).await?;
-
         Ok(())
     }
 
@@ -138,36 +190,36 @@ where
     /// Decrypts any configured column values and writes the decrypted values to the client
     ///
     async fn flush(&mut self) -> Result<(), Error> {
-        let rows: Vec<DataRow> = self.buffer.drain().await.into_iter().collect();
+        if self.buffer.is_empty() {
+            debug!(target: MAPPER, client_id = self.context.client_id, src = "flush", msg = "Empty buffer");
+        }
+
+        let portal = self.context.get_portal_from_execute();
+        let portal = match portal.as_deref() {
+            Some(Portal::Encrypted(portal)) => portal,
+            _ => {
+                debug!(target: MAPPER, client_id = self.context.client_id, src = "flush", msg = "Passthrough");
+                return Ok(());
+            }
+        };
+
+        let rows: Vec<DataRow> = self.buffer.drain().into_iter().collect();
+        debug!(target: DEVELOPMENT, client_id = self.context.client_id, src = "flush", rows = rows.len());
 
         let result_column_count = match rows.first() {
             Some(row) => row.column_count(),
             None => return Ok(()),
         };
 
-        let portal = self.context.get_portal_from_execute();
-
-        if portal.is_none() {
-            debug!(target: MAPPER, client_id = self.context.client_id, "Unencrypted statement: passthrough");
-            for row in rows {
-                let bytes = BytesMut::try_from(row)?;
-                self.client.write_all(&bytes).await?;
-            }
-            return Ok(());
-        }
-
-        debug!(target: MAPPER, client_id = self.context.client_id, "Decryptable statement");
-
         // Result Column Format Codes are passed with the Bind message
         // Bind is turned into a Portal
         // We pull the format codes from the portal
         // If no portal, assume Text for all columns
-        let result_column_format_codes = self
-            .context
-            .get_portal_from_execute()
-            .map_or(vec![FormatCode::Text; result_column_count], |p| {
-                p.format_codes(result_column_count)
-            });
+        // let result_column_format_codes = portal
+        //     .map_or(vec![FormatCode::Text; result_column_count], |p| {
+        //         p.format_codes(result_column_count)
+        //     });
+        let result_column_format_codes = portal.format_codes(result_column_count);
 
         // Each row is converted into Vec<Option<CipherText>>
         let ciphertexts: Vec<Option<Ciphertext>> = rows
@@ -273,16 +325,15 @@ where
     /// If there is no associated Portal, the row does not require decryption and can be passed through
     ///
     async fn data_row_handler(&mut self, bytes: &BytesMut) -> Result<bool, Error> {
-        match self.context.get_portal_from_execute() {
-            Some(_) => {
+        match self.context.get_portal_from_execute().as_deref() {
+            Some(Portal::Encrypted(portal)) => {
+                debug!(target: MAPPER, client_id = self.context.client_id, src = "data_row_handler", portal = ?portal);
                 let data_row = DataRow::try_from(bytes)?;
                 self.buffer(data_row).await?;
                 Ok(true)
             }
-            None => {
-                debug!(target: MAPPER,
-                    client_id = self.context.client_id,
-                    "Passthrough DataRow");
+            _ => {
+                debug!(target: MAPPER, client_id = self.context.client_id, src = "data_row_handler", msg = "Passthrough");
                 Ok(false)
             }
         }

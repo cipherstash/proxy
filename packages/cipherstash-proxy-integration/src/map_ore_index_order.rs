@@ -4,7 +4,7 @@ mod tests {
 
     // Currently not working, needs statement rewriting
     // #[tokio::test]
-    async fn map_ore_order_int2() {
+    async fn _map_ore_order_int2() {
         trace();
 
         clear().await;
@@ -38,7 +38,7 @@ mod tests {
 
     // Currently not working, needs statement rewriting
     // #[tokio::test]
-    async fn map_ore_order_int4() {
+    async fn _map_ore_order_int4() {
         trace();
 
         clear().await;
@@ -72,7 +72,7 @@ mod tests {
 
     // Currently not working, needs statement rewriting
     // #[tokio::test]
-    async fn map_ore_order_int8() {
+    async fn _map_ore_order_int8() {
         trace();
 
         clear().await;

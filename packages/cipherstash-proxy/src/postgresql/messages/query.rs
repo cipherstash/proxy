@@ -7,12 +7,30 @@ use std::convert::TryFrom;
 use std::ffi::CString;
 use std::io::Cursor;
 
-use super::{FrontendCode, Name};
+use super::FrontendCode;
 
 #[derive(Debug, Clone)]
 pub(crate) struct Query {
     pub statement: String,
-    pub portal: Name,
+
+    dirty: bool,
+}
+
+impl Query {
+    pub fn new(statement: String) -> Self {
+        Self {
+            statement,
+            dirty: false,
+        }
+    }
+
+    pub fn requires_rewrite(&self) -> bool {
+        self.dirty
+    }
+
+    pub fn rewrite(&mut self, statement: String) {
+        self.statement = statement;
+    }
 }
 
 impl TryFrom<&BytesMut> for Query {
@@ -35,7 +53,7 @@ impl TryFrom<&BytesMut> for Query {
 
         Ok(Query {
             statement: query,
-            portal: Name::unnamed(),
+            dirty: false,
         })
     }
 }

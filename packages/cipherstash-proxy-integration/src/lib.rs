@@ -5,5 +5,6 @@ mod map_ore_index_where;
 mod map_params;
 mod map_unique_index;
 mod passthrough;
+mod pipeline;
 mod schema_change;
 mod simple_protocol;

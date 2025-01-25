@@ -202,6 +202,10 @@ impl Name {
     pub fn unnamed() -> Name {
         Name("".to_string())
     }
+
+    pub fn is_unnamed(&self) -> bool {
+        self.0.is_empty()
+    }
 }
 
 impl std::ops::Deref for Name {

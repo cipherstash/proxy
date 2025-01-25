@@ -1,7 +1,4 @@
-use std::collections::HashMap;
-use std::fmt::Display;
-
-use super::context::{self, Context};
+use super::context::{self, Context, Statement};
 use super::messages::bind::Bind;
 use super::messages::describe::Describe;
 use super::messages::execute::Execute;
@@ -14,6 +11,7 @@ use crate::eql::Identifier;
 use crate::error::{EncryptError, Error, MappingError};
 use crate::log::{MAPPER, PROTOCOL};
 use crate::postgresql::context::column::Column;
+use crate::postgresql::context::Portal;
 use crate::postgresql::data::literal_from_sql;
 use crate::postgresql::messages::Name;
 use bytes::BytesMut;
@@ -23,6 +21,8 @@ use pg_escape::quote_literal;
 use sqlparser::ast::{self, Expr, Value};
 use sqlparser::dialect::PostgreSqlDialect;
 use sqlparser::parser::Parser;
+use std::collections::HashMap;
+use std::fmt::Display;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use tracing::{debug, info};
 
@@ -166,8 +166,6 @@ where
             self.context.set_schema_changed();
         }
 
-        let mut requires_rewrite = false;
-
         if eql_mapper::requires_type_check(&statement) {
             let typed_statement =
                 eql_mapper::type_check(self.context.get_table_resolver(), &statement);
@@ -202,26 +200,6 @@ where
             // Yes, I know
             let typed_statement = typed_statement.unwrap();
 
-            // Same borrow error occurs with this code
-            //
-            // let typed_statement = match typed_statement {
-            //     Ok(ts) => ts,
-            //     Err(_) => {
-            //         debug!(target: MAPPER,
-            //             client_id = self.context.client_id,
-            //             src = "query_handler"
-            //         );
-
-            //         // return Ok(None);
-
-            //         if self.encrypt.config.enable_mapping_errors() {
-            //             return Err(MappingError::StatementCouldNotBeTypeChecked.into());
-            //         } else {
-            //             return Ok(None);
-            //         }
-            //     }
-            // };
-
             debug!(target: MAPPER,
                 client_id = self.context.client_id,
                 src = "query_handler",
@@ -230,11 +208,13 @@ where
 
             let literal_columns = self.get_literal_columns(&typed_statement)?;
 
+            if literal_columns.is_empty() {
+                return Ok(None);
+            }
+
             let plaintexts = literals_to_plaintext(&typed_statement.literals, &literal_columns);
 
             let encrypted = self.encrypt.encrypt(plaintexts, &literal_columns).await?;
-
-            requires_rewrite = !encrypted.is_empty();
 
             let encrypted_values = encrypted
                 .into_iter()
@@ -244,7 +224,8 @@ where
                 })
                 .collect::<Result<Vec<_>, _>>()?;
 
-            let original_values_and_replacements = (&typed_statement.literals)
+            let original_values_and_replacements = typed_statement
+                .literals
                 .iter()
                 .map(|(_, original_node)| *original_node)
                 .zip(encrypted_values.into_iter())
@@ -254,91 +235,19 @@ where
                 .transform(original_values_and_replacements)
                 .map_err(|_e| MappingError::StatementCouldNotBeTransformed)?;
 
-            query.statement = transformed_statement.to_string();
-
-            self.context.add_portal(
-                query.portal.to_owned(),
-                context::Portal::new(
-                    context::Statement::new(vec![], vec![], vec![]).into(),
-                    vec![], // defaults to all Text if empty
-                ),
-            );
+            query.rewrite(transformed_statement.to_string());
         }
 
-        // This is the match flow structure
-        //
-        // if eql_mapper::requires_type_check(&statement) {
-        //     match eql_mapper::type_check(self.context.table_resolver.clone(), &statement) {
-        //         Ok(typed_statement) => {
-        //             debug!(target: MAPPER,
-        //                 client_id = self.context.client_id,
-        //                 src = "query_handler",
-        //                 typed_statement = ?typed_statement
-        //             );
+        self.context
+            .add_portal(Name::unnamed(), Portal::passthrough());
 
-        //             // let literals = &typed_statement.literals;
-
-        //             let literal_columns = self.get_literal_columns(&typed_statement)?;
-
-        //             let plaintexts =
-        //                 literals_to_plaintext(&typed_statement.literals, &literal_columns);
-        //             // let plaintexts = Self::get_plaintexts(literals, &literal_columns);
-
-        //             let encrypted = self.encrypt.encrypt(plaintexts, &literal_columns).await?;
-
-        //             requires_rewrite = !encrypted.is_empty();
-
-        //             let encrypted_values = encrypted
-        //                 .into_iter()
-        //                 .map(|ct| {
-        //                     serde_json::to_string(&ct)
-        //                         .map(|json| ast::Expr::Value(Value::SingleQuotedString(json)))
-        //                 })
-        //                 .collect::<Result<Vec<_>, _>>()?;
-
-        //             let original_values_and_replacements = (typed_statement.literals)
-        //                 .iter()
-        //                 .map(|(_, original_node)| *original_node)
-        //                 .zip(encrypted_values.into_iter())
-        //                 .collect::<HashMap<_, _>>();
-
-        //             let transformed_statement = typed_statement
-        //                 .transform(original_values_and_replacements)
-        //                 .map_err(|_e| MappingError::StatementCouldNotBeTransformed)?;
-
-        //             query.statement = transformed_statement.to_string();
-
-        //             self.context.add_portal(
-        //                 query.portal.to_owned(),
-        //                 context::Portal::new(
-        //                     context::Statement::new(vec![], vec![], vec![]).into(),
-        //                     vec![], // defaults to all Text if empty
-        //                 ),
-        //             );
-        //         }
-        //         Err(error) => {
-        //             debug!(target: MAPPER,
-        //                 client_id = self.context.client_id,
-        //                 src = "query_handler",
-        //                 error = ?error
-        //             );
-        //             if self.encrypt.config.enable_mapping_errors() {
-        //                 return Err(MappingError::StatementCouldNotBeTypeChecked(
-        //                     error.to_string(),
-        //                 )
-        //                 .into());
-        //             }
-        //         }
-        //     }
-        // }
-
-        if requires_rewrite {
-            debug!(target: MAPPER, "Rewrite Query");
+        if query.requires_rewrite() {
             let bytes = BytesMut::try_from(query)?;
             debug!(
                 target: MAPPER,
                 client_id = self.context.client_id,
-                "Mapped params {bytes:?}"
+                msg = "Rewrite Query",
+                bytes = ?bytes
             );
             Ok(Some(bytes))
         } else {
@@ -418,13 +327,11 @@ where
 
                     debug!(target: MAPPER,
                         client_id = self.context.client_id,
-                        src = "parse_handler",
                         param_columns = ?param_columns
                     );
 
                     debug!(target: MAPPER,
                         client_id = self.context.client_id,
-                        src = "parse_handler",
                         projection_columns = ?projection_columns
                     );
 
@@ -432,7 +339,7 @@ where
                     if param_columns.is_some() || projection_columns.is_some() {
                         debug!(target: MAPPER,
                             client_id = self.context.client_id,
-                            "Encryptable statement");
+                            msg = "Encryptable Statement");
 
                         let param_columns = param_columns.unwrap_or(vec![]);
                         let projection_columns = projection_columns.unwrap_or(vec![]);
@@ -457,7 +364,7 @@ where
                 Err(error) => {
                     debug!(target: MAPPER,
                         client_id = self.context.client_id,
-                        src = "parse_handler",
+
                         error = ?error
                     );
                     if self.encrypt.config.enable_mapping_errors() {
@@ -470,10 +377,13 @@ where
         }
 
         if message.requires_rewrite() {
+            let bytes = BytesMut::try_from(message)?;
+
             debug!(target: MAPPER,
                 client_id = self.context.client_id,
-                "Rewrite Parse");
-            let bytes = BytesMut::try_from(message)?;
+                msg = "Rewrite Parse",
+                bytes = ?bytes);
+
             Ok(Some(bytes))
         } else {
             Ok(None)
@@ -500,41 +410,47 @@ where
         let mut bind = Bind::try_from(bytes)?;
         debug!(target: PROTOCOL, client_id = self.context.client_id,"Bind: {bind:?}");
 
-        // Only encryptable statements are in the Context
-        if let Some(statement) = self.context.get_statement(&bind.prepared_statement) {
-            let param_columns = &statement.param_columns;
+        let portal = match self.context.get_statement(&bind.prepared_statement) {
+            Some(statement) => {
+                let encrypted = self.encrypt_params(&bind, &statement).await?;
 
-            let plaintexts = bind.to_plaintext(param_columns, &statement.postgres_param_types)?;
+                bind.rewrite(encrypted)?;
+                Portal::encrypted(statement, bind.result_columns_format_codes.to_owned())
+            }
+            _ => Portal::passthrough(),
+        };
 
-            // TODO: THIS OUTPUTS SENSITIVE DATA
-            //       Great for debugging, but not great for production
-            debug!(target: MAPPER, client_id = self.context.client_id,"Plaintexts {plaintexts:?}");
+        debug!(target: MAPPER, client_id = self.context.client_id, portal = ?portal);
 
-            let encrypted = self.encrypt.encrypt(plaintexts, param_columns).await?;
-
-            bind.rewrite(encrypted)?;
-
-            self.context.add_portal(
-                bind.portal.to_owned(),
-                context::Portal::new(
-                    statement.clone(),
-                    bind.result_columns_format_codes.to_owned(),
-                ),
-            );
-        }
+        self.context.add_portal(bind.portal.to_owned(), portal);
 
         if bind.requires_rewrite() {
-            debug!(target: MAPPER, client_id = self.context.client_id,"Rewrite Bind");
             let bytes = BytesMut::try_from(bind)?;
             debug!(
                 target: MAPPER,
                 client_id = self.context.client_id,
-                "Mapped params {bytes:?}"
+                msg = "Rewrite Bind",
+                bytes = ?bytes
             );
+
             Ok(Some(bytes))
         } else {
             Ok(None)
         }
+    }
+
+    async fn encrypt_params(
+        &mut self,
+        bind: &Bind,
+        statement: &Statement,
+    ) -> Result<Vec<Option<crate::Ciphertext>>, Error> {
+        let plaintexts =
+            bind.to_plaintext(&statement.param_columns, &statement.postgres_param_types)?;
+        let encrypted = self
+            .encrypt
+            .encrypt(plaintexts, &statement.param_columns)
+            .await?;
+        Ok(encrypted)
     }
 
     fn get_projection_columns(
@@ -634,10 +550,7 @@ fn build_frontend_exception<E: Display>(err: E) -> Result<BytesMut, Error> {
     let quoted_error = quote_literal(format!("[CipherStash] {}", err).as_str());
     let content = format!("DO $$ begin raise exception {quoted_error}; END; $$;");
 
-    let query = Query {
-        statement: content,
-        portal: Name::unnamed(),
-    };
+    let query = Query::new(content);
     let bytes = BytesMut::try_from(query)?;
     debug!(
         "frontend sending an exception-raising message: {:?}",
