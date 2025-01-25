@@ -53,6 +53,7 @@ where
     }
 
     pub async fn rewrite(&mut self) -> Result<(), Error> {
+        // TODO: Ideally error messages would be written back to the client as an ErrorResponse
         let bytes = self.read().await?;
         self.write(bytes).await?;
         Ok(())
@@ -78,8 +79,27 @@ where
 
         match code.into() {
             Code::Query => {
-                if let Some(b) = self.query_handler(&bytes).await? {
-                    bytes = b
+                match self.query_handler(&bytes).await {
+                    Ok(Some(b)) => bytes = b,
+                    // No mapping needed
+                    Ok(None) => (),
+                    Err(err) => {
+                        debug!("error handling query: {}", err);
+                        // This *should* be sufficient for escaping error messages as we're only
+                        // using the string literal, and not identifiers
+                        let quoted_error = quote_literal(format!("[CipherStash] {}", err).as_str());
+                        let content =
+                            format!("DO $$ begin raise exception {quoted_error}; END; $$;");
+                        let query = Query {
+                            statement: content,
+                            portal: Name::unnamed(),
+                        };
+                        bytes = BytesMut::try_from(query)?;
+                        debug!(
+                            "frontend sending an exception-raising message: {:?}",
+                            &bytes
+                        );
+                    }
                 }
             }
             Code::Describe => {
@@ -166,12 +186,8 @@ where
         info!(target: MAPPER, "Statement {:?}", statement);
         if eql_mapper::requires_type_check(&statement) {
             let typed_statement =
-                eql_mapper::type_check(self.context.table_resolver.clone(), &statement).map_err(
-                    |e| {
-                        info!("{e:?}");
-                        MappingError::StatementCouldNotBeTypeChecked
-                    },
-                )?;
+                eql_mapper::type_check(self.context.table_resolver.clone(), &statement)
+                    .map_err(|e| MappingError::StatementCouldNotBeTypeChecked(e.to_string()))?;
 
             info!(target: MAPPER, "typed_statement {:?}", typed_statement);
 
@@ -370,7 +386,7 @@ where
                         error = ?error
                     );
                     if self.encrypt.config.enable_mapping_errors() {
-                        return Err(MappingError::StatementCouldNotBeTypeChecked.into());
+                        Err(MappingError::StatementCouldNotBeTypeChecked(error.to_string()))?;
                     }
                 }
             }
