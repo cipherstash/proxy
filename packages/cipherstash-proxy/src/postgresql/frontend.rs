@@ -151,60 +151,86 @@ where
             .try_with_sql(&query.statement)?
             .parse_statement()?;
 
+        debug!(target: MAPPER,
+            client_id = self.context.client_id,
+            src = "query_handler",
+            statement = ?statement
+        );
+
         let schema_changed = eql_mapper::collect_ddl(self.context.get_table_resolver(), &statement);
 
         if schema_changed {
-            debug!(target: MAPPER, "Changing schema");
+            debug!(target: MAPPER,
+                client_id = self.context.client_id,
+                src = "query_handler",
+                msg = "schema changed"
+            );
             self.context.set_schema_changed();
         }
 
         let mut requires_rewrite = false;
-        info!(target: MAPPER, "Statement {:?}", statement);
+
         if eql_mapper::requires_type_check(&statement) {
-            let typed_statement =
-                eql_mapper::type_check(self.context.table_resolver.clone(), &statement)
-                    .map_err(|e| MappingError::StatementCouldNotBeTypeChecked(e.to_string()))?;
+            match eql_mapper::type_check(self.context.table_resolver.clone(), &statement) {
+                Ok(typed_statement) => {
+                    debug!(target: MAPPER,
+                        client_id = self.context.client_id,
+                        src = "query_handler",
+                        typed_statement = ?typed_statement
+                    );
 
-            info!(target: MAPPER, "typed_statement {:?}", typed_statement);
+                    let literals = &typed_statement.literals;
 
-            let literals = &typed_statement.literals;
-            info!(target: MAPPER, "Literals {:?}", literals);
+                    let literal_columns = self.get_literal_columns(&typed_statement)?;
 
-            let literal_columns = self.get_literal_columns(&typed_statement)?;
+                    let plaintexts = Self::get_plaintexts(literals, &literal_columns);
 
-            let plaintexts = Self::get_plaintexts(literals, &literal_columns);
+                    let encrypted = self.encrypt.encrypt(plaintexts, &literal_columns).await?;
 
-            let encrypted = self.encrypt.encrypt(plaintexts, &literal_columns).await?;
+                    requires_rewrite = !encrypted.is_empty();
 
-            requires_rewrite = !encrypted.is_empty();
+                    let encrypted_values = encrypted
+                        .into_iter()
+                        .map(|ct| {
+                            serde_json::to_string(&ct)
+                                .map(|json| ast::Expr::Value(Value::SingleQuotedString(json)))
+                        })
+                        .collect::<Result<Vec<_>, _>>()?;
 
-            let encrypted_values = encrypted
-                .into_iter()
-                .map(|ct| {
-                    serde_json::to_string(&ct)
-                        .map(|json| ast::Expr::Value(Value::SingleQuotedString(json)))
-                })
-                .collect::<Result<Vec<_>, _>>()?;
+                    let original_values_and_replacements = (typed_statement.literals)
+                        .iter()
+                        .map(|(_, original_node)| *original_node)
+                        .zip(encrypted_values.into_iter())
+                        .collect::<HashMap<_, _>>();
 
-            let original_values_and_replacements = (typed_statement.literals)
-                .iter()
-                .map(|(_, original_node)| *original_node)
-                .zip(encrypted_values.into_iter())
-                .collect::<HashMap<_, _>>();
+                    let transformed_statement = typed_statement
+                        .transform(original_values_and_replacements)
+                        .map_err(|_e| MappingError::StatementCouldNotBeTransformed)?;
 
-            let transformed_statement = typed_statement
-                .transform(original_values_and_replacements)
-                .map_err(|_e| MappingError::StatementCouldNotBeTransformed)?;
+                    query.statement = transformed_statement.to_string();
 
-            query.statement = transformed_statement.to_string();
-
-            self.context.add_portal(
-                query.portal.to_owned(),
-                context::Portal::new(
-                    context::Statement::new(vec![], vec![], vec![]).into(),
-                    vec![], // defaults to all Text if empty
-                ),
-            );
+                    self.context.add_portal(
+                        query.portal.to_owned(),
+                        context::Portal::new(
+                            context::Statement::new(vec![], vec![], vec![]).into(),
+                            vec![], // defaults to all Text if empty
+                        ),
+                    );
+                }
+                Err(error) => {
+                    debug!(target: MAPPER,
+                        client_id = self.context.client_id,
+                        src = "query_handler",
+                        error = ?error
+                    );
+                    if self.encrypt.config.enable_mapping_errors() {
+                        return Err(MappingError::StatementCouldNotBeTypeChecked(
+                            error.to_string(),
+                        )
+                        .into());
+                    }
+                }
+            }
         }
 
         if requires_rewrite {
