@@ -171,67 +171,165 @@ where
         let mut requires_rewrite = false;
 
         if eql_mapper::requires_type_check(&statement) {
-            match eql_mapper::type_check(self.context.table_resolver.clone(), &statement) {
-                Ok(typed_statement) => {
-                    debug!(target: MAPPER,
-                        client_id = self.context.client_id,
-                        src = "query_handler",
-                        typed_statement = ?typed_statement
+            let typed_statement =
+                eql_mapper::type_check(self.context.get_table_resolver(), &statement);
+
+            // This isn't sensible code.
+            // But using the match flow from the parse_handler here results in a borrow error
+            // Attempted mulitple variations but this is the only one that works
+            //
+            // The call to encrypt is the culprit.
+            // Th borrow checker claims that the use of RefCell in the mapper violates
+            // the Send+Sync requirement.
+            //
+            // Although we do use references to the literals owned by the typed_statement,
+            // the data passed to encrypt is owned in this context.
+            //
+            // References do not cross the await boundary.
+            //
+            if let Err(error) = typed_statement {
+                debug!(target: MAPPER,
+                    client_id = self.context.client_id,
+                    src = "query_handler",
+                    error = ?error
+                );
+                if self.encrypt.config.enable_mapping_errors() {
+                    return Err(
+                        MappingError::StatementCouldNotBeTypeChecked(error.to_string()).into(),
                     );
-
-                    let literals = &typed_statement.literals;
-
-                    let literal_columns = self.get_literal_columns(&typed_statement)?;
-
-                    let plaintexts = Self::get_plaintexts(literals, &literal_columns);
-
-                    let encrypted = self.encrypt.encrypt(plaintexts, &literal_columns).await?;
-
-                    requires_rewrite = !encrypted.is_empty();
-
-                    let encrypted_values = encrypted
-                        .into_iter()
-                        .map(|ct| {
-                            serde_json::to_string(&ct)
-                                .map(|json| ast::Expr::Value(Value::SingleQuotedString(json)))
-                        })
-                        .collect::<Result<Vec<_>, _>>()?;
-
-                    let original_values_and_replacements = (typed_statement.literals)
-                        .iter()
-                        .map(|(_, original_node)| *original_node)
-                        .zip(encrypted_values.into_iter())
-                        .collect::<HashMap<_, _>>();
-
-                    let transformed_statement = typed_statement
-                        .transform(original_values_and_replacements)
-                        .map_err(|_e| MappingError::StatementCouldNotBeTransformed)?;
-
-                    query.statement = transformed_statement.to_string();
-
-                    self.context.add_portal(
-                        query.portal.to_owned(),
-                        context::Portal::new(
-                            context::Statement::new(vec![], vec![], vec![]).into(),
-                            vec![], // defaults to all Text if empty
-                        ),
-                    );
-                }
-                Err(error) => {
-                    debug!(target: MAPPER,
-                        client_id = self.context.client_id,
-                        src = "query_handler",
-                        error = ?error
-                    );
-                    if self.encrypt.config.enable_mapping_errors() {
-                        return Err(MappingError::StatementCouldNotBeTypeChecked(
-                            error.to_string(),
-                        )
-                        .into());
-                    }
+                } else {
+                    return Ok(None);
                 }
             }
+            // Yes, I know
+            let typed_statement = typed_statement.unwrap();
+
+            // Same borrow error occurs with this code
+            //
+            // let typed_statement = match typed_statement {
+            //     Ok(ts) => ts,
+            //     Err(_) => {
+            //         debug!(target: MAPPER,
+            //             client_id = self.context.client_id,
+            //             src = "query_handler"
+            //         );
+
+            //         // return Ok(None);
+
+            //         if self.encrypt.config.enable_mapping_errors() {
+            //             return Err(MappingError::StatementCouldNotBeTypeChecked.into());
+            //         } else {
+            //             return Ok(None);
+            //         }
+            //     }
+            // };
+
+            debug!(target: MAPPER,
+                client_id = self.context.client_id,
+                src = "query_handler",
+                typed_statement = ?typed_statement
+            );
+
+            let literal_columns = self.get_literal_columns(&typed_statement)?;
+
+            let plaintexts = Self::get_plaintexts(&typed_statement.literals, &literal_columns);
+
+            let encrypted = self.encrypt.encrypt(plaintexts, &literal_columns).await?;
+
+            requires_rewrite = !encrypted.is_empty();
+
+            let encrypted_values = encrypted
+                .into_iter()
+                .map(|ct| {
+                    serde_json::to_string(&ct)
+                        .map(|json| ast::Expr::Value(Value::SingleQuotedString(json)))
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+
+            let original_values_and_replacements = (&typed_statement.literals)
+                .iter()
+                .map(|(_, original_node)| *original_node)
+                .zip(encrypted_values.into_iter())
+                .collect::<HashMap<_, _>>();
+
+            let transformed_statement = typed_statement
+                .transform(original_values_and_replacements)
+                .map_err(|_e| MappingError::StatementCouldNotBeTransformed)?;
+
+            query.statement = transformed_statement.to_string();
+
+            self.context.add_portal(
+                query.portal.to_owned(),
+                context::Portal::new(
+                    context::Statement::new(vec![], vec![], vec![]).into(),
+                    vec![], // defaults to all Text if empty
+                ),
+            );
         }
+
+        // This is the code using the match flow
+        //
+        // if eql_mapper::requires_type_check(&statement) {
+        //     match eql_mapper::type_check(self.context.table_resolver.clone(), &statement) {
+        //         Ok(typed_statement) => {
+        //             debug!(target: MAPPER,
+        //                 client_id = self.context.client_id,
+        //                 src = "query_handler",
+        //                 typed_statement = ?typed_statement
+        //             );
+
+        //             // let literals = &typed_statement.literals;
+
+        //             let literal_columns = self.get_literal_columns(&typed_statement)?;
+
+        //             let plaintexts =
+        //                 Self::get_plaintexts(&typed_statement.literals, &literal_columns);
+        //             // let plaintexts = Self::get_plaintexts(literals, &literal_columns);
+
+        //             let encrypted = self.encrypt.encrypt(plaintexts, &literal_columns).await?;
+
+        //             requires_rewrite = !encrypted.is_empty();
+
+        //             let encrypted_values = encrypted
+        //                 .into_iter()
+        //                 .map(|ct| {
+        //                     serde_json::to_string(&ct)
+        //                         .map(|json| ast::Expr::Value(Value::SingleQuotedString(json)))
+        //                 })
+        //                 .collect::<Result<Vec<_>, _>>()?;
+
+        //             let original_values_and_replacements = (typed_statement.literals)
+        //                 .iter()
+        //                 .map(|(_, original_node)| *original_node)
+        //                 .zip(encrypted_values.into_iter())
+        //                 .collect::<HashMap<_, _>>();
+
+        //             let transformed_statement = typed_statement
+        //                 .transform(original_values_and_replacements)
+        //                 .map_err(|_e| MappingError::StatementCouldNotBeTransformed)?;
+
+        //             query.statement = transformed_statement.to_string();
+
+        //             self.context.add_portal(
+        //                 query.portal.to_owned(),
+        //                 context::Portal::new(
+        //                     context::Statement::new(vec![], vec![], vec![]).into(),
+        //                     vec![], // defaults to all Text if empty
+        //                 ),
+        //             );
+        //         }
+        //         Err(error) => {
+        //             debug!(target: MAPPER,
+        //                 client_id = self.context.client_id,
+        //                 src = "query_handler",
+        //                 error = ?error
+        //             );
+        //             if self.encrypt.config.enable_mapping_errors() {
+        //                 return Err(MappingError::StatementCouldNotBeTypeChecked.into());
+        //             }
+        //         }
+        //     }
+        // }
 
         if requires_rewrite {
             debug!(target: MAPPER, "Rewrite Query");
