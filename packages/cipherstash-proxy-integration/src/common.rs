@@ -106,7 +106,7 @@ pub async fn connect(port: u16) -> Client {
 ///
 /// This is because the test database uses a self-signed certificate.
 pub fn configure_test_client() -> ClientConfig {
-    let verifier = DangerousTestCertVerifier::default();
+    let verifier = DangerousTestCertVerifier;
     rustls::ClientConfig::builder()
         .dangerous()
         .with_custom_certificate_verifier(Arc::new(verifier))
@@ -115,7 +115,7 @@ pub fn configure_test_client() -> ClientConfig {
 
 /// Dangerous test certificate "verifier" that does not actually verify the server's certificate.
 /// This **must** never be used for anything other than testing.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 struct DangerousTestCertVerifier;
 
 impl ServerCertVerifier for DangerousTestCertVerifier {
