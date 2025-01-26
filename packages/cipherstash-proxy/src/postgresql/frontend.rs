@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::fmt::Display;
 
 use super::context::{self, Context};
 use super::messages::bind::Bind;
@@ -80,25 +81,12 @@ where
         match code.into() {
             Code::Query => {
                 match self.query_handler(&bytes).await {
-                    Ok(Some(b)) => bytes = b,
-                    // No mapping needed
+                    Ok(Some(mapped)) => bytes = mapped,
+                    // No mapping needed, don't change the bytes
                     Ok(None) => (),
                     Err(err) => {
                         debug!("error handling query: {}", err);
-                        // This *should* be sufficient for escaping error messages as we're only
-                        // using the string literal, and not identifiers
-                        let quoted_error = quote_literal(format!("[CipherStash] {}", err).as_str());
-                        let content =
-                            format!("DO $$ begin raise exception {quoted_error}; END; $$;");
-                        let query = Query {
-                            statement: content,
-                            portal: Name::unnamed(),
-                        };
-                        bytes = BytesMut::try_from(query)?;
-                        debug!(
-                            "frontend sending an exception-raising message: {:?}",
-                            &bytes
-                        );
+                        bytes = build_frontend_exception(err)?;
                     }
                 }
             }
@@ -110,24 +98,12 @@ where
             }
             Code::Parse => {
                 match self.parse_handler(&bytes).await {
-                    Ok(Some(b)) => bytes = b,
+                    Ok(Some(mapped)) => bytes = mapped,
+                    // No mapping needed, don't change the bytes
                     Ok(None) => (),
                     Err(e) => {
                         debug!("error parsing query: {}", e);
-                        // This *should* be sufficient for escaping error messages as we're only
-                        // using the string literal, and not identifiers
-                        let quoted_error = quote_literal(format!("[CipherStash] {}", e).as_str());
-                        let content =
-                            format!("DO $$ begin raise exception {quoted_error}; END; $$;");
-                        let query = Query {
-                            statement: content,
-                            portal: Name::unnamed(),
-                        };
-                        bytes = BytesMut::try_from(query)?;
-                        debug!(
-                            "frontend sending an exception-raising message: {:?}",
-                            &bytes
-                        );
+                        bytes = build_frontend_exception(e)?;
                     }
                 }
             }
@@ -551,4 +527,29 @@ where
             .into()),
         }
     }
+}
+
+
+// TODO: IMHO this would be better achieved by writing an `ErrorResponse` message back to the client.
+// It could be achieved by send a message across a tokio channel to the Backend.
+// The current approach means the client sees "CONTEXT:  PL/pgSQL function inline_code_block line 1 at RAISE"
+// which confused the shit out of me at first!
+// See https://linear.app/cipherstash/issue/CIP-1169/use-errorresponse-message-for-exceptions-instead-of-jit-plpgsql
+fn build_frontend_exception<E: Display>(err: E) -> Result<BytesMut, Error> {
+    // This *should* be sufficient for escaping error messages as we're only
+    // using the string literal, and not identifiers
+    let quoted_error = quote_literal(format!("[CipherStash] {}", err).as_str());
+    let content =
+        format!("DO $$ begin raise exception {quoted_error}; END; $$;");
+
+    let query = Query {
+        statement: content,
+        portal: Name::unnamed(),
+    };
+    let bytes = BytesMut::try_from(query)?;
+    debug!(
+        "frontend sending an exception-raising message: {:?}",
+        &bytes
+    );
+    Ok(bytes)
 }
