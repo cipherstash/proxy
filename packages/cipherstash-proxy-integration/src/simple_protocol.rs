@@ -70,12 +70,12 @@ mod tests {
         let client = connect_with_tls(PROXY).await;
 
         // Statement has the wrong column name
-        let sql =
-            format!("INSERT INTO encrypted (id, encrypted) VALUES ({}, 'foo@example.net')", id());
-            
-        let result = client
-            .simple_query(&sql)
-            .await;
+        let sql = format!(
+            "INSERT INTO encrypted (id, encrypted) VALUES ({}, 'foo@example.net')",
+            id()
+        );
+
+        let result = client.simple_query(&sql).await;
 
         assert!(result.is_err());
         let error = result.unwrap_err();
@@ -84,11 +84,11 @@ mod tests {
         assert!(!error.is_closed());
 
         // And we can still use the connection
-        let sql =
-            format!("INSERT INTO encrypted (id, encrypted_text) VALUES ({}, 'foo@example.net')", id());
-        let result = client
-            .simple_query(&sql)
-            .await;
+        let sql = format!(
+            "INSERT INTO encrypted (id, encrypted_text) VALUES ({}, 'foo@example.net')",
+            id()
+        );
+        let result = client.simple_query(&sql).await;
 
         assert!(result.is_ok());
     }

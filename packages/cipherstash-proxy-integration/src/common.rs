@@ -1,7 +1,10 @@
 #![allow(dead_code)]
 
 use rand::{distributions::Alphanumeric, Rng};
-use rustls::{client::danger::ServerCertVerifier, crypto::{aws_lc_rs::default_provider}, pki_types::CertificateDer, ClientConfig};
+use rustls::{
+    client::danger::ServerCertVerifier, crypto::aws_lc_rs::default_provider,
+    pki_types::CertificateDer, ClientConfig,
+};
 use std::sync::{Arc, Once};
 use tokio_postgres::{Client, NoTls};
 use tracing_subscriber::{filter::Directive, EnvFilter, FmtSubscriber};
@@ -100,7 +103,7 @@ pub async fn connect(port: u16) -> Client {
 /// These are the settings for connecting to the database with TLS.
 ///
 /// NOTE: This client uses a dangerous test certificate verifier that does not verify the server's certificate.
-/// 
+///
 /// This is because the test database uses a self-signed certificate.
 pub fn configure_test_client() -> ClientConfig {
     let verifier = DangerousTestCertVerifier::default();
@@ -117,38 +120,37 @@ struct DangerousTestCertVerifier;
 
 impl ServerCertVerifier for DangerousTestCertVerifier {
     fn verify_server_cert(
-            &self,
-            _end_entity: &CertificateDer<'_>,
-            _intermediates: &[CertificateDer<'_>],
-            _server_name: &rustls::pki_types::ServerName<'_>,
-            _ocsp_response: &[u8],
-            _now: rustls::pki_types::UnixTime,
-        ) -> Result<rustls::client::danger::ServerCertVerified, rustls::Error> {
-        
+        &self,
+        _end_entity: &CertificateDer<'_>,
+        _intermediates: &[CertificateDer<'_>],
+        _server_name: &rustls::pki_types::ServerName<'_>,
+        _ocsp_response: &[u8],
+        _now: rustls::pki_types::UnixTime,
+    ) -> Result<rustls::client::danger::ServerCertVerified, rustls::Error> {
         Ok(rustls::client::danger::ServerCertVerified::assertion())
     }
 
     fn verify_tls12_signature(
-            &self,
-            _message: &[u8],
-            _cert: &CertificateDer<'_>,
-            _dss: &rustls::DigitallySignedStruct,
-        ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
-        
+        &self,
+        _message: &[u8],
+        _cert: &CertificateDer<'_>,
+        _dss: &rustls::DigitallySignedStruct,
+    ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
         Ok(rustls::client::danger::HandshakeSignatureValid::assertion())
     }
 
     fn verify_tls13_signature(
-            &self,
-            _message: &[u8],
-            _cert: &CertificateDer<'_>,
-            _dss: &rustls::DigitallySignedStruct,
-        ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
-        
+        &self,
+        _message: &[u8],
+        _cert: &CertificateDer<'_>,
+        _dss: &rustls::DigitallySignedStruct,
+    ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
         Ok(rustls::client::danger::HandshakeSignatureValid::assertion())
     }
 
     fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
-        default_provider().signature_verification_algorithms.supported_schemes()
+        default_provider()
+            .signature_verification_algorithms
+            .supported_schemes()
     }
 }

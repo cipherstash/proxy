@@ -529,7 +529,6 @@ where
     }
 }
 
-
 // TODO: IMHO this would be better achieved by writing an `ErrorResponse` message back to the client.
 // It could be achieved by send a message across a tokio channel to the Backend.
 // The current approach means the client sees "CONTEXT:  PL/pgSQL function inline_code_block line 1 at RAISE"
@@ -539,8 +538,7 @@ fn build_frontend_exception<E: Display>(err: E) -> Result<BytesMut, Error> {
     // This *should* be sufficient for escaping error messages as we're only
     // using the string literal, and not identifiers
     let quoted_error = quote_literal(format!("[CipherStash] {}", err).as_str());
-    let content =
-        format!("DO $$ begin raise exception {quoted_error}; END; $$;");
+    let content = format!("DO $$ begin raise exception {quoted_error}; END; $$;");
 
     let query = Query {
         statement: content,
