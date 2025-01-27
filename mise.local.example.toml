@@ -25,8 +25,3 @@ CS_LOG__KEYSET_LEVEL = "info"
 CS_LOG__PROTOCOL_LEVEL = "info"
 CS_LOG__MAPPER_LEVEL = "info"
 CS_LOG__SCHEMA_LEVEL = "info"
-
-# Override the default port in mise.toml
-# I can't work out how to use env vars in tasks, so port is defined here again
-[vars]
-database_port = "5532"

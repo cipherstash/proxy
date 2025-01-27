@@ -10,8 +10,6 @@ trusted_config_paths = [
 [task_config]
 includes = ["tests/tasks"]
 
-[vars]
-database_port = "5532" # default postgres port using built in docker-compose setup
 
 [env]
 # Default configuration for running cipherstash-proxy out of the box
@@ -107,7 +105,7 @@ echo docker compose up {{arg(name="service",default="proxy")}} {{option(name="ex
 """
 
 [tasks."proxy:psql"]
-description="Run psql (interactively) against the proxy; assumes the proxy is already up"
+description = "Run psql (interactively) against the proxy; assumes the proxy is already up"
 run = """
 set -eu
 docker exec -it postgres${CONTAINER_SUFFIX:-} psql "postgresql://${CS_DATABASE__USERNAME}:${CS_DATABASE__PASSWORD}@${CS_PROXY__HOST}:6432/${CS_DATABASE__NAME}"
@@ -125,7 +123,7 @@ run = "docker compose rm --stop --force proxy proxy-tls"
 # Test Tasks
 
 [tasks.test]
-alias = [ 't', 'ci' ]
+alias = ['t', 'ci']
 description = "Runs all tests (hygiene, unit, integration)"
 run = """
 mise run test:check
@@ -356,7 +354,7 @@ echo docker compose up --build {{arg(name="service",default="postgres postgres-1
 """
 
 [tasks."postgres:psql"]
-description="Run psql (interactively) against the Postgres instance; assumes Postgres is already up"
+description = "Run psql (interactively) against the Postgres instance; assumes Postgres is already up"
 run = """
 set -eu
 docker exec -it postgres${CONTAINER_SUFFIX:-} psql "postgresql://${CS_DATABASE__USERNAME}:${CS_DATABASE__PASSWORD}@${CS_DATABASE__HOST}:${CS_DATABASE__PORT}/${CS_DATABASE__NAME}"
@@ -482,4 +480,21 @@ docker tag cipherstash/proxy:latest cipherstash/proxy:latest
 docker push cipherstash/proxy:latest
 """
 
+
 # ====================================================================================================
+
+
+[tasks.cert]
+description = "Regenerate server certs"
+dir = "{{config_root}}/tests/tls"
+run = """
+  openssl req -new -x509 -days 365 -nodes -out server.cert -keyout server.key -subj "/CN=localhost"
+  chmod 600 server.cert server.key
+"""
+
+# openssl req -x509 -in server.req -text -key server.key -out server.crt                                                                                                                                                                                                                                                      │
+#  openssl rsa -in privkey.pem -out server.key                                                                                                                                                                                                                                                            │
+#  openssl req -x509 -in server.req -text -key server.key -out server.crt
+# openssl req -x509 -newkey rsa:4096 -sha256 -days 3650 \
+#   -nodes -keyout example.com.key -out example.com.crt -subj "/CN=example.com" \
+#   -addext "subjectAltName=DNS:example.com,DNS:*.example.com,IP:10.0.0.1"
