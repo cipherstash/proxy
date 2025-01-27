@@ -85,7 +85,6 @@ where
                     // No mapping needed, don't change the bytes
                     Ok(None) => (),
                     Err(err) => {
-                        debug!("error handling query: {}", err);
                         bytes = build_frontend_exception(err)?;
                     }
                 }
@@ -102,7 +101,6 @@ where
                     // No mapping needed, don't change the bytes
                     Ok(None) => (),
                     Err(e) => {
-                        debug!("error parsing query: {}", e);
                         bytes = build_frontend_exception(e)?;
                     }
                 }
@@ -232,7 +230,7 @@ where
 
             let literal_columns = self.get_literal_columns(&typed_statement)?;
 
-            let plaintexts = Self::get_plaintexts(&typed_statement.literals, &literal_columns);
+            let plaintexts = literals_to_plaintext(&typed_statement.literals, &literal_columns);
 
             let encrypted = self.encrypt.encrypt(plaintexts, &literal_columns).await?;
 
@@ -267,7 +265,7 @@ where
             );
         }
 
-        // This is the code using the match flow
+        // This is the match flow structure
         //
         // if eql_mapper::requires_type_check(&statement) {
         //     match eql_mapper::type_check(self.context.table_resolver.clone(), &statement) {
@@ -283,7 +281,7 @@ where
         //             let literal_columns = self.get_literal_columns(&typed_statement)?;
 
         //             let plaintexts =
-        //                 Self::get_plaintexts(&typed_statement.literals, &literal_columns);
+        //                 literals_to_plaintext(&typed_statement.literals, &literal_columns);
         //             // let plaintexts = Self::get_plaintexts(literals, &literal_columns);
 
         //             let encrypted = self.encrypt.encrypt(plaintexts, &literal_columns).await?;
@@ -325,7 +323,10 @@ where
         //                 error = ?error
         //             );
         //             if self.encrypt.config.enable_mapping_errors() {
-        //                 return Err(MappingError::StatementCouldNotBeTypeChecked.into());
+        //                 return Err(MappingError::StatementCouldNotBeTypeChecked(
+        //                     error.to_string(),
+        //                 )
+        //                 .into());
         //             }
         //         }
         //     }
@@ -343,32 +344,6 @@ where
         } else {
             Ok(None)
         }
-    }
-
-    fn get_plaintexts(
-        literals: &Vec<(EqlValue, &Expr)>,
-        literal_columns: &Vec<Option<Column>>,
-    ) -> Vec<Option<Plaintext>> {
-        literals
-            .iter()
-            .zip(literal_columns)
-            .map(|((_, expr), column)| {
-                if let Some(col) = column {
-                    match expr {
-                        sqlparser::ast::Expr::Value(value) => {
-                            literal_from_sql(value.to_string(), &col.postgres_type)
-                        }
-                        _ => Ok(None),
-                    }
-                } else {
-                    Ok(None)
-                }
-            })
-            .map(|pt| match pt {
-                Ok(Some(inner)) => Some(inner.clone()),
-                _ => None,
-            })
-            .collect()
     }
 
     fn get_literal_columns(
@@ -653,11 +628,6 @@ where
     }
 }
 
-// TODO: IMHO this would be better achieved by writing an `ErrorResponse` message back to the client.
-// It could be achieved by send a message across a tokio channel to the Backend.
-// The current approach means the client sees "CONTEXT:  PL/pgSQL function inline_code_block line 1 at RAISE"
-// which confused the shit out of me at first!
-// See https://linear.app/cipherstash/issue/CIP-1169/use-errorresponse-message-for-exceptions-instead-of-jit-plpgsql
 fn build_frontend_exception<E: Display>(err: E) -> Result<BytesMut, Error> {
     // This *should* be sufficient for escaping error messages as we're only
     // using the string literal, and not identifiers
@@ -674,4 +644,25 @@ fn build_frontend_exception<E: Display>(err: E) -> Result<BytesMut, Error> {
         &bytes
     );
     Ok(bytes)
+}
+
+fn literals_to_plaintext(
+    literals: &Vec<(EqlValue, &Expr)>,
+    literal_columns: &Vec<Option<Column>>,
+) -> Vec<Option<Plaintext>> {
+    literals
+        .iter()
+        .zip(literal_columns)
+        .map(|((_, expr), column)| {
+            column.as_ref().and_then(|col| {
+                if let sqlparser::ast::Expr::Value(value) = expr {
+                    literal_from_sql(value.to_string(), &col.postgres_type)
+                        .ok()
+                        .flatten()
+                } else {
+                    None
+                }
+            })
+        })
+        .collect()
 }
