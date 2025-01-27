@@ -31,11 +31,17 @@ SELECT cs_add_index_v1(
   'text'
 );
 
-
 SELECT cs_add_index_v1(
   'encrypted',
   'encrypted_text',
   'match',
+  'text'
+);
+
+SELECT cs_add_index_v1(
+  'encrypted',
+  'encrypted_text',
+  'ore',
   'text'
 );
 

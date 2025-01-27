@@ -241,35 +241,32 @@ mod tests {
         }
     }
 
-    //
-    // TH: I think I am doing it wrong
-    //
-    // #[tokio::test]
-    // async fn map_ore_where_text() {
-    //     trace();
+    #[tokio::test]
+    async fn map_ore_where_text() {
+        trace();
 
-    //     clear().await;
+        clear().await;
 
-    //     let client = connect_with_tls(PROXY).await;
+        let client = connect_with_tls(PROXY).await;
 
-    //     let id = id();
-    //     let encrypted_text = "ABC";
-    //     let search_text = "ABCDEF";
+        let id = id();
+        let encrypted_text = "ABC";
+        let search_text = "XYZ";
 
-    //     let sql = "INSERT INTO encrypted (id, encrypted_text) VALUES ($1, $2)";
-    //     client
-    //         .query(sql, &[&id, &encrypted_text])
-    //         .await
-    //         .expect("ok");
+        let sql = "INSERT INTO encrypted (id, encrypted_text) VALUES ($1, $2)";
+        client
+            .query(sql, &[&id, &encrypted_text])
+            .await
+            .expect("ok");
 
-    //     let sql = "SELECT id, encrypted_text FROM encrypted WHERE encrypted_text < $1";
-    //     let rows = client.query(sql, &[&search_text]).await.expect("ok");
+        let sql = "SELECT id, encrypted_text FROM encrypted WHERE encrypted_text < $1";
+        let rows = client.query(sql, &[&search_text]).await.expect("ok");
 
-    //     assert!(rows.len() == 1);
+        assert_eq!(rows.len(), 1);
 
-    //     for row in rows {
-    //         let result: String = row.get("encrypted_text");
-    //         assert_eq!(encrypted_text, result);
-    //     }
-    // }
+        for row in rows {
+            let result: String = row.get("encrypted_text");
+            assert_eq!(encrypted_text, result);
+        }
+    }
 }
