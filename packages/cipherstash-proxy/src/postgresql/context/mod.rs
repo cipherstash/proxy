@@ -43,6 +43,7 @@ pub struct Queue<T> {
 pub struct Statement {
     pub param_columns: Vec<Option<Column>>,
     pub projection_columns: Vec<Option<Column>>,
+    pub literal_columns: Vec<Option<Column>>,
     pub postgres_param_types: Vec<i32>,
 }
 
@@ -222,13 +223,23 @@ impl Statement {
     pub fn new(
         param_columns: Vec<Option<Column>>,
         projection_columns: Vec<Option<Column>>,
+        literal_columns: Vec<Option<Column>>,
         postgres_param_types: Vec<i32>,
     ) -> Statement {
         Statement {
             param_columns,
             projection_columns,
+            literal_columns,
             postgres_param_types,
         }
+    }
+
+    pub fn unencryped() -> Statement {
+        Statement::new(vec![], vec![], vec![], vec![])
+    }
+
+    pub fn has_literals(&self) -> bool {
+        !self.literal_columns.is_empty()
     }
 }
 
@@ -301,6 +312,7 @@ mod tests {
         Statement {
             param_columns: vec![],
             projection_columns: vec![],
+            literal_columns: vec![],
             postgres_param_types: vec![],
         }
     }

@@ -12,7 +12,6 @@ use super::FrontendCode;
 #[derive(Debug, Clone)]
 pub(crate) struct Query {
     pub statement: String,
-
     dirty: bool,
 }
 
@@ -30,6 +29,7 @@ impl Query {
 
     pub fn rewrite(&mut self, statement: String) {
         self.statement = statement;
+        self.dirty = true;
     }
 }
 
