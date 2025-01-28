@@ -7,6 +7,9 @@ tests/pg/data**
 tests/sql/cipherstash-encrypt.sql
 .vscode
 
+rust-toolchain.toml
+.cargo/config.toml
+
 # release artifacts
 /cipherstash-proxy
 /cipherstash-eql.sql
