@@ -45,3 +45,31 @@ flowchart LR
     B_AddContext --> B_Write[Write]
 
 ```
+
+
+
+
+### Pipelining
+
+Pipelining allows the client and server sides of the connection to work concurrently.
+The Client sends messages without waiting for responses from the Server.
+The proxy needs to keep track of Describe and Execute messages in order to know which statement or portal server messages correlate to.
+
+The PostgreSQL server executes the queries sequentially.
+
+
+
+```
+            Sequential                              Pipelined
+| Client         | Server          |    | Client         | Server          |
+|----------------|-----------------|    |----------------|-----------------|
+| send query 1   |                 |    | send query 1   |                 |
+|                | process query 1 |    | send query 2   | process query 1 |
+| receive rows 1 |                 |    | send query 3   | process query 2 |
+| send query 2   |                 |    | receive rows 1 | process query 3 |
+|                | process query 2 |    | receive rows 2 |                 |
+| receive rows 2 |                 |    | receive rows 3 |                 |
+| send query 3   |                 |
+|                | process query 3 |
+| receive rows 3 |                 |
+```
