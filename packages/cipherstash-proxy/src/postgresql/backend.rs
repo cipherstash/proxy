@@ -151,11 +151,6 @@ where
         Ok(())
     }
 
-    // async fn complete_execution(&mut self) -> Result<(), Error> {
-    //     debug!(target: DEVELOPMENT, client_id = self.context.client_id, src = "complete_execution");
-    //     self.context.complete_execution();
-    // }
-
     ///
     /// DataRows are buffered so that Decryption can be batched
     /// Decryption will occur

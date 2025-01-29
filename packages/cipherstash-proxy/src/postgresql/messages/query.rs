@@ -10,8 +10,9 @@ use std::io::Cursor;
 use super::FrontendCode;
 
 #[derive(Debug, Clone)]
-pub(crate) struct Query {
+pub struct Query {
     pub statement: String,
+    // Used to mark that a Query message requires rewrite
     dirty: bool,
 }
 

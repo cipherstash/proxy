@@ -207,8 +207,7 @@ where
                         query.rewrite(transformed_statement.to_string());
                     };
                 }
-                // Don't need to add the statement to the context
-                // self.context.add_statement(Name::unnamed(), statement);
+
                 Portal::encrypted(statement.into(), vec![])
             }
             None => {
@@ -368,7 +367,7 @@ where
     }
 
     ///
-    ///  Convert a Mapper Typed Statement into an EncryptableStatement
+    /// Convert a Typed Statement from Mapper into a Statement
     ///
     ///
     fn to_encryptable_statement(
@@ -431,18 +430,19 @@ where
         let mut bind = Bind::try_from(bytes)?;
         debug!(target: PROTOCOL, client_id = self.context.client_id,"Bind: {bind:?}");
 
-        let portal = match self.context.get_statement(&bind.prepared_statement) {
-            Some(statement) => {
-                let encrypted = self.encrypt_params(&bind, &statement).await?;
+        let mut portal = Portal::passthrough();
 
+        if let Some(statement) = self.context.get_statement(&bind.prepared_statement) {
+            if statement.has_params() {
+                let encrypted = self.encrypt_params(&bind, &statement).await?;
                 bind.rewrite(encrypted)?;
-                Portal::encrypted(statement, bind.result_columns_format_codes.to_owned())
             }
-            _ => Portal::passthrough(),
+            if statement.has_projection() {
+                portal = Portal::encrypted(statement, bind.result_columns_format_codes.to_owned());
+            }
         };
 
         debug!(target: MAPPER, client_id = self.context.client_id, portal = ?portal);
-
         self.context.add_portal(bind.portal.to_owned(), portal);
 
         if bind.requires_rewrite() {

@@ -1,8 +1,7 @@
 #[cfg(test)]
 mod tests {
-    use std::sync::{Arc, RwLock};
-
     use crate::common::{clear, connect_with_tls, id, trace, PROXY};
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     #[tokio::test]
     async fn pipeline() {
@@ -48,7 +47,7 @@ mod tests {
             .await
             .expect("ok");
 
-        let counter = Arc::new(RwLock::new(0));
+        let counter = AtomicUsize::new(0);
 
         let text = async {
             let sql = "SELECT id, encrypted_text FROM encrypted WHERE id = $1";
@@ -60,7 +59,7 @@ mod tests {
                 let result: String = row.get("encrypted_text");
                 assert_eq!(encrypted_text, result);
 
-                let _ = counter.write().map(|mut c| *c += 1);
+                let _ = counter.fetch_add(1, Ordering::SeqCst);
             }
         };
 
@@ -74,7 +73,7 @@ mod tests {
                 let result: i16 = row.get("encrypted_int2");
                 assert_eq!(encrypted_int2, result);
 
-                let _ = counter.write().map(|mut c| *c += 1);
+                let _ = counter.fetch_add(1, Ordering::SeqCst);
             }
         };
 
@@ -88,7 +87,7 @@ mod tests {
                 let result: i32 = row.get("encrypted_int4");
                 assert_eq!(encrypted_int4, result);
 
-                let _ = counter.write().map(|mut c| *c += 1);
+                let _ = counter.fetch_add(1, Ordering::SeqCst);
             }
         };
 
@@ -102,13 +101,13 @@ mod tests {
                 let result: String = row.get("plaintext");
                 assert_eq!(plaintext_text, result);
 
-                let _ = counter.write().map(|mut c| *c += 1);
+                let _ = counter.fetch_add(1, Ordering::SeqCst);
             }
         };
 
         tokio::join!(text, plaintext, int2, int4);
 
-        let count = counter.read().ok().map(|c| *c).unwrap();
+        let count = counter.load(Ordering::SeqCst);
         assert_eq!(count, 4);
     }
 }

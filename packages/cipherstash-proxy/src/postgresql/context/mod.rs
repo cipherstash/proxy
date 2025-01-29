@@ -241,6 +241,14 @@ impl Statement {
     pub fn has_literals(&self) -> bool {
         !self.literal_columns.is_empty()
     }
+
+    pub fn has_params(&self) -> bool {
+        !self.param_columns.is_empty()
+    }
+
+    pub fn has_projection(&self) -> bool {
+        !self.projection_columns.is_empty()
+    }
 }
 
 impl<T> Queue<T> {
