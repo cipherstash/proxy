@@ -18,6 +18,7 @@ pub const AUTHENTICATION: &str = "authentication";
 pub const CONTEXT: &str = "context";
 pub const ENCRYPT: &str = "encrypt";
 pub const KEYSET: &str = "keyset";
+pub const PARSER: &str = "parser";
 pub const PROTOCOL: &str = "protocol";
 pub const MAPPER: &str = "mapper";
 pub const SCHEMA: &str = "schema";
