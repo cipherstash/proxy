@@ -6,7 +6,11 @@ authors = [{ name = "Toby Hede", email = "toby@cipherstash.com" }]
 readme = "README.md"
 requires-python = ">=3.12"
 
-dependencies = ["psycopg (>=3.2.3,<4.0.0)", "pytest (>=8.3.4,<9.0.0)"]
+dependencies = [
+    "psycopg (>=3.2.3,<4.0.0)",
+    "pytest (>=8.3.4,<9.0.0)",
+    "pytest-asyncio (>=0.25.3,<0.26.0)",
+]
 
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]
