@@ -3,49 +3,79 @@ mod tests {
     use crate::common::{clear, connect_with_tls, id, trace, PROXY};
     use std::sync::atomic::{AtomicUsize, Ordering};
 
+    ///
+    /// Test statement pipelinining
+    ///
+    /// Executes statements asynchronously.
+    ///
+    /// Tests encryption, decryption and passthrough workloads
+    ///
     #[tokio::test]
-    async fn pipeline() {
+    async fn pipelined_statements() {
         trace();
 
         clear().await;
 
         let client = connect_with_tls(PROXY).await;
 
+        let counter = AtomicUsize::new(0);
+
         let text_id = id();
         let encrypted_text = "hello@cipherstash.com";
 
-        let sql = "INSERT INTO encrypted (id, encrypted_text) VALUES ($1, $2)";
-        client
-            .query(sql, &[&text_id, &encrypted_text])
-            .await
-            .expect("ok");
+        let text = async {
+            let sql = "INSERT INTO encrypted (id, encrypted_text) VALUES ($1, $2)";
+            client
+                .query(sql, &[&text_id, &encrypted_text])
+                .await
+                .expect("ok");
+
+            let _ = counter.fetch_add(1, Ordering::SeqCst);
+        };
 
         let int2_id = id();
         let encrypted_int2: i16 = 16;
 
-        let sql = "INSERT INTO encrypted (id, encrypted_int2) VALUES ($1, $2)";
-        client
-            .query(sql, &[&int2_id, &encrypted_int2])
-            .await
-            .expect("ok");
+        let int2 = async {
+            let sql = "INSERT INTO encrypted (id, encrypted_int2) VALUES ($1, $2)";
+            client
+                .query(sql, &[&int2_id, &encrypted_int2])
+                .await
+                .expect("ok");
+
+            let _ = counter.fetch_add(1, Ordering::SeqCst);
+        };
 
         let int4_id = id();
         let encrypted_int4: i32 = 32;
 
-        let sql = "INSERT INTO encrypted (id, encrypted_int4) VALUES ($1, $2)";
-        client
-            .query(sql, &[&int4_id, &encrypted_int4])
-            .await
-            .expect("ok");
+        let int4 = async {
+            let sql = "INSERT INTO encrypted (id, encrypted_int4) VALUES ($1, $2)";
+            client
+                .query(sql, &[&int4_id, &encrypted_int4])
+                .await
+                .expect("ok");
+
+            let _ = counter.fetch_add(1, Ordering::SeqCst);
+        };
 
         let plaintext_id = id();
         let plaintext_text = "blahvtha";
 
-        let sql = "INSERT INTO encrypted (id, plaintext) VALUES ($1, $2)";
-        client
-            .query(sql, &[&plaintext_id, &plaintext_text])
-            .await
-            .expect("ok");
+        let plaintext = async {
+            let sql = "INSERT INTO encrypted (id, plaintext) VALUES ($1, $2)";
+            client
+                .query(sql, &[&plaintext_id, &plaintext_text])
+                .await
+                .expect("ok");
+
+            let _ = counter.fetch_add(1, Ordering::SeqCst);
+        };
+
+        tokio::join!(text, plaintext, int2, int4);
+
+        let count = counter.load(Ordering::SeqCst);
+        assert_eq!(count, 4);
 
         let counter = AtomicUsize::new(0);
 
