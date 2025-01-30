@@ -2,141 +2,306 @@ use crate::{
     error::{Error, MappingError},
     postgresql::{format_code::FormatCode, messages::bind::BindParam},
 };
+use bigdecimal::BigDecimal;
 use bytes::BytesMut;
 use chrono::NaiveDate;
 use cipherstash_client::encryption::Plaintext;
+use cipherstash_config::ColumnType;
 use postgres_types::FromSql;
 use postgres_types::Type;
 use rust_decimal::Decimal;
+use sqlparser::ast::Value;
 use std::str::FromStr;
 
 pub fn bind_param_from_sql(
     param: &BindParam,
     postgres_type: &Type,
+    col_type: ColumnType,
 ) -> Result<Option<Plaintext>, Error> {
     if param.is_null() {
         return Ok(None);
     }
 
     let pt = match param.format_code {
-        FormatCode::Text => text_from_sql(&param.to_string(), postgres_type),
-        FormatCode::Binary => binary_from_sql(&param.bytes, postgres_type),
+        FormatCode::Text => text_from_sql(&param.to_string(), postgres_type, col_type),
+        FormatCode::Binary => binary_from_sql(&param.bytes, postgres_type, col_type),
     }?;
 
     Ok(Some(pt))
 }
 
-pub fn literal_from_sql(literal: String, postgres_type: &Type) -> Result<Option<Plaintext>, Error> {
-    let pt = text_from_sql(&literal, postgres_type)?;
-    Ok(Some(pt))
+/// Converts a SQL literal to a Plaintext value based on the column type.
+/// The [Value] enum represents all the various quoted forms of literals in SQL.
+/// This function extracts the inner type and converts it to a Plaintext value.
+pub fn literal_from_sql(literal: &Value, col_type: ColumnType) -> Result<Plaintext, MappingError> {
+    match literal {
+        // All string literal variants
+        Value::SingleQuotedString(s)
+        | Value::DoubleQuotedString(s)
+        | Value::TripleSingleQuotedString(s)
+        | Value::TripleDoubleQuotedString(s)
+        | Value::EscapedStringLiteral(s)
+        | Value::UnicodeStringLiteral(s)
+        | Value::TripleSingleQuotedByteStringLiteral(s)
+        | Value::TripleDoubleQuotedByteStringLiteral(s)
+        | Value::SingleQuotedRawStringLiteral(s)
+        | Value::DoubleQuotedRawStringLiteral(s)
+        | Value::TripleSingleQuotedRawStringLiteral(s)
+        | Value::TripleDoubleQuotedRawStringLiteral(s)
+        | Value::NationalStringLiteral(s) => text_from_sql(s, &Type::TEXT, col_type),
+
+        // Dollar quoted strings are a special case of string literals
+        Value::DollarQuotedString(s) => text_from_sql(&s.value, &Type::TEXT, col_type),
+
+        // If a boolean was parsed directly map it to a Plaintext::Boolean
+        Value::Boolean(b) => Ok(Plaintext::new(*b)),
+
+        // Null values should be mapped to a null Plaintext for the configured column type
+        Value::Null => Ok(Plaintext::null_for_column_type(col_type)),
+
+        // Plaintext doesn't have a binary type, so we'll just pass through as a string
+        Value::HexStringLiteral(s)
+        | Value::SingleQuotedByteStringLiteral(s)
+        | Value::DoubleQuotedByteStringLiteral(s) => Ok(Plaintext::new(s.to_owned())),
+
+        // Parsed number types should be mapped according to the postgres_type/column type
+        // #[cfg(not(feature = "bigdecimal"))]
+        // Value::Number(s, _) => todo!("Number parsed type not implemented"),
+        // #[cfg(feature = "bigdecimal")]
+        Value::Number(d, _) => decimal_from_sql(d, col_type),
+
+        // TODO: Not sure what the behaviour should be for these
+        Value::Placeholder(_) => todo!("Placeholder parsed type not implemented"),
+    }
 }
 
-fn text_from_sql(val: &str, postgres_type: &Type) -> Result<Plaintext, Error> {
-    match postgres_type {
-        &Type::BOOL => {
+/// Converts a string value to a Plaintext value based on input postgres type and target column type.
+/// Usually, the input type is a string and the target type is parsed appropriately (for example, a string to a number).
+/// However, other input postgres types are possible.
+///
+/// An example is a timestamp target column ([ColumnType::Timestamp]) where the input type is [Type::DATE].
+/// In such cases, this function is called when a [BindParam] is processed with a [FormatCode::Text].
+///
+/// The following also work!
+///
+/// ```sql
+/// create table example1 (x int, y bigint, z text);
+/// insert into example1 VALUES ('100', 10::int, 1000);
+///
+/// create table example2 (d date);
+/// insert into example2 VALUES ('2025-01-01');
+/// insert into example2 VALUES ('2025-01-01 15:00:00'::timestamp);
+/// ```
+///
+/// ## Examples
+///
+/// | Input Type | Target Column Type | Result |
+/// |------------|--------------------|--------|
+/// | `Type::INT4` | `ColumnType::Utf8Str` | `Plaintext::Utf8Str` |
+/// | `Type::INT2` | `ColumnType::Int` | `Plaintext::Int` |
+/// | `Type::INT8` | `ColumnType::Int` | `Error`` |
+fn text_from_sql(
+    val: &str,
+    pg_type: &Type,
+    col_type: ColumnType,
+) -> Result<Plaintext, MappingError> {
+    match (pg_type, col_type) {
+        // String is is String
+        (&Type::TEXT, ColumnType::Utf8Str) => Ok(Plaintext::new(val)),
+        // Primitive numeric types are parsed from the string or from types that will fit
+        (&Type::TEXT, ColumnType::Float) => parse_str_as_numeric_plaintext::<f64>(val),
+        (&Type::TEXT | &Type::INT2, ColumnType::SmallInt) => {
+            parse_str_as_numeric_plaintext::<i16>(val)
+        }
+        (&Type::TEXT | &Type::INT2 | &Type::INT4, ColumnType::Int) => {
+            parse_str_as_numeric_plaintext::<i32>(val)
+        }
+        (&Type::TEXT | &Type::INT2 | &Type::INT4 | &Type::INT8, ColumnType::BigInt) => {
+            parse_str_as_numeric_plaintext::<i64>(val)
+        }
+        (&Type::TEXT | &Type::INT2 | &Type::INT4 | &Type::INT8, ColumnType::BigUInt) => {
+            parse_str_as_numeric_plaintext::<u64>(val)
+        }
+        (
+            &Type::TEXT | &Type::BOOL | &Type::INT2 | &Type::INT4 | &Type::INT8,
+            ColumnType::Boolean,
+        ) => {
             let val = match val {
                 "TRUE" | "true" | "t" | "y" | "yes" | "on" | "1" => true,
                 "FALSE" | "f" | "false" | "n" | "no" | "off" | "0" => false,
                 _ => Err(MappingError::CouldNotParseParameter)?,
             };
-            Ok(Plaintext::Boolean(Some(val)))
+            Ok(Plaintext::new(val))
         }
-        &Type::DATE => {
-            let val = NaiveDate::parse_from_str(val, "%Y-%m-%d")?;
-            Ok(Plaintext::NaiveDate(Some(val)))
+        // NaiveDate::parse_from_str ignores time and offset so these are all valid
+        (&Type::TEXT | &Type::DATE | &Type::TIMESTAMP | &Type::TIMESTAMPTZ, ColumnType::Date) => {
+            NaiveDate::parse_from_str(val, "%Y-%m-%d")
+                .map_err(|_| MappingError::CouldNotParseParameter)
+                .map(Plaintext::new)
         }
-        &Type::FLOAT8 => {
-            let val = val.parse()?;
-            Ok(Plaintext::Float(Some(val)))
-        }
-        &Type::INT2 => {
-            let val = val.parse()?;
-            Ok(Plaintext::SmallInt(Some(val)))
-        }
-        &Type::INT4 => {
-            let val = val.parse()?;
-            Ok(Plaintext::Int(Some(val)))
-        }
-        &Type::INT8 => {
-            let val = val.parse()?;
-            Ok(Plaintext::BigInt(Some(val)))
-        }
-        &Type::NUMERIC => {
-            let val = Decimal::from_str(val)?;
-            Ok(Plaintext::Decimal(Some(val)))
-        }
-        &Type::TEXT => {
-            let val = val.to_owned();
-            Ok(Plaintext::Utf8Str(Some(val)))
-        }
-        &Type::TIMESTAMPTZ => {
+        (&Type::TEXT | &Type::NUMERIC, ColumnType::Decimal) => Decimal::from_str(val)
+            .map_err(|_| MappingError::CouldNotParseParameter)
+            .map(Plaintext::new),
+
+        (&Type::TIMESTAMPTZ, _) => {
             unimplemented!("TIMESTAMPTZ")
         }
-        &Type::JSONB => {
-            unimplemented!("JSONB")
-        }
-        ty => Err(MappingError::UnsupportedParameterType {
+        (&Type::JSONB, ColumnType::JsonB) => serde_json::from_str::<serde_json::Value>(val)
+            .map_err(|_| MappingError::CouldNotParseParameter)
+            .map(Plaintext::new),
+        (ty, _) => Err(MappingError::UnsupportedParameterType {
             name: ty.name().to_owned(),
             oid: ty.oid(),
-        }
-        .into()),
+        }),
     }
 }
 
-fn binary_from_sql(bytes: &BytesMut, postgres_type: &Type) -> Result<Plaintext, Error> {
-    match postgres_type {
-        &Type::BOOL => {
-            let val = <bool>::from_sql(&Type::BOOL, bytes)
-                .map_err(|_| MappingError::CouldNotParseParameter)?;
-            Ok(Plaintext::Boolean(Some(val)))
+/// Converts a binary value to a Plaintext value based on input postgres type and target column type.
+/// It is common for clients to send params whose types don't match the column type.
+/// For example, an i16 for an INT4/i32 or INT8/i64 value or a string for a numeric value.
+fn binary_from_sql(
+    bytes: &BytesMut,
+    pg_type: &Type,
+    col_type: ColumnType,
+) -> Result<Plaintext, MappingError> {
+    match (pg_type, col_type) {
+        (&Type::BOOL, ColumnType::Boolean) => {
+            parse_bytes_from_sql::<bool>(bytes, pg_type).map(Plaintext::new)
         }
-        &Type::DATE => {
-            let val = <NaiveDate>::from_sql(&Type::DATE, bytes)
-                .map_err(|_| MappingError::CouldNotParseParameter)?;
-            Ok(Plaintext::NaiveDate(Some(val)))
+        (&Type::DATE, ColumnType::Date) => {
+            parse_bytes_from_sql::<NaiveDate>(bytes, pg_type).map(Plaintext::new)
         }
-        &Type::FLOAT8 => {
-            let val = <f64>::from_sql(&Type::FLOAT8, bytes)
-                .map_err(|_| MappingError::CouldNotParseParameter)?;
-            Ok(Plaintext::Float(Some(val)))
+        (&Type::FLOAT8, ColumnType::Float) => {
+            parse_bytes_from_sql::<f64>(bytes, pg_type).map(Plaintext::new)
         }
-        &Type::INT2 => {
-            let val = <i16>::from_sql(&Type::INT2, bytes)
-                .map_err(|_| MappingError::CouldNotParseParameter)?;
+        (&Type::INT2, ColumnType::SmallInt) => {
+            parse_bytes_from_sql::<i16>(bytes, pg_type).map(Plaintext::new)
+        }
+        (&Type::TEXT, ColumnType::Utf8Str) => {
+            parse_bytes_from_sql::<String>(bytes, pg_type).map(Plaintext::new)
+        }
 
-            Ok(Plaintext::SmallInt(Some(val)))
+        // INT4 and INT2 can be converted to Int plaintext
+        (&Type::INT4, ColumnType::Int) => {
+            parse_bytes_from_sql::<i32>(bytes, pg_type).map(Plaintext::new)
         }
-        &Type::INT4 => {
-            let val = <i32>::from_sql(&Type::INT4, bytes)
-                .map_err(|_| MappingError::CouldNotParseParameter)?;
-            Ok(Plaintext::Int(Some(val)))
+        (&Type::INT2, ColumnType::Int) => {
+            parse_bytes_from_sql::<i16>(bytes, pg_type).map(|i| Plaintext::new(i as i32))
         }
-        &Type::INT8 => {
-            let val = <i64>::from_sql(&Type::INT8, bytes)
-                .map_err(|_| MappingError::CouldNotParseParameter)?;
-            Ok(Plaintext::BigInt(Some(val)))
+
+        // INT8, INT4 and INT2 can be converted to BigInt plaintext
+        (&Type::INT8, ColumnType::BigInt) => {
+            parse_bytes_from_sql::<i64>(bytes, pg_type).map(Plaintext::new)
         }
-        &Type::NUMERIC => {
-            let val = <Decimal>::from_sql(&Type::NUMERIC, bytes)
-                .map_err(|_| MappingError::CouldNotParseParameter)?;
-            Ok(Plaintext::Decimal(Some(val)))
+        (&Type::INT4, ColumnType::BigInt) => {
+            parse_bytes_from_sql::<i32>(bytes, pg_type).map(|i| Plaintext::new(i as i64))
         }
-        &Type::TEXT => {
-            let val = <String>::from_sql(&Type::TEXT, bytes)
-                .map_err(|_| MappingError::CouldNotParseParameter)?;
-            Ok(Plaintext::Utf8Str(Some(val)))
+        (&Type::INT2, ColumnType::BigInt) => {
+            parse_bytes_from_sql::<i16>(bytes, pg_type).map(|i| Plaintext::new(i as i64))
         }
-        &Type::TIMESTAMPTZ => {
-            unimplemented!("TIMESTAMPTZ")
+
+        // INT8, INT4 and INT2 can be converted to BigUInt plaintext (note the sign change)
+        (&Type::INT8, ColumnType::BigUInt) => {
+            parse_bytes_from_sql::<i64>(bytes, pg_type).map(|b| Plaintext::new(b as u64))
         }
-        &Type::JSONB => {
-            unimplemented!("JSONB")
+        (&Type::INT4, ColumnType::BigUInt) => {
+            parse_bytes_from_sql::<i32>(bytes, pg_type).map(|b| Plaintext::new(b as u64))
         }
-        ty => Err(MappingError::UnsupportedParameterType {
+        (&Type::INT2, ColumnType::BigUInt) => {
+            parse_bytes_from_sql::<i16>(bytes, pg_type).map(|b| Plaintext::new(b as u64))
+        }
+
+        // Even though basically any number can be a decimal, `rust_decimal` only supports converting from NUMERIC
+        // Text values will be handled by the text_from_sql function (see below)
+        (&Type::NUMERIC, ColumnType::Decimal) => {
+            parse_bytes_from_sql::<Decimal>(bytes, pg_type).map(Plaintext::new)
+        }
+
+        // If input type is a string but the target column isn't then parse as string and convert
+        (&Type::TEXT, _) => parse_bytes_from_sql::<String>(bytes, pg_type)
+            .and_then(|val| text_from_sql(&val, pg_type, col_type)),
+
+        // TODO: The others
+        (_, ColumnType::JsonB) => unimplemented!("JSONB"),
+        (_, ColumnType::Timestamp) => unimplemented!("TIMESTAMPTZ"),
+
+        // Unsupported
+        (ty, _) => Err(MappingError::UnsupportedParameterType {
             name: ty.name().to_owned(),
             oid: ty.oid(),
+        }),
+    }
+}
+
+fn parse_bytes_from_sql<T>(bytes: &BytesMut, pg_type: &Type) -> Result<T, MappingError>
+where
+    T: for<'a> FromSql<'a>,
+{
+    T::from_sql(pg_type, bytes).map_err(|_| MappingError::CouldNotParseParameter)
+}
+
+fn parse_str_as_numeric_plaintext<T>(val: &str) -> Result<Plaintext, MappingError>
+where
+    T: FromStr + Into<Plaintext>,
+{
+    val.parse::<T>()
+        .map_err(|_| MappingError::CouldNotParseParameter)
+        .map(Plaintext::new)
+}
+
+fn decimal_from_sql(
+    decimal: &BigDecimal,
+    column_type: ColumnType,
+) -> Result<Plaintext, MappingError> {
+    use bigdecimal::ToPrimitive;
+
+    match column_type {
+        ColumnType::SmallInt => decimal
+            .to_i16()
+            .ok_or(MappingError::CouldNotParseParameter)
+            .map(Plaintext::new),
+
+        ColumnType::Int => decimal
+            .to_i32()
+            .ok_or(MappingError::CouldNotParseParameter)
+            .map(Plaintext::new),
+
+        ColumnType::BigInt => decimal
+            .to_i64()
+            .ok_or(MappingError::CouldNotParseParameter)
+            .map(Plaintext::new),
+
+        ColumnType::BigUInt => decimal
+            .to_u64()
+            .ok_or(MappingError::CouldNotParseParameter)
+            .map(Plaintext::new),
+
+        ColumnType::Decimal => decimal
+            .to_f64()
+            .ok_or(MappingError::CouldNotParseParameter)
+            .map(Plaintext::new),
+
+        ColumnType::Float => decimal
+            .to_f64()
+            .ok_or(MappingError::CouldNotParseParameter)
+            .map(Plaintext::new),
+
+        ColumnType::Timestamp => decimal
+            .to_i64()
+            .ok_or(MappingError::CouldNotParseParameter)
+            .map(Plaintext::new),
+
+        ColumnType::Utf8Str => Ok(Plaintext::new(decimal.to_string())),
+
+        ColumnType::JsonB => {
+            let val: serde_json::Value = serde_json::from_str(&decimal.to_string())
+                .map_err(|_| MappingError::CouldNotParseParameter)?;
+            Ok(Plaintext::new(val))
         }
-        .into()),
+
+        ColumnType::Boolean => Err(MappingError::CouldNotParseParameter),
+
+        ColumnType::Date => Err(MappingError::CouldNotParseParameter),
     }
 }
 
@@ -185,7 +350,9 @@ mod tests {
         bytes.put_i64(val);
         let param = BindParam::new(FormatCode::Binary, bytes);
 
-        let pt = bind_param_from_sql(&param, &Type::INT8).unwrap().unwrap();
+        let pt = bind_param_from_sql(&param, &Type::INT8, ColumnType::BigInt)
+            .unwrap()
+            .unwrap();
         assert_eq!(pt, Plaintext::BigInt(Some(val)));
 
         // Text
@@ -197,7 +364,9 @@ mod tests {
 
         let param = BindParam::new(FormatCode::Text, bytes);
 
-        let pt = bind_param_from_sql(&param, &Type::INT8).unwrap().unwrap();
+        let pt = bind_param_from_sql(&param, &Type::INT8, ColumnType::BigInt)
+            .unwrap()
+            .unwrap();
         assert_eq!(pt, Plaintext::BigInt(Some(val)));
     }
 
@@ -211,7 +380,9 @@ mod tests {
         bytes.put_u8(true as u8);
         let param = BindParam::new(FormatCode::Binary, bytes);
 
-        let pt = bind_param_from_sql(&param, &Type::BOOL).unwrap().unwrap();
+        let pt = bind_param_from_sql(&param, &Type::BOOL, ColumnType::Boolean)
+            .unwrap()
+            .unwrap();
         assert_eq!(pt, Plaintext::Boolean(Some(val)));
 
         // Text
@@ -223,7 +394,9 @@ mod tests {
 
         let param = BindParam::new(FormatCode::Text, bytes);
 
-        let pt = bind_param_from_sql(&param, &Type::BOOL).unwrap().unwrap();
+        let pt = bind_param_from_sql(&param, &Type::BOOL, ColumnType::Boolean)
+            .unwrap()
+            .unwrap();
         assert_eq!(pt, Plaintext::Boolean(Some(val)));
     }
 
@@ -239,7 +412,9 @@ mod tests {
 
         let param = BindParam::new(FormatCode::Binary, bytes);
 
-        let pt = bind_param_from_sql(&param, &Type::DATE).unwrap().unwrap();
+        let pt = bind_param_from_sql(&param, &Type::DATE, ColumnType::Date)
+            .unwrap()
+            .unwrap();
         assert_eq!(pt, Plaintext::NaiveDate(Some(val)));
 
         // Text
@@ -248,7 +423,9 @@ mod tests {
 
         let param = BindParam::new(FormatCode::Text, bytes);
 
-        let pt = bind_param_from_sql(&param, &Type::DATE).unwrap().unwrap();
+        let pt = bind_param_from_sql(&param, &Type::DATE, ColumnType::Date)
+            .unwrap()
+            .unwrap();
         assert_eq!(pt, Plaintext::NaiveDate(Some(val)));
     }
 }

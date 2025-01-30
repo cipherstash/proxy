@@ -32,6 +32,10 @@ impl Column {
         self.postgres_type.oid()
     }
 
+    pub fn cast_type(&self) -> ColumnType {
+        self.config.cast_type
+    }
+
     pub fn is_param_type(&self, param_type: &Type) -> bool {
         param_type == &self.postgres_type
     }

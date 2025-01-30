@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 
-use rand::{distributions::Alphanumeric, Rng};
+use rand::{distr::Alphanumeric, Rng};
 use rustls::{
     client::danger::ServerCertVerifier, crypto::aws_lc_rs::default_provider,
     pki_types::CertificateDer, ClientConfig,
@@ -17,12 +17,12 @@ static INIT: Once = Once::new();
 
 pub fn id() -> i64 {
     use rand::Rng;
-    let mut rng = rand::thread_rng();
-    rng.gen_range(1..=i64::MAX)
+    let mut rng = rand::rng();
+    rng.random_range(1..=i64::MAX)
 }
 
 pub fn random_string() -> String {
-    rand::thread_rng()
+    rand::rng()
         .sample_iter(&Alphanumeric)
         .take(10) // Length of string
         .map(char::from)

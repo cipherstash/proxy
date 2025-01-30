@@ -25,7 +25,7 @@ use sqlparser::parser::Parser;
 use std::collections::HashMap;
 use std::fmt::Display;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
-use tracing::{debug, info};
+use tracing::{debug, error, info};
 
 const DIALECT: PostgreSqlDialect = PostgreSqlDialect {};
 
@@ -86,7 +86,7 @@ where
                     // No mapping needed, don't change the bytes
                     Ok(None) => (),
                     Err(err) => {
-                        bytes = build_frontend_exception(err)?;
+                        bytes = self.build_frontend_exception(err)?;
                     }
                 }
             }
@@ -102,7 +102,7 @@ where
                     // No mapping needed, don't change the bytes
                     Ok(None) => (),
                     Err(e) => {
-                        bytes = build_frontend_exception(e)?;
+                        bytes = self.build_frontend_exception(e)?;
                     }
                 }
             }
@@ -492,8 +492,7 @@ where
                                     debug!(
                                         target: MAPPER,
                                         client_id = self.context.client_id,
-                                        "Encrypted column{:?}",
-                                        identifier
+                                        identifier = ?identifier
                                     );
                                     encryptable = true;
                                     self.get_column(identifier)
@@ -584,21 +583,25 @@ where
             .into()),
         }
     }
-}
 
-fn build_frontend_exception<E: Display>(err: E) -> Result<BytesMut, Error> {
-    // This *should* be sufficient for escaping error messages as we're only
-    // using the string literal, and not identifiers
-    let quoted_error = quote_literal(format!("[CipherStash] {}", err).as_str());
-    let content = format!("DO $$ begin raise exception {quoted_error}; END; $$;");
+    fn build_frontend_exception<E: Display>(&self, error: E) -> Result<BytesMut, Error> {
+        // This *should* be sufficient for escaping error messages as we're only
+        // using the string literal, and not identifiers
+        let quoted_error = quote_literal(format!("[CipherStash] {}", error).as_str());
+        let content = format!("DO $$ begin raise exception {quoted_error}; END; $$;");
 
-    let query = Query::new(content);
-    let bytes = BytesMut::try_from(query)?;
-    debug!(
-        "frontend sending an exception-raising message: {:?}",
-        &bytes
-    );
-    Ok(bytes)
+        let query = Query::new(content);
+        let bytes = BytesMut::try_from(query)?;
+
+        debug!(
+            target: MAPPER,
+            client_id = self.context.client_id,
+            msg = "Frontend exception",
+            error = error.to_string()
+        );
+
+        Ok(bytes)
+    }
 }
 
 fn literals_to_plaintext(
@@ -611,9 +614,26 @@ fn literals_to_plaintext(
         .map(|((_, expr), column)| {
             column.as_ref().and_then(|col| {
                 if let sqlparser::ast::Expr::Value(value) = expr {
-                    literal_from_sql(value.to_string(), &col.postgres_type)
-                        .ok()
-                        .flatten()
+                    error!(
+                        target: MAPPER,
+                        msg = "LITERAL",
+                        value = ?value,
+                        cast_type = ?col.cast_type()
+                    );
+
+                    match literal_from_sql(value, col.cast_type()) {
+                        Ok(pt) => Some(pt),
+                        Err(err) => {
+                            error!(msg = "Could not parse literal value", err = err.to_string());
+                            debug!(
+                                target: MAPPER,
+                                msg = "Could not parse literal value",
+                                value = ?value,
+                                cast_type = ?col.cast_type()
+                            );
+                            None
+                        }
+                    }
                 } else {
                     None
                 }

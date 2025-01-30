@@ -6,7 +6,7 @@ edition = "2021"
 [dependencies]
 cipherstash-proxy = { path = "../cipherstash-proxy/" }
 chrono = { version = "0.4.39", features = ["clock"] }
-rand = "0.8.5"
+rand = "0.9"
 recipher = "0.1.3"
 rustls = { version = "0.23.20", default-features = false, features = ["std"] }
 temp-env = "0.3.6"

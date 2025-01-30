@@ -163,7 +163,7 @@ async fn init(mut config: TandemConfig) -> Encrypt {
         }
         Err(err) => {
             error!("Could not start CipherStash proxy");
-            debug!("{}", err);
+            debug!(err = ?err);
             std::process::exit(exitcode::UNAVAILABLE);
         }
     }

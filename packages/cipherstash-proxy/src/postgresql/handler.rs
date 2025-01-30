@@ -291,7 +291,7 @@ pub fn md5_hash(username: &[u8], password: &[u8], salt: &[u8; 4]) -> String {
 }
 
 fn generate_md5_password_salt() -> [u8; 4] {
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rng();
     let mut bytes = [0u8; 4];
     rng.fill(&mut bytes);
     bytes

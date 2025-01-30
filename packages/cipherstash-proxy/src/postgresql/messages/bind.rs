@@ -3,7 +3,7 @@ use crate::eql;
 use crate::error::{Error, MappingError, ProtocolError};
 use crate::log::MAPPER;
 use crate::postgresql::context::column::Column;
-use crate::postgresql::data::{bind_param_from_sql, to_type};
+use crate::postgresql::data::bind_param_from_sql;
 use crate::postgresql::format_code::FormatCode;
 use crate::postgresql::protocol::BytesMutReadString;
 use crate::{SIZE_I16, SIZE_I32};
@@ -56,22 +56,17 @@ impl Bind {
             .enumerate()
             .map(|(idx, (param, col))| match col {
                 Some(col) => {
-                    let param_type = get_param_type(idx, param_types, col);
+                    let bound_param_type = get_param_type(idx, param_types, col);
 
-                    debug!(target = MAPPER, "Mapping: {col:?}");
-                    debug!(target = MAPPER, "Param Type: {param_type:?}");
+                    debug!(
+                        target: MAPPER,
+                        col = ?col, bound_param_type = ?bound_param_type
+                    );
 
                     // Convert param bytes into a Plaintext wrapping a Value
-                    // If the param type is different, convert to the correct Plaintext variant
-                    let plaintext = bind_param_from_sql(param, &param_type)
-                        .map_err(|_| MappingError::InvalidParameter(col.to_owned()))?
-                        .map(|pt| {
-                            if col.is_param_type(&param_type) {
-                                pt
-                            } else {
-                                to_type(pt, &col.postgres_type)
-                            }
-                        });
+                    // If the param type is different, will convert the bound type to the correct Plaintext variant identified by the cast_type
+                    let plaintext = bind_param_from_sql(param, &bound_param_type, col.cast_type())
+                        .map_err(|_| MappingError::InvalidParameter(col.to_owned()))?;
 
                     Ok(plaintext)
                 }

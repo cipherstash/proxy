@@ -81,7 +81,7 @@ mod tests {
             .await
             .unwrap();
 
-            let sleep_duration = rand::thread_rng().gen_range(1..=10);
+            let sleep_duration = rand::rng().random_range(1..=10);
             tokio::time::sleep(std::time::Duration::from_millis(sleep_duration)).await;
         }
     }
