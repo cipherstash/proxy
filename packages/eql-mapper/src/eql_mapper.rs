@@ -353,7 +353,7 @@ impl<'ast> Transform<'ast> for EncryptedStatement<'ast> {
         if let Some(target_value) = new_node.downcast_mut::<ast::Expr>() {
             match original_node.downcast_ref::<ast::Expr>() {
                 Some(original_value) => match original_value {
-                    ast::Expr::Value(ast::Value::Placeholder(_)) => {
+                    ast::Expr::Value(ast::Value::Placeholder(_)) if original_value != target_value => {
                         return Err(EqlMapperError::InternalError(
                             "attempt was made to update placeholder with literal".to_string(),
                         ));

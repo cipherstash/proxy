@@ -38,6 +38,10 @@ impl Parse {
             }
         }
     }
+
+    pub fn require_rewrite(&mut self) {
+        self.dirty = true;
+    }
 }
 
 impl TryFrom<&BytesMut> for Parse {

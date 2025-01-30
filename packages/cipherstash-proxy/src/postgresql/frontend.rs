@@ -271,7 +271,7 @@ where
 
         let transformed_statement = typed_statement
             .transform(original_values_and_replacements)
-            .map_err(|_e| MappingError::StatementCouldNotBeTransformed)?;
+            .map_err(|e| MappingError::StatementCouldNotBeTransformed(e.to_string()))?;
 
         Ok(Some(transformed_statement))
     }
@@ -322,6 +322,53 @@ where
         }
 
         if eql_mapper::requires_type_check(&statement) {
+            let typed_statement_result =
+                eql_mapper::type_check(self.context.get_table_resolver(), &statement);
+            let typed_statement = typed_statement_result
+                .map_err(|e|
+                    MappingError::StatementCouldNotBeTypeChecked(e.to_string())
+                )?;
+
+            let literal_columns = self.get_literal_columns(&typed_statement)?.unwrap_or(vec![]);
+
+            let plaintexts = literals_to_plaintext(&typed_statement.literals, &literal_columns);
+            let encrypted = self.encrypt.encrypt(plaintexts, &literal_columns).await?;
+
+            if !encrypted.is_empty() {
+                message.require_rewrite();
+            }
+
+            let encrypted_values = encrypted
+                .into_iter()
+                .map(|ct| {
+                    serde_json::to_string(&ct)
+                        .map(|json| ast::Expr::Value(Value::SingleQuotedString(json)))
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+
+            let original_values_and_replacements = (&typed_statement.literals)
+                .iter()
+                .map(|(_, original_node)| *original_node)
+                .zip(encrypted_values.into_iter())
+                .collect::<HashMap<_, _>>();
+
+            let transformed_statement = typed_statement
+                .transform(original_values_and_replacements)
+                .map_err(|e| MappingError::StatementCouldNotBeTransformed(e.to_string()))?;
+
+            message.statement = transformed_statement.to_string();
+
+            // TODO: is this okay?
+            self.context.add_statement(
+                message.name.to_owned(),
+                Statement::new(
+                    vec![None],
+                    vec![None],
+                    vec![],
+                    vec![],
+                ),
+            );
+
             match eql_mapper::type_check(self.context.get_table_resolver(), &statement) {
                 Ok(typed_statement) => {
                     // Capture the parse message param_types
