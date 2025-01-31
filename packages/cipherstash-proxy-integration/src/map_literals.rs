@@ -1,6 +1,6 @@
 #[cfg(test)]
 mod tests {
-    use crate::common::{connect_with_tls, id, trace, PROXY};
+    use crate::common::{connect_with_tls, id, PROXY};
 
     #[tokio::test]
     async fn map_literal() {
@@ -14,10 +14,7 @@ mod tests {
         client.query(&sql, &[]).await.expect("INSERT query failed");
 
         let sql = format!("SELECT id, encrypted_text FROM encrypted WHERE id = {id}");
-        let rows = client
-            .query(&sql, &[])
-            .await
-            .expect("SELECT query failed");
+        let rows = client.query(&sql, &[]).await.expect("SELECT query failed");
 
         let result: String = rows[0].get("encrypted_text");
         assert_eq!(encrypted_text, result);
@@ -33,13 +30,13 @@ mod tests {
 
         let sql =
             format!("INSERT INTO encrypted (id, encrypted_text, encrypted_bool, encrypted_int2) VALUES ({id}, '{encrypted_text}', $1, $2)");
-        client.query(&sql, &[&true, &int2]).await.expect("INSERT query failed");
+        client
+            .query(&sql, &[&true, &int2])
+            .await
+            .expect("INSERT query failed");
 
         let sql = format!("SELECT id, encrypted_text FROM encrypted WHERE id = {id}");
-        let rows = client
-            .query(&sql, &[])
-            .await
-            .expect("SELECT query failed");
+        let rows = client.query(&sql, &[]).await.expect("SELECT query failed");
 
         println!("encrypted: {:?}", rows[0])
     }

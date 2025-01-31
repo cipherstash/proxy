@@ -39,7 +39,8 @@ impl Parse {
         }
     }
 
-    pub fn require_rewrite(&mut self) {
+    pub fn rewrite_statement(&mut self, statement: String) {
+        self.statement = statement;
         self.dirty = true;
     }
 }

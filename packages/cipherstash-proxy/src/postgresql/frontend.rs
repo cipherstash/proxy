@@ -202,7 +202,8 @@ where
                         debug!(target: MAPPER,
                             client_id = self.context.client_id,
                             msg = "Transformed Statement",
-                            transformed_statement = ?transformed_statement
+                            transformed_statement = ?transformed_statement,
+                            location = "query_handler",
                         );
                         query.rewrite(transformed_statement.to_string());
                     };
@@ -321,83 +322,52 @@ where
             self.context.set_schema_changed();
         }
 
-        if eql_mapper::requires_type_check(&statement) {
-            let typed_statement_result =
-                eql_mapper::type_check(self.context.get_table_resolver(), &statement);
-            let typed_statement = typed_statement_result
-                .map_err(|e|
-                    MappingError::StatementCouldNotBeTypeChecked(e.to_string())
-                )?;
+        if !eql_mapper::requires_type_check(&statement) {
+            return Ok(None);
+        }
 
-            let literal_columns = self.get_literal_columns(&typed_statement)?.unwrap_or(vec![]);
+        let typed_statement = eql_mapper::type_check(self.context.get_table_resolver(), &statement);
+        if let Err(ref error) = typed_statement {
+            debug!(target: MAPPER,
+                client_id = self.context.client_id,
 
-            let plaintexts = literals_to_plaintext(&typed_statement.literals, &literal_columns);
-            let encrypted = self.encrypt.encrypt(plaintexts, &literal_columns).await?;
-
-            if !encrypted.is_empty() {
-                message.require_rewrite();
-            }
-
-            let encrypted_values = encrypted
-                .into_iter()
-                .map(|ct| {
-                    serde_json::to_string(&ct)
-                        .map(|json| ast::Expr::Value(Value::SingleQuotedString(json)))
-                })
-                .collect::<Result<Vec<_>, _>>()?;
-
-            let original_values_and_replacements = (&typed_statement.literals)
-                .iter()
-                .map(|(_, original_node)| *original_node)
-                .zip(encrypted_values.into_iter())
-                .collect::<HashMap<_, _>>();
-
-            let transformed_statement = typed_statement
-                .transform(original_values_and_replacements)
-                .map_err(|e| MappingError::StatementCouldNotBeTransformed(e.to_string()))?;
-
-            message.statement = transformed_statement.to_string();
-
-            // TODO: is this okay?
-            self.context.add_statement(
-                message.name.to_owned(),
-                Statement::new(
-                    vec![None],
-                    vec![None],
-                    vec![],
-                    vec![],
-                ),
+                error = ?error
             );
+            return if self.encrypt.config.enable_mapping_errors() {
+                Err(MappingError::StatementCouldNotBeTypeChecked(
+                    error.to_string(),
+                ))?
+            } else {
+                Ok(None)
+            };
+        }
 
-            match eql_mapper::type_check(self.context.get_table_resolver(), &statement) {
-                Ok(typed_statement) => {
-                    // Capture the parse message param_types
-                    // These override the underlying column type
-                    let param_types = message.param_types.clone();
+        let typed_statement = typed_statement.unwrap();
+        // Capture the parse message param_types
+        // These override the underlying column type
+        let param_types = message.param_types.clone();
 
-                    if let Some(statement) =
-                        self.to_encryptable_statement(&typed_statement, param_types)?
-                    {
-                        // Rewrite the type of any encrypted column
-                        message.rewrite_param_types(&statement.param_columns);
-
-                        self.context
-                            .add_statement(message.name.to_owned(), statement);
-                    }
-                }
-                Err(error) => {
+        if let Some(statement) = self.to_encryptable_statement(&typed_statement, param_types)? {
+            if statement.has_literals() {
+                if let Some(transformed_statement) = self
+                    .encrypt_literals(&typed_statement, &statement.literal_columns)
+                    .await?
+                {
                     debug!(target: MAPPER,
                         client_id = self.context.client_id,
-
-                        error = ?error
+                        msg = "Transformed Statement",
+                        transformed_statement = ?transformed_statement,
+                        location = "parse_handler",
                     );
-                    if self.encrypt.config.enable_mapping_errors() {
-                        Err(MappingError::StatementCouldNotBeTypeChecked(
-                            error.to_string(),
-                        ))?;
-                    }
-                }
+                    message.rewrite_statement(transformed_statement.to_string());
+                };
             }
+
+            // Rewrite the type of any encrypted column
+            message.rewrite_param_types(&statement.param_columns);
+
+            self.context
+                .add_statement(message.name.to_owned(), statement);
         }
 
         if message.requires_rewrite() {
