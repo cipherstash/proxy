@@ -298,10 +298,18 @@ fn decimal_from_sql(
                 .map_err(|_| MappingError::CouldNotParseParameter)?;
             Ok(Plaintext::new(val))
         }
-
-        ColumnType::Boolean => Err(MappingError::CouldNotParseParameter),
-
-        ColumnType::Date => Err(MappingError::CouldNotParseParameter),
+        // False 0, True = any other value
+        ColumnType::Boolean => {
+            let x = decimal
+                .to_i8()
+                .ok_or(MappingError::CouldNotParseParameter)?;
+            let val = x != 0;
+            Ok(Plaintext::new(val))
+        }
+        ColumnType::Date => decimal
+            .to_i64()
+            .ok_or(MappingError::CouldNotParseParameter)
+            .map(Plaintext::new),
     }
 }
 
