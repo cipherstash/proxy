@@ -308,6 +308,23 @@ impl<'ast> TypedStatement<'ast> {
         self.statement
             .apply_transform(&mut EncryptedStatement::new(encrypted_literals))
     }
+
+    pub fn literal_values(&self) -> Vec<&sqlparser::ast::Value> {
+        if self.literals.is_empty() {
+            return vec![];
+        }
+
+        self.literals
+            .iter()
+            .map(|(_eql_value, expr)| {
+                if let sqlparser::ast::Expr::Value(value) = expr {
+                    value
+                } else {
+                    &sqlparser::ast::Value::Null
+                }
+            })
+            .collect::<Vec<_>>()
+    }
 }
 
 #[derive(Debug)]
