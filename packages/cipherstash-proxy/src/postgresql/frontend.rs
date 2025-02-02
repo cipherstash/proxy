@@ -457,6 +457,13 @@ where
         }
     }
 
+    ///
+    /// Encrypt Bind Params
+    /// Bind holds the params.
+    /// Statement holds the column configuration and param types.
+    ///
+    /// Params are converted to plaintext using the column configuration and any `postgres_param_types` specified on Parse.
+    ///
     async fn encrypt_params(
         &mut self,
         bind: &Bind,
