@@ -210,10 +210,6 @@ where
         // Bind is turned into a Portal
         // We pull the format codes from the portal
         // If no portal, assume Text for all columns
-        // let result_column_format_codes = portal
-        //     .map_or(vec![FormatCode::Text; result_column_count], |p| {
-        //         p.format_codes(result_column_count)
-        //     });
         let result_column_format_codes = portal.format_codes(result_column_count);
 
         // Each row is converted into Vec<Option<CipherText>>
@@ -225,8 +221,6 @@ where
 
         // Decrypt CipherText -> Plaintext
         let plaintexts = self.encrypt.decrypt(ciphertexts).await?;
-
-        // debug!(target: MAPPER, "Plaintexts: {plaintexts:?}");
 
         // Chunk rows into sets of columns
         let rows = plaintexts.chunks(result_column_count).zip(rows);

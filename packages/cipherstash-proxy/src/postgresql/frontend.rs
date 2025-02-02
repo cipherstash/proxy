@@ -580,6 +580,10 @@ where
         Ok(literal_columns)
     }
 
+    ///
+    /// Get the column configuration for the Identifier
+    /// Returns `EncryptError::UnknownColumn` if configuratiuon cannot be found for the Identified column
+    ///
     fn get_column(&self, identifier: Identifier) -> Result<Column, Error> {
         match self.encrypt.get_column_config(&identifier) {
             Some(config) => {
