@@ -244,9 +244,10 @@ where
     async fn encrypt_literals(
         &mut self,
         typed_statement: &TypedStatement<'_>,
-        literal_columns: &Vec<Option<Column>>,
+        literal_columns: &Vec<Column>,
     ) -> Result<Option<ast::Statement>, Error> {
-        let plaintexts = literals_to_plaintext(&typed_statement.literals, literal_columns);
+        let literal_values = typed_statement.literal_values();
+        let plaintexts = literals_to_plaintext(&literal_values, literal_columns)?;
 
         let encrypted = self.encrypt.encrypt(plaintexts, literal_columns).await?;
 
@@ -388,17 +389,13 @@ where
             projection_columns = ?projection_columns
         );
 
-        if param_columns.is_none() && projection_columns.is_none() && literal_columns.is_none() {
+        if param_columns.is_empty() && projection_columns.is_empty() && literal_columns.is_empty() {
             return Ok(None);
         }
 
         debug!(target: MAPPER,
                 client_id = self.context.client_id,
                 msg = "Encryptable Statement");
-
-        let param_columns = param_columns.unwrap_or(vec![]);
-        let projection_columns = projection_columns.unwrap_or(vec![]);
-        let literal_columns = literal_columns.unwrap_or(vec![]);
 
         let statement = Statement::new(
             param_columns.to_owned(),
@@ -469,60 +466,68 @@ where
             bind.to_plaintext(&statement.param_columns, &statement.postgres_param_types)?;
         let encrypted = self
             .encrypt
-            .encrypt(plaintexts, &statement.param_columns)
+            .encrypt_some(plaintexts, &statement.param_columns)
             .await?;
         Ok(encrypted)
     }
 
+    ///
+    /// Maps typed statement projection columns to an Encrypt column configuration
+    ///
+    /// The returned `Vec` is of `Option<Column>` because the Projection columns are a mix of native and EQL types.
+    /// Only EQL colunms will have a configuration. Native types are always None.
+    ///
+    /// Preserves the ordering and semantics of the projection to reduce the complexity of positional encryption.
+    ///
     fn get_projection_columns(
         &self,
         typed_statement: &eql_mapper::TypedStatement<'_>,
-    ) -> Result<Option<Vec<Option<Column>>>, Error> {
-        let projection_columns = match &typed_statement.projection {
-            Some(projection) => match projection {
+    ) -> Result<Vec<Option<Column>>, Error> {
+        let mut projection_columns = vec![];
+        if let Some(projection) = &typed_statement.projection {
+            match projection {
                 eql_mapper::Projection::WithColumns(columns) => {
-                    let mut encryptable = false;
-                    let projection_columns = columns
-                        .iter()
-                        .map(|col| {
-                            let eql_mapper::ProjectionColumn { ty, .. } = col;
-                            match ty {
-                                eql_mapper::Value::Eql(EqlValue(TableColumn { table, column })) => {
-                                    let identifier: Identifier = Identifier::from((table, column));
-                                    debug!(
-                                        target: MAPPER,
-                                        client_id = self.context.client_id,
-                                        identifier = ?identifier
-                                    );
-                                    encryptable = true;
-                                    self.get_column(identifier)
-                                }
-                                _ => Ok(None),
+                    for col in columns {
+                        let eql_mapper::ProjectionColumn { ty, .. } = col;
+                        let configured_column = match ty {
+                            eql_mapper::Value::Eql(EqlValue(TableColumn { table, column })) => {
+                                let identifier: Identifier = Identifier::from((table, column));
+                                debug!(
+                                    target: MAPPER,
+                                    client_id = self.context.client_id,
+                                    msg = "Configured column",
+                                    identifier = ?identifier
+                                );
+                                let col = self.get_column(identifier)?;
+                                Some(col)
                             }
-                        })
-                        .collect::<Result<Vec<_>, _>>()?;
-                    if encryptable {
-                        Some(projection_columns)
-                    } else {
-                        None
+                            _ => None,
+                        };
+                        projection_columns.push(configured_column)
                     }
                 }
-                eql_mapper::Projection::Empty => None,
-            },
-            None => None,
-        };
+                _ => {}
+            }
+        }
         Ok(projection_columns)
     }
 
+    ///
+    /// Maps typed statement param columns to an Encrypt column configuration
+    ///
+    /// The returned `Vec` is of `Option<Column>` because the Param columns are a mix of native and EQL types.
+    /// Only EQL colunms will have a configuration. Native types are always None.
+    ///
+    /// Preserves the ordering and semantics of the projection to reduce the complexity of positional encryption.
+    ///
     fn get_param_columns(
         &self,
         typed_statement: &eql_mapper::TypedStatement<'_>,
-    ) -> Result<Option<Vec<Option<Column>>>, Error> {
-        let mut encryptable = false;
-        let param_columns = typed_statement
-            .params
-            .iter()
-            .map(|param| match param {
+    ) -> Result<Vec<Option<Column>>, Error> {
+        let mut param_columns = vec![];
+
+        for param in typed_statement.params.iter() {
+            let configured_column = match param {
                 eql_mapper::Value::Eql(EqlValue(TableColumn { table, column })) => {
                     let identifier = Identifier::from((table, column));
                     debug!(
@@ -531,41 +536,44 @@ where
                         "Encrypted parameter {:?}",
                         identifier
                     );
-                    encryptable = true;
-                    self.get_column(identifier)
+
+                    let col = self.get_column(identifier)?;
+                    Some(col)
                 }
-                _ => Ok(None),
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-        if encryptable {
-            Ok(Some(param_columns))
-        } else {
-            Ok(None)
+                _ => None,
+            };
+            param_columns.push(configured_column);
         }
+
+        Ok(param_columns)
     }
 
     fn get_literal_columns(
         &self,
         typed_statement: &eql_mapper::TypedStatement<'_>,
-    ) -> Result<Option<Vec<Option<Column>>>, Error> {
-        if typed_statement.literals.is_empty() {
-            return Ok(None);
-        }
-        let literal_columns = typed_statement
-            .literals
-            .iter()
-            .map(|(eql_value, _exp)| match eql_value {
+    ) -> Result<Vec<Column>, Error> {
+        let mut literal_columns = vec![];
+
+        for (eql_value, _) in typed_statement.literals.iter() {
+            match eql_value {
                 EqlValue(TableColumn { table, column }) => {
                     let identifier = Identifier::from((table, column));
-                    debug!(target = MAPPER, "Encrypted literal {:?}", identifier);
-                    self.get_column(identifier)
+                    debug!(
+                        target: MAPPER,
+                        client_id = self.context.client_id,
+                        msg = "Encrypted literal",
+                        identifier = ?identifier
+                    );
+                    let col = self.get_column(identifier)?;
+                    literal_columns.push(col);
                 }
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-        Ok(Some(literal_columns))
+            }
+        }
+
+        Ok(literal_columns)
     }
 
-    fn get_column(&self, identifier: Identifier) -> Result<Option<Column>, Error> {
+    fn get_column(&self, identifier: Identifier) -> Result<Column, Error> {
         match self.encrypt.get_column_config(&identifier) {
             Some(config) => {
                 debug!(
@@ -574,7 +582,7 @@ where
                     "Configured column {:?}",
                     identifier
                 );
-                Ok(Some(Column::new(identifier, config)))
+                Ok(Column::new(identifier, config))
             }
             None => Err(EncryptError::UnknownColumn {
                 table: identifier.table.to_owned(),
@@ -605,41 +613,26 @@ where
 }
 
 fn literals_to_plaintext(
-    literals: &Vec<(EqlValue, &Expr)>,
-    literal_columns: &Vec<Option<Column>>,
-) -> Vec<Option<Plaintext>> {
-    literals
+    literals: &Vec<&ast::Value>,
+    literal_columns: &Vec<Column>,
+) -> Result<Vec<Plaintext>, Error> {
+    let plaintexts = literals
         .iter()
         .zip(literal_columns)
-        .map(|((_, expr), column)| {
-            column.as_ref().and_then(|col| {
-                if let sqlparser::ast::Expr::Value(value) = expr {
-                    error!(
-                        target: MAPPER,
-                        msg = "LITERAL",
-                        value = ?value,
-                        cast_type = ?col.cast_type()
-                    );
-
-                    match literal_from_sql(value, col.cast_type()) {
-                        Ok(pt) => Some(pt),
-                        Err(err) => {
-                            error!(msg = "Could not parse literal value", err = err.to_string());
-                            debug!(
-                                target: MAPPER,
-                                msg = "Could not parse literal value",
-                                value = ?value,
-                                cast_type = ?col.cast_type()
-                            );
-                            None
-                        }
-                    }
-                } else {
-                    None
-                }
+        .map(|(val, col)| {
+            literal_from_sql(val, col.cast_type()).map_err(|err| {
+                debug!(
+                    target: MAPPER,
+                    msg = "Could not convert literal value",
+                    value = ?val,
+                    cast_type = ?col.cast_type(),
+                    err = ?err
+                );
+                MappingError::InvalidParameter(col.to_owned())
             })
         })
-        .collect()
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(plaintexts)
 }
 
 fn to_json_literal<T>(literal: &T) -> Result<Expr, Error>

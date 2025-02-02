@@ -74,7 +74,7 @@ pub enum MappingError {
     #[error("Statement could not be transformed")]
     StatementCouldNotBeTransformed,
 
-    #[error("could not parse parameter")]
+    #[error("Could not parse parameter")]
     CouldNotParseParameter,
 }
 
