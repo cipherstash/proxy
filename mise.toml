@@ -318,7 +318,7 @@ run = 'cargo check'
 
 [tasks."test:clippy"]
 description = "Runs clippy"
-run = 'cargo clippy --all --no-deps --all-targets --all-features'
+run = 'cargo clippy --all --no-deps --all-targets --all-features -- -D warnings'
 
 [tasks."postgres:fail_if_not_running"]
 description = "Check if postgres containers are running, and fail if not"
