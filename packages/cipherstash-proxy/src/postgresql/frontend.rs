@@ -25,7 +25,7 @@ use sqlparser::parser::Parser;
 use std::collections::HashMap;
 use std::fmt::Display;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
-use tracing::{debug, error, info};
+use tracing::{debug, info};
 
 const DIALECT: PostgreSqlDialect = PostgreSqlDialect {};
 
@@ -491,29 +491,24 @@ where
         typed_statement: &eql_mapper::TypedStatement<'_>,
     ) -> Result<Vec<Option<Column>>, Error> {
         let mut projection_columns = vec![];
-        if let Some(projection) = &typed_statement.projection {
-            match projection {
-                eql_mapper::Projection::WithColumns(columns) => {
-                    for col in columns {
-                        let eql_mapper::ProjectionColumn { ty, .. } = col;
-                        let configured_column = match ty {
-                            eql_mapper::Value::Eql(EqlValue(TableColumn { table, column })) => {
-                                let identifier: Identifier = Identifier::from((table, column));
-                                debug!(
-                                    target: MAPPER,
-                                    client_id = self.context.client_id,
-                                    msg = "Configured column",
-                                    identifier = ?identifier
-                                );
-                                let col = self.get_column(identifier)?;
-                                Some(col)
-                            }
-                            _ => None,
-                        };
-                        projection_columns.push(configured_column)
+        if let Some(eql_mapper::Projection::WithColumns(columns)) = &typed_statement.projection {
+            for col in columns {
+                let eql_mapper::ProjectionColumn { ty, .. } = col;
+                let configured_column = match ty {
+                    eql_mapper::Value::Eql(EqlValue(TableColumn { table, column })) => {
+                        let identifier: Identifier = Identifier::from((table, column));
+                        debug!(
+                            target: MAPPER,
+                            client_id = self.context.client_id,
+                            msg = "Configured column",
+                            identifier = ?identifier
+                        );
+                        let col = self.get_column(identifier)?;
+                        Some(col)
                     }
-                }
-                _ => {}
+                    _ => None,
+                };
+                projection_columns.push(configured_column)
             }
         }
         Ok(projection_columns)
