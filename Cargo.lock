@@ -610,7 +610,7 @@ dependencies = [
  "uuid",
  "winnow 0.6.26",
  "zeroize",
- "zerokms-protocol 0.3.1",
+ "zerokms-protocol 0.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
@@ -668,7 +668,7 @@ dependencies = [
  "uuid",
  "winnow 0.6.26",
  "zeroize",
- "zerokms-protocol 0.4.0",
+ "zerokms-protocol 0.4.0 (git+ssh://git@github.com/cipherstash/cipherstash-suite.git?branch=main)",
 ]
 
 [[package]]
@@ -727,7 +727,7 @@ dependencies = [
  "bigdecimal",
  "bytes",
  "chrono",
- "cipherstash-client 0.14.0",
+ "cipherstash-client 0.16.0",
  "cipherstash-config 0.2.3 (registry+https://github.com/rust-lang/crates.io-index)",
  "config",
  "eql-mapper",
