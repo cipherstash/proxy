@@ -2,54 +2,81 @@
 mod tests {
     use crate::common::{clear, connect_with_tls, id, trace, PROXY};
     use chrono::NaiveDate;
+    use tokio_postgres::types::{ToSql, FromSql};
+    use tokio_postgres::Client;
 
     #[tokio::test]
-    async fn map_ore_where_int2() {
+    async fn map_ore_where_generic_int2() {
+        map_ore_where_generic("encrypted_int2", 40i16, 42i16, 99i16).await;
+    }
+
+    /// Tests ORE operations with 3 values - high, mid & low.
+    /// The type of column identified by col_name must match the parameters
+    /// such as INT2 and i16, FLOAT8 and f64
+    async fn map_ore_where_generic<T>(col_name: &str, low: T, mid: T, high: T)
+    where
+        for<'a> T: Clone + PartialEq + ToSql + Sync + FromSql<'a> + PartialOrd
+    {
         trace();
 
         clear().await;
 
         let client = connect_with_tls(PROXY).await;
 
-        let id = id();
-        let encrypted_int2: i16 = 42;
+        let sql = format!("INSERT INTO encrypted (id, {col_name}) VALUES ($1, $2)");
 
-        let low: i16 = 40;
-        let high: i16 = 99;
-
-        let sql = "INSERT INTO encrypted (id, encrypted_int2) VALUES ($1, $2)";
-        client
-            .query(sql, &[&id, &encrypted_int2])
-            .await
-            .expect("ok");
-
-        let sql = "SELECT encrypted_int2 FROM encrypted WHERE encrypted_int2 > $1";
-        let rows = client.query(sql, &[&low]).await.expect("ok");
-
-        assert!(rows.len() == 1);
-        for row in rows {
-            let result_int: i16 = row.get("encrypted_int2");
-            assert_eq!(encrypted_int2, result_int);
+        for val in [low.clone(), mid.clone(), high.clone()] {
+            client
+                .query(&sql, &[&id(), &val])
+                .await
+                .expect("insert failed");
         }
 
-        let sql = "SELECT encrypted_int2 FROM encrypted WHERE encrypted_int2 < $1";
-        let rows = client.query(sql, &[&high]).await.expect("ok");
+        // GT: given [1, 2, 3], `> 2` returns [3]
+        let sql = format!("SELECT {col_name} FROM encrypted WHERE {col_name} > $1");
+        test_ore_op(&client, col_name, &sql, &[&mid], &[high.clone()]).await;
 
-        assert!(rows.len() == 1);
-        for row in rows {
-            let result_int: i16 = row.get("encrypted_int2");
-            assert_eq!(encrypted_int2, result_int);
-        }
+        // LT: given [1, 2, 3], `< 2` returns [1]
+        let sql = format!("SELECT {col_name} FROM encrypted WHERE {col_name} < $1");
+        test_ore_op(&client, col_name, &sql, &[&mid], &[low.clone()]).await;
 
-        let sql = "SELECT encrypted_int2 FROM encrypted WHERE encrypted_int2 > $1 AND encrypted_int2 < $2";
-        let rows = client.query(sql, &[&low, &high]).await.expect("ok");
+        // GT && LT: given [1, 2, 3], `> 1 and < 3` returns [2]
+        let sql = format!("SELECT {col_name} FROM encrypted WHERE {col_name} > $1 AND {col_name} < $2");
+        test_ore_op(&client, col_name, &sql, &[&low, &high], &[mid.clone()]).await;
 
-        assert!(rows.len() == 1);
-        for row in rows {
-            let result_int: i16 = row.get("encrypted_int2");
-            assert_eq!(encrypted_int2, result_int);
-        }
+        // LTEQ: given [1, 2, 3], `<= 2` returns [1, 2]
+        let sql = format!("SELECT {col_name} FROM encrypted WHERE {col_name} <= $1");
+        test_ore_op(&client, col_name, &sql, &[&mid], &[low.clone(), mid.clone()]).await;
+
+        // GTEQ: given [1, 2, 3], `>= 2` returns [2, 3]
+        let sql = format!("SELECT {col_name} FROM encrypted WHERE {col_name} >= $1");
+        test_ore_op(&client, col_name, &sql, &[&mid], &[mid.clone(), high.clone()]).await;
+
+        // EQ: given [1, 2, 3], `= 2` returns [2]
+        let sql = format!("SELECT {col_name} FROM encrypted WHERE {col_name} = $1");
+        test_ore_op(&client, col_name, &sql, &[&mid], &[mid.clone()]).await;
+
+        // NEQ: given [1, 2, 3], `<> 2` returns [1, 3]
+        let sql = format!("SELECT {col_name} FROM encrypted WHERE {col_name} <> $1");
+        test_ore_op(&client, col_name, &sql, &[&mid], &[low.clone(), high.clone()]).await;
     }
+
+    /// Runs the query and checks the returned results match the expected results.
+    /// The results are sorted after the query as there are separate tests for ordering
+    /// Using sort_by & partial_cmp here because this is used for floats too (NaN cannot be compared)
+    async fn test_ore_op<T>(client: &Client, col_name: &str, sql: &str, params: &[&(dyn ToSql + Sync)], expected: &[T])
+    where
+        for<'a> T: ToSql + PartialEq + Sync + FromSql<'a> + PartialOrd
+    {
+        let rows = client.query(sql, params).await.expect("query failed");
+
+        let mut results: Vec<_> = rows
+            .iter()
+            .map(|r| r.get::<&str, T>(&format!("{col_name}")))
+            .collect::<Vec<_>>();
+        results.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        assert_eq!(expected, &results);
+   }
 
     #[tokio::test]
     async fn map_ore_where_int4() {
