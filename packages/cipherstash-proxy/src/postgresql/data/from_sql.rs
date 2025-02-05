@@ -146,6 +146,7 @@ fn text_from_sql(
         (&Type::TIMESTAMPTZ, _) => {
             unimplemented!("TIMESTAMPTZ")
         }
+        // TODO: need to test this one, too
         (&Type::JSONB, ColumnType::JsonB) => serde_json::from_str::<serde_json::Value>(val)
             .map_err(|_| MappingError::CouldNotParseParameter)
             .map(Plaintext::new),
@@ -221,8 +222,11 @@ fn binary_from_sql(
         (&Type::TEXT, _) => parse_bytes_from_sql::<String>(bytes, pg_type)
             .and_then(|val| text_from_sql(&val, pg_type, col_type)),
 
-        // TODO: The others
-        (_, ColumnType::JsonB) => unimplemented!("JSONB"),
+        (_, ColumnType::JsonB) => {
+            parse_bytes_from_sql::<serde_json::Value>(bytes, pg_type).map(Plaintext::new)
+        }
+
+        // TODO: timestamps
         (_, ColumnType::Timestamp) => unimplemented!("TIMESTAMPTZ"),
 
         // Unsupported

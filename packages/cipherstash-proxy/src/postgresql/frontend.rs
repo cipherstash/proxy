@@ -475,7 +475,7 @@ where
         &mut self,
         bind: &Bind,
         statement: &Statement,
-    ) -> Result<Vec<Option<crate::Ciphertext>>, Error> {
+    ) -> Result<Vec<Option<crate::Encrypted>>, Error> {
         let plaintexts =
             bind.to_plaintext(&statement.param_columns, &statement.postgres_param_types)?;
         let encrypted = self

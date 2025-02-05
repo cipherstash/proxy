@@ -5,7 +5,7 @@ use super::messages::error_response::ErrorResponse;
 use super::messages::row_description::RowDescription;
 use super::messages::BackendCode;
 use crate::encrypt::Encrypt;
-use crate::eql::Ciphertext;
+use crate::eql::Encrypted;
 use crate::error::Error;
 use crate::log::{DEVELOPMENT, MAPPER};
 use crate::postgresql::context::Portal;
@@ -210,7 +210,7 @@ where
         let result_column_format_codes = portal.format_codes(result_column_count);
 
         // Each row is converted into Vec<Option<CipherText>>
-        let ciphertexts: Vec<Option<Ciphertext>> = rows
+        let ciphertexts: Vec<Option<Encrypted>> = rows
             .iter()
             .map(|row| row.to_ciphertext())
             .flatten_ok()

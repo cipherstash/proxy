@@ -20,6 +20,7 @@ CREATE TABLE encrypted (
     encrypted_int8 cs_encrypted_v1,
     encrypted_float8 cs_encrypted_v1,
     encrypted_date cs_encrypted_v1,
+    encrypted_jsonb cs_encrypted_v1,
     PRIMARY KEY(id)
 );
 
@@ -130,6 +131,13 @@ SELECT cs_add_index_v1(
   'date'
 );
 
+SELECT cs_add_index_v1(
+  'encrypted',
+  'encrypted_jsonb',
+  'ste_vec',
+  'jsonb',
+  '{"prefix": "encrypted/encrypted_jsonb"}'
+);
+
 SELECT cs_encrypt_v1();
 SELECT cs_activate_v1();
-

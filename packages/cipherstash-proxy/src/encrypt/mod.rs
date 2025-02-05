@@ -52,7 +52,7 @@ impl Encrypt {
         &self,
         plaintexts: Vec<Plaintext>,
         columns: &[Column],
-    ) -> Result<Vec<eql::Ciphertext>, Error> {
+    ) -> Result<Vec<eql::Encrypted>, Error> {
         let mut pipeline = ReferencedPendingPipeline::new(self.cipher.clone());
 
         for (idx, (plaintext, column)) in plaintexts.into_iter().zip(columns.iter()).enumerate() {
@@ -93,7 +93,7 @@ impl Encrypt {
         &self,
         plaintexts: Vec<Option<Plaintext>>,
         columns: &[Option<Column>],
-    ) -> Result<Vec<Option<eql::Ciphertext>>, Error> {
+    ) -> Result<Vec<Option<eql::Encrypted>>, Error> {
         let mut pipeline = ReferencedPendingPipeline::new(self.cipher.clone());
 
         // Zip the plaintexts and columns together
@@ -158,7 +158,7 @@ impl Encrypt {
     ///
     pub async fn decrypt(
         &self,
-        ciphertexts: Vec<Option<eql::Ciphertext>>,
+        ciphertexts: Vec<Option<eql::Encrypted>>,
     ) -> Result<Vec<Option<Plaintext>>, Error> {
         // Create a mutable vector to hold the decrypted results
         let mut results = vec![None; ciphertexts.len()];
@@ -167,7 +167,15 @@ impl Encrypt {
         let (indices, encrypted): (Vec<_>, Vec<_>) = ciphertexts
             .into_iter()
             .enumerate()
-            .filter_map(|(idx, opt)| opt.map(|ct| (idx, ct.ciphertext)))
+            .filter_map(|(idx, opt)| {
+                opt.map(|ct| match ct {
+                    eql::Encrypted::Ciphertext { ciphertext, .. } => (idx, ciphertext),
+                    eql::Encrypted::SteVec { ste_vec_index, .. } => {
+                        // TODO: don't unwrap
+                        (idx, ste_vec_index.into_root_ciphertext().unwrap())
+                    }
+                })
+            })
             .unzip();
 
         // Decrypt the ciphertexts
@@ -234,38 +242,58 @@ async fn init_cipher(config: &TandemConfig) -> Result<ScopedCipher, Error> {
 fn to_eql_encrypted(
     encrypted: Encrypted,
     identifier: &Identifier,
-) -> Result<eql::Ciphertext, Error> {
+) -> Result<eql::Encrypted, Error> {
     match encrypted {
         Encrypted::Record(ciphertext, terms) => {
             debug!(target: ENCRYPT, ciphertext = ?ciphertext);
             debug!(target: ENCRYPT, terms = ?terms);
 
-            let mut ciphertext = eql::Ciphertext::new(ciphertext, identifier.to_owned());
+            struct Indexes {
+                match_index: Option<Vec<u16>>,
+                ore_index: Option<String>,
+                unique_index: Option<String>,
+            }
+
+            let mut indexes = Indexes {
+                match_index: None,
+                ore_index: None,
+                unique_index: None,
+            };
 
             for index_term in terms {
                 match index_term {
                     IndexTerm::Binary(bytes) => {
-                        ciphertext.unique_index = Some(format_index_term_binary(&bytes))
+                        indexes.unique_index = Some(format_index_term_binary(&bytes))
                     }
-                    IndexTerm::BitMap(inner) => ciphertext.match_index = Some(inner),
+                    IndexTerm::BitMap(inner) => indexes.match_index = Some(inner),
                     IndexTerm::OreArray(vec_of_bytes) => {
-                        ciphertext.ore_index = Some(format_index_term_ore_array(&vec_of_bytes));
+                        indexes.ore_index = Some(format_index_term_ore_array(&vec_of_bytes));
                     }
                     IndexTerm::OreFull(bytes) => {
-                        ciphertext.ore_index = Some(format_index_term_ore_full(&bytes));
+                        indexes.ore_index = Some(format_index_term_ore_full(&bytes));
                     }
                     IndexTerm::OreLeft(bytes) => {
-                        ciphertext.ore_index = Some(format_index_term_ore_full(&bytes));
+                        indexes.ore_index = Some(format_index_term_ore_full(&bytes));
                     }
                     IndexTerm::Null => {}
                     _ => return Err(EncryptError::UnknownIndexTerm(identifier.to_owned()).into()),
                 };
             }
-            Ok(ciphertext)
+
+            Ok(eql::Encrypted::Ciphertext {
+                ciphertext,
+                identifier: identifier.to_owned(),
+                match_index: indexes.match_index,
+                ore_index: indexes.ore_index,
+                unique_index: indexes.unique_index,
+                version: 1,
+            })
         }
-        Encrypted::SteVec(_ste_vec_index) => {
-            todo!("Encrypted::SteVec");
-        }
+        Encrypted::SteVec(ste_vec_index) => Ok(eql::Encrypted::SteVec {
+            identifier: identifier.to_owned(),
+            ste_vec_index,
+            version: 1,
+        }),
     }
 }
 

@@ -775,6 +775,8 @@ dependencies = [
  "rand 0.9.0",
  "recipher 0.1.3 (registry+https://github.com/rust-lang/crates.io-index)",
  "rustls",
+ "serde",
+ "serde_json",
  "temp-env",
  "tokio",
  "tokio-postgres",

@@ -1,4 +1,7 @@
-use cipherstash_client::zerokms::{encrypted_record, EncryptedRecord};
+use cipherstash_client::{
+    encryption::SteVec,
+    zerokms::{encrypted_record, EncryptedRecord},
+};
 use serde::{Deserialize, Serialize, Serializer};
 use sqlparser::ast::Ident;
 
@@ -59,41 +62,33 @@ pub enum ForQuery {
     SteVecTerm,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename = "ct")]
-pub struct Ciphertext {
-    #[serde(rename = "c", with = "encrypted_record::formats::mp_base85")]
-    pub ciphertext: EncryptedRecord,
-    #[serde(rename = "k", default = "Ciphertext::default_kind")]
-    pub kind: String,
-    #[serde(rename = "o")]
-    pub ore_index: Option<String>,
-    #[serde(rename = "m")]
-    pub match_index: Option<Vec<u16>>,
-    #[serde(rename = "u")]
-    pub unique_index: Option<String>,
-    #[serde(rename = "i")]
-    pub identifier: Identifier,
-    #[serde(rename = "v")]
-    pub version: u16,
-}
-
-impl Ciphertext {
-    pub fn new(ciphertext: EncryptedRecord, identifier: Identifier) -> Self {
-        Self {
-            ciphertext,
-            kind: Self::default_kind(),
-            identifier,
-            version: 1,
-            ore_index: None,
-            match_index: None,
-            unique_index: None,
-        }
-    }
-
-    pub fn default_kind() -> String {
-        "ct".to_string()
-    }
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(tag = "k")]
+pub enum Encrypted {
+    #[serde(rename = "ct")]
+    Ciphertext {
+        #[serde(rename = "c", with = "encrypted_record::formats::mp_base85")]
+        ciphertext: EncryptedRecord,
+        #[serde(rename = "o")]
+        ore_index: Option<String>,
+        #[serde(rename = "m")]
+        match_index: Option<Vec<u16>>,
+        #[serde(rename = "u")]
+        unique_index: Option<String>,
+        #[serde(rename = "i")]
+        identifier: Identifier,
+        #[serde(rename = "v")]
+        version: u16,
+    },
+    #[serde(rename = "sv")]
+    SteVec {
+        #[serde(rename = "sv")]
+        ste_vec_index: SteVec<16>,
+        #[serde(rename = "i")]
+        identifier: Identifier,
+        #[serde(rename = "v")]
+        version: u16,
+    },
 }
 
 fn ident_de<'de, D>(deserializer: D) -> Result<Ident, D::Error>

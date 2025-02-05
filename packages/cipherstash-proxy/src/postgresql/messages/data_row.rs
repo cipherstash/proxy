@@ -19,7 +19,7 @@ pub struct DataColumn {
 }
 
 impl DataRow {
-    pub fn to_ciphertext(&self) -> Result<Vec<Option<eql::Ciphertext>>, Error> {
+    pub fn to_ciphertext(&self) -> Result<Vec<Option<eql::Encrypted>>, Error> {
         Ok(self.columns.iter().map(|col| col.into()).collect())
     }
 
@@ -159,7 +159,7 @@ impl TryFrom<DataColumn> for BytesMut {
     }
 }
 
-impl From<&DataColumn> for Option<eql::Ciphertext> {
+impl From<&DataColumn> for Option<eql::Encrypted> {
     fn from(col: &DataColumn) -> Self {
         match col.json_bytes() {
             Some(bytes) => match serde_json::from_slice(bytes) {
