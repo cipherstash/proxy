@@ -7,11 +7,11 @@ use crate::{
     Identifier,
 };
 use cipherstash_client::{
-    credentials::{auto_refresh::AutoRefresh, service_credentials::ServiceCredentials},
+    credentials::{auto_refresh::AutoRefresh, ServiceCredentials},
     encryption::{
         self, Encrypted, IndexTerm, Plaintext, PlaintextTarget, ReferencedPendingPipeline,
     },
-    ConsoleConfig, CtsConfig, ZeroKMS, ZeroKMSConfig,
+    ConsoleConfig, CtsConfig, ZeroKMSConfig,
 };
 use cipherstash_config::ColumnConfig;
 use std::{sync::Arc, vec};
@@ -56,13 +56,13 @@ impl Encrypt {
         let mut pipeline = ReferencedPendingPipeline::new(self.cipher.clone());
 
         for (idx, (plaintext, column)) in plaintexts.into_iter().zip(columns.iter()).enumerate() {
-            let encryptable = PlaintextTarget::new(plaintext, column.config.clone(), None);
+            let encryptable = PlaintextTarget::new(plaintext, column.config.clone());
             pipeline.add_with_ref::<PlaintextTarget>(encryptable, idx)?;
         }
 
         let mut encrypted_eql = vec![];
         if !pipeline.is_empty() {
-            let mut result = pipeline.encrypt().await?;
+            let mut result = pipeline.encrypt(None).await?;
 
             for (idx, col) in columns.iter().enumerate() {
                 let maybe_encrypted = result.remove(idx);
@@ -103,7 +103,7 @@ impl Encrypt {
         for (idx, item) in plaintexts.into_iter().zip(columns.iter()).enumerate() {
             match item {
                 (Some(plaintext), Some(column)) => {
-                    let encryptable = PlaintextTarget::new(plaintext, column.config.clone(), None);
+                    let encryptable = PlaintextTarget::new(plaintext, column.config.clone());
                     pipeline.add_with_ref::<PlaintextTarget>(encryptable, idx)?;
                 }
                 (None, None) => {
@@ -122,7 +122,7 @@ impl Encrypt {
 
         let mut encrypted_eql = vec![];
         if !pipeline.is_empty() {
-            let mut result = pipeline.encrypt().await?;
+            let mut result = pipeline.encrypt(None).await?;
 
             for (idx, opt) in columns.iter().enumerate() {
                 match opt {
@@ -208,12 +208,8 @@ async fn init_cipher(config: &TandemConfig) -> Result<ScopedCipher, Error> {
         .cts_config(&cts_config)
         .build_with_client_key()?;
 
-    let zerokms_client = ZeroKMS::new_with_client_key(
-        &zerokms_config.base_url(),
-        AutoRefresh::new(zerokms_config.credentials()),
-        zerokms_config.decryption_log_path().as_deref(),
-        zerokms_config.client_key(),
-    );
+    let zerokms_client = zerokms_config
+        .create_client_with_credentials(AutoRefresh::new(zerokms_config.credentials()));
 
     match ScopedCipher::init(Arc::new(zerokms_client), config.encrypt.dataset_id).await {
         Ok(cipher) => {
