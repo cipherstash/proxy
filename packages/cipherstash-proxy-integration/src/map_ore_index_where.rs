@@ -77,14 +77,22 @@ mod tests {
         let sql = format!("SELECT {col_name} FROM encrypted WHERE {col_name} > $1");
         test_ore_op(&client, col_name, &sql, &[&low], &[high.clone()]).await;
 
+        // GT 2nd case: given [1, 3], `> 3` returns []
+        let sql = format!("SELECT {col_name} FROM encrypted WHERE {col_name} > $1");
+        test_ore_op::<T>(&client, col_name, &sql, &[&high], &[]).await;
+
         // LT: given [1, 3], `< 3` returns [1]
         let sql = format!("SELECT {col_name} FROM encrypted WHERE {col_name} < $1");
         test_ore_op(&client, col_name, &sql, &[&high], &[low.clone()]).await;
 
+        // LT 2nd case: given [1, 3], `< 3` returns []
+        let sql = format!("SELECT {col_name} FROM encrypted WHERE {col_name} < $1");
+        test_ore_op(&client, col_name, &sql, &[&low], &[] as &[T]).await;
+
         // GT && LT: given [1, 3], `> 1 and < 3` returns []
         let sql =
             format!("SELECT {col_name} FROM encrypted WHERE {col_name} > $1 AND {col_name} < $2");
-        test_ore_op::<T>(&client, col_name, &sql, &[&low, &high], &[]).await;
+        test_ore_op(&client, col_name, &sql, &[&low, &high], &[] as &[T]).await;
 
         // LTEQ: given [1, 3], `<= 3` returns [1, 3]
         let sql = format!("SELECT {col_name} FROM encrypted WHERE {col_name} <= $1");
