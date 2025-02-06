@@ -63,7 +63,7 @@ async fn init_reloader(config: DatabaseConfig) -> Result<EncryptConfigManager, E
     };
 
     if encrypt_config.is_empty() {
-        warn!("Encrypt configuration is empty");
+        warn!("⚠️ ENCRYPTION CONFIGURATION IS EMPTY");
     } else {
         info!("Loaded Encrypt configuration");
     }
