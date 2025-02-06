@@ -261,6 +261,7 @@ echo '# Test: unconfigured proxy'
 echo '###############################################'
 echo
 
+mise --env tcp run postgres:eql:teardown
 mise --env tcp run proxy:up proxy --extra-args "--detach --wait"
 mise --env tcp run test:wait_for_postgres_to_quack --port 6432 --max-retries 20
 mise --env tcp run test:integration:psql-passthrough
@@ -360,6 +361,18 @@ cat sql/cipherstash-encrypt.sql | docker exec -i postgres${CONTAINER_SUFFIX} psq
 cat sql/schema.sql | docker exec -i postgres${CONTAINER_SUFFIX} psql postgresql://${CS_DATABASE__USERNAME}:${CS_DATABASE__PASSWORD}@${CS_DATABASE__HOST}:${CS_DATABASE__PORT}/${CS_DATABASE__NAME} -f-
 """
 
+[tasks."postgres:eql:teardown"]
+alias = 's'
+description = "Uninstalls EQL and removes schema from database"
+run = """
+#!/bin/bash
+cd tests
+mise run postgres:fail_if_not_running
+mise run postgres:eql:download
+cat sql/cipherstash-encrypt-uninstall.sql | docker exec -i postgres${CONTAINER_SUFFIX} psql postgresql://${CS_DATABASE__USERNAME}:${CS_DATABASE__PASSWORD}@${CS_DATABASE__HOST}:${CS_DATABASE__PORT}/${CS_DATABASE__NAME} -f-
+cat sql/schema-uninstall.sql | docker exec -i postgres${CONTAINER_SUFFIX} psql postgresql://${CS_DATABASE__USERNAME}:${CS_DATABASE__PASSWORD}@${CS_DATABASE__HOST}:${CS_DATABASE__PORT}/${CS_DATABASE__NAME} -f-
+"""
+
 [tasks."postgres:up"]
 alias = 'u'
 dir = "{{config_root}}/tests"
@@ -423,13 +436,22 @@ done
 alias = 'e'
 description = "Download latest EQL release"
 dir = "{{config_root}}/tests"
-outputs = ["{{config_root}}/tests/sql/cipherstash-encrypt.sql"]
+outputs = ["{{config_root}}/tests/sql/cipherstash-encrypt.sql", "{{config_root}}/tests/sql/cipherstash-encrypt-uninstall.sql"]
 run = """
+# install script
 if [ -z "$CS_EQL_PATH" ]; then
   curl -sLo sql/cipherstash-encrypt.sql https://github.com/cipherstash/encrypt-query-language/releases/latest/download/cipherstash-encrypt.sql
 else
   echo "Using EQL: ${CS_EQL_PATH}"
   cp "$CS_EQL_PATH" sql/cipherstash-encrypt.sql
+fi
+
+# uninstall script
+if [ -z "$CS_EQL_UNINSTALL_PATH" ]; then
+  curl -sLo sql/cipherstash-encrypt-uninstall.sql https://github.com/cipherstash/encrypt-query-language/releases/latest/download/cipherstash-encrypt-uninstall.sql
+else
+  echo "Using EQL: ${CS_EQL_PATH}"
+  cp "$CS_EQL_UNINSTALL_PATH" sql/cipherstash-encrypt-uninstall.sql
 fi
 """
 
