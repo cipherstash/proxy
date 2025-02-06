@@ -248,12 +248,29 @@ set -e
 
 echo
 echo '###############################################'
-echo '# Setup'
+echo '# Preflight'
 echo '###############################################'
 echo
 
 # Ensure Postgres instances are running
 mise run test:integration:preflight
+
+echo
+echo '###############################################'
+echo '# Test: unconfigured proxy'
+echo '###############################################'
+echo
+
+mise --env tcp run proxy:up proxy --extra-args "--detach --wait"
+mise --env tcp run test:wait_for_postgres_to_quack --port 6432 --max-retries 20
+mise --env tcp run test:integration:psql-passthrough
+mise --env tcp run proxy:down
+
+echo
+echo '###############################################'
+echo '# Setup'
+echo '###############################################'
+echo
 
 # Ensure EQL is set up before we try and start Proxy
 mise --env tcp run postgres:setup
