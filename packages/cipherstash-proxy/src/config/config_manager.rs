@@ -33,6 +33,10 @@ impl EncryptConfigManager {
     pub fn load(&self) -> Arc<EncryptConfigMap> {
         self.config.load().clone()
     }
+
+    pub fn is_empty(&self) -> bool {
+        self.config.load().is_empty()
+    }
 }
 
 async fn init_reloader(config: DatabaseConfig) -> Result<EncryptConfigManager, Error> {
@@ -42,6 +46,8 @@ async fn init_reloader(config: DatabaseConfig) -> Result<EncryptConfigManager, E
         Ok(encrypt_config) => encrypt_config,
         Err(err) => {
             match err {
+                // Similar messages are displayed on connection, defined in handler.rs
+                // Please keep the language in sync when making changes here.
                 Error::Config(ConfigError::MissingEncryptConfigTable) => {
                     error!("No Encrypt configuration table in database.");
                     warn!("Encrypt requires the Encrypt Query Language (EQL) to be installed in the target database");
@@ -49,15 +55,17 @@ async fn init_reloader(config: DatabaseConfig) -> Result<EncryptConfigManager, E
                 }
                 _ => {
                     error!("Error loading Encrypt configuration");
+                    return Err(err);
                 }
             }
-            return Err(err);
+            HashMap::new()
         }
     };
 
-    info!("Loaded Encrypt configuration");
     if encrypt_config.is_empty() {
-        warn!("Encrypt configuration is currently empty");
+        warn!("Encrypt configuration is empty");
+    } else {
+        info!("Loaded Encrypt configuration");
     }
 
     let encrypt_config = Arc::new(ArcSwap::new(Arc::new(encrypt_config)));

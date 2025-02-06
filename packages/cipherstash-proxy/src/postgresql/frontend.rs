@@ -55,7 +55,6 @@ where
     }
 
     pub async fn rewrite(&mut self) -> Result<(), Error> {
-        // TODO: Ideally error messages would be written back to the client as an ErrorResponse
         let bytes = self.read().await?;
         self.write(bytes).await?;
         Ok(())
@@ -75,7 +74,7 @@ where
         )
         .await?;
 
-        if self.encrypt.config.disable_mapping() {
+        if self.encrypt.is_passthrough() {
             return Ok(bytes);
         }
 

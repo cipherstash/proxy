@@ -22,7 +22,7 @@ use md5::{Digest, Md5};
 use postgres_protocol::authentication::sasl::{ChannelBinding, ScramSha256};
 use rand::Rng;
 use tokio::io::{split, AsyncRead, AsyncWrite, AsyncWriteExt};
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 
 ///
 ///
@@ -234,6 +234,11 @@ pub async fn handler(
         encrypt.clone(),
         context.clone(),
     );
+
+    if encrypt.is_passthrough() {
+        warn!("Running in passthrough mode");
+        warn!("Data is not protected");
+    }
 
     let client_to_server = async {
         loop {

@@ -79,7 +79,7 @@ where
         )
         .await?;
 
-        if self.encrypt.config.disable_mapping() {
+        if self.encrypt.is_passthrough() {
             self.write(bytes).await?;
             return Ok(());
         }

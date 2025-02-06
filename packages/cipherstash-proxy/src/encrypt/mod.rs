@@ -190,6 +190,14 @@ impl Encrypt {
     pub async fn reload_schema(&self) {
         self.schema.reload().await
     }
+
+    pub fn is_passthrough(&self) -> bool {
+        self.encrypt_config.is_empty() || self.config.disable_mapping()
+    }
+
+    pub fn is_empty_config(&self) -> bool {
+        self.encrypt_config.is_empty()
+    }
 }
 
 async fn init_cipher(config: &TandemConfig) -> Result<ScopedCipher, Error> {
