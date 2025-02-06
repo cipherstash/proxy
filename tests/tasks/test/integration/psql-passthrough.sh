@@ -10,14 +10,17 @@ docker exec -i postgres${CONTAINER_SUFFIX} psql postgresql://${CS_DATABASE__USER
 SELECT 1;
 EOF
 
-set +e
 # Connect to the proxy
 docker exec -i postgres${CONTAINER_SUFFIX} psql postgresql://cipherstash:password@proxy:6432/cipherstash <<-EOF
-SELECT * FROM cs_configuration_v1;
+SELECT 1;
 EOF
 
-if [ $? -eq 0 ]; then
-    echo "cs_configuration_v1 table should not exist"
+# Confirm that there is indeed no config
+set +e
+OUTPUT="$(docker exec -i postgres${CONTAINER_SUFFIX} psql 'postgresql://cipherstash:password@proxy:6432/cipherstash?sslmode=disable' --command 'SELECT * FROM cs_configuration_v1' 2>&1)"
+retval=$?
+if echo ${OUTPUT} | grep -v 'relation "cs_configuration_v1" does not exist'; then
+    echo "error: did not see string in output: \"relation "cs_configuration_v1" does not exist\""
     exit 1
 fi
 
