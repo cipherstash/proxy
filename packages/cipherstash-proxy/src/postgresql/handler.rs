@@ -236,8 +236,8 @@ pub async fn handler(
     );
 
     if encrypt.is_passthrough() {
-        warn!("Running in passthrough mode");
-        warn!("Data is not protected");
+        warn!("⚠️ RUNNING IN PASSTHROUGH MODE");
+        warn!("⛔️ YOUR DATA IS NOT PROTECTED WITH ENCRYPTION");
     }
 
     let client_to_server = async {
