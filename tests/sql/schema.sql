@@ -54,6 +54,13 @@ SELECT cs_add_index_v1(
 
 SELECT cs_add_index_v1(
   'encrypted',
+  'encrypted_bool',
+  'ore',
+  'boolean'
+);
+
+SELECT cs_add_index_v1(
+  'encrypted',
   'encrypted_int2',
   'unique',
   'small_int'
