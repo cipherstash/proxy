@@ -29,21 +29,21 @@ fn log_level_for<'a>(config: &'a LogConfig, target: &str) -> &'a str {
         PROTOCOL => &config.protocol_level,
         MAPPER => &config.mapper_level,
         SCHEMA => &config.schema_level,
-        _ => &config.log_level,
+        _ => &config.level,
     }
 }
 
 pub fn builder(
     config: &LogConfig,
 ) -> SubscriberBuilder<DefaultFields, Format, EnvFilter, BoxMakeWriter> {
-    let log_level = config.log_level.to_owned();
+    let log_level = config.level.to_owned();
 
     let mut env_filter: EnvFilter = EnvFilter::builder().parse_lossy(&log_level);
 
     let mut debug = is_debug(&log_level);
 
     for &target in log_targets().iter() {
-        let level = log_level_for(&config, target);
+        let level = log_level_for(config, target);
 
         // If any level is debug, enable debug mode
         if is_debug(level) {
@@ -53,7 +53,7 @@ pub fn builder(
         env_filter = env_filter.add_directive(format!("{target}={level}").parse().unwrap());
     }
 
-    let writer = match config.log_output {
+    let writer = match config.output {
         LogOutput::Stderr => BoxMakeWriter::new(std::io::stderr),
         LogOutput::Stdout => BoxMakeWriter::new(std::io::stdout),
     };

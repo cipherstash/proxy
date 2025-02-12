@@ -105,13 +105,13 @@ pub struct LogConfig {
     pub ansi_enabled: bool,
 
     #[serde(default = "LogConfig::default_log_format")]
-    pub log_format: LogFormat,
+    pub format: LogFormat,
 
     #[serde(default = "LogConfig::default_log_output")]
-    pub log_output: LogOutput,
+    pub output: LogOutput,
 
     #[serde(default = "LogConfig::default_log_level")]
-    pub log_level: String,
+    pub level: String,
 
     #[serde(default = "LogConfig::default_log_level")]
     pub development_level: String,
@@ -341,10 +341,10 @@ impl TlsConfig {
 impl Default for LogConfig {
     fn default() -> Self {
         LogConfig {
-            log_format: LogConfig::default_log_format(),
-            log_output: LogConfig::default_log_output(),
+            format: LogConfig::default_log_format(),
+            output: LogConfig::default_log_output(),
             ansi_enabled: LogConfig::default_ansi_enabled(),
-            log_level: LogConfig::default_log_level(),
+            level: LogConfig::default_log_level(),
             development_level: LogConfig::default_log_level(),
             authentication_level: LogConfig::default_log_level(),
             context_level: LogConfig::default_log_level(),
@@ -360,10 +360,10 @@ impl Default for LogConfig {
 impl LogConfig {
     pub fn with_level(level: &str) -> Self {
         LogConfig {
-            log_format: LogConfig::default_log_format(),
-            log_output: LogConfig::default_log_output(),
+            format: LogConfig::default_log_format(),
+            output: LogConfig::default_log_output(),
             ansi_enabled: LogConfig::default_ansi_enabled(),
-            log_level: level.to_owned(),
+            level: level.to_owned(),
             development_level: level.to_owned(),
             authentication_level: level.to_owned(),
             context_level: level.to_owned(),

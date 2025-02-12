@@ -41,12 +41,9 @@ pub fn set_format(
     config: &LogConfig,
     subscriber: SubscriberBuilder<DefaultFields, Format, EnvFilter, BoxMakeWriter>,
 ) -> Subscriber {
-    match &config.log_format {
+    match &config.format {
         LogFormat::Pretty => Box::new(subscriber.pretty().finish()),
-        LogFormat::Structured => {
-            println!("Using structured logging");
-            Box::new(subscriber.json().finish())
-        }
+        LogFormat::Structured => Box::new(subscriber.json().finish()),
         LogFormat::Text => Box::new(subscriber.finish()),
     }
 }
@@ -54,7 +51,6 @@ pub fn set_format(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::LogOutput;
     use std::sync::{Arc, Mutex};
     use std::{
         io,
@@ -87,7 +83,7 @@ mod tests {
     fn test_log_levels() {
         let make_writer = MockMakeWriter::default();
 
-        let config = LogConfig::with_level("warn".into());
+        let config = LogConfig::with_level("warn");
 
         let subscriber =
             subscriber::builder(&config).with_writer(BoxMakeWriter::new(make_writer.clone()));
@@ -116,10 +112,10 @@ mod tests {
         let make_writer = MockMakeWriter::default();
 
         let config = LogConfig {
-            log_format: LogConfig::default_log_format(),
-            log_output: LogConfig::default_log_output(),
+            format: LogConfig::default_log_format(),
+            output: LogConfig::default_log_output(),
             ansi_enabled: LogConfig::default_ansi_enabled(),
-            log_level: "info".into(),
+            level: "info".into(),
             development_level: "info".into(),
             authentication_level: "debug".into(),
             context_level: "error".into(),
@@ -189,8 +185,8 @@ mod tests {
     fn test_log_format_structured() {
         let make_writer = MockMakeWriter::default();
 
-        let mut config = LogConfig::with_level("info".into());
-        config.log_format = LogFormat::Structured;
+        let mut config = LogConfig::with_level("info");
+        config.format = LogFormat::Structured;
 
         let subscriber =
             subscriber::builder(&config).with_writer(BoxMakeWriter::new(make_writer.clone()));

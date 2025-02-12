@@ -1,8 +1,199 @@
 # CipherStash Proxy
 
+CipherStash Proxy provides a transparent proxy to your existing postgres database, handling the complexity of encrypting and decrypting your data.
 CipherStash Proxy keeps your sensitive data in PostgreSQL encrypted and searchable, without changing your SQL queries.
 
 Behind the scenes, it uses the [Encrypt Query Language](https://github.com/cipherstash/encrypt-query-language/) to index and search encrypted data.
+
+
+## Getting Started
+
+
+## Configuration
+
+At a high level, CipherStash Proxy requires
+
+- a port to run on
+- connection settings for the target postgres database
+- CipherStash credentials
+
+Configuration is via file and/or Environment Variables.
+Environment variables will be used if the the configuration file is not present, and override any configuration values specified in the file.
+
+Example configurations are in `cipherstash-proxy-example.toml` and in `./packages/cipherstash-proxy/tests/config/`
+
+Minimally viable configuration
+```
+[database]
+name = "cipherstash"
+username = "cipherstash"
+password = "password"
+
+[auth]
+workspace_id = "cipherstash-workspace-id"
+client_access_key = "cipherstash-clien-access-key"
+
+[encrypt]
+dataset_id = "cipherstash-dataset-id"
+client_id = "cipherstash-client-id"
+client_key = "cipherstash-client-key"
+```
+
+
+### Configuration Options
+
+
+```toml
+
+[server]
+# Proxy host address
+# Optional
+# Default: `0.0.0.0`
+# Env: CS_SERVER__HOST
+host = "0.0.0.0"
+
+# Proxy host posgt
+# Optional
+# Default: `6432`
+# Env: CS_SERVER__PORT
+port = "6432"
+
+# Enforce TLS connections
+# Optional
+# Default: `false`
+# Env: CS_SERVER__REQUIRE_TLS
+require_tls = "false",
+
+# Shutdown timeout in ms
+# Sets how long to wait for connections to drain on shutdown
+# Optional
+# Default: `2000`
+# Env: CS_SERVER__SHUTDOWN_TIMEOUT
+shutdown_timeout = "2000"
+
+
+[database]
+# Database host address
+# Optional
+# Default: `0.0.0.0`
+# Env: CS_DATABASE__HOST
+host = "0.0.0.0"
+
+# Database host post
+# Optional
+# Default: `5432`
+# Env: CS_DATABASE__PORT
+port = "5432"
+
+# Database host post
+# Optional
+# Default: `5432`
+# Env: CS_DATABASE__PORT
+name = "5432"
+
+# Database username
+# Env: CS_DATABASE__USERNAME
+username = "username"
+
+# Database username
+# Env: CS_DATABASE__PASSWORD
+password = "password"
+
+# Connection timeout in ms
+# Sets how long to hold an open connection
+# Optional
+# Default: `300000` (5 minutes)
+# Env: CS_DATABASE__SHUTDOWN_TIMEOUT
+connection_timeout = "300000"
+
+# Enable TLS verification
+# Optional
+# Default: `false`
+# Env: CS_DATABASE__WITH_TLS_VERIFICATION
+with_tls_verification = "false"
+
+# Encrypt configuration reload interval in sec
+# Sets how frequently Encrypted index configuration should be reloaded
+# The configuration specifies the encrypted columns in the database
+# Optional
+# Default: `60`
+# Env: CS_DATABASE__CONFIG_RELOAD_INTERVAL
+config_reload_interval = "60"
+
+# Schema configuration reload interval in sec
+# Sets how frequently the database schema should be reloaded
+# The schema is used to analyse SQL statements
+# Optional
+# Default: `60`
+# Env: CS_DATABASE__SCHEMA_RELOAD_INTERVAL
+schema_reload_interval = "60"
+
+
+[tls]
+# Certificate path
+# Env: CS_TLS__CERTIFICATE
+certificate = "./server.cert"
+
+# Private Key path
+# Env: CS_TLS__PRIVATE_KEY
+private_key = "./server.key"
+
+
+[auth]
+# Cipherstash Workspace Id
+# Env: CS_AUTH__WORKSPACE_ID
+workspace_id = "cipherstash-workspace-id"
+
+# Cipherstash Client Access Key
+# Env: CS_AUTH__CLIENT_ACCESS_KEY
+client_access_key = "cipherstash-client-access-key"
+
+[encrypt]
+# Cipherstash Dataset Id
+# Env: CS_AUTH__DATASET_ID
+dataset_id = "cipherstash-dataset-id"
+
+# Cipherstash Client Id
+# Env: CS__AUTH__cipherstash__CLIENT__ID
+client_id = "cipherstash-client-id"
+
+# Cipherstash Client Key
+# Env: CS_AUTH__CLIENT_KEY
+client_key = "cipherstash-client-key"
+
+
+[log]
+# Log level
+# Optional
+# Default: `info`
+# Env: CS_LOG__LEVEL
+level = "info"
+
+# Log format
+# Optional
+# Valid values: `pretty | text | structured (json)`
+# Default: `pretty`
+# Env: CS_LOG__FORMAT
+format = "pretty"
+
+# Log format
+# Optional
+# Valid values: `stdout | stderr`
+# Default: `info`
+# Env: CS_LOG__OUTPUT
+output = "stdout"
+
+# Enable ansi (colored) output
+# Optional
+# Default: `true`
+# Env: CS_LOG__ANSI_ENABLED
+ansi_enabled = "true"
+
+```
+
+
+
+
 
 ## Developing
 
