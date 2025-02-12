@@ -46,7 +46,8 @@ pub async fn server(stream: TcpStream, config: &TlsConfig) -> Result<TlsStream<T
 ///
 pub fn configure_server(config: &TlsConfig) -> Result<rustls::ServerConfig, Error> {
     let content_certs = CertificateDer::pem_slice_iter(config.certificate.as_bytes())
-        .collect::<Result<Vec<_>, _>>().unwrap_or(Vec::new());
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap_or(Vec::new());
     let certs = if content_certs.is_empty() {
         info!(target: CONFIG, "Could not parse certificate content as PEM. Treating it as a path.");
         CertificateDer::pem_file_iter(&config.certificate)?.collect::<Result<Vec<_>, _>>()?
