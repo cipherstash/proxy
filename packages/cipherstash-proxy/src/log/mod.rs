@@ -31,7 +31,6 @@ pub fn init(config: LogConfig) {
         let subscriber = subscriber::builder(&config);
         let subscriber = set_format(&config, subscriber);
 
-        // let subscriber = init_subscriber(&config);
         tracing::subscriber::set_global_default(subscriber)
             .expect("Could not set the tracing subscriber");
     });
@@ -39,12 +38,12 @@ pub fn init(config: LogConfig) {
 
 pub fn set_format(
     config: &LogConfig,
-    subscriber: SubscriberBuilder<DefaultFields, Format, EnvFilter, BoxMakeWriter>,
+    builder: SubscriberBuilder<DefaultFields, Format, EnvFilter, BoxMakeWriter>,
 ) -> Subscriber {
     match &config.format {
-        LogFormat::Pretty => Box::new(subscriber.pretty().finish()),
-        LogFormat::Structured => Box::new(subscriber.json().finish()),
-        LogFormat::Text => Box::new(subscriber.finish()),
+        LogFormat::Pretty => Box::new(builder.pretty().finish()),
+        LogFormat::Structured => Box::new(builder.json().finish()),
+        LogFormat::Text => Box::new(builder.finish()),
     }
 }
 
@@ -198,8 +197,6 @@ mod tests {
         info!(msg = "message", value = 42);
 
         let log_contents = make_writer.get_string();
-
-        println!("{}", log_contents);
 
         assert!(log_contents.contains(r#"fields":{"msg":"message","value":42}"#));
     }

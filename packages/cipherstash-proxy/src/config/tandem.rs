@@ -3,6 +3,7 @@ use config::{Config, Environment};
 use regex::Regex;
 use rustls_pki_types::ServerName;
 use serde::Deserialize;
+use std::io::IsTerminal;
 use std::path::PathBuf;
 use std::{fmt::Display, time::Duration};
 
@@ -374,20 +375,25 @@ impl LogConfig {
             schema_level: level.to_owned(),
         }
     }
+
     pub fn default_log_format() -> LogFormat {
-        LogFormat::Pretty
+        if std::io::stdout().is_terminal() {
+            LogFormat::Pretty
+        } else {
+            LogFormat::Structured
+        }
+    }
+
+    pub fn default_ansi_enabled() -> bool {
+        std::io::stdout().is_terminal()
     }
 
     pub fn default_log_output() -> LogOutput {
         LogOutput::Stdout
     }
 
-    pub fn default_ansi_enabled() -> bool {
-        true
-    }
-
     pub fn default_log_level() -> String {
-        std::env::var("RUST_LOG").unwrap_or("info".into())
+        "info".into()
     }
 }
 
