@@ -1,4 +1,5 @@
 mod common;
+mod map_concat;
 mod map_literals;
 mod map_match_index;
 mod map_ore_index_order;

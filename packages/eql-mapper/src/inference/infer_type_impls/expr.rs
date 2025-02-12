@@ -155,7 +155,10 @@ impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
                     | BinaryOperator::PGNotILikeMatch
                     | BinaryOperator::PGStartsWith
                     | BinaryOperator::PGCustomBinaryOperator(_) => {
-                        self.unify_node_with_type(this_expr, self.unify_nodes(&**left, &**right)?)?;
+                        // EQL columns don't support these operators, so we only care that the output and inputs unify to a native type.
+                        self.unify_node_with_type(&**left, Type::any_native())?;
+                        self.unify_node_with_type(&**right, Type::any_native())?;
+                        self.unify_node_with_type(this_expr, Type::any_native())?;
                     }
 
                     // JSON(B) operators.

@@ -1134,4 +1134,29 @@ mod test {
             Some(projection![(NATIVE)]),
         ]);
     }
+
+    #[test]
+    fn update_with_concat_regression() {
+        let _ = tracing_subscriber::fmt::try_init();
+        let schema = resolver(schema! {
+            tables: {
+                example: {
+                    encrypted_str (EQL),
+                    other_str,
+                }
+            }
+        });
+
+        // Can't use concat in an update on an EQL column
+        let statement = parse("update example set encrypted_str = encrypted_str || 'a'");
+
+        let err = type_check(schema.clone(), &statement)
+            .expect_err("expected type check to fail, but it succeeded");
+
+        assert_eq!(err.to_string(), "type Constructor(Value(EQL(example.encrypted_str))) cannot be unified with Constructor(Value(Native))");
+
+        // Can use concat in an update on a plaintext column
+        let statement = parse("update example set other_str = other_str || 'a'");
+        type_check(schema, &statement).expect("expected type check to succeed, but it failed");
+    }
 }
