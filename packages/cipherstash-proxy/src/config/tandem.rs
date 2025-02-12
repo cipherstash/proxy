@@ -1,5 +1,4 @@
 use crate::error::{ConfigError, Error};
-use crate::log::global_default_log_level;
 use config::{Config, Environment};
 use regex::Regex;
 use rustls_pki_types::ServerName;
@@ -100,27 +99,56 @@ pub struct DevelopmentConfig {
     pub enable_mapping_errors: bool,
 }
 
-#[derive(Debug, Deserialize, Clone, PartialEq, Default)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct LogConfig {
-    #[serde(default)]
-    pub disable_ansi: bool,
+    #[serde(default = "LogConfig::default_ansi_enabled")]
+    pub ansi_enabled: bool,
 
-    #[serde(default = "global_default_log_level")]
+    #[serde(default = "LogConfig::default_log_format")]
+    pub log_format: LogFormat,
+
+    #[serde(default = "LogConfig::default_log_output")]
+    pub log_output: LogOutput,
+
+    #[serde(default = "LogConfig::default_log_level")]
+    pub log_level: String,
+
+    #[serde(default = "LogConfig::default_log_level")]
     pub development_level: String,
-    #[serde(default = "global_default_log_level")]
+
+    #[serde(default = "LogConfig::default_log_level")]
     pub authentication_level: String,
-    #[serde(default = "global_default_log_level")]
+
+    #[serde(default = "LogConfig::default_log_level")]
     pub context_level: String,
-    #[serde(default = "global_default_log_level")]
+
+    #[serde(default = "LogConfig::default_log_level")]
     pub encrypt_level: String,
-    #[serde(default = "global_default_log_level")]
+
+    #[serde(default = "LogConfig::default_log_level")]
     pub keyset_level: String,
-    #[serde(default = "global_default_log_level")]
+
+    #[serde(default = "LogConfig::default_log_level")]
     pub protocol_level: String,
-    #[serde(default = "global_default_log_level")]
+
+    #[serde(default = "LogConfig::default_log_level")]
     pub mapper_level: String,
-    #[serde(default = "global_default_log_level")]
+
+    #[serde(default = "LogConfig::default_log_level")]
     pub schema_level: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub enum LogFormat {
+    Pretty,
+    Structured,
+    Text,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub enum LogOutput {
+    Stdout,
+    Stderr,
 }
 
 /// Config defaults to a file called `tandem` in the current directory.
@@ -200,6 +228,10 @@ impl TandemConfig {
     }
 }
 
+///
+/// Extracts a field name (if present) from a config::ConfigError::Message
+/// This is called in `build` if a ConfigError message contains the string `missing field`
+///
 fn extract_field_name(input: &str) -> Option<String> {
     let re = Regex::new(r"`(\w+)`").unwrap();
     re.captures(input)
@@ -303,6 +335,59 @@ impl TlsConfig {
 
     pub fn private_key_exists(&self) -> bool {
         PathBuf::from(&self.private_key).exists()
+    }
+}
+
+impl Default for LogConfig {
+    fn default() -> Self {
+        LogConfig {
+            log_format: LogConfig::default_log_format(),
+            log_output: LogConfig::default_log_output(),
+            ansi_enabled: LogConfig::default_ansi_enabled(),
+            log_level: LogConfig::default_log_level(),
+            development_level: LogConfig::default_log_level(),
+            authentication_level: LogConfig::default_log_level(),
+            context_level: LogConfig::default_log_level(),
+            encrypt_level: LogConfig::default_log_level(),
+            keyset_level: LogConfig::default_log_level(),
+            protocol_level: LogConfig::default_log_level(),
+            mapper_level: LogConfig::default_log_level(),
+            schema_level: LogConfig::default_log_level(),
+        }
+    }
+}
+
+impl LogConfig {
+    pub fn with_level(level: &str) -> Self {
+        LogConfig {
+            log_format: LogConfig::default_log_format(),
+            log_output: LogConfig::default_log_output(),
+            ansi_enabled: LogConfig::default_ansi_enabled(),
+            log_level: level.to_owned(),
+            development_level: level.to_owned(),
+            authentication_level: level.to_owned(),
+            context_level: level.to_owned(),
+            encrypt_level: level.to_owned(),
+            keyset_level: level.to_owned(),
+            protocol_level: level.to_owned(),
+            mapper_level: level.to_owned(),
+            schema_level: level.to_owned(),
+        }
+    }
+    pub fn default_log_format() -> LogFormat {
+        LogFormat::Pretty
+    }
+
+    pub fn default_log_output() -> LogOutput {
+        LogOutput::Stdout
+    }
+
+    pub fn default_ansi_enabled() -> bool {
+        true
+    }
+
+    pub fn default_log_level() -> String {
+        std::env::var("RUST_LOG").unwrap_or("info".into())
     }
 }
 
