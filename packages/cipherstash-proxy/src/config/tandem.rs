@@ -1,12 +1,14 @@
 use crate::error::{ConfigError, Error};
+use crate::log::CONFIG;
 use config::{Config, Environment};
 use regex::Regex;
-use rustls_pki_types::ServerName;
+use rustls_pki_types::{CertificateDer, PrivateKeyDer, ServerName};
 use serde::Deserialize;
 use std::io::IsTerminal;
 use std::path::PathBuf;
 use std::{fmt::Display, time::Duration};
-
+use rustls_pki_types::pem::PemObject;
+use tracing::info;
 use uuid::Uuid;
 
 use super::{CS_PREFIX, DEFAULT_CONFIG_FILE_PATH};
@@ -386,11 +388,28 @@ impl Display for DatabaseConfig {
 
 impl TlsConfig {
     pub fn cert_exists(&self) -> bool {
-        PathBuf::from(&self.certificate).exists()
+        // this would result in an error if the content is broken pem
+        // but, if it is not interpreted as a pem, it results in an empty vector
+        let content_certs = CertificateDer::pem_slice_iter(self.certificate.as_bytes())
+            .collect::<Result<Vec<_>, _>>().unwrap_or(Vec::new());
+        if content_certs.is_empty() {
+            info!(target: CONFIG, "Could not parse TLS certificate. Treating it as a path.");
+            PathBuf::from(&self.certificate).exists()
+        } else {
+            info!(target: CONFIG, "Found TLS certificate with PEM contents.");
+            true
+        }
     }
 
     pub fn private_key_exists(&self) -> bool {
-        PathBuf::from(&self.private_key).exists()
+        let content_key = PrivateKeyDer::from_pem_slice(self.private_key.as_bytes());
+        if content_key.is_ok() {
+            info!(target: CONFIG, "Found TLS private key with PEM contents.");
+            true
+        } else {
+            info!(target: CONFIG, "Could not parse TLS private key. Treating it as a path.");
+            PathBuf::from(&self.private_key).exists()
+        }
     }
 }
 
@@ -473,6 +492,7 @@ mod tests {
         config::{LogFormat, LogLevel, LogOutput, TandemConfig},
         error::Error,
     };
+    use super::*;
 
     const CS_PREFIX: &str = "CS_TEST";
 
@@ -529,5 +549,88 @@ mod tests {
             assert!(config.is_err());
             assert!(matches!(config.unwrap_err(), Error::Config(_)));
         });
+    }
+
+    fn test_config_with_path() -> TlsConfig {
+        TlsConfig {
+            certificate: "../../tests/tls/server.cert".to_string(),
+            private_key: "../../tests/tls/server.key".to_string(),
+        }
+    }
+
+    fn test_config_with_content() -> TlsConfig {
+        TlsConfig {
+            certificate: "\
+-----BEGIN CERTIFICATE-----
+MIIDKzCCAhOgAwIBAgIUMXfu7Mj22j+e9Gt2gjV73TBg20wwDQYJKoZIhvcNAQEL
+BQAwFDESMBAGA1UEAwwJbG9jYWxob3N0MB4XDTI1MDEyNjAxNDkzMVoXDTI2MDEy
+NjAxNDkzMVowFDESMBAGA1UEAwwJbG9jYWxob3N0MIIBIjANBgkqhkiG9w0BAQEF
+AAOCAQ8AMIIBCgKCAQEApuqOqv0P8IPe7TmQGO2HeO0DjPrIVyYYCtJXEyUhPSuq
+20ePjb6PyCeAlG873fJW4+fSF6YP0nsb7PJQYYa7E5CxJNYtjJ9c19l0CpgkNmHP
+ogK8HhAokvjxKGTwidj37KAVBXznaWPfFvf8SuS2xFSCknTou2m67Q68rCYM8h9e
+AjB5L0kL2bM6ySgGt5m0lWsr73duaGrLEJxfjV+JVitDSqLqbeDWOKXHfaKBBwL1
+BZWyl4f4MM0rhLoDcbGOYIlkZtadB2lqdaFqfuejIcmZd/Q41mRhNmwNnG9guSWC
+YHMdPkIrAaZNZlL0drIeTVgPcVkP8lPEkXsxHhmybwIDAQABo3UwczAdBgNVHQ4E
+FgQUWQ8oySVGv/BhOr1B6zMVyNDeobkwHwYDVR0jBBgwFoAUWQ8oySVGv/BhOr1B
+6zMVyNDeobkwDAYDVR0TAQH/BAIwADAOBgNVHQ8BAf8EBAMCBaAwEwYDVR0lBAww
+CgYIKwYBBQUHAwEwDQYJKoZIhvcNAQELBQADggEBAFzLi09kyRBE/H3RarjQdolv
+eAPwpn16YqUgppYjKIbPHx6QtXBElhhqTlW104x8CMzx3pT0wBIaUPmhWj6DeWET
+TZIDbXhWiMRhsB7cup7y5O9mlXvST4fyrcD30rgfO8XAL8nJLsAbCgL/BWlptC1m
+2tFtY1Y8bYTD04TMVVVA20rvwwINg1Gd+JYRoHysBvnGuespMVuW0Ji49U7OWPp/
+Iwy49Eyr7U0xg2VFPNBkNUmw6MQQVumt3OBydAKmd3XAJy/Nmzq/ZHvL3jdl1jlC
+TU/T2RF2sDsSHrUIVMeifhYc0jfNlRwnUG5liN9BiGo1QxNZ9jGY/3ts5eu8+XM=
+-----END CERTIFICATE-----
+".to_string(),
+            private_key: "\
+-----BEGIN PRIVATE KEY-----
+MIIEugIBADANBgkqhkiG9w0BAQEFAASCBKQwggSgAgEAAoIBAQCm6o6q/Q/wg97t
+OZAY7Yd47QOM+shXJhgK0lcTJSE9K6rbR4+Nvo/IJ4CUbzvd8lbj59IXpg/Sexvs
+8lBhhrsTkLEk1i2Mn1zX2XQKmCQ2Yc+iArweECiS+PEoZPCJ2PfsoBUFfOdpY98W
+9/xK5LbEVIKSdOi7abrtDrysJgzyH14CMHkvSQvZszrJKAa3mbSVayvvd25oassQ
+nF+NX4lWK0NKoupt4NY4pcd9ooEHAvUFlbKXh/gwzSuEugNxsY5giWRm1p0HaWp1
+oWp+56MhyZl39DjWZGE2bA2cb2C5JYJgcx0+QisBpk1mUvR2sh5NWA9xWQ/yU8SR
+ezEeGbJvAgMBAAECgf8E32YqIqznJ9ZwvCIg2FBdc1fHRFJ78Few64VugtCMwVu8
+/fCsDTVzIOHR7dXlK5z7JY1VCURxInql5uwYsfIbcvfdtdt8GNL2tiNs7WHryZRP
+CVgcnCkQ++Koy4RcjbI9FEgQPjPLFK8Hx8JDvG90nSfIVMkp34t3Hs4Hu8IRr5Cq
+dv1PsYzoa2DJb/gsed7fefm7MQ2SGH0r9TrA+rzUx3Vb05z5Wi/AEsCReLaWbplJ
+ARwQCcfvMOAA3CvDkLH2m1J64EqS/vt6fmiE9x8KOU9OZ0FK6pP8evvHpkyaopqN
+59DcNzDvGVyxLtwJ6JoQXLsoZywHIjah+eGu6ikCgYEA1TT2Sgx2E+4NOefPvuMg
+DkT/3EYnXEOufI+rrr01J84gn1IuukC4nfKxel5KgVhMxZHHmB25Kp8G9tdDgVMd
+qHdT5oMZgYAW7+vtQOWf8Px7P80WvN38LlI/v2bngSPnNhrg3MsBzpqnXtOlBFfR
+Zq3PhWkwzCnSvuSbLELszOsCgYEAyGsUjcFFyF/so9FA6rrNplwisUy3ykBO98Ye
+KIa5Dz3UsGqYraqk59MIC5f1BdeYRlVKUNlxcmT089goc0MxwKbqJHJdTVqWrnnK
+o5+jAddv/awbuMYbt+//zM296SyXgi8y6eUt6TN8ss4NztpcxzBNmCrny8s6Xd9K
+OqX9P40CgYBhE4xQivv4dxtuki31LFUcKi6VjRu+1tJLxN7W4S+iwCf6YuEDzRRC
+Vo6YuPYTjrDmBEps6Ju23FG/cqQ57i5C1pJNEsQ6Qqgu9a1BL0xz3YIAutDvjeOU
+874y2BfwpPhRmktoPMbF24T5mEQ6hgHCTsF+bTbavvBGGrDMpmxLoQKBgFjsWeRD
+esja9s4AjEMZuyEzBBmSpoFQYzlAaCUnEXkXwAS+Zxu2+Q/67DjopUiATgn20dBp
+ihJthNmkcN4jVDHcXUrqi0dFCFJFq4lJzTOF+SSednZXP/kuvVqLdtW8eUTD2F06
+2FH+DDfxgOLktAGVBvibINmlRDJeXjsDZwgJAoGAOL28xi4UqaFOu4CbB5BvCIxN
+l0AUk9ZCx4hOwE7BUqG9winPtmwqoXGtMuamlKf7vxONhg68EHFyDuMxL8rgHjrH
+eq8W0CchxrihmoEm6zGtDbrdJ6KkbhyeFJgZPKX8Nff7Nsi7FJyea53CCv3B5aQr
+B+qwsnNEiDoJhgYj+cQ=
+-----END PRIVATE KEY-----
+".to_string(),
+        }
+    }
+
+    #[test]
+    fn test_tls_cert_exists_with_path() {
+        assert!(test_config_with_path().cert_exists());
+    }
+
+    #[test]
+    fn test_tls_cert_exists_with_content() {
+        assert!(test_config_with_content().cert_exists());
+    }
+
+    #[test]
+    fn test_tls_private_key_exists_with_path() {
+        assert!(test_config_with_path().private_key_exists());
+    }
+
+    #[test]
+    fn test_tls_private_key_exists_with_content() {
+        assert!(test_config_with_content().private_key_exists());
     }
 }
