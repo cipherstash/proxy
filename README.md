@@ -25,7 +25,7 @@ CipherStash Proxy can source configuration from a config file, and environment v
 
 Example configuration files are in [`cipherstash-proxy-example.toml`](./cipherstash-proxy-example.toml) and [`./packages/cipherstash-proxy/tests/config/`](./packages/cipherstash-proxy/tests/config/).
 
-This is the minimum configuration in `cipherstash-proxy.toml` required to run Proxy:
+If you are configuring Proxy with a `cipherstash-proxy.toml` file, these are the minimum values required to run Proxy:
 
 ```toml
 [database]
@@ -43,6 +43,18 @@ client_id = "cipherstash-client-id"
 client_key = "cipherstash-client-key"
 ```
 
+If you are configuring Proxy with environment variables, these are the minimum environment variables required to run Proxy:
+
+```bash
+CS_DATABASE__NAME
+CS_DATABASE__USERNAME
+CS_DATABASE__PASSWORD
+CS_AUTH__WORKSPACE_ID
+CS_AUTH__CLIENT_ACCESS_KEY
+CS_ENCRYPT__DATASET_ID
+CS_ENCRYPT__CLIENT_ID
+CS_ENCRYPT__CLIENT_KEY
+```
 
 ### Configuration Options
 
