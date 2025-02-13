@@ -80,7 +80,6 @@ pub struct AuthConfig {
     pub client_access_key: String,
 }
 
-// TODO: Use Paranoid from the primitives crate when that lands
 #[derive(Debug, Deserialize, Clone, PartialEq)]
 pub struct EncryptConfig {
     pub client_id: String,

@@ -36,7 +36,6 @@ impl MessageBuffer {
         self.buffer.is_empty()
     }
 
-    // TODO: Consider treating capacity as the number of columns or memory used
     pub fn at_capacity(&self) -> bool {
         self.buffer.len() >= Self::DEFAULT_RESPONSE_BUFFER_SIZE
     }

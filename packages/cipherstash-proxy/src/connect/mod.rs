@@ -102,8 +102,6 @@ pub async fn connect_with_retry(addr: &str) -> Result<TcpStream, Error> {
 ///     set_nodelay
 ///     set_keepalive
 ///
-/// TODO stay on target
-/// TODO should this be configurable?
 /// Keepalive is not as important without connection pooling timeouts to deal with
 ///
 pub fn configure(stream: &TcpStream) {

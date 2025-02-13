@@ -66,7 +66,6 @@ pub enum CastAs {
     JsonB,
 }
 
-// TODO: list instead of struct here/object in DB?
 #[derive(Debug, Deserialize, Serialize, Clone, Default, PartialEq)]
 pub struct Indexes {
     #[serde(rename = "ore")]

@@ -46,8 +46,6 @@ where
     }
 
     ///
-    /// TODO: fix the structure once implementation stabilizes
-    ///
     /// An Execute phase is always terminated by the appearance of exactly one of these messages:
     ///     CommandComplete
     ///     EmptyQueryResponse
@@ -86,7 +84,6 @@ where
 
         match code.into() {
             BackendCode::DataRow => {
-                // TODO: Not sure of the control flow here
                 // Encrypted DataRows are added to the buffer and we return early
                 // Otherwise, continue and write
                 if self.data_row_handler(&bytes).await? {

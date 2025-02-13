@@ -8,7 +8,6 @@ use tokio::signal::unix::{signal, SignalKind};
 use tokio_util::task::TaskTracker;
 use tracing::{error, info, warn};
 
-// TODO: Accept command line arguments for config file path
 #[tokio::main]
 async fn main() {
     let config_file = "cipherstash-proxy.toml";
@@ -206,9 +205,6 @@ async fn reload_config(
     };
 
     let new_encrypt = init(new_config).await;
-
-    // TODO: if it is not too hard to implement PartialEq for Encrypt, it would be great to check for changes
-    // and skip reloading if nothing has changed
 
     // Explicit drop needed here to free the network resources before binding if using the same address & port
     std::mem::drop(listener);
