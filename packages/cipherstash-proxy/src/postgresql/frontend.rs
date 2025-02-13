@@ -169,14 +169,14 @@ where
         }
 
         let typed_statement = eql_mapper::type_check(self.context.get_table_resolver(), &statement);
-        if let Err(error) = typed_statement {
+        if let Err(err) = typed_statement {
             debug!(target: MAPPER,
                 client_id = self.context.client_id,
-                error = ?error
+                error = err.to_string()
             );
 
             if self.encrypt.config.enable_mapping_errors() {
-                return Err(MappingError::StatementCouldNotBeTypeChecked(error.to_string()).into());
+                return Err(MappingError::StatementCouldNotBeTypeChecked(err.to_string()).into());
             } else {
                 return Ok(None);
             }
@@ -319,14 +319,14 @@ where
         }
 
         let typed_statement = eql_mapper::type_check(self.context.get_table_resolver(), &statement);
-        if let Err(ref error) = typed_statement {
+        if let Err(ref err) = typed_statement {
             debug!(target: MAPPER,
                 client_id = self.context.client_id,
-                error = ?error
+                error = err.to_string()
             );
             return if self.encrypt.config.enable_mapping_errors() {
                 Err(MappingError::StatementCouldNotBeTypeChecked(
-                    error.to_string(),
+                    err.to_string(),
                 ))?
             } else {
                 Ok(None)
@@ -639,7 +639,7 @@ fn literals_to_plaintext(
                     msg = "Could not convert literal value",
                     value = ?val,
                     cast_type = ?col.cast_type(),
-                    err = ?err
+                    error = err.to_string()
                 );
                 MappingError::InvalidParameter(col.to_owned())
             })

@@ -42,7 +42,7 @@ pub async fn database(config: &DatabaseConfig) -> Result<Client, Error> {
 
     tokio::spawn(async move {
         if let Err(err) = connection.await {
-            error!(msg = "Connection error", error = ?err);
+            error!(msg = "Connection error", error = err.to_string());
         }
     });
     Ok(client)
@@ -60,7 +60,11 @@ pub async fn bind_with_retry(server: &ServerConfig) -> TcpListener {
             }
             Err(err) => {
                 if retry_count > MAX_RETRY_COUNT {
-                    error!(msg = "Error binding connection", retries = MAX_RETRY_COUNT, error = ?err);
+                    error!(
+                        msg = "Error binding connection",
+                        retries = MAX_RETRY_COUNT,
+                        error = err.to_string()
+                    );
                     std::process::exit(exitcode::CONFIG);
                 }
             }
@@ -84,7 +88,7 @@ pub async fn connect_with_retry(addr: &str) -> Result<TcpStream, Error> {
             }
             Err(err) => {
                 if retry_count > MAX_RETRY_COUNT {
-                    error!(msg = "Could not connect to database", retries = ?retry_count, error = ?err);
+                    error!(msg = "Could not connect to database", retries = ?retry_count, error = err.to_string());
                     return Err(Error::DatabaseConnection);
                 }
             }
@@ -108,7 +112,10 @@ pub fn configure(stream: &TcpStream) {
     let sock_ref = socket2::SockRef::from(&stream);
 
     stream.set_nodelay(true).unwrap_or_else(|err| {
-        warn!(msg = "Error configuring nodelay for connection", error = ?err);
+        warn!(
+            msg = "Error configuring nodelay for connection",
+            error = err.to_string()
+        );
     });
 
     match sock_ref.set_keepalive(true) {
@@ -121,12 +128,18 @@ pub fn configure(stream: &TcpStream) {
             match sock_ref.set_tcp_keepalive(params) {
                 Ok(_) => (),
                 Err(err) => {
-                    warn!(msg = "Error configuring keepalive for connection", error = ?err);
+                    warn!(
+                        msg = "Error configuring keepalive for connection",
+                        error = err.to_string()
+                    );
                 }
             }
         }
         Err(err) => {
-            warn!(msg = "Error configuring connection", error = ?err);
+            warn!(
+                msg = "Error configuring connection",
+                error = err.to_string()
+            );
         }
     }
 }

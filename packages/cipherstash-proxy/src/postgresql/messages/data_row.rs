@@ -165,7 +165,7 @@ impl From<&DataColumn> for Option<eql::Ciphertext> {
             Some(bytes) => match serde_json::from_slice(bytes) {
                 Ok(ct) => Some(ct),
                 Err(err) => {
-                    debug!(target: MAPPER, msg = "Could not convert DataColumn to Ciphertext", error = ?err);
+                    debug!(target: MAPPER, msg = "Could not convert DataColumn to Ciphertext", error = err.to_string());
                     None
                 }
             },

@@ -225,7 +225,7 @@ async fn init_cipher(config: &TandemConfig) -> Result<ScopedCipher, Error> {
             Ok(cipher)
         }
         Err(err) => {
-            debug!(target: DEVELOPMENT, msg =  "Error initializing ZeroKMS ScopedCipher", error = ?err);
+            debug!(target: DEVELOPMENT, msg =  "Error initializing ZeroKMS ScopedCipher", error = err.to_string());
             Err(err.into())
         }
     }

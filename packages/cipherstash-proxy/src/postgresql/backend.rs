@@ -143,7 +143,7 @@ where
     ///
     fn error_response_handler(&mut self, bytes: &BytesMut) -> Result<(), Error> {
         let error_response = ErrorResponse::try_from(bytes)?;
-        error!(error = ?error_response);
+        error!(msg = "PostgreSQL Error", error = ?error_response);
         warn!("Error response originates in the PostgreSQL database.");
         Ok(())
     }

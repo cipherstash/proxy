@@ -29,11 +29,14 @@ impl SchemaManager {
     pub async fn reload(&self) {
         match load_schema_with_retry(&self.config).await {
             Ok(reloaded) => {
-                debug!(target = SCHEMA, msg = "Reloaded database schema");
+                debug!(target: SCHEMA, msg = "Reloaded database schema");
                 self.schema.swap(Arc::new(reloaded));
             }
             Err(err) => {
-                warn!(msg = "Error reloading Encrypt configuration", error = ?err);
+                warn!(
+                    msg = "Error reloading Encrypt configuration",
+                    error = err.to_string()
+                );
             }
         };
     }
@@ -65,7 +68,10 @@ async fn init_reloader(config: DatabaseConfig) -> Result<SchemaManager, Error> {
                     schema_ref.swap(Arc::new(reloaded));
                 }
                 Err(err) => {
-                    warn!(msg = "Error loading Encrypt configuration", error = ?err);
+                    warn!(
+                        msg = "Error loading Encrypt configuration",
+                        error = err.to_string()
+                    );
                 }
             }
         }

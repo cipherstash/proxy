@@ -106,7 +106,10 @@ async fn init(mut config: TandemConfig) -> Encrypt {
     match config.server.server_name() {
         Ok(_) => {}
         Err(err) => {
-            error!(msg = "Could not start CipherStash proxy", error = ?err);
+            error!(
+                msg = "Could not start CipherStash proxy",
+                error = err.to_string()
+            );
             std::process::exit(exitcode::CONFIG);
         }
     }
@@ -144,7 +147,10 @@ async fn init(mut config: TandemConfig) -> Encrypt {
                     info!(msg = "Server Transport Layer Security (TLS) configuration validated");
                 }
                 Err(err) => {
-                    error!(msg = "Server Transport Layer Security (TLS) configuration error", error = ?err);
+                    error!(
+                        msg = "Server Transport Layer Security (TLS) configuration error",
+                        error = err.to_string()
+                    );
                     std::process::exit(exitcode::CONFIG);
                 }
             }
@@ -199,7 +205,10 @@ async fn reload_config(
     let new_config = match TandemConfig::load(config_file) {
         Ok(config) => config,
         Err(err) => {
-            warn!(msg = "Configuration could not be reloaded: {}", error = ?err);
+            warn!(
+                msg = "Configuration could not be reloaded: {}",
+                error = err.to_string()
+            );
             return (listener, encrypt);
         }
     };

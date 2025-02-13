@@ -54,7 +54,10 @@ async fn init_reloader(config: DatabaseConfig) -> Result<EncryptConfigManager, E
                     warn!(msg = "See https://github.com/cipherstash/encrypt-query-language");
                 }
                 _ => {
-                    error!(msg = "Error loading Encrypt configuration", error = ?err);
+                    error!(
+                        msg = "Error loading Encrypt configuration",
+                        error = err.to_string()
+                    );
                     return Err(err);
                 }
             }
@@ -86,11 +89,14 @@ async fn init_reloader(config: DatabaseConfig) -> Result<EncryptConfigManager, E
 
             match load_encrypt_config_with_retry(&config_ref).await {
                 Ok(reloaded) => {
-                    debug!(target = DEVELOPMENT, msg = "Reloaded Encrypt configuration");
+                    debug!(target: DEVELOPMENT, msg = "Reloaded Encrypt configuration");
                     dataset_ref.swap(Arc::new(reloaded));
                 }
                 Err(err) => {
-                    warn!(msg = "Error reloading Encrypt configuration", error = ?err);
+                    warn!(
+                        msg = "Error reloading Encrypt configuration",
+                        error = err.to_string()
+                    );
                 }
             }
         }
@@ -126,7 +132,7 @@ async fn load_encrypt_config_with_retry(
                         DEVELOPMENT,
                         msg = "Encrypt configuration could not beloaded",
                         retries = retry_count,
-                        error = ?err
+                        error = err.to_string()
                     );
                     return Err(err);
                 }
