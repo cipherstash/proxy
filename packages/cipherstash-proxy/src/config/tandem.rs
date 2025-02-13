@@ -223,6 +223,10 @@ impl TandemConfig {
 
                         ConfigError::MissingParameter { name }
                     }
+                    s if s.contains("does not have variant constructor") => {
+                        let (name, value) = extract_invalid_field(s);
+                        ConfigError::InvalidParameter { name, value }
+                    }
                     _ => err.into(),
                 },
                 _ => err.into(),
@@ -261,6 +265,33 @@ fn extract_field_name(input: &str) -> Option<String> {
     let re = Regex::new(r"`(\w+)`").unwrap();
     re.captures(input)
         .and_then(|caps| caps.get(1).map(|m| m.as_str().to_string()))
+}
+
+///
+/// Extracts a field name (if present) from a config::ConfigError::Message
+/// This is called in `build` if a ConfigError message contains the string `does not have variant constructor`
+///
+/// Error string is `enum {name} does not have variant constructor {value}`
+///
+fn extract_invalid_field(input: &str) -> (String, String) {
+    let words = input.split(" ").collect::<Vec<_>>();
+
+    let default_name = "unknown".to_string();
+    let default_val = "".to_string();
+
+    if !input.starts_with("enum") {
+        return (default_name, default_val);
+    }
+
+    let name = words
+        .get(1)
+        .map_or(default_name.to_owned(), |w| w.to_string());
+
+    let value = words
+        .last()
+        .map_or(default_val.to_owned(), |w| w.to_string());
+
+    (name, value)
 }
 
 impl Default for ServerConfig {
@@ -471,7 +502,7 @@ mod tests {
     }
 
     #[test]
-    fn log_config_is_case_insensitive() {
+    fn log_config_is_almost_case_insensitive() {
         temp_env::with_vars([("CS_LOG__LEVEL", Some("error"))], || {
             let config = TandemConfig::build("tests/config/cipherstash-proxy-test.toml").unwrap();
             assert_eq!(config.log.level, LogLevel::Error);
@@ -490,6 +521,13 @@ mod tests {
         temp_env::with_vars([("CS_LOG__FORMAT", Some("Pretty"))], || {
             let config = TandemConfig::build("tests/config/cipherstash-proxy-test.toml").unwrap();
             assert_eq!(config.log.format, LogFormat::Pretty);
+        });
+
+        temp_env::with_vars([("CS_LOG__FORMAT", Some("dEbUG"))], || {
+            let config = TandemConfig::build("tests/config/cipherstash-proxy-test.toml");
+
+            assert!(config.is_err());
+            assert!(matches!(config.unwrap_err(), Error::Config(_)));
         });
     }
 }

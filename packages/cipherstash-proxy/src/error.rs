@@ -95,6 +95,9 @@ pub enum ConfigError {
     #[error("Server host {name} is not a valid server name")]
     InvalidServerName { name: String },
 
+    #[error("Invalid {name}: {value}")]
+    InvalidParameter { name: String, value: String },
+
     #[error("Expected an active Encrypt configuration")]
     MissingActiveEncryptConfig,
 
