@@ -11,11 +11,11 @@ Behind the scenes, it uses the [Encrypt Query Language](https://github.com/ciphe
 
 ## Configuration
 
-At a high level, CipherStash Proxy requires
+To run, CipherStash Proxy needs to know:
 
-- a port to run on
-- connection settings for the target postgres database
-- CipherStash credentials
+- What port to run on
+- How to connect to the target PostgreSQL database
+- Secrets to authenticate to CipherStash
 
 Configuration is via file and/or Environment Variables.
 Environment variables will be used if the the configuration file is not present, and override any configuration values specified in the file.
