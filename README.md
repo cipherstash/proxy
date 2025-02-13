@@ -102,6 +102,10 @@ host = "0.0.0.0"
 # Env: CS_DATABASE__PORT
 name = "5432"
 
+# Database name
+# Env: CS_DATABASE__NAME
+name = "database"
+
 # Database username
 # Env: CS_DATABASE__USERNAME
 username = "username"
