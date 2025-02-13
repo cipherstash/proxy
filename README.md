@@ -17,13 +17,17 @@ To run, CipherStash Proxy needs to know:
 - How to connect to the target PostgreSQL database
 - Secrets to authenticate to CipherStash
 
-Configuration is via file and/or Environment Variables.
-Environment variables will be used if the the configuration file is not present, and override any configuration values specified in the file.
+CipherStash Proxy can source configuration from a config file, and environment variables:
 
-Example configurations are in `cipherstash-proxy-example.toml` and in `./packages/cipherstash-proxy/tests/config/`
+- If `cipherstash-proxy.toml` is present in the current working directory, Proxy will read its config from that file
+- If `cipherstash-proxy.toml` is not present, Proxy will look up environment variables to configure itself
+- If both `cipherstash-proxy.toml` and environment variables are present, Proxy will use `cipherstash-proxy.toml` as the base configuration, and override it with any environment variables that are set
 
-Minimally viable configuration
-```
+Example configuration files are in [`cipherstash-proxy-example.toml`](./cipherstash-proxy-example.toml) and [`./packages/cipherstash-proxy/tests/config/`](./packages/cipherstash-proxy/tests/config/).
+
+This is the minimum configuration in `cipherstash-proxy.toml` required to run Proxy:
+
+```toml
 [database]
 name = "cipherstash"
 username = "cipherstash"
