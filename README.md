@@ -155,24 +155,24 @@ private_key = "./server.key"
 
 
 [auth]
-# Cipherstash Workspace Id
+# CipherStash Workspace ID
 # Env: CS_AUTH__WORKSPACE_ID
 workspace_id = "cipherstash-workspace-id"
 
-# Cipherstash Client Access Key
+# CipherStash Client Access Key
 # Env: CS_AUTH__CLIENT_ACCESS_KEY
 client_access_key = "cipherstash-client-access-key"
 
 [encrypt]
-# Cipherstash Dataset Id
+# CipherStash Dataset ID
 # Env: CS_ENCRYPT__DATASET_ID
 dataset_id = "cipherstash-dataset-id"
 
-# Cipherstash Client Id
+# CipherStash Client ID
 # Env: CS_ENCRYPT__CLIENT_ID
 client_id = "cipherstash-client-id"
 
-# Cipherstash Client Key
+# CipherStash Client Key
 # Env: CS_ENCRYPT__CLIENT_KEY
 client_key = "cipherstash-client-key"
 
