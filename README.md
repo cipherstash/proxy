@@ -165,15 +165,15 @@ client_access_key = "cipherstash-client-access-key"
 
 [encrypt]
 # Cipherstash Dataset Id
-# Env: CS_AUTH__DATASET_ID
+# Env: CS_ENCRYPT__DATASET_ID
 dataset_id = "cipherstash-dataset-id"
 
 # Cipherstash Client Id
-# Env: CS__AUTH__cipherstash__CLIENT__ID
+# Env: CS_ENCRYPT__CLIENT_ID
 client_id = "cipherstash-client-id"
 
 # Cipherstash Client Key
-# Env: CS_AUTH__CLIENT_KEY
+# Env: CS_ENCRYPT__CLIENT_KEY
 client_key = "cipherstash-client-key"
 
 
