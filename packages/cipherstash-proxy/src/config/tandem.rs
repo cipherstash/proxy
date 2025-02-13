@@ -111,44 +111,66 @@ pub struct LogConfig {
     pub output: LogOutput,
 
     #[serde(default = "LogConfig::default_log_level")]
-    pub level: String,
+    pub level: LogLevel,
 
     #[serde(default = "LogConfig::default_log_level")]
-    pub development_level: String,
+    pub development_level: LogLevel,
 
     #[serde(default = "LogConfig::default_log_level")]
-    pub authentication_level: String,
+    pub authentication_level: LogLevel,
 
     #[serde(default = "LogConfig::default_log_level")]
-    pub context_level: String,
+    pub context_level: LogLevel,
 
     #[serde(default = "LogConfig::default_log_level")]
-    pub encrypt_level: String,
+    pub encrypt_level: LogLevel,
 
     #[serde(default = "LogConfig::default_log_level")]
-    pub keyset_level: String,
+    pub keyset_level: LogLevel,
 
     #[serde(default = "LogConfig::default_log_level")]
-    pub protocol_level: String,
+    pub protocol_level: LogLevel,
 
     #[serde(default = "LogConfig::default_log_level")]
-    pub mapper_level: String,
+    pub mapper_level: LogLevel,
 
     #[serde(default = "LogConfig::default_log_level")]
-    pub schema_level: String,
+    pub schema_level: LogLevel,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[serde(rename_all = "lowercase")]
 pub enum LogFormat {
+    #[serde(alias = "Pretty", alias = "pretty", alias = "PRETTY")]
     Pretty,
+    #[serde(alias = "Structured", alias = "structured", alias = "STRUCTURED")]
     Structured,
+    #[serde(alias = "Text", alias = "text", alias = "TEXT")]
     Text,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[serde(rename_all = "lowercase")]
 pub enum LogOutput {
+    #[serde(alias = "Stdout", alias = "stdout", alias = "STDOUT")]
     Stdout,
+    #[serde(alias = "Stderr", alias = "stderr", alias = "STDERR")]
     Stderr,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum LogLevel {
+    #[serde(alias = "Error", alias = "error", alias = "ERROR")]
+    Error,
+    #[serde(alias = "Warn", alias = "warn", alias = "WARN")]
+    Warn,
+    #[serde(alias = "Info", alias = "info", alias = "INFO")]
+    Info,
+    #[serde(alias = "Debug", alias = "debug", alias = "DEBUG")]
+    Debug,
+    #[serde(alias = "Trace", alias = "trace", alias = "TRACE")]
+    Trace,
 }
 
 /// Config defaults to a file called `tandem` in the current directory.
@@ -338,6 +360,19 @@ impl TlsConfig {
     }
 }
 
+impl Display for LogLevel {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = match self {
+            LogLevel::Error => "error",
+            LogLevel::Warn => "warn",
+            LogLevel::Info => "info",
+            LogLevel::Debug => "debug",
+            LogLevel::Trace => "trace",
+        };
+        write!(f, "{}", s)
+    }
+}
+
 impl Default for LogConfig {
     fn default() -> Self {
         LogConfig {
@@ -358,20 +393,20 @@ impl Default for LogConfig {
 }
 
 impl LogConfig {
-    pub fn with_level(level: &str) -> Self {
+    pub fn with_level(level: LogLevel) -> Self {
         LogConfig {
             format: LogConfig::default_log_format(),
             output: LogConfig::default_log_output(),
             ansi_enabled: LogConfig::default_ansi_enabled(),
-            level: level.to_owned(),
-            development_level: level.to_owned(),
-            authentication_level: level.to_owned(),
-            context_level: level.to_owned(),
-            encrypt_level: level.to_owned(),
-            keyset_level: level.to_owned(),
-            protocol_level: level.to_owned(),
-            mapper_level: level.to_owned(),
-            schema_level: level.to_owned(),
+            level,
+            development_level: level,
+            authentication_level: level,
+            context_level: level,
+            encrypt_level: level,
+            keyset_level: level,
+            protocol_level: level,
+            mapper_level: level,
+            schema_level: level,
         }
     }
 
@@ -391,8 +426,8 @@ impl LogConfig {
         LogOutput::Stdout
     }
 
-    pub fn default_log_level() -> String {
-        "info".into()
+    pub fn default_log_level() -> LogLevel {
+        LogLevel::Info
     }
 }
 
@@ -400,7 +435,10 @@ impl LogConfig {
 mod tests {
     use uuid::Uuid;
 
-    use crate::{config::TandemConfig, error::Error};
+    use crate::{
+        config::{LogFormat, LogLevel, LogOutput, TandemConfig},
+        error::Error,
+    };
 
     const CS_PREFIX: &str = "CS_TEST";
 
@@ -426,6 +464,29 @@ mod tests {
 
             assert!(config.is_err());
             assert!(matches!(config.unwrap_err(), Error::Config(_)));
+        });
+    }
+
+    #[test]
+    fn log_config_is_case_insensitive() {
+        temp_env::with_vars([("CS_LOG__LEVEL", Some("error"))], || {
+            let config = TandemConfig::build("tests/config/cipherstash-proxy-test.toml").unwrap();
+            assert_eq!(config.log.level, LogLevel::Error);
+        });
+
+        temp_env::with_vars([("CS_LOG__LEVEL", Some("WARN"))], || {
+            let config = TandemConfig::build("tests/config/cipherstash-proxy-test.toml").unwrap();
+            assert_eq!(config.log.level, LogLevel::Warn);
+        });
+
+        temp_env::with_vars([("CS_LOG__OUTPUT", Some("stderr"))], || {
+            let config = TandemConfig::build("tests/config/cipherstash-proxy-test.toml").unwrap();
+            assert_eq!(config.log.output, LogOutput::Stderr);
+        });
+
+        temp_env::with_vars([("CS_LOG__FORMAT", Some("Pretty"))], || {
+            let config = TandemConfig::build("tests/config/cipherstash-proxy-test.toml").unwrap();
+            assert_eq!(config.log.format, LogFormat::Pretty);
         });
     }
 }

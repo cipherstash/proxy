@@ -49,6 +49,8 @@ pub fn set_format(
 
 #[cfg(test)]
 mod tests {
+    use crate::config::LogLevel;
+
     use super::*;
     use std::sync::{Arc, Mutex};
     use std::{
@@ -82,7 +84,7 @@ mod tests {
     fn test_log_levels() {
         let make_writer = MockMakeWriter::default();
 
-        let config = LogConfig::with_level("warn");
+        let config = LogConfig::with_level(LogLevel::Warn);
 
         let subscriber =
             subscriber::builder(&config).with_writer(BoxMakeWriter::new(make_writer.clone()));
@@ -114,15 +116,15 @@ mod tests {
             format: LogConfig::default_log_format(),
             output: LogConfig::default_log_output(),
             ansi_enabled: LogConfig::default_ansi_enabled(),
-            level: "info".into(),
-            development_level: "info".into(),
-            authentication_level: "debug".into(),
-            context_level: "error".into(),
-            encrypt_level: "error".into(),
-            keyset_level: "trace".into(),
-            protocol_level: "info".into(),
-            mapper_level: "info".into(),
-            schema_level: "info".into(),
+            level: LogLevel::Info,
+            development_level: LogLevel::Info,
+            authentication_level: LogLevel::Debug,
+            context_level: LogLevel::Error,
+            encrypt_level: LogLevel::Error,
+            keyset_level: LogLevel::Trace,
+            protocol_level: LogLevel::Info,
+            mapper_level: LogLevel::Info,
+            schema_level: LogLevel::Info,
         };
 
         let subscriber =
@@ -184,7 +186,7 @@ mod tests {
     fn test_log_format_structured() {
         let make_writer = MockMakeWriter::default();
 
-        let mut config = LogConfig::with_level("info");
+        let mut config = LogConfig::with_level(LogLevel::Info);
         config.format = LogFormat::Structured;
 
         let subscriber =

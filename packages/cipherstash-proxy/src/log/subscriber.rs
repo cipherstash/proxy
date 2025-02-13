@@ -1,4 +1,4 @@
-use crate::config::{LogConfig, LogOutput};
+use crate::config::{LogConfig, LogLevel, LogOutput};
 use crate::log::{AUTHENTICATION, CONTEXT, DEVELOPMENT, ENCRYPT, KEYSET, MAPPER, PROTOCOL, SCHEMA};
 use tracing_subscriber::filter::EnvFilter;
 use tracing_subscriber::fmt::format::{DefaultFields, Format};
@@ -19,17 +19,17 @@ fn log_targets() -> Vec<&'static str> {
     ]
 }
 
-fn log_level_for<'a>(config: &'a LogConfig, target: &str) -> &'a str {
+fn log_level_for(config: &LogConfig, target: &str) -> LogLevel {
     match target {
-        DEVELOPMENT => &config.development_level,
-        AUTHENTICATION => &config.authentication_level,
-        CONTEXT => &config.context_level,
-        ENCRYPT => &config.encrypt_level,
-        KEYSET => &config.keyset_level,
-        PROTOCOL => &config.protocol_level,
-        MAPPER => &config.mapper_level,
-        SCHEMA => &config.schema_level,
-        _ => &config.level,
+        DEVELOPMENT => config.development_level,
+        AUTHENTICATION => config.authentication_level,
+        CONTEXT => config.context_level,
+        ENCRYPT => config.encrypt_level,
+        KEYSET => config.keyset_level,
+        PROTOCOL => config.protocol_level,
+        MAPPER => config.mapper_level,
+        SCHEMA => config.schema_level,
+        _ => config.level,
     }
 }
 
@@ -38,7 +38,7 @@ pub fn builder(
 ) -> SubscriberBuilder<DefaultFields, Format, EnvFilter, BoxMakeWriter> {
     let log_level = config.level.to_owned();
 
-    let mut env_filter: EnvFilter = EnvFilter::builder().parse_lossy(&log_level);
+    let mut env_filter: EnvFilter = EnvFilter::builder().parse_lossy(log_level.to_string());
 
     let mut debug = is_debug(&log_level);
 
@@ -46,7 +46,7 @@ pub fn builder(
         let level = log_level_for(config, target);
 
         // If any level is debug, enable debug mode
-        if is_debug(level) {
+        if is_debug(&level) {
             debug = true;
         }
 
@@ -73,6 +73,6 @@ pub fn builder(
     builder
 }
 
-fn is_debug(level: &str) -> bool {
-    level.to_uppercase() == "DEBUG" || level.to_uppercase() == "TRACE"
+fn is_debug(level: &LogLevel) -> bool {
+    matches!(level, LogLevel::Debug | LogLevel::Trace)
 }

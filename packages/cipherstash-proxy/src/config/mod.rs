@@ -8,7 +8,8 @@ pub use encrypt_config::EncryptConfig;
 pub use schema_manager::SchemaManager;
 
 pub use tandem::{
-    DatabaseConfig, LogConfig, LogFormat, LogOutput, ServerConfig, TandemConfig, TlsConfig,
+    DatabaseConfig, LogConfig, LogFormat, LogLevel, LogOutput, ServerConfig, TandemConfig,
+    TlsConfig,
 };
 
 pub const CS_PREFIX: &str = "CS";
