@@ -223,6 +223,10 @@ impl std::ops::Deref for Name {
 /// We are not worried about an exhaustive check here
 ///
 pub fn maybe_json(bytes: &BytesMut) -> bool {
+    if bytes.is_empty() {
+        return false;
+    }
+
     let b = bytes.as_ref()[0];
     b == b'{'
 }
