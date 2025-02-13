@@ -79,7 +79,7 @@ port = "6432"
 # Optional
 # Default: `false`
 # Env: CS_SERVER__REQUIRE_TLS
-require_tls = "false",
+require_tls = "false"
 
 # Shutdown timeout in ms
 # Sets how long to wait for connections to drain on shutdown
