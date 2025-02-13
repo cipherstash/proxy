@@ -87,12 +87,6 @@ host = "0.0.0.0"
 # Optional
 # Default: `5432`
 # Env: CS_DATABASE__PORT
-port = "5432"
-
-# Database host post
-# Optional
-# Default: `5432`
-# Env: CS_DATABASE__PORT
 name = "5432"
 
 # Database username
