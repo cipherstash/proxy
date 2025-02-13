@@ -58,6 +58,7 @@ CS_ENCRYPT__CLIENT_KEY
 
 ### Configuration Options
 
+These are all the configuration options available for Proxy:
 
 ```toml
 
