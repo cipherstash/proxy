@@ -76,7 +76,7 @@ impl AsyncStream {
                     _ => {
                         debug!(
                             target: AUTHENTICATION,
-                            "Missing certificates, ChannelBinding is unsupported"
+                            msg = "Missing certificates, ChannelBinding is unsupported"
                         );
                         ChannelBinding::unsupported()
                     }

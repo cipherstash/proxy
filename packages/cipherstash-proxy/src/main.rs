@@ -2,12 +2,11 @@ use cipherstash_proxy::config::TandemConfig;
 use cipherstash_proxy::connect::{self, AsyncStream};
 use cipherstash_proxy::encrypt::Encrypt;
 use cipherstash_proxy::error::Error;
-use cipherstash_proxy::log::DEVELOPMENT;
 use cipherstash_proxy::{log, postgresql as pg, tls};
 use tokio::net::TcpListener;
 use tokio::signal::unix::{signal, SignalKind};
 use tokio_util::task::TaskTracker;
-use tracing::{debug, error, info, warn};
+use tracing::{error, info, warn};
 
 // TODO: Accept command line arguments for config file path
 #[tokio::main]
@@ -24,8 +23,6 @@ async fn main() {
 
     log::init(config.log.clone());
 
-    debug!(target: DEVELOPMENT,"Log config {:?}", config.log);
-
     let shutdown_timeout = &config.server.shutdown_timeout();
 
     let mut encrypt = init(config).await;
@@ -38,16 +35,16 @@ async fn main() {
     loop {
         tokio::select! {
             _ = sigint() => {
-                info!("Received SIGINT");
+                info!(msg = "Received SIGINT");
                 break;
             },
             _ = sighup() => {
-                info!("Received SIGHUP. Reloading configuration");
+                info!(msg = "Received SIGHUP. Reloading configuration");
                 (listener, encrypt) = reload_config(listener, config_file, encrypt).await;
-                info!("Finished reloading configuration");
+                info!(msg = "Reloaded configuration");
             },
             _ = sigterm() => {
-                info!("Received SIGTERM");
+                info!(msg = "Received SIGTERM");
                 break;
             },
             Ok(client_stream) = AsyncStream::accept(&listener) => {
@@ -61,18 +58,18 @@ async fn main() {
 
                     match pg::handler(client_stream, encrypt, client_id).await {
                         Ok(_) => (),
-                        Err(e) => match e {
+                        Err(err) => match err {
                             Error::ConnectionClosed => {
-                                info!("Database connection closed by client");
+                                info!(msg = "Database connection closed by client");
                             }
                             Error::CancelRequest => {
-                                info!("Database connection closed after cancel request");
+                                info!(msg = "Database connection closed after cancel request");
                             }
                             Error::ConnectionTimeout(_) => {
-                                warn!("Database connection timeout");
+                                warn!(msg = "Database connection timeout");
                             }
                             _ => {
-                                error!("Error {:?}", e);
+                                error!(msg = "Error {:?}", error = ?err);
                             }
                         },
                     }
@@ -81,17 +78,20 @@ async fn main() {
         }
     }
 
-    info!("Shutting down CipherStash Proxy");
+    info!(msg = "Shutting down CipherStash Proxy");
 
     // Close the listener
     drop(listener);
 
     tracker.close();
 
-    info!("Waiting for clients");
+    info!(msg = "Waiting for clients");
 
     if (tokio::time::timeout(*shutdown_timeout, tracker.wait()).await).is_err() {
-        warn!("Terminated {} client connections", tracker.len());
+        warn!(
+            msg = "Terminated {count} client connections",
+            count = tracker.len()
+        );
     }
 }
 
@@ -101,7 +101,7 @@ async fn main() {
 ///
 async fn init(mut config: TandemConfig) -> Encrypt {
     if config.encrypt.dataset_id.is_none() {
-        info!("Encrypt using default dataset");
+        info!(msg = "Encrypt using default dataset");
     }
 
     match config.server.server_name() {
@@ -113,57 +113,62 @@ async fn init(mut config: TandemConfig) -> Encrypt {
     }
 
     if !config.database.with_tls_verification {
-        warn!("Bypassing Transport Layer Security (TLS) verification for database connections");
+        warn!(
+            msg = "Bypassing Transport Layer Security (TLS) verification for database connections"
+        );
     }
 
     if config.disable_mapping() {
-        warn!("Mapping is not enabled");
+        warn!(msg = "Mapping is not enabled");
     }
 
     match config.tls {
         Some(ref mut tls) => {
             if !tls.cert_exists() {
                 error!(
-                    "Transport Layer Security (TLS) Certificate not found: {}",
-                    tls.certificate
+                    msg = "Transport Layer Security (TLS) Certificate not found",
+                    certificate = ?tls.certificate
                 );
                 std::process::exit(exitcode::CONFIG);
             }
 
             if !tls.private_key_exists() {
                 error!(
-                    "Transport Layer Security (TLS) Private key not found: {}",
-                    tls.private_key
+                    msg = "Transport Layer Security (TLS) Private key not found",
+                    private_key = ?tls.private_key
                 );
                 std::process::exit(exitcode::CONFIG);
             };
 
             match tls::configure_server(tls) {
                 Ok(_) => {
-                    info!("Server Transport Layer Security (TLS) configuration validated");
+                    info!(msg = "Server Transport Layer Security (TLS) configuration validated");
                 }
                 Err(err) => {
-                    error!("Server Transport Layer Security (TLS) configuration error");
-                    error!("{}", err);
+                    error!(msg = "Server Transport Layer Security (TLS) configuration error", error = ?err);
                     std::process::exit(exitcode::CONFIG);
                 }
             }
         }
         None => {
-            warn!("Transport Layer Security (TLS) is not configured");
-            warn!("Listening on an unsafe connection");
+            warn!(msg = "Transport Layer Security (TLS) is not configured");
+            warn!(msg = "Listening on an unsafe connection");
         }
     }
 
     match Encrypt::init(config).await {
         Ok(encrypt) => {
-            info!("Connected to CipherStash Encrypt");
-            info!("Connected to database: {}", encrypt.config.database);
+            info!(msg = "Connected to CipherStash Encrypt");
+            info!(
+                msg = "Database connected",
+                database = encrypt.config.database.name,
+                host = encrypt.config.database.host,
+                port = encrypt.config.database.port,
+            );
             encrypt
         }
         Err(err) => {
-            error!("Could not start CipherStash proxy");
-            debug!(err = ?err);
+            error!(msg = "Could not start CipherStash proxy", error = ?err);
             std::process::exit(exitcode::UNAVAILABLE);
         }
     }
@@ -192,7 +197,7 @@ async fn reload_config(
     let new_config = match TandemConfig::load(config_file) {
         Ok(config) => config,
         Err(err) => {
-            warn!("Configuration could not be reloaded: {}", err);
+            warn!(msg = "Configuration could not be reloaded: {}", error = ?err);
             return (listener, encrypt);
         }
     };

@@ -99,7 +99,7 @@ where
             BackendCode::CommandComplete
             | BackendCode::EmptyQueryResponse
             | BackendCode::PortalSuspended => {
-                debug!(target: DEVELOPMENT, client_id = self.context.client_id, src = "rewrite", "CommandComplete | EmptyQueryResponse | PortalSuspended");
+                debug!(target: DEVELOPMENT, client_id = self.context.client_id, msg = "CommandComplete | EmptyQueryResponse | PortalSuspended");
                 self.flush().await?;
                 self.context.complete_execution();
             }
@@ -146,7 +146,7 @@ where
     ///
     fn error_response_handler(&mut self, bytes: &BytesMut) -> Result<(), Error> {
         let error_response = ErrorResponse::try_from(bytes)?;
-        error!("{}", error_response);
+        error!(error = ?error_response);
         warn!("Error response originates in the PostgreSQL database.");
         Ok(())
     }
@@ -161,7 +161,7 @@ where
     async fn buffer(&mut self, data_row: DataRow) -> Result<(), Error> {
         self.buffer.push(data_row);
         if self.buffer.at_capacity() {
-            debug!(target: DEVELOPMENT, client_id = self.context.client_id, "Flush message buffer");
+            debug!(target: DEVELOPMENT, client_id = self.context.client_id, msg = "Flush message buffer");
             self.flush().await?;
         }
         Ok(())
@@ -173,7 +173,7 @@ where
     /// Flushes any nessages in the buffer before writing the message
     ///
     pub async fn write(&mut self, bytes: BytesMut) -> Result<(), Error> {
-        debug!(target: DEVELOPMENT, client_id = self.context.client_id, src = "write");
+        debug!(target: DEVELOPMENT, client_id = self.context.client_id, msg = "Write");
         self.flush().await?;
         self.client.write_all(&bytes).await?;
         Ok(())
@@ -186,20 +186,20 @@ where
     ///
     async fn flush(&mut self) -> Result<(), Error> {
         if self.buffer.is_empty() {
-            debug!(target: MAPPER, client_id = self.context.client_id, src = "flush", msg = "Empty buffer");
+            debug!(target: MAPPER, client_id = self.context.client_id, msg = "Empty buffer");
         }
 
         let portal = self.context.get_portal_from_execute();
         let portal = match portal.as_deref() {
             Some(Portal::Encrypted(portal)) => portal,
             _ => {
-                debug!(target: MAPPER, client_id = self.context.client_id, src = "flush", msg = "Passthrough");
+                debug!(target: MAPPER, client_id = self.context.client_id, msg = "Passthrough");
                 return Ok(());
             }
         };
 
         let rows: Vec<DataRow> = self.buffer.drain().into_iter().collect();
-        debug!(target: DEVELOPMENT, client_id = self.context.client_id, src = "flush", rows = rows.len());
+        debug!(target: DEVELOPMENT, client_id = self.context.client_id, rows = rows.len());
 
         let result_column_count = match rows.first() {
             Some(row) => row.column_count(),
@@ -259,14 +259,14 @@ where
                 .map(|col| col.as_ref().map(|col| col.postgres_type.clone()))
                 .collect::<Vec<_>>();
 
-            debug!(target: MAPPER, client_id = self.context.client_id, src = "parameter_description_handler", param_types = "{param_types:?}");
+            debug!(target: MAPPER, client_id = self.context.client_id, param_types = ?param_types);
 
             description.map_types(&param_types);
         }
 
         if description.requires_rewrite() {
-            debug!(target: MAPPER, client_id = self.context.client_id, "Rewrite ParamDescription");
             let bytes = BytesMut::try_from(description)?;
+            debug!(target: MAPPER, client_id = self.context.client_id, msg = "Rewrite ParamDescription", bytes = ?bytes);
             Ok(Some(bytes))
         } else {
             Ok(None)
@@ -286,8 +286,6 @@ where
     ) -> Result<Option<BytesMut>, Error> {
         let mut description = RowDescription::try_from(bytes)?;
 
-        debug!(target: MAPPER, client_id = self.context.client_id, src = "row_description_handler");
-
         if let Some(statement) = self.context.get_statement_from_describe() {
             let projection_types = statement
                 .projection_columns
@@ -295,14 +293,14 @@ where
                 .map(|col| col.as_ref().map(|col| col.postgres_type.clone()))
                 .collect::<Vec<_>>();
 
-            debug!(target: MAPPER, client_id = self.context.client_id, src = "row_description_handler", projection_types = ?projection_types);
+            debug!(target: MAPPER, client_id = self.context.client_id, projection_types = ?projection_types);
 
             description.map_types(&projection_types);
         }
 
         if description.requires_rewrite() {
-            debug!(target: MAPPER, client_id = self.context.client_id, src = "row_description_handler", "Rewrite RowDescription");
             let bytes = BytesMut::try_from(description)?;
+            debug!(target: MAPPER, client_id = self.context.client_id, msg = "Rewrite RowDescription", bytes = ?bytes);
             Ok(Some(bytes))
         } else {
             Ok(None)
@@ -316,13 +314,13 @@ where
     async fn data_row_handler(&mut self, bytes: &BytesMut) -> Result<bool, Error> {
         match self.context.get_portal_from_execute().as_deref() {
             Some(Portal::Encrypted(portal)) => {
-                debug!(target: MAPPER, client_id = self.context.client_id, src = "data_row_handler", portal = ?portal);
+                debug!(target: MAPPER, client_id = self.context.client_id, portal = ?portal);
                 let data_row = DataRow::try_from(bytes)?;
                 self.buffer(data_row).await?;
                 Ok(true)
             }
             _ => {
-                debug!(target: MAPPER, client_id = self.context.client_id, src = "data_row_handler", msg = "Passthrough");
+                debug!(target: MAPPER, client_id = self.context.client_id, msg = "Passthrough");
                 Ok(false)
             }
         }

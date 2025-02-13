@@ -151,7 +151,6 @@ where
 
         debug!(target: MAPPER,
             client_id = self.context.client_id,
-            src = "query_handler",
             statement = ?statement
         );
 
@@ -160,7 +159,6 @@ where
         if schema_changed {
             debug!(target: MAPPER,
                 client_id = self.context.client_id,
-                src = "query_handler",
                 msg = "schema changed"
             );
             self.context.set_schema_changed();
@@ -187,7 +185,6 @@ where
         let typed_statement = typed_statement.unwrap();
         debug!(target: MAPPER,
             client_id = self.context.client_id,
-            src = "query_handler",
             typed_statement = ?typed_statement
         );
 
@@ -200,9 +197,7 @@ where
                     {
                         debug!(target: MAPPER,
                             client_id = self.context.client_id,
-                            msg = "Transformed Statement",
                             transformed_statement = ?transformed_statement,
-                            location = "query_handler",
                         );
                         query.rewrite(transformed_statement.to_string());
                     };
@@ -213,7 +208,7 @@ where
             None => {
                 debug!(target: MAPPER,
                     client_id = self.context.client_id,
-                    msg = "Query Passthrough"
+                    msg = "Passthrough Query"
                 );
                 Portal::passthrough()
             }
@@ -258,8 +253,7 @@ where
 
         debug!(target: MAPPER,
             client_id = self.context.client_id,
-            src = "encrypt_literals",
-            encrypted_values = ?encrypted_values
+            encrypted_literals = ?encrypted_values
         );
 
         let original_values_and_replacements = typed_statement
@@ -307,8 +301,7 @@ where
         debug!(
             target: PROTOCOL,
             client_id = self.context.client_id,
-            "Parse: {:?}",
-            message
+            parse = ?message
         );
 
         let statement = Parser::new(&DIALECT)
@@ -329,7 +322,6 @@ where
         if let Err(ref error) = typed_statement {
             debug!(target: MAPPER,
                 client_id = self.context.client_id,
-
                 error = ?error
             );
             return if self.encrypt.config.enable_mapping_errors() {
@@ -354,9 +346,7 @@ where
                 {
                     debug!(target: MAPPER,
                         client_id = self.context.client_id,
-                        msg = "Transformed Statement",
                         transformed_statement = ?transformed_statement,
-                        location = "parse_handler",
                     );
                     message.rewrite_statement(transformed_statement.to_string());
                 };
@@ -441,7 +431,8 @@ where
     ///
     async fn bind_handler(&mut self, bytes: &BytesMut) -> Result<Option<BytesMut>, Error> {
         let mut bind = Bind::try_from(bytes)?;
-        debug!(target: PROTOCOL, client_id = self.context.client_id,"Bind: {bind:?}");
+
+        debug!(target: PROTOCOL, client_id = self.context.client_id, bind = ?bind);
 
         let mut portal = Portal::passthrough();
 
@@ -517,7 +508,7 @@ where
                             target: MAPPER,
                             client_id = self.context.client_id,
                             msg = "Configured column",
-                            identifier = ?identifier
+                            column = ?identifier
                         );
                         let col = self.get_column(identifier)?;
                         Some(col)
@@ -551,8 +542,8 @@ where
                     debug!(
                         target: MAPPER,
                         client_id = self.context.client_id,
-                        "Encrypted parameter {:?}",
-                        identifier
+                        msg = "Encrypted parameter",
+                        column = ?identifier
                     );
 
                     let col = self.get_column(identifier)?;
@@ -601,8 +592,8 @@ where
                 debug!(
                     target: MAPPER,
                     client_id = self.context.client_id,
-                    "Configured column {:?}",
-                    identifier
+                    msg = "Configured column",
+                    column = ?identifier
                 );
                 Ok(Column::new(identifier, config))
             }

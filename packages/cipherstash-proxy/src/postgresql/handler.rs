@@ -63,11 +63,10 @@ pub async fn handler(
     let stream = AsyncStream::connect(&encrypt.config.database.to_socket_address()).await?;
     let mut database_stream = startup::with_tls(stream, &encrypt.config).await?;
     info!(
+        msg = "Client connected",
         database = encrypt.config.database.to_socket_address(),
         client_id = client_id,
-        "Database connected"
     );
-
     loop {
         let startup_message = startup::read_message_with_timeout(
             &mut client_stream,
@@ -130,14 +129,14 @@ pub async fn handler(
 
         if hash == password_message.password {
             let message = Authentication::authentication_ok();
-            debug!(target: AUTHENTICATION, "Client AuthenticationOk");
+            debug!(target: AUTHENTICATION, msg = "Client AuthenticationOk");
             let bytes = BytesMut::try_from(message)?;
             client_stream.write_all(&bytes).await?;
         } else {
             let message = ErrorResponse::invalid_password(&encrypt.config.database.username);
             debug!(
                 target: AUTHENTICATION,
-                "Client authenticaion failed: invalid password"
+                msg = "Client authenticaion failed: invalid password"
             );
             let bytes = BytesMut::try_from(message)?;
             client_stream.write_all(&bytes).await?;
@@ -159,17 +158,17 @@ pub async fn handler(
 
     match &auth.method {
         AuthenticationMethod::AuthenticationOk => {
-            debug!(target: AUTHENTICATION, "AuthenticationOk");
+            debug!(target: AUTHENTICATION, msg = "AuthenticationOk");
         }
         AuthenticationMethod::AuthenticationCleartextPassword => {
-            debug!(target: AUTHENTICATION, "AuthenticationCleartextPassword");
+            debug!(target: AUTHENTICATION, msg = "AuthenticationCleartextPassword");
             let password = encrypt.config.database.password.to_owned();
             let message = PasswordMessage::new(password);
             let bytes = BytesMut::try_from(message)?;
             database_stream.write_all(&bytes).await?;
         }
         AuthenticationMethod::Md5Password { salt } => {
-            debug!(target: AUTHENTICATION, "Md5Password");
+            debug!(target: AUTHENTICATION, msg = "Md5Password");
             let username = encrypt.config.database.username.as_bytes();
             let password = encrypt.config.database.password.as_bytes();
 
@@ -179,7 +178,7 @@ pub async fn handler(
             database_stream.write_all(&bytes).await?;
         }
         AuthenticationMethod::Sasl { .. } => {
-            debug!(target: AUTHENTICATION, "Sasl");
+            debug!(target: AUTHENTICATION, msg = "Sasl");
             let mechanism = auth.sasl_mechanism()?;
 
             sanity_check_sasl_mechanism(&mechanism, &client_stream);
@@ -193,15 +192,14 @@ pub async fn handler(
                 .await?;
         }
         AuthenticationMethod::Other { method_code, .. } => {
-            debug!(target: AUTHENTICATION, "UnsupportedAuthentication");
+            debug!(target: AUTHENTICATION, msg = "UnsupportedAuthentication");
             return Err(ProtocolError::UnsupportedAuthentication {
                 method_code: *method_code,
             }
             .into());
         }
         method => {
-            debug!(target: AUTHENTICATION, "UnexpectedStartupMessage");
-            debug!(target: AUTHENTICATION, "AuthencticationMethod {method:?}");
+            debug!(target: AUTHENTICATION, msg = "UnexpectedStartupMessage", authentication_method = ?method);
             return Err(ProtocolError::UnexpectedStartupMessage.into());
         }
     }
@@ -211,7 +209,7 @@ pub async fn handler(
         let bytes = BytesMut::try_from(message)?;
         client_stream.write_all(&bytes).await?;
 
-        error!("Client must connect with Transport Layer Security (TLS)");
+        error!(msg = "Client must connect with Transport Layer Security (TLS)");
         return Err(ConfigError::TlsRequired.into());
     }
 
@@ -236,8 +234,8 @@ pub async fn handler(
     );
 
     if encrypt.is_passthrough() {
-        warn!("⚠️ RUNNING IN PASSTHROUGH MODE");
-        warn!("⛔️ YOUR DATA IS NOT PROTECTED WITH ENCRYPTION");
+        warn!(msg = "⚠️ RUNNING IN PASSTHROUGH MODE");
+        warn!(msg = "⛔️ DATA IS NOT PROTECTED WITH ENCRYPTION");
     }
 
     let client_to_server = async {
@@ -270,7 +268,7 @@ fn sanity_check_sasl_mechanism(mechanism: &SaslMechanism, client_stream: &AsyncS
             if client_stream.is_tls() {
                 debug!(
                     PROTOCOL,
-                    "Database requested SCRAM-SHA-256, but Proxy has a TLS connection"
+                    msg = "Database requested SCRAM-SHA-256, but Proxy has a TLS connection"
                 );
             }
         }
@@ -278,7 +276,7 @@ fn sanity_check_sasl_mechanism(mechanism: &SaslMechanism, client_stream: &AsyncS
             if client_stream.is_tcp() {
                 debug!(
                     PROTOCOL,
-                    "Database requested SCRAM-SHA-256-PLUS, but Proxy has a TCP connection"
+                    msg = "Database requested SCRAM-SHA-256-PLUS, but Proxy has a TCP connection"
                 );
             }
         }
@@ -334,7 +332,7 @@ async fn scram_sha_256_plus_handler<S: AsyncRead + AsyncWrite + Unpin>(
     let auth = protocol::read_auth_message(&mut stream, 1).await?;
 
     if auth.is_ok() {
-        debug!(target: AUTHENTICATION, "SASL authentication successful");
+        debug!(target: AUTHENTICATION, msg = "SASL authentication successful");
         Ok(())
     } else {
         Err(ProtocolError::AuthenticationFailed.into())

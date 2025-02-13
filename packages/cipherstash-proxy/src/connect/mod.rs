@@ -28,15 +28,21 @@ pub async fn database(config: &DatabaseConfig) -> Result<Client, Error> {
     let (client, connection) = match tokio_postgres::connect(&connection_string, tls).await {
         Ok((client, connection)) => (client, connection),
         Err(e) => {
-            error!("Could not connect to database: {config}");
-            error!("Confirm that the database configuration is correct");
+            error!(
+                msg = "Could not connect to database",
+                database = config.name,
+                host = config.host,
+                port = config.port,
+                username = config.username,
+            );
+            error!(msg = "Confirm that the database configuration is correct");
             return Err(Error::Config(e.into()));
         }
     };
 
     tokio::spawn(async move {
-        if let Err(e) = connection.await {
-            error!("Connection error: {}", e);
+        if let Err(err) = connection.await {
+            error!(msg = "Connection error", error = ?err);
         }
     });
     Ok(client)
@@ -49,13 +55,12 @@ pub async fn bind_with_retry(server: &ServerConfig) -> TcpListener {
     loop {
         match TcpListener::bind(address).await {
             Ok(listener) => {
-                info!(address = address, "Server connected");
+                info!(msg = "Server connected", address = address);
                 return listener;
             }
             Err(err) => {
                 if retry_count > MAX_RETRY_COUNT {
-                    error!("Error binding connection after {MAX_RETRY_COUNT} retries");
-                    error!("{err}");
+                    error!(msg = "Error binding connection", retries = MAX_RETRY_COUNT, error = ?err);
                     std::process::exit(exitcode::CONFIG);
                 }
             }
@@ -72,14 +77,14 @@ pub async fn connect_with_retry(addr: &str) -> Result<TcpStream, Error> {
     let mut retry_count = 0;
 
     loop {
-        info!("Connecting to database");
+        info!(msg = "Connecting to database");
         match TcpStream::connect(&addr).await {
             Ok(stream) => {
                 return Ok(stream);
             }
             Err(err) => {
                 if retry_count > MAX_RETRY_COUNT {
-                    debug!("Database connection error {err}");
+                    debug!(msg = "Database connection error", retries = MAX_RETRY_COUNT, error = ?err);
                     return Err(Error::DatabaseConnection {
                         retries: MAX_RETRY_COUNT,
                     });
@@ -107,8 +112,7 @@ pub fn configure(stream: &TcpStream) {
     let sock_ref = socket2::SockRef::from(&stream);
 
     stream.set_nodelay(true).unwrap_or_else(|err| {
-        warn!("Error configuring nodelay for connection");
-        debug!("{err}");
+        warn!(msg = "Error configuring nodelay for connection", error = ?err);
     });
 
     match sock_ref.set_keepalive(true) {
@@ -121,14 +125,12 @@ pub fn configure(stream: &TcpStream) {
             match sock_ref.set_tcp_keepalive(params) {
                 Ok(_) => (),
                 Err(err) => {
-                    warn!("Error configuring keepalive for connection");
-                    debug!("{err}");
+                    warn!(msg = "Error configuring keepalive for connection", error = ?err);
                 }
             }
         }
         Err(err) => {
-            warn!("Error configuring connection");
-            debug!("{err}");
+            warn!(msg = "Error configuring connection", error = ?err);
         }
     }
 }
