@@ -110,7 +110,7 @@ name = "database"
 # Env: CS_DATABASE__USERNAME
 username = "username"
 
-# Database username
+# Database password
 # Env: CS_DATABASE__PASSWORD
 password = "password"
 
