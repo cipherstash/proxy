@@ -141,6 +141,7 @@ pub struct LogConfig {
 #[derive(Clone, Debug, Deserialize, PartialEq)]
 #[serde(rename_all = "lowercase")]
 pub enum LogFormat {
+    // Serde does not seem to have a case insensitive option. alias is clunky, but better than custom de/serialisers
     #[serde(alias = "Pretty", alias = "pretty", alias = "PRETTY")]
     Pretty,
     #[serde(alias = "Structured", alias = "structured", alias = "STRUCTURED")]
@@ -152,6 +153,7 @@ pub enum LogFormat {
 #[derive(Clone, Debug, Deserialize, PartialEq)]
 #[serde(rename_all = "lowercase")]
 pub enum LogOutput {
+    // Serde does not seem to have a case insensitive option. alias is clunky, but better than custom de/serialisers
     #[serde(alias = "Stdout", alias = "stdout", alias = "STDOUT")]
     Stdout,
     #[serde(alias = "Stderr", alias = "stderr", alias = "STDERR")]
@@ -161,6 +163,7 @@ pub enum LogOutput {
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq)]
 #[serde(rename_all = "lowercase")]
 pub enum LogLevel {
+    // Serde does not seem to have a case insensitive option. alias is clunky, but better than custom de/serialisers
     #[serde(alias = "Error", alias = "error", alias = "ERROR")]
     Error,
     #[serde(alias = "Warn", alias = "warn", alias = "WARN")]

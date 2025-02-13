@@ -180,6 +180,7 @@ client_key = "cipherstash-client-key"
 [log]
 # Log level
 # Optional
+# Valid values: `error | warn | info | debug | trace`
 # Default: `info`
 # Env: CS_LOG__LEVEL
 level = "info"
