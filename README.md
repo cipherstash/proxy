@@ -35,7 +35,7 @@ password = "password"
 
 [auth]
 workspace_id = "cipherstash-workspace-id"
-client_access_key = "cipherstash-clien-access-key"
+client_access_key = "cipherstash-client-access-key"
 
 [encrypt]
 dataset_id = "cipherstash-dataset-id"
