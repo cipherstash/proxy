@@ -49,12 +49,12 @@ async fn init_reloader(config: DatabaseConfig) -> Result<EncryptConfigManager, E
                 // Similar messages are displayed on connection, defined in handler.rs
                 // Please keep the language in sync when making changes here.
                 Error::Config(ConfigError::MissingEncryptConfigTable) => {
-                    error!("No Encrypt configuration table in database.");
-                    warn!("Encrypt requires the Encrypt Query Language (EQL) to be installed in the target database");
-                    warn!("See https://github.com/cipherstash/encrypt-query-language");
+                    error!(msg = "No Encrypt configuration table in database.");
+                    warn!(msg = "Encrypt requires the Encrypt Query Language (EQL) to be installed in the target database");
+                    warn!(msg = "See https://github.com/cipherstash/encrypt-query-language");
                 }
                 _ => {
-                    error!("Error loading Encrypt configuration");
+                    error!(msg = "Error loading Encrypt configuration", error = ?err);
                     return Err(err);
                 }
             }
@@ -63,9 +63,9 @@ async fn init_reloader(config: DatabaseConfig) -> Result<EncryptConfigManager, E
     };
 
     if encrypt_config.is_empty() {
-        warn!("⚠️ ENCRYPTION CONFIGURATION IS EMPTY");
+        warn!(msg = "⚠️ ENCRYPT CONFIGURATION IS EMPTY");
     } else {
-        info!("Loaded Encrypt configuration");
+        info!(msg = "Loaded Encrypt configuration");
     }
 
     let encrypt_config = Arc::new(ArcSwap::new(Arc::new(encrypt_config)));
@@ -86,12 +86,11 @@ async fn init_reloader(config: DatabaseConfig) -> Result<EncryptConfigManager, E
 
             match load_encrypt_config_with_retry(&config_ref).await {
                 Ok(reloaded) => {
-                    debug!(target = DEVELOPMENT, "Reloaded Encrypt config");
+                    debug!(target = DEVELOPMENT, msg = "Reloaded Encrypt configuration");
                     dataset_ref.swap(Arc::new(reloaded));
                 }
-                Err(e) => {
-                    warn!("Error reloading Encrypt configuration");
-                    warn!("{e}");
+                Err(err) => {
+                    warn!(msg = "Error reloading Encrypt configuration", error = ?err);
                 }
             }
         }
@@ -121,13 +120,15 @@ async fn load_encrypt_config_with_retry(
                 return Ok(encrypt_config);
             }
 
-            Err(e) => {
+            Err(err) => {
                 if retry_count >= max_retry_count {
                     debug!(
                         DEVELOPMENT,
-                        "Encrypt config not loaded after {retry_count} retries"
+                        msg = "Encrypt configuration could not beloaded",
+                        retries = retry_count,
+                        error = ?err
                     );
-                    return Err(e);
+                    return Err(err);
                 }
             }
         }

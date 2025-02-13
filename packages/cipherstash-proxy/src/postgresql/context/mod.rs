@@ -206,7 +206,6 @@ impl Context {
     }
 
     pub fn set_schema_changed(&self) {
-        debug!(target: CONTEXT, client_id = self.client_id, src = "set_schema_changed");
         let _ = self.schema_changed.write().map(|mut guard| *guard = true);
     }
 

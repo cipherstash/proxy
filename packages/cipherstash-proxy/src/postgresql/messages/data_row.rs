@@ -2,6 +2,7 @@ use super::{maybe_json, maybe_jsonb, BackendCode, NULL};
 use crate::{
     eql,
     error::{Error, ProtocolError},
+    log::MAPPER,
 };
 use bytes::{Buf, BufMut, BytesMut};
 use std::io::Cursor;
@@ -163,8 +164,8 @@ impl From<&DataColumn> for Option<eql::Ciphertext> {
         match col.json_bytes() {
             Some(bytes) => match serde_json::from_slice(bytes) {
                 Ok(ct) => Some(ct),
-                Err(e) => {
-                    debug!(error = e.to_string(), "Failed to parse parameter");
+                Err(err) => {
+                    debug!(target: MAPPER, msg = "Could not convert DataColumn to Ciphertext", error = ?err);
                     None
                 }
             },

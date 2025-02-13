@@ -21,7 +21,8 @@ pub use to_sql::to_sql;
 ///
 ///
 pub fn to_type(plaintext: Plaintext, postgres_type: &Type) -> Plaintext {
-    debug!(target = MAPPER, "Convert {plaintext:?} to {postgres_type}");
+    debug!(target = MAPPER, msg = "Convert plaintext to postgres_type", plaintext = ?plaintext, postgres_type = ?postgres_type );
+
     match (plaintext, postgres_type) {
         (Plaintext::SmallInt(Some(val)), &Type::INT4) => Plaintext::Int(Some(val as i32)),
         (Plaintext::SmallInt(Some(val)), &Type::INT8) => Plaintext::BigInt(Some(val as i64)),
@@ -48,8 +49,8 @@ pub fn to_type(plaintext: Plaintext, postgres_type: &Type) -> Plaintext {
         }
         (plaintext, _ty) => {
             warn!(
-                target = MAPPER,
-                "Invalid parameter type conversion (OID {postgres_type})"
+                msg = "Invalid parameter type conversion",
+                postgres_type = ?postgres_type
             );
             plaintext
         }

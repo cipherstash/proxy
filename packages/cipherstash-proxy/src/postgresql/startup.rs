@@ -11,7 +11,7 @@ use crate::{
     connect::AsyncStream,
     encrypt::Encrypt,
     error::{Error, ProtocolError},
-    log::{DEVELOPMENT, PROTOCOL},
+    log::PROTOCOL,
     postgresql::{SSL_REQUEST, SSL_RESPONSE_NO, SSL_RESPONSE_YES},
     tls, TandemConfig, SIZE_I32,
 };
@@ -20,10 +20,7 @@ use super::protocol::StartupMessage;
 
 pub async fn with_tls(stream: AsyncStream, config: &TandemConfig) -> Result<AsyncStream, Error> {
     if config.disable_database_tls() {
-        warn!(
-            DEVELOPMENT,
-            "Connecting to database without Transport Layer Security (TLS)"
-        );
+        warn!(msg = "Connecting to database without Transport Layer Security (TLS)");
         return Ok(stream);
     }
     match stream {
@@ -36,14 +33,14 @@ pub async fn with_tls(stream: AsyncStream, config: &TandemConfig) -> Result<Asyn
                     Ok(AsyncStream::Tls(tls_stream))
                 }
                 false => {
-                    warn!("Connecting to database without Transport Layer Security (TLS)");
+                    warn!(msg = "Connecting to database without Transport Layer Security (TLS)");
                     Ok(AsyncStream::Tcp(tcp_stream))
                 }
             }
         }
         AsyncStream::Tls(_) => {
             // Technically unreachable unless the server is misbehaving
-            warn!("Database already connected over Transport Layer Security (TLS)");
+            warn!(msg = "Database already connected over Transport Layer Security (TLS)");
             Ok(stream)
         }
     }
@@ -94,7 +91,7 @@ where
         code: code.into(),
         bytes,
     };
-    debug!(target: PROTOCOL, "StartupMessage {:?}", message);
+    debug!(target: PROTOCOL, StartupMessage = ?message);
 
     Ok(message)
 }
@@ -117,12 +114,12 @@ pub async fn send_ssl_request<T: AsyncRead + AsyncWrite + Unpin>(
         SSL_RESPONSE_YES => true,
         SSL_RESPONSE_NO => false,
         code => {
-            error!("Unexpected startup message: {}", code as char);
+            error!(msg = "Unexpected startup message", code = ?(code as char));
             return Err(ProtocolError::UnexpectedStartupMessage.into());
         }
     };
 
-    debug!(target: PROTOCOL, "Received SSLResponse {response}");
+    debug!(target: PROTOCOL, msg = "Database SSLResponse", SSLResponse = ?response);
     Ok(response)
 }
 
@@ -141,7 +138,7 @@ pub async fn send_ssl_response<T: AsyncWrite + Unpin>(
         None => b'N',
     };
 
-    debug!(target: PROTOCOL, "Send SSLResponse {response}");
+    debug!(target: PROTOCOL, msg = "SSLResponse to Client", SSLResponse = ?response);
 
     stream.write_all(&[response]).await?;
 

@@ -112,7 +112,11 @@ pub async fn read_message<S: AsyncRead + Unpin>(
     // Detect unexpected message len and avoid panic on read_exact
     // Len must be at least 4 bytes (4 bytes for len/i32)
     if (len as usize) < SIZE_I32 {
-        error!(code = code, len = len, "Unexpected message length");
+        error!(
+            msg = "Unexpected ProstgreSQL message length",
+            code = code,
+            len = len
+        );
         return Err(ProtocolError::UnexpectedMessageLength {
             code,
             len: len as usize,
@@ -134,7 +138,7 @@ pub async fn read_message<S: AsyncRead + Unpin>(
 
     stream.read_exact(&mut bytes[slice_start..]).await?;
 
-    debug!(target: PROTOCOL, client_id, "Code[{}] {bytes:?}", code as char);
+    debug!(target: PROTOCOL, client_id, code = ?(code as char), bytes = ?bytes);
 
     Ok((code, bytes))
 }

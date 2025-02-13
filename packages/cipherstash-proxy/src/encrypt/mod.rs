@@ -221,11 +221,11 @@ async fn init_cipher(config: &TandemConfig) -> Result<ScopedCipher, Error> {
 
     match ScopedCipher::init(Arc::new(zerokms_client), config.encrypt.dataset_id).await {
         Ok(cipher) => {
-            debug!(target: DEVELOPMENT, "Initialized ZeroKMS ScopedCipher");
+            debug!(target: DEVELOPMENT, msg = "Initialized ZeroKMS ScopedCipher");
             Ok(cipher)
         }
         Err(err) => {
-            debug!(target: DEVELOPMENT, "Error initializing ZeroKMS ScopedCipher: {:?}", err);
+            debug!(target: DEVELOPMENT, msg =  "Error initializing ZeroKMS ScopedCipher", error = ?err);
             Err(err.into())
         }
     }
@@ -237,8 +237,8 @@ fn to_eql_encrypted(
 ) -> Result<eql::Ciphertext, Error> {
     match encrypted {
         Encrypted::Record(ciphertext, terms) => {
-            debug!(target: ENCRYPT, src = "to_eql_encrypted", ciphertext = ?ciphertext);
-            debug!(target: ENCRYPT, src = "to_eql_encrypted", terms = ?terms);
+            debug!(target: ENCRYPT, ciphertext = ?ciphertext);
+            debug!(target: ENCRYPT, terms = ?terms);
 
             let mut ciphertext = eql::Ciphertext::new(ciphertext, identifier.to_owned());
 

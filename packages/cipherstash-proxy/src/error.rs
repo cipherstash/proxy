@@ -25,8 +25,8 @@ pub enum Error {
     #[error("Connection timed out")]
     ConnectionTimeout(#[from] Elapsed),
 
-    #[error("Error creating connection after {retries} retries")]
-    DatabaseConnection { retries: u32 },
+    #[error("Error creating connection")]
+    DatabaseConnection,
 
     #[error(transparent)]
     Encrypt(#[from] EncryptError),

@@ -29,12 +29,11 @@ impl SchemaManager {
     pub async fn reload(&self) {
         match load_schema_with_retry(&self.config).await {
             Ok(reloaded) => {
-                debug!(target = SCHEMA, "Reloaded database schema");
+                debug!(target = SCHEMA, msg = "Reloaded database schema");
                 self.schema.swap(Arc::new(reloaded));
             }
-            Err(e) => {
-                warn!("Error reloading Encrypt configuration");
-                warn!("{e}");
+            Err(err) => {
+                warn!(msg = "Error reloading Encrypt configuration", error = ?err);
             }
         };
     }
@@ -43,7 +42,7 @@ impl SchemaManager {
 async fn init_reloader(config: DatabaseConfig) -> Result<SchemaManager, Error> {
     // Skip retries on startup as the likely failure mode is configuration
     let schema = load_schema(&config).await?;
-    info!("Loaded database schema");
+    info!(msg = "Loaded database schema");
 
     let schema = Arc::new(ArcSwap::new(Arc::new(schema)));
 
@@ -63,12 +62,10 @@ async fn init_reloader(config: DatabaseConfig) -> Result<SchemaManager, Error> {
 
             match load_schema_with_retry(&config_ref).await {
                 Ok(reloaded) => {
-                    // debug!("Reloaded database schema");
                     schema_ref.swap(Arc::new(reloaded));
                 }
-                Err(e) => {
-                    warn!("Error reloading Encrypt configuration");
-                    warn!("{e}");
+                Err(err) => {
+                    warn!(msg = "Error loading Encrypt configuration", error = ?err);
                 }
             }
         }
@@ -120,7 +117,7 @@ pub async fn load_schema(config: &DatabaseConfig) -> Result<Schema, Error> {
     let mut schema = Schema::new("public");
 
     if tables.is_empty() {
-        warn!("Database schema contains no tables");
+        warn!(msg = "Database schema contains no tables");
         return Ok(schema);
     };
 
@@ -140,7 +137,7 @@ pub async fn load_schema(config: &DatabaseConfig) -> Result<Schema, Error> {
 
             let column = match domain.as_deref() {
                 Some("cs_encrypted_v1") => {
-                    debug!(target: SCHEMA, "cs_encrypted_v1 column: {table_name}.{col}");
+                    debug!(target: SCHEMA, msg = "cs_encrypted_v1 column", table = table_name, column = col);
                     Column::eql(ident)
                 }
                 _ => Column::native(ident),

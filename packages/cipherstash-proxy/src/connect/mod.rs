@@ -1,6 +1,6 @@
 mod async_stream;
 
-use crate::{config::ServerConfig, error::Error, tls, DatabaseConfig};
+use crate::{config::ServerConfig, error::Error, log::DEVELOPMENT, tls, DatabaseConfig};
 use socket2::TcpKeepalive;
 use std::time::Duration;
 use tokio::{
@@ -55,7 +55,7 @@ pub async fn bind_with_retry(server: &ServerConfig) -> TcpListener {
     loop {
         match TcpListener::bind(address).await {
             Ok(listener) => {
-                info!(msg = "Server connected", address = address);
+                info!(msg = "Server waiting for connections", address);
                 return listener;
             }
             Err(err) => {
@@ -77,17 +77,15 @@ pub async fn connect_with_retry(addr: &str) -> Result<TcpStream, Error> {
     let mut retry_count = 0;
 
     loop {
-        info!(msg = "Connecting to database");
+        debug!(target: DEVELOPMENT, msg = "Connecting to database");
         match TcpStream::connect(&addr).await {
             Ok(stream) => {
                 return Ok(stream);
             }
             Err(err) => {
                 if retry_count > MAX_RETRY_COUNT {
-                    debug!(msg = "Database connection error", retries = MAX_RETRY_COUNT, error = ?err);
-                    return Err(Error::DatabaseConnection {
-                        retries: MAX_RETRY_COUNT,
-                    });
+                    error!(msg = "Could not connect to database", retries = ?retry_count, error = ?err);
+                    return Err(Error::DatabaseConnection);
                 }
             }
         };

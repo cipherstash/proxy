@@ -6,11 +6,6 @@ use postgres_types::ToSql;
 use postgres_types::Type;
 
 pub fn to_sql(plaintext: &Plaintext, format_code: &FormatCode) -> Result<Option<BytesMut>, Error> {
-    // info!(
-    //     "to_sql: plaintext: {:?}, format_code: {:?}",
-    //     plaintext, format_code
-    // );
-
     let bytes = match format_code {
         FormatCode::Text => text_to_sql(plaintext)?,
         FormatCode::Binary => binary_to_sql(plaintext)?,

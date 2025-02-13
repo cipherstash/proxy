@@ -69,7 +69,7 @@ async fn main() {
                                 warn!(msg = "Database connection timeout");
                             }
                             _ => {
-                                error!(msg = "Error {:?}", error = ?err);
+                                error!(msg = "Database connection error", error = err.to_string());
                             }
                         },
                     }
@@ -107,7 +107,7 @@ async fn init(mut config: TandemConfig) -> Encrypt {
     match config.server.server_name() {
         Ok(_) => {}
         Err(err) => {
-            error!("{}", err);
+            error!(msg = "Could not start CipherStash proxy", error = ?err);
             std::process::exit(exitcode::CONFIG);
         }
     }
@@ -168,7 +168,10 @@ async fn init(mut config: TandemConfig) -> Encrypt {
             encrypt
         }
         Err(err) => {
-            error!(msg = "Could not start CipherStash proxy", error = ?err);
+            error!(
+                msg = "Could not start CipherStash proxy",
+                error = err.to_string()
+            );
             std::process::exit(exitcode::UNAVAILABLE);
         }
     }

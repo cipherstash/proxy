@@ -308,23 +308,21 @@ async fn scram_sha_256_plus_handler<S: AsyncRead + AsyncWrite + Unpin>(
 ) -> Result<(), Error> {
     let mut scram = ScramSha256::new(password, channel_binding);
     let bytes = scram.message().to_vec();
-    // debug!("SASLInitialResponse");
+
     let sasl_initial_response = SASLInitialResponse::new(mechanism, bytes);
     let bytes = BytesMut::try_from(sasl_initial_response)?;
     stream.write_all(&bytes).await?;
 
-    // debug!("SASLContinue");
     let auth = protocol::read_auth_message(&mut stream, 1).await?;
 
     let bytes = auth.sasl_continue()?;
     scram.update(bytes)?;
 
     let sasl_response = SASLResponse::new(scram.message().to_vec());
-    // debug!("sasl_response {sasl_response:?}");
+
     let bytes = BytesMut::try_from(sasl_response)?;
     stream.write_all(&bytes).await?;
 
-    // debug!("SASLFinal");
     let auth = protocol::read_auth_message(&mut stream, 1).await?;
     let bytes = auth.sasl_final()?;
     scram.finish(bytes)?;

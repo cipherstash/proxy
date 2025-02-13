@@ -152,7 +152,7 @@ impl EncryptConfig {
         let mut map = HashMap::new();
         for (table_name, columns) in self.tables.into_iter() {
             for (column_name, column) in columns.into_iter() {
-                debug!(target: KEYSET, "Configured column: {table_name}.{column_name}");
+                debug!(target: KEYSET, msg = "Configured column", table = table_name, column = column_name);
                 let column_config = column.into_column_config(&column_name);
                 let key = eql::Identifier::new(&table_name, &column_name);
                 map.insert(key, column_config);
@@ -204,7 +204,7 @@ mod tests {
     fn parse(json: serde_json::Value) -> HashMap<eql::Identifier, ColumnConfig> {
         serde_json::from_value::<EncryptConfig>(json)
             .map(|config| config.to_config_map())
-            .expect("ok")
+            .expect("Error ok")
     }
 
     #[test]
