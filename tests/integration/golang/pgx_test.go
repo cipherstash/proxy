@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -59,10 +60,32 @@ func TestPgxEncryptedMapText(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
+	modes := []pgx.QueryExecMode{
+		pgx.QueryExecModeCacheStatement,
+		pgx.QueryExecModeCacheDescribe,
+		pgx.QueryExecModeDescribeExec,
+		pgx.QueryExecModeExec,
+		pgx.QueryExecModeSimpleProtocol,
+	}
+
 	column := "encrypted_text"
-	id := rand.Int()
 	value := "hello, world"
-	sql := fmt.Sprintf(`INSERT INTO encrypted (id, %s) VALUES ($1, $2)`, column)
-	_, err := conn.Exec(ctx, sql, id, value)
-	require.NoError(err)
+	insertStmt := fmt.Sprintf(`INSERT INTO encrypted (id, %s) VALUES ($1, $2)`, column)
+	selectStmt := fmt.Sprintf(`SELECT id, %s FROM encrypted WHERE id=$1`, column)
+
+	for _, mode := range modes {
+		id := rand.Int()
+		t.Run(mode.String(), func(t *testing.T) {
+			assert := assert.New(t)
+			_, err := conn.Exec(ctx, insertStmt, mode, id, value)
+			assert.NoError(err)
+
+			var rid int
+			var rv string
+			err = conn.QueryRow(context.Background(), selectStmt, id).Scan(&rid, &rv)
+			assert.NoError(err)
+			assert.Equal(id, rid)
+			assert.Equal(value, rv)
+		})
+	}
 }
