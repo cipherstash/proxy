@@ -323,6 +323,17 @@ mise --env tls run proxy:up proxy-tls --extra-args "--detach --wait"
 mise --env tls run test:wait_for_postgres_to_quack --port 6432 --max-retries 20 --tls
 mise --env tls run python:test
 mise --env tls run proxy:down
+
+echo
+echo '###############################################'
+echo '# Test: Golang'
+echo '###############################################'
+echo
+
+mise --env tls run proxy:up proxy-tls --extra-args "--detach --wait"
+mise --env tls run test:wait_for_postgres_to_quack --port 6432 --max-retries 20 --tls
+mise --env tls run test:integration:golang
+mise --env tls run proxy:down
 """
 
 [tasks."test:nextest"]
