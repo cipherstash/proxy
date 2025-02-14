@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"fmt"
+	"math/rand"
 	"os"
 	"testing"
 	"time"
@@ -29,7 +31,7 @@ func TestPgxConnect(t *testing.T) {
 	require.Equal(1, result)
 }
 
-func TestPgxInsert(t *testing.T) {
+func TestPgxUnencryptedInsertAndSelect(t *testing.T) {
 	require := require.New(t)
 	conn := setupPgxConnection(require)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -49,4 +51,18 @@ INSERT INTO t (name) VALUES
 	err = conn.QueryRow(context.Background(), "SELECT name FROM t").Scan(&result)
 	require.NoError(err)
 	require.Equal("Ada", result)
+}
+
+func TestPgxEncryptedMapText(t *testing.T) {
+	require := require.New(t)
+	conn := setupPgxConnection(require)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	column := "encrypted_text"
+	id := rand.Int()
+	value := "hello, world"
+	sql := fmt.Sprintf(`INSERT INTO encrypted (id, %s) VALUES ($1, $2)`, column)
+	_, err := conn.Exec(ctx, sql, id, value)
+	require.NoError(err)
 }
