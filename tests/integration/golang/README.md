@@ -7,6 +7,7 @@ To run the integration tests:
 ```bash
 # start postgres
 mise run postgres:up
+mise run postgres:setup
 
 # start proxy
 mise run proxy:up
