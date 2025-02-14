@@ -12,10 +12,10 @@ import (
 func TestPgxConnect(t *testing.T) {
 	require := require.New(t)
 	dbURL := os.Getenv("DATABASE_URL")
-	require.NotEmpty(dbURL)
+	require.NotEmpty(dbURL, "DATABASE_URL environment variable not set")
 
 	conn, err := pgx.Connect(context.Background(), dbURL)
-	require.NoError(err)
+	require.NoError(err, "unable to connect to the database")
 
 	var result int
 	err = conn.QueryRow(context.Background(), "select 1").Scan(&result)
