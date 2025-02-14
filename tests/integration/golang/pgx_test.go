@@ -82,7 +82,7 @@ func TestPgxEncryptedMapText(t *testing.T) {
 
 			var rid int
 			var rv string
-			err = conn.QueryRow(context.Background(), selectStmt, id).Scan(&rid, &rv)
+			err = conn.QueryRow(context.Background(), selectStmt, mode, id).Scan(&rid, &rv)
 			assert.NoError(err)
 			assert.Equal(id, rid)
 			assert.Equal(value, rv)
@@ -112,7 +112,7 @@ func TestPgxEncryptedMapInts(t *testing.T) {
 
 					var rid int
 					var rv int
-					err = conn.QueryRow(context.Background(), selectStmt, id).Scan(&rid, &rv)
+					err = conn.QueryRow(context.Background(), selectStmt, mode, id).Scan(&rid, &rv)
 					assert.NoError(err)
 					assert.Equal(id, rid)
 					assert.Equal(value, rv)
@@ -146,7 +146,7 @@ func TestPgxEncryptedMapFloat(t *testing.T) {
 
 			var rid int
 			var rv float64
-			err = conn.QueryRow(context.Background(), selectStmt, id).Scan(&rid, &rv)
+			err = conn.QueryRow(context.Background(), selectStmt, mode, id).Scan(&rid, &rv)
 			assert.NoError(err)
 			assert.Equal(id, rid)
 			assert.Equal(value, rv)
