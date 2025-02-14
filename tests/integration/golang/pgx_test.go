@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -76,16 +75,19 @@ func TestPgxEncryptedMapText(t *testing.T) {
 	for _, mode := range modes {
 		id := rand.Int()
 		t.Run(mode.String(), func(t *testing.T) {
-			assert := assert.New(t)
-			_, err := conn.Exec(ctx, insertStmt, mode, id, value)
-			assert.NoError(err)
+			t.Run("insert", func(t *testing.T) {
+				_, err := conn.Exec(ctx, insertStmt, mode, id, value)
+				require.NoError(t, err)
+			})
 
-			var rid int
-			var rv string
-			err = conn.QueryRow(context.Background(), selectStmt, mode, id).Scan(&rid, &rv)
-			assert.NoError(err)
-			assert.Equal(id, rid)
-			assert.Equal(value, rv)
+			t.Run("select", func(t *testing.T) {
+				var rid int
+				var rv string
+				err := conn.QueryRow(context.Background(), selectStmt, mode, id).Scan(&rid, &rv)
+				require.NoError(t, err)
+				require.Equal(t, id, rid)
+				require.Equal(t, value, rv)
+			})
 		})
 	}
 }
@@ -105,16 +107,19 @@ func TestPgxEncryptedMapInts(t *testing.T) {
 			for _, mode := range modes {
 				id := rand.Int()
 				t.Run(mode.String(), func(t *testing.T) {
-					assert := assert.New(t)
-					_, err := conn.Exec(ctx, insertStmt, mode, id, value)
-					assert.NoError(err)
+					t.Run("insert", func(t *testing.T) {
+						_, err := conn.Exec(ctx, insertStmt, mode, id, value)
+						require.NoError(t, err)
+					})
 
-					var rid int
-					var rv int
-					err = conn.QueryRow(context.Background(), selectStmt, mode, id).Scan(&rid, &rv)
-					assert.NoError(err)
-					assert.Equal(id, rid)
-					assert.Equal(value, rv)
+					t.Run("select", func(t *testing.T) {
+						var rid int
+						var rv int
+						err := conn.QueryRow(context.Background(), selectStmt, mode, id).Scan(&rid, &rv)
+						require.NoError(t, err)
+						require.Equal(t, id, rid)
+						require.Equal(t, value, rv)
+					})
 				})
 			}
 		})
@@ -138,16 +143,19 @@ func TestPgxEncryptedMapFloat(t *testing.T) {
 			continue
 		}
 		t.Run(mode.String(), func(t *testing.T) {
-			assert := assert.New(t)
-			_, err := conn.Exec(ctx, insertStmt, mode, id, value)
-			assert.NoError(err)
+			t.Run("insert", func(t *testing.T) {
+				_, err := conn.Exec(ctx, insertStmt, mode, id, value)
+				require.NoError(t, err)
+			})
 
-			var rid int
-			var rv float64
-			err = conn.QueryRow(context.Background(), selectStmt, mode, id).Scan(&rid, &rv)
-			assert.NoError(err)
-			assert.Equal(id, rid)
-			assert.Equal(value, rv)
+			t.Run("select", func(t *testing.T) {
+				var rid int
+				var rv float64
+				err := conn.QueryRow(context.Background(), selectStmt, mode, id).Scan(&rid, &rv)
+				require.NoError(t, err)
+				require.Equal(t, id, rid)
+				require.Equal(t, value, rv)
+			})
 		})
 	}
 }

@@ -27,7 +27,7 @@ To change the tests:
 
 Alternatively, to run the tests outside of the container:
 
-```
+``` bash
 # Tell the tests where to find Proxy
 export DATABASE_URL="postgresql://cipherstash:password@localhost:6432/cipherstash"
 
@@ -36,3 +36,16 @@ go test -v ./...
 ```
 
 This requires you to have [Go installed](https://go.dev/dl/), but gives you a much faster feedback loop than `docker build`.
+
+The test suite uses subtests heavily, so you can be very specific about what tests to run:
+
+```bash
+# Tell the tests where to find Proxy
+export DATABASE_URL="postgresql://cipherstash:password@localhost:6432/cipherstash"
+
+# Run tests for encrypted_int8 columns
+go test -v ./... -run TestPgxEncryptedMapInts/encrypted_int8
+
+# Run tests for ints, but only with the Postgres simple protocol
+go test ./... -v -run TestPgxEncryptedMapInts/.*/simple_protocol
+```
