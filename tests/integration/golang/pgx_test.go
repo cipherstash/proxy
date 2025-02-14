@@ -21,7 +21,8 @@ var modes = []pgx.QueryExecMode{
 	pgx.QueryExecModeSimpleProtocol,
 }
 
-func setupPgxConnection(require *require.Assertions) *pgx.Conn {
+func setupPgxConnection(t *testing.T) *pgx.Conn {
+	require := require.New(t)
 	dbURL := os.Getenv("DATABASE_URL")
 	require.NotEmpty(dbURL, "DATABASE_URL environment variable not set")
 
@@ -31,8 +32,8 @@ func setupPgxConnection(require *require.Assertions) *pgx.Conn {
 }
 
 func TestPgxConnect(t *testing.T) {
+	conn := setupPgxConnection(t)
 	require := require.New(t)
-	conn := setupPgxConnection(require)
 
 	var result int
 	err := conn.QueryRow(context.Background(), "select 1").Scan(&result)
@@ -41,8 +42,8 @@ func TestPgxConnect(t *testing.T) {
 }
 
 func TestPgxUnencryptedInsertAndSelect(t *testing.T) {
+	conn := setupPgxConnection(t)
 	require := require.New(t)
-	conn := setupPgxConnection(require)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
@@ -63,8 +64,7 @@ INSERT INTO t (name) VALUES
 }
 
 func TestPgxEncryptedMapText(t *testing.T) {
-	require := require.New(t)
-	conn := setupPgxConnection(require)
+	conn := setupPgxConnection(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
@@ -91,8 +91,7 @@ func TestPgxEncryptedMapText(t *testing.T) {
 }
 
 func TestPgxEncryptedMapInts(t *testing.T) {
-	require := require.New(t)
-	conn := setupPgxConnection(require)
+	conn := setupPgxConnection(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
@@ -123,8 +122,7 @@ func TestPgxEncryptedMapInts(t *testing.T) {
 }
 
 func TestPgxEncryptedMapFloat(t *testing.T) {
-	require := require.New(t)
-	conn := setupPgxConnection(require)
+	conn := setupPgxConnection(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
