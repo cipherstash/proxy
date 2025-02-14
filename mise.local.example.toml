@@ -14,9 +14,24 @@ CS_ENCRYPT__DATASET_ID = "dataset_id"
 CS_ENCRYPT__CLIENT_KEY = "client_key"
 CS_ENCRYPT__CLIENT_ID = "client_id"
 
-# optional, but both required if one is set
+# TLS variables are required for providing TLS to Proxy's clients.
+# CS_TLS__TYPE can be either "Path" or "Pem" (case-sensitive).
+# When TYPE is "Pem", CERTIFICATE and PRIVATE_KEY must contain
+# the respective .pem contents (starting with '-----BEGIN').
+# When TYPE is "Path", CERTIFICATE and PRIVATE_KEY must contain
+# the paths to the respoctive files.
+CS_TLS__TYPE = "Path"
 CS_TLS__CERTIFICATE = "tests/tls/server.cert"
 CS_TLS__PRIVATE_KEY = "tests/tls/server.key"
+# CS_TLS__TYPE = "Pem"
+# certificate = """-----BEGIN CERTIFICATE-----
+# ...your certificate content here...
+# -----END CERTIFICATE-----
+# """
+# private_key = """-----BEGIN PRIVATE KEY-----
+# ...your private key content here...
+# -----END PRIVATE KEY-----
+# """
 
 CS_LOG__DEVELOPMENT_LEVEL = "info"
 CS_LOG__AUTHENTICATION_LEVEL = "info"

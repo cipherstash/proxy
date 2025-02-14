@@ -78,7 +78,10 @@ mise run build:docker --platform {{docker_platform}}
 #   if [ -z "${CS_TLS__PRIVATE_KEY}" ]; then
 #     echo "error: CS_TLS__PRIVATE_KEY is not set, and you are trying to bring up the proxy-tls container"
 #   fi
-#   if [ -z "${CS_TLS__CERTIFICATE}" ] || [ -z "${CS_TLS__CERTIFICATE}" ]; then
+#   if [ -z "${CS_TLS__TYPE}" ]; then
+#     echo "error: CS_TLS__TYPE is not set (either 'Pem' or 'Path' required), and you are trying to bring up the proxy-tls container"
+#   fi
+#   if [ -z "${CS_TLS__CERTIFICATE}" ] || [ -z "${CS_TLS__CERTIFICATE}" ] || [ -z "${CS_TLS__TYPE}" ];; then
 #     exit 67
 #   fi
 # fi
