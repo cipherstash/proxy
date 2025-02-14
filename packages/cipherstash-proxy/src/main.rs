@@ -10,6 +10,10 @@ use tracing::{error, info, warn};
 
 #[tokio::main]
 async fn main() {
+    for (key, value) in std::env::vars() {
+        println!("{}: {}", key, value);
+    }
+
     let config_file = "cipherstash-proxy.toml";
 
     let config = match TandemConfig::load(config_file) {
@@ -129,7 +133,7 @@ async fn init(mut config: TandemConfig) -> Encrypt {
             if !tls.cert_exists() {
                 error!(
                     msg = "Transport Layer Security (TLS) Certificate not found",
-                    certificate = ?tls.certificate.lines().next().unwrap_or("") // show first line only in case it's PEM
+                    certificate = ?tls.certificate().lines().next().unwrap_or("") // show first line only in case it's PEM
                 );
                 std::process::exit(exitcode::CONFIG);
             }
@@ -137,7 +141,7 @@ async fn init(mut config: TandemConfig) -> Encrypt {
             if !tls.private_key_exists() {
                 error!(
                     msg = "Transport Layer Security (TLS) Private key not found",
-                    private_key = ?tls.private_key.lines().next().unwrap_or("") // show first line only in case it's PEM
+                    private_key = ?tls.private_key().lines().next().unwrap_or("") // show first line only in case it's PEM
                 );
                 std::process::exit(exitcode::CONFIG);
             };

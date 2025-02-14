@@ -1,4 +1,5 @@
 [tls]
+type = "Path"
 certificate = "tests/tls/server.cert"
 private_key = "tests/tls/server.key"
 
