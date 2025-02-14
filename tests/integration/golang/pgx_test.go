@@ -13,6 +13,14 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+var modes = []pgx.QueryExecMode{
+	pgx.QueryExecModeCacheStatement,
+	pgx.QueryExecModeCacheDescribe,
+	pgx.QueryExecModeDescribeExec,
+	pgx.QueryExecModeExec,
+	pgx.QueryExecModeSimpleProtocol,
+}
+
 func setupPgxConnection(require *require.Assertions) *pgx.Conn {
 	dbURL := os.Getenv("DATABASE_URL")
 	require.NotEmpty(dbURL, "DATABASE_URL environment variable not set")
@@ -60,14 +68,6 @@ func TestPgxEncryptedMapText(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	modes := []pgx.QueryExecMode{
-		pgx.QueryExecModeCacheStatement,
-		pgx.QueryExecModeCacheDescribe,
-		pgx.QueryExecModeDescribeExec,
-		pgx.QueryExecModeExec,
-		pgx.QueryExecModeSimpleProtocol,
-	}
-
 	column := "encrypted_text"
 	value := "hello, world"
 	insertStmt := fmt.Sprintf(`INSERT INTO encrypted (id, %s) VALUES ($1, $2)`, column)
@@ -86,6 +86,38 @@ func TestPgxEncryptedMapText(t *testing.T) {
 			assert.NoError(err)
 			assert.Equal(id, rid)
 			assert.Equal(value, rv)
+		})
+	}
+}
+
+func TestPgxEncryptedMapInts(t *testing.T) {
+	require := require.New(t)
+	conn := setupPgxConnection(require)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	columns := []string{"encrypted_int2", "encrypted_int4", "encrypted_int8"}
+	value := 99
+
+	for _, column := range columns {
+		t.Run(column, func(t *testing.T) {
+			insertStmt := fmt.Sprintf(`INSERT INTO encrypted (id, %s) VALUES ($1, $2)`, column)
+			selectStmt := fmt.Sprintf(`SELECT id, %s FROM encrypted WHERE id=$1`, column)
+			for _, mode := range modes {
+				id := rand.Int()
+				t.Run(mode.String(), func(t *testing.T) {
+					assert := assert.New(t)
+					_, err := conn.Exec(ctx, insertStmt, mode, id, value)
+					assert.NoError(err)
+
+					var rid int
+					var rv int
+					err = conn.QueryRow(context.Background(), selectStmt, id).Scan(&rid, &rv)
+					assert.NoError(err)
+					assert.Equal(id, rid)
+					assert.Equal(value, rv)
+				})
+			}
 		})
 	}
 }
