@@ -75,7 +75,7 @@ services:
       - CS_ENCRYPT__DATASET_ID=${CS_ENCRYPT__DATASET_ID}
       - CS_ENCRYPT__CLIENT_KEY=${CS_ENCRYPT__CLIENT_KEY}
       - CS_ENCRYPT__CLIENT_ID=${CS_ENCRYPT__CLIENT_ID}
-      # TLS is set to use paths under /etc if no environment variable is set
+      # TLS is set to use paths under /etc if no environment variable is set. Comment these out to load from toml
       - CS_TLS__TYPE=${CS_TLS__TYPE:-Path}
       - CS_TLS__CERTIFICATE=${CS_TLS__CERTIFICATE:-/etc/cipherstash-proxy/server.cert}
       - CS_TLS__PRIVATE_KEY=${CS_TLS__PRIVATE_KEY:-/etc/cipherstash-proxy/server.key}

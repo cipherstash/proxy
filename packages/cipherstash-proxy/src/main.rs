@@ -10,10 +10,6 @@ use tracing::{error, info, warn};
 
 #[tokio::main]
 async fn main() {
-    for (key, value) in std::env::vars() {
-        println!("{}: {}", key, value);
-    }
-
     let config_file = "cipherstash-proxy.toml";
 
     let config = match TandemConfig::load(config_file) {

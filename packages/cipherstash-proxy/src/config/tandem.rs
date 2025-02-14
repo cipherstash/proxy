@@ -164,6 +164,9 @@ pub struct LogConfig {
 
     #[serde(default = "LogConfig::default_log_level")]
     pub schema_level: LogLevel,
+
+    #[serde(default = "LogConfig::default_log_level")]
+    pub config_level: LogLevel,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]
@@ -416,14 +419,14 @@ impl TlsConfig {
     pub fn cert_exists(&self) -> bool {
         match self {
             TlsConfig::Pem { certificate, .. } => {
-                info!(target: CONFIG, "TLS certificate is a pem string (content omitted)");
+                info!(target: CONFIG, msg = "TLS certificate is a pem string (content omitted)");
                 let certs = CertificateDer::pem_slice_iter(certificate.as_bytes())
                     .collect::<Result<Vec<_>, _>>()
                     .unwrap_or(Vec::new());
                 !certs.is_empty()
             }
             TlsConfig::Path { certificate, .. } => {
-                info!(target: CONFIG, "TLS certificate is a path: {}", certificate);
+                info!(target: CONFIG, msg = "TLS certificate is a path: {}", certificate);
                 PathBuf::from(certificate).exists()
             }
         }
@@ -432,11 +435,11 @@ impl TlsConfig {
     pub fn private_key_exists(&self) -> bool {
         match self {
             TlsConfig::Pem { private_key, .. } => {
-                info!(target: CONFIG, "TLS private_key is a pem string (content omitted)");
+                info!(target: CONFIG, msg = "TLS private_key is a pem string (content omitted)");
                 PrivateKeyDer::from_pem_slice(private_key.as_bytes()).is_ok()
             }
             TlsConfig::Path { private_key, .. } => {
-                info!(target: CONFIG, "TLS private_key is a path: {}", private_key);
+                info!(target: CONFIG, msg = "TLS private_key is a path: {}", private_key);
                 PathBuf::from(private_key).exists()
             }
         }
@@ -471,6 +474,7 @@ impl Default for LogConfig {
             protocol_level: LogConfig::default_log_level(),
             mapper_level: LogConfig::default_log_level(),
             schema_level: LogConfig::default_log_level(),
+            config_level: LogConfig::default_log_level(),
         }
     }
 }
@@ -490,6 +494,7 @@ impl LogConfig {
             protocol_level: level,
             mapper_level: level,
             schema_level: level,
+            config_level: level,
         }
     }
 
@@ -518,11 +523,11 @@ impl LogConfig {
 mod tests {
     use uuid::Uuid;
 
+    use super::*;
     use crate::{
         config::{LogFormat, LogLevel, LogOutput, TandemConfig},
         error::Error,
     };
-    use super::*;
 
     const CS_PREFIX: &str = "CS_TEST";
 

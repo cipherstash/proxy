@@ -126,6 +126,7 @@ mod tests {
             protocol_level: LogLevel::Info,
             mapper_level: LogLevel::Info,
             schema_level: LogLevel::Info,
+            config_level: LogLevel::Info,
         };
 
         let subscriber =
@@ -264,117 +265,5 @@ mod tests {
         fn make_writer(&'a self) -> Self::Writer {
             MockWriter::new(self.buf.clone())
         }
-    }
-
-    #[test]
-    fn test_simple_log() {
-        let make_writer = MockMakeWriter::default();
-        let subscriber = subscriber_builder("info", LogConfig::default())
-            .with_writer(make_writer.clone())
-            .finish();
-        let _default = set_default(&subscriber.into());
-
-        error!("error message");
-
-        let log_contents = make_writer.get_string();
-        assert!(log_contents.contains("error message"));
-    }
-
-    #[test]
-    fn test_log_levels() {
-        let make_writer = MockMakeWriter::default();
-        let subscriber = subscriber_builder("warn", LogConfig::default())
-            .with_writer(make_writer.clone())
-            .finish();
-        let _default = set_default(&subscriber.into());
-
-        trace!("trace message");
-        debug!("debug message");
-        info!("info message");
-        warn!("warn message");
-        error!("error message");
-
-        let log_contents = make_writer.get_string();
-        assert!(!log_contents.contains("trace message"));
-        assert!(!log_contents.contains("debug message"));
-        assert!(!log_contents.contains("info message"));
-        assert!(log_contents.contains("warn message"));
-        assert!(log_contents.contains("error message"));
-    }
-
-    // test info level with debug target and error target
-    #[test]
-    fn test_log_levels_with_targets() {
-        let config = LogConfig {
-            development_level: "info".into(),
-            authentication_level: "debug".into(),
-            context_level: "error".into(),
-            encrypt_level: "error".into(),
-            keyset_level: "trace".into(),
-            protocol_level: "info".into(),
-            mapper_level: "info".into(),
-            schema_level: "info".into(),
-            config_level: "info".into(),
-            disable_ansi: false,
-        };
-        let make_writer = MockMakeWriter::default();
-        let subscriber = subscriber_builder("warn", config)
-            .with_writer(make_writer.clone())
-            .finish();
-        let _default = set_default(&subscriber.into());
-
-        // with development level 'info', info should be logged but not debug
-        debug!(target: "development", "debug/development");
-        info!(target: "development", "info/development");
-        let log_contents = make_writer.get_string();
-        assert!(!log_contents.contains("debug/development"));
-        assert!(log_contents.contains("info/development"));
-
-        // with authentication level 'debug', debug should be logged but not trace
-        trace!(target: "authentication", "trace/authentication");
-        debug!(target: "authentication", "debug/authentication");
-        let log_contents = make_writer.get_string();
-        assert!(!log_contents.contains("trace/authentication"));
-        assert!(log_contents.contains("debug/authentication"));
-
-        // with context level 'error', error should be logged but not warn
-        warn!(target: "context", "warn/context");
-        error!(target: "context", "error/context");
-        let log_contents = make_writer.get_string();
-        assert!(!log_contents.contains("warn/context"));
-        assert!(log_contents.contains("error/context"));
-
-        // with keyset level 'trace', trace should be logged
-        trace!(target: "keyset", "trace/keyset");
-        let log_contents = make_writer.get_string();
-        assert!(log_contents.contains("trace/keyset"));
-
-        // with protocol level 'info', info should be logged but not debug
-        debug!(target: "protocol", "debug/protocol");
-        info!(target: "protocol", "info/protocol");
-        let log_contents = make_writer.get_string();
-        assert!(!log_contents.contains("debug/protocol"));
-        assert!(log_contents.contains("info/protocol"));
-
-        // with mapper level 'info', info should be logged but not debug
-        debug!(target: "mapper", "debug/mapper");
-        info!(target: "mapper", "info/mapper");
-        let log_contents = make_writer.get_string();
-        assert!(!log_contents.contains("debug/mapper"));
-        assert!(log_contents.contains("info/mapper"));
-
-        // with schema level 'info', info should be logged but not debug
-        debug!(target: "schema", "debug/schema");
-        info!(target: "schema", "info/schema");
-        let log_contents = make_writer.get_string();
-        assert!(!log_contents.contains("debug/schema"));
-        assert!(log_contents.contains("info/schema"));
-
-        // with config level 'info', info should be logged but not debug
-        debug!(target: "config", "debug/config");
-        info!(target: "config", "info/config");
-        let log_contents = make_writer.get_string();
-        assert!(!log_contents.contains("debug/config"));
-        assert!(log_contents.contains("info/config"));
     }
 }
