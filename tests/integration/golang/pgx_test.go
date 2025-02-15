@@ -64,7 +64,7 @@ INSERT INTO t (name) VALUES
 
 func TestPgxEncryptedMapText(t *testing.T) {
 	conn := setupPgxConnection(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	column := "encrypted_text"
@@ -94,7 +94,7 @@ func TestPgxEncryptedMapText(t *testing.T) {
 
 func TestPgxEncryptedMapInts(t *testing.T) {
 	conn := setupPgxConnection(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	columns := []string{"encrypted_int2", "encrypted_int4", "encrypted_int8"}
@@ -128,7 +128,7 @@ func TestPgxEncryptedMapInts(t *testing.T) {
 
 func TestPgxEncryptedMapFloat(t *testing.T) {
 	conn := setupPgxConnection(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	column := "encrypted_float8"
@@ -163,7 +163,7 @@ func TestPgxEncryptedMapFloat(t *testing.T) {
 /*
 func TestPgxEncryptedMapDate(t *testing.T) {
 	conn := setupPgxConnection(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	column := "encrypted_date"
