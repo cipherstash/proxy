@@ -21,9 +21,10 @@ pub struct TandemConfig {
     pub auth: AuthConfig,
     pub encrypt: EncryptConfig,
     pub tls: Option<TlsConfig>,
-    pub development: Option<DevelopmentConfig>,
     #[serde(default)]
     pub log: LogConfig,
+    pub prometheus: Option<PrometheusConfig>,
+    pub development: Option<DevelopmentConfig>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -39,6 +40,15 @@ pub struct ServerConfig {
 
     #[serde(default = "ServerConfig::default_shutdown_timeout")]
     pub shutdown_timeout: u64,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct PrometheusConfig {
+    #[serde(default)]
+    pub enabled: bool,
+
+    #[serde(default = "PrometheusConfig::default_port")]
+    pub port: u16,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -300,6 +310,18 @@ impl TandemConfig {
             None => false,
         }
     }
+
+    ///
+    /// Prometheus is enabled if
+    ///  - enabled is true
+    ///  - a port has been explicitly set
+    ///
+    pub fn prometheus_enabled(&self) -> bool {
+        match &self.prometheus {
+            Some(cfg) => cfg.enabled || cfg.port != PrometheusConfig::default_port(),
+            None => false,
+        }
+    }
 }
 
 ///
@@ -378,6 +400,12 @@ impl ServerConfig {
 
     pub fn shutdown_timeout(&self) -> Duration {
         Duration::from_millis(self.shutdown_timeout)
+    }
+}
+
+impl PrometheusConfig {
+    pub fn default_port() -> u16 {
+        9930
     }
 }
 
@@ -701,5 +729,27 @@ B+qwsnNEiDoJhgYj+cQ=
     fn test_tls_private_key_exists_with_pem() {
         assert!(test_config_with_pem().private_key_exists());
         assert!(!test_config_with_invalid_pem().private_key_exists());
+    }
+
+    #[test]
+    fn prometheus_config() {
+        let config = TandemConfig::build("tests/config/cipherstash-proxy-test.toml").unwrap();
+        assert!(!config.prometheus_enabled());
+
+        temp_env::with_vars([("CS_PROMETHEUS__ENABLED", Some("true"))], || {
+            let config = TandemConfig::build("tests/config/cipherstash-proxy-test.toml").unwrap();
+            assert!(config.prometheus_enabled());
+            assert_eq!(config.prometheus.unwrap().port, 9930);
+        });
+
+        temp_env::with_vars([("CS_PROMETHEUS__PORT", Some("7777"))], || {
+            let config = TandemConfig::build("tests/config/cipherstash-proxy-test.toml").unwrap();
+            assert!(config.prometheus_enabled());
+        });
+
+        temp_env::with_vars([("CS_PROMETHEUS__PORT", Some("9930"))], || {
+            let config = TandemConfig::build("tests/config/cipherstash-proxy-test.toml").unwrap();
+            assert!(!config.prometheus_enabled());
+        });
     }
 }

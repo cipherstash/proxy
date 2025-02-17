@@ -102,7 +102,7 @@ host = "0.0.0.0"
 # Optional
 # Default: `5432`
 # Env: CS_DATABASE__PORT
-name = "5432"
+port = "5432"
 
 # Database name
 # Env: CS_DATABASE__NAME
@@ -207,6 +207,20 @@ output = "stdout"
 # Env: CS_LOG__ANSI_ENABLED
 ansi_enabled = "true"
 
+
+
+[prometheus]
+# Enable prometheus stats
+# Optional
+# Default: `false`
+# Env: CS_PROMETHEUS__ENABLED
+enabled = "false"
+
+# Prometheus exporter post
+# Optional
+# Default: `9930`
+# Env: CS_PROMETHEUS__PORT
+port = "9930"
 ```
 
 
