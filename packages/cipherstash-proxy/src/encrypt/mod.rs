@@ -164,19 +164,18 @@ impl Encrypt {
         let mut results = vec![None; ciphertexts.len()];
 
         // Collect the index and ciphertext details for every Some(ciphertext)
-        let (indices, encrypted): (Vec<_>, Vec<_>) = ciphertexts
+        let (indices, encrypted) = ciphertexts
             .into_iter()
             .enumerate()
             .filter_map(|(idx, opt)| {
                 opt.map(|ct| match ct {
-                    eql::Encrypted::Ciphertext { ciphertext, .. } => (idx, ciphertext),
-                    eql::Encrypted::SteVec { ste_vec_index, .. } => {
-                        // TODO: don't unwrap
-                        (idx, ste_vec_index.into_root_ciphertext().unwrap())
-                    }
+                    eql::Encrypted::Ciphertext { ciphertext, .. } => Ok((idx, ciphertext)),
+                    eql::Encrypted::SteVec { ste_vec_index, .. } => ste_vec_index
+                        .into_root_ciphertext()
+                        .map(|root_ciphertext| (idx, root_ciphertext)),
                 })
             })
-            .unzip();
+            .collect::<Result<(Vec<_>, Vec<_>), _>>()?;
 
         // Decrypt the ciphertexts
         let decrypted = self.cipher.decrypt(encrypted).await?;
