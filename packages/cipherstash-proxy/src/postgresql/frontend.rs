@@ -175,7 +175,7 @@ where
                 error = err.to_string()
             );
 
-            if self.encrypt.config.enable_mapping_errors() {
+            if self.encrypt.config.mapping_errors_enabled() {
                 return Err(MappingError::StatementCouldNotBeTypeChecked(err.to_string()).into());
             } else {
                 return Ok(None);
@@ -324,7 +324,7 @@ where
                 client_id = self.context.client_id,
                 error = err.to_string()
             );
-            return if self.encrypt.config.enable_mapping_errors() {
+            return if self.encrypt.config.mapping_errors_enabled() {
                 Err(MappingError::StatementCouldNotBeTypeChecked(
                     err.to_string(),
                 ))?

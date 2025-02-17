@@ -120,7 +120,7 @@ async fn init(mut config: TandemConfig) -> Encrypt {
         );
     }
 
-    if config.disable_mapping() {
+    if config.mapping_disabled() {
         warn!(msg = "Mapping is not enabled");
     }
 

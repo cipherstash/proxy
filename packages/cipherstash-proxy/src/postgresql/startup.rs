@@ -19,7 +19,7 @@ use crate::{
 use super::protocol::StartupMessage;
 
 pub async fn with_tls(stream: AsyncStream, config: &TandemConfig) -> Result<AsyncStream, Error> {
-    if config.disable_database_tls() {
+    if config.database_tls_disabled() {
         warn!(msg = "Connecting to database without Transport Layer Security (TLS)");
         return Ok(stream);
     }

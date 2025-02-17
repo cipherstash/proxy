@@ -290,21 +290,21 @@ impl TandemConfig {
         Ok(config)
     }
 
-    pub fn disable_database_tls(&self) -> bool {
+    pub fn database_tls_disabled(&self) -> bool {
         match &self.development {
             Some(dev) => dev.disable_database_tls,
             None => false,
         }
     }
 
-    pub fn disable_mapping(&self) -> bool {
+    pub fn mapping_disabled(&self) -> bool {
         match &self.development {
             Some(dev) => dev.disable_mapping,
             None => false,
         }
     }
 
-    pub fn enable_mapping_errors(&self) -> bool {
+    pub fn mapping_errors_enabled(&self) -> bool {
         match &self.development {
             Some(dev) => dev.enable_mapping_errors,
             None => false,

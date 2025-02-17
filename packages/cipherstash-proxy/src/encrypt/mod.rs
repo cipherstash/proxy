@@ -199,7 +199,7 @@ impl Encrypt {
     }
 
     pub fn is_passthrough(&self) -> bool {
-        self.encrypt_config.is_empty() || self.config.disable_mapping()
+        self.encrypt_config.is_empty() || self.config.mapping_disabled()
     }
 
     pub fn is_empty_config(&self) -> bool {
