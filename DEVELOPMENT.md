@@ -7,7 +7,7 @@
 ## Logging
 
 - Use structured logging
-- Use te appropriate targets
+- Use the appropriate targets
 - Include the `client_id` where appropriate
 
 Debug logging is very verbose, and targets allow configuration of granular log levels.
