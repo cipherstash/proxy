@@ -8,7 +8,7 @@ use serde::Deserialize;
 use std::io::IsTerminal;
 use std::path::PathBuf;
 use std::{fmt::Display, time::Duration};
-use tracing::info;
+use tracing::debug;
 use uuid::Uuid;
 
 use super::{CS_PREFIX, DEFAULT_CONFIG_FILE_PATH};
@@ -93,6 +93,20 @@ impl TlsConfig {
     pub fn private_key(&self) -> &str {
         match self {
             Self::Pem { private_key, .. } | Self::Path { private_key, .. } => private_key,
+        }
+    }
+
+    pub fn certificate_err_msg(&self) -> &str {
+        match self {
+            Self::Pem { .. } => "Transport Layer Security (TLS) Certificate is invalid",
+            Self::Path { .. } => "Transport Layer Security (TLS) Certificate not found",
+        }
+    }
+
+    pub fn private_key_err_msg(&self) -> &str {
+        match self {
+            Self::Pem { .. } => "Transport Layer Security (TLS) Private key is invalid",
+            Self::Path { .. } => "Transport Layer Security (TLS) Private key not found",
         }
     }
 }
@@ -419,14 +433,14 @@ impl TlsConfig {
     pub fn cert_exists(&self) -> bool {
         match self {
             TlsConfig::Pem { certificate, .. } => {
-                info!(target: CONFIG, msg = "TLS certificate is a pem string (content omitted)");
+                debug!(target: CONFIG, msg = "TLS certificate is a pem string (content omitted)");
                 let certs = CertificateDer::pem_slice_iter(certificate.as_bytes())
                     .collect::<Result<Vec<_>, _>>()
                     .unwrap_or(Vec::new());
                 !certs.is_empty()
             }
             TlsConfig::Path { certificate, .. } => {
-                info!(target: CONFIG, msg = "TLS certificate is a path: {}", certificate);
+                debug!(target: CONFIG, msg = "TLS certificate is a path: {}", certificate);
                 PathBuf::from(certificate).exists()
             }
         }
@@ -435,11 +449,11 @@ impl TlsConfig {
     pub fn private_key_exists(&self) -> bool {
         match self {
             TlsConfig::Pem { private_key, .. } => {
-                info!(target: CONFIG, msg = "TLS private_key is a pem string (content omitted)");
+                debug!(target: CONFIG, msg = "TLS private_key is a pem string (content omitted)");
                 PrivateKeyDer::from_pem_slice(private_key.as_bytes()).is_ok()
             }
             TlsConfig::Path { private_key, .. } => {
-                info!(target: CONFIG, msg = "TLS private_key is a path: {}", private_key);
+                debug!(target: CONFIG, msg = "TLS private_key is a path: {}", private_key);
                 PathBuf::from(private_key).exists()
             }
         }

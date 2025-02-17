@@ -128,16 +128,16 @@ async fn init(mut config: TandemConfig) -> Encrypt {
         Some(ref mut tls) => {
             if !tls.cert_exists() {
                 error!(
-                    msg = "Transport Layer Security (TLS) Certificate not found",
-                    certificate = ?tls.certificate().lines().next().unwrap_or("") // show first line only in case it's PEM
+                    msg = tls.certificate_err_msg(),
+                    certificate = ?tls.certificate().lines().next().unwrap_or("") // show first line of PEM, or path (_should_ be 1 line)
                 );
                 std::process::exit(exitcode::CONFIG);
             }
 
             if !tls.private_key_exists() {
                 error!(
-                    msg = "Transport Layer Security (TLS) Private key not found",
-                    private_key = ?tls.private_key().lines().next().unwrap_or("") // show first line only in case it's PEM
+                    msg = tls.private_key_err_msg(),
+                    private_key = ?tls.private_key().lines().next().unwrap_or("") // show first line of PEM, or path (_should_ be 1 line)
                 );
                 std::process::exit(exitcode::CONFIG);
             };
