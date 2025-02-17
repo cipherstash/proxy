@@ -14,9 +14,15 @@ use crate::postgresql::context::column::Column;
 use crate::postgresql::context::Portal;
 use crate::postgresql::data::literal_from_sql;
 use crate::postgresql::messages::Name;
+use crate::prometheus::{
+    CLIENT_BYTES_RECEIVED, ENCRYPTION_COUNT, ENCRYPTION_DURATION, ENCRYPTION_ERROR_COUNT,
+    SERVER_BYTES_SENT, STATEMENT_ENCRYPTED_COUNT, STATEMENT_PASSTHROUGH_COUNT,
+    STATEMENT_TOTAL_COUNT, STATEMENT_UNMAPPABLE_COUNT,
+};
 use bytes::BytesMut;
 use cipherstash_client::encryption::Plaintext;
 use eql_mapper::{self, EqlValue, TableColumn, TypedStatement};
+use metrics::{counter, histogram};
 use pg_escape::quote_literal;
 use serde::Serialize;
 use sqlparser::ast::{self, Expr, Value};
@@ -24,6 +30,7 @@ use sqlparser::dialect::PostgreSqlDialect;
 use sqlparser::parser::Parser;
 use std::collections::HashMap;
 use std::fmt::Display;
+use std::time::Instant;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use tracing::{debug, info};
 
@@ -61,6 +68,8 @@ where
     }
 
     pub async fn write(&mut self, bytes: BytesMut) -> Result<(), Error> {
+        let sent: u64 = bytes.len() as u64;
+        counter!(SERVER_BYTES_SENT).increment(sent);
         self.server.write_all(&bytes).await?;
         Ok(())
     }
@@ -73,6 +82,9 @@ where
             connection_timeout,
         )
         .await?;
+
+        let sent: u64 = bytes.len() as u64;
+        counter!(CLIENT_BYTES_RECEIVED).increment(sent);
 
         if self.encrypt.is_passthrough() {
             return Ok(bytes);
@@ -145,48 +157,24 @@ where
     async fn query_handler(&mut self, bytes: &BytesMut) -> Result<Option<BytesMut>, Error> {
         let mut query = Query::try_from(bytes)?;
 
-        let statement = Parser::new(&DIALECT)
-            .try_with_sql(&query.statement)?
-            .parse_statement()?;
-
-        debug!(target: MAPPER,
-            client_id = self.context.client_id,
-            statement = ?statement
-        );
-
-        let schema_changed = eql_mapper::collect_ddl(self.context.get_table_resolver(), &statement);
-
-        if schema_changed {
-            debug!(target: MAPPER,
-                client_id = self.context.client_id,
-                msg = "schema changed"
-            );
-            self.context.set_schema_changed();
-        }
+        let statement = self.parse_statement(&query.statement)?;
+        self.check_for_schema_change(&statement);
 
         if !eql_mapper::requires_type_check(&statement) {
+            counter!(STATEMENT_PASSTHROUGH_COUNT).increment(1);
             return Ok(None);
         }
 
-        let typed_statement = eql_mapper::type_check(self.context.get_table_resolver(), &statement);
-        if let Err(err) = typed_statement {
-            debug!(target: MAPPER,
-                client_id = self.context.client_id,
-                error = err.to_string()
-            );
-
-            if self.encrypt.config.mapping_errors_enabled() {
-                return Err(MappingError::StatementCouldNotBeTypeChecked(err.to_string()).into());
-            } else {
-                return Ok(None);
+        let typed_statement = match self.type_check(&statement) {
+            Ok(ts) => ts,
+            Err(err) => {
+                if self.encrypt.config.mapping_errors_enabled() {
+                    return Err(err);
+                } else {
+                    return Ok(None);
+                };
             }
-        }
-
-        let typed_statement = typed_statement.unwrap();
-        debug!(target: MAPPER,
-            client_id = self.context.client_id,
-            typed_statement = ?typed_statement
-        );
+        };
 
         let portal = match self.to_encryptable_statement(&typed_statement, vec![])? {
             Some(statement) => {
@@ -202,7 +190,7 @@ where
                         query.rewrite(transformed_statement.to_string());
                     };
                 }
-
+                counter!(STATEMENT_ENCRYPTED_COUNT).increment(1);
                 Portal::encrypted(statement.into(), vec![])
             }
             None => {
@@ -210,6 +198,7 @@ where
                     client_id = self.context.client_id,
                     msg = "Passthrough Query"
                 );
+                counter!(STATEMENT_PASSTHROUGH_COUNT).increment(1);
                 Portal::passthrough()
             }
         };
@@ -244,7 +233,20 @@ where
         let literal_values = typed_statement.literal_values();
         let plaintexts = literals_to_plaintext(&literal_values, literal_columns)?;
 
-        let encrypted = self.encrypt.encrypt(plaintexts, literal_columns).await?;
+        let start = Instant::now();
+
+        let encrypted = self
+            .encrypt
+            .encrypt(plaintexts, literal_columns)
+            .await
+            .inspect_err(|_| {
+                counter!(ENCRYPTION_ERROR_COUNT).increment(1);
+            })?;
+
+        counter!(ENCRYPTION_COUNT).increment(encrypted.len() as u64);
+
+        let duration = Instant::now().duration_since(start);
+        histogram!(ENCRYPTION_DURATION).record(duration);
 
         let encrypted_values = encrypted
             .into_iter()
@@ -304,59 +306,58 @@ where
             parse = ?message
         );
 
-        let statement = Parser::new(&DIALECT)
-            .try_with_sql(&message.statement)?
-            .parse_statement()?;
-
-        let schema_changed = eql_mapper::collect_ddl(self.context.get_table_resolver(), &statement);
-
-        if schema_changed {
-            self.context.set_schema_changed();
-        }
+        let statement = self.parse_statement(&message.statement)?;
+        self.check_for_schema_change(&statement);
 
         if !eql_mapper::requires_type_check(&statement) {
+            counter!(STATEMENT_PASSTHROUGH_COUNT).increment(1);
             return Ok(None);
         }
 
-        let typed_statement = eql_mapper::type_check(self.context.get_table_resolver(), &statement);
-        if let Err(ref err) = typed_statement {
-            debug!(target: MAPPER,
-                client_id = self.context.client_id,
-                error = err.to_string()
-            );
-            return if self.encrypt.config.mapping_errors_enabled() {
-                Err(MappingError::StatementCouldNotBeTypeChecked(
-                    err.to_string(),
-                ))?
-            } else {
-                Ok(None)
-            };
-        }
+        let typed_statement = match self.type_check(&statement) {
+            Ok(ts) => ts,
+            Err(err) => {
+                if self.encrypt.config.mapping_errors_enabled() {
+                    return Err(err);
+                } else {
+                    return Ok(None);
+                };
+            }
+        };
 
-        let typed_statement = typed_statement.unwrap();
         // Capture the parse message param_types
         // These override the underlying column type
         let param_types = message.param_types.clone();
 
-        if let Some(statement) = self.to_encryptable_statement(&typed_statement, param_types)? {
-            if statement.has_literals() {
-                if let Some(transformed_statement) = self
-                    .encrypt_literals(&typed_statement, &statement.literal_columns)
-                    .await?
-                {
-                    debug!(target: MAPPER,
-                        client_id = self.context.client_id,
-                        transformed_statement = ?transformed_statement,
-                    );
-                    message.rewrite_statement(transformed_statement.to_string());
-                };
+        match self.to_encryptable_statement(&typed_statement, param_types)? {
+            Some(statement) => {
+                if statement.has_literals() {
+                    if let Some(transformed_statement) = self
+                        .encrypt_literals(&typed_statement, &statement.literal_columns)
+                        .await?
+                    {
+                        debug!(target: MAPPER,
+                            client_id = self.context.client_id,
+                            transformed_statement = ?transformed_statement,
+                        );
+
+                        message.rewrite_statement(transformed_statement.to_string());
+                    };
+                }
+
+                counter!(STATEMENT_ENCRYPTED_COUNT).increment(1);
+
+                message.rewrite_param_types(&statement.param_columns);
+                self.context
+                    .add_statement(message.name.to_owned(), statement);
             }
-
-            // Rewrite the type of any encrypted column
-            message.rewrite_param_types(&statement.param_columns);
-
-            self.context
-                .add_statement(message.name.to_owned(), statement);
+            _ => {
+                debug!(target: MAPPER,
+                    client_id = self.context.client_id,
+                    msg = "Passthrough Parse"
+                );
+                counter!(STATEMENT_PASSTHROUGH_COUNT).increment(1);
+            }
         }
 
         if message.requires_rewrite() {
@@ -374,8 +375,44 @@ where
     }
 
     ///
-    /// Convert a Typed Statement from Mapper into a Statement
+    /// Parse a SQL statement string into an SqlParser AST
     ///
+    fn parse_statement(&mut self, statement: &str) -> Result<ast::Statement, Error> {
+        let statement = Parser::new(&DIALECT)
+            .try_with_sql(statement)?
+            .parse_statement()?;
+
+        debug!(target: MAPPER,
+            client_id = self.context.client_id,
+            statement = ?statement
+        );
+
+        counter!(STATEMENT_TOTAL_COUNT).increment(1);
+
+        Ok(statement)
+    }
+
+    ///
+    /// Check the Statement AST for DDL
+    /// Sets a schema changed flag in the Context
+    ///
+    ///
+    fn check_for_schema_change(&self, statement: &ast::Statement) {
+        let schema_changed = eql_mapper::collect_ddl(self.context.get_table_resolver(), statement);
+
+        if schema_changed {
+            debug!(target: MAPPER,
+                client_id = self.context.client_id,
+                msg = "schema changed"
+            );
+            self.context.set_schema_changed();
+        }
+    }
+
+    ///
+    /// Creates a Statement from an EQL Mapper Typed Statement
+    /// Returned Statement contains the Column configuration for any encrypted columns in params, literals and projection.
+    /// Returns `None` if the Statement is not Encryptable
     ///
     fn to_encryptable_statement(
         &self,
@@ -386,22 +423,23 @@ where
         let projection_columns = self.get_projection_columns(typed_statement)?;
         let literal_columns = self.get_literal_columns(typed_statement)?;
 
-        debug!(target: MAPPER,
-            client_id = self.context.client_id,
-            param_columns = ?param_columns
-        );
-        debug!(target: MAPPER,
-            client_id = self.context.client_id,
-            projection_columns = ?projection_columns
-        );
+        let no_encrypted_param_columns = param_columns.iter().all(|c| c.is_none());
+        let no_encrypted_projection_columns = projection_columns.iter().all(|c| c.is_none());
 
-        if param_columns.is_empty() && projection_columns.is_empty() && literal_columns.is_empty() {
+        if (param_columns.is_empty() || no_encrypted_param_columns)
+            && (projection_columns.is_empty() || no_encrypted_projection_columns)
+            && literal_columns.is_empty()
+        {
             return Ok(None);
         }
 
         debug!(target: MAPPER,
-                client_id = self.context.client_id,
-                msg = "Encryptable Statement");
+            client_id = self.context.client_id,
+            msg = "Encryptable Statement",
+            param_columns = ?param_columns,
+            projection_columns = ?projection_columns,
+            literal_columns = ?literal_columns,
+        );
 
         let statement = Statement::new(
             param_columns.to_owned(),
@@ -478,11 +516,50 @@ where
     ) -> Result<Vec<Option<crate::Encrypted>>, Error> {
         let plaintexts =
             bind.to_plaintext(&statement.param_columns, &statement.postgres_param_types)?;
+
+        let start = Instant::now();
+
         let encrypted = self
             .encrypt
             .encrypt_some(plaintexts, &statement.param_columns)
-            .await?;
+            .await
+            .inspect_err(|_| {
+                counter!(ENCRYPTION_ERROR_COUNT).increment(1);
+            })?;
+
+        let encrypted_count = encrypted
+            .iter()
+            .fold(0, |acc, o| if o.is_some() { acc + 1 } else { acc });
+
+        counter!(ENCRYPTION_COUNT).increment(encrypted_count);
+
+        let duration = Instant::now().duration_since(start);
+        histogram!(ENCRYPTION_DURATION).record(duration);
+
         Ok(encrypted)
+    }
+
+    fn type_check<'a>(&self, statement: &'a ast::Statement) -> Result<TypedStatement<'a>, Error> {
+        match eql_mapper::type_check(self.context.get_table_resolver(), statement) {
+            Ok(typed_statement) => {
+                debug!(target: MAPPER,
+                    client_id = self.context.client_id,
+                    typed_statement = ?typed_statement
+                );
+
+                Ok(typed_statement)
+            }
+            Err(err) => {
+                debug!(target: MAPPER,
+                    client_id = self.context.client_id,
+                    error = err.to_string()
+                );
+
+                counter!(STATEMENT_UNMAPPABLE_COUNT).increment(1);
+
+                Err(MappingError::StatementCouldNotBeTypeChecked(err.to_string()).into())
+            }
+        }
     }
 
     ///

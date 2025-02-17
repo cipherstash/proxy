@@ -67,6 +67,7 @@ pub async fn handler(
         database = encrypt.config.database.to_socket_address(),
         client_id = client_id,
     );
+
     loop {
         let startup_message = startup::read_message_with_timeout(
             &mut client_stream,

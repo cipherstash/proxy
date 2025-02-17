@@ -7,13 +7,19 @@ use super::messages::BackendCode;
 use crate::encrypt::Encrypt;
 use crate::eql::Encrypted;
 use crate::error::Error;
-use crate::log::{DEVELOPMENT, MAPPER};
+use crate::log::{DEVELOPMENT, MAPPER, PROTOCOL};
 use crate::postgresql::context::Portal;
 use crate::postgresql::messages::data_row::DataRow;
 use crate::postgresql::messages::param_description::ParamDescription;
 use crate::postgresql::protocol::{self};
+use crate::prometheus::{
+    CLIENT_BYTES_SENT, DECRYPTION_DURATION, DECRYPTION_ERROR_COUNT, ROW_ENCRYPTED_COUNT,
+    ROW_PASSTHROUGH_COUNT, ROW_TOTAL_COUNT, SERVER_BYTES_RECEIVED,
+};
 use bytes::BytesMut;
 use itertools::Itertools;
+use metrics::{counter, histogram};
+use std::time::Instant;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use tracing::{debug, error, warn};
 
@@ -77,8 +83,11 @@ where
         )
         .await?;
 
+        let sent: u64 = bytes.len() as u64;
+        counter!(SERVER_BYTES_RECEIVED).increment(sent);
+
         if self.encrypt.is_passthrough() {
-            self.write(bytes).await?;
+            self.write_with_flush(bytes).await?;
             return Ok(());
         }
 
@@ -96,7 +105,7 @@ where
             BackendCode::CommandComplete
             | BackendCode::EmptyQueryResponse
             | BackendCode::PortalSuspended => {
-                debug!(target: DEVELOPMENT, client_id = self.context.client_id, msg = "CommandComplete | EmptyQueryResponse | PortalSuspended");
+                debug!(target: PROTOCOL, client_id = self.context.client_id, msg = "CommandComplete | EmptyQueryResponse | PortalSuspended");
                 self.flush().await?;
                 self.context.complete_execution();
             }
@@ -132,7 +141,7 @@ where
             _ => {}
         }
 
-        self.write(bytes).await?;
+        self.write_with_flush(bytes).await?;
 
         Ok(())
     }
@@ -166,12 +175,23 @@ where
 
     ///
     /// Write a message to the client
+    /// Flushes all messages in the buffer before writing the message
     ///
-    /// Flushes any nessages in the buffer before writing the message
-    ///
-    pub async fn write(&mut self, bytes: BytesMut) -> Result<(), Error> {
+    pub async fn write_with_flush(&mut self, bytes: BytesMut) -> Result<(), Error> {
         debug!(target: DEVELOPMENT, client_id = self.context.client_id, msg = "Write");
         self.flush().await?;
+
+        self.write(bytes).await?;
+        Ok(())
+    }
+
+    ///
+    /// Write a message to the client
+    ///
+    pub async fn write(&mut self, bytes: BytesMut) -> Result<(), Error> {
+        let sent: u64 = bytes.len() as u64;
+        counter!(CLIENT_BYTES_SENT).increment(sent);
+
         self.client.write_all(&bytes).await?;
         Ok(())
     }
@@ -216,8 +236,15 @@ where
             .flatten_ok()
             .collect::<Result<Vec<_>, _>>()?;
 
+        let start = Instant::now();
+
         // Decrypt CipherText -> Plaintext
-        let plaintexts = self.encrypt.decrypt(ciphertexts).await?;
+        let plaintexts = self.encrypt.decrypt(ciphertexts).await.inspect_err(|_| {
+            counter!(DECRYPTION_ERROR_COUNT).increment(1);
+        })?;
+
+        let duration = Instant::now().duration_since(start);
+        histogram!(DECRYPTION_DURATION).record(duration);
 
         // Chunk rows into sets of columns
         let rows = plaintexts.chunks(result_column_count).zip(rows);
@@ -237,7 +264,7 @@ where
             row.rewrite(&data)?;
 
             let bytes = BytesMut::try_from(row)?;
-            self.client.write_all(&bytes).await?;
+            self.write(bytes).await?;
         }
 
         Ok(())
@@ -309,15 +336,18 @@ where
     /// If there is no associated Portal, the row does not require decryption and can be passed through
     ///
     async fn data_row_handler(&mut self, bytes: &BytesMut) -> Result<bool, Error> {
+        counter!(ROW_TOTAL_COUNT).increment(1);
         match self.context.get_portal_from_execute().as_deref() {
             Some(Portal::Encrypted(portal)) => {
                 debug!(target: MAPPER, client_id = self.context.client_id, portal = ?portal);
                 let data_row = DataRow::try_from(bytes)?;
                 self.buffer(data_row).await?;
+                counter!(ROW_ENCRYPTED_COUNT).increment(1);
                 Ok(true)
             }
             _ => {
                 debug!(target: MAPPER, client_id = self.context.client_id, msg = "Passthrough");
+                counter!(ROW_PASSTHROUGH_COUNT).increment(1);
                 Ok(false)
             }
         }

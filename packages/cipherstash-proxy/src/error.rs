@@ -1,4 +1,5 @@
 use cipherstash_client::encryption;
+use metrics_exporter_prometheus::BuildError;
 use std::io;
 use thiserror::Error;
 use tokio::time::error::Elapsed;
@@ -36,6 +37,9 @@ pub enum Error {
 
     #[error(transparent)]
     Mapping(#[from] MappingError),
+
+    #[error(transparent)]
+    Prometheus(#[from] BuildError),
 
     #[error(transparent)]
     Protocol(#[from] ProtocolError),

@@ -9,9 +9,7 @@ edition = "2021"
 [profile.dev]
 incremental = true
 debug = true
-
-# [profile.dev.package]
-# aws-lc-sys.opt-level = 3
+# [profile.dev.package]# aws-lc-sys.opt-level = 3
 # proc-macro2.opt-level = 3
 # quote.opt-level = 3
 # serde_derive.opt-level = 3
@@ -36,6 +34,7 @@ sqlparser = { git = "https://github.com/cipherstash/datafusion-sqlparser-rs", br
   "bigdecimal",
 ] }
 thiserror = "2.0.9"
+tokio = { version = "1.42.0", features = ["full"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = [
   "ansi",

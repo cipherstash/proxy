@@ -7,6 +7,7 @@ pub mod eql;
 pub mod error;
 pub mod log;
 pub mod postgresql;
+pub mod prometheus;
 pub mod tls;
 
 pub use crate::config::{DatabaseConfig, ServerConfig, TandemConfig, TlsConfig};

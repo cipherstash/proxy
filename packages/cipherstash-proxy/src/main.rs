@@ -2,7 +2,9 @@ use cipherstash_proxy::config::TandemConfig;
 use cipherstash_proxy::connect::{self, AsyncStream};
 use cipherstash_proxy::encrypt::Encrypt;
 use cipherstash_proxy::error::Error;
-use cipherstash_proxy::{log, postgresql as pg, tls};
+use cipherstash_proxy::prometheus::CLIENT_CONNECTION_COUNT;
+use cipherstash_proxy::{log, postgresql as pg, prometheus, tls};
+use metrics::gauge;
 use tokio::net::TcpListener;
 use tokio::signal::unix::{signal, SignalKind};
 use tokio_util::task::TaskTracker;
@@ -31,6 +33,20 @@ async fn main() {
 
     let mut client_id = 0;
 
+    if encrypt.config.prometheus_enabled() {
+        let host = encrypt.config.server.host.to_owned();
+        match prometheus::start(host, encrypt.config.prometheus.port) {
+            Ok(_) => {}
+            Err(err) => {
+                error!(
+                    msg = "Could not start CipherStash proxy",
+                    error = err.to_string()
+                );
+                std::process::exit(exitcode::CONFIG);
+            }
+        }
+    }
+
     loop {
         tokio::select! {
             _ = sigint() => {
@@ -55,20 +71,27 @@ async fn main() {
                 tracker.spawn(async move {
                     let encrypt = encrypt.clone();
 
+                    gauge!(CLIENT_CONNECTION_COUNT).increment(1);
+
                     match pg::handler(client_stream, encrypt, client_id).await {
                         Ok(_) => (),
-                        Err(err) => match err {
-                            Error::ConnectionClosed => {
-                                info!(msg = "Database connection closed by client");
-                            }
-                            Error::CancelRequest => {
-                                info!(msg = "Database connection closed after cancel request");
-                            }
-                            Error::ConnectionTimeout(_) => {
-                                warn!(msg = "Database connection timeout");
-                            }
-                            _ => {
-                                error!(msg = "Database connection error", error = err.to_string());
+                        Err(err) => {
+
+                            gauge!(CLIENT_CONNECTION_COUNT).decrement(1);
+
+                            match err {
+                                Error::ConnectionClosed => {
+                                    info!(msg = "Database connection closed by client");
+                                }
+                                Error::CancelRequest => {
+                                    info!(msg = "Database connection closed after cancel request");
+                                }
+                                Error::ConnectionTimeout(_) => {
+                                    warn!(msg = "Database connection timeout");
+                                }
+                                _ => {
+                                    error!(msg = "Database connection error", error = err.to_string());
+                                }
                             }
                         },
                     }
@@ -165,10 +188,11 @@ async fn init(mut config: TandemConfig) -> Encrypt {
         Ok(encrypt) => {
             info!(msg = "Connected to CipherStash Encrypt");
             info!(
-                msg = "Database connected",
+                msg = "Connected to Database",
                 database = encrypt.config.database.name,
                 host = encrypt.config.database.host,
                 port = encrypt.config.database.port,
+                username = encrypt.config.database.username,
             );
             encrypt
         }

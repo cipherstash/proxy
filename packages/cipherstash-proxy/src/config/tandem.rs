@@ -23,7 +23,7 @@ pub struct TandemConfig {
     pub tls: Option<TlsConfig>,
     #[serde(default)]
     pub log: LogConfig,
-    pub prometheus: Option<PrometheusConfig>,
+    pub prometheus: PrometheusConfig,
     pub development: Option<DevelopmentConfig>,
 }
 
@@ -317,10 +317,7 @@ impl TandemConfig {
     ///  - a port has been explicitly set
     ///
     pub fn prometheus_enabled(&self) -> bool {
-        match &self.prometheus {
-            Some(cfg) => cfg.enabled || cfg.port != PrometheusConfig::default_port(),
-            None => false,
-        }
+        self.prometheus.enabled || self.prometheus.port != PrometheusConfig::default_port()
     }
 }
 
@@ -739,7 +736,7 @@ B+qwsnNEiDoJhgYj+cQ=
         temp_env::with_vars([("CS_PROMETHEUS__ENABLED", Some("true"))], || {
             let config = TandemConfig::build("tests/config/cipherstash-proxy-test.toml").unwrap();
             assert!(config.prometheus_enabled());
-            assert_eq!(config.prometheus.unwrap().port, 9930);
+            assert_eq!(config.prometheus.port, 9930);
         });
 
         temp_env::with_vars([("CS_PROMETHEUS__PORT", Some("7777"))], || {

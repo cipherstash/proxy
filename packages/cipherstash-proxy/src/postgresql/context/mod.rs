@@ -8,16 +8,18 @@ use super::{
     },
     Column,
 };
-use crate::log::CONTEXT;
+use crate::{log::CONTEXT, prometheus::STATEMENT_DURATION};
 use eql_mapper::{Schema, TableResolver};
+use metrics::histogram;
 use std::{
     collections::{HashMap, VecDeque},
     sync::{Arc, RwLock},
+    time::{Duration, Instant},
 };
 use tracing::debug;
 
 type DescribeQueue = Queue<Describe>;
-type ExecuteQueue = Queue<Name>;
+type ExecuteQueue = Queue<ExecuteContext>;
 type PortalQueue = Queue<Arc<Portal>>;
 
 #[derive(Clone, Debug)]
@@ -29,6 +31,25 @@ pub struct Context {
     execute: Arc<RwLock<ExecuteQueue>>,
     schema_changed: Arc<RwLock<bool>>,
     table_resolver: Arc<TableResolver>,
+}
+
+#[derive(Clone, Debug)]
+pub struct ExecuteContext {
+    name: Name,
+    start: Instant,
+}
+
+impl ExecuteContext {
+    fn new(name: Name) -> ExecuteContext {
+        ExecuteContext {
+            name,
+            start: Instant::now(),
+        }
+    }
+
+    fn duration(&self) -> Duration {
+        Instant::now().duration_since(self.start)
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -52,6 +73,7 @@ pub enum Portal {
     Encrypted(EncryptedPortal),
     Passthrough,
 }
+
 ///
 /// Portal is a Statement with Bound variables
 /// An Execute message will execute the statement with the variables associated during a Bind.
@@ -76,7 +98,7 @@ impl Context {
     }
 
     pub fn set_describe(&mut self, describe: Describe) {
-        debug!(target: CONTEXT, client_id = self.client_id, "set_describe: {describe:?}");
+        debug!(target: CONTEXT, client_id = self.client_id, describe = ?describe);
         let _ = self.describe.write().map(|mut queue| queue.add(describe));
     }
     ///
@@ -84,29 +106,36 @@ impl Context {
     /// Removes the Describe from the Queue
     ///
     pub fn complete_describe(&mut self) {
-        debug!(target: CONTEXT, client_id = self.client_id, src = "complete_describe");
+        debug!(target: CONTEXT, client_id = self.client_id, msg = "Describe complete");
         let _ = self.describe.write().map(|mut queue| queue.complete());
     }
 
     pub fn set_execute(&mut self, name: Name) {
-        debug!(target: CONTEXT, client_id = self.client_id, "set_execute: {name:?}");
-        let _ = self.execute.write().map(|mut queue| queue.add(name));
+        debug!(target: CONTEXT, client_id = self.client_id, execute = ?name);
+
+        let ctx = ExecuteContext::new(name);
+
+        let _ = self.execute.write().map(|mut queue| queue.add(ctx));
     }
 
     ///
     /// Marks the current Execution as Complete
-    /// Removes the Named portal from the Queue
-    /// Note that the Portal itself is not removed
     ///
-    /// If successfully created, a named portal object lasts till the end of the current transaction, unless explicitly destroyed.
-    /// An unnamed portal is destroyed at the end of the transaction, or as soon as the next Bind statement specifying the unnamed portal as destination is issued
+    /// If the associated portal is Unnamed, it is closed
+    ///
+    /// From the PostgreSQL Extended Query docs:
+    ///     If successfully created, a named portal object lasts till the end of the current transaction, unless explicitly destroyed.
+    ///     An unnamed portal is destroyed at the end of the transaction, or as soon as the next Bind statement specifying the unnamed portal as destination is issued
+    ///
+    /// https://www.postgresql.org/docs/current/protocol-flow.html#PROTOCOL-FLOW-EXT-QUERY
+    ///
     pub fn complete_execution(&mut self) {
-        debug!(target: CONTEXT, client_id = self.client_id, src = "complete_execution");
+        debug!(target: CONTEXT, client_id = self.client_id, msg = "Execute complete");
 
-        if let Some(name) = self.get_execute() {
-            if name.is_unnamed() {
-                debug!(target: CONTEXT, client_id = self.client_id, msg= "Close unnamed portal");
-                self.close_portal(&name);
+        if let Some(execute) = self.get_execute() {
+            histogram!(STATEMENT_DURATION).record(execute.duration());
+            if execute.name.is_unnamed() {
+                self.close_portal(&execute.name);
             }
         }
 
@@ -114,7 +143,7 @@ impl Context {
     }
 
     pub fn add_statement(&mut self, name: Name, statement: Statement) {
-        debug!(target: CONTEXT, client_id = self.client_id, src = "add_statement",  statement = ?name);
+        debug!(target: CONTEXT, client_id = self.client_id, statement = ?name);
         let _ = self
             .statements
             .write()
@@ -122,7 +151,7 @@ impl Context {
     }
 
     pub fn add_portal(&mut self, name: Name, portal: Portal) {
-        debug!(target: CONTEXT, client_id = self.client_id, src = "add_portal", name = ?name, portal = ?portal);
+        debug!(target: CONTEXT, client_id = self.client_id, name = ?name, portal = ?portal);
         let _ = self.portals.write().map(|mut portals| {
             portals
                 .entry(name)
@@ -131,15 +160,8 @@ impl Context {
         });
     }
 
-    pub fn get_execute(&self) -> Option<Name> {
-        let queue = self.execute.read().ok()?;
-        let name = queue.next()?;
-        debug!(target: CONTEXT, client_id = self.client_id, src = "get_execute", name = ?name);
-        Some(name.to_owned())
-    }
-
     pub fn get_statement(&self, name: &Name) -> Option<Arc<Statement>> {
-        debug!(target: CONTEXT, client_id = self.client_id, src = "get_statement", name = ?name);
+        debug!(target: CONTEXT, client_id = self.client_id, statement = ?name);
         let statements = self.statements.read().ok()?;
         statements.get(name).cloned()
     }
@@ -149,7 +171,7 @@ impl Context {
     /// Portal is removed from  queue
     ///
     pub fn close_portal(&mut self, name: &Name) {
-        debug!(target: CONTEXT, client_id = self.client_id, src = "close_portal", name = ?name);
+        debug!(target: CONTEXT, client_id = self.client_id, msg = "Close Portal", name = ?name);
         let _ = self.portals.write().map(|mut portals| {
             portals
                 .entry(name.clone())
@@ -158,7 +180,7 @@ impl Context {
     }
 
     pub fn get_portal(&self, name: &Name) -> Option<Arc<Portal>> {
-        debug!(target: CONTEXT, client_id = self.client_id, src = "get_portal");
+        debug!(target: CONTEXT, client_id = self.client_id, src = "Get Portal", portal = ?name);
         let portals = self.portals.read().ok()?;
 
         let queue = portals.get(name)?;
@@ -166,13 +188,11 @@ impl Context {
     }
 
     pub fn get_portal_statement(&self, name: &Name) -> Option<Arc<Statement>> {
-        debug!(target: CONTEXT, client_id = self.client_id, src = "get_portal_statement");
-
         let portals = self.portals.read().ok()?;
         let queue = portals.get(name)?;
         let portal = queue.next()?;
 
-        debug!(target: CONTEXT, client_id = self.client_id, src = "get_portal_statement", portal = ?portal);
+        debug!(target: CONTEXT, client_id = self.client_id, portal = ?portal);
 
         match portal.as_ref() {
             Portal::Encrypted(p) => Some(p.statement.clone()),
@@ -184,7 +204,7 @@ impl Context {
         let queue = self.describe.read().ok()?;
         let describe = queue.next()?;
 
-        debug!(target: CONTEXT, client_id = self.client_id, src = "get_statement_from_describe", describe = ?describe);
+        debug!(target: CONTEXT, client_id = self.client_id, msg = "Get Statement", describe = ?describe);
 
         match describe {
             Describe {
@@ -200,9 +220,16 @@ impl Context {
 
     pub fn get_portal_from_execute(&self) -> Option<Arc<Portal>> {
         let queue = self.execute.read().ok()?;
-        let name = queue.next()?;
-        debug!(target: CONTEXT, client_id = self.client_id, src = "get_portal_from_execute", name = ?name);
+        let execute_context = queue.next()?;
+        let name = &execute_context.name;
         self.get_portal(name)
+    }
+
+    pub fn get_execute(&self) -> Option<ExecuteContext> {
+        let queue = self.execute.read().ok()?;
+        let execute_context = queue.next()?;
+        debug!(target: CONTEXT, client_id = self.client_id, msg = "Get Execute", execute = ?execute_context);
+        Some(execute_context.to_owned())
     }
 
     pub fn set_schema_changed(&self) {
