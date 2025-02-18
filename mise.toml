@@ -280,6 +280,18 @@ echo
 mise --env tcp run postgres:setup
 mise --env tls run postgres:setup
 
+
+echo
+echo '###############################################'
+echo '# Test: Prometheus'
+echo '###############################################'
+echo
+
+mise --env tcp run proxy:up proxy --extra-args "--detach --wait"
+mise --env tcp run test:wait_for_postgres_to_quack --port 6432 --max-retries 20
+mise --env tcp run test:integration:prometheus
+mise --env tcp run proxy:down
+
 echo
 echo '###############################################'
 echo '# Test: non-TLS'
@@ -301,6 +313,7 @@ mise --env tls run proxy:up proxy-tls --extra-args "--detach --wait"
 mise --env tls run test:wait_for_postgres_to_quack --port 6432 --max-retries 20 --tls
 mise --env tls run test:integration:psql-tls
 mise --env tls run proxy:down
+
 
 echo
 echo '###############################################'
@@ -450,7 +463,10 @@ done
 alias = 'e'
 description = "Download latest EQL release"
 dir = "{{config_root}}/tests"
-outputs = ["{{config_root}}/tests/sql/cipherstash-encrypt.sql", "{{config_root}}/tests/sql/cipherstash-encrypt-uninstall.sql"]
+outputs = [
+  "{{config_root}}/tests/sql/cipherstash-encrypt.sql",
+  "{{config_root}}/tests/sql/cipherstash-encrypt-uninstall.sql",
+]
 run = """
 # install script
 if [ -z "$CS_EQL_PATH" ]; then

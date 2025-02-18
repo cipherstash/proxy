@@ -1,5 +1,5 @@
 use crate::error::Error;
-use metrics::{describe_counter, describe_gauge, describe_histogram, Unit};
+use metrics::{describe_counter, describe_gauge, describe_histogram, gauge, Unit};
 use metrics_exporter_prometheus::PrometheusBuilder;
 use std::net::SocketAddr;
 use tracing::info;
@@ -77,6 +77,10 @@ pub fn start(host: String, port: u16) -> Result<(), Error> {
         SERVER_BYTES_RECEIVED,
         "Number of bytes received from the server."
     );
+
+    // Prometheus endpoint is empty on startup and looks like an error
+    // Explicitly set count to zero
+    gauge!(CLIENT_CONNECTION_COUNT).set(0);
 
     info!(msg = "Prometheus exporter started", port);
     Ok(())
