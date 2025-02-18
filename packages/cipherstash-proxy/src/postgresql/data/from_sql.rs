@@ -219,13 +219,13 @@ fn binary_from_sql(
             parse_bytes_from_sql::<Decimal>(bytes, pg_type).map(Plaintext::new)
         }
 
+        (&Type::JSON | &Type::JSONB | &Type::BYTEA, ColumnType::JsonB) => {
+            parse_bytes_from_sql::<serde_json::Value>(bytes, pg_type).map(Plaintext::new)
+        }
+
         // If input type is a string but the target column isn't then parse as string and convert
         (&Type::TEXT, _) => parse_bytes_from_sql::<String>(bytes, pg_type)
             .and_then(|val| text_from_sql(&val, pg_type, col_type)),
-
-        (_, ColumnType::JsonB) => {
-            parse_bytes_from_sql::<serde_json::Value>(bytes, pg_type).map(Plaintext::new)
-        }
 
         // TODO: timestamps
         (_, ColumnType::Timestamp) => unimplemented!("TIMESTAMPTZ"),
