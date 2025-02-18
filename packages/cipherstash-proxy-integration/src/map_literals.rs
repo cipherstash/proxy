@@ -52,7 +52,7 @@ mod tests {
             "INSERT INTO encrypted (id, encrypted_jsonb) VALUES ($1, '{encrypted_jsonb}')",
         );
 
-        client.query(&sql, &[&id]).await.expect("ok");
+        client.query(&sql, &[&id]).await.unwrap();
 
         let sql = "SELECT id, encrypted_jsonb FROM encrypted WHERE id = $1";
         let rows = client.query(sql, &[&id]).await.unwrap();
