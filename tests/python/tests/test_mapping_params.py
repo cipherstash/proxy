@@ -1,4 +1,4 @@
-
+import json
 import os
 import psycopg
 from psycopg.types import TypeInfo
@@ -108,9 +108,26 @@ def test_map_int8():
 
                 execute(val, "encrypted_int8", binary=False, prepare=True)
 
+def test_map_jsonb():
+    with psycopg.connect(connection_str, autocommit=True) as conn:
+
+        with conn.cursor() as cursor:
+
+            with conn.transaction():
+
+                val = {"key": "value"}
+
+                execute(json.dumps(val), "encrypted_jsonb", expected=val)
+
+                execute(json.dumps(val).encode(), "encrypted_jsonb", binary=True, expected=val)
+
+                execute(json.dumps(val).encode(), "encrypted_jsonb", binary=True, prepare=True, expected=val)
+
+                execute(json.dumps(val), "encrypted_jsonb", binary=False, prepare=True, expected=val)
 
 
-def execute(val, column, binary=None, prepare=None):
+
+def execute(val, column, binary=None, prepare=None, expected=None):
     with psycopg.connect(connection_str, autocommit=True) as conn:
 
         with conn.cursor() as cursor:
@@ -129,11 +146,9 @@ def execute(val, column, binary=None, prepare=None):
                 cursor.execute(sql, [id], binary=binary, prepare=prepare)
 
                 row = cursor.fetchone()
+
                 (result_id, result) = row
+                expected_result = expected if expected is not None else val
 
                 assert(result_id == id)
-
-                assert(result == val)
-
-
-
+                assert(result == expected_result)

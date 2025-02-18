@@ -146,9 +146,11 @@ fn text_from_sql(
         (&Type::TIMESTAMPTZ, _) => {
             unimplemented!("TIMESTAMPTZ")
         }
-        (&Type::TEXT, ColumnType::JsonB) => serde_json::from_str::<serde_json::Value>(val)
-            .map_err(|_| MappingError::CouldNotParseParameter)
-            .map(Plaintext::new),
+        (&Type::TEXT | &Type::JSONB, ColumnType::JsonB) => {
+            serde_json::from_str::<serde_json::Value>(val)
+                .map_err(|_| MappingError::CouldNotParseParameter)
+                .map(Plaintext::new)
+        }
         (ty, _) => Err(MappingError::UnsupportedParameterType {
             name: ty.name().to_owned(),
             oid: ty.oid(),

@@ -26,6 +26,7 @@ fn text_to_sql(plaintext: &Plaintext) -> Result<BytesMut, Error> {
         Plaintext::NaiveDate(Some(x)) => x.to_string(),
         Plaintext::SmallInt(Some(x)) => x.to_string(),
         Plaintext::Timestamp(Some(x)) => x.to_string(),
+        Plaintext::JsonB(Some(x)) => x.to_string(),
         _ => todo!(),
     };
 
