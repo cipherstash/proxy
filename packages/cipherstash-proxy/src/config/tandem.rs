@@ -23,6 +23,7 @@ pub struct TandemConfig {
     pub tls: Option<TlsConfig>,
     #[serde(default)]
     pub log: LogConfig,
+    #[serde(default)]
     pub prometheus: PrometheusConfig,
     pub development: Option<DevelopmentConfig>,
 }
@@ -403,6 +404,15 @@ impl ServerConfig {
 impl PrometheusConfig {
     pub fn default_port() -> u16 {
         9930
+    }
+}
+
+impl Default for PrometheusConfig {
+    fn default() -> Self {
+        PrometheusConfig {
+            enabled: false,
+            port: PrometheusConfig::default_port(),
+        }
     }
 }
 
