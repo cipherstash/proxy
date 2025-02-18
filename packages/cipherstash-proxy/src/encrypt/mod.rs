@@ -9,8 +9,10 @@ use crate::{
 use cipherstash_client::{
     credentials::{auto_refresh::AutoRefresh, ServiceCredentials},
     encryption::{
-        self, Encrypted, IndexTerm, Plaintext, PlaintextTarget, ReferencedPendingPipeline,
+        self, Encrypted, EncryptionError, IndexTerm, Plaintext, PlaintextTarget,
+        ReferencedPendingPipeline,
     },
+    zerokms::EncryptedRecord,
     ConsoleConfig, CtsConfig, ZeroKMSConfig,
 };
 use cipherstash_config::ColumnConfig;
@@ -168,11 +170,9 @@ impl Encrypt {
             .into_iter()
             .enumerate()
             .filter_map(|(idx, opt)| {
-                opt.map(|ct| match ct {
-                    eql::Encrypted::Ciphertext { ciphertext, .. } => Ok((idx, ciphertext)),
-                    eql::Encrypted::SteVec { ste_vec_index, .. } => ste_vec_index
-                        .into_root_ciphertext()
-                        .map(|root_ciphertext| (idx, root_ciphertext)),
+                opt.map(|ct| {
+                    eql_encrypted_to_encrypted_record(ct)
+                        .map(|encrypted_record| (idx, encrypted_record))
                 })
             })
             .collect::<Result<(Vec<_>, Vec<_>), _>>()?;
@@ -316,4 +316,13 @@ fn format_index_term_binary(bytes: &Vec<u8>) -> String {
 fn format_index_term_ore_array(vec_of_bytes: &[Vec<u8>]) -> String {
     let inner: Vec<String> = vec_of_bytes.iter().map(format_index_term_ore).collect();
     format!("{}{}{}", r#"("{"#, inner.join(", "), r#"}")"#)
+}
+
+fn eql_encrypted_to_encrypted_record(
+    eql_encrypted: eql::Encrypted,
+) -> Result<EncryptedRecord, EncryptionError> {
+    match eql_encrypted {
+        eql::Encrypted::Ciphertext { ciphertext, .. } => Ok(ciphertext),
+        eql::Encrypted::SteVec { ste_vec_index, .. } => ste_vec_index.into_root_ciphertext(),
+    }
 }
