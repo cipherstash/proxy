@@ -13,7 +13,7 @@ EOF
 
 echo "curling"
 
-response=$(curl -s http://proxy:9930)
+response=$(curl -s http://localhost:9930)
 
 echo $response
 
@@ -39,7 +39,7 @@ docker exec -i postgres${CONTAINER_SUFFIX} psql postgresql://cipherstash:passwor
 INSERT INTO encrypted (id, encrypted_text) VALUES (${id}, 'hello@cipherstash.com')
 EOF
 
-response=$(curl -s http://proxy:9930)
+response=$(curl -s http://localhost:9930)
 
 if [[ $response != *"statement_total_count 2"* ]]; then
     echo "error: did not see string in output: \"statement_total_count 2\""
@@ -61,7 +61,7 @@ docker exec -i postgres${CONTAINER_SUFFIX} psql postgresql://cipherstash:passwor
 SELECT * FROM encrypted;
 EOF
 
-response=$(curl -s http://proxy:9930)
+response=$(curl -s http://localhost:9930)
 
 if [[ $response != *"statement_total_count 3"* ]]; then
     echo "error: did not see string in output: \"statement_total_count 3\""
@@ -77,6 +77,7 @@ if [[ $response != *"row_encrypted_count 1"* ]]; then
     echo "error: did not see string in output: \"row_encrypted_count 1\""
     exit 1
 fi
+
 
 
 set -e

@@ -1,3 +1,7 @@
 [env]
 CS_DATABASE__HOST = "postgres"
 CS_DATABASE__PORT = "5532"
+
+CS_PROMETHEUS__ENABLED = "true"
+
+CS_LOG__LEVEL = "debug"
