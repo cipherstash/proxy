@@ -313,7 +313,7 @@ impl TandemConfig {
     }
 
     ///
-    /// Prometheus is enabled if
+    /// Prometheus is enabled if either:
     ///  - enabled is true
     ///  - a port has been explicitly set by the user
     ///
