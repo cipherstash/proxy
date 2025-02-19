@@ -5,6 +5,7 @@
 mise.local.toml
 tests/pg/data**
 tests/sql/cipherstash-encrypt.sql
+tests/sql/cipherstash-encrypt-uninstall.sql
 .vscode
 
 rust-toolchain.toml
