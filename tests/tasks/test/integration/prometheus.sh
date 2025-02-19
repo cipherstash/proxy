@@ -13,18 +13,18 @@ EOF
 
 response=$(curl -s http://localhost:9930)
 
-if [[ $response != *"statement_total_count 1"* ]]; then
-    echo "error: did not see string in output: \"statement_total_count 1\""
+if [[ $response != *"cipherstash_proxy_statements_total 1"* ]]; then
+    echo "error: did not see string in output: \"cipherstash_proxy_statements_total 1\""
     exit 1
 fi
 
-if [[ $response != *"row_passthrough_count 1"* ]]; then
-    echo "error: did not see string in output: \"row_passthrough_count 1\""
+if [[ $response != *"cipherstash_proxy_rows_passthrough_total 1"* ]]; then
+    echo "error: did not see string in output: \"cipherstash_proxy_rows_passthrough_total 1\""
     exit 1
 fi
 
-if [[ $response != *"row_total_count 1"* ]]; then
-    echo "error: did not see string in output: \"row_total_count 1\""
+if [[ $response != *"cipherstash_proxy_rows_total 1"* ]]; then
+    echo "error: did not see string in output: \"cipherstash_proxy_rows_total 1\""
     exit 1
 fi
 
@@ -37,18 +37,18 @@ EOF
 
 response=$(curl -s http://localhost:9930)
 
-if [[ $response != *"statement_total_count 2"* ]]; then
-    echo "error: did not see string in output: \"statement_total_count 2\""
+if [[ $response != *"cipherstash_proxy_statements_total 2"* ]]; then
+    echo "error: did not see string in output: \"cipherstash_proxy_statements_total 2\""
     exit 1
 fi
 
-if [[ $response != *"statement_passthrough_count 1"* ]]; then
-    echo "error: did not see string in output: \"statement_passthrough_count 1\""
+if [[ $response != *"cipherstash_proxy_statements_passthrough_total 1"* ]]; then
+    echo "error: did not see string in output: \"cipherstash_proxy_statements_passthrough_total 1\""
     exit 1
 fi
 
-if [[ $response != *"encryption_count 1"* ]]; then
-    echo "error: did not see string in output: \"encryption_count 1\""
+if [[ $response != *"cipherstash_proxy_encrypted_values_total 1"* ]]; then
+    echo "error: did not see string in output: \"cipherstash_proxy_encrypted_values_total 1\""
     exit 1
 fi
 
@@ -59,18 +59,18 @@ EOF
 
 response=$(curl -s http://localhost:9930)
 
-if [[ $response != *"statement_total_count 3"* ]]; then
-    echo "error: did not see string in output: \"statement_total_count 3\""
+if [[ $response != *"cipherstash_proxy_statements_total 3"* ]]; then
+    echo "error: did not see string in output: \"cipherstash_proxy_statements_total 3\""
     exit 1
 fi
 
-if [[ $response != *"statement_encrypted_count 2"* ]]; then
-    echo "error: did not see string in output: \"statement_encrypted_count 2\""
+if [[ $response != *"cipherstash_proxy_statements_encrypted_total 2"* ]]; then
+    echo "error: did not see string in output: \"cipherstash_proxy_statements_encrypted_total 2\""
     exit 1
 fi
 
-if [[ $response != *"row_encrypted_count 1"* ]]; then
-    echo "error: did not see string in output: \"row_encrypted_count 1\""
+if [[ $response != *"cipherstash_proxy_rows_encrypted_total 1"* ]]; then
+    echo "error: did not see string in output: \"cipherstash_proxy_rows_encrypted_total 1\""
     exit 1
 fi
 

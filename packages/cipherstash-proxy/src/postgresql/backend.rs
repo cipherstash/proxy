@@ -13,8 +13,9 @@ use crate::postgresql::messages::data_row::DataRow;
 use crate::postgresql::messages::param_description::ParamDescription;
 use crate::postgresql::protocol::{self};
 use crate::prometheus::{
-    CLIENT_BYTES_SENT, DECRYPTION_DURATION, DECRYPTION_ERROR_COUNT, ROW_ENCRYPTED_COUNT,
-    ROW_PASSTHROUGH_COUNT, ROW_TOTAL_COUNT, SERVER_BYTES_RECEIVED,
+    CLIENTS_BYTES_SENT_TOTAL, DECRYPTED_VALUES_TOTAL, DECRYPTION_DURATION_SECONDS,
+    DECRYPTION_ERROR_TOTAL, ROWS_ENCRYPTED_TOTAL, ROWS_PASSTHROUGH_TOTAL, ROWS_TOTAL,
+    SERVER_BYTES_RECEIVED_TOTAL,
 };
 use bytes::BytesMut;
 use itertools::Itertools;
@@ -84,7 +85,7 @@ where
         .await?;
 
         let sent: u64 = bytes.len() as u64;
-        counter!(SERVER_BYTES_RECEIVED).increment(sent);
+        counter!(SERVER_BYTES_RECEIVED_TOTAL).increment(sent);
 
         if self.encrypt.is_passthrough() {
             self.write_with_flush(bytes).await?;
@@ -190,7 +191,7 @@ where
     ///
     pub async fn write(&mut self, bytes: BytesMut) -> Result<(), Error> {
         let sent: u64 = bytes.len() as u64;
-        counter!(CLIENT_BYTES_SENT).increment(sent);
+        counter!(CLIENTS_BYTES_SENT_TOTAL).increment(sent);
 
         self.client.write_all(&bytes).await?;
         Ok(())
@@ -240,11 +241,21 @@ where
 
         // Decrypt CipherText -> Plaintext
         let plaintexts = self.encrypt.decrypt(ciphertexts).await.inspect_err(|_| {
-            counter!(DECRYPTION_ERROR_COUNT).increment(1);
+            counter!(DECRYPTION_ERROR_TOTAL).increment(1);
         })?;
 
-        let duration = Instant::now().duration_since(start);
-        histogram!(DECRYPTION_DURATION).record(duration);
+        // Avoid the iter calculation if we can
+        if self.encrypt.config.prometheus_enabled() {
+            let decrypted_count =
+                plaintexts
+                    .iter()
+                    .fold(0, |acc, o| if o.is_some() { acc + 1 } else { acc });
+
+            counter!(DECRYPTED_VALUES_TOTAL).increment(decrypted_count);
+
+            let duration = Instant::now().duration_since(start);
+            histogram!(DECRYPTION_DURATION_SECONDS).record(duration);
+        }
 
         // Chunk rows into sets of columns
         let rows = plaintexts.chunks(result_column_count).zip(rows);
@@ -336,18 +347,18 @@ where
     /// If there is no associated Portal, the row does not require decryption and can be passed through
     ///
     async fn data_row_handler(&mut self, bytes: &BytesMut) -> Result<bool, Error> {
-        counter!(ROW_TOTAL_COUNT).increment(1);
+        counter!(ROWS_TOTAL).increment(1);
         match self.context.get_portal_from_execute().as_deref() {
             Some(Portal::Encrypted(portal)) => {
                 debug!(target: MAPPER, client_id = self.context.client_id, portal = ?portal);
                 let data_row = DataRow::try_from(bytes)?;
                 self.buffer(data_row).await?;
-                counter!(ROW_ENCRYPTED_COUNT).increment(1);
+                counter!(ROWS_ENCRYPTED_TOTAL).increment(1);
                 Ok(true)
             }
             _ => {
                 debug!(target: MAPPER, client_id = self.context.client_id, msg = "Passthrough");
-                counter!(ROW_PASSTHROUGH_COUNT).increment(1);
+                counter!(ROWS_PASSTHROUGH_TOTAL).increment(1);
                 Ok(false)
             }
         }

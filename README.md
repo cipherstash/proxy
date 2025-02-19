@@ -256,6 +256,9 @@ If the proxy is running on a host other than localhost, access on that host.
 | `cipherstash_proxy_clients_received_bytes_total` | Counter   | Number of bytes CipherStash Proxy received from clients                   |
 | `cipherstash_proxy_server_bytes_sent`            | Counter   | Number of bytes CipherStash Proxy sent to the PostgreSQL server           |
 | `cipherstash_proxy_server_bytes_received`        | Counter   | Number of bytes CipherStash Proxy received from the PostgreSQL server     |
+| `cipherstash_proxy_rows_total`                   | Counter   | Total number of rows returned                                             |
+| `cipherstash_proxy_rows_encrypted_total`         | Counter   | Number of encrypted rows returned                                         |
+| `cipherstash_proxy_rows_passthrough_total`       | Counter   | Number of passthrough (non-encrypted) rows returned                       |
 
 
 ## Developing

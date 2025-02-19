@@ -5,25 +5,30 @@ use metrics_exporter_prometheus::PrometheusBuilder;
 use std::net::SocketAddr;
 use tracing::{debug, info};
 
-pub const ENCRYPTION_COUNT: &str = "encryption_count";
-pub const ENCRYPTION_ERROR_COUNT: &str = "encryption_error_count";
-pub const ENCRYPTION_DURATION: &str = "encryption_duration";
-pub const DECRYPTION_COUNT: &str = "decryption_count";
-pub const DECRYPTION_ERROR_COUNT: &str = "decryption_error_count";
-pub const DECRYPTION_DURATION: &str = "decryption_duration";
-pub const STATEMENT_TOTAL_COUNT: &str = "statement_total_count";
-pub const STATEMENT_ENCRYPTED_COUNT: &str = "statement_encrypted_count";
-pub const STATEMENT_PASSTHROUGH_COUNT: &str = "statement_passthrough_count";
-pub const STATEMENT_UNMAPPABLE_COUNT: &str = "statement_unmappable_count";
-pub const STATEMENT_DURATION: &str = "statement_duration";
-pub const ROW_TOTAL_COUNT: &str = "row_total_count";
-pub const ROW_ENCRYPTED_COUNT: &str = "row_encrypted_count";
-pub const ROW_PASSTHROUGH_COUNT: &str = "row_passthrough_count";
-pub const CLIENT_CONNECTION_COUNT: &str = "client_connection_count";
-pub const CLIENT_BYTES_SENT: &str = "client_bytes_sent";
-pub const CLIENT_BYTES_RECEIVED: &str = "client_bytes_received";
-pub const SERVER_BYTES_SENT: &str = "server_bytes_sent";
-pub const SERVER_BYTES_RECEIVED: &str = "server_bytes_received";
+// See https://prometheus.io/docs/practices/naming/
+pub const ENCRYPTED_VALUES_TOTAL: &str = "cipherstash_proxy_encrypted_values_total";
+pub const ENCRYPTION_ERROR_TOTAL: &str = "cipherstash_proxy_encryption_error_total";
+pub const ENCRYPTION_DURATION_SECONDS: &str = "cipherstash_proxy_encryption_duration_seconds";
+
+pub const DECRYPTED_VALUES_TOTAL: &str = "cipherstash_proxy_decrypted_values_total";
+pub const DECRYPTION_ERROR_TOTAL: &str = "cipherstash_proxy_decryption_error_total";
+pub const DECRYPTION_DURATION_SECONDS: &str = "cipherstash_proxy_decryption_duration_seconds";
+
+pub const STATEMENTS_TOTAL: &str = "cipherstash_proxy_statements_total";
+pub const STATEMENTS_ENCRYPTED_TOTAL: &str = "cipherstash_proxy_statements_encrypted_total";
+pub const STATEMENTS_PASSTHROUGH_TOTAL: &str = "cipherstash_proxy_statements_passthrough_total";
+pub const STATEMENT_UNMAPPABLE_TOTAL: &str = "cipherstash_proxy_statements_unmappable_total";
+pub const STATEMENT_DURATION_SECONDS: &str = "cipherstash_proxy_statements_duration_seconds";
+
+pub const ROWS_TOTAL: &str = "cipherstash_proxy_rows_total";
+pub const ROWS_ENCRYPTED_TOTAL: &str = "cipherstash_proxy_rows_encrypted_total";
+pub const ROWS_PASSTHROUGH_TOTAL: &str = "cipherstash_proxy_rows_passthrough_total";
+
+pub const CLIENTS_ACTIVE_CONNECTIONS: &str = "cipherstash_proxy_clients_active_connections";
+pub const CLIENTS_BYTES_SENT_TOTAL: &str = "cipherstash_proxy_clients_bytes_sent_total";
+pub const CLIENTS_BYTES_RECEIVED_TOTAL: &str = "cipherstash_proxy_clients_bytes_received_total";
+pub const SERVER_BYTES_SENT_TOTAL: &str = "cipherstash_proxy_server_bytes_sent_total";
+pub const SERVER_BYTES_RECEIVED_TOTAL: &str = "cipherstash_proxy_server_bytes_received_total";
 
 pub fn start(host: String, port: u16) -> Result<(), Error> {
     let address = format!("{}:{}", host, port);
@@ -35,55 +40,68 @@ pub fn start(host: String, port: u16) -> Result<(), Error> {
         .with_http_listener(socket_address)
         .install()?;
 
-    describe_counter!(ENCRYPTION_COUNT, "Number of encryption actions.");
-    describe_counter!(ENCRYPTION_ERROR_COUNT, "Number of encryption errors.");
+    describe_counter!(ENCRYPTED_VALUES_TOTAL, "Number of encrypted values");
+    describe_counter!(ENCRYPTION_ERROR_TOTAL, "Number of encryption errors");
     describe_histogram!(
-        ENCRYPTION_DURATION,
-        Unit::Milliseconds,
-        "Duration of encryption operations (ms)"
+        ENCRYPTION_DURATION_SECONDS,
+        Unit::Seconds,
+        "Duration of encryption operations"
     );
-    describe_counter!(DECRYPTION_COUNT, "Number of decryption actions.");
-    describe_counter!(DECRYPTION_ERROR_COUNT, "Number of decryption errors.");
+    describe_counter!(DECRYPTED_VALUES_TOTAL, "Number of decrypted values");
+    describe_counter!(DECRYPTION_ERROR_TOTAL, "Number of decryption errors");
     describe_histogram!(
-        DECRYPTION_DURATION,
-        Unit::Milliseconds,
-        "Duration of decryption operations (ms)"
+        DECRYPTION_DURATION_SECONDS,
+        Unit::Seconds,
+        "Duration of decryption operations"
     );
 
-    describe_counter!(STATEMENT_TOTAL_COUNT, "Total number of SQL statements.");
+    describe_counter!(STATEMENTS_TOTAL, "Total number of SQL statements");
     describe_counter!(
-        STATEMENT_ENCRYPTED_COUNT,
-        "Number of encrypted SQL statements."
+        STATEMENTS_ENCRYPTED_TOTAL,
+        "Number of encrypted SQL statements"
     );
     describe_counter!(
-        STATEMENT_PASSTHROUGH_COUNT,
-        "Number of passthrough (non-encrypted) SQL statements."
+        STATEMENTS_PASSTHROUGH_TOTAL,
+        "Number of passthrough (non-encrypted) SQL statements"
     );
     describe_histogram!(
-        STATEMENT_DURATION,
-        Unit::Milliseconds,
-        "Duration of statement execution (ms)"
+        STATEMENT_DURATION_SECONDS,
+        Unit::Seconds,
+        "Duration of statement execution"
+    );
+
+    describe_counter!(ROWS_TOTAL, "Number of rows returned");
+    describe_counter!(ROWS_ENCRYPTED_TOTAL, "Number of encrypted rows returned");
+    describe_counter!(
+        ROWS_PASSTHROUGH_TOTAL,
+        "Number of passthrough (non-encrypted) rows returned"
     );
 
     describe_gauge!(
-        CLIENT_CONNECTION_COUNT,
+        CLIENTS_ACTIVE_CONNECTIONS,
         "Current number of client connections"
     );
-    describe_counter!(CLIENT_BYTES_SENT, "Number of bytes sent to the client.");
     describe_counter!(
-        CLIENT_BYTES_RECEIVED,
-        "Number of bytes received from the client."
+        CLIENTS_BYTES_SENT_TOTAL,
+        "Number of bytes sent to the client"
+    );
+    describe_counter!(
+        CLIENTS_BYTES_RECEIVED_TOTAL,
+        "Number of bytes received from the client"
     );
 
-    describe_counter!(SERVER_BYTES_SENT, "Number of bytes sent to the server.");
     describe_counter!(
-        SERVER_BYTES_RECEIVED,
-        "Number of bytes received from the server."
+        SERVER_BYTES_SENT_TOTAL,
+        "Number of bytes sent to the server"
+    );
+    describe_counter!(
+        SERVER_BYTES_RECEIVED_TOTAL,
+        "Number of bytes received from the server"
     );
 
     // Prometheus endpoint is empty on startup and looks like an error
     // Explicitly set count to zero
-    gauge!(CLIENT_CONNECTION_COUNT).set(0);
+    gauge!(CLIENTS_ACTIVE_CONNECTIONS).set(0);
 
     info!(msg = "Prometheus exporter started", port);
     Ok(())

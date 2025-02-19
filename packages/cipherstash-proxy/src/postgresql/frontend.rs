@@ -15,9 +15,9 @@ use crate::postgresql::context::Portal;
 use crate::postgresql::data::literal_from_sql;
 use crate::postgresql::messages::Name;
 use crate::prometheus::{
-    CLIENT_BYTES_RECEIVED, ENCRYPTION_COUNT, ENCRYPTION_DURATION, ENCRYPTION_ERROR_COUNT,
-    SERVER_BYTES_SENT, STATEMENT_ENCRYPTED_COUNT, STATEMENT_PASSTHROUGH_COUNT,
-    STATEMENT_TOTAL_COUNT, STATEMENT_UNMAPPABLE_COUNT,
+    CLIENTS_BYTES_RECEIVED_TOTAL, ENCRYPTED_VALUES_TOTAL, ENCRYPTION_DURATION_SECONDS,
+    ENCRYPTION_ERROR_TOTAL, SERVER_BYTES_SENT_TOTAL, STATEMENTS_ENCRYPTED_TOTAL,
+    STATEMENTS_PASSTHROUGH_TOTAL, STATEMENTS_TOTAL, STATEMENT_UNMAPPABLE_TOTAL,
 };
 use bytes::BytesMut;
 use cipherstash_client::encryption::Plaintext;
@@ -69,7 +69,7 @@ where
 
     pub async fn write(&mut self, bytes: BytesMut) -> Result<(), Error> {
         let sent: u64 = bytes.len() as u64;
-        counter!(SERVER_BYTES_SENT).increment(sent);
+        counter!(SERVER_BYTES_SENT_TOTAL).increment(sent);
         self.server.write_all(&bytes).await?;
         Ok(())
     }
@@ -84,7 +84,7 @@ where
         .await?;
 
         let sent: u64 = bytes.len() as u64;
-        counter!(CLIENT_BYTES_RECEIVED).increment(sent);
+        counter!(CLIENTS_BYTES_RECEIVED_TOTAL).increment(sent);
 
         if self.encrypt.is_passthrough() {
             return Ok(bytes);
@@ -161,7 +161,7 @@ where
         self.check_for_schema_change(&statement);
 
         if !eql_mapper::requires_type_check(&statement) {
-            counter!(STATEMENT_PASSTHROUGH_COUNT).increment(1);
+            counter!(STATEMENTS_PASSTHROUGH_TOTAL).increment(1);
             return Ok(None);
         }
 
@@ -190,7 +190,7 @@ where
                         query.rewrite(transformed_statement.to_string());
                     };
                 }
-                counter!(STATEMENT_ENCRYPTED_COUNT).increment(1);
+                counter!(STATEMENTS_ENCRYPTED_TOTAL).increment(1);
                 Portal::encrypted(statement.into(), vec![])
             }
             None => {
@@ -198,7 +198,7 @@ where
                     client_id = self.context.client_id,
                     msg = "Passthrough Query"
                 );
-                counter!(STATEMENT_PASSTHROUGH_COUNT).increment(1);
+                counter!(STATEMENTS_PASSTHROUGH_TOTAL).increment(1);
                 Portal::passthrough()
             }
         };
@@ -240,13 +240,13 @@ where
             .encrypt(plaintexts, literal_columns)
             .await
             .inspect_err(|_| {
-                counter!(ENCRYPTION_ERROR_COUNT).increment(1);
+                counter!(ENCRYPTION_ERROR_TOTAL).increment(1);
             })?;
 
-        counter!(ENCRYPTION_COUNT).increment(encrypted.len() as u64);
+        counter!(ENCRYPTED_VALUES_TOTAL).increment(encrypted.len() as u64);
 
         let duration = Instant::now().duration_since(start);
-        histogram!(ENCRYPTION_DURATION).record(duration);
+        histogram!(ENCRYPTION_DURATION_SECONDS).record(duration);
 
         let encrypted_values = encrypted
             .into_iter()
@@ -310,7 +310,7 @@ where
         self.check_for_schema_change(&statement);
 
         if !eql_mapper::requires_type_check(&statement) {
-            counter!(STATEMENT_PASSTHROUGH_COUNT).increment(1);
+            counter!(STATEMENTS_PASSTHROUGH_TOTAL).increment(1);
             return Ok(None);
         }
 
@@ -345,7 +345,7 @@ where
                     };
                 }
 
-                counter!(STATEMENT_ENCRYPTED_COUNT).increment(1);
+                counter!(STATEMENTS_ENCRYPTED_TOTAL).increment(1);
 
                 message.rewrite_param_types(&statement.param_columns);
                 self.context
@@ -356,7 +356,7 @@ where
                     client_id = self.context.client_id,
                     msg = "Passthrough Parse"
                 );
-                counter!(STATEMENT_PASSTHROUGH_COUNT).increment(1);
+                counter!(STATEMENTS_PASSTHROUGH_TOTAL).increment(1);
             }
         }
 
@@ -387,7 +387,7 @@ where
             statement = ?statement
         );
 
-        counter!(STATEMENT_TOTAL_COUNT).increment(1);
+        counter!(STATEMENTS_TOTAL).increment(1);
 
         Ok(statement)
     }
@@ -524,17 +524,20 @@ where
             .encrypt_some(plaintexts, &statement.param_columns)
             .await
             .inspect_err(|_| {
-                counter!(ENCRYPTION_ERROR_COUNT).increment(1);
+                counter!(ENCRYPTION_ERROR_TOTAL).increment(1);
             })?;
 
-        let encrypted_count = encrypted
-            .iter()
-            .fold(0, |acc, o| if o.is_some() { acc + 1 } else { acc });
+        // Avoid the iter calculation if we can
+        if self.encrypt.config.prometheus_enabled() {
+            let encrypted_count = encrypted
+                .iter()
+                .fold(0, |acc, o| if o.is_some() { acc + 1 } else { acc });
 
-        counter!(ENCRYPTION_COUNT).increment(encrypted_count);
+            counter!(ENCRYPTED_VALUES_TOTAL).increment(encrypted_count);
 
-        let duration = Instant::now().duration_since(start);
-        histogram!(ENCRYPTION_DURATION).record(duration);
+            let duration = Instant::now().duration_since(start);
+            histogram!(ENCRYPTION_DURATION_SECONDS).record(duration);
+        }
 
         Ok(encrypted)
     }
@@ -555,7 +558,7 @@ where
                     error = err.to_string()
                 );
 
-                counter!(STATEMENT_UNMAPPABLE_COUNT).increment(1);
+                counter!(STATEMENT_UNMAPPABLE_TOTAL).increment(1);
 
                 Err(MappingError::StatementCouldNotBeTypeChecked(err.to_string()).into())
             }

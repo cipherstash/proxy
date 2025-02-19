@@ -2,7 +2,7 @@ use cipherstash_proxy::config::TandemConfig;
 use cipherstash_proxy::connect::{self, AsyncStream};
 use cipherstash_proxy::encrypt::Encrypt;
 use cipherstash_proxy::error::Error;
-use cipherstash_proxy::prometheus::CLIENT_CONNECTION_COUNT;
+use cipherstash_proxy::prometheus::CLIENTS_ACTIVE_CONNECTIONS;
 use cipherstash_proxy::{log, postgresql as pg, prometheus, tls};
 use metrics::gauge;
 use tokio::net::TcpListener;
@@ -71,13 +71,13 @@ async fn main() {
                 tracker.spawn(async move {
                     let encrypt = encrypt.clone();
 
-                    gauge!(CLIENT_CONNECTION_COUNT).increment(1);
+                    gauge!(CLIENTS_ACTIVE_CONNECTIONS).increment(1);
 
                     match pg::handler(client_stream, encrypt, client_id).await {
                         Ok(_) => (),
                         Err(err) => {
 
-                            gauge!(CLIENT_CONNECTION_COUNT).decrement(1);
+                            gauge!(CLIENTS_ACTIVE_CONNECTIONS).decrement(1);
 
                             match err {
                                 Error::ConnectionClosed => {
