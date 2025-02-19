@@ -50,14 +50,14 @@ pub fn start(host: String, port: u16) -> Result<(), Error> {
         "Duration of decryption operations (ms)"
     );
 
-    describe_counter!(STATEMENT_TOTAL_COUNT, "Total number of SQL statements .");
+    describe_counter!(STATEMENT_TOTAL_COUNT, "Total number of SQL statements.");
     describe_counter!(
         STATEMENT_ENCRYPTED_COUNT,
-        "Number of encrypted SQL statements ."
+        "Number of encrypted SQL statements."
     );
     describe_counter!(
         STATEMENT_PASSTHROUGH_COUNT,
-        "Number of passthrough (non-encrypted) SQL statements ."
+        "Number of passthrough (non-encrypted) SQL statements."
     );
     describe_histogram!(
         STATEMENT_DURATION,

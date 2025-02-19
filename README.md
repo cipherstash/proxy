@@ -208,7 +208,6 @@ output = "stdout"
 ansi_enabled = "true"
 
 
-
 [prometheus]
 # Enable prometheus stats
 # Optional
@@ -224,7 +223,39 @@ port = "9930"
 ```
 
 
+## Prometheus Metrics
 
+To enable a Prometheus exporter on the default port (`9930`) use either:
+
+```toml
+[prometheus]
+enabled = "true"
+```
+
+```env
+CS_PROMETHEUS__ENABLED = "true"
+```
+
+When enabled, metrics can be accessed via `http://localhost:9930/metrics`.
+If the proxy is running on a host other than localhost, access on that host.
+
+
+### Available metrics
+
+Name                        | Type          | Decription
+--------------------------- | ------------- | -------------------------------------------------------
+statement_total_count       | Counter       | Total number of SQL statements.
+statement_encrypted_count   | Counter       | Number of encrypted SQL statements.
+statement_passthrough_count | Counter       | Number of passthrough (non-encrypted) SQL statements.
+statement_duration          | Histogram     | Duration of statement execution (ms)
+encryption_count            | Counter       | Number of encryption actions.
+encryption_duration         | Histogram     | Duration of encryption operations (ms)
+decryption_duration         | Histogram     | Duration of decryption operations (ms)
+client_connection_count     | Gauge         | Current number of client connections
+client_bytes_sent           | Counter       | Number of bytes sent to the client.
+client_bytes_received       | Counter       | Number of bytes received from the client.
+server_bytes_sent           | Counter       | Number of bytes sent to the server.
+server_bytes_received       | Counter       | Number of bytes received from the server.
 
 
 ## Developing
