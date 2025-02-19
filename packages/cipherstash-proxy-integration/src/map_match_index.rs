@@ -19,7 +19,7 @@ mod tests {
         let sql = "SELECT * FROM encrypted WHERE encrypted_text @> $1";
         let rows = client.query(sql, &[&"hello@"]).await.unwrap();
 
-        assert!(rows.len() == 1);
+        assert_eq!(rows.len(), 1);
 
         for row in rows {
             let result: String = row.get("encrypted_text");

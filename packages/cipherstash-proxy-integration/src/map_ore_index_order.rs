@@ -25,7 +25,7 @@ mod tests {
         let sql = "SELECT encrypted_int2 FROM encrypted ORDER BY encrypted_int2 ASC";
         let rows = client.query(sql, &[]).await.unwrap();
 
-        assert!(rows.len() == 2);
+        assert_eq!(rows.len(), 2);
 
         let row = &rows[0];
         let result_int: i16 = row.get("encrypted_int2");
@@ -59,7 +59,7 @@ mod tests {
         let sql = "SELECT encrypted_int4 FROM encrypted ORDER BY encrypted_int4 ASC";
         let rows = client.query(sql, &[]).await.unwrap();
 
-        assert!(rows.len() == 2);
+        assert_eq!(rows.len(), 2);
 
         let row = &rows[0];
         let result_int: i32 = row.get("encrypted_int4");
@@ -93,7 +93,7 @@ mod tests {
         let sql = "SELECT encrypted_int8 FROM encrypted ORDER BY encrypted_int8 ASC";
         let rows = client.query(sql, &[]).await.unwrap();
 
-        assert!(rows.len() == 2);
+        assert_eq!(rows.len(), 2);
 
         let row = &rows[0];
         let result_int: i64 = row.get("encrypted_int8");

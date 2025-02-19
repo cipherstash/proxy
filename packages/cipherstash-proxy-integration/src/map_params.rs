@@ -18,7 +18,7 @@ mod tests {
         let sql = "SELECT id, encrypted_text FROM encrypted WHERE id = $1";
         let rows = client.query(sql, &[&id]).await.unwrap();
 
-        assert!(rows.len() == 1);
+        assert_eq!(rows.len(), 1);
 
         for row in rows {
             let result: String = row.get("encrypted_text");
@@ -41,7 +41,7 @@ mod tests {
         let sql = "SELECT id, encrypted_bool FROM encrypted WHERE id = $1";
         let rows = client.query(sql, &[&id]).await.unwrap();
 
-        assert!(rows.len() == 1);
+        assert_eq!(rows.len(), 1);
 
         for row in rows {
             let result_id: i64 = row.get("id");
@@ -67,7 +67,7 @@ mod tests {
         let sql = "SELECT id, encrypted_int2 FROM encrypted WHERE id = $1";
         let rows = client.query(sql, &[&id]).await.unwrap();
 
-        assert!(rows.len() == 1);
+        assert_eq!(rows.len(), 1);
 
         for row in rows {
             let result_id: i64 = row.get("id");
@@ -93,7 +93,7 @@ mod tests {
         let sql = "SELECT id, encrypted_int4 FROM encrypted WHERE id = $1";
         let rows = client.query(sql, &[&id]).await.unwrap();
 
-        assert!(rows.len() == 1);
+        assert_eq!(rows.len(), 1);
 
         for row in rows {
             let result_id: i64 = row.get("id");
@@ -119,7 +119,7 @@ mod tests {
         let sql = "SELECT id, encrypted_int8 FROM encrypted WHERE id = $1";
         let rows = client.query(sql, &[&id]).await.unwrap();
 
-        assert!(rows.len() == 1);
+        assert_eq!(rows.len(), 1);
 
         for row in rows {
             let result_id: i64 = row.get("id");
@@ -145,7 +145,7 @@ mod tests {
         let sql = "SELECT id, encrypted_float8 FROM encrypted WHERE id = $1";
         let rows = client.query(sql, &[&id]).await.unwrap();
 
-        assert!(rows.len() == 1);
+        assert_eq!(rows.len(), 1);
 
         for row in rows {
             let result_id: i64 = row.get("id");
@@ -171,7 +171,7 @@ mod tests {
         let sql = "SELECT id, encrypted_date FROM encrypted WHERE id = $1";
         let rows = client.query(sql, &[&id]).await.unwrap();
 
-        assert!(rows.len() == 1);
+        assert_eq!(rows.len(), 1);
 
         for row in rows {
             let result_id: i64 = row.get("id");
@@ -223,7 +223,7 @@ mod tests {
         let sql = "SELECT id, plaintext FROM encrypted WHERE id = $1";
         let rows = client.query(sql, &[&id]).await.unwrap();
 
-        assert!(rows.len() == 1);
+        assert_eq!(rows.len(), 1);
 
         for row in rows {
             let result: String = row.get("plaintext");
@@ -267,7 +267,7 @@ mod tests {
         let sql = "SELECT * FROM encrypted WHERE id = $1";
         let rows = client.query(sql, &[&id]).await.unwrap();
 
-        assert!(rows.len() == 1);
+        assert_eq!(rows.len(), 1);
 
         for row in rows {
             let result: String = row.get("plaintext");
