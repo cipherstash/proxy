@@ -11,11 +11,7 @@ docker exec -i postgres${CONTAINER_SUFFIX} psql postgresql://cipherstash:passwor
 SELECT 1;
 EOF
 
-echo "curling"
-
 response=$(curl -s http://localhost:9930)
-
-echo $response
 
 if [[ $response != *"statement_total_count 1"* ]]; then
     echo "error: did not see string in output: \"statement_total_count 1\""
@@ -68,7 +64,7 @@ if [[ $response != *"statement_total_count 3"* ]]; then
     exit 1
 fi
 
-if [[ $response != *"statement_encrypted_count 1"* ]]; then
+if [[ $response != *"statement_encrypted_count 2"* ]]; then
     echo "error: did not see string in output: \"statement_encrypted_count 2\""
     exit 1
 fi
@@ -77,7 +73,6 @@ if [[ $response != *"row_encrypted_count 1"* ]]; then
     echo "error: did not see string in output: \"row_encrypted_count 1\""
     exit 1
 fi
-
 
 
 set -e

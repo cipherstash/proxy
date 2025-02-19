@@ -1,8 +1,9 @@
 use crate::error::Error;
+use crate::log::DEVELOPMENT;
 use metrics::{describe_counter, describe_gauge, describe_histogram, gauge, Unit};
 use metrics_exporter_prometheus::PrometheusBuilder;
 use std::net::SocketAddr;
-use tracing::info;
+use tracing::{debug, info};
 
 pub const ENCRYPTION_COUNT: &str = "encryption_count";
 pub const ENCRYPTION_ERROR_COUNT: &str = "encryption_error_count";
@@ -27,6 +28,8 @@ pub const SERVER_BYTES_RECEIVED: &str = "server_bytes_received";
 pub fn start(host: String, port: u16) -> Result<(), Error> {
     let address = format!("{}:{}", host, port);
     let socket_address: SocketAddr = address.parse().unwrap();
+
+    debug!(target: DEVELOPMENT, msg = "Starting Prometheus exporter", port);
 
     PrometheusBuilder::new()
         .with_http_listener(socket_address)

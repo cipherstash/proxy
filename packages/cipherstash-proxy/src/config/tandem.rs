@@ -746,12 +746,15 @@ B+qwsnNEiDoJhgYj+cQ=
         temp_env::with_vars([("CS_PROMETHEUS__ENABLED", Some("true"))], || {
             let config = TandemConfig::build("tests/config/cipherstash-proxy-test.toml").unwrap();
             assert!(config.prometheus_enabled());
+            assert!(config.prometheus.enabled);
             assert_eq!(config.prometheus.port, 9930);
         });
 
         temp_env::with_vars([("CS_PROMETHEUS__PORT", Some("7777"))], || {
             let config = TandemConfig::build("tests/config/cipherstash-proxy-test.toml").unwrap();
             assert!(config.prometheus_enabled());
+            assert!(!config.prometheus.enabled);
+            assert_eq!(config.prometheus.port, 7777);
         });
 
         temp_env::with_vars([("CS_PROMETHEUS__PORT", Some("9930"))], || {
