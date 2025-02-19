@@ -33,7 +33,7 @@ pub async fn clear() {
     let client = connect_with_tls(PROXY).await;
 
     let sql = "TRUNCATE encrypted";
-    client.simple_query(sql).await.expect("ok");
+    client.simple_query(sql).await.unwrap();
 }
 
 pub fn trace() {
@@ -87,7 +87,7 @@ pub async fn connect(port: u16) -> Client {
     let connection_string = connection_string(port);
     let (client, connection) = tokio_postgres::connect(&connection_string, NoTls)
         .await
-        .expect("ok");
+        .unwrap();
 
     tokio::spawn(async move {
         if let Err(e) = connection.await {

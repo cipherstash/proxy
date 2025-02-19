@@ -357,12 +357,12 @@ mod tests {
 
         let expected = bytes.clone();
 
-        let bind = Bind::try_from(&bytes).expect("ok");
+        let bind = Bind::try_from(&bytes).unwrap();
 
         assert_eq!(bind.param_values.len(), 1);
         assert_eq!(bind.result_columns_format_codes[0], FormatCode::Binary);
 
-        let bytes = BytesMut::try_from(bind).expect("ok");
+        let bytes = BytesMut::try_from(bind).unwrap();
         assert_eq!(bytes, expected);
     }
 

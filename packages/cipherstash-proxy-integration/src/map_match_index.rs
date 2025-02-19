@@ -14,13 +14,10 @@ mod tests {
         let encrypted_text = "hello@cipherstash.com";
 
         let sql = "INSERT INTO encrypted (id, encrypted_text) VALUES ($1, $2)";
-        client
-            .query(sql, &[&id, &encrypted_text])
-            .await
-            .expect("ok");
+        client.query(sql, &[&id, &encrypted_text]).await.unwrap();
 
         let sql = "SELECT * FROM encrypted WHERE encrypted_text @> $1";
-        let rows = client.query(sql, &[&"hello@"]).await.expect("ok");
+        let rows = client.query(sql, &[&"hello@"]).await.unwrap();
 
         assert!(rows.len() == 1);
 

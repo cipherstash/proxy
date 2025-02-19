@@ -28,7 +28,7 @@ mod tests {
             client
                 .query(sql, &[&text_id, &encrypted_text])
                 .await
-                .expect("ok");
+                .unwrap();
 
             let _ = counter.fetch_add(1, Ordering::SeqCst);
         };
@@ -41,7 +41,7 @@ mod tests {
             client
                 .query(sql, &[&int2_id, &encrypted_int2])
                 .await
-                .expect("ok");
+                .unwrap();
 
             let _ = counter.fetch_add(1, Ordering::SeqCst);
         };
@@ -54,7 +54,7 @@ mod tests {
             client
                 .query(sql, &[&int4_id, &encrypted_int4])
                 .await
-                .expect("ok");
+                .unwrap();
 
             let _ = counter.fetch_add(1, Ordering::SeqCst);
         };
@@ -67,7 +67,7 @@ mod tests {
             client
                 .query(sql, &[&plaintext_id, &plaintext_text])
                 .await
-                .expect("ok");
+                .unwrap();
 
             let _ = counter.fetch_add(1, Ordering::SeqCst);
         };
@@ -81,7 +81,7 @@ mod tests {
 
         let text = async {
             let sql = "SELECT id, encrypted_text FROM encrypted WHERE id = $1";
-            let rows = client.query(sql, &[&text_id]).await.expect("ok");
+            let rows = client.query(sql, &[&text_id]).await.unwrap();
 
             assert!(rows.len() == 1);
 
@@ -95,7 +95,7 @@ mod tests {
 
         let int2 = async {
             let sql = "SELECT id, encrypted_int2 FROM encrypted WHERE id = $1";
-            let rows = client.query(sql, &[&int2_id]).await.expect("ok");
+            let rows = client.query(sql, &[&int2_id]).await.unwrap();
 
             assert!(rows.len() == 1);
 
@@ -109,7 +109,7 @@ mod tests {
 
         let int4 = async {
             let sql = "SELECT id, encrypted_int4 FROM encrypted WHERE id = $1";
-            let rows = client.query(sql, &[&int4_id]).await.expect("ok");
+            let rows = client.query(sql, &[&int4_id]).await.unwrap();
 
             assert!(rows.len() == 1);
 
@@ -123,7 +123,7 @@ mod tests {
 
         let plaintext = async {
             let sql = "SELECT id, plaintext FROM encrypted WHERE id = $1";
-            let rows = client.query(sql, &[&plaintext_id]).await.expect("ok");
+            let rows = client.query(sql, &[&plaintext_id]).await.unwrap();
 
             assert!(rows.len() == 1);
 

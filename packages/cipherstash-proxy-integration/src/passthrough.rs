@@ -12,13 +12,10 @@ mod tests {
         let encrypted_text = "hello@cipherstash.com";
 
         let sql = "INSERT INTO plaintext (id, plaintext) VALUES ($1, $2)";
-        client
-            .query(sql, &[&id, &encrypted_text])
-            .await
-            .expect("ok");
+        client.query(sql, &[&id, &encrypted_text]).await.unwrap();
 
         let sql = "SELECT id, plaintext FROM plaintext WHERE id = $1";
-        let rows = client.query(sql, &[&id]).await.expect("ok");
+        let rows = client.query(sql, &[&id]).await.unwrap();
 
         assert!(rows.len() == 1);
 
@@ -62,13 +59,10 @@ mod tests {
                     let encrypted_text = random_string();
 
                     let sql = "INSERT INTO plaintext (id,  plaintext) VALUES ($1, $2)";
-                    client
-                        .query(sql, &[&id, &encrypted_text])
-                        .await
-                        .expect("ok");
+                    client.query(sql, &[&id, &encrypted_text]).await.unwrap();
 
                     let sql = "SELECT id, plaintext FROM plaintext WHERE id = $1";
-                    let rows = client.query(sql, &[&id]).await.expect("ok");
+                    let rows = client.query(sql, &[&id]).await.unwrap();
 
                     assert!(rows.len() == 1);
 

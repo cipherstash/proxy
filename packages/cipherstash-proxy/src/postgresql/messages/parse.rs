@@ -138,9 +138,9 @@ mod tests {
 
         let expected = bytes.clone();
 
-        let parse = Parse::try_from(&bytes).expect("ok");
+        let parse = Parse::try_from(&bytes).unwrap();
 
-        let bytes = BytesMut::try_from(parse).expect("ok");
+        let bytes = BytesMut::try_from(parse).unwrap();
         assert_eq!(bytes, expected);
     }
 
@@ -151,7 +151,7 @@ mod tests {
              b"P\0\0\0J\0INSERT INTO encrypted (id, encrypted_int2) VALUES ($1, $2)\0\0\x02\0\0\0\x15\0\0\0\x15"
         );
 
-        let mut parse = Parse::try_from(&bytes).expect("ok");
+        let mut parse = Parse::try_from(&bytes).unwrap();
 
         let identifier = Identifier::new("table", "column");
 

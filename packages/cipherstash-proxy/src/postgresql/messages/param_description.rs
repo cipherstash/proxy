@@ -160,7 +160,7 @@ mod tests {
 
         let expected = bytes.clone();
 
-        let description = ParamDescription::try_from(&bytes).expect("ok");
+        let description = ParamDescription::try_from(&bytes).unwrap();
 
         info!("{:?}", description);
 
@@ -168,7 +168,7 @@ mod tests {
         assert_eq!(description.types[0], postgres_types::Type::INT8);
         assert_eq!(description.types[1], postgres_types::Type::JSONB);
 
-        let bytes = BytesMut::try_from(description).expect("ok");
+        let bytes = BytesMut::try_from(description).unwrap();
         assert_eq!(bytes, expected);
     }
 }

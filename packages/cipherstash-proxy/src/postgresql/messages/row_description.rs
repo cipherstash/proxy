@@ -214,14 +214,14 @@ mod tests {
 
         let expected = bytes.clone();
 
-        let row_description = RowDescription::try_from(&bytes).expect("ok");
+        let row_description = RowDescription::try_from(&bytes).unwrap();
 
         info!("{:?}", row_description);
 
         assert_eq!(row_description.fields.len(), 1);
         assert_eq!(row_description.fields[0].name, "TimeZone");
 
-        let bytes = BytesMut::try_from(row_description).expect("ok");
+        let bytes = BytesMut::try_from(row_description).unwrap();
         assert_eq!(bytes, expected);
     }
 
@@ -234,14 +234,14 @@ mod tests {
 
         let expected = bytes.clone();
 
-        let row_description = RowDescription::try_from(&bytes).expect("ok");
+        let row_description = RowDescription::try_from(&bytes).unwrap();
 
         assert_eq!(row_description.fields.len(), 3);
         assert_eq!(row_description.fields[0].name, "id");
         assert_eq!(row_description.fields[1].name, "name");
         assert_eq!(row_description.fields[2].name, "email");
 
-        let bytes = BytesMut::try_from(row_description).expect("ok");
+        let bytes = BytesMut::try_from(row_description).unwrap();
         assert_eq!(bytes, expected);
     }
 }

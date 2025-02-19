@@ -204,7 +204,7 @@ mod tests {
 
         let record = record();
 
-        let s = record.to_mp_base85().expect("ok");
+        let s = record.to_mp_base85().unwrap();
         info!("{:?}", s);
 
         // "{\"c\": \"mBbKx=EbyVyx>mNt9E<k5A&(S8?o+de4F^|i^}7e3l4YE2r(f|W`0Und}s4|#2_A>;-h3xf8wDrq~v|IvQ=jXYG!u4Uu9SI)@Q+xmSd+PWo=<;Y$Ct\",\"k\": \"ct\",\"i\": {\"t\": \"\"users\"\",\"c\": \"\"email\"\"},\"v\": 1}";
@@ -212,7 +212,7 @@ mod tests {
         let bytes = to_message(b"D\0\0\0i\0\x01\0\0\0_\x01{\"c\": \"mBbKx=EbyVyx>mNt9E<k5A&(S8?o+de4F^|i^}7e3l4YE2r(f|W`0Und}s4|#2_A>;-h3xf8wDrq~v|IvQ=jXYG!u4Uu9SI)@Q+xmSd+PWo=<;Y$Ct\",\"k\": \"ct\",\"i\": {\"t\": \"\"users\"\",\"c\": \"\"email\"\"},\"v\": 1}");
         // let expected = bytes.clone();
 
-        let _data_row = DataRow::try_from(&bytes).expect("ok");
+        let _data_row = DataRow::try_from(&bytes).unwrap();
 
         // let ciphertext = data_row.to_ciphertext().expect("ok");
 
@@ -250,7 +250,7 @@ mod tests {
         let bytes = to_message(b"D\0\0\0\x0e\0\x01\0\0\0\x04\0\0\x1e\xa2");
         let expected = bytes.clone();
 
-        let data_row = DataRow::try_from(&bytes).expect("ok");
+        let data_row = DataRow::try_from(&bytes).unwrap();
 
         let data_col = data_row.columns.first().unwrap();
 
@@ -258,7 +258,7 @@ mod tests {
         let value = buf.get_i32();
         assert_eq!(value, 7842);
 
-        let bytes = BytesMut::try_from(data_row).expect("ok");
+        let bytes = BytesMut::try_from(data_row).unwrap();
         assert_eq!(bytes, expected);
     }
 
@@ -268,7 +268,7 @@ mod tests {
             b"D\0\0\09\0\x03\0\0\0\x08blahvtha\0\0\0\x0242\0\0\0\x1d2023-12-16 01:52:25.031985+00",
         );
 
-        let data_row = DataRow::try_from(&bytes).expect("ok");
+        let data_row = DataRow::try_from(&bytes).unwrap();
 
         let data_col = data_row.columns.first().unwrap();
 
@@ -281,7 +281,7 @@ mod tests {
     pub fn parse_data_row_with_null_column() {
         let bytes = to_message(b"D\0\0\0\n\0\x01\xff\xff\xff\xff");
 
-        let data_row = DataRow::try_from(&bytes).expect("ok");
+        let data_row = DataRow::try_from(&bytes).unwrap();
 
         let data_col = data_row.columns.first().unwrap();
 

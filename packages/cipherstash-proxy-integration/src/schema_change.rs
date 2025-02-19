@@ -15,10 +15,10 @@ mod tests {
         );"
         );
 
-        let _ = client.execute(&sql, &[]).await.expect("ok");
+        let _ = client.execute(&sql, &[]).await.unwrap();
 
         let sql = format!("SELECT id FROM table_{id}");
-        let rows = client.query(&sql, &[]).await.expect("ok");
+        let rows = client.query(&sql, &[]).await.unwrap();
 
         assert!(rows.is_empty());
     }

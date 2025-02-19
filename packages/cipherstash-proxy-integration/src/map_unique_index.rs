@@ -15,13 +15,10 @@ mod tests {
         let encrypted_text = "hello@cipherstash.com";
 
         let sql = "INSERT INTO encrypted (id, encrypted_text) VALUES ($1, $2)";
-        client
-            .query(sql, &[&id, &encrypted_text])
-            .await
-            .expect("ok");
+        client.query(sql, &[&id, &encrypted_text]).await.unwrap();
 
         let sql = "SELECT id, encrypted_text FROM encrypted WHERE encrypted_text = $1";
-        let rows = client.query(sql, &[&encrypted_text]).await.expect("ok");
+        let rows = client.query(sql, &[&encrypted_text]).await.unwrap();
 
         assert!(rows.len() == 1);
 
@@ -43,13 +40,10 @@ mod tests {
         let encrypted_bool: bool = true;
 
         let sql = "INSERT INTO encrypted (id, encrypted_bool) VALUES ($1, $2)";
-        client
-            .query(sql, &[&id, &encrypted_bool])
-            .await
-            .expect("ok");
+        client.query(sql, &[&id, &encrypted_bool]).await.unwrap();
 
         let sql = "SELECT id, encrypted_bool FROM encrypted WHERE encrypted_bool = $1";
-        let rows = client.query(sql, &[&encrypted_bool]).await.expect("ok");
+        let rows = client.query(sql, &[&encrypted_bool]).await.unwrap();
 
         assert!(rows.len() == 1);
 
@@ -74,13 +68,10 @@ mod tests {
         let encrypted_int2: i16 = 42;
 
         let sql = "INSERT INTO encrypted (id, encrypted_int2) VALUES ($1, $2)";
-        client
-            .query(sql, &[&id, &encrypted_int2])
-            .await
-            .expect("ok");
+        client.query(sql, &[&id, &encrypted_int2]).await.unwrap();
 
         let sql = "SELECT id, encrypted_int2 FROM encrypted WHERE encrypted_int2 = $1";
-        let rows = client.query(sql, &[&encrypted_int2]).await.expect("ok");
+        let rows = client.query(sql, &[&encrypted_int2]).await.unwrap();
 
         assert!(rows.len() == 1);
 
@@ -105,13 +96,10 @@ mod tests {
         let encrypted_int4: i32 = 42;
 
         let sql = "INSERT INTO encrypted (id, encrypted_int4) VALUES ($1, $2)";
-        client
-            .query(sql, &[&id, &encrypted_int4])
-            .await
-            .expect("ok");
+        client.query(sql, &[&id, &encrypted_int4]).await.unwrap();
 
         let sql = "SELECT id, encrypted_int4 FROM encrypted WHERE encrypted_int4 = $1";
-        let rows = client.query(sql, &[&encrypted_int4]).await.expect("ok");
+        let rows = client.query(sql, &[&encrypted_int4]).await.unwrap();
 
         assert!(rows.len() == 1);
 
@@ -136,13 +124,10 @@ mod tests {
         let encrypted_int8: i64 = 42;
 
         let sql = "INSERT INTO encrypted (id, encrypted_int8) VALUES ($1, $2)";
-        client
-            .query(sql, &[&id, &encrypted_int8])
-            .await
-            .expect("ok");
+        client.query(sql, &[&id, &encrypted_int8]).await.unwrap();
 
         let sql = "SELECT id, encrypted_int8 FROM encrypted WHERE encrypted_int8 = $1";
-        let rows = client.query(sql, &[&encrypted_int8]).await.expect("ok");
+        let rows = client.query(sql, &[&encrypted_int8]).await.unwrap();
 
         assert!(rows.len() == 1);
 
@@ -167,13 +152,10 @@ mod tests {
         let encrypted_float8: f64 = 42.00;
 
         let sql = "INSERT INTO encrypted (id, encrypted_float8) VALUES ($1, $2)";
-        client
-            .query(sql, &[&id, &encrypted_float8])
-            .await
-            .expect("ok");
+        client.query(sql, &[&id, &encrypted_float8]).await.unwrap();
 
         let sql = "SELECT id, encrypted_float8 FROM encrypted WHERE encrypted_float8 = $1";
-        let rows = client.query(sql, &[&encrypted_float8]).await.expect("ok");
+        let rows = client.query(sql, &[&encrypted_float8]).await.unwrap();
 
         assert!(rows.len() == 1);
 
@@ -198,13 +180,10 @@ mod tests {
         let encrypted_date = NaiveDate::parse_from_str("2025-01-01", "%Y-%m-%d").unwrap();
 
         let sql = "INSERT INTO encrypted (id, encrypted_date) VALUES ($1, $2)";
-        client
-            .query(sql, &[&id, &encrypted_date])
-            .await
-            .expect("ok");
+        client.query(sql, &[&id, &encrypted_date]).await.unwrap();
 
         let sql = "SELECT id, encrypted_date FROM encrypted WHERE encrypted_date = $1";
-        let rows = client.query(sql, &[&encrypted_date]).await.expect("ok");
+        let rows = client.query(sql, &[&encrypted_date]).await.unwrap();
 
         assert!(rows.len() == 1);
 
@@ -229,10 +208,10 @@ mod tests {
         let plaintext = "hello@cipherstash.com";
 
         let sql = "INSERT INTO encrypted (id, plaintext) VALUES ($1, $2)";
-        client.query(sql, &[&id, &plaintext]).await.expect("ok");
+        client.query(sql, &[&id, &plaintext]).await.unwrap();
 
         let sql = "SELECT id, plaintext FROM encrypted WHERE plaintext = $1";
-        let rows = client.query(sql, &[&plaintext]).await.expect("ok");
+        let rows = client.query(sql, &[&plaintext]).await.unwrap();
 
         assert!(rows.len() == 1);
 
@@ -275,7 +254,7 @@ mod tests {
                 ],
             )
             .await
-            .expect("ok");
+            .unwrap();
 
         let sql = "SELECT * FROM encrypted WHERE encrypted_text = $1 AND encrypted_bool = $2 AND encrypted_int2 = $3 AND encrypted_int4 = $4 AND encrypted_int8 = $5 AND encrypted_float8 = $6";
         let rows = client
@@ -291,7 +270,7 @@ mod tests {
                 ],
             )
             .await
-            .expect("ok");
+            .unwrap();
 
         assert!(rows.len() == 1);
 

@@ -17,13 +17,13 @@ mod tests {
         let high: i16 = 99;
 
         let sql = "INSERT INTO encrypted (id, encrypted_int2) VALUES ($1, $2)";
-        client.query(sql, &[&low_id, &low]).await.expect("ok");
+        client.query(sql, &[&low_id, &low]).await.unwrap();
 
         let sql = "INSERT INTO encrypted (id, encrypted_int2) VALUES ($1, $2)";
-        client.query(sql, &[&high_id, &high]).await.expect("ok");
+        client.query(sql, &[&high_id, &high]).await.unwrap();
 
         let sql = "SELECT encrypted_int2 FROM encrypted ORDER BY encrypted_int2 ASC";
-        let rows = client.query(sql, &[]).await.expect("ok");
+        let rows = client.query(sql, &[]).await.unwrap();
 
         assert!(rows.len() == 2);
 
@@ -51,13 +51,13 @@ mod tests {
         let high: i32 = 99;
 
         let sql = "INSERT INTO encrypted (id, encrypted_int4) VALUES ($1, $2)";
-        client.query(sql, &[&low_id, &low]).await.expect("ok");
+        client.query(sql, &[&low_id, &low]).await.unwrap();
 
         let sql = "INSERT INTO encrypted (id, encrypted_int4) VALUES ($1, $2)";
-        client.query(sql, &[&high_id, &high]).await.expect("ok");
+        client.query(sql, &[&high_id, &high]).await.unwrap();
 
         let sql = "SELECT encrypted_int4 FROM encrypted ORDER BY encrypted_int4 ASC";
-        let rows = client.query(sql, &[]).await.expect("ok");
+        let rows = client.query(sql, &[]).await.unwrap();
 
         assert!(rows.len() == 2);
 
@@ -85,13 +85,13 @@ mod tests {
         let high: i64 = 99;
 
         let sql = "INSERT INTO encrypted (id, encrypted_int8) VALUES ($1, $2)";
-        client.query(sql, &[&low_id, &low]).await.expect("ok");
+        client.query(sql, &[&low_id, &low]).await.unwrap();
 
         let sql = "INSERT INTO encrypted (id, encrypted_int8) VALUES ($1, $2)";
-        client.query(sql, &[&high_id, &high]).await.expect("ok");
+        client.query(sql, &[&high_id, &high]).await.unwrap();
 
         let sql = "SELECT encrypted_int8 FROM encrypted ORDER BY encrypted_int8 ASC";
-        let rows = client.query(sql, &[]).await.expect("ok");
+        let rows = client.query(sql, &[]).await.unwrap();
 
         assert!(rows.len() == 2);
 
