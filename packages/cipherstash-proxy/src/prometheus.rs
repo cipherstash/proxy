@@ -8,10 +8,12 @@ use tracing::{debug, info};
 // See https://prometheus.io/docs/practices/naming/
 pub const ENCRYPTED_VALUES_TOTAL: &str = "cipherstash_proxy_encrypted_values_total";
 pub const ENCRYPTION_ERROR_TOTAL: &str = "cipherstash_proxy_encryption_error_total";
+pub const ENCRYPTION_REQUESTS_TOTAL: &str = "cipherstash_proxy_encryption_requests_total";
 pub const ENCRYPTION_DURATION_SECONDS: &str = "cipherstash_proxy_encryption_duration_seconds";
 
 pub const DECRYPTED_VALUES_TOTAL: &str = "cipherstash_proxy_decrypted_values_total";
 pub const DECRYPTION_ERROR_TOTAL: &str = "cipherstash_proxy_decryption_error_total";
+pub const DECRYPTION_REQUESTS_TOTAL: &str = "cipherstash_proxy_decryption_requests_total";
 pub const DECRYPTION_DURATION_SECONDS: &str = "cipherstash_proxy_decryption_duration_seconds";
 
 pub const STATEMENTS_TOTAL: &str = "cipherstash_proxy_statements_total";

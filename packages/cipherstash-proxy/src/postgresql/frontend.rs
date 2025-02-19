@@ -16,8 +16,9 @@ use crate::postgresql::data::literal_from_sql;
 use crate::postgresql::messages::Name;
 use crate::prometheus::{
     CLIENTS_BYTES_RECEIVED_TOTAL, ENCRYPTED_VALUES_TOTAL, ENCRYPTION_DURATION_SECONDS,
-    ENCRYPTION_ERROR_TOTAL, SERVER_BYTES_SENT_TOTAL, STATEMENTS_ENCRYPTED_TOTAL,
-    STATEMENTS_PASSTHROUGH_TOTAL, STATEMENTS_TOTAL, STATEMENT_UNMAPPABLE_TOTAL,
+    ENCRYPTION_ERROR_TOTAL, ENCRYPTION_REQUESTS_TOTAL, SERVER_BYTES_SENT_TOTAL,
+    STATEMENTS_ENCRYPTED_TOTAL, STATEMENTS_PASSTHROUGH_TOTAL, STATEMENTS_TOTAL,
+    STATEMENT_UNMAPPABLE_TOTAL,
 };
 use bytes::BytesMut;
 use cipherstash_client::encryption::Plaintext;
@@ -243,6 +244,7 @@ where
                 counter!(ENCRYPTION_ERROR_TOTAL).increment(1);
             })?;
 
+        counter!(ENCRYPTION_REQUESTS_TOTAL).increment(1);
         counter!(ENCRYPTED_VALUES_TOTAL).increment(encrypted.len() as u64);
 
         let duration = Instant::now().duration_since(start);
@@ -533,6 +535,7 @@ where
                 .iter()
                 .fold(0, |acc, o| if o.is_some() { acc + 1 } else { acc });
 
+            counter!(ENCRYPTION_REQUESTS_TOTAL).increment(1);
             counter!(ENCRYPTED_VALUES_TOTAL).increment(encrypted_count);
 
             let duration = Instant::now().duration_since(start);

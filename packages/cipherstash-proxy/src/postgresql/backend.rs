@@ -14,8 +14,8 @@ use crate::postgresql::messages::param_description::ParamDescription;
 use crate::postgresql::protocol::{self};
 use crate::prometheus::{
     CLIENTS_BYTES_SENT_TOTAL, DECRYPTED_VALUES_TOTAL, DECRYPTION_DURATION_SECONDS,
-    DECRYPTION_ERROR_TOTAL, ROWS_ENCRYPTED_TOTAL, ROWS_PASSTHROUGH_TOTAL, ROWS_TOTAL,
-    SERVER_BYTES_RECEIVED_TOTAL,
+    DECRYPTION_ERROR_TOTAL, DECRYPTION_REQUESTS_TOTAL, ROWS_ENCRYPTED_TOTAL,
+    ROWS_PASSTHROUGH_TOTAL, ROWS_TOTAL, SERVER_BYTES_RECEIVED_TOTAL,
 };
 use bytes::BytesMut;
 use itertools::Itertools;
@@ -251,6 +251,7 @@ where
                     .iter()
                     .fold(0, |acc, o| if o.is_some() { acc + 1 } else { acc });
 
+            counter!(DECRYPTION_REQUESTS_TOTAL).increment(1);
             counter!(DECRYPTED_VALUES_TOTAL).increment(decrypted_count);
 
             let duration = Instant::now().duration_since(start);
