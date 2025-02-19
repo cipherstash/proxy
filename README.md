@@ -1,3 +1,5 @@
+[![Docker Pulls](https://img.shields.io/docker/pulls/cipherstash/proxy.svg)](https://hub.docker.com/r/cipherstash/proxy/tags)
+
 # CipherStash Proxy
 
 CipherStash Proxy provides a transparent proxy to your existing postgres database, handling the complexity of encrypting and decrypting your data.
