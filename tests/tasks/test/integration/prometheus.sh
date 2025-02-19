@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-#MISE description="PSQL with passtrhough"
+#MISE description="Test Prometheus metrics are exported and updated"
 
 #!/bin/bash
 
