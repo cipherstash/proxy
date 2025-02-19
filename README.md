@@ -242,20 +242,20 @@ If the proxy is running on a host other than localhost, access on that host.
 
 ### Available metrics
 
-Name                        | Type          | Decription
---------------------------- | ------------- | -------------------------------------------------------
-statement_total_count       | Counter       | Total number of SQL statements.
-statement_encrypted_count   | Counter       | Number of encrypted SQL statements.
-statement_passthrough_count | Counter       | Number of passthrough (non-encrypted) SQL statements.
-statement_duration          | Histogram     | Duration of statement execution (ms)
-encryption_count            | Counter       | Number of encryption actions.
-encryption_duration         | Histogram     | Duration of encryption operations (ms)
-decryption_duration         | Histogram     | Duration of decryption operations (ms)
-client_connection_count     | Gauge         | Current number of client connections
-client_bytes_sent           | Counter       | Number of bytes sent to the client.
-client_bytes_received       | Counter       | Number of bytes received from the client.
-server_bytes_sent           | Counter       | Number of bytes sent to the server.
-server_bytes_received       | Counter       | Number of bytes received from the server.
+| Name                                             | Target    | Description                                                               |
+|--------------------------------------------------|-----------|---------------------------------------------------------------------------|
+| `cipherstash_proxy_statements_total`             | Counter   | Total number of SQL statements processed by CipherStash Proxy             |
+| `cipherstash_proxy_statements_encrypted_total`   | Counter   | Number of SQL statements that required encryption                         |
+| `cipherstash_proxy_statements_passthrough_total` | Counter   | Number of SQL statements that did not require encryption                  |
+| `cipherstash_proxy_statements_duration_seconds`  | Histogram | Duration of time CipherStash Proxy spent executing SQL statements         |
+| `cipherstash_proxy_encryptions_total`            | Counter   | Number of encryption operations performed by CipherStash Proxy            |
+| `cipherstash_proxy_encryptions_duration_seconds` | Histogram | Duration of time CipherStash Proxy spent performing encryption operations |
+| `cipherstash_proxy_decryptions_duration_seconds` | Histogram | Duration of time CipherStash Proxy spent performing decryption operations |
+| `cipherstash_proxy_clients_active_connections`   | Gauge     | Current number of connections to CipherStash Proxy from clients           |
+| `cipherstash_proxy_clients_sent_bytes_total`     | Counter   | Number of bytes CipherStash Proxy sent to clients                         |
+| `cipherstash_proxy_clients_received_bytes_total` | Counter   | Number of bytes CipherStash Proxy received from clients                   |
+| `cipherstash_proxy_server_bytes_sent`            | Counter   | Number of bytes CipherStash Proxy sent to the PostgreSQL server           |
+| `cipherstash_proxy_server_bytes_received`        | Counter   | Number of bytes CipherStash Proxy received from the PostgreSQL server     |
 
 
 ## Developing
