@@ -315,7 +315,7 @@ impl TandemConfig {
     ///
     /// Prometheus is enabled if
     ///  - enabled is true
-    ///  - a port has been explicitly set
+    ///  - a port has been explicitly set by the user
     ///
     pub fn prometheus_enabled(&self) -> bool {
         self.prometheus.enabled || self.prometheus.port != PrometheusConfig::default_port()
