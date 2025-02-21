@@ -18,7 +18,7 @@ use crate::prometheus::{
     CLIENTS_BYTES_RECEIVED_TOTAL, ENCRYPTED_VALUES_TOTAL, ENCRYPTION_DURATION_SECONDS,
     ENCRYPTION_ERROR_TOTAL, ENCRYPTION_REQUESTS_TOTAL, SERVER_BYTES_SENT_TOTAL,
     STATEMENTS_ENCRYPTED_TOTAL, STATEMENTS_PASSTHROUGH_TOTAL, STATEMENTS_TOTAL,
-    STATEMENT_UNMAPPABLE_TOTAL,
+    STATEMENTS_UNMAPPABLE_TOTAL,
 };
 use bytes::BytesMut;
 use cipherstash_client::encryption::Plaintext;
@@ -559,7 +559,7 @@ where
                     error = err.to_string()
                 );
 
-                counter!(STATEMENT_UNMAPPABLE_TOTAL).increment(1);
+                counter!(STATEMENTS_UNMAPPABLE_TOTAL).increment(1);
 
                 Err(MappingError::StatementCouldNotBeTypeChecked(err.to_string()).into())
             }

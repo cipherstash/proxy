@@ -19,8 +19,8 @@ pub const DECRYPTION_DURATION_SECONDS: &str = "cipherstash_proxy_decryption_dura
 pub const STATEMENTS_TOTAL: &str = "cipherstash_proxy_statements_total";
 pub const STATEMENTS_ENCRYPTED_TOTAL: &str = "cipherstash_proxy_statements_encrypted_total";
 pub const STATEMENTS_PASSTHROUGH_TOTAL: &str = "cipherstash_proxy_statements_passthrough_total";
-pub const STATEMENT_UNMAPPABLE_TOTAL: &str = "cipherstash_proxy_statements_unmappable_total";
-pub const STATEMENT_DURATION_SECONDS: &str = "cipherstash_proxy_statements_duration_seconds";
+pub const STATEMENTS_UNMAPPABLE_TOTAL: &str = "cipherstash_proxy_statements_unmappable_total";
+pub const STATEMENTS_DURATION_SECONDS: &str = "cipherstash_proxy_statements_duration_seconds";
 
 pub const ROWS_TOTAL: &str = "cipherstash_proxy_rows_total";
 pub const ROWS_ENCRYPTED_TOTAL: &str = "cipherstash_proxy_rows_encrypted_total";
