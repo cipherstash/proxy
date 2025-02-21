@@ -245,23 +245,25 @@ If the proxy is running on a host other than localhost, access on that host.
 | Name                                                  | Target    | Description                                                                 |
 |-------------------------------------------------------|-----------|-----------------------------------------------------------------------------|
 | `cipherstash_proxy_clients_active_connections`        | Gauge     | Current number of connections to CipherStash Proxy from clients             |
-| `cipherstash_proxy_clients_bytes_received_total`      | Counter   | Number of bytes CipherStash Proxy received from clients                     |
-| `cipherstash_proxy_clients_bytes_sent_total`          | Counter   | Number of bytes CipherStash Proxy sent to clients                           |
+| `cipherstash_proxy_clients_bytes_received_total`      | Counter   | Number of bytes received by CipherStash Proxy from clients                  |
+| `cipherstash_proxy_clients_bytes_sent_total`          | Counter   | Number of bytes sent from CipherStash Proxy to clients                      |
 | `cipherstash_proxy_decrypted_values_total`            | Counter   | Number of individual values that have been decrypted                        |
 | `cipherstash_proxy_decryption_duration_seconds`       | Histogram | Duration of time CipherStash Proxy spent performing decryption operations   |
 | `cipherstash_proxy_decryption_duration_seconds_count` | Counter   | Number of observations of requests to CipherStash ZeroKMS to decrypt values |
-| `cipherstash_proxy_decryption_duration_seconds_sum`   | Counter   | Number of requests to CipherStash ZeroKMS to decrypt values                 |
+| `cipherstash_proxy_decryption_duration_seconds_sum`   | Counter   | Total time CipherStash Proxy spent performing decryption operations         |
+| `cipherstash_proxy_decryption_error_total`            | Counter   | Number of decryption operations that were unsuccessful                      |
 | `cipherstash_proxy_decryption_requests_total`         | Counter   | Number of requests to CipherStash ZeroKMS to decrypt values                 |
 | `cipherstash_proxy_encrypted_values_total`            | Counter   | Number of individual values that have been encrypted                        |
 | `cipherstash_proxy_encryption_duration_seconds`       | Histogram | Duration of time CipherStash Proxy spent performing encryption operations   |
 | `cipherstash_proxy_encryption_duration_seconds_count` | Counter   | Number of observations of requests to CipherStash ZeroKMS to encrypt values |
-| `cipherstash_proxy_encryption_duration_seconds_sum`   | Counter   | Number of requests to CipherStash ZeroKMS to encrypt values                 |
+| `cipherstash_proxy_encryption_duration_seconds_sum`   | Counter   | Total time CipherStash Proxy spent performing encryption operations         |
+| `cipherstash_proxy_encryption_error_total`            | Counter   | Number of encryption operations that were unsuccessful                      |
 | `cipherstash_proxy_encryption_requests_total`         | Counter   | Number of requests to CipherStash ZeroKMS to encrypt values                 |
-| `cipherstash_proxy_rows_encrypted_total`              | Counter   | Number of encrypted rows returned                                           |
-| `cipherstash_proxy_rows_passthrough_total`            | Counter   | Number of passthrough (non-encrypted) rows returned                         |
+| `cipherstash_proxy_rows_encrypted_total`              | Counter   | Number of encrypted rows returned to clients                                |
+| `cipherstash_proxy_rows_passthrough_total`            | Counter   | Number of non-encrypted rows returned to clients                            |
 | `cipherstash_proxy_rows_total`                        | Counter   | Total number of rows returned                                               |
-| `cipherstash_proxy_server_bytes_received`             | Counter   | Number of bytes CipherStash Proxy received from the PostgreSQL server       |
-| `cipherstash_proxy_server_bytes_sent`                 | Counter   | Number of bytes CipherStash Proxy sent to the PostgreSQL server             |
+| `cipherstash_proxy_server_bytes_received_total`       | Counter   | Number of bytes CipherStash Proxy received from the PostgreSQL server       |
+| `cipherstash_proxy_server_bytes_sent_total`           | Counter   | Number of bytes CipherStash Proxy sent to the PostgreSQL server             |
 | `cipherstash_proxy_statements_duration_seconds`       | Histogram | Duration of time CipherStash Proxy spent executing SQL statements           |
 | `cipherstash_proxy_statements_duration_seconds_count` | Count     | Number of observations of CipherStash Proxy statement duration              |
 | `cipherstash_proxy_statements_duration_seconds_sum`   | Count     | Total time CipherStash Proxy spent executing SQL statements                 |

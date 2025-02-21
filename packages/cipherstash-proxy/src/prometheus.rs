@@ -42,63 +42,93 @@ pub fn start(host: String, port: u16) -> Result<(), Error> {
         .with_http_listener(socket_address)
         .install()?;
 
-    describe_counter!(ENCRYPTED_VALUES_TOTAL, "Number of encrypted values");
-    describe_counter!(ENCRYPTION_ERROR_TOTAL, "Number of encryption errors");
+    describe_counter!(
+        ENCRYPTED_VALUES_TOTAL,
+        "Number of individual values that have been encrypted"
+    );
+    describe_counter!(
+        ENCRYPTION_REQUESTS_TOTAL,
+        "Number of requests to CipherStash ZeroKMS to encrypt values"
+    );
+    describe_counter!(
+        ENCRYPTION_ERROR_TOTAL,
+        "Number of encryption operations that were unsuccessful"
+    );
     describe_histogram!(
         ENCRYPTION_DURATION_SECONDS,
         Unit::Seconds,
-        "Duration of encryption operations"
+        "Duration of time CipherStash Proxy spent performing encryption operations"
     );
-    describe_counter!(DECRYPTED_VALUES_TOTAL, "Number of decrypted values");
-    describe_counter!(DECRYPTION_ERROR_TOTAL, "Number of decryption errors");
+    describe_counter!(
+        DECRYPTED_VALUES_TOTAL,
+        "Number of individual values that have been decrypted"
+    );
+    describe_counter!(
+        DECRYPTION_REQUESTS_TOTAL,
+        "Number of requests to CipherStash ZeroKMS to decrypt values"
+    );
+    describe_counter!(
+        DECRYPTION_ERROR_TOTAL,
+        "Number of decryption operations that were unsuccessful"
+    );
     describe_histogram!(
         DECRYPTION_DURATION_SECONDS,
         Unit::Seconds,
-        "Duration of decryption operations"
+        "Duration of time CipherStash Proxy spent performing decryption operations"
     );
 
-    describe_counter!(STATEMENTS_TOTAL, "Total number of SQL statements");
+    describe_counter!(
+        STATEMENTS_TOTAL,
+        "Total number of SQL statements processed by CipherStash Proxy"
+    );
     describe_counter!(
         STATEMENTS_ENCRYPTED_TOTAL,
-        "Number of encrypted SQL statements"
+        "Number of SQL statements that required encryption"
     );
     describe_counter!(
         STATEMENTS_PASSTHROUGH_TOTAL,
-        "Number of passthrough (non-encrypted) SQL statements"
+        "Number of SQL statements that did not require encryption"
+    );
+    describe_counter!(
+        STATEMENTS_UNMAPPABLE_TOTAL,
+        "Total number of unmappable SQL statements processed by CipherStash Proxy"
     );
     describe_histogram!(
-        STATEMENT_DURATION_SECONDS,
+        STATEMENTS_DURATION_SECONDS,
         Unit::Seconds,
-        "Duration of statement execution"
+        "Duration of time CipherStash Proxy spent executing SQL statements"
     );
 
-    describe_counter!(ROWS_TOTAL, "Number of rows returned");
-    describe_counter!(ROWS_ENCRYPTED_TOTAL, "Number of encrypted rows returned");
+    describe_counter!(ROWS_TOTAL, "Total number of rows returned to clients");
+    describe_counter!(
+        ROWS_ENCRYPTED_TOTAL,
+        "Number of encrypted rows returned to clients"
+    );
     describe_counter!(
         ROWS_PASSTHROUGH_TOTAL,
-        "Number of passthrough (non-encrypted) rows returned"
+        "Number of non-encrypted rows returned to clients"
     );
 
     describe_gauge!(
         CLIENTS_ACTIVE_CONNECTIONS,
-        "Current number of client connections"
+        "Current number of connections to CipherStash Proxy from clients"
     );
     describe_counter!(
         CLIENTS_BYTES_SENT_TOTAL,
-        "Number of bytes sent to the client"
+        "Number of bytes sent from CipherStash Proxy to clients"
     );
     describe_counter!(
         CLIENTS_BYTES_RECEIVED_TOTAL,
-        "Number of bytes received from the client"
+        "Number of bytes received by CipherStash Proxy from clients"
     );
 
     describe_counter!(
         SERVER_BYTES_SENT_TOTAL,
-        "Number of bytes sent to the server"
+        "Number of bytes CipherStash Proxy sent to the PostgreSQL server"
     );
     describe_counter!(
         SERVER_BYTES_RECEIVED_TOTAL,
-        "Number of bytes received from the server"
+        "Number of bytes CipherStash Proxy received from the PostgreSQL server"
     );
 
     // Prometheus endpoint is empty on startup and looks like an error
