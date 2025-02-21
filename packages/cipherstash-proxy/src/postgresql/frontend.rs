@@ -531,9 +531,7 @@ where
 
         // Avoid the iter calculation if we can
         if self.encrypt.config.prometheus_enabled() {
-            let encrypted_count = encrypted
-                .iter()
-                .fold(0, |acc, o| if o.is_some() { acc + 1 } else { acc });
+            let encrypted_count = encrypted.iter().filter(|e| e.is_some()).count() as u64;
 
             counter!(ENCRYPTION_REQUESTS_TOTAL).increment(1);
             counter!(ENCRYPTED_VALUES_TOTAL).increment(encrypted_count);

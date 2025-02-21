@@ -313,12 +313,10 @@ impl TandemConfig {
     }
 
     ///
-    /// Prometheus is enabled if either:
-    ///  - enabled is true
-    ///  - a port has been explicitly set by the user
+    /// Returns true if Prometheus export is enabled
     ///
     pub fn prometheus_enabled(&self) -> bool {
-        self.prometheus.enabled || self.prometheus.port != PrometheusConfig::default_port()
+        self.prometheus.enabled
     }
 }
 
@@ -752,14 +750,23 @@ B+qwsnNEiDoJhgYj+cQ=
 
         temp_env::with_vars([("CS_PROMETHEUS__PORT", Some("7777"))], || {
             let config = TandemConfig::build("tests/config/cipherstash-proxy-test.toml").unwrap();
-            assert!(config.prometheus_enabled());
+            assert!(!config.prometheus_enabled());
             assert!(!config.prometheus.enabled);
             assert_eq!(config.prometheus.port, 7777);
         });
 
-        temp_env::with_vars([("CS_PROMETHEUS__PORT", Some("9930"))], || {
-            let config = TandemConfig::build("tests/config/cipherstash-proxy-test.toml").unwrap();
-            assert!(!config.prometheus_enabled());
-        });
+        temp_env::with_vars(
+            [
+                ("CS_PROMETHEUS__ENABLED", Some("true")),
+                ("CS_PROMETHEUS__PORT", Some("7777")),
+            ],
+            || {
+                let config =
+                    TandemConfig::build("tests/config/cipherstash-proxy-test.toml").unwrap();
+                assert!(config.prometheus_enabled());
+                assert!(config.prometheus.enabled);
+                assert_eq!(config.prometheus.port, 7777);
+            },
+        );
     }
 }
