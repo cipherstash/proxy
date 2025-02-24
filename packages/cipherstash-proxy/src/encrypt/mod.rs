@@ -249,7 +249,7 @@ fn to_eql_encrypted(
 
             struct Indexes {
                 match_index: Option<Vec<u16>>,
-                ore_index: Option<String>,
+                ore_index: Option<Vec<String>>,
                 unique_index: Option<String>,
             }
 
@@ -269,10 +269,10 @@ fn to_eql_encrypted(
                         indexes.ore_index = Some(format_index_term_ore_array(&vec_of_bytes));
                     }
                     IndexTerm::OreFull(bytes) => {
-                        indexes.ore_index = Some(format_index_term_ore_full(&bytes));
+                        indexes.ore_index = Some(format_index_term_ore(&bytes));
                     }
                     IndexTerm::OreLeft(bytes) => {
-                        indexes.ore_index = Some(format_index_term_ore_full(&bytes));
+                        indexes.ore_index = Some(format_index_term_ore(&bytes));
                     }
                     IndexTerm::Null => {}
                     _ => return Err(EncryptError::UnknownIndexTerm(identifier.to_owned()).into()),
@@ -296,26 +296,29 @@ fn to_eql_encrypted(
     }
 }
 
-fn format_index_term_ore(bytes: &Vec<u8>) -> String {
-    format!(
-        "{}{}{}",
-        r#"""(\\""\\\\\\\\x"#,
-        hex::encode(bytes),
-        r#"\\"")"""#
-    )
-}
-
-fn format_index_term_ore_full(bytes: &Vec<u8>) -> String {
-    format!("{}{}{}", r#"("{"#, format_index_term_ore(bytes), r#"}")"#)
-}
-
 fn format_index_term_binary(bytes: &Vec<u8>) -> String {
     hex::encode(bytes)
 }
 
-fn format_index_term_ore_array(vec_of_bytes: &[Vec<u8>]) -> String {
-    let inner: Vec<String> = vec_of_bytes.iter().map(format_index_term_ore).collect();
-    format!("{}{}{}", r#"("{"#, inner.join(", "), r#"}")"#)
+fn format_index_term_ore_bytea(bytes: &Vec<u8>) -> String {
+    hex::encode(bytes)
+}
+
+///
+/// Formats a Vec<Vec<u8>> into a Vec<String>
+///
+fn format_index_term_ore_array(vec_of_bytes: &[Vec<u8>]) -> Vec<String> {
+    vec_of_bytes
+        .iter()
+        .map(format_index_term_ore_bytea)
+        .collect()
+}
+
+///
+/// Formats a Vec<Vec<u8>> into a sindle elenent Vec<String>
+///
+fn format_index_term_ore(bytes: &Vec<u8>) -> Vec<String> {
+    vec![format_index_term_ore_bytea(bytes)]
 }
 
 fn eql_encrypted_to_encrypted_record(

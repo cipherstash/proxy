@@ -70,7 +70,7 @@ pub enum Encrypted {
         #[serde(rename = "c", with = "encrypted_record::formats::mp_base85")]
         ciphertext: EncryptedRecord,
         #[serde(rename = "o")]
-        ore_index: Option<String>,
+        ore_index: Option<Vec<String>>,
         #[serde(rename = "m")]
         match_index: Option<Vec<u16>>,
         #[serde(rename = "u")]
