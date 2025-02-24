@@ -315,7 +315,7 @@ fn format_index_term_ore_array(vec_of_bytes: &[Vec<u8>]) -> Vec<String> {
 }
 
 ///
-/// Formats a Vec<Vec<u8>> into a sindle elenent Vec<String>
+/// Formats a Vec<Vec<u8>> into a single elenent Vec<String>
 ///
 fn format_index_term_ore(bytes: &Vec<u8>) -> Vec<String> {
     vec![format_index_term_ore_bytea(bytes)]
