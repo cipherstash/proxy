@@ -54,6 +54,13 @@ impl TypeCell {
         self.shared_ty.borrow().as_type()
     }
 
+    pub fn is_eql_value(&self) -> bool {
+        matches!(
+            *self.as_type(),
+            Type::Constructor(Constructor::Value(Value::Eql(_)))
+        )
+    }
+
     /// Tests whether `self` and `other` share a mutable type allocation.
     pub fn has_same_pointee(&self, other: &Self) -> bool {
         self.shared_ty

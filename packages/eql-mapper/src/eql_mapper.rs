@@ -1,14 +1,23 @@
 use super::importer::{ImportError, Importer};
 use crate::{
+    eql_function_tracker::{EqlFunctionTracker, EqlFunctionTrackerError},
     inference::{unifier, TypeError, TypeInferencer},
     unifier::{EqlValue, Unifier},
     DepMut, NodeKey, Projection, ProjectionColumn, ScopeError, ScopeTracker, TableResolver,
     TypeRegistry, Value,
 };
-use sqlparser::ast::{self as ast, Statement};
+use sqlparser::{
+    ast::{self as ast, Statement},
+    tokenizer::Span,
+};
 use sqltk::{convert_control_flow, Break, Transform, Transformable, Visitable, Visitor};
 use std::{
-    cell::RefCell, collections::HashMap, marker::PhantomData, ops::ControlFlow, rc::Rc, sync::Arc,
+    cell::RefCell,
+    collections::{HashMap, HashSet},
+    marker::PhantomData,
+    ops::ControlFlow,
+    rc::Rc,
+    sync::Arc,
 };
 
 /// Validates that a SQL statement is well-typed with respect to a database schema that contains zero or more columns with
@@ -53,6 +62,8 @@ pub fn type_check<'ast>(
                 projection: projection?,
                 params: params?,
                 literals: literals?,
+                // TODO: remove clone?
+                nodes_to_wrap: mapper.eql_function_tracker.borrow().to_wrap.clone(),
             })
         }
         ControlFlow::Break(Break::Err(err)) => {
@@ -107,6 +118,8 @@ pub struct TypedStatement<'ast> {
 
     /// The types and values of all literals from the SQL statement.
     pub literals: Vec<(EqlValue, &'ast ast::Expr)>,
+
+    pub nodes_to_wrap: HashSet<NodeKey<'ast>>,
 }
 
 /// The error type returned by various functions in the `eql_mapper` crate.
@@ -132,6 +145,9 @@ pub enum EqlMapperError {
     /// A type error encountered during type checking
     #[error(transparent)]
     Type(#[from] TypeError),
+
+    #[error(transparent)]
+    EqlFunctionTracker(#[from] EqlFunctionTrackerError),
 }
 
 /// `EqlMapper` can safely convert a SQL statement into an equivalent statement where all of the plaintext literals have
@@ -142,6 +158,7 @@ struct EqlMapper<'ast> {
     importer: Rc<RefCell<Importer<'ast>>>,
     inferencer: Rc<RefCell<TypeInferencer<'ast>>>,
     registry: Rc<RefCell<TypeRegistry<'ast>>>,
+    eql_function_tracker: Rc<RefCell<EqlFunctionTracker<'ast>>>,
     _ast: PhantomData<&'ast ()>,
 }
 
@@ -155,6 +172,7 @@ impl<'ast> EqlMapper<'ast> {
             &registry,
             &scope_tracker,
         ));
+        let eql_function_tracker = DepMut::new(EqlFunctionTracker::new(&registry));
         let unifier = DepMut::new(Unifier::new(&registry));
         let inferencer = DepMut::new(TypeInferencer::new(
             table_resolver.clone(),
@@ -168,6 +186,7 @@ impl<'ast> EqlMapper<'ast> {
             importer: importer.into(),
             inferencer: inferencer.into(),
             registry: registry.into(),
+            eql_function_tracker: eql_function_tracker.into(),
             _ast: PhantomData,
         }
     }
@@ -244,7 +263,7 @@ impl<'ast> EqlMapper<'ast> {
         Ok(param_types.into_iter().map(|(_, ty)| ty).collect())
     }
 
-    /// Asks the [`TypeInferencer`] for a hashmap of literal types, validating that that are all `Scalar` types.
+    /// Asks the [`TypeInferencer`] for a hashmap of literal types, validating that they are all `Scalar` types.
     fn literal_types(&self) -> Result<Vec<(EqlValue, &'ast ast::Expr)>, EqlMapperError> {
         let inferencer = self.inferencer.borrow();
         let literal_nodes = inferencer.literal_nodes();
@@ -285,6 +304,7 @@ impl<'ast> TypedStatement<'ast> {
     /// Note: this check is conservative with respect to params. Some kinds of encrypted params will not require
     /// statement transformation but we do not currently track that information anywhere so instead we assume the all
     /// potentially require AST edits.
+    // TODO: Is this used?
     pub fn requires_transform(&self) -> bool {
         // if there are any literals that require encryption, or any params that require encryption.
         !self.literals.is_empty()
@@ -305,8 +325,10 @@ impl<'ast> TypedStatement<'ast> {
             }
         }
 
-        self.statement
-            .apply_transform(&mut EncryptedStatement::new(encrypted_literals))
+        self.statement.apply_transform(&mut EncryptedStatement::new(
+            encrypted_literals,
+            &self.nodes_to_wrap,
+        ))
     }
 
     pub fn literal_values(&self) -> Vec<&sqlparser::ast::Value> {
@@ -330,11 +352,18 @@ impl<'ast> TypedStatement<'ast> {
 #[derive(Debug)]
 struct EncryptedStatement<'ast> {
     encrypted_literals: HashMap<&'ast ast::Expr, ast::Expr>,
+    nodes_to_wrap: &'ast HashSet<NodeKey<'ast>>,
 }
 
 impl<'ast> EncryptedStatement<'ast> {
-    fn new(encrypted_literals: HashMap<&'ast ast::Expr, ast::Expr>) -> Self {
-        Self { encrypted_literals }
+    fn new(
+        encrypted_literals: HashMap<&'ast ast::Expr, ast::Expr>,
+        nodes_to_wrap: &'ast HashSet<NodeKey<'ast>>,
+    ) -> Self {
+        Self {
+            encrypted_literals,
+            nodes_to_wrap,
+        }
     }
 }
 
@@ -359,6 +388,35 @@ impl<'ast> Transform<'ast> for EncryptedStatement<'ast> {
                         return Err(EqlMapperError::InternalError(
                             "attempt was made to update placeholder with literal".to_string(),
                         ));
+                    }
+
+                    // TODO: compound/qualified idents?
+                    ast::Expr::Identifier(_) => {
+                        let node_key = NodeKey::new(original_value);
+                        if self.nodes_to_wrap.contains(&node_key) {
+                            let new_node = ast::Expr::Function(ast::Function {
+                                uses_odbc_syntax: false,
+                                parameters: ast::FunctionArguments::None,
+                                filter: None,
+                                null_treatment: None,
+                                over: None,
+                                within_group: vec![],
+                                name: ast::ObjectName(vec![ast::Ident {
+                                    value: "cs_ore_64_8_v1".to_string(),
+                                    quote_style: None,
+                                    span: Span::empty(),
+                                }]),
+                                args: ast::FunctionArguments::List(ast::FunctionArgumentList {
+                                    duplicate_treatment: None,
+                                    clauses: vec![],
+                                    args: vec![ast::FunctionArg::Unnamed(
+                                        ast::FunctionArgExpr::Expr(original_value.clone()),
+                                    )],
+                                }),
+                            });
+
+                            *target_value = new_node;
+                        }
                     }
 
                     _ => {
@@ -387,6 +445,7 @@ impl<'ast> Visitor<'ast> for EqlMapper<'ast> {
     fn enter<N: Visitable>(&mut self, node: &'ast N) -> ControlFlow<Break<Self::Error>> {
         convert_control_flow(self.scope_tracker.borrow_mut().enter(node))?;
         convert_control_flow(self.importer.borrow_mut().enter(node))?;
+        convert_control_flow(self.eql_function_tracker.borrow_mut().enter(node))?;
         convert_control_flow(self.inferencer.borrow_mut().enter(node))?;
 
         ControlFlow::Continue(())
@@ -394,6 +453,7 @@ impl<'ast> Visitor<'ast> for EqlMapper<'ast> {
 
     fn exit<N: Visitable>(&mut self, node: &'ast N) -> ControlFlow<Break<Self::Error>> {
         convert_control_flow(self.inferencer.borrow_mut().exit(node))?;
+        convert_control_flow(self.eql_function_tracker.borrow_mut().exit(node))?;
         convert_control_flow(self.importer.borrow_mut().exit(node))?;
         convert_control_flow(self.scope_tracker.borrow_mut().exit(node))?;
 

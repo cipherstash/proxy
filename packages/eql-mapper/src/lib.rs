@@ -1,6 +1,7 @@
 //! `eql-mapper` transforms SQL to SQL+EQL using a known database schema as a reference.
 
 mod dep;
+mod eql_function_tracker;
 mod eql_mapper;
 mod importer;
 mod inference;
