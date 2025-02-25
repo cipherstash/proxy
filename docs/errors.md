@@ -74,10 +74,6 @@ The parameter type is not supported.
 Encryption of PostgreSQL {name} (OID {oid}) types is not currently supported.
 ```
 
-### Notes
-
-
-
 ### How to Fix
 
 Check the supported types for encrypted columns.
