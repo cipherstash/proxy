@@ -238,8 +238,15 @@ pub async fn handler(
     );
 
     if encrypt.is_passthrough() {
-        warn!(msg = "⚠️ RUNNING IN PASSTHROUGH MODE");
-        warn!(msg = "⛔️ DATA IS NOT PROTECTED WITH ENCRYPTION");
+        if encrypt.config.use_structured_logging() {
+            warn!(msg = "RUNNING IN PASSTHROUGH MODE");
+            warn!(msg = "DATA IS NOT PROTECTED WITH ENCRYPTION");
+        } else {
+            warn!(msg = "========================================");
+            warn!(msg = "RUNNING IN PASSTHROUGH MODE");
+            warn!(msg = "DATA IS NOT PROTECTED WITH ENCRYPTION");
+            warn!(msg = "========================================");
+        }
     }
 
     tokio::spawn(channel_writer.receive());

@@ -110,10 +110,7 @@ async fn main() {
     info!(msg = "Waiting for clients");
 
     if (tokio::time::timeout(*shutdown_timeout, tracker.wait()).await).is_err() {
-        warn!(
-            msg = "Terminated {count} client connections",
-            count = tracker.len()
-        );
+        warn!(msg = "Terminated client connections", count = tracker.len());
     }
 }
 

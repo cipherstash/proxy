@@ -34,7 +34,7 @@ impl SchemaManager {
             }
             Err(err) => {
                 warn!(
-                    msg = "Error reloading Encrypt configuration",
+                    msg = "Error reloading database schema",
                     error = err.to_string()
                 );
             }

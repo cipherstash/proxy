@@ -138,7 +138,7 @@ pub async fn read_message<S: AsyncRead + Unpin>(
 
     stream.read_exact(&mut bytes[slice_start..]).await?;
 
-    debug!(target: PROTOCOL, client_id, code = ?(code as char), bytes = ?bytes);
+    debug!(target: PROTOCOL, client_id, code = ?(code as char), ?bytes);
 
     Ok((code, bytes))
 }

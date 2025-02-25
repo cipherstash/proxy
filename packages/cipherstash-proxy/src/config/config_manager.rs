@@ -66,7 +66,9 @@ async fn init_reloader(config: DatabaseConfig) -> Result<EncryptConfigManager, E
     };
 
     if encrypt_config.is_empty() {
-        warn!(msg = "⚠️ ENCRYPT CONFIGURATION IS EMPTY");
+        warn!(msg = "ENCRYPT CONFIGURATION NOT LOADED");
+        warn!(msg = "No active Encrypt configuration found in database.");
+        warn!(msg = "Data is not protected with encryption");
     } else {
         info!(msg = "Loaded Encrypt configuration");
     }

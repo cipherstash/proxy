@@ -74,7 +74,7 @@ impl Encrypt {
                         encrypted_eql.push(ct);
                     }
                     None => {
-                        return Err(EncryptError::ColumnNotEncrypted {
+                        return Err(EncryptError::ColumnCouldNotBeEncrypted {
                             table: col.identifier.table.to_string(),
                             column: col.identifier.column.to_string(),
                         }
@@ -136,7 +136,7 @@ impl Encrypt {
                                 encrypted_eql.push(Some(ct));
                             }
                             None => {
-                                return Err(EncryptError::ColumnNotEncrypted {
+                                return Err(EncryptError::ColumnCouldNotBeEncrypted {
                                     table: col.identifier.table.to_string(),
                                     column: col.identifier.column.to_string(),
                                 }

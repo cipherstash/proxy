@@ -30,11 +30,10 @@ use sqlparser::ast::{self, Expr, Value};
 use sqlparser::dialect::PostgreSqlDialect;
 use sqlparser::parser::Parser;
 use std::collections::HashMap;
-use std::fmt::Display;
 use std::time::Instant;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use tokio::sync::mpsc::Sender;
-use tracing::{debug, info};
+use tracing::{debug, error, warn};
 
 const DIALECT: PostgreSqlDialect = PostgreSqlDialect {};
 
@@ -122,8 +121,8 @@ where
                     Ok(Some(mapped)) => bytes = mapped,
                     // No mapping needed, don't change the bytes
                     Ok(None) => (),
-                    Err(e) => {
-                        bytes = self.build_frontend_exception(e)?;
+                    Err(err) => {
+                        bytes = self.build_frontend_exception(err)?;
                     }
                 }
             }
@@ -145,14 +144,14 @@ where
 
     async fn describe_handler(&mut self, bytes: &BytesMut) -> Result<(), Error> {
         let describe = Describe::try_from(bytes)?;
-        info!(target: PROTOCOL, "{:?}", describe);
+        debug!(target: PROTOCOL, client_id = self.context.client_id, ?describe);
         self.context.set_describe(describe);
         Ok(())
     }
 
     async fn execute_handler(&mut self, bytes: &BytesMut) -> Result<(), Error> {
         let execute = Execute::try_from(bytes)?;
-        info!(target: PROTOCOL, "{:?}", execute);
+        debug!(target: PROTOCOL, client_id = self.context.client_id, ?execute);
         self.context.set_execute(execute.portal.to_owned());
         Ok(())
     }
@@ -178,6 +177,12 @@ where
         let typed_statement = match self.type_check(&statement) {
             Ok(ts) => ts,
             Err(err) => {
+                warn!(
+                    client_id = self.context.client_id,
+                    msg = "Unmappable statement",
+                    mapping_errors_enabled = self.encrypt.config.mapping_errors_enabled(),
+                    error = err.to_string(),
+                );
                 if self.encrypt.config.mapping_errors_enabled() {
                     return Err(err);
                 } else {
@@ -328,6 +333,13 @@ where
         let typed_statement = match self.type_check(&statement) {
             Ok(ts) => ts,
             Err(err) => {
+                warn!(
+                    client_id = self.context.client_id,
+                    msg = "Unmappable statement",
+                    mapping_errors_enabled = self.encrypt.config.mapping_errors_enabled(),
+                    error = err.to_string(),
+                );
+
                 if self.encrypt.config.mapping_errors_enabled() {
                     return Err(err);
                 } else {
@@ -563,14 +575,13 @@ where
                 Ok(typed_statement)
             }
             Err(err) => {
-                debug!(target: MAPPER,
+                debug!(
                     client_id = self.context.client_id,
+                    msg = "Unmappable statement",
                     error = err.to_string()
                 );
-
                 counter!(STATEMENTS_UNMAPPABLE_TOTAL).increment(1);
-
-                Err(MappingError::StatementCouldNotBeTypeChecked(err.to_string()).into())
+                Err(MappingError::StatementCouldNotBeMapped(err.to_string()).into())
             }
         }
     }
@@ -629,6 +640,7 @@ where
             let configured_column = match param {
                 eql_mapper::Value::Eql(EqlValue(TableColumn { table, column })) => {
                     let identifier = Identifier::from((table, column));
+
                     debug!(
                         target: MAPPER,
                         client_id = self.context.client_id,
@@ -695,21 +707,25 @@ where
         }
     }
 
-    fn build_frontend_exception<E: Display>(&self, error: E) -> Result<BytesMut, Error> {
+    /// TODO output err as structured data.
+    ///      err can carry any additional context from caller
+    fn build_frontend_exception(&self, err: Error) -> Result<BytesMut, Error> {
+        error!(client_id = self.context.client_id, msg = err.to_string(), error = ?err);
+
         // This *should* be sufficient for escaping error messages as we're only
         // using the string literal, and not identifiers
-        let quoted_error = quote_literal(format!("[CipherStash] {}", error).as_str());
-        let content = format!("DO $$ begin raise exception {quoted_error}; END; $$;");
-
-        let query = Query::new(content);
-        let bytes = BytesMut::try_from(query)?;
+        let quoted_error = quote_literal(format!("{}", err).as_str());
+        let content = format!("DO $$ BEGIN RAISE EXCEPTION {quoted_error}; END; $$;");
 
         debug!(
             target: MAPPER,
             client_id = self.context.client_id,
             msg = "Frontend exception",
-            error = error.to_string()
+            error = err.to_string()
         );
+
+        let query = Query::new(content);
+        let bytes = BytesMut::try_from(query)?;
 
         Ok(bytes)
     }

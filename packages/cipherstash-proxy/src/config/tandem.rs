@@ -312,6 +312,10 @@ impl TandemConfig {
         }
     }
 
+    pub fn use_structured_logging(&self) -> bool {
+        matches!(self.log.format, LogFormat::Structured)
+    }
+
     ///
     /// Returns true if Prometheus export is enabled
     ///

@@ -1,3 +1,4 @@
+use crate::{postgresql::Column, Identifier};
 use bytes::BytesMut;
 use cipherstash_client::encryption;
 use metrics_exporter_prometheus::BuildError;
@@ -5,7 +6,7 @@ use std::io;
 use thiserror::Error;
 use tokio::time::error::Elapsed;
 
-use crate::{postgresql::Column, Identifier};
+const ERROR_DOC_BASE_URL: &str = "https://github.com/cipherstash/proxy/docs/errors.md";
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -66,18 +67,18 @@ pub enum ContextError {
 
 #[derive(Error, Debug)]
 pub enum MappingError {
-    #[error("Invalid parameter data for column {} in table {} (OID {})",
-    _0.column_name(), _0.table_name(), _0.oid())]
+    #[error("Invalid parameter for column '{}' of type '{}' in table '{}' (OID {}). For help visit {}#mapping-invalid-parameter",
+    _0.column_name(), _0.cast_type(), _0.table_name(), _0.oid(), ERROR_DOC_BASE_URL)]
     InvalidParameter(Column),
 
     #[error(transparent)]
     SqlParse(#[from] sqlparser::parser::ParserError),
 
-    #[error("Encryption of PostgreSQL {name} (OID {oid}) types is not currently supported")]
+    #[error("Encryption of PostgreSQL {name} (OID {oid}) types is not currently supported. For help visit {}#mapping-unsupported-parameter-type", ERROR_DOC_BASE_URL)]
     UnsupportedParameterType { name: String, oid: u32 },
 
-    #[error("Statement could not be type checked: {0}")]
-    StatementCouldNotBeTypeChecked(String),
+    #[error("Statement could not be type checked: {}. For help visit {}#mapping-statement-could-not-be-mapped", _0, ERROR_DOC_BASE_URL)]
+    StatementCouldNotBeMapped(String),
 
     #[error("Statement could not be transformed: {0}")]
     StatementCouldNotBeTransformed(String),
@@ -136,13 +137,13 @@ pub enum EncryptError {
     #[error(transparent)]
     CiphertextCouldNotBeSerialised(#[from] serde_json::Error),
 
-    #[error("Column {column} in table {table} was not encrypted")]
-    ColumnNotEncrypted { table: String, column: String },
+    #[error("Column '{column}' in table '{table}' could not be encrypted. For help visit {}#encrypt-column-could-not-be-encrypted", ERROR_DOC_BASE_URL)]
+    ColumnCouldNotBeEncrypted { table: String, column: String },
 
-    #[error("Expected {expected} columns, received {received}")]
+    #[error("Expected '{expected}' columns, received '{received}'")]
     EncryptedColumnMismatch { expected: usize, received: usize },
 
-    #[error("Decrypted column could not be encoded as the expected type")]
+    #[error("Decrypted column could not be encoded as the expected type. For help visit {}#encrypt-plaintext-could-not-be-encoded", ERROR_DOC_BASE_URL)]
     PlaintextCouldNotBeEncoded,
 
     #[error(transparent)]
@@ -151,13 +152,19 @@ pub enum EncryptError {
     #[error(transparent)]
     PlaintextCouldNotBeDecoded(#[from] cipherstash_client::encryption::TypeParseError),
 
-    #[error("Column {column} in table {table} has no Encrypt configuration")]
+    #[error(
+        "Column '{column}' in table '{table}' has no Encrypt configuration. For help visit {}#encrypt-unknown-column",
+        ERROR_DOC_BASE_URL
+    )]
     UnknownColumn { table: String, column: String },
 
-    #[error("Table {table} has no Encrypt configuration")]
+    #[error(
+        "Table '{table}' has no Encrypt configuration. For help visit {}#encrypt-unknown-table",
+        ERROR_DOC_BASE_URL
+    )]
     UnknownTable { table: String },
 
-    #[error("Unknown Index Term for column {} in table {}", _0.column(), _0.table())]
+    #[error("Unknown Index Term for column '{}' in table '{}'. For help visit {}#encrypt-unknown-index-term", _0.column(), _0.table(), ERROR_DOC_BASE_URL)]
     UnknownIndexTerm(Identifier),
 }
 

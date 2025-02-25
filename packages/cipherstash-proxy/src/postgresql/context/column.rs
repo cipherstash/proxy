@@ -32,6 +32,10 @@ impl Column {
         self.postgres_type.oid()
     }
 
+    pub fn postgres_type_name(&self) -> &str {
+        self.postgres_type.name()
+    }
+
     pub fn cast_type(&self) -> ColumnType {
         self.config.cast_type
     }

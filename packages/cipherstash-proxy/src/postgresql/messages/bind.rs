@@ -13,7 +13,7 @@ use postgres_types::Type;
 use std::fmt::{self, Display, Formatter};
 use std::io::Cursor;
 use std::{convert::TryFrom, ffi::CString};
-use tracing::{debug, info};
+use tracing::debug;
 
 /// Bind (B) message.
 /// See: <https://www.postgresql.org/docs/current/protocol-message-formats.html>
@@ -80,8 +80,6 @@ impl Bind {
         for (idx, ct) in encrypted.iter().enumerate() {
             if let Some(ct) = ct {
                 let json = serde_json::to_value(ct)?;
-
-                info!("bytes {}", json.to_string());
 
                 // convert json to bytes
                 let bytes = json.to_string().into_bytes();
