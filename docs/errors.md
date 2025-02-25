@@ -35,7 +35,9 @@ The column parameter value is not of the correct `cast` type for the target encr
 
 ### Error message
 
-    Invalid parameter for column 'column_name' of type 'cast' in table 'table_name'. (OID 'oid')
+```
+Invalid parameter for column 'column_name' of type 'cast' in table 'table_name'. (OID 'oid')
+```
 
 
 ### Notes
@@ -68,7 +70,9 @@ The parameter type is not supported.
 
 ### Error message
 
-    Encryption of PostgreSQL {name} (OID {oid}) types is not currently supported.
+```
+Encryption of PostgreSQL {name} (OID {oid}) types is not currently supported.
+```
 
 ### Notes
 
@@ -95,7 +99,9 @@ The column could not be encrypted.
 
 ### Error message
 
-    Column 'column_name' in table 'table_name' could not be encrypted.
+```
+Column 'column_name' in table 'table_name' could not be encrypted.
+```
 
 ### Notes
 
@@ -127,7 +133,9 @@ The encrypted data in a column returned by a SQL statement cannot be encoded int
 
 ### Error message
 
-    Decrypted column could not be encoded as the expected type.
+```
+Decrypted column could not be encoded as the expected type.
+```
 
 ### Notes
 
@@ -197,9 +205,9 @@ Any data is unprotected and unencrypted.
 
 ### Error message
 
-    Table 'table_name' has no Encrypt configuration
-
-
+```
+Table 'table_name' has no Encrypt configuration
+```
 
 ### How to Fix
 
@@ -228,7 +236,9 @@ However, if the configuration is changed directly in the database, it is possibl
 
 ### Error message
 
-    Unknown Index Term for column '{column_name}' in table '{table_name}'.
+```
+Unknown Index Term for column '{column_name}' in table '{table_name}'.
+```
 
 
 ### How to Fix
