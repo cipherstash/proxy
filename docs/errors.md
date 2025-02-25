@@ -57,7 +57,7 @@ For example PostgreSQL `INT2`, `INT4` and `INT8` will all be converted into encr
 Check the parameter or literal is of the appropriate type for the configured encrypted column.
 
 
-See [TODO: Link to encrtyped types](https://).
+<!-- TODO: Link to encrypted types -->
 
 
 <!-- ---------------------------------------------------------------------------------------------------- -->
@@ -82,7 +82,7 @@ Encryption of PostgreSQL {name} (OID {oid}) types is not currently supported.
 
 Check the supported types for encrypted columns.
 
-See [TODO: Link to doc](https://).
+<!-- TODO: link to doc -->
 
 
 
@@ -177,14 +177,16 @@ Any data is unprotected and unencrypted.
 
 ### Error message
 
-    Column 'column_name' in table 'table_name' has no Encrypt configuration
+```
+Column 'column_name' in table 'table_name' has no Encrypt configuration
+```
 
 
 ### How to Fix
 
 Define the encrypted configuration using [EQL](https://github.com/cipherstash/encrypt-query-language).
 
-See {LINK TO DOC}.
+<!-- TODO: link to doc -->
 
 Adding `users.email` as an encrypted column:
 
@@ -213,7 +215,7 @@ Table 'table_name' has no Encrypt configuration
 
 Define the encrypted configuration using [EQL](https://github.com/cipherstash/encrypt-query-language).
 
-See {LINK TO DOC}.
+<!-- TODO: link to doc -->
 
 Adding `users.email` as an encrypted column:
 
