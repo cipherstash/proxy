@@ -54,7 +54,7 @@ fi
 
 
 docker exec -i postgres${CONTAINER_SUFFIX} psql postgresql://cipherstash:password@proxy:6432/cipherstash <<-EOF
-SELECT * FROM encrypted;
+SELECT id, encrypted_text FROM encrypted;
 EOF
 
 response=$(curl -s http://localhost:9930)
