@@ -21,6 +21,7 @@ CREATE TABLE encrypted (
     encrypted_float8 cs_encrypted_v1,
     encrypted_date cs_encrypted_v1,
     encrypted_jsonb cs_encrypted_v1,
+    encrypted_unconfigured cs_encrypted_v1,
     PRIMARY KEY(id)
 );
 
