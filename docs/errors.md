@@ -108,14 +108,11 @@ The most likely cause is network access to the ZeroKMS service.
 
 ### How to Fix
 
-Check that CipherStash ZeroKMS is available.
-See [CipherStash Status](https://status.cipherstash.com/).
-
-Check that CipherStash Proxy has network access to ZeroKMS in the appropriate region.
-See [TODO: Link to ZeroKMS Doc](https://).
-
-Check that the encrypted configuration `cast` matches the expected type.
-See [TODO: Link to config](https://).
+1. Check that CipherStash ZeroKMS is available at [the status page](https://status.cipherstash.com/).
+1. Check that CipherStash Proxy has network access to ZeroKMS in the appropriate region.
+<!-- TODO: Link to ZeroKMS Doc -->
+1. Check that the encrypted configuration `cast` matches the expected type.
+<!-- TODO: Link to config -->
 
 
 
@@ -155,12 +152,9 @@ For example:
 
 ### How to Fix
 
-Check the encrypted configuration has the correct type.
-
-Check that the configuration has not changed.
-
-See [EQL](https://github.com/cipherstash/encrypt-query-language).
-
+1. Check the encrypted configuration has the correct type.
+1. Check that the configuration has not changed.
+1. Check [EQL](https://github.com/cipherstash/encrypt-query-language).
 
 <!-- ---------------------------------------------------------------------------------------------------- -->
 
@@ -181,15 +175,12 @@ Column 'column_name' in table 'table_name' has no Encrypt configuration
 
 ### How to Fix
 
-Define the encrypted configuration using [EQL](https://github.com/cipherstash/encrypt-query-language).
-
-<!-- TODO: link to doc -->
-
-Adding `users.email` as an encrypted column:
-
-```sql
-SELECT cs_add_column_v1('users', 'email');
-```
+1. Define the encrypted configuration using [EQL](https://github.com/cipherstash/encrypt-query-language).
+   <!-- TODO: link to doc -->
+1. Add `users.email` as an encrypted column:
+   ```sql
+   SELECT cs_add_column_v1('users', 'email');
+   ```
 
 <!-- ---------------------------------------------------------------------------------------------------- -->
 
@@ -210,15 +201,12 @@ Table 'table_name' has no Encrypt configuration
 
 ### How to Fix
 
-Define the encrypted configuration using [EQL](https://github.com/cipherstash/encrypt-query-language).
-
-<!-- TODO: link to doc -->
-
-Adding `users.email` as an encrypted column:
-
-```sql
-SELECT cs_add_column_v1('users', 'email');
-```
+1. Define the encrypted configuration using [EQL](https://github.com/cipherstash/encrypt-query-language).
+   <!-- TODO: link to doc -->
+1. Add `users.email` as an encrypted column:
+   ```sql
+   SELECT cs_add_column_v1('users', 'email');
+   ```
 
 
 
@@ -242,10 +230,7 @@ Unknown Index Term for column '{column_name}' in table '{table_name}'.
 
 ### How to Fix
 
-Check the Encrypt configuration for the column.
-
-Define the encrypted configuration using [EQL](https://github.com/cipherstash/encrypt-query-language).
-
-
+1. Check the Encrypt configuration for the column.
+1. Define the encrypted configuration using [EQL](https://github.com/cipherstash/encrypt-query-language).
 
 
