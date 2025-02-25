@@ -149,7 +149,8 @@ The error indicates that the stored data cannot be encoded and returned as the e
 
 Changing the encrypted column definition of a column with existing data can cause this error.
 
-eg:
+For example:
+
 - column is defined with a cast of `text`
 - data is encrypted and stored as `text`
 - column is redefined with a cast of  `int`
