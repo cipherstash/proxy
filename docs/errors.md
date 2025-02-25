@@ -105,7 +105,7 @@ Column 'column_name' in table 'table_name' could not be encrypted.
 
 ### Notes
 
-CipherStash Proxy uses [CipherStash ZeroKms](https://cipherstash.com/products/zerokms) for low-latency encryption and decrypion operations.
+CipherStash Proxy uses [CipherStash ZeroKMS](https://cipherstash.com/products/zerokms) for low-latency encryption and decryption operations.
 
 The error indicates an issue has occurred in the encryption pipeline processing.
 The most likely cause is network access to the ZeroKMS service.
