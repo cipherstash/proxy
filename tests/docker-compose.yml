@@ -82,6 +82,7 @@ services:
       - CS_TLS__CERTIFICATE=${CS_TLS__CERTIFICATE:-/etc/cipherstash-proxy/server.cert}
       - CS_TLS__PRIVATE_KEY=${CS_TLS__PRIVATE_KEY:-/etc/cipherstash-proxy/server.key}
       - CS_SERVER__REQUIRE_TLS=true
+      - CS_PROMETHEUS__ENABLED=${CS_PROMETHEUS__ENABLED:-true}
 
     volumes:
       - ./tls/server.cert:/etc/cipherstash-proxy/server.cert
