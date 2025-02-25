@@ -12,11 +12,8 @@ mod tests {
 
         let client = connect_with_tls(PROXY).await;
 
-        let id_one = id();
         let n_one = 10i16;
-        let id_two = id();
         let n_two = 20i16;
-        let id_three = id();
         let n_three = 30i16;
 
         let sql = "
@@ -25,101 +22,109 @@ mod tests {
         ";
 
         client
-            .query(
-                sql,
-                &[&id_two, &n_two, &id_one, &n_one, &id_three, &n_three],
-            )
+            .query(sql, &[&id(), &n_two, &id(), &n_one, &id(), &n_three])
             .await
             .unwrap();
 
-        let sql = "SELECT encrypted_int2 FROM encrypted ORDER BY encrypted_int2 ASC";
+        let sql = "SELECT encrypted_int2 FROM encrypted ORDER BY encrypted_int2";
         let rows = client.query(sql, &[]).await.unwrap();
 
-        assert_eq!(rows.len(), 3);
+        let actual = rows.iter().map(|row| row.get(0)).collect::<Vec<i16>>();
+        let expected = vec![n_one, n_two, n_three];
 
-        for row in &rows {
-            let i: i16 = row.get("encrypted_int2");
-            dbg!(i);
-        }
-
-        let row = &rows[0];
-        let result_int: i16 = row.get("encrypted_int2");
-        assert_eq!(n_one, result_int);
-
-        let row = &rows[1];
-        let result_int: i16 = row.get("encrypted_int2");
-        assert_eq!(n_two, result_int);
-
-        let row = &rows[2];
-        let result_int: i16 = row.get("encrypted_int2");
-        assert_eq!(n_three, result_int);
+        assert_eq!(actual, expected);
     }
 
-    // Currently not working, needs statement rewriting
-    // #[tokio::test]
-    async fn _map_ore_order_int4() {
+    #[tokio::test]
+    async fn map_ore_order_int2_desc() {
         trace();
 
         clear().await;
 
         let client = connect_with_tls(PROXY).await;
 
-        let low_id = id();
-        let high_id = id();
-        let low: i32 = 1;
-        let high: i32 = 99;
+        let n_one = 10i16;
+        let n_two = 20i16;
+        let n_three = 30i16;
 
-        let sql = "INSERT INTO encrypted (id, encrypted_int4) VALUES ($1, $2)";
-        client.query(sql, &[&low_id, &low]).await.unwrap();
+        let sql = "
+            INSERT INTO encrypted (id, encrypted_int2)
+            VALUES ($1, $2), ($3, $4), ($5, $6)
+        ";
 
-        let sql = "INSERT INTO encrypted (id, encrypted_int4) VALUES ($1, $2)";
-        client.query(sql, &[&high_id, &high]).await.unwrap();
+        client
+            .query(sql, &[&id(), &n_two, &id(), &n_one, &id(), &n_three])
+            .await
+            .unwrap();
 
-        let sql = "SELECT encrypted_int4 FROM encrypted ORDER BY encrypted_int4 ASC";
+        let sql = "SELECT encrypted_int2 FROM encrypted ORDER BY encrypted_int2 DESC";
         let rows = client.query(sql, &[]).await.unwrap();
 
-        assert_eq!(rows.len(), 2);
+        let actual = rows.iter().map(|row| row.get(0)).collect::<Vec<i16>>();
+        let expected = vec![n_three, n_two, n_one];
 
-        let row = &rows[0];
-        let result_int: i32 = row.get("encrypted_int4");
-        assert_eq!(low, result_int);
-
-        let row = &rows[1];
-        let result_int: i32 = row.get("encrypted_int4");
-        assert_eq!(high, result_int);
+        assert_eq!(actual, expected);
     }
 
-    // Currently not working, needs statement rewriting
-    // #[tokio::test]
-    async fn _map_ore_order_int8() {
+    #[tokio::test]
+    async fn map_ore_order_int4() {
         trace();
 
         clear().await;
 
         let client = connect_with_tls(PROXY).await;
 
-        let low_id = id();
-        let high_id = id();
-        let low: i64 = 1;
-        let high: i64 = 99;
+        let n_one = 10i32;
+        let n_two = 20i32;
+        let n_three = 30i32;
 
-        let sql = "INSERT INTO encrypted (id, encrypted_int8) VALUES ($1, $2)";
-        client.query(sql, &[&low_id, &low]).await.unwrap();
+        let sql = "
+            INSERT INTO encrypted (id, encrypted_int4)
+            VALUES ($1, $2), ($3, $4), ($5, $6)
+        ";
 
-        let sql = "INSERT INTO encrypted (id, encrypted_int8) VALUES ($1, $2)";
-        client.query(sql, &[&high_id, &high]).await.unwrap();
+        client
+            .query(sql, &[&id(), &n_two, &id(), &n_one, &id(), &n_three])
+            .await
+            .unwrap();
 
-        let sql = "SELECT encrypted_int8 FROM encrypted ORDER BY encrypted_int8 ASC";
+        let sql = "SELECT encrypted_int4 FROM encrypted ORDER BY encrypted_int4";
         let rows = client.query(sql, &[]).await.unwrap();
 
-        assert_eq!(rows.len(), 2);
+        let actual = rows.iter().map(|row| row.get(0)).collect::<Vec<i32>>();
+        let expected = vec![n_one, n_two, n_three];
 
-        let row = &rows[0];
-        let result_int: i64 = row.get("encrypted_int8");
-        assert_eq!(low, result_int);
+        assert_eq!(actual, expected);
+    }
 
-        let row = &rows[1];
-        let result_int: i64 = row.get("encrypted_int8");
-        assert_eq!(high, result_int);
+    #[tokio::test]
+    async fn map_ore_order_int8() {
+        trace();
+
+        clear().await;
+
+        let client = connect_with_tls(PROXY).await;
+
+        let n_one = 10i64;
+        let n_two = 20i64;
+        let n_three = 30i64;
+
+        let sql = "
+            INSERT INTO encrypted (id, encrypted_int8)
+            VALUES ($1, $2), ($3, $4), ($5, $6)
+        ";
+
+        client
+            .query(sql, &[&id(), &n_two, &id(), &n_one, &id(), &n_three])
+            .await
+            .unwrap();
+
+        let sql = "SELECT encrypted_int8 FROM encrypted ORDER BY encrypted_int8";
+        let rows = client.query(sql, &[]).await.unwrap();
+
+        let actual = rows.iter().map(|row| row.get(0)).collect::<Vec<i64>>();
+        let expected = vec![n_one, n_two, n_three];
+
+        assert_eq!(actual, expected);
     }
 }
