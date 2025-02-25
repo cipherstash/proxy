@@ -15,6 +15,9 @@ mod tests {
         // let sql = "INSERT INTO encrypted (id, encrypted_text) VALUES ($1, $2)";
         // client.query(sql, &[&id, &encrypted_text]).await.unwrap();
 
+        let sql = "ALTER TABLE encrypted ADD COLUMN encrypted_unconfigured cs_encrypted_v1";
+        client.simple_query(&sql);
+
         let sql = "INSERT INTO encrypted (encrypted_unconfigured) VALUES ($1)";
         let result = client.query(sql, &[&encrypted_text]).await;
 
@@ -24,5 +27,8 @@ mod tests {
             let msg = err.to_string();
             assert_eq!(msg, "db error: ERROR: Column 'encrypted_unconfigured' in table 'encrypted' has no Encrypt configuration. For help visit https://github.com/cipherstash/proxy/docs/errors.md#encrypt-unknown-column");
         }
+
+        let sql = "ALTER TABLE encrypted DROP COLUMN encrypted_unconfigured";
+        client.simple_query(&sql);
     }
 }

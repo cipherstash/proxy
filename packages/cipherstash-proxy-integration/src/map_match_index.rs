@@ -16,7 +16,7 @@ mod tests {
         let sql = "INSERT INTO encrypted (id, encrypted_text) VALUES ($1, $2)";
         client.query(sql, &[&id, &encrypted_text]).await.unwrap();
 
-        let sql = "SELECT * FROM encrypted WHERE encrypted_text @> $1";
+        let sql = "SELECT id, encrypted_text FROM encrypted WHERE encrypted_text @> $1";
         let rows = client.query(sql, &[&"hello@"]).await.unwrap();
 
         assert_eq!(rows.len(), 1);
