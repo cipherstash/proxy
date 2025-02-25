@@ -3,17 +3,18 @@
 # Errors
 
 ## Encrypt Errors
-[Column could not be encrypted](#encrypt-column-could-not-be-encrypted)
-[Plaintext could not be encoded](#encrypt-plaintext-could-not-be-encoded)
-[Unknown column](#encrypt-unknown-column)
-[Unknown table](#encrypt-unknown-table)
-[Unknown index term](#encrypt-unknown-index-term)
+
+- [Column could not be encrypted](#encrypt-column-could-not-be-encrypted)
+- [Plaintext could not be encoded](#encrypt-plaintext-could-not-be-encoded)
+- [Unknown column](#encrypt-unknown-column)
+- [Unknown table](#encrypt-unknown-table)
+- [Unknown index term](#encrypt-unknown-index-term)
 
 
 ## Mapping Errors
 
-[Invalid parameter](#mapping-invalid-parameter)
-[Unsupported parameter type](#mapping-unsupported-parameter-type)
+- [Invalid parameter](#mapping-invalid-parameter)
+- [Unsupported parameter type](#mapping-unsupported-parameter-type)
 
 
 <!-- ---------------------------------------------------------------------------------------------------- -->
