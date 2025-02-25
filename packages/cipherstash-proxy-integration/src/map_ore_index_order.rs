@@ -2,7 +2,67 @@
 mod tests {
     use crate::common::{clear, connect_with_tls, id, trace, PROXY};
 
-    // TODO: tests for text fields
+    #[tokio::test]
+    async fn map_ore_order_text() {
+        trace();
+
+        clear().await;
+
+        let client = connect_with_tls(PROXY).await;
+
+        let s_one = "a";
+        let s_two = "b";
+        let s_three = "c";
+
+        let sql = "
+            INSERT INTO encrypted (id, encrypted_text)
+            VALUES ($1, $2), ($3, $4), ($5, $6)
+        ";
+
+        client
+            .query(sql, &[&id(), &s_two, &id(), &s_one, &id(), &s_three])
+            .await
+            .unwrap();
+
+        let sql = "SELECT encrypted_text FROM encrypted ORDER BY encrypted_text";
+        let rows = client.query(sql, &[]).await.unwrap();
+
+        let actual = rows.iter().map(|row| row.get(0)).collect::<Vec<String>>();
+        let expected = vec![s_one, s_two, s_three];
+
+        assert_eq!(actual, expected);
+    }
+
+    #[tokio::test]
+    async fn map_ore_order_text_desc() {
+        trace();
+
+        clear().await;
+
+        let client = connect_with_tls(PROXY).await;
+
+        let s_one = "a";
+        let s_two = "b";
+        let s_three = "c";
+
+        let sql = "
+            INSERT INTO encrypted (id, encrypted_text)
+            VALUES ($1, $2), ($3, $4), ($5, $6)
+        ";
+
+        client
+            .query(sql, &[&id(), &s_two, &id(), &s_one, &id(), &s_three])
+            .await
+            .unwrap();
+
+        let sql = "SELECT encrypted_text FROM encrypted ORDER BY encrypted_text DESC";
+        let rows = client.query(sql, &[]).await.unwrap();
+
+        let actual = rows.iter().map(|row| row.get(0)).collect::<Vec<String>>();
+        let expected = vec![s_three, s_two, s_one];
+
+        assert_eq!(actual, expected);
+    }
 
     #[tokio::test]
     async fn map_ore_order_int2() {
