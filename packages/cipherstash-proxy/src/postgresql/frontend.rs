@@ -193,7 +193,6 @@ where
 
         let portal = match self.to_encryptable_statement(&typed_statement, vec![])? {
             Some(statement) => {
-                // TODO: do the same for parse handler. probably extract this logic somewhere shared.
                 if statement.has_literals() || !typed_statement.nodes_to_wrap.is_empty() {
                     if let Some(transformed_statement) = self
                         .encrypt_literals(&typed_statement, &statement.literal_columns)
@@ -355,7 +354,7 @@ where
 
         match self.to_encryptable_statement(&typed_statement, param_types)? {
             Some(statement) => {
-                if statement.has_literals() {
+                if statement.has_literals() || !typed_statement.nodes_to_wrap.is_empty() {
                     if let Some(transformed_statement) = self
                         .encrypt_literals(&typed_statement, &statement.literal_columns)
                         .await?
