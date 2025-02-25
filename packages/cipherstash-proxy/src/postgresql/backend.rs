@@ -92,6 +92,10 @@ where
         counter!(SERVER_BYTES_RECEIVED_TOTAL).increment(sent);
 
         if self.encrypt.is_passthrough() {
+            debug!(target: DEVELOPMENT,
+                client_id = self.context.client_id,
+                msg = "Passthrough enabled"
+            );
             self.write_with_flush(bytes).await?;
             return Ok(());
         }
@@ -143,6 +147,19 @@ where
             BackendCode::NoData => {
                 self.context.complete_describe();
             }
+            // Reload for SompleQuery flow
+            // Reload is potentially triggered by a FrontEnd Sync message.
+            // However, the SimpleQuery flow does not use Sync so we check here as well
+            BackendCode::ReadyForQuery => {
+                debug!(target: PROTOCOL,
+                    client_id = self.context.client_id,
+                    msg = "ReadyForQuery"
+                );
+                if self.context.schema_changed() {
+                    self.encrypt.reload_schema().await;
+                }
+            }
+
             _ => {}
         }
 
@@ -215,7 +232,13 @@ where
         let portal = match portal.as_deref() {
             Some(Portal::Encrypted(portal)) => portal,
             _ => {
-                debug!(target: MAPPER, client_id = self.context.client_id, msg = "Passthrough");
+                debug!(target: MAPPER, client_id = self.context.client_id, msg = "Passthrough portal");
+                if !self.buffer.is_empty() {
+                    error!(
+                        client_id = self.context.client_id,
+                        msg = "Buffer is not empty"
+                    );
+                }
                 return Ok(());
             }
         };

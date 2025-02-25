@@ -24,7 +24,6 @@ CREATE TABLE encrypted (
     PRIMARY KEY(id)
 );
 
-
 SELECT cs_add_index_v1(
   'encrypted',
   'encrypted_text',

@@ -195,7 +195,8 @@ impl Encrypt {
     }
 
     pub async fn reload_schema(&self) {
-        self.schema.reload().await
+        self.schema.reload().await;
+        self.encrypt_config.reload().await;
     }
 
     pub fn is_passthrough(&self) -> bool {

@@ -13,6 +13,8 @@ pub const PROXY: u16 = 6432;
 pub const PG_LATEST: u16 = 5532;
 pub const PG_V17_TLS: u16 = 5617;
 
+pub const TEST_SCHEMA_SQL: &str = include_str!(concat!("../../../tests/sql/schema.sql"));
+
 static INIT: Once = Once::new();
 
 pub fn id() -> i64 {
@@ -34,6 +36,11 @@ pub async fn clear() {
 
     let sql = "TRUNCATE encrypted";
     client.simple_query(sql).await.unwrap();
+}
+
+pub async fn reset_schema() {
+    let client = connect_with_tls(PROXY).await;
+    client.simple_query(TEST_SCHEMA_SQL).await.unwrap();
 }
 
 pub fn trace() {

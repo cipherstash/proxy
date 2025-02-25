@@ -3,7 +3,7 @@ use crate::{
     config::ENCRYPT_CONFIG_QUERY,
     connect, eql,
     error::{ConfigError, Error},
-    log::DEVELOPMENT,
+    log::ENCRYPT_CONFIG,
 };
 use arc_swap::ArcSwap;
 use cipherstash_config::ColumnConfig;
@@ -20,8 +20,9 @@ type EncryptConfigMap = HashMap<eql::Identifier, ColumnConfig>;
 
 #[derive(Clone, Debug)]
 pub struct EncryptConfigManager {
+    config: DatabaseConfig,
+    encrypt_config: Arc<ArcSwap<EncryptConfigMap>>,
     _reload_handle: Arc<JoinHandle<()>>,
-    config: Arc<ArcSwap<EncryptConfigMap>>,
 }
 
 impl EncryptConfigManager {
@@ -31,11 +32,26 @@ impl EncryptConfigManager {
     }
 
     pub fn load(&self) -> Arc<EncryptConfigMap> {
-        self.config.load().clone()
+        self.encrypt_config.load().clone()
     }
 
     pub fn is_empty(&self) -> bool {
-        self.config.load().is_empty()
+        self.encrypt_config.load().is_empty()
+    }
+
+    pub async fn reload(&self) {
+        match load_encrypt_config_with_retry(&self.config).await {
+            Ok(reloaded) => {
+                debug!(target: ENCRYPT_CONFIG, msg = "Reloaded encrypt configuration");
+                self.encrypt_config.swap(Arc::new(reloaded));
+            }
+            Err(err) => {
+                warn!(
+                    msg = "Error reloading encrypt configuration",
+                    error = err.to_string()
+                );
+            }
+        };
     }
 }
 
@@ -65,6 +81,8 @@ async fn init_reloader(config: DatabaseConfig) -> Result<EncryptConfigManager, E
         }
     };
 
+    debug!(target: ENCRYPT_CONFIG, ?encrypt_config);
+
     if encrypt_config.is_empty() {
         warn!(msg = "ENCRYPT CONFIGURATION NOT LOADED");
         warn!(msg = "No active Encrypt configuration found in database.");
@@ -91,7 +109,7 @@ async fn init_reloader(config: DatabaseConfig) -> Result<EncryptConfigManager, E
 
             match load_encrypt_config_with_retry(&config_ref).await {
                 Ok(reloaded) => {
-                    debug!(target: DEVELOPMENT, msg = "Reloaded Encrypt configuration");
+                    debug!(target: ENCRYPT_CONFIG, msg = "Reloaded Encrypt configuration");
                     dataset_ref.swap(Arc::new(reloaded));
                 }
                 Err(err) => {
@@ -105,7 +123,8 @@ async fn init_reloader(config: DatabaseConfig) -> Result<EncryptConfigManager, E
     });
 
     Ok(EncryptConfigManager {
-        config: encrypt_config,
+        config,
+        encrypt_config,
         _reload_handle: Arc::new(reload_handle),
     })
 }
@@ -131,7 +150,7 @@ async fn load_encrypt_config_with_retry(
             Err(err) => {
                 if retry_count >= max_retry_count {
                     debug!(
-                        DEVELOPMENT,
+                        ENCRYPT_CONFIG,
                         msg = "Encrypt configuration could not beloaded",
                         retries = retry_count,
                         error = err.to_string()

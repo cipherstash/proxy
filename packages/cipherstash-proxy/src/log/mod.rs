@@ -17,6 +17,7 @@ pub const DEVELOPMENT: &str = "development"; // one for various hidden "developm
 pub const AUTHENTICATION: &str = "authentication";
 pub const CONTEXT: &str = "context";
 pub const ENCRYPT: &str = "encrypt";
+pub const ENCRYPT_CONFIG: &str = "encrypt_config";
 pub const KEYSET: &str = "keyset";
 pub const PARSER: &str = "parser";
 pub const PROTOCOL: &str = "protocol";
@@ -123,6 +124,7 @@ mod tests {
             authentication_level: LogLevel::Debug,
             context_level: LogLevel::Error,
             encrypt_level: LogLevel::Error,
+            encrypt_config_level: LogLevel::Error,
             keyset_level: LogLevel::Trace,
             protocol_level: LogLevel::Info,
             mapper_level: LogLevel::Info,
