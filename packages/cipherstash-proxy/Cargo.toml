@@ -36,6 +36,7 @@ rust_decimal = { version = "1.36.0", default-features = false, features = [
     "db-postgres",
 ] }
 rustls = { version = "0.23.20", default-features = false, features = ["std"] }
+rustls-native-certs = "0.8.1"
 rustls-pemfile = "2.2.0"
 rustls-pki-types = "1.10.0"
 serde = "1.0"

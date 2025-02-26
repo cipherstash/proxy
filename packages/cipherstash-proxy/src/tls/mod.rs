@@ -71,7 +71,12 @@ pub fn configure_server(config: &TlsConfig) -> Result<rustls::ServerConfig, Erro
 ///
 pub fn configure_client(config: &DatabaseConfig) -> ClientConfig {
     let mut root_cert_store = rustls::RootCertStore::empty();
+    // `expect`ing is OK here because the app can't run if we can't load TLS certs.
+    let native_certs =
+        rustls_native_certs::load_native_certs().expect("failed to load native certs");
+    let native_certs: Vec<_> = native_certs.into_iter().collect();
     root_cert_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+    root_cert_store.add_parsable_certificates(native_certs);
 
     let mut tls_config = rustls::ClientConfig::builder()
         .with_root_certificates(root_cert_store)

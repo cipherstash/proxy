@@ -688,6 +688,7 @@ dependencies = [
  "ring",
  "rust_decimal",
  "rustls",
+ "rustls-native-certs",
  "rustls-pemfile",
  "rustls-pki-types",
  "serde",
