@@ -390,8 +390,7 @@ impl<'ast> Transform<'ast> for EncryptedStatement<'ast> {
                         ));
                     }
 
-                    // TODO: compound/qualified idents?
-                    ast::Expr::Identifier(_) => {
+                    ast::Expr::Identifier(_) | ast::Expr::CompoundIdentifier(_) => {
                         let node_key = NodeKey::new(original_value);
                         if self.nodes_to_wrap.contains(&node_key) {
                             let new_node = ast::Expr::Function(ast::Function {

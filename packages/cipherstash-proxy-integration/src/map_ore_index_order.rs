@@ -143,6 +143,68 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn map_ore_order_qualified_column() {
+        trace();
+
+        clear().await;
+
+        let client = connect_with_tls(PROXY).await;
+
+        let s_one = "a";
+        let s_two = "b";
+        let s_three = "c";
+
+        let sql = "
+            INSERT INTO encrypted (id, encrypted_text)
+            VALUES ($1, $2), ($3, $4), ($5, $6)
+        ";
+
+        client
+            .query(sql, &[&id(), &s_two, &id(), &s_one, &id(), &s_three])
+            .await
+            .unwrap();
+
+        let sql = "SELECT encrypted_text FROM encrypted ORDER BY encrypted.encrypted_text";
+        let rows = client.query(sql, &[]).await.unwrap();
+
+        let actual = rows.iter().map(|row| row.get(0)).collect::<Vec<String>>();
+        let expected = vec![s_one, s_two, s_three];
+
+        assert_eq!(actual, expected);
+    }
+
+    #[tokio::test]
+    async fn map_ore_order_qualified_column_with_alias() {
+        trace();
+
+        clear().await;
+
+        let client = connect_with_tls(PROXY).await;
+
+        let s_one = "a";
+        let s_two = "b";
+        let s_three = "c";
+
+        let sql = "
+            INSERT INTO encrypted (id, encrypted_text)
+            VALUES ($1, $2), ($3, $4), ($5, $6)
+        ";
+
+        client
+            .query(sql, &[&id(), &s_two, &id(), &s_one, &id(), &s_three])
+            .await
+            .unwrap();
+
+        let sql = "SELECT encrypted_text FROM encrypted e ORDER BY e.encrypted_text";
+        let rows = client.query(sql, &[]).await.unwrap();
+
+        let actual = rows.iter().map(|row| row.get(0)).collect::<Vec<String>>();
+        let expected = vec![s_one, s_two, s_three];
+
+        assert_eq!(actual, expected);
+    }
+
+    #[tokio::test]
     async fn map_ore_order_simple_protocol() {
         trace();
 
