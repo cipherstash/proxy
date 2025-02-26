@@ -21,31 +21,35 @@ use bytes::BytesMut;
 use itertools::Itertools;
 use metrics::{counter, histogram};
 use std::time::Instant;
-use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
+use tokio::io::AsyncRead;
+use tokio::sync::mpsc::Sender;
 use tracing::{debug, error, warn};
 
-pub struct Backend<C, S>
+pub struct Backend<R>
 where
-    C: AsyncWrite + Unpin,
-    S: AsyncRead + Unpin,
+    R: AsyncRead + Unpin,
 {
-    client: C,
-    server: S,
+    client_sender: Sender<BytesMut>,
+    server_reader: R,
     encrypt: Encrypt,
     context: Context,
     buffer: MessageBuffer,
 }
 
-impl<C, S> Backend<C, S>
+impl<R> Backend<R>
 where
-    C: AsyncWrite + Unpin,
-    S: AsyncRead + Unpin,
+    R: AsyncRead + Unpin,
 {
-    pub fn new(client: C, server: S, encrypt: Encrypt, context: Context) -> Self {
+    pub fn new(
+        client_sender: Sender<BytesMut>,
+        server_reader: R,
+        encrypt: Encrypt,
+        context: Context,
+    ) -> Self {
         let buffer = MessageBuffer::new();
         Backend {
-            client,
-            server,
+            client_sender,
+            server_reader,
             encrypt,
             context,
             buffer,
@@ -78,7 +82,7 @@ where
         let connection_timeout = self.encrypt.config.database.connection_timeout();
 
         let (code, mut bytes) = protocol::read_message_with_timeout(
-            &mut self.server,
+            &mut self.server_reader,
             self.context.client_id,
             connection_timeout,
         )
@@ -193,7 +197,7 @@ where
         let sent: u64 = bytes.len() as u64;
         counter!(CLIENTS_BYTES_SENT_TOTAL).increment(sent);
 
-        self.client.write_all(&bytes).await?;
+        self.client_sender.send(bytes).await?;
         Ok(())
     }
 

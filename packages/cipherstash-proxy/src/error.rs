@@ -1,3 +1,4 @@
+use bytes::BytesMut;
 use cipherstash_client::encryption;
 use metrics_exporter_prometheus::BuildError;
 use std::io;
@@ -52,6 +53,9 @@ pub enum Error {
 
     #[error("Unknown error")]
     Unknown,
+
+    #[error(transparent)]
+    SendError(#[from] tokio::sync::mpsc::error::SendError<BytesMut>),
 }
 
 #[derive(Error, Debug)]

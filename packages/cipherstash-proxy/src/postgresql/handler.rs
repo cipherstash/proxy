@@ -1,6 +1,7 @@
 use super::backend::Backend;
 use super::frontend::Frontend;
 use super::protocol::StartupCode;
+use crate::connect::ChannelWriter;
 use crate::error::ConfigError;
 use crate::log::{AUTHENTICATION, PROTOCOL};
 use crate::postgresql::context::Context;
@@ -217,18 +218,21 @@ pub async fn handler(
     let (client_reader, client_writer) = split(client_stream);
     let (server_reader, server_writer) = split(database_stream);
 
+    let channel_writer = ChannelWriter::new(client_writer, client_id);
+
     let schema = encrypt.schema.load();
 
     let context = Context::new(client_id, schema);
 
     let mut frontend = Frontend::new(
         client_reader,
+        channel_writer.sender(),
         server_writer,
         encrypt.clone(),
         context.clone(),
     );
     let mut backend = Backend::new(
-        client_writer,
+        channel_writer.sender(),
         server_reader,
         encrypt.clone(),
         context.clone(),
@@ -238,6 +242,8 @@ pub async fn handler(
         warn!(msg = "⚠️ RUNNING IN PASSTHROUGH MODE");
         warn!(msg = "⛔️ DATA IS NOT PROTECTED WITH ENCRYPTION");
     }
+
+    tokio::spawn(channel_writer.receive());
 
     let client_to_server = async {
         loop {

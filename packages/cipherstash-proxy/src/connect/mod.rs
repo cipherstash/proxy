@@ -10,7 +10,7 @@ use tokio::{
 use tokio_postgres::Client;
 use tracing::{debug, error, info, warn};
 
-pub use async_stream::AsyncStream;
+pub use async_stream::{AsyncStream, ChannelWriter};
 
 const TCP_KEEPALIVE_INTERVAL: Duration = Duration::from_secs(5);
 const TCP_KEEPALIVE_TIME: Duration = Duration::from_secs(5);
