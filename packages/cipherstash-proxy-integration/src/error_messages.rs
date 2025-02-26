@@ -49,34 +49,24 @@ mod tests {
 
         reset_schema().await;
 
-        let id = id();
-
         let client = connect_with_tls(PROXY).await;
 
         let _reset = Reset;
 
         // Create a record
         // If select returns no results, no configuration is required
+        let id = id();
         let encrypted_text = "hello@cipherstash.com";
-        let sql = "INSERT INTO encrypted (id, encrypted_text) VALUES ($1, $2)";
-        client.query(sql, &[&id, &encrypted_text]).await.unwrap();
 
-        let sql = "ALTER TABLE encrypted ADD COLUMN encrypted_unconfigured cs_encrypted_v1";
-        client.simple_query(sql).await.unwrap();
-
-        let encrypted_text = "hello@cipherstash.com";
-        let sql = "INSERT INTO encrypted (id, encrypted_unconfigured) VALUES ($1, $2)";
+        let sql = "INSERT INTO unconfigured (id, encrypted_unconfigured) VALUES ($1, $2)";
         let result = client.query(sql, &[&id, &encrypted_text]).await;
-
-        // let sql = "SELECT id, encrypted_text, encrypted_unconfigured FROM encrypted";
-        // let result = client.query(sql, &[]).await;
 
         assert!(result.is_err());
 
         if let Err(err) = result {
             let msg = err.to_string();
 
-            assert_eq!(msg, "db error: ERROR: Column 'encrypted_unconfigured' in table 'encrypted' has no Encrypt configuration. For help visit https://github.com/cipherstash/proxy/docs/errors.md#encrypt-unknown-column");
+            assert_eq!(msg, "db error: ERROR: Column 'encrypted_unconfigured' in table 'unconfigured' has no Encrypt configuration. For help visit https://github.com/cipherstash/proxy/docs/errors.md#encrypt-unknown-column");
         } else {
             unreachable!();
         }

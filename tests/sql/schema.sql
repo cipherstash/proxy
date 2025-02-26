@@ -24,6 +24,13 @@ CREATE TABLE encrypted (
     PRIMARY KEY(id)
 );
 
+DROP TABLE IF EXISTS unconfigured;
+CREATE TABLE unconfigured (
+    id bigint,
+    encrypted_unconfigured cs_encrypted_v1,
+    PRIMARY KEY(id)
+);
+
 SELECT cs_add_index_v1(
   'encrypted',
   'encrypted_text',
