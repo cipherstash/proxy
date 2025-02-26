@@ -11,7 +11,7 @@ services:
     ports:
       - 5432:5432
     networks:
-      - cipherstash_proxy
+      - cipherstash
     deploy:
       resources:
         limits:
@@ -43,9 +43,9 @@ services:
       - CS_ENCRYPT__CLIENT_ID=${CS_ENCRYPT__CLIENT_ID}
       - CS_PROMETHEUS__ENABLED=${CS_PROMETHEUS__ENABLED:-true}
     networks:
-      - cipherstash_proxy
+      - cipherstash
 
 networks:
-  cipherstash_proxy:
+  cipherstash:
     driver: bridge
 
