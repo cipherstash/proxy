@@ -22,7 +22,7 @@ use bytes::BytesMut;
 use md5::{Digest, Md5};
 use postgres_protocol::authentication::sasl::{ChannelBinding, ScramSha256};
 use rand::Rng;
-use tokio::io::{split, AsyncRead, AsyncWrite, AsyncWriteExt};
+use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use tracing::{debug, error, info, warn};
 
 ///
@@ -215,13 +215,12 @@ pub async fn handler(
         return Err(ConfigError::TlsRequired.into());
     }
 
-    let (client_reader, client_writer) = split(client_stream);
-    let (server_reader, server_writer) = split(database_stream);
+    let (client_reader, client_writer) = client_stream.split();
+    let (server_reader, server_writer) = database_stream.split();
 
     let channel_writer = ChannelWriter::new(client_writer, client_id);
 
     let schema = encrypt.schema.load();
-
     let context = Context::new(client_id, schema);
 
     let mut frontend = Frontend::new(
