@@ -452,6 +452,7 @@ where
         if (param_columns.is_empty() || no_encrypted_param_columns)
             && (projection_columns.is_empty() || no_encrypted_projection_columns)
             && literal_columns.is_empty()
+            && typed_statement.nodes_to_wrap.is_empty()
         {
             return Ok(None);
         }

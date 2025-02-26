@@ -205,6 +205,43 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn map_ore_order_no_eql_column_in_select_projection() {
+        trace();
+
+        clear().await;
+
+        let client = connect_with_tls(PROXY).await;
+
+        let id_one = id();
+        let s_one = "a";
+        let id_two = id();
+        let s_two = "b";
+        let id_three = id();
+        let s_three = "c";
+
+        let sql = "
+            INSERT INTO encrypted (id, encrypted_text)
+            VALUES ($1, $2), ($3, $4), ($5, $6)
+        ";
+
+        client
+            .query(
+                sql,
+                &[&id_two, &s_two, &id_one, &s_one, &id_three, &s_three],
+            )
+            .await
+            .unwrap();
+
+        let sql = "SELECT id FROM encrypted ORDER BY encrypted_text";
+        let rows = client.query(sql, &[]).await.unwrap();
+
+        let actual = rows.iter().map(|row| row.get(0)).collect::<Vec<i64>>();
+        let expected = vec![id_one, id_two, id_three];
+
+        assert_eq!(actual, expected);
+    }
+
+    #[tokio::test]
     async fn map_ore_order_simple_protocol() {
         trace();
 
