@@ -1,5 +1,7 @@
 #[cfg(test)]
 mod tests {
+    use tokio_postgres::SimpleQueryMessage;
+
     use crate::common::{clear, connect_with_tls, id, trace, PROXY};
 
     #[tokio::test]
@@ -60,6 +62,118 @@ mod tests {
 
         let actual = rows.iter().map(|row| row.get(0)).collect::<Vec<String>>();
         let expected = vec![s_three, s_two, s_one];
+
+        assert_eq!(actual, expected);
+    }
+
+    #[tokio::test]
+    async fn map_ore_order_nulls_last_by_default() {
+        trace();
+
+        clear().await;
+
+        let client = connect_with_tls(PROXY).await;
+
+        let s_one = "a";
+        let s_two = "b";
+
+        client
+            .query("INSERT INTO encrypted (id) values ($1)", &[&id()])
+            .await
+            .unwrap();
+
+        let sql = "
+            INSERT INTO encrypted (id, encrypted_text)
+            VALUES ($1, $2), ($3, $4)
+        ";
+
+        client
+            .query(sql, &[&id(), &s_one, &id(), &s_two])
+            .await
+            .unwrap();
+
+        let sql = "SELECT encrypted_text FROM encrypted ORDER BY encrypted_text";
+        let rows = client.query(sql, &[]).await.unwrap();
+
+        let actual = rows
+            .iter()
+            .map(|row| row.get(0))
+            .collect::<Vec<Option<String>>>();
+        let expected = vec![Some(s_one.to_string()), Some(s_two.to_string()), None];
+
+        assert_eq!(actual, expected);
+    }
+
+    #[tokio::test]
+    async fn map_ore_order_nulls_first() {
+        trace();
+
+        clear().await;
+
+        let client = connect_with_tls(PROXY).await;
+
+        let s_one = "a";
+        let s_two = "b";
+
+        let sql = "
+            INSERT INTO encrypted (id, encrypted_text)
+            VALUES ($1, $2), ($3, $4)
+        ";
+
+        client
+            .query(sql, &[&id(), &s_one, &id(), &s_two])
+            .await
+            .unwrap();
+
+        client
+            .query("INSERT INTO encrypted (id) values ($1)", &[&id()])
+            .await
+            .unwrap();
+
+        let sql = "SELECT encrypted_text FROM encrypted ORDER BY encrypted_text NULLS FIRST";
+        let rows = client.query(sql, &[]).await.unwrap();
+
+        let actual = rows
+            .iter()
+            .map(|row| row.get(0))
+            .collect::<Vec<Option<String>>>();
+        let expected = vec![None, Some(s_one.to_string()), Some(s_two.to_string())];
+
+        assert_eq!(actual, expected);
+    }
+
+    #[tokio::test]
+    async fn map_ore_order_simple_protocol() {
+        trace();
+
+        clear().await;
+
+        let client = connect_with_tls(PROXY).await;
+
+        let sql = format!(
+            "INSERT INTO encrypted (id, encrypted_text) VALUES ({}, 'y'), ({}, 'x'), ({}, 'z')",
+            id(),
+            id(),
+            id()
+        );
+
+        client.simple_query(&sql).await.unwrap();
+
+        let sql = "SELECT encrypted_text FROM encrypted ORDER BY encrypted_text";
+        let rows = client.simple_query(sql).await.unwrap();
+
+        let actual = rows
+            .iter()
+            .filter_map(|row| {
+                if let SimpleQueryMessage::Row(row) = row {
+                    row.get(0)
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>();
+
+        let expected = vec!["x", "y", "z"];
 
         assert_eq!(actual, expected);
     }
