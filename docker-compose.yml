@@ -1,0 +1,51 @@
+services:
+  postgres: &postgres
+    image: postgres:latest
+    container_name: postgres
+    environment:
+      PGPORT: 5432
+      POSTGRES_DB: "cipherstash"
+      POSTGRES_USER: "cipherstash"
+      PGUSER: "cipherstash"
+      POSTGRES_PASSWORD: "password"
+    ports:
+      - 5432:5432
+    networks:
+      - cipherstash_proxy
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-2}"
+          memory: 2048mb
+    restart: always
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready"]
+      interval: 1s
+      timeout: 5s
+      retries: 10
+
+  proxy:
+    image: cipherstash/proxy:latest
+    container_name: proxy
+    ports:
+      - 6432:6432
+      - 9930:9930
+    environment:
+      - CS_DATABASE__NAME=${CS_DATABASE__NAME}
+      - CS_DATABASE__USERNAME=${CS_DATABASE__USERNAME}
+      - CS_DATABASE__PASSWORD=${CS_DATABASE__PASSWORD}
+      - CS_DATABASE__HOST=${CS_DATABASE__HOST}
+      - CS_DATABASE__PORT=${CS_DATABASE__PORT}
+      - CS_AUTH__WORKSPACE_ID=${CS_AUTH__WORKSPACE_ID}
+      - CS_AUTH__CLIENT_ACCESS_KEY=${CS_AUTH__CLIENT_ACCESS_KEY}
+      - CS_ENCRYPT__DATASET_ID=${CS_ENCRYPT__DATASET_ID}
+      - CS_ENCRYPT__CLIENT_KEY=${CS_ENCRYPT__CLIENT_KEY}
+      - CS_ENCRYPT__CLIENT_ID=${CS_ENCRYPT__CLIENT_ID}
+      - CS_PROMETHEUS__ENABLED=${CS_PROMETHEUS__ENABLED:-true}
+    networks:
+      - cipherstash_proxy
+
+networks:
+  cipherstash_proxy:
+    driver: bridge
+

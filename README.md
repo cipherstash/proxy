@@ -30,9 +30,20 @@ Behind the scenes, it uses the [Encrypt Query Language](https://github.com/ciphe
 
 ## Getting started
 
-### Prerequisites
+> [!IMPORTANT]
+> **Before you start** you need to have this software installed:
+>  - [Docker](https://www.docker.com/) — see Docker's [documentation for installing](https://docs.docker.com/get-started/get-docker/)
 
-xxx
+Get up and running in local dev in < 5 minutes:
+
+```bash
+# Clone the repo
+git clone https://github.com/cipherstash/proxy
+cd proxy
+
+# Start the containers
+docker compose up
+```
 
 ## How-to
 
@@ -74,7 +85,7 @@ CS_ENCRYPT__CLIENT_ID
 CS_ENCRYPT__CLIENT_KEY
 ```
 
-See [`./packages/cipherstash-proxy/tests/config/`](./packages/cipherstash-proxy/tests/config/) for example environment variables. 
+See [`./packages/cipherstash-proxy/tests/config/`](./packages/cipherstash-proxy/tests/config/) for example environment variables.
 
 #### Configuring Proxy with a TOML file
 
@@ -96,7 +107,7 @@ client_id = "cipherstash-client-id"
 client_key = "cipherstash-client-key"
 ```
 
-See [`cipherstash-proxy-example.toml`](./cipherstash-proxy-example.toml) for an example TOML configuration files. 
+See [`cipherstash-proxy-example.toml`](./cipherstash-proxy-example.toml) for an example TOML configuration files.
 
 ### Running Proxy locally
 
