@@ -41,8 +41,19 @@ Get up and running in local dev in < 5 minutes:
 git clone https://github.com/cipherstash/proxy
 cd proxy
 
+# Setup your CipherStash configuration
+stash setup
+# TODO: get the config into a format cipherstash-proxy can read
+
 # Start the containers
 docker compose up
+# TODO: Install a database schema: https://docs.docker.com/compose/how-tos/lifecycle/
+
+# TODO: Run a query
+psql postgres://${CS_DATABASE__USERNAME}:${CS_DATABASE__PASSWORD}@localhost:6432/cipherstash
+
+# TODO: Verify the data is encrypted
+psql postgres://${CS_DATABASE__USERNAME}:${CS_DATABASE__PASSWORD}@postgres:5432/cipherstash
 ```
 
 ## How-to
