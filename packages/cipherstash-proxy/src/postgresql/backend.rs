@@ -4,6 +4,7 @@ use super::message_buffer::MessageBuffer;
 use super::messages::error_response::ErrorResponse;
 use super::messages::row_description::RowDescription;
 use super::messages::BackendCode;
+use crate::connect::Sender;
 use crate::encrypt::Encrypt;
 use crate::eql::Encrypted;
 use crate::error::Error;
@@ -22,14 +23,14 @@ use itertools::Itertools;
 use metrics::{counter, histogram};
 use std::time::Instant;
 use tokio::io::AsyncRead;
-use tokio::sync::mpsc::Sender;
-use tracing::{debug, error, warn};
+
+use tracing::{debug, error, info};
 
 pub struct Backend<R>
 where
     R: AsyncRead + Unpin,
 {
-    client_sender: Sender<BytesMut>,
+    client_sender: Sender,
     server_reader: R,
     encrypt: Encrypt,
     context: Context,
@@ -41,7 +42,7 @@ where
     R: AsyncRead + Unpin,
 {
     pub fn new(
-        client_sender: Sender<BytesMut>,
+        client_sender: Sender,
         server_reader: R,
         encrypt: Encrypt,
         context: Context,
@@ -119,7 +120,9 @@ where
                 self.context.complete_execution();
             }
             BackendCode::ErrorResponse => {
-                self.error_response_handler(&bytes)?;
+                if let Some(b) = self.error_response_handler(&bytes)? {
+                    bytes = b
+                }
                 self.flush().await?;
                 self.context.complete_execution();
             }
@@ -170,13 +173,15 @@ where
 
     ///
     /// Handle error response messages
-    /// Error Responses are not rewritten, we log the error for ease of use
+    /// The Frontend triggers an exception in the database for some errors
+    /// These errors are filtered here
+    /// Other Error Responses are logged and passed through
     ///
-    fn error_response_handler(&mut self, bytes: &BytesMut) -> Result<(), Error> {
+    fn error_response_handler(&mut self, bytes: &BytesMut) -> Result<Option<BytesMut>, Error> {
         let error_response = ErrorResponse::try_from(bytes)?;
         error!(msg = "PostgreSQL Error", error = ?error_response);
-        warn!("Error response originates in the PostgreSQL database.");
-        Ok(())
+        info!(msg = "PostgreSQL Errors are returned from the database");
+        Ok(Some(bytes.to_owned()))
     }
 
     ///
@@ -214,7 +219,7 @@ where
         let sent: u64 = bytes.len() as u64;
         counter!(CLIENTS_BYTES_SENT_TOTAL).increment(sent);
 
-        self.client_sender.send(bytes).await?;
+        self.client_sender.send(bytes)?;
         Ok(())
     }
 

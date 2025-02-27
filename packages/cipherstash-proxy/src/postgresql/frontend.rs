@@ -6,9 +6,10 @@ use super::messages::parse::Parse;
 use super::messages::query::Query;
 use super::messages::FrontendCode as Code;
 use super::protocol::{self};
+use crate::connect::Sender;
 use crate::encrypt::Encrypt;
 use crate::eql::Identifier;
-use crate::error::{EncryptError, Error, ErrorCode, MappingError};
+use crate::error::{EncryptError, Error, MappingError};
 use crate::log::{MAPPER, PROTOCOL};
 use crate::postgresql::context::column::Column;
 use crate::postgresql::context::Portal;
@@ -33,7 +34,6 @@ use sqlparser::parser::Parser;
 use std::collections::HashMap;
 use std::time::Instant;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
-use tokio::sync::mpsc::Sender;
 use tracing::{debug, error, warn};
 
 const DIALECT: PostgreSqlDialect = PostgreSqlDialect {};
@@ -44,10 +44,11 @@ where
     W: AsyncWrite + Unpin,
 {
     client_reader: R,
-    client_sender: Sender<BytesMut>,
+    client_sender: Sender,
     server_writer: W,
     encrypt: Encrypt,
     context: Context,
+    in_error: bool,
 }
 
 impl<R, W> Frontend<R, W>
@@ -57,7 +58,7 @@ where
 {
     pub fn new(
         client_reader: R,
-        client_sender: Sender<BytesMut>,
+        client_sender: Sender,
         server_writer: W,
         encrypt: Encrypt,
         context: Context,
@@ -68,23 +69,11 @@ where
             server_writer,
             encrypt,
             context,
+            in_error: false,
         }
     }
 
     pub async fn rewrite(&mut self) -> Result<(), Error> {
-        let bytes = self.read().await?;
-        self.write(bytes).await?;
-        Ok(())
-    }
-
-    pub async fn write(&mut self, bytes: BytesMut) -> Result<(), Error> {
-        let sent: u64 = bytes.len() as u64;
-        counter!(SERVER_BYTES_SENT_TOTAL).increment(sent);
-        self.server_writer.write_all(&bytes).await?;
-        Ok(())
-    }
-
-    pub async fn read(&mut self) -> Result<BytesMut, Error> {
         let connection_timeout = self.encrypt.config.database.connection_timeout();
         let (code, mut bytes) = protocol::read_message_with_timeout(
             &mut self.client_reader,
@@ -97,17 +86,33 @@ where
         counter!(CLIENTS_BYTES_RECEIVED_TOTAL).increment(sent);
 
         if self.encrypt.is_passthrough() {
-            return Ok(bytes);
+            self.write_to_server(bytes).await?;
+            return Ok(());
         }
 
-        match code.into() {
+        let code = Code::from(code);
+
+        // When an error is detected while processing any extended-query message, the backend issues ErrorResponse, then reads and discards messages until a Sync is reached,
+        // https://www.postgresql.org/docs/current/protocol-flow.html#PROTOCOL-FLOW-EXT-QUERY
+        if self.in_error {
+            warn!(target: PROTOCOL,
+                client_id = self.context.client_id,
+                in_error = self.in_error,
+                ?code,
+            );
+            if code != Code::Sync {
+                return Ok(());
+            }
+        }
+
+        match code {
             Code::Query => {
                 match self.query_handler(&bytes).await {
                     Ok(Some(mapped)) => bytes = mapped,
                     // No mapping needed, don't change the bytes
                     Ok(None) => (),
                     Err(err) => {
-                        bytes = self.build_frontend_exception(err)?;
+                        bytes = self.to_database_exception(err)?;
                     }
                 }
             }
@@ -127,20 +132,36 @@ where
                             ref table,
                             ref column,
                         }) => {
+                            warn!(target: PROTOCOL,
+                                client_id = self.context.client_id,
+                                msg = "EncryptError::UnknownColumn",
+                            );
+
+                            self.in_error = true;
+
                             // Send an ErrorResponse to the client immediately
                             let message =
-                                ErrorResponse::unknown_column(err.to_string(), &table, &column);
+                                ErrorResponse::unknown_column(err.to_string(), table, column);
                             let message = BytesMut::try_from(message)?;
-                            self.client_sender.send(message).await?;
+
+                            warn!(target: PROTOCOL,
+                                client_id = self.context.client_id,
+                                ?message,
+                            );
+                            self.client_sender.send(message)?;
 
                             // Send an Exception to the database
                             // Ensures any transaction is rolled back
                             // Filtered out on the return in the Backend
                             // let error_code = encrypt_error;
-                            bytes = self.to_database_exception(err)?;
+                            // bytes = self.to_database_exception(err)?;
                         }
                         _ => {
-                            bytes = self.build_frontend_exception(err)?;
+                            warn!(target: PROTOCOL,
+                                client_id = self.context.client_id,
+                                msg = "build_frontend_exception",
+                            );
+                            bytes = self.to_database_exception(err)?;
                         }
                     },
                 }
@@ -154,11 +175,27 @@ where
                 if self.context.schema_changed() {
                     self.encrypt.reload_schema().await;
                 }
+                // Clear the error state
+                if self.in_error {
+                    warn!(target: PROTOCOL,
+                        client_id = self.context.client_id,
+                        msg = "Clear error state",
+                    );
+                    self.in_error = false;
+                }
             }
             _code => {}
         }
 
-        Ok(bytes)
+        self.write_to_server(bytes).await?;
+        Ok(())
+    }
+
+    pub async fn write_to_server(&mut self, bytes: BytesMut) -> Result<(), Error> {
+        let sent: u64 = bytes.len() as u64;
+        counter!(SERVER_BYTES_SENT_TOTAL).increment(sent);
+        self.server_writer.write_all(&bytes).await?;
+        Ok(())
     }
 
     async fn describe_handler(&mut self, bytes: &BytesMut) -> Result<(), Error> {
@@ -737,7 +774,7 @@ where
 
     /// TODO output err as structured data.
     ///      err can carry any additional context from caller
-    fn build_frontend_exception(&self, err: Error) -> Result<BytesMut, Error> {
+    fn to_database_exception(&self, err: Error) -> Result<BytesMut, Error> {
         error!(client_id = self.context.client_id, msg = err.to_string(), error = ?err);
 
         // This *should* be sufficient for escaping error messages as we're only
@@ -750,24 +787,6 @@ where
             client_id = self.context.client_id,
             msg = "Frontend exception",
             error = err.to_string()
-        );
-
-        let query = Query::new(content);
-        let bytes = BytesMut::try_from(query)?;
-
-        Ok(bytes)
-    }
-
-    fn to_database_exception(&self, err: Error) -> Result<BytesMut, Error> {
-        let error_code = ErrorCode::from(err);
-        let quoted_error_code = quote_literal(error_code.to_string().as_str());
-        let content = format!("DO $$ BEGIN RAISE EXCEPTION {quoted_error_code}; END; $$;");
-
-        debug!(
-            target: MAPPER,
-            client_id = self.context.client_id,
-            msg = "Database exception",
-            ?error_code
         );
 
         let query = Query::new(content);

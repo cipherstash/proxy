@@ -1,11 +1,14 @@
 use bytes::BytesMut;
 use tokio::{
     io::{AsyncWrite, AsyncWriteExt},
-    sync::mpsc::{self, Receiver, Sender},
+    sync::mpsc::{self, UnboundedReceiver, UnboundedSender},
 };
 use tracing::{debug, error};
 
 use crate::log::PROTOCOL;
+
+pub type Receiver = UnboundedReceiver<BytesMut>;
+pub type Sender = UnboundedSender<BytesMut>;
 
 #[derive(Debug)]
 pub struct ChannelWriter<W>
@@ -13,8 +16,8 @@ where
     W: AsyncWrite + Unpin,
 {
     writer: W,
-    receiver: Receiver<BytesMut>,
-    sender: Sender<BytesMut>,
+    receiver: Receiver,
+    sender: Sender,
     client_id: i32,
 }
 
@@ -23,7 +26,8 @@ where
     W: AsyncWrite + Unpin,
 {
     pub fn new(writer: W, client_id: i32) -> Self {
-        let (sender, receiver): (Sender<BytesMut>, Receiver<BytesMut>) = mpsc::channel(32);
+        let (sender, receiver): (UnboundedSender<BytesMut>, UnboundedReceiver<BytesMut>) =
+            mpsc::unbounded_channel();
 
         ChannelWriter {
             writer,
@@ -59,7 +63,7 @@ where
         }
     }
 
-    pub fn sender(&self) -> Sender<BytesMut> {
+    pub fn sender(&self) -> Sender {
         self.sender.clone()
     }
 }

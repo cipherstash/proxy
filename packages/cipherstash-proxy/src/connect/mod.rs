@@ -2,7 +2,7 @@ mod async_stream;
 mod channel_writer;
 
 pub use async_stream::AsyncStream;
-pub use channel_writer::ChannelWriter;
+pub use channel_writer::{ChannelWriter, Sender};
 
 use crate::{config::ServerConfig, error::Error, log::DEVELOPMENT, tls, DatabaseConfig};
 use socket2::TcpKeepalive;
