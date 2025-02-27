@@ -126,9 +126,11 @@ There are two ways to configure Proxy:
 - [With environment variables that Proxy looks up on startup](#configuring-proxy-with-environment-variables)
 - [With a TOML file that Proxy reads on startup](#configuring-proxy-with-a-toml-file)
 
-If `cipherstash-proxy.toml` is present in the current working directory, Proxy will read its config from that file
-If `cipherstash-proxy.toml` is not present, Proxy will look up environment variables to configure itself
-If **both** `cipherstash-proxy.toml` and environment variables are present, Proxy will use `cipherstash-proxy.toml` as the base configuration, and override it with any environment variables that are set
+Proxy's configuration loading order of preference is:
+
+1. If `cipherstash-proxy.toml` is present in the current working directory, Proxy will read its config from that file
+1. If `cipherstash-proxy.toml` is not present, Proxy will look up environment variables to configure itself
+1. If **both** `cipherstash-proxy.toml` and environment variables are present, Proxy will use `cipherstash-proxy.toml` as the base configuration, and override it with any environment variables that are set
 
 See [Proxy config options](#proxy-config-options) for all the available options.
 
