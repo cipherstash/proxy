@@ -199,7 +199,9 @@ This is reference documentation for configuring Proxy and its features.
 
 ### Proxy config options
 
-These are all the configuration options available for Proxy:
+CipherStash Proxy can be configured with a config file, enviroment variables, or a combination of the two.
+
+These are all the configuration options available for Proxy, and their equivalent environment variables:
 
 ```toml
 
