@@ -6,6 +6,7 @@ from psycopg.types.hstore import register_hstore
 from psycopg.types.range import Range, RangeInfo, register_range
 from psycopg.types.json import Json
 from psycopg.types.json import Jsonb
+import pytest
 import random
 
 
@@ -35,15 +36,9 @@ def test_encrypted_column_not_defined_in_schema():
 
                 sql = "INSERT INTO encrypted (id, encrypted_unconfigured) VALUES (%s, %s)"
 
-                try:
+
+                with pytest.raises(psycopg.Error, match=r'relation ".*" does not exist'):
                     cursor.execute(sql, [id, val])
-                    # Unreachable
-                    assert(false)
-
-                except Exception as err:
-                    msg = str(err)
-                    assert(msg.find('column "encrypted_unconfigured" of relation "encrypted" does not exist') == 0)
-
 
 
 def test_encrypted_column_with_no_configuration():
@@ -59,15 +54,8 @@ def test_encrypted_column_with_no_configuration():
 
                 sql = "INSERT INTO unconfigured (id, encrypted_unconfigured) VALUES (%s, %s)"
 
-                try:
+                with pytest.raises(psycopg.Error, match='#encrypt-unknown-column'):
                     cursor.execute(sql, [id, val])
-
-                    # Unreachable
-                    assert(false)
-
-                except Exception as err:
-                    msg = str(err)
-                    assert(msg.find("Column 'encrypted_unconfigured' in table 'unconfigured' has no Encrypt configuration. For help visit https://github.com/cipherstash/proxy/docs/errors.md#encrypt-unknown-column") == 0)
 
 
 def test_mapper_unsupported_parameter_type():
@@ -82,13 +70,5 @@ def test_mapper_unsupported_parameter_type():
 
                 sql = "INSERT INTO encrypted (id, encrypted_date) VALUES (%s, %s)"
 
-                try:
+                with pytest.raises(psycopg.Error, match='#mapping-invalid-parameter'):
                     cursor.execute(sql, [id, val])
-
-                    # Unreachable
-                    assert(false)
-
-                except psycopg.Error as err:
-                  msg = str(err)
-
-                  assert(msg.find("Invalid parameter for column 'encrypted_date' of type 'Date' in table 'encrypted' (OID 1082). For help visit https://github.com/cipherstash/proxy/docs/errors.md#mapping-invalid-parameter") == 0)
