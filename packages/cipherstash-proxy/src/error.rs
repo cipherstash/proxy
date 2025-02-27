@@ -8,12 +8,6 @@ use tokio::time::error::Elapsed;
 
 const ERROR_DOC_BASE_URL: &str = "https://github.com/cipherstash/proxy/docs/errors.md";
 
-pub const ERROR_DOC_ENCRYPT_UNKNOWN_COLUMN_URL: &str =
-    "https://github.com/cipherstash/proxy/docs/errors.md#encrypt-unknown-column";
-
-pub const ERROR_DOC_ENCRYPT_INVALID_PARAMETER_URL: &str =
-    "https://github.com/cipherstash/proxy/docs/errors.md#encrypt-invalid-parameter";
-
 #[derive(Error, Debug)]
 pub enum Error {
     #[error("Connection closed after cancel request")]
@@ -159,8 +153,8 @@ pub enum EncryptError {
     PlaintextCouldNotBeDecoded(#[from] cipherstash_client::encryption::TypeParseError),
 
     #[error(
-        "Column '{column}' in table '{table}' has no Encrypt configuration. For help visit {}",
-        ERROR_DOC_ENCRYPT_UNKNOWN_COLUMN_URL
+        "Column '{column}' in table '{table}' has no Encrypt configuration. For help visit {}#encrypt-unknown-column",
+        ERROR_DOC_BASE_URL
     )]
     UnknownColumn { table: String, column: String },
 
