@@ -11,13 +11,11 @@ Behind the scenes, it uses the [Encrypt Query Language](https://github.com/ciphe
 
 - [Getting started](#getting-started)
 - [How-to](#how-to)
-  - [Installing Proxy locally](#installing-proxy-locally)
+  - [Installing Proxy](#installing-proxy)
   - [Configuring Proxy](#configuring-proxy)
     - [Configuring Proxy with environment variables](#configuring-proxy-with-environment-variables)
     - [Configuring Proxy with a TOML file](#configuring-proxy-with-a-toml-file)
   - [Running Proxy locally](#running-proxy-locally)
-    - [Running Proxy locally as a process](#running-proxy-locally-as-a-process)
-    - [Running Proxy locally as a container](#running-proxy-locally-as-a-container)
   - [Setting up the database schema](#setting-up-the-database-schema)
     - [Creating columns with the right types](#creating-columns-with-the-right-types)
 - [Reference](#reference)
@@ -25,7 +23,7 @@ Behind the scenes, it uses the [Encrypt Query Language](https://github.com/ciphe
   - [Prometheus metrics](#prometheus-metrics)
     - [Available metrics](#available-metrics)
 - [More info](#more-info)
-  - [Developing for Proxy](#developing-for-Proxy)
+  - [Developing for Proxy](#developing-for-proxy)
 
 ## Getting started
 
@@ -57,12 +55,14 @@ psql postgres://${CS_DATABASE__USERNAME}:${CS_DATABASE__PASSWORD}@postgres:5432/
 
 ## How-to
 
+This section contains how-to documentation for installing, configuring, and running CipherStash Proxy.
+
 ### Installing Proxy
 
 CipherStash Proxy is available as a [container image](https://hub.docker.com/r/cipherstash/proxy) on Docker Hub that can be deployed locally, in CI/CD, through to production.
 
 The easiest way to start using CipherStash Proxy with your application is by adding a container to your application's `docker-compose.yml`.
-This is an example of what adding CipherStash Proxy to your app's `docker-compose.yml` might look like:
+The following is an example of what adding CipherStash Proxy to your app's `docker-compose.yml` might look like:
 
 ```yaml
 services:
@@ -101,17 +101,16 @@ services:
       - CS_PROMETHEUS__ENABLED=${CS_PROMETHEUS__ENABLED:-true}
 ```
 
-You can find a fully working example at [`docker-compose.yml`](./docker-compose.yml), and follow the [getting started guide](#getting-started) to see it in action.
+For a fully-working example, go to [`docker-compose.yml`](./docker-compose.yml). Follow the steps in [Getting started](#getting-started) to see it in action.
 
-Once you have set up a `docker-compose.yml`, start the container:
+Once you have set up a `docker-compose.yml`, start the Proxy container:
 
 ```bash
 docker compose up
 ```
 
-This will start the Proxy container.
-You can connect your PostgreSQL client to Proxy on TCP 6432.
-You can point [Prometheus to scrape metrics](#prometheus-metrics) on TCP 9930.
+Connect your PostgreSQL client to Proxy on TCP 6432.
+Point [Prometheus to scrape metrics](#prometheus-metrics) on TCP 9930.
 
 ### Configuring Proxy
 
@@ -175,25 +174,25 @@ Read the full list of configuration options and what they do in the [reference d
 
 ### Running Proxy locally
 
-xxx
+TODO: Add instructions for running Proxy locally
 
 ### Setting up the database schema
 
-xxx
+TODO: Add instructions for setting up the database schema
 
 #### Creating columns with the right types
 
-xxx
+TODO: Add instructions for creating columns with the right types
 
 ## Reference
 
-This is reference documentation for configuring Proxy and its features.
+This section contains reference documentation for configuring CipherStash Proxy and its features.
 
 ### Proxy config options
 
-CipherStash Proxy can be configured with a config file, enviroment variables, or a combination of the two.
+You can configure CipherStash Proxy with a config file, enviroment variables, or a combination of the two – see [Configuring Proxy](#configuring-proxy) for instructions.
 
-These are all the configuration options available for Proxy, and their equivalent environment variables:
+The following are all the configuration options available for Proxy, with their equivalent environment variables:
 
 ```toml
 
