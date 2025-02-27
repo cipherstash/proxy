@@ -8,12 +8,6 @@ from psycopg.types.json import Json
 from psycopg.types.json import Jsonb
 import random
 
-# CREATE USER cipherstash WITH PASSWORD 'password';
-# GRANT ALL PRIVILEGES ON DATABASE "cipherstash" to cipherstash;
-# GRANT ALL ON SCHEMA public TO cipherstash;
-# GRANT ALL ON DATABASE cipherstash TO cipherstash;
-# ALTER DATABASE cipherstash OWNER TO cipherstash;
-
 
 username = os.environ.get("CS_DATABASE__USERNAME")
 password = os.environ.get("CS_DATABASE__PASSWORD")
