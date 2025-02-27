@@ -149,7 +149,7 @@ CS_ENCRYPT__CLIENT_ID
 CS_ENCRYPT__CLIENT_KEY
 ```
 
-See [`./packages/cipherstash-proxy/tests/config/`](./packages/cipherstash-proxy/tests/config/) for example environment variables.
+Read the full list of environment variables and what they do in the [reference documentation](#proxy-config-options).
 
 #### Configuring Proxy with a TOML file
 
@@ -171,7 +171,7 @@ client_id = "cipherstash-client-id"
 client_key = "cipherstash-client-key"
 ```
 
-See [`cipherstash-proxy-example.toml`](./cipherstash-proxy-example.toml) for an example TOML configuration files.
+Read the full list of configuration options and what they do in the [reference documentation](#proxy-config-options).
 
 ### Running Proxy locally
 
