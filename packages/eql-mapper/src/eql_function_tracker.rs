@@ -1,4 +1,3 @@
-use crate::inference::TypeError;
 use crate::{NodeKey, TypeRegistry};
 use sqlparser::ast::OrderByExpr;
 use sqltk::{Break, Visitable, Visitor};
@@ -8,10 +7,17 @@ use std::fmt::Debug;
 use std::ops::ControlFlow;
 use std::rc::Rc;
 
-#[derive(Debug)]
+/// [`Visitor`] implementation that keeps track of nodes that need to be wrapped in EQL function calls.
+///
+/// For example, given the following statement with an EQL column in an `ORDER BY`, the identifier
+/// `encrypted_text` will be tracked for wrapping with an EQL function call:
+/// ```sql
+/// SELECT id FROM encrypted ORDER BY encrypted_text;
+/// ```
+#[derive(Debug, Default)]
 pub struct EqlFunctionTracker<'ast> {
     reg: Rc<RefCell<TypeRegistry<'ast>>>,
-    pub to_wrap: HashSet<NodeKey<'ast>>,
+    to_wrap: HashSet<NodeKey<'ast>>,
 }
 
 impl<'ast> EqlFunctionTracker<'ast> {
@@ -21,13 +27,16 @@ impl<'ast> EqlFunctionTracker<'ast> {
             to_wrap: HashSet::new(),
         }
     }
+
+    /// Consumes `self` and returns a [`HashSet`] of [`NodeKey`]s for nodes that have been tracked for
+    /// wrapping in EQL function calls.
+    pub fn into_to_wrap(self) -> HashSet<NodeKey<'ast>> {
+        self.to_wrap
+    }
 }
 
 #[derive(thiserror::Error, PartialEq, Eq, Debug)]
-pub enum EqlFunctionTrackerError {
-    #[error(transparent)]
-    _TypeError(Box<TypeError>),
-}
+pub enum EqlFunctionTrackerError {}
 
 impl<'ast> Visitor<'ast> for EqlFunctionTracker<'ast> {
     type Error = EqlFunctionTrackerError;

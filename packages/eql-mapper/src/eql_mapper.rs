@@ -62,8 +62,7 @@ pub fn type_check<'ast>(
                 projection: projection?,
                 params: params?,
                 literals: literals?,
-                // TODO: remove clone?
-                nodes_to_wrap: mapper.eql_function_tracker.borrow().to_wrap.clone(),
+                nodes_to_wrap: mapper.nodes_to_wrap(),
             })
         }
         ControlFlow::Break(Break::Err(err)) => {
@@ -295,6 +294,12 @@ impl<'ast> EqlMapper<'ast> {
 
         Ok(literals)
     }
+
+    /// Takes `eql_function_tracker`, consumes it, and returns a `HashSet` of keys for nodes
+    /// that the type checker has marked for wrapping with EQL function calls.
+    fn nodes_to_wrap(&self) -> HashSet<NodeKey<'ast>> {
+        self.eql_function_tracker.take().into_to_wrap()
+    }
 }
 
 impl<'ast> TypedStatement<'ast> {
@@ -304,7 +309,6 @@ impl<'ast> TypedStatement<'ast> {
     /// Note: this check is conservative with respect to params. Some kinds of encrypted params will not require
     /// statement transformation but we do not currently track that information anywhere so instead we assume the all
     /// potentially require AST edits.
-    // TODO: Is this used?
     pub fn requires_transform(&self) -> bool {
         // if there are any literals that require encryption, or any params that require encryption.
         !self.literals.is_empty()
@@ -346,6 +350,11 @@ impl<'ast> TypedStatement<'ast> {
                 }
             })
             .collect::<Vec<_>>()
+    }
+
+    /// Returns `true` if the typed statement has nodes that the type checker has marked for wrapping with EQL function calls.
+    pub fn has_nodes_to_wrap(&self) -> bool {
+        !self.nodes_to_wrap.is_empty()
     }
 }
 
@@ -390,31 +399,18 @@ impl<'ast> Transform<'ast> for EncryptedStatement<'ast> {
                         ));
                     }
 
+                    // Wrap identifiers (e.g. `encrypted_col`) and compound identifiers (e.g. `some_tbl.encrypted_col`)
+                    // in an EQL function if the type checker has marked them as nodes that need to be
+                    // wrapped.
+                    //
+                    // For example (assuming that `encrypted_col` is an identifier for an EQL column) transform
+                    // `encrypted_col` to `cs_ore_64_8_v1(encrypted_col)`.
                     ast::Expr::Identifier(_) | ast::Expr::CompoundIdentifier(_) => {
                         let node_key = NodeKey::new(original_value);
-                        if self.nodes_to_wrap.contains(&node_key) {
-                            let new_node = ast::Expr::Function(ast::Function {
-                                uses_odbc_syntax: false,
-                                parameters: ast::FunctionArguments::None,
-                                filter: None,
-                                null_treatment: None,
-                                over: None,
-                                within_group: vec![],
-                                name: ast::ObjectName(vec![ast::Ident {
-                                    value: "cs_ore_64_8_v1".to_string(),
-                                    quote_style: None,
-                                    span: Span::empty(),
-                                }]),
-                                args: ast::FunctionArguments::List(ast::FunctionArgumentList {
-                                    duplicate_treatment: None,
-                                    clauses: vec![],
-                                    args: vec![ast::FunctionArg::Unnamed(
-                                        ast::FunctionArgExpr::Expr(original_value.clone()),
-                                    )],
-                                }),
-                            });
 
-                            *target_value = new_node;
+                        if self.nodes_to_wrap.contains(&node_key) {
+                            *target_value =
+                                make_eql_function_node("cs_ore_64_8_v1", original_value.clone());
                         }
                     }
 
@@ -434,6 +430,27 @@ impl<'ast> Transform<'ast> for EncryptedStatement<'ast> {
 
         Ok(new_node)
     }
+}
+
+fn make_eql_function_node(function_name: &str, arg: ast::Expr) -> ast::Expr {
+    ast::Expr::Function(ast::Function {
+        uses_odbc_syntax: false,
+        parameters: ast::FunctionArguments::None,
+        filter: None,
+        null_treatment: None,
+        over: None,
+        within_group: vec![],
+        name: ast::ObjectName(vec![ast::Ident {
+            value: function_name.to_string(),
+            quote_style: None,
+            span: Span::empty(),
+        }]),
+        args: ast::FunctionArguments::List(ast::FunctionArgumentList {
+            duplicate_treatment: None,
+            clauses: vec![],
+            args: vec![ast::FunctionArg::Unnamed(ast::FunctionArgExpr::Expr(arg))],
+        }),
+    })
 }
 
 /// [`Visitor`] implememtation that composes the [`Scope`] visitor, the [`Importer`] and the [`TypeInferencer`]

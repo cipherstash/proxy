@@ -193,7 +193,7 @@ where
 
         let portal = match self.to_encryptable_statement(&typed_statement, vec![])? {
             Some(statement) => {
-                if statement.has_literals() || !typed_statement.nodes_to_wrap.is_empty() {
+                if statement.has_literals() || typed_statement.has_nodes_to_wrap() {
                     if let Some(transformed_statement) = self
                         .encrypt_literals(&typed_statement, &statement.literal_columns)
                         .await?
@@ -354,7 +354,7 @@ where
 
         match self.to_encryptable_statement(&typed_statement, param_types)? {
             Some(statement) => {
-                if statement.has_literals() || !typed_statement.nodes_to_wrap.is_empty() {
+                if statement.has_literals() || typed_statement.has_nodes_to_wrap() {
                     if let Some(transformed_statement) = self
                         .encrypt_literals(&typed_statement, &statement.literal_columns)
                         .await?
@@ -452,7 +452,7 @@ where
         if (param_columns.is_empty() || no_encrypted_param_columns)
             && (projection_columns.is_empty() || no_encrypted_projection_columns)
             && literal_columns.is_empty()
-            && typed_statement.nodes_to_wrap.is_empty()
+            && !typed_statement.has_nodes_to_wrap()
         {
             return Ok(None);
         }
