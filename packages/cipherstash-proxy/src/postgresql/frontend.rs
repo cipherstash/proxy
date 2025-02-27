@@ -136,25 +136,9 @@ where
                                 client_id = self.context.client_id,
                                 msg = "EncryptError::UnknownColumn",
                             );
-
-                            self.in_error = true;
-
-                            // Send an ErrorResponse to the client immediately
-                            let message =
+                            let error_response =
                                 ErrorResponse::unknown_column(err.to_string(), table, column);
-                            let message = BytesMut::try_from(message)?;
-
-                            warn!(target: PROTOCOL,
-                                client_id = self.context.client_id,
-                                ?message,
-                            );
-                            self.client_sender.send(message)?;
-
-                            // Send an Exception to the database
-                            // Ensures any transaction is rolled back
-                            // Filtered out on the return in the Backend
-                            // let error_code = encrypt_error;
-                            // bytes = self.to_database_exception(err)?;
+                            self.send_error_response(error_response)?;
                         }
                         _ => {
                             warn!(target: PROTOCOL,
@@ -770,6 +754,24 @@ where
                 .into())
             }
         }
+    }
+
+    ///
+    /// Send an ErrorResponse to the client and set the Frontend in error state
+    ///
+    fn send_error_response(&mut self, error_response: ErrorResponse) -> Result<(), Error> {
+        let message = BytesMut::try_from(error_response)?;
+
+        debug!(target: PROTOCOL,
+            client_id = self.context.client_id,
+            msg = "send_error_response",
+            ?message,
+        );
+
+        self.client_sender.send(message)?;
+        self.in_error = true;
+
+        Ok(())
     }
 
     /// TODO output err as structured data.
