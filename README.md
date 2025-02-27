@@ -7,11 +7,40 @@ CipherStash Proxy keeps your sensitive data in PostgreSQL encrypted and searchab
 
 Behind the scenes, it uses the [Encrypt Query Language](https://github.com/cipherstash/encrypt-query-language/) to index and search encrypted data.
 
+## Table of contents
 
-## Getting Started
+- [Getting started](#getting-started)
+  - [Prerequisites](#prerequisites)
+- [How-to](#how-to)
+  - [Installing Proxy locally](#installing-proxy-locally)
+  - [Configuring Proxy](#configuring-proxy)
+    - [Configuring Proxy with environment variables](#configuring-proxy-with-environment-variables)
+    - [Configuring Proxy with a TOML file](#configuring-proxy-with-a-toml-file)
+  - [Running Proxy locally](#running-proxy-locally)
+    - [Running Proxy locally as a process](#running-proxy-locally-as-a-process)
+    - [Running Proxy locally as a container](#running-proxy-locally-as-a-container)
+  - [Setting up the database schema](#setting-up-the-database-schema)
+    - [Creating columns with the right types](#creating-columns-with-the-right-types)
+- [Reference](#reference)
+  - [Proxy config options](#proxy-config-options)
+  - [Prometheus metrics](#prometheus-metrics)
+    - [Available metrics](#available-metrics)
+- [More info](#more-info)
+  - [Developing for Proxy](#developing-for-Proxy)
 
+## Getting started
 
-## Configuration
+### Prerequisites
+
+xxx
+
+## How-to
+
+### Installing Proxy
+
+xxx
+
+### Configuring Proxy
 
 To run, CipherStash Proxy needs to know:
 
@@ -19,13 +48,35 @@ To run, CipherStash Proxy needs to know:
 - How to connect to the target PostgreSQL database
 - Secrets to authenticate to CipherStash
 
-CipherStash Proxy can source configuration from a config file, and environment variables:
+There are two ways to configure Proxy:
 
-- If `cipherstash-proxy.toml` is present in the current working directory, Proxy will read its config from that file
-- If `cipherstash-proxy.toml` is not present, Proxy will look up environment variables to configure itself
-- If both `cipherstash-proxy.toml` and environment variables are present, Proxy will use `cipherstash-proxy.toml` as the base configuration, and override it with any environment variables that are set
+- [With environment variables that Proxy looks up on startup](#configuring-proxy-with-environment-variables)
+- [With a TOML file that Proxy reads on startup](#configuring-proxy-with-a-toml-file)
 
-Example configuration files are in [`cipherstash-proxy-example.toml`](./cipherstash-proxy-example.toml) and [`./packages/cipherstash-proxy/tests/config/`](./packages/cipherstash-proxy/tests/config/).
+If `cipherstash-proxy.toml` is present in the current working directory, Proxy will read its config from that file
+If `cipherstash-proxy.toml` is not present, Proxy will look up environment variables to configure itself
+If **both** `cipherstash-proxy.toml` and environment variables are present, Proxy will use `cipherstash-proxy.toml` as the base configuration, and override it with any environment variables that are set
+
+See [Proxy config options](#proxy-config-options) for all the available options.
+
+#### Configuring Proxy with environment variables
+
+If you are configuring Proxy with environment variables, these are the minimum environment variables required to run Proxy:
+
+```bash
+CS_DATABASE__NAME
+CS_DATABASE__USERNAME
+CS_DATABASE__PASSWORD
+CS_AUTH__WORKSPACE_ID
+CS_AUTH__CLIENT_ACCESS_KEY
+CS_ENCRYPT__DATASET_ID
+CS_ENCRYPT__CLIENT_ID
+CS_ENCRYPT__CLIENT_KEY
+```
+
+See [`./packages/cipherstash-proxy/tests/config/`](./packages/cipherstash-proxy/tests/config/) for example environment variables. 
+
+#### Configuring Proxy with a TOML file
 
 If you are configuring Proxy with a `cipherstash-proxy.toml` file, these are the minimum values required to run Proxy:
 
@@ -45,20 +96,31 @@ client_id = "cipherstash-client-id"
 client_key = "cipherstash-client-key"
 ```
 
-If you are configuring Proxy with environment variables, these are the minimum environment variables required to run Proxy:
+See [`cipherstash-proxy-example.toml`](./cipherstash-proxy-example.toml) for an example TOML configuration files. 
 
-```bash
-CS_DATABASE__NAME
-CS_DATABASE__USERNAME
-CS_DATABASE__PASSWORD
-CS_AUTH__WORKSPACE_ID
-CS_AUTH__CLIENT_ACCESS_KEY
-CS_ENCRYPT__DATASET_ID
-CS_ENCRYPT__CLIENT_ID
-CS_ENCRYPT__CLIENT_KEY
-```
+### Running Proxy locally
 
-### Configuration Options
+xxx
+
+#### Running Proxy locally as a process
+
+xxx
+
+#### Running Proxy locally as a container
+
+xxx
+
+### Setting up the database schema
+
+xxx
+
+#### Creating columns with the right types
+
+xxx
+
+## Reference
+
+### Proxy config options
 
 These are all the configuration options available for Proxy:
 
@@ -223,7 +285,7 @@ port = "9930"
 ```
 
 
-## Prometheus Metrics
+### Prometheus metrics
 
 To enable a Prometheus exporter on the default port (`9930`) use either:
 
@@ -240,7 +302,7 @@ When enabled, metrics can be accessed via `http://localhost:9930/metrics`.
 If the proxy is running on a host other than localhost, access on that host.
 
 
-### Available metrics
+#### Available metrics
 
 | Name                                                  | Target    | Description                                                                 |
 |-------------------------------------------------------|-----------|-----------------------------------------------------------------------------|
@@ -273,6 +335,8 @@ If the proxy is running on a host other than localhost, access on that host.
 | `cipherstash_proxy_statements_unmappable_total`       | Counter   | Total number of unmappable SQL statements processed by CipherStash Proxy    |
 
 
-## Developing
+## More info
 
-Check out the [development guide](./DEVELOPMENT.md).
+### Developing for Proxy
+
+Check out the [Proxy development guide](./DEVELOPMENT.md).
