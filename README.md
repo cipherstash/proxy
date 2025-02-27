@@ -77,15 +77,15 @@ services:
       - 6432:6432
       - 9930:9930
     environment:
-      # Hostname of the Postgres server connections will be proxied to
+      # Hostname of the Postgres database server connections will be proxied to
       - CS_DATABASE__HOST=${CS_DATABASE__HOST}
-      # Port of the Postgres server connections will be proxied to
+      # Port of the Postgres database server connections will be proxied to
       - CS_DATABASE__PORT=${CS_DATABASE__PORT}
-      # Username of the Postgres server connections will be proxied to
+      # Username of the Postgres database server connections will be proxied to
       - CS_DATABASE__USERNAME=${CS_DATABASE__USERNAME}
-      # Password of the Postgres server connections will be proxied to
+      # Password of the Postgres database server connections will be proxied to
       - CS_DATABASE__PASSWORD=${CS_DATABASE__PASSWORD}
-      # The database name on the Postgres server connections will be proxied to
+      # The database name on the Postgres database server connections will be proxied to
       - CS_DATABASE__NAME=${CS_DATABASE__NAME}
       # The CipherStash workspace ID for making requests for encryption keys
       - CS_AUTH__WORKSPACE_ID=${CS_AUTH__WORKSPACE_ID}
