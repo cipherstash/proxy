@@ -177,14 +177,6 @@ Read the full list of configuration options and what they do in the [reference d
 
 xxx
 
-#### Running Proxy locally as a process
-
-xxx
-
-#### Running Proxy locally as a container
-
-xxx
-
 ### Setting up the database schema
 
 xxx
