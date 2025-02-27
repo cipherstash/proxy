@@ -70,6 +70,25 @@ def test_encrypted_column_with_no_configuration():
                     assert(msg.find("Column 'encrypted_unconfigured' in table 'unconfigured' has no Encrypt configuration. For help visit https://github.com/cipherstash/proxy/docs/errors.md#encrypt-unknown-column") == 0)
 
 
+def test_mapper_unsupported_parameter_type():
+    with psycopg.connect(connection_str, autocommit=True) as conn:
 
+        with conn.cursor() as cursor:
 
+            with conn.transaction():
 
+                id = make_id()
+                val = 2025
+
+                sql = "INSERT INTO encrypted (id, encrypted_date) VALUES (%s, %s)"
+
+                try:
+                    cursor.execute(sql, [id, val])
+
+                    # Unreachable
+                    assert(false)
+
+                except psycopg.Error as err:
+                  msg = str(err)
+
+                  assert(msg.find("Invalid parameter for column 'encrypted_date' of type 'Date' in table 'encrypted' (OID 1082). For help visit https://github.com/cipherstash/proxy/docs/errors.md#mapping-invalid-parameter") == 0)

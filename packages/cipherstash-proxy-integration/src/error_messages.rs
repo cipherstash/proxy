@@ -71,4 +71,31 @@ mod tests {
             unreachable!();
         }
     }
+
+    /// The error here is in the Tokio/Postgres layer
+    /// The statement is valid and parses correctly, and the encrypted_date columns is Described as a date
+    /// An i32 cannot be converted to a date and tokio_postgres returns an error
+    /// See python tests for example with no client type checking
+    #[tokio::test]
+    async fn mapper_unsupported_parameter_type_with_date() {
+        trace();
+
+        let client = connect_with_tls(PROXY).await;
+
+        let id = id();
+        // let encrypted_date = NaiveDate::parse_from_str("2025-01-01", "%Y-%m-%d").unwrap();
+        let encrypted_date: i32 = 2025;
+
+        let sql = "INSERT INTO encrypted (id, encrypted_date) VALUES ($1, $2)";
+        let result = client.query(sql, &[&id, &encrypted_date]).await;
+
+        assert!(result.is_err());
+
+        if let Err(err) = result {
+            let msg = err.to_string();
+            assert_eq!(msg, "error serializing parameter 1: cannot convert between the Rust type `i32` and the Postgres type `date`");
+        } else {
+            unreachable!();
+        }
+    }
 }

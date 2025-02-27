@@ -151,8 +151,33 @@ where
                 }
             }
             Code::Bind => {
-                if let Some(b) = self.bind_handler(&bytes).await? {
-                    bytes = b
+                match self.bind_handler(&bytes).await {
+                    Ok(Some(mapped)) => bytes = mapped,
+                    // No mapping needed, don't change the bytes
+                    Ok(None) => (),
+                    Err(err) => match err {
+                        Error::Mapping(MappingError::InvalidParameter(ref column)) => {
+                            warn!(target: PROTOCOL,
+                                client_id = self.context.client_id,
+                                msg = "EncryptError::InvalidParameter",
+                            );
+
+                            let error_response = ErrorResponse::invalid_parameter(
+                                err.to_string(),
+                                &column.table_name(),
+                                &column.column_name(),
+                            );
+
+                            self.send_error_response(error_response)?;
+                        }
+                        _ => {
+                            warn!(target: PROTOCOL,
+                                client_id = self.context.client_id,
+                                msg = "Bind Error",
+                            );
+                            return Err(err);
+                        }
+                    },
                 }
             }
             Code::Sync => {
