@@ -8,11 +8,12 @@ use super::messages::FrontendCode as Code;
 use super::protocol::{self};
 use crate::encrypt::Encrypt;
 use crate::eql::Identifier;
-use crate::error::{EncryptError, Error, MappingError};
+use crate::error::{EncryptError, Error, ErrorCode, MappingError};
 use crate::log::{MAPPER, PROTOCOL};
 use crate::postgresql::context::column::Column;
 use crate::postgresql::context::Portal;
 use crate::postgresql::data::literal_from_sql;
+use crate::postgresql::messages::error_response::ErrorResponse;
 use crate::postgresql::messages::Name;
 use crate::prometheus::{
     CLIENTS_BYTES_RECEIVED_TOTAL, ENCRYPTED_VALUES_TOTAL, ENCRYPTION_DURATION_SECONDS,
@@ -121,9 +122,27 @@ where
                     Ok(Some(mapped)) => bytes = mapped,
                     // No mapping needed, don't change the bytes
                     Ok(None) => (),
-                    Err(err) => {
-                        bytes = self.build_frontend_exception(err)?;
-                    }
+                    Err(err) => match err {
+                        Error::Encrypt(EncryptError::UnknownColumn {
+                            ref table,
+                            ref column,
+                        }) => {
+                            // Send an ErrorResponse to the client immediately
+                            let message =
+                                ErrorResponse::unknown_column(err.to_string(), &table, &column);
+                            let message = BytesMut::try_from(message)?;
+                            self.client_sender.send(message).await?;
+
+                            // Send an Exception to the database
+                            // Ensures any transaction is rolled back
+                            // Filtered out on the return in the Backend
+                            // let error_code = encrypt_error;
+                            bytes = self.to_database_exception(err)?;
+                        }
+                        _ => {
+                            bytes = self.build_frontend_exception(err)?;
+                        }
+                    },
                 }
             }
             Code::Bind => {
@@ -700,11 +719,19 @@ where
                 );
                 Ok(Column::new(identifier, config))
             }
-            None => Err(EncryptError::UnknownColumn {
-                table: identifier.table.to_owned(),
-                column: identifier.column.to_owned(),
+            None => {
+                debug!(
+                    target: MAPPER,
+                    client_id = self.context.client_id,
+                    msg = "Configured column not found ",
+                    ?identifier,
+                );
+                Err(EncryptError::UnknownColumn {
+                    table: identifier.table.to_owned(),
+                    column: identifier.column.to_owned(),
+                }
+                .into())
             }
-            .into()),
         }
     }
 
@@ -723,6 +750,24 @@ where
             client_id = self.context.client_id,
             msg = "Frontend exception",
             error = err.to_string()
+        );
+
+        let query = Query::new(content);
+        let bytes = BytesMut::try_from(query)?;
+
+        Ok(bytes)
+    }
+
+    fn to_database_exception(&self, err: Error) -> Result<BytesMut, Error> {
+        let error_code = ErrorCode::from(err);
+        let quoted_error_code = quote_literal(error_code.to_string().as_str());
+        let content = format!("DO $$ BEGIN RAISE EXCEPTION {quoted_error_code}; END; $$;");
+
+        debug!(
+            target: MAPPER,
+            client_id = self.context.client_id,
+            msg = "Database exception",
+            ?error_code
         );
 
         let query = Query::new(content);
