@@ -2,11 +2,20 @@ use crate::{postgresql::Column, Identifier};
 use bytes::BytesMut;
 use cipherstash_client::encryption;
 use metrics_exporter_prometheus::BuildError;
-use std::io;
+use std::{
+    fmt::{self, Display, Formatter},
+    io,
+};
 use thiserror::Error;
 use tokio::time::error::Elapsed;
 
 const ERROR_DOC_BASE_URL: &str = "https://github.com/cipherstash/proxy/docs/errors.md";
+
+pub const ERROR_DOC_ENCRYPT_UNKNOWN_COLUMN_URL: &str =
+    "https://github.com/cipherstash/proxy/docs/errors.md#encrypt-unknown-column";
+
+pub const ERROR_DOC_ENCRYPT_INVALID_PARAMETER_URL: &str =
+    "https://github.com/cipherstash/proxy/docs/errors.md#encrypt-invalid-parameter";
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -153,8 +162,8 @@ pub enum EncryptError {
     PlaintextCouldNotBeDecoded(#[from] cipherstash_client::encryption::TypeParseError),
 
     #[error(
-        "Column '{column}' in table '{table}' has no Encrypt configuration. For help visit {}#encrypt-unknown-column",
-        ERROR_DOC_BASE_URL
+        "Column '{column}' in table '{table}' has no Encrypt configuration. For help visit {}",
+        ERROR_DOC_ENCRYPT_UNKNOWN_COLUMN_URL
     )]
     UnknownColumn { table: String, column: String },
 
@@ -208,6 +217,31 @@ pub enum ProtocolError {
 
     #[error("Unsupported authentication method {method_code}")]
     UnsupportedAuthentication { method_code: i32 },
+}
+
+#[derive(Debug)]
+pub enum ErrorCode {
+    EncryptUnknownColumn,
+    Error,
+}
+
+impl Display for ErrorCode {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        let s = match self {
+            ErrorCode::EncryptUnknownColumn => "encrypt-unknown-column",
+            ErrorCode::Error => "cipherstash-proxy-error",
+        };
+        write!(f, "{}", s)
+    }
+}
+
+impl From<Error> for ErrorCode {
+    fn from(err: Error) -> Self {
+        match err {
+            Error::Encrypt(EncryptError::UnknownColumn { .. }) => ErrorCode::EncryptUnknownColumn,
+            _ => ErrorCode::Error,
+        }
+    }
 }
 
 impl From<config::ConfigError> for Error {

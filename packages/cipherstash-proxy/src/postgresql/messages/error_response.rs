@@ -1,11 +1,20 @@
 use super::BackendCode;
-use crate::error::{Error, ProtocolError};
+use crate::error::{
+    Error, ErrorCode, ProtocolError, ERROR_DOC_ENCRYPT_INVALID_PARAMETER_URL,
+    ERROR_DOC_ENCRYPT_UNKNOWN_COLUMN_URL,
+};
 use crate::postgresql::protocol::BytesMutReadString;
 use crate::SIZE_I32;
 use bytes::{Buf, BufMut, BytesMut};
 use core::fmt;
 use std::io::Cursor;
 use std::{convert::TryFrom, ffi::CString};
+
+///
+/// Postgres Error Codes
+/// https://www.postgresql.org/docs/current/errcodes-appendix.html
+pub const CODE_UNDEFINED_COLUMN: &str = "42703";
+pub const CODE_RAISE_EXCEPTION: &str = "P0001";
 
 ///
 /// ErrorResponse (B)
@@ -24,7 +33,7 @@ pub struct Field {
 
 /// ErrorResponseCodes
 /// https://www.postgresql.org/docs/current/protocol-error-fields.html
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum ErrorResponseCode {
     Severity,
     SeverityLegacy,
@@ -48,6 +57,22 @@ pub enum ErrorResponseCode {
 }
 
 impl ErrorResponse {
+    pub fn is_proxy_error(&self) -> bool {
+        let error_code = ErrorCode::EncryptUnknownColumn.to_string();
+        let has_error_code = self
+            .fields
+            .iter()
+            .any(|f| f.code == ErrorResponseCode::Message && f.value.contains(&error_code));
+
+        self.is_raise_exception() && has_error_code
+    }
+
+    pub fn is_raise_exception(&self) -> bool {
+        self.fields
+            .iter()
+            .any(|f| f.code == ErrorResponseCode::Code && f.value == CODE_RAISE_EXCEPTION)
+    }
+
     pub fn invalid_password(username: &str) -> Self {
         Self {
             fields: vec![
@@ -66,6 +91,52 @@ impl ErrorResponse {
                 Field {
                     code: ErrorResponseCode::Message,
                     value: format!("password authentication failed for user \"{}\"", username),
+                },
+            ],
+        }
+    }
+
+    /// Code: 22023 invalid_parameter_value
+    /// eg 'smallint out of range'
+
+    ///
+    /// Unknown encrypted column as PostgreSQL error
+    /// Code: 42703 undefined_column
+    ///
+    pub fn unknown_column(message: String, table: &str, column: &str) -> Self {
+        Self {
+            fields: vec![
+                Field {
+                    code: ErrorResponseCode::Severity,
+                    value: "ERROR".to_string(),
+                },
+                Field {
+                    code: ErrorResponseCode::SeverityLegacy,
+                    value: "ERROR".to_string(),
+                },
+                Field {
+                    code: ErrorResponseCode::Code,
+                    value: CODE_UNDEFINED_COLUMN.to_string(),
+                },
+                Field {
+                    code: ErrorResponseCode::Message,
+                    value: message,
+                },
+                Field {
+                    code: ErrorResponseCode::Detail,
+                    value: ERROR_DOC_ENCRYPT_UNKNOWN_COLUMN_URL.to_string(),
+                },
+                Field {
+                    code: ErrorResponseCode::Table,
+                    value: table.to_string(),
+                },
+                Field {
+                    code: ErrorResponseCode::Column,
+                    value: column.to_string(),
+                },
+                Field {
+                    code: ErrorResponseCode::Routine,
+                    value: "cipherstash-proxy".to_string(),
                 },
             ],
         }
@@ -273,7 +344,9 @@ impl From<u8> for ErrorResponseCode {
 
 #[cfg(test)]
 mod tests {
-    use crate::postgresql::messages::error_response::ErrorResponse;
+    use crate::postgresql::messages::error_response::{
+        ErrorResponse, ErrorResponseCode, Field, CODE_RAISE_EXCEPTION,
+    };
 
     use bytes::BytesMut;
 
@@ -294,5 +367,33 @@ mod tests {
         let bytes = BytesMut::try_from(error_response).unwrap();
         let message = to_message(b"E\0\0\0kSERROR\0VERROR\0C26000\0Mprepared statement \"a37\" does not exist\0Fprepare.c\0L454\0RFetchPreparedStatement\0\0");
         assert_eq!(bytes, message);
+    }
+
+    #[test]
+    pub fn is_proxy_error() {
+        let message = "encrypt-unknown-column".to_string();
+
+        let fields = vec![
+            Field {
+                code: ErrorResponseCode::Severity,
+                value: "ERROR".to_string(),
+            },
+            Field {
+                code: ErrorResponseCode::SeverityLegacy,
+                value: "ERROR".to_string(),
+            },
+            Field {
+                code: ErrorResponseCode::Code,
+                value: CODE_RAISE_EXCEPTION.to_string(),
+            },
+            Field {
+                code: ErrorResponseCode::Message,
+                value: message,
+            },
+        ];
+
+        let error_response = ErrorResponse { fields };
+
+        assert!(error_response.is_proxy_error());
     }
 }
