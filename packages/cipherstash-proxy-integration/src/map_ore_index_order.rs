@@ -242,6 +242,94 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn can_order_by_plaintext_column() {
+        trace();
+
+        clear().await;
+
+        let client = connect_with_tls(PROXY).await;
+
+        let s_one = "a";
+        let s_two = "b";
+        let s_three = "c";
+
+        let sql = "
+            INSERT INTO encrypted (id, plaintext)
+            VALUES ($1, $2), ($3, $4), ($5, $6)
+        ";
+
+        client
+            .query(sql, &[&id(), &s_two, &id(), &s_one, &id(), &s_three])
+            .await
+            .unwrap();
+
+        let sql = "SELECT plaintext FROM encrypted ORDER BY plaintext";
+        let rows = client.query(sql, &[]).await.unwrap();
+
+        let actual = rows.iter().map(|row| row.get(0)).collect::<Vec<String>>();
+        let expected = vec![s_one, s_two, s_three];
+
+        assert_eq!(actual, expected);
+    }
+
+    #[tokio::test]
+    async fn can_order_by_plaintext_and_eql_columns() {
+        trace();
+
+        clear().await;
+
+        let client = connect_with_tls(PROXY).await;
+
+        let s_plaintext_one = "a";
+        let s_plaintext_two = "a";
+        let s_plaintext_three = "b";
+
+        let s_enctrypted_one = "a";
+        let s_encrypted_two = "b";
+        let s_encrypted_three = "c";
+
+        let sql = "
+            INSERT INTO encrypted (id, plaintext, encrypted_text)
+            VALUES ($1, $2, $3), ($4, $5, $6), ($7, $8, $9)
+        ";
+
+        client
+            .query(
+                sql,
+                &[
+                    &id(),
+                    &s_plaintext_two,
+                    &s_encrypted_two,
+                    &id(),
+                    &s_plaintext_one,
+                    &s_enctrypted_one,
+                    &id(),
+                    &s_plaintext_three,
+                    &s_encrypted_three,
+                ],
+            )
+            .await
+            .unwrap();
+
+        let sql =
+            "SELECT plaintext, encrypted_text FROM encrypted ORDER BY plaintext, encrypted_text";
+        let rows = client.query(sql, &[]).await.unwrap();
+
+        let actual = rows
+            .iter()
+            .map(|row| (row.get(0), row.get(1)))
+            .collect::<Vec<(&str, &str)>>();
+
+        let expected = vec![
+            (s_plaintext_one, s_enctrypted_one),
+            (s_plaintext_two, s_encrypted_two),
+            (s_plaintext_three, s_encrypted_three),
+        ];
+
+        assert_eq!(actual, expected);
+    }
+
+    #[tokio::test]
     async fn map_ore_order_simple_protocol() {
         trace();
 
