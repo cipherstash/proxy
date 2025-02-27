@@ -29,7 +29,7 @@ use sqltk::{into_control_flow, Break, Semantic, Visitable, Visitor};
 
 use crate::{ScopeTracker, TableResolver};
 
-pub(crate) use node_key::*;
+pub use node_key::*;
 pub(crate) use registry::*;
 pub(crate) use type_error::*;
 pub(crate) use type_variables::*;

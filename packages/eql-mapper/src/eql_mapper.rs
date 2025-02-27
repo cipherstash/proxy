@@ -321,10 +321,10 @@ impl<'ast> TypedStatement<'ast> {
     /// Transforms the SQL statement by replacing all plaintext literals with EQL equivalents.
     pub fn transform(
         &self,
-        encrypted_literals: HashMap<&'ast ast::Expr, ast::Expr>,
+        encrypted_literals: HashMap<NodeKey<'ast>, ast::Expr>,
     ) -> Result<Statement, EqlMapperError> {
         for (_, target) in self.literals.iter() {
-            if !encrypted_literals.contains_key(target) {
+            if !encrypted_literals.contains_key(&NodeKey::new(*target)) {
                 return Err(EqlMapperError::Transform(String::from("encrypted literals refers to a literal node which is not present in the SQL statement")));
             }
         }
@@ -360,13 +360,13 @@ impl<'ast> TypedStatement<'ast> {
 
 #[derive(Debug)]
 struct EncryptedStatement<'ast> {
-    encrypted_literals: HashMap<&'ast ast::Expr, ast::Expr>,
+    encrypted_literals: HashMap<NodeKey<'ast>, ast::Expr>,
     nodes_to_wrap: &'ast HashSet<NodeKey<'ast>>,
 }
 
 impl<'ast> EncryptedStatement<'ast> {
     fn new(
-        encrypted_literals: HashMap<&'ast ast::Expr, ast::Expr>,
+        encrypted_literals: HashMap<NodeKey<'ast>, ast::Expr>,
         nodes_to_wrap: &'ast HashSet<NodeKey<'ast>>,
     ) -> Self {
         Self {
@@ -399,6 +399,15 @@ impl<'ast> Transform<'ast> for EncryptedStatement<'ast> {
                         ));
                     }
 
+                    ast::Expr::Value(_) => {
+                        if let Some(replacement) = self
+                            .encrypted_literals
+                            .remove(&NodeKey::new(original_value))
+                        {
+                            *target_value = replacement;
+                        }
+                    }
+
                     // Wrap identifiers (e.g. `encrypted_col`) and compound identifiers (e.g. `some_tbl.encrypted_col`)
                     // in an EQL function if the type checker has marked them as nodes that need to be
                     // wrapped.
@@ -414,11 +423,7 @@ impl<'ast> Transform<'ast> for EncryptedStatement<'ast> {
                         }
                     }
 
-                    _ => {
-                        if let Some(replacement) = self.encrypted_literals.remove(original_value) {
-                            *target_value = replacement;
-                        }
-                    }
+                    _ => { /* other variants are a no-op and don't require transformation */ }
                 },
                 None => {
                     return Err(EqlMapperError::Transform(String::from(

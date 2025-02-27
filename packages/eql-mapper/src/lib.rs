@@ -26,6 +26,7 @@ mod test {
     use super::type_check;
     use crate::col;
     use crate::projection;
+    use crate::NodeKey;
     use crate::Schema;
     use crate::TableResolver;
     use crate::{schema, EqlValue, NativeValue, Projection, ProjectionColumn, TableColumn, Value};
@@ -1010,16 +1011,19 @@ mod test {
             Err(err) => panic!("type check failed: {:#?}", err),
         };
 
-        assert!(typed.literals.contains(&(
-            EqlValue(TableColumn {
-                table: id("employees"),
-                column: id("salary")
-            }),
-            &ast::Expr::Value(ast::Value::Number(200000.into(), false))
-        )));
+        assert_eq!(
+            typed.literals,
+            vec![(
+                EqlValue(TableColumn {
+                    table: id("employees"),
+                    column: id("salary")
+                }),
+                &ast::Expr::Value(ast::Value::Number(200000.into(), false))
+            )]
+        );
 
         let transformed_statement = match typed.transform(HashMap::from_iter([(
-            &ast::Expr::Value(ast::Value::Number(200000.into(), false)),
+            NodeKey::new(typed.literals[0].1),
             ast::Expr::Value(ast::Value::SingleQuotedString("ENCRYPTED".into())),
         )])) {
             Ok(transformed_statement) => transformed_statement,

@@ -22,7 +22,7 @@ use crate::prometheus::{
 };
 use bytes::BytesMut;
 use cipherstash_client::encryption::Plaintext;
-use eql_mapper::{self, EqlValue, TableColumn, TypedStatement};
+use eql_mapper::{self, EqlValue, NodeKey, TableColumn, TypedStatement};
 use metrics::{counter, histogram};
 use pg_escape::quote_literal;
 use serde::Serialize;
@@ -277,7 +277,7 @@ where
         let original_values_and_replacements = typed_statement
             .literals
             .iter()
-            .map(|(_, original_node)| *original_node)
+            .map(|(_, original_node)| NodeKey::new(*original_node))
             .zip(encrypted_values.into_iter())
             .collect::<HashMap<_, _>>();
 
