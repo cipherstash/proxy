@@ -59,7 +59,59 @@ psql postgres://${CS_DATABASE__USERNAME}:${CS_DATABASE__PASSWORD}@postgres:5432/
 
 ### Installing Proxy
 
-xxx
+CipherStash Proxy is available as a [container image](https://hub.docker.com/r/cipherstash/proxy) on Docker Hub that can be deployed locally, in CI/CD, through to production.
+
+The easiest way to start using CipherStash Proxy with your application is by adding a container to your application's `docker-compose.yml`.
+This is an example of what adding CipherStash Proxy to your app's `docker-compose.yml` might look like:
+
+```yaml
+services:
+  app:
+    # Your Postgres container config
+  db:
+    # Your Postgres container config
+  proxy:
+    image: cipherstash/proxy:latest
+    container_name: proxy
+    ports:
+      - 6432:6432
+      - 9930:9930
+    environment:
+      # Hostname of the Postgres server connections will be proxied to
+      - CS_DATABASE__HOST=${CS_DATABASE__HOST}
+      # Port of the Postgres server connections will be proxied to
+      - CS_DATABASE__PORT=${CS_DATABASE__PORT}
+      # Username of the Postgres server connections will be proxied to
+      - CS_DATABASE__USERNAME=${CS_DATABASE__USERNAME}
+      # Password of the Postgres server connections will be proxied to
+      - CS_DATABASE__PASSWORD=${CS_DATABASE__PASSWORD}
+      # The database name on the Postgres server connections will be proxied to
+      - CS_DATABASE__NAME=${CS_DATABASE__NAME}
+      # The CipherStash workspace ID for making requests for encryption keys
+      - CS_AUTH__WORKSPACE_ID=${CS_AUTH__WORKSPACE_ID}
+      # The CipherStash client access key for making requests for encryption keys
+      - CS_AUTH__CLIENT_ACCESS_KEY=${CS_AUTH__CLIENT_ACCESS_KEY}
+      # The CipherStash dataset ID for generating and retrieving encryption keys
+      - CS_ENCRYPT__DATASET_ID=${CS_ENCRYPT__DATASET_ID}
+      # The CipherStash client ID used to programmatically access a dataset
+      - CS_ENCRYPT__CLIENT_ID=${CS_ENCRYPT__CLIENT_ID}
+      # The CipherStash client key used to programmatically access a dataset
+      - CS_ENCRYPT__CLIENT_KEY=${CS_ENCRYPT__CLIENT_KEY}
+      # Toggle Prometheus exporter for CipherStash Proxy operations
+      - CS_PROMETHEUS__ENABLED=${CS_PROMETHEUS__ENABLED:-true}
+```
+
+You can find a fully working example at [`docker-compose.yml`](./docker-compose.yml), and follow the [getting started guide](#getting-started) to see it in action.
+
+Once you have set up a `docker-compose.yml`, start the container:
+
+```bash
+docker compose up
+```
+
+This will start the Proxy container.
+You can connect your PostgreSQL client to Proxy on TCP 6432.
+You can point [Prometheus to scrape metrics](#prometheus-metrics) on TCP 9930.
 
 ### Configuring Proxy
 
