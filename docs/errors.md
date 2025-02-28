@@ -70,7 +70,7 @@ The SQL statement could not be parsed.
 
 ### Error message
 
-Error messages will vary depending on the specifics syntax error in the sql statement provided.
+Error messages will vary depending on the specific syntax error in the sql statement provided.
 
 ```
    sql parser error: Expected: SELECT, VALUES, or a subquery in the query body
