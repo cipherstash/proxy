@@ -4,3 +4,4 @@
 mise.local.toml
 tests/pg/data**
 tests/sql/cipherstash-encrypt.sql
+.vscode

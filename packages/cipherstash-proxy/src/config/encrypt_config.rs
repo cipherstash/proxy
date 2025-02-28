@@ -12,30 +12,26 @@ use crate::{
 };
 
 #[derive(Debug, Deserialize, Serialize, Clone, Default)]
-pub struct Tables {
-    tables: HashMap<Ident, Table>
-}
+pub struct Tables(HashMap<String, Table>);
 
 impl IntoIterator for Tables {
-    type Item = (Ident, Table);
-    type IntoIter = std::collections::hash_map::IntoIter<Ident, Table>;
+    type Item = (String, Table);
+    type IntoIter = std::collections::hash_map::IntoIter<String, Table>;
 
     fn into_iter(self) -> Self::IntoIter {
-        self.tables.into_iter()
+        self.0.into_iter()
     }
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, Default)]
-pub struct Table {
-    columns: HashMap<Ident, Column>
-}
+pub struct Table(HashMap<String, Column>);
 
 impl IntoIterator for Table {
-    type Item = (Ident, Column);
-    type IntoIter = std::collections::hash_map::IntoIter<Ident, Column>;
+    type Item = (String, Column);
+    type IntoIter = std::collections::hash_map::IntoIter<String, Column>;
 
     fn into_iter(self) -> Self::IntoIter {
-        self.columns.into_iter()
+        self.0.into_iter()
     }
 }
 
@@ -148,11 +144,10 @@ impl EncryptConfig {
         let mut map = HashMap::new();
         for (table_name, columns) in self.tables.into_iter() {
             for (name, column) in columns.into_iter() {
-                let column_config = column.to_column_config(&name);
-                // let key = format!("{}.{}", table_name, name);
+                let column_config = column.to_column_config(&Ident::with_quote('"', &name));
                 let key = eql::Identifier {
-                    table: table_name.to_owned(),
-                    column: name.to_owned(),
+                    table: Ident::with_quote('"', &table_name),
+                    column: Ident::with_quote('"', &name),
                 };
                 map.insert(key, column_config);
             }
@@ -218,8 +213,8 @@ mod tests {
 
         let encrypt_config = parse(json);
         let ident = &eql::Identifier {
-            table: "users".into(),
-            column: "email".into(),
+            table: Ident::with_quote('"', "users"),
+            column: Ident::with_quote('"', "email"),
         };
         let column = encrypt_config.get(ident).expect("column exists");
 
@@ -242,13 +237,13 @@ mod tests {
 
         let encrypt_config = parse(json);
         let ident = &eql::Identifier {
-            table: "users".into(),
-            column: "favourite_int".into(),
+            table: Ident::with_quote('"', "users"),
+            column: Ident::with_quote('"', "favourite_int"),
         };
         let column = encrypt_config.get(ident).expect("column exists");
 
         assert_eq!(column.cast_type, ColumnType::Int);
-        assert_eq!(column.name, "favourite_int");
+        assert_eq!(column.name, "\"favourite_int\"");
         assert!(column.indexes.is_empty());
     }
 
@@ -267,8 +262,8 @@ mod tests {
 
         let encrypt_config = parse(json);
         let ident = &eql::Identifier {
-            table: "users".into(),
-            column: "email".into(),
+            table: Ident::with_quote('"', "users"),
+            column: Ident::with_quote('"', "email"),
         };
         let column = encrypt_config.get(ident).expect("column exists");
 
@@ -292,8 +287,8 @@ mod tests {
 
         let encrypt_config = parse(json);
         let ident = &eql::Identifier {
-            table: "users".into(),
-            column: "email".into(),
+            table: Ident::with_quote('"', "users"),
+            column: Ident::with_quote('"', "email"),
         };
         let column = encrypt_config.get(ident).expect("column exists");
 
@@ -317,8 +312,8 @@ mod tests {
 
         let encrypt_config = parse(json);
         let ident = &eql::Identifier {
-            table: "users".into(),
-            column: "email".into(),
+            table: Ident::with_quote('"', "users"),
+            column: Ident::with_quote('"', "email"),
         };
         let column = encrypt_config.get(ident).expect("column exists");
 
@@ -353,8 +348,8 @@ mod tests {
 
         let encrypt_config = parse(json);
         let ident = &eql::Identifier {
-            table: "users".into(),
-            column: "email".into(),
+            table: Ident::with_quote('"', "users"),
+            column: Ident::with_quote('"', "email"),
         };
         let column = encrypt_config.get(ident).expect("column exists");
 
@@ -383,8 +378,8 @@ mod tests {
 
         let encrypt_config = parse(json);
         let ident = &eql::Identifier {
-            table: "users".into(),
-            column: "email".into(),
+            table: Ident::with_quote('"', "users"),
+            column: Ident::with_quote('"', "email"),
         };
         let column = encrypt_config.get(ident).expect("column exists");
 
@@ -430,8 +425,8 @@ mod tests {
 
         let encrypt_config = parse(json);
         let ident = &eql::Identifier {
-            table: "users".into(),
-            column: "email".into(),
+            table: Ident::with_quote('"', "users"),
+            column: Ident::with_quote('"', "email"),
         };
         let column = encrypt_config.get(ident).expect("column exists");
 
@@ -466,8 +461,8 @@ mod tests {
 
         let encrypt_config = parse(json);
         let ident = &eql::Identifier {
-            table: "users".into(),
-            column: "event_data".into(),
+            table: Ident::with_quote('"', "users"),
+            column: Ident::with_quote('"', "event_data"),
         };
         let column = encrypt_config.get(ident).expect("column exists");
 
