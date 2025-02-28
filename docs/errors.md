@@ -72,6 +72,7 @@ The SQL statement could not be parsed.
 
 Error messages will vary depending on the specific syntax error in the sql statement provided.
 
+
 ```
    sql parser error: Expected: SELECT, VALUES, or a subquery in the query body
 ```
@@ -83,13 +84,9 @@ As SQL is a vast, sprawling language, the proxy may fail to parse some valid SQL
 Please contact CipherStash if you think your SQL is correct and the parser is wrong.
 
 
-
 ### How to Fix
 
 Check the sql is a valid PostgreSQL SQL statement.
-
-
-<!-- TODO: Link to encrypted types -->
 
 
 <!-- ---------------------------------------------------------------------------------------------------- -->

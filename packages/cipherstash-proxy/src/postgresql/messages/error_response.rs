@@ -83,7 +83,7 @@ impl ErrorResponse {
 
     ///
     /// SQL Parse error as PostgreSQL error
-    /// Code: 22P02 invalid_text_representation
+    /// Code: 22P02 syntax_errpr
     ///
     /// As EncryptError is an enum, this can be passed a different error variation.
     ///
@@ -128,7 +128,7 @@ impl ErrorResponse {
 
     ///
     /// Invalid parameter as PostgreSQL error
-    /// Code: 22P02 invalid_text_representation
+    /// Code: 42601 invalid_text_representation
     ///
     /// As EncryptError is an enum, this can be passed a different error variation.
     ///
