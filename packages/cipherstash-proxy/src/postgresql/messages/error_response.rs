@@ -6,8 +6,8 @@ use bytes::{Buf, BufMut, BytesMut};
 use core::fmt;
 use regex::Regex;
 use std::io::Cursor;
+use std::sync::LazyLock;
 use std::{convert::TryFrom, ffi::CString};
-
 ///
 /// Postgres Error Codes
 /// https://www.postgresql.org/docs/current/errcodes-appendix.html
@@ -242,9 +242,8 @@ impl ErrorResponse {
 /// Extracts line (if present) from a SQL Parser error message
 ///
 fn extract_line_from_parse_error(error_message: &str) -> Option<usize> {
-    let line_rx = Regex::new(r"\s*Line:\s*(\d+)").unwrap();
-    line_rx
-        .captures(error_message)
+    static RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\s*Line:\s*(\d+)").unwrap());
+    RE.captures(error_message)
         .and_then(|c| c.get(1)?.as_str().parse::<usize>().ok())
 }
 
@@ -253,9 +252,9 @@ fn extract_line_from_parse_error(error_message: &str) -> Option<usize> {
 /// Column in the error message is the "text" column, not a reference to a database column
 ///
 fn extract_position_from_parse_error(error_message: &str) -> Option<usize> {
-    let column_rx = Regex::new(r"\s*Column:\s*(\d+)").unwrap();
-    column_rx
-        .captures(error_message)
+    static RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\s*Column:\s*(\d+)").unwrap());
+
+    RE.captures(error_message)
         .and_then(|c| c.get(1)?.as_str().parse::<usize>().ok())
 }
 
