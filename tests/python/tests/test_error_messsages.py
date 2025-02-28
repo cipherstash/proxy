@@ -72,3 +72,19 @@ def test_mapper_unsupported_parameter_type():
 
                 with pytest.raises(psycopg.Error, match='#mapping-invalid-parameter'):
                     cursor.execute(sql, [id, val])
+
+
+def test_invalid_sql_statement():
+    with psycopg.connect(connection_str, autocommit=True) as conn:
+
+        with conn.cursor() as cursor:
+
+            with conn.transaction():
+
+                id = make_id()
+                val = 2025
+
+                sql = "INSERT INTO encrypted id, encrypted_date VALUES (%s, %s)"
+
+                with pytest.raises(psycopg.Error, match='#mapping-invalid-sql-statement'):
+                    cursor.execute(sql, [id, val])

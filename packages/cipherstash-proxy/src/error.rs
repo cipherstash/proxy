@@ -71,8 +71,12 @@ pub enum MappingError {
     _0.column_name(), _0.cast_type(), _0.table_name(), _0.oid(), ERROR_DOC_BASE_URL)]
     InvalidParameter(Column),
 
-    #[error(transparent)]
-    SqlParse(#[from] sqlparser::parser::ParserError),
+    #[error(
+        "{}. For help visit {}#mapping-invalid-sql-statement",
+        _0,
+        ERROR_DOC_BASE_URL
+    )]
+    InvalidSqlStatement(String),
 
     #[error("Encryption of PostgreSQL {name} (OID {oid}) types is not currently supported. For help visit {}#mapping-unsupported-parameter-type", ERROR_DOC_BASE_URL)]
     UnsupportedParameterType { name: String, oid: u32 },
@@ -257,7 +261,7 @@ impl From<serde_json::Error> for Error {
 
 impl From<sqlparser::parser::ParserError> for Error {
     fn from(e: sqlparser::parser::ParserError) -> Self {
-        Error::Mapping(e.into())
+        Error::Mapping(MappingError::InvalidSqlStatement(e.to_string()))
     }
 }
 

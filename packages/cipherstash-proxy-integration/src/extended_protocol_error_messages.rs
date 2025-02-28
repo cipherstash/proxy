@@ -1,6 +1,6 @@
 #[cfg(test)]
 mod tests {
-    use tracing::debug;
+    use tracing::{debug, info};
 
     use crate::common::{clear, connect_with_tls, id, reset_schema, trace, PROXY};
 
@@ -94,6 +94,35 @@ mod tests {
         if let Err(err) = result {
             let msg = err.to_string();
             assert_eq!(msg, "error serializing parameter 1: cannot convert between the Rust type `i32` and the Postgres type `date`");
+        } else {
+            unreachable!();
+        }
+    }
+
+    #[tokio::test]
+    async fn invalid_sql_statement() {
+        trace();
+
+        reset_schema().await;
+
+        let client = connect_with_tls(PROXY).await;
+
+        let _reset = Reset;
+
+        // Create a record
+        // If select returns no results, no configuration is required
+        let id = id();
+        let encrypted_text = "hello@cipherstash.com";
+
+        let sql = "INSERT INTO encrypted id, encrypted_text VALUES ($1, $2)";
+        let result = client.query(sql, &[&id, &encrypted_text]).await;
+
+        assert!(result.is_err());
+
+        if let Err(err) = result {
+            let msg = err.to_string();
+            info!("{}", msg);
+            assert_eq!(msg, "db error: ERROR: sql parser error: Expected: SELECT, VALUES, or a subquery in the query body, found: id at Line: 1, Column: 23. For help visit https://github.com/cipherstash/proxy/docs/errors.md#mapping-invalid-sql-statement");
         } else {
             unreachable!();
         }

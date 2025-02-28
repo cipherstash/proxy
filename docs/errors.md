@@ -6,7 +6,9 @@
 
 - Mapping Errors:
   - [Invalid parameter](#mapping-invalid-parameter)
+  - [Invalid SQL statement](#mapping-invalid-sql-statement)
   - [Unsupported parameter type](#mapping-unsupported-parameter-type)
+
 - Encrypt Errors:
   - [Column could not be encrypted](#encrypt-column-could-not-be-encrypted)
   - [Plaintext could not be encoded](#encrypt-plaintext-could-not-be-encoded)
@@ -55,6 +57,36 @@ For example PostgreSQL `INT2`, `INT4` and `INT8` will all be converted into encr
 ### How to Fix
 
 Check the parameter or literal is of the appropriate type for the configured encrypted column.
+
+
+<!-- TODO: Link to encrypted types -->
+
+
+<!-- ---------------------------------------------------------------------------------------------------- -->
+
+## Invalid SQL Statement <a id='mapping-invalid-sql-statement'></a>
+
+The SQL statement could not be parsed.
+
+### Error message
+
+Error messages will vary depending on the specifics syntax error in the sql statement provided.
+
+```
+   sql parser error: Expected: SELECT, VALUES, or a subquery in the query body
+```
+
+
+### Notes
+
+As SQL is a vast, sprawling language, the proxy may fail to parse some valid SQL statements.
+Please contact CipherStash if you think your SQL is correct and the parser is wrong.
+
+
+
+### How to Fix
+
+Check the sql is a valid PostgreSQL SQL statement.
 
 
 <!-- TODO: Link to encrypted types -->

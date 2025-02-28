@@ -4,6 +4,7 @@ use crate::postgresql::protocol::BytesMutReadString;
 use crate::SIZE_I32;
 use bytes::{Buf, BufMut, BytesMut};
 use core::fmt;
+use regex::Regex;
 use std::io::Cursor;
 use std::{convert::TryFrom, ffi::CString};
 
@@ -11,7 +12,10 @@ use std::{convert::TryFrom, ffi::CString};
 /// Postgres Error Codes
 /// https://www.postgresql.org/docs/current/errcodes-appendix.html
 pub const CODE_UNDEFINED_COLUMN: &str = "42703";
+pub const CODE_INVALID_PASSWORD: &str = "28P01";
 pub const CODE_RAISE_EXCEPTION: &str = "P0001";
+pub const CODE_SYNTAX_ERROR: &str = "42601";
+pub const CODE_INVALID_TEXT_REPRESENTATION: &str = "22P02";
 
 ///
 /// ErrorResponse (B)
@@ -30,7 +34,7 @@ pub struct Field {
 
 /// ErrorResponseCodes
 /// https://www.postgresql.org/docs/current/protocol-error-fields.html
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum ErrorResponseCode {
     Severity,
     SeverityLegacy,
@@ -67,7 +71,7 @@ impl ErrorResponse {
                 },
                 Field {
                     code: ErrorResponseCode::Code,
-                    value: "28P01".to_string(),
+                    value: CODE_INVALID_PASSWORD.to_string(),
                 },
                 Field {
                     code: ErrorResponseCode::Message,
@@ -75,6 +79,51 @@ impl ErrorResponse {
                 },
             ],
         }
+    }
+
+    ///
+    /// SQL Parse error as PostgreSQL error
+    /// Code: 22P02 invalid_text_representation
+    ///
+    /// As EncryptError is an enum, this can be passed a different error variation.
+    ///
+    pub fn invalid_sql_statement(message: String) -> Self {
+        let line = extract_line_from_parse_error(&message);
+        let position: Option<usize> = extract_position_from_parse_error(&message);
+
+        let mut fields = vec![
+            Field {
+                code: ErrorResponseCode::Severity,
+                value: "ERROR".to_string(),
+            },
+            Field {
+                code: ErrorResponseCode::SeverityLegacy,
+                value: "ERROR".to_string(),
+            },
+            Field {
+                code: ErrorResponseCode::Code,
+                value: CODE_SYNTAX_ERROR.to_string(),
+            },
+            Field {
+                code: ErrorResponseCode::Message,
+                value: message,
+            },
+        ];
+
+        if let Some(line) = line {
+            fields.push(Field {
+                code: ErrorResponseCode::Line,
+                value: line.to_string(),
+            });
+        }
+        if let Some(position) = position {
+            fields.push(Field {
+                code: ErrorResponseCode::Position,
+                value: position.to_string(),
+            });
+        }
+
+        Self { fields }
     }
 
     ///
@@ -96,7 +145,7 @@ impl ErrorResponse {
                 },
                 Field {
                     code: ErrorResponseCode::Code,
-                    value: "22P02".to_string(),
+                    value: CODE_INVALID_TEXT_REPRESENTATION.to_string(),
                 },
                 Field {
                     code: ErrorResponseCode::Message,
@@ -115,10 +164,6 @@ impl ErrorResponse {
                 Field {
                     code: ErrorResponseCode::Column,
                     value: column.to_string(),
-                },
-                Field {
-                    code: ErrorResponseCode::Routine,
-                    value: "cipherstash-proxy".to_string(),
                 },
             ],
         }
@@ -191,6 +236,27 @@ impl ErrorResponse {
             ],
         }
     }
+}
+
+///
+/// Extracts line (if present) from a SQL Parser error message
+///
+fn extract_line_from_parse_error(error_message: &str) -> Option<usize> {
+    let line_rx = Regex::new(r"\s*Line:\s*(\d+)").unwrap();
+    line_rx
+        .captures(error_message)
+        .and_then(|c| c.get(1)?.as_str().parse::<usize>().ok())
+}
+
+///
+/// Extracts position (if present) from a SQL Parser error message
+/// Column in the error message is the "text" column, not a reference to a database column
+///
+fn extract_position_from_parse_error(error_message: &str) -> Option<usize> {
+    let column_rx = Regex::new(r"\s*Column:\s*(\d+)").unwrap();
+    column_rx
+        .captures(error_message)
+        .and_then(|c| c.get(1)?.as_str().parse::<usize>().ok())
 }
 
 impl TryFrom<&BytesMut> for ErrorResponse {
@@ -371,8 +437,8 @@ impl From<u8> for ErrorResponseCode {
 
 #[cfg(test)]
 mod tests {
+    use super::ErrorResponseCode;
     use crate::postgresql::messages::error_response::ErrorResponse;
-
     use bytes::BytesMut;
 
     fn to_message(s: &[u8]) -> BytesMut {
@@ -392,5 +458,47 @@ mod tests {
         let bytes = BytesMut::try_from(error_response).unwrap();
         let message = to_message(b"E\0\0\0kSERROR\0VERROR\0C26000\0Mprepared statement \"a37\" does not exist\0Fprepare.c\0L454\0RFetchPreparedStatement\0\0");
         assert_eq!(bytes, message);
+    }
+
+    #[test]
+    pub fn sql_parse_error_response() {
+        let response = ErrorResponse::invalid_sql_statement(
+            "sql syntax error in blah vtha Line: 1, Column: 2".to_string(),
+        );
+
+        let line = response
+            .fields
+            .iter()
+            .find(|f| f.code == ErrorResponseCode::Line)
+            .unwrap();
+
+        assert_eq!(line.value, "1".to_string());
+
+        let position = response
+            .fields
+            .iter()
+            .find(|f| f.code == ErrorResponseCode::Position)
+            .unwrap();
+
+        assert_eq!(position.value, "2".to_string());
+
+        let response = ErrorResponse::invalid_sql_statement(
+            "sql syntax error in blah vtha Column: 2".to_string(),
+        );
+
+        let line = response
+            .fields
+            .iter()
+            .find(|f| f.code == ErrorResponseCode::Line);
+
+        assert!(line.is_none());
+
+        let position = response
+            .fields
+            .iter()
+            .find(|f| f.code == ErrorResponseCode::Position)
+            .unwrap();
+
+        assert_eq!(position.value, "2".to_string());
     }
 }

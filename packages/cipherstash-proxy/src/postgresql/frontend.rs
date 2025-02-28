@@ -128,6 +128,18 @@ where
                     // No mapping needed, don't change the bytes
                     Ok(None) => (),
                     Err(err) => match err {
+                        Error::Mapping(MappingError::InvalidSqlStatement(_)) => {
+                            warn!(target: PROTOCOL,
+                                client_id = self.context.client_id,
+                                msg = "MappingError::SqlParse",
+                                error = ?err,
+                            );
+
+                            let error_response =
+                                ErrorResponse::invalid_sql_statement(err.to_string());
+
+                            self.send_error_response(error_response)?;
+                        }
                         Error::Encrypt(EncryptError::UnknownColumn {
                             ref table,
                             ref column,
