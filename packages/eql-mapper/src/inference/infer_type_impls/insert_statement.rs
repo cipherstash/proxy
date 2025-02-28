@@ -3,10 +3,8 @@ use std::{cell::RefCell, rc::Rc};
 use sqlparser::ast::{Ident, Insert};
 
 use crate::{
-    inference::type_error::TypeError,
-    inference::InferType,
-    inference::{Constructor, Def, Status, Type},
-    TypeInferencer,
+    inference::{type_error::TypeError, Constructor, Def, InferType, Status, Type},
+    ColumnKind, Scalar, TypeInferencer,
 };
 
 impl<'ast> InferType<'ast, Insert> for TypeInferencer<'ast> {
@@ -36,9 +34,20 @@ impl<'ast> InferType<'ast, Insert> for TypeInferencer<'ast> {
                 &table_columns
                     .into_iter()
                     .map(|tc| {
+                        let scalar_ty = if tc.column.kind == ColumnKind::Native {
+                            Scalar::Native {
+                                table: tc.table.name.clone(),
+                                column: tc.column.name.clone(),
+                            }
+                        } else {
+                            Scalar::Encrypted {
+                                table: tc.table.name.clone(),
+                                column: tc.column.name.clone(),
+                            }
+                        };
                         (
                             Rc::new(RefCell::new(Type(
-                                Def::Constructor(Constructor::Scalar(tc.column.ty.clone())),
+                                Def::Constructor(Constructor::Scalar(Rc::new(scalar_ty))),
                                 Status::Resolved,
                             ))),
                             Some(tc.column.name.clone()),

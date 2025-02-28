@@ -86,7 +86,7 @@ impl<'ast> TypeRegistry<'ast> {
     /// `Type(Def::Var(TypeVar::Fresh))` will be associated with the node and returned.
     ///
     /// This method is idempotent and further calls will return the same type.
-    pub fn get_type<N: Semantic>(&mut self, node: &'ast N) -> Rc<RefCell<Type>> {
+    pub(crate) fn get_type<N: Semantic>(&mut self, node: &'ast N) -> Rc<RefCell<Type>> {
         let ty = Type::new(Def::Var(TypeVar::Fresh)).wrap();
 
         let ty = &*self
@@ -104,7 +104,7 @@ impl<'ast> TypeRegistry<'ast> {
     /// Tries to resolve all types in `self`.
     ///
     /// If successful, returns `Ok(HashMap<NodeKey, Rc<RefCell<Type>>>)` else `Err(TypeError)`.
-    pub fn try_resolve_all_types(
+    pub(crate) fn try_resolve_all_types(
         &self,
     ) -> Result<HashMap<NodeKey<'ast>, Rc<RefCell<Type>>>, TypeError> {
         for ty in self.node_types.values() {

@@ -1,8 +1,7 @@
-use std::{cell::RefCell, rc::Rc, sync::Arc};
-
-use crate::{inference::ProjectionColumn, model::schema::Table};
-
-use super::TableColumn;
+use crate::{
+    model::schema::Table,
+    pub_types::{Projection, TableColumn},
+};
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum Provenance {
@@ -14,31 +13,26 @@ pub enum Provenance {
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct SelectProvenance {
-    pub projection: Rc<RefCell<Vec<ProjectionColumn>>>,
-    pub projection_table_columns: Vec<TableColumn>,
+    pub projection: Projection,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct InsertProvenance {
-    pub into_table: Arc<Table>,
-    pub returning: Option<Rc<RefCell<Vec<ProjectionColumn>>>>,
-    pub returning_table_columns: Option<Vec<TableColumn>>,
+    pub into_table: Table,
+    pub returning: Option<Projection>,
     pub columns_written: Vec<TableColumn>,
-    pub source_projection: Option<Rc<RefCell<Vec<ProjectionColumn>>>>,
-    pub source_table_columns: Option<Vec<TableColumn>>,
+    pub source_projection: Option<Projection>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct UpdateProvenance {
-    pub update_table: Arc<Table>,
-    pub returning: Option<Rc<RefCell<Vec<ProjectionColumn>>>>,
-    pub returning_table_columns: Option<Vec<TableColumn>>,
+    pub update_table: Table,
+    pub returning: Option<Projection>,
     pub columns_written: Vec<TableColumn>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct DeleteProvenance {
-    pub from_table: Arc<Table>,
-    pub returning: Option<Rc<RefCell<Vec<ProjectionColumn>>>>,
-    pub returning_table_columns: Option<Vec<TableColumn>>,
+    pub from_table: Table,
+    pub returning: Option<Projection>,
 }

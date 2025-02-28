@@ -2,8 +2,6 @@ use std::collections::HashSet;
 
 use crate::{SchemaError, ScopeError};
 
-use super::Type;
-
 #[derive(PartialEq, Eq, Clone, Debug, thiserror::Error)]
 pub enum TypeError {
     #[error("SQL feature {} is not supported", _0)]
@@ -31,7 +29,7 @@ pub enum TypeError {
     Params(HashSet<String>),
 
     #[error("Expected scalar type for param {} but got type {}", _0, _1)]
-    NonScalarParam(String, Type),
+    NonScalarParam(String, String),
 
     #[error("Expected param count to be {}, but got {}", _0, _1)]
     ParamCount(usize, usize),

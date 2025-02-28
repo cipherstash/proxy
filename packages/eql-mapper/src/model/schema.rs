@@ -10,7 +10,7 @@ use thiserror::Error;
 
 use super::sql_ident::*;
 
-use crate::{inference::Scalar, iterator_ext::IteratorExt};
+use crate::iterator_ext::IteratorExt;
 
 /// A database schema.
 ///
@@ -36,10 +36,16 @@ pub struct Table {
 
 /// A column.
 #[derive(Debug, Clone, PartialEq, Eq, Display)]
-#[display("Column<{}: {}>", name, ty)]
+#[display("Column<{}: {}>", name, kind)]
 pub struct Column {
     pub name: Ident,
-    pub ty: Arc<Scalar>,
+    pub kind: ColumnKind,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Display)]
+pub enum ColumnKind {
+    Native,
+    Eql,
 }
 
 /// Describes a reference to a table + column.
@@ -51,17 +57,17 @@ pub struct TableColumn {
 }
 
 impl Column {
-    pub fn of_type(name: Ident, ty: Scalar) -> Self {
+    pub fn eql(name: Ident) -> Self {
         Self {
             name,
-            ty: Arc::new(ty),
+            kind: ColumnKind::Eql,
         }
     }
 
-    pub fn new(name: Ident) -> Self {
+    pub fn native(name: Ident) -> Self {
         Self {
             name,
-            ty: Arc::new(Scalar::AnonymousNative),
+            kind: ColumnKind::Native,
         }
     }
 }
@@ -211,23 +217,15 @@ macro_rules! make_schema {
         $( make_schema!(@add_column $table $column_name $(($($options)*))? ); )*
     };
     (@add_column $table:ident $column_name:ident (ENCRYPTED) ) => {
-        $table.add_column(std::sync::Arc::new($crate::model::Column::of_type(
-            ::sqlparser::ast::Ident::unquoted(stringify!($column_name)),
-                $crate::inference::Scalar::Encrypted {
-                    table: $table.name.clone(),
-                    column: ::sqlparser::ast::Ident::unquoted(stringify!($column_name)),
-                }
-            )), false);
+        $table.add_column(std::sync::Arc::new($crate::model::Column::eql(
+            ::sqlparser::ast::Ident::unquoted(stringify!($column_name))
+        )), false);
     };
     (@add_column $table:ident $column_name:ident (PK) ) => {
         $table.add_column(
             std::sync::Arc::new(
-                $crate::model::Column::of_type(
-                    ::sqlparser::ast::Ident::unquoted(stringify!($column_name)),
-                    $crate::inference::Scalar::Native {
-                        table: $table.name.clone(),
-                        column: ::sqlparser::ast::Ident::unquoted(stringify!($column_name))
-                    }
+                $crate::model::Column::native(
+                    ::sqlparser::ast::Ident::unquoted(stringify!($column_name))
                 )
             ),
             true
@@ -250,9 +248,8 @@ macro_rules! make_schema {
     (@add_column $table:ident $column_name:ident ) => {
         $table.add_column(
             std::sync::Arc::new(
-                $crate::model::Column::of_type(
+                $crate::model::Column::native(
                     ::sqlparser::ast::Ident::unquoted(stringify!($column_name)),
-                    $crate::inference::Scalar::Native { table: $table.name.clone(), column: ::sqlparser::ast::Ident::unquoted(stringify!($column_name)) }
                 )
             ),
             false

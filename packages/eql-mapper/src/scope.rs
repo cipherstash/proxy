@@ -190,7 +190,7 @@ impl Scope {
 
     /// Resolves an unqualified wildcard. Resolution occurs in the current scope only  (i.e. does not look into parent
     /// scopes).
-    pub fn resolve_wildcard(&self) -> Result<Rc<RefCell<Type>>, ScopeError> {
+    pub(crate) fn resolve_wildcard(&self) -> Result<Rc<RefCell<Type>>, ScopeError> {
         let scope = self.top_scope()?;
         if scope.relations.is_empty() {
             Err(ScopeError::InvariantFailed(
@@ -229,7 +229,7 @@ impl Scope {
 
     /// Resolves a qualified wildcard. Resolution occurs in the current scope only (i.e. does not look into parent
     /// scopes).
-    pub fn resolve_qualified_wildcard(
+    pub(crate) fn resolve_qualified_wildcard(
         &self,
         idents: &[Ident],
     ) -> Result<Rc<RefCell<Type>>, ScopeError> {
@@ -269,7 +269,7 @@ impl Scope {
     }
 
     /// Uniquely resolves an identifier against all relations that are in scope.
-    pub fn resolve_ident(&self, ident: &Ident) -> Result<Rc<RefCell<Type>>, ScopeError> {
+    pub(crate) fn resolve_ident(&self, ident: &Ident) -> Result<Rc<RefCell<Type>>, ScopeError> {
         let sql_ident = Some(SqlIdent::from(ident));
         let mut scope = self.top_scope()?;
 
@@ -321,7 +321,7 @@ impl Scope {
     ///
     /// Note that currently only compound identifier of length 2 are supported
     /// and resolution will fail if the identifier has more than two parts.
-    pub fn resolve_compound_ident(
+    pub(crate) fn resolve_compound_ident(
         &self,
         idents: &[Ident],
     ) -> Result<Rc<RefCell<Type>>, ScopeError> {
@@ -399,13 +399,13 @@ impl Scope {
     }
 
     /// Add a table/view/subquery to the current scope.
-    pub fn add_relation(&mut self, relation: Relation) -> Result<Rc<Relation>, ScopeError> {
+    pub(crate) fn add_relation(&mut self, relation: Relation) -> Result<Rc<Relation>, ScopeError> {
         let current_scope = self.top_scope_mut()?;
         current_scope.relations.push(Rc::new(relation));
         Ok(current_scope.relations[current_scope.relations.len() - 1].clone())
     }
 
-    pub fn resolve_relation(&self, name: &ObjectName) -> Result<&Relation, ScopeError> {
+    pub(crate) fn resolve_relation(&self, name: &ObjectName) -> Result<&Relation, ScopeError> {
         if name.0.len() > 1 {
             return Err(ScopeError::UnsupportedSqlFeature(
                 "Tried to resolve a relation using a compound identifier".into(),

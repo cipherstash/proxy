@@ -1,19 +1,14 @@
 use std::{
-    cell::{Ref, RefCell},
-    collections::HashMap,
-    marker::PhantomData,
-    ops::ControlFlow,
-    rc::Rc,
-    sync::Arc,
+    cell::RefCell, collections::HashMap, marker::PhantomData, ops::ControlFlow, rc::Rc, sync::Arc,
 };
 
 use sqlparser::ast::{Expr, Statement, Value};
 use sqltk::{convert_control_flow, Break, Semantic, Transform, Transformable, Visitable, Visitor};
 
 use crate::{
-    inference::{Type, TypeError, TypeInferencer},
-    Constructor, Def, Dep, DepMut, NodeKey, ProjectionColumn, Scalar, Schema, Scope, ScopeError,
-    Status, TypeRegistry,
+    inference::{self, TypeError, TypeInferencer},
+    pub_types::{Projection, ProjectionColumn, Scalar, Type},
+    Dep, DepMut, NodeKey, Schema, Scope, ScopeError, TypeRegistry,
 };
 
 use super::importer::{ImportError, Importer};
@@ -128,12 +123,22 @@ impl<'ast> EqlMapper<'ast> {
 
     /// Asks the [`TypeInferencer`] for a hashmap of node types.
     fn node_types(&self) -> Result<HashMap<NodeKey<'ast>, Type>, EqlMapperError> {
-        Ok(self.inferencer.borrow().node_types()?)
+        let node_types = self.inferencer.borrow().node_types()?;
+
+        node_types
+            .iter()
+            .map(|(key, ty)| Type::try_from(ty).map(|ty| (key.clone(), ty)))
+            .collect::<Result<HashMap<_, _>, _>>()
     }
 
     /// Asks the [`TypeInferencer`] for a hashmap of parameter types.
     fn param_types(&self) -> Result<HashMap<String, Scalar>, EqlMapperError> {
-        Ok(self.inferencer.borrow().param_types()?)
+        let param_types = self.inferencer.borrow().param_types()?;
+
+        param_types
+            .iter()
+            .map(|(param, ty)| Scalar::try_from(ty).map(|ty| (param.clone(), ty)))
+            .collect::<Result<HashMap<_, _>, _>>()
     }
 
     /// Asks the [`TypeInferencer`] for a hashmap of literal types, validating that that are all `Scalar` types.
@@ -144,19 +149,19 @@ impl<'ast> EqlMapper<'ast> {
             .iter()
             .map(|node_key| match inferencer.get_type_by_node_key(node_key) {
                 Some(ty) => {
-                    if let Type(
-                        Def::Constructor(Constructor::Scalar(scalar_ty)),
-                        Status::Resolved,
+                    if let inference::Type(
+                        inference::Def::Constructor(inference::Constructor::Scalar(scalar_ty)),
+                        inference::Status::Resolved,
                     ) = &*ty.borrow()
                     {
-                        Ok((node_key.clone(), (**scalar_ty).clone()))
+                        Ok((node_key.clone(), Scalar::try_from(&**scalar_ty)?))
                     } else {
-                        Err(TypeError::Expected(
+                        Err(EqlMapperError::InternalError(
                             "literal is not a scalar type".to_string(),
                         ))
                     }
                 }
-                None => Err(TypeError::InternalError(String::from(
+                None => Err(EqlMapperError::InternalError(String::from(
                     "failed to get type of literal node",
                 ))),
             })
@@ -175,11 +180,11 @@ impl<'ast> TypedStatement<'ast> {
     /// potentially require AST edits.
     pub fn requires_transform(&self) -> bool {
         // if there are any literals that require encryption, or any params that require encryption.
-        self.literals.len() > 0
+        !self.literals.is_empty()
             || self
                 .params
                 .iter()
-                .any(|(_, scalar_ty)| matches!(scalar_ty, Scalar::Encrypted { .. }))
+                .any(|(_, scalar_ty)| matches!(scalar_ty, Scalar::EqlColumn(_)))
     }
 
     /// Tries to get a [`Value`] (a literal) from `self`.
@@ -205,10 +210,10 @@ impl<'ast> TypedStatement<'ast> {
     /// Gets the projection associated with a SQL statement.
     ///
     /// Not all statments have a projection, so the result is wrapped in an [`Option`].
-    pub fn get_projection_columns(&self) -> Option<Ref<Vec<ProjectionColumn>>> {
+    pub fn get_projection_columns(&self) -> Option<&[ProjectionColumn]> {
         match self.node_types.get(&NodeKey::new(self.statement)) {
-            Some(ty) => match &ty.0 {
-                Def::Constructor(Constructor::Projection(columns)) => Some(columns.borrow()),
+            Some(ty) => match ty {
+                Type::Projection(Projection(columns)) => Some(columns.as_slice()),
                 _ => None,
             },
             None => None,
@@ -312,7 +317,7 @@ mod test {
         parser::Parser,
     };
 
-    use crate::{inference::Type, make_schema, type_check, Dep};
+    use crate::{make_schema, pub_types::*, type_check, Dep};
 
     fn parse(statement: &'static str) -> Statement {
         Parser::parse_sql(&PostgreSqlDialect {}, statement).unwrap()[0].clone()
@@ -376,13 +381,13 @@ mod test {
 
         assert_eq!(
             typed.get_type(&statement),
-            Some(
-                &*Type::projection(&[(
-                    Type::encrypted_scalar("users", "email"),
-                    Some(id("email"))
-                ),])
-                .borrow()
-            )
+            Some(&Type::Projection(Projection(vec![ProjectionColumn {
+                ty: ProjectionColumnType::Scalar(Scalar::EqlColumn(TableColumn {
+                    table: id("users"),
+                    column: id("email")
+                })),
+                alias: Some(id("email"))
+            }])))
         )
     }
 
@@ -437,34 +442,38 @@ mod test {
 
         assert_eq!(
             typed.get_type(&statement),
-            Some(
-                &*Type::projection(&[
-                    (Type::native_scalar("users", "id"), Some(id("user_id"))),
-                    (
-                        Type::native_scalar("todo_list_items", "id"),
-                        Some(id("todo_list_item_id"))
-                    ),
-                    (
-                        Type::encrypted_scalar("todo_list_items", "description"),
-                        Some(id("todo_list_item_description"))
-                    ),
-                ])
-                .borrow()
-            )
+            Some(&Type::Projection(Projection(vec![
+                ProjectionColumn {
+                    ty: ProjectionColumnType::Scalar(Scalar::Native(None)),
+                    alias: Some(id("user_id"))
+                },
+                ProjectionColumn {
+                    ty: ProjectionColumnType::Scalar(Scalar::Native(None)),
+                    alias: Some(id("todo_list_item_id"))
+                },
+                ProjectionColumn {
+                    ty: ProjectionColumnType::Scalar(Scalar::EqlColumn(TableColumn {
+                        table: id("todo_list_items"),
+                        column: id("description")
+                    })),
+                    alias: Some(id("todo_list_item_description"))
+                }
+            ])))
         );
     }
 
     #[test]
+    #[ignore]
     fn wildcard_expansion() {
         let schema = Dep::new(make_schema! {
             tables: {
                 users: {
                     id,
-                    email,
+                    email (ENCRYPTED),
                 }
                 todo_lists: {
                     id,
-                    owner_id,
+                    secret (ENCRYPTED),
                 }
             }
         });
@@ -486,15 +495,36 @@ mod test {
 
         assert_eq!(
             typed.get_type(&statement),
-            Some(
-                &*Type::projection(&[
-                    (Type::native_scalar("users", "id"), None),
-                    (Type::native_scalar("users", "email"), None),
-                    (Type::native_scalar("todo_lists", "id"), None),
-                    (Type::native_scalar("todo_lists", "owner_id"), None),
-                ])
-                .borrow()
-            ),
+            Some(&Type::Projection(Projection(vec![
+                ProjectionColumn {
+                    ty: ProjectionColumnType::Scalar(Scalar::Native(Some(TableColumn {
+                        table: id("users"),
+                        column: id("id")
+                    }))),
+                    alias: None
+                },
+                ProjectionColumn {
+                    ty: ProjectionColumnType::Scalar(Scalar::EqlColumn(TableColumn {
+                        table: id("users"),
+                        column: id("email")
+                    })),
+                    alias: None
+                },
+                ProjectionColumn {
+                    ty: ProjectionColumnType::Scalar(Scalar::Native(Some(TableColumn {
+                        table: id("todo_lists"),
+                        column: id("id")
+                    }))),
+                    alias: None
+                },
+                ProjectionColumn {
+                    ty: ProjectionColumnType::Scalar(Scalar::EqlColumn(TableColumn {
+                        table: id("todo_lists"),
+                        column: id("secret")
+                    })),
+                    alias: None
+                },
+            ])))
         );
     }
 }

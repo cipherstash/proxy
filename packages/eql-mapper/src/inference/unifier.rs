@@ -311,17 +311,17 @@ mod test {
         Constructor::*, Def::*, ProjectionColumn, Scalar::*, Status, Type, TypeVar,
     };
     use crate::Unifier;
-    use std::{cell::RefCell, rc::Rc, sync::Arc};
+    use std::{cell::RefCell, rc::Rc};
 
     #[test]
     fn eq_native() {
         let left = Type(
-            Constructor(Scalar(Arc::new(AnonymousNative))),
+            Constructor(Scalar(Rc::new(AnonymousNative))),
             Status::Resolved,
         )
         .wrap();
         let right = Type(
-            Constructor(Scalar(Arc::new(AnonymousNative))),
+            Constructor(Scalar(Rc::new(AnonymousNative))),
             Status::Resolved,
         )
         .wrap();
@@ -344,7 +344,7 @@ mod test {
     #[test]
     fn constructor_with_var() {
         let left = Type(
-            Constructor(Scalar(Arc::new(AnonymousNative))),
+            Constructor(Scalar(Rc::new(AnonymousNative))),
             Status::Resolved,
         )
         .wrap();
@@ -361,7 +361,7 @@ mod test {
     fn var_with_constructor() {
         let left = Type(Var(TypeVar::Fresh), Status::Partial).wrap();
         let right = Type(
-            Constructor(Scalar(Arc::new(AnonymousNative))),
+            Constructor(Scalar(Rc::new(AnonymousNative))),
             Status::Resolved,
         )
         .wrap();
@@ -379,7 +379,7 @@ mod test {
             Constructor(Projection(Rc::new(RefCell::new(vec![
                 ProjectionColumn {
                     ty: Type(
-                        Constructor(Scalar(Arc::new(AnonymousNative))),
+                        Constructor(Scalar(Rc::new(AnonymousNative))),
                         Status::Resolved,
                     )
                     .wrap(),
@@ -417,7 +417,7 @@ mod test {
                 Constructor(Projection(Rc::new(RefCell::new(vec![
                     ProjectionColumn {
                         ty: Type(
-                            Constructor(Scalar(Arc::new(AnonymousNative))),
+                            Constructor(Scalar(Rc::new(AnonymousNative))),
                             Status::Resolved
                         )
                         .wrap(),
@@ -442,7 +442,7 @@ mod test {
             Constructor(Projection(Rc::new(RefCell::new(vec![
                 ProjectionColumn {
                     ty: Type(
-                        Constructor(Scalar(Arc::new(AnonymousNative))),
+                        Constructor(Scalar(Rc::new(AnonymousNative))),
                         Status::Resolved,
                     )
                     .wrap(),
@@ -466,7 +466,7 @@ mod test {
                     Constructor(Projection(Rc::new(RefCell::new(vec![
                         ProjectionColumn {
                             ty: Type(
-                                Constructor(Scalar(Arc::new(AnonymousNative))),
+                                Constructor(Scalar(Rc::new(AnonymousNative))),
                                 Status::Resolved,
                             )
                             .wrap(),
@@ -494,7 +494,7 @@ mod test {
                 Constructor(Projection(Rc::new(RefCell::new(vec![
                     ProjectionColumn {
                         ty: Type(
-                            Constructor(Scalar(Arc::new(AnonymousNative))),
+                            Constructor(Scalar(Rc::new(AnonymousNative))),
                             Status::Resolved
                         )
                         .wrap(),

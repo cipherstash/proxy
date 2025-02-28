@@ -32,7 +32,7 @@ pub(crate) use type_error::*;
 pub(crate) use type_variables::*;
 pub(crate) use unifier::*;
 
-pub use types::*;
+pub(crate) use types::*;
 
 /// [`Visitor`] implementation that performs type inference on AST nodes.
 ///
@@ -145,7 +145,7 @@ impl<'ast> TypeInferencer<'ast> {
                 if let Def::Constructor(Constructor::Scalar(scalar)) = &ty.0 {
                     Ok((param, (**scalar).clone()))
                 } else {
-                    Err(TypeError::NonScalarParam(param, ty.clone()))
+                    Err(TypeError::NonScalarParam(param, ty.to_string()))
                 }
             })
             .collect::<Result<_, _>>()?;
