@@ -13,7 +13,7 @@ authors = [
 derive_more = { version = "^1.0", features = ["display", "constructor"] }
 itertools = "^0.13"
 sqlparser = { workspace = true }
-sqltk = { git = "https://github.com/cipherstash/sqltk/", branch = "chore/make-build-work" }
+sqltk = { git = "https://github.com/cipherstash/sqltk/", branch = "CIP-1079/update-sqlparser" }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
