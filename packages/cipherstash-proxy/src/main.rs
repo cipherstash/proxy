@@ -11,8 +11,7 @@ use tokio::signal::unix::{signal, SignalKind};
 use tokio_util::task::TaskTracker;
 use tracing::{error, info, warn};
 
-#[tokio::main]
-async fn main() {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
 
     let config = match TandemConfig::load(&args) {
@@ -25,28 +24,35 @@ async fn main() {
 
     log::init(config.log.clone());
 
-    let shutdown_timeout = &config.server.shutdown_timeout();
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(config.server.worker_threads)
+        .thread_stack_size(config.thread_stack_size())
+        .enable_all()
+        .build()?;
 
-    let mut encrypt = init(config).await;
+    runtime.block_on(async move {
+        let shutdown_timeout = &config.server.shutdown_timeout();
 
-    let mut listener = connect::bind_with_retry(&encrypt.config.server).await;
-    let tracker = TaskTracker::new();
+        let mut encrypt = init(config).await;
 
-    let mut client_id = 0;
+        let mut listener = connect::bind_with_retry(&encrypt.config.server).await;
+        let tracker = TaskTracker::new();
 
-    if encrypt.config.prometheus_enabled() {
-        let host = encrypt.config.server.host.to_owned();
-        match prometheus::start(host, encrypt.config.prometheus.port) {
-            Ok(_) => {}
-            Err(err) => {
-                error!(
-                    msg = "Could not start CipherStash proxy",
-                    error = err.to_string()
-                );
-                std::process::exit(exitcode::CONFIG);
+        let mut client_id = 0;
+
+        if encrypt.config.prometheus_enabled() {
+            let host = encrypt.config.server.host.to_owned();
+            match prometheus::start(host, encrypt.config.prometheus.port) {
+                Ok(_) => {}
+                Err(err) => {
+                    error!(
+                        msg = "Could not start CipherStash proxy",
+                        error = err.to_string()
+                    );
+                    std::process::exit(exitcode::CONFIG);
+                }
             }
         }
-    }
 
     loop {
         tokio::select! {
@@ -65,54 +71,56 @@ async fn main() {
             },
             Ok(client_stream) = AsyncStream::accept(&listener) => {
 
-                let encrypt = encrypt.clone();
-
-                client_id += 1;
-
-                tracker.spawn(async move {
                     let encrypt = encrypt.clone();
 
-                    gauge!(CLIENTS_ACTIVE_CONNECTIONS).increment(1);
+                    client_id += 1;
 
-                    match pg::handler(client_stream, encrypt, client_id).await {
-                        Ok(_) => (),
-                        Err(err) => {
+                    tracker.spawn(async move {
+                        let encrypt = encrypt.clone();
 
-                            gauge!(CLIENTS_ACTIVE_CONNECTIONS).decrement(1);
+                        gauge!(CLIENTS_ACTIVE_CONNECTIONS).increment(1);
 
-                            match err {
-                                Error::ConnectionClosed => {
-                                    info!(msg = "Database connection closed by client");
+                        match pg::handler(client_stream, encrypt, client_id).await {
+                            Ok(_) => (),
+                            Err(err) => {
+
+                                gauge!(CLIENTS_ACTIVE_CONNECTIONS).decrement(1);
+
+                                match err {
+                                    Error::ConnectionClosed => {
+                                        info!(msg = "Database connection closed by client");
+                                    }
+                                    Error::CancelRequest => {
+                                        info!(msg = "Database connection closed after cancel request");
+                                    }
+                                    Error::ConnectionTimeout(_) => {
+                                        warn!(msg = "Database connection timeout");
+                                    }
+                                    _ => {
+                                        error!(msg = "Database connection error", error = err.to_string());
+                                    }
                                 }
-                                Error::CancelRequest => {
-                                    info!(msg = "Database connection closed after cancel request");
-                                }
-                                Error::ConnectionTimeout(_) => {
-                                    warn!(msg = "Database connection timeout");
-                                }
-                                _ => {
-                                    error!(msg = "Database connection error", error = err.to_string());
-                                }
-                            }
-                        },
-                    }
-                });
-            },
+                            },
+                        }
+                    });
+                },
+            }
         }
-    }
 
-    info!(msg = "Shutting down CipherStash Proxy");
+        info!(msg = "Shutting down CipherStash Proxy");
 
-    // Close the listener
-    drop(listener);
+        // Close the listener
+        drop(listener);
 
-    tracker.close();
+        tracker.close();
 
-    info!(msg = "Waiting for clients");
+        info!(msg = "Waiting for clients");
 
-    if (tokio::time::timeout(*shutdown_timeout, tracker.wait()).await).is_err() {
-        warn!(msg = "Terminated client connections", count = tracker.len());
-    }
+        if (tokio::time::timeout(*shutdown_timeout, tracker.wait()).await).is_err() {
+            warn!(msg = "Terminated client connections", count = tracker.len());
+        }
+    });
+    Ok(())
 }
 
 ///

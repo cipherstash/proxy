@@ -1,3 +1,4 @@
+use super::{CS_PREFIX, DEFAULT_CONFIG_FILE_PATH};
 use crate::error::{ConfigError, Error};
 use crate::log::CONFIG;
 use crate::Args;
@@ -9,11 +10,20 @@ use rustls_pki_types::{CertificateDer, PrivateKeyDer, ServerName};
 use serde::Deserialize;
 use std::io::IsTerminal;
 use std::path::PathBuf;
+use std::{env, thread};
 use std::{fmt::Display, time::Duration};
 use tracing::debug;
 use uuid::Uuid;
 
-use super::{CS_PREFIX, DEFAULT_CONFIG_FILE_PATH};
+// 2 MiB
+pub const DEFAULT_THREAD_STACK_SIZE: usize = 2 * 1024 * 1024;
+
+// 4 MiB
+pub const DEBUG_THREAD_STACK_SIZE: usize = 4 * 1024 * 1024;
+
+pub const DEFAULT_PORT: u16 = 6432;
+pub const DEFAULT_SHUTDOWN_TIMEOUT: u64 = 2000;
+pub const DEFAULT_WORKER_THREADS: usize = 4;
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct TandemConfig {
@@ -43,6 +53,11 @@ pub struct ServerConfig {
 
     #[serde(default = "ServerConfig::default_shutdown_timeout")]
     pub shutdown_timeout: u64,
+
+    #[serde(default = "ServerConfig::default_worker_threads")]
+    pub worker_threads: usize,
+
+    pub thread_stack_size: Option<usize>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -339,6 +354,34 @@ impl TandemConfig {
     pub fn prometheus_enabled(&self) -> bool {
         self.prometheus.enabled
     }
+
+    ///
+    /// Thread stack size
+    /// Not defined using a default, as we depend on the log level to increase the size for debugging
+    ///
+    /// In order of precedence
+    ///     config if explicitly set
+    ///     RUST_MIN_STACK env var if set
+    ///     DEBUG_THREAD_STACK_SIZE if log level is Debug or Trace
+    ///     otherwise set to DEFAULT_THREAD_STACK_SIZE (2MiB)
+    ///
+    pub fn thread_stack_size(&self) -> usize {
+        // If the config variable is set, use that value
+        if let Some(thread_stack_size) = self.server.thread_stack_size {
+            return thread_stack_size;
+        }
+
+        // If the environment variable is set, use that value
+        if let Ok(stack_size) = env::var("RUST_MIN_STACK") {
+            return stack_size.parse().unwrap_or(DEFAULT_THREAD_STACK_SIZE);
+        }
+
+        if self.log.level == LogLevel::Debug || self.log.level == LogLevel::Trace {
+            return DEBUG_THREAD_STACK_SIZE;
+        }
+
+        DEFAULT_THREAD_STACK_SIZE
+    }
 }
 
 ///
@@ -385,6 +428,8 @@ impl Default for ServerConfig {
             port: ServerConfig::default_port(),
             require_tls: false,
             shutdown_timeout: ServerConfig::default_shutdown_timeout(),
+            worker_threads: ServerConfig::default_worker_threads(),
+            thread_stack_size: None,
         }
     }
 }
@@ -395,11 +440,25 @@ impl ServerConfig {
     }
 
     pub fn default_port() -> u16 {
-        6432
+        DEFAULT_PORT
     }
 
     pub fn default_shutdown_timeout() -> u64 {
-        2000
+        DEFAULT_SHUTDOWN_TIMEOUT
+    }
+
+    ///
+    /// Default number of worker threads
+    /// This is half the number of available cores or DEFAULT_WORKER_THREADS, whichever is greater
+    pub fn default_worker_threads() -> usize {
+        match thread::available_parallelism() {
+            Ok(p) => {
+                let count = p.get();
+                let threads = count / 2;
+                threads.max(DEFAULT_WORKER_THREADS)
+            }
+            Err(_) => DEFAULT_WORKER_THREADS,
+        }
     }
 
     pub fn server_name(&self) -> Result<ServerName, Error> {

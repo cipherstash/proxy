@@ -223,6 +223,20 @@ require_tls = "false"
 shutdown_timeout = "2000"
 
 
+# Number of worker threads the server should use
+# Optional
+# Default: `NUMBER_OF_CORES/2` or `4`
+# Env: CS_SERVER__WORKER_THREADS
+worker_threads = "4"
+
+
+# Thread stack size in bytes
+# Optional
+# Default: `2 * 1024 * 1024` (2MiB) or `4 * 1024 * 1024` (4MiB) if log level is DEBUG or TRACE
+# Env: CS_SERVER__THREAD_STACK_SIZE
+thread_stack_size = "2097152"
+
+
 [database]
 # Database host address
 # Optional
