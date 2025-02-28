@@ -14,7 +14,7 @@ config = { version = "0.14", features = [
     "json",
     "toml",
 ], default-features = false }
-eql-mapper = { git = "ssh://git@github.com/cipherstash/eql-mapper.git" }
+eql-mapper = { path = "../eql-mapper" }
 exitcode = "1.1.2"
 native-tls = "0.2.12"
 rustls = "0.23.17"
