@@ -1,9 +1,0 @@
-/target
-<<<<<<< HEAD
-.DS_Store
-cipherstash-proxy.toml
-mise.local.toml
-tests/pg/data**
-tests/sql/cipherstash-encrypt.sql
-=======
->>>>>>> 061dca7 (Initial commit)
