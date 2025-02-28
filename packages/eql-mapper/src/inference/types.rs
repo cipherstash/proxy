@@ -1,5 +1,6 @@
 use std::{cell::RefCell, ops::Add, rc::Rc, sync::Arc};
 
+use derive_more::Display;
 use sqlparser::ast::Ident;
 
 use crate::{inference::TypeError, Table};
@@ -13,12 +14,12 @@ use crate::{inference::TypeError, Table};
 /// A `Type` has a [`Def`] and a [`Status`]. The `Def` contains the inferred details of the type.  The `Status` captures
 /// whether the type is fully resolved or partial (may contain unsubstituted type variables).
 ///
-#[derive(Debug, PartialEq, Eq, Clone, derive_more::Display)]
+#[derive(Debug, PartialEq, Eq, Clone, Display)]
 #[display("Type({_0}, {_1})")]
 pub struct Type(pub(crate) Def, pub(crate) Status);
 
 /// A `Status` represents the "completeness" of a [`Type`].
-#[derive(Debug, PartialEq, Eq, Copy, Clone, derive_more::Display)]
+#[derive(Debug, PartialEq, Eq, Copy, Clone, Display)]
 pub enum Status {
     /// The type is completely known.
     ///
@@ -184,7 +185,7 @@ impl Type {
 }
 
 /// A `Def` is either a [`Constructor`] (fully or partially known type) or a [`TypeVar`] (a placeholder for an unknown type).
-#[derive(Debug, PartialEq, Eq, Clone, derive_more::Display)]
+#[derive(Debug, PartialEq, Eq, Clone, Display)]
 #[display("{self}")]
 pub enum Def {
     /// A specific type constructor with zero or more generic parameters.
@@ -197,7 +198,7 @@ pub enum Def {
 }
 
 /// A `Constructor` is what is known about a [`Type`].
-#[derive(Debug, Clone, PartialEq, Eq, derive_more::Display)]
+#[derive(Debug, Clone, PartialEq, Eq, Display)]
 pub enum Constructor {
     /// A [`Scalar`] type; either an encrypted column from the database schema or some native (plaintext) database type.
     #[display("Scalar({_0})")]
@@ -278,7 +279,7 @@ impl Constructor {
 ///
 /// Native database types are not distinguished in this type system. Valid usage of native types is best determined by
 /// the database.
-#[derive(Debug, Clone, Eq, PartialEq, PartialOrd, Ord, derive_more::Display)]
+#[derive(Debug, Clone, Eq, PartialEq, PartialOrd, Ord, Display, Hash)]
 pub enum Scalar {
     /// An encrypted type from a particular table-column in the schema.
     ///
@@ -299,7 +300,7 @@ pub enum Scalar {
 }
 
 /// A column from a projection.
-#[derive(Debug, PartialEq, Eq, Clone, derive_more::Display)]
+#[derive(Debug, PartialEq, Eq, Clone, Display)]
 #[display("{} {}", ty.borrow(), self.render_alias())]
 pub struct ProjectionColumn {
     /// The type of the column
@@ -323,7 +324,7 @@ impl ProjectionColumn {
 }
 
 /// A placeholder for an unknown type.
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, derive_more::Display)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, Display)]
 pub enum TypeVar {
     /// A type variable that has not yet been assigned a unique identifier.
     Fresh,

@@ -8,7 +8,7 @@ use crate::{
     TypeInferencer,
 };
 
-impl<'ast> InferType<'ast, Function> for TypeInferencer {
+impl<'ast> InferType<'ast, Function> for TypeInferencer<'ast> {
     fn infer_enter(&mut self, function: &'ast Function) -> Result<(), TypeError> {
         if !matches!(function.parameters, FunctionArguments::None) {
             return Err(TypeError::UnsupportedSqlFeature(

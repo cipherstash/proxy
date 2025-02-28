@@ -266,7 +266,7 @@ dependencies = [
  "bitflags 2.8.0",
  "cexpr",
  "clang-sys",
- "itertools",
+ "itertools 0.12.1",
  "lazy_static",
  "lazycell",
  "log",
@@ -538,7 +538,7 @@ dependencies = [
  "futures",
  "hex",
  "hmac",
- "itertools",
+ "itertools 0.12.1",
  "lazy_static",
  "log",
  "miette 5.10.0",
@@ -595,7 +595,7 @@ dependencies = [
  "futures",
  "hex",
  "hmac",
- "itertools",
+ "itertools 0.12.1",
  "lazy_static",
  "log",
  "miette 7.5.0",
@@ -694,8 +694,8 @@ dependencies = [
  "serde",
  "serde_json",
  "socket2",
- "sqlparser 0.52.0",
- "sqltk 0.1.0",
+ "sqlparser",
+ "sqltk",
  "thiserror 2.0.11",
  "tokio",
  "tokio-postgres",
@@ -954,7 +954,6 @@ version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cb7330aeadfbe296029522e6c40f315320aba36fc43a5b3632f3795348f3bd22"
 dependencies = [
- "convert_case",
  "proc-macro2",
  "quote",
  "syn 2.0.98",
@@ -1046,9 +1045,10 @@ dependencies = [
  "cipherstash-client 0.17.0-pre.1",
  "cipherstash-config 0.2.3 (git+ssh://git@github.com/cipherstash/cipherstash-suite.git?branch=main)",
  "derive_more",
+ "itertools 0.13.0",
  "pretty_assertions",
- "sqlparser 0.52.0",
- "sqltk 0.4.7",
+ "sqlparser",
+ "sqltk",
  "thiserror 2.0.11",
 ]
 
@@ -1675,6 +1675,15 @@ name = "itertools"
 version = "0.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ba291022dbbd398a455acf126c1e341954079855bc60dfdda641363bd6922569"
+dependencies = [
+ "either",
+]
+
+[[package]]
+name = "itertools"
+version = "0.13.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "413ee7dfc52ee1a4949ceeb7dbc8a33f2d6c088194d9f922fb8318faf1f01186"
 dependencies = [
  "either",
 ]
@@ -3041,16 +3050,6 @@ dependencies = [
 
 [[package]]
 name = "sqlparser"
-version = "0.50.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b2e5b515a2bd5168426033e9efbfd05500114833916f1d5c268f938b4ee130ac"
-dependencies = [
- "bigdecimal",
- "log",
-]
-
-[[package]]
-name = "sqlparser"
 version = "0.52.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9a875d8cd437cc8a97e9aeaeea352ec9a19aea99c23e9effb17757291de80b08"
@@ -3071,26 +3070,8 @@ dependencies = [
  "prettyplease",
  "proc-macro2",
  "quote",
- "sqlparser 0.52.0",
+ "sqlparser",
  "syn 2.0.98",
-]
-
-[[package]]
-name = "sqltk"
-version = "0.4.7"
-source = "git+ssh://git@github.com/cipherstash/sqltk.git?branch=main#f3f4d114cc5a237690da190194bcf809872021c9"
-dependencies = [
- "Inflector",
- "bigdecimal",
- "cargo_metadata",
- "prettyplease",
- "proc-macro2",
- "quote",
- "serde",
- "serde_json",
- "sqlparser 0.50.0",
- "syn 2.0.98",
- "tempfile",
 ]
 
 [[package]]

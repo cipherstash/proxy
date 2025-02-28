@@ -2,7 +2,7 @@ use sqlparser::ast::{AssignmentTarget, Statement};
 
 use crate::{inference::infer_type::InferType, Type, TypeError, TypeInferencer};
 
-impl<'ast> InferType<'ast, Statement> for TypeInferencer {
+impl<'ast> InferType<'ast, Statement> for TypeInferencer<'ast> {
     fn infer_exit(&mut self, statement: &'ast Statement) -> Result<(), TypeError> {
         match statement {
             Statement::Query(query) => {

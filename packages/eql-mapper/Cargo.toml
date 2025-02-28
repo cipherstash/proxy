@@ -13,10 +13,11 @@ authors = [
 
 cipherstash-client = { git = "ssh://git@github.com/cipherstash/cipherstash-suite.git", branch = "main" }
 cipherstash-config = { git = "ssh://git@github.com/cipherstash/cipherstash-suite.git", branch = "main" }
-derive_more = { version = "1", features = ["full"] }
-sqlparser = { version = "0.52.0", features = ["bigdecimal"] }
-sqltk = { git = "ssh://git@github.com/cipherstash/sqltk.git", branch = "main" }
-thiserror = "2.0.3"
+derive_more = { version = "^1.0", features = ["display", "constructor"] }
+itertools = "^0.13"
+sqlparser = { version = "^0.52", features = ["bigdecimal"] }
+sqltk = "^0.1"
+thiserror = "^2.0"
 
 [dev-dependencies]
 pretty_assertions = "1.4.1"

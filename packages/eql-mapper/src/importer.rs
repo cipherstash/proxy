@@ -1,4 +1,4 @@
-use std::{cell::RefCell, fmt::Debug, ops::ControlFlow, rc::Rc, sync::Arc};
+use std::{cell::RefCell, fmt::Debug, marker::PhantomData, ops::ControlFlow, rc::Rc, sync::Arc};
 
 use sqlparser::ast::{Cte, Ident, Insert, TableAlias, TableFactor};
 use sqltk::{Break, Visitable, Visitor};
@@ -13,19 +13,25 @@ use crate::{
 
 /// `Importer` is a [`Visitor`] implementation that brings projections (from "FROM" clauses and subqueries) into lexical scope.
 #[derive(Debug)]
-pub struct Importer {
+pub struct Importer<'ast> {
     schema: Arc<Schema>,
-    reg: Rc<RefCell<TypeRegistry>>,
+    reg: Rc<RefCell<TypeRegistry<'ast>>>,
     scope: Rc<RefCell<Scope>>,
+    _ast: PhantomData<&'ast ()>,
 }
 
-impl Importer {
+impl<'ast> Importer<'ast> {
     pub fn new(
-        reg: Rc<RefCell<TypeRegistry>>,
-        schema: Arc<Schema>,
-        scope: Rc<RefCell<Scope>>,
-    ) -> Rc<RefCell<Self>> {
-        Rc::new(RefCell::new(Self { reg, schema, scope }))
+        schema: impl Into<Arc<Schema>>,
+        reg: impl Into<Rc<RefCell<TypeRegistry<'ast>>>>,
+        scope: impl Into<Rc<RefCell<Scope>>>,
+    ) -> Self {
+        Self {
+            reg: reg.into(),
+            schema: schema.into(),
+            scope: scope.into(),
+            _ast: PhantomData,
+        }
     }
 
     fn update_scope_for_insert_statement(&mut self, insert: &Insert) -> Result<(), ImportError> {
@@ -53,7 +59,7 @@ impl Importer {
         Ok(())
     }
 
-    fn update_scope_for_cte(&mut self, cte: &Cte) -> Result<(), ImportError> {
+    fn update_scope_for_cte(&mut self, cte: &'ast Cte) -> Result<(), ImportError> {
         let Cte {
             alias: TableAlias {
                 name: alias,
@@ -80,7 +86,7 @@ impl Importer {
 
     fn update_scope_for_table_factor(
         &mut self,
-        table_factor: &TableFactor,
+        table_factor: &'ast TableFactor,
     ) -> Result<(), ImportError> {
         match table_factor {
             TableFactor::Table {
@@ -295,7 +301,7 @@ pub enum ImportError {
     TypeError(#[from] TypeError),
 }
 
-impl<'ast> Visitor<'ast> for Importer {
+impl<'ast> Visitor<'ast> for Importer<'ast> {
     type Error = ImportError;
 
     fn enter<N: Visitable>(&mut self, node: &'ast N) -> ControlFlow<Break<Self::Error>> {

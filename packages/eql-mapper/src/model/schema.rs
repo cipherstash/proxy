@@ -3,9 +3,10 @@
 //! Column type information is unused currently.
 
 use core::fmt::Debug;
-use derive_more::Display;
+use derive_more::{Constructor, Display};
 use sqlparser::ast::Ident;
 use std::sync::Arc;
+use thiserror::Error;
 
 use super::sql_ident::*;
 
@@ -42,7 +43,7 @@ pub struct Column {
 }
 
 /// Describes a reference to a table + column.
-#[derive(Clone, Debug, PartialEq, Eq, derive_more::Display, derive_more::Constructor)]
+#[derive(Clone, Debug, PartialEq, Eq, Display, Constructor)]
 #[display("{}.{}", table.name, column.name)]
 pub struct TableColumn {
     pub table: Arc<Table>,
@@ -65,7 +66,7 @@ impl Column {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum SchemaError {
     #[error("Table not found: {}", _0)]
     TableNotFound(String),

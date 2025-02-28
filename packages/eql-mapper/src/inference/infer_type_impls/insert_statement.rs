@@ -9,7 +9,7 @@ use crate::{
     TypeInferencer,
 };
 
-impl<'ast> InferType<'ast, Insert> for TypeInferencer {
+impl<'ast> InferType<'ast, Insert> for TypeInferencer<'ast> {
     fn infer_enter(&mut self, insert: &'ast Insert) -> Result<(), TypeError> {
         let Insert {
             table_name,

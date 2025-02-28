@@ -4,7 +4,7 @@ use crate::{
     inference::type_error::TypeError, inference::InferType, inference::Type, TypeInferencer,
 };
 
-impl<'ast> InferType<'ast, Select> for TypeInferencer {
+impl<'ast> InferType<'ast, Select> for TypeInferencer<'ast> {
     fn infer_exit(&mut self, select: &'ast Select) -> Result<(), TypeError> {
         let mut projection_columns: Vec<(_, _)> = Vec::new();
 

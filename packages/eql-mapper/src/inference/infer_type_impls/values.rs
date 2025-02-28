@@ -2,7 +2,7 @@ use sqlparser::ast::Values;
 
 use crate::{inference::type_error::TypeError, inference::InferType, Type, TypeInferencer};
 
-impl<'ast> InferType<'ast, Values> for TypeInferencer {
+impl<'ast> InferType<'ast, Values> for TypeInferencer<'ast> {
     fn infer_exit(&mut self, values: &'ast Values) -> Result<(), TypeError> {
         if values.rows.is_empty() {
             return Err(TypeError::InternalError(

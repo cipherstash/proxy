@@ -6,7 +6,7 @@ use crate::{
     TypeInferencer,
 };
 
-impl<'ast> InferType<'ast, FunctionArguments> for TypeInferencer {
+impl<'ast> InferType<'ast, FunctionArguments> for TypeInferencer<'ast> {
     fn infer_enter(&mut self, function_args: &'ast FunctionArguments) -> Result<(), TypeError> {
         let this_type = self.get_type(function_args);
 

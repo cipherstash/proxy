@@ -2,7 +2,7 @@ use sqlparser::ast::SetExpr;
 
 use crate::{inference::type_error::TypeError, inference::InferType, TypeInferencer};
 
-impl<'ast> InferType<'ast, SetExpr> for TypeInferencer {
+impl<'ast> InferType<'ast, SetExpr> for TypeInferencer<'ast> {
     fn infer_exit(&mut self, set_expr: &'ast SetExpr) -> Result<(), TypeError> {
         match set_expr {
             SetExpr::Select(select) => {

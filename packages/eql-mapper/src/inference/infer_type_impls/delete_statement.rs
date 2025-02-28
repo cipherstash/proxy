@@ -5,7 +5,7 @@ use crate::{
     TypeInferencer,
 };
 
-impl<'ast> InferType<'ast, Delete> for TypeInferencer {
+impl<'ast> InferType<'ast, Delete> for TypeInferencer<'ast> {
     fn infer_exit(&mut self, delete: &'ast Delete) -> Result<(), TypeError> {
         let Delete { returning, .. } = delete;
 

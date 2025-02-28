@@ -2,7 +2,7 @@ use sqlparser::ast::{BinaryOperator, Expr};
 
 use crate::{inference::InferType, inference::Type, inference::TypeError, TypeInferencer};
 
-impl<'ast> InferType<'ast, Expr> for TypeInferencer {
+impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
     fn infer_enter(&mut self, this_expr: &'ast Expr) -> Result<(), TypeError> {
         match this_expr {
             // At this stage there is no available information with which to constrain identifiers or wildcards.
