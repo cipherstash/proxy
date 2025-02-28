@@ -10,12 +10,10 @@ authors = [
 ]
 
 [dependencies]
-cipherstash-client = { git = "ssh://git@github.com/cipherstash/cipherstash-suite.git", branch = "main" }
-cipherstash-config = { git = "ssh://git@github.com/cipherstash/cipherstash-suite.git", branch = "main" }
 derive_more = { version = "^1.0", features = ["display", "constructor"] }
 itertools = "^0.13"
 sqlparser = { workspace = true }
-sqltk = { git = "https://github.com/cipherstash/sqltk/" }
+sqltk = { git = "https://github.com/cipherstash/sqltk/", branch = "chore/make-build-work" }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
