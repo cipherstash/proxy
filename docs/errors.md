@@ -4,6 +4,10 @@
 
 ## Table of Contents
 
+- Authentication Errors:
+  - [Database](#authentication-failed-database)
+  - [Client](#authentication-failed-client)
+
 - Mapping Errors:
   - [Invalid parameter](#mapping-invalid-parameter)
   - [Invalid SQL statement](#mapping-invalid-sql-statement)
@@ -18,16 +22,65 @@
 
 <!-- ---------------------------------------------------------------------------------------------------- -->
 
+<!-- ---------------------------------------------------------------------------------------------------- -->
 
+# Authentication Errors
+
+
+## Database <a id='authentication-failed-database'></a>
+
+Authentication failed when connecting to the database.
+
+
+### Error message
+
+```
+Database authentication failed: check username and password
+```
+
+### How to Fix
+
+Check the configured username and password are correct and can connect to the database.
+
+Check the database is using a supported authentication method.
+
+CipherStash Proxy supportsseveral PostgreSQL password authentication methods:
+
+ - password
+ - md5
+ - scram-sha-256
+
+ See [PostgreSQL password authentication](https://www.postgresql.org/docs/17/auth-password.html)
+
+
+<!-- ---------------------------------------------------------------------------------------------------- -->
+
+
+
+## Client <a id='authentication-failed-client'></a>
+
+Authentication failed when connecting a client to the proxy.
+
+
+### Error message
+
+```
+Client authentication failed: check username and password
+```
+
+### How to Fix
+
+Check the configured username and password are correct.
+
+
+
+<!-- ---------------------------------------------------------------------------------------------------- -->
 
 
 
 <!-- ---------------------------------------------------------------------------------------------------- -->
 
 # Mapping Errors
-
-
-
 
 
 ## Invalid parameter <a id='mapping-invalid-parameter'></a>

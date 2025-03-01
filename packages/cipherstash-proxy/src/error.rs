@@ -174,8 +174,11 @@ pub enum EncryptError {
 
 #[derive(Error, Debug)]
 pub enum ProtocolError {
-    #[error("AuthenticationFailed")]
+    #[error("Database authentication failed: check username and password. For help visit {}#authentication-failed-database", ERROR_DOC_BASE_URL)]
     AuthenticationFailed,
+
+    #[error("Client authentication failed: check username and password. For help visit {}#authentication-failed-client", ERROR_DOC_BASE_URL)]
+    ClientAuthenticationFailed,
 
     #[error("Expected {expected} parameter format codes, received {received}")]
     ParameterFormatCodesMismatch { expected: usize, received: usize },

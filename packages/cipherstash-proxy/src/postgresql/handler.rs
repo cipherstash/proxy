@@ -135,14 +135,12 @@ pub async fn handler(
             let bytes = BytesMut::try_from(message)?;
             client_stream.write_all(&bytes).await?;
         } else {
-            let message = ErrorResponse::invalid_password(&encrypt.config.database.username);
-            debug!(
-                target: AUTHENTICATION,
-                msg = "Client authenticaion failed: invalid password"
-            );
+            let message = ProtocolError::ClientAuthenticationFailed.to_string();
+            error!(msg = message);
+
+            let message = ErrorResponse::invalid_password(&message);
             let bytes = BytesMut::try_from(message)?;
             client_stream.write_all(&bytes).await?;
-            // return Err(ConfigError::TlsRequired.into());
         }
     }
 
@@ -155,7 +153,6 @@ pub async fn handler(
     //
 
     // First message should always be Auth
-
     let auth = protocol::read_auth_message(&mut database_stream, client_id).await?;
 
     match &auth.method {
@@ -182,7 +179,6 @@ pub async fn handler(
         AuthenticationMethod::Sasl { .. } => {
             debug!(target: AUTHENTICATION, msg = "Sasl");
             let mechanism = auth.sasl_mechanism()?;
-
             sanity_check_sasl_mechanism(&mechanism, &client_stream);
 
             // Toby: I don't think we need to do anything here

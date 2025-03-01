@@ -58,7 +58,7 @@ pub enum ErrorResponseCode {
 }
 
 impl ErrorResponse {
-    pub fn invalid_password(username: &str) -> Self {
+    pub fn invalid_password(message: &str) -> Self {
         Self {
             fields: vec![
                 Field {
@@ -75,7 +75,7 @@ impl ErrorResponse {
                 },
                 Field {
                     code: ErrorResponseCode::Message,
-                    value: format!("password authentication failed for user \"{}\"", username),
+                    value: message.to_string(),
                 },
             ],
         }
