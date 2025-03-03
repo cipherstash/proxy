@@ -1,5 +1,5 @@
 use crate::config::{LogConfig, LogFormat, LogLevel};
-use clap::Parser;
+use clap::{Parser, Subcommand};
 
 const DEFAULT_CONFIG_FILE: &str = "cipherstash-proxy.toml";
 
@@ -30,4 +30,16 @@ pub struct Args {
     ///
     #[arg(short='f', long, value_enum, default_value_t = LogConfig::default_log_format(), env = "CS_LOG__FORMAT")]
     pub log_format: LogFormat,
+
+    #[command(subcommand)]
+    command: Option<Commands>,
+}
+
+#[derive(Subcommand, Debug)]
+///
+/// A `help` subcommand is automatically generated but ONLY if there are other subcommands.
+/// Noop is not visible in help, but enables proxy to be called as `cipherstash-proxy help` to show help
+enum Commands {
+    #[command(hide = true)]
+    Noop,
 }
