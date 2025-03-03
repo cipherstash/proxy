@@ -1,5 +1,7 @@
 use crate::error::{ConfigError, Error};
 use crate::log::CONFIG;
+use crate::Args;
+use clap::ValueEnum;
 use config::{Config, Environment};
 use regex::Regex;
 use rustls_pki_types::pem::PemObject;
@@ -197,7 +199,7 @@ pub struct LogConfig {
     pub config_level: LogLevel,
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, ValueEnum)]
 #[serde(rename_all = "lowercase")]
 pub enum LogFormat {
     // Serde does not seem to have a case insensitive option. alias is clunky, but better than custom de/serialisers
@@ -209,7 +211,7 @@ pub enum LogFormat {
     Text,
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq)]
 #[serde(rename_all = "lowercase")]
 pub enum LogOutput {
     // Serde does not seem to have a case insensitive option. alias is clunky, but better than custom de/serialisers
@@ -219,7 +221,7 @@ pub enum LogOutput {
     Stderr,
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, PartialEq)]
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, ValueEnum)]
 #[serde(rename_all = "lowercase")]
 pub enum LogLevel {
     // Serde does not seem to have a case insensitive option. alias is clunky, but better than custom de/serialisers
@@ -248,13 +250,25 @@ impl TandemConfig {
         DEFAULT_CONFIG_FILE_PATH.to_string()
     }
 
-    pub fn load(path: &str) -> Result<TandemConfig, Error> {
+    pub fn load(args: &Args) -> Result<TandemConfig, Error> {
         // Log a warning to user that config file is missing
-        if !PathBuf::from(path).exists() {
-            println!("Configuration file was not found: {path}");
+        if !PathBuf::from(&args.config_file).exists() {
+            println!("Configuration file was not found: {}", args.config_file);
             println!("Loading config values from environment variables.");
         }
-        TandemConfig::build(path)
+        let mut config = TandemConfig::build(&args.config_file)?;
+
+        // If log level is default, it has not been set by the user in config
+        if config.log.level == LogConfig::default_log_level() {
+            config.log.level = args.log_level;
+        }
+
+        // If log format is default, it has not been set by the user in config
+        if config.log.format == LogConfig::default_log_format() {
+            config.log.format = args.log_format;
+        }
+
+        Ok(config)
     }
 
     fn build(path: &str) -> Result<Self, Error> {

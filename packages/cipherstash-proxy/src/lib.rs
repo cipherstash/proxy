@@ -1,5 +1,6 @@
 #![allow(dead_code)]
 
+pub mod cli;
 pub mod config;
 pub mod connect;
 pub mod encrypt;
@@ -10,6 +11,7 @@ pub mod postgresql;
 pub mod prometheus;
 pub mod tls;
 
+pub use crate::cli::Args;
 pub use crate::config::{DatabaseConfig, ServerConfig, TandemConfig, TlsConfig};
 pub use crate::encrypt::Encrypt;
 pub use crate::eql::{Encrypted, ForQuery, Identifier, Plaintext};

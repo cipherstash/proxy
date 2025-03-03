@@ -3,7 +3,8 @@ use cipherstash_proxy::connect::{self, AsyncStream};
 use cipherstash_proxy::encrypt::Encrypt;
 use cipherstash_proxy::error::Error;
 use cipherstash_proxy::prometheus::CLIENTS_ACTIVE_CONNECTIONS;
-use cipherstash_proxy::{log, postgresql as pg, prometheus, tls};
+use cipherstash_proxy::{log, postgresql as pg, prometheus, tls, Args};
+use clap::Parser;
 use metrics::gauge;
 use tokio::net::TcpListener;
 use tokio::signal::unix::{signal, SignalKind};
@@ -12,9 +13,9 @@ use tracing::{error, info, warn};
 
 #[tokio::main]
 async fn main() {
-    let config_file = "cipherstash-proxy.toml";
+    let args = Args::parse();
 
-    let config = match TandemConfig::load(config_file) {
+    let config = match TandemConfig::load(&args) {
         Ok(config) => config,
         Err(err) => {
             eprintln!("Configuration Error: {}", err);
@@ -55,7 +56,7 @@ async fn main() {
             },
             _ = sighup() => {
                 info!(msg = "Received SIGHUP. Reloading configuration");
-                (listener, encrypt) = reload_config(listener, config_file, encrypt).await;
+                (listener, encrypt) = reload_config(listener, &args, encrypt).await;
                 info!(msg = "Reloaded configuration");
             },
             _ = sigterm() => {
@@ -220,10 +221,10 @@ async fn sighup() -> std::io::Result<()> {
 
 async fn reload_config(
     listener: TcpListener,
-    config_file: &str,
+    args: &Args,
     encrypt: Encrypt,
 ) -> (TcpListener, Encrypt) {
-    let new_config = match TandemConfig::load(config_file) {
+    let new_config = match TandemConfig::load(args) {
         Ok(config) => config,
         Err(err) => {
             warn!(
