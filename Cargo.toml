@@ -29,10 +29,7 @@ strip = "symbols"
 lto = true
 
 [workspace.dependencies]
-sqlparser = { git = "https://github.com/cipherstash/datafusion-sqlparser-rs", branch = "main", features = [
-  "serde",
-  "bigdecimal",
-] }
+sqlparser = { version = "^0.52", features = ["bigdecimal", "serde"]}
 thiserror = "2.0.9"
 tokio = { version = "1.42.0", features = ["full"] }
 tracing = "0.1"
