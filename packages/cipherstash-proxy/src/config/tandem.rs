@@ -373,7 +373,13 @@ impl TandemConfig {
 
         // If the environment variable is set, use that value
         if let Ok(stack_size) = env::var("RUST_MIN_STACK") {
-            return stack_size.parse().unwrap_or(DEFAULT_THREAD_STACK_SIZE);
+            stack_size
+                .parse()
+                .inspect_err(|err| {
+                    println!("Could not parse env var RUST_MIN_STACK: {}", err);
+                    println!("Using the default thread stack size");
+                })
+                .unwrap_or(DEFAULT_THREAD_STACK_SIZE);
         }
 
         if self.log.level == LogLevel::Debug || self.log.level == LogLevel::Trace {
