@@ -62,15 +62,6 @@ impl<'ast> InferType<'ast, Function> for TypeInferencer<'ast> {
                                     )))
                                 }
                             },
-
-                            #[allow(unused_variables)]
-                            FunctionArg::ExprNamed {
-                                name,
-                                arg,
-                                operator,
-                            } => {
-                                unimplemented!("FunctionArg::ExprNamed")
-                            }
                         }
                     } else {
                         return Err(TypeError::FunctionCall(format!(

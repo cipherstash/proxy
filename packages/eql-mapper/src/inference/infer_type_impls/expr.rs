@@ -28,7 +28,7 @@ impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
             }
 
             #[allow(unused_variables)]
-            Expr::Wildcard(attached_token) => {
+            Expr::Wildcard => {
                 self.unify_node_with_type(
                     this_expr,
                     self.scope_tracker.borrow().resolve_wildcard()?,
@@ -36,7 +36,7 @@ impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
             }
 
             #[allow(unused_variables)]
-            Expr::QualifiedWildcard(object_name, attached_token) => {
+            Expr::QualifiedWildcard(object_name) => {
                 self.unify_node_with_type(
                     this_expr,
                     self.scope_tracker
@@ -466,10 +466,6 @@ impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
 
             Expr::Lambda(_) => Err(TypeError::UnsupportedSqlFeature(
                 "Unsupported SQL feature: lambda functions".into(),
-            ))?,
-
-            Expr::Method(_) => Err(TypeError::UnsupportedSqlFeature(
-                "Unsupported SQL feature: expression methods".into(),
             ))?,
         }
 

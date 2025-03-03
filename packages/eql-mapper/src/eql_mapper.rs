@@ -6,10 +6,7 @@ use crate::{
     DepMut, NodeKey, Projection, ProjectionColumn, ScopeError, ScopeTracker, TableResolver,
     TypeRegistry, Value,
 };
-use sqlparser::{
-    ast::{self as ast, Statement},
-    tokenizer::Span,
-};
+use sqlparser::ast::{self as ast, Statement};
 use sqltk::{convert_control_flow, Break, Transform, Transformable, Visitable, Visitor};
 use std::{
     cell::RefCell,
@@ -439,7 +436,6 @@ impl<'ast> Transform<'ast> for EncryptedStatement<'ast> {
 
 fn make_eql_function_node(function_name: &str, arg: ast::Expr) -> ast::Expr {
     ast::Expr::Function(ast::Function {
-        uses_odbc_syntax: false,
         parameters: ast::FunctionArguments::None,
         filter: None,
         null_treatment: None,
@@ -448,7 +444,6 @@ fn make_eql_function_node(function_name: &str, arg: ast::Expr) -> ast::Expr {
         name: ast::ObjectName(vec![ast::Ident {
             value: function_name.to_string(),
             quote_style: None,
-            span: Span::empty(),
         }]),
         args: ast::FunctionArguments::List(ast::FunctionArgumentList {
             duplicate_treatment: None,
