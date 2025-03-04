@@ -618,6 +618,8 @@ where
         let plaintexts =
             bind.to_plaintext(&statement.param_columns, &statement.postgres_param_types)?;
 
+        debug!(target: MAPPER, client_id = self.context.client_id, plaintexts = ?plaintexts);
+
         let start = Instant::now();
 
         let encrypted = self

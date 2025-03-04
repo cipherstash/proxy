@@ -144,8 +144,9 @@ pub enum EncryptError {
     #[error("Column '{column}' in table '{table}' could not be encrypted. For help visit {}#encrypt-column-could-not-be-encrypted", ERROR_DOC_BASE_URL)]
     ColumnCouldNotBeEncrypted { table: String, column: String },
 
-    #[error("Expected '{expected}' columns, received '{received}'")]
-    EncryptedColumnMismatch { expected: usize, received: usize },
+    /// This should in practice be unreachable
+    #[error("Missing encrypt configuration for column type `{plaintext_type}`. For help visit {}#encrypt-missing-encrypt-configuration", ERROR_DOC_BASE_URL)]
+    MissingEncryptConfiguration { plaintext_type: String },
 
     #[error("Decrypted column could not be encoded as the expected type. For help visit {}#encrypt-plaintext-could-not-be-encoded", ERROR_DOC_BASE_URL)]
     PlaintextCouldNotBeEncoded,

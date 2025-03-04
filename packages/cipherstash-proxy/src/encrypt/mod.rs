@@ -98,26 +98,26 @@ impl Encrypt {
     ) -> Result<Vec<Option<eql::Encrypted>>, Error> {
         let mut pipeline = ReferencedPendingPipeline::new(self.cipher.clone());
 
-        // Zip the plaintexts and columns together
-        // For each plaintex/column pair, create a new PlaintextTarget
-        let received = plaintexts.len();
-
         for (idx, item) in plaintexts.into_iter().zip(columns.iter()).enumerate() {
             match item {
                 (Some(plaintext), Some(column)) => {
                     let encryptable = PlaintextTarget::new(plaintext, column.config.clone());
                     pipeline.add_with_ref::<PlaintextTarget>(encryptable, idx)?;
                 }
+                (None, Some(column)) => {
+                    // Parameter is NULL
+                    // Do nothing
+                    debug!(target: ENCRYPT, msg = "Null parameter", ?column);
+                }
+                (Some(plaintext), None) => {
+                    // Should be unreachable
+                    // Bind doesn't know what type of Plaintext to create in the first place if the column is None
+                    let plaintext_type = plaintext_type_name(plaintext);
+                    return Err(EncryptError::MissingEncryptConfiguration { plaintext_type }.into());
+                }
                 (None, None) => {
                     // Parameter is not encryptable
                     // Do nothing
-                }
-                _ => {
-                    return Err(EncryptError::EncryptedColumnMismatch {
-                        expected: columns.len(),
-                        received,
-                    }
-                    .into());
                 }
             }
         }
@@ -127,25 +127,16 @@ impl Encrypt {
             let mut result = pipeline.encrypt(None).await?;
 
             for (idx, opt) in columns.iter().enumerate() {
-                match opt {
-                    Some(col) => {
-                        let maybe_encrypted = result.remove(idx);
-                        match maybe_encrypted {
-                            Some(encrypted) => {
-                                let ct = to_eql_encrypted(encrypted, &col.identifier)?;
-                                encrypted_eql.push(Some(ct));
-                            }
-                            None => {
-                                return Err(EncryptError::ColumnCouldNotBeEncrypted {
-                                    table: col.identifier.table.to_string(),
-                                    column: col.identifier.column.to_string(),
-                                }
-                                .into());
-                            }
-                        }
+                let mut encrypted = None;
+                if let Some(col) = opt {
+                    debug!(target: ENCRYPT, column = ?col );
+
+                    if let Some(e) = result.remove(idx) {
+                        debug!(target: ENCRYPT, msg = "to_eql_encrypted");
+                        encrypted = Some(to_eql_encrypted(e, &col.identifier)?);
                     }
-                    None => encrypted_eql.push(None),
                 }
+                encrypted_eql.push(encrypted);
             }
         }
 
@@ -243,10 +234,11 @@ fn to_eql_encrypted(
     encrypted: Encrypted,
     identifier: &Identifier,
 ) -> Result<eql::Encrypted, Error> {
+    debug!(target: ENCRYPT, msg = "to_eql_encrypted", ?identifier);
     match encrypted {
         Encrypted::Record(ciphertext, terms) => {
-            debug!(target: ENCRYPT, ciphertext = ?ciphertext);
-            debug!(target: ENCRYPT, terms = ?terms);
+            debug!(target: ENCRYPT, ?ciphertext);
+            debug!(target: ENCRYPT, ?terms);
 
             struct Indexes {
                 match_index: Option<Vec<u16>>,
@@ -328,5 +320,21 @@ fn eql_encrypted_to_encrypted_record(
     match eql_encrypted {
         eql::Encrypted::Ciphertext { ciphertext, .. } => Ok(ciphertext),
         eql::Encrypted::SteVec { ste_vec_index, .. } => ste_vec_index.into_root_ciphertext(),
+    }
+}
+
+fn plaintext_type_name(pt: Plaintext) -> String {
+    match pt {
+        Plaintext::BigInt(_) => "BigInt".to_string(),
+        Plaintext::BigUInt(_) => "BigUInt".to_string(),
+        Plaintext::Boolean(_) => "Boolean".to_string(),
+        Plaintext::Decimal(_) => "Decimal".to_string(),
+        Plaintext::Float(_) => "Float".to_string(),
+        Plaintext::Int(_) => "Int".to_string(),
+        Plaintext::NaiveDate(_) => "NaiveDate".to_string(),
+        Plaintext::SmallInt(_) => "SmallInt".to_string(),
+        Plaintext::Timestamp(_) => "Timestamp".to_string(),
+        Plaintext::Utf8Str(_) => "Utf8Str".to_string(),
+        Plaintext::JsonB(_) => "JsonB".to_string(),
     }
 }
