@@ -1,5 +1,6 @@
 use crate::{
     error::{Error, MappingError},
+    log::ENCODING,
     postgresql::{format_code::FormatCode, messages::bind::BindParam},
 };
 use bigdecimal::BigDecimal;
@@ -12,6 +13,7 @@ use postgres_types::Type;
 use rust_decimal::Decimal;
 use sqlparser::ast::Value;
 use std::str::FromStr;
+use tracing::debug;
 
 pub fn bind_param_from_sql(
     param: &BindParam,
@@ -31,10 +33,15 @@ pub fn bind_param_from_sql(
 }
 
 /// Converts a SQL literal to a Plaintext value based on the column type.
+/// Returns Some(Plaintext) or None if the literal is NULL.
 /// The [Value] enum represents all the various quoted forms of literals in SQL.
 /// This function extracts the inner type and converts it to a Plaintext value.
-pub fn literal_from_sql(literal: &Value, col_type: ColumnType) -> Result<Plaintext, MappingError> {
-    match literal {
+pub fn literal_from_sql(
+    literal: &Value,
+    col_type: ColumnType,
+) -> Result<Option<Plaintext>, MappingError> {
+    debug!(target: ENCODING, ?literal, ?col_type);
+    let pt = match literal {
         // All string literal variants
         Value::SingleQuotedString(s)
         | Value::DoubleQuotedString(s)
@@ -48,31 +55,35 @@ pub fn literal_from_sql(literal: &Value, col_type: ColumnType) -> Result<Plainte
         | Value::DoubleQuotedRawStringLiteral(s)
         | Value::TripleSingleQuotedRawStringLiteral(s)
         | Value::TripleDoubleQuotedRawStringLiteral(s)
-        | Value::NationalStringLiteral(s) => text_from_sql(s, &Type::TEXT, col_type),
+        | Value::NationalStringLiteral(s) => Some(text_from_sql(s, &Type::TEXT, col_type)?),
 
         // Dollar quoted strings are a special case of string literals
-        Value::DollarQuotedString(s) => text_from_sql(&s.value, &Type::TEXT, col_type),
+        Value::DollarQuotedString(s) => Some(text_from_sql(&s.value, &Type::TEXT, col_type)?),
 
         // If a boolean was parsed directly map it to a Plaintext::Boolean
-        Value::Boolean(b) => Ok(Plaintext::new(*b)),
+        Value::Boolean(b) => Some(Plaintext::new(*b)),
 
+        // TODO: encrypted nulls
         // Null values should be mapped to a null Plaintext for the configured column type
-        Value::Null => Ok(Plaintext::null_for_column_type(col_type)),
+        // Value::Null => Ok(Plaintext::null_for_column_type(col_type)),
+        Value::Null => None,
 
         // Plaintext doesn't have a binary type, so we'll just pass through as a string
         Value::HexStringLiteral(s)
         | Value::SingleQuotedByteStringLiteral(s)
-        | Value::DoubleQuotedByteStringLiteral(s) => Ok(Plaintext::new(s.to_owned())),
+        | Value::DoubleQuotedByteStringLiteral(s) => Some(Plaintext::new(s.to_owned())),
 
         // Parsed number types should be mapped according to the postgres_type/column type
         // #[cfg(not(feature = "bigdecimal"))]
         // Value::Number(s, _) => todo!("Number parsed type not implemented"),
         // #[cfg(feature = "bigdecimal")]
-        Value::Number(d, _) => decimal_from_sql(d, col_type),
+        Value::Number(d, _) => Some(decimal_from_sql(d, col_type)?),
 
         // TODO: Not sure what the behaviour should be for these
         Value::Placeholder(_) => todo!("Placeholder parsed type not implemented"),
-    }
+    };
+
+    Ok(pt)
 }
 
 /// Converts a string value to a Plaintext value based on input postgres type and target column type.

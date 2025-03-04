@@ -161,6 +161,7 @@ impl TryFrom<DataColumn> for BytesMut {
 
 impl From<&DataColumn> for Option<eql::Encrypted> {
     fn from(col: &DataColumn) -> Self {
+        debug!(target: MAPPER, data_column = ?col);
         match col.json_bytes() {
             Some(bytes) => match serde_json::from_slice(bytes) {
                 Ok(ct) => Some(ct),

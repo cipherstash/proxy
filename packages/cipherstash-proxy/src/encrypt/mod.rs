@@ -52,47 +52,6 @@ impl Encrypt {
     ///
     pub async fn encrypt(
         &self,
-        plaintexts: Vec<Plaintext>,
-        columns: &[Column],
-    ) -> Result<Vec<eql::Encrypted>, Error> {
-        let mut pipeline = ReferencedPendingPipeline::new(self.cipher.clone());
-
-        for (idx, (plaintext, column)) in plaintexts.into_iter().zip(columns.iter()).enumerate() {
-            let encryptable = PlaintextTarget::new(plaintext, column.config.clone());
-            pipeline.add_with_ref::<PlaintextTarget>(encryptable, idx)?;
-        }
-
-        let mut encrypted_eql = vec![];
-        if !pipeline.is_empty() {
-            let mut result = pipeline.encrypt(None).await?;
-
-            for (idx, col) in columns.iter().enumerate() {
-                let maybe_encrypted = result.remove(idx);
-                match maybe_encrypted {
-                    Some(encrypted) => {
-                        let ct = to_eql_encrypted(encrypted, &col.identifier)?;
-                        encrypted_eql.push(ct);
-                    }
-                    None => {
-                        return Err(EncryptError::ColumnCouldNotBeEncrypted {
-                            table: col.identifier.table.to_string(),
-                            column: col.identifier.column.to_string(),
-                        }
-                        .into());
-                    }
-                }
-            }
-        }
-
-        Ok(encrypted_eql)
-    }
-
-    ///
-    /// Encrypt `Plaintexts` using the `Column` configuration
-    ///
-    ///
-    pub async fn encrypt_some(
-        &self,
         plaintexts: Vec<Option<Plaintext>>,
         columns: &[Option<Column>],
     ) -> Result<Vec<Option<eql::Encrypted>>, Error> {

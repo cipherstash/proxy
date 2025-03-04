@@ -27,7 +27,7 @@ fn text_to_sql(plaintext: &Plaintext) -> Result<BytesMut, Error> {
         Plaintext::SmallInt(Some(x)) => x.to_string(),
         Plaintext::Timestamp(Some(x)) => x.to_string(),
         Plaintext::JsonB(Some(x)) => x.to_string(),
-        _ => todo!(),
+        _ => "".to_string(),
     };
 
     Ok(BytesMut::from(s.as_bytes()))

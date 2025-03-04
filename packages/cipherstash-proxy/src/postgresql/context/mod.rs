@@ -64,7 +64,7 @@ pub struct Queue<T> {
 pub struct Statement {
     pub param_columns: Vec<Option<Column>>,
     pub projection_columns: Vec<Option<Column>>,
-    pub literal_columns: Vec<Column>,
+    pub literal_columns: Vec<Option<Column>>,
     pub postgres_param_types: Vec<i32>,
 }
 
@@ -249,7 +249,7 @@ impl Statement {
     pub fn new(
         param_columns: Vec<Option<Column>>,
         projection_columns: Vec<Option<Column>>,
-        literal_columns: Vec<Column>,
+        literal_columns: Vec<Option<Column>>,
         postgres_param_types: Vec<i32>,
     ) -> Statement {
         Statement {

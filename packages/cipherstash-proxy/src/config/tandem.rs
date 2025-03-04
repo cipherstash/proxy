@@ -193,6 +193,9 @@ pub struct LogConfig {
     pub context_level: LogLevel,
 
     #[serde(default = "LogConfig::default_log_level")]
+    pub encoding_level: LogLevel,
+
+    #[serde(default = "LogConfig::default_log_level")]
     pub encrypt_level: LogLevel,
 
     #[serde(default = "LogConfig::default_log_level")]
@@ -603,6 +606,7 @@ impl Default for LogConfig {
             authentication_level: LogConfig::default_log_level(),
             context_level: LogConfig::default_log_level(),
             encrypt_level: LogConfig::default_log_level(),
+            encoding_level: LogConfig::default_log_level(),
             encrypt_config_level: LogConfig::default_log_level(),
             keyset_level: LogConfig::default_log_level(),
             protocol_level: LogConfig::default_log_level(),
@@ -623,6 +627,7 @@ impl LogConfig {
             development_level: level,
             authentication_level: level,
             context_level: level,
+            encoding_level: level,
             encrypt_level: level,
             encrypt_config_level: level,
             keyset_level: level,

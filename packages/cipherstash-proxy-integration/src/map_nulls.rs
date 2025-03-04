@@ -1,8 +1,6 @@
 #[cfg(test)]
 mod tests {
-    use crate::common::{clear, connect_with_tls, id, trace, PROXY};
-    use tokio_postgres::SimpleQueryMessage::{CommandComplete, Row};
-    use tracing::info;
+    use crate::common::{connect_with_tls, id, trace, PROXY};
 
     #[tokio::test]
     async fn map_insert_null_param() {
@@ -79,26 +77,83 @@ mod tests {
         }
     }
 
+    // #[tokio::test]
+    // async fn map_insert_null_literal_simple() {
+    //     clear().await;
+
+    //     let client = connect_with_tls(PROXY).await;
+
+    //     let id = id();
+    //     let encrypted_text = "hello@cipherstash.com";
+
+    //     let sql = format!("INSERT INTO encrypted (id, encrypted_text) VALUES ({id}, NULL)");
+
+    //     client.simple_query(&sql).await.unwrap();
+
+    //     let sql = format!("SELECT id, encrypted_text FROM encrypted WHERE id = {id}");
+    //     let rows = client.simple_query(&sql).await.unwrap();
+
+    //     if let Row(r) = &rows[1] {
+    //         assert_eq!(Some("plain"), r.get(1));
+    //     } else {
+    //         panic!("Unexpected query results: {:?}", rows);
+    //     }
+    // }
+
     #[tokio::test]
     async fn map_insert_null_literal() {
-        clear().await;
+        trace();
 
         let client = connect_with_tls(PROXY).await;
 
         let id = id();
-        let encrypted_text = "hello@cipherstash.com";
+        let encrypted_text: Option<String> = None;
 
-        let sql = format!("INSERT INTO encrypted (id, encrypted_text) VALUES ({id}, NULL)");
+        let sql = "INSERT INTO encrypted (id, encrypted_text) VALUES ($1, NULL)";
+        client.query(sql, &[&id]).await.unwrap();
 
-        client.simple_query(&sql).await.unwrap();
+        let sql = "SELECT id, encrypted_text FROM encrypted WHERE id = $1";
+        let rows = client.query(sql, &[&id]).await.unwrap();
 
-        let sql = format!("SELECT id, encrypted_text FROM encrypted WHERE id = {id}");
-        let rows = client.simple_query(&sql).await.unwrap();
+        assert_eq!(rows.len(), 1);
 
-        if let Row(r) = &rows[1] {
-            assert_eq!(Some("plain"), r.get(1));
-        } else {
-            panic!("Unexpected query results: {:?}", rows);
+        for row in rows {
+            let result_id: i64 = row.get("id");
+            assert_eq!(id, result_id);
+
+            let result: Option<String> = row.get("encrypted_text");
+            assert_eq!(encrypted_text, result);
+        }
+    }
+
+    #[tokio::test]
+    async fn map_insert_null_literal_with_param() {
+        trace();
+
+        let client = connect_with_tls(PROXY).await;
+
+        let id = id();
+        let encrypted_text: Option<String> = None;
+        let encrypted_int2: i16 = 42;
+
+        let sql =
+            "INSERT INTO encrypted (id, encrypted_text, encrypted_int2) VALUES ($1, NULL, $2)";
+        client.query(sql, &[&id, &encrypted_int2]).await.unwrap();
+
+        let sql = "SELECT id, encrypted_text, encrypted_int2 FROM encrypted WHERE id = $1";
+        let rows = client.query(sql, &[&id]).await.unwrap();
+
+        assert_eq!(rows.len(), 1);
+
+        for row in rows {
+            let result_id: i64 = row.get("id");
+            assert_eq!(id, result_id);
+
+            let result_int: i16 = row.get("encrypted_int2");
+            assert_eq!(encrypted_int2, result_int);
+
+            let result: Option<String> = row.get("encrypted_text");
+            assert_eq!(encrypted_text, result);
         }
     }
 }

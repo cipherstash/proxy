@@ -24,7 +24,7 @@ use metrics::{counter, histogram};
 use std::time::Instant;
 use tokio::io::AsyncRead;
 
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 
 pub struct Backend<R>
 where
@@ -275,6 +275,8 @@ where
         let plaintexts = self.encrypt.decrypt(ciphertexts).await.inspect_err(|_| {
             counter!(DECRYPTION_ERROR_TOTAL).increment(1);
         })?;
+
+        warn!(target: MAPPER, client_id = self.context.client_id, ?plaintexts);
 
         // Avoid the iter calculation if we can
         if self.encrypt.config.prometheus_enabled() {

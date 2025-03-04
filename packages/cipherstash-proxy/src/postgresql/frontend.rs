@@ -320,7 +320,7 @@ where
     async fn encrypt_literals(
         &mut self,
         typed_statement: &TypedStatement<'_>,
-        literal_columns: &Vec<Column>,
+        literal_columns: &Vec<Option<Column>>,
     ) -> Result<Option<ast::Statement>, Error> {
         let literal_values = typed_statement.literal_values();
         let plaintexts = literals_to_plaintext(&literal_values, literal_columns)?;
@@ -341,22 +341,53 @@ where
         let duration = Instant::now().duration_since(start);
         histogram!(ENCRYPTION_DURATION_SECONDS).record(duration);
 
-        let encrypted_values = encrypted
-            .into_iter()
-            .map(|ct| to_json_literal(&ct))
-            .collect::<Result<Vec<_>, _>>()?;
+        let mut encrypted_values = vec![];
+        for encrypted in &encrypted {
+            let e = match encrypted {
+                Some(en) => Some(to_json_literal_expr(&en)?),
+                None => None,
+            };
+            encrypted_values.push(e);
+        }
+
+        debug!(
+            target: MAPPER,
+            client_id = self.context.client_id,
+            ?encrypted_values,
+        );
+
+        // It makes me uncool and unfunctional, but I think the dunb loop above has less cognitive load
+        // let encrypted_values = encrypted
+        // .into_iter()
+        // .map(|opt| match opt {
+        //     Some(en) => to_json_literal_expr(&en).map(Some).map_err(Error::from),
+        //     None => Ok(None),
+        // })
+        // .collect::<Result<Vec<Option<_>>, _>>()?;
 
         debug!(target: MAPPER,
             client_id = self.context.client_id,
             encrypted_literals = ?encrypted_values
         );
 
+        // Filter out the Null/None values
+        // We only transform the literals that have been encrypted
         let original_values_and_replacements = typed_statement
             .literals
             .iter()
-            .map(|(_, original_node)| NodeKey::new(*original_node))
             .zip(encrypted_values.into_iter())
+            .filter_map(|((_, original_node), en)| en.map(|en| (NodeKey::new(*original_node), en)))
             .collect::<HashMap<_, _>>();
+
+        debug!(target: MAPPER,
+            client_id = self.context.client_id,
+            msg = "Transforming statement",
+            ?original_values_and_replacements
+        );
+
+        if original_values_and_replacements.is_empty() {
+            return Ok(None);
+        }
 
         let transformed_statement = typed_statement
             .transform(original_values_and_replacements)
@@ -624,7 +655,7 @@ where
 
         let encrypted = self
             .encrypt
-            .encrypt_some(plaintexts, &statement.param_columns)
+            .encrypt(plaintexts, &statement.param_columns)
             .await
             .inspect_err(|_| {
                 counter!(ENCRYPTION_ERROR_TOTAL).increment(1);
@@ -742,7 +773,7 @@ where
     fn get_literal_columns(
         &self,
         typed_statement: &eql_mapper::TypedStatement<'_>,
-    ) -> Result<Vec<Column>, Error> {
+    ) -> Result<Vec<Option<Column>>, Error> {
         let mut literal_columns = vec![];
 
         for (eql_value, _) in typed_statement.literals.iter() {
@@ -756,7 +787,7 @@ where
                         identifier = ?identifier
                     );
                     let col = self.get_column(identifier)?;
-                    literal_columns.push(col);
+                    literal_columns.push(Some(col));
                 }
             }
         }
@@ -839,13 +870,13 @@ where
 
 fn literals_to_plaintext(
     literals: &Vec<&ast::Value>,
-    literal_columns: &Vec<Column>,
-) -> Result<Vec<Plaintext>, Error> {
+    literal_columns: &Vec<Option<Column>>,
+) -> Result<Vec<Option<Plaintext>>, Error> {
     let plaintexts = literals
         .iter()
         .zip(literal_columns)
-        .map(|(val, col)| {
-            literal_from_sql(val, col.cast_type()).map_err(|err| {
+        .map(|(val, col)| match col {
+            Some(col) => literal_from_sql(val, col.cast_type()).map_err(|err| {
                 debug!(
                     target: MAPPER,
                     msg = "Could not convert literal value",
@@ -854,13 +885,14 @@ fn literals_to_plaintext(
                     error = err.to_string()
                 );
                 MappingError::InvalidParameter(col.to_owned())
-            })
+            }),
+            None => Ok(None),
         })
         .collect::<Result<Vec<_>, _>>()?;
     Ok(plaintexts)
 }
 
-fn to_json_literal<T>(literal: &T) -> Result<Expr, Error>
+fn to_json_literal_expr<T>(literal: &T) -> Result<Expr, Error>
 where
     T: ?Sized + Serialize,
 {
