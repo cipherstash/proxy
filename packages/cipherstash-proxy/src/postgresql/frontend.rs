@@ -22,6 +22,7 @@ use crate::prometheus::{
     STATEMENTS_ENCRYPTED_TOTAL, STATEMENTS_PASSTHROUGH_TOTAL, STATEMENTS_TOTAL,
     STATEMENTS_UNMAPPABLE_TOTAL,
 };
+use crate::Encrypted;
 use bytes::BytesMut;
 use cipherstash_client::encryption::Plaintext;
 use eql_mapper::{self, EqlValue, NodeKey, TableColumn, TypedStatement};
@@ -271,8 +272,12 @@ where
         let portal = match self.to_encryptable_statement(&typed_statement, vec![])? {
             Some(statement) => {
                 if statement.has_literals() || typed_statement.has_nodes_to_wrap() {
-                    if let Some(transformed_statement) = self
+                    let encrypted_literals = self
                         .encrypt_literals(&typed_statement, &statement.literal_columns)
+                        .await?;
+
+                    if let Some(transformed_statement) = self
+                        .transform_statement(&typed_statement, &encrypted_literals)
                         .await?
                     {
                         debug!(target: MAPPER,
@@ -280,7 +285,7 @@ where
                             transformed_statement = ?transformed_statement,
                         );
                         query.rewrite(transformed_statement.to_string());
-                    };
+                    }
                 }
                 counter!(STATEMENTS_ENCRYPTED_TOTAL).increment(1);
                 Portal::encrypted(statement.into(), vec![])
@@ -321,8 +326,16 @@ where
         &mut self,
         typed_statement: &TypedStatement<'_>,
         literal_columns: &Vec<Option<Column>>,
-    ) -> Result<Option<ast::Statement>, Error> {
+    ) -> Result<Vec<Option<Encrypted>>, Error> {
         let literal_values = typed_statement.literal_values();
+        if literal_values.is_empty() {
+            debug!(target: MAPPER,
+                client_id = self.context.client_id,
+                msg = "No literals to encrypt"
+            );
+            return Ok(vec![]);
+        }
+
         let plaintexts = literals_to_plaintext(&literal_values, literal_columns)?;
 
         let start = Instant::now();
@@ -335,62 +348,62 @@ where
                 counter!(ENCRYPTION_ERROR_TOTAL).increment(1);
             })?;
 
+        debug!(target: MAPPER,
+            client_id = self.context.client_id,
+            ?literal_columns,
+            ?encrypted
+        );
+
         counter!(ENCRYPTION_REQUESTS_TOTAL).increment(1);
         counter!(ENCRYPTED_VALUES_TOTAL).increment(encrypted.len() as u64);
 
         let duration = Instant::now().duration_since(start);
         histogram!(ENCRYPTION_DURATION_SECONDS).record(duration);
 
-        let mut encrypted_values = vec![];
-        for encrypted in &encrypted {
+        Ok(encrypted)
+    }
+
+    ///
+    /// Transforms a typed statement
+    ///  - rewrites any encrypted literal values
+    ///  - wraps any nodes in appropriate EQL function
+    ///
+    async fn transform_statement(
+        &mut self,
+        typed_statement: &TypedStatement<'_>,
+        encrypted_literals: &Vec<Option<Encrypted>>,
+    ) -> Result<Option<ast::Statement>, Error> {
+        // Convert literals to ast Expr
+        let mut encrypted_expressions = vec![];
+        for encrypted in encrypted_literals {
             let e = match encrypted {
                 Some(en) => Some(to_json_literal_expr(&en)?),
                 None => None,
             };
-            encrypted_values.push(e);
+            encrypted_expressions.push(e);
         }
 
-        debug!(
-            target: MAPPER,
-            client_id = self.context.client_id,
-            ?encrypted_values,
-        );
-
-        // It makes me uncool and unfunctional, but I think the dunb loop above has less cognitive load
-        // let encrypted_values = encrypted
-        // .into_iter()
-        // .map(|opt| match opt {
-        //     Some(en) => to_json_literal_expr(&en).map(Some).map_err(Error::from),
-        //     None => Ok(None),
-        // })
-        // .collect::<Result<Vec<Option<_>>, _>>()?;
-
-        debug!(target: MAPPER,
-            client_id = self.context.client_id,
-            encrypted_literals = ?encrypted_values
-        );
-
-        // Filter out the Null/None values
-        // We only transform the literals that have been encrypted
-        let original_values_and_replacements = typed_statement
+        // Map encrypted literal values back to the Expression nodes.
+        // Filter out the Null/None values to only include literals that have been encrypted
+        let encrypted_nodes = typed_statement
             .literals
             .iter()
-            .zip(encrypted_values.into_iter())
+            .zip(encrypted_expressions.into_iter())
             .filter_map(|((_, original_node), en)| en.map(|en| (NodeKey::new(*original_node), en)))
             .collect::<HashMap<_, _>>();
 
         debug!(target: MAPPER,
             client_id = self.context.client_id,
-            msg = "Transforming statement",
-            ?original_values_and_replacements
+            nodes_to_wrap = typed_statement.nodes_to_wrap.len(),
+            literals = encrypted_nodes.len(),
         );
 
-        if original_values_and_replacements.is_empty() {
+        if !typed_statement.has_nodes_to_wrap() && encrypted_nodes.is_empty() {
             return Ok(None);
         }
 
         let transformed_statement = typed_statement
-            .transform(original_values_and_replacements)
+            .transform(encrypted_nodes)
             .map_err(|e| MappingError::StatementCouldNotBeTransformed(e.to_string()))?;
 
         Ok(Some(transformed_statement))
@@ -463,8 +476,12 @@ where
         match self.to_encryptable_statement(&typed_statement, param_types)? {
             Some(statement) => {
                 if statement.has_literals() || typed_statement.has_nodes_to_wrap() {
-                    if let Some(transformed_statement) = self
+                    let encrypted_literals = self
                         .encrypt_literals(&typed_statement, &statement.literal_columns)
+                        .await?;
+
+                    if let Some(transformed_statement) = self
+                        .transform_statement(&typed_statement, &encrypted_literals)
                         .await?
                     {
                         debug!(target: MAPPER,
@@ -473,7 +490,7 @@ where
                         );
 
                         message.rewrite_statement(transformed_statement.to_string());
-                    };
+                    }
                 }
 
                 counter!(STATEMENTS_ENCRYPTED_TOTAL).increment(1);

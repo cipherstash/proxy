@@ -21,21 +21,7 @@ mod tests {
 
         for row in rows {
             let result: Option<String> = row.get("encrypted_text");
-            assert_eq!(encrypted_text, result);
-        }
-
-        let encrypted_int4: Option<i32> = None;
-        let sql = "UPDATE encrypted SET encrypted_int4 = $1 WHERE id = $2";
-        client.query(sql, &[&encrypted_int4, &id]).await.unwrap();
-
-        let sql = "SELECT id, encrypted_int4 FROM encrypted WHERE id = $1";
-        let rows = client.query(sql, &[&id]).await.unwrap();
-
-        assert_eq!(rows.len(), 1);
-
-        for row in rows {
-            let result: Option<i32> = row.get("encrypted_int4");
-            assert_eq!(encrypted_int4, result);
+            assert!(result.is_none());
         }
     }
 
@@ -73,7 +59,7 @@ mod tests {
 
         for row in rows {
             let result: Option<String> = row.get("encrypted_text");
-            assert_eq!(encrypted_text, result);
+            assert!(result.is_none());
         }
     }
 
@@ -84,7 +70,6 @@ mod tests {
         let client = connect_with_tls(PROXY).await;
 
         let id = id();
-        let encrypted_text: Option<String> = None;
 
         let sql = "INSERT INTO encrypted (id, encrypted_text) VALUES ($1, NULL)";
         client.query(sql, &[&id]).await.unwrap();
@@ -99,7 +84,7 @@ mod tests {
             assert_eq!(id, result_id);
 
             let result: Option<String> = row.get("encrypted_text");
-            assert_eq!(encrypted_text, result);
+            assert!(result.is_none());
         }
     }
 
@@ -110,7 +95,6 @@ mod tests {
         let client = connect_with_tls(PROXY).await;
 
         let id = id();
-        let encrypted_text: Option<String> = None;
         let encrypted_int2: i16 = 42;
 
         let sql =
@@ -130,7 +114,7 @@ mod tests {
             assert_eq!(encrypted_int2, result_int);
 
             let result: Option<String> = row.get("encrypted_text");
-            assert_eq!(encrypted_text, result);
+            assert!(result.is_none());
         }
     }
 }

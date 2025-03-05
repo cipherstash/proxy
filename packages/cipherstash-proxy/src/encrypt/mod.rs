@@ -2,7 +2,7 @@ use crate::{
     config::{EncryptConfigManager, SchemaManager, TandemConfig},
     eql,
     error::{EncryptError, Error},
-    log::{DEVELOPMENT, ENCRYPT},
+    log::ENCRYPT,
     postgresql::Column,
     Identifier,
 };
@@ -88,10 +88,7 @@ impl Encrypt {
             for (idx, opt) in columns.iter().enumerate() {
                 let mut encrypted = None;
                 if let Some(col) = opt {
-                    debug!(target: ENCRYPT, column = ?col );
-
                     if let Some(e) = result.remove(idx) {
-                        debug!(target: ENCRYPT, msg = "to_eql_encrypted");
                         encrypted = Some(to_eql_encrypted(e, &col.identifier)?);
                     }
                 }
@@ -179,11 +176,11 @@ async fn init_cipher(config: &TandemConfig) -> Result<ScopedCipher, Error> {
 
     match ScopedCipher::init(Arc::new(zerokms_client), config.encrypt.dataset_id).await {
         Ok(cipher) => {
-            debug!(target: DEVELOPMENT, msg = "Initialized ZeroKMS ScopedCipher");
+            debug!(target: ENCRYPT, msg = "Initialized ZeroKMS ScopedCipher");
             Ok(cipher)
         }
         Err(err) => {
-            debug!(target: DEVELOPMENT, msg =  "Error initializing ZeroKMS ScopedCipher", error = err.to_string());
+            debug!(target: ENCRYPT, msg =  "Error initializing ZeroKMS ScopedCipher", error = err.to_string());
             Err(err.into())
         }
     }
@@ -193,12 +190,9 @@ fn to_eql_encrypted(
     encrypted: Encrypted,
     identifier: &Identifier,
 ) -> Result<eql::Encrypted, Error> {
-    debug!(target: ENCRYPT, msg = "to_eql_encrypted", ?identifier);
+    debug!(target: ENCRYPT, msg = "Encrypted to EQL", ?identifier);
     match encrypted {
         Encrypted::Record(ciphertext, terms) => {
-            debug!(target: ENCRYPT, ?ciphertext);
-            debug!(target: ENCRYPT, ?terms);
-
             struct Indexes {
                 match_index: Option<Vec<u16>>,
                 ore_index: Option<Vec<String>>,
