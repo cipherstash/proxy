@@ -30,6 +30,8 @@ services:
     ports:
       - 6432:6432
       - 9930:9930
+    env_file:
+      - .env.proxy.docker
     environment:
       - CS_DATABASE__NAME=cipherstash
       - CS_DATABASE__USERNAME=cipherstash

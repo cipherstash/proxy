@@ -14,3 +14,6 @@ rust-toolchain.toml
 # release artifacts
 /cipherstash-proxy
 /cipherstash-eql.sql
+
+# credentials for local dev
+.env.proxy.docker
