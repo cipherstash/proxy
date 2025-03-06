@@ -382,6 +382,7 @@ mod tests {
             VALUES ($1, $2), ($3, $4), ($5, $6)
         ";
 
+        // INSERT OUT OF ORDER
         client
             .query(sql, &[&id(), &n_two, &id(), &n_one, &id(), &n_three])
             .await
