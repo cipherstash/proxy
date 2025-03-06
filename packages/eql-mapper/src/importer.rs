@@ -1,9 +1,3 @@
-use std::{cell::RefCell, fmt::Debug, marker::PhantomData, ops::ControlFlow, rc::Rc, sync::Arc};
-
-use sqlparser::ast::{Cte, Ident, Insert, TableAlias, TableFactor};
-use sqltk::{Break, Visitable, Visitor};
-use tracing::info;
-
 use crate::{
     inference::{
         unifier::{Constructor, Type},
@@ -13,6 +7,9 @@ use crate::{
     unifier::{Projection, ProjectionColumns},
     Relation, ScopeError, ScopeTracker,
 };
+use sqlparser::ast::{Cte, Ident, Insert, TableAlias, TableFactor};
+use sqltk::{Break, Visitable, Visitor};
+use std::{cell::RefCell, fmt::Debug, marker::PhantomData, ops::ControlFlow, rc::Rc, sync::Arc};
 
 /// `Importer` is a [`Visitor`] implementation that brings projections (from "FROM" clauses and subqueries) into lexical scope.
 #[derive(Debug)]
@@ -60,8 +57,6 @@ impl<'ast> Importer<'ast> {
     }
 
     fn update_scope_for_cte(&mut self, cte: &'ast Cte) -> Result<(), ImportError> {
-        info!("update_scope_for_cte");
-
         let Cte {
             alias: TableAlias {
                 name: alias,
@@ -323,14 +318,12 @@ impl<'ast> Visitor<'ast> for Importer<'ast> {
 
     fn exit<N: Visitable>(&mut self, node: &'ast N) -> ControlFlow<Break<Self::Error>> {
         if let Some(cte) = node.downcast_ref::<Cte>() {
-            // info!("CTE {}", cte);
             if let Err(err) = self.update_scope_for_cte(cte) {
                 return ControlFlow::Break(Break::Err(err));
             }
         };
 
         if let Some(table_factor) = node.downcast_ref::<TableFactor>() {
-            // info!("TableFactor {}", table_factor);
             if let Err(err) = self.update_scope_for_table_factor(table_factor) {
                 return ControlFlow::Break(Break::Err(err));
             }

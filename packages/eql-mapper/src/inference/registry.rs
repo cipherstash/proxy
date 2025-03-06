@@ -85,6 +85,7 @@ pub(crate) mod test_util {
     };
     use sqltk::{Break, Visitable, Visitor};
     use std::{convert::Infallible, fmt::Debug, ops::ControlFlow};
+    use tracing::error;
 
     use super::{NodeKey, TypeRegistry};
 
@@ -97,7 +98,7 @@ pub(crate) mod test_util {
         pub(crate) fn dump_node<N: Display + Visitable + Debug>(&self, node: &N) {
             let key = NodeKey::new_from_visitable(node);
             if let Some(ty) = self.node_types.get(&key) {
-                eprintln!(
+                error!(
                     "TYPE<\nast: {}\nsyn: {}\nty: {}\n>",
                     std::any::type_name::<N>(),
                     node,
