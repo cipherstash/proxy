@@ -1,6 +1,25 @@
-[![Docker Pulls](https://img.shields.io/docker/pulls/cipherstash/proxy.svg)](https://hub.docker.com/r/cipherstash/proxy/tags)
+<h1 align="center">
+  <img alt="CipherStash Logo" loading="lazy" width="200" height="60" decoding="async" data-nimg="1"   style="color:transparent" src="https://cipherstash.com/assets/cs-github.png">
+  </br>
 
-# CipherStash Proxy
+  Proxy</h1>
+<p align="center">
+  Implement robust data security without sacrificing performance or usability
+  <br/>
+  <div align="center" style="display: flex; justify-content: center; gap: 10px;">
+  <a href="https://cipherstash.com">
+    <img alt="" src="https://img.shields.io/badge/built_by-cipherstash-5532A6">
+  </a>
+  <a href="https://hub.docker.com/r/cipherstash/proxy">
+    <img alt="Docker Pulls" src="https://img.shields.io/docker/pulls/cipherstash/proxy">
+  </a>
+  </div>
+</p>
+<br/>
+
+<!-- start -->
+
+# What's CipherStash Proxy?
 
 CipherStash Proxy provides a transparent proxy to your existing postgres database, handling the complexity of encrypting and decrypting your data.
 CipherStash Proxy keeps your sensitive data in PostgreSQL encrypted and searchable, without changing your SQL queries.
