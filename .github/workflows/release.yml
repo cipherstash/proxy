@@ -3,6 +3,13 @@ on:
   push:
     branches:
       - main
+  pull_request:
+    branches:
+      - main
+    paths:
+      - .github/workflows/release.yml
+  workflow_dispatch:
+
 jobs:
   build:
     name: 🏗️ Build binaries + Docker images
@@ -11,7 +18,7 @@ jobs:
       matrix:
         build:
           #- { os: buildjet-16vcpu-ubuntu-2204, arch: linux/amd64, cache-provider: buildjet }
-          - { os: linux-arm64,                 arch: linux/arm64, cache-provider: github }
+          - { os: linux-arm64-public,          arch: linux/arm64, cache-provider: github }
     runs-on: ${{matrix.build.os}}
     steps:
       - uses: actions/checkout@v4
@@ -31,7 +38,8 @@ jobs:
         with:
           name: cipherstash-proxy-${{matrix.build.arch == 'linux/amd64' && 'linux_amd64' || 'linux_arm64'}}
           path: cipherstash-proxy
-      - env:
+      - if: github.event_name != 'pull_request' && github.event_name != 'push'
+        env:
           DOCKER_HUB_USERNAME: ${{ secrets.DOCKER_HUB_USERNAME }}
           DOCKER_HUB_PERSONAL_ACCESS_TOKEN: ${{ secrets.DOCKER_HUB_PERSONAL_ACCESS_TOKEN }}
         run: |
