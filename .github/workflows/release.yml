@@ -11,7 +11,7 @@ jobs:
       matrix:
         build:
           #- { os: buildjet-16vcpu-ubuntu-2204, arch: linux/amd64, cache-provider: buildjet }
-          - { os: linux-arm64,                 arch: linux/arm64, cache-provider: github }
+          - { os: linux-arm64-public,          arch: linux/arm64, cache-provider: github }
     runs-on: ${{matrix.build.os}}
     steps:
       - uses: actions/checkout@v4
