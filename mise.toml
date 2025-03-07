@@ -33,7 +33,7 @@ DOCKER_CLI_HINTS = "false" # Please don't show us What's Next.
 [tasks.proxy]
 alias = 'p'
 description = "Run the proxy (with `cargo run`)"
-run = 'pwd && env | grep CS_ && echo cargo run {{option(name="extra-args",default="")}} | bash'
+run = 'pwd && env | grep CS_ && cargo run {{option(name="extra-args",default="")}}'
 
 [tasks."proxy:kill"]
 alias = 'k'
@@ -71,6 +71,20 @@ cp {{config_root}}/target/{{ target }}/release/cipherstash-proxy {{config_root}}
 # build a new container
 mise run build:docker --platform {{docker_platform}}
 
+# if [[ "{{arg(name="service",default="proxy")}}" =~ "proxy-tls" ]]; then
+#   if [ -z "${CS_TLS__CERTIFICATE}" ]; then
+#     echo "error: CS_TLS__CERTIFICATE is not set, and you are trying to bring up the proxy-tls container"
+#   fi
+#   if [ -z "${CS_TLS__PRIVATE_KEY}" ]; then
+#     echo "error: CS_TLS__PRIVATE_KEY is not set, and you are trying to bring up the proxy-tls container"
+#   fi
+#   if [ -z "${CS_TLS__TYPE}" ]; then
+#     echo "error: CS_TLS__TYPE is not set (either 'Pem' or 'Path' required), and you are trying to bring up the proxy-tls container"
+#   fi
+#   if [ -z "${CS_TLS__CERTIFICATE}" ] || [ -z "${CS_TLS__CERTIFICATE}" ] || [ -z "${CS_TLS__TYPE}" ];; then
+#     exit 67
+#   fi
+# fi
 
 # Make the default invocation with `mise run proxy:up` work.
 # The default mise environment configuration works for Proxy running as a process, connecting via a port forward.
@@ -134,13 +148,6 @@ alias = 'li'
 description = "Runs test/s"
 run = """
 cargo nextest run --no-fail-fast --nocapture -p cipherstash-proxy-integration
-"""
-
-[tasks."test:local:mapper"]
-alias = 'lm'
-description = "Runs test/s"
-run = """
-cargo nextest run --no-fail-fast --nocapture -p eql-mapper
 """
 
 [tasks."test:unit"]

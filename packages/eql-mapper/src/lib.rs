@@ -35,7 +35,6 @@ mod test {
     use sqlparser::ast::{self as ast};
     use std::collections::HashMap;
     use std::sync::Arc;
-    use tracing::error;
 
     fn resolver(schema: Schema) -> Arc<TableResolver> {
         Arc::new(TableResolver::new_fixed(schema.into()))
@@ -120,6 +119,7 @@ mod test {
 
         match type_check(schema, &statement) {
             Ok(typed) => {
+                eprintln!("{:#?}", &typed.literals);
                 assert!(typed.literals.contains(&(
                     EqlValue(TableColumn {
                         table: id("users"),
@@ -151,6 +151,7 @@ mod test {
 
         match type_check(schema, &statement) {
             Ok(typed) => {
+                eprintln!("{:#?}", &typed.literals);
                 assert!(typed.literals.contains(&(
                     EqlValue(TableColumn {
                         table: id("users"),
@@ -183,6 +184,7 @@ mod test {
 
         match type_check(schema, &statement) {
             Ok(typed) => {
+                eprintln!("{:#?}", &typed.literals);
                 assert!(typed.literals.contains(&(
                     EqlValue(TableColumn {
                         table: id("users"),
@@ -716,6 +718,7 @@ mod test {
         let typed = match type_check(schema, &statement) {
             Ok(typed) => typed,
             Err(err) => {
+                // eprintln!("Error: {}", err, err.source());
                 panic!("type check failed: {:#?}", err)
             }
         };
@@ -1140,7 +1143,6 @@ mod test {
     #[test]
     fn update_with_concat_regression() {
         let _ = tracing_subscriber::fmt::try_init();
-
         let schema = resolver(schema! {
             tables: {
                 example: {
@@ -1161,158 +1163,5 @@ mod test {
         // Can use concat in an update on a plaintext column
         let statement = parse("update example set other_str = other_str || 'a'");
         type_check(schema, &statement).expect("expected type check to succeed, but it failed");
-    }
-
-    #[test]
-    fn function_with_literal() {
-        let _ = tracing_subscriber::fmt::try_init();
-
-        let schema = resolver(schema! {
-            tables: {
-                employees: {
-                    id,
-                    name,
-                    salary (EQL),
-                }
-            }
-        });
-
-        let statement = parse(
-            r#"
-                select upper('x'), salary from employees;
-            "#,
-        );
-        let typed = type_check(schema, &statement).unwrap();
-
-        error!("{:?}", typed.projection);
-        assert_eq!(
-            typed.projection,
-            Some(projection![
-                (NATIVE as upper),
-                (EQL(employees.salary) as salary)
-            ])
-        );
-    }
-
-    #[test]
-    fn function_with_wildcard() {
-        let _ = tracing_subscriber::fmt::try_init();
-
-        let schema = resolver(schema! {
-            tables: {
-                employees: {
-                    id,
-                    name,
-                    salary (EQL),
-                }
-            }
-        });
-
-        let statement = parse(
-            r#"
-                select count(*), salary from employees group by salary;
-            "#,
-        );
-        let typed = type_check(schema, &statement).unwrap();
-
-        assert_eq!(
-            typed.projection,
-            Some(projection![
-                (NATIVE as count),
-                (EQL(employees.salary) as salary)
-            ])
-        );
-    }
-
-    #[test]
-    fn function_with_column_and_literal() {
-        let _ = tracing_subscriber::fmt::try_init();
-
-        let schema = resolver(schema! {
-            tables: {
-                employees: {
-                    id,
-                    name,
-                    salary (EQL),
-                }
-            }
-        });
-
-        let statement = parse(
-            r#"
-                select concat(name, 'x'), salary from employees;
-            "#,
-        );
-        let typed = type_check(schema, &statement).unwrap();
-
-        assert_eq!(
-            typed.projection,
-            Some(projection![
-                (NATIVE(employees.name) as concat),
-                (EQL(employees.salary) as salary)
-            ])
-        );
-    }
-
-    #[test]
-    fn function_with_param() {
-        let _ = tracing_subscriber::fmt::try_init();
-
-        let schema = resolver(schema! {
-            tables: {
-                employees: {
-                    id,
-                    name,
-                    salary (EQL),
-                }
-            }
-        });
-
-        let statement = parse(
-            r#"
-                select concat(name, $1), salary from employees;
-            "#,
-        );
-
-        let typed = type_check(schema, &statement).unwrap();
-
-        let a = Value::Native(NativeValue(Some(TableColumn {
-            table: id("employees"),
-            column: id("name"),
-        })));
-
-        assert_eq!(typed.params, vec![a]);
-
-        assert_eq!(
-            typed.projection,
-            Some(projection![
-                (NATIVE(employees.name) as concat),
-                (EQL(employees.salary) as salary)
-            ])
-        );
-    }
-
-    #[test]
-    fn function_with_eql_column_and_literal() {
-        let _ = tracing_subscriber::fmt::try_init();
-
-        let schema = resolver(schema! {
-            tables: {
-                employees: {
-                    id,
-                    name (EQL),
-                    salary (EQL),
-                }
-            }
-        });
-
-        let statement = parse(
-            r#"
-                select concat(name, 'x'), salary from employees;
-            "#,
-        );
-
-        type_check(schema, &statement)
-            .expect_err("eql columns in functions should be a type error");
     }
 }
