@@ -424,3 +424,31 @@ If the proxy is running on a host other than localhost, access on that host.
 ### Developing for Proxy
 
 Check out the [Proxy development guide](./DEVELOPMENT.md).
+
+
+
+## Items of Interest
+
+### NULL Value Encryption
+
+Cipherstash Proxy currently stores `NULL` values as PostgreSQL `NULL` values.
+Normal PostgreSQL column constraints still apply.
+
+A column defined as `NOT NULL` will enforce the constraint and prevent `NULL` values being stored.
+
+Encrypting `NULL` values is on the roadmap, please contact [Cipherstash Support](https://cipherstash.com/support).
+
+### Order Revealing Encryption (ORE) and NULL values
+
+Normal PostgreSQL ordering applies to order operations using ORE indexes and columns with `NULL` values.
+
+The `NULLS FIRST` and `NULLS LAST` options can be used to determine whether nulls appear before or after non-null values in the sort ordering.
+By default, null values sort as if larger than any non-null value; that is, NULLS FIRST is the default for DESC order, and NULLS LAST otherwise.
+
+```
+ORDER BY encrypted_text [NULLS {FIRST | LAST}]
+```
+See [Sorting Rows (ORDER BY) ](https://www.postgresql.org/docs/current/queries-order.html) for more details.
+
+In a `WHERE CLAUSE` ORE columns follow other PostgreSQL operator and `NULL` values are excluded from comparison.
+
