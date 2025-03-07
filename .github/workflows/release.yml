@@ -3,6 +3,13 @@ on:
   push:
     branches:
       - main
+  pull_request:
+    branches:
+      - main
+    paths:
+      - .github/workflows/release.yml
+  workflow_dispatch:
+
 jobs:
   build:
     name: 🏗️ Build binaries + Docker images
@@ -31,7 +38,8 @@ jobs:
         with:
           name: cipherstash-proxy-${{matrix.build.arch == 'linux/amd64' && 'linux_amd64' || 'linux_arm64'}}
           path: cipherstash-proxy
-      - env:
+      - if: github.event_name != 'pull_request' && github.event_name != 'push'
+        env:
           DOCKER_HUB_USERNAME: ${{ secrets.DOCKER_HUB_USERNAME }}
           DOCKER_HUB_PERSONAL_ACCESS_TOKEN: ${{ secrets.DOCKER_HUB_PERSONAL_ACCESS_TOKEN }}
         run: |
