@@ -73,10 +73,43 @@ impl<'ast> InferType<'ast, Function> for TypeInferencer<'ast> {
                 }
             }
         } else {
-            // All other functions:
-            // 1. no constraints are imposed on their arguments (they can be any type) (TODO: do we need a "do not care" type)
-            // 2. the return type is always native.
+            // All other functions: resolve to native
+            // EQL values will be rejected in function calls
             self.unify_node_with_type(function, Type::any_native())?;
+
+            match args {
+                // Function called without any arguments.
+                // Used for functions like `CURRENT_TIMESTAMP` that do not require parentheses ()
+                // This is not the same as a function that has zero arguments (which would be an empty arg list)
+                FunctionArguments::None => {}
+
+                FunctionArguments::Subquery(query) => {
+                    // The query must return a single column projection which has the same type as the result of the function
+                    self.unify_node_with_type(
+                        &**query,
+                        Type::projection(&[(self.get_type(function), None)]),
+                    )?;
+                }
+
+                FunctionArguments::List(args_list) => {
+                    self.unify_node_with_type(function, Type::any_native())?;
+
+                    for arg in &args_list.args {
+                        match arg {
+                            FunctionArg::Named { arg, .. } | FunctionArg::Unnamed(arg) => match arg
+                            {
+                                FunctionArgExpr::Expr(expr) => {
+                                    self.unify_node_with_type(expr, Type::any_native())?;
+                                }
+                                // Aggregate functions like COUNT(table.*)
+                                FunctionArgExpr::QualifiedWildcard(_) => {}
+                                // Aggregate functions like COUNT(*)
+                                FunctionArgExpr::Wildcard => {}
+                            },
+                        }
+                    }
+                }
+            }
         }
 
         Ok(())
