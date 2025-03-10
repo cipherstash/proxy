@@ -1,18 +1,24 @@
 <h1 align="center">
-  <img alt="CipherStash Logo" loading="lazy" width="200" height="60" decoding="async" data-nimg="1"   style="color:transparent" src="https://cipherstash.com/assets/cs-github.png">
+  <img alt="CipherStash Logo" loading="lazy" width="128" height="128" decoding="async" data-nimg="1"   style="color:transparent" src="https://cipherstash.com/assets/cs-github.png">
   </br>
-
-  Proxy</h1>
+  Proxy
+</h1>
 <p align="center">
   Implement robust data security without sacrificing performance or usability
   <br/>
-  <div align="center" style="display: flex; justify-content: center; gap: 10px;">
-  <a href="https://cipherstash.com">
-    <img alt="" src="https://img.shields.io/badge/built_by-cipherstash-5532A6">
-  </a>
-  <a href="https://hub.docker.com/r/cipherstash/proxy">
-    <img alt="Docker Pulls" src="https://img.shields.io/docker/pulls/cipherstash/proxy">
-  </a>
+  <div align="center" style="display: flex; justify-content: center; gap: 1rem;">
+    <a href="https://cipherstash.com">
+      <img
+        src="https://raw.githubusercontent.com/cipherstash/meta/refs/heads/main/csbadge.svg"
+        alt="Built by CipherStash"
+      />
+    </a>
+    <a href="https://hub.docker.com/r/cipherstash/proxy">
+      <img
+        alt="Docker Pulls"
+        src="https://img.shields.io/docker/pulls/cipherstash/proxy?style=for-the-badge&labelColor=000000"
+      />
+    </a>
   </div>
 </p>
 <br/>
