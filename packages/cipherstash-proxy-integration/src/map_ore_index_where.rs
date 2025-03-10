@@ -64,14 +64,9 @@ mod tests {
                 .expect("insert failed");
         }
 
-        /* Currently, the `<` operator returns null rows when they shouldn't
-         * TODO: uncomment this when the operator issue is addressed
+        // NULL record
         let sql = format!("INSERT INTO encrypted (id, {col_name}) VALUES ($1, null)");
-        client
-            .query(&sql, &[&id()])
-            .await
-            .expect("insert failed");
-         */
+        client.query(&sql, &[&id()]).await.expect("insert failed");
 
         // GT: given [1, 3], `> 1` returns [3]
         let sql = format!("SELECT {col_name} FROM encrypted WHERE {col_name} > $1");
