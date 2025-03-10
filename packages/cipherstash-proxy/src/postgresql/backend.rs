@@ -234,7 +234,7 @@ where
 
         let portal = self.context.get_portal_from_execute();
         let portal = match portal.as_deref() {
-            Some(Portal::Encrypted(portal)) => portal,
+            Some(Portal::Encrypted { .. }) | Some(Portal::EncryptedText) => portal.unwrap(),
             _ => {
                 debug!(target: MAPPER, client_id = self.context.client_id, msg = "Passthrough portal");
                 if !self.buffer.is_empty() {
@@ -381,10 +381,12 @@ where
     async fn data_row_handler(&mut self, bytes: &BytesMut) -> Result<bool, Error> {
         counter!(ROWS_TOTAL).increment(1);
         match self.context.get_portal_from_execute().as_deref() {
-            Some(Portal::Encrypted(portal)) => {
-                debug!(target: MAPPER, client_id = self.context.client_id, portal = ?portal);
+            Some(Portal::Encrypted { .. }) | Some(Portal::EncryptedText) => {
+                debug!(target: MAPPER, client_id = self.context.client_id, msg = "Encrypted");
+
                 let data_row = DataRow::try_from(bytes)?;
                 self.buffer(data_row).await?;
+
                 counter!(ROWS_ENCRYPTED_TOTAL).increment(1);
                 Ok(true)
             }

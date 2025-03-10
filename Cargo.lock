@@ -714,6 +714,7 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "cipherstash-proxy",
+ "fake 4.0.0",
  "rand 0.9.0",
  "recipher",
  "rustls",
@@ -1123,6 +1124,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "dummy"
+version = "0.9.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "abcba80bdf851db5616e27ff869399468e2d339d7c6480f5887681e6bdfc2186"
+dependencies = [
+ "darling",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.98",
+]
+
+[[package]]
 name = "dunce"
 version = "1.0.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1183,9 +1196,20 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2d391ba4af7f1d93f01fcf7b2f29e2bc9348e109dfdbf4dcbdc51dfa38dab0b6"
 dependencies = [
  "deunicode",
- "dummy",
+ "dummy 0.8.0",
  "rand 0.8.5",
  "uuid",
+]
+
+[[package]]
+name = "fake"
+version = "4.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "206294f947d314ea224901e0b409c25465d1014ea0c3af27baaec861061a0426"
+dependencies = [
+ "deunicode",
+ "dummy 0.9.2",
+ "rand 0.9.0",
 ]
 
 [[package]]
@@ -4636,7 +4660,7 @@ dependencies = [
  "async-trait",
  "base64",
  "cipherstash-config",
- "fake",
+ "fake 2.10.0",
  "opaque-debug",
  "rand 0.8.5",
  "serde",
