@@ -244,72 +244,96 @@ where
     async fn query_handler(&mut self, bytes: &BytesMut) -> Result<Option<BytesMut>, Error> {
         let mut query = Query::try_from(bytes)?;
 
-        let statement = self.parse_statement(&query.statement)?;
-        self.check_for_schema_change(&statement);
+        // Simple Query may contain many statements
+        let parsed_statements = self.parse_statements(&query.statement)?;
+        let mut transformed_statements = vec![];
 
-        if !eql_mapper::requires_type_check(&statement) {
-            counter!(STATEMENTS_PASSTHROUGH_TOTAL).increment(1);
-            return Ok(None);
-        }
+        debug!(target: MAPPER,
+            client_id = self.context.client_id,
+            statements = parsed_statements.len(),
+        );
 
-        let typed_statement = match self.type_check(&statement) {
-            Ok(ts) => ts,
-            Err(err) => {
-                warn!(
-                    client_id = self.context.client_id,
-                    msg = "Unmappable statement",
-                    mapping_errors_enabled = self.encrypt.config.mapping_errors_enabled(),
-                    error = err.to_string(),
-                );
-                if self.encrypt.config.mapping_errors_enabled() {
-                    return Err(err);
-                } else {
-                    return Ok(None);
-                };
-            }
-        };
+        let mut portal = Portal::passthrough();
+        let mut encrypted = false;
 
-        let portal = match self.to_encryptable_statement(&typed_statement, vec![])? {
-            Some(statement) => {
-                if statement.has_literals() || typed_statement.has_nodes_to_wrap() {
-                    let encrypted_literals = self
-                        .encrypt_literals(&typed_statement, &statement.literal_columns)
-                        .await?;
+        for statement in parsed_statements {
+            self.check_for_schema_change(&statement);
 
-                    if let Some(transformed_statement) = self
-                        .transform_statement(&typed_statement, &encrypted_literals)
-                        .await?
-                    {
-                        debug!(target: MAPPER,
-                            client_id = self.context.client_id,
-                            transformed_statement = ?transformed_statement,
-                        );
-                        query.rewrite(transformed_statement.to_string());
-                    }
-                }
-                counter!(STATEMENTS_ENCRYPTED_TOTAL).increment(1);
-                Portal::encrypted(statement.into(), vec![])
-            }
-            None => {
-                debug!(target: MAPPER,
-                    client_id = self.context.client_id,
-                    msg = "Passthrough Query"
-                );
+            if !eql_mapper::requires_type_check(&statement) {
                 counter!(STATEMENTS_PASSTHROUGH_TOTAL).increment(1);
-                Portal::passthrough()
+                continue;
             }
-        };
+
+            let typed_statement = match self.type_check(&statement) {
+                Ok(ts) => ts,
+                Err(err) => {
+                    if self.encrypt.config.mapping_errors_enabled() {
+                        return Err(err);
+                    } else {
+                        return Ok(None);
+                    };
+                }
+            };
+
+            match self.to_encryptable_statement(&typed_statement, vec![])? {
+                Some(statement) => {
+                    if statement.has_literals() || typed_statement.has_nodes_to_wrap() {
+                        let encrypted_literals = self
+                            .encrypt_literals(&typed_statement, &statement.literal_columns)
+                            .await?;
+
+                        if let Some(transformed_statement) = self
+                            .transform_statement(&typed_statement, &encrypted_literals)
+                            .await?
+                        {
+                            debug!(target: MAPPER,
+                                client_id = self.context.client_id,
+                                transformed_statement = ?transformed_statement,
+                            );
+
+                            transformed_statements.push(transformed_statement);
+                            encrypted = true;
+                        }
+                    }
+                    debug!(target: MAPPER,
+                        client_id = self.context.client_id,
+                        msg = "Encrypted Statement"
+                    );
+                    counter!(STATEMENTS_ENCRYPTED_TOTAL).increment(1);
+
+                    // Set Encrypted portal
+                    portal = Portal::encrypted_text();
+                }
+                None => {
+                    debug!(target: MAPPER,
+                        client_id = self.context.client_id,
+                        msg = "Passthrough Statement"
+                    );
+                    counter!(STATEMENTS_PASSTHROUGH_TOTAL).increment(1);
+                    transformed_statements.push(statement);
+                }
+            };
+        }
 
         self.context.add_portal(Name::unnamed(), portal);
         self.context.set_execute(Name::unnamed());
 
-        if query.requires_rewrite() {
+        if encrypted {
+            let transformed_statement = transformed_statements
+                .iter()
+                .map(|s| s.to_string())
+                .collect::<Vec<_>>()
+                .join(";");
+
+            query.rewrite(transformed_statement.to_string());
+
             let bytes = BytesMut::try_from(query)?;
             debug!(
                 target: MAPPER,
                 client_id = self.context.client_id,
                 msg = "Rewrite Query",
-                bytes = ?bytes
+                transformed_statement = transformed_statement.to_string(),
+                bytes = ?bytes,
             );
             Ok(Some(bytes))
         } else {
@@ -454,13 +478,6 @@ where
         let typed_statement = match self.type_check(&statement) {
             Ok(ts) => ts,
             Err(err) => {
-                warn!(
-                    client_id = self.context.client_id,
-                    msg = "Unmappable statement",
-                    mapping_errors_enabled = self.encrypt.config.mapping_errors_enabled(),
-                    error = err.to_string(),
-                );
-
                 if self.encrypt.config.mapping_errors_enabled() {
                     return Err(err);
                 } else {
@@ -536,6 +553,24 @@ where
         );
 
         counter!(STATEMENTS_TOTAL).increment(1);
+
+        Ok(statement)
+    }
+
+    ///
+    /// Parse a SQL String potentially containing multiple statements into parsed SqlParser AST
+    ///
+    fn parse_statements(&mut self, statement: &str) -> Result<Vec<ast::Statement>, Error> {
+        let statement = Parser::new(&DIALECT)
+            .try_with_sql(statement)?
+            .parse_statements()?;
+
+        debug!(target: MAPPER,
+            client_id = self.context.client_id,
+            statement = ?statement
+        );
+
+        counter!(STATEMENTS_TOTAL).increment(statement.len() as u64);
 
         Ok(statement)
     }
@@ -703,10 +738,11 @@ where
                 Ok(typed_statement)
             }
             Err(err) => {
-                debug!(
+                warn!(
                     client_id = self.context.client_id,
                     msg = "Unmappable statement",
-                    error = err.to_string()
+                    mapping_errors_enabled = self.encrypt.config.mapping_errors_enabled(),
+                    error = err.to_string(),
                 );
                 counter!(STATEMENTS_UNMAPPABLE_TOTAL).increment(1);
                 Err(MappingError::StatementCouldNotBeMapped(err.to_string()).into())

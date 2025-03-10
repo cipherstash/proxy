@@ -22,3 +22,6 @@ tokio-rustls = "0.26.0"
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 webpki-roots = "0.26.7"
+
+[dev-dependencies]
+fake = { version = "4", features = ["derive"] }
