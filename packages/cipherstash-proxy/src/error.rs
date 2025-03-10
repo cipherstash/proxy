@@ -111,7 +111,7 @@ pub enum ConfigError {
     #[error("Invalid {name}: {value}")]
     InvalidParameter { name: String, value: String },
 
-    #[error("Expected an active Encrypt configuration")]
+    #[error("Missing an active Encrypt configuration")]
     MissingActiveEncryptConfig,
 
     #[error("Missing field {name} from configuration file or environment")]

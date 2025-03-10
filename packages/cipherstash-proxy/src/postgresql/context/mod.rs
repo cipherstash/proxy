@@ -70,7 +70,11 @@ pub struct Statement {
 
 #[derive(Clone, Debug)]
 pub enum Portal {
-    Encrypted(EncryptedPortal),
+    Encrypted {
+        format_codes: Vec<FormatCode>,
+        statement: Arc<Statement>,
+    },
+    EncryptedText,
     Passthrough,
 }
 
@@ -195,8 +199,9 @@ impl Context {
         debug!(target: CONTEXT, client_id = self.client_id, portal = ?portal);
 
         match portal.as_ref() {
-            Portal::Encrypted(p) => Some(p.statement.clone()),
-            _ => None,
+            Portal::Encrypted { statement, .. } => Some(statement.clone()),
+            Portal::EncryptedText => None,
+            Portal::Passthrough => None,
         }
     }
 
@@ -299,34 +304,42 @@ impl<T> Queue<T> {
 
 impl Portal {
     pub fn encrypted(statement: Arc<Statement>, format_codes: Vec<FormatCode>) -> Portal {
-        Portal::Encrypted(EncryptedPortal {
+        Portal::Encrypted {
             statement,
             format_codes,
-        })
+        }
     }
 
     pub fn passthrough() -> Portal {
         Portal::Passthrough
     }
-}
 
-impl EncryptedPortal {
+    pub fn encrypted_text() -> Portal {
+        Portal::EncryptedText
+    }
+
     // FormatCodes should not be None at this point
     // FormatCodes will be:
     //  - empty, in which case assume Text
     //  - single value, in which case use this for all columns
     //  - multiple values, in which case use the value for each column
     pub fn format_codes(&self, row_len: usize) -> Vec<FormatCode> {
-        match self.format_codes.len() {
-            0 => vec![FormatCode::Text; row_len],
-            1 => {
-                let format_code = match self.format_codes.first() {
-                    Some(code) => *code,
-                    None => FormatCode::Text,
-                };
-                vec![format_code; row_len]
+        match self {
+            Portal::Encrypted { format_codes, .. } => match format_codes.len() {
+                0 => vec![FormatCode::Text; row_len],
+                1 => {
+                    let format_code = match format_codes.first() {
+                        Some(code) => *code,
+                        None => FormatCode::Text,
+                    };
+                    vec![format_code; row_len]
+                }
+                _ => format_codes.clone(),
+            },
+            Portal::EncryptedText => vec![FormatCode::Text; row_len],
+            Portal::Passthrough => {
+                unreachable!()
             }
-            _ => self.format_codes.clone(),
         }
     }
 }
@@ -357,7 +370,7 @@ mod tests {
 
     fn get_statement(portal: Arc<Portal>) -> Arc<Statement> {
         match portal.as_ref() {
-            Portal::Encrypted(portal) => portal.statement.clone(),
+            Portal::Encrypted { statement, .. } => statement.clone(),
             _ => {
                 panic!("Expected Encrypted Portal");
             }
