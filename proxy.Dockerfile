@@ -6,6 +6,7 @@ RUN apt update && apt install -y ca-certificates postgresql-client curl
 
 # Copy binary
 COPY cipherstash-proxy /usr/local/bin/cipherstash-proxy
+# Copy entrypoint, for handling Proxy startup
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 
 # Copy EQL install scripts
