@@ -165,8 +165,8 @@ async fn init_cipher(config: &TandemConfig) -> Result<ScopedCipher, Error> {
     let zerokms_config = builder
         .workspace_id(&config.auth.workspace_id)
         .access_key(&config.auth.client_access_key)
-        .client_id(&config.encrypt.client_id)
-        .client_key(&config.encrypt.client_key)
+        .try_with_client_id(&config.encrypt.client_id)?
+        .try_with_client_key(&config.encrypt.client_key)?
         .console_config(&console_config)
         .cts_config(&cts_config)
         .build_with_client_key()?;
