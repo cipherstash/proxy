@@ -52,21 +52,8 @@ run = """
 {% set target = arch() ~ "-unknown-linux-gnu" | replace(from="arm64", to="aarch64") | replace(from="x64", to="x86_64") %}
 {% set docker_platform = "linux/" ~ arch() | replace(from="x64", to="amd64") %}
 
-{# If we are on macos, cross-compile for Linux, so we can run the binary in a Docker container. #}
-{# Only supports Apple Silicon. #}
-{% if os() == "macos" %}
-if ! which {{ target }}-gcc ; then
-  brew install MaterializeInc/crosstools/aarch64-unknown-linux-gnu
-fi
-export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER={{ target }}-gcc
-{% endif %}
-
-# cross-compile
-rustup target add --toolchain stable {{ target }}
-
-cargo build --locked --target {{ target }} --release --package cipherstash-proxy
-
-cp {{config_root}}/target/{{ target }}/release/cipherstash-proxy {{config_root}}/
+# build a binary
+mise run build:binary --target {{target}}
 
 # build a new container
 mise run build:docker --platform {{docker_platform}}
@@ -514,8 +501,29 @@ mise run build:docker --platform {{option(name="platform",default=default_platfo
 [tasks."build:binary"]
 description = "Build a releasable binary for cipherstash-proxy"
 run = """
-cargo build --locked --release --package cipherstash-proxy
-cp -v target/release/cipherstash-proxy .
+#!/bin/bash
+{% set default_target_arch = arch() | replace(from="arm64", to="aarch64") | replace(from="x64", to="x86_64") %}
+{% set default_target_os = os() | replace(from="linux", to="unknown-linux-gnu") | replace(from="macos", to="apple-darwin") %}
+{% set default_target = default_target_arch ~ "-" ~ default_target_os %}
+{% set target = option(name="target", default=default_target) %}
+
+{# If we are on macos and are cross-compiling for Linux, set up a linker and toolchain. #}
+{# Only supports cross-compiling to Linux/ARM64. #}
+{% if os() == "macos" %}
+{% if target is containing("linux") %}
+if ! which {{ target }}-gcc ; then
+  brew install MaterializeInc/crosstools/aarch64-unknown-linux-gnu
+fi
+export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER={{ target }}-gcc
+{% endif %}
+{% endif %}
+
+# cross-compile
+rustup target add --toolchain stable {{ target }}
+
+cargo build --locked --target {{ target }} --release --package cipherstash-proxy
+
+cp {{config_root}}/target/{{ target }}/release/cipherstash-proxy {{config_root}}/
 """
 
 [tasks."build:docker"]
