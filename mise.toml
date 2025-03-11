@@ -351,8 +351,14 @@ description = "Runs cargo fmt"
 run = 'cargo fmt --all -- --check'
 
 [tasks."test:check"]
-description = "Runs cargo check"
-run = 'cargo check'
+description = "Runs cargo check to check types and dependencies"
+run = """
+# Assert that `Cargo.lock` will remain unchanged
+cargo check --locked
+
+# Check types of packages and dependencies"
+cargo check
+"""
 
 [tasks."test:clippy"]
 description = "Runs clippy"
