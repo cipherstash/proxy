@@ -9,4 +9,7 @@ COPY cipherstash-proxy /usr/local/bin/cipherstash-proxy
 # Copy EQL install scripts
 COPY cipherstash-eql.sql /opt/cipherstash-eql.sql
 
-ENTRYPOINT ["cipherstash-proxy"]
+# Copy entrypoint (for optionally installing EQL in target database)
+COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+
+ENTRYPOINT ["docker-entrypoint.sh"]
