@@ -513,9 +513,12 @@ depends = ["build:docker:fetch_eql"]
 description = "Build a Docker image for cipherstash-proxy"
 run = """
 {% set default_platform = "linux/" ~ arch() | replace(from="x86_64", to="amd64") %}
+[ -n "${DEBUG}" ] && PROGRESS_FLAG="--progress=plain" || PROGRESS_FLAG=""
+
 docker build . \
   --tag cipherstash/proxy:latest \
   --file proxy.Dockerfile \
+  ${PROGRESS_FLAG} \
   --platform {{option(name="platform",default=default_platform)}} \
 """
 
