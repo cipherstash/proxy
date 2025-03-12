@@ -3,6 +3,7 @@ use crate::{DatabaseConfig, TandemConfig};
 use rustls::client::danger::ServerCertVerifier;
 use rustls::ClientConfig;
 use rustls_pki_types::{pem::PemObject, CertificateDer, PrivateKeyDer, ServerName};
+use rustls_platform_verifier::ConfigVerifierExt;
 use std::sync::Arc;
 use tokio::net::TcpStream;
 use tokio_rustls::{TlsAcceptor, TlsConnector, TlsStream};
@@ -70,12 +71,7 @@ pub fn configure_server(config: &TlsConfig) -> Result<rustls::ServerConfig, Erro
 /// The client will use the system root certificates
 ///
 pub fn configure_client(config: &DatabaseConfig) -> ClientConfig {
-    let mut root_cert_store = rustls::RootCertStore::empty();
-    root_cert_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
-
-    let mut tls_config = rustls::ClientConfig::builder()
-        .with_root_certificates(root_cert_store)
-        .with_no_client_auth();
+    let mut tls_config = ClientConfig::with_platform_verifier();
 
     if !config.with_tls_verification {
         let mut dangerous = tls_config.dangerous();
