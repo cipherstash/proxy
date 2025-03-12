@@ -20,6 +20,10 @@ pub struct Migrate {
     #[arg(short, long)]
     table: String,
 
+    ///
+    /// Primary key column/s
+    /// Compound primary keys can be provided as a space delimted list: `--primary-key id user_id``
+    ///
     #[arg(short = 'k', long, num_args(1..), value_delimiter = ' ', default_values_t = vec![ID.to_string()])]
     primary_key: Vec<String>,
 
@@ -238,5 +242,22 @@ impl Migrate {
         }
 
         Ok(())
+    }
+}
+
+mod tests {
+    use super::Migrate;
+
+    impl Migrate {
+        pub fn new(table: String, columns: Vec<(String, String)>) -> Self {
+            Migrate {
+                table,
+                columns,
+                primary_key: vec!["id".to_string()],
+                batch_size: 10,
+                dry_run: false,
+                verbose: false,
+            }
+        }
     }
 }

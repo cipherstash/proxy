@@ -24,4 +24,5 @@ tracing-subscriber = { workspace = true }
 webpki-roots = "0.26.7"
 
 [dev-dependencies]
+clap = "4.5.32"
 fake = { version = "4", features = ["derive"] }

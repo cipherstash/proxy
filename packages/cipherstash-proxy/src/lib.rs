@@ -12,6 +12,7 @@ pub mod prometheus;
 pub mod tls;
 
 pub use crate::cli::Args;
+pub use crate::cli::Migrate;
 pub use crate::config::{DatabaseConfig, ServerConfig, TandemConfig, TlsConfig};
 pub use crate::encrypt::Encrypt;
 pub use crate::eql::{Encrypted, ForQuery, Identifier, Plaintext};

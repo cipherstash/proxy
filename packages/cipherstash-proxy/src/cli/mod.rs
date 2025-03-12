@@ -7,8 +7,9 @@ use crate::{
     TandemConfig,
 };
 use clap::{Parser, Subcommand};
-use migrate::Migrate;
-use tracing::{debug, info};
+use tracing::debug;
+
+pub use migrate::Migrate;
 
 const DEFAULT_CONFIG_FILE: &str = "cipherstash-proxy.toml";
 
@@ -41,12 +42,12 @@ pub struct Args {
     pub log_format: LogFormat,
 
     #[command(subcommand)]
-    command: Option<Commands>,
+    pub command: Option<Commands>,
 }
 
 #[derive(Clone, Debug, Subcommand)]
 
-enum Commands {
+pub enum Commands {
     Encrypt(Migrate),
 }
 

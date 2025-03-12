@@ -307,7 +307,6 @@ mise --env tls run test:wait_for_postgres_to_quack --port 6432 --max-retries 20 
 mise --env tls run test:integration:psql-tls
 mise --env tls run proxy:down
 
-
 echo
 echo '###############################################'
 echo '# Test: Integration'
@@ -318,6 +317,17 @@ mise --env tls run proxy:up proxy-tls --extra-args "--detach --wait"
 mise --env tls run test:wait_for_postgres_to_quack --port 6432 --max-retries 20 --tls
 cargo nextest run --no-fail-fast --nocapture -E 'package(cipherstash-proxy-integration)'
 mise --env tls run proxy:down
+
+echo
+echo '###############################################'
+echo '# Test: Migrate'
+echo '###############################################'
+echo
+
+mise --env tcp run proxy:up proxy --extra-args "--detach --wait"
+mise --env tcp run test:wait_for_postgres_to_quack --port 6432 --max-retries 20
+mise --env tcp run test:integration:migrate
+mise --env tcp run proxy:down
 
 echo
 echo '###############################################'
