@@ -273,11 +273,14 @@ impl TandemConfig {
 
     pub fn load(args: &Args) -> Result<TandemConfig, Error> {
         // Log a warning to user that config file is missing
-        if !PathBuf::from(&args.config_file).exists() {
-            println!("Configuration file was not found: {}", args.config_file);
+        if !PathBuf::from(&args.config_file_path).exists() {
+            println!(
+                "Configuration file was not found: {}",
+                args.config_file_path
+            );
             println!("Loading config values from environment variables.");
         }
-        let mut config = TandemConfig::build(&args.config_file)?;
+        let mut config = TandemConfig::build(&args.config_file_path)?;
 
         // If log level is default, it has not been set by the user in config
         if config.log.level == LogConfig::default_log_level() {
@@ -656,6 +659,10 @@ impl LogConfig {
     }
 
     pub fn default_log_format() -> LogFormat {
+        debug!(
+            "default_log_format is_terminal {} ",
+            std::io::stdout().is_terminal()
+        );
         if std::io::stdout().is_terminal() {
             LogFormat::Pretty
         } else {

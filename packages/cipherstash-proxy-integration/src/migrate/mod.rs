@@ -13,8 +13,8 @@ mod tests {
         clear().await;
 
         let args = Args {
-            config_file: "".to_string(),
-            log_level: LogLevel::Info,
+            config_file_path: "".to_string(),
+            log_level: LogLevel::Debug,
             log_format: LogFormat::Pretty,
             command: None,
         };

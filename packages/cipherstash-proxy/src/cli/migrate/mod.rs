@@ -1,12 +1,15 @@
-use postgres_protocol::escape::{escape_identifier, escape_literal};
-use std::error::Error as ClapError;
-use std::{self};
-use tokio_postgres::NoTls;
-use tracing::{debug, error, info, warn};
-
 use crate::error::Error;
 use crate::log::MIGRATE;
+use crate::tls::NoCertificateVerification;
 use crate::TandemConfig;
+use postgres_protocol::escape::{escape_identifier, escape_literal};
+use rustls::ClientConfig;
+use rustls_platform_verifier::ConfigVerifierExt;
+use std::error::Error as ClapError;
+use std::sync::Arc;
+use std::{self};
+use tokio_postgres::{Client, NoTls};
+use tracing::{debug, error, info, warn};
 
 const ID: &str = "id";
 const LOCALHOST: &str = "127.0.0.1";
@@ -43,20 +46,6 @@ pub struct Migrate {
     verbose: bool,
 }
 
-/// Parse a single key-value pair - copied from clap example https://github.com/clap-rs/clap/blob/master/examples/typed-derive.rs#L25
-fn parse_key_val<T, U>(s: &str) -> Result<(T, U), Box<dyn ClapError + Send + Sync + 'static>>
-where
-    T: std::str::FromStr,
-    T::Err: ClapError + Send + Sync + 'static,
-    U: std::str::FromStr,
-    U::Err: ClapError + Send + Sync + 'static,
-{
-    let pos = s
-        .find('=')
-        .ok_or_else(|| format!("invalid KEY=value: no `=` found in `{s}`"))?;
-    Ok((s[..pos].parse()?, s[pos + 1..].parse()?))
-}
-
 impl Migrate {
     ///
     /// Returns true if this is not a `dry_run`
@@ -78,16 +67,10 @@ impl Migrate {
             config.database.name
         );
 
-        let (client, connection) = tokio_postgres::connect(&connection_string, NoTls)
-            .await
-            .inspect_err(|_| {
-                error!(target: MIGRATE, msg = "Error connecting Encryption Migrator to Proxy");
-            })?;
-        tokio::spawn(async move {
-            if let Err(err) = connection.await {
-                error!("Connection error: {}", err);
-            }
-        });
+        debug!(target: MIGRATE, ?config);
+
+        let client =
+            connect_with_tls(&connection_string, config.database.with_tls_verification).await?;
 
         info!(
             target: MIGRATE,
@@ -96,6 +79,7 @@ impl Migrate {
             host = config.server.host,
             port = config.server.port,
             username = config.database.username,
+            with_tls_verification = config.database.with_tls_verification,
         );
 
         info!(target: MIGRATE, msg = "Encrypting table", table = self.table, columns = ?self.columns);
@@ -243,6 +227,61 @@ impl Migrate {
 
         Ok(())
     }
+}
+
+/// Parse a single key-value pair - copied from clap example https://github.com/clap-rs/clap/blob/master/examples/typed-derive.rs#L25
+fn parse_key_val<T, U>(s: &str) -> Result<(T, U), Box<dyn ClapError + Send + Sync + 'static>>
+where
+    T: std::str::FromStr,
+    T::Err: ClapError + Send + Sync + 'static,
+    U: std::str::FromStr,
+    U::Err: ClapError + Send + Sync + 'static,
+{
+    let pos = s
+        .find('=')
+        .ok_or_else(|| format!("invalid KEY=value: no `=` found in `{s}`"))?;
+    Ok((s[..pos].parse()?, s[pos + 1..].parse()?))
+}
+
+pub async fn connect_with_tls(
+    connection_string: &str,
+    with_tls_verification: bool,
+) -> Result<Client, Error> {
+    let mut tls_config = ClientConfig::with_platform_verifier();
+
+    if !with_tls_verification {
+        let mut dangerous = tls_config.dangerous();
+        dangerous.set_certificate_verifier(Arc::new(NoCertificateVerification {}));
+    }
+
+    let tls = tokio_postgres_rustls::MakeRustlsConnect::new(tls_config);
+    let (client, connection) = tokio_postgres::connect(connection_string, tls)
+        .await
+        .inspect_err(|_| {
+            error!(target: MIGRATE, msg = "Error connecting Encryption Migrator to Proxy");
+        })?;
+
+    tokio::spawn(async move {
+        if let Err(err) = connection.await {
+            error!("Connection error: {}", err);
+        }
+    });
+    Ok(client)
+}
+
+pub async fn connect_with_no_tls(connection_string: &str) -> Result<Client, Error> {
+    let (client, connection) = tokio_postgres::connect(connection_string, NoTls)
+        .await
+        .inspect_err(|_| {
+            error!(target: MIGRATE, msg = "Error connecting Encryption Migrator to Proxy");
+        })?;
+
+    tokio::spawn(async move {
+        if let Err(err) = connection.await {
+            error!("Connection error: {}", err);
+        }
+    });
+    Ok(client)
 }
 
 mod tests {

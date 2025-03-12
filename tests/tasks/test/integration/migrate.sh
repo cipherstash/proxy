@@ -6,6 +6,10 @@
 set -e
 
 
+docker exec -i postgres${CONTAINER_SUFFIX} psql postgresql://cipherstash:password@proxy:6432/cipherstash <<-EOF
+TRUNCATE encrypted;
+EOF
+
 # Connect to the proxy
 docker exec -i postgres${CONTAINER_SUFFIX} psql postgresql://cipherstash:password@proxy:6432/cipherstash <<-EOF
 INSERT INTO encrypted (id, plaintext) VALUES (1, 'One');
@@ -15,7 +19,7 @@ INSERT INTO encrypted (id, plaintext) VALUES (4, 'Four');
 INSERT INTO encrypted (id, plaintext) VALUES (5, 'Five');
 EOF
 
-docker exec -it proxy cipherstash-proxy encrypt --table encrypted --columns plaintext=encrypted_text  --verbose
+docker exec -i proxy cipherstash-proxy encrypt --table encrypted --columns plaintext=encrypted_text  --verbose
 
 docker exec -i postgres${CONTAINER_SUFFIX} psql postgresql://cipherstash:password@proxy:6432/cipherstash <<-EOF
 SELECT * FROM encrypted;
