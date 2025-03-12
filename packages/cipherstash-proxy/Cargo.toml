@@ -37,6 +37,7 @@ rust_decimal = { version = "1.36.0", default-features = false, features = [
 ] }
 rustls = { version = "0.23.20", default-features = false, features = ["std"] }
 rustls-pemfile = "2.2.0"
+rustls-platform-verifier = "0.5.0"
 rustls-pki-types = "1.10.0"
 serde = "1.0"
 serde_json = "1.0"
@@ -54,7 +55,6 @@ tokio-util = { version = "0.7.13", features = ["rt"] }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 uuid = { version = "1.11.0", features = ["serde", "v4"] }
-webpki-roots = "0.26.7"
 x509-parser = "0.17.0"
 
 

@@ -539,6 +539,15 @@ impl DatabaseConfig {
     pub fn connection_timeout(&self) -> Duration {
         Duration::from_millis(self.connection_timeout)
     }
+
+    pub fn server_name(&self) -> Result<ServerName, Error> {
+        let name = ServerName::try_from(self.host.as_str()).map_err(|_| {
+            ConfigError::InvalidServerName {
+                name: self.host.to_owned(),
+            }
+        })?;
+        Ok(name)
+    }
 }
 
 impl Display for DatabaseConfig {
