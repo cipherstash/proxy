@@ -18,7 +18,7 @@ pub async fn client(
 ) -> Result<TlsStream<TcpStream>, Error> {
     let tls_config = configure_client(&config.database);
     let connector = TlsConnector::from(Arc::new(tls_config));
-    let domain = config.server.server_name()?.to_owned();
+    let domain = config.database.server_name()?.to_owned();
     let tls_stream = connector.connect(domain, stream).await?;
 
     Ok(tls_stream.into())
