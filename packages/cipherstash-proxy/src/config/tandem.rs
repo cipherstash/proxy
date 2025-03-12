@@ -190,6 +190,9 @@ pub struct LogConfig {
     pub authentication_level: LogLevel,
 
     #[serde(default = "LogConfig::default_log_level")]
+    pub config_level: LogLevel,
+
+    #[serde(default = "LogConfig::default_log_level")]
     pub context_level: LogLevel,
 
     #[serde(default = "LogConfig::default_log_level")]
@@ -205,6 +208,9 @@ pub struct LogConfig {
     pub keyset_level: LogLevel,
 
     #[serde(default = "LogConfig::default_log_level")]
+    pub migrate_level: LogLevel,
+
+    #[serde(default = "LogConfig::default_log_level")]
     pub protocol_level: LogLevel,
 
     #[serde(default = "LogConfig::default_log_level")]
@@ -212,9 +218,6 @@ pub struct LogConfig {
 
     #[serde(default = "LogConfig::default_log_level")]
     pub schema_level: LogLevel,
-
-    #[serde(default = "LogConfig::default_log_level")]
-    pub config_level: LogLevel,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, ValueEnum)]
@@ -550,6 +553,9 @@ impl DatabaseConfig {
     }
 }
 
+///
+/// Password is NEVER EVER displayed
+///
 impl Display for DatabaseConfig {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
@@ -618,6 +624,7 @@ impl Default for LogConfig {
             encoding_level: LogConfig::default_log_level(),
             encrypt_config_level: LogConfig::default_log_level(),
             keyset_level: LogConfig::default_log_level(),
+            migrate_level: LogConfig::default_log_level(),
             protocol_level: LogConfig::default_log_level(),
             mapper_level: LogConfig::default_log_level(),
             schema_level: LogConfig::default_log_level(),
@@ -640,6 +647,7 @@ impl LogConfig {
             encrypt_level: level,
             encrypt_config_level: level,
             keyset_level: level,
+            migrate_level: level,
             protocol_level: level,
             mapper_level: level,
             schema_level: level,

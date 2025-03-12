@@ -15,16 +15,17 @@ use tracing_subscriber::{
 // If you add one, make sure `log_targets()` and `log_level_for()` functions are updated.
 pub const DEVELOPMENT: &str = "development"; // one for various hidden "development mode" messages
 pub const AUTHENTICATION: &str = "authentication";
+pub const CONFIG: &str = "config";
 pub const CONTEXT: &str = "context";
 pub const ENCRYPT: &str = "encrypt";
 pub const ENCODING: &str = "encoding";
 pub const ENCRYPT_CONFIG: &str = "encrypt_config";
 pub const KEYSET: &str = "keyset";
+pub const MIGRATE: &str = "migrate";
 pub const PARSER: &str = "parser";
 pub const PROTOCOL: &str = "protocol";
 pub const MAPPER: &str = "mapper";
 pub const SCHEMA: &str = "schema";
-pub const CONFIG: &str = "config";
 
 static INIT: Once = Once::new();
 
@@ -128,6 +129,7 @@ mod tests {
             encrypt_level: LogLevel::Error,
             encrypt_config_level: LogLevel::Error,
             keyset_level: LogLevel::Trace,
+            migrate_level: LogLevel::Trace,
             protocol_level: LogLevel::Info,
             mapper_level: LogLevel::Info,
             schema_level: LogLevel::Info,

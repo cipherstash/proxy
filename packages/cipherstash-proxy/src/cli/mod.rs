@@ -1,9 +1,18 @@
-use crate::config::{LogConfig, LogFormat, LogLevel};
+mod migrate;
+
+use crate::{
+    config::{LogConfig, LogFormat, LogLevel},
+    error::Error,
+    log::MIGRATE,
+    TandemConfig,
+};
 use clap::{Parser, Subcommand};
+use migrate::Migrate;
+use tracing::{debug, info};
 
 const DEFAULT_CONFIG_FILE: &str = "cipherstash-proxy.toml";
 
-#[derive(Parser, Debug)]
+#[derive(Clone, Debug, Parser)]
 #[command(version, about, verbatim_doc_comment)]
 ///
 /// CipherStash Proxy
@@ -35,11 +44,20 @@ pub struct Args {
     command: Option<Commands>,
 }
 
-#[derive(Subcommand, Debug)]
-///
-/// A `help` subcommand is automatically generated but ONLY if there are other subcommands.
-/// Noop is not visible in help, but enables proxy to be called as `cipherstash-proxy help` to show help
+#[derive(Clone, Debug, Subcommand)]
+
 enum Commands {
-    #[command(hide = true)]
-    Noop,
+    Encrypt(Migrate),
+}
+
+pub async fn run(args: Args, config: TandemConfig) -> Result<(), Error> {
+    match args.command {
+        Some(Commands::Encrypt(migrate)) => {
+            debug!(target: MIGRATE, ?migrate);
+            migrate.run(config).await?;
+            std::process::exit(exitcode::OK);
+        }
+        None => {}
+    }
+    Ok(())
 }
