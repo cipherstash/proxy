@@ -5,7 +5,7 @@ use cipherstash_client::{
 use serde::{Deserialize, Serialize, Serializer};
 use sqlparser::ast::Ident;
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct Plaintext {
     #[serde(rename = "p")]
     pub plaintext: String,
@@ -18,7 +18,9 @@ pub struct Plaintext {
 }
 #[derive(Clone, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
 pub struct Identifier {
+    #[serde(rename = "t")]
     pub table: String,
+    #[serde(rename = "c")]
     pub column: String,
 }
 
@@ -51,7 +53,7 @@ impl From<(&Ident, &Ident)> for Identifier {
     }
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ForQuery {
     Match,
@@ -105,4 +107,68 @@ where
 {
     let s = ident.to_string();
     serializer.serialize_str(&s)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Identifier, Plaintext};
+    use crate::Encrypted;
+    use cipherstash_client::zerokms::EncryptedRecord;
+    use recipher::key::Iv;
+    use uuid::Uuid;
+
+    #[test]
+    pub fn plaintext_json() {
+        let identifier = Identifier::new("table", "column");
+        let pt = Plaintext {
+            identifier,
+            plaintext: "plaintext".to_string(),
+            version: 1,
+            for_query: None,
+        };
+
+        let value = serde_json::to_value(&pt).unwrap();
+
+        let i = &value["i"];
+        let t = &i["t"];
+        assert_eq!(t, "table");
+
+        let result: Plaintext = serde_json::from_value(value).unwrap();
+        assert_eq!(pt, result);
+    }
+
+    #[test]
+    pub fn ciphertext_json() {
+        let expected = Identifier::new("table", "column");
+
+        let ct = Encrypted::Ciphertext {
+            identifier: expected.clone(),
+            version: 1,
+            ciphertext: EncryptedRecord {
+                iv: Iv::default(),
+                ciphertext: vec![1; 32],
+                tag: vec![1; 16],
+                descriptor: "ciphertext".to_string(),
+                dataset_id: Some(Uuid::new_v4()),
+            },
+
+            ore_index: None,
+            match_index: None,
+            unique_index: None,
+        };
+
+        let value = serde_json::to_value(&ct).unwrap();
+
+        let i = &value["i"];
+        let t = &i["t"];
+        assert_eq!(t, "table");
+
+        let result: Encrypted = serde_json::from_value(value).unwrap();
+
+        if let Encrypted::Ciphertext { identifier, .. } = result {
+            assert_eq!(expected, identifier);
+        } else {
+            panic!("Expected Encrypted::Ciphertext");
+        }
+    }
 }
