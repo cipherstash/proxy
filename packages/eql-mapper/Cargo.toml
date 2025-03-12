@@ -1,12 +1,13 @@
 [package]
 name = "eql-mapper"
 description = "The SQL transformation layer of CipherStash Proxy. Safely transforms SQL to SQL+EQL using a reference schema and type inference approach"
-version = "0.1.0"
+version = "1.0.0"
 edition = "2021"
 authors = [
   "James Sadler <james@cipherstash.com>",
   "Yuji Yokoo <yuji@cipherstash.com>",
-  "Ragib Badaruddin <ragib@cipherstash.com>",
+  "Drew Thomas <drew@cipherstash.com>",
+  "Toby Hede <drew@cipherstash.com>"
 ]
 
 [dependencies]
