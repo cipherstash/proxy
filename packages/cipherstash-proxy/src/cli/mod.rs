@@ -51,14 +51,17 @@ pub enum Commands {
     Encrypt(Migrate),
 }
 
-pub async fn run(args: Args, config: TandemConfig) -> Result<(), Error> {
+///
+/// Runs command specified in command line
+/// Returns Ok(true) if the caller should exit
+///
+pub async fn run(args: Args, config: TandemConfig) -> Result<bool, Error> {
     match args.command {
         Some(Commands::Encrypt(migrate)) => {
             debug!(target: MIGRATE, ?migrate);
             migrate.run(config).await?;
-            std::process::exit(exitcode::OK);
+            Ok(true)
         }
-        None => {}
+        None => Ok(false),
     }
-    Ok(())
 }

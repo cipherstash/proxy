@@ -36,9 +36,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config_clone = config.clone();
     runtime.block_on(async move {
         match cli::run(args_clone, config_clone).await {
-            Ok(_) => {
-                debug!(target: DEVELOPMENT, "No command")
+            Ok(exit) => {
+                if exit {
+                    std::process::exit(exitcode::OK);
+                }
             }
+
             Err(err) => {
                 error!(msg = "Error running command", error = err.to_string());
                 std::process::exit(exitcode::USAGE);
