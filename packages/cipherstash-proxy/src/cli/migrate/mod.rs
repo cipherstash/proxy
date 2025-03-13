@@ -25,32 +25,32 @@ pub struct Migrate {
     /// Name of database table
     ///
     #[arg(short, long)]
-    table: String,
+    pub table: String,
 
     ///
     /// Source and destination columns as space-delimited key pairs `--columns source=destination`
     ///
     #[arg(short, required = true, long, num_args(1..), value_parser = parse_key_val::<String, String>)]
-    columns: Vec<(String, String)>,
+    pub columns: Vec<(String, String)>,
 
     ///
     /// Primary key column/s
     /// Compound primary keys can be provided as a space delimted list: `--primary-key id user_id`
     ///
     #[arg(short = 'k', long, num_args(1..), value_delimiter = ' ', default_values_t = vec![ID.to_string()])]
-    primary_key: Vec<String>,
+    pub primary_key: Vec<String>,
 
     // Updates `batch_size` records at a time
     #[arg(short, long, default_value_t = 100)]
-    batch_size: usize,
+    pub batch_size: usize,
 
     /// Run without update. Data is fetched, but updates are not performed.
     #[arg(short, long, default_value_t = false)]
-    dry_run: bool,
+    pub dry_run: bool,
 
     /// Turn on additional logging output
     #[arg(short, long, default_value_t = false)]
-    verbose: bool,
+    pub verbose: bool,
 }
 
 impl Migrate {
@@ -289,21 +289,4 @@ pub async fn connect_with_no_tls(connection_string: &str) -> Result<Client, Erro
         }
     });
     Ok(client)
-}
-
-mod tests {
-    use super::Migrate;
-
-    impl Migrate {
-        pub fn new(table: String, columns: Vec<(String, String)>) -> Self {
-            Migrate {
-                table,
-                columns,
-                primary_key: vec!["id".to_string()],
-                batch_size: 10,
-                dry_run: false,
-                verbose: false,
-            }
-        }
-    }
 }

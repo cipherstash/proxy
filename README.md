@@ -230,7 +230,7 @@ cipherstash-proxy encrypt [OPTIONS] --table <TABLE>  --columns <SOURCE_COLUMN=TA
 
 At a high-level, the process for encrypting a column in the database is:
 
-1. Add a new encrypted destination column with the appropriate encrypted configuration.
+1. Add a new encrypted destination column with the appropriate encryption configuration.
 2. Using CipherStash Proxy to process:
   1. Select from the original plaintext column.
   2. Update the encrpted column to set the plaintext value.

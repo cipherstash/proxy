@@ -1,11 +1,36 @@
 #[cfg(test)]
 mod tests {
+    use std::ops::Deref;
+
     use crate::common::{clear, connect_with_tls, id, trace, PROXY};
     use cipherstash_proxy::{
         config::{LogFormat, LogLevel},
         Args, Migrate, TandemConfig,
     };
     use fake::{Fake, Faker};
+
+    struct TestMigrate(Migrate);
+
+    impl TestMigrate {
+        pub fn new(table: String, columns: Vec<(String, String)>) -> Self {
+            TestMigrate(Migrate {
+                table,
+                columns,
+                primary_key: vec!["id".to_string()],
+                batch_size: 10,
+                dry_run: false,
+                verbose: false,
+            })
+        }
+    }
+
+    impl Deref for TestMigrate {
+        type Target = Migrate;
+
+        fn deref(&self) -> &Self::Target {
+            &self.0
+        }
+    }
 
     #[tokio::test]
     async fn migrate_text() {
@@ -39,7 +64,7 @@ mod tests {
 
         let table = "encrypted".to_string();
         let columns = vec![("plaintext".to_string(), "encrypted_text".to_string())];
-        let migrate = Migrate::new(table, columns);
+        let migrate = TestMigrate::new(table, columns);
 
         migrate.run(config).await.unwrap();
 

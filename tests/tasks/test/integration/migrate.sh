@@ -33,6 +33,15 @@ if echo ${OUTPUT} | grep -v '(0 rows)'; then
     exit 1
 fi
 
+set +e
+OUTPUT="$(docker exec -i postgres${CONTAINER_SUFFIX} psql 'postgresql://cipherstash:password@proxy:6432/cipherstash?sslmode=disable' --command "SELECT id FROM encrypted WHERE encrypted_text = 'Three'" 2>&1)"
+retval=$?
+if echo ${OUTPUT} | grep -v '(1 row)'; then
+    echo "error: did not see string in output: \"(0 rows)\""
+    exit 1
+fi
+
+
 docker exec -i postgres${CONTAINER_SUFFIX} psql postgresql://cipherstash:password@proxy:6432/cipherstash <<-EOF
 TRUNCATE encrypted;
 EOF
