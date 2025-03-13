@@ -17,27 +17,34 @@ const LOCALHOST: &str = "127.0.0.1";
 #[derive(clap::Args, Clone, Debug)]
 #[command(version, about, long_about)]
 ///
-/// Encrypt data in table
+/// Encrypt one or more columns in table
+/// Requires a running and configured CipherStash Proxy instance.
 ///
 pub struct Migrate {
+    ///
+    /// Name of database table
+    ///
     #[arg(short, long)]
     table: String,
 
     ///
+    /// Source and destination columns as space-delimited key pairs `--columns source=destination`
+    ///
+    #[arg(short, required = true, long, num_args(1..), value_parser = parse_key_val::<String, String>)]
+    columns: Vec<(String, String)>,
+
+    ///
     /// Primary key column/s
-    /// Compound primary keys can be provided as a space delimted list: `--primary-key id user_id``
+    /// Compound primary keys can be provided as a space delimted list: `--primary-key id user_id`
     ///
     #[arg(short = 'k', long, num_args(1..), value_delimiter = ' ', default_values_t = vec![ID.to_string()])]
     primary_key: Vec<String>,
-
-    #[arg(short, long, num_args(1..), value_parser = parse_key_val::<String, String>)]
-    columns: Vec<(String, String)>,
 
     // Updates `batch_size` records at a time
     #[arg(short, long, default_value_t = 100)]
     batch_size: usize,
 
-    /// Run without update. Data is loaded, but updates are not performed.
+    /// Run without update. Data is fetched, but updates are not performed.
     #[arg(short, long, default_value_t = false)]
     dry_run: bool,
 

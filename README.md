@@ -444,8 +444,94 @@ If the proxy is running on a host other than localhost, access on that host.
 | `cipherstash_proxy_statements_unmappable_total`       | Counter   | Total number of unmappable SQL statements processed by CipherStash Proxy    |
 
 
+
+## Encrypting data in an existing database
+
+CipherStash Proxy includes a CLI application to encrypt existing data or to apply index changes after encryption configuration changes of a protected database.
+
+### Usage
+
+Encrypt the `source` column data in `table` into the specified encrypted `target` column.
+Connects to CipherStash Proxy using the `cipherstash.toml` configuration or `ENV` variables.
+
+```
+cipherstash-proxy encrypt [OPTIONS] --table <TABLE>  --columns <SOURCE_COLUMN=TARGET_COLUMN>...
+```
+
+### How it works
+
+At a high-level, the process for encrypting a column in the database is:
+
+- add a new encrypted destination column with the appropriate encrypted configuration
+- using CipherStash proxy to process
+  - select from the original plaintext column
+  - update the encrpted column to set the plaintext value
+- drop the original plaintext column
+- rename the encrypted column to the original plaintext column name
+
+The CipherStash Proxy `encrypt` tool automates the data process to encrypt one or more columns in a table.
+Updates are executed in batches of 100 records (and the `batch_size` is configurable).
+The process is idempotent and can be run repeatedly.
+
+
+### Configuration
+
+The CipherStash Proxy `encrypt` tool reuses the CipherStash Proxy configuration for the Proxy connection details.
+
+## Options
+
+| Option                  | Description                                                    | Default         |
+| ----------------------- | -------------------------------------------------------------- | --------------- |
+| `-t`, `--table`         | Specifies the table to migrate                                 | None (Required) |
+| `-c`, `--columns`       | List of columns to migrate (space-delimited key=value pairs)   | None (Required) |
+| `-k`, `--primary-key`   | List of primary key columns (space-delimited)                  | `id`            |
+| `-b`, `--batch-size`    | Number of records to process at once                           | `100`           |
+| `-d`, `--dry-run`       | Runs without updating. Loads data but does not perform updates | None (Optional) |
+| `-v`, `--verbose`       | Turn on additional logging output                              | None (Optional) |
+| `-h`, `--help`          | Displays this help message                                     | -               |
+
+
+{% callout title="Connection" %}
+Connection to CipherStash Proxy reuses Proxy configuration:
+ - server host
+ - server port
+ - database username
+ - database password
+ - database name
+{% /callout %}
+
+
+### Example usage
+
+Given a running instance of CipherStash Proxy and a `users` table with:
+ - a primary key `id` column
+ - a source plaintext `email` column
+ - a destination `encrypted_email` column configured to be encrypted text.
+
+Encrypt `email` into `encrypted_email`
+
+```bash
+cipherstash-proxy encrypt --table users --columns email=encrypted_email
+```
+
+Specify the primary key column
+
+```bash
+cipherstash-proxy encrypt --table users --columns email=encrypted_email --primary-key user_id
+```
+
+Specify multiple primary key columns (compound primary key)
+
+```bash
+cipherstash-proxy encrypt --table users --columns email=encrypted_email --primary-key user_id tenant_id
+```
+
+
 ## More info
 
 ### Developing for Proxy
 
 Check out the [Proxy development guide](./DEVELOPMENT.md).
+
+
+
