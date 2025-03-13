@@ -198,7 +198,7 @@ impl Migrate {
                     tokio_postgres::SimpleQueryMessage::CommandComplete(..) => {}
                     tokio_postgres::SimpleQueryMessage::RowDescription(..) => {}
                     _ => {
-                        error!(target: MIGRATE, msg = "Invalid row. You should not even be here.");
+                        error!(target: MIGRATE, msg = "Invalid row. This should be impossible.");
                         unreachable!()
                     }
                 }
