@@ -2,7 +2,6 @@ use cipherstash_proxy::config::TandemConfig;
 use cipherstash_proxy::connect::{self, AsyncStream};
 use cipherstash_proxy::encrypt::Encrypt;
 use cipherstash_proxy::error::Error;
-use cipherstash_proxy::log::DEVELOPMENT;
 use cipherstash_proxy::prometheus::CLIENTS_ACTIVE_CONNECTIONS;
 use cipherstash_proxy::{cli, log, postgresql as pg, prometheus, tls, Args};
 use clap::Parser;
@@ -10,7 +9,7 @@ use metrics::gauge;
 use tokio::net::TcpListener;
 use tokio::signal::unix::{signal, SignalKind};
 use tokio_util::task::TaskTracker;
-use tracing::{debug, error, info, warn};
+use tracing::{error, info, warn};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
