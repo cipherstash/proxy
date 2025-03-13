@@ -2,12 +2,16 @@ use super::{CS_PREFIX, DEFAULT_CONFIG_FILE_PATH};
 use crate::error::{ConfigError, Error};
 use crate::log::CONFIG;
 use crate::Args;
+use cipherstash_client::config::vars::{
+    CS_CLIENT_ACCESS_KEY, CS_CLIENT_ID, CS_CLIENT_KEY, CS_DEFAULT_KEYSET_ID, CS_WORKSPACE_ID,
+};
 use clap::ValueEnum;
 use config::{Config, Environment};
 use regex::Regex;
 use rustls_pki_types::pem::PemObject;
 use rustls_pki_types::{CertificateDer, PrivateKeyDer, ServerName};
 use serde::Deserialize;
+use std::collections::HashMap;
 use std::io::IsTerminal;
 use std::path::PathBuf;
 use std::{env, thread};
@@ -297,31 +301,111 @@ impl TandemConfig {
             .separator("__")
             .prefix_separator("_");
 
-        let config: Self = Config::builder()
+        let cs_client_source = Environment::with_prefix(CS_PREFIX)
+            .separator("__")
+            .prefix_separator("_")
+            .source(Some({
+                let mut env = HashMap::new();
+
+                if let Ok(value) = std::env::var(CS_CLIENT_ID) {
+                    env.insert("CS_ENCRYPT__CLIENT_ID".into(), value);
+                }
+
+                if let Ok(value) = std::env::var(CS_CLIENT_KEY) {
+                    env.insert("CS_ENCRYPT__CLIENT_KEY".into(), value);
+                }
+
+                if let Ok(value) = std::env::var(CS_DEFAULT_KEYSET_ID) {
+                    env.insert("CS_ENCRYPT__DATASET_ID".into(), value);
+                }
+
+                if let Ok(value) = std::env::var(CS_WORKSPACE_ID) {
+                    env.insert("CS_AUTH__WORKSPACE_ID".into(), value);
+                }
+
+                if let Ok(value) = std::env::var(CS_CLIENT_ACCESS_KEY) {
+                    env.insert("CS_AUTH__CLIENT_ACCESS_KEY".into(), value);
+                }
+
+                env
+            }));
+
+        let unnested_source = Environment::with_prefix(CS_PREFIX)
+            .separator("__")
+            .prefix_separator("_")
+            .source(Some({
+                let mut env = HashMap::new();
+
+                if let Ok(value) = std::env::var("CS_DATABASE_HOST") {
+                    env.insert("CS_DATABASE__HOST".into(), value);
+                }
+
+                if let Ok(value) = std::env::var("CS_DATABASE_PORT") {
+                    env.insert("CS_DATABASE__PORT".into(), value);
+                }
+
+                if let Ok(value) = std::env::var("CS_DATABASE_NAME") {
+                    env.insert("CS_DATABASE__NAME".into(), value);
+                }
+
+                if let Ok(value) = std::env::var("CS_DATABASE_USERNAME") {
+                    env.insert("CS_DATABASE__USERNAME".into(), value);
+                }
+
+                if let Ok(value) = std::env::var("CS_DATABASE_PASSWORD") {
+                    env.insert("CS_DATABASE__PASSWORD".into(), value);
+                }
+
+                if let Ok(value) = std::env::var("CS_DATABASE_CONNECTION_TIMEOUT") {
+                    env.insert("CS_DATABASE__CONNECTION_TIMEOUT".into(), value);
+                }
+
+                if let Ok(value) = std::env::var("CS_DATABASE_WITH_TLS_VERIFICATION") {
+                    env.insert("CS_DATABASE__WITH_TLS_VERIFICATION".into(), value);
+                }
+
+                if let Ok(value) = std::env::var("CS_DATABASE_CONFIG_RELOAD_INTERVAL") {
+                    env.insert("CS_DATABASE__CONFIG_RELOAD_INTERVAL".into(), value);
+                }
+
+                if let Ok(value) = std::env::var("CS_DATABASE_SCHEMA_RELOAD_INTERVAL") {
+                    env.insert("CS_DATABASE__SCHEMA_RELOAD_INTERVAL".into(), value);
+                }
+
+                env
+            }));
+
+        let config = Config::builder()
             .add_source(config::File::with_name(path).required(false))
             .add_source(cs_env_source)
-            .build()?
-            .try_deserialize()
-            .map_err(|err| match err {
-                config::ConfigError::Message(ref s) => match s {
-                    s if s.contains("UUID parsing failed") => ConfigError::InvalidDatasetId,
-                    s if s.contains("missing field") => {
-                        let mut name = extract_field_name(s).map_or("unknown".to_string(), |s| s);
+            .add_source(cs_client_source)
+            .add_source(unnested_source)
+            .build()?;
 
-                        if name == "name" {
-                            name = "database.name".to_string();
-                        }
+        println!("{:?}", config);
 
-                        ConfigError::MissingParameter { name }
+        let config = config.try_deserialize().map_err(|err| match err {
+            config::ConfigError::Message(ref s) => match s {
+                s if s.contains("UUID parsing failed") => ConfigError::InvalidDatasetId,
+                s if s.contains("missing field") => {
+                    let mut name = extract_field_name(s).map_or("unknown".to_string(), |s| s);
+
+                    if name == "name" {
+                        name = "database.name".to_string();
                     }
-                    s if s.contains("does not have variant constructor") => {
-                        let (name, value) = extract_invalid_field(s);
-                        ConfigError::InvalidParameter { name, value }
-                    }
-                    _ => err.into(),
-                },
+
+                    ConfigError::MissingParameter { name }
+                }
+                s if s.contains("does not have variant constructor") => {
+                    let (name, value) = extract_invalid_field(s);
+                    ConfigError::InvalidParameter { name, value }
+                }
                 _ => err.into(),
-            })?;
+            },
+            _ => err.into(),
+        })?;
+
+        println!("{:?}", config);
 
         Ok(config)
     }
