@@ -3,7 +3,7 @@ use cipherstash_proxy::connect::{self, AsyncStream};
 use cipherstash_proxy::encrypt::Encrypt;
 use cipherstash_proxy::error::Error;
 use cipherstash_proxy::prometheus::CLIENTS_ACTIVE_CONNECTIONS;
-use cipherstash_proxy::{log, postgresql as pg, prometheus, tls, Args};
+use cipherstash_proxy::{cli, log, postgresql as pg, prometheus, tls, Args};
 use clap::Parser;
 use metrics::gauge;
 use tokio::net::TcpListener;
@@ -29,6 +29,24 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .thread_stack_size(config.thread_stack_size())
         .enable_all()
         .build()?;
+
+    // Run any CLI commands
+    let args_clone = args.clone();
+    let config_clone = config.clone();
+    runtime.block_on(async move {
+        match cli::run(args_clone, config_clone).await {
+            Ok(exit) => {
+                if exit {
+                    std::process::exit(exitcode::OK);
+                }
+            }
+
+            Err(err) => {
+                error!(msg = "Error running command", error = err.to_string());
+                std::process::exit(exitcode::USAGE);
+            }
+        }
+    });
 
     runtime.block_on(async move {
         let shutdown_timeout = &config.server.shutdown_timeout();
