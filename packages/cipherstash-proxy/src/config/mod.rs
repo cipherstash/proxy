@@ -13,6 +13,7 @@ pub use tandem::{
 };
 
 pub const CS_PREFIX: &str = "CS";
+
 pub const DEFAULT_CONFIG_FILE_PATH: &str = "cipherstash-proxy.toml";
 
 const ENCRYPT_CONFIG_QUERY: &str = include_str!("./sql/select_config.sql");
