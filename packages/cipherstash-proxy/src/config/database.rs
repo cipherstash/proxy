@@ -35,20 +35,20 @@ impl DatabaseConfig {
         "127.0.0.1".to_string()
     }
 
-    pub fn default_port() -> u16 {
+    pub const fn default_port() -> u16 {
         5432
     }
 
     // 5 minutes
-    pub fn default_connection_timeout() -> u64 {
+    pub const fn default_connection_timeout() -> u64 {
         1000 * 60 * 5
     }
 
-    pub fn default_config_reload_interval() -> u64 {
+    pub const fn default_config_reload_interval() -> u64 {
         60
     }
 
-    pub fn default_schema_reload_interval() -> u64 {
+    pub const fn default_schema_reload_interval() -> u64 {
         60
     }
 

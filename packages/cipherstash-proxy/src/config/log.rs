@@ -162,11 +162,11 @@ impl LogConfig {
         std::io::stdout().is_terminal()
     }
 
-    pub fn default_log_output() -> LogOutput {
+    pub const fn default_log_output() -> LogOutput {
         LogOutput::Stdout
     }
 
-    pub fn default_log_level() -> LogLevel {
+    pub const fn default_log_level() -> LogLevel {
         LogLevel::Info
     }
 }

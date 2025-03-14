@@ -43,11 +43,11 @@ impl ServerConfig {
         "0.0.0.0".to_string()
     }
 
-    pub fn default_port() -> u16 {
+    pub const fn default_port() -> u16 {
         DEFAULT_PORT
     }
 
-    pub fn default_shutdown_timeout() -> u64 {
+    pub const fn default_shutdown_timeout() -> u64 {
         DEFAULT_SHUTDOWN_TIMEOUT
     }
 
