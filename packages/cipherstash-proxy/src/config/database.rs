@@ -1,9 +1,9 @@
-use std::{fmt::Display, time::Duration};
-
+use super::protected_string_deserializer;
+use crate::error::{ConfigError, Error};
 use rustls_pki_types::ServerName;
 use serde::Deserialize;
-
-use crate::error::{ConfigError, Error};
+use std::{fmt::Display, time::Duration};
+use vitaminc_protected::{Controlled, Protected};
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct DatabaseConfig {
@@ -15,7 +15,9 @@ pub struct DatabaseConfig {
 
     pub name: String,
     pub username: String,
-    pub password: String,
+
+    #[serde(deserialize_with = "protected_string_deserializer")]
+    password: Protected<String>,
 
     #[serde(default = "DatabaseConfig::default_connection_timeout")]
     pub connection_timeout: u64,
@@ -59,8 +61,16 @@ impl DatabaseConfig {
     pub fn to_connection_string(&self) -> String {
         format!(
             "postgres://{}:{}@{}:{}/{}",
-            self.username, self.password, self.host, self.port, self.name
+            self.username,
+            self.risky_password(),
+            self.host,
+            self.port,
+            self.name
         )
+    }
+
+    pub fn risky_password(&self) -> String {
+        self.password.to_owned().risky_unwrap()
     }
 
     pub fn connection_timeout(&self) -> Duration {

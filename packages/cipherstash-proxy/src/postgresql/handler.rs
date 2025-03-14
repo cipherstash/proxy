@@ -114,7 +114,8 @@ pub async fn handler(
         let salt = generate_md5_password_salt();
 
         let username = encrypt.config.database.username.as_bytes();
-        let password = encrypt.config.database.password.as_bytes();
+        let password = encrypt.config.database.risky_password();
+        let password = password.as_bytes();
 
         let hash = md5_hash(username, password, &salt);
 
@@ -161,7 +162,7 @@ pub async fn handler(
         }
         AuthenticationMethod::AuthenticationCleartextPassword => {
             debug!(target: AUTHENTICATION, msg = "AuthenticationCleartextPassword");
-            let password = encrypt.config.database.password.to_owned();
+            let password = encrypt.config.database.risky_password();
             let message = PasswordMessage::new(password);
             let bytes = BytesMut::try_from(message)?;
             database_stream.write_all(&bytes).await?;
@@ -169,7 +170,8 @@ pub async fn handler(
         AuthenticationMethod::Md5Password { salt } => {
             debug!(target: AUTHENTICATION, msg = "Md5Password");
             let username = encrypt.config.database.username.as_bytes();
-            let password = encrypt.config.database.password.as_bytes();
+            let password = encrypt.config.database.risky_password();
+            let password = password.as_bytes();
 
             let hash = md5_hash(username, password, salt);
             let message = PasswordMessage::new(hash);
@@ -185,7 +187,8 @@ pub async fn handler(
             // If we are connected via TLS, we can support SCRAM-SHA-256-PLUS
             // If we are not connected via TLS, the database won't ask for SCRAM-SHA-256-PLUS
             let channel_binding = database_stream.channel_binding();
-            let password = encrypt.config.database.password.as_bytes();
+            let password = encrypt.config.database.risky_password();
+            let password = password.as_bytes();
             scram_sha_256_plus_handler(&mut database_stream, mechanism, password, channel_binding)
                 .await?;
         }

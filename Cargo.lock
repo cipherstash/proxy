@@ -719,6 +719,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "uuid",
+ "vitaminc-protected",
  "x509-parser",
 ]
 

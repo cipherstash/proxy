@@ -68,7 +68,7 @@ impl Migrate {
         let connection_string = format!(
             "postgresql://{}:{}@{}:{}/{}",
             config.database.username,
-            config.database.password,
+            config.database.risky_password(),
             config.server.host,
             config.server.port,
             config.database.name
