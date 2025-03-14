@@ -1,7 +1,8 @@
-use super::{tandem::DatabaseConfig, EncryptConfig};
 use crate::{
-    config::ENCRYPT_CONFIG_QUERY,
-    connect, eql,
+    config::DatabaseConfig,
+    connect,
+    encrypt::ENCRYPT_CONFIG_QUERY,
+    eql,
     error::{ConfigError, Error},
     log::ENCRYPT_CONFIG,
 };
@@ -11,6 +12,8 @@ use serde_json::Value;
 use std::{collections::HashMap, sync::Arc, time::Duration};
 use tokio::{task::JoinHandle, time};
 use tracing::{debug, error, info, warn};
+
+use super::encrypt_config::EncryptConfig;
 
 ///
 /// Column configuration keyed by table name and column name
@@ -182,7 +185,7 @@ pub async fn load_encrypt_config(config: &DatabaseConfig) -> Result<EncryptConfi
 
             let json_value: Value = row.get("data");
             let encrypt_config: EncryptConfig = serde_json::from_value(json_value)?;
-            Ok(encrypt_config.to_config_map())
+            Ok(encrypt_config.into_config_map())
         }
         Err(err) => {
             if configuration_table_not_found(&err) {

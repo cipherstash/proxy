@@ -1,4 +1,5 @@
-use super::{tandem::DatabaseConfig, AGGREGATE_QUERY, SCHEMA_QUERY};
+use crate::config::DatabaseConfig;
+use crate::encrypt::{AGGREGATE_QUERY, SCHEMA_QUERY};
 use crate::error::Error;
 use crate::{connect, log::SCHEMA};
 use arc_swap::ArcSwap;

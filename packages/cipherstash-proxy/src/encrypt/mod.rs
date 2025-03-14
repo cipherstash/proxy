@@ -1,5 +1,8 @@
+mod config;
+mod schema;
+
 use crate::{
-    config::{EncryptConfigManager, SchemaManager, TandemConfig},
+    config::TandemConfig,
     eql,
     error::{EncryptError, Error},
     log::ENCRYPT,
@@ -16,8 +19,19 @@ use cipherstash_client::{
     ConsoleConfig, CtsConfig, ZeroKMSConfig,
 };
 use cipherstash_config::ColumnConfig;
+use config::EncryptConfigManager;
+use schema::SchemaManager;
 use std::{sync::Arc, vec};
 use tracing::debug;
+
+/// SQL Statement for loading encrypt configuration from database
+const ENCRYPT_CONFIG_QUERY: &str = include_str!("./sql/select_config.sql");
+
+/// SQL Statement for loading database schema
+const SCHEMA_QUERY: &str = include_str!("./sql/select_table_schemas.sql");
+
+/// SQL Statement for loading aggregates as part of database schema
+const AGGREGATE_QUERY: &str = include_str!("./sql/select_aggregates.sql");
 
 type ScopedCipher = encryption::ScopedCipher<AutoRefresh<ServiceCredentials>>;
 
