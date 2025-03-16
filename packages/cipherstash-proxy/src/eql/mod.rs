@@ -2,7 +2,7 @@ use cipherstash_client::{
     encryption::SteVec,
     zerokms::{encrypted_record, EncryptedRecord},
 };
-use serde::{Deserialize, Serialize, Serializer};
+use serde::{Deserialize, Serialize};
 use sqlparser::ast::Ident;
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -93,21 +93,21 @@ pub enum Encrypted {
     },
 }
 
-fn ident_de<'de, D>(deserializer: D) -> Result<Ident, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    let s = String::deserialize(deserializer)?;
-    Ok(Ident::with_quote('"', s))
-}
+// fn ident_de<'de, D>(deserializer: D) -> Result<Ident, D::Error>
+// where
+//     D: serde::Deserializer<'de>,
+// {
+//     let s = String::deserialize(deserializer)?;
+//     Ok(Ident::with_quote('"', s))
+// }
 
-fn ident_se<S>(ident: &Ident, serializer: S) -> Result<S::Ok, S::Error>
-where
-    S: Serializer,
-{
-    let s = ident.to_string();
-    serializer.serialize_str(&s)
-}
+// fn ident_se<S>(ident: &Ident, serializer: S) -> Result<S::Ok, S::Error>
+// where
+//     S: Serializer,
+// {
+//     let s = ident.to_string();
+//     serializer.serialize_str(&s)
+// }
 
 #[cfg(test)]
 mod tests {

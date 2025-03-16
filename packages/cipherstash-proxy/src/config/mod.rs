@@ -1,22 +1,34 @@
-mod config_manager;
-mod encrypt_config;
-mod schema_manager;
+mod database;
+mod log;
+mod server;
 mod tandem;
+mod tls;
 
-pub use config_manager::EncryptConfigManager;
-pub use encrypt_config::EncryptConfig;
-pub use schema_manager::SchemaManager;
-
-pub use tandem::{
-    DatabaseConfig, LogConfig, LogFormat, LogLevel, LogOutput, ServerConfig, TandemConfig,
-    TlsConfig,
-};
+pub use database::DatabaseConfig;
+pub use log::{LogConfig, LogFormat, LogLevel, LogOutput};
+use serde::Deserialize;
+pub use server::ServerConfig;
+pub use tandem::TandemConfig;
+pub use tls::TlsConfig;
+use vitaminc_protected::Protected;
 
 pub const CS_PREFIX: &str = "CS";
 pub const DEFAULT_CONFIG_FILE_PATH: &str = "cipherstash-proxy.toml";
 
-const ENCRYPT_CONFIG_QUERY: &str = include_str!("./sql/select_config.sql");
+// 2 MiB
+pub const DEFAULT_THREAD_STACK_SIZE: usize = 2 * 1024 * 1024;
 
-const SCHEMA_QUERY: &str = include_str!("./sql/select_table_schemas.sql");
+// 4 MiB
+pub const DEBUG_THREAD_STACK_SIZE: usize = 4 * 1024 * 1024;
 
-const AGGREGATE_QUERY: &str = include_str!("./sql/select_aggregates.sql");
+pub const DEFAULT_PORT: u16 = 6432;
+pub const DEFAULT_SHUTDOWN_TIMEOUT: u64 = 2000;
+pub const DEFAULT_WORKER_THREADS: usize = 4;
+
+fn protected_string_deserializer<'de, D>(deserializer: D) -> Result<Protected<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let s = String::deserialize(deserializer)?;
+    Ok(Protected::new(s))
+}
