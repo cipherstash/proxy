@@ -400,11 +400,11 @@ private_key = "./server.key"
 
 [auth]
 # CipherStash Workspace ID
-# Env: CS_AUTH__WORKSPACE_ID
+# Env: CS_WORKSPACE_ID
 workspace_id = "cipherstash-workspace-id"
 
 # CipherStash Client Access Key
-# Env: CS_AUTH__CLIENT_ACCESS_KEY
+# Env: CS_CLIENT_ACCESS_KEY
 client_access_key = "cipherstash-client-access-key"
 
 [encrypt]
@@ -413,11 +413,11 @@ client_access_key = "cipherstash-client-access-key"
 default_keyset_id = "cipherstash-dataset-id"
 
 # CipherStash Client ID
-# Env: CS_ENCRYPT__CLIENT_ID
+# Env: CS_CLIENT_ID
 client_id = "cipherstash-client-id"
 
 # CipherStash Client Key
-# Env: CS_ENCRYPT__CLIENT_KEY
+# Env: CS_CLIENT_KEY
 client_key = "cipherstash-client-key"
 
 
