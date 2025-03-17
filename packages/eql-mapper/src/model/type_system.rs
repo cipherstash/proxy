@@ -104,7 +104,7 @@ impl TryFrom<&unifier::ProjectionColumns> for Type {
                 }
 
                 unexpected => Err(crate::EqlMapperError::InternalError(format!(
-                    "WAT2 unexpected type {} in projection column",
+                    "unexpected type {} in projection column",
                     unexpected
                 )))?,
             };
@@ -172,7 +172,7 @@ impl TryFrom<&unifier::Type> for Type {
                         }
 
                         unexpected => Err(crate::EqlMapperError::InternalError(format!(
-                            "WAT3 unexpected type {} in projection column",
+                            "unexpected type {} in projection column",
                             unexpected
                         )))?,
                     };
