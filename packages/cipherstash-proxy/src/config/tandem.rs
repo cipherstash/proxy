@@ -126,12 +126,6 @@ impl TandemConfig {
                     env.insert("CS_ENCRYPT__CLIENT_KEY".into(), value);
                 }
 
-                // TODO: REMOVE
-                // Added so that the build would not break with the name change
-                if let Ok(value) = std::env::var("CS_ENCRYPT__DATASET_ID") {
-                    env.insert("CS_ENCRYPT__DEFAULT_KEYSET_ID".into(), value);
-                }
-
                 if let Ok(value) = std::env::var(CS_DEFAULT_KEYSET_ID) {
                     env.insert("CS_ENCRYPT__DEFAULT_KEYSET_ID".into(), value);
                 }
