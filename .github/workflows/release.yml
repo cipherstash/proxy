@@ -38,7 +38,7 @@ jobs:
         with:
           name: cipherstash-proxy-${{matrix.build.arch == 'linux/amd64' && 'linux_amd64' || 'linux_arm64'}}
           path: cipherstash-proxy
-      - if: github.event_name != 'pull_request' && github.event_name != 'push'
+      - if: github.event_name != 'pull_request'
         env:
           DOCKER_HUB_USERNAME: ${{ secrets.DOCKER_HUB_USERNAME }}
           DOCKER_HUB_PERSONAL_ACCESS_TOKEN: ${{ secrets.DOCKER_HUB_PERSONAL_ACCESS_TOKEN }}
