@@ -453,7 +453,7 @@ fn make_eql_function_node(function_name: &str, arg: ast::Expr) -> ast::Expr {
     })
 }
 
-/// [`Visitor`] implememtation that composes the [`Scope`] visitor, the [`Importer`] and the [`TypeInferencer`]
+/// [`Visitor`] implementation that composes the [`Scope`] visitor, the [`Importer`] and the [`TypeInferencer`]
 /// visitors.
 impl<'ast> Visitor<'ast> for EqlMapper<'ast> {
     type Error = EqlMapperError;
