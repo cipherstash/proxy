@@ -7,12 +7,13 @@ CS_DATABASE__HOST = "localhost" # optional
 CS_DATABASE__PORT = "5532"      # optional
 CS_DATABASE__WITH_TLS = false   # optional
 
-CS_AUTH__WORKSPACE_ID = "workspace_id"
-CS_AUTH__CLIENT_ACCESS_KEY = "client_access_key"
+CS_WORKSPACE_ID = "workspace-id"
+CS_CLIENT_ACCESS_KEY = "client-access-key"
 
-CS_ENCRYPT__DATASET_ID = "dataset_id"
-CS_ENCRYPT__CLIENT_KEY = "client_key"
-CS_ENCRYPT__CLIENT_ID = "client_id"
+CS_DEFAULT_KEYSET_ID = "default-keyset-id"
+CS_CLIENT_KEY = "client-key"
+CS_CLIENT_ID = "client-id"
+
 
 # TLS variables are required for providing TLS to Proxy's clients.
 # CS_TLS__TYPE can be either "Path" or "Pem" (case-sensitive).

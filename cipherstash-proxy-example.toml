@@ -1,5 +1,5 @@
 [tls]
-type = "Path" # To provide paths to PEM files
+type = "Path"                         # To provide paths to PEM files
 certificate = "tests/tls/server.cert"
 private_key = "tests/tls/server.key"
 
@@ -24,6 +24,6 @@ workspace_id = "workspace_id"
 client_access_key = "client_access_key"
 
 [encrypt]
-dataset_id = "dataset_id"
+default_keyset_id = "default_keyset_id"
 client_id = "client_id"
 client_key = "client_key"

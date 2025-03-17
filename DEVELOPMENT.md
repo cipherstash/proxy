@@ -34,28 +34,28 @@ mise run postgres:setup
 #  - `stash login`
 
 # Create minimal mise.local.toml
-# CS_AUTH__WORKSPACE_ID
-# CS_AUTH__CLIENT_ACCESS_KEY
-# CS_ENCRYPT__DATASET_ID
-# CS_ENCRYPT__CLIENT_KEY
-# CS_ENCRYPT__CLIENT_ID
+# CS_WORKSPACE_ID
+# CS_CLIENT_ACCESS_KEY
+# CS_DEFAULT_KEYSET_ID
+# CS_CLIENT_KEY
+# CS_CLIENT_ID
 
 # Get the workspace ID
 stash workspaces
-# add to CS_AUTH__WORKSPACE_ID
+# add to CS_WORKSPACE_ID
 
 # Create an access key
 stash access-keys create proxy
-# add to CS_AUTH__CLIENT_ACCESS_KEY
+# add to CS_CLIENT_ACCESS_KEY
 
 # Create a dataset
 stash datasets create proxy
-# add to CS_ENCRYPT__DATASET_ID
+# add to CS_DEFAULT_KEYSET_ID
 
 # Create a client
-stash clients create --dataset-id $DATASET_ID proxy
-# add to CS_ENCRYPT__CLIENT_ID
-# add to CS_ENCRYPT__CLIENT_KEY
+stash clients create --keyset-id $DEFAULT_KEYSET_ID proxy
+# add to CS_CLIENT_ID
+# add to CS_CLIENT_KEY
 
 # Build and run Proxy
 mise run proxy
@@ -551,3 +551,56 @@ Reference: [Rust documentation on `expect`](https://doc.rust-lang.org/std/result
 #### Prefer `assert_eq!` over `assert!` for equality checks
 Use `assert_eq!` instead of `assert!` when testing equality in Rust.
 While both achieve the same result, `assert_eq!` provides clearer failure messages by displaying the expected and actual values, making debugging easier.
+
+
+
+### Errors
+
+- errors are defined in `cipherstash-proxy/src/error.rs`
+- not all errors are customer-facing
+- for all customer-facing errors ensure there is:
+ - a friendly error message
+ - an entry in `docs/errors.md`
+ - a link in the error message to the appropraite anchor in `docs/errors.md`
+
+#### Keep the errors in one place
+
+Keeping the errors in one place mean that the error structure is
+- easier to visualise and understand
+- simpler to deduplicate for consistent messaging
+- easier to edit messages for consistent tone
+
+
+#### Align errors to the domain, not the module structure
+
+The error structure attempts to group errors into related problem domains.
+eg, the `Protocol` error groups all of the errors originating from interactions with the Postgresql protocol and is used by any module that interacts with the Protocol.
+If each module defines errors, it becomes harder to have consistent messaging and more difficult to understand the error flow.
+
+
+#### Prefer descriptive names and don't use Error
+
+Be kind to your future self and make the error as descriptive as possible
+
+eg `ColumnCouldNotBeEncrypted` over `ColumnError`
+
+Error enum names should contain `Error` but the variants should not.
+
+The enum defines the `Error` for the domain, and the variant describes the error.
+
+eg `ColumnCouldNotBeEncrypted` is a variant of an `EncryptError`.
+
+
+#### Make errors as friendly as possible, include details and keep a consistent tone
+
+Friendly can be hard when talking about errors, but do your best.
+
+
+#### Prefer struct definitions
+
+Struct definitions make error message strings slightly clearer.
+
+`UnsupportedParameterType { name: String, oid: u32 }` over `UnsupportedParameterType(String, u32)`
+
+Note: not all errors do this at the moment, and we will change over time.
+
