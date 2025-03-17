@@ -188,7 +188,7 @@ async fn init_cipher(config: &TandemConfig) -> Result<ScopedCipher, Error> {
     let zerokms_client = zerokms_config
         .create_client_with_credentials(AutoRefresh::new(zerokms_config.credentials()));
 
-    match ScopedCipher::init(Arc::new(zerokms_client), config.encrypt.dataset_id).await {
+    match ScopedCipher::init(Arc::new(zerokms_client), config.encrypt.default_keyset_id).await {
         Ok(cipher) => {
             debug!(target: ENCRYPT, msg = "Initialized ZeroKMS ScopedCipher");
             Ok(cipher)
