@@ -405,8 +405,8 @@ run = """
 cd tests
 mise run postgres:fail_if_not_running
 mise run postgres:eql:download
-cat sql/cipherstash-encrypt-uninstall.sql | docker exec -i postgres${CONTAINER_SUFFIX} psql postgresql://${CS_DATABASE__USERNAME}:${CS_DATABASE__PASSWORD}@${CS_DATABASE__HOST}:${CS_DATABASE__PORT}/${CS_DATABASE__NAME} -f-
 cat sql/schema-uninstall.sql | docker exec -i postgres${CONTAINER_SUFFIX} psql postgresql://${CS_DATABASE__USERNAME}:${CS_DATABASE__PASSWORD}@${CS_DATABASE__HOST}:${CS_DATABASE__PORT}/${CS_DATABASE__NAME} -f-
+cat sql/cipherstash-encrypt-uninstall.sql | docker exec -i postgres${CONTAINER_SUFFIX} psql postgresql://${CS_DATABASE__USERNAME}:${CS_DATABASE__PASSWORD}@${CS_DATABASE__HOST}:${CS_DATABASE__PORT}/${CS_DATABASE__NAME} -f-
 """
 
 [tasks."postgres:up"]
