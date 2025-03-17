@@ -13,6 +13,7 @@ pub use tls::TlsConfig;
 use vitaminc_protected::Protected;
 
 pub const CS_PREFIX: &str = "CS";
+
 pub const DEFAULT_CONFIG_FILE_PATH: &str = "cipherstash-proxy.toml";
 
 // 2 MiB

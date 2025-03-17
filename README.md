@@ -117,18 +117,19 @@ services:
       # The database name on the Postgres database server connections will be proxied to
       - CS_DATABASE__NAME=${CS_DATABASE__NAME}
       # The CipherStash workspace ID for making requests for encryption keys
-      - CS_AUTH__WORKSPACE_ID=${CS_AUTH__WORKSPACE_ID}
+      - CS_WORKSPACE_ID=${CS_WORKSPACE_ID}
       # The CipherStash client access key for making requests for encryption keys
-      - CS_AUTH__CLIENT_ACCESS_KEY=${CS_AUTH__CLIENT_ACCESS_KEY}
+      - CS_CLIENT_ACCESS_KEY=${CS_CLIENT_ACCESS_KEY}
       # The CipherStash dataset ID for generating and retrieving encryption keys
-      - CS_ENCRYPT__DATASET_ID=${CS_ENCRYPT__DATASET_ID}
+      - CS_DEFAULT_KEYSET_ID=${CS_DEFAULT_KEYSET_ID}
       # The CipherStash client ID used to programmatically access a dataset
-      - CS_ENCRYPT__CLIENT_ID=${CS_ENCRYPT__CLIENT_ID}
+      - CS_CLIENT_ID=${CS_CLIENT_ID}
       # The CipherStash client key used to programmatically access a dataset
-      - CS_ENCRYPT__CLIENT_KEY=${CS_ENCRYPT__CLIENT_KEY}
+      - CS_CLIENT_KEY=${CS_CLIENT_KEY}
       # Toggle Prometheus exporter for CipherStash Proxy operations
       - CS_PROMETHEUS__ENABLED=${CS_PROMETHEUS__ENABLED:-true}
 ```
+
 
 For a fully-working example, go to [`docker-compose.yml`](./docker-compose.yml). Follow the steps in [Getting started](#getting-started) to see it in action.
 
@@ -170,11 +171,11 @@ If you are configuring Proxy with environment variables, these are the minimum e
 CS_DATABASE__NAME
 CS_DATABASE__USERNAME
 CS_DATABASE__PASSWORD
-CS_AUTH__WORKSPACE_ID
-CS_AUTH__CLIENT_ACCESS_KEY
-CS_ENCRYPT__DATASET_ID
-CS_ENCRYPT__CLIENT_ID
-CS_ENCRYPT__CLIENT_KEY
+CS_WORKSPACE_ID
+CS_CLIENT_ACCESS_KEY
+CS_DEFAULT_KEYSET_ID
+CS_CLIENT_ID
+CS_CLIENT_KEY
 ```
 
 Read the full list of environment variables and what they do in the [reference documentation](#proxy-config-options).
@@ -194,7 +195,7 @@ workspace_id = "cipherstash-workspace-id"
 client_access_key = "cipherstash-client-access-key"
 
 [encrypt]
-dataset_id = "cipherstash-dataset-id"
+default_keyset_id = "cipherstash-default-keyset-id"
 client_id = "cipherstash-client-id"
 client_key = "cipherstash-client-key"
 ```
@@ -408,8 +409,8 @@ client_access_key = "cipherstash-client-access-key"
 
 [encrypt]
 # CipherStash Dataset ID
-# Env: CS_ENCRYPT__DATASET_ID
-dataset_id = "cipherstash-dataset-id"
+# Env: CS_DEFAULT_KEYSET_ID
+default_keyset_id = "cipherstash-dataset-id"
 
 # CipherStash Client ID
 # Env: CS_ENCRYPT__CLIENT_ID
