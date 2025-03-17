@@ -42,10 +42,10 @@ Behind the scenes, it uses the [Encrypt Query Language](https://github.com/ciphe
   - [Setting up the database schema](#setting-up-the-database-schema)
     - [Creating columns with the right types](#creating-columns-with-the-right-types)
   - [Encrypting data in an existing database](#encrypting-data-in-an-existing-database)
-    - [Usage](#usage)
-    - [How it works](#how-it-works)
-    - [Configuration](#configuration)
-    - [Example usage](#example-usage)
+    - [Using the `encrypt` tool](#using-the-encrypt-tool)
+    - [How the `encrypt` tool works](#how-the-encrypt-tool-works)
+    - [Configuring the `encrypt` tool](#configuring-the-encrypt-tool)
+    - [Example `encrypt` tool usage](#example-encrypt-tool-usage)
 - [Reference](#reference)
   - [Proxy config options](#proxy-config-options)
   - [Prometheus metrics](#prometheus-metrics)
@@ -217,7 +217,7 @@ TODO: Add instructions for creating columns with the right types
 
 CipherStash Proxy includes an `encrypt` tool – a CLI application to encrypt existing data, or to apply index changes after changes to the encryption configuration of a protected database.
 
-### Usage
+### Using the `encrypt` tool
 
 Encrypt the `source` column data in `table` into the specified encrypted `target` column.
 The `encrypt` tool connects to CipherStash Proxy using the `cipherstash.toml` configuration or `ENV` variables.
@@ -226,7 +226,7 @@ The `encrypt` tool connects to CipherStash Proxy using the `cipherstash.toml` co
 cipherstash-proxy encrypt [OPTIONS] --table <TABLE>  --columns <SOURCE_COLUMN=TARGET_COLUMN>...
 ```
 
-### How it works
+### How the `encrypt` tool works
 
 At a high-level, the process for encrypting a column in the database is:
 
@@ -241,7 +241,7 @@ The CipherStash Proxy `encrypt` tool automates the data process to encrypt one o
 Updates are executed in batches of 100 records (and the `batch_size` is configurable).
 The process is idempotent and can be run repeatedly.
 
-### Configuration
+### Configuring the `encrypt` tool
 
 The CipherStash Proxy `encrypt` tool reuses the CipherStash Proxy configuration for the Proxy connection details. See [`encrypt` tool config options](#encrypt-tool-config-options) for the available options.
 
@@ -254,7 +254,7 @@ Connection to CipherStash Proxy reuses Proxy configuration:
  - database name
 {% /callout %}
 
-### Example usage
+### Example `encrypt` tool usage
 
 Given a running instance of CipherStash Proxy and a `users` table with:
  - `id` – a primary key column
