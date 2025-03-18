@@ -67,9 +67,14 @@ Get up and running in local dev in < 5 minutes:
 git clone https://github.com/cipherstash/proxy
 cd proxy
 
+# Install the CipherStash CLI
+## macOS
+brew install cipherstash/tap/stash
+## Linux
+## Download from https://github.com/cipherstash/cli-releases/releases/latest
+
 # Setup your CipherStash configuration
 stash setup
-# TODO: get the config into a format cipherstash-proxy can read
 
 # Start the containers
 docker compose up
