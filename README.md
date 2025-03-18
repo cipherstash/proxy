@@ -208,7 +208,27 @@ TODO: Add instructions for running Proxy locally
 
 ### Setting up the database schema
 
-TODO: Add instructions for setting up the database schema
+Under the hood, Proxy uses [CipherStash Encrypt Query Language](https://github.com/cipherstash/encrypt-query-language/) to index and search encrypted data.
+
+When you start the Proxy container, you can install EQL by setting the `CS_DATABASE__INSTALL_EQL` environment variable:
+
+```bash
+CS_DATABASE__INSTALL_EQL=true
+```
+
+This will install the version of EQL bundled with the Proxy container.
+The version of EQL bundled with the Proxy container is tested to work with that version of Proxy.
+
+If you are following the [getting started](#getting-started) guide above, EQL is automatically installed for you.
+You can also install EQL by running [the installation script](https://github.com/cipherstash/encrypt-query-language/releases) as a database migration in your application.
+
+Once you have installed EQL, you can see what version is installed by querying the database:
+
+```sql
+SELECT cs_eql_version();
+```
+
+This will output the version of EQL installed.
 
 #### Creating columns with the right types
 
