@@ -510,12 +510,12 @@ run = """
 {# If we are on macos and are cross-compiling for Linux, set up a linker and toolchain. #}
 {# Only supports cross-compiling to Linux/ARM64. #}
 {% if os() == "macos" %}
-{% if target is containing("linux") %}
-if ! which {{ target }}-gcc ; then
-  brew install MaterializeInc/crosstools/aarch64-unknown-linux-gnu
+if [[ "{{option(name="target", default=default_target)}}" =~ "linux" ]]; then
+  if ! which {{ target }}-gcc ; then
+    brew install MaterializeInc/crosstools/aarch64-unknown-linux-gnu
+  fi
+  export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER={{ target }}-gcc
 fi
-export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER={{ target }}-gcc
-{% endif %}
 {% endif %}
 
 # cross-compile
