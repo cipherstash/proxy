@@ -57,10 +57,7 @@ services:
       - CS_DEFAULT_KEYSET_ID=${CS_DEFAULT_KEYSET_ID}
       - CS_CLIENT_KEY=${CS_CLIENT_KEY}
       - CS_CLIENT_ID=${CS_CLIENT_ID}
-
       - CS_PROMETHEUS__ENABLED=${CS_PROMETHEUS__ENABLED:-true}
-
-
     networks:
       - postgres
 
