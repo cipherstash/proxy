@@ -29,7 +29,7 @@ jobs:
           cache-all-crates: true
       - uses: jdx/mise-action@v2
         with:
-          version: 2024.12.0 # [default: latest] mise version to install
+          version: 2025.1.6 # [default: latest] mise version to install
           install: true # [default: true] run `mise install`
           cache: true # [default: true] cache mise using GitHub's cache
       - run: |
