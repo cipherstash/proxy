@@ -66,7 +66,7 @@ mod tests {
         if let Err(err) = result {
             let msg = err.to_string();
 
-            assert_eq!(msg, "db error: ERROR: Column 'encrypted_unconfigured' in table 'unconfigured' has no Encrypt configuration. For help visit https://github.com/cipherstash/proxy/docs/errors.md#encrypt-unknown-column");
+            assert_eq!(msg, "db error: ERROR: Column 'encrypted_unconfigured' in table 'unconfigured' has no Encrypt configuration. For help visit https://github.com/cipherstash/proxy/blob/main/docs/errors.md#encrypt-unknown-column");
         } else {
             unreachable!();
         }
@@ -122,7 +122,7 @@ mod tests {
         if let Err(err) = result {
             let msg = err.to_string();
             info!("{}", msg);
-            assert_eq!(msg, "db error: ERROR: sql parser error: Expected: SELECT, VALUES, or a subquery in the query body, found: id at Line: 1, Column: 23. For help visit https://github.com/cipherstash/proxy/docs/errors.md#mapping-invalid-sql-statement");
+            assert_eq!(msg, "db error: ERROR: sql parser error: Expected: SELECT, VALUES, or a subquery in the query body, found: id at Line: 1, Column: 23. For help visit https://github.com/cipherstash/proxy/blob/main/docs/errors.md#mapping-invalid-sql-statement");
         } else {
             unreachable!();
         }
