@@ -523,7 +523,7 @@ rustup target add --toolchain stable {{ target }}
 
 cargo build --locked --target {{ target }} --release --package cipherstash-proxy
 
-cp {{config_root}}/target/{{ target }}/release/cipherstash-proxy {{config_root}}/
+cp -v {{config_root}}/target/{{ target }}/release/cipherstash-proxy {{config_root}}/
 """
 
 [tasks."build:docker"]
