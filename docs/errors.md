@@ -170,13 +170,13 @@ Check the supported types for encrypted columns.
 
 ## Internal Mapper error <a id='mapping-internal-error'></a>
 
-An error that is internal to the EQL Mapper module. This may be a defect or a limitation of the current EQL Mapper.
-
+An internal error occurred when attempting to rewrite the SQL statement.
+This could be due to an internal invariant failure or because of a specific fragment of unsupported SQL syntax.
 
 ### Error message
 
 ```
-Internal error: 'internal details'
+Statement encountered an internal error. This may be a bug in the statement mapping module of CipherStash Proxy.
 ```
 
 ### How to Fix
