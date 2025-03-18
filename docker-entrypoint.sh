@@ -1,6 +1,34 @@
 #!/usr/bin/env bash
 set -eu
 
+DATABASE_URL="postgresql://${CS_DATABASE__USERNAME}:${CS_DATABASE__PASSWORD}@${CS_DATABASE__HOST}:${CS_DATABASE__PORT}/${CS_DATABASE__NAME}"
+
+postgres_ready () {
+  psql ${DATABASE_URL} -c "SELECT 1" > /dev/null 2>&1
+}
+
+wait_for_postgres_or_exit() {
+  host=${CS_DATABASE__HOST}
+  port=${CS_DATABASE__PORT}
+  max_retries=20
+  interval=0.5
+  attempt=1
+  echo "Testing presence of PostgreSQL at ${host}:${port} with a maximum of ${max_retries} retries"
+
+  until postgres_ready
+  do
+    if [ $attempt -lt $max_retries ]; then
+      echo "Waiting for ${host}:${port}"
+      sleep $interval
+      attempt=$(expr $attempt + 1)
+    else
+      echo "Unable to connect to ${host}:${port} after ${max_retries} attempts"
+      exit 64
+    fi
+  done
+  echo "Connected to ${host}:${port} after ${attempt} attempts"
+}
+
 : "${CS_DATABASE__AWS_BUNDLE_PATH:=./aws-rds-global-bundle.pem}"
 
 # Optionally pull in the AWS RDS global certificate bundle. This is required
@@ -27,6 +55,33 @@ case "${CS_DATABASE__INSTALL_AWS_RDS_CERT_BUNDLE:-}" in
     >&2 echo "Installing AWS RDS certificate bundle..."
     csplit --quiet --elide-empty-files --prefix /usr/local/share/ca-certificates/aws --suffix '.%d.crt' "$CS_DATABASE__AWS_BUNDLE_PATH" '/-----BEGIN CERTIFICATE-----/' '{*}'
     update-ca-certificates
+    ;;
+esac
+
+# Optionally install EQL in the target database
+case "${CS_DATABASE__INSTALL_EQL:-}" in
+  "true") ;&
+  "yes") ;&
+  "1")
+    >&2 echo "Installing EQL in target PostgreSQL database..."
+
+    if [ ! -f "/opt/cipherstash-eql.sql" ]; then
+      >&2 echo "error: unable to find EQL installer at: /opt/cipherstash-eql.sql"
+      exit 1
+    fi
+
+    # Wait for postgres to become available
+    wait_for_postgres_or_exit
+
+    # Attempt to install EQL
+    psql --file=/opt/cipherstash-eql.sql --quiet $DATABASE_URL > /dev/null 2>&1
+    if [ $? != 0 ]; then
+      >&2 echo "error: unable to install EQL in target PostgreSQL database!"
+      exit 2
+    fi
+    ;;
+  *)
+    >&2 echo "Not installing EQL in target PostgreSQL database."
     ;;
 esac
 
