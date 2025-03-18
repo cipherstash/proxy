@@ -25,7 +25,7 @@ use crate::prometheus::{
 use crate::Encrypted;
 use bytes::BytesMut;
 use cipherstash_client::encryption::Plaintext;
-use eql_mapper::{self, EqlValue, NodeKey, TableColumn, TypedStatement};
+use eql_mapper::{self, EqlMapperError, EqlValue, NodeKey, TableColumn, TypedStatement};
 use metrics::{counter, histogram};
 use pg_escape::quote_literal;
 use serde::Serialize;
@@ -736,6 +736,16 @@ where
                 );
 
                 Ok(typed_statement)
+            }
+            Err(EqlMapperError::InternalError(str)) => {
+                warn!(
+                    client_id = self.context.client_id,
+                    msg = "Internal Error in EQL Mapper",
+                    mapping_errors_enabled = self.encrypt.config.mapping_errors_enabled(),
+                    error = str,
+                );
+                counter!(STATEMENTS_UNMAPPABLE_TOTAL).increment(1);
+                Err(MappingError::Internal(str).into())
             }
             Err(err) => {
                 warn!(

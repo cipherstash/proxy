@@ -12,6 +12,7 @@
   - [Invalid parameter](#mapping-invalid-parameter)
   - [Invalid SQL statement](#mapping-invalid-sql-statement)
   - [Unsupported parameter type](#mapping-unsupported-parameter-type)
+  - [Internal Error](#mapping-internal-error)
 
 - Encrypt Errors:
   - [Column could not be encrypted](#encrypt-column-could-not-be-encrypted)
@@ -161,6 +162,28 @@ Encryption of PostgreSQL {name} (OID {oid}) types is not currently supported.
 Check the supported types for encrypted columns.
 
 <!-- TODO: link to doc -->
+
+
+
+<!-- ---------------------------------------------------------------------------------------------------- -->
+
+
+## Internal Mapper error <a id='mapping-internal-error'></a>
+
+An error that is internal to the EQL Mapper module. This may be a defect or a limitation of the current EQL Mapper.
+
+
+### Error message
+
+```
+Internal error: 'internal details'
+```
+
+### How to Fix
+
+If you are running an older version of CipherStash Proxy, please update to the latest version.
+
+If the error persists, please contact CipherStash [support](https://cipherstash.com/support).
 
 
 
