@@ -6,7 +6,7 @@ use std::io;
 use thiserror::Error;
 use tokio::time::error::Elapsed;
 
-const ERROR_DOC_BASE_URL: &str = "https://github.com/cipherstash/proxy/docs/errors.md";
+const ERROR_DOC_BASE_URL: &str = "https://github.com/cipherstash/proxy/blob/main/docs/errors.md";
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -89,6 +89,9 @@ pub enum MappingError {
 
     #[error("Could not parse parameter")]
     CouldNotParseParameter,
+
+    #[error("Statement encountered an internal error. This may be a bug in the statement mapping module of CipherStash Proxy. Please visit {}#mapping-internal-error for more information.", ERROR_DOC_BASE_URL)]
+    Internal(String),
 }
 
 #[derive(Error, Debug)]
@@ -302,5 +305,18 @@ impl From<rust_decimal::Error> for Error {
 impl From<chrono::ParseError> for Error {
     fn from(_e: chrono::ParseError) -> Self {
         MappingError::CouldNotParseParameter.into()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_internal_error_message() {
+        let error = MappingError::Internal("unexpected bug encounterd".to_string());
+        let message = error.to_string();
+
+        assert_eq!(format!("Statement encountered an internal error. This may be a bug in the statement mapping module of CipherStash Proxy. Please visit {}#mapping-internal-error for more information.", ERROR_DOC_BASE_URL), message);
     }
 }
