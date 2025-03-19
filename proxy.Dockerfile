@@ -1,4 +1,4 @@
-FROM ubuntu:latest
+FROM ubuntu:24.10
 
 # Install TLS/SSL certs for https support, PostgreSQL client (psql), and curl
 # for retrieving the certificate bundle.
