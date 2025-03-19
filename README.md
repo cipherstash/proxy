@@ -84,6 +84,8 @@ docker compose up
 This will start a PostgreSQL database on `localhost:5432`, and a CipherStash Proxy on `localhost:6432`.
 There is an example table called `users` that we can start inserting and querying encrypted data with.
 
+### Step 1: insert and read some data <a id='getting-started-step-1'></a>
+
 Now let's connect to the Proxy via `psql` and run some queries:
 
 ```bash
@@ -92,30 +94,64 @@ docker compose exec proxy psql postgres://cipherstash:3ncryp7@localhost:6432/cip
 
 This establishes an interactive session with the database, via CipherStash Proxy.
 
-Now we run some queries:
+Now we insert and read some data via Proxy:
 
 ```sql
-# Insert a new record via Proxy
 INSERT INTO users (encrypted_email, encrypted_dob, encrypted_salary) VALUES ('alice@cipherstash.com', '1970-01-01', '100');
 
-# Query via Proxy
-# Returns 'alice@cipherstash.com', '1970-01-01', '100'
 SELECT encrypted_email, encrypted_dob, encrypted_salary FROM users;
+```
 
-# Query the database directly
-# Returns the raw encrypted data
+The `INSERT` statement inserts a record into the `users` table, and the `SELECT` statement reads the same record back.
+You'll notice that it looks like nothing happened: the data in the `INSERT` was unencrypted, and the data in the `SELECT` is also unencrypted.
+
+Now let's connect to the database directly via `psql` and see what the data actually looks like behind the scenes:
+
+```bash
+docker compose exec proxy psql postgres://cipherstash:3ncryp7@postgres:5432/cipherstash
+```
+
+This establishes an interactive session directly with the database (note the change of host to `postgres` and port to `5432`).
+
+Now we query the database directly:
+
+```sql
 SELECT encrypted_email, encrypted_dob, encrypted_salary FROM users;
+```
 
-# Update record via Proxy
-# The comparison is over the **encrypted** data
-# The literal email value is encrypted and compared in the database against the encrypted email
+You'll see the output is _much_ larger, because the `SELECT` returns the raw encrypted data.
+The data is transparently encrypted and decrypted by Proxy in the `INSERT` and `SELECT` statements.
+
+### Step 2: Update the data, with a WHERE clause <a id='getting-started-step-2'></a>
+
+In your `psql` connection to Proxy:
+
+```bash
+docker compose exec proxy psql postgres://cipherstash:3ncryp7@localhost:6432/cipherstash
+```
+
+Update the data we inserted in [Step 1](#getting-started-step-1), and read it back:
+
+```sql
 UPDATE users SET encrypted_dob = '1978-02-01' WHERE encrypted_email = 'alice@cipherstash.com';
 
-# Query via Proxy
-# Returns '1978-02-01'
 SELECT encrypted_dob FROM users WHERE encrypted_email = 'alice@cipherstash.com';
+```
 
+When the `UPDATE` runs, the comparison is over the **encrypted** data.
+The literal email value is encrypted and compared in the database against the stored encrypted email.
 
+Back on the `psql` session directly on the database, verify the data is still encrypted:
+
+```sql
+SELECT encrypted_email, encrypted_dob, encrypted_salary FROM users;
+```
+
+This `SELECT` shows the raw encrypted data.
+
+### Step 3: Update the data, with a WHERE clause <a id='getting-started-step-3'></a>
+
+```
 # Insert more records via Proxy
 INSERT INTO users (encrypted_email, encrypted_dob, encrypted_salary) VALUES ('bob@cipherstash.com', '1991-03-06', '10');
 INSERT INTO users (encrypted_email, encrypted_dob, encrypted_salary) VALUES ('carol@cipherstash.com', '2005-12-30', '1000');
