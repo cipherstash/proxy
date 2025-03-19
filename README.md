@@ -84,6 +84,9 @@ docker compose up
 This will start a PostgreSQL database on `localhost:5432`, and CipherStash Proxy on `localhost:6432`.
 There's an example table called `users` that you can use to start inserting and querying encrypted data with.
 
+> [!NOTE]
+> In this example table we've chosen users' email, date of birth, and salary as examples of the kind of sensitive data that you might want to protect with encryption. 
+
 ### Step 1: Insert and read some data <a id='getting-started-step-1'></a>
 
 Now let's connect to the Proxy via `psql` and run some queries:
@@ -122,7 +125,7 @@ SELECT encrypted_email, encrypted_dob, encrypted_salary FROM users;
 You'll see the output is _much_ larger, because the `SELECT` returns the raw encrypted data.
 The data is transparently encrypted and decrypted by Proxy in the `INSERT` and `SELECT` statements.
 
-### Step 2: Update the data, with a `WHERE` clause <a id='getting-started-step-2'></a>
+### Step 2: Update the data with a `WHERE` clause <a id='getting-started-step-2'></a>
 
 In your `psql` connection to Proxy:
 
