@@ -2,9 +2,8 @@ use crate::{postgresql::Column, Identifier};
 use bytes::BytesMut;
 use cipherstash_client::encryption;
 use metrics_exporter_prometheus::BuildError;
-use std::io;
+use std::{io, time::Duration};
 use thiserror::Error;
-use tokio::time::error::Elapsed;
 
 const ERROR_DOC_BASE_URL: &str = "https://github.com/cipherstash/proxy/blob/main/docs/errors.md";
 
@@ -25,8 +24,8 @@ pub enum Error {
     #[error("Connection closed by client")]
     ConnectionClosed,
 
-    #[error("Connection timed out")]
-    ConnectionTimeout(#[from] Elapsed),
+    #[error("Connection timed out after {} ms", duration.as_secs())]
+    ConnectionTimeout { duration: Duration },
 
     #[error("Error creating connection")]
     DatabaseConnection,

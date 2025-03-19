@@ -19,8 +19,7 @@ pub struct DatabaseConfig {
     #[serde(deserialize_with = "protected_string_deserializer")]
     password: Protected<String>,
 
-    #[serde(default = "DatabaseConfig::default_connection_timeout")]
-    pub connection_timeout: u64,
+    pub connection_timeout: Option<u64>,
 
     #[serde(default)]
     pub with_tls_verification: bool,
@@ -39,11 +38,6 @@ impl DatabaseConfig {
 
     pub const fn default_port() -> u16 {
         5432
-    }
-
-    // 5 minutes
-    pub const fn default_connection_timeout() -> u64 {
-        1000 * 60 * 5
     }
 
     pub const fn default_config_reload_interval() -> u64 {
@@ -73,8 +67,8 @@ impl DatabaseConfig {
         self.password.to_owned().risky_unwrap()
     }
 
-    pub fn connection_timeout(&self) -> Duration {
-        Duration::from_millis(self.connection_timeout)
+    pub fn connection_timeout(&self) -> Option<Duration> {
+        self.connection_timeout.map(Duration::from_millis)
     }
 
     pub fn server_name(&self) -> Result<ServerName, Error> {

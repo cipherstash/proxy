@@ -82,17 +82,36 @@ pub async fn read_auth_message<S: AsyncRead + Unpin>(
 }
 
 ///
+/// Reads a Postgres message from client with an optional timeout
+///
+/// Timeout values are in config
+///
+///
+pub async fn read_message<S: AsyncRead + Unpin>(
+    mut stream: S,
+    client_id: i32,
+    connection_timeout: Option<Duration>,
+) -> Result<(Code, BytesMut), Error> {
+    match connection_timeout {
+        Some(duration) => read_message_with_timeout(stream, client_id, duration).await,
+        None => read(&mut stream, client_id).await,
+    }
+}
+
+///
 /// Reads a Postgres message from client with a timeout
 ///
 /// Timeout values are in config
 ///
 ///
-pub async fn read_message_with_timeout<S: AsyncRead + Unpin>(
+async fn read_message_with_timeout<S: AsyncRead + Unpin>(
     mut stream: S,
     client_id: i32,
-    connection_timeout: Duration,
+    duration: Duration,
 ) -> Result<(Code, BytesMut), Error> {
-    timeout(connection_timeout, read_message(&mut stream, client_id)).await?
+    timeout(duration, read(&mut stream, client_id))
+        .await
+        .map_err(|_| Error::ConnectionTimeout { duration })?
 }
 
 ///
@@ -102,7 +121,7 @@ pub async fn read_message_with_timeout<S: AsyncRead + Unpin>(
 /// Byte is then passed as `code` to this function to preserve the message structure
 ///
 ///
-pub async fn read_message<S: AsyncRead + Unpin>(
+async fn read<S: AsyncRead + Unpin>(
     mut stream: S,
     client_id: i32,
 ) -> Result<(Code, BytesMut), Error> {
