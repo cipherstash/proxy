@@ -3,7 +3,7 @@ mod schema;
 
 use crate::{
     config::TandemConfig,
-    eql,
+    connect, eql,
     error::{EncryptError, Error},
     log::ENCRYPT,
     postgresql::Column,
@@ -22,7 +22,7 @@ use cipherstash_config::ColumnConfig;
 use config::EncryptConfigManager;
 use schema::SchemaManager;
 use std::{sync::Arc, vec};
-use tracing::debug;
+use tracing::{debug, warn};
 
 /// SQL Statement for loading encrypt configuration from database
 const ENCRYPT_CONFIG_QUERY: &str = include_str!("./sql/select_config.sql");
@@ -44,6 +44,8 @@ pub struct Encrypt {
     cipher: Arc<ScopedCipher>,
     pub encrypt_config: EncryptConfigManager,
     pub schema: SchemaManager,
+    /// The EQL version installed in the database or `None` if it was not present
+    pub eql_version: Option<String>,
 }
 
 impl Encrypt {
@@ -52,11 +54,28 @@ impl Encrypt {
         let schema = SchemaManager::init(&config.database).await?;
         let encrypt_config = EncryptConfigManager::init(&config.database).await?;
 
+        let eql_version = {
+            let client = connect::database(&config.database).await?;
+            let rows = client.query("SELECT cs_eql_version();", &[]).await;
+
+            match rows {
+                Ok(rows) => rows.first().map(|row| row.get("cs_eql_version")),
+                Err(err) => {
+                    warn!(
+                        msg = "Could not query EQL version from database",
+                        error = err.to_string()
+                    );
+                    None
+                }
+            }
+        };
+
         Ok(Encrypt {
             config,
             cipher,
             encrypt_config,
             schema,
+            eql_version,
         })
     }
 
