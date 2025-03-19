@@ -118,4 +118,7 @@ case "${CS_DATABASE__INSTALL_EXAMPLE_SCHEMA:-}" in
     ;;
 esac
 
+>&2 echo "Proxy container setup complete!"
+>&2 echo "Running CipherStash Proxy..."
+
 exec cipherstash-proxy "$@"
