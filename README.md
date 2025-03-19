@@ -103,7 +103,7 @@ SELECT encrypted_email, encrypted_dob, encrypted_salary FROM users;
 ```
 
 The `INSERT` statement inserts a record into the `users` table, and the `SELECT` statement reads the same record back.
-You'll notice that it looks like nothing happened: the data in the `INSERT` was unencrypted, and the data in the `SELECT` is also unencrypted.
+Notice that it looks like nothing happened: the data in the `INSERT` was unencrypted, and the data in the `SELECT` is also unencrypted.
 
 Now let's connect to the database directly via `psql` and see what the data actually looks like behind the scenes:
 
@@ -113,7 +113,7 @@ docker compose exec proxy psql postgres://cipherstash:3ncryp7@postgres:5432/ciph
 
 This establishes an interactive session directly with the database (note the change of host to `postgres` and port to `5432`).
 
-Now query the database directly:
+Now on this direct `psql` session, query the database directly:
 
 ```sql
 SELECT encrypted_email, encrypted_dob, encrypted_salary FROM users;
@@ -122,7 +122,7 @@ SELECT encrypted_email, encrypted_dob, encrypted_salary FROM users;
 You'll see the output is _much_ larger, because the `SELECT` returns the raw encrypted data.
 The data is transparently encrypted and decrypted by Proxy in the `INSERT` and `SELECT` statements.
 
-### Step 2: Update the data, with a WHERE clause <a id='getting-started-step-2'></a>
+### Step 2: Update the data, with a `WHERE` clause <a id='getting-started-step-2'></a>
 
 In your `psql` connection to Proxy:
 
@@ -138,39 +138,63 @@ UPDATE users SET encrypted_dob = '1978-02-01' WHERE encrypted_email = 'alice@cip
 SELECT encrypted_dob FROM users WHERE encrypted_email = 'alice@cipherstash.com';
 ```
 
-When the `UPDATE` runs, the comparison is over the **encrypted** data.
-The literal email value is encrypted and compared in the database against the stored encrypted email.
+In the `UPDATE` statement, the `=` comparison operation in the `WHERE` clause is evaluated against **encrypted** data.
+In the `SELECT` statement, the `encrypted_email` value is transparently encrypted by Proxy, and compared in the database against the stored encrypted email value.
+In the `SELECT` statement, the `SELECT` returns `1978-02-01`.
 
-Back on the `psql` session directly on the database, verify the data is still encrypted:
+Back on the `psql` session connected directly to the database, verify the data is encrypted:
 
 ```sql
 SELECT encrypted_email, encrypted_dob, encrypted_salary FROM users;
 ```
 
-This `SELECT` shows the raw encrypted data.
+This `SELECT` shows the raw encrypted data — no plaintext to see.
 
-### Step 3: Update the data with a WHERE clause <a id='getting-started-step-3'></a>
+### Step 3: Search encrypted data with a `WHERE` clause <a id='getting-started-step-3'></a>
 
+In your `psql` connection to Proxy:
+
+```bash
+docker compose exec proxy psql postgres://cipherstash:3ncryp7@localhost:6432/cipherstash
 ```
-# Insert more records via Proxy
+
+Insert more records via Proxy, and search by salary:
+
+```sql
 INSERT INTO users (encrypted_email, encrypted_dob, encrypted_salary) VALUES ('bob@cipherstash.com', '1991-03-06', '10');
 INSERT INTO users (encrypted_email, encrypted_dob, encrypted_salary) VALUES ('carol@cipherstash.com', '2005-12-30', '1000');
 
-# Confirm the data
-SELECT encrypted_email, encrypted_dob, encrypted_salary FROM users;
-
-# Query by salary
-# Should return 'alice' and 'bob' but not 'carol'
-# Again, the comparison is over the **encrypted** data
-# The literal salary value is encrypted and compared in the database against the encrypted salary
 SELECT encrypted_email, encrypted_dob, encrypted_salary FROM users WHERE encrypted_salary <= 100;
+```
 
-# Query by date
-# Should return 'carol'
-# The literal date value is encrypted and compared in the database against the encrypted date
-# The comparison is over the **encrypted** data
+In the `INSERT` statement, the salary value is transparently encrypted by Proxy, and stored in the database in encrypted form.
+In the `SELECT` statement, the `encrypted_salary` value is transparently encrypted and compared in the database against the stored encrypted salary value.
+In the `SELECT` statement, the `<=` comparison operation in the `WHERE` clause is evaluated against **encrypted** data.
+In the `SELECT` statement, the `SELECT` returns `alice` and `bob`, but not `carol`.
+
+Finally, query `users` by date:
+
+```sql
 SELECT encrypted_email, encrypted_dob, encrypted_salary FROM users WHERE encrypted_dob > '2000-01-01' ;
 ```
+
+The `encrypted_dob` value is transparently encrypted by Proxy, and compared in the database against the stored encrypted date value.
+The `>` comparison operation is evaluated against **encrypted** data.
+The `SELECT` will only return `carol`.
+
+Back on the `psql` session connected directly to the database, verify the data is encrypted:
+
+```sql
+SELECT encrypted_email, encrypted_dob, encrypted_salary FROM users;
+```
+
+This `SELECT` shows the raw encrypted data, no plaintext to see.
+
+This demonstrates the power of CipherStash Proxy:
+
+- Completely transparent encryption of sensitive data in PostgreSQL
+- All data remains searchable, while being protected with non-deterministic AES-256-GCM encryption
+- Zero changes required to your application's database queries
 
 ## How-to
 
