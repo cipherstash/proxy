@@ -74,11 +74,11 @@ brew install cipherstash/tap/stash
 ## Download from https://github.com/cipherstash/cli-releases/releases/latest
 
 # Setup your CipherStash configuration
-stash setup
+stash setup --proxy
+# ⬆️ this outputs creds to .env.proxy.docker
 
 # Start the containers
 docker compose up
-# TODO: Install a database schema: https://docs.docker.com/compose/how-tos/lifecycle/
 
 # TODO: Run a query
 psql postgres://${CS_DATABASE__USERNAME}:${CS_DATABASE__PASSWORD}@localhost:6432/cipherstash
