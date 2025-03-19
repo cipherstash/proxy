@@ -26,6 +26,7 @@ services:
 
   proxy:
     image: cipherstash/proxy:latest
+    pull_policy: always
     container_name: proxy
     ports:
       - 6432:6432
