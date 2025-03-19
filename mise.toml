@@ -22,6 +22,7 @@ CS_DATABASE__PORT = "5532"
 CS_PROXY__HOST = "proxy"
 # Misc
 DOCKER_CLI_HINTS = "false" # Please don't show us What's Next.
+CS_EQL_VERSION="eql-0.5.4"
 
 [tools]
 "cargo:cargo-binstall" = "latest"
@@ -466,7 +467,7 @@ outputs = [
 run = """
 # install script
 if [ -z "$CS_EQL_PATH" ]; then
-  curl -sLo sql/cipherstash-encrypt.sql https://github.com/cipherstash/encrypt-query-language/releases/latest/download/cipherstash-encrypt.sql
+  curl -sLo sql/cipherstash-encrypt.sql https://github.com/cipherstash/encrypt-query-language/releases/download/${CS_EQL_VERSION}/cipherstash-encrypt.sql
 else
   echo "Using EQL: ${CS_EQL_PATH}"
   cp "$CS_EQL_PATH" sql/cipherstash-encrypt.sql
@@ -474,7 +475,7 @@ fi
 
 # uninstall script
 if [ -z "$CS_EQL_UNINSTALL_PATH" ]; then
-  curl -sLo sql/cipherstash-encrypt-uninstall.sql https://github.com/cipherstash/encrypt-query-language/releases/latest/download/cipherstash-encrypt-uninstall.sql
+  curl -sLo sql/cipherstash-encrypt-uninstall.sql https://github.com/cipherstash/encrypt-query-language/releases/download/${CS_EQL_VERSION}/cipherstash-encrypt-uninstall.sql
 else
   echo "Using EQL: ${CS_EQL_PATH}"
   cp "$CS_EQL_UNINSTALL_PATH" sql/cipherstash-encrypt-uninstall.sql
@@ -545,7 +546,7 @@ description = "Fetch the EQL installation script"
 run = """
 if [ ! -e "cipherstash-eql.sql" ]; then
   echo "Fetching: cipherstash-eql.sql"
-  curl -sLo cipherstash-eql.sql https://github.com/cipherstash/encrypt-query-language/releases/latest/download/cipherstash-encrypt.sql
+  curl -sLo cipherstash-eql.sql https://github.com/cipherstash/encrypt-query-language/releases/download/${CS_EQL_VERSION}/cipherstash-encrypt.sql
 else
   echo "Prefetched: cipherstash-eql.sql"
 fi
