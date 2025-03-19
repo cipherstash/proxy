@@ -90,7 +90,7 @@ case "${CS_DATABASE__INSTALL_EXAMPLE_SCHEMA:-}" in
   "true") ;&
   "yes") ;&
   "1")
-    >&2 echo "Installing example schema in target PostgreSQL database..."
+    >&2 echo "Applying example schema in target PostgreSQL database..."
 
     SQL_FILENAME="/opt/schema-example.sql"
 
@@ -105,9 +105,12 @@ case "${CS_DATABASE__INSTALL_EXAMPLE_SCHEMA:-}" in
     # Attempt to install EQL
     psql --file=${SQL_FILENAME} --quiet $DATABASE_URL > /dev/null 2>&1
     if [ $? != 0 ]; then
-      >&2 echo "error: unable to insert example schema in target PostgreSQL database!"
+      >&2 echo "error: unable to apply example schema in target PostgreSQL database!"
       exit 2
     fi
+
+    >&2 echo "Successfully applied example schema in target PostgreSQL database."
+    >&2 echo "Example tables: users"
     ;;
   *)
     >&2 echo "Not installing example schema in target PostgreSQL database."
