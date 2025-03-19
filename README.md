@@ -83,8 +83,46 @@ docker compose up
 # TODO: Run a query
 psql postgres://${CS_DATABASE__USERNAME}:${CS_DATABASE__PASSWORD}@localhost:6432/cipherstash
 
-# TODO: Verify the data is encrypted
-psql postgres://${CS_DATABASE__USERNAME}:${CS_DATABASE__PASSWORD}@postgres:5432/cipherstash
+
+# Insert a new record via Proxy
+INSERT INTO users (encrypted_email, encrypted_dob, encrypted_salary) VALUES ('alice@cipherstash.com', '1970-01-01', '100');
+
+# Query via Proxy
+# Returns 'alice@cipherstash.com', '1970-01-01', '100'
+SELECT encrypted_email, encrypted_dob, encrypted_salary FROM users;
+
+# Query the database directly
+# Returns the raw encrypted data
+SELECT encrypted_email, encrypted_dob, encrypted_salary FROM users;
+
+# Update record via Proxy
+# The comparison is over the **encrypted** data
+# The literal email value is encrypted and compared in the database against the encrypted email
+UPDATE users SET encrypted_dob = '1978-02-01' WHERE encrypted_email = 'alice@cipherstash.com';
+
+# Query via Proxy
+# Returns '1978-02-01'
+SELECT encrypted_dob FROM users WHERE encrypted_email = 'alice@cipherstash.com';
+
+
+# Insert more records via Proxy
+INSERT INTO users (encrypted_email, encrypted_dob, encrypted_salary) VALUES ('bob@cipherstash.com', '1991-03-06', '10');
+INSERT INTO users (encrypted_email, encrypted_dob, encrypted_salary) VALUES ('carol@cipherstash.com', '2005-12-30', '1000');
+
+# Confirm the data
+SELECT encrypted_email, encrypted_dob, encrypted_salary FROM users;
+
+# Query by salary
+# Should return 'alice' and 'bob' but not 'carol'
+# Again, the comparison is over the **encrypted** data
+# The literal salary value is encrypted and compared in the database against the encrypted salary
+SELECT encrypted_email, encrypted_dob, encrypted_salary FROM users WHERE encrypted_salary <= 100;
+
+# Query by date
+# Should return 'carol'
+# The literal date value is encrypted and compared in the database against the encrypted date
+# The comparison is over the **encrypted** data
+SELECT encrypted_email, encrypted_dob, encrypted_salary FROM users WHERE encrypted_dob > '2000-01-01' ;
 ```
 
 ## How-to
