@@ -81,10 +81,10 @@ stash setup --proxy
 docker compose up
 ```
 
-This will start a PostgreSQL database on `localhost:5432`, and a CipherStash Proxy on `localhost:6432`.
-There is an example table called `users` that we can start inserting and querying encrypted data with.
+This will start a PostgreSQL database on `localhost:5432`, and CipherStash Proxy on `localhost:6432`.
+There's an example table called `users` that you can use to start inserting and querying encrypted data with.
 
-### Step 1: insert and read some data <a id='getting-started-step-1'></a>
+### Step 1: Insert and read some data <a id='getting-started-step-1'></a>
 
 Now let's connect to the Proxy via `psql` and run some queries:
 
@@ -94,7 +94,7 @@ docker compose exec proxy psql postgres://cipherstash:3ncryp7@localhost:6432/cip
 
 This establishes an interactive session with the database, via CipherStash Proxy.
 
-Now we insert and read some data via Proxy:
+Now insert and read some data via Proxy:
 
 ```sql
 INSERT INTO users (encrypted_email, encrypted_dob, encrypted_salary) VALUES ('alice@cipherstash.com', '1970-01-01', '100');
@@ -113,7 +113,7 @@ docker compose exec proxy psql postgres://cipherstash:3ncryp7@postgres:5432/ciph
 
 This establishes an interactive session directly with the database (note the change of host to `postgres` and port to `5432`).
 
-Now we query the database directly:
+Now query the database directly:
 
 ```sql
 SELECT encrypted_email, encrypted_dob, encrypted_salary FROM users;
@@ -149,7 +149,7 @@ SELECT encrypted_email, encrypted_dob, encrypted_salary FROM users;
 
 This `SELECT` shows the raw encrypted data.
 
-### Step 3: Update the data, with a WHERE clause <a id='getting-started-step-3'></a>
+### Step 3: Update the data with a WHERE clause <a id='getting-started-step-3'></a>
 
 ```
 # Insert more records via Proxy
