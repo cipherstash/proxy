@@ -79,10 +79,46 @@ case "${CS_DATABASE__INSTALL_EQL:-}" in
       >&2 echo "error: unable to install EQL in target PostgreSQL database!"
       exit 2
     fi
+    >&2 echo "Successfully installed EQL in target PostgreSQL database."
     ;;
   *)
     >&2 echo "Not installing EQL in target PostgreSQL database."
     ;;
 esac
+
+# Optionally install example schema in the target database
+case "${CS_DATABASE__INSTALL_EXAMPLE_SCHEMA:-}" in
+  "true") ;&
+  "yes") ;&
+  "1")
+    >&2 echo "Applying example schema in target PostgreSQL database..."
+
+    SQL_FILENAME="/opt/schema-example.sql"
+
+    if [ ! -f "${SQL_FILENAME}" ]; then
+      >&2 echo "error: unable to find example schema at: ${SQL_FILENAME}"
+      exit 1
+    fi
+
+    # Wait for postgres to become available
+    wait_for_postgres_or_exit
+
+    # Attempt to install EQL
+    psql --file=${SQL_FILENAME} --quiet $DATABASE_URL > /dev/null 2>&1
+    if [ $? != 0 ]; then
+      >&2 echo "error: unable to apply example schema in target PostgreSQL database!"
+      exit 2
+    fi
+
+    >&2 echo "Successfully applied example schema in target PostgreSQL database."
+    >&2 echo "Example tables: users"
+    ;;
+  *)
+    >&2 echo "Not installing example schema in target PostgreSQL database."
+    ;;
+esac
+
+>&2 echo "Proxy container setup complete!"
+>&2 echo "Running CipherStash Proxy..."
 
 exec cipherstash-proxy "$@"

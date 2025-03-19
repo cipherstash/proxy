@@ -40,7 +40,8 @@ services:
       - CS_DATABASE__HOST=postgres
       - CS_DATABASE__PORT=5432
       - CS_PROMETHEUS__ENABLED=${CS_PROMETHEUS__ENABLED:-true}
-      - CS_DATABASE__INSTALL_EQL=true # install EQL into the PostgreSQL database we start above
+      - CS_DATABASE__INSTALL_EQL=true            # install EQL into the PostgreSQL database
+      - CS_DATABASE__INSTALL_EXAMPLE_SCHEMA=true # install example schema into the PostgreSQL database
     networks:
       - cipherstash
 
