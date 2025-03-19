@@ -3,7 +3,7 @@
 > [!IMPORTANT]
 > **Before you quickstart** you need to have this software installed:
 >  - [mise](https://mise.jdx.dev/) — see the [installing mise](#installing-mise) instructions
->  - [Docker](https://www.docker.com/) — see Docker's [documentation for installing](https://docs.docker.com/get-started/get-docker/)
+>  - [Docker](https://www.docker.com/) — see Docker's [documentation for installing](https://docs.docker.com/get-started/get-docker/) and ensure that your Docker daemon is running. On *macOS* and *Linux* you can do this by running Docker Desktop.  See: [Docker Desktop docs](https://docs.docker.com/get-started/introduction/get-docker-desktop/). If you have installed Docker without Docker Desktop then you will need to launch `dockerd` manually.
 
 Local development quickstart:
 
