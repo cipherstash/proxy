@@ -14,6 +14,7 @@ use tokio::{
 use tokio_postgres::Client;
 use tracing::{debug, error, info, warn};
 
+const TCP_USER_TIMEOUT: Duration = Duration::from_secs(10);
 const TCP_KEEPALIVE_INTERVAL: Duration = Duration::from_secs(5);
 const TCP_KEEPALIVE_TIME: Duration = Duration::from_secs(5);
 const TCP_KEEPALIVE_RETRIES: u32 = 5;
@@ -119,6 +120,17 @@ pub fn configure(stream: &TcpStream) {
             error = err.to_string()
         );
     });
+
+    #[cfg(target_os = "linux")]
+    match sock_ref.set_tcp_user_timeout(Some(TCP_USER_TIMEOUT)) {
+        Ok(_) => (),
+        Err(err) => {
+            warn!(
+                msg = "Error configuring tcp_user_timeout for connection",
+                error = err.to_string()
+            );
+        }
+    }
 
     match sock_ref.set_keepalive(true) {
         Ok(_) => {

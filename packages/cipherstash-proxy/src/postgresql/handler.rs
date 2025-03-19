@@ -70,7 +70,7 @@ pub async fn handler(
     );
 
     loop {
-        let startup_message = startup::read_message_with_timeout(
+        let startup_message = startup::read_message(
             &mut client_stream,
             encrypt.config.database.connection_timeout(),
         )
@@ -125,8 +125,7 @@ pub async fn handler(
 
         let connection_timeout = encrypt.config.database.connection_timeout();
         let (_code, bytes) =
-            protocol::read_message_with_timeout(&mut client_stream, client_id, connection_timeout)
-                .await?;
+            protocol::read_message(&mut client_stream, client_id, connection_timeout).await?;
 
         let password_message = PasswordMessage::try_from(&bytes)?;
 

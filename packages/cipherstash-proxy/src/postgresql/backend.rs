@@ -81,7 +81,7 @@ where
     pub async fn rewrite(&mut self) -> Result<(), Error> {
         let connection_timeout = self.encrypt.config.database.connection_timeout();
 
-        let (code, mut bytes) = protocol::read_message_with_timeout(
+        let (code, mut bytes) = protocol::read_message(
             &mut self.server_reader,
             self.context.client_id,
             connection_timeout,

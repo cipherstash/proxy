@@ -16,6 +16,7 @@ pub const CODE_INVALID_PASSWORD: &str = "28P01";
 pub const CODE_RAISE_EXCEPTION: &str = "P0001";
 pub const CODE_SYNTAX_ERROR: &str = "42601";
 pub const CODE_INVALID_TEXT_REPRESENTATION: &str = "22P02";
+pub const CODE_IDLE_SESSION_TIMEOUT: &str = "57P05";
 
 ///
 /// ErrorResponse (B)
@@ -58,6 +59,29 @@ pub enum ErrorResponseCode {
 }
 
 impl ErrorResponse {
+    pub fn connection_timeout() -> Self {
+        Self {
+            fields: vec![
+                Field {
+                    code: ErrorResponseCode::Severity,
+                    value: "FATAL".to_string(),
+                },
+                Field {
+                    code: ErrorResponseCode::SeverityLegacy,
+                    value: "FATAL".to_string(),
+                },
+                Field {
+                    code: ErrorResponseCode::Code,
+                    value: CODE_IDLE_SESSION_TIMEOUT.to_string(),
+                },
+                Field {
+                    code: ErrorResponseCode::Message,
+                    value: "Connection timeout".to_string(),
+                },
+            ],
+        }
+    }
+
     pub fn invalid_password(message: &str) -> Self {
         Self {
             fields: vec![

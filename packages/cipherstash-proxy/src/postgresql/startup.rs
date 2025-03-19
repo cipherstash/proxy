@@ -46,14 +46,35 @@ pub async fn with_tls(stream: AsyncStream, config: &TandemConfig) -> Result<Asyn
     }
 }
 
-pub async fn read_message_with_timeout<C>(
-    client: &mut C,
-    connection_timeout: Duration,
-) -> Result<StartupMessage, Error>
-where
-    C: AsyncRead + Unpin,
-{
-    timeout(connection_timeout, read_message(client)).await?
+///
+/// Reads a Postgres startup message from client with an optional timeout
+///
+/// Timeout values are in config
+///
+///
+pub async fn read_message<S: AsyncRead + Unpin>(
+    mut stream: S,
+    connection_timeout: Option<Duration>,
+) -> Result<StartupMessage, Error> {
+    match connection_timeout {
+        Some(duration) => read_message_with_timeout(stream, duration).await,
+        None => read(&mut stream).await,
+    }
+}
+
+///
+/// Reads a Postgres message from client with a timeout
+///
+/// Timeout values are in config
+///
+///
+async fn read_message_with_timeout<S: AsyncRead + Unpin>(
+    mut stream: S,
+    duration: Duration,
+) -> Result<StartupMessage, Error> {
+    timeout(duration, read(&mut stream))
+        .await
+        .map_err(|_| Error::ConnectionTimeout { duration })?
 }
 
 ///
@@ -62,7 +83,7 @@ where
 ///
 ///
 ///
-async fn read_message<C>(client: &mut C) -> Result<StartupMessage, Error>
+async fn read<C>(client: &mut C) -> Result<StartupMessage, Error>
 where
     C: AsyncRead + Unpin,
 {
