@@ -104,6 +104,9 @@ pub enum ConfigError {
     #[error(transparent)]
     Database(#[from] tokio_postgres::Error),
 
+    #[error(transparent)]
+    FileOrEnvironment(#[from] config::ConfigError),
+
     #[error("Dataset id is not a valid UUID.")]
     InvalidDatasetId,
 
@@ -122,9 +125,6 @@ pub enum ConfigError {
     #[error("Expected an Encrypt configuration table")]
     MissingEncryptConfigTable,
 
-    #[error("Missing Transport Layer Security (TLS) certificate")]
-    MissingCertificate,
-
     #[error(transparent)]
     Parse(#[from] serde_json::Error),
 
@@ -135,7 +135,34 @@ pub enum ConfigError {
     TlsRequired,
 
     #[error(transparent)]
-    FileOrEnvironment(#[from] config::ConfigError),
+    TlsConfigError(#[from] TlsConfigError),
+}
+
+#[derive(Error, Debug)]
+pub enum TlsConfigError {
+    #[error(
+        "Invalid Transport Layer Security (TLS) certificate. For help visit {}#config-missing-or-invalid-tls",
+        ERROR_DOC_BASE_URL
+    )]
+    InvalidCertificate,
+
+    #[error(
+        "Invalid Transport Layer Security (TLS) private key. For help visit {}#config-missing-or-invalid-tls",
+        ERROR_DOC_BASE_URL
+    )]
+    InvalidPrivateKey,
+
+    #[error(
+        "Missing Transport Layer Security (TLS) certificate at path: {path}. For help visit {}#config-missing-or-invalid-tls",
+        ERROR_DOC_BASE_URL
+    )]
+    MissingCertificate { path: String },
+
+    #[error(
+        "Missing Transport Layer Security (TLS) private key at path: {path}. For help visit {}#config-missing-or-invalid-tls",
+        ERROR_DOC_BASE_URL
+    )]
+    MissingPrivateKey { path: String },
 }
 
 #[derive(Error, Debug)]

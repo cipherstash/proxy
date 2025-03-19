@@ -415,12 +415,20 @@ schema_reload_interval = "60"
 
 [tls]
 # Certificate path
-# Env: CS_TLS__CERTIFICATE
-certificate = "./server.cert"
+# Env: CS_TLS__CERTIFICATE_PATH
+certificate_path = "./server.cert"
 
 # Private Key path
-# Env: CS_TLS__PRIVATE_KEY
-private_key = "./server.key"
+# Env: CS_TLS__PRIVATE_KEY_PATH
+private_key_path = "./server.key"
+
+# Certificate path
+# Env: CS_TLS__CERTIFICATE_PEM
+certificate_pem = "..."
+
+# Private Key path
+# Env: CS_TLS__PRIVATE_KEY_PEM
+private_key_pem = "..."
 
 
 [auth]

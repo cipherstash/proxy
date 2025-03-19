@@ -77,10 +77,8 @@ services:
       - CS_DEFAULT_KEYSET_ID=${CS_DEFAULT_KEYSET_ID}
       - CS_CLIENT_KEY=${CS_CLIENT_KEY}
       - CS_CLIENT_ID=${CS_CLIENT_ID}
-      # TLS is set to use paths under /etc if no environment variable is set. Comment these out to load from toml
-      - CS_TLS__TYPE=${CS_TLS__TYPE:-Path}
-      - CS_TLS__CERTIFICATE=${CS_TLS__CERTIFICATE:-/etc/cipherstash-proxy/server.cert}
-      - CS_TLS__PRIVATE_KEY=${CS_TLS__PRIVATE_KEY:-/etc/cipherstash-proxy/server.key}
+      - CS_TLS__CERTIFICATE_PATH=${CS_TLS__CERTIFICATE:-/etc/cipherstash-proxy/server.cert}
+      - CS_TLS__PRIVATE_KEY_PATH=${CS_TLS__PRIVATE_KEY:-/etc/cipherstash-proxy/server.key}
       - CS_SERVER__REQUIRE_TLS=true
       - CS_PROMETHEUS__ENABLED=${CS_PROMETHEUS__ENABLED:-true}
 

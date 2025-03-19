@@ -45,17 +45,27 @@ pub async fn server(stream: TcpStream, config: &TlsConfig) -> Result<TlsStream<T
 ///
 pub fn configure_server(config: &TlsConfig) -> Result<rustls::ServerConfig, Error> {
     let certs = match config {
-        TlsConfig::Pem { certificate, .. } => {
+        TlsConfig::Pem {
+            certificate_pem: certificate,
+            ..
+        } => {
             CertificateDer::pem_slice_iter(certificate.as_bytes()).collect::<Result<Vec<_>, _>>()?
         }
-        TlsConfig::Path { certificate, .. } => {
-            CertificateDer::pem_file_iter(certificate)?.collect::<Result<Vec<_>, _>>()?
-        }
+        TlsConfig::Path {
+            certificate_path: certificate,
+            ..
+        } => CertificateDer::pem_file_iter(certificate)?.collect::<Result<Vec<_>, _>>()?,
     };
 
     let key = match config {
-        TlsConfig::Pem { private_key, .. } => PrivateKeyDer::from_pem_slice(private_key.as_bytes()),
-        TlsConfig::Path { private_key, .. } => PrivateKeyDer::from_pem_file(private_key),
+        TlsConfig::Pem {
+            private_key_pem: private_key,
+            ..
+        } => PrivateKeyDer::from_pem_slice(private_key.as_bytes()),
+        TlsConfig::Path {
+            private_key_path: private_key,
+            ..
+        } => PrivateKeyDer::from_pem_file(private_key),
     }?;
 
     let server_config = rustls::ServerConfig::builder()
@@ -191,8 +201,8 @@ B+qwsnNEiDoJhgYj+cQ=
     #[test]
     fn test_configure_server_with_paths() {
         let tls_config = TlsConfig::Path {
-            private_key: "../../tests/tls/server.key".to_string(),
-            certificate: "../../tests/tls/server.cert".to_string(),
+            private_key_path: "../../tests/tls/server.key".to_string(),
+            certificate_path: "../../tests/tls/server.cert".to_string(),
         };
         let server_config = configure_server(&tls_config);
 
@@ -202,8 +212,8 @@ B+qwsnNEiDoJhgYj+cQ=
     #[test]
     fn test_configure_server_with_path_for_pem() {
         let tls_config = TlsConfig::Pem {
-            private_key: "../../tests/tls/server.key".to_string(),
-            certificate: "../../tests/tls/server.cert".to_string(),
+            private_key_pem: "../../tests/tls/server.key".to_string(),
+            certificate_pem: "../../tests/tls/server.cert".to_string(),
         };
         let server_config = configure_server(&tls_config);
 
@@ -213,8 +223,8 @@ B+qwsnNEiDoJhgYj+cQ=
     #[test]
     fn test_configure_server_with_pem_for_path() {
         let tls_config = TlsConfig::Path {
-            private_key: private_key_pem(),
-            certificate: certificate_pem(),
+            private_key_path: private_key_pem(),
+            certificate_path: certificate_pem(),
         };
         let server_config = configure_server(&tls_config);
 
@@ -224,8 +234,8 @@ B+qwsnNEiDoJhgYj+cQ=
     #[test]
     fn test_configure_server_with_pems() {
         let tls_config = TlsConfig::Pem {
-            private_key: private_key_pem(),
-            certificate: certificate_pem(),
+            private_key_pem: private_key_pem(),
+            certificate_pem: certificate_pem(),
         };
         let server_config = configure_server(&tls_config);
 

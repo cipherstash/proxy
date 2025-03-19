@@ -21,6 +21,8 @@
   - [Unknown table](#encrypt-unknown-table)
   - [Unknown index term](#encrypt-unknown-index-term)
 
+- Configuration Errors:
+  - [Missing or invalid TLS configuration](#config-missing-or-invalid-tls)
 <!-- ---------------------------------------------------------------------------------------------------- -->
 
 <!-- ---------------------------------------------------------------------------------------------------- -->
@@ -339,3 +341,40 @@ Unknown Index Term for column '{column_name}' in table '{table_name}'.
 1. Define the encrypted configuration using [EQL](https://github.com/cipherstash/encrypt-query-language).
 
 
+<!-- ---------------------------------------------------------------------------------------------------- -->
+
+
+
+<!-- ---------------------------------------------------------------------------------------------------- -->
+
+# Configuration Errors
+
+
+## Database <a id='config-missing-or-invalid-tls'></a>
+
+There was a problem with the Tls configuration.
+
+
+### Error message
+
+```
+# PEM-based configuration
+Invalid Transport Layer Security (TLS) certificate.
+Invalid Transport Layer Security (TLS) private key.
+
+# Path-based configuration
+Missing Transport Layer Security (TLS) certificate at path: {path}.
+Missing Transport Layer Security (TLS) private key at path: {path}.
+```
+
+### How to Fix
+
+If using path-based configuration:
+Check that the certificate and private key exists at the specified path.
+Check that the certificate and private key are valid.
+
+If using PEM-based configuration:
+Check that the certificate and private key are valid.
+
+
+<!-- ---------------------------------------------------------------------------------------------------- -->
