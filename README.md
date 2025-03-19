@@ -74,7 +74,7 @@ brew install cipherstash/tap/stash
 ## Download from https://github.com/cipherstash/cli-releases/releases/latest
 
 # Setup your CipherStash configuration
-stash setup
+stash setup --proxy
 
 # Start the containers
 docker compose up
