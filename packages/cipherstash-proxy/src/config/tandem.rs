@@ -138,7 +138,6 @@ impl TandemConfig {
                     env.insert("CS_AUTH__CLIENT_ACCESS_KEY".into(), value);
                 }
 
-                println!("ENV {:?}", env);
                 env
             }));
 
