@@ -12,6 +12,7 @@
   - [Invalid parameter](#mapping-invalid-parameter)
   - [Invalid SQL statement](#mapping-invalid-sql-statement)
   - [Unsupported parameter type](#mapping-unsupported-parameter-type)
+  - [Statement could not be type checked](#mapping-statement-could-not-be-mapped)
   - [Internal Error](#mapping-internal-error)
 
 - Encrypt Errors:
@@ -162,6 +163,29 @@ Encryption of PostgreSQL {name} (OID {oid}) types is not currently supported.
 Check the supported types for encrypted columns.
 
 <!-- TODO: link to doc -->
+
+
+
+<!-- ---------------------------------------------------------------------------------------------------- -->
+
+
+## Statement could not be type checked <a id='mapping-statement-could-not-be-mapped'></a>
+
+An error occurred when attempting to type check the SQL statement.
+
+### Error message
+
+```
+Statement could not be type checked: 'details'
+```
+
+### How to Fix
+
+In most cases, this error will occur if the statement contains invalid or unsupported syntax.
+
+This error will not be raised, unless you set `mapping_errors_enabled` to `true`.
+If mapping errors are not enabled, the statement will be passed through unchanged.
+The statement that is passed through may result in syntax errors from PostgreSQL.
 
 
 
