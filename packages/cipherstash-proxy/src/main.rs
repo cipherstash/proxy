@@ -217,6 +217,7 @@ async fn init(mut config: TandemConfig) -> Encrypt {
                 host = encrypt.config.database.host,
                 port = encrypt.config.database.port,
                 username = encrypt.config.database.username,
+                eql_version = encrypt.eql_version,
             );
             encrypt
         }
