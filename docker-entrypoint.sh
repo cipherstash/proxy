@@ -79,6 +79,7 @@ case "${CS_DATABASE__INSTALL_EQL:-}" in
       >&2 echo "error: unable to install EQL in target PostgreSQL database!"
       exit 2
     fi
+    >&2 echo "Successfully installed EQL in target PostgreSQL database."
     ;;
   *)
     >&2 echo "Not installing EQL in target PostgreSQL database."
