@@ -75,6 +75,7 @@ brew install cipherstash/tap/stash
 
 # Setup your CipherStash configuration
 stash setup --proxy
+# ⬆️ this outputs creds to .env.proxy.docker
 
 # Start the containers
 docker compose up
