@@ -621,8 +621,7 @@ CS_LOG__FORMAT = "pretty"
 CS_LOG__ANSI_ENABLED = "true"
 ```
 
-If you are frequently changing the database schema or making updates to the column encryption configuration,
-it can be useful to reload the config and schema more frequently.
+If you are frequently changing the database schema or making updates to the column encryption configuration, it can be useful to reload the config and schema more frequently:
 
 ```bash
 CS_DATABASE__CONFIG_RELOAD_INTERVAL = "10"
