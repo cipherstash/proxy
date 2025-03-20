@@ -193,7 +193,7 @@ In our experience, most production systems have a relatively small number of col
 As SQL is large and complex, instead of blocking statements with type check errors that are false negatives, the default behaviour of Proxy is to allow the statement.
 
 However, this does mean it is possible that a statement referencing encrypted columns cannot be type-checked and is passed through to the database.
-In this case, database column constraints (included in EQL) will catch the statement and return a PostgreSQL error.
+When a statement is passed through to the database, the database's column constraints (provided by EQL) will catch the statement, and return a PostgreSQL error.
 
 Example constraint error:
 ```sql
