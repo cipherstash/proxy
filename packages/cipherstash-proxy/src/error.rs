@@ -80,8 +80,8 @@ pub enum MappingError {
     #[error("Encryption of PostgreSQL {name} (OID {oid}) types is not currently supported. For help visit {}#mapping-unsupported-parameter-type", ERROR_DOC_BASE_URL)]
     UnsupportedParameterType { name: String, oid: u32 },
 
-    #[error("Statement could not be type checked: {}. For help visit {}#mapping-statement-could-not-be-mapped", _0, ERROR_DOC_BASE_URL)]
-    StatementCouldNotBeMapped(String),
+    #[error("Statement could not be type checked: {}. For help visit {}#mapping-statement-could-not-be-type-checked", _0, ERROR_DOC_BASE_URL)]
+    StatementCouldNotBeTypeChecked(String),
 
     #[error("Statement could not be transformed: {0}")]
     StatementCouldNotBeTransformed(String),

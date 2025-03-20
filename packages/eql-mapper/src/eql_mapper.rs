@@ -127,9 +127,6 @@ pub enum EqlMapperError {
     #[error("Internal error: {}", _0)]
     InternalError(String),
 
-    #[error("Unsupported value variant: {}", _0)]
-    UnsupportedValueVariant(String),
-
     /// A lexical scope error
     #[error(transparent)]
     Scope(#[from] ScopeError),

@@ -755,7 +755,7 @@ where
                     error = err.to_string(),
                 );
                 counter!(STATEMENTS_UNMAPPABLE_TOTAL).increment(1);
-                Err(MappingError::StatementCouldNotBeMapped(err.to_string()).into())
+                Err(MappingError::StatementCouldNotBeTypeChecked(err.to_string()).into())
             }
         }
     }
