@@ -185,7 +185,7 @@ CipherStash Proxy checks SQL statements against the database schema to transpare
 
 The behaviour of Proxy depends on the `mapping_errors_enabled` configuration.
 
-When `mapping_errors_enabled == false` (the default) type check errors are logged, and the statement is passed through to the database.
+When `mapping_errors_enabled` is `false` (the default), then type check errors are logged, and the statement is passed through to the database.
 
 When `mapping_errors_enabled == true` type check errors are raised and statement execution halts.
 
