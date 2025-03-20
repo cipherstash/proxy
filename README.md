@@ -590,7 +590,7 @@ output = "stdout"
 
 # Enable ansi (colored) output
 # Optional
-# Default: `true` if Proxy detects it is running in a terminal context on startup
+# Default: `true` if Proxy detects during startup that a terminal is attached, otherwise `false`
 # Env: CS_LOG__ANSI_ENABLED
 ansi_enabled = "true"
 
