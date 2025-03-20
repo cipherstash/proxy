@@ -190,7 +190,7 @@ When `mapping_errors_enabled` is `false` (the default), then type check errors a
 When `mapping_errors_enabled` is `true`, then type check errors are raised, and statement execution halts.
 
 In our experience, most production systems have a relatively small number of columns that require protection.
-As SQL is large and complex, rather than block statements with false negative type check errors, the default behaviour is to allow the statement.
+As SQL is large and complex, instead of blocking statements with type check errors that are false negatives, the default behaviour of Proxy is to allow the statement.
 
 However, this does mean it is possible that a statement referencing encrypted columns cannot be type-checked and is passed through to the database.
 In this case, database column constraints (included in EQL) will catch the statement and return a PostgreSQL error.
