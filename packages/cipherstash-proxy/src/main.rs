@@ -11,6 +11,8 @@ use tokio::signal::unix::{signal, SignalKind};
 use tokio_util::task::TaskTracker;
 use tracing::{error, info, warn};
 
+const EQL_VERSION_AT_BUILD_TIME: Option<&'static str> = option_env!("EQL_VERSION_AT_BUILD_TIME");
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
 
@@ -219,6 +221,13 @@ async fn init(mut config: TandemConfig) -> Encrypt {
                 username = encrypt.config.database.username,
                 eql_version = encrypt.eql_version,
             );
+            if encrypt.eql_version.as_deref() != EQL_VERSION_AT_BUILD_TIME {
+                warn!(
+                    msg = "installed version of EQL is different to the version that Proxy was built with",
+                    eql_build_version = EQL_VERSION_AT_BUILD_TIME,
+                    eql_installed_version = encrypt.eql_version,
+                );
+            }
             encrypt
         }
         Err(err) => {
