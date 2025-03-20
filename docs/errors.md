@@ -187,7 +187,7 @@ The behaviour of Proxy depends on the `mapping_errors_enabled` configuration.
 
 When `mapping_errors_enabled` is `false` (the default), then type check errors are logged, and the statement is passed through to the database.
 
-When `mapping_errors_enabled == true` type check errors are raised and statement execution halts.
+When `mapping_errors_enabled` is `true`, then type check errors are raised, and statement execution halts.
 
 In our experience, most production systems have a relatively small number of columns that require protection.
 As SQL is large and complex, rather than block statements with false negative type check errors, the default behaviour is to allow the statement.
