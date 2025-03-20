@@ -218,7 +218,7 @@ If the error persists, please contact CipherStash [support](https://cipherstash.
 ## Internal Mapper error <a id='mapping-internal-error'></a>
 
 An internal error occurred when attempting to type check or transform a SQL statement.
-This could be due to an internal invariant failure or because of a specific fragment of unsupported SQL syntax.
+This could be due to an internal invariant failure, or because of a specific fragment of unsupported SQL syntax.
 
 ### Error message
 
