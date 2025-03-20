@@ -1,7 +1,6 @@
 [tls]
-type = "Path"
-certificate = "tests/tls/server.cert"
-private_key = "tests/tls/server.key"
+certificate_path = "tests/tls/server.cert"
+private_key_path = "tests/tls/server.key"
 
 [database]
 name = "cipherstash"

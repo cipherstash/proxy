@@ -175,21 +175,15 @@ async fn init(mut config: TandemConfig) -> Encrypt {
 
     match config.tls {
         Some(ref mut tls) => {
-            if !tls.cert_exists() {
-                error!(
-                    msg = tls.certificate_err_msg(),
-                    certificate = ?tls.certificate().lines().next().unwrap_or("") // show first line of PEM, or path (_should_ be 1 line)
-                );
+            _ = tls.check_cert().inspect_err(|err| {
+                error!(msg = err.to_string());
                 std::process::exit(exitcode::CONFIG);
-            }
+            });
 
-            if !tls.private_key_exists() {
-                error!(
-                    msg = tls.private_key_err_msg(),
-                    private_key = ?tls.private_key().lines().next().unwrap_or("") // show first line of PEM, or path (_should_ be 1 line)
-                );
+            _ = tls.check_private_key().inspect_err(|err| {
+                error!(msg = err.to_string());
                 std::process::exit(exitcode::CONFIG);
-            };
+            });
 
             match tls::configure_server(tls) {
                 Ok(_) => {

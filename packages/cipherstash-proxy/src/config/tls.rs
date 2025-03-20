@@ -4,85 +4,77 @@ use rustls_pki_types::{pem::PemObject, CertificateDer, PrivateKeyDer};
 use serde::Deserialize;
 use tracing::debug;
 
-use crate::log::CONFIG;
+use crate::{error::TlsConfigError, log::CONFIG};
 
 ///
 /// Server TLS Configuration
 /// This is listener/inbound connection config
 ///
 #[derive(Clone, Debug, Deserialize)]
-#[serde(tag = "type")]
+#[serde(untagged)]
 pub enum TlsConfig {
     Pem {
-        certificate: String,
-        private_key: String,
+        certificate_pem: String,
+        private_key_pem: String,
     },
     Path {
-        certificate: String,
-        private_key: String,
+        certificate_path: String,
+        private_key_path: String,
     },
-}
-
-#[derive(Clone, Debug, Deserialize)]
-pub struct KeyCertPair {
-    pub certificate: String,
-    pub private_key: String,
 }
 
 impl TlsConfig {
-    pub fn cert_exists(&self) -> bool {
+    pub fn check_cert(&self) -> Result<(), TlsConfigError> {
         match self {
-            TlsConfig::Pem { certificate, .. } => {
-                debug!(target: CONFIG, msg = "TLS certificate is a pem string (content omitted)");
+            TlsConfig::Pem {
+                certificate_pem: certificate,
+                ..
+            } => {
+                debug!(target: CONFIG, msg = "TLS certificate from PEM string");
                 let certs = CertificateDer::pem_slice_iter(certificate.as_bytes())
                     .collect::<Result<Vec<_>, _>>()
                     .unwrap_or(Vec::new());
-                !certs.is_empty()
+                if certs.is_empty() {
+                    return Err(TlsConfigError::InvalidCertificate);
+                }
             }
-            TlsConfig::Path { certificate, .. } => {
-                debug!(target: CONFIG, msg = "TLS certificate is a path: {}", certificate);
-                PathBuf::from(certificate).exists()
-            }
-        }
-    }
-
-    pub fn private_key_exists(&self) -> bool {
-        match self {
-            TlsConfig::Pem { private_key, .. } => {
-                debug!(target: CONFIG, msg = "TLS private_key is a pem string (content omitted)");
-                PrivateKeyDer::from_pem_slice(private_key.as_bytes()).is_ok()
-            }
-            TlsConfig::Path { private_key, .. } => {
-                debug!(target: CONFIG, msg = "TLS private_key is a path: {}", private_key);
-                PathBuf::from(private_key).exists()
+            TlsConfig::Path {
+                certificate_path, ..
+            } => {
+                debug!(target: CONFIG, msg = "TLS certificate from path", certificate_path);
+                if !PathBuf::from(certificate_path).exists() {
+                    return Err(TlsConfigError::MissingCertificate {
+                        path: certificate_path.to_owned(),
+                    });
+                }
             }
         }
+        Ok(())
     }
 
-    pub fn certificate(&self) -> &str {
+    pub fn check_private_key(&self) -> Result<(), TlsConfigError> {
         match self {
-            Self::Pem { certificate, .. } | Self::Path { certificate, .. } => certificate,
+            TlsConfig::Pem {
+                private_key_pem: private_key,
+                ..
+            } => {
+                debug!(target: CONFIG, msg = "TLS private key from PEM string");
+                if PrivateKeyDer::from_pem_slice(private_key.as_bytes()).is_err() {
+                    return Err(TlsConfigError::InvalidPrivateKey);
+                }
+            }
+            TlsConfig::Path {
+                private_key_path, ..
+            } => {
+                debug!(target: CONFIG, msg = "TLS private key from path", private_key_path);
+                if !PathBuf::from(private_key_path).exists() {
+                    return Err(TlsConfigError::MissingPrivateKey {
+                        path: private_key_path.to_owned(),
+                    });
+                }
+            }
         }
-    }
-
-    pub fn private_key(&self) -> &str {
-        match self {
-            Self::Pem { private_key, .. } | Self::Path { private_key, .. } => private_key,
-        }
-    }
-
-    pub fn certificate_err_msg(&self) -> &str {
-        match self {
-            Self::Pem { .. } => "Transport Layer Security (TLS) Certificate is invalid",
-            Self::Path { .. } => "Transport Layer Security (TLS) Certificate not found",
-        }
-    }
-
-    pub fn private_key_err_msg(&self) -> &str {
-        match self {
-            Self::Pem { .. } => "Transport Layer Security (TLS) Private key is invalid",
-            Self::Path { .. } => "Transport Layer Security (TLS) Private key not found",
-        }
+        Ok(())
     }
 }
 
@@ -92,21 +84,21 @@ mod tests {
 
     fn test_config_with_path() -> TlsConfig {
         TlsConfig::Path {
-            certificate: "../../tests/tls/server.cert".to_string(),
-            private_key: "../../tests/tls/server.key".to_string(),
+            certificate_path: "../../tests/tls/server.cert".to_string(),
+            private_key_path: "../../tests/tls/server.key".to_string(),
         }
     }
 
     fn test_config_with_invalid_path() -> TlsConfig {
         TlsConfig::Path {
-            certificate: "/path/to/non-existent/file".to_string(),
-            private_key: "/path/to/non-existent/file".to_string(),
+            certificate_path: "/path/to/non-existent/file".to_string(),
+            private_key_path: "/path/to/non-existent/file".to_string(),
         }
     }
 
     fn test_config_with_pem() -> TlsConfig {
         TlsConfig::Pem {
-            certificate: "\
+            certificate_pem: "\
 -----BEGIN CERTIFICATE-----
 MIIDKzCCAhOgAwIBAgIUMXfu7Mj22j+e9Gt2gjV73TBg20wwDQYJKoZIhvcNAQEL
 BQAwFDESMBAGA1UEAwwJbG9jYWxob3N0MB4XDTI1MDEyNjAxNDkzMVoXDTI2MDEy
@@ -128,7 +120,7 @@ TU/T2RF2sDsSHrUIVMeifhYc0jfNlRwnUG5liN9BiGo1QxNZ9jGY/3ts5eu8+XM=
 -----END CERTIFICATE-----
 "
             .to_string(),
-            private_key: "\
+            private_key_pem: "\
 -----BEGIN PRIVATE KEY-----
 MIIEugIBADANBgkqhkiG9w0BAQEFAASCBKQwggSgAgEAAoIBAQCm6o6q/Q/wg97t
 OZAY7Yd47QOM+shXJhgK0lcTJSE9K6rbR4+Nvo/IJ4CUbzvd8lbj59IXpg/Sexvs
@@ -164,32 +156,32 @@ B+qwsnNEiDoJhgYj+cQ=
 
     fn test_config_with_invalid_pem() -> TlsConfig {
         TlsConfig::Pem {
-            certificate: "-----INVALID PEM-----".to_string(),
-            private_key: "-----INVALID PEM-----".to_string(),
+            certificate_pem: "-----INVALID PEM-----".to_string(),
+            private_key_pem: "-----INVALID PEM-----".to_string(),
         }
     }
 
     #[test]
     fn test_tls_cert_exists_with_path() {
-        assert!(test_config_with_path().cert_exists());
-        assert!(!test_config_with_invalid_path().cert_exists());
+        assert!(test_config_with_path().check_cert().is_ok());
+        assert!(test_config_with_invalid_path().check_cert().is_err());
     }
 
     #[test]
     fn test_tls_cert_exists_with_pem() {
-        assert!(test_config_with_pem().cert_exists());
-        assert!(!test_config_with_invalid_pem().cert_exists());
+        assert!(test_config_with_pem().check_cert().is_ok());
+        assert!(test_config_with_invalid_pem().check_cert().is_err());
     }
 
     #[test]
     fn test_tls_private_key_exists_with_path() {
-        assert!(test_config_with_path().private_key_exists());
-        assert!(!test_config_with_invalid_path().private_key_exists());
+        assert!(test_config_with_path().check_private_key().is_ok());
+        assert!(test_config_with_invalid_path().check_private_key().is_err());
     }
 
     #[test]
     fn test_tls_private_key_exists_with_pem() {
-        assert!(test_config_with_pem().private_key_exists());
-        assert!(!test_config_with_invalid_pem().private_key_exists());
+        assert!(test_config_with_pem().check_private_key().is_ok());
+        assert!(test_config_with_invalid_pem().check_private_key().is_err());
     }
 }

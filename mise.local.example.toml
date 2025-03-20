@@ -23,15 +23,16 @@ CS_EQL_VERSION="eql-0.5.4"
 # the respective .pem contents (starting with '-----BEGIN').
 # When TYPE is "Path", CERTIFICATE and PRIVATE_KEY must contain
 # the paths to the respoctive files.
-CS_TLS__TYPE = "Path"
-CS_TLS__CERTIFICATE = "tests/tls/server.cert"
-CS_TLS__PRIVATE_KEY = "tests/tls/server.key"
-# CS_TLS__TYPE = "Pem"
-# certificate = """-----BEGIN CERTIFICATE-----
+
+CS_TLS__CERTIFICATE_PATH = "tests/tls/server.cert"
+CS_TLS__PRIVATE_KEY_PATH = "tests/tls/server.key"
+
+
+# CS_TLS__CERTIFICATE_PEM = """-----BEGIN CERTIFICATE-----
 # ...your certificate content here...
 # -----END CERTIFICATE-----
 # """
-# private_key = """-----BEGIN PRIVATE KEY-----
+# CS_TLS__PRIVATE_KEY_PEM = """-----BEGIN PRIVATE KEY-----
 # ...your private key content here...
 # -----END PRIVATE KEY-----
 # """
