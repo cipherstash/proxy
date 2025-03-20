@@ -12,7 +12,7 @@
   - [Invalid parameter](#mapping-invalid-parameter)
   - [Invalid SQL statement](#mapping-invalid-sql-statement)
   - [Unsupported parameter type](#mapping-unsupported-parameter-type)
-  - [Statement could not be type checked](#mapping-statement-could-not-be-mapped)
+  - [Statement could not be type checked](#mapping-statement-could-not-be-type-checked)
   - [Internal Error](#mapping-internal-error)
 
 - Encrypt Errors:
@@ -169,23 +169,46 @@ Check the supported types for encrypted columns.
 <!-- ---------------------------------------------------------------------------------------------------- -->
 
 
-## Statement could not be type checked <a id='mapping-statement-could-not-be-mapped'></a>
+## Statement could not be type checked <a id='mapping-statement-could-not-be-type-checked'></a>
 
 An error occurred when attempting to type check the SQL statement.
 
 ### Error message
 
 ```
-Statement could not be type checked: 'details'
+Statement could not be type checked: '{type-check-erro-message}'
+```
+
+### Notes
+
+CipherStash Proxy checks SQL statements against the database schema to transparently encrypt and decrypt data.
+
+The behaviour of Proxy depends on the `mapping_errors_enabled` configuration.
+
+When `mapping_errors_enabled == false` (the default) type check errors are logged, and the statement is passed through to the database.
+
+When `mapping_errors_enabled == true` type check errors are raised and statement execution halts.
+
+In our experience, most production systems have a relatively small number of columns that require protection.
+As SQL is large and complex, rather than block statements with false negative type check errors, the default behaviour is to allow the statement.
+
+However, this does mean it is possible that a statement referencing encrypted columns cannot be type-checked and is passed through to the database.
+In this case, database column constraints (included in EQL) will catch the statement and return a PostgreSQL error.
+
+Example constraint error:
+```sql
+ERROR:  Encrypted column missing version (v) field: 34234
+CONTEXT:  PL/pgSQL function _cs_encrypted_check_v(jsonb) line 6 at RAISE
+SQL function "cs_check_encrypted_v1" statement 1
 ```
 
 ### How to Fix
 
 In most cases, this error will occur if the statement contains invalid or unsupported syntax.
 
-This error will not be raised, unless you set `mapping_errors_enabled` to `true`.
-If mapping errors are not enabled, the statement will be passed through unchanged.
-The statement that is passed through may result in syntax errors from PostgreSQL.
+Check that the installed version of CipherStash Proxy, and update to the latest version if possible.
+
+If the error persists, please contact CipherStash [support](https://cipherstash.com/support).
 
 
 
@@ -194,7 +217,7 @@ The statement that is passed through may result in syntax errors from PostgreSQL
 
 ## Internal Mapper error <a id='mapping-internal-error'></a>
 
-An internal error occurred when attempting to rewrite the SQL statement.
+An internal error occurred when attempting to type check or transform a SQL statement.
 This could be due to an internal invariant failure or because of a specific fragment of unsupported SQL syntax.
 
 ### Error message
@@ -205,7 +228,7 @@ Statement encountered an internal error. This may be a bug in the statement mapp
 
 ### How to Fix
 
-If you are running an older version of CipherStash Proxy, please update to the latest version.
+Check that the installed version of CipherStash Proxy, and update to the latest version if possible.
 
 If the error persists, please contact CipherStash [support](https://cipherstash.com/support).
 
