@@ -577,7 +577,7 @@ level = "info"
 # Log format
 # Optional
 # Valid values: `pretty | text | structured (json)`
-# Default: `pretty` if proxy detects it is running in a terminal context on startup (uses structured otherwise)
+# Default: `pretty` if Proxy detects it is running in a terminal context on startup (uses structured otherwise)
 # Env: CS_LOG__FORMAT
 format = "pretty"
 
@@ -590,7 +590,7 @@ output = "stdout"
 
 # Enable ansi (colored) output
 # Optional
-# Default: `true` if proxy detects it is running in a terminal context on startup
+# Default: `true` if Proxy detects it is running in a terminal context on startup
 # Env: CS_LOG__ANSI_ENABLED
 ansi_enabled = "true"
 
@@ -612,8 +612,7 @@ port = "9930"
 ### Recommended settings for development
 
 The default configuration settings are biased toward running in production environments.
-
-Although Proxy attempts to detect the environment and set a sensible default for logging, ymmv.
+Although Proxy attempts to detect the environment and set a sensible default for logging, your mileage may vary.
 
 To turn on human-friendly logging:
 
