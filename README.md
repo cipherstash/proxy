@@ -577,7 +577,7 @@ level = "info"
 # Log format
 # Optional
 # Valid values: `pretty | text | structured (json)`
-# Default: `pretty` if Proxy detects it is running in a terminal context on startup (uses structured otherwise)
+# Default: `pretty` if Proxy detects during startup that a terminal is attached, otherwise `structured`
 # Env: CS_LOG__FORMAT
 format = "pretty"
 
