@@ -206,7 +206,7 @@ SQL function "cs_check_encrypted_v1" statement 1
 
 In most cases, this error will occur if the statement contains invalid or unsupported syntax.
 
-Check that the installed version of CipherStash Proxy, and update to the latest version if possible.
+Check if you are running the latest version of CipherStash Proxy, and update to the latest version if not.
 
 If the error persists, please contact CipherStash [support](https://cipherstash.com/support).
 
