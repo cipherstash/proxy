@@ -85,7 +85,7 @@ This will start a PostgreSQL database on `localhost:5432`, and CipherStash Proxy
 There's an example table called `users` that you can use to start inserting and querying encrypted data with.
 
 > [!NOTE]
-> In this example table we've chosen users' email, date of birth, and salary as examples of the kind of sensitive data that you might want to protect with encryption. 
+> In this example table we've chosen users' email, date of birth, and salary as examples of the kind of sensitive data that you might want to protect with encryption.
 
 ### Step 1: Insert and read some data <a id='getting-started-step-1'></a>
 
@@ -455,13 +455,11 @@ require_tls = "false"
 # Env: CS_SERVER__SHUTDOWN_TIMEOUT
 shutdown_timeout = "2000"
 
-
 # Number of worker threads the server should use
 # Optional
 # Default: `NUMBER_OF_CORES/2` or `4`
 # Env: CS_SERVER__WORKER_THREADS
 worker_threads = "4"
-
 
 # Thread stack size in bytes
 # Optional
@@ -496,10 +494,12 @@ username = "username"
 password = "password"
 
 # Connection timeout in ms
-# Sets how long to hold an open connection
+# Sets how long to hold an open idle connection
+# In production environments this should be greater than the idle timeout of any connection pool in the application.
+#
 # Optional
-# Default: `300000` (5 minutes)
-# Env: CS_DATABASE__SHUTDOWN_TIMEOUT
+# No Default (NO TIMEOUT)
+# Env: CS_DATABASE__CONNECTION_TIMEOUT
 connection_timeout = "300000"
 
 # Enable TLS verification
@@ -577,7 +577,7 @@ level = "info"
 # Log format
 # Optional
 # Valid values: `pretty | text | structured (json)`
-# Default: `pretty`
+# Default: `pretty` if Proxy detects during startup that a terminal is attached, otherwise `structured`
 # Env: CS_LOG__FORMAT
 format = "pretty"
 
@@ -590,7 +590,7 @@ output = "stdout"
 
 # Enable ansi (colored) output
 # Optional
-# Default: `true`
+# Default: `true` if Proxy detects during startup that a terminal is attached, otherwise `false`
 # Env: CS_LOG__ANSI_ENABLED
 ansi_enabled = "true"
 
@@ -609,6 +609,24 @@ enabled = "false"
 port = "9930"
 ```
 
+### Recommended settings for development
+
+The default configuration settings are biased toward running in production environments.
+Although Proxy attempts to detect the environment and set a sensible default for logging, your mileage may vary.
+
+To turn on human-friendly logging:
+
+```bash
+CS_LOG__FORMAT = "pretty"
+CS_LOG__ANSI_ENABLED = "true"
+```
+
+If you are frequently changing the database schema or making updates to the column encryption configuration, it can be useful to reload the config and schema more frequently:
+
+```bash
+CS_DATABASE__CONFIG_RELOAD_INTERVAL = "10"
+CS_DATABASE__SCHEMA_RELOAD_INTERVAL = "10"
+```
 
 ### Prometheus metrics
 
