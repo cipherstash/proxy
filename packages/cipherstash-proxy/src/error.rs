@@ -6,6 +6,7 @@ use std::{io, time::Duration};
 use thiserror::Error;
 
 const ERROR_DOC_BASE_URL: &str = "https://github.com/cipherstash/proxy/blob/main/docs/errors.md";
+const ERROR_DOC_CONFIG_URL: &str = "https://github.com/cipherstash/proxy#configuring-proxy";
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -119,8 +120,35 @@ pub enum ConfigError {
     #[error("Missing an active Encrypt configuration")]
     MissingActiveEncryptConfig,
 
-    #[error("Missing field {name} from configuration file or environment")]
-    MissingParameter { name: String },
+    #[error(
+        "Missing {field} from [{key}] configuration. For help visit {}",
+        ERROR_DOC_CONFIG_URL
+    )]
+    MissingFieldForKey { field: String, key: String },
+
+    #[error(
+        "Missing {field} from configuration. For help visit {}",
+        ERROR_DOC_CONFIG_URL
+    )]
+    MissingField { field: String },
+
+    #[error(
+        "Missing [auth] configuration. Check that workspace_id and client_access_key are defined. For help visit {}",
+        ERROR_DOC_CONFIG_URL
+    )]
+    MissingAuthKey,
+
+    #[error(
+        "Missing [encrypt] configuration. Check that client_id, client_key, and default_keyset_id are defined. For help visit {}",
+        ERROR_DOC_CONFIG_URL
+    )]
+    MissingEncryptKey,
+
+    #[error(
+        "Missing [database] configuration. Check that username, password, and name are defined. For help visit {}",
+        ERROR_DOC_CONFIG_URL
+    )]
+    MissingDatabaseKey,
 
     #[error("Expected an Encrypt configuration table")]
     MissingEncryptConfigTable,
