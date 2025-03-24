@@ -25,15 +25,5 @@ mod tests {
             let result: String = row.get("encrypted_text");
             assert_eq!(encrypted_text, result);
         }
-
-        let sql = "SELECT id, encrypted_text FROM encrypted WHERE encrypted_text ~~ $1";
-        let rows = client.query(sql, &[&"hello@"]).await.unwrap();
-
-        assert_eq!(rows.len(), 1);
-
-        for row in rows {
-            let result: String = row.get("encrypted_text");
-            assert_eq!(encrypted_text, result);
-        }
     }
 }

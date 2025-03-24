@@ -161,7 +161,7 @@ In your `psql` connection to Proxy:
 docker compose exec proxy psql postgres://cipherstash:3ncryp7@localhost:6432/cipherstash
 ```
 
-Insert more records via Proxy, and search by salary:
+Insert more records via Proxy, and query by email:
 
 ```sql
 INSERT INTO users (encrypted_email, encrypted_dob, encrypted_salary) VALUES ('bob@cipherstash.com', '1991-03-06', '10');
@@ -175,13 +175,24 @@ In the `SELECT` statement, the `encrypted_salary` value is transparently encrypt
 In the `SELECT` statement, the `<=` comparison operation in the `WHERE` clause is evaluated against **encrypted** data.
 In the `SELECT` statement, the `SELECT` returns `alice` and `bob`, but not `carol`.
 
+Query `users` by email:
+
+```sql
+SELECT encrypted_email, encrypted_dob, encrypted_salary FROM users WHERE encrypted_email LIKE 'alice';
+```
+
+The literal string `alice` is transparently encrypted by Proxy, and compared in the database against the stored encrypted date value.
+The `LIKE` comparison operation is evaluated against **encrypted** data.
+The `SELECT` will only return `alice`.
+
+
 Finally, query `users` by date:
 
 ```sql
 SELECT encrypted_email, encrypted_dob, encrypted_salary FROM users WHERE encrypted_dob > '2000-01-01' ;
 ```
 
-The `encrypted_dob` value is transparently encrypted by Proxy, and compared in the database against the stored encrypted date value.
+The literal date `2000-01-01` is transparently encrypted by Proxy, and compared in the database against the stored encrypted date value.
 The `>` comparison operation is evaluated against **encrypted** data.
 The `SELECT` will only return `carol`.
 
