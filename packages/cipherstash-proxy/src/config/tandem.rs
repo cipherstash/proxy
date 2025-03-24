@@ -259,8 +259,6 @@ impl Default for PrometheusConfig {
     }
 }
 
-// static RE: LazyLock<Regex> =
-//     LazyLock::new(|| Regex::new(r"missing field `([^`]+)`(.+)`([^`]+)`").unwrap());
 static RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"`([^`]+)`").unwrap());
 
 ///
