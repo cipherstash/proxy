@@ -57,14 +57,9 @@ mod tests {
     use crate::config::LogLevel;
 
     use super::*;
-    use std::sync::{Arc, Mutex};
-    use std::{
-        io,
-        sync::{MutexGuard, TryLockError},
-    };
+    use super::log_test_helper::MockMakeWriter;
     use tracing::dispatcher::set_default;
     use tracing::{debug, error, info, trace, warn};
-    use tracing_subscriber::fmt::MakeWriter;
 
     #[test]
     fn test_simple_log() {
@@ -211,7 +206,17 @@ mod tests {
 
         assert!(log_contents.contains(r#"fields":{"msg":"message","value":42}"#));
     }
+}
 
+#[cfg(test)]
+pub mod log_test_helper {
+    use std::sync::{Arc, Mutex};
+    use std::{
+        io,
+        sync::{MutexGuard, TryLockError},
+    };
+
+    use tracing_subscriber::fmt::MakeWriter;
     // Mock Writer for flexibly testing the logging behaviour, copy-pasted from
     // tracing_subscriber's internal test code (with JSON functionality deleted).
     // https://github.com/tokio-rs/tracing/blob/b02a700ba6850ad813f77e65144114f866074a8f/tracing-subscriber/src/fmt/mod.rs#L1247-L1314
