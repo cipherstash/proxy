@@ -18,11 +18,12 @@ CS_DATABASE__USERNAME = "cipherstash"
 CS_DATABASE__PASSWORD = "password"
 CS_DATABASE__HOST = "localhost"
 CS_DATABASE__PORT = "5532"
+
 # Default configuration for dev cipherstash-proxy run using 'mise run proxy:up'
 CS_PROXY__HOST = "proxy"
 # Misc
-DOCKER_CLI_HINTS = "false" # Please don't show us What's Next.
-CS_EQL_VERSION="eql-1.0.0"
+DOCKER_CLI_HINTS = "false"   # Please don't show us What's Next.
+CS_EQL_VERSION = "eql-1.0.1"
 
 [tools]
 "cargo:cargo-binstall" = "latest"
