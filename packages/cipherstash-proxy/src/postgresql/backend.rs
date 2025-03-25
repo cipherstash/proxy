@@ -435,13 +435,11 @@ where
             let possible_encrypted_fields: Vec<_> = data_row
                 .columns
                 .iter()
-                .filter_map(|c|
-                    match Option::<crate::eql::Encrypted>::from(c) {
-                        Some(Encrypted::Ciphertext { identifier, .. }) => Some(identifier),
-                        Some(Encrypted::SteVec { identifier, .. }) => Some(identifier),
-                        None => None,
-                    }
-                )
+                .filter_map(|c| match Option::<crate::eql::Encrypted>::from(c) {
+                    Some(Encrypted::Ciphertext { identifier, .. }) => Some(identifier),
+                    Some(Encrypted::SteVec { identifier, .. }) => Some(identifier),
+                    None => None,
+                })
                 .collect();
 
             for identifier in possible_encrypted_fields {
