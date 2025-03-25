@@ -18,7 +18,8 @@ use sqlparser::ast::{
 
 use crate::{ScopeTracker, SqlIdent};
 
-/// Trait for comparing [`Expr`] nodes for semantic equivalence.
+/// Trait for comparing [`Expr`] (and types that are transitively reachable via a struct field or enum variant of
+/// `Expr`) nodes for semantic equivalence.
 ///
 /// This trait is required in order to accurately determine which projection columns require aggregation when there is a
 /// `GROUP BY` clause present.
@@ -71,7 +72,7 @@ impl<'ast> SemanticEq<'ast> for Ident {
     }
 }
 
-/// The implementation for [`ObjectName`] is purely syntactic. Compund identifier resolution is handled in the
+/// The implementation for [`ObjectName`] is purely syntactic. Compound identifier resolution is handled in the
 /// implementation for [`Expr`].
 impl<'ast> SemanticEq<'ast> for ObjectName {
     fn semantic_eq(&self, other: &Self, scope: &ScopeTracker<'ast>) -> bool {
@@ -106,7 +107,7 @@ impl<'ast, T: SemanticEq<'ast>> SemanticEq<'ast> for Option<T> {
 
 impl<'ast, T: SemanticEq<'ast>> SemanticEq<'ast> for Box<T> {
     fn semantic_eq(&self, other: &Box<T>, scope: &ScopeTracker<'ast>) -> bool {
-        self.as_ref().semantic_eq(other, scope)
+        (&**self).semantic_eq(&**other, scope)
     }
 }
 
@@ -482,7 +483,7 @@ impl<'ast> SemanticEq<'ast> for Values {
             rows: rows_rhs,
         } = other;
 
-        *explicit_row_lhs == *explicit_row_rhs && rows_lhs.semantic_eq(rows_rhs, scope)
+        explicit_row_lhs == explicit_row_rhs && rows_lhs.semantic_eq(rows_rhs, scope)
     }
 }
 
@@ -667,9 +668,9 @@ impl<'ast> SemanticEq<'ast> for SelectInto {
         } = other;
 
         name_lhs.semantic_eq(name_rhs, scope)
-            && *temporary_lhs == *temporary_rhs
-            && *unlogged_lhs == *unlogged_rhs
-            && *table_lhs == *table_rhs
+            && temporary_lhs == temporary_rhs
+            && unlogged_lhs == unlogged_rhs
+            && table_lhs == table_rhs
     }
 }
 
@@ -691,7 +692,7 @@ impl<'ast> SemanticEq<'ast> for LateralView {
         lateral_view_lhs.semantic_eq(lateral_view_rhs, scope)
             && lateral_view_name_lhs.semantic_eq(lateral_view_name_rhs, scope)
             && lateral_col_alias_lhs.semantic_eq(lateral_col_alias_rhs, scope)
-            && *outer_lhs == *outer_rhs
+            && outer_lhs == outer_rhs
     }
 }
 
@@ -743,7 +744,7 @@ impl<'ast> SemanticEq<'ast> for Join {
         } = other;
 
         relation_lhs.semantic_eq(relation_rhs, scope)
-            && *global_lhs == *global_rhs
+            && global_lhs == global_rhs
             && join_operator_lhs.semantic_eq(join_operator_rhs, scope)
     }
 }
@@ -950,7 +951,7 @@ impl<'ast> SemanticEq<'ast> for TableFactor {
                     alias: alias_rhs,
                 },
             ) => {
-                *lateral_lhs == *lateral_rhs
+                lateral_lhs == lateral_rhs
                     && name_rhs.semantic_eq(name_lhs, scope)
                     && args_rhs.semantic_eq(args_lhs, scope)
                     && alias_lhs.semantic_eq(alias_rhs, scope)
@@ -1133,7 +1134,7 @@ impl<'ast> SemanticEq<'ast> for JsonTableNamedColumn {
         name_lhs.semantic_eq(name_rhs, scope)
             && r#type_lhs == r#type_rhs
             && path_lhs == path_rhs
-            && *exists_lhs == *exists_rhs
+            && exists_lhs == exists_rhs
             && on_empty_lhs == on_empty_rhs
             && on_error_lhs == on_error_rhs
     }
@@ -1612,7 +1613,7 @@ impl<'ast> SemanticEq<'ast> for Array {
             named: named_rhs,
         } = other;
 
-        elem_lhs.semantic_eq(elem_rhs, scope) && *named_lhs == *named_rhs
+        elem_lhs.semantic_eq(elem_rhs, scope) && named_lhs == named_rhs
     }
 }
 
