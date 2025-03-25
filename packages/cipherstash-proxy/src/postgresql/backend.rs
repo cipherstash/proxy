@@ -432,15 +432,23 @@ where
 
         if let BackendCode::DataRow = (*code).into() {
             let data_row = DataRow::try_from(bytes)?;
-            let has_encrypted_field = data_row
+            let possible_encrypted_fields: Vec<_> = data_row
                 .columns
                 .iter()
-                .any(|c| Option::<crate::eql::Encrypted>::from(c).is_some());
+                .filter_map(|c|
+                    match Option::<crate::eql::Encrypted>::from(c) {
+                        Some(Encrypted::Ciphertext { identifier, .. }) => Some(identifier),
+                        Some(Encrypted::SteVec { identifier, .. }) => Some(identifier),
+                        None => None,
+                    }
+                )
+                .collect();
 
-            if has_encrypted_field {
+            for identifier in possible_encrypted_fields {
                 warn!(target: CONFIG,
                     client_id = client_id,
-                    msg = "WARNING: Possible encrypted column with no encrypt config found",
+                    // This is only getting the name from the JSON value. Maybe we should get the actual table and column names, but leaving it this way for now
+                    msg = format!("Possible encrypted column (seemingly intended for, but not necessarily in {}.{}) with no encrypt config found", identifier.table, identifier.column),
                 );
             }
         }
@@ -495,7 +503,7 @@ mod tests {
 
         let log_contents = make_writer.get_string();
         assert!(log_contents
-            .contains("WARNING: Possible encrypted column with no encrypt config found"));
+            .contains("Possible encrypted column (seemingly intended for, but not necessarily in encrypted.encrypted_bool) with no encrypt config found"));
     }
 
     // warning is not emitted if encryption is explicitly disabled
