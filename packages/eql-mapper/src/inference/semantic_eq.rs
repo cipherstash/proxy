@@ -107,7 +107,7 @@ impl<'ast, T: SemanticEq<'ast>> SemanticEq<'ast> for Option<T> {
 
 impl<'ast, T: SemanticEq<'ast>> SemanticEq<'ast> for Box<T> {
     fn semantic_eq(&self, other: &Box<T>, scope: &ScopeTracker<'ast>) -> bool {
-        (&**self).semantic_eq(&**other, scope)
+        (**self).semantic_eq(&**other, scope)
     }
 }
 
@@ -1676,7 +1676,7 @@ impl<'ast> SemanticEq<'ast> for Expr {
         // Expr::Nested(_) requires special handling because the parens are superfluous when it comes to equality.
         match (self, other) {
             (Expr::Nested(expr_lhs), expr_rhs) => {
-                return (&**expr_lhs).semantic_eq(expr_rhs, scope)
+                return (**expr_lhs).semantic_eq(expr_rhs, scope)
             }
             (expr_lhs, Expr::Nested(expr_rhs)) => return expr_lhs.semantic_eq(expr_rhs, scope),
             _ => {}

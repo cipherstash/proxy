@@ -384,15 +384,12 @@ impl<'ast> Transform<'ast> for EncryptedStatement<'ast> {
         context: &Context<'ast>,
     ) -> Result<N, Self::Error> {
 
-        match (context.nth_last_as::<GroupByExpr>(1), context.nth_last_as::<Vec<Expr>>(0), new_node.downcast_mut::<Expr>()) {
-            (Some(GroupByExpr::Expressions(_, _)), _, Some(expr)) => {
-                // If the type is an EQL Value
-                // and it supports equality
-                // then we need to wrap in the appropriate EQL function
+        if let (Some(GroupByExpr::Expressions(_, _)), _, Some(expr)) = (context.nth_last_as::<GroupByExpr>(1), context.nth_last_as::<Vec<Expr>>(0), new_node.downcast_mut::<Expr>()) {
+            // If the type is an EQL Value
+            // and it supports equality
+            // then we need to wrap in the appropriate EQL function
 
-                // we also need to find the optional corresponding expression in the projection and wrap that in an aggregate function.
-            }
-            _ => {}
+            // we also need to find the optional corresponding expression in the projection and wrap that in an aggregate function.
         }
 
         if let Some(target_value) = new_node.downcast_mut::<ast::Expr>() {

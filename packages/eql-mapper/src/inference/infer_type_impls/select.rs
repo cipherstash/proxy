@@ -18,7 +18,7 @@ impl<'ast> InferType<'ast, Select> for TypeInferencer<'ast> {
                 .iter()
                 .map(|select_item| ProjectionColumn {
                     ty: self.fresh_tvar(),
-                    must_be_aggregated: Some(requires_aggregation(select_item, group_by_exprs, &*self.scope_tracker.borrow())),
+                    must_be_aggregated: Some(requires_aggregation(select_item, group_by_exprs, &self.scope_tracker.borrow())),
                     alias: None,
                 })
                 .collect(),
