@@ -59,7 +59,7 @@ use crate::{ScopeTracker, SqlIdent};
 /// 6. Both expressions are the same variant and are recursively semantically equal.
 ///
 /// Every AST node type that is reachable via an [`Expr`] variant implements `SemanticEq` except where that type does
-/// not own (transitively) an `Expr` and those fallback to [`std::cmp::Eq`].
+/// not own (transitively) an `Expr` and those simply fallback to [`std::cmp::Eq`].
 pub(crate) trait SemanticEq<'ast> {
     fn semantic_eq(&self, other: &Self, scope: &ScopeTracker<'ast>) -> bool;
 }
