@@ -46,7 +46,7 @@ use crate::{ScopeTracker, SqlIdent};
 /// semantically equal if (and only if):
 ///
 /// 1. Both `LHS` & `RHS` are **identifiers** ([`Expr::Identifier`] or [`Expr::CompoundIdentifier`]) and they resolve to
-/// the same [`crate::inference::unifier::Value`] in the same [`scope`](`ScopeTracker`).
+///    the same [`crate::inference::unifier::Value`] in the same [`scope`](`ScopeTracker`).
 ///
 /// 2. Both `LHS` & `RHS` are [`Expr::Wildcard`]
 ///
@@ -459,7 +459,6 @@ impl<'ast> SemanticEq<'ast> for SetExpr {
                 },
             ) => {
                 op_lhs == op_rhs
-                    && op_lhs == op_rhs
                     && left_lhs.semantic_eq(left_rhs, scope)
                     && right_lhs.semantic_eq(right_rhs, scope)
                     && set_quantifier_lhs == set_quantifier_rhs
