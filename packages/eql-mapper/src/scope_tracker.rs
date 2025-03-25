@@ -145,7 +145,10 @@ impl Scope {
         }
     }
 
-    pub(crate) fn resolve_qualified_wildcard(&self, idents: &[Ident]) -> Result<TypeCell, ScopeError> {
+    pub(crate) fn resolve_qualified_wildcard(
+        &self,
+        idents: &[Ident],
+    ) -> Result<TypeCell, ScopeError> {
         if idents.len() > 1 {
             return Err(ScopeError::UnsupportedCompoundIdentifierLength(
                 idents

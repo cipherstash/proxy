@@ -383,8 +383,11 @@ impl<'ast> Transform<'ast> for EncryptedStatement<'ast> {
         original_node: &'ast N,
         context: &Context<'ast>,
     ) -> Result<N, Self::Error> {
-
-        if let (Some(GroupByExpr::Expressions(_, _)), _, Some(expr)) = (context.nth_last_as::<GroupByExpr>(1), context.nth_last_as::<Vec<Expr>>(0), new_node.downcast_mut::<Expr>()) {
+        if let (Some(GroupByExpr::Expressions(_, _)), _, Some(expr)) = (
+            context.nth_last_as::<GroupByExpr>(1),
+            context.nth_last_as::<Vec<Expr>>(0),
+            new_node.downcast_mut::<Expr>(),
+        ) {
             // If the type is an EQL Value
             // and it supports equality
             // then we need to wrap in the appropriate EQL function

@@ -1,8 +1,8 @@
-mod semantic_eq;
 mod infer_type;
 mod infer_type_impls;
 mod node_key;
 mod registry;
+mod semantic_eq;
 mod type_error;
 mod type_variables;
 

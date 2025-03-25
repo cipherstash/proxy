@@ -372,7 +372,8 @@ impl<'ast> SemanticEq<'ast> for Fetch {
 
 impl<'ast> SemanticEq<'ast> for OrderBy {
     fn semantic_eq(&self, other: &Self, scope: &ScopeTracker<'ast>) -> bool {
-        self.exprs.semantic_eq(&other.exprs, scope) && self.interpolate.semantic_eq(&other.interpolate, scope)
+        self.exprs.semantic_eq(&other.exprs, scope)
+            && self.interpolate.semantic_eq(&other.interpolate, scope)
     }
 }
 
@@ -1674,9 +1675,7 @@ impl<'ast> SemanticEq<'ast> for Expr {
     fn semantic_eq(&self, other: &Self, scope: &ScopeTracker<'ast>) -> bool {
         // Expr::Nested(_) requires special handling because the parens are superfluous when it comes to equality.
         match (self, other) {
-            (Expr::Nested(expr_lhs), expr_rhs) => {
-                return (**expr_lhs).semantic_eq(expr_rhs, scope)
-            }
+            (Expr::Nested(expr_lhs), expr_rhs) => return (**expr_lhs).semantic_eq(expr_rhs, scope),
             (expr_lhs, Expr::Nested(expr_rhs)) => return expr_lhs.semantic_eq(expr_rhs, scope),
             _ => {}
         }
@@ -1692,11 +1691,7 @@ impl<'ast> SemanticEq<'ast> for Expr {
                 .is_ok_and(|_| scope.resolve_ident(ident_rhs).is_ok()),
             (Expr::CompoundIdentifier(idents_lhs), Expr::CompoundIdentifier(idents_rhs)) => scope
                 .resolve_compound_ident(idents_lhs)
-                .is_ok_and(|_| {
-                    scope
-                        .resolve_compound_ident(idents_rhs)
-                        .is_ok()
-                }),
+                .is_ok_and(|_| scope.resolve_compound_ident(idents_rhs).is_ok()),
             (
                 Expr::JsonAccess {
                     value: value_lhs,

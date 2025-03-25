@@ -91,7 +91,6 @@ pub struct ProjectionColumn {
     pub alias: Option<Ident>,
 }
 
-
 /// A placeholder for an unknown type.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, Display, Default)]
 pub struct TypeVar(pub u32);
@@ -211,15 +210,17 @@ impl ProjectionColumns {
     }
 
     fn flatten_impl(&self, mut output: Vec<ProjectionColumn>) -> Vec<ProjectionColumn> {
-        for ProjectionColumn { ty, alias, must_be_aggregated: _ } in &self.0 {
+        for ProjectionColumn {
+            ty,
+            alias,
+            must_be_aggregated: _,
+        } in &self.0
+        {
             match &*ty.as_type() {
                 Type::Constructor(Constructor::Projection(Projection::WithColumns(nested))) => {
                     output = nested.flatten_impl(output);
                 }
-                _ => output.push(ProjectionColumn::new(
-                    ty.clone(),
-                    alias.clone(),
-                )),
+                _ => output.push(ProjectionColumn::new(ty.clone(), alias.clone())),
             }
         }
         output
@@ -259,12 +260,24 @@ impl ProjectionColumn {
     ///
     /// `must_be_aggregated` will be set to `None`.
     pub(crate) fn new(ty: TypeCell, alias: Option<Ident>) -> Self {
-        Self { ty, alias, must_be_aggregated: None }
+        Self {
+            ty,
+            alias,
+            must_be_aggregated: None,
+        }
     }
 
     /// Returns a new `ProjectionColumn` with type `ty` and optional `alias` with specified aggregation.
-    pub(crate) fn new_with_aggregation(ty: TypeCell, alias: Option<Ident>, must_be_aggregated: Option<bool>) -> Self {
-        Self { ty, alias, must_be_aggregated }
+    pub(crate) fn new_with_aggregation(
+        ty: TypeCell,
+        alias: Option<Ident>,
+        must_be_aggregated: Option<bool>,
+    ) -> Self {
+        Self {
+            ty,
+            alias,
+            must_be_aggregated,
+        }
     }
 
     fn render_alias(&self) -> String {
