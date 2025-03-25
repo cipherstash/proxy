@@ -1,7 +1,19 @@
-use std::{mem, ops::Deref};
+use std::mem;
 
 use sqlparser::ast::{
-    AfterMatchSkip, ConnectBy, Cte, Distinct, ExceptSelectItem, ExcludeSelectItem, Expr, ExprWithAlias, Fetch, FormatClause, FunctionArg, FunctionArgExpr, GroupByExpr, Ident, IdentWithAlias, Interpolate, InterpolateExpr, Join, JoinConstraint, JoinOperator, JsonPath, JsonTableColumn, JsonTableNamedColumn, JsonTableNestedColumn, LateralView, LockClause, MatchRecognizePattern, MatchRecognizeSymbol, Measure, NamedWindowDefinition, NamedWindowExpr, ObjectName, Offset, OrderBy, OrderByExpr, PivotValueSource, Query, RenameSelectItem, ReplaceSelectItem, RowsPerMatch, Select, SelectInto, SelectItem, SetExpr, Setting, SymbolDefinition, TableAlias, TableFactor, TableFunctionArgs, TableWithJoins, Top, TopQuantity, Values, WildcardAdditionalOptions, WindowFrame, WindowFrameBound, WindowSpec, With, WithFill
+    AfterMatchSkip, Array, CeilFloorKind, ConnectBy, Cte, DateTimeField, DictionaryField, Distinct,
+    ExceptSelectItem, ExcludeSelectItem, Expr, ExprWithAlias, Fetch, FormatClause, Function,
+    FunctionArg, FunctionArgExpr, FunctionArgumentClause, FunctionArgumentList, FunctionArguments,
+    GroupByExpr, HavingBound, Ident, IdentWithAlias, Interpolate, InterpolateExpr, Interval, Join,
+    JoinConstraint, JoinOperator, JsonPath, JsonTableColumn, JsonTableNamedColumn,
+    JsonTableNestedColumn, LambdaFunction, LateralView, ListAggOnOverflow, LockClause, Map,
+    MapAccessKey, MapEntry, MatchRecognizePattern, MatchRecognizeSymbol, Measure,
+    NamedWindowDefinition, NamedWindowExpr, ObjectName, Offset, OneOrManyWithParens, OrderBy,
+    OrderByExpr, PivotValueSource, Query, RenameSelectItem, ReplaceSelectElement,
+    ReplaceSelectItem, Select, SelectInto, SelectItem, SetExpr, Setting, StructField, Subscript,
+    SymbolDefinition, TableAlias, TableFactor, TableFunctionArgs, TableWithJoins, Top, TopQuantity,
+    Values, WildcardAdditionalOptions, WindowFrame, WindowFrameBound, WindowSpec, WindowType, With,
+    WithFill,
 };
 
 use crate::SqlIdent;
@@ -13,10 +25,12 @@ use crate::SqlIdent;
 ///
 /// # Why is this required?
 ///
-/// 1. To robustly compare expressions in projections and `GROUP BY` clauses to accurately deternine which projetion
+/// 1. To robustly compare expressions in projections and `GROUP BY` clauses to accurately deternine which projection
 /// columns should be aggregated.
 ///
-/// 2. To bury all of the `SqlIdent` logic (future work).
+/// 2. To encapsulate all of the `SqlIdent` logic (future work).
+///
+/// # TODO: generate this code
 pub(crate) trait SyntacticEq<Rhs = Self> {
     fn syntactic_eq(&self, other: &Rhs) -> bool;
 }
@@ -29,12 +43,15 @@ impl SyntacticEq for Ident {
 
 impl SyntacticEq for ObjectName {
     fn syntactic_eq(&self, other: &Self) -> bool {
-        self.0.syntactic_eq(&other.0)
+        let Self(idents_lhs) = self;
+        let Self(idents_rhs) = other;
+
+        idents_lhs.syntactic_eq(idents_rhs)
     }
 }
 
 impl<T: SyntacticEq> SyntacticEq for Vec<T> {
-    fn syntactic_eq(&self, other: &Self) -> bool {
+    fn syntactic_eq(&self, other: &Vec<T>) -> bool {
         self.len() == other.len()
             && self
                 .iter()
@@ -53,9 +70,163 @@ impl<T: SyntacticEq> SyntacticEq for Option<T> {
     }
 }
 
-impl<T: SyntacticEq, Rhs: Deref<Target = T>> SyntacticEq<Rhs> for Box<T> {
-    fn syntactic_eq(&self, other: &Rhs) -> bool {
+impl<T: SyntacticEq> SyntacticEq for Box<T> {
+    fn syntactic_eq(&self, other: &Box<T>) -> bool {
         self.as_ref().syntactic_eq(other)
+    }
+}
+
+impl SyntacticEq for MapAccessKey {
+    fn syntactic_eq(&self, other: &Self) -> bool {
+        let Self {
+            key: key_lhs,
+            syntax: syntax_lhs,
+        } = self;
+        let Self {
+            key: key_rhs,
+            syntax: syntax_rhs,
+        } = other;
+
+        key_lhs.syntactic_eq(key_rhs) && syntax_lhs == syntax_rhs
+    }
+}
+
+impl SyntacticEq for Function {
+    fn syntactic_eq(&self, other: &Self) -> bool {
+        let Self {
+            name: name_lhs,
+            parameters: parameters_lhs,
+            args: args_lhs,
+            filter: filter_lhs,
+            null_treatment: null_treatment_lhs,
+            over: over_lhs,
+            within_group: within_group_lhs,
+        } = self;
+        let Self {
+            name: name_rhs,
+            parameters: parameters_rhs,
+            args: args_rhs,
+            filter: filter_rhs,
+            null_treatment: null_treatment_rhs,
+            over: over_rhs,
+            within_group: within_group_rhs,
+        } = other;
+
+        name_lhs.syntactic_eq(name_rhs)
+            && parameters_lhs.syntactic_eq(parameters_rhs)
+            && args_lhs.syntactic_eq(args_rhs)
+            && filter_lhs.syntactic_eq(filter_rhs)
+            && null_treatment_lhs == null_treatment_rhs
+            && over_lhs.syntactic_eq(over_rhs)
+            && within_group_lhs.syntactic_eq(within_group_rhs)
+    }
+}
+
+impl SyntacticEq for WindowType {
+    fn syntactic_eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (WindowType::WindowSpec(window_spec_lhs), WindowType::WindowSpec(window_spec_rhs)) => {
+                window_spec_lhs.syntactic_eq(window_spec_rhs)
+            }
+            (WindowType::NamedWindow(ident_lhs), WindowType::NamedWindow(ident_rhs)) => {
+                ident_lhs.syntactic_eq(ident_rhs)
+            }
+            _ => false,
+        }
+    }
+}
+
+impl SyntacticEq for FunctionArguments {
+    fn syntactic_eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (FunctionArguments::None, FunctionArguments::None) => true,
+            (FunctionArguments::Subquery(query_lhs), FunctionArguments::Subquery(query_rhs)) => {
+                query_lhs.syntactic_eq(query_rhs)
+            }
+            (
+                FunctionArguments::List(function_argument_list_lhs),
+                FunctionArguments::List(function_argument_list_rhs),
+            ) => function_argument_list_lhs.syntactic_eq(function_argument_list_rhs),
+            _ => false,
+        }
+    }
+}
+
+impl SyntacticEq for FunctionArgumentList {
+    fn syntactic_eq(&self, other: &Self) -> bool {
+        let Self {
+            duplicate_treatment: duplicate_treatment_lhs,
+            args: args_lhs,
+            clauses: clauses_lhs,
+        } = self;
+        let Self {
+            duplicate_treatment: duplicate_treatment_rhs,
+            args: args_rhs,
+            clauses: clauses_rhs,
+        } = other;
+
+        duplicate_treatment_lhs == duplicate_treatment_rhs
+            && args_lhs.syntactic_eq(args_rhs)
+            && clauses_lhs.syntactic_eq(clauses_rhs)
+    }
+}
+
+impl SyntacticEq for FunctionArgumentClause {
+    fn syntactic_eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (
+                FunctionArgumentClause::IgnoreOrRespectNulls(null_treatment_lhs),
+                FunctionArgumentClause::IgnoreOrRespectNulls(null_treatment_rhs),
+            ) => null_treatment_lhs == null_treatment_rhs,
+            (
+                FunctionArgumentClause::OrderBy(order_by_exprs_lhs),
+                FunctionArgumentClause::OrderBy(order_by_exprs_rhs),
+            ) => order_by_exprs_lhs.syntactic_eq(order_by_exprs_rhs),
+            (FunctionArgumentClause::Limit(expr_lhs), FunctionArgumentClause::Limit(expr_rhs)) => {
+                expr_lhs.syntactic_eq(expr_rhs)
+            }
+            (
+                FunctionArgumentClause::OnOverflow(list_agg_on_overflow_lhs),
+                FunctionArgumentClause::OnOverflow(list_agg_on_overflow_rhs),
+            ) => list_agg_on_overflow_lhs.syntactic_eq(list_agg_on_overflow_rhs),
+            (
+                FunctionArgumentClause::Having(having_bound_lhs),
+                FunctionArgumentClause::Having(having_bound_rhs),
+            ) => having_bound_lhs.syntactic_eq(having_bound_rhs),
+            (
+                FunctionArgumentClause::Separator(value_lhs),
+                FunctionArgumentClause::Separator(value_rhs),
+            ) => value_lhs == value_rhs,
+            _ => false,
+        }
+    }
+}
+
+impl SyntacticEq for HavingBound {
+    fn syntactic_eq(&self, other: &Self) -> bool {
+        let Self(kind_lhs, expr_lhs) = self;
+        let Self(kind_rhs, expr_rhs) = other;
+
+        kind_lhs == kind_rhs && expr_lhs.syntactic_eq(expr_rhs)
+    }
+}
+
+impl SyntacticEq for ListAggOnOverflow {
+    fn syntactic_eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (ListAggOnOverflow::Error, ListAggOnOverflow::Error) => todo!(),
+            (
+                ListAggOnOverflow::Truncate {
+                    filler: filler_lhs,
+                    with_count: with_count_lhs,
+                },
+                ListAggOnOverflow::Truncate {
+                    filler: filler_rhs,
+                    with_count: with_count_rhs,
+                },
+            ) => filler_lhs.syntactic_eq(filler_rhs) && with_count_lhs == with_count_rhs,
+            _ => false,
+        }
     }
 }
 
@@ -68,44 +239,44 @@ impl SyntacticEq for JsonPath {
 impl SyntacticEq for Query {
     fn syntactic_eq(&self, other: &Self) -> bool {
         let Query {
-            body: body_left,
-            order_by: order_by_left,
-            limit: limit_left,
-            offset: offset_left,
-            fetch: fetch_left,
-            with: with_left,
-            limit_by: limit_by_left,
-            locks: locks_left,
-            for_clause: for_clause_left,
-            settings: settings_left,
-            format_clause: format_clause_left,
+            body: body_lhs,
+            order_by: order_by_lhs,
+            limit: limit_lhs,
+            offset: offset_lhs,
+            fetch: fetch_lhs,
+            with: with_lhs,
+            limit_by: limit_by_lhs,
+            locks: locks_lhs,
+            for_clause: for_clause_lhs,
+            settings: settings_lhs,
+            format_clause: format_clause_lhs,
         } = self;
 
         let Query {
-            body: body_right,
-            order_by: order_by_right,
-            limit: limit_right,
-            offset: offset_right,
-            fetch: fetch_right,
-            with: with_right,
-            limit_by: limit_by_right,
-            locks: locks_right,
-            for_clause: for_clause_right,
-            settings: settings_right,
-            format_clause: format_clause_right,
+            body: body_rhs,
+            order_by: order_by_rhs,
+            limit: limit_rhs,
+            offset: offset_rhs,
+            fetch: fetch_rhs,
+            with: with_rhs,
+            limit_by: limit_by_rhs,
+            locks: locks_rhs,
+            for_clause: for_clause_rhs,
+            settings: settings_rhs,
+            format_clause: format_clause_rhs,
         } = other;
 
-        body_left.syntactic_eq(body_right)
-            && order_by_left.syntactic_eq(order_by_right)
-            && limit_left.syntactic_eq(limit_right)
-            && offset_left.syntactic_eq(offset_right)
-            && fetch_left.syntactic_eq(fetch_right)
-            && with_left.syntactic_eq(with_right)
-            && limit_by_left.syntactic_eq(limit_by_right)
-            && locks_left.syntactic_eq(locks_right)
-            && for_clause_left == for_clause_right
-            && settings_left.syntactic_eq(settings_right)
-            && format_clause_left.syntactic_eq(format_clause_right)
+        body_lhs.syntactic_eq(body_rhs)
+            && order_by_lhs.syntactic_eq(order_by_rhs)
+            && limit_lhs.syntactic_eq(limit_rhs)
+            && offset_lhs.syntactic_eq(offset_rhs)
+            && fetch_lhs.syntactic_eq(fetch_rhs)
+            && with_lhs.syntactic_eq(with_rhs)
+            && limit_by_lhs.syntactic_eq(limit_by_rhs)
+            && locks_lhs.syntactic_eq(locks_rhs)
+            && for_clause_lhs == for_clause_rhs
+            && settings_lhs.syntactic_eq(settings_rhs)
+            && format_clause_lhs.syntactic_eq(format_clause_rhs)
     }
 }
 
@@ -230,34 +401,34 @@ impl SyntacticEq for Offset {
 impl SyntacticEq for SetExpr {
     fn syntactic_eq(&self, other: &Self) -> bool {
         match (self, other) {
-            (SetExpr::Select(select_left), SetExpr::Select(select_right)) => {
-                select_left.syntactic_eq(select_right)
+            (SetExpr::Select(select_lhs), SetExpr::Select(select_rhs)) => {
+                select_lhs.syntactic_eq(select_rhs)
             }
-            (SetExpr::Query(query_left), SetExpr::Query(query_right)) => {
-                query_left.syntactic_eq(query_right)
+            (SetExpr::Query(query_lhs), SetExpr::Query(query_rhs)) => {
+                query_lhs.syntactic_eq(query_rhs)
             }
             (
                 SetExpr::SetOperation {
-                    op: op_left,
-                    left: left_left,
-                    right: right_left,
-                    set_quantifier: set_quantifier_left,
+                    op: op_lhs,
+                    left: left_lhs,
+                    right: right_lhs,
+                    set_quantifier: set_quantifier_lhs,
                 },
                 SetExpr::SetOperation {
-                    op: op_right,
-                    left: left_right,
-                    right: right_right,
-                    set_quantifier: set_quantifier_right,
+                    op: op_rhs,
+                    left: left_rhs,
+                    right: right_rhs,
+                    set_quantifier: set_quantifier_rhs,
                 },
             ) => {
-                op_left == op_right
-                    && op_left == op_right
-                    && left_left.syntactic_eq(left_right)
-                    && right_left.syntactic_eq(right_right)
-                    && set_quantifier_left == set_quantifier_right
+                op_lhs == op_rhs
+                    && op_lhs == op_rhs
+                    && left_lhs.syntactic_eq(left_rhs)
+                    && right_lhs.syntactic_eq(right_rhs)
+                    && set_quantifier_lhs == set_quantifier_rhs
             }
-            (SetExpr::Values(values_left), SetExpr::Values(values_right)) => {
-                values_left.syntactic_eq(values_right)
+            (SetExpr::Values(values_lhs), SetExpr::Values(values_rhs)) => {
+                values_lhs.syntactic_eq(values_rhs)
             }
             _ => false,
         }
@@ -282,68 +453,68 @@ impl SyntacticEq for Values {
 impl SyntacticEq for Select {
     fn syntactic_eq(&self, other: &Self) -> bool {
         let Select {
-            distinct: distinct_left,
-            top: top_left,
-            projection: projection_left,
-            from: from_left,
-            selection: selection_left,
-            group_by: group_by_left,
-            having: having_left,
-            lateral_views: lateral_views_left,
-            top_before_distinct: top_before_distinct_left,
-            into: into_left,
-            prewhere: prewhere_left,
-            cluster_by: cluster_by_left,
-            distribute_by: distribute_by_left,
-            sort_by: sort_by_left,
-            named_window: named_window_left,
-            qualify: qualify_left,
-            window_before_qualify: window_before_qualify_left,
-            value_table_mode: value_table_mode_left,
-            connect_by: connect_by_left,
+            distinct: distinct_lhs,
+            top: top_lhs,
+            projection: projection_lhs,
+            from: from_lhs,
+            selection: selection_lhs,
+            group_by: group_by_lhs,
+            having: having_lhs,
+            lateral_views: lateral_views_lhs,
+            top_before_distinct: top_before_distinct_lhs,
+            into: into_lhs,
+            prewhere: prewhere_lhs,
+            cluster_by: cluster_by_lhs,
+            distribute_by: distribute_by_lhs,
+            sort_by: sort_by_lhs,
+            named_window: named_window_lhs,
+            qualify: qualify_lhs,
+            window_before_qualify: window_before_qualify_lhs,
+            value_table_mode: value_table_mode_lhs,
+            connect_by: connect_by_lhs,
         } = self;
 
         let Select {
-            distinct: distinct_right,
-            top: top_right,
-            projection: projection_right,
-            from: from_right,
-            selection: selection_right,
-            group_by: group_by_right,
-            having: having_right,
-            lateral_views: lateral_views_right,
-            top_before_distinct: top_before_distinct_right,
-            into: into_right,
-            prewhere: prewhere_right,
-            cluster_by: cluster_by_right,
-            distribute_by: distribute_by_right,
-            sort_by: sort_by_right,
-            named_window: named_window_right,
-            qualify: qualify_right,
-            window_before_qualify: window_before_qualify_right,
-            value_table_mode: value_table_mode_right,
-            connect_by: connect_by_right,
+            distinct: distinct_rhs,
+            top: top_rhs,
+            projection: projection_rhs,
+            from: from_rhs,
+            selection: selection_rhs,
+            group_by: group_by_rhs,
+            having: having_rhs,
+            lateral_views: lateral_views_rhs,
+            top_before_distinct: top_before_distinct_rhs,
+            into: into_rhs,
+            prewhere: prewhere_rhs,
+            cluster_by: cluster_by_rhs,
+            distribute_by: distribute_by_rhs,
+            sort_by: sort_by_rhs,
+            named_window: named_window_rhs,
+            qualify: qualify_rhs,
+            window_before_qualify: window_before_qualify_rhs,
+            value_table_mode: value_table_mode_rhs,
+            connect_by: connect_by_rhs,
         } = other;
 
-        distinct_left.syntactic_eq(distinct_right)
-            && top_left.syntactic_eq(top_right)
-            && projection_left.syntactic_eq(projection_right)
-            && from_left.syntactic_eq(from_right)
-            && selection_left.syntactic_eq(selection_right)
-            && group_by_left.syntactic_eq(group_by_right)
-            && having_left.syntactic_eq(having_right)
-            && lateral_views_left.syntactic_eq(lateral_views_right)
-            && top_before_distinct_left == top_before_distinct_right
-            && into_left.syntactic_eq(into_right)
-            && prewhere_left.syntactic_eq(prewhere_right)
-            && cluster_by_left.syntactic_eq(cluster_by_right)
-            && distribute_by_left.syntactic_eq(distribute_by_right)
-            && sort_by_left.syntactic_eq(sort_by_right)
-            && named_window_left.syntactic_eq(named_window_right)
-            && qualify_left.syntactic_eq(qualify_right)
-            && window_before_qualify_left == window_before_qualify_right
-            && value_table_mode_left == value_table_mode_right
-            && connect_by_left.syntactic_eq(connect_by_right)
+        distinct_lhs.syntactic_eq(distinct_rhs)
+            && top_lhs.syntactic_eq(top_rhs)
+            && projection_lhs.syntactic_eq(projection_rhs)
+            && from_lhs.syntactic_eq(from_rhs)
+            && selection_lhs.syntactic_eq(selection_rhs)
+            && group_by_lhs.syntactic_eq(group_by_rhs)
+            && having_lhs.syntactic_eq(having_rhs)
+            && lateral_views_lhs.syntactic_eq(lateral_views_rhs)
+            && top_before_distinct_lhs == top_before_distinct_rhs
+            && into_lhs.syntactic_eq(into_rhs)
+            && prewhere_lhs.syntactic_eq(prewhere_rhs)
+            && cluster_by_lhs.syntactic_eq(cluster_by_rhs)
+            && distribute_by_lhs.syntactic_eq(distribute_by_rhs)
+            && sort_by_lhs.syntactic_eq(sort_by_rhs)
+            && named_window_lhs.syntactic_eq(named_window_rhs)
+            && qualify_lhs.syntactic_eq(qualify_rhs)
+            && window_before_qualify_lhs == window_before_qualify_rhs
+            && value_table_mode_lhs == value_table_mode_rhs
+            && connect_by_lhs.syntactic_eq(connect_by_rhs)
     }
 }
 
@@ -696,7 +867,7 @@ impl SyntacticEq for TableFactor {
                 },
             ) => {
                 name_lhs.syntactic_eq(name_rhs)
-                    && alias_lhs.syntactic_eq(alias_lhs)
+                    && alias_lhs.syntactic_eq(alias_rhs)
                     && args_lhs.syntactic_eq(args_rhs)
                     && with_hints_lhs.syntactic_eq(with_hints_rhs)
                     && version_lhs == version_rhs
@@ -949,7 +1120,7 @@ impl SyntacticEq for MatchRecognizePattern {
             (
                 MatchRecognizePattern::Concat(match_recognize_patterns_lhs),
                 MatchRecognizePattern::Concat(match_recognize_patterns_rhs),
-            ) => match_recognize_patterns_rhs.syntactic_eq(match_recognize_patterns_rhs),
+            ) => match_recognize_patterns_lhs.syntactic_eq(match_recognize_patterns_rhs),
             (
                 MatchRecognizePattern::Group(match_recognize_pattern_lhs),
                 MatchRecognizePattern::Group(match_recognize_pattern_rhs),
@@ -1090,9 +1261,7 @@ impl SyntacticEq for Distinct {
     fn syntactic_eq(&self, other: &Self) -> bool {
         match (self, other) {
             (Distinct::Distinct, Distinct::Distinct) => true,
-            (Distinct::On(exprs_left), Distinct::On(exprs_right)) => {
-                exprs_left.syntactic_eq(exprs_right)
-            }
+            (Distinct::On(exprs_lhs), Distinct::On(exprs_rhs)) => exprs_lhs.syntactic_eq(exprs_rhs),
             _ => false,
         }
     }
@@ -1101,20 +1270,20 @@ impl SyntacticEq for Distinct {
 impl SyntacticEq for Top {
     fn syntactic_eq(&self, other: &Self) -> bool {
         let Self {
-            percent: percent_left,
-            with_ties: with_ties_left,
-            quantity: quantity_left,
+            percent: percent_lhs,
+            with_ties: with_ties_lhs,
+            quantity: quantity_lhs,
         } = self;
 
         let Self {
-            percent: percent_right,
-            with_ties: with_ties_right,
-            quantity: quantity_right,
+            percent: percent_rhs,
+            with_ties: with_ties_rhs,
+            quantity: quantity_rhs,
         } = other;
 
-        percent_left == percent_right
-            && with_ties_left == with_ties_right
-            && quantity_left.syntactic_eq(quantity_right)
+        percent_lhs == percent_rhs
+            && with_ties_lhs == with_ties_rhs
+            && quantity_lhs.syntactic_eq(quantity_rhs)
     }
 }
 
@@ -1193,8 +1362,14 @@ impl SyntacticEq for RenameSelectItem {
 
 impl SyntacticEq for IdentWithAlias {
     fn syntactic_eq(&self, other: &Self) -> bool {
-        let Self { ident: ident_lhs, alias: alias_lhs } = self;
-        let Self { ident: ident_rhs, alias: alias_rhs } = other;
+        let Self {
+            ident: ident_lhs,
+            alias: alias_lhs,
+        } = self;
+        let Self {
+            ident: ident_rhs,
+            alias: alias_rhs,
+        } = other;
 
         ident_lhs.syntactic_eq(ident_rhs) && alias_lhs.syntactic_eq(alias_rhs)
     }
@@ -1233,10 +1408,10 @@ impl SyntacticEq for ExceptSelectItem {
 impl SyntacticEq for TopQuantity {
     fn syntactic_eq(&self, other: &Self) -> bool {
         match (self, other) {
-            (TopQuantity::Expr(expr_left), TopQuantity::Expr(expr_right)) => {
-                expr_left.syntactic_eq(expr_right)
+            (TopQuantity::Expr(expr_lhs), TopQuantity::Expr(expr_rhs)) => {
+                expr_lhs.syntactic_eq(expr_rhs)
             }
-            (TopQuantity::Constant(c_left), TopQuantity::Constant(c_right)) => c_left == c_right,
+            (TopQuantity::Constant(c_lhs), TopQuantity::Constant(c_rhs)) => c_lhs == c_rhs,
             _ => false,
         }
     }
@@ -1247,7 +1422,205 @@ impl SyntacticEq for ReplaceSelectItem {
         let Self { items: items_lhs } = self;
         let Self { items: items_rhs } = other;
 
-        items_lhs.syntactic_eq(items_rhs.as_slice())
+        items_lhs.syntactic_eq(items_rhs)
+    }
+}
+
+impl SyntacticEq for ReplaceSelectElement {
+    fn syntactic_eq(&self, other: &Self) -> bool {
+        let Self {
+            expr: expr_lhs,
+            column_name: column_name_lhs,
+            as_keyword: as_keyword_lhs,
+        } = self;
+        let Self {
+            expr: expr_rhs,
+            column_name: column_name_rhs,
+            as_keyword: as_keyword_rhs,
+        } = other;
+
+        expr_lhs.syntactic_eq(expr_rhs)
+            && column_name_lhs.syntactic_eq(column_name_rhs)
+            && as_keyword_lhs == as_keyword_rhs
+    }
+}
+
+impl SyntacticEq for DateTimeField {
+    fn syntactic_eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Week(ident_lhs), Self::Week(ident_rhs)) => ident_lhs.syntactic_eq(ident_rhs),
+            (Self::Custom(ident_lhs), Self::Custom(ident_rhs)) => ident_lhs.syntactic_eq(ident_rhs),
+            _ => mem::discriminant(self) == mem::discriminant(other),
+        }
+    }
+}
+
+impl SyntacticEq for CeilFloorKind {
+    fn syntactic_eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (
+                CeilFloorKind::DateTimeField(date_time_field_lhs),
+                CeilFloorKind::DateTimeField(date_time_field_rhs),
+            ) => date_time_field_lhs.syntactic_eq(date_time_field_rhs),
+            (CeilFloorKind::Scale(value_lhs), CeilFloorKind::Scale(value_rhs)) => {
+                value_lhs == value_rhs
+            }
+            _ => false,
+        }
+    }
+}
+
+impl SyntacticEq for StructField {
+    fn syntactic_eq(&self, other: &Self) -> bool {
+        let Self {
+            field_name: field_name_lhs,
+            field_type: field_type_lhs,
+        } = self;
+        let Self {
+            field_name: field_name_rhs,
+            field_type: field_type_rhs,
+        } = other;
+
+        field_name_lhs.syntactic_eq(field_name_rhs) && field_type_lhs == field_type_rhs
+    }
+}
+
+impl SyntacticEq for DictionaryField {
+    fn syntactic_eq(&self, other: &Self) -> bool {
+        let Self {
+            key: key_lhs,
+            value: value_lhs,
+        } = self;
+        let Self {
+            key: key_rhs,
+            value: value_rhs,
+        } = other;
+
+        key_lhs.syntactic_eq(key_rhs) && value_lhs.syntactic_eq(value_rhs)
+    }
+}
+
+impl SyntacticEq for Map {
+    fn syntactic_eq(&self, other: &Self) -> bool {
+        let Self {
+            entries: entries_lhs,
+        } = self;
+        let Self {
+            entries: entries_rhs,
+        } = other;
+
+        entries_lhs.syntactic_eq(entries_rhs)
+    }
+}
+
+impl SyntacticEq for MapEntry {
+    fn syntactic_eq(&self, other: &Self) -> bool {
+        let Self {
+            key: key_lhs,
+            value: value_lhs,
+        } = self;
+        let Self {
+            key: key_rhs,
+            value: value_rhs,
+        } = other;
+
+        key_lhs.syntactic_eq(key_rhs) && value_lhs.syntactic_eq(value_rhs)
+    }
+}
+
+impl SyntacticEq for Subscript {
+    fn syntactic_eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Subscript::Index { index: index_lhs }, Subscript::Index { index: index_rhs }) => {
+                index_lhs.syntactic_eq(index_rhs)
+            }
+            (
+                Subscript::Slice {
+                    lower_bound: lower_bound_lhs,
+                    upper_bound: upper_bound_lhs,
+                    stride: stride_lhs,
+                },
+                Subscript::Slice {
+                    lower_bound: lower_bound_rhs,
+                    upper_bound: upper_bound_rhs,
+                    stride: stride_rhs,
+                },
+            ) => {
+                lower_bound_lhs.syntactic_eq(lower_bound_rhs)
+                    && upper_bound_lhs.syntactic_eq(upper_bound_rhs)
+                    && stride_lhs.syntactic_eq(stride_rhs)
+            }
+            _ => false,
+        }
+    }
+}
+
+impl SyntacticEq for Array {
+    fn syntactic_eq(&self, other: &Self) -> bool {
+        let Self {
+            elem: elem_lhs,
+            named: named_lhs,
+        } = self;
+        let Self {
+            elem: elem_rhs,
+            named: named_rhs,
+        } = other;
+
+        elem_lhs.syntactic_eq(elem_rhs) && *named_lhs == *named_rhs
+    }
+}
+
+impl SyntacticEq for Interval {
+    fn syntactic_eq(&self, other: &Self) -> bool {
+        let Self {
+            value: value_lhs,
+            leading_field: leading_field_lhs,
+            leading_precision: leading_precision_lhs,
+            last_field: last_field_lhs,
+            fractional_seconds_precision: fractional_seconds_precision_lhs,
+        } = self;
+        let Self {
+            value: value_rhs,
+            leading_field: leading_field_rhs,
+            leading_precision: leading_precision_rhs,
+            last_field: last_field_rhs,
+            fractional_seconds_precision: fractional_seconds_precision_rhs,
+        } = other;
+
+        value_lhs.syntactic_eq(value_rhs)
+            && leading_field_lhs.syntactic_eq(leading_field_rhs)
+            && leading_precision_lhs == leading_precision_rhs
+            && last_field_lhs.syntactic_eq(last_field_rhs)
+            && fractional_seconds_precision_lhs == fractional_seconds_precision_rhs
+    }
+}
+
+impl SyntacticEq for LambdaFunction {
+    fn syntactic_eq(&self, other: &Self) -> bool {
+        let Self {
+            params: params_lhs,
+            body: body_lhs,
+        } = self;
+        let Self {
+            params: params_rhs,
+            body: body_rhs,
+        } = other;
+
+        params_lhs.syntactic_eq(params_rhs) && body_lhs.syntactic_eq(body_rhs)
+    }
+}
+
+impl<T: SyntacticEq> SyntacticEq for OneOrManyWithParens<T> {
+    fn syntactic_eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (OneOrManyWithParens::One(item_lhs), OneOrManyWithParens::One(item_rhs)) => {
+                item_lhs.syntactic_eq(item_rhs)
+            }
+            (OneOrManyWithParens::Many(items_lhs), OneOrManyWithParens::Many(items_rhs)) => {
+                items_lhs.syntactic_eq(items_rhs)
+            }
+            _ => false,
+        }
     }
 }
 
@@ -1255,10 +1628,8 @@ impl SyntacticEq for Expr {
     fn syntactic_eq(&self, other: &Self) -> bool {
         // Expr::Nested(_) requires special handling because the parens are superfluous when it comes to equality.
         match (self, other) {
-            (Expr::Nested(expr_left), expr_right) => {
-                return (&**expr_left).syntactic_eq(expr_right)
-            }
-            (expr_left, Expr::Nested(expr_right)) => return expr_left.syntactic_eq(expr_right),
+            (Expr::Nested(expr_lhs), expr_rhs) => return (&**expr_lhs).syntactic_eq(expr_rhs),
+            (expr_lhs, Expr::Nested(expr_rhs)) => return expr_lhs.syntactic_eq(expr_rhs),
             _ => {}
         }
 
@@ -1268,604 +1639,580 @@ impl SyntacticEq for Expr {
         }
 
         match (self, other) {
-            (Expr::Identifier(ident_left), Expr::Identifier(ident_right)) => {
-                ident_left.syntactic_eq(ident_right)
+            (Expr::Identifier(ident_lhs), Expr::Identifier(ident_rhs)) => {
+                ident_lhs.syntactic_eq(ident_rhs)
             }
-            (Expr::CompoundIdentifier(idents_left), Expr::CompoundIdentifier(idents_right)) => {
-                idents_left.syntactic_eq(idents_right)
+            (Expr::CompoundIdentifier(idents_lhs), Expr::CompoundIdentifier(idents_rhs)) => {
+                idents_lhs.syntactic_eq(idents_rhs)
             }
             (
                 Expr::JsonAccess {
-                    value: value_left,
-                    path: path_left,
+                    value: value_lhs,
+                    path: path_lhs,
                 },
                 Expr::JsonAccess {
-                    value: value_right,
-                    path: path_right,
+                    value: value_rhs,
+                    path: path_rhs,
                 },
-            ) => value_left.syntactic_eq(value_right) && path_left.syntactic_eq(path_right),
+            ) => value_lhs.syntactic_eq(value_rhs) && path_lhs.syntactic_eq(path_rhs),
             (
                 Expr::CompositeAccess {
-                    expr: expr_left,
-                    key: key_left,
+                    expr: expr_lhs,
+                    key: key_lhs,
                 },
                 Expr::CompositeAccess {
-                    expr: expr_right,
-                    key: key_right,
+                    expr: expr_rhs,
+                    key: key_rhs,
                 },
-            ) => expr_left.syntactic_eq(expr_right) && key_left.syntactic_eq(key_right),
-            (Expr::IsFalse(expr_left), Expr::IsFalse(expr_right)) => {
-                expr_left.syntactic_eq(expr_right)
+            ) => expr_lhs.syntactic_eq(expr_rhs) && key_lhs.syntactic_eq(key_rhs),
+            (Expr::IsFalse(expr_lhs), Expr::IsFalse(expr_rhs)) => expr_lhs.syntactic_eq(expr_rhs),
+            (Expr::IsNotFalse(expr_lhs), Expr::IsNotFalse(expr_rhs)) => {
+                expr_lhs.syntactic_eq(expr_rhs)
             }
-            (Expr::IsNotFalse(expr_left), Expr::IsNotFalse(expr_right)) => {
-                expr_left.syntactic_eq(expr_right)
+            (Expr::IsTrue(expr_lhs), Expr::IsTrue(expr_rhs)) => expr_lhs.syntactic_eq(expr_rhs),
+            (Expr::IsNotTrue(expr_lhs), Expr::IsNotTrue(expr_rhs)) => {
+                expr_lhs.syntactic_eq(expr_rhs)
             }
-            (Expr::IsTrue(expr_left), Expr::IsTrue(expr_right)) => {
-                expr_left.syntactic_eq(expr_right)
+            (Expr::IsNull(expr_lhs), Expr::IsNull(expr_rhs)) => expr_lhs.syntactic_eq(expr_rhs),
+            (Expr::IsNotNull(expr_lhs), Expr::IsNotNull(expr_rhs)) => {
+                expr_lhs.syntactic_eq(expr_rhs)
             }
-            (Expr::IsNotTrue(expr_left), Expr::IsNotTrue(expr_right)) => {
-                expr_left.syntactic_eq(expr_right)
+            (Expr::IsUnknown(expr_lhs), Expr::IsUnknown(expr_rhs)) => {
+                expr_lhs.syntactic_eq(expr_rhs)
             }
-            (Expr::IsNull(expr_left), Expr::IsNull(expr_right)) => {
-                expr_left.syntactic_eq(expr_right)
-            }
-            (Expr::IsNotNull(expr_left), Expr::IsNotNull(expr_right)) => {
-                expr_left.syntactic_eq(expr_right)
-            }
-            (Expr::IsUnknown(expr_left), Expr::IsUnknown(expr_right)) => {
-                expr_left.syntactic_eq(expr_right)
-            }
-            (Expr::IsNotUnknown(expr_left), Expr::IsNotUnknown(expr_right)) => {
-                expr_left.syntactic_eq(expr_right)
+            (Expr::IsNotUnknown(expr_lhs), Expr::IsNotUnknown(expr_rhs)) => {
+                expr_lhs.syntactic_eq(expr_rhs)
             }
             (
-                Expr::IsDistinctFrom(expr_left, expr1_left),
-                Expr::IsDistinctFrom(expr_right, expr1_right),
-            ) => expr_left.syntactic_eq(expr_right) && expr1_left.syntactic_eq(expr1_right),
+                Expr::IsDistinctFrom(expr_lhs, expr1_lhs),
+                Expr::IsDistinctFrom(expr_rhs, expr1_rhs),
+            ) => expr_lhs.syntactic_eq(expr_rhs) && expr1_lhs.syntactic_eq(expr1_rhs),
             (
-                Expr::IsNotDistinctFrom(expr_left, expr1_left),
-                Expr::IsNotDistinctFrom(expr_right, expr1_right),
-            ) => expr_left.syntactic_eq(expr_right) && expr1_left.syntactic_eq(expr1_right),
+                Expr::IsNotDistinctFrom(expr_lhs, expr1_lhs),
+                Expr::IsNotDistinctFrom(expr_rhs, expr1_rhs),
+            ) => expr_lhs.syntactic_eq(expr_rhs) && expr1_lhs.syntactic_eq(expr1_rhs),
             (
                 Expr::InList {
-                    expr: expr_left,
-                    list: list_left,
-                    negated: negated_left,
+                    expr: expr_lhs,
+                    list: list_lhs,
+                    negated: negated_lhs,
                 },
                 Expr::InList {
-                    expr: expr_right,
-                    list: list_right,
-                    negated: negated_right,
+                    expr: expr_rhs,
+                    list: list_rhs,
+                    negated: negated_rhs,
                 },
             ) => {
-                expr_left.syntactic_eq(expr_right)
-                    && list_left
+                expr_lhs.syntactic_eq(expr_rhs)
+                    && list_lhs
                         .iter()
-                        .zip(list_right.iter())
+                        .zip(list_rhs.iter())
                         .all(|(l, r)| l.syntactic_eq(r))
-                    && negated_left == negated_right
+                    && negated_lhs == negated_rhs
             }
             (
                 Expr::InSubquery {
-                    expr: expr_left,
-                    subquery: subquery_left,
-                    negated: negated_left,
+                    expr: expr_lhs,
+                    subquery: subquery_lhs,
+                    negated: negated_lhs,
                 },
                 Expr::InSubquery {
-                    expr: expr_right,
-                    subquery: subquery_right,
-                    negated: negated_right,
+                    expr: expr_rhs,
+                    subquery: subquery_rhs,
+                    negated: negated_rhs,
                 },
             ) => {
-                expr_left.syntactic_eq(expr_right)
-                    && subquery_left.syntactic_eq(subquery_right)
-                    && negated_left == negated_right
+                expr_lhs.syntactic_eq(expr_rhs)
+                    && subquery_lhs.syntactic_eq(subquery_rhs)
+                    && negated_lhs == negated_rhs
             }
             (
                 Expr::InUnnest {
-                    expr: expr_left,
-                    array_expr: array_expr_left,
-                    negated: negated_left,
+                    expr: expr_lhs,
+                    array_expr: array_expr_lhs,
+                    negated: negated_lhs,
                 },
                 Expr::InUnnest {
-                    expr: expr_right,
-                    array_expr: array_expr_right,
-                    negated: negated_right,
+                    expr: expr_rhs,
+                    array_expr: array_expr_rhs,
+                    negated: negated_rhs,
                 },
             ) => {
-                expr_left.syntactic_eq(expr_right)
-                    && array_expr_left.syntactic_eq(array_expr_right)
-                    && negated_left == negated_right
+                expr_lhs.syntactic_eq(expr_rhs)
+                    && array_expr_lhs.syntactic_eq(array_expr_rhs)
+                    && negated_lhs == negated_rhs
             }
             (
                 Expr::Between {
-                    expr: expr_left,
-                    negated: negated_left,
-                    low: low_left,
-                    high: high_left,
+                    expr: expr_lhs,
+                    negated: negated_lhs,
+                    low: low_lhs,
+                    high: high_lhs,
                 },
                 Expr::Between {
-                    expr: expr_right,
-                    negated: negated_right,
-                    low: low_right,
-                    high: high_right,
+                    expr: expr_rhs,
+                    negated: negated_rhs,
+                    low: low_rhs,
+                    high: high_rhs,
                 },
             ) => {
-                expr_left.syntactic_eq(expr_right)
-                    && negated_left == negated_right
-                    && low_left.syntactic_eq(low_right)
-                    && high_left.syntactic_eq(high_right)
+                expr_lhs.syntactic_eq(expr_rhs)
+                    && negated_lhs == negated_rhs
+                    && low_lhs.syntactic_eq(low_rhs)
+                    && high_lhs.syntactic_eq(high_rhs)
             }
             (
                 Expr::BinaryOp {
-                    left: left_left,
-                    op: op_left,
-                    right: right_left,
+                    left: left_lhs,
+                    op: op_lhs,
+                    right: right_lhs,
                 },
                 Expr::BinaryOp {
-                    left: left_right,
-                    op: op_right,
-                    right: right_right,
+                    left: left_rhs,
+                    op: op_rhs,
+                    right: right_rhs,
                 },
             ) => {
-                left_left.syntactic_eq(left_right)
-                    && right_left.syntactic_eq(right_right)
-                    && op_left == op_right
+                left_lhs.syntactic_eq(left_rhs)
+                    && right_lhs.syntactic_eq(right_rhs)
+                    && op_lhs == op_rhs
             }
             (
                 Expr::Like {
-                    negated: negated_left,
-                    any: any_left,
-                    expr: expr_left,
-                    pattern: pattern_left,
-                    escape_char: escape_char_left,
+                    negated: negated_lhs,
+                    any: any_lhs,
+                    expr: expr_lhs,
+                    pattern: pattern_lhs,
+                    escape_char: escape_char_lhs,
                 },
                 Expr::Like {
-                    negated: negated_right,
-                    any: any_right,
-                    expr: expr_right,
-                    pattern: pattern_right,
-                    escape_char: escape_char_right,
+                    negated: negated_rhs,
+                    any: any_rhs,
+                    expr: expr_rhs,
+                    pattern: pattern_rhs,
+                    escape_char: escape_char_rhs,
                 },
             ) => {
-                negated_left == negated_right
-                    && any_left == any_right
-                    && expr_left.syntactic_eq(expr_right)
-                    && pattern_left.syntactic_eq(pattern_right)
-                    && escape_char_left == escape_char_right
+                negated_lhs == negated_rhs
+                    && any_lhs == any_rhs
+                    && expr_lhs.syntactic_eq(expr_rhs)
+                    && pattern_lhs.syntactic_eq(pattern_rhs)
+                    && escape_char_lhs == escape_char_rhs
             }
             (
                 Expr::ILike {
-                    negated: negated_left,
-                    any: any_left,
-                    expr: expr_left,
-                    pattern: pattern_left,
-                    escape_char: escape_char_left,
+                    negated: negated_lhs,
+                    any: any_lhs,
+                    expr: expr_lhs,
+                    pattern: pattern_lhs,
+                    escape_char: escape_char_lhs,
                 },
                 Expr::ILike {
-                    negated: negated_right,
-                    any: any_right,
-                    expr: expr_right,
-                    pattern: pattern_right,
-                    escape_char: escape_char_right,
+                    negated: negated_rhs,
+                    any: any_rhs,
+                    expr: expr_rhs,
+                    pattern: pattern_rhs,
+                    escape_char: escape_char_rhs,
                 },
             ) => {
-                negated_left == negated_right
-                    && any_left == any_right
-                    && expr_left.syntactic_eq(expr_right)
-                    && pattern_left.syntactic_eq(pattern_right)
-                    && escape_char_left == escape_char_right
+                negated_lhs == negated_rhs
+                    && any_lhs == any_rhs
+                    && expr_lhs.syntactic_eq(expr_rhs)
+                    && pattern_lhs.syntactic_eq(pattern_rhs)
+                    && escape_char_lhs == escape_char_rhs
             }
             (
                 Expr::SimilarTo {
-                    negated: negated_left,
-                    expr: expr_left,
-                    pattern: pattern_left,
-                    escape_char: escape_char_left,
+                    negated: negated_lhs,
+                    expr: expr_lhs,
+                    pattern: pattern_lhs,
+                    escape_char: escape_char_lhs,
                 },
                 Expr::SimilarTo {
-                    negated: negated_right,
-                    expr: expr_right,
-                    pattern: pattern_right,
-                    escape_char: escape_char_right,
+                    negated: negated_rhs,
+                    expr: expr_rhs,
+                    pattern: pattern_rhs,
+                    escape_char: escape_char_rhs,
                 },
             ) => {
-                negated_left == negated_right
-                    && expr_left.syntactic_eq(expr_right)
-                    && pattern_left.syntactic_eq(pattern_right)
-                    && escape_char_left == escape_char_right
+                negated_lhs == negated_rhs
+                    && expr_lhs.syntactic_eq(expr_rhs)
+                    && pattern_lhs.syntactic_eq(pattern_rhs)
+                    && escape_char_lhs == escape_char_rhs
             }
             (
                 Expr::RLike {
-                    negated: negated_left,
-                    expr: expr_left,
-                    pattern: pattern_left,
-                    regexp: regexp_left,
+                    negated: negated_lhs,
+                    expr: expr_lhs,
+                    pattern: pattern_lhs,
+                    regexp: regexp_lhs,
                 },
                 Expr::RLike {
-                    negated: negated_right,
-                    expr: expr_right,
-                    pattern: pattern_right,
-                    regexp: regexp_right,
+                    negated: negated_rhs,
+                    expr: expr_rhs,
+                    pattern: pattern_rhs,
+                    regexp: regexp_rhs,
                 },
             ) => {
-                negated_left == negated_right
-                    && expr_left.syntactic_eq(expr_right)
-                    && pattern_left.syntactic_eq(pattern_right)
-                    && regexp_left == regexp_right
+                negated_lhs == negated_rhs
+                    && expr_lhs.syntactic_eq(expr_rhs)
+                    && pattern_lhs.syntactic_eq(pattern_rhs)
+                    && regexp_lhs == regexp_rhs
             }
             (
                 Expr::AnyOp {
-                    left: left_left,
-                    compare_op: compare_op_left,
-                    right: right_left,
-                    is_some: is_some_left,
+                    left: left_lhs,
+                    compare_op: compare_op_lhs,
+                    right: right_lhs,
+                    is_some: is_some_lhs,
                 },
                 Expr::AnyOp {
-                    left: left_right,
-                    compare_op: compare_op_right,
-                    right: right_right,
-                    is_some: is_some_right,
+                    left: left_rhs,
+                    compare_op: compare_op_rhs,
+                    right: right_rhs,
+                    is_some: is_some_rhs,
                 },
             ) => {
-                left_left.syntactic_eq(left_right)
-                    && compare_op_left == compare_op_right
-                    && right_left.syntactic_eq(right_right)
-                    && is_some_left == is_some_right
+                left_lhs.syntactic_eq(left_rhs)
+                    && compare_op_lhs == compare_op_rhs
+                    && right_lhs.syntactic_eq(right_rhs)
+                    && is_some_lhs == is_some_rhs
             }
             (
                 Expr::AllOp {
-                    left: left_left,
-                    compare_op: compare_op_left,
-                    right: right_left,
+                    left: left_lhs,
+                    compare_op: compare_op_lhs,
+                    right: right_lhs,
                 },
                 Expr::AllOp {
-                    left: left_right,
-                    compare_op: compare_op_right,
-                    right: right_right,
+                    left: left_rhs,
+                    compare_op: compare_op_rhs,
+                    right: right_rhs,
                 },
             ) => {
-                left_left.syntactic_eq(left_right)
-                    && compare_op_left == compare_op_right
-                    && right_left.syntactic_eq(right_right)
+                left_lhs.syntactic_eq(left_rhs)
+                    && compare_op_lhs == compare_op_rhs
+                    && right_lhs.syntactic_eq(right_rhs)
             }
             (
                 Expr::UnaryOp {
-                    op: op_left,
-                    expr: expr_left,
+                    op: op_lhs,
+                    expr: expr_lhs,
                 },
                 Expr::UnaryOp {
-                    op: op_right,
-                    expr: expr_right,
+                    op: op_rhs,
+                    expr: expr_rhs,
                 },
-            ) => op_left == op_right && expr_left.syntactic_eq(expr_right),
+            ) => op_lhs == op_rhs && expr_lhs.syntactic_eq(expr_rhs),
             (
                 Expr::Convert {
-                    is_try: is_try_left,
-                    expr: expr_left,
-                    data_type: data_type_left,
-                    charset: charset_left,
-                    target_before_value: target_before_value_left,
-                    styles: styles_left,
+                    is_try: is_try_lhs,
+                    expr: expr_lhs,
+                    data_type: data_type_lhs,
+                    charset: charset_lhs,
+                    target_before_value: target_before_value_lhs,
+                    styles: styles_lhs,
                 },
                 Expr::Convert {
-                    is_try: is_try_right,
-                    expr: expr_right,
-                    data_type: data_type_right,
-                    charset: charset_right,
-                    target_before_value: target_before_value_right,
-                    styles: styles_right,
+                    is_try: is_try_rhs,
+                    expr: expr_rhs,
+                    data_type: data_type_rhs,
+                    charset: charset_rhs,
+                    target_before_value: target_before_value_rhs,
+                    styles: styles_rhs,
                 },
             ) => {
-                is_try_left == is_try_right
-                    && expr_left.syntactic_eq(expr_right)
-                    && data_type_left == data_type_right
-                    && charset_left.syntactic_eq(charset_right)
-                    && target_before_value_left == target_before_value_right
-                    && styles_left.syntactic_eq(styles_right)
+                is_try_lhs == is_try_rhs
+                    && expr_lhs.syntactic_eq(expr_rhs)
+                    && data_type_lhs == data_type_rhs
+                    && charset_lhs.syntactic_eq(charset_rhs)
+                    && target_before_value_lhs == target_before_value_rhs
+                    && styles_lhs.syntactic_eq(styles_rhs)
             }
             (
                 Expr::Cast {
-                    kind: kind_left,
-                    expr: expr_left,
-                    data_type: data_type_left,
-                    format: format_left,
+                    kind: kind_lhs,
+                    expr: expr_lhs,
+                    data_type: data_type_lhs,
+                    format: format_lhs,
                 },
                 Expr::Cast {
-                    kind: kind_right,
-                    expr: expr_right,
-                    data_type: data_type_right,
-                    format: format_right,
+                    kind: kind_rhs,
+                    expr: expr_rhs,
+                    data_type: data_type_rhs,
+                    format: format_rhs,
                 },
             ) => {
-                kind_left == kind_right
-                    && expr_left.syntactic_eq(expr_right)
-                    && data_type_left.syntactic_eq(data_type_right)
-                    && format_left.syntactic_eq(format_right)
+                kind_lhs == kind_rhs
+                    && expr_lhs.syntactic_eq(expr_rhs)
+                    && data_type_lhs == data_type_rhs
+                    && format_lhs == format_rhs
             }
             (
                 Expr::AtTimeZone {
-                    timestamp: timestamp_left,
-                    time_zone: time_zone_left,
+                    timestamp: timestamp_lhs,
+                    time_zone: time_zone_lhs,
                 },
                 Expr::AtTimeZone {
-                    timestamp: timestamp_right,
-                    time_zone: time_zone_right,
+                    timestamp: timestamp_rhs,
+                    time_zone: time_zone_rhs,
                 },
             ) => {
-                timestamp_left.syntactic_eq(timestamp_right)
-                    && time_zone_left.syntactic_eq(time_zone_right)
+                timestamp_lhs.syntactic_eq(timestamp_rhs)
+                    && time_zone_lhs.syntactic_eq(time_zone_rhs)
             }
             (
                 Expr::Extract {
-                    field: field_left,
-                    syntax: syntax_left,
-                    expr: expr_left,
+                    field: field_lhs,
+                    syntax: syntax_lhs,
+                    expr: expr_lhs,
                 },
                 Expr::Extract {
-                    field: field_right,
-                    syntax: syntax_right,
-                    expr: expr_right,
+                    field: field_rhs,
+                    syntax: syntax_rhs,
+                    expr: expr_rhs,
                 },
             ) => {
-                field_left.syntactic_eq(field_right)
-                    && syntax_left.syntactic_eq(syntax_right)
-                    && expr_left.syntactic_eq(expr_right)
+                field_lhs.syntactic_eq(field_rhs)
+                    && syntax_lhs == syntax_rhs
+                    && expr_lhs.syntactic_eq(expr_rhs)
             }
             (
                 Expr::Ceil {
-                    expr: expr_left,
-                    field: field_left,
+                    expr: expr_lhs,
+                    field: field_lhs,
                 },
                 Expr::Ceil {
-                    expr: expr_right,
-                    field: field_right,
+                    expr: expr_rhs,
+                    field: field_rhs,
                 },
-            ) => expr_left.syntactic_eq(expr_right) && field_left.syntactic_eq(field_right),
+            ) => expr_lhs.syntactic_eq(expr_rhs) && field_lhs.syntactic_eq(field_rhs),
             (
                 Expr::Floor {
-                    expr: expr_left,
-                    field: field_left,
+                    expr: expr_lhs,
+                    field: field_lhs,
                 },
                 Expr::Floor {
-                    expr: expr_right,
-                    field: field_right,
+                    expr: expr_rhs,
+                    field: field_rhs,
                 },
-            ) => expr_left.syntactic_eq(expr_right) && field_left.syntactic_eq(field_right),
+            ) => expr_lhs.syntactic_eq(expr_rhs) && field_lhs.syntactic_eq(field_rhs),
             (
                 Expr::Position {
-                    expr: expr_left,
-                    r#in: in_left,
+                    expr: expr_lhs,
+                    r#in: in_lhs,
                 },
                 Expr::Position {
-                    expr: expr_right,
-                    r#in: in_right,
+                    expr: expr_rhs,
+                    r#in: in_rhs,
                 },
-            ) => expr_left.syntactic_eq(expr_right) && in_left.syntactic_eq(in_right),
+            ) => expr_lhs.syntactic_eq(expr_rhs) && in_lhs.syntactic_eq(in_rhs),
             (
                 Expr::Substring {
-                    expr: expr_left,
-                    substring_from: substring_from_left,
-                    substring_for: substring_for_left,
-                    special: special_left,
+                    expr: expr_lhs,
+                    substring_from: substring_from_lhs,
+                    substring_for: substring_for_lhs,
+                    special: special_lhs,
                 },
                 Expr::Substring {
-                    expr: expr_right,
-                    substring_from: substring_from_right,
-                    substring_for: substring_for_right,
-                    special: special_right,
+                    expr: expr_rhs,
+                    substring_from: substring_from_rhs,
+                    substring_for: substring_for_rhs,
+                    special: special_rhs,
                 },
             ) => {
-                expr_left.syntactic_eq(expr_right)
-                    && substring_from_left.syntactic_eq(substring_from_right)
-                    && substring_for_left.syntactic_eq(substring_for_right)
-                    && special_left.syntactic_eq(special_right)
+                expr_lhs.syntactic_eq(expr_rhs)
+                    && substring_from_lhs.syntactic_eq(substring_from_rhs)
+                    && substring_for_lhs.syntactic_eq(substring_for_rhs)
+                    && special_lhs == special_rhs
             }
             (
                 Expr::Trim {
-                    expr: expr_left,
-                    trim_where: trim_where_left,
-                    trim_what: trim_what_left,
-                    trim_characters: trim_characters_left,
+                    expr: expr_lhs,
+                    trim_where: trim_where_lhs,
+                    trim_what: trim_what_lhs,
+                    trim_characters: trim_characters_lhs,
                 },
                 Expr::Trim {
-                    expr: expr_right,
-                    trim_where: trim_where_right,
-                    trim_what: trim_what_right,
-                    trim_characters: trim_characters_right,
+                    expr: expr_rhs,
+                    trim_where: trim_where_rhs,
+                    trim_what: trim_what_rhs,
+                    trim_characters: trim_characters_rhs,
                 },
             ) => {
-                expr_left.syntactic_eq(expr_right)
-                    && trim_where_left.syntactic_eq(trim_where_right)
-                    && trim_what_left.syntactic_eq(trim_what_right)
-                    && trim_characters_left.syntactic_eq(trim_characters_right)
+                expr_lhs.syntactic_eq(expr_rhs)
+                    && trim_where_lhs == trim_where_rhs
+                    && trim_what_lhs.syntactic_eq(trim_what_rhs)
+                    && trim_characters_lhs.syntactic_eq(trim_characters_rhs)
             }
             (
                 Expr::Overlay {
-                    expr: expr_left,
-                    overlay_what: overlay_what_left,
-                    overlay_from: overlay_from_left,
-                    overlay_for: overlay_for_left,
+                    expr: expr_lhs,
+                    overlay_what: overlay_what_lhs,
+                    overlay_from: overlay_from_lhs,
+                    overlay_for: overlay_for_lhs,
                 },
                 Expr::Overlay {
-                    expr: expr_right,
-                    overlay_what: overlay_what_right,
-                    overlay_from: overlay_from_right,
-                    overlay_for: overlay_for_right,
+                    expr: expr_rhs,
+                    overlay_what: overlay_what_rhs,
+                    overlay_from: overlay_from_rhs,
+                    overlay_for: overlay_for_rhs,
                 },
             ) => {
-                expr_left.syntactic_eq(expr_right)
-                    && overlay_what_left.syntactic_eq(overlay_what_right)
-                    && overlay_from_left.syntactic_eq(overlay_from_right)
-                    && overlay_for_left.syntactic_eq(overlay_for_right)
+                expr_lhs.syntactic_eq(expr_rhs)
+                    && overlay_what_lhs.syntactic_eq(overlay_what_rhs)
+                    && overlay_from_lhs.syntactic_eq(overlay_from_rhs)
+                    && overlay_for_lhs.syntactic_eq(overlay_for_rhs)
             }
             (
                 Expr::Collate {
-                    expr: expr_left,
-                    collation: collation_left,
+                    expr: expr_lhs,
+                    collation: collation_lhs,
                 },
                 Expr::Collate {
-                    expr: expr_right,
-                    collation: collation_right,
+                    expr: expr_rhs,
+                    collation: collation_rhs,
                 },
-            ) => expr_left.syntactic_eq(expr_right) && collation_left.syntactic_eq(collation_right),
-            (Expr::Nested(expr_left), Expr::Nested(expr_right)) => {
-                expr_left.syntactic_eq(expr_right)
-            }
-            (Expr::Value(value_left), Expr::Value(value_right)) => {
-                value_left.syntactic_eq(value_right)
-            }
+            ) => expr_lhs.syntactic_eq(expr_rhs) && collation_lhs.syntactic_eq(collation_rhs),
+            (Expr::Value(value_lhs), Expr::Value(value_rhs)) => value_lhs == value_rhs,
             (
                 Expr::IntroducedString {
-                    introducer: introducer_left,
-                    value: value_left,
+                    introducer: introducer_lhs,
+                    value: value_lhs,
                 },
                 Expr::IntroducedString {
-                    introducer: introducer_right,
-                    value: value_right,
+                    introducer: introducer_rhs,
+                    value: value_rhs,
                 },
-            ) => {
-                introducer_left.syntactic_eq(introducer_right)
-                    && value_left.syntactic_eq(value_right)
-            }
+            ) => introducer_lhs == introducer_rhs && value_lhs == value_rhs,
             (
                 Expr::TypedString {
-                    data_type: data_type_left,
-                    value: value_left,
+                    data_type: data_type_lhs,
+                    value: value_lhs,
                 },
                 Expr::TypedString {
-                    data_type: data_type_right,
-                    value: value_right,
+                    data_type: data_type_rhs,
+                    value: value_rhs,
                 },
-            ) => {
-                data_type_left.syntactic_eq(data_type_right) && value_left.syntactic_eq(value_right)
-            }
+            ) => data_type_lhs == data_type_rhs && value_lhs == value_rhs,
             (
                 Expr::MapAccess {
-                    column: column_left,
-                    keys: keys_left,
+                    column: column_lhs,
+                    keys: keys_lhs,
                 },
                 Expr::MapAccess {
-                    column: column_right,
-                    keys: keys_right,
+                    column: column_rhs,
+                    keys: keys_rhs,
                 },
-            ) => column_left.syntactic_eq(column_right) && keys_left.syntactic_eq(keys_right),
-            (Expr::Function(function_left), Expr::Function(function_right)) => {
-                function_left.syntactic_eq(function_right)
+            ) => column_lhs.syntactic_eq(column_rhs) && keys_lhs.syntactic_eq(keys_rhs),
+            (Expr::Function(function_lhs), Expr::Function(function_rhs)) => {
+                function_lhs.syntactic_eq(function_rhs)
             }
             (
                 Expr::Case {
-                    operand: operand_left,
-                    conditions: conditions_left,
-                    results: results_left,
-                    else_result: else_result_left,
+                    operand: operand_lhs,
+                    conditions: conditions_lhs,
+                    results: results_lhs,
+                    else_result: else_result_lhs,
                 },
                 Expr::Case {
-                    operand: operand_right,
-                    conditions: conditions_right,
-                    results: results_right,
-                    else_result: else_result_right,
+                    operand: operand_rhs,
+                    conditions: conditions_rhs,
+                    results: results_rhs,
+                    else_result: else_result_rhs,
                 },
             ) => {
-                operand_left.syntactic_eq(operand_right)
-                    && conditions_left.syntactic_eq(conditions_right)
-                    && results_left.syntactic_eq(results_right)
-                    && else_result_left.syntactic_eq(else_result_right)
+                operand_lhs.syntactic_eq(operand_rhs)
+                    && conditions_lhs.syntactic_eq(conditions_rhs)
+                    && results_lhs.syntactic_eq(results_rhs)
+                    && else_result_lhs.syntactic_eq(else_result_rhs)
             }
             (
                 Expr::Exists {
-                    subquery: subquery_left,
-                    negated: negated_left,
+                    subquery: subquery_lhs,
+                    negated: negated_lhs,
                 },
                 Expr::Exists {
-                    subquery: subquery_right,
-                    negated: negated_right,
+                    subquery: subquery_rhs,
+                    negated: negated_rhs,
                 },
-            ) => subquery_left.syntactic_eq(subquery_right) && negated_left == negated_right,
-            (Expr::Subquery(query_left), Expr::Subquery(query_right)) => {
-                query_left.syntactic_eq(query_right)
+            ) => subquery_lhs.syntactic_eq(subquery_rhs) && negated_lhs == negated_rhs,
+            (Expr::Subquery(query_lhs), Expr::Subquery(query_rhs)) => {
+                query_lhs.syntactic_eq(query_rhs)
             }
-            (Expr::GroupingSets(items_left), Expr::GroupingSets(items_right)) => {
-                items_left.syntactic_eq(items_right)
+            (Expr::GroupingSets(items_lhs), Expr::GroupingSets(items_rhs)) => {
+                items_lhs.syntactic_eq(items_rhs)
             }
-            (Expr::Cube(items_left), Expr::Cube(items_right)) => {
-                items_left.syntactic_eq(items_right)
-            }
-            (Expr::Rollup(items_left), Expr::Rollup(items_right)) => {
-                items_left.syntactic_eq(items_right)
-            }
-            (Expr::Tuple(exprs_left), Expr::Tuple(exprs_right)) => {
-                exprs_left.syntactic_eq(exprs_right)
-            }
+            (Expr::Cube(items_lhs), Expr::Cube(items_rhs)) => items_lhs.syntactic_eq(items_rhs),
+            (Expr::Rollup(items_lhs), Expr::Rollup(items_rhs)) => items_lhs.syntactic_eq(items_rhs),
+            (Expr::Tuple(exprs_lhs), Expr::Tuple(exprs_rhs)) => exprs_lhs.syntactic_eq(exprs_rhs),
             (
                 Expr::Struct {
-                    values: values_left,
-                    fields: fields_left,
+                    values: values_lhs,
+                    fields: fields_lhs,
                 },
                 Expr::Struct {
-                    values: values_right,
-                    fields: fields_right,
+                    values: values_rhs,
+                    fields: fields_rhs,
                 },
-            ) => values_left.syntactic_eq(values_right) && fields_left.syntactic_eq(fields_right),
+            ) => values_lhs.syntactic_eq(values_rhs) && fields_lhs.syntactic_eq(fields_rhs),
             (
                 Expr::Named {
-                    expr: expr_left,
-                    name: name_left,
+                    expr: expr_lhs,
+                    name: name_lhs,
                 },
                 Expr::Named {
-                    expr: expr_right,
-                    name: name_right,
+                    expr: expr_rhs,
+                    name: name_rhs,
                 },
-            ) => expr_left.syntactic_eq(expr_right) && name_left.syntactic_eq(name_right),
-            (
-                Expr::Dictionary(dictionary_fields_left),
-                Expr::Dictionary(dictionary_fields_right),
-            ) => dictionary_fields_left.syntactic_eq(dictionary_fields_right),
-            (Expr::Map(map_left), Expr::Map(map_right)) => map_left.syntactic_eq(map_right),
-            (
-                Expr::Subscript {
-                    expr: expr_left,
-                    subscript: subscript_left,
-                },
-                Expr::Subscript {
-                    expr: expr_right,
-                    subscript: subscript_right,
-                },
-            ) => expr_left.syntactic_eq(expr_right) && subscript_left.syntactic_eq(subscript_right),
-            (Expr::Array(array_left), Expr::Array(array_right)) => {
-                array_left.syntactic_eq(array_right)
+            ) => expr_lhs.syntactic_eq(expr_rhs) && name_lhs.syntactic_eq(name_rhs),
+            (Expr::Dictionary(dictionary_fields_lhs), Expr::Dictionary(dictionary_fields_rhs)) => {
+                dictionary_fields_lhs.syntactic_eq(dictionary_fields_rhs)
             }
-            (Expr::Interval(interval_left), Expr::Interval(interval_right)) => {
-                interval_left.syntactic_eq(interval_right)
+            (Expr::Map(map_lhs), Expr::Map(map_rhs)) => map_lhs.syntactic_eq(map_rhs),
+            (
+                Expr::Subscript {
+                    expr: expr_lhs,
+                    subscript: subscript_lhs,
+                },
+                Expr::Subscript {
+                    expr: expr_rhs,
+                    subscript: subscript_rhs,
+                },
+            ) => expr_lhs.syntactic_eq(expr_rhs) && subscript_lhs.syntactic_eq(subscript_rhs),
+            (Expr::Array(array_lhs), Expr::Array(array_rhs)) => array_lhs.syntactic_eq(array_rhs),
+            (Expr::Interval(interval_lhs), Expr::Interval(interval_rhs)) => {
+                interval_lhs.syntactic_eq(interval_rhs)
             }
             (
                 Expr::MatchAgainst {
-                    columns: columns_left,
-                    match_value: match_value_left,
-                    opt_search_modifier: opt_search_modifier_left,
+                    columns: columns_lhs,
+                    match_value: match_value_lhs,
+                    opt_search_modifier: opt_search_modifier_lhs,
                 },
                 Expr::MatchAgainst {
-                    columns: columns_right,
-                    match_value: match_value_right,
-                    opt_search_modifier: opt_search_modifier_right,
+                    columns: columns_rhs,
+                    match_value: match_value_rhs,
+                    opt_search_modifier: opt_search_modifier_rhs,
                 },
             ) => {
-                columns_left.syntactic_eq(columns_right)
-                    && match_value_left.syntactic_eq(match_value_right)
-                    && opt_search_modifier_left.syntactic_eq(opt_search_modifier_right)
+                columns_lhs.syntactic_eq(columns_rhs)
+                    && match_value_lhs == match_value_rhs
+                    && opt_search_modifier_lhs == opt_search_modifier_rhs
             }
             (Expr::Wildcard, Expr::Wildcard) => true,
             (
-                Expr::QualifiedWildcard(object_name_left),
-                Expr::QualifiedWildcard(object_name_right),
-            ) => object_name_left.syntactic_eq(object_name_right),
-            (Expr::OuterJoin(expr_left), Expr::OuterJoin(expr_right)) => {
-                expr_left.syntactic_eq(expr_right)
+                Expr::QualifiedWildcard(object_name_lhs),
+                Expr::QualifiedWildcard(object_name_rhs),
+            ) => object_name_lhs.syntactic_eq(object_name_rhs),
+            (Expr::OuterJoin(expr_lhs), Expr::OuterJoin(expr_rhs)) => {
+                expr_lhs.syntactic_eq(expr_rhs)
             }
-            (Expr::Prior(expr_left), Expr::Prior(expr_right)) => expr_left.syntactic_eq(expr_right),
-            (Expr::Lambda(lambda_function_left), Expr::Lambda(lambda_function_right)) => {
-                lambda_function_left.syntactic_eq(lambda_function_right)
+            (Expr::Prior(expr_lhs), Expr::Prior(expr_rhs)) => expr_lhs.syntactic_eq(expr_rhs),
+            (Expr::Lambda(lambda_function_lhs), Expr::Lambda(lambda_function_rhs)) => {
+                lambda_function_lhs.syntactic_eq(lambda_function_rhs)
             }
+            _ => false
         }
     }
 }
