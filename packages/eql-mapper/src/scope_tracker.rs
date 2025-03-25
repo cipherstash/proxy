@@ -38,6 +38,10 @@ impl ScopeTracker<'_> {
         self.stack.last().cloned().ok_or(ScopeError::NoCurrentScope)
     }
 
+    pub(crate) fn scope_for_node(&self, key: NodeKey<'_>) -> Option<Rc<RefCell<Scope>>> {
+        self.node_scopes.get(&key).cloned()
+    }
+
     /// Resolves an unqualified wildcard. Resolution occurs in the current scope only  (i.e. does not look into parent
     /// scopes).
     pub(crate) fn resolve_wildcard(&self) -> Result<TypeCell, ScopeError> {
@@ -93,7 +97,7 @@ impl ScopeTracker<'_> {
 
 /// A lexical scope.
 #[derive(Debug)]
-struct Scope {
+pub(crate) struct Scope {
     /// The items in scope.
     ///
     /// This is a `Vec` because the order of relations is important to be compatible with how databases deal with
@@ -121,7 +125,7 @@ impl Scope {
         }))
     }
 
-    fn resolve_wildcard(&self) -> Result<TypeCell, ScopeError> {
+    pub(crate) fn resolve_wildcard(&self) -> Result<TypeCell, ScopeError> {
         if self.relations.is_empty() {
             match &self.parent {
                 Some(parent) => parent.borrow().resolve_wildcard(),
@@ -141,7 +145,7 @@ impl Scope {
         }
     }
 
-    fn resolve_qualified_wildcard(&self, idents: &[Ident]) -> Result<TypeCell, ScopeError> {
+    pub(crate) fn resolve_qualified_wildcard(&self, idents: &[Ident]) -> Result<TypeCell, ScopeError> {
         if idents.len() > 1 {
             return Err(ScopeError::UnsupportedCompoundIdentifierLength(
                 idents
@@ -169,7 +173,7 @@ impl Scope {
         }
     }
 
-    fn resolve_ident(&self, ident: &Ident) -> Result<TypeCell, ScopeError> {
+    pub(crate) fn resolve_ident(&self, ident: &Ident) -> Result<TypeCell, ScopeError> {
         if self.relations.is_empty() {
             match &self.parent {
                 Some(parent) => parent.borrow().resolve_ident(ident),
@@ -213,7 +217,7 @@ impl Scope {
         }
     }
 
-    fn resolve_compound_ident(&self, idents: &[Ident]) -> Result<TypeCell, ScopeError> {
+    pub(crate) fn resolve_compound_ident(&self, idents: &[Ident]) -> Result<TypeCell, ScopeError> {
         if idents.len() != 2 {
             return Err(ScopeError::InvariantFailed(
                 "Unsupported compound identifier length (max = 2)".to_string(),
@@ -259,7 +263,7 @@ impl Scope {
         Ok(())
     }
 
-    fn resolve_relation(&self, name: &ObjectName) -> Result<Rc<Relation>, ScopeError> {
+    pub(crate) fn resolve_relation(&self, name: &ObjectName) -> Result<Rc<Relation>, ScopeError> {
         if name.0.len() > 1 {
             return Err(ScopeError::UnsupportedSqlFeature(
                 "Tried to resolve a relation using a compound identifier".into(),

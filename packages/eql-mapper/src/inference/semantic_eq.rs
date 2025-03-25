@@ -16,68 +16,102 @@ use sqlparser::ast::{
     WithFill,
 };
 
-use crate::SqlIdent;
+use crate::{ScopeTracker, SqlIdent};
 
-/// Trait for comparing AST nodes for equality that takes into account SQL identifier case comparison rules and
-/// superfluous nesting of expressions in parens, e.g. `(foo)` versus `foo`.
+/// Trait for comparing [`Expr`] nodes for semantic equivalence.
 ///
-/// Otherwise it works exactly like [`Eq`].
+/// This trait is required in order to accurately determine which projection columns require aggregation when there is a
+/// `GROUP BY` clause present.
 ///
-/// # Why is this required?
+/// For example:
 ///
-/// 1. To robustly compare expressions in projections and `GROUP BY` clauses to accurately deternine which projection
-/// columns should be aggregated.
+/// ```sql
+/// -- the same identifier 'email' is used in both the SELECT projection and the GROUP BY clause
+/// -- therefore 'name' must be aggregated
+/// SELECT email, MIN(name) FROM users GROUP BY email;
 ///
-/// 2. To encapsulate all of the `SqlIdent` logic (future work).
+/// -- the identifier 'eMaIl' us used in the SELECT projection and the compound identifier 'u.email' in used in the GROUP BY
+/// -- therefore 'name' must be aggregated because due to SQL identifier comparison rules, unquoted identifiers are compared ignoring case.
+/// SELECT eMaIl, MIN(name) FROM users GROUP BY email;
 ///
-/// # TODO: generate this code
-pub(crate) trait SyntacticEq {
-    fn syntactic_eq(&self, other: &Self) -> bool;
+/// -- the identifier 'email' us used in the SELECT projection and the compound identifier 'u.email' in used in the GROUP BY
+/// -- therefore 'name' must be aggregated
+/// SELECT email, MIN(name) FROM users as u GROUP BY u.email;
+/// ```
+///
+/// If we only support syntactic equality with [`std::cmp::Eq`] then we could only support the first case.
+///
+/// Two [`Expr`] nodes `LHS` and `RHS` (left hand side and right hand side, respectively) will be considered
+/// semantically equal if (and only if):
+///
+/// 1. Both `LHS` & `RHS` are **identifiers** ([`Expr::Identifier`] or [`Expr::CompoundIdentifier`]) and they resolve to
+/// the same [`crate::inference::unifier::Value`] in the same [`scope`](`ScopeTracker`).
+///
+/// 2. Both `LHS` & `RHS` are [`Expr::Wildcard`]
+///
+/// 3. Both `LHS` & `RHS` are [`Expr::QualifiedWildcard`]
+///
+/// 4. `LHS` is `Expr::Nested(lhs_inner)` and `lhs_inner` is semantically equal to `RHS`, or
+///
+/// 5. `RHS` is `Expr::Nested(rhs_inner)` and `rhs_inner` is semantically equal to `LHS`, or
+///
+/// 6. Both expressions are the same variant and are recursively semantically equal.
+///
+/// Every AST node type that is reachable via an [`Expr`] variant implements `SemanticEq` except where that type does
+/// not own (transitively) an `Expr` and those fallback to [`std::cmp::Eq`].
+pub(crate) trait SemanticEq<'ast> {
+    fn semantic_eq(&self, other: &Self, scope: &ScopeTracker<'ast>) -> bool;
 }
 
-impl SyntacticEq for Ident {
-    fn syntactic_eq(&self, other: &Self) -> bool {
+/// The implementation for [`Ident`] is purely syntactic. Identifier resolution is handled in the implementation for
+/// [`Expr`].
+impl<'ast> SemanticEq<'ast> for Ident {
+    fn semantic_eq(&self, other: &Self, _: &ScopeTracker<'ast>) -> bool {
         SqlIdent(self) == SqlIdent(other)
     }
 }
 
-impl SyntacticEq for ObjectName {
-    fn syntactic_eq(&self, other: &Self) -> bool {
-        let Self(idents_lhs) = self;
-        let Self(idents_rhs) = other;
-
-        idents_lhs.syntactic_eq(idents_rhs)
+/// The implementation for [`ObjectName`] is purely syntactic. Compund identifier resolution is handled in the
+/// implementation for [`Expr`].
+impl<'ast> SemanticEq<'ast> for ObjectName {
+    fn semantic_eq(&self, other: &Self, scope: &ScopeTracker<'ast>) -> bool {
+        self.0.len() == other.0.len()
+            && self
+                .0
+                .iter()
+                .zip(other.0.iter())
+                .fold(true, |acc, (l, r)| acc && l.semantic_eq(r, scope))
     }
 }
 
-impl<T: SyntacticEq> SyntacticEq for Vec<T> {
-    fn syntactic_eq(&self, other: &Vec<T>) -> bool {
+impl<'ast, T: SemanticEq<'ast>> SemanticEq<'ast> for Vec<T> {
+    fn semantic_eq(&self, other: &Vec<T>, scope: &ScopeTracker<'ast>) -> bool {
         self.len() == other.len()
             && self
                 .iter()
                 .zip(other.iter())
-                .all(|(l, r)| l.syntactic_eq(r))
+                .fold(true, |acc, (l, r)| acc && l.semantic_eq(r, scope))
     }
 }
 
-impl<T: SyntacticEq> SyntacticEq for Option<T> {
-    fn syntactic_eq(&self, other: &Self) -> bool {
+impl<'ast, T: SemanticEq<'ast>> SemanticEq<'ast> for Option<T> {
+    fn semantic_eq(&self, other: &Self, scope: &ScopeTracker<'ast>) -> bool {
         match (self, other) {
-            (Some(l), Some(r)) => l.syntactic_eq(r),
+            (Some(l), Some(r)) => l.semantic_eq(r, scope),
             (None, None) => true,
             _ => false,
         }
     }
 }
 
-impl<T: SyntacticEq> SyntacticEq for Box<T> {
-    fn syntactic_eq(&self, other: &Box<T>) -> bool {
-        self.as_ref().syntactic_eq(other)
+impl<'ast, T: SemanticEq<'ast>> SemanticEq<'ast> for Box<T> {
+    fn semantic_eq(&self, other: &Box<T>, scope: &ScopeTracker<'ast>) -> bool {
+        self.as_ref().semantic_eq(other, scope)
     }
 }
 
-impl SyntacticEq for MapAccessKey {
-    fn syntactic_eq(&self, other: &Self) -> bool {
+impl<'ast> SemanticEq<'ast> for MapAccessKey {
+    fn semantic_eq(&self, other: &Self, scope: &ScopeTracker<'ast>) -> bool {
         let Self {
             key: key_lhs,
             syntax: syntax_lhs,
@@ -87,12 +121,12 @@ impl SyntacticEq for MapAccessKey {
             syntax: syntax_rhs,
         } = other;
 
-        key_lhs.syntactic_eq(key_rhs) && syntax_lhs == syntax_rhs
+        key_lhs.semantic_eq(key_rhs, scope) && syntax_lhs == syntax_rhs
     }
 }
 
-impl SyntacticEq for Function {
-    fn syntactic_eq(&self, other: &Self) -> bool {
+impl<'ast> SemanticEq<'ast> for Function {
+    fn semantic_eq(&self, other: &Self, scope: &ScopeTracker<'ast>) -> bool {
         let Self {
             name: name_lhs,
             parameters: parameters_lhs,
@@ -112,48 +146,48 @@ impl SyntacticEq for Function {
             within_group: within_group_rhs,
         } = other;
 
-        name_lhs.syntactic_eq(name_rhs)
-            && parameters_lhs.syntactic_eq(parameters_rhs)
-            && args_lhs.syntactic_eq(args_rhs)
-            && filter_lhs.syntactic_eq(filter_rhs)
+        name_lhs.semantic_eq(name_rhs, scope)
+            && parameters_lhs.semantic_eq(parameters_rhs, scope)
+            && args_lhs.semantic_eq(args_rhs, scope)
+            && filter_lhs.semantic_eq(filter_rhs, scope)
             && null_treatment_lhs == null_treatment_rhs
-            && over_lhs.syntactic_eq(over_rhs)
-            && within_group_lhs.syntactic_eq(within_group_rhs)
+            && over_lhs.semantic_eq(over_rhs, scope)
+            && within_group_lhs.semantic_eq(within_group_rhs, scope)
     }
 }
 
-impl SyntacticEq for WindowType {
-    fn syntactic_eq(&self, other: &Self) -> bool {
+impl<'ast> SemanticEq<'ast> for WindowType {
+    fn semantic_eq(&self, other: &Self, scope: &ScopeTracker<'ast>) -> bool {
         match (self, other) {
             (WindowType::WindowSpec(window_spec_lhs), WindowType::WindowSpec(window_spec_rhs)) => {
-                window_spec_lhs.syntactic_eq(window_spec_rhs)
+                window_spec_lhs.semantic_eq(window_spec_rhs, scope)
             }
             (WindowType::NamedWindow(ident_lhs), WindowType::NamedWindow(ident_rhs)) => {
-                ident_lhs.syntactic_eq(ident_rhs)
+                ident_lhs.semantic_eq(ident_rhs, scope)
             }
             _ => false,
         }
     }
 }
 
-impl SyntacticEq for FunctionArguments {
-    fn syntactic_eq(&self, other: &Self) -> bool {
+impl<'ast> SemanticEq<'ast> for FunctionArguments {
+    fn semantic_eq(&self, other: &Self, scope: &ScopeTracker<'ast>) -> bool {
         match (self, other) {
             (FunctionArguments::None, FunctionArguments::None) => true,
             (FunctionArguments::Subquery(query_lhs), FunctionArguments::Subquery(query_rhs)) => {
-                query_lhs.syntactic_eq(query_rhs)
+                query_lhs.semantic_eq(query_rhs, scope)
             }
             (
                 FunctionArguments::List(function_argument_list_lhs),
                 FunctionArguments::List(function_argument_list_rhs),
-            ) => function_argument_list_lhs.syntactic_eq(function_argument_list_rhs),
+            ) => function_argument_list_lhs.semantic_eq(function_argument_list_rhs, scope),
             _ => false,
         }
     }
 }
 
-impl SyntacticEq for FunctionArgumentList {
-    fn syntactic_eq(&self, other: &Self) -> bool {
+impl<'ast> SemanticEq<'ast> for FunctionArgumentList {
+    fn semantic_eq(&self, other: &Self, scope: &ScopeTracker<'ast>) -> bool {
         let Self {
             duplicate_treatment: duplicate_treatment_lhs,
             args: args_lhs,
@@ -166,13 +200,13 @@ impl SyntacticEq for FunctionArgumentList {
         } = other;
 
         duplicate_treatment_lhs == duplicate_treatment_rhs
-            && args_lhs.syntactic_eq(args_rhs)
-            && clauses_lhs.syntactic_eq(clauses_rhs)
+            && args_lhs.semantic_eq(args_rhs, scope)
+            && clauses_lhs.semantic_eq(clauses_rhs, scope)
     }
 }
 
-impl SyntacticEq for FunctionArgumentClause {
-    fn syntactic_eq(&self, other: &Self) -> bool {
+impl<'ast> SemanticEq<'ast> for FunctionArgumentClause {
+    fn semantic_eq(&self, other: &Self, scope: &ScopeTracker<'ast>) -> bool {
         match (self, other) {
             (
                 FunctionArgumentClause::IgnoreOrRespectNulls(null_treatment_lhs),
@@ -181,18 +215,18 @@ impl SyntacticEq for FunctionArgumentClause {
             (
                 FunctionArgumentClause::OrderBy(order_by_exprs_lhs),
                 FunctionArgumentClause::OrderBy(order_by_exprs_rhs),
-            ) => order_by_exprs_lhs.syntactic_eq(order_by_exprs_rhs),
+            ) => order_by_exprs_lhs.semantic_eq(order_by_exprs_rhs, scope),
             (FunctionArgumentClause::Limit(expr_lhs), FunctionArgumentClause::Limit(expr_rhs)) => {
-                expr_lhs.syntactic_eq(expr_rhs)
+                expr_lhs.semantic_eq(expr_rhs, scope)
             }
             (
                 FunctionArgumentClause::OnOverflow(list_agg_on_overflow_lhs),
                 FunctionArgumentClause::OnOverflow(list_agg_on_overflow_rhs),
-            ) => list_agg_on_overflow_lhs.syntactic_eq(list_agg_on_overflow_rhs),
+            ) => list_agg_on_overflow_lhs.semantic_eq(list_agg_on_overflow_rhs, scope),
             (
                 FunctionArgumentClause::Having(having_bound_lhs),
                 FunctionArgumentClause::Having(having_bound_rhs),
-            ) => having_bound_lhs.syntactic_eq(having_bound_rhs),
+            ) => having_bound_lhs.semantic_eq(having_bound_rhs, scope),
             (
                 FunctionArgumentClause::Separator(value_lhs),
                 FunctionArgumentClause::Separator(value_rhs),
@@ -202,17 +236,17 @@ impl SyntacticEq for FunctionArgumentClause {
     }
 }
 
-impl SyntacticEq for HavingBound {
-    fn syntactic_eq(&self, other: &Self) -> bool {
+impl<'ast> SemanticEq<'ast> for HavingBound {
+    fn semantic_eq(&self, other: &Self, scope: &ScopeTracker<'ast>) -> bool {
         let Self(kind_lhs, expr_lhs) = self;
         let Self(kind_rhs, expr_rhs) = other;
 
-        kind_lhs == kind_rhs && expr_lhs.syntactic_eq(expr_rhs)
+        kind_lhs == kind_rhs && expr_lhs.semantic_eq(expr_rhs, scope)
     }
 }
 
-impl SyntacticEq for ListAggOnOverflow {
-    fn syntactic_eq(&self, other: &Self) -> bool {
+impl<'ast> SemanticEq<'ast> for ListAggOnOverflow {
+    fn semantic_eq(&self, other: &Self, scope: &ScopeTracker<'ast>) -> bool {
         match (self, other) {
             (ListAggOnOverflow::Error, ListAggOnOverflow::Error) => todo!(),
             (
@@ -224,20 +258,20 @@ impl SyntacticEq for ListAggOnOverflow {
                     filler: filler_rhs,
                     with_count: with_count_rhs,
                 },
-            ) => filler_lhs.syntactic_eq(filler_rhs) && with_count_lhs == with_count_rhs,
+            ) => filler_lhs.semantic_eq(filler_rhs, scope) && with_count_lhs == with_count_rhs,
             _ => false,
         }
     }
 }
 
-impl SyntacticEq for JsonPath {
-    fn syntactic_eq(&self, other: &Self) -> bool {
+impl<'ast> SemanticEq<'ast> for JsonPath {
+    fn semantic_eq(&self, other: &Self, _scope: &ScopeTracker<'ast>) -> bool {
         self.path == other.path
     }
 }
 
-impl SyntacticEq for Query {
-    fn syntactic_eq(&self, other: &Self) -> bool {
+impl<'ast> SemanticEq<'ast> for Query {
+    fn semantic_eq(&self, other: &Self, scope: &ScopeTracker<'ast>) -> bool {
         let Query {
             body: body_lhs,
             order_by: order_by_lhs,
@@ -266,81 +300,83 @@ impl SyntacticEq for Query {
             format_clause: format_clause_rhs,
         } = other;
 
-        body_lhs.syntactic_eq(body_rhs)
-            && order_by_lhs.syntactic_eq(order_by_rhs)
-            && limit_lhs.syntactic_eq(limit_rhs)
-            && offset_lhs.syntactic_eq(offset_rhs)
-            && fetch_lhs.syntactic_eq(fetch_rhs)
-            && with_lhs.syntactic_eq(with_rhs)
-            && limit_by_lhs.syntactic_eq(limit_by_rhs)
-            && locks_lhs.syntactic_eq(locks_rhs)
+        body_lhs.semantic_eq(body_rhs, scope)
+            && order_by_lhs.semantic_eq(order_by_rhs, scope)
+            && limit_lhs.semantic_eq(limit_rhs, scope)
+            && offset_lhs.semantic_eq(offset_rhs, scope)
+            && fetch_lhs.semantic_eq(fetch_rhs, scope)
+            && with_lhs.semantic_eq(with_rhs, scope)
+            && limit_by_lhs.semantic_eq(limit_by_rhs, scope)
+            && locks_lhs.semantic_eq(locks_rhs, scope)
             && for_clause_lhs == for_clause_rhs
-            && settings_lhs.syntactic_eq(settings_rhs)
-            && format_clause_lhs.syntactic_eq(format_clause_rhs)
+            && settings_lhs.semantic_eq(settings_rhs, scope)
+            && format_clause_lhs.semantic_eq(format_clause_rhs, scope)
     }
 }
 
-impl SyntacticEq for FormatClause {
-    fn syntactic_eq(&self, other: &Self) -> bool {
+impl<'ast> SemanticEq<'ast> for FormatClause {
+    fn semantic_eq(&self, other: &Self, scope: &ScopeTracker<'ast>) -> bool {
         match (self, other) {
-            (FormatClause::Identifier(lhs), FormatClause::Identifier(rhs)) => rhs.syntactic_eq(lhs),
+            (FormatClause::Identifier(lhs), FormatClause::Identifier(rhs)) => {
+                rhs.semantic_eq(lhs, scope)
+            }
             (FormatClause::Null, FormatClause::Null) => true,
             _ => false,
         }
     }
 }
 
-impl SyntacticEq for Setting {
-    fn syntactic_eq(&self, other: &Self) -> bool {
-        self.key.syntactic_eq(&other.key) && self.value == other.value
+impl<'ast> SemanticEq<'ast> for Setting {
+    fn semantic_eq(&self, other: &Self, scope: &ScopeTracker<'ast>) -> bool {
+        self.key.semantic_eq(&other.key, scope) && self.value == other.value
     }
 }
 
-impl SyntacticEq for LockClause {
-    fn syntactic_eq(&self, other: &Self) -> bool {
+impl<'ast> SemanticEq<'ast> for LockClause {
+    fn semantic_eq(&self, other: &Self, scope: &ScopeTracker<'ast>) -> bool {
         self.lock_type == other.lock_type
-            && self.of.syntactic_eq(&other.of)
+            && self.of.semantic_eq(&other.of, scope)
             && self.nonblock == other.nonblock
     }
 }
 
-impl SyntacticEq for With {
-    fn syntactic_eq(&self, other: &Self) -> bool {
-        self.recursive == other.recursive && self.cte_tables.syntactic_eq(&other.cte_tables)
+impl<'ast> SemanticEq<'ast> for With {
+    fn semantic_eq(&self, other: &Self, scope: &ScopeTracker<'ast>) -> bool {
+        self.recursive == other.recursive && self.cte_tables.semantic_eq(&other.cte_tables, scope)
     }
 }
 
-impl SyntacticEq for Cte {
-    fn syntactic_eq(&self, other: &Self) -> bool {
-        self.alias.syntactic_eq(&other.alias)
-            && self.query.syntactic_eq(&other.query)
-            && self.from.syntactic_eq(&other.from)
+impl<'ast> SemanticEq<'ast> for Cte {
+    fn semantic_eq(&self, other: &Self, scope: &ScopeTracker<'ast>) -> bool {
+        self.alias.semantic_eq(&other.alias, scope)
+            && self.query.semantic_eq(&other.query, scope)
+            && self.from.semantic_eq(&other.from, scope)
             && self.materialized == other.materialized
     }
 }
 
-impl SyntacticEq for TableAlias {
-    fn syntactic_eq(&self, other: &Self) -> bool {
-        self.name.syntactic_eq(&other.name) && self.columns.syntactic_eq(&other.columns)
+impl<'ast> SemanticEq<'ast> for TableAlias {
+    fn semantic_eq(&self, other: &Self, scope: &ScopeTracker<'ast>) -> bool {
+        self.name.semantic_eq(&other.name, scope) && self.columns.semantic_eq(&other.columns, scope)
     }
 }
 
-impl SyntacticEq for Fetch {
-    fn syntactic_eq(&self, other: &Self) -> bool {
+impl<'ast> SemanticEq<'ast> for Fetch {
+    fn semantic_eq(&self, other: &Self, scope: &ScopeTracker<'ast>) -> bool {
         self.with_ties == other.with_ties
             && self.percent == other.percent
-            && self.quantity.syntactic_eq(&other.quantity)
+            && self.quantity.semantic_eq(&other.quantity, scope)
     }
 }
 
-impl SyntacticEq for OrderBy {
-    fn syntactic_eq(&self, other: &Self) -> bool {
-        self.exprs.syntactic_eq(&other.exprs) && self.interpolate.syntactic_eq(&other.interpolate)
+impl<'ast> SemanticEq<'ast> for OrderBy {
+    fn semantic_eq(&self, other: &Self, scope: &ScopeTracker<'ast>) -> bool {
+        self.exprs.semantic_eq(&other.exprs, scope) && self.interpolate.semantic_eq(&other.interpolate, scope)
     }
 }
 
-impl SyntacticEq for OrderByExpr {
-    fn syntactic_eq(&self, other: &Self) -> bool {
+impl<'ast> SemanticEq<'ast> for OrderByExpr {
+    fn semantic_eq(&self, other: &Self, scope: &ScopeTracker<'ast>) -> bool {
         let Self {
             expr: expr_lhs,
             nulls_first: nulls_first_lhs,
@@ -354,15 +390,15 @@ impl SyntacticEq for OrderByExpr {
             asc: asc_rhs,
         } = other;
 
-        expr_lhs.syntactic_eq(expr_rhs)
+        expr_lhs.semantic_eq(expr_rhs, scope)
             && nulls_first_lhs == nulls_first_rhs
-            && with_fill_lhs.syntactic_eq(with_fill_rhs)
+            && with_fill_lhs.semantic_eq(with_fill_rhs, scope)
             && asc_lhs == asc_rhs
     }
 }
 
-impl SyntacticEq for WithFill {
-    fn syntactic_eq(&self, other: &Self) -> bool {
+impl<'ast> SemanticEq<'ast> for WithFill {
+    fn semantic_eq(&self, other: &Self, scope: &ScopeTracker<'ast>) -> bool {
         let Self {
             from: from_lhs,
             to: to_lhs,
@@ -374,38 +410,38 @@ impl SyntacticEq for WithFill {
             step: step_rhs,
         } = other;
 
-        from_lhs.syntactic_eq(from_rhs)
-            && to_lhs.syntactic_eq(to_rhs)
-            && step_lhs.syntactic_eq(step_rhs)
+        from_lhs.semantic_eq(from_rhs, scope)
+            && to_lhs.semantic_eq(to_rhs, scope)
+            && step_lhs.semantic_eq(step_rhs, scope)
     }
 }
 
-impl SyntacticEq for Interpolate {
-    fn syntactic_eq(&self, other: &Self) -> bool {
-        self.exprs.syntactic_eq(&other.exprs)
+impl<'ast> SemanticEq<'ast> for Interpolate {
+    fn semantic_eq(&self, other: &Self, scope: &ScopeTracker<'ast>) -> bool {
+        self.exprs.semantic_eq(&other.exprs, scope)
     }
 }
 
-impl SyntacticEq for InterpolateExpr {
-    fn syntactic_eq(&self, other: &Self) -> bool {
-        self.column.syntactic_eq(&other.column) && self.expr.syntactic_eq(&other.expr)
+impl<'ast> SemanticEq<'ast> for InterpolateExpr {
+    fn semantic_eq(&self, other: &Self, scope: &ScopeTracker<'ast>) -> bool {
+        self.column.semantic_eq(&other.column, scope) && self.expr.semantic_eq(&other.expr, scope)
     }
 }
 
-impl SyntacticEq for Offset {
-    fn syntactic_eq(&self, other: &Self) -> bool {
-        self.value.syntactic_eq(&other.value) && self.rows == other.rows
+impl<'ast> SemanticEq<'ast> for Offset {
+    fn semantic_eq(&self, other: &Self, scope: &ScopeTracker<'ast>) -> bool {
+        self.value.semantic_eq(&other.value, scope) && self.rows == other.rows
     }
 }
 
-impl SyntacticEq for SetExpr {
-    fn syntactic_eq(&self, other: &Self) -> bool {
+impl<'ast> SemanticEq<'ast> for SetExpr {
+    fn semantic_eq(&self, other: &Self, scope: &ScopeTracker<'ast>) -> bool {
         match (self, other) {
             (SetExpr::Select(select_lhs), SetExpr::Select(select_rhs)) => {
-                select_lhs.syntactic_eq(select_rhs)
+                select_lhs.semantic_eq(select_rhs, scope)
             }
             (SetExpr::Query(query_lhs), SetExpr::Query(query_rhs)) => {
-                query_lhs.syntactic_eq(query_rhs)
+                query_lhs.semantic_eq(query_rhs, scope)
             }
             (
                 SetExpr::SetOperation {
@@ -423,20 +459,20 @@ impl SyntacticEq for SetExpr {
             ) => {
                 op_lhs == op_rhs
                     && op_lhs == op_rhs
-                    && left_lhs.syntactic_eq(left_rhs)
-                    && right_lhs.syntactic_eq(right_rhs)
+                    && left_lhs.semantic_eq(left_rhs, scope)
+                    && right_lhs.semantic_eq(right_rhs, scope)
                     && set_quantifier_lhs == set_quantifier_rhs
             }
             (SetExpr::Values(values_lhs), SetExpr::Values(values_rhs)) => {
-                values_lhs.syntactic_eq(values_rhs)
+                values_lhs.semantic_eq(values_rhs, scope)
             }
             _ => false,
         }
     }
 }
 
-impl SyntacticEq for Values {
-    fn syntactic_eq(&self, other: &Self) -> bool {
+impl<'ast> SemanticEq<'ast> for Values {
+    fn semantic_eq(&self, other: &Self, scope: &ScopeTracker<'ast>) -> bool {
         let Self {
             explicit_row: explicit_row_lhs,
             rows: rows_lhs,
@@ -446,12 +482,12 @@ impl SyntacticEq for Values {
             rows: rows_rhs,
         } = other;
 
-        *explicit_row_lhs == *explicit_row_rhs && rows_lhs.syntactic_eq(rows_rhs)
+        *explicit_row_lhs == *explicit_row_rhs && rows_lhs.semantic_eq(rows_rhs, scope)
     }
 }
 
-impl SyntacticEq for Select {
-    fn syntactic_eq(&self, other: &Self) -> bool {
+impl<'ast> SemanticEq<'ast> for Select {
+    fn semantic_eq(&self, other: &Self, scope: &ScopeTracker<'ast>) -> bool {
         let Select {
             distinct: distinct_lhs,
             top: top_lhs,
@@ -496,30 +532,30 @@ impl SyntacticEq for Select {
             connect_by: connect_by_rhs,
         } = other;
 
-        distinct_lhs.syntactic_eq(distinct_rhs)
-            && top_lhs.syntactic_eq(top_rhs)
-            && projection_lhs.syntactic_eq(projection_rhs)
-            && from_lhs.syntactic_eq(from_rhs)
-            && selection_lhs.syntactic_eq(selection_rhs)
-            && group_by_lhs.syntactic_eq(group_by_rhs)
-            && having_lhs.syntactic_eq(having_rhs)
-            && lateral_views_lhs.syntactic_eq(lateral_views_rhs)
+        distinct_lhs.semantic_eq(distinct_rhs, scope)
+            && top_lhs.semantic_eq(top_rhs, scope)
+            && projection_lhs.semantic_eq(projection_rhs, scope)
+            && from_lhs.semantic_eq(from_rhs, scope)
+            && selection_lhs.semantic_eq(selection_rhs, scope)
+            && group_by_lhs.semantic_eq(group_by_rhs, scope)
+            && having_lhs.semantic_eq(having_rhs, scope)
+            && lateral_views_lhs.semantic_eq(lateral_views_rhs, scope)
             && top_before_distinct_lhs == top_before_distinct_rhs
-            && into_lhs.syntactic_eq(into_rhs)
-            && prewhere_lhs.syntactic_eq(prewhere_rhs)
-            && cluster_by_lhs.syntactic_eq(cluster_by_rhs)
-            && distribute_by_lhs.syntactic_eq(distribute_by_rhs)
-            && sort_by_lhs.syntactic_eq(sort_by_rhs)
-            && named_window_lhs.syntactic_eq(named_window_rhs)
-            && qualify_lhs.syntactic_eq(qualify_rhs)
+            && into_lhs.semantic_eq(into_rhs, scope)
+            && prewhere_lhs.semantic_eq(prewhere_rhs, scope)
+            && cluster_by_lhs.semantic_eq(cluster_by_rhs, scope)
+            && distribute_by_lhs.semantic_eq(distribute_by_rhs, scope)
+            && sort_by_lhs.semantic_eq(sort_by_rhs, scope)
+            && named_window_lhs.semantic_eq(named_window_rhs, scope)
+            && qualify_lhs.semantic_eq(qualify_rhs, scope)
             && window_before_qualify_lhs == window_before_qualify_rhs
             && value_table_mode_lhs == value_table_mode_rhs
-            && connect_by_lhs.syntactic_eq(connect_by_rhs)
+            && connect_by_lhs.semantic_eq(connect_by_rhs, scope)
     }
 }
 
-impl SyntacticEq for ConnectBy {
-    fn syntactic_eq(&self, other: &Self) -> bool {
+impl<'ast> SemanticEq<'ast> for ConnectBy {
+    fn semantic_eq(&self, other: &Self, scope: &ScopeTracker<'ast>) -> bool {
         let Self {
             condition: condition_lhs,
             relationships: relationships_lhs,
@@ -529,38 +565,38 @@ impl SyntacticEq for ConnectBy {
             relationships: relationships_rhs,
         } = other;
 
-        condition_lhs.syntactic_eq(condition_rhs)
-            && relationships_lhs.syntactic_eq(relationships_rhs)
+        condition_lhs.semantic_eq(condition_rhs, scope)
+            && relationships_lhs.semantic_eq(relationships_rhs, scope)
     }
 }
 
-impl SyntacticEq for NamedWindowDefinition {
-    fn syntactic_eq(&self, other: &Self) -> bool {
+impl<'ast> SemanticEq<'ast> for NamedWindowDefinition {
+    fn semantic_eq(&self, other: &Self, scope: &ScopeTracker<'ast>) -> bool {
         let Self(ident_lhs, named_window_expr_lhs) = self;
         let Self(ident_rhs, named_window_expr_rhs) = other;
 
-        ident_lhs.syntactic_eq(ident_rhs)
-            && named_window_expr_lhs.syntactic_eq(named_window_expr_rhs)
+        ident_lhs.semantic_eq(ident_rhs, scope)
+            && named_window_expr_lhs.semantic_eq(named_window_expr_rhs, scope)
     }
 }
 
-impl SyntacticEq for NamedWindowExpr {
-    fn syntactic_eq(&self, other: &Self) -> bool {
+impl<'ast> SemanticEq<'ast> for NamedWindowExpr {
+    fn semantic_eq(&self, other: &Self, scope: &ScopeTracker<'ast>) -> bool {
         match (self, other) {
             (NamedWindowExpr::NamedWindow(ident_lhs), NamedWindowExpr::NamedWindow(ident_rhs)) => {
-                ident_lhs.syntactic_eq(ident_rhs)
+                ident_lhs.semantic_eq(ident_rhs, scope)
             }
             (
                 NamedWindowExpr::WindowSpec(window_spec_lhs),
                 NamedWindowExpr::WindowSpec(window_spec_rhs),
-            ) => window_spec_lhs.syntactic_eq(window_spec_rhs),
+            ) => window_spec_lhs.semantic_eq(window_spec_rhs, scope),
             _ => false,
         }
     }
 }
 
-impl SyntacticEq for WindowSpec {
-    fn syntactic_eq(&self, other: &Self) -> bool {
+impl<'ast> SemanticEq<'ast> for WindowSpec {
+    fn semantic_eq(&self, other: &Self, scope: &ScopeTracker<'ast>) -> bool {
         let Self {
             window_name: window_name_lhs,
             partition_by: partition_by_lhs,
@@ -574,15 +610,15 @@ impl SyntacticEq for WindowSpec {
             window_frame: window_frame_rhs,
         } = other;
 
-        window_name_lhs.syntactic_eq(window_name_rhs)
-            && partition_by_lhs.syntactic_eq(partition_by_rhs)
-            && order_by_lhs.syntactic_eq(order_by_rhs)
-            && window_frame_lhs.syntactic_eq(window_frame_rhs)
+        window_name_lhs.semantic_eq(window_name_rhs, scope)
+            && partition_by_lhs.semantic_eq(partition_by_rhs, scope)
+            && order_by_lhs.semantic_eq(order_by_rhs, scope)
+            && window_frame_lhs.semantic_eq(window_frame_rhs, scope)
     }
 }
 
-impl SyntacticEq for WindowFrame {
-    fn syntactic_eq(&self, other: &Self) -> bool {
+impl<'ast> SemanticEq<'ast> for WindowFrame {
+    fn semantic_eq(&self, other: &Self, scope: &ScopeTracker<'ast>) -> bool {
         let Self {
             units: units_lhs,
             start_bound: start_bound_lhs,
@@ -595,28 +631,28 @@ impl SyntacticEq for WindowFrame {
         } = other;
 
         units_lhs == units_rhs
-            && start_bound_lhs.syntactic_eq(start_bound_rhs)
-            && end_bound_lhs.syntactic_eq(end_bound_rhs)
+            && start_bound_lhs.semantic_eq(start_bound_rhs, scope)
+            && end_bound_lhs.semantic_eq(end_bound_rhs, scope)
     }
 }
 
-impl SyntacticEq for WindowFrameBound {
-    fn syntactic_eq(&self, other: &Self) -> bool {
+impl<'ast> SemanticEq<'ast> for WindowFrameBound {
+    fn semantic_eq(&self, other: &Self, scope: &ScopeTracker<'ast>) -> bool {
         match (self, other) {
             (WindowFrameBound::CurrentRow, WindowFrameBound::CurrentRow) => true,
             (WindowFrameBound::Preceding(expr_lhs), WindowFrameBound::Preceding(expr_rhs)) => {
-                expr_lhs.syntactic_eq(expr_rhs)
+                expr_lhs.semantic_eq(expr_rhs, scope)
             }
             (WindowFrameBound::Following(expr_lhs), WindowFrameBound::Following(expr_rhs)) => {
-                expr_lhs.syntactic_eq(expr_rhs)
+                expr_lhs.semantic_eq(expr_rhs, scope)
             }
             _ => false,
         }
     }
 }
 
-impl SyntacticEq for SelectInto {
-    fn syntactic_eq(&self, other: &Self) -> bool {
+impl<'ast> SemanticEq<'ast> for SelectInto {
+    fn semantic_eq(&self, other: &Self, scope: &ScopeTracker<'ast>) -> bool {
         let Self {
             temporary: temporary_lhs,
             unlogged: unlogged_lhs,
@@ -630,15 +666,15 @@ impl SyntacticEq for SelectInto {
             name: name_rhs,
         } = other;
 
-        name_lhs.syntactic_eq(name_rhs)
+        name_lhs.semantic_eq(name_rhs, scope)
             && *temporary_lhs == *temporary_rhs
             && *unlogged_lhs == *unlogged_rhs
             && *table_lhs == *table_rhs
     }
 }
 
-impl SyntacticEq for LateralView {
-    fn syntactic_eq(&self, other: &Self) -> bool {
+impl<'ast> SemanticEq<'ast> for LateralView {
+    fn semantic_eq(&self, other: &Self, scope: &ScopeTracker<'ast>) -> bool {
         let Self {
             lateral_view: lateral_view_lhs,
             lateral_view_name: lateral_view_name_lhs,
@@ -652,15 +688,15 @@ impl SyntacticEq for LateralView {
             outer: outer_rhs,
         } = other;
 
-        lateral_view_lhs.syntactic_eq(lateral_view_rhs)
-            && lateral_view_name_lhs.syntactic_eq(lateral_view_name_rhs)
-            && lateral_col_alias_lhs.syntactic_eq(lateral_col_alias_rhs)
+        lateral_view_lhs.semantic_eq(lateral_view_rhs, scope)
+            && lateral_view_name_lhs.semantic_eq(lateral_view_name_rhs, scope)
+            && lateral_col_alias_lhs.semantic_eq(lateral_col_alias_rhs, scope)
             && *outer_lhs == *outer_rhs
     }
 }
 
-impl SyntacticEq for GroupByExpr {
-    fn syntactic_eq(&self, other: &Self) -> bool {
+impl<'ast> SemanticEq<'ast> for GroupByExpr {
+    fn semantic_eq(&self, other: &Self, scope: &ScopeTracker<'ast>) -> bool {
         match (self, other) {
             (
                 GroupByExpr::All(group_by_with_modifiers_lhs),
@@ -670,7 +706,7 @@ impl SyntacticEq for GroupByExpr {
                 GroupByExpr::Expressions(exprs_lhs, group_by_with_modifiers_lhs),
                 GroupByExpr::Expressions(exprs_rhs, group_by_with_modifiers_rhs),
             ) => {
-                exprs_lhs.syntactic_eq(exprs_rhs)
+                exprs_lhs.semantic_eq(exprs_rhs, scope)
                     && group_by_with_modifiers_lhs == group_by_with_modifiers_rhs
             }
             _ => false,
@@ -678,8 +714,8 @@ impl SyntacticEq for GroupByExpr {
     }
 }
 
-impl SyntacticEq for TableWithJoins {
-    fn syntactic_eq(&self, other: &Self) -> bool {
+impl<'ast> SemanticEq<'ast> for TableWithJoins {
+    fn semantic_eq(&self, other: &Self, scope: &ScopeTracker<'ast>) -> bool {
         let Self {
             relation: relation_lhs,
             joins: joins_lhs,
@@ -689,12 +725,12 @@ impl SyntacticEq for TableWithJoins {
             joins: joins_rhs,
         } = other;
 
-        relation_lhs.syntactic_eq(relation_rhs) && joins_lhs.syntactic_eq(joins_rhs)
+        relation_lhs.semantic_eq(relation_rhs, scope) && joins_lhs.semantic_eq(joins_rhs, scope)
     }
 }
 
-impl SyntacticEq for Join {
-    fn syntactic_eq(&self, other: &Self) -> bool {
+impl<'ast> SemanticEq<'ast> for Join {
+    fn semantic_eq(&self, other: &Self, scope: &ScopeTracker<'ast>) -> bool {
         let Self {
             relation: relation_lhs,
             global: global_lhs,
@@ -706,14 +742,14 @@ impl SyntacticEq for Join {
             join_operator: join_operator_rhs,
         } = other;
 
-        relation_lhs.syntactic_eq(relation_rhs)
+        relation_lhs.semantic_eq(relation_rhs, scope)
             && *global_lhs == *global_rhs
-            && join_operator_lhs.syntactic_eq(join_operator_rhs)
+            && join_operator_lhs.semantic_eq(join_operator_rhs, scope)
     }
 }
 
-impl SyntacticEq for JoinOperator {
-    fn syntactic_eq(&self, other: &Self) -> bool {
+impl<'ast> SemanticEq<'ast> for JoinOperator {
+    fn semantic_eq(&self, other: &Self, scope: &ScopeTracker<'ast>) -> bool {
         match (self, other) {
             (
                 JoinOperator::Inner(join_constraint_lhs),
@@ -746,7 +782,7 @@ impl SyntacticEq for JoinOperator {
             | (
                 JoinOperator::RightAnti(join_constraint_lhs),
                 JoinOperator::RightAnti(join_constraint_rhs),
-            ) => join_constraint_lhs.syntactic_eq(join_constraint_rhs),
+            ) => join_constraint_lhs.semantic_eq(join_constraint_rhs, scope),
             (JoinOperator::CrossJoin, JoinOperator::CrossJoin)
             | (JoinOperator::CrossApply, JoinOperator::CrossApply)
             | (JoinOperator::OuterApply, JoinOperator::OuterApply) => true,
@@ -760,22 +796,22 @@ impl SyntacticEq for JoinOperator {
                     constraint: constraint_rhs,
                 },
             ) => {
-                match_condition_lhs.syntactic_eq(match_condition_rhs)
-                    && constraint_lhs.syntactic_eq(constraint_rhs)
+                match_condition_lhs.semantic_eq(match_condition_rhs, scope)
+                    && constraint_lhs.semantic_eq(constraint_rhs, scope)
             }
             _ => false,
         }
     }
 }
 
-impl SyntacticEq for JoinConstraint {
-    fn syntactic_eq(&self, other: &Self) -> bool {
+impl<'ast> SemanticEq<'ast> for JoinConstraint {
+    fn semantic_eq(&self, other: &Self, scope: &ScopeTracker<'ast>) -> bool {
         match (self, other) {
             (JoinConstraint::On(expr_lhs), JoinConstraint::On(expr_rhs)) => {
-                expr_lhs.syntactic_eq(expr_rhs)
+                expr_lhs.semantic_eq(expr_rhs, scope)
             }
             (JoinConstraint::Using(idents_lhs), JoinConstraint::Using(idents_rhs)) => {
-                idents_lhs.syntactic_eq(idents_rhs)
+                idents_lhs.semantic_eq(idents_rhs, scope)
             }
             (JoinConstraint::Natural, JoinConstraint::Natural) => todo!(),
             (JoinConstraint::None, JoinConstraint::None) => todo!(),
@@ -784,8 +820,8 @@ impl SyntacticEq for JoinConstraint {
     }
 }
 
-impl SyntacticEq for TableFunctionArgs {
-    fn syntactic_eq(&self, other: &Self) -> bool {
+impl<'ast> SemanticEq<'ast> for TableFunctionArgs {
+    fn semantic_eq(&self, other: &Self, scope: &ScopeTracker<'ast>) -> bool {
         let Self {
             args: args_lhs,
             settings: settings_lhs,
@@ -795,12 +831,12 @@ impl SyntacticEq for TableFunctionArgs {
             settings: settings_rhs,
         } = other;
 
-        args_lhs.syntactic_eq(args_rhs) && settings_lhs.syntactic_eq(settings_rhs)
+        args_lhs.semantic_eq(args_rhs, scope) && settings_lhs.semantic_eq(settings_rhs, scope)
     }
 }
 
-impl SyntacticEq for FunctionArg {
-    fn syntactic_eq(&self, other: &Self) -> bool {
+impl<'ast> SemanticEq<'ast> for FunctionArg {
+    fn semantic_eq(&self, other: &Self, scope: &ScopeTracker<'ast>) -> bool {
         match (self, other) {
             (
                 FunctionArg::Named {
@@ -814,37 +850,37 @@ impl SyntacticEq for FunctionArg {
                     operator: operator_rhs,
                 },
             ) => {
-                name_lhs.syntactic_eq(name_rhs)
-                    && arg_lhs.syntactic_eq(arg_rhs)
+                name_lhs.semantic_eq(name_rhs, scope)
+                    && arg_lhs.semantic_eq(arg_rhs, scope)
                     && operator_lhs == operator_rhs
             }
             (
                 FunctionArg::Unnamed(function_arg_expr_lhs),
                 FunctionArg::Unnamed(function_arg_expr_rhs),
-            ) => function_arg_expr_lhs.syntactic_eq(function_arg_expr_rhs),
+            ) => function_arg_expr_lhs.semantic_eq(function_arg_expr_rhs, scope),
             _ => false,
         }
     }
 }
 
-impl SyntacticEq for FunctionArgExpr {
-    fn syntactic_eq(&self, other: &Self) -> bool {
+impl<'ast> SemanticEq<'ast> for FunctionArgExpr {
+    fn semantic_eq(&self, other: &Self, scope: &ScopeTracker<'ast>) -> bool {
         match (self, other) {
             (FunctionArgExpr::Expr(expr_lhs), FunctionArgExpr::Expr(expr_rhs)) => {
-                expr_lhs.syntactic_eq(expr_rhs)
+                expr_lhs.semantic_eq(expr_rhs, scope)
             }
             (
                 FunctionArgExpr::QualifiedWildcard(object_name_lhs),
                 FunctionArgExpr::QualifiedWildcard(object_name_rhs),
-            ) => object_name_lhs.syntactic_eq(object_name_rhs),
+            ) => object_name_lhs.semantic_eq(object_name_rhs, scope),
             (FunctionArgExpr::Wildcard, FunctionArgExpr::Wildcard) => true,
             _ => false,
         }
     }
 }
 
-impl SyntacticEq for TableFactor {
-    fn syntactic_eq(&self, other: &Self) -> bool {
+impl<'ast> SemanticEq<'ast> for TableFactor {
+    fn semantic_eq(&self, other: &Self, scope: &ScopeTracker<'ast>) -> bool {
         match (self, other) {
             (
                 TableFactor::Table {
@@ -866,13 +902,13 @@ impl SyntacticEq for TableFactor {
                     partitions: partitions_rhs,
                 },
             ) => {
-                name_lhs.syntactic_eq(name_rhs)
-                    && alias_lhs.syntactic_eq(alias_rhs)
-                    && args_lhs.syntactic_eq(args_rhs)
-                    && with_hints_lhs.syntactic_eq(with_hints_rhs)
+                name_lhs.semantic_eq(name_rhs, scope)
+                    && alias_lhs.semantic_eq(alias_rhs, scope)
+                    && args_lhs.semantic_eq(args_rhs, scope)
+                    && with_hints_lhs.semantic_eq(with_hints_rhs, scope)
                     && version_lhs == version_rhs
                     && with_ordinality_lhs == with_ordinality_rhs
-                    && partitions_lhs.syntactic_eq(partitions_rhs)
+                    && partitions_lhs.semantic_eq(partitions_rhs, scope)
             }
             (
                 TableFactor::Derived {
@@ -887,8 +923,8 @@ impl SyntacticEq for TableFactor {
                 },
             ) => {
                 lateral_lhs == lateral_rhs
-                    && subquery_lhs.syntactic_eq(subquery_rhs)
-                    && alias_lhs.syntactic_eq(alias_rhs)
+                    && subquery_lhs.semantic_eq(subquery_rhs, scope)
+                    && alias_lhs.semantic_eq(alias_rhs, scope)
             }
             (
                 TableFactor::TableFunction {
@@ -899,7 +935,7 @@ impl SyntacticEq for TableFactor {
                     expr: expr_rhs,
                     alias: alias_rhs,
                 },
-            ) => expr_lhs.syntactic_eq(expr_rhs) && alias_lhs.syntactic_eq(alias_rhs),
+            ) => expr_lhs.semantic_eq(expr_rhs, scope) && alias_lhs.semantic_eq(alias_rhs, scope),
             (
                 TableFactor::Function {
                     lateral: lateral_lhs,
@@ -915,9 +951,9 @@ impl SyntacticEq for TableFactor {
                 },
             ) => {
                 *lateral_lhs == *lateral_rhs
-                    && name_rhs.syntactic_eq(name_lhs)
-                    && args_rhs.syntactic_eq(args_lhs)
-                    && alias_lhs.syntactic_eq(alias_rhs)
+                    && name_rhs.semantic_eq(name_lhs, scope)
+                    && args_rhs.semantic_eq(args_lhs, scope)
+                    && alias_lhs.semantic_eq(alias_rhs, scope)
             }
             (
                 TableFactor::UNNEST {
@@ -935,10 +971,10 @@ impl SyntacticEq for TableFactor {
                     with_ordinality: with_ordinality_rhs,
                 },
             ) => {
-                alias_lhs.syntactic_eq(alias_rhs)
-                    && array_exprs_lhs.syntactic_eq(array_exprs_rhs)
+                alias_lhs.semantic_eq(alias_rhs, scope)
+                    && array_exprs_lhs.semantic_eq(array_exprs_rhs, scope)
                     && with_offset_lhs == with_offset_rhs
-                    && with_offset_alias_lhs.syntactic_eq(with_offset_alias_rhs)
+                    && with_offset_alias_lhs.semantic_eq(with_offset_alias_rhs, scope)
                     && with_ordinality_lhs == with_ordinality_rhs
             }
             (
@@ -955,10 +991,10 @@ impl SyntacticEq for TableFactor {
                     alias: alias_rhs,
                 },
             ) => {
-                json_expr_lhs.syntactic_eq(json_expr_rhs)
+                json_expr_lhs.semantic_eq(json_expr_rhs, scope)
                     && json_path_lhs == json_path_rhs
-                    && columns_lhs.syntactic_eq(columns_rhs)
-                    && alias_lhs.syntactic_eq(alias_rhs)
+                    && columns_lhs.semantic_eq(columns_rhs, scope)
+                    && alias_lhs.semantic_eq(alias_rhs, scope)
             }
             (
                 TableFactor::NestedJoin {
@@ -970,8 +1006,8 @@ impl SyntacticEq for TableFactor {
                     alias: alias_rhs,
                 },
             ) => {
-                table_with_joins_lhs.syntactic_eq(table_with_joins_rhs)
-                    && alias_lhs.syntactic_eq(alias_rhs)
+                table_with_joins_lhs.semantic_eq(table_with_joins_rhs, scope)
+                    && alias_lhs.semantic_eq(alias_rhs, scope)
             }
             (
                 TableFactor::Pivot {
@@ -991,12 +1027,12 @@ impl SyntacticEq for TableFactor {
                     alias: alias_rhs,
                 },
             ) => {
-                table_lhs.syntactic_eq(table_rhs)
-                    && aggregate_functions_lhs.syntactic_eq(aggregate_functions_rhs)
-                    && value_column_lhs.syntactic_eq(value_column_rhs)
-                    && value_source_lhs.syntactic_eq(value_source_rhs)
-                    && default_on_null_lhs.syntactic_eq(default_on_null_rhs)
-                    && alias_lhs.syntactic_eq(alias_rhs)
+                table_lhs.semantic_eq(table_rhs, scope)
+                    && aggregate_functions_lhs.semantic_eq(aggregate_functions_rhs, scope)
+                    && value_column_lhs.semantic_eq(value_column_rhs, scope)
+                    && value_source_lhs.semantic_eq(value_source_rhs, scope)
+                    && default_on_null_lhs.semantic_eq(default_on_null_rhs, scope)
+                    && alias_lhs.semantic_eq(alias_rhs, scope)
             }
             (
                 TableFactor::Unpivot {
@@ -1014,11 +1050,11 @@ impl SyntacticEq for TableFactor {
                     alias: alias_rhs,
                 },
             ) => {
-                table_lhs.syntactic_eq(table_rhs)
-                    && value_lhs.syntactic_eq(value_rhs)
-                    && name_lhs.syntactic_eq(name_rhs)
-                    && columns_lhs.syntactic_eq(columns_rhs)
-                    && alias_lhs.syntactic_eq(alias_rhs)
+                table_lhs.semantic_eq(table_rhs, scope)
+                    && value_lhs.semantic_eq(value_rhs, scope)
+                    && name_lhs.semantic_eq(name_rhs, scope)
+                    && columns_lhs.semantic_eq(columns_rhs, scope)
+                    && alias_lhs.semantic_eq(alias_rhs, scope)
             }
             (
                 TableFactor::MatchRecognize {
@@ -1044,23 +1080,23 @@ impl SyntacticEq for TableFactor {
                     alias: alias_rhs,
                 },
             ) => {
-                table_lhs.syntactic_eq(table_rhs)
-                    && partition_by_lhs.syntactic_eq(partition_by_rhs)
-                    && order_by_lhs.syntactic_eq(order_by_rhs)
-                    && measures_lhs.syntactic_eq(measures_rhs)
+                table_lhs.semantic_eq(table_rhs, scope)
+                    && partition_by_lhs.semantic_eq(partition_by_rhs, scope)
+                    && order_by_lhs.semantic_eq(order_by_rhs, scope)
+                    && measures_lhs.semantic_eq(measures_rhs, scope)
                     && rows_per_match_lhs == rows_per_match_rhs
-                    && after_match_skip_lhs.syntactic_eq(after_match_skip_rhs)
-                    && pattern_lhs.syntactic_eq(pattern_rhs)
-                    && symbols_lhs.syntactic_eq(symbols_rhs)
-                    && alias_lhs.syntactic_eq(alias_rhs)
+                    && after_match_skip_lhs.semantic_eq(after_match_skip_rhs, scope)
+                    && pattern_lhs.semantic_eq(pattern_rhs, scope)
+                    && symbols_lhs.semantic_eq(symbols_rhs, scope)
+                    && alias_lhs.semantic_eq(alias_rhs, scope)
             }
             _ => false,
         }
     }
 }
 
-impl SyntacticEq for SymbolDefinition {
-    fn syntactic_eq(&self, other: &Self) -> bool {
+impl<'ast> SemanticEq<'ast> for SymbolDefinition {
+    fn semantic_eq(&self, other: &Self, scope: &ScopeTracker<'ast>) -> bool {
         let Self {
             symbol: symbol_lhs,
             definition: defininition_lhs,
@@ -1070,12 +1106,13 @@ impl SyntacticEq for SymbolDefinition {
             definition: defininition_rhs,
         } = other;
 
-        symbol_lhs.syntactic_eq(symbol_rhs) && defininition_lhs.syntactic_eq(defininition_rhs)
+        symbol_lhs.semantic_eq(symbol_rhs, scope)
+            && defininition_lhs.semantic_eq(defininition_rhs, scope)
     }
 }
 
-impl SyntacticEq for JsonTableNamedColumn {
-    fn syntactic_eq(&self, other: &Self) -> bool {
+impl<'ast> SemanticEq<'ast> for JsonTableNamedColumn {
+    fn semantic_eq(&self, other: &Self, scope: &ScopeTracker<'ast>) -> bool {
         let Self {
             name: name_lhs,
             r#type: r#type_lhs,
@@ -1093,7 +1130,7 @@ impl SyntacticEq for JsonTableNamedColumn {
             on_error: on_error_rhs,
         } = other;
 
-        name_lhs.syntactic_eq(name_rhs)
+        name_lhs.semantic_eq(name_rhs, scope)
             && r#type_lhs == r#type_rhs
             && path_lhs == path_rhs
             && *exists_lhs == *exists_rhs
@@ -1102,8 +1139,8 @@ impl SyntacticEq for JsonTableNamedColumn {
     }
 }
 
-impl SyntacticEq for MatchRecognizePattern {
-    fn syntactic_eq(&self, other: &Self) -> bool {
+impl<'ast> SemanticEq<'ast> for MatchRecognizePattern {
+    fn semantic_eq(&self, other: &Self, scope: &ScopeTracker<'ast>) -> bool {
         match (self, other) {
             (
                 MatchRecognizePattern::Symbol(match_recognize_symbol_lhs),
@@ -1112,23 +1149,23 @@ impl SyntacticEq for MatchRecognizePattern {
             | (
                 MatchRecognizePattern::Exclude(match_recognize_symbol_lhs),
                 MatchRecognizePattern::Exclude(match_recognize_symbol_rhs),
-            ) => match_recognize_symbol_lhs.syntactic_eq(match_recognize_symbol_rhs),
+            ) => match_recognize_symbol_lhs.semantic_eq(match_recognize_symbol_rhs, scope),
             (
                 MatchRecognizePattern::Permute(match_recognize_symbols_lhs),
                 MatchRecognizePattern::Permute(match_recognize_symbols_rhs),
-            ) => match_recognize_symbols_lhs.syntactic_eq(match_recognize_symbols_rhs),
+            ) => match_recognize_symbols_lhs.semantic_eq(match_recognize_symbols_rhs, scope),
             (
                 MatchRecognizePattern::Concat(match_recognize_patterns_lhs),
                 MatchRecognizePattern::Concat(match_recognize_patterns_rhs),
-            ) => match_recognize_patterns_lhs.syntactic_eq(match_recognize_patterns_rhs),
+            ) => match_recognize_patterns_lhs.semantic_eq(match_recognize_patterns_rhs, scope),
             (
                 MatchRecognizePattern::Group(match_recognize_pattern_lhs),
                 MatchRecognizePattern::Group(match_recognize_pattern_rhs),
-            ) => match_recognize_pattern_lhs.syntactic_eq(match_recognize_pattern_rhs),
+            ) => match_recognize_pattern_lhs.semantic_eq(match_recognize_pattern_rhs, scope),
             (
                 MatchRecognizePattern::Alternation(match_recognize_patterns_lhs),
                 MatchRecognizePattern::Alternation(match_recognize_patterns_rhs),
-            ) => match_recognize_patterns_lhs.syntactic_eq(match_recognize_patterns_rhs),
+            ) => match_recognize_patterns_lhs.semantic_eq(match_recognize_patterns_rhs, scope),
             (
                 MatchRecognizePattern::Repetition(
                     match_recognize_pattern_lhs,
@@ -1139,7 +1176,7 @@ impl SyntacticEq for MatchRecognizePattern {
                     repetition_quantifier_rhs,
                 ),
             ) => {
-                match_recognize_pattern_lhs.syntactic_eq(match_recognize_pattern_rhs)
+                match_recognize_pattern_lhs.semantic_eq(match_recognize_pattern_rhs, scope)
                     && repetition_quantifier_lhs == repetition_quantifier_rhs
             }
             _ => false,
@@ -1147,11 +1184,11 @@ impl SyntacticEq for MatchRecognizePattern {
     }
 }
 
-impl SyntacticEq for MatchRecognizeSymbol {
-    fn syntactic_eq(&self, other: &Self) -> bool {
+impl<'ast> SemanticEq<'ast> for MatchRecognizeSymbol {
+    fn semantic_eq(&self, other: &Self, scope: &ScopeTracker<'ast>) -> bool {
         match (self, other) {
             (MatchRecognizeSymbol::Named(ident_lhs), MatchRecognizeSymbol::Named(ident_rhs)) => {
-                ident_lhs.syntactic_eq(ident_rhs)
+                ident_lhs.semantic_eq(ident_rhs, scope)
             }
             (MatchRecognizeSymbol::Start, MatchRecognizeSymbol::Start)
             | (MatchRecognizeSymbol::End, MatchRecognizeSymbol::End) => true,
@@ -1160,22 +1197,22 @@ impl SyntacticEq for MatchRecognizeSymbol {
     }
 }
 
-impl SyntacticEq for AfterMatchSkip {
-    fn syntactic_eq(&self, other: &Self) -> bool {
+impl<'ast> SemanticEq<'ast> for AfterMatchSkip {
+    fn semantic_eq(&self, other: &Self, scope: &ScopeTracker<'ast>) -> bool {
         match (self, other) {
             (AfterMatchSkip::PastLastRow, AfterMatchSkip::PastLastRow)
             | (AfterMatchSkip::ToNextRow, AfterMatchSkip::ToNextRow) => true,
             (AfterMatchSkip::ToFirst(ident_lhs), AfterMatchSkip::ToFirst(ident_rhs))
             | (AfterMatchSkip::ToLast(ident_lhs), AfterMatchSkip::ToLast(ident_rhs)) => {
-                ident_lhs.syntactic_eq(ident_rhs)
+                ident_lhs.semantic_eq(ident_rhs, scope)
             }
             _ => false,
         }
     }
 }
 
-impl SyntacticEq for Measure {
-    fn syntactic_eq(&self, other: &Self) -> bool {
+impl<'ast> SemanticEq<'ast> for Measure {
+    fn semantic_eq(&self, other: &Self, scope: &ScopeTracker<'ast>) -> bool {
         let Self {
             expr: expr_lhs,
             alias: alias_lhs,
@@ -1185,30 +1222,30 @@ impl SyntacticEq for Measure {
             alias: alias_rhs,
         } = other;
 
-        expr_lhs.syntactic_eq(expr_rhs) && alias_lhs.syntactic_eq(alias_rhs)
+        expr_lhs.semantic_eq(expr_rhs, scope) && alias_lhs.semantic_eq(alias_rhs, scope)
     }
 }
 
-impl SyntacticEq for PivotValueSource {
-    fn syntactic_eq(&self, other: &Self) -> bool {
+impl<'ast> SemanticEq<'ast> for PivotValueSource {
+    fn semantic_eq(&self, other: &Self, scope: &ScopeTracker<'ast>) -> bool {
         match (self, other) {
             (PivotValueSource::List(items_lhs), PivotValueSource::List(items_rhs)) => {
-                items_lhs.syntactic_eq(items_rhs)
+                items_lhs.semantic_eq(items_rhs, scope)
             }
             (
                 PivotValueSource::Any(order_by_exprs_lhs),
                 PivotValueSource::Any(order_by_exprs_rhs),
-            ) => order_by_exprs_lhs.syntactic_eq(order_by_exprs_rhs),
+            ) => order_by_exprs_lhs.semantic_eq(order_by_exprs_rhs, scope),
             (PivotValueSource::Subquery(query_lhs), PivotValueSource::Subquery(query_rhs)) => {
-                query_lhs.syntactic_eq(query_rhs)
+                query_lhs.semantic_eq(query_rhs, scope)
             }
             _ => false,
         }
     }
 }
 
-impl SyntacticEq for ExprWithAlias {
-    fn syntactic_eq(&self, other: &Self) -> bool {
+impl<'ast> SemanticEq<'ast> for ExprWithAlias {
+    fn semantic_eq(&self, other: &Self, scope: &ScopeTracker<'ast>) -> bool {
         let Self {
             expr: expr_lhs,
             alias: alias_lhs,
@@ -1218,32 +1255,32 @@ impl SyntacticEq for ExprWithAlias {
             alias: alias_rhs,
         } = other;
 
-        expr_lhs.syntactic_eq(expr_rhs) && alias_lhs.syntactic_eq(alias_rhs)
+        expr_lhs.semantic_eq(expr_rhs, scope) && alias_lhs.semantic_eq(alias_rhs, scope)
     }
 }
 
-impl SyntacticEq for JsonTableColumn {
-    fn syntactic_eq(&self, other: &Self) -> bool {
+impl<'ast> SemanticEq<'ast> for JsonTableColumn {
+    fn semantic_eq(&self, other: &Self, scope: &ScopeTracker<'ast>) -> bool {
         match (self, other) {
             (
                 JsonTableColumn::Named(json_table_named_column_lhs),
                 JsonTableColumn::Named(json_table_named_column_rhs),
-            ) => json_table_named_column_lhs.syntactic_eq(json_table_named_column_rhs),
+            ) => json_table_named_column_lhs.semantic_eq(json_table_named_column_rhs, scope),
             (
                 JsonTableColumn::ForOrdinality(ident_lhs),
                 JsonTableColumn::ForOrdinality(ident_rhs),
-            ) => ident_lhs.syntactic_eq(ident_rhs),
+            ) => ident_lhs.semantic_eq(ident_rhs, scope),
             (
                 JsonTableColumn::Nested(json_table_nested_column_lhs),
                 JsonTableColumn::Nested(json_table_nested_column_rhs),
-            ) => json_table_nested_column_lhs.syntactic_eq(json_table_nested_column_rhs),
+            ) => json_table_nested_column_lhs.semantic_eq(json_table_nested_column_rhs, scope),
             _ => false,
         }
     }
 }
 
-impl SyntacticEq for JsonTableNestedColumn {
-    fn syntactic_eq(&self, other: &Self) -> bool {
+impl<'ast> SemanticEq<'ast> for JsonTableNestedColumn {
+    fn semantic_eq(&self, other: &Self, scope: &ScopeTracker<'ast>) -> bool {
         let Self {
             path: path_lhs,
             columns: columns_lhs,
@@ -1253,22 +1290,24 @@ impl SyntacticEq for JsonTableNestedColumn {
             columns: columns_rhs,
         } = other;
 
-        path_lhs == path_rhs && columns_lhs.syntactic_eq(columns_rhs)
+        path_lhs == path_rhs && columns_lhs.semantic_eq(columns_rhs, scope)
     }
 }
 
-impl SyntacticEq for Distinct {
-    fn syntactic_eq(&self, other: &Self) -> bool {
+impl<'ast> SemanticEq<'ast> for Distinct {
+    fn semantic_eq(&self, other: &Self, scope: &ScopeTracker<'ast>) -> bool {
         match (self, other) {
             (Distinct::Distinct, Distinct::Distinct) => true,
-            (Distinct::On(exprs_lhs), Distinct::On(exprs_rhs)) => exprs_lhs.syntactic_eq(exprs_rhs),
+            (Distinct::On(exprs_lhs), Distinct::On(exprs_rhs)) => {
+                exprs_lhs.semantic_eq(exprs_rhs, scope)
+            }
             _ => false,
         }
     }
 }
 
-impl SyntacticEq for Top {
-    fn syntactic_eq(&self, other: &Self) -> bool {
+impl<'ast> SemanticEq<'ast> for Top {
+    fn semantic_eq(&self, other: &Self, scope: &ScopeTracker<'ast>) -> bool {
         let Self {
             percent: percent_lhs,
             with_ties: with_ties_lhs,
@@ -1283,15 +1322,15 @@ impl SyntacticEq for Top {
 
         percent_lhs == percent_rhs
             && with_ties_lhs == with_ties_rhs
-            && quantity_lhs.syntactic_eq(quantity_rhs)
+            && quantity_lhs.semantic_eq(quantity_rhs, scope)
     }
 }
 
-impl SyntacticEq for SelectItem {
-    fn syntactic_eq(&self, other: &Self) -> bool {
+impl<'ast> SemanticEq<'ast> for SelectItem {
+    fn semantic_eq(&self, other: &Self, scope: &ScopeTracker<'ast>) -> bool {
         match (self, other) {
             (SelectItem::UnnamedExpr(expr_lhs), SelectItem::UnnamedExpr(expr_rhs)) => {
-                expr_lhs.syntactic_eq(expr_rhs)
+                expr_lhs.semantic_eq(expr_rhs, scope)
             }
             (
                 SelectItem::ExprWithAlias {
@@ -1302,25 +1341,28 @@ impl SyntacticEq for SelectItem {
                     expr: expr_rhs,
                     alias: alias_rhs,
                 },
-            ) => expr_lhs.syntactic_eq(expr_rhs) && alias_lhs.syntactic_eq(alias_rhs),
+            ) => expr_lhs.semantic_eq(expr_rhs, scope) && alias_lhs.semantic_eq(alias_rhs, scope),
             (
                 SelectItem::QualifiedWildcard(object_name_lhs, wildcard_additional_options_lhs),
                 SelectItem::QualifiedWildcard(object_name_rhs, wildcard_additional_options_rhs),
             ) => {
-                object_name_lhs.syntactic_eq(object_name_rhs)
-                    && wildcard_additional_options_lhs.syntactic_eq(wildcard_additional_options_rhs)
+                object_name_lhs.semantic_eq(object_name_rhs, scope)
+                    && wildcard_additional_options_lhs
+                        .semantic_eq(wildcard_additional_options_rhs, scope)
             }
             (
                 SelectItem::Wildcard(wildcard_additional_options_lhs),
                 SelectItem::Wildcard(wildcard_additional_options_rhs),
-            ) => wildcard_additional_options_lhs.syntactic_eq(wildcard_additional_options_rhs),
+            ) => {
+                wildcard_additional_options_lhs.semantic_eq(wildcard_additional_options_rhs, scope)
+            }
             _ => false,
         }
     }
 }
 
-impl SyntacticEq for WildcardAdditionalOptions {
-    fn syntactic_eq(&self, other: &Self) -> bool {
+impl<'ast> SemanticEq<'ast> for WildcardAdditionalOptions {
+    fn semantic_eq(&self, other: &Self, scope: &ScopeTracker<'ast>) -> bool {
         let Self {
             opt_ilike: opt_ilike_lhs,
             opt_exclude: opt_exclude_lhs,
@@ -1338,30 +1380,30 @@ impl SyntacticEq for WildcardAdditionalOptions {
         } = other;
 
         opt_ilike_lhs == opt_ilike_rhs
-            && opt_exclude_lhs.syntactic_eq(opt_exclude_rhs)
-            && opt_except_lhs.syntactic_eq(opt_except_rhs)
-            && opt_replace_lhs.syntactic_eq(opt_replace_rhs)
-            && opt_rename_lhs.syntactic_eq(opt_rename_rhs)
+            && opt_exclude_lhs.semantic_eq(opt_exclude_rhs, scope)
+            && opt_except_lhs.semantic_eq(opt_except_rhs, scope)
+            && opt_replace_lhs.semantic_eq(opt_replace_rhs, scope)
+            && opt_rename_lhs.semantic_eq(opt_rename_rhs, scope)
     }
 }
 
-impl SyntacticEq for RenameSelectItem {
-    fn syntactic_eq(&self, other: &Self) -> bool {
+impl<'ast> SemanticEq<'ast> for RenameSelectItem {
+    fn semantic_eq(&self, other: &Self, scope: &ScopeTracker<'ast>) -> bool {
         match (self, other) {
             (
                 RenameSelectItem::Single(ident_with_alias_lhs),
                 RenameSelectItem::Single(ident_with_alias_rhs),
-            ) => ident_with_alias_lhs.syntactic_eq(ident_with_alias_rhs),
+            ) => ident_with_alias_lhs.semantic_eq(ident_with_alias_rhs, scope),
             (RenameSelectItem::Multiple(items_lhs), RenameSelectItem::Multiple(items_rhs)) => {
-                items_lhs.syntactic_eq(items_rhs)
+                items_lhs.semantic_eq(items_rhs, scope)
             }
             _ => false,
         }
     }
 }
 
-impl SyntacticEq for IdentWithAlias {
-    fn syntactic_eq(&self, other: &Self) -> bool {
+impl<'ast> SemanticEq<'ast> for IdentWithAlias {
+    fn semantic_eq(&self, other: &Self, scope: &ScopeTracker<'ast>) -> bool {
         let Self {
             ident: ident_lhs,
             alias: alias_lhs,
@@ -1371,26 +1413,26 @@ impl SyntacticEq for IdentWithAlias {
             alias: alias_rhs,
         } = other;
 
-        ident_lhs.syntactic_eq(ident_rhs) && alias_lhs.syntactic_eq(alias_rhs)
+        ident_lhs.semantic_eq(ident_rhs, scope) && alias_lhs.semantic_eq(alias_rhs, scope)
     }
 }
 
-impl SyntacticEq for ExcludeSelectItem {
-    fn syntactic_eq(&self, other: &Self) -> bool {
+impl<'ast> SemanticEq<'ast> for ExcludeSelectItem {
+    fn semantic_eq(&self, other: &Self, scope: &ScopeTracker<'ast>) -> bool {
         match (self, other) {
             (ExcludeSelectItem::Single(ident_lhs), ExcludeSelectItem::Single(ident_rhs)) => {
-                ident_lhs.syntactic_eq(ident_rhs)
+                ident_lhs.semantic_eq(ident_rhs, scope)
             }
             (ExcludeSelectItem::Multiple(idents_lhs), ExcludeSelectItem::Multiple(idents_rhs)) => {
-                idents_lhs.syntactic_eq(idents_rhs)
+                idents_lhs.semantic_eq(idents_rhs, scope)
             }
             _ => false,
         }
     }
 }
 
-impl SyntacticEq for ExceptSelectItem {
-    fn syntactic_eq(&self, other: &Self) -> bool {
+impl<'ast> SemanticEq<'ast> for ExceptSelectItem {
+    fn semantic_eq(&self, other: &Self, scope: &ScopeTracker<'ast>) -> bool {
         let Self {
             first_element: first_element_lhs,
             additional_elements: additional_elements_lhs,
@@ -1400,16 +1442,16 @@ impl SyntacticEq for ExceptSelectItem {
             additional_elements: additional_elements_rhs,
         } = other;
 
-        first_element_lhs.syntactic_eq(first_element_rhs)
-            && additional_elements_lhs.syntactic_eq(additional_elements_rhs)
+        first_element_lhs.semantic_eq(first_element_rhs, scope)
+            && additional_elements_lhs.semantic_eq(additional_elements_rhs, scope)
     }
 }
 
-impl SyntacticEq for TopQuantity {
-    fn syntactic_eq(&self, other: &Self) -> bool {
+impl<'ast> SemanticEq<'ast> for TopQuantity {
+    fn semantic_eq(&self, other: &Self, scope: &ScopeTracker<'ast>) -> bool {
         match (self, other) {
             (TopQuantity::Expr(expr_lhs), TopQuantity::Expr(expr_rhs)) => {
-                expr_lhs.syntactic_eq(expr_rhs)
+                expr_lhs.semantic_eq(expr_rhs, scope)
             }
             (TopQuantity::Constant(c_lhs), TopQuantity::Constant(c_rhs)) => c_lhs == c_rhs,
             _ => false,
@@ -1417,17 +1459,17 @@ impl SyntacticEq for TopQuantity {
     }
 }
 
-impl SyntacticEq for ReplaceSelectItem {
-    fn syntactic_eq(&self, other: &Self) -> bool {
+impl<'ast> SemanticEq<'ast> for ReplaceSelectItem {
+    fn semantic_eq(&self, other: &Self, scope: &ScopeTracker<'ast>) -> bool {
         let Self { items: items_lhs } = self;
         let Self { items: items_rhs } = other;
 
-        items_lhs.syntactic_eq(items_rhs)
+        items_lhs.semantic_eq(items_rhs, scope)
     }
 }
 
-impl SyntacticEq for ReplaceSelectElement {
-    fn syntactic_eq(&self, other: &Self) -> bool {
+impl<'ast> SemanticEq<'ast> for ReplaceSelectElement {
+    fn semantic_eq(&self, other: &Self, scope: &ScopeTracker<'ast>) -> bool {
         let Self {
             expr: expr_lhs,
             column_name: column_name_lhs,
@@ -1439,29 +1481,33 @@ impl SyntacticEq for ReplaceSelectElement {
             as_keyword: as_keyword_rhs,
         } = other;
 
-        expr_lhs.syntactic_eq(expr_rhs)
-            && column_name_lhs.syntactic_eq(column_name_rhs)
+        expr_lhs.semantic_eq(expr_rhs, scope)
+            && column_name_lhs.semantic_eq(column_name_rhs, scope)
             && as_keyword_lhs == as_keyword_rhs
     }
 }
 
-impl SyntacticEq for DateTimeField {
-    fn syntactic_eq(&self, other: &Self) -> bool {
+impl<'ast> SemanticEq<'ast> for DateTimeField {
+    fn semantic_eq(&self, other: &Self, scope: &ScopeTracker<'ast>) -> bool {
         match (self, other) {
-            (Self::Week(ident_lhs), Self::Week(ident_rhs)) => ident_lhs.syntactic_eq(ident_rhs),
-            (Self::Custom(ident_lhs), Self::Custom(ident_rhs)) => ident_lhs.syntactic_eq(ident_rhs),
+            (Self::Week(ident_lhs), Self::Week(ident_rhs)) => {
+                ident_lhs.semantic_eq(ident_rhs, scope)
+            }
+            (Self::Custom(ident_lhs), Self::Custom(ident_rhs)) => {
+                ident_lhs.semantic_eq(ident_rhs, scope)
+            }
             _ => mem::discriminant(self) == mem::discriminant(other),
         }
     }
 }
 
-impl SyntacticEq for CeilFloorKind {
-    fn syntactic_eq(&self, other: &Self) -> bool {
+impl<'ast> SemanticEq<'ast> for CeilFloorKind {
+    fn semantic_eq(&self, other: &Self, scope: &ScopeTracker<'ast>) -> bool {
         match (self, other) {
             (
                 CeilFloorKind::DateTimeField(date_time_field_lhs),
                 CeilFloorKind::DateTimeField(date_time_field_rhs),
-            ) => date_time_field_lhs.syntactic_eq(date_time_field_rhs),
+            ) => date_time_field_lhs.semantic_eq(date_time_field_rhs, scope),
             (CeilFloorKind::Scale(value_lhs), CeilFloorKind::Scale(value_rhs)) => {
                 value_lhs == value_rhs
             }
@@ -1470,8 +1516,8 @@ impl SyntacticEq for CeilFloorKind {
     }
 }
 
-impl SyntacticEq for StructField {
-    fn syntactic_eq(&self, other: &Self) -> bool {
+impl<'ast> SemanticEq<'ast> for StructField {
+    fn semantic_eq(&self, other: &Self, scope: &ScopeTracker<'ast>) -> bool {
         let Self {
             field_name: field_name_lhs,
             field_type: field_type_lhs,
@@ -1481,12 +1527,12 @@ impl SyntacticEq for StructField {
             field_type: field_type_rhs,
         } = other;
 
-        field_name_lhs.syntactic_eq(field_name_rhs) && field_type_lhs == field_type_rhs
+        field_name_lhs.semantic_eq(field_name_rhs, scope) && field_type_lhs == field_type_rhs
     }
 }
 
-impl SyntacticEq for DictionaryField {
-    fn syntactic_eq(&self, other: &Self) -> bool {
+impl<'ast> SemanticEq<'ast> for DictionaryField {
+    fn semantic_eq(&self, other: &Self, scope: &ScopeTracker<'ast>) -> bool {
         let Self {
             key: key_lhs,
             value: value_lhs,
@@ -1496,12 +1542,12 @@ impl SyntacticEq for DictionaryField {
             value: value_rhs,
         } = other;
 
-        key_lhs.syntactic_eq(key_rhs) && value_lhs.syntactic_eq(value_rhs)
+        key_lhs.semantic_eq(key_rhs, scope) && value_lhs.semantic_eq(value_rhs, scope)
     }
 }
 
-impl SyntacticEq for Map {
-    fn syntactic_eq(&self, other: &Self) -> bool {
+impl<'ast> SemanticEq<'ast> for Map {
+    fn semantic_eq(&self, other: &Self, scope: &ScopeTracker<'ast>) -> bool {
         let Self {
             entries: entries_lhs,
         } = self;
@@ -1509,12 +1555,12 @@ impl SyntacticEq for Map {
             entries: entries_rhs,
         } = other;
 
-        entries_lhs.syntactic_eq(entries_rhs)
+        entries_lhs.semantic_eq(entries_rhs, scope)
     }
 }
 
-impl SyntacticEq for MapEntry {
-    fn syntactic_eq(&self, other: &Self) -> bool {
+impl<'ast> SemanticEq<'ast> for MapEntry {
+    fn semantic_eq(&self, other: &Self, scope: &ScopeTracker<'ast>) -> bool {
         let Self {
             key: key_lhs,
             value: value_lhs,
@@ -1524,15 +1570,15 @@ impl SyntacticEq for MapEntry {
             value: value_rhs,
         } = other;
 
-        key_lhs.syntactic_eq(key_rhs) && value_lhs.syntactic_eq(value_rhs)
+        key_lhs.semantic_eq(key_rhs, scope) && value_lhs.semantic_eq(value_rhs, scope)
     }
 }
 
-impl SyntacticEq for Subscript {
-    fn syntactic_eq(&self, other: &Self) -> bool {
+impl<'ast> SemanticEq<'ast> for Subscript {
+    fn semantic_eq(&self, other: &Self, scope: &ScopeTracker<'ast>) -> bool {
         match (self, other) {
             (Subscript::Index { index: index_lhs }, Subscript::Index { index: index_rhs }) => {
-                index_lhs.syntactic_eq(index_rhs)
+                index_lhs.semantic_eq(index_rhs, scope)
             }
             (
                 Subscript::Slice {
@@ -1546,17 +1592,17 @@ impl SyntacticEq for Subscript {
                     stride: stride_rhs,
                 },
             ) => {
-                lower_bound_lhs.syntactic_eq(lower_bound_rhs)
-                    && upper_bound_lhs.syntactic_eq(upper_bound_rhs)
-                    && stride_lhs.syntactic_eq(stride_rhs)
+                lower_bound_lhs.semantic_eq(lower_bound_rhs, scope)
+                    && upper_bound_lhs.semantic_eq(upper_bound_rhs, scope)
+                    && stride_lhs.semantic_eq(stride_rhs, scope)
             }
             _ => false,
         }
     }
 }
 
-impl SyntacticEq for Array {
-    fn syntactic_eq(&self, other: &Self) -> bool {
+impl<'ast> SemanticEq<'ast> for Array {
+    fn semantic_eq(&self, other: &Self, scope: &ScopeTracker<'ast>) -> bool {
         let Self {
             elem: elem_lhs,
             named: named_lhs,
@@ -1566,12 +1612,12 @@ impl SyntacticEq for Array {
             named: named_rhs,
         } = other;
 
-        elem_lhs.syntactic_eq(elem_rhs) && *named_lhs == *named_rhs
+        elem_lhs.semantic_eq(elem_rhs, scope) && *named_lhs == *named_rhs
     }
 }
 
-impl SyntacticEq for Interval {
-    fn syntactic_eq(&self, other: &Self) -> bool {
+impl<'ast> SemanticEq<'ast> for Interval {
+    fn semantic_eq(&self, other: &Self, scope: &ScopeTracker<'ast>) -> bool {
         let Self {
             value: value_lhs,
             leading_field: leading_field_lhs,
@@ -1587,16 +1633,16 @@ impl SyntacticEq for Interval {
             fractional_seconds_precision: fractional_seconds_precision_rhs,
         } = other;
 
-        value_lhs.syntactic_eq(value_rhs)
-            && leading_field_lhs.syntactic_eq(leading_field_rhs)
+        value_lhs.semantic_eq(value_rhs, scope)
+            && leading_field_lhs.semantic_eq(leading_field_rhs, scope)
             && leading_precision_lhs == leading_precision_rhs
-            && last_field_lhs.syntactic_eq(last_field_rhs)
+            && last_field_lhs.semantic_eq(last_field_rhs, scope)
             && fractional_seconds_precision_lhs == fractional_seconds_precision_rhs
     }
 }
 
-impl SyntacticEq for LambdaFunction {
-    fn syntactic_eq(&self, other: &Self) -> bool {
+impl<'ast> SemanticEq<'ast> for LambdaFunction {
+    fn semantic_eq(&self, other: &Self, scope: &ScopeTracker<'ast>) -> bool {
         let Self {
             params: params_lhs,
             body: body_lhs,
@@ -1606,30 +1652,32 @@ impl SyntacticEq for LambdaFunction {
             body: body_rhs,
         } = other;
 
-        params_lhs.syntactic_eq(params_rhs) && body_lhs.syntactic_eq(body_rhs)
+        params_lhs.semantic_eq(params_rhs, scope) && body_lhs.semantic_eq(body_rhs, scope)
     }
 }
 
-impl<T: SyntacticEq> SyntacticEq for OneOrManyWithParens<T> {
-    fn syntactic_eq(&self, other: &Self) -> bool {
+impl<'ast, T: SemanticEq<'ast>> SemanticEq<'ast> for OneOrManyWithParens<T> {
+    fn semantic_eq(&self, other: &Self, scope: &ScopeTracker<'ast>) -> bool {
         match (self, other) {
             (OneOrManyWithParens::One(item_lhs), OneOrManyWithParens::One(item_rhs)) => {
-                item_lhs.syntactic_eq(item_rhs)
+                item_lhs.semantic_eq(item_rhs, scope)
             }
             (OneOrManyWithParens::Many(items_lhs), OneOrManyWithParens::Many(items_rhs)) => {
-                items_lhs.syntactic_eq(items_rhs)
+                items_lhs.semantic_eq(items_rhs, scope)
             }
             _ => false,
         }
     }
 }
 
-impl SyntacticEq for Expr {
-    fn syntactic_eq(&self, other: &Self) -> bool {
+impl<'ast> SemanticEq<'ast> for Expr {
+    fn semantic_eq(&self, other: &Self, scope: &ScopeTracker<'ast>) -> bool {
         // Expr::Nested(_) requires special handling because the parens are superfluous when it comes to equality.
         match (self, other) {
-            (Expr::Nested(expr_lhs), expr_rhs) => return (&**expr_lhs).syntactic_eq(expr_rhs),
-            (expr_lhs, Expr::Nested(expr_rhs)) => return expr_lhs.syntactic_eq(expr_rhs),
+            (Expr::Nested(expr_lhs), expr_rhs) => {
+                return (&**expr_lhs).semantic_eq(expr_rhs, scope)
+            }
+            (expr_lhs, Expr::Nested(expr_rhs)) => return expr_lhs.semantic_eq(expr_rhs, scope),
             _ => {}
         }
 
@@ -1639,12 +1687,16 @@ impl SyntacticEq for Expr {
         }
 
         match (self, other) {
-            (Expr::Identifier(ident_lhs), Expr::Identifier(ident_rhs)) => {
-                ident_lhs.syntactic_eq(ident_rhs)
-            }
-            (Expr::CompoundIdentifier(idents_lhs), Expr::CompoundIdentifier(idents_rhs)) => {
-                idents_lhs.syntactic_eq(idents_rhs)
-            }
+            (Expr::Identifier(ident_lhs), Expr::Identifier(ident_rhs)) => scope
+                .resolve_ident(ident_lhs)
+                .is_ok_and(|_| scope.resolve_ident(ident_rhs).is_ok()),
+            (Expr::CompoundIdentifier(idents_lhs), Expr::CompoundIdentifier(idents_rhs)) => scope
+                .resolve_compound_ident(idents_lhs)
+                .is_ok_and(|_| {
+                    scope
+                        .resolve_compound_ident(idents_rhs)
+                        .is_ok()
+                }),
             (
                 Expr::JsonAccess {
                     value: value_lhs,
@@ -1654,7 +1706,7 @@ impl SyntacticEq for Expr {
                     value: value_rhs,
                     path: path_rhs,
                 },
-            ) => value_lhs.syntactic_eq(value_rhs) && path_lhs.syntactic_eq(path_rhs),
+            ) => value_lhs.semantic_eq(value_rhs, scope) && path_lhs.semantic_eq(path_rhs, scope),
             (
                 Expr::CompositeAccess {
                     expr: expr_lhs,
@@ -1664,33 +1716,39 @@ impl SyntacticEq for Expr {
                     expr: expr_rhs,
                     key: key_rhs,
                 },
-            ) => expr_lhs.syntactic_eq(expr_rhs) && key_lhs.syntactic_eq(key_rhs),
-            (Expr::IsFalse(expr_lhs), Expr::IsFalse(expr_rhs)) => expr_lhs.syntactic_eq(expr_rhs),
+            ) => expr_lhs.semantic_eq(expr_rhs, scope) && key_lhs.semantic_eq(key_rhs, scope),
+            (Expr::IsFalse(expr_lhs), Expr::IsFalse(expr_rhs)) => {
+                expr_lhs.semantic_eq(expr_rhs, scope)
+            }
             (Expr::IsNotFalse(expr_lhs), Expr::IsNotFalse(expr_rhs)) => {
-                expr_lhs.syntactic_eq(expr_rhs)
+                expr_lhs.semantic_eq(expr_rhs, scope)
             }
-            (Expr::IsTrue(expr_lhs), Expr::IsTrue(expr_rhs)) => expr_lhs.syntactic_eq(expr_rhs),
+            (Expr::IsTrue(expr_lhs), Expr::IsTrue(expr_rhs)) => {
+                expr_lhs.semantic_eq(expr_rhs, scope)
+            }
             (Expr::IsNotTrue(expr_lhs), Expr::IsNotTrue(expr_rhs)) => {
-                expr_lhs.syntactic_eq(expr_rhs)
+                expr_lhs.semantic_eq(expr_rhs, scope)
             }
-            (Expr::IsNull(expr_lhs), Expr::IsNull(expr_rhs)) => expr_lhs.syntactic_eq(expr_rhs),
+            (Expr::IsNull(expr_lhs), Expr::IsNull(expr_rhs)) => {
+                expr_lhs.semantic_eq(expr_rhs, scope)
+            }
             (Expr::IsNotNull(expr_lhs), Expr::IsNotNull(expr_rhs)) => {
-                expr_lhs.syntactic_eq(expr_rhs)
+                expr_lhs.semantic_eq(expr_rhs, scope)
             }
             (Expr::IsUnknown(expr_lhs), Expr::IsUnknown(expr_rhs)) => {
-                expr_lhs.syntactic_eq(expr_rhs)
+                expr_lhs.semantic_eq(expr_rhs, scope)
             }
             (Expr::IsNotUnknown(expr_lhs), Expr::IsNotUnknown(expr_rhs)) => {
-                expr_lhs.syntactic_eq(expr_rhs)
+                expr_lhs.semantic_eq(expr_rhs, scope)
             }
             (
                 Expr::IsDistinctFrom(expr_lhs, expr1_lhs),
                 Expr::IsDistinctFrom(expr_rhs, expr1_rhs),
-            ) => expr_lhs.syntactic_eq(expr_rhs) && expr1_lhs.syntactic_eq(expr1_rhs),
+            ) => expr_lhs.semantic_eq(expr_rhs, scope) && expr1_lhs.semantic_eq(expr1_rhs, scope),
             (
                 Expr::IsNotDistinctFrom(expr_lhs, expr1_lhs),
                 Expr::IsNotDistinctFrom(expr_rhs, expr1_rhs),
-            ) => expr_lhs.syntactic_eq(expr_rhs) && expr1_lhs.syntactic_eq(expr1_rhs),
+            ) => expr_lhs.semantic_eq(expr_rhs, scope) && expr1_lhs.semantic_eq(expr1_rhs, scope),
             (
                 Expr::InList {
                     expr: expr_lhs,
@@ -1703,11 +1761,11 @@ impl SyntacticEq for Expr {
                     negated: negated_rhs,
                 },
             ) => {
-                expr_lhs.syntactic_eq(expr_rhs)
+                expr_lhs.semantic_eq(expr_rhs, scope)
                     && list_lhs
                         .iter()
                         .zip(list_rhs.iter())
-                        .all(|(l, r)| l.syntactic_eq(r))
+                        .all(|(l, r)| l.semantic_eq(r, scope))
                     && negated_lhs == negated_rhs
             }
             (
@@ -1722,8 +1780,8 @@ impl SyntacticEq for Expr {
                     negated: negated_rhs,
                 },
             ) => {
-                expr_lhs.syntactic_eq(expr_rhs)
-                    && subquery_lhs.syntactic_eq(subquery_rhs)
+                expr_lhs.semantic_eq(expr_rhs, scope)
+                    && subquery_lhs.semantic_eq(subquery_rhs, scope)
                     && negated_lhs == negated_rhs
             }
             (
@@ -1738,8 +1796,8 @@ impl SyntacticEq for Expr {
                     negated: negated_rhs,
                 },
             ) => {
-                expr_lhs.syntactic_eq(expr_rhs)
-                    && array_expr_lhs.syntactic_eq(array_expr_rhs)
+                expr_lhs.semantic_eq(expr_rhs, scope)
+                    && array_expr_lhs.semantic_eq(array_expr_rhs, scope)
                     && negated_lhs == negated_rhs
             }
             (
@@ -1756,10 +1814,10 @@ impl SyntacticEq for Expr {
                     high: high_rhs,
                 },
             ) => {
-                expr_lhs.syntactic_eq(expr_rhs)
+                expr_lhs.semantic_eq(expr_rhs, scope)
                     && negated_lhs == negated_rhs
-                    && low_lhs.syntactic_eq(low_rhs)
-                    && high_lhs.syntactic_eq(high_rhs)
+                    && low_lhs.semantic_eq(low_rhs, scope)
+                    && high_lhs.semantic_eq(high_rhs, scope)
             }
             (
                 Expr::BinaryOp {
@@ -1773,8 +1831,8 @@ impl SyntacticEq for Expr {
                     right: right_rhs,
                 },
             ) => {
-                left_lhs.syntactic_eq(left_rhs)
-                    && right_lhs.syntactic_eq(right_rhs)
+                left_lhs.semantic_eq(left_rhs, scope)
+                    && right_lhs.semantic_eq(right_rhs, scope)
                     && op_lhs == op_rhs
             }
             (
@@ -1795,8 +1853,8 @@ impl SyntacticEq for Expr {
             ) => {
                 negated_lhs == negated_rhs
                     && any_lhs == any_rhs
-                    && expr_lhs.syntactic_eq(expr_rhs)
-                    && pattern_lhs.syntactic_eq(pattern_rhs)
+                    && expr_lhs.semantic_eq(expr_rhs, scope)
+                    && pattern_lhs.semantic_eq(pattern_rhs, scope)
                     && escape_char_lhs == escape_char_rhs
             }
             (
@@ -1817,8 +1875,8 @@ impl SyntacticEq for Expr {
             ) => {
                 negated_lhs == negated_rhs
                     && any_lhs == any_rhs
-                    && expr_lhs.syntactic_eq(expr_rhs)
-                    && pattern_lhs.syntactic_eq(pattern_rhs)
+                    && expr_lhs.semantic_eq(expr_rhs, scope)
+                    && pattern_lhs.semantic_eq(pattern_rhs, scope)
                     && escape_char_lhs == escape_char_rhs
             }
             (
@@ -1836,8 +1894,8 @@ impl SyntacticEq for Expr {
                 },
             ) => {
                 negated_lhs == negated_rhs
-                    && expr_lhs.syntactic_eq(expr_rhs)
-                    && pattern_lhs.syntactic_eq(pattern_rhs)
+                    && expr_lhs.semantic_eq(expr_rhs, scope)
+                    && pattern_lhs.semantic_eq(pattern_rhs, scope)
                     && escape_char_lhs == escape_char_rhs
             }
             (
@@ -1855,8 +1913,8 @@ impl SyntacticEq for Expr {
                 },
             ) => {
                 negated_lhs == negated_rhs
-                    && expr_lhs.syntactic_eq(expr_rhs)
-                    && pattern_lhs.syntactic_eq(pattern_rhs)
+                    && expr_lhs.semantic_eq(expr_rhs, scope)
+                    && pattern_lhs.semantic_eq(pattern_rhs, scope)
                     && regexp_lhs == regexp_rhs
             }
             (
@@ -1873,9 +1931,9 @@ impl SyntacticEq for Expr {
                     is_some: is_some_rhs,
                 },
             ) => {
-                left_lhs.syntactic_eq(left_rhs)
+                left_lhs.semantic_eq(left_rhs, scope)
                     && compare_op_lhs == compare_op_rhs
-                    && right_lhs.syntactic_eq(right_rhs)
+                    && right_lhs.semantic_eq(right_rhs, scope)
                     && is_some_lhs == is_some_rhs
             }
             (
@@ -1890,9 +1948,9 @@ impl SyntacticEq for Expr {
                     right: right_rhs,
                 },
             ) => {
-                left_lhs.syntactic_eq(left_rhs)
+                left_lhs.semantic_eq(left_rhs, scope)
                     && compare_op_lhs == compare_op_rhs
-                    && right_lhs.syntactic_eq(right_rhs)
+                    && right_lhs.semantic_eq(right_rhs, scope)
             }
             (
                 Expr::UnaryOp {
@@ -1903,7 +1961,7 @@ impl SyntacticEq for Expr {
                     op: op_rhs,
                     expr: expr_rhs,
                 },
-            ) => op_lhs == op_rhs && expr_lhs.syntactic_eq(expr_rhs),
+            ) => op_lhs == op_rhs && expr_lhs.semantic_eq(expr_rhs, scope),
             (
                 Expr::Convert {
                     is_try: is_try_lhs,
@@ -1923,11 +1981,11 @@ impl SyntacticEq for Expr {
                 },
             ) => {
                 is_try_lhs == is_try_rhs
-                    && expr_lhs.syntactic_eq(expr_rhs)
+                    && expr_lhs.semantic_eq(expr_rhs, scope)
                     && data_type_lhs == data_type_rhs
-                    && charset_lhs.syntactic_eq(charset_rhs)
+                    && charset_lhs.semantic_eq(charset_rhs, scope)
                     && target_before_value_lhs == target_before_value_rhs
-                    && styles_lhs.syntactic_eq(styles_rhs)
+                    && styles_lhs.semantic_eq(styles_rhs, scope)
             }
             (
                 Expr::Cast {
@@ -1944,7 +2002,7 @@ impl SyntacticEq for Expr {
                 },
             ) => {
                 kind_lhs == kind_rhs
-                    && expr_lhs.syntactic_eq(expr_rhs)
+                    && expr_lhs.semantic_eq(expr_rhs, scope)
                     && data_type_lhs == data_type_rhs
                     && format_lhs == format_rhs
             }
@@ -1958,8 +2016,8 @@ impl SyntacticEq for Expr {
                     time_zone: time_zone_rhs,
                 },
             ) => {
-                timestamp_lhs.syntactic_eq(timestamp_rhs)
-                    && time_zone_lhs.syntactic_eq(time_zone_rhs)
+                timestamp_lhs.semantic_eq(timestamp_rhs, scope)
+                    && time_zone_lhs.semantic_eq(time_zone_rhs, scope)
             }
             (
                 Expr::Extract {
@@ -1973,9 +2031,9 @@ impl SyntacticEq for Expr {
                     expr: expr_rhs,
                 },
             ) => {
-                field_lhs.syntactic_eq(field_rhs)
+                field_lhs.semantic_eq(field_rhs, scope)
                     && syntax_lhs == syntax_rhs
-                    && expr_lhs.syntactic_eq(expr_rhs)
+                    && expr_lhs.semantic_eq(expr_rhs, scope)
             }
             (
                 Expr::Ceil {
@@ -1986,7 +2044,7 @@ impl SyntacticEq for Expr {
                     expr: expr_rhs,
                     field: field_rhs,
                 },
-            ) => expr_lhs.syntactic_eq(expr_rhs) && field_lhs.syntactic_eq(field_rhs),
+            ) => expr_lhs.semantic_eq(expr_rhs, scope) && field_lhs.semantic_eq(field_rhs, scope),
             (
                 Expr::Floor {
                     expr: expr_lhs,
@@ -1996,7 +2054,7 @@ impl SyntacticEq for Expr {
                     expr: expr_rhs,
                     field: field_rhs,
                 },
-            ) => expr_lhs.syntactic_eq(expr_rhs) && field_lhs.syntactic_eq(field_rhs),
+            ) => expr_lhs.semantic_eq(expr_rhs, scope) && field_lhs.semantic_eq(field_rhs, scope),
             (
                 Expr::Position {
                     expr: expr_lhs,
@@ -2006,7 +2064,7 @@ impl SyntacticEq for Expr {
                     expr: expr_rhs,
                     r#in: in_rhs,
                 },
-            ) => expr_lhs.syntactic_eq(expr_rhs) && in_lhs.syntactic_eq(in_rhs),
+            ) => expr_lhs.semantic_eq(expr_rhs, scope) && in_lhs.semantic_eq(in_rhs, scope),
             (
                 Expr::Substring {
                     expr: expr_lhs,
@@ -2021,9 +2079,9 @@ impl SyntacticEq for Expr {
                     special: special_rhs,
                 },
             ) => {
-                expr_lhs.syntactic_eq(expr_rhs)
-                    && substring_from_lhs.syntactic_eq(substring_from_rhs)
-                    && substring_for_lhs.syntactic_eq(substring_for_rhs)
+                expr_lhs.semantic_eq(expr_rhs, scope)
+                    && substring_from_lhs.semantic_eq(substring_from_rhs, scope)
+                    && substring_for_lhs.semantic_eq(substring_for_rhs, scope)
                     && special_lhs == special_rhs
             }
             (
@@ -2040,10 +2098,10 @@ impl SyntacticEq for Expr {
                     trim_characters: trim_characters_rhs,
                 },
             ) => {
-                expr_lhs.syntactic_eq(expr_rhs)
+                expr_lhs.semantic_eq(expr_rhs, scope)
                     && trim_where_lhs == trim_where_rhs
-                    && trim_what_lhs.syntactic_eq(trim_what_rhs)
-                    && trim_characters_lhs.syntactic_eq(trim_characters_rhs)
+                    && trim_what_lhs.semantic_eq(trim_what_rhs, scope)
+                    && trim_characters_lhs.semantic_eq(trim_characters_rhs, scope)
             }
             (
                 Expr::Overlay {
@@ -2059,10 +2117,10 @@ impl SyntacticEq for Expr {
                     overlay_for: overlay_for_rhs,
                 },
             ) => {
-                expr_lhs.syntactic_eq(expr_rhs)
-                    && overlay_what_lhs.syntactic_eq(overlay_what_rhs)
-                    && overlay_from_lhs.syntactic_eq(overlay_from_rhs)
-                    && overlay_for_lhs.syntactic_eq(overlay_for_rhs)
+                expr_lhs.semantic_eq(expr_rhs, scope)
+                    && overlay_what_lhs.semantic_eq(overlay_what_rhs, scope)
+                    && overlay_from_lhs.semantic_eq(overlay_from_rhs, scope)
+                    && overlay_for_lhs.semantic_eq(overlay_for_rhs, scope)
             }
             (
                 Expr::Collate {
@@ -2073,7 +2131,10 @@ impl SyntacticEq for Expr {
                     expr: expr_rhs,
                     collation: collation_rhs,
                 },
-            ) => expr_lhs.syntactic_eq(expr_rhs) && collation_lhs.syntactic_eq(collation_rhs),
+            ) => {
+                expr_lhs.semantic_eq(expr_rhs, scope)
+                    && collation_lhs.semantic_eq(collation_rhs, scope)
+            }
             (Expr::Value(value_lhs), Expr::Value(value_rhs)) => value_lhs == value_rhs,
             (
                 Expr::IntroducedString {
@@ -2104,9 +2165,9 @@ impl SyntacticEq for Expr {
                     column: column_rhs,
                     keys: keys_rhs,
                 },
-            ) => column_lhs.syntactic_eq(column_rhs) && keys_lhs.syntactic_eq(keys_rhs),
+            ) => column_lhs.semantic_eq(column_rhs, scope) && keys_lhs.semantic_eq(keys_rhs, scope),
             (Expr::Function(function_lhs), Expr::Function(function_rhs)) => {
-                function_lhs.syntactic_eq(function_rhs)
+                function_lhs.semantic_eq(function_rhs, scope)
             }
             (
                 Expr::Case {
@@ -2122,10 +2183,10 @@ impl SyntacticEq for Expr {
                     else_result: else_result_rhs,
                 },
             ) => {
-                operand_lhs.syntactic_eq(operand_rhs)
-                    && conditions_lhs.syntactic_eq(conditions_rhs)
-                    && results_lhs.syntactic_eq(results_rhs)
-                    && else_result_lhs.syntactic_eq(else_result_rhs)
+                operand_lhs.semantic_eq(operand_rhs, scope)
+                    && conditions_lhs.semantic_eq(conditions_rhs, scope)
+                    && results_lhs.semantic_eq(results_rhs, scope)
+                    && else_result_lhs.semantic_eq(else_result_rhs, scope)
             }
             (
                 Expr::Exists {
@@ -2136,16 +2197,22 @@ impl SyntacticEq for Expr {
                     subquery: subquery_rhs,
                     negated: negated_rhs,
                 },
-            ) => subquery_lhs.syntactic_eq(subquery_rhs) && negated_lhs == negated_rhs,
+            ) => subquery_lhs.semantic_eq(subquery_rhs, scope) && negated_lhs == negated_rhs,
             (Expr::Subquery(query_lhs), Expr::Subquery(query_rhs)) => {
-                query_lhs.syntactic_eq(query_rhs)
+                query_lhs.semantic_eq(query_rhs, scope)
             }
             (Expr::GroupingSets(items_lhs), Expr::GroupingSets(items_rhs)) => {
-                items_lhs.syntactic_eq(items_rhs)
+                items_lhs.semantic_eq(items_rhs, scope)
             }
-            (Expr::Cube(items_lhs), Expr::Cube(items_rhs)) => items_lhs.syntactic_eq(items_rhs),
-            (Expr::Rollup(items_lhs), Expr::Rollup(items_rhs)) => items_lhs.syntactic_eq(items_rhs),
-            (Expr::Tuple(exprs_lhs), Expr::Tuple(exprs_rhs)) => exprs_lhs.syntactic_eq(exprs_rhs),
+            (Expr::Cube(items_lhs), Expr::Cube(items_rhs)) => {
+                items_lhs.semantic_eq(items_rhs, scope)
+            }
+            (Expr::Rollup(items_lhs), Expr::Rollup(items_rhs)) => {
+                items_lhs.semantic_eq(items_rhs, scope)
+            }
+            (Expr::Tuple(exprs_lhs), Expr::Tuple(exprs_rhs)) => {
+                exprs_lhs.semantic_eq(exprs_rhs, scope)
+            }
             (
                 Expr::Struct {
                     values: values_lhs,
@@ -2155,7 +2222,10 @@ impl SyntacticEq for Expr {
                     values: values_rhs,
                     fields: fields_rhs,
                 },
-            ) => values_lhs.syntactic_eq(values_rhs) && fields_lhs.syntactic_eq(fields_rhs),
+            ) => {
+                values_lhs.semantic_eq(values_rhs, scope)
+                    && fields_lhs.semantic_eq(fields_rhs, scope)
+            }
             (
                 Expr::Named {
                     expr: expr_lhs,
@@ -2165,11 +2235,11 @@ impl SyntacticEq for Expr {
                     expr: expr_rhs,
                     name: name_rhs,
                 },
-            ) => expr_lhs.syntactic_eq(expr_rhs) && name_lhs.syntactic_eq(name_rhs),
+            ) => expr_lhs.semantic_eq(expr_rhs, scope) && name_lhs.semantic_eq(name_rhs, scope),
             (Expr::Dictionary(dictionary_fields_lhs), Expr::Dictionary(dictionary_fields_rhs)) => {
-                dictionary_fields_lhs.syntactic_eq(dictionary_fields_rhs)
+                dictionary_fields_lhs.semantic_eq(dictionary_fields_rhs, scope)
             }
-            (Expr::Map(map_lhs), Expr::Map(map_rhs)) => map_lhs.syntactic_eq(map_rhs),
+            (Expr::Map(map_lhs), Expr::Map(map_rhs)) => map_lhs.semantic_eq(map_rhs, scope),
             (
                 Expr::Subscript {
                     expr: expr_lhs,
@@ -2179,10 +2249,15 @@ impl SyntacticEq for Expr {
                     expr: expr_rhs,
                     subscript: subscript_rhs,
                 },
-            ) => expr_lhs.syntactic_eq(expr_rhs) && subscript_lhs.syntactic_eq(subscript_rhs),
-            (Expr::Array(array_lhs), Expr::Array(array_rhs)) => array_lhs.syntactic_eq(array_rhs),
+            ) => {
+                expr_lhs.semantic_eq(expr_rhs, scope)
+                    && subscript_lhs.semantic_eq(subscript_rhs, scope)
+            }
+            (Expr::Array(array_lhs), Expr::Array(array_rhs)) => {
+                array_lhs.semantic_eq(array_rhs, scope)
+            }
             (Expr::Interval(interval_lhs), Expr::Interval(interval_rhs)) => {
-                interval_lhs.syntactic_eq(interval_rhs)
+                interval_lhs.semantic_eq(interval_rhs, scope)
             }
             (
                 Expr::MatchAgainst {
@@ -2196,7 +2271,7 @@ impl SyntacticEq for Expr {
                     opt_search_modifier: opt_search_modifier_rhs,
                 },
             ) => {
-                columns_lhs.syntactic_eq(columns_rhs)
+                columns_lhs.semantic_eq(columns_rhs, scope)
                     && match_value_lhs == match_value_rhs
                     && opt_search_modifier_lhs == opt_search_modifier_rhs
             }
@@ -2204,15 +2279,15 @@ impl SyntacticEq for Expr {
             (
                 Expr::QualifiedWildcard(object_name_lhs),
                 Expr::QualifiedWildcard(object_name_rhs),
-            ) => object_name_lhs.syntactic_eq(object_name_rhs),
+            ) => object_name_lhs.semantic_eq(object_name_rhs, scope),
             (Expr::OuterJoin(expr_lhs), Expr::OuterJoin(expr_rhs)) => {
-                expr_lhs.syntactic_eq(expr_rhs)
+                expr_lhs.semantic_eq(expr_rhs, scope)
             }
-            (Expr::Prior(expr_lhs), Expr::Prior(expr_rhs)) => expr_lhs.syntactic_eq(expr_rhs),
+            (Expr::Prior(expr_lhs), Expr::Prior(expr_rhs)) => expr_lhs.semantic_eq(expr_rhs, scope),
             (Expr::Lambda(lambda_function_lhs), Expr::Lambda(lambda_function_rhs)) => {
-                lambda_function_lhs.syntactic_eq(lambda_function_rhs)
+                lambda_function_lhs.semantic_eq(lambda_function_rhs, scope)
             }
-            _ => false
+            _ => false,
         }
     }
 }
