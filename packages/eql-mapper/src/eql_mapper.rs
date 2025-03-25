@@ -6,8 +6,8 @@ use crate::{
     DepMut, NodeKey, Projection, ProjectionColumn, ScopeError, ScopeTracker, TableResolver,
     TypeRegistry, Value,
 };
-use sqlparser::ast::{self as ast, Statement};
-use sqltk::{convert_control_flow, Break, Transform, Transformable, Visitable, Visitor};
+use sqlparser::ast::{self as ast, Expr, GroupByExpr, Statement};
+use sqltk::{convert_control_flow, Break, Context, Transform, Transformable, Visitable, Visitor};
 use std::{
     cell::RefCell,
     collections::{HashMap, HashSet},
@@ -379,9 +379,22 @@ impl<'ast> Transform<'ast> for EncryptedStatement<'ast> {
 
     fn transform<N: Visitable>(
         &mut self,
-        original_node: &'ast N,
         mut new_node: N,
+        original_node: &'ast N,
+        context: &Context<'ast>,
     ) -> Result<N, Self::Error> {
+
+        match (context.nth_last_as::<GroupByExpr>(1), context.nth_last_as::<Vec<Expr>>(0), new_node.downcast_mut::<Expr>()) {
+            (Some(GroupByExpr::Expressions(_, _)), _, Some(expr)) => {
+                // If the type is an EQL Value
+                // and it supports equality
+                // then we need to wrap in the appropriate EQL function
+
+                // we also need to find the optional corresponding expression in the projection and wrap that in an aggregate function.
+            }
+            _ => {}
+        }
+
         if let Some(target_value) = new_node.downcast_mut::<ast::Expr>() {
             match original_node.downcast_ref::<ast::Expr>() {
                 Some(original_value) => match original_value {

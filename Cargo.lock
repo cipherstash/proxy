@@ -3447,7 +3447,7 @@ dependencies = [
 [[package]]
 name = "sqltk"
 version = "0.2.2"
-source = "git+https://github.com/cipherstash/sqltk/?rev=214f9b90e4f07d4414292813ffd6e45dec075fbb#214f9b90e4f07d4414292813ffd6e45dec075fbb"
+source = "git+https://github.com/cipherstash/sqltk/?rev=cdf2e7c#cdf2e7cf8dc43313cc1a9af42838fa581bd0976c"
 dependencies = [
  "bigdecimal",
  "sqlparser",

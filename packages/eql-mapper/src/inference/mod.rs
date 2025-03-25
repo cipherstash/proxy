@@ -1,3 +1,4 @@
+mod syntactic_eq;
 mod infer_type;
 mod infer_type_impls;
 mod node_key;

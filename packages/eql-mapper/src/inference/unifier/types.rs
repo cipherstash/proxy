@@ -78,8 +78,12 @@ pub struct NativeValue(pub Option<TableColumn>);
 #[derive(Debug, PartialEq, Eq, Clone, Display)]
 #[display("{} {}", *ty.as_type(), self.render_alias())]
 pub struct ProjectionColumn {
-    /// The type of the column
+    /// The type of the column.
     pub ty: TypeCell,
+
+    /// If a `GROUP BY` clause is present which *does not* mention this column then this column
+    /// must be aggregated when selected in a projection (whether by name or wildcard).
+    pub must_be_aggregated: bool,
 
     /// The columm alias
     pub alias: Option<Ident>,
