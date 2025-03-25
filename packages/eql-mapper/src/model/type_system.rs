@@ -94,7 +94,7 @@ impl TryFrom<&unifier::ProjectionColumns> for Type {
         let mut pub_columns: Vec<ProjectionColumn> = Vec::with_capacity(columns.len());
         let columns = columns.flatten();
 
-        for unifier::ProjectionColumn { ty, alias } in columns.0.iter() {
+        for unifier::ProjectionColumn { ty, alias, must_be_aggregated: _ } in columns.0.iter() {
             let pub_column: ProjectionColumn = match &*ty.as_type() {
                 unifier::Type::Constructor(unifier::Constructor::Value(value)) => {
                     ProjectionColumn {
@@ -162,7 +162,7 @@ impl TryFrom<&unifier::Type> for Type {
                 let mut pub_columns: Vec<ProjectionColumn> = Vec::with_capacity(columns.len());
                 let columns = columns.flatten();
 
-                for unifier::ProjectionColumn { ty, alias } in columns.0.iter() {
+                for unifier::ProjectionColumn { ty, alias, must_be_aggregated: _ } in columns.0.iter() {
                     let pub_column: ProjectionColumn = match &*ty.as_type() {
                         unifier::Type::Constructor(unifier::Constructor::Value(ty)) => {
                             ProjectionColumn {

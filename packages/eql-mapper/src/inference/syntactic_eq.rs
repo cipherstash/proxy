@@ -31,8 +31,8 @@ use crate::SqlIdent;
 /// 2. To encapsulate all of the `SqlIdent` logic (future work).
 ///
 /// # TODO: generate this code
-pub(crate) trait SyntacticEq<Rhs = Self> {
-    fn syntactic_eq(&self, other: &Rhs) -> bool;
+pub(crate) trait SyntacticEq {
+    fn syntactic_eq(&self, other: &Self) -> bool;
 }
 
 impl SyntacticEq for Ident {

@@ -12,37 +12,33 @@ impl<'ast> InferType<'ast, Vec<SelectItem>> for TypeInferencer<'ast> {
             .iter()
             .map(|select_item| {
                 match select_item {
-                    SelectItem::UnnamedExpr(Expr::Identifier(ident)) => Ok(ProjectionColumn {
-                        ty: self.scope_tracker.borrow().resolve_ident(ident)?,
-                        alias: Some(ident.clone()),
-                    }),
+                    SelectItem::UnnamedExpr(Expr::Identifier(ident)) => Ok(ProjectionColumn::new(
+                        self.scope_tracker.borrow().resolve_ident(ident)?,
+                        Some(ident.clone()),
+                    )),
 
                     SelectItem::UnnamedExpr(Expr::CompoundIdentifier(object_name)) => {
-                        Ok(ProjectionColumn {
-                            ty: self
-                                .scope_tracker
+                        Ok(ProjectionColumn::new(
+                            self.scope_tracker
                                 .borrow()
                                 .resolve_compound_ident(object_name)?,
-                            alias: Some(object_name.last().cloned().unwrap()),
-                        })
+                            Some(object_name.last().cloned().unwrap()),
+                        ))
                     }
 
                     SelectItem::UnnamedExpr(expr) => match expr {
                         // For an unnamed expression that is a function call the name of the function becomes the alias.
-                        Expr::Function(Function { name, .. }) => Ok(ProjectionColumn {
-                            ty: self.get_type(expr),
-                            alias: Some(name.0.last().unwrap().clone()),
-                        }),
-                        _ => Ok(ProjectionColumn {
-                            ty: self.get_type(expr),
-                            alias: None,
-                        }),
+                        Expr::Function(Function { name, .. }) => Ok(ProjectionColumn::new(
+                            self.get_type(expr),
+                            Some(name.0.last().unwrap().clone()),
+                        )),
+                        _ => Ok(ProjectionColumn::new(self.get_type(expr), None)),
                     },
 
-                    SelectItem::ExprWithAlias { expr, alias } => Ok(ProjectionColumn {
-                        ty: self.get_type(expr),
-                        alias: Some(alias.clone()),
-                    }),
+                    SelectItem::ExprWithAlias { expr, alias } => Ok(ProjectionColumn::new(
+                        self.get_type(expr),
+                        Some(alias.clone()),
+                    )),
 
                     #[allow(unused_variables)]
                     SelectItem::QualifiedWildcard(object_name, options) => {
@@ -59,13 +55,12 @@ impl<'ast> InferType<'ast, Vec<SelectItem>> for TypeInferencer<'ast> {
                             ));
                         };
 
-                        Ok(ProjectionColumn {
-                            ty: self
-                                .scope_tracker
+                        Ok(ProjectionColumn::new(
+                            self.scope_tracker
                                 .borrow()
                                 .resolve_qualified_wildcard(&object_name.0)?,
-                            alias: None,
-                        })
+                            None,
+                        ))
                     }
 
                     SelectItem::Wildcard(options) => {
@@ -82,10 +77,10 @@ impl<'ast> InferType<'ast, Vec<SelectItem>> for TypeInferencer<'ast> {
                             ));
                         };
 
-                        Ok(ProjectionColumn {
-                            ty: self.scope_tracker.borrow().resolve_wildcard()?,
-                            alias: None,
-                        })
+                        Ok(ProjectionColumn::new(
+                            self.scope_tracker.borrow().resolve_wildcard()?,
+                            None,
+                        ))
                     }
                 }
             })
