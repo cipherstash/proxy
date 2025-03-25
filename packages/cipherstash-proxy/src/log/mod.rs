@@ -56,8 +56,8 @@ pub fn set_format(
 mod tests {
     use crate::config::LogLevel;
 
-    use super::*;
     use super::log_test_helper::MockMakeWriter;
+    use super::*;
     use tracing::dispatcher::set_default;
     use tracing::{debug, error, info, trace, warn};
 
