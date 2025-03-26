@@ -484,16 +484,9 @@ The process is idempotent and can be run repeatedly.
 
 ### Configuring the `encrypt` tool
 
-The CipherStash Proxy `encrypt` tool reuses the CipherStash Proxy configuration for the Proxy connection details. See [`encrypt` tool config options](#encrypt-tool-config-options) for the available options.
-
-{% callout title="Connection" %}
-Connection to CipherStash Proxy reuses Proxy configuration:
- - server host
- - server port
- - database username
- - database password
- - database name
-{% /callout %}
+The CipherStash Proxy `encrypt` tool reuses the CipherStash Proxy configuration for the Proxy connection details.
+This configuration includes database server host, port, username, password, and database name.
+See [`encrypt` tool config options](#encrypt-tool-config-options) for the available options.
 
 ### Example `encrypt` tool usage
 
