@@ -375,7 +375,7 @@ This will output the version of EQL installed.
 In your existing PostgreSQL database, you store your data in tables and columns.
 Those columns have types like `integer`, `text`, `timestamp`, and `boolean`.
 When storing encrypted data in PostgreSQL with Proxy, you use a special column type called `cs_encrypted_v1`, which is [provided by EQL](#setting-up-the-database-schema).
-`cs_encrypted_v1` is a container column type that can be used for any type of encrypted data you want to store or search, whether they be numbers (`int`, `small_int`, `big_int`), text (`text`), dates and times (`date`), or booleans (`boolean`).
+`cs_encrypted_v1` is a container column type that can be used for any type of encrypted data you want to store or search, whether they are numbers (`int`, `small_int`, `big_int`), text (`text`), dates and times (`date`), or booleans (`boolean`).
 
 Create a table with an encrypted column for `email`:
 
@@ -391,7 +391,7 @@ This creates a `users` table with two columns:
  - `id`, an autoincrementing integer column that is the primary key for the record
  - `email`, a `cs_encrypted_v1` column
 
-There is one important difference between the plaintext columns you've traditionally used in PostgreSQL and encrypted columns with CipherStash Proxy:
+There are important differences between the plaintext columns you've traditionally used in PostgreSQL and encrypted columns with CipherStash Proxy:
 
 - **Plaintext columns can be searched if they don't have an index**, albeit with the performance cost of a full table scan.
 - **Encrypted columns cannot be searched without an encrypted index**, and the encrypted indexes you define determine what kind of searches you can do on encrypted data.
@@ -448,11 +448,11 @@ You must run the `cs_encrypt_v1()` and `cs_activate_v1()` functions after any mo
 > ![IMPORTANT]
 > Adding, updating, or deleting encrypted indexes on columns that already contain encrypted data will not re-index that data. To use the new indexes, you must `SELECT` the data out of the column, and `UPDATE` it again.
 
-To learn how to use encrypted indexes for other encrypted data types like `text`, `int`, `boolean`, `date`, and `jsonb`, [see the EQL documentation](https://github.com/cipherstash/encrypt-query-language/blob/main/docs/reference/INDEX.md).
+To learn how to use encrypted indexes for other encrypted data types like `text`, `int`, `boolean`, `date`, and `jsonb`, see the [EQL documentation](https://github.com/cipherstash/encrypt-query-language/blob/main/docs/reference/INDEX.md).
 
 When deploying CipherStash Proxy into production environments with real data, we recommend that you apply these database schema changes with the normal tools and process you use for making changes to your database schema.
 
-To see more examples of how to modify your database schema, check out [the example schema](./docs/getting-started/schema-example.sql) from [getting started](#getting-started).
+To see more examples of how to modify your database schema, check out [the example schema](./docs/getting-started/schema-example.sql) from [Getting started](#getting-started).
 
 ## Encrypting data in an existing database
 
