@@ -371,7 +371,87 @@ This will output the version of EQL installed.
 
 #### Creating columns with the right types
 
-TODO: Add instructions for creating columns with the right types
+In your existing PostgreSQL database, you store your data in tables and columns.
+Those columns have types like `integer`, `text`, `timestamp`, and `boolean`.
+When storing encrypted data in PostgreSQL with Proxy, you use a special column type called `cs_encrypted_v1`, which is [provided by EQL](#setting-up-the-database-schema).
+`cs_encrypted_v1` is a container column type that can be used for any type of encrypted data you want to store or search, whether they be numbers (`int`, `small_int`, `big_int`), text (`text`), dates and times (`date`), or booleans (`boolean`).
+
+Create a table with an encrypted column for `email`:
+
+```sql
+CREATE TABLE users (
+    id SERIAL PRIMARY KEY,
+    email cs_encrypted_v1
+)
+```
+
+This creates a `users` table with two columns:
+
+ - `id`, an autoincrementing integer column that is the primary key for the record
+ - `email`, a `cs_encrypted_v1` column
+
+There is one important difference between the plaintext columns you've traditionally used in PostgreSQL and encrypted columns with CipherStash Proxy:
+
+- **Plaintext columns can be searched if they don't have an index**, albeit with the performance cost of a full table scan.
+- **Encrypted columns cannot be searched without an encrypted index**, and the encrypted indexes you define determine what kind of searches you can do on encrypted data.
+
+In the previous step we created a table with an encrypted column, but without any encrypted indexes.
+
+Now you can add an encrypted index for that encrypted column:
+
+```sql
+SELECT cs_add_index_v1(
+  'users',
+  'email',
+  'unique',
+  'text'
+);
+```
+
+This statement adds a `unique` index for the `email` column in the `users` table, which has an underlying data type of `text`.
+
+`unique` indexes are used to find records with columns with unique values, like with the `=` operator.
+
+There are two other types of encrypted indexes you can use on `text` data:
+
+```sql
+SELECT cs_add_index_v1(
+  'users',
+  'email',
+  'match',
+  'text'
+);
+
+SELECT cs_add_index_v1(
+  'users',
+  'email',
+  'ore',
+  'text'
+);
+```
+
+The first SQL statement adds a `match` index, which is used for partial matches with `LIKE`.
+The second SQL statement adds an `ore` index, which is used for ordering with `ORDER BY`.
+
+Now that the indexes has been added, you must activate them:
+
+```sql
+SELECT cs_encrypt_v1();
+SELECT cs_activate_v1();
+```
+
+This loads and activates the encrypted indexes.
+
+You must run the `cs_encrypt_v1()` and `cs_activate_v1()` functions after any modifications to the encrypted indexes.
+
+> ![IMPORTANT]
+> Adding, updating, or deleting encrypted indexes on columns that already contain encrypted data will not re-index that data. To use the new indexes, you must `SELECT` the data out of the column, and `UPDATE` it again.
+
+To learn how to use encrypted indexes for other encrypted data types like `text`, `int`, `boolean`, `date`, and `jsonb`, [see the EQL documentation](https://github.com/cipherstash/encrypt-query-language/blob/main/docs/reference/INDEX.md).
+
+When deploying CipherStash Proxy into production environments with real data, we recommend that you apply these database schema changes with the normal tools and process you use for making changes to your database schema.
+
+To see more examples of how to modify your database schema, check out [the example schema](./docs/getting-started/schema-example.sql) from [getting started](#getting-started).
 
 ## Encrypting data in an existing database
 
