@@ -270,7 +270,8 @@ services:
 ```
 
 
-For a fully-working example, go to [`docker-compose.yml`](./docker-compose.yml). Follow the steps in [Getting started](#getting-started) to see it in action.
+For a fully-working example, go to [`docker-compose.yml`](./docker-compose.yml).
+Follow the steps in [Getting started](#getting-started) to see it in action.
 
 Once you have set up a `docker-compose.yml`, start the Proxy container:
 
