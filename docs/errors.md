@@ -48,7 +48,7 @@ Check the configured username and password are correct and can connect to the da
 
 Check the database is using a supported authentication method.
 
-CipherStash Proxy supportsseveral PostgreSQL password authentication methods:
+CipherStash Proxy supports several PostgreSQL password authentication methods:
 
  - password
  - md5
@@ -178,7 +178,7 @@ An error occurred when attempting to type check the SQL statement.
 ### Error message
 
 ```
-Statement could not be type checked: '{type-check-erro-message}'
+Statement could not be type checked: '{type-check-error-message}'
 ```
 
 ### Notes
