@@ -320,6 +320,18 @@ mise --env tcp run proxy:down
 
 echo
 echo '###############################################'
+echo '# Test: Warning for missing encrypt config'
+echo '###############################################'
+echo
+
+# TODO set env
+mise --env tcp run proxy:up proxy --extra-args "--detach --wait"
+mise --env tcp run test:wait_for_postgres_to_quack --port 6432 --max-retries 20
+mise --env tcp run test:integration:warn_missing_config
+mise --env tcp run proxy:down
+
+echo
+echo '###############################################'
 echo '# Test: Python'
 echo '###############################################'
 echo
