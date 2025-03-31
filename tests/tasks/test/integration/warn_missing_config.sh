@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-##MISE description="Test for warning about missing encrypt config. Run with mapping enabled and mapping error disabled"
+#MISE description="Test for warning about missing encrypt config. Run with mapping enabled and mapping error disabled"
 
 # This test assumes that Proxy is running with mapping enabled with mapping error disabled
 
