@@ -86,7 +86,7 @@ where
         let sent: u64 = bytes.len() as u64;
         counter!(CLIENTS_BYTES_RECEIVED_TOTAL).increment(sent);
 
-        if self.encrypt.is_passthrough() {
+        if self.encrypt.config.mapping_disabled() {
             self.write_to_server(bytes).await?;
             return Ok(());
         }
@@ -785,8 +785,7 @@ where
                             msg = "Configured column",
                             column = ?identifier
                         );
-                        let col = self.get_column(identifier)?;
-                        Some(col)
+                        self.get_column(identifier)?
                     }
                     _ => None,
                 };
@@ -822,8 +821,7 @@ where
                         column = ?identifier
                     );
 
-                    let col = self.get_column(identifier)?;
-                    Some(col)
+                    self.get_column(identifier)?
                 }
                 _ => None,
             };
@@ -850,7 +848,9 @@ where
                         identifier = ?identifier
                     );
                     let col = self.get_column(identifier)?;
-                    literal_columns.push(Some(col));
+                    if col.is_some() {
+                        literal_columns.push(col);
+                    }
                 }
             }
         }
@@ -860,9 +860,9 @@ where
 
     ///
     /// Get the column configuration for the Identifier
-    /// Returns `EncryptError::UnknownColumn` if configuratiuon cannot be found for the Identified column
-    ///
-    fn get_column(&self, identifier: Identifier) -> Result<Column, Error> {
+    /// Returns `EncryptError::UnknownColumn` if configuration cannot be found for the Identified column
+    /// if mapping enabled, and None if mapping is disabled. It'll log a warning either way.
+    fn get_column(&self, identifier: Identifier) -> Result<Option<Column>, Error> {
         match self.encrypt.get_column_config(&identifier) {
             Some(config) => {
                 debug!(
@@ -871,20 +871,24 @@ where
                     msg = "Configured column",
                     column = ?identifier
                 );
-                Ok(Column::new(identifier, config))
+                Ok(Some(Column::new(identifier, config)))
             }
             None => {
-                debug!(
+                warn!(
                     target: MAPPER,
                     client_id = self.context.client_id,
-                    msg = "Configured column not found ",
+                    msg = "Configured column not found. Encryption configuration may have been deleted.",
                     ?identifier,
                 );
-                Err(EncryptError::UnknownColumn {
-                    table: identifier.table.to_owned(),
-                    column: identifier.column.to_owned(),
+                if self.encrypt.config.mapping_errors_enabled() {
+                    Err(EncryptError::UnknownColumn {
+                        table: identifier.table.to_owned(),
+                        column: identifier.column.to_owned(),
+                    }
+                    .into())
+                } else {
+                    Ok(None)
                 }
-                .into())
             }
         }
     }
