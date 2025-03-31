@@ -861,7 +861,7 @@ where
     ///
     /// Get the column configuration for the Identifier
     /// Returns `EncryptError::UnknownColumn` if configuration cannot be found for the Identified column
-    ///
+    /// if mapping enabled, and None if mapping is disabled. It'll log a warning either way.
     fn get_column(&self, identifier: Identifier) -> Result<Option<Column>, Error> {
         match self.encrypt.get_column_config(&identifier) {
             Some(config) => {
