@@ -16,6 +16,8 @@ services:
       - ./pg/common.env
     networks:
       - postgres
+    extra_hosts:
+      - host.docker.internal:host-gateway
     deploy:
       resources:
         limits:
@@ -61,6 +63,7 @@ services:
       - CS_CLIENT_KEY=${CS_CLIENT_KEY}
       - CS_CLIENT_ID=${CS_CLIENT_ID}
       - CS_PROMETHEUS__ENABLED=${CS_PROMETHEUS__ENABLED:-true}
+      - CS_SERVER__WORKER_THREADS=${CS_SERVER__WORKER_THREADS:-4}
     networks:
       - postgres
     deploy:

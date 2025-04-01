@@ -10,6 +10,13 @@ edition = "2021"
 incremental = true
 debug = true
 
+# [profile.dev.package]# aws-lc-sys.opt-level = 3
+# proc-macro2.opt-level = 3
+# quote.opt-level = 3
+# serde_derive.opt-level = 3
+# sqlparser.opt-level = 3
+# syn.opt-level = 3
+
 [profile.dev.build-override]
 opt-level = 3
 
@@ -17,10 +24,15 @@ opt-level = 3
 incremental = true
 debug = true
 
+#  Default release profile (https://doc.rust-lang.org/cargo/reference/profiles.html)
 [profile.release]
 codegen-units = 1
 strip = "symbols"
-lto = true
+
+[profile.profiling]
+inherits = "release"
+strip = "none"
+debug = true
 
 [workspace.dependencies]
 sqlparser = { version = "^0.52", features = ["bigdecimal", "serde"] }

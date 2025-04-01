@@ -3,18 +3,42 @@ import glob
 import matplotlib.pyplot as plt
 import time
 
-MARKERS = [
-    "^",
-    "o",
-    "s",
-    "d",
-    "v",
-    "P",
-    ">",
-    "X",
-    "<",
-    "*",
-]
+
+MARKERS = {
+  "proxy-extended-default": "o",
+  "proxy-extended-plaintext": "o",
+  "proxy-extended-encrypted": "o",
+
+  "postgres-extended-default": ".",
+  "postgres-extended-plaintext": ".",
+
+  "pgbouncer-extended-default": "s",
+  "pgbouncer-extended-plaintext": "s",
+}
+
+LINES = {
+  "proxy-extended-default": "-",
+  "proxy-extended-plaintext": "-",
+  "proxy-extended-encrypted": "-",
+
+  "postgres-extended-default": ":",
+  "postgres-extended-plaintext": ":",
+
+  "pgbouncer-extended-default": "-",
+  "pgbouncer-extended-plaintext": "-",
+}
+
+COLORS = {
+  "proxy-extended-default": "xkcd:light pink",
+  "proxy-extended-plaintext": "xkcd:pink",
+  "proxy-extended-encrypted": "xkcd:hot pink",
+
+  "postgres-extended-default": "xkcd:sky blue",
+  "postgres-extended-plaintext": "xkcd:blue",
+
+  "pgbouncer-extended-default": "xkcd:light green",
+  "pgbouncer-extended-plaintext": "xkcd:green",
+}
 
 
 def read_csv(file_name):
@@ -45,16 +69,23 @@ def main():
 
     for i, file in enumerate(files):
         label = file.replace(".csv", "")
-        data = read_csv(file)
+        label = label.replace("results/", "")
 
+        marker = MARKERS[label]
+        line = LINES[label]
+        color = COLORS[label]
+
+        data = read_csv(file)
         clients = [d["clients"] for d in data]
         tps = [d["tps"] for d in data]
+
         ax.plot(
             clients,
             tps,
             label=label,
-            linestyle="-",
-            marker=MARKERS[i],
+            marker=marker,
+            linestyle=line,
+            color=color,
             markeredgewidth=1,
             markersize=10,
         )

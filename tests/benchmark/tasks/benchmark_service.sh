@@ -3,6 +3,7 @@
 #USAGE flag "--host <host>" default="host.docker.internal" help="Host of target service"
 #USAGE flag "--port <port>" help="Port of target service"
 #USAGE flag "--time <time>" help="Time for each run"
+#USAGE flag "--clients <clients>" help="Number of clients to run"
 #USAGE flag "--target <target>" help="Target service" {
 #USAGE  choices "postgres" "proxy" "pgbouncer"
 #USAGE }
@@ -16,11 +17,14 @@
 
 set -e
 
-# clients_array=(10)
-clients_array=(5 10 50 75 100 125)
 
+clients_array=(5 10 50 75 100)
 
-# output="results/$usage_target-$(date +"%Y%m%d%H%M").csv"
+if [ -n "$usage_clients" ]; then
+    clients_array=($usage_clients)
+fi
+
+mkdir -p results
 output="results/$usage_target-$usage_protocol-$usage_transaction.csv"
 
 # CSV header
