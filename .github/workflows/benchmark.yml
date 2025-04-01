@@ -50,14 +50,10 @@ jobs:
           tool: 'customSmallerIsBetter'
           # Where the output from the benchmark tool is stored
           output-file-path: tests/benchmark/results/output.json
-          # # Where the previous data file is stored
-          # external-data-json-path: ./cache/benchmark-data.json
-          # Workflow will fail when an alert happens
+
+          github-token: ${{ secrets.GITHUB_TOKEN }}
           fail-on-alert: true
-          # Enable alert commit comment
-          # comment-on-alert: true
-          # GitHub API token to make a commit comment
-          # github-token: ${{ secrets.GITHUB_TOKEN }}
-          # Enable Job Summary for PRs
+          comment-on-alert: true
           summary-always: true
           auto-push: true
+          benchmark-data-dir-path: docs
