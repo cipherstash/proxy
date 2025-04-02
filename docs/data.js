@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1743570477735,
+  "lastUpdate": 1743633863210,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -174,6 +174,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 6.804433,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "toby@cipherstash.com",
+            "name": "Toby Hede",
+            "username": "tobyhede"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "368b957ca047d6554c899a6cd0b0f5918b028b92",
+          "message": "Merge pull request #197 from cipherstash/benchmarks\n\nfeat: pgbench with postgres, pgbouncer and proxy",
+          "timestamp": "2025-04-03T08:40:46+10:00",
+          "tree_id": "454e55da5a0f5f8bee06cb90d2243dc7ad8f1d63",
+          "url": "https://github.com/cipherstash/proxy/commit/368b957ca047d6554c899a6cd0b0f5918b028b92"
+        },
+        "date": 1743633862151,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 7.103985,
             "unit": "Number"
           }
         ]
