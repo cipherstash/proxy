@@ -5,7 +5,7 @@
 #USAGE flag "--time <time>" help="Time for each run"
 #USAGE flag "--clients <clients>" help="Number of clients to run"
 #USAGE flag "--target <target>" help="Target service" {
-#USAGE  choices "postgres" "proxy" "pgbouncer"
+#USAGE  choices "postgres" "proxy" "pgbouncer" "pgcat"
 #USAGE }
 #USAGE flag "--protocol <protocol>" default="simple" help="Procol to use" {
 #USAGE  choices "simple" "extended" "prepared"

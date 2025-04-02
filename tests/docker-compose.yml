@@ -128,7 +128,7 @@ services:
     ports:
       - 6433:6433
     pull_policy: build
-    build: benchmark/docker/pgbouncer
+    build: ./benchmark/docker/pgbouncer
     networks:
       - postgres
     extra_hosts:
@@ -138,6 +138,27 @@ services:
         limits:
           cpus: ${CPU_LIMIT_PGBOUNCER:-4}
           memory: ${CONTAINER_RAM_LIMIT_PGBOUNCER:-8g}
+
+  pgcat:
+    image: ghcr.io/postgresml/pgcat:v1.2.0
+    container_name: pgcat
+    pull_policy: always
+    ports:
+      - 6434:6434
+    command:
+      - pgcat
+      - /etc/pgcat/pgcat.toml
+    volumes:
+      - ./benchmark/docker/pgcat/pgcat.toml:/etc/pgcat/pgcat.toml
+    networks:
+      - postgres
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    deploy:
+      resources:
+        limits:
+          cpus: ${CPU_LIMIT_PGCAT:-4}
+          memory: ${CONTAINER_RAM_LIMIT_PGCAT:-8g}
 
 networks:
   postgres:

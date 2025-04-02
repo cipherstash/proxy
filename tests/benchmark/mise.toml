@@ -88,6 +88,7 @@ mise --env tcp run postgres:setup
 mise run benchmark:setup
 
 mise --env tcp run pgbouncer:up --extra-args "--detach --wait"
+mise --env tcp run pgcat:up --extra-args "--detach --wait"
 mise --env tcp run proxy:up proxy --extra-args "--detach --wait"
 mise --env tcp run test:wait_for_postgres_to_quack --port 6432 --max-retries 20
 
@@ -101,6 +102,7 @@ echo
 # # Extended protocol with default script
 mise run benchmark_service --target=postgres --protocol=extended --port=5532 --time=5
 mise run benchmark_service --target=pgbouncer --protocol=extended --port=6433 --time=5
+mise run benchmark_service --target=pgcat --protocol=extended --port=6434 --time=5
 mise run benchmark_service --target=proxy --protocol=extended --port=6432 --time=5
 
 
@@ -112,6 +114,7 @@ echo
 
 mise run benchmark_service --target=postgres --transaction=plaintext --protocol=extended --port=5532 --time=5
 mise run benchmark_service --target=pgbouncer --transaction=plaintext --protocol=extended --port=6433 --time=5
+mise run benchmark_service --target=pgcat --transaction=plaintext --protocol=extended --port=6434 --time=5
 mise run benchmark_service --target=proxy --transaction=plaintext --protocol=extended --port=6432 --time=5
 
 
@@ -156,9 +159,16 @@ rm -rf {{config_root}}/results/*.csv
 """
 
 [tasks."pgbouncer:up"]
-alias = 'u'
 description = "Run pgbouncer"
 run = """
 set -e
 echo docker compose up --build {{arg(name="service",default="pgbouncer")}} {{option(name="extra-args",default="")}} | bash
+"""
+
+
+[tasks."pgcat:up"]
+description = "Run pgcat"
+run = """
+set -e
+echo docker compose up --build {{arg(name="service",default="pgcat")}} {{option(name="extra-args",default="")}} | bash
 """

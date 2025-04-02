@@ -5,39 +5,48 @@ import time
 
 
 MARKERS = {
-  "proxy-extended-default": "o",
-  "proxy-extended-plaintext": "o",
-  "proxy-extended-encrypted": "o",
+  "proxy-extended-default": "*",
+  "proxy-extended-plaintext": "*",
+  "proxy-extended-encrypted": "*",
 
   "postgres-extended-default": ".",
   "postgres-extended-plaintext": ".",
+
+  "pgcat-extended-default": "o",
+  "pgcat-extended-plaintext": "o",
 
   "pgbouncer-extended-default": "s",
   "pgbouncer-extended-plaintext": "s",
 }
 
 LINES = {
-  "proxy-extended-default": "-",
-  "proxy-extended-plaintext": "-",
+  "proxy-extended-default": ":",
+  "proxy-extended-plaintext": "--",
   "proxy-extended-encrypted": "-",
 
   "postgres-extended-default": ":",
-  "postgres-extended-plaintext": ":",
+  "postgres-extended-plaintext": "--",
+
+  "pgcat-extended-default": "-",
+  "pgcat-extended-plaintext": "--",
 
   "pgbouncer-extended-default": "-",
-  "pgbouncer-extended-plaintext": "-",
+  "pgbouncer-extended-plaintext": "--",
 }
 
 COLORS = {
-  "proxy-extended-default": "xkcd:light pink",
-  "proxy-extended-plaintext": "xkcd:pink",
-  "proxy-extended-encrypted": "xkcd:hot pink",
+  "proxy-extended-default": "xkcd:grey",
+  "proxy-extended-plaintext": "xkcd:bright blue",
+  "proxy-extended-encrypted": "xkcd:red orange",
 
-  "postgres-extended-default": "xkcd:sky blue",
+  "postgres-extended-default": "xkcd:grey",
   "postgres-extended-plaintext": "xkcd:blue",
 
-  "pgbouncer-extended-default": "xkcd:light green",
-  "pgbouncer-extended-plaintext": "xkcd:green",
+  "pgcat-extended-default": "xkcd:grey",
+  "pgcat-extended-plaintext": "xkcd:ocean blue",
+
+  "pgbouncer-extended-default": "xkcd:grey",
+  "pgbouncer-extended-plaintext": "xkcd:cornflower blue",
 }
 
 
