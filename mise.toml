@@ -111,6 +111,15 @@ mise run test:unit
 mise run test:integration
 """
 
+[tasks."reset"]
+alias = 'r'
+description = "Reset database"
+run = """
+mise run postgres:down
+mise run postgres:up --extra-args "--detach --wait"
+mise run postgres:setup
+"""
+
 [tasks."test:local:unit"]
 alias = 'lu'
 description = "Runs test/s"
