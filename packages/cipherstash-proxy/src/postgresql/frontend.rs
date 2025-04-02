@@ -15,6 +15,7 @@ use crate::postgresql::context::column::Column;
 use crate::postgresql::context::Portal;
 use crate::postgresql::data::literal_from_sql;
 use crate::postgresql::messages::error_response::ErrorResponse;
+use crate::postgresql::messages::terminate::Terminate;
 use crate::postgresql::messages::Name;
 use crate::prometheus::{
     CLIENTS_BYTES_RECEIVED_TOTAL, ENCRYPTED_VALUES_TOTAL, ENCRYPTION_DURATION_SECONDS,
@@ -217,6 +218,13 @@ where
         let sent: u64 = bytes.len() as u64;
         counter!(SERVER_BYTES_SENT_TOTAL).increment(sent);
         self.server_writer.write_all(&bytes).await?;
+        Ok(())
+    }
+
+    pub async fn terminate(&mut self) -> Result<(), Error> {
+        debug!(target: PROTOCOL, msg = "Terminate server connection");
+        let bytes = Terminate::message();
+        self.write_to_server(bytes).await?;
         Ok(())
     }
 
