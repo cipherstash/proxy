@@ -1,6 +1,5 @@
-use bytes::{BufMut, BytesMut};
-
 use super::FrontendCode;
+use bytes::{BufMut, BytesMut};
 
 pub struct Terminate;
 
