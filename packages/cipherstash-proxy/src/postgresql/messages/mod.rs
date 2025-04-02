@@ -10,6 +10,7 @@ pub mod param_description;
 pub mod parse;
 pub mod query;
 pub mod row_description;
+pub mod terminate;
 
 pub const NULL: i32 = -1;
 
@@ -24,6 +25,7 @@ pub enum FrontendCode {
     SASLInitialResponse,
     SASLResponse,
     Sync,
+    Terminate,
     Unknown(char),
 }
 
@@ -72,6 +74,7 @@ impl From<char> for FrontendCode {
             #[allow(unreachable_patterns)]
             'p' => FrontendCode::SASLResponse, // Uses same char, here for completeness
             'S' => FrontendCode::Sync,
+            'X' => FrontendCode::Terminate,
             _ => FrontendCode::Unknown(code),
         }
     }
@@ -89,6 +92,7 @@ impl From<FrontendCode> for u8 {
             FrontendCode::SASLInitialResponse => b'p',
             FrontendCode::SASLResponse => b'p',
             FrontendCode::Sync => b'S',
+            FrontendCode::Terminate => b'X',
             FrontendCode::Unknown(c) => c as u8,
         }
     }
@@ -106,6 +110,7 @@ impl From<FrontendCode> for char {
             FrontendCode::SASLInitialResponse => 'p',
             FrontendCode::SASLResponse => 'p',
             FrontendCode::Sync => 'S',
+            FrontendCode::Terminate => 'X',
             FrontendCode::Unknown(c) => c,
         }
     }

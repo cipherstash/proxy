@@ -251,7 +251,13 @@ pub async fn handler(
 
     let client_to_server = async {
         loop {
-            frontend.rewrite().await?;
+            let result = frontend.rewrite().await;
+            // Ensure the connection is terminated if the client closes the connection
+            // The client ConnectionClosed error is triggered before the terminate message is passed through
+            if matches!(result, Err(Error::ConnectionClosed)) {
+                frontend.terminate().await?
+            }
+            result?;
         }
         // Unreachable, but helps the compiler understand the return type
         // TODO: extract into a function or something with type
