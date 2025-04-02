@@ -786,6 +786,41 @@ If the proxy is running on a host other than localhost, access on that host.
 | `-h`, `--help`          | Displays this help message                                     | -               |
 
 
+## Benchmarks
+
+Benchmarking is integrated into CI, and can be run locally.
+
+The benchmark uses `pgbench` to compare direct access to PostgreSQL against `pgbouncer` and Proxy.
+Benchmarks are executed in Docker containers, as the focus is on providing a repeatable baseline for performance.
+Your mileage may vary when comparing against a "real-world" production configuration.
+
+The benchmarks use the extended protocol option and cover:
+- the default `pgbench` transaction
+- insert, update & select of plaintext data
+- insert, update & select of encrypted data (CipherStash Proxy only)
+
+The benchmark setup includes the database configuration, but does requires access to a CipherStash account environment.
+
+### Require environment variables
+```
+CS_WORKSPACE_ID
+CS_CLIENT_ACCESS_KEY
+CS_DEFAULT_KEYSET_ID
+CS_CLIENT_ID
+CS_CLIENT_KEY
+```
+
+
+### Running the benchmark
+
+```bash
+cd tests/benchmark
+mise run benchmark
+```
+
+Results are graphed in a file called `benchmark-{YmdHM}.png` where `YmdHM` is a generated timestamp.
+Detailed results are generated in `csv` format and in the `results` directory.
+
 
 ## More info
 

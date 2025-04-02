@@ -18,3 +18,7 @@ rust-toolchain.toml
 
 # credentials for local dev
 .env.proxy.docker
+
+## benchmark result data
+tests/benchmark/results/*.csv
+tests/benchmark/benchmark-*.png

@@ -1,4 +1,4 @@
-name: test
+name: Test
 on:
   pull_request:
     branches:
@@ -10,25 +10,14 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+
 jobs:
   test:
     name: Test
     runs-on: buildjet-16vcpu-ubuntu-2204
     steps:
       - uses: actions/checkout@v4
-      - name: Install rust
-        shell: /bin/bash -l {0}
-        run: rustup toolchain install stable --profile minimal --no-self-update
-      - name: Setup Rust cache
-        uses: Swatinem/rust-cache@v2
-        with:
-          cache-provider: buildjet
-          cache-all-crates: true
-      - uses: jdx/mise-action@v2
-        with:
-          version: 2025.1.0 # [default: latest] mise version to install
-          install: true # [default: true] run `mise install`
-          cache: true # [default: true] cache mise using GitHub's cache
+      - uses: ./.github/actions/setup-test
       - run: |
           mise run postgres:up --extra-args "--detach --wait"
       - env:

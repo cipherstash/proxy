@@ -2,22 +2,27 @@ services:
   postgres: &postgres
     image: postgres:latest
     container_name: postgres
+    command: -c 'config_file=/etc/postgresql/postgresql.conf'
+    restart: always
     environment:
       PGPORT: 5532
     ports:
       - 5532:5532
     volumes:
+      - ./pg/postgresql.conf:/etc/postgresql/postgresql.conf
+      - ./benchmark/sql/:/etc/postgresql/benchmark/sql
       - ./pg/data-latest:/var/lib/postgresql/data
     env_file:
       - ./pg/common.env
     networks:
       - postgres
+    extra_hosts:
+      - host.docker.internal:host-gateway
     deploy:
       resources:
         limits:
-          cpus: "${CPU_LIMIT:-2}"
-          memory: 2048mb
-    restart: always
+          cpus: ${CPU_LIMIT_POSTGRES:-4}
+          memory: ${CONTAINER_RAM_LIMIT_POSTGRES:-4g}
     healthcheck:
       test: ["CMD-SHELL", "pg_isready"]
       interval: 1s
@@ -58,8 +63,21 @@ services:
       - CS_CLIENT_KEY=${CS_CLIENT_KEY}
       - CS_CLIENT_ID=${CS_CLIENT_ID}
       - CS_PROMETHEUS__ENABLED=${CS_PROMETHEUS__ENABLED:-true}
+      - CS_SERVER__WORKER_THREADS=${CS_SERVER__WORKER_THREADS:-4}
     networks:
       - postgres
+    deploy:
+      resources:
+        limits:
+          cpus: ${CPU_LIMIT_PROXY:-4}
+          memory: ${CONTAINER_RAM_LIMIT_PROXY:-8g}
+    cap_add:
+      - CAP_PERFMON
+      - SYS_ADMIN
+    security_opt:
+      - seccomp:unconfined
+    stop_grace_period: 30s
+    stop_signal: SIGKILL # SIGTERM is the default signal
 
   proxy-tls:
     image: cipherstash/proxy:latest
@@ -104,6 +122,43 @@ services:
     networks:
       - postgres
 
+  pgbouncer:
+    image: pgbouncer
+    container_name: pgbouncer
+    ports:
+      - 6433:6433
+    pull_policy: build
+    build: ./benchmark/docker/pgbouncer
+    networks:
+      - postgres
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    deploy:
+      resources:
+        limits:
+          cpus: ${CPU_LIMIT_PGBOUNCER:-4}
+          memory: ${CONTAINER_RAM_LIMIT_PGBOUNCER:-8g}
+
+  pgcat:
+    image: ghcr.io/postgresml/pgcat:v1.2.0
+    container_name: pgcat
+    pull_policy: always
+    ports:
+      - 6434:6434
+    command:
+      - pgcat
+      - /etc/pgcat/pgcat.toml
+    volumes:
+      - ./benchmark/docker/pgcat/pgcat.toml:/etc/pgcat/pgcat.toml
+    networks:
+      - postgres
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    deploy:
+      resources:
+        limits:
+          cpus: ${CPU_LIMIT_PGCAT:-4}
+          memory: ${CONTAINER_RAM_LIMIT_PGCAT:-8g}
 
 networks:
   postgres:

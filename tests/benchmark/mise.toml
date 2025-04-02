@@ -1,0 +1,174 @@
+[settings]
+
+trusted_config_paths = ["./env/mise.passthrough.toml"]
+
+[task_config]
+includes = ["./tasks"]
+
+
+[env]
+
+POSTGRES_DB = "{{env.CS_DATABASE__NAME}}"
+PGUSER = "{{env.CS_DATABASE__USERNAME}}"
+PGPASSWORD = "{{env.CS_DATABASE__PASSWORD}}"
+PGHOST = "{{env.CS_DATABASE__HOST}}"
+PGPORT = "{{env.CS_DATABASE__PORT}}"
+
+# ====================================================================================================
+
+[tasks."benchmark:continuous"]
+description = "Run proxy encryption benchmark for CI"
+run = """
+set -e
+
+echo
+echo '###############################################'
+echo '# Preflight'
+echo '###############################################'
+echo
+
+mise run benchmark:clean
+
+# Ensure Postgres instances are running
+mise run test:integration:preflight
+
+echo
+echo '###############################################'
+echo '# Setup'
+echo '###############################################'
+echo
+
+# Ensure EQL is set up before we try and start Proxy
+mise --env tcp run postgres:setup
+
+mise run benchmark:setup
+
+mise --env tcp run proxy:up proxy --extra-args "--detach --wait"
+mise --env tcp run test:wait_for_postgres_to_quack --port 6432 --max-retries 20
+
+echo
+echo '###############################################'
+echo '# Extended protocol with encrypted transaction'
+echo '###############################################'
+echo
+
+# Extended protocol with encrypted script
+mise run benchmark_service --target=proxy --transaction=encrypted --protocol=extended --port=6432 --time=30 --clients=10
+"""
+
+
+[tasks."benchmark"]
+alias = 'b'
+description = "Run benchmarks"
+run = """
+set -e
+
+mise run benchmark:clean
+
+set -e
+
+echo
+echo '###############################################'
+echo '# Preflight'
+echo '###############################################'
+echo
+
+# Ensure Postgres instances are running
+mise run test:integration:preflight
+
+echo
+echo '###############################################'
+echo '# Setup'
+echo '###############################################'
+echo
+
+# Ensure EQL is set up before we try and start Proxy
+mise --env tcp run postgres:setup
+
+mise run benchmark:setup
+
+mise --env tcp run pgbouncer:up --extra-args "--detach --wait"
+mise --env tcp run pgcat:up --extra-args "--detach --wait"
+mise --env tcp run proxy:up proxy --extra-args "--detach --wait"
+mise --env tcp run test:wait_for_postgres_to_quack --port 6432 --max-retries 20
+
+
+echo
+echo '###############################################'
+echo '# Extended protocol with default pgbench transaction'
+echo '###############################################'
+echo
+
+# # Extended protocol with default script
+mise run benchmark_service --target=postgres --protocol=extended --port=5532 --time=5
+mise run benchmark_service --target=pgbouncer --protocol=extended --port=6433 --time=5
+mise run benchmark_service --target=pgcat --protocol=extended --port=6434 --time=5
+mise run benchmark_service --target=proxy --protocol=extended --port=6432 --time=5
+
+
+echo
+echo '###############################################'
+echo '# Extended protocol with plaintext transaction'
+echo '###############################################'
+echo
+
+mise run benchmark_service --target=postgres --transaction=plaintext --protocol=extended --port=5532 --time=5
+mise run benchmark_service --target=pgbouncer --transaction=plaintext --protocol=extended --port=6433 --time=5
+mise run benchmark_service --target=pgcat --transaction=plaintext --protocol=extended --port=6434 --time=5
+mise run benchmark_service --target=proxy --transaction=plaintext --protocol=extended --port=6432 --time=5
+
+
+echo
+echo '###############################################'
+echo '# Extended protocol with encrypted transaction'
+echo '###############################################'
+echo
+
+# Extended protocol with encrypted script
+mise run benchmark_service --target=proxy --transaction=encrypted --protocol=extended --port=6432 --time=5
+
+
+echo
+echo '###############################################'
+echo '# Process results'
+echo '###############################################'
+echo
+
+mise run benchmark:plot
+"""
+
+[tasks."benchmark:setup"]
+run = """
+cat sql/benchmark-schema.sql | docker exec -i postgres${CONTAINER_SUFFIX} psql postgresql://${CS_DATABASE__USERNAME}:${CS_DATABASE__PASSWORD}@${CS_DATABASE__HOST}:${CS_DATABASE__PORT}/${CS_DATABASE__NAME} -f-
+
+# Initialize pgbench
+docker compose run --rm postgres${CONTAINER_SUFFIX:-} pgbench --host=host.docker.internal --port=${CS_DATABASE__PORT} --scale=1 -i --no-vacuum
+"""
+
+[tasks."benchmark:plot"]
+alias = 'b'
+description = "Plot graphs from benchmark results"
+run = """
+python plot.py
+"""
+
+[tasks."benchmark:clean"]
+description = "Clean old benchmark results"
+run = """
+rm -rf {{config_root}}/results/*.csv
+"""
+
+[tasks."pgbouncer:up"]
+description = "Run pgbouncer"
+run = """
+set -e
+echo docker compose up --build {{arg(name="service",default="pgbouncer")}} {{option(name="extra-args",default="")}} | bash
+"""
+
+
+[tasks."pgcat:up"]
+description = "Run pgcat"
+run = """
+set -e
+echo docker compose up --build {{arg(name="service",default="pgcat")}} {{option(name="extra-args",default="")}} | bash
+"""
