@@ -803,17 +803,17 @@ The benchmark setup includes the database configuration, but does requires acces
 
 ### Require environment variables
 ```
-  CS_WORKSPACE_ID
-  CS_CLIENT_ACCESS_KEY
-  CS_DEFAULT_KEYSET_ID
-  CS_CLIENT_ID
-  CS_CLIENT_KEY
+CS_WORKSPACE_ID
+CS_CLIENT_ACCESS_KEY
+CS_DEFAULT_KEYSET_ID
+CS_CLIENT_ID
+CS_CLIENT_KEY
 ```
 
 
 ### Running the benchmark
 
-```
+```bash
 cd tests/benchmark
 mise run benchmark
 ```
