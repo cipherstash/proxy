@@ -76,11 +76,13 @@ impl<'ast> SemanticEq<'ast> for Ident {
 /// implementation for [`Expr`].
 impl<'ast> SemanticEq<'ast> for ObjectName {
     fn semantic_eq(&self, other: &Self, scope: &ScopeTracker<'ast>) -> bool {
-        self.0.len() == other.0.len()
-            && self
-                .0
+        let ObjectName(idents_lhs) = self;
+        let ObjectName(idents_rhs) = other;
+
+        idents_lhs.len() == idents_rhs.len()
+            && idents_lhs
                 .iter()
-                .zip(other.0.iter())
+                .zip(idents_rhs.iter())
                 .fold(true, |acc, (l, r)| acc && l.semantic_eq(r, scope))
     }
 }
@@ -267,7 +269,10 @@ impl<'ast> SemanticEq<'ast> for ListAggOnOverflow {
 
 impl<'ast> SemanticEq<'ast> for JsonPath {
     fn semantic_eq(&self, other: &Self, _scope: &ScopeTracker<'ast>) -> bool {
-        self.path == other.path
+        let Self { path: path_lhs } = self;
+        let Self { path: path_rhs } = other;
+
+        path_lhs == path_rhs
     }
 }
 
@@ -329,7 +334,10 @@ impl<'ast> SemanticEq<'ast> for FormatClause {
 
 impl<'ast> SemanticEq<'ast> for Setting {
     fn semantic_eq(&self, other: &Self, scope: &ScopeTracker<'ast>) -> bool {
-        self.key.semantic_eq(&other.key, scope) && self.value == other.value
+        let Self { key: key_lhs, value: value_lhs } = self;
+        let Self { key: key_rhs, value: value_rhs } = other;
+
+        key_lhs.semantic_eq(key_rhs, scope) && value_lhs == value_rhs
     }
 }
 

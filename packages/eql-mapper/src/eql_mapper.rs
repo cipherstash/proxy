@@ -6,7 +6,7 @@ use crate::{
     DepMut, NodeKey, Projection, ProjectionColumn, ScopeError, ScopeTracker, TableResolver,
     TypeRegistry, Value,
 };
-use sqlparser::ast::{self as ast, Expr, GroupByExpr, Statement};
+use sqlparser::ast::{self as ast, Expr, GroupByExpr, Select, SelectItem, Statement};
 use sqltk::{convert_control_flow, Break, Context, Transform, Transformable, Visitable, Visitor};
 use std::{
     cell::RefCell,
@@ -297,21 +297,6 @@ impl<'ast> EqlMapper<'ast> {
 }
 
 impl<'ast> TypedStatement<'ast> {
-    /// Some statements do not require transformation and this means the application can choose to skip the
-    /// transformation step (which would be a no-op) and save come CPU cycles.
-    ///
-    /// Note: this check is conservative with respect to params. Some kinds of encrypted params will not require
-    /// statement transformation but we do not currently track that information anywhere so instead we assume the all
-    /// potentially require AST edits.
-    pub fn requires_transform(&self) -> bool {
-        // if there are any literals that require encryption, or any params that require encryption.
-        !self.literals.is_empty()
-            || self
-                .params
-                .iter()
-                .any(|value_ty| matches!(value_ty, Value::Eql(_)))
-    }
-
     /// Transforms the SQL statement by replacing all plaintext literals with EQL equivalents.
     pub fn transform(
         &self,
@@ -383,6 +368,20 @@ impl<'ast> Transform<'ast> for EncryptedStatement<'ast> {
         original_node: &'ast N,
         context: &Context<'ast>,
     ) -> Result<N, Self::Error> {
+        // When new_node matches path: Select -> Vec<SelectItem> -> SelectItem -> Expr
+        // If SelectItem is affected by a GROUP BY
+        // And SelectItem type is EQL
+        //
+
+        if let (Some(select), Some(select_projection), Some(select_item), Some(expr)) = (
+            context.nth_last_as::<Select>(22),
+            context.nth_last_as::<Vec<SelectItem>>(1),
+            context.nth_last_as::<SelectItem>(0),
+            new_node.downcast_mut::<Expr>(),
+        ) {
+            let ty: ProjectionColumn = self.registry.get_type(select_item)?;
+        }
+
         if let (Some(GroupByExpr::Expressions(_, _)), _, Some(expr)) = (
             context.nth_last_as::<GroupByExpr>(1),
             context.nth_last_as::<Vec<Expr>>(0),
@@ -463,25 +462,25 @@ fn make_eql_function_node(function_name: &str, arg: ast::Expr) -> ast::Expr {
     })
 }
 
-/// [`Visitor`] implementation that composes the [`Scope`] visitor, the [`Importer`] and the [`TypeInferencer`]
+/// [`Visitor`] implementation that composes the [`ScopeTracker`] visitor, the [`Importer`] and the [`TypeInferencer`]
 /// visitors.
 impl<'ast> Visitor<'ast> for EqlMapper<'ast> {
     type Error = EqlMapperError;
 
     fn enter<N: Visitable>(&mut self, node: &'ast N) -> ControlFlow<Break<Self::Error>> {
-        convert_control_flow(self.scope_tracker.borrow_mut().enter(node))?;
-        convert_control_flow(self.importer.borrow_mut().enter(node))?;
-        convert_control_flow(self.eql_function_tracker.borrow_mut().enter(node))?;
-        convert_control_flow(self.inferencer.borrow_mut().enter(node))?;
+        self.scope_tracker.borrow_mut().enter(node).map_break(Break::convert)?;
+        self.importer.borrow_mut().enter(node).map_break(Break::convert)?;
+        self.eql_function_tracker.borrow_mut().enter(node).map_break(Break::convert)?;
+        self.inferencer.borrow_mut().enter(node).map_break(Break::convert)?;
 
         ControlFlow::Continue(())
     }
 
     fn exit<N: Visitable>(&mut self, node: &'ast N) -> ControlFlow<Break<Self::Error>> {
-        convert_control_flow(self.inferencer.borrow_mut().exit(node))?;
-        convert_control_flow(self.eql_function_tracker.borrow_mut().exit(node))?;
-        convert_control_flow(self.importer.borrow_mut().exit(node))?;
-        convert_control_flow(self.scope_tracker.borrow_mut().exit(node))?;
+        self.inferencer.borrow_mut().exit(node).map_break(Break::convert)?;
+        self.eql_function_tracker.borrow_mut().exit(node).map_break(Break::convert)?;
+        self.importer.borrow_mut().exit(node).map_break(Break::convert)?;
+        self.scope_tracker.borrow_mut().exit(node).map_break(Break::convert)?;
 
         ControlFlow::Continue(())
     }

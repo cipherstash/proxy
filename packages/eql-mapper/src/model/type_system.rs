@@ -97,7 +97,7 @@ impl TryFrom<&unifier::ProjectionColumns> for Type {
         for unifier::ProjectionColumn {
             ty,
             alias,
-            must_be_aggregated: _,
+            affected_by_group_by: _,
         } in columns.0.iter()
         {
             let pub_column: ProjectionColumn = match &*ty.as_type() {
@@ -170,7 +170,7 @@ impl TryFrom<&unifier::Type> for Type {
                 for unifier::ProjectionColumn {
                     ty,
                     alias,
-                    must_be_aggregated: _,
+                    affected_by_group_by: _,
                 } in columns.0.iter()
                 {
                     let pub_column: ProjectionColumn = match &*ty.as_type() {

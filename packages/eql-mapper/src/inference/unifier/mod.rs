@@ -200,7 +200,7 @@ impl<'ast> Unifier<'ast> {
                         .iter()
                         .zip(rhs_projection.columns())
                     {
-                        let must_be_aggregated = match (lhs_col.must_be_aggregated, rhs_col.must_be_aggregated) {
+                        let affected_by_group_by = match (lhs_col.affected_by_group_by, rhs_col.affected_by_group_by) {
                             (None, None) => None,
                             (None, Some(rhs)) => Some(rhs),
                             (Some(lhs), None) => Some(lhs),
@@ -214,7 +214,7 @@ impl<'ast> Unifier<'ast> {
                         cols.push(ProjectionColumn::new_with_aggregation(
                             self.unify(lhs_col.ty.clone(), rhs_col.ty.clone())?,
                             lhs_col.alias.clone(),
-                            must_be_aggregated,
+                            affected_by_group_by,
                         ));
                     }
                     let unified = TypeCell::new(Type::Constructor(Constructor::Projection(

@@ -11,14 +11,14 @@ impl<'ast> InferType<'ast, Select> for TypeInferencer<'ast> {
         // Every Expr in the SELECT projection
         //  1. that is *not* in the GROUP BY clause
         //  2. that is not already performing aggregation
-        // MUST be a ProjectionColumn with `must_be_aggregated: Some(true)`
+        // MUST be a ProjectionColumn with `affected_by_group_by: Some(true)`
         let projection_columns: Vec<ProjectionColumn> = match &select.group_by {
             GroupByExpr::Expressions(group_by_exprs, _) => select
                 .projection
                 .iter()
                 .map(|select_item| ProjectionColumn {
                     ty: self.fresh_tvar(),
-                    must_be_aggregated: Some(requires_aggregation(
+                    affected_by_group_by: Some(affected_by_group_by(
                         select_item,
                         group_by_exprs,
                         &self.scope_tracker.borrow(),
@@ -31,7 +31,7 @@ impl<'ast> InferType<'ast, Select> for TypeInferencer<'ast> {
                 .iter()
                 .map(|_| ProjectionColumn {
                     ty: self.fresh_tvar(),
-                    must_be_aggregated: Some(false),
+                    affected_by_group_by: Some(false),
                     alias: None,
                 })
                 .collect(),
@@ -57,14 +57,14 @@ impl<'ast> InferType<'ast, Select> for TypeInferencer<'ast> {
     }
 }
 
-fn requires_aggregation<'ast>(
+fn affected_by_group_by<'ast>(
     select_item: &'ast SelectItem,
     group_by_exprs: &'ast [Expr],
     scope: &ScopeTracker<'ast>,
 ) -> bool {
     match select_item {
         SelectItem::UnnamedExpr(expr) | SelectItem::ExprWithAlias { expr, alias: _ } => {
-            !is_aggregated(expr) && !is_in_group_by(expr, group_by_exprs, scope)
+            !is_present_in_group_by(expr, group_by_exprs, scope)
         }
 
         SelectItem::QualifiedWildcard(_, _) => false,
@@ -72,11 +72,7 @@ fn requires_aggregation<'ast>(
     }
 }
 
-fn is_aggregated(expr: &Expr) -> bool {
-    false
-}
-
-fn is_in_group_by<'ast>(
+fn is_present_in_group_by<'ast>(
     expr: &'ast Expr,
     group_by_exprs: &'ast [Expr],
     scope: &ScopeTracker<'ast>,

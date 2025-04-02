@@ -84,8 +84,8 @@ pub struct ProjectionColumn {
     /// If a `GROUP BY` clause is present which *does not* mention this column then this column must be aggregated when
     /// selected in a projection.
     ///
-    /// If `must_be_aggregated` == `None` it means at the current stage of type inference it is unknown.
-    pub must_be_aggregated: Option<bool>,
+    /// If `affected_by_group_by` == `None` it means at the current stage of type inference it is unknown.
+    pub affected_by_group_by: Option<bool>,
 
     /// The columm alias
     pub alias: Option<Ident>,
@@ -213,7 +213,7 @@ impl ProjectionColumns {
         for ProjectionColumn {
             ty,
             alias,
-            must_be_aggregated: _,
+            affected_by_group_by: _,
         } in &self.0
         {
             match &*ty.as_type() {
@@ -258,12 +258,12 @@ impl From<Arc<Table>> for ProjectionColumns {
 impl ProjectionColumn {
     /// Returns a new `ProjectionColumn` with type `ty` and optional `alias`.
     ///
-    /// `must_be_aggregated` will be set to `None`.
+    /// `affected_by_group_by` will be set to `None`.
     pub(crate) fn new(ty: TypeCell, alias: Option<Ident>) -> Self {
         Self {
             ty,
             alias,
-            must_be_aggregated: None,
+            affected_by_group_by: None,
         }
     }
 
@@ -271,12 +271,12 @@ impl ProjectionColumn {
     pub(crate) fn new_with_aggregation(
         ty: TypeCell,
         alias: Option<Ident>,
-        must_be_aggregated: Option<bool>,
+        affected_by_group_by: Option<bool>,
     ) -> Self {
         Self {
             ty,
             alias,
-            must_be_aggregated,
+            affected_by_group_by,
         }
     }
 
