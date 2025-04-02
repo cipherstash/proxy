@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1743569874300,
+  "lastUpdate": 1743570336787,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -124,6 +124,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 6.664656,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "9f66ba68aa2c8045d1510d98c70f40e539ea45c8",
+          "message": "feat: pgbench with postgres, pgbouncer and proxy",
+          "timestamp": "2025-04-02T04:59:06Z",
+          "url": "https://github.com/cipherstash/proxy/pull/197/commits/9f66ba68aa2c8045d1510d98c70f40e539ea45c8"
+        },
+        "date": 1743570335296,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 6.729725,
             "unit": "Number"
           }
         ]
