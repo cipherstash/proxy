@@ -51,6 +51,10 @@ description = "Run Proxy instance with docker compose"
 dir = "{{config_root}}/tests"
 run = """
 #!/bin/bash
+
+# Exit immediately if any command returns non-zero. Stops proxy from starting when the build fails
+set -e
+
 {% set target = arch() ~ "-unknown-linux-gnu" | replace(from="arm64", to="aarch64") | replace(from="x64", to="x86_64") %}
 {% set docker_platform = "linux/" ~ arch() | replace(from="x64", to="amd64") %}
 
@@ -524,6 +528,10 @@ mise run build:docker --platform {{option(name="platform",default=default_platfo
 description = "Build a releasable binary for cipherstash-proxy"
 run = """
 #!/bin/bash
+
+# Exit immediately if any command returns a non-zero value
+set -e
+
 {% set default_target_arch = arch() | replace(from="arm64", to="aarch64") | replace(from="x64", to="x86_64") %}
 {% set default_target_os = os() | replace(from="linux", to="unknown-linux-gnu") | replace(from="macos", to="apple-darwin") %}
 {% set default_target = default_target_arch ~ "-" ~ default_target_os %}
