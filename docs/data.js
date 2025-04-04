@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1743732807355,
+  "lastUpdate": 1743734503783,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -253,6 +253,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 6.75447,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "yujiyokoo@gmail.com",
+            "name": "Yuji Yokoo",
+            "username": "yujiyokoo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "864609076bfa6a22e409b02ca52961d21053a03a",
+          "message": "Merge pull request #200 from cipherstash/update-auth-rs-for-new-stable-rust\n\nchore: update code so it builds on 1.86.0",
+          "timestamp": "2025-04-04T11:38:34+09:00",
+          "tree_id": "0f2e6bc30cbb11c00069713f62812507bf360b33",
+          "url": "https://github.com/cipherstash/proxy/commit/864609076bfa6a22e409b02ca52961d21053a03a"
+        },
+        "date": 1743734502389,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 6.711046,
             "unit": "Number"
           }
         ]
