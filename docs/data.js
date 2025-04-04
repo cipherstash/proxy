@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1743633863210,
+  "lastUpdate": 1743730896636,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -203,6 +203,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 7.103985,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "35075b8902de03bcdbaa21060bc1631cc3bace88",
+          "message": "chore: Make proxy not start on build failure",
+          "timestamp": "2025-04-02T22:40:51Z",
+          "url": "https://github.com/cipherstash/proxy/pull/199/commits/35075b8902de03bcdbaa21060bc1631cc3bace88"
+        },
+        "date": 1743730895603,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 7.140097,
             "unit": "Number"
           }
         ]
