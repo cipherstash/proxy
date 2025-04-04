@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1743734520040,
+  "lastUpdate": 1743735546495,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -307,6 +307,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 6.585234,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "yujiyokoo@gmail.com",
+            "name": "Yuji Yokoo",
+            "username": "yujiyokoo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "a412914a25398543fa00fc4b825bcfefb2910a9d",
+          "message": "Merge pull request #199 from cipherstash/make-proxy-not-start-on-build-fail\n\nchore: Make proxy not start on build failure",
+          "timestamp": "2025-04-04T11:55:52+09:00",
+          "tree_id": "26b0fa4b239d9ce3671990b5e8eba93e0b3c946d",
+          "url": "https://github.com/cipherstash/proxy/commit/a412914a25398543fa00fc4b825bcfefb2910a9d"
+        },
+        "date": 1743735545116,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 6.742193,
             "unit": "Number"
           }
         ]
