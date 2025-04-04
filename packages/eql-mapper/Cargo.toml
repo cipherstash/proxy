@@ -16,7 +16,7 @@ itertools = "^0.13"
 sqlparser = { workspace = true }
 # sqltk = { git = "https://github.com/cipherstash/sqltk/", rev = "214f9b90e4f07d4414292813ffd6e45dec075fbb" }
 # sqltk = { git = "https://github.com/cipherstash/sqltk/", rev = "cdf2e7c" }
-sqltk = { git = "https://github.com/cipherstash/sqltk/", rev = "ed16c91" }
+sqltk = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }

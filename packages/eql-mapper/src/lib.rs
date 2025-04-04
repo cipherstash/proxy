@@ -1,5 +1,6 @@
 //! `eql-mapper` transforms SQL to SQL+EQL using a known database schema as a reference.
 
+mod selector;
 mod dep;
 mod eql_function_tracker;
 mod eql_mapper;
@@ -12,6 +13,7 @@ mod scope_tracker;
 #[cfg(test)]
 mod test_helpers;
 
+pub use selector::*;
 pub use dep::*;
 pub use eql_mapper::*;
 pub use importer::*;
@@ -26,7 +28,7 @@ mod test {
     use super::type_check;
     use crate::col;
     use crate::projection;
-    use crate::NodeKey;
+    use sqltk::AsNodeKey;
     use crate::Schema;
     use crate::TableResolver;
     use crate::{schema, EqlValue, NativeValue, Projection, ProjectionColumn, TableColumn, Value};
@@ -1020,7 +1022,7 @@ mod test {
         );
 
         let transformed_statement = match typed.transform(HashMap::from_iter([(
-            NodeKey::new(typed.literals[0].1),
+            typed.literals[0].1.as_node_key(),
             ast::Expr::Value(ast::Value::SingleQuotedString("ENCRYPTED".into())),
         )])) {
             Ok(transformed_statement) => transformed_statement,
@@ -1314,5 +1316,34 @@ mod test {
 
         type_check(schema, &statement)
             .expect_err("eql columns in functions should be a type error");
+    }
+
+    #[test]
+    fn group_by_eql_column() {
+        let _ = tracing_subscriber::fmt::try_init();
+        let schema = resolver(schema! {
+            tables: {
+                users: {
+                    id (PK),
+                    email (EQL),
+                    first_name,
+                }
+            }
+        });
+
+        let statement = parse("SELECT email FROM users GROUP BY email");
+
+        match type_check(schema, &statement) {
+            Ok(typed) => {
+                match typed.transform(HashMap::new()) {
+                    Ok(statement) => assert_eq!(
+                        statement.to_string(),
+                        "SELECT cs_grouped_value_v1(email) AS email FROM users GROUP BY cs_ore_64_8_v1(email)".to_string()
+                    ),
+                    Err(err) => panic!("transformation failed: {err}"),
+                }
+            }
+            Err(err) => panic!("type check failed: {err}"),
+        }
     }
 }

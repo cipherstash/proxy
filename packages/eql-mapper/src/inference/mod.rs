@@ -1,8 +1,6 @@
 mod infer_type;
 mod infer_type_impls;
-mod node_key;
 mod registry;
-mod semantic_eq;
 mod type_error;
 mod type_variables;
 
@@ -26,11 +24,10 @@ use infer_type::InferType;
 use sqlparser::ast::{
     Delete, Expr, Function, Insert, Query, Select, SelectItem, SetExpr, Statement, Value, Values,
 };
-use sqltk::{into_control_flow, Break, Semantic, Visitable, Visitor};
+use sqltk::{into_control_flow, AsNodeKey, Break, NodeKey, Visitable, Visitor};
 
 use crate::{ScopeTracker, TableResolver};
 
-pub use node_key::*;
 pub(crate) use registry::*;
 pub(crate) use type_error::*;
 pub(crate) use type_variables::*;
@@ -55,7 +52,7 @@ pub struct TypeInferencer<'ast> {
     table_resolver: Arc<TableResolver>,
 
     // The lexical scope - for resolving projection columns & expanding wildcards.
-    scope_tracker: Rc<RefCell<ScopeTracker<'ast>>>,
+    scope_tracker: Rc<RefCell<ScopeTracker>>,
 
     /// Associates types with AST nodes.
     reg: Rc<RefCell<TypeRegistry<'ast>>>,
@@ -77,7 +74,7 @@ impl<'ast> TypeInferencer<'ast> {
     /// Create a new `TypeInferencer`.
     pub fn new(
         table_resolver: impl Into<Arc<TableResolver>>,
-        scope: impl Into<Rc<RefCell<ScopeTracker<'ast>>>>,
+        scope: impl Into<Rc<RefCell<ScopeTracker>>>,
         reg: impl Into<Rc<RefCell<TypeRegistry<'ast>>>>,
         unifier: impl Into<Rc<RefCell<unifier::Unifier<'ast>>>>,
     ) -> Self {
@@ -93,7 +90,7 @@ impl<'ast> TypeInferencer<'ast> {
     }
 
     /// Shorthand for calling `self.reg.borrow_mut().get_type(node)` in [`InferType`] implementations for `TypeInferencer`.
-    pub(crate) fn get_type<N: Semantic>(&self, node: &'ast N) -> TypeCell {
+    pub(crate) fn get_type<N: AsNodeKey>(&self, node: &'ast N) -> TypeCell {
         self.reg.borrow_mut().get_type(node).clone()
     }
 
@@ -159,7 +156,7 @@ impl<'ast> TypeInferencer<'ast> {
 
     /// Unifies the types of two nodes with a third type and records the unification result.
     /// After a successful unification both nodes will refer to the same type.
-    fn unify_nodes_with_type<N1: Semantic, N2: Semantic>(
+    fn unify_nodes_with_type<N1: AsNodeKey, N2: AsNodeKey>(
         &self,
         left: &'ast N1,
         right: &'ast N2,
@@ -172,7 +169,7 @@ impl<'ast> TypeInferencer<'ast> {
     }
 
     /// Unifies the type of a node with a second type and records the unification result.
-    fn unify_node_with_type<N: Semantic>(
+    fn unify_node_with_type<N: AsNodeKey>(
         &self,
         node: &'ast N,
         ty: TypeCell,
@@ -183,7 +180,7 @@ impl<'ast> TypeInferencer<'ast> {
 
     /// Unifies the types of two nodes with each other.
     /// After a successful unification both nodes will refer to the same type.
-    fn unify_nodes<N1: Semantic + Debug, N2: Semantic + Debug>(
+    fn unify_nodes<N1: AsNodeKey + Debug, N2: AsNodeKey + Debug>(
         &self,
         left: &'ast N1,
         right: &'ast N2,
@@ -204,7 +201,7 @@ impl<'ast> TypeInferencer<'ast> {
         }
     }
 
-    fn unify_all_with_type<N: Semantic + Debug>(
+    fn unify_all_with_type<N: Debug + AsNodeKey>(
         &self,
         nodes: &'ast [N],
         ty: TypeCell,
@@ -216,6 +213,10 @@ impl<'ast> TypeInferencer<'ast> {
 
     pub(crate) fn fresh_tvar(&self) -> TypeCell {
         self.reg.borrow_mut().fresh_tvar()
+    }
+
+    pub(crate) fn node_types(&self) -> HashMap<NodeKey<'ast>, TypeCell> {
+        self.reg.borrow_mut().take_node_types()
     }
 }
 
@@ -251,7 +252,7 @@ impl<'ast> Visitor<'ast> for TypeInferencer<'ast> {
                         self.param_types.push((param.clone(), self.get_type(node)));
                     }
                     _ => {
-                        self.literal_nodes.insert(NodeKey::new(node));
+                        self.literal_nodes.insert(node.as_node_key());
                     }
                 }
             }
@@ -266,6 +267,10 @@ impl<'ast> Visitor<'ast> for TypeInferencer<'ast> {
         }
 
         if let Some(node) = node.downcast_ref::<Vec<SelectItem>>() {
+            into_control_flow(self.infer_enter(node))?
+        }
+
+        if let Some(node) = node.downcast_ref::<SelectItem>() {
             into_control_flow(self.infer_enter(node))?
         }
 
@@ -310,6 +315,10 @@ impl<'ast> Visitor<'ast> for TypeInferencer<'ast> {
         }
 
         if let Some(node) = node.downcast_ref::<Vec<SelectItem>>() {
+            into_control_flow(self.infer_exit(node))?
+        }
+
+        if let Some(node) = node.downcast_ref::<SelectItem>() {
             into_control_flow(self.infer_exit(node))?
         }
 

@@ -1,11 +1,11 @@
 use std::{collections::HashMap, marker::PhantomData};
 
 use sqlparser::ast::Expr;
-use sqltk::Semantic;
+use sqltk::{AsNodeKey, NodeKey};
 
 use crate::inference::unifier::{Type, TypeVar};
 
-use super::{NodeKey, TypeCell, TypeVarGenerator};
+use super::{TypeCell, TypeVarGenerator};
 
 /// `TypeRegistry` maintains an association between `sqlparser` AST nodes and the node's inferred [`Type`].
 #[derive(Debug)]
@@ -33,6 +33,10 @@ impl<'ast> TypeRegistry<'ast> {
         }
     }
 
+    pub(crate) fn take_node_types(&mut self) -> HashMap<NodeKey<'ast>, TypeCell> {
+        std::mem::take(&mut self.node_types)
+    }
+
     pub(crate) fn get_substitution(&self, tvar: TypeVar) -> Option<TypeCell> {
         self.substitutions.get(&tvar).cloned()
     }
@@ -46,10 +50,10 @@ impl<'ast> TypeRegistry<'ast> {
     /// `Type(Def::Var(TypeVar::Fresh))` will be associated with the node and returned.
     ///
     /// This method is idempotent and further calls will return the same type.
-    pub(crate) fn get_type<N: Semantic>(&mut self, node: &'ast N) -> &TypeCell {
+    pub(crate) fn get_type<N: AsNodeKey>(&mut self, node: &'ast N) -> &TypeCell {
         let tvar = self.fresh_tvar();
 
-        self.node_types.entry(NodeKey::new(node)).or_insert(tvar)
+        self.node_types.entry(node.as_node_key()).or_insert(tvar)
     }
 
     pub(crate) fn get_type_by_node_key(&self, key: &NodeKey<'ast>) -> Option<&TypeCell> {
@@ -83,11 +87,11 @@ pub(crate) mod test_util {
         Delete, Expr, Function, FunctionArguments, Insert, Query, Select, SelectItem, SetExpr,
         Statement,
     };
-    use sqltk::{Break, Visitable, Visitor};
+    use sqltk::{AsNodeKey, Break, Visitable, Visitor};
     use std::{convert::Infallible, fmt::Debug, ops::ControlFlow};
     use tracing::error;
 
-    use super::{NodeKey, TypeRegistry};
+    use super::TypeRegistry;
 
     use std::fmt::Display;
 
@@ -95,8 +99,8 @@ pub(crate) mod test_util {
         /// Dumps the type information for a specific AST node to STDERR.
         ///
         /// Useful when debugging tests.
-        pub(crate) fn dump_node<N: Display + Visitable + Debug>(&self, node: &N) {
-            let key = NodeKey::new_from_visitable(node);
+        pub(crate) fn dump_node<N: Display + AsNodeKey + Debug>(&self, node: &N) {
+            let key = node.as_node_key();
             if let Some(ty) = self.node_types.get(&key) {
                 error!(
                     "TYPE<\nast: {}\nsyn: {}\nty: {}\n>",

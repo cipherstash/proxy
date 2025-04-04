@@ -4,42 +4,35 @@ use crate::inference::TypeError;
 use crate::iterator_ext::IteratorExt;
 use crate::model::SqlIdent;
 use crate::unifier::{Projection, ProjectionColumns, TypeCell};
-use crate::{NodeKey, Relation};
+use crate::Relation;
 use sqlparser::ast::{Ident, ObjectName, Query, Statement};
 use sqltk::{into_control_flow, Break, Visitable, Visitor};
 use std::cell::RefCell;
-use std::collections::HashMap;
 use std::fmt::Debug;
 use std::ops::ControlFlow;
 use std::rc::Rc;
 
 /// [`Visitor`] implementation that manages creation of lexical [`Scope`]s and the current active lexical scope.
 #[derive(Debug)]
-pub struct ScopeTracker<'ast> {
+pub struct ScopeTracker {
     stack: Vec<Rc<RefCell<Scope>>>,
-    node_scopes: HashMap<NodeKey<'ast>, Rc<RefCell<Scope>>>,
 }
 
-impl Default for ScopeTracker<'_> {
+impl Default for ScopeTracker {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl ScopeTracker<'_> {
+impl ScopeTracker {
     pub fn new() -> Self {
         Self {
-            node_scopes: HashMap::new(),
             stack: Vec::with_capacity(64),
         }
     }
 
     fn current_scope(&self) -> Result<Rc<RefCell<Scope>>, ScopeError> {
         self.stack.last().cloned().ok_or(ScopeError::NoCurrentScope)
-    }
-
-    pub(crate) fn scope_for_node(&self, key: NodeKey<'_>) -> Option<Rc<RefCell<Scope>>> {
-        self.node_scopes.get(&key).cloned()
     }
 
     /// Resolves an unqualified wildcard. Resolution occurs in the current scope only  (i.e. does not look into parent
@@ -312,20 +305,13 @@ pub enum ScopeError {
     NoCurrentScope,
 }
 
-impl<'ast> Visitor<'ast> for ScopeTracker<'ast> {
+impl<'ast> Visitor<'ast> for ScopeTracker {
     type Error = ScopeError;
 
     fn enter<N: Visitable>(&mut self, node: &'ast N) -> ControlFlow<Break<Self::Error>> {
-        let node_key = NodeKey::new_from_visitable(node);
-        if let Some(current_scope) = self.stack.last() {
-            self.node_scopes
-                .insert(node_key.clone(), current_scope.clone());
-        }
-
         if node.downcast_ref::<Statement>().is_some() {
             let root = Scope::new_root();
             self.stack.push(root.clone());
-            self.node_scopes.insert(node_key, root);
             return ControlFlow::Continue(());
         }
 
@@ -334,16 +320,10 @@ impl<'ast> Visitor<'ast> for ScopeTracker<'ast> {
                 Some(scope) => {
                     let child = Scope::new_child(scope);
                     self.stack.push(child.clone());
-                    self.node_scopes.insert(node_key, child);
                     return ControlFlow::Continue(());
                 }
                 None => return ControlFlow::Break(Break::Err(ScopeError::NoCurrentScope)),
             }
-        }
-
-        if let Some(current_scope) = self.stack.last() {
-            let node_key = NodeKey::new_from_visitable(node);
-            self.node_scopes.insert(node_key, current_scope.clone());
         }
 
         ControlFlow::Continue(())

@@ -200,21 +200,9 @@ impl<'ast> Unifier<'ast> {
                         .iter()
                         .zip(rhs_projection.columns())
                     {
-                        let affected_by_group_by = match (lhs_col.affected_by_group_by, rhs_col.affected_by_group_by) {
-                            (None, None) => None,
-                            (None, Some(rhs)) => Some(rhs),
-                            (Some(lhs), None) => Some(lhs),
-                            (Some(lhs), Some(rhs)) if lhs == rhs => Some(lhs),
-                            (Some(_), Some(_)) => Err(TypeError::Conflict(format!(
-                                "cannot unify projection columns {} and {} because they have conflicting aggregation requirements",
-                                lhs_col,rhs_col
-                            )))?,
-                        };
-
-                        cols.push(ProjectionColumn::new_with_aggregation(
+                        cols.push(ProjectionColumn::new(
                             self.unify(lhs_col.ty.clone(), rhs_col.ty.clone())?,
                             lhs_col.alias.clone(),
-                            affected_by_group_by,
                         ));
                     }
                     let unified = TypeCell::new(Type::Constructor(Constructor::Projection(

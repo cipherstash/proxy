@@ -26,13 +26,14 @@ use crate::prometheus::{
 use crate::Encrypted;
 use bytes::BytesMut;
 use cipherstash_client::encryption::Plaintext;
-use eql_mapper::{self, EqlMapperError, EqlValue, NodeKey, TableColumn, TypedStatement};
+use eql_mapper::{self, EqlMapperError, EqlValue, TableColumn, TypedStatement};
 use metrics::{counter, histogram};
 use pg_escape::quote_literal;
 use serde::Serialize;
 use sqlparser::ast::{self, Expr, Value};
 use sqlparser::dialect::PostgreSqlDialect;
 use sqlparser::parser::Parser;
+use sqltk::AsNodeKey;
 use std::collections::HashMap;
 use std::time::Instant;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
@@ -421,7 +422,7 @@ where
             .literals
             .iter()
             .zip(encrypted_expressions.into_iter())
-            .filter_map(|((_, original_node), en)| en.map(|en| (NodeKey::new(*original_node), en)))
+            .filter_map(|((_, original_node), en)| en.map(|en| (original_node.as_node_key(), en)))
             .collect::<HashMap<_, _>>();
 
         debug!(target: MAPPER,

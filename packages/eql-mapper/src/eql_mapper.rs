@@ -3,14 +3,18 @@ use crate::{
     eql_function_tracker::{EqlFunctionTracker, EqlFunctionTrackerError},
     inference::{unifier, TypeError, TypeInferencer},
     unifier::{EqlValue, Unifier},
-    DepMut, NodeKey, Projection, ProjectionColumn, ScopeError, ScopeTracker, TableResolver,
+    DepMut, EndsWith, Projection, ProjectionColumn, ScopeError, ScopeTracker, TableResolver, Type,
     TypeRegistry, Value,
 };
-use sqlparser::ast::{self as ast, Expr, GroupByExpr, Select, SelectItem, Statement};
-use sqltk::{convert_control_flow, Break, Context, Transform, Transformable, Visitable, Visitor};
+use sqlparser::ast::{
+    self as ast, Expr, Function, FunctionArg, FunctionArgumentList, FunctionArguments, GroupByExpr,
+    Ident, ObjectName, Select, SelectItem, Statement,
+};
+use sqltk::{AsNodeKey, Break, Context, NodeKey, Transform, Transformable, Visitable, Visitor};
 use std::{
     cell::RefCell,
     collections::{HashMap, HashSet},
+    convert::Infallible,
     marker::PhantomData,
     ops::ControlFlow,
     rc::Rc,
@@ -46,6 +50,7 @@ pub fn type_check<'ast>(
             let projection = mapper.statement_type(statement);
             let params = mapper.param_types();
             let literals = mapper.literal_types();
+            let node_types = mapper.node_types();
 
             if projection.is_err() || params.is_err() || literals.is_err() {
                 #[cfg(test)]
@@ -60,6 +65,7 @@ pub fn type_check<'ast>(
                 params: params?,
                 literals: literals?,
                 nodes_to_wrap: mapper.nodes_to_wrap(),
+                node_types: node_types?,
             })
         }
         ControlFlow::Break(Break::Err(err)) => {
@@ -116,6 +122,8 @@ pub struct TypedStatement<'ast> {
     pub literals: Vec<(EqlValue, &'ast ast::Expr)>,
 
     pub nodes_to_wrap: HashSet<NodeKey<'ast>>,
+
+    pub node_types: HashMap<NodeKey<'ast>, Type>,
 }
 
 /// The error type returned by various functions in the `eql_mapper` crate.
@@ -147,7 +155,7 @@ pub enum EqlMapperError {
 /// been converted to EQL payloads containing the encrypted literal and/or encrypted representations of those literals.
 #[derive(Debug)]
 struct EqlMapper<'ast> {
-    scope_tracker: Rc<RefCell<ScopeTracker<'ast>>>,
+    scope_tracker: Rc<RefCell<ScopeTracker>>,
     importer: Rc<RefCell<Importer<'ast>>>,
     inferencer: Rc<RefCell<TypeInferencer<'ast>>>,
     registry: Rc<RefCell<TypeRegistry<'ast>>>,
@@ -190,7 +198,7 @@ impl<'ast> EqlMapper<'ast> {
         statement: &'ast Statement,
     ) -> Result<Option<Projection>, EqlMapperError> {
         let reg = self.registry.borrow();
-        match reg.get_type_by_node_key(&NodeKey::new(statement)) {
+        match reg.get_type_by_node_key(&statement.as_node_key()) {
             Some(ty_cell) => match ty_cell.resolved(&reg) {
                 Ok(ty_ref) => match &*ty_ref {
                     unifier::Type::Constructor(unifier::Constructor::Projection(
@@ -289,6 +297,21 @@ impl<'ast> EqlMapper<'ast> {
         Ok(literals)
     }
 
+    fn node_types(&self) -> Result<HashMap<NodeKey<'ast>, Type>, EqlMapperError> {
+        let inferencer = self.inferencer.borrow();
+        let node_types = inferencer.node_types();
+
+        let mut resolved_node_types: HashMap<NodeKey<'ast>, Type> = HashMap::new();
+        for (key, tcell) in node_types {
+            resolved_node_types.insert(
+                key,
+                Type::try_from(&*tcell.resolved(&*self.registry.borrow())?)?,
+            );
+        }
+
+        Ok(resolved_node_types)
+    }
+
     /// Takes `eql_function_tracker`, consumes it, and returns a `HashSet` of keys for nodes
     /// that the type checker has marked for wrapping with EQL function calls.
     fn nodes_to_wrap(&self) -> HashSet<NodeKey<'ast>> {
@@ -303,7 +326,7 @@ impl<'ast> TypedStatement<'ast> {
         encrypted_literals: HashMap<NodeKey<'ast>, ast::Expr>,
     ) -> Result<Statement, EqlMapperError> {
         for (_, target) in self.literals.iter() {
-            if !encrypted_literals.contains_key(&NodeKey::new(*target)) {
+            if !encrypted_literals.contains_key(&target.as_node_key()) {
                 return Err(EqlMapperError::Transform(String::from("encrypted literals refers to a literal node which is not present in the SQL statement")));
             }
         }
@@ -311,6 +334,7 @@ impl<'ast> TypedStatement<'ast> {
         self.statement.apply_transform(&mut EncryptedStatement::new(
             encrypted_literals,
             &self.nodes_to_wrap,
+            &self.node_types,
         ))
     }
 
@@ -341,16 +365,247 @@ impl<'ast> TypedStatement<'ast> {
 struct EncryptedStatement<'ast> {
     encrypted_literals: HashMap<NodeKey<'ast>, ast::Expr>,
     nodes_to_wrap: &'ast HashSet<NodeKey<'ast>>,
+    node_types: &'ast HashMap<NodeKey<'ast>, Type>,
 }
 
 impl<'ast> EncryptedStatement<'ast> {
     fn new(
         encrypted_literals: HashMap<NodeKey<'ast>, ast::Expr>,
         nodes_to_wrap: &'ast HashSet<NodeKey<'ast>>,
+        node_types: &'ast HashMap<NodeKey<'ast>, Type>,
     ) -> Self {
         Self {
             encrypted_literals,
             nodes_to_wrap,
+            node_types,
+        }
+    }
+
+    /// We need to know if an [`Expr`] using an EQL column in a projection has to be aggregated, or have its
+    /// aggregation rewritten.
+    ///
+    /// # Scenario 1: The "grouping by the encrypted column" case
+    ///
+    /// In this case the encrypted column is mentioned in the GROUP BY clause so the grouped value must be extracted.
+    ///
+    /// ## Input
+    ///
+    /// ```sql
+    /// SELECT
+    ///   email_encrypted,
+    ///   count(*)
+    /// FROM orders
+    /// GROUP BY email_encrypted;
+    /// ```
+    ///
+    /// ## Output
+    ///
+    /// SELECT
+    ///   cs_grouped_value_v1(email_encrypted) as email_encrypted,
+    ///   count(*)
+    /// FROM orders
+    /// GROUP BY cs_ore_64_8_1(email_encrypted);
+    ///
+    /// # Scenario 2: The "grouping by another column" case
+    ///
+    /// In this case the encrypted column is NOT mentioned in the GROUP BY which means it already must be aggregated but
+    /// we need to change the aggregate function: `MIN` becomes `cs_min_v1` and `MAX` becomes `cs_max_v1`.
+    ///
+    /// ## Input
+    ///
+    /// ```sql
+    /// SELECT
+    ///   MIN(email_encrypted) as email_encrypted,
+    ///   completed_at
+    /// FROM orders
+    /// GROUP BY completed_at;
+    /// ```
+    ///
+    /// ## Output
+    ///
+    /// ```sql
+    /// SELECT
+    ///   cs_min_v1(email_encrypted) as email_encrypted,
+    ///   completed_at
+    /// FROM orders
+    /// GROUP BY completed_at;
+    /// ```
+    fn transform_projection_exprs_as_per_group_by_clause<N: Visitable>(
+        &mut self,
+        new_node: &mut N,
+        original_node: &'ast N,
+        context: &Context<'ast>,
+    ) -> Result<(), EqlMapperError> {
+        // Scenario 1: Wrap column expr in cs_grouped_value_1
+        if let Some((select, _projection, _select_item, expr)) =
+            EndsWith::<(&Select, &Vec<SelectItem>, &SelectItem, &mut Expr)>::try_match(
+                context, new_node,
+            )
+        {
+            if self.is_used_in_group_by_clause(&select.group_by, original_node) {
+                *expr = self.wrap_in_single_arg_function(
+                    expr.clone(),
+                    ObjectName(vec![Ident::new("cs_grouped_value_v1")]),
+                );
+            }
+        }
+
+        // Scenario 1: add alias to column in order to preserve the effective alias prior to transformation.
+        if let Some((select, _projection, select_item)) =
+            EndsWith::<(&Select, &Vec<SelectItem>, &mut SelectItem)>::try_match(context, new_node)
+        {
+            if self.is_used_in_group_by_clause(&select.group_by, original_node) {
+                *select_item = self.add_alias_to_unnamed_select_item(
+                    select_item.clone(),
+                    original_node.downcast_ref().unwrap(),
+                );
+            }
+        }
+
+        // Scenario 1: wrap the specific group clause expression in `cs_ore_64_8_v1(..)`
+        if let Some((_group_by_clause, _exprs, expr)) =
+            EndsWith::<(&GroupByExpr, &Vec<Expr>, &mut Expr)>::try_match(context, new_node)
+        {
+            let _s = format!("TY: {:#?}", self.node_types.get(&original_node.as_node_key()));
+            if let Some(Type::Value(Value::Eql(_))) = self.node_types.get(&original_node.as_node_key()) {
+                *expr = self.wrap_in_single_arg_function(
+                    expr.clone(),
+                    ObjectName(vec![Ident::new("cs_ore_64_8_v1")]),
+                );
+            }
+        }
+
+        Ok(())
+    }
+
+    fn wrap_in_single_arg_function(&self, to_wrap: Expr, name: ObjectName) -> Expr {
+        Expr::Function(Function {
+            name,
+            parameters: FunctionArguments::None,
+            args: FunctionArguments::List(FunctionArgumentList {
+                args: vec![FunctionArg::Unnamed(ast::FunctionArgExpr::Expr(
+                    to_wrap.clone(),
+                ))],
+                duplicate_treatment: None,
+                clauses: vec![],
+            }),
+            filter: None,
+            null_treatment: None,
+            over: None,
+            within_group: vec![],
+        })
+    }
+
+    /// Converts [`SelectItem::UnnamedExpr`] to [`SelectItem::ExprWithAlias`].
+    ///
+    /// All other variants are returned unmodified.
+    fn add_alias_to_unnamed_select_item(
+        &self,
+        to_wrap: SelectItem,
+        original_node: &SelectItem,
+    ) -> SelectItem {
+        match to_wrap {
+            SelectItem::UnnamedExpr(expr) => {
+                match self.derive_alias_from_select_item(original_node) {
+                    Some(alias) => SelectItem::ExprWithAlias { expr, alias },
+                    None => SelectItem::UnnamedExpr(expr),
+                }
+            }
+            other => other,
+        }
+    }
+
+    fn derive_alias_from_select_item(&self, node: &SelectItem) -> Option<Ident> {
+        match node {
+            SelectItem::UnnamedExpr(expr) => {
+                /// Unwrap an [`Expr`] until we find a `Expr::Identifier`, `Expr::CompoundIdentifier` or `Expr::Function`.
+                /// This is meant to emulate what Postgres does when it tries to derive a column name from an expression that
+                /// has no alias.
+                struct DeriveNameFromExpr {
+                    found: Option<Ident>,
+                }
+
+                impl<'ast> Visitor<'ast> for DeriveNameFromExpr {
+                    type Error = Infallible;
+
+                    fn enter<N: Visitable>(
+                        &mut self,
+                        node: &'ast N,
+                    ) -> ControlFlow<Break<Self::Error>> {
+                        if let Some(expr) = node.downcast_ref::<Expr>() {
+                            match expr {
+                                Expr::Identifier(ident) => {
+                                    self.found = Some(ident.clone());
+                                    return ControlFlow::Break(Break::Finished);
+                                }
+                                Expr::CompoundIdentifier(obj_name) => {
+                                    self.found = Some(obj_name.last().unwrap().clone());
+                                    return ControlFlow::Break(Break::Finished);
+                                }
+                                Expr::Function(Function { name, .. }) => {
+                                    self.found = Some(name.0.last().unwrap().clone());
+                                    return ControlFlow::Break(Break::Finished);
+                                }
+                                _ => {}
+                            }
+                        }
+
+                        ControlFlow::Continue(())
+                    }
+                }
+
+                let mut visitor = DeriveNameFromExpr { found: None };
+                expr.accept(&mut visitor);
+                visitor.found
+            }
+            SelectItem::ExprWithAlias { expr: _, alias } => Some(alias.clone()),
+            _ => None,
+        }
+    }
+
+    /// Checks if `node` has an EQL type (encrypted) and that type is referenced in the `GROUP BY` clause of `select`.
+    fn is_used_in_group_by_clause<N: AsNodeKey>(
+        &self,
+        group_by: &'ast GroupByExpr,
+        node: &'ast N,
+    ) -> bool {
+        struct ContainsExprWithType<'ast, 't> {
+            node_types: &'t HashMap<NodeKey<'ast>, Type>,
+            needle: &'t Type,
+            found: bool,
+        }
+
+        impl<'t, 'ast> Visitor<'ast> for ContainsExprWithType<'t, 'ast> {
+            type Error = Infallible;
+
+            fn enter<N: Visitable>(&mut self, node: &'ast N) -> ControlFlow<Break<Self::Error>> {
+                if let Some(expr) = node.downcast_ref::<Expr>() {
+                    if let Some(expr_ty) = self.node_types.get(&expr.as_node_key()) {
+                        if expr_ty == self.needle {
+                            self.found = true;
+                            return ControlFlow::Break(Break::Finished);
+                        }
+                    }
+                }
+
+                ControlFlow::Continue(())
+            }
+        }
+
+        match self.node_types.get(&node.as_node_key()) {
+            Some(needle @ Type::Value(Value::Eql(_))) => match group_by {
+                GroupByExpr::All(_) => true,
+                GroupByExpr::Expressions(exprs, _) => {
+                    let mut visitor = ContainsExprWithType {
+                        node_types: &self.node_types,
+                        needle,
+                        found: false,
+                    };
+                    exprs.accept(&mut visitor);
+                    return visitor.found;
+                }
+            },
+            _ => false,
         }
     }
 }
@@ -368,31 +623,11 @@ impl<'ast> Transform<'ast> for EncryptedStatement<'ast> {
         original_node: &'ast N,
         context: &Context<'ast>,
     ) -> Result<N, Self::Error> {
-        // When new_node matches path: Select -> Vec<SelectItem> -> SelectItem -> Expr
-        // If SelectItem is affected by a GROUP BY
-        // And SelectItem type is EQL
-        //
-
-        if let (Some(select), Some(select_projection), Some(select_item), Some(expr)) = (
-            context.nth_last_as::<Select>(22),
-            context.nth_last_as::<Vec<SelectItem>>(1),
-            context.nth_last_as::<SelectItem>(0),
-            new_node.downcast_mut::<Expr>(),
-        ) {
-            let ty: ProjectionColumn = self.registry.get_type(select_item)?;
-        }
-
-        if let (Some(GroupByExpr::Expressions(_, _)), _, Some(expr)) = (
-            context.nth_last_as::<GroupByExpr>(1),
-            context.nth_last_as::<Vec<Expr>>(0),
-            new_node.downcast_mut::<Expr>(),
-        ) {
-            // If the type is an EQL Value
-            // and it supports equality
-            // then we need to wrap in the appropriate EQL function
-
-            // we also need to find the optional corresponding expression in the projection and wrap that in an aggregate function.
-        }
+        self.transform_projection_exprs_as_per_group_by_clause(
+            &mut new_node,
+            original_node,
+            context,
+        )?;
 
         if let Some(target_value) = new_node.downcast_mut::<ast::Expr>() {
             match original_node.downcast_ref::<ast::Expr>() {
@@ -408,7 +643,7 @@ impl<'ast> Transform<'ast> for EncryptedStatement<'ast> {
                     ast::Expr::Value(_) => {
                         if let Some(replacement) = self
                             .encrypted_literals
-                            .remove(&NodeKey::new(original_value))
+                            .remove(&original_value.as_node_key())
                         {
                             *target_value = replacement;
                         }
@@ -421,7 +656,7 @@ impl<'ast> Transform<'ast> for EncryptedStatement<'ast> {
                     // For example (assuming that `encrypted_col` is an identifier for an EQL column) transform
                     // `encrypted_col` to `cs_ore_64_8_v1(encrypted_col)`.
                     ast::Expr::Identifier(_) | ast::Expr::CompoundIdentifier(_) => {
-                        let node_key = NodeKey::new(original_value);
+                        let node_key = original_value.as_node_key();
 
                         if self.nodes_to_wrap.contains(&node_key) {
                             *target_value =
@@ -445,7 +680,7 @@ impl<'ast> Transform<'ast> for EncryptedStatement<'ast> {
 
 fn make_eql_function_node(function_name: &str, arg: ast::Expr) -> ast::Expr {
     ast::Expr::Function(ast::Function {
-        parameters: ast::FunctionArguments::None,
+        parameters: FunctionArguments::None,
         filter: None,
         null_treatment: None,
         over: None,
@@ -454,7 +689,7 @@ fn make_eql_function_node(function_name: &str, arg: ast::Expr) -> ast::Expr {
             value: function_name.to_string(),
             quote_style: None,
         }]),
-        args: ast::FunctionArguments::List(ast::FunctionArgumentList {
+        args: FunctionArguments::List(ast::FunctionArgumentList {
             duplicate_treatment: None,
             clauses: vec![],
             args: vec![ast::FunctionArg::Unnamed(ast::FunctionArgExpr::Expr(arg))],
@@ -468,19 +703,43 @@ impl<'ast> Visitor<'ast> for EqlMapper<'ast> {
     type Error = EqlMapperError;
 
     fn enter<N: Visitable>(&mut self, node: &'ast N) -> ControlFlow<Break<Self::Error>> {
-        self.scope_tracker.borrow_mut().enter(node).map_break(Break::convert)?;
-        self.importer.borrow_mut().enter(node).map_break(Break::convert)?;
-        self.eql_function_tracker.borrow_mut().enter(node).map_break(Break::convert)?;
-        self.inferencer.borrow_mut().enter(node).map_break(Break::convert)?;
+        self.scope_tracker
+            .borrow_mut()
+            .enter(node)
+            .map_break(Break::convert)?;
+        self.importer
+            .borrow_mut()
+            .enter(node)
+            .map_break(Break::convert)?;
+        self.eql_function_tracker
+            .borrow_mut()
+            .enter(node)
+            .map_break(Break::convert)?;
+        self.inferencer
+            .borrow_mut()
+            .enter(node)
+            .map_break(Break::convert)?;
 
         ControlFlow::Continue(())
     }
 
     fn exit<N: Visitable>(&mut self, node: &'ast N) -> ControlFlow<Break<Self::Error>> {
-        self.inferencer.borrow_mut().exit(node).map_break(Break::convert)?;
-        self.eql_function_tracker.borrow_mut().exit(node).map_break(Break::convert)?;
-        self.importer.borrow_mut().exit(node).map_break(Break::convert)?;
-        self.scope_tracker.borrow_mut().exit(node).map_break(Break::convert)?;
+        self.inferencer
+            .borrow_mut()
+            .exit(node)
+            .map_break(Break::convert)?;
+        self.eql_function_tracker
+            .borrow_mut()
+            .exit(node)
+            .map_break(Break::convert)?;
+        self.importer
+            .borrow_mut()
+            .exit(node)
+            .map_break(Break::convert)?;
+        self.scope_tracker
+            .borrow_mut()
+            .exit(node)
+            .map_break(Break::convert)?;
 
         ControlFlow::Continue(())
     }

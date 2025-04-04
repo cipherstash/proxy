@@ -1,6 +1,6 @@
-use crate::{NodeKey, TypeRegistry};
+use crate::TypeRegistry;
 use sqlparser::ast::OrderByExpr;
-use sqltk::{Break, Visitable, Visitor};
+use sqltk::{AsNodeKey, Break, NodeKey, Visitable, Visitor};
 use std::cell::RefCell;
 use std::collections::HashSet;
 use std::fmt::Debug;
@@ -47,7 +47,7 @@ impl<'ast> Visitor<'ast> for EqlFunctionTracker<'ast> {
 
     fn exit<N: Visitable>(&mut self, node: &'ast N) -> ControlFlow<Break<Self::Error>> {
         if let Some(node) = node.downcast_ref::<OrderByExpr>() {
-            let node_key = NodeKey::new(&node.expr);
+            let node_key = node.expr.as_node_key();
 
             if let Some(type_cell) = self.reg.borrow().get_type_by_node_key(&node_key) {
                 if type_cell.is_eql_value() {
