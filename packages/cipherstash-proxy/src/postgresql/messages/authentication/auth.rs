@@ -47,7 +47,7 @@ pub struct PasswordMessage {
 
 impl Authentication {
     pub fn is_ok(&self) -> bool {
-        matches!(self.method, AuthenticationMethod::AuthenticationOk { .. })
+        matches!(self.method, AuthenticationMethod::AuthenticationOk)
     }
 
     pub fn is_sasl(&self) -> bool {
@@ -305,8 +305,8 @@ impl Display for SaslMechanism {
 impl From<&AuthenticationMethod> for i32 {
     fn from(method: &AuthenticationMethod) -> Self {
         match method {
-            AuthenticationMethod::AuthenticationOk { .. } => 0,
-            AuthenticationMethod::AuthenticationCleartextPassword { .. } => 3,
+            AuthenticationMethod::AuthenticationOk => 0,
+            AuthenticationMethod::AuthenticationCleartextPassword => 3,
             AuthenticationMethod::Md5Password { .. } => 5,
             AuthenticationMethod::Sasl { .. } => 10,
             AuthenticationMethod::AuthenticationSASLContinue { .. } => 11,
