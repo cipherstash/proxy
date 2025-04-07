@@ -71,7 +71,7 @@ impl<'ast> Importer<'ast> {
         }
 
         let mut reg = self.reg.borrow_mut();
-        let projection_type = reg.get_type(&**query).clone();
+        let projection_type = reg.get_or_init_type(&**query).clone();
 
         self.scope_tracker.borrow_mut().add_relation(Relation {
             name: Some(alias.clone()),
@@ -144,7 +144,7 @@ impl<'ast> Importer<'ast> {
                 subquery,
                 alias,
             } => {
-                let projection_type = self.reg.borrow_mut().get_type(&*subquery.body).clone();
+                let projection_type = self.reg.borrow_mut().get_or_init_type(&*subquery.body).clone();
 
                 self.scope_tracker.borrow_mut().add_relation(Relation {
                     name: alias.clone().map(|a| a.name.clone()),

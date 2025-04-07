@@ -21,10 +21,6 @@ pub enum Type {
     /// A projection type that is parameterized by a list of projection column types.
     #[display("Projection({})", _0)]
     Projection(Projection),
-
-    /// A column of a projectio
-    #[display("Projection({})", _0)]
-    ProjectionColumn(ProjectionColumn),
 }
 
 /// A value type (an EQL type, native database type or an array type)

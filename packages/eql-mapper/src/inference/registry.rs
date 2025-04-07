@@ -45,12 +45,14 @@ impl<'ast> TypeRegistry<'ast> {
         self.substitutions.insert(tvar, sub);
     }
 
-    /// Gets (and creates, if required) the [`Type`] associated with a node (which must be an AST node type that
-    /// implements [`Semantic`]). If the node does not already have an associated `Type` then a
-    /// `Type(Def::Var(TypeVar::Fresh))` will be associated with the node and returned.
-    ///
-    /// This method is idempotent and further calls will return the same type.
-    pub(crate) fn get_type<N: AsNodeKey>(&mut self, node: &'ast N) -> &TypeCell {
+    /// Gets the [`Type`] associated with a node.
+    pub(crate) fn get_type<N: AsNodeKey>(&self, node: &'ast N) -> Option<&TypeCell> {
+        self.node_types.get(&node.as_node_key())
+    }
+
+    /// Gets (and creates, if required) the [`Type`] associated with a node. If the node does not already have an
+    /// associated `Type` then a [`Type::Var`] will be assigned to the node with a fresh [`TypeVar`].
+    pub(crate) fn get_or_init_type<N: AsNodeKey>(&mut self, node: &'ast N) -> &TypeCell {
         let tvar = self.fresh_tvar();
 
         self.node_types.entry(node.as_node_key()).or_insert(tvar)

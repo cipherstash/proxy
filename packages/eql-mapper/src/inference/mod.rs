@@ -91,7 +91,7 @@ impl<'ast> TypeInferencer<'ast> {
 
     /// Shorthand for calling `self.reg.borrow_mut().get_type(node)` in [`InferType`] implementations for `TypeInferencer`.
     pub(crate) fn get_type<N: AsNodeKey>(&self, node: &'ast N) -> TypeCell {
-        self.reg.borrow_mut().get_type(node).clone()
+        self.reg.borrow_mut().get_or_init_type(node).clone()
     }
 
     pub(crate) fn get_type_by_node_key(&self, key: &NodeKey<'ast>) -> Option<TypeCell> {

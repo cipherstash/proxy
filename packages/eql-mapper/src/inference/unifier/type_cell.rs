@@ -1,4 +1,6 @@
-use std::{cell::RefCell, rc::Rc};
+use std::{any::type_name, cell::RefCell, rc::Rc, sync::Arc};
+
+use crate::{ArcRef, ArcMap};
 
 use super::{Constructor, NativeValue, Type, TypeError, TypeRegistry, Value};
 
@@ -49,8 +51,8 @@ impl TypeCell {
         self.shared_ty.borrow().set_type(ty);
     }
 
-    /// Returns the [`Rc<Type>`] that underlying `self`.
-    pub fn as_type(&self) -> Rc<Type> {
+    /// Returns the [`Arc<Type>`] that underlying `self`.
+    pub fn as_type(&self) -> Arc<Type> {
         self.shared_ty.borrow().as_type()
     }
 
@@ -68,12 +70,12 @@ impl TypeCell {
             .has_same_pointee(&other.shared_ty.borrow())
     }
 
-    /// Resolves the `Type` stored in `self`, returning it as an [`Rc<Type>`].
+    /// Resolves the `Type` stored in `self`, returning it as an [`Arc<Type>`].
     ///
     /// A resolved type is one in which all type variables have been resolved, recursively.
     ///
     /// Fails with a [`TypeError`] if the stored `Type` cannot be fully resolved.
-    pub fn resolved(&self, registry: &TypeRegistry<'_>) -> Result<Rc<Type>, TypeError> {
+    pub fn resolved(&self, registry: &TypeRegistry<'_>) -> Result<Arc<Type>, TypeError> {
         let ty = self.as_type();
         match &*ty {
             Type::Constructor(constructor) => match constructor {
@@ -106,9 +108,41 @@ impl TypeCell {
             },
         }
     }
+
+    pub fn resolved_as<T: 'static>(
+        &self,
+        registry: &TypeRegistry<'_>,
+    ) -> Result<ArcRef<T>, TypeError> {
+        let resolved = &self.resolved(registry)?;
+        resolved
+            .try_map(|r| match r {
+                Type::Constructor(Constructor::Projection(projection)) => {
+                    if let Some(t) = (projection as &dyn std::any::Any).downcast_ref::<T>() {
+                        return Ok(t);
+                    }
+
+                    Err(())
+                }
+                Type::Constructor(Constructor::Value(value)) => {
+                    if let Some(t) = (value as &dyn std::any::Any).downcast_ref::<T>() {
+                        return Ok(t);
+                    }
+
+                    Err(())
+                }
+                Type::Var(_) => return Err(()),
+            })
+            .map_err(|_| {
+                TypeError::InternalError(format!(
+                    "could not resolved type {} as {}",
+                    &*resolved,
+                    type_name::<T>()
+                ))
+            })
+    }
 }
 
-type SharedType = Rc<Type>;
+type SharedType = Arc<Type>;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct SharedTypeMut {
@@ -127,12 +161,12 @@ impl SharedTypeMut {
         *self.alloc.borrow_mut() = SharedType::new(ty);
     }
 
-    fn as_type(&self) -> Rc<Type> {
+    fn as_type(&self) -> Arc<Type> {
         self.alloc.borrow().clone()
     }
 
     fn has_same_pointee(&self, other: &Self) -> bool {
-        Rc::ptr_eq(&self.alloc.borrow(), &other.alloc.borrow())
+        Arc::ptr_eq(&self.alloc.borrow(), &other.alloc.borrow())
     }
 }
 

@@ -6,7 +6,7 @@ use sqlparser::{
     parser::Parser,
 };
 
-use crate::{Projection, ProjectionColumn};
+use crate::{ArcRef, Projection, ProjectionColumn};
 
 pub(crate) fn parse(statement: &'static str) -> Statement {
     Parser::parse_sql(&PostgreSqlDialect {}, statement).unwrap()[0].clone()
@@ -72,11 +72,11 @@ macro_rules! col {
 
 #[macro_export]
 macro_rules! projection {
-    [$($column:tt),*] => { Projection::new(vec![$(col!($column)),*]) };
+    [$($column:tt),*] => { crate::ArcRef::from(std::sync::Arc::new(Projection::new(vec![$(col!($column)),*]))) };
 }
 
-pub fn ignore_aliases(t: &Projection) -> Projection {
-    match t {
+pub fn ignore_aliases(t: &ArcRef<Projection>) -> Projection {
+    match &**t {
         Projection::WithColumns(columns) => Projection::WithColumns(
             columns
                 .iter()
@@ -86,7 +86,7 @@ pub fn ignore_aliases(t: &Projection) -> Projection {
                 })
                 .collect(),
         ),
-        Projection::Empty => t.clone(),
+        Projection::Empty => Projection::Empty,
     }
 }
 

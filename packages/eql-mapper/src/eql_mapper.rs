@@ -3,7 +3,7 @@ use crate::{
     eql_function_tracker::{EqlFunctionTracker, EqlFunctionTrackerError},
     inference::{unifier, TypeError, TypeInferencer},
     unifier::{EqlValue, Unifier},
-    DepMut, EndsWith, Projection, ProjectionColumn, ScopeError, ScopeTracker, TableResolver, Type,
+    ArcRef, DepMut, EndsWith, Projection, ScopeError, ScopeTracker, TableResolver, Type,
     TypeRegistry, Value,
 };
 use sqlparser::ast::{
@@ -113,7 +113,7 @@ pub struct TypedStatement<'ast> {
     pub statement: &'ast Statement,
 
     /// The SQL statement which was type-checked against the schema.
-    pub projection: Option<Projection>,
+    pub projection: Option<ArcRef<Projection>>,
 
     /// The types of all params discovered from [`Value::Placeholder`] nodes in the SQL statement.
     pub params: Vec<Value>,
@@ -192,49 +192,20 @@ impl<'ast> EqlMapper<'ast> {
         }
     }
 
-    /// Asks the [`TypeInferencer`] for a hashmap of node types.
     fn statement_type(
         &self,
         statement: &'ast Statement,
-    ) -> Result<Option<Projection>, EqlMapperError> {
-        let reg = self.registry.borrow();
-        match reg.get_type_by_node_key(&statement.as_node_key()) {
-            Some(ty_cell) => match ty_cell.resolved(&reg) {
-                Ok(ty_ref) => match &*ty_ref {
-                    unifier::Type::Constructor(unifier::Constructor::Projection(
-                        unifier::Projection::WithColumns(cols),
-                    )) => {
-                        let cols = cols.flatten();
-                        Ok(Some(Projection::WithColumns(
-                            cols.0
-                                .iter()
-                                .map(|col| match &*col.ty.as_type() {
-                                    unifier::Type::Constructor(unifier::Constructor::Value(
-                                        value,
-                                    )) => Ok(ProjectionColumn {
-                                        ty: value.try_into()?,
-                                        alias: col.alias.clone(),
-                                    }),
-                                    ty => Err(EqlMapperError::InternalError(format!(
-                                        "unexpected type {} in projection column",
-                                        ty
-                                    ))),
-                                })
-                                .collect::<Result<Vec<_>, _>>()?,
-                        )))
-                    }
-                    unifier::Type::Constructor(unifier::Constructor::Projection(
-                        unifier::Projection::Empty,
-                    )) => Ok(Some(Projection::Empty)),
-                    unexpected => Err(EqlMapperError::InternalError(format!(
-                        "unexpected type {unexpected} for statement"
-                    ))),
-                },
-                Err(err) => Err(EqlMapperError::from(err)),
-            },
-            None => Err(EqlMapperError::InternalError(
-                "could not find statement type information".to_string(),
-            )),
+    ) -> Result<Option<ArcRef<Projection>>, EqlMapperError> {
+        let reg = self.registry.borrow_mut();
+
+        match reg.get_type(statement) {
+            Some(ty) => {
+                let projection = ty.resolved_as::<Projection>(&*reg)?;
+                Ok(Some(projection))
+            }
+            None => Err(EqlMapperError::InternalError(format!(
+                "missing type for statement: {statement}"
+            ))),
         }
     }
 
@@ -466,8 +437,13 @@ impl<'ast> EncryptedStatement<'ast> {
         if let Some((_group_by_clause, _exprs, expr)) =
             EndsWith::<(&GroupByExpr, &Vec<Expr>, &mut Expr)>::try_match(context, new_node)
         {
-            let _s = format!("TY: {:#?}", self.node_types.get(&original_node.as_node_key()));
-            if let Some(Type::Value(Value::Eql(_))) = self.node_types.get(&original_node.as_node_key()) {
+            let _s = format!(
+                "TY: {:#?}",
+                self.node_types.get(&original_node.as_node_key())
+            );
+            if let Some(Type::Value(Value::Eql(_))) =
+                self.node_types.get(&original_node.as_node_key())
+            {
                 *expr = self.wrap_in_single_arg_function(
                     expr.clone(),
                     ObjectName(vec![Ident::new("cs_ore_64_8_v1")]),

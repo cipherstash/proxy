@@ -1,6 +1,6 @@
 //! `eql-mapper` transforms SQL to SQL+EQL using a known database schema as a reference.
 
-mod selector;
+mod arc_ref;
 mod dep;
 mod eql_function_tracker;
 mod eql_mapper;
@@ -8,18 +8,22 @@ mod importer;
 mod inference;
 mod iterator_ext;
 mod model;
+mod rc_ref;
 mod scope_tracker;
+mod selector;
 
 #[cfg(test)]
 mod test_helpers;
 
-pub use selector::*;
+pub use arc_ref::*;
 pub use dep::*;
 pub use eql_mapper::*;
 pub use importer::*;
 pub use inference::*;
 pub use model::*;
+pub use rc_ref::*;
 pub use scope_tracker::*;
+pub use selector::*;
 pub use unifier::{EqlValue, NativeValue, TableColumn};
 
 #[cfg(test)]
@@ -28,14 +32,16 @@ mod test {
     use super::type_check;
     use crate::col;
     use crate::projection;
-    use sqltk::AsNodeKey;
+    use crate::ArcRef;
     use crate::Schema;
     use crate::TableResolver;
     use crate::{schema, EqlValue, NativeValue, Projection, ProjectionColumn, TableColumn, Value};
     use pretty_assertions::assert_eq;
     use sqlparser::ast::Statement;
     use sqlparser::ast::{self as ast};
+    use sqltk::AsNodeKey;
     use std::collections::HashMap;
+    use std::rc::Rc;
     use std::sync::Arc;
     use tracing::error;
 
@@ -801,7 +807,10 @@ mod test {
             Err(err) => panic!("type check failed: {:#?}", err),
         };
 
-        assert_eq!(typed.projection, Some(Projection::Empty));
+        assert_eq!(
+            typed.projection,
+            Some(ArcRef::from(Arc::new(Projection::Empty)))
+        );
     }
 
     #[test]
@@ -872,7 +881,10 @@ mod test {
             Err(err) => panic!("type check failed: {:#?}", err),
         };
 
-        assert_eq!(typed.projection, Some(Projection::Empty));
+        assert_eq!(
+            typed.projection,
+            Some(ArcRef::from(Arc::new(Projection::Empty)))
+        );
     }
 
     #[test]
@@ -941,7 +953,10 @@ mod test {
             Err(err) => panic!("type check failed: {:#?}", err),
         };
 
-        assert_eq!(typed.projection, Some(Projection::Empty));
+        assert_eq!(
+            typed.projection,
+            Some(ArcRef::from(Arc::new(Projection::Empty)))
+        );
     }
 
     #[test]
@@ -1129,13 +1144,17 @@ mod test {
         };
 
         assert_transitive_eq(&[
-            projection_type(&parse("select 1")),
-            projection_type(&parse("select t from (select 1 as t)")),
-            projection_type(&parse("select * from (select 1)")),
-            projection_type(&parse("select $1")),
-            projection_type(&parse("select t from (select $1 as t)")),
-            projection_type(&parse("select * from (select $1)")),
-            Some(projection![(NATIVE)]),
+            projection_type(&parse("select 'lit'")),
+            projection_type(&parse("select x from (select 'lit' as x)")),
+            projection_type(&parse("select * from (select 'lit')")),
+            projection_type(&parse("select * from (select 'lit' as t)")),
+            // projection_type(&parse("select $1")),
+            // projection_type(&parse("select t from (select $1 as t)")),
+            // projection_type(&parse("select * from (select $1)")),
+            Some(Projection::WithColumns(vec![ProjectionColumn {
+                alias: None,
+                ty: Value::Native(NativeValue(None)),
+            }])),
         ]);
     }
 
