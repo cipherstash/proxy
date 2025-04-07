@@ -29,6 +29,17 @@ pub enum Type {
     // TODO: consider including `Error` as a variant
 }
 
+const _: () = {
+    fn assert_send<T: Send>() {}
+    fn assert_sync<T: Sync>() {}
+
+    // RFC 2056
+    fn assert_all() {
+        assert_send::<Type>();
+        assert_sync::<Type>();
+    }
+};
+
 /// A `Constructor` is what is known about a [`Type`].
 #[derive(Debug, Clone, PartialEq, Eq, Display)]
 pub enum Constructor {

@@ -3,7 +3,7 @@ use crate::{
     eql_function_tracker::{EqlFunctionTracker, EqlFunctionTrackerError},
     inference::{unifier, TypeError, TypeInferencer},
     unifier::{EqlValue, Unifier},
-    ArcRef, DepMut, EndsWith, Projection, ScopeError, ScopeTracker, TableResolver, Type,
+    DepMut, EndsWith, Projection, ScopeError, ScopeTracker, TableResolver, Type,
     TypeRegistry, Value,
 };
 use sqlparser::ast::{
@@ -113,7 +113,7 @@ pub struct TypedStatement<'ast> {
     pub statement: &'ast Statement,
 
     /// The SQL statement which was type-checked against the schema.
-    pub projection: Option<ArcRef<Projection>>,
+    pub projection: Option<Projection>,
 
     /// The types of all params discovered from [`Value::Placeholder`] nodes in the SQL statement.
     pub params: Vec<Value>,
@@ -195,13 +195,13 @@ impl<'ast> EqlMapper<'ast> {
     fn statement_type(
         &self,
         statement: &'ast Statement,
-    ) -> Result<Option<ArcRef<Projection>>, EqlMapperError> {
+    ) -> Result<Option<Projection>, EqlMapperError> {
         let reg = self.registry.borrow_mut();
 
         match reg.get_type(statement) {
             Some(ty) => {
-                let projection = ty.resolved_as::<Projection>(&*reg)?;
-                Ok(Some(projection))
+                let projection = ty.resolved_as::<crate::unifier::Projection>(&*reg)?;
+                Ok(Some(Projection::try_from(&*projection)?))
             }
             None => Err(EqlMapperError::InternalError(format!(
                 "missing type for statement: {statement}"

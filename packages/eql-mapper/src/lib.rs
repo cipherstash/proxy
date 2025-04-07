@@ -32,7 +32,6 @@ mod test {
     use super::type_check;
     use crate::col;
     use crate::projection;
-    use crate::ArcRef;
     use crate::Schema;
     use crate::TableResolver;
     use crate::{schema, EqlValue, NativeValue, Projection, ProjectionColumn, TableColumn, Value};
@@ -41,7 +40,6 @@ mod test {
     use sqlparser::ast::{self as ast};
     use sqltk::AsNodeKey;
     use std::collections::HashMap;
-    use std::rc::Rc;
     use std::sync::Arc;
     use tracing::error;
 
@@ -809,7 +807,7 @@ mod test {
 
         assert_eq!(
             typed.projection,
-            Some(ArcRef::from(Arc::new(Projection::Empty)))
+            Some(Projection::Empty)
         );
     }
 
@@ -883,7 +881,7 @@ mod test {
 
         assert_eq!(
             typed.projection,
-            Some(ArcRef::from(Arc::new(Projection::Empty)))
+            Some(Projection::Empty)
         );
     }
 
@@ -955,7 +953,7 @@ mod test {
 
         assert_eq!(
             typed.projection,
-            Some(ArcRef::from(Arc::new(Projection::Empty)))
+            Some(Projection::Empty)
         );
     }
 
