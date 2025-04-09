@@ -3,8 +3,8 @@ use crate::{
     eql_function_tracker::{EqlFunctionTracker, EqlFunctionTrackerError},
     inference::{unifier, TypeError, TypeInferencer},
     unifier::{EqlValue, Unifier},
-    DepMut, EndsWith, Projection, ScopeError, ScopeTracker, TableResolver, Type,
-    TypeRegistry, Value, ValueTracker,
+    DepMut, EndsWith, Projection, ScopeError, ScopeTracker, TableResolver, Type, TypeRegistry,
+    Value, ValueTracker,
 };
 use sqlparser::ast::{
     self as ast, Expr, Function, FunctionArg, FunctionArgumentList, FunctionArguments, GroupByExpr,
@@ -684,9 +684,7 @@ impl<'ast> Visitor<'ast> for EqlMapper<'ast> {
     type Error = EqlMapperError;
 
     fn enter<N: Visitable>(&mut self, node: &'ast N) -> ControlFlow<Break<Self::Error>> {
-        self.value_tracker
-            .borrow_mut()
-            .enter(node);
+        self.value_tracker.borrow_mut().enter(node);
 
         self.scope_tracker
             .borrow_mut()
@@ -732,9 +730,7 @@ impl<'ast> Visitor<'ast> for EqlMapper<'ast> {
             .exit(node)
             .map_break(Break::convert)?;
 
-        self.value_tracker
-            .borrow_mut()
-            .exit(node);
+        self.value_tracker.borrow_mut().exit(node);
 
         ControlFlow::Continue(())
     }

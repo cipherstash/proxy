@@ -87,7 +87,9 @@ impl<'ast, P1: Visitable, P0: Visitable, C: Visitable> EndsWith<(&P1, &P0, &mut 
 }
 
 #[allow(unused)]
-impl<'ast, P2: Visitable, P1: Visitable, P0: Visitable, C: Visitable> EndsWith<(&P2, &P1, &P0, &C)> {
+impl<'ast, P2: Visitable, P1: Visitable, P0: Visitable, C: Visitable>
+    EndsWith<(&P2, &P1, &P0, &C)>
+{
     pub(crate) fn try_match<N: Visitable>(
         context: &Context<'ast>,
         current_node: &'ast N,
@@ -102,7 +104,9 @@ impl<'ast, P2: Visitable, P1: Visitable, P0: Visitable, C: Visitable> EndsWith<(
 }
 
 #[allow(unused)]
-impl<'ast, P2: Visitable, P1: Visitable, P0: Visitable, C: Visitable> EndsWith<(&P2, &P1, &P0, &mut C)> {
+impl<'ast, P2: Visitable, P1: Visitable, P0: Visitable, C: Visitable>
+    EndsWith<(&P2, &P1, &P0, &mut C)>
+{
     pub(crate) fn try_match<N: Visitable>(
         context: &Context<'ast>,
         current_node: &'ast mut N,

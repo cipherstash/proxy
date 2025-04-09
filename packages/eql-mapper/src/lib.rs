@@ -807,10 +807,7 @@ mod test {
             Err(err) => panic!("type check failed: {:#?}", err),
         };
 
-        assert_eq!(
-            typed.projection,
-            Some(Projection::Empty)
-        );
+        assert_eq!(typed.projection, Some(Projection::Empty));
     }
 
     #[test]
@@ -881,10 +878,7 @@ mod test {
             Err(err) => panic!("type check failed: {:#?}", err),
         };
 
-        assert_eq!(
-            typed.projection,
-            Some(Projection::Empty)
-        );
+        assert_eq!(typed.projection, Some(Projection::Empty));
     }
 
     #[test]
@@ -953,10 +947,7 @@ mod test {
             Err(err) => panic!("type check failed: {:#?}", err),
         };
 
-        assert_eq!(
-            typed.projection,
-            Some(Projection::Empty)
-        );
+        assert_eq!(typed.projection, Some(Projection::Empty));
     }
 
     #[test]

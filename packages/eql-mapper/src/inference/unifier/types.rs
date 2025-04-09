@@ -215,11 +215,7 @@ impl ProjectionColumns {
     }
 
     fn flatten_impl(&self, mut output: Vec<ProjectionColumn>) -> Vec<ProjectionColumn> {
-        for ProjectionColumn {
-            ty,
-            alias,
-        } in &self.0
-        {
+        for ProjectionColumn { ty, alias } in &self.0 {
             match &*ty.as_type() {
                 Type::Constructor(Constructor::Projection(Projection::WithColumns(nested))) => {
                     output = nested.flatten_impl(output);
@@ -262,10 +258,7 @@ impl From<Arc<Table>> for ProjectionColumns {
 impl ProjectionColumn {
     /// Returns a new `ProjectionColumn` with type `ty` and optional `alias`.
     pub(crate) fn new(ty: TypeCell, alias: Option<Ident>) -> Self {
-        Self {
-            ty,
-            alias,
-        }
+        Self { ty, alias }
     }
 
     fn render_alias(&self) -> String {

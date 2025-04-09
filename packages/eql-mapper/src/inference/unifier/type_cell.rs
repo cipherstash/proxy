@@ -1,6 +1,6 @@
-use std::{any::type_name, sync::RwLock, sync::Arc};
+use std::{any::type_name, sync::Arc, sync::RwLock};
 
-use crate::{ArcRef, ArcMap};
+use crate::{ArcMap, ArcRef};
 
 use super::{Constructor, NativeValue, Type, TypeError, TypeRegistry, Value};
 
@@ -162,7 +162,7 @@ impl Eq for SharedTypeMut {}
 
 impl PartialEq for SharedTypeMut {
     fn eq(&self, other: &Self) -> bool {
-       *self.alloc.read().unwrap() == *other.alloc.read().unwrap()
+        *self.alloc.read().unwrap() == *other.alloc.read().unwrap()
     }
 }
 
