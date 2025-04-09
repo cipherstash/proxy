@@ -139,12 +139,12 @@ impl TypeCell {
 
                     Err(())
                 }
-                Type::Var(_) => return Err(()),
+                Type::Var(_) => Err(()),
             })
             .map_err(|_| {
                 TypeError::InternalError(format!(
                     "could not resolve type {} as {}",
-                    &*resolved,
+                    resolved,
                     type_name::<T>()
                 ))
             })

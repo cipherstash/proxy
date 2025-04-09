@@ -24,7 +24,7 @@ use std::{fmt::Debug, hash::Hash, rc::Rc};
 #[derive(Clone)]
 pub struct RcRef<U: ?Sized> {
     value_addr: *const U,
-    on_drop: Rc<dyn Fn() -> ()>,
+    on_drop: Rc<dyn Fn()>,
 }
 
 mod sealed {
@@ -77,13 +77,13 @@ impl<T: ?Sized + 'static, U: ?Sized> RcMap<T, U> for Rc<T> {
 
 impl<T: ?Sized + 'static> From<Rc<T>> for RcRef<T> {
     fn from(value: Rc<T>) -> Self {
-        value.map(|itself| &itself)
+        value.map(|itself| itself)
     }
 }
 
 impl<T: ?Sized + 'static> From<&Rc<T>> for RcRef<T> {
     fn from(value: &Rc<T>) -> Self {
-        value.clone().map(|itself| &itself)
+        value.clone().map(|itself| itself)
     }
 }
 
@@ -110,7 +110,7 @@ impl<U: ?Sized> Deref for RcRef<U> {
 
 impl<U: ?Sized> Drop for RcRef<U> {
     fn drop(&mut self) {
-        (&*self.on_drop)()
+        (*self.on_drop)()
     }
 }
 
@@ -121,7 +121,7 @@ where
     U: PartialEq,
 {
     fn eq(&self, other: &Self) -> bool {
-        (&**self) == &**other
+        **self == **other
     }
 }
 
@@ -130,7 +130,7 @@ where
     U: Ord,
 {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        (&**self).cmp(&**other)
+        (**self).cmp(&**other)
     }
 }
 
@@ -139,7 +139,7 @@ where
     U: PartialOrd,
 {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        (&**self).partial_cmp(&**other)
+        (**self).partial_cmp(&**other)
     }
 }
 
@@ -148,7 +148,7 @@ where
     U: Hash,
 {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        (&**self).hash(state);
+        (**self).hash(state);
     }
 }
 
@@ -157,7 +157,7 @@ where
     U: Debug,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        (&**self).fmt(f)
+        (**self).fmt(f)
     }
 }
 
@@ -191,12 +191,12 @@ mod test {
     #[test]
     fn rc_strong_count() {
         let rc = &Rc::new(String::from("Hello!"));
-        assert_eq!(Rc::strong_count(&rc), 1);
+        assert_eq!(Rc::strong_count(rc), 1);
 
         let rcref = rc.map(|s| s.as_str());
-        assert_eq!(Rc::strong_count(&rc), 2);
+        assert_eq!(Rc::strong_count(rc), 2);
 
         drop(rcref);
-        assert_eq!(Rc::strong_count(&rc), 1);
+        assert_eq!(Rc::strong_count(rc), 1);
     }
 }

@@ -26,7 +26,7 @@ pub struct ArcRef<U: ?Sized> {
     update_strong_count: UpdateStrongCountFn,
 }
 
-type UpdateStrongCountFn = Arc<dyn Fn(bool) -> () + Send + Sync + 'static>;
+type UpdateStrongCountFn = Arc<dyn Fn(bool) + Send + Sync + 'static>;
 
 mod sealed {
     pub(crate) trait Private {}
@@ -106,7 +106,7 @@ where
     T: Send + Sync,
 {
     fn from(value: Arc<T>) -> Self {
-        value.map(|itself| &itself)
+        value.map(|itself| itself)
     }
 }
 
@@ -115,7 +115,7 @@ where
     T: Send + Sync,
 {
     fn from(value: &Arc<T>) -> Self {
-        value.clone().map(|itself| &itself)
+        value.clone().map(|itself| itself)
     }
 }
 
@@ -158,7 +158,7 @@ impl<U: ?Sized> Deref for ArcRef<U> {
 
 impl<U: ?Sized> Drop for ArcRef<U> {
     fn drop(&mut self) {
-        (&*self.update_strong_count)(false)
+        (*self.update_strong_count)(false)
     }
 }
 
@@ -169,7 +169,7 @@ where
     U: PartialEq,
 {
     fn eq(&self, other: &Self) -> bool {
-        (&**self) == &**other
+        **self == **other
     }
 }
 
@@ -178,7 +178,7 @@ where
     U: Ord,
 {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        (&**self).cmp(&**other)
+        (**self).cmp(&**other)
     }
 }
 
@@ -187,7 +187,7 @@ where
     U: PartialOrd,
 {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        (&**self).partial_cmp(&**other)
+        (**self).partial_cmp(&**other)
     }
 }
 
@@ -196,7 +196,7 @@ where
     U: Hash,
 {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        (&**self).hash(state);
+        (**self).hash(state);
     }
 }
 
@@ -205,7 +205,7 @@ where
     U: Debug,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        (&**self).fmt(f)
+        (**self).fmt(f)
     }
 }
 
@@ -239,19 +239,19 @@ mod test {
     #[test]
     fn arc_strong_count() {
         let arc = &Arc::new(String::from("Hello!"));
-        assert_eq!(Arc::strong_count(&arc), 1);
+        assert_eq!(Arc::strong_count(arc), 1);
 
         let arc_ref = arc.map(|s| s.as_str());
-        assert_eq!(Arc::strong_count(&arc), 2);
+        assert_eq!(Arc::strong_count(arc), 2);
 
         drop(arc_ref);
-        assert_eq!(Arc::strong_count(&arc), 1);
+        assert_eq!(Arc::strong_count(arc), 1);
 
         let arc_ref = arc.map(|s| s.as_str());
-        assert_eq!(Arc::strong_count(&arc), 2);
+        assert_eq!(Arc::strong_count(arc), 2);
         let cloned = arc_ref.clone();
         assert_eq!(&*cloned, "Hello!");
 
-        assert_eq!(Arc::strong_count(&arc), 3);
+        assert_eq!(Arc::strong_count(arc), 3);
     }
 }

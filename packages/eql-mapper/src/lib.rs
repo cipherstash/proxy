@@ -9,6 +9,7 @@ mod inference;
 mod iterator_ext;
 mod model;
 mod rc_ref;
+mod rules;
 mod scope_tracker;
 mod selector;
 mod value_tracker;
@@ -24,6 +25,7 @@ pub use inference::*;
 pub use model::*;
 pub use rc_ref::*;
 pub use scope_tracker::*;
+pub use rules::*;
 pub use selector::*;
 pub use unifier::{EqlValue, NativeValue, TableColumn};
 pub use value_tracker::*;
@@ -1349,6 +1351,35 @@ mod test {
                     Ok(statement) => assert_eq!(
                         statement.to_string(),
                         "SELECT cs_grouped_value_v1(email) AS email FROM users GROUP BY cs_ore_64_8_v1(email)".to_string()
+                    ),
+                    Err(err) => panic!("transformation failed: {err}"),
+                }
+            }
+            Err(err) => panic!("type check failed: {err}"),
+        }
+    }
+
+    #[test]
+    fn modify_aggregate_when_eql_column_affected_by_group_by_of_other_column() {
+        let _ = tracing_subscriber::fmt::try_init();
+        let schema = resolver(schema! {
+            tables: {
+                employees: {
+                    id (PK),
+                    department,
+                    salary (EQL),
+                }
+            }
+        });
+
+        let statement = parse("SELECT MIN(salary), MAX(salary), department FROM employees GROUP BY department");
+
+        match type_check(schema, &statement) {
+            Ok(typed) => {
+                match typed.transform(HashMap::new()) {
+                    Ok(statement) => assert_eq!(
+                        statement.to_string(),
+                        "SELECT cs_min_v1(salary) AS MIN, cs_max_v1(salary) AS MAX, department FROM employees GROUP BY department".to_string()
                     ),
                     Err(err) => panic!("transformation failed: {err}"),
                 }

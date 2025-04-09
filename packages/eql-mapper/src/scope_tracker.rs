@@ -18,7 +18,7 @@ pub struct ScopeTracker<'ast> {
     stack: Vec<Rc<RefCell<Scope<'ast>>>>,
 }
 
-impl<'ast> Default for ScopeTracker<'ast> {
+impl Default for ScopeTracker<'_> {
     fn default() -> Self {
         Self::new()
     }

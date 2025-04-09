@@ -36,23 +36,21 @@ impl<'ast> TypeInferencer<'ast> {
         query: &'ast Query,
     ) -> Result<(), TypeError> {
         let ty = self.get_type(query);
-        Ok(match &*ty.as_type() {
-            Type::Constructor(Constructor::Projection(Projection::WithColumns(
+        if let Type::Constructor(Constructor::Projection(Projection::WithColumns(
                 ProjectionColumns(cols),
-            ))) => {
-                for col in cols {
-                    if let Type::Var(tvar) = &*col.ty.as_type() {
-                        if self
-                            .value_tracker
-                            .borrow()
-                            .exists_value_with_type_var(*tvar)
-                        {
-                            self.unify(col.ty.clone(), Type::any_native())?;
-                        }
+            ))) = &*ty.as_type() {
+            for col in cols {
+                if let Type::Var(tvar) = &*col.ty.as_type() {
+                    if self
+                        .value_tracker
+                        .borrow()
+                        .exists_value_with_type_var(*tvar)
+                    {
+                        self.unify(col.ty.clone(), Type::any_native())?;
                     }
                 }
             }
-            _ => {}
-        })
+        };
+        Ok(())
     }
 }

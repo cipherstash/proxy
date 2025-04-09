@@ -3,8 +3,8 @@ use crate::{
     eql_function_tracker::{EqlFunctionTracker, EqlFunctionTrackerError},
     inference::{unifier, TypeError, TypeInferencer},
     unifier::{EqlValue, Unifier},
-    DepMut, EndsWith, Projection, ScopeError, ScopeTracker, TableResolver, Type, TypeRegistry,
-    Value, ValueTracker,
+    DepMut, EndsWith, Projection, ScopeError, ScopeTracker, SqlIdent, TableResolver, Type,
+    TypeRegistry, Value, ValueTracker,
 };
 use sqlparser::ast::{
     self as ast, Expr, Function, FunctionArg, FunctionArgumentList, FunctionArguments, GroupByExpr,
@@ -205,7 +205,7 @@ impl<'ast> EqlMapper<'ast> {
 
         match reg.get_type(statement) {
             Some(ty) => {
-                let projection = ty.resolved_as::<crate::unifier::Projection>(&*reg)?;
+                let projection = ty.resolved_as::<crate::unifier::Projection>(&reg)?;
                 Ok(Some(Projection::try_from(&*projection)?))
             }
             None => Err(EqlMapperError::InternalError(format!(
@@ -281,7 +281,7 @@ impl<'ast> EqlMapper<'ast> {
         for (key, tcell) in node_types {
             resolved_node_types.insert(
                 key,
-                Type::try_from(&*tcell.resolved(&*self.registry.borrow())?)?,
+                Type::try_from(&*tcell.resolved(&self.registry.borrow())?)?,
             );
         }
 
@@ -442,16 +442,44 @@ impl<'ast> EncryptedStatement<'ast> {
         if let Some((_group_by_clause, _exprs, expr)) =
             EndsWith::<(&GroupByExpr, &Vec<Expr>, &mut Expr)>::try_match(context, new_node)
         {
-            let _s = format!(
-                "TY: {:#?}",
-                self.node_types.get(&original_node.as_node_key())
-            );
             if let Some(Type::Value(Value::Eql(_))) =
                 self.node_types.get(&original_node.as_node_key())
             {
                 *expr = self.wrap_in_single_arg_function(
                     expr.clone(),
                     ObjectName(vec![Ident::new("cs_ore_64_8_v1")]),
+                );
+            }
+        }
+
+        // Scenario 2: Change MIN to CS_MIN_V1
+        if let Some((select, _projection, _select_item, expr)) =
+            EndsWith::<(&Select, &Vec<SelectItem>, &SelectItem, &mut Expr)>::try_match(
+                context, new_node,
+            )
+        {
+            if !self.is_used_in_group_by_clause(&select.group_by, original_node) {
+                if let Expr::Function(Function { name, .. }) = expr {
+                    let f_name = name.0.last_mut().unwrap();
+
+                    if SqlIdent(&*f_name) == SqlIdent(Ident::new("MIN")) {
+                        *f_name = Ident::new("cs_min_v1");
+                    }
+
+                    if SqlIdent(&*f_name) == SqlIdent(Ident::new("MAX")) {
+                        *f_name = Ident::new("cs_max_v1");
+                    }
+                }
+            }
+        }
+
+        if let Some((select, _projection, select_item)) =
+            EndsWith::<(&Select, &Vec<SelectItem>, &mut SelectItem)>::try_match(context, new_node)
+        {
+            if !self.is_used_in_group_by_clause(&select.group_by, original_node) {
+                *select_item = self.add_alias_to_unnamed_select_item(
+                    select_item.clone(),
+                    original_node.downcast_ref().unwrap(),
                 );
             }
         }
@@ -477,7 +505,7 @@ impl<'ast> EncryptedStatement<'ast> {
         })
     }
 
-    /// Converts [`SelectItem::UnnamedExpr`] to [`SelectItem::ExprWithAlias`].
+    /// Converts [`SelectItem::UnnamedExpr`] to [`SelectItem::ExprWithAlias`]
     ///
     /// All other variants are returned unmodified.
     fn add_alias_to_unnamed_select_item(
@@ -498,6 +526,10 @@ impl<'ast> EncryptedStatement<'ast> {
 
     fn derive_alias_from_select_item(&self, node: &SelectItem) -> Option<Ident> {
         match node {
+            // Select items that consist of just an identifer do not require aliasing.
+            SelectItem::UnnamedExpr(Expr::Identifier(_))
+            | SelectItem::UnnamedExpr(Expr::CompoundIdentifier(_)) => None,
+
             SelectItem::UnnamedExpr(expr) => {
                 /// Unwrap an [`Expr`] until we find a `Expr::Identifier`, `Expr::CompoundIdentifier` or `Expr::Function`.
                 /// This is meant to emulate what Postgres does when it tries to derive a column name from an expression that
@@ -556,7 +588,7 @@ impl<'ast> EncryptedStatement<'ast> {
             found: bool,
         }
 
-        impl<'t, 'ast> Visitor<'ast> for ContainsExprWithType<'t, 'ast> {
+        impl<'ast> Visitor<'ast> for ContainsExprWithType<'_, 'ast> {
             type Error = Infallible;
 
             fn enter<N: Visitable>(&mut self, node: &'ast N) -> ControlFlow<Break<Self::Error>> {
@@ -578,12 +610,12 @@ impl<'ast> EncryptedStatement<'ast> {
                 GroupByExpr::All(_) => true,
                 GroupByExpr::Expressions(exprs, _) => {
                     let mut visitor = ContainsExprWithType {
-                        node_types: &self.node_types,
+                        node_types: self.node_types,
                         needle,
                         found: false,
                     };
                     exprs.accept(&mut visitor);
-                    return visitor.found;
+                    visitor.found
                 }
             },
             _ => false,
