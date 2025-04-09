@@ -26,7 +26,7 @@ use sqlparser::ast::{
 };
 use sqltk::{into_control_flow, AsNodeKey, Break, NodeKey, Visitable, Visitor};
 
-use crate::{ScopeTracker, TableResolver};
+use crate::{ScopeTracker, TableResolver, ValueTracker};
 
 pub(crate) use registry::*;
 pub(crate) use type_error::*;
@@ -52,7 +52,7 @@ pub struct TypeInferencer<'ast> {
     table_resolver: Arc<TableResolver>,
 
     // The lexical scope - for resolving projection columns & expanding wildcards.
-    scope_tracker: Rc<RefCell<ScopeTracker>>,
+    scope_tracker: Rc<RefCell<ScopeTracker<'ast>>>,
 
     /// Associates types with AST nodes.
     reg: Rc<RefCell<TypeRegistry<'ast>>>,
@@ -67,6 +67,8 @@ pub struct TypeInferencer<'ast> {
     /// `Expr::Value(Value::Placeholder(_))` nodes.
     literal_nodes: HashSet<NodeKey<'ast>>,
 
+    value_tracker: Rc<RefCell<ValueTracker<'ast>>>,
+
     _ast: PhantomData<&'ast ()>,
 }
 
@@ -74,9 +76,10 @@ impl<'ast> TypeInferencer<'ast> {
     /// Create a new `TypeInferencer`.
     pub fn new(
         table_resolver: impl Into<Arc<TableResolver>>,
-        scope: impl Into<Rc<RefCell<ScopeTracker>>>,
+        scope: impl Into<Rc<RefCell<ScopeTracker<'ast>>>>,
         reg: impl Into<Rc<RefCell<TypeRegistry<'ast>>>>,
         unifier: impl Into<Rc<RefCell<unifier::Unifier<'ast>>>>,
+        value_tracker: impl Into<Rc<RefCell<ValueTracker<'ast>>>>,
     ) -> Self {
         Self {
             table_resolver: table_resolver.into(),
@@ -85,6 +88,7 @@ impl<'ast> TypeInferencer<'ast> {
             unifier: unifier.into(),
             param_types: Vec::with_capacity(16),
             literal_nodes: HashSet::with_capacity(64),
+            value_tracker: value_tracker.into(),
             _ast: PhantomData,
         }
     }

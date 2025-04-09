@@ -14,24 +14,24 @@ use std::rc::Rc;
 
 /// [`Visitor`] implementation that manages creation of lexical [`Scope`]s and the current active lexical scope.
 #[derive(Debug)]
-pub struct ScopeTracker {
-    stack: Vec<Rc<RefCell<Scope>>>,
+pub struct ScopeTracker<'ast> {
+    stack: Vec<Rc<RefCell<Scope<'ast>>>>,
 }
 
-impl Default for ScopeTracker {
+impl<'ast> Default for ScopeTracker<'ast> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl ScopeTracker {
+impl<'ast> ScopeTracker<'ast> {
     pub fn new() -> Self {
         Self {
             stack: Vec::with_capacity(64),
         }
     }
 
-    fn current_scope(&self) -> Result<Rc<RefCell<Scope>>, ScopeError> {
+    fn current_scope(&self) -> Result<Rc<RefCell<Scope<'ast>>>, ScopeError> {
         self.stack.last().cloned().ok_or(ScopeError::NoCurrentScope)
     }
 
@@ -90,7 +90,7 @@ impl ScopeTracker {
 
 /// A lexical scope.
 #[derive(Debug)]
-pub(crate) struct Scope {
+pub(crate) struct Scope<'ast> {
     /// The items in scope.
     ///
     /// This is a `Vec` because the order of relations is important to be compatible with how databases deal with
@@ -100,10 +100,10 @@ pub(crate) struct Scope {
     relations: Vec<Rc<Relation>>,
 
     /// The parent scope.
-    parent: Option<Rc<RefCell<Scope>>>,
+    parent: Option<Rc<RefCell<Scope<'ast>>>>,
 }
 
-impl Scope {
+impl<'ast> Scope<'ast> {
     fn new_root() -> Rc<RefCell<Self>> {
         Rc::new(RefCell::new(Self {
             relations: Vec::new(),
@@ -111,7 +111,7 @@ impl Scope {
         }))
     }
 
-    fn new_child(parent: &Rc<RefCell<Scope>>) -> Rc<RefCell<Self>> {
+    fn new_child(parent: &Rc<RefCell<Scope<'ast>>>) -> Rc<RefCell<Self>> {
         Rc::new(RefCell::new(Self {
             relations: Vec::new(),
             parent: Some(parent.clone()),
@@ -305,7 +305,7 @@ pub enum ScopeError {
     NoCurrentScope,
 }
 
-impl<'ast> Visitor<'ast> for ScopeTracker {
+impl<'ast> Visitor<'ast> for ScopeTracker<'ast> {
     type Error = ScopeError;
 
     fn enter<N: Visitable>(&mut self, node: &'ast N) -> ControlFlow<Break<Self::Error>> {

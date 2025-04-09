@@ -4,7 +4,7 @@ use crate::{
     inference::{unifier, TypeError, TypeInferencer},
     unifier::{EqlValue, Unifier},
     DepMut, EndsWith, Projection, ScopeError, ScopeTracker, TableResolver, Type,
-    TypeRegistry, Value,
+    TypeRegistry, Value, ValueTracker,
 };
 use sqlparser::ast::{
     self as ast, Expr, Function, FunctionArg, FunctionArgumentList, FunctionArguments, GroupByExpr,
@@ -155,10 +155,11 @@ pub enum EqlMapperError {
 /// been converted to EQL payloads containing the encrypted literal and/or encrypted representations of those literals.
 #[derive(Debug)]
 struct EqlMapper<'ast> {
-    scope_tracker: Rc<RefCell<ScopeTracker>>,
+    scope_tracker: Rc<RefCell<ScopeTracker<'ast>>>,
     importer: Rc<RefCell<Importer<'ast>>>,
     inferencer: Rc<RefCell<TypeInferencer<'ast>>>,
     registry: Rc<RefCell<TypeRegistry<'ast>>>,
+    value_tracker: Rc<RefCell<ValueTracker<'ast>>>,
     eql_function_tracker: Rc<RefCell<EqlFunctionTracker<'ast>>>,
     _ast: PhantomData<&'ast ()>,
 }
@@ -175,11 +176,14 @@ impl<'ast> EqlMapper<'ast> {
         ));
         let eql_function_tracker = DepMut::new(EqlFunctionTracker::new(&registry));
         let unifier = DepMut::new(Unifier::new(&registry));
+        let value_tracker = DepMut::new(ValueTracker::new(&registry));
+
         let inferencer = DepMut::new(TypeInferencer::new(
             table_resolver.clone(),
             &scope_tracker,
             &registry,
             &unifier,
+            &value_tracker,
         ));
 
         Self {
@@ -188,6 +192,7 @@ impl<'ast> EqlMapper<'ast> {
             inferencer: inferencer.into(),
             registry: registry.into(),
             eql_function_tracker: eql_function_tracker.into(),
+            value_tracker: value_tracker.into(),
             _ast: PhantomData,
         }
     }
@@ -679,18 +684,25 @@ impl<'ast> Visitor<'ast> for EqlMapper<'ast> {
     type Error = EqlMapperError;
 
     fn enter<N: Visitable>(&mut self, node: &'ast N) -> ControlFlow<Break<Self::Error>> {
+        self.value_tracker
+            .borrow_mut()
+            .enter(node);
+
         self.scope_tracker
             .borrow_mut()
             .enter(node)
             .map_break(Break::convert)?;
+
         self.importer
             .borrow_mut()
             .enter(node)
             .map_break(Break::convert)?;
+
         self.eql_function_tracker
             .borrow_mut()
             .enter(node)
             .map_break(Break::convert)?;
+
         self.inferencer
             .borrow_mut()
             .enter(node)
@@ -704,18 +716,25 @@ impl<'ast> Visitor<'ast> for EqlMapper<'ast> {
             .borrow_mut()
             .exit(node)
             .map_break(Break::convert)?;
+
         self.eql_function_tracker
             .borrow_mut()
             .exit(node)
             .map_break(Break::convert)?;
+
         self.importer
             .borrow_mut()
             .exit(node)
             .map_break(Break::convert)?;
+
         self.scope_tracker
             .borrow_mut()
             .exit(node)
             .map_break(Break::convert)?;
+
+        self.value_tracker
+            .borrow_mut()
+            .exit(node);
 
         ControlFlow::Continue(())
     }

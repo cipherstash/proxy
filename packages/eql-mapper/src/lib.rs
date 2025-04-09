@@ -11,6 +11,7 @@ mod model;
 mod rc_ref;
 mod scope_tracker;
 mod selector;
+mod value_tracker;
 
 #[cfg(test)]
 mod test_helpers;
@@ -25,6 +26,7 @@ pub use rc_ref::*;
 pub use scope_tracker::*;
 pub use selector::*;
 pub use unifier::{EqlValue, NativeValue, TableColumn};
+pub use value_tracker::*;
 
 #[cfg(test)]
 mod test {
@@ -1146,9 +1148,9 @@ mod test {
             projection_type(&parse("select x from (select 'lit' as x)")),
             projection_type(&parse("select * from (select 'lit')")),
             projection_type(&parse("select * from (select 'lit' as t)")),
-            // projection_type(&parse("select $1")),
-            // projection_type(&parse("select t from (select $1 as t)")),
-            // projection_type(&parse("select * from (select $1)")),
+            projection_type(&parse("select $1")),
+            projection_type(&parse("select t from (select $1 as t)")),
+            projection_type(&parse("select * from (select $1)")),
             Some(Projection::WithColumns(vec![ProjectionColumn {
                 alias: None,
                 ty: Value::Native(NativeValue(None)),

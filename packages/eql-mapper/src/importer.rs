@@ -16,7 +16,7 @@ use std::{cell::RefCell, fmt::Debug, marker::PhantomData, ops::ControlFlow, rc::
 pub struct Importer<'ast> {
     table_resolver: Arc<TableResolver>,
     reg: Rc<RefCell<TypeRegistry<'ast>>>,
-    scope_tracker: Rc<RefCell<ScopeTracker>>,
+    scope_tracker: Rc<RefCell<ScopeTracker<'ast>>>,
     _ast: PhantomData<&'ast ()>,
 }
 
@@ -24,7 +24,7 @@ impl<'ast> Importer<'ast> {
     pub fn new(
         table_resolver: impl Into<Arc<TableResolver>>,
         reg: impl Into<Rc<RefCell<TypeRegistry<'ast>>>>,
-        scope: impl Into<Rc<RefCell<ScopeTracker>>>,
+        scope: impl Into<Rc<RefCell<ScopeTracker<'ast>>>>,
     ) -> Self {
         Self {
             reg: reg.into(),
