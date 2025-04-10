@@ -16,6 +16,7 @@ use std::{
     collections::{HashMap, HashSet},
     convert::Infallible,
     marker::PhantomData,
+    mem,
     ops::ControlFlow,
     rc::Rc,
     sync::Arc,
@@ -426,18 +427,6 @@ impl<'ast> EncryptedStatement<'ast> {
             }
         }
 
-        // Scenario 1: add alias to column in order to preserve the effective alias prior to transformation.
-        if let Some((select, _projection, select_item)) =
-            EndsWith::<(&Select, &Vec<SelectItem>, &mut SelectItem)>::try_match(context, new_node)
-        {
-            if self.is_used_in_group_by_clause(&select.group_by, original_node) {
-                *select_item = self.add_alias_to_unnamed_select_item(
-                    select_item.clone(),
-                    original_node.downcast_ref().unwrap(),
-                );
-            }
-        }
-
         // Scenario 1: wrap the specific group clause expression in `cs_ore_64_8_v1(..)`
         if let Some((_group_by_clause, _exprs, expr)) =
             EndsWith::<(&GroupByExpr, &Vec<Expr>, &mut Expr)>::try_match(context, new_node)
@@ -473,15 +462,10 @@ impl<'ast> EncryptedStatement<'ast> {
             }
         }
 
-        if let Some((select, _projection, select_item)) =
+        if let Some((_select, _projection, select_item)) =
             EndsWith::<(&Select, &Vec<SelectItem>, &mut SelectItem)>::try_match(context, new_node)
         {
-            if !self.is_used_in_group_by_clause(&select.group_by, original_node) {
-                *select_item = self.add_alias_to_unnamed_select_item(
-                    select_item.clone(),
-                    original_node.downcast_ref().unwrap(),
-                );
-            }
+            self.preserve_effective_alias_of_select_item(select_item, original_node.downcast_ref());
         }
 
         Ok(())
@@ -508,27 +492,58 @@ impl<'ast> EncryptedStatement<'ast> {
     /// Converts [`SelectItem::UnnamedExpr`] to [`SelectItem::ExprWithAlias`]
     ///
     /// All other variants are returned unmodified.
-    fn add_alias_to_unnamed_select_item(
+    fn preserve_effective_alias_of_select_item(
         &self,
-        to_wrap: SelectItem,
-        original_node: &SelectItem,
-    ) -> SelectItem {
-        match to_wrap {
+        target_node: &mut SelectItem,
+        reference_node: Option<&SelectItem>,
+    ) {
+        let reference_node = reference_node.unwrap_or_else(|| &target_node);
+        let reference_alias = self.derive_effective_alias(reference_node);
+        let target_alias = self.derive_effective_alias(target_node);
+        match target_node {
+            // The captured binding `expr` has type `&mut Expr` but we need an owned `Expr`.  to avoid
+            // cloning `expr` (which can be arbitrarily large) we replace it with another which gives is
+            // ownership of the original value. Chosing `Expr::Wildcard` as the throwaway value because it's
+            // cheap.
             SelectItem::UnnamedExpr(expr) => {
-                match self.derive_alias_from_select_item(original_node) {
-                    Some(alias) => SelectItem::ExprWithAlias { expr, alias },
-                    None => SelectItem::UnnamedExpr(expr),
+                if let (Some(target_alias), Some(reference_alias)) = (target_alias, reference_alias)
+                {
+                    if target_alias != reference_alias {
+                        let alias = reference_alias.clone();
+                        drop(target_alias);
+                        drop(reference_alias);
+                        *target_node = SelectItem::ExprWithAlias {
+                            expr: mem::replace(expr, Expr::Wildcard),
+                            alias,
+                        }
+                    }
                 }
             }
-            other => other,
+            // SelectItem::UnnamedExpr(expr) => match alias {
+            //     Some(alias) => {
+            //         *target_node = SelectItem::ExprWithAlias {
+            //             // the captured binding `expr` has type `&mut Expr` but we need an owned `Expr`.  to avoid
+            //             // cloning `expr` (which can be arbitrarily large) we replace it with another which gives is
+            //             // ownership of the original value. Chosing `Expr::Wildcard` as the throwaway value because it's
+            //             // cheap.
+            //             expr: mem::replace(expr, Expr::Wildcard),
+            //             alias,
+            //         }
+            //     }
+            //     None => *target_node = SelectItem::UnnamedExpr(mem::replace(expr, Expr::Wildcard)),
+            // },
+            _ => {}
         }
     }
 
-    fn derive_alias_from_select_item(&self, node: &SelectItem) -> Option<Ident> {
+    fn derive_effective_alias(&self, node: &'ast SelectItem) -> Option<Ident> {
         match node {
             // Select items that consist of just an identifer do not require aliasing.
-            SelectItem::UnnamedExpr(Expr::Identifier(_))
-            | SelectItem::UnnamedExpr(Expr::CompoundIdentifier(_)) => None,
+            SelectItem::UnnamedExpr(Expr::Identifier(ident)) => Some(ident.clone()),
+
+            SelectItem::UnnamedExpr(Expr::CompoundIdentifier(obj_name)) => {
+                Some(obj_name.last().unwrap().clone())
+            }
 
             SelectItem::UnnamedExpr(expr) => {
                 /// Unwrap an [`Expr`] until we find a `Expr::Identifier`, `Expr::CompoundIdentifier` or `Expr::Function`.
