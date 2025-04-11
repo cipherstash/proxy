@@ -1350,7 +1350,7 @@ mod test {
                 match typed.transform(HashMap::new()) {
                     Ok(statement) => assert_eq!(
                         statement.to_string(),
-                        "SELECT cs_grouped_value_v1(email) AS email FROM users GROUP BY cs_ore_64_8_v1(email)".to_string()
+                        "SELECT CS_GROUPED_VALUE_V1(email) AS email FROM users GROUP BY CS_ORE_64_8_V1(email)".to_string()
                     ),
                     Err(err) => panic!("transformation failed: {err}"),
                 }
@@ -1380,7 +1380,7 @@ mod test {
                 match typed.transform(HashMap::new()) {
                     Ok(statement) => assert_eq!(
                         statement.to_string(),
-                        "SELECT cs_min_v1(salary) AS MIN, cs_max_v1(salary) AS MAX, department FROM employees GROUP BY department".to_string()
+                        "SELECT CS_MIN_V1(salary) AS MIN, CS_MAX_V1(salary) AS MAX, department FROM employees GROUP BY department".to_string()
                     ),
                     Err(err) => panic!("transformation failed: {err}"),
                 }

@@ -59,16 +59,14 @@ impl<C: Visitable> Selector for MatchTrailing<(C,)> {
         N: Visitable,
         F: FnMut((&'ast C,), &'ast mut C) -> Result<(), EqlMapperError>,
     {
-        let target_node: &mut C = target_node.downcast_mut().unwrap();
+        let matcher =
+            || -> Option<Self::Matched<'ast>> { Some((source_node.downcast_ref::<C>()?,)) };
 
-        let matcher = || -> Option<Self::Matched<'ast>> {
-            Some(( source_node.downcast_ref::<C>()?,))
-        };
+        let target_node: &mut Self::Target = target_node.downcast_mut().unwrap();
 
         if let Some(matched) = matcher() {
-            return (then)(matched, target_node)
+            return (then)(matched, target_node);
         }
-
 
         Ok(())
     }
@@ -76,7 +74,7 @@ impl<C: Visitable> Selector for MatchTrailing<(C,)> {
 
 #[allow(unused)]
 impl<P0: Visitable, C: Visitable> Selector for MatchTrailing<(P0, C)> {
-    type Matched<'a> = (&'a P0, &'a C,);
+    type Matched<'a> = (&'a P0, &'a C);
     type Target = C;
 
     fn on_match_then<'ast, N, F>(
@@ -89,17 +87,13 @@ impl<P0: Visitable, C: Visitable> Selector for MatchTrailing<(P0, C)> {
         N: Visitable,
         F: FnMut(Self::Matched<'ast>, &'ast mut Self::Target) -> Result<(), EqlMapperError>,
     {
-        let target_node: &mut C = target_node.downcast_mut().unwrap();
-
         let matcher = || -> Option<Self::Matched<'ast>> {
-            Some((
-                ctx.nth_last_as(0)?,
-                source_node.downcast_ref::<C>()?,
-            ))
+            Some((ctx.nth_last_as(0)?, source_node.downcast_ref::<C>()?))
         };
 
         if let Some(matched) = matcher() {
-            return (then)(matched, target_node)
+            let target_node: &mut Self::Target = target_node.downcast_mut().unwrap();
+            return (then)(matched, target_node);
         }
 
         Ok(())
@@ -108,7 +102,7 @@ impl<P0: Visitable, C: Visitable> Selector for MatchTrailing<(P0, C)> {
 
 #[allow(unused)]
 impl<P1: Visitable, P0: Visitable, C: Visitable> Selector for MatchTrailing<(P1, P0, C)> {
-    type Matched<'a> = (&'a P1, &'a P0, &'a C,);
+    type Matched<'a> = (&'a P1, &'a P0, &'a C);
     type Target = C;
 
     fn on_match_then<'ast, N, F>(
@@ -121,8 +115,6 @@ impl<P1: Visitable, P0: Visitable, C: Visitable> Selector for MatchTrailing<(P1,
         N: Visitable,
         F: FnMut(Self::Matched<'ast>, &'ast mut Self::Target) -> Result<(), EqlMapperError>,
     {
-        let target_node: &mut C = target_node.downcast_mut().unwrap();
-
         let matcher = || -> Option<Self::Matched<'ast>> {
             Some((
                 ctx.nth_last_as(1)?,
@@ -132,7 +124,8 @@ impl<P1: Visitable, P0: Visitable, C: Visitable> Selector for MatchTrailing<(P1,
         };
 
         if let Some(matched) = matcher() {
-            return (then)(matched, target_node)
+            let target_node: &mut Self::Target = target_node.downcast_mut().unwrap();
+            return (then)(matched, target_node);
         }
 
         Ok(())
@@ -142,7 +135,7 @@ impl<P1: Visitable, P0: Visitable, C: Visitable> Selector for MatchTrailing<(P1,
 impl<P2: Visitable, P1: Visitable, P0: Visitable, C: Visitable> Selector
     for MatchTrailing<(P2, P1, P0, C)>
 {
-    type Matched<'a> = (&'a P2, &'a P1, &'a P0, &'a C,);
+    type Matched<'a> = (&'a P2, &'a P1, &'a P0, &'a C);
     type Target = C;
 
     fn on_match_then<'ast, N, F>(
@@ -155,8 +148,6 @@ impl<P2: Visitable, P1: Visitable, P0: Visitable, C: Visitable> Selector
         N: Visitable,
         F: FnMut(Self::Matched<'ast>, &'ast mut Self::Target) -> Result<(), EqlMapperError>,
     {
-        let target_node: &mut C = target_node.downcast_mut().unwrap();
-
         let matcher = || -> Option<Self::Matched<'ast>> {
             Some((
                 ctx.nth_last_as(2)?,
@@ -167,7 +158,8 @@ impl<P2: Visitable, P1: Visitable, P0: Visitable, C: Visitable> Selector
         };
 
         if let Some(matched) = matcher() {
-            return (then)(matched, target_node)
+            let target_node: &mut Self::Target = target_node.downcast_mut().unwrap();
+            return (then)(matched, target_node);
         }
 
         Ok(())
