@@ -3,14 +3,14 @@
 mod helpers;
 
 mod eql_col_in_projection_and_group_by;
-mod group_by_eql_cols;
+mod group_by_eql_col;
 mod preserve_aliases;
 mod use_equivalent_eql_fns_on_eql_types;
 
 pub(self) mod selector;
 
 pub(crate) use eql_col_in_projection_and_group_by::*;
-pub(crate) use group_by_eql_cols::*;
+pub(crate) use group_by_eql_col::*;
 pub(crate) use preserve_aliases::*;
 pub(crate) use use_equivalent_eql_fns_on_eql_types::*;
 

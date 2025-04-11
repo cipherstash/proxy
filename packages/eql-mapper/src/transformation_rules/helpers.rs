@@ -31,7 +31,7 @@ pub(crate) fn is_used_in_group_by_clause<'ast, N: AsNodeKey>(
     }
 }
 
-pub(crate) fn wrap_in_single_arg_function(expr: Expr, name: ObjectName) -> Expr {
+pub(crate) fn wrap_in_1_arg_function(expr: Expr, name: ObjectName) -> Expr {
     Expr::Function(Function {
         name,
         parameters: FunctionArguments::None,

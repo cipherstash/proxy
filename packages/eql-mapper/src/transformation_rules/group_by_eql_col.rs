@@ -11,17 +11,17 @@ use super::{
     Rule,
 };
 
-pub struct GroupByEqlCols<'a, 'ast> {
+pub struct GroupByEqlCol<'a, 'ast> {
     node_types: &'a HashMap<NodeKey<'ast>, Type>,
 }
 
-impl<'a, 'ast> GroupByEqlCols<'a, 'ast> {
+impl<'a, 'ast> GroupByEqlCol<'a, 'ast> {
     pub fn new(node_types: &'a HashMap<NodeKey<'ast>, Type>) -> Self {
         Self { node_types }
     }
 }
 
-impl<'a, 'ast> Rule<'ast> for GroupByEqlCols<'a, 'ast> {
+impl<'a, 'ast> Rule<'ast> for GroupByEqlCol<'a, 'ast> {
     type Sel = MatchTrailing<(GroupByExpr, Vec<Expr>, Expr)>;
 
     fn apply<N0: Visitable>(
@@ -38,7 +38,7 @@ impl<'a, 'ast> Rule<'ast> for GroupByEqlCols<'a, 'ast> {
                 if let Some(Type::Value(Value::Eql(_))) =
                     self.node_types.get(&original_node.as_node_key())
                 {
-                    *expr = helpers::wrap_in_single_arg_function(
+                    *expr = helpers::wrap_in_1_arg_function(
                         expr.clone(),
                         ObjectName(vec![Ident::new("CS_ORE_64_8_V1")]),
                     );

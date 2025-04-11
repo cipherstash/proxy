@@ -1,6 +1,6 @@
 use super::importer::{ImportError, Importer};
 use crate::{
-    eql_function_tracker::{EqlFunctionTracker, EqlFunctionTrackerError}, inference::{unifier, TypeError, TypeInferencer}, unifier::{EqlValue, Unifier}, DepMut, EqlColInProjectionAndGroupBy, GroupByEqlCols, PreserveAliases, Projection, Rule, ScopeError, ScopeTracker, TableResolver, Type, TypeRegistry, UseEquivalentSqlFuncForEqlTypes, Value, ValueTracker
+    eql_function_tracker::{EqlFunctionTracker, EqlFunctionTrackerError}, inference::{unifier, TypeError, TypeInferencer}, unifier::{EqlValue, Unifier}, DepMut, EqlColInProjectionAndGroupBy, GroupByEqlCol, PreserveAliases, Projection, Rule, ScopeError, ScopeTracker, TableResolver, Type, TypeRegistry, UseEquivalentSqlFuncForEqlTypes, Value, ValueTracker
 };
 use sqlparser::ast::{self as ast, FunctionArguments, Statement};
 use sqltk::{AsNodeKey, Break, Context, NodeKey, Transform, Transformable, Visitable, Visitor};
@@ -369,7 +369,7 @@ impl<'ast> Transform<'ast> for EncryptedStatement<'ast> {
             source_node,
             &mut target_node,
         )?;
-        GroupByEqlCols::new(self.node_types).apply(ctx, source_node, &mut target_node)?;
+        GroupByEqlCol::new(self.node_types).apply(ctx, source_node, &mut target_node)?;
         UseEquivalentSqlFuncForEqlTypes::new(self.node_types).apply(
             ctx,
             source_node,
