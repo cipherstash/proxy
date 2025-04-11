@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1744347567633,
+  "lastUpdate": 1744348341590,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -390,6 +390,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 6.765671,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "f80bb75fb9e1435085ca3a9f1f590cf8b2aa303e",
+          "message": "Chore: add footer to README to trigger docs issue",
+          "timestamp": "2025-04-11T04:57:01Z",
+          "url": "https://github.com/cipherstash/proxy/pull/204/commits/f80bb75fb9e1435085ca3a9f1f590cf8b2aa303e"
+        },
+        "date": 1744348340026,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 6.827552,
             "unit": "Number"
           }
         ]
