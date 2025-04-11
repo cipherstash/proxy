@@ -1,22 +1,13 @@
 use super::importer::{ImportError, Importer};
 use crate::{
-    eql_function_tracker::{EqlFunctionTracker, EqlFunctionTrackerError},
-    inference::{unifier, TypeError, TypeInferencer},
-    unifier::{EqlValue, Unifier},
-    DepMut, EndsWith, Projection, ScopeError, ScopeTracker, SqlIdent, TableResolver, Type,
-    TypeRegistry, Value, ValueTracker,
+    eql_function_tracker::{EqlFunctionTracker, EqlFunctionTrackerError}, inference::{unifier, TypeError, TypeInferencer}, unifier::{EqlValue, Unifier}, DepMut, EqlColInProjectionAndGroupBy, GroupByEqlCols, PreserveAliases, Projection, Rule, ScopeError, ScopeTracker, TableResolver, Type, TypeRegistry, UseEquivalentSqlFuncForEqlTypes, Value, ValueTracker
 };
-use sqlparser::ast::{
-    self as ast, Expr, Function, FunctionArg, FunctionArgumentList, FunctionArguments, GroupByExpr,
-    Ident, ObjectName, Select, SelectItem, Statement,
-};
+use sqlparser::ast::{self as ast, FunctionArguments, Statement};
 use sqltk::{AsNodeKey, Break, Context, NodeKey, Transform, Transformable, Visitable, Visitor};
 use std::{
     cell::RefCell,
     collections::{HashMap, HashSet},
-    convert::Infallible,
     marker::PhantomData,
-    mem,
     ops::ControlFlow,
     rc::Rc,
     sync::Arc,
@@ -357,285 +348,6 @@ impl<'ast> EncryptedStatement<'ast> {
             node_types,
         }
     }
-
-    /// We need to know if an [`Expr`] using an EQL column in a projection has to be aggregated, or have its
-    /// aggregation rewritten.
-    ///
-    /// # Scenario 1: The "grouping by the encrypted column" case
-    ///
-    /// In this case the encrypted column is mentioned in the GROUP BY clause so the grouped value must be extracted.
-    ///
-    /// ## Input
-    ///
-    /// ```sql
-    /// SELECT
-    ///   email_encrypted,
-    ///   count(*)
-    /// FROM orders
-    /// GROUP BY email_encrypted;
-    /// ```
-    ///
-    /// ## Output
-    ///
-    /// SELECT
-    ///   cs_grouped_value_v1(email_encrypted) as email_encrypted,
-    ///   count(*)
-    /// FROM orders
-    /// GROUP BY cs_ore_64_8_1(email_encrypted);
-    ///
-    /// # Scenario 2: The "grouping by another column" case
-    ///
-    /// In this case the encrypted column is NOT mentioned in the GROUP BY which means it already must be aggregated but
-    /// we need to change the aggregate function: `MIN` becomes `cs_min_v1` and `MAX` becomes `cs_max_v1`.
-    ///
-    /// ## Input
-    ///
-    /// ```sql
-    /// SELECT
-    ///   MIN(email_encrypted) as email_encrypted,
-    ///   completed_at
-    /// FROM orders
-    /// GROUP BY completed_at;
-    /// ```
-    ///
-    /// ## Output
-    ///
-    /// ```sql
-    /// SELECT
-    ///   cs_min_v1(email_encrypted) as email_encrypted,
-    ///   completed_at
-    /// FROM orders
-    /// GROUP BY completed_at;
-    /// ```
-    fn transform_projection_exprs_as_per_group_by_clause<N: Visitable>(
-        &mut self,
-        new_node: &mut N,
-        original_node: &'ast N,
-        context: &Context<'ast>,
-    ) -> Result<(), EqlMapperError> {
-        // Scenario 1: Wrap column expr in cs_grouped_value_1
-        if let Some((select, _projection, _select_item, expr)) =
-            EndsWith::<(&Select, &Vec<SelectItem>, &SelectItem, &mut Expr)>::try_match(
-                context, new_node,
-            )
-        {
-            if self.is_used_in_group_by_clause(&select.group_by, original_node) {
-                *expr = self.wrap_in_single_arg_function(
-                    expr.clone(),
-                    ObjectName(vec![Ident::new("cs_grouped_value_v1")]),
-                );
-            }
-        }
-
-        // Scenario 1: wrap the specific group clause expression in `cs_ore_64_8_v1(..)`
-        if let Some((_group_by_clause, _exprs, expr)) =
-            EndsWith::<(&GroupByExpr, &Vec<Expr>, &mut Expr)>::try_match(context, new_node)
-        {
-            if let Some(Type::Value(Value::Eql(_))) =
-                self.node_types.get(&original_node.as_node_key())
-            {
-                *expr = self.wrap_in_single_arg_function(
-                    expr.clone(),
-                    ObjectName(vec![Ident::new("cs_ore_64_8_v1")]),
-                );
-            }
-        }
-
-        // Scenario 2: Change MIN to CS_MIN_V1
-        if let Some((select, _projection, _select_item, expr)) =
-            EndsWith::<(&Select, &Vec<SelectItem>, &SelectItem, &mut Expr)>::try_match(
-                context, new_node,
-            )
-        {
-            if !self.is_used_in_group_by_clause(&select.group_by, original_node) {
-                if let Expr::Function(Function { name, .. }) = expr {
-                    let f_name = name.0.last_mut().unwrap();
-
-                    if SqlIdent(&*f_name) == SqlIdent(Ident::new("MIN")) {
-                        *f_name = Ident::new("cs_min_v1");
-                    }
-
-                    if SqlIdent(&*f_name) == SqlIdent(Ident::new("MAX")) {
-                        *f_name = Ident::new("cs_max_v1");
-                    }
-                }
-            }
-        }
-
-        if let Some((_select, _projection, select_item)) =
-            EndsWith::<(&Select, &Vec<SelectItem>, &mut SelectItem)>::try_match(context, new_node)
-        {
-            self.preserve_effective_alias_of_select_item(select_item, original_node.downcast_ref());
-        }
-
-        Ok(())
-    }
-
-    fn wrap_in_single_arg_function(&self, to_wrap: Expr, name: ObjectName) -> Expr {
-        Expr::Function(Function {
-            name,
-            parameters: FunctionArguments::None,
-            args: FunctionArguments::List(FunctionArgumentList {
-                args: vec![FunctionArg::Unnamed(ast::FunctionArgExpr::Expr(
-                    to_wrap.clone(),
-                ))],
-                duplicate_treatment: None,
-                clauses: vec![],
-            }),
-            filter: None,
-            null_treatment: None,
-            over: None,
-            within_group: vec![],
-        })
-    }
-
-    /// Converts [`SelectItem::UnnamedExpr`] to [`SelectItem::ExprWithAlias`]
-    ///
-    /// All other variants are returned unmodified.
-    fn preserve_effective_alias_of_select_item(
-        &self,
-        target_node: &mut SelectItem,
-        reference_node: Option<&SelectItem>,
-    ) {
-        let reference_node = reference_node.unwrap_or_else(|| &target_node);
-        let reference_alias = self.derive_effective_alias(reference_node);
-        let target_alias = self.derive_effective_alias(target_node);
-        match target_node {
-            // The captured binding `expr` has type `&mut Expr` but we need an owned `Expr`.  to avoid
-            // cloning `expr` (which can be arbitrarily large) we replace it with another which gives is
-            // ownership of the original value. Chosing `Expr::Wildcard` as the throwaway value because it's
-            // cheap.
-            SelectItem::UnnamedExpr(expr) => {
-                if let (Some(target_alias), Some(reference_alias)) = (target_alias, reference_alias)
-                {
-                    if target_alias != reference_alias {
-                        let alias = reference_alias.clone();
-                        drop(target_alias);
-                        drop(reference_alias);
-                        *target_node = SelectItem::ExprWithAlias {
-                            expr: mem::replace(expr, Expr::Wildcard),
-                            alias,
-                        }
-                    }
-                }
-            }
-            // SelectItem::UnnamedExpr(expr) => match alias {
-            //     Some(alias) => {
-            //         *target_node = SelectItem::ExprWithAlias {
-            //             // the captured binding `expr` has type `&mut Expr` but we need an owned `Expr`.  to avoid
-            //             // cloning `expr` (which can be arbitrarily large) we replace it with another which gives is
-            //             // ownership of the original value. Chosing `Expr::Wildcard` as the throwaway value because it's
-            //             // cheap.
-            //             expr: mem::replace(expr, Expr::Wildcard),
-            //             alias,
-            //         }
-            //     }
-            //     None => *target_node = SelectItem::UnnamedExpr(mem::replace(expr, Expr::Wildcard)),
-            // },
-            _ => {}
-        }
-    }
-
-    fn derive_effective_alias(&self, node: &'ast SelectItem) -> Option<Ident> {
-        match node {
-            // Select items that consist of just an identifer do not require aliasing.
-            SelectItem::UnnamedExpr(Expr::Identifier(ident)) => Some(ident.clone()),
-
-            SelectItem::UnnamedExpr(Expr::CompoundIdentifier(obj_name)) => {
-                Some(obj_name.last().unwrap().clone())
-            }
-
-            SelectItem::UnnamedExpr(expr) => {
-                /// Unwrap an [`Expr`] until we find a `Expr::Identifier`, `Expr::CompoundIdentifier` or `Expr::Function`.
-                /// This is meant to emulate what Postgres does when it tries to derive a column name from an expression that
-                /// has no alias.
-                struct DeriveNameFromExpr {
-                    found: Option<Ident>,
-                }
-
-                impl<'ast> Visitor<'ast> for DeriveNameFromExpr {
-                    type Error = Infallible;
-
-                    fn enter<N: Visitable>(
-                        &mut self,
-                        node: &'ast N,
-                    ) -> ControlFlow<Break<Self::Error>> {
-                        if let Some(expr) = node.downcast_ref::<Expr>() {
-                            match expr {
-                                Expr::Identifier(ident) => {
-                                    self.found = Some(ident.clone());
-                                    return ControlFlow::Break(Break::Finished);
-                                }
-                                Expr::CompoundIdentifier(obj_name) => {
-                                    self.found = Some(obj_name.last().unwrap().clone());
-                                    return ControlFlow::Break(Break::Finished);
-                                }
-                                Expr::Function(Function { name, .. }) => {
-                                    self.found = Some(name.0.last().unwrap().clone());
-                                    return ControlFlow::Break(Break::Finished);
-                                }
-                                _ => {}
-                            }
-                        }
-
-                        ControlFlow::Continue(())
-                    }
-                }
-
-                let mut visitor = DeriveNameFromExpr { found: None };
-                expr.accept(&mut visitor);
-                visitor.found
-            }
-            SelectItem::ExprWithAlias { expr: _, alias } => Some(alias.clone()),
-            _ => None,
-        }
-    }
-
-    /// Checks if `node` has an EQL type (encrypted) and that type is referenced in the `GROUP BY` clause of `select`.
-    fn is_used_in_group_by_clause<N: AsNodeKey>(
-        &self,
-        group_by: &'ast GroupByExpr,
-        node: &'ast N,
-    ) -> bool {
-        struct ContainsExprWithType<'ast, 't> {
-            node_types: &'t HashMap<NodeKey<'ast>, Type>,
-            needle: &'t Type,
-            found: bool,
-        }
-
-        impl<'ast> Visitor<'ast> for ContainsExprWithType<'_, 'ast> {
-            type Error = Infallible;
-
-            fn enter<N: Visitable>(&mut self, node: &'ast N) -> ControlFlow<Break<Self::Error>> {
-                if let Some(expr) = node.downcast_ref::<Expr>() {
-                    if let Some(expr_ty) = self.node_types.get(&expr.as_node_key()) {
-                        if expr_ty == self.needle {
-                            self.found = true;
-                            return ControlFlow::Break(Break::Finished);
-                        }
-                    }
-                }
-
-                ControlFlow::Continue(())
-            }
-        }
-
-        match self.node_types.get(&node.as_node_key()) {
-            Some(needle @ Type::Value(Value::Eql(_))) => match group_by {
-                GroupByExpr::All(_) => true,
-                GroupByExpr::Expressions(exprs, _) => {
-                    let mut visitor = ContainsExprWithType {
-                        node_types: self.node_types,
-                        needle,
-                        found: false,
-                    };
-                    exprs.accept(&mut visitor);
-                    visitor.found
-                }
-            },
-            _ => false,
-        }
-    }
 }
 
 /// Updates all [`Expr::Value`] nodes that:
@@ -647,18 +359,25 @@ impl<'ast> Transform<'ast> for EncryptedStatement<'ast> {
 
     fn transform<N: Visitable>(
         &mut self,
-        mut new_node: N,
-        original_node: &'ast N,
-        context: &Context<'ast>,
+        mut target_node: N,
+        source_node: &'ast N,
+        ctx: &Context<'ast>,
     ) -> Result<N, Self::Error> {
-        self.transform_projection_exprs_as_per_group_by_clause(
-            &mut new_node,
-            original_node,
-            context,
+        PreserveAliases.apply(ctx, source_node, &mut target_node)?;
+        EqlColInProjectionAndGroupBy::new(self.node_types).apply(
+            ctx,
+            source_node,
+            &mut target_node,
+        )?;
+        GroupByEqlCols::new(self.node_types).apply(ctx, source_node, &mut target_node)?;
+        UseEquivalentSqlFuncForEqlTypes::new(self.node_types).apply(
+            ctx,
+            source_node,
+            &mut target_node,
         )?;
 
-        if let Some(target_value) = new_node.downcast_mut::<ast::Expr>() {
-            match original_node.downcast_ref::<ast::Expr>() {
+        if let Some(target_value) = target_node.downcast_mut::<ast::Expr>() {
+            match source_node.downcast_ref::<ast::Expr>() {
                 Some(original_value) => match original_value {
                     ast::Expr::Value(ast::Value::Placeholder(_))
                         if original_value != target_value =>
@@ -702,7 +421,7 @@ impl<'ast> Transform<'ast> for EncryptedStatement<'ast> {
             }
         }
 
-        Ok(new_node)
+        Ok(target_node)
     }
 }
 

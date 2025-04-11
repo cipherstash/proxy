@@ -9,26 +9,23 @@ mod inference;
 mod iterator_ext;
 mod model;
 mod rc_ref;
-mod rules;
+mod transformation_rules;
 mod scope_tracker;
-mod selector;
 mod value_tracker;
 
 #[cfg(test)]
 mod test_helpers;
 
-pub use arc_ref::*;
-pub use dep::*;
 pub use eql_mapper::*;
-pub use importer::*;
-pub use inference::*;
 pub use model::*;
-pub use rc_ref::*;
-pub use scope_tracker::*;
-pub use rules::*;
-pub use selector::*;
-pub use unifier::{EqlValue, NativeValue, TableColumn};
-pub use value_tracker::*;
+pub use unifier::{TableColumn, EqlValue, NativeValue};
+
+pub(crate) use arc_ref::*;
+pub(crate) use dep::*;
+pub(crate) use inference::*;
+pub(crate) use transformation_rules::*;
+pub(crate) use scope_tracker::*;
+pub(crate) use value_tracker::*;
 
 #[cfg(test)]
 mod test {
@@ -38,7 +35,10 @@ mod test {
     use crate::projection;
     use crate::Schema;
     use crate::TableResolver;
-    use crate::{schema, EqlValue, NativeValue, Projection, ProjectionColumn, TableColumn, Value};
+    use crate::{
+        schema, unifier::EqlValue, unifier::NativeValue, Projection, ProjectionColumn, TableColumn,
+        Value,
+    };
     use pretty_assertions::assert_eq;
     use sqlparser::ast::Statement;
     use sqlparser::ast::{self as ast};
@@ -1372,7 +1372,8 @@ mod test {
             }
         });
 
-        let statement = parse("SELECT MIN(salary), MAX(salary), department FROM employees GROUP BY department");
+        let statement =
+            parse("SELECT MIN(salary), MAX(salary), department FROM employees GROUP BY department");
 
         match type_check(schema, &statement) {
             Ok(typed) => {
