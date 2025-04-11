@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1744346429313,
+  "lastUpdate": 1744347567633,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -361,6 +361,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 7.212336,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "keandrews@gmail.com",
+            "name": "Kate Andrews",
+            "username": "kateandrews"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "c35d9ecb8d08ac7ed9fe37e64a792a4718d504af",
+          "message": "Merge pull request #203 from cipherstash/issue-template-for-docs\n\nChore: add template for docs issue form",
+          "timestamp": "2025-04-11T14:56:56+10:00",
+          "tree_id": "0f4c399c6602a5ee0136f36926daf98bc79c0df7",
+          "url": "https://github.com/cipherstash/proxy/commit/c35d9ecb8d08ac7ed9fe37e64a792a4718d504af"
+        },
+        "date": 1744347566289,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 6.765671,
             "unit": "Number"
           }
         ]
