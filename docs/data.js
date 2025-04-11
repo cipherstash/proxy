@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1743735546495,
+  "lastUpdate": 1744346429313,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -336,6 +336,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 6.742193,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "a26168f0fdf6596c337126f379f2242d95126c44",
+          "message": "Chore: add template for docs issue form",
+          "timestamp": "2025-04-05T03:57:13Z",
+          "url": "https://github.com/cipherstash/proxy/pull/203/commits/a26168f0fdf6596c337126f379f2242d95126c44"
+        },
+        "date": 1744346428281,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 7.212336,
             "unit": "Number"
           }
         ]
