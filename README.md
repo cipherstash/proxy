@@ -828,5 +828,9 @@ Detailed results are generated in `csv` format and in the `results` directory.
 
 Check out the [Proxy development guide](./DEVELOPMENT.md).
 
+---
 
+### Didn't find what you wanted?
+
+[Click here to let us know what was missing from our docs.](https://github.com/cipherstash/proxy/issues/new?template=docs-feedback.yml&title=[Docs:]%20Feedback%20on%20README.md)
 
