@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1744348341590,
+  "lastUpdate": 1744351866112,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -415,6 +415,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 6.827552,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "keandrews@gmail.com",
+            "name": "Kate Andrews",
+            "username": "kateandrews"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "e9f1a111a561703febf3cc1932d0d12f1da3f789",
+          "message": "Merge pull request #204 from cipherstash/footer-for-docs-issues\n\nChore: add footer to README to trigger docs issue",
+          "timestamp": "2025-04-11T16:08:37+10:00",
+          "tree_id": "b3889d889233c8482142b64c2a46674d8c1337c7",
+          "url": "https://github.com/cipherstash/proxy/commit/e9f1a111a561703febf3cc1932d0d12f1da3f789"
+        },
+        "date": 1744351865128,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 7.242767,
             "unit": "Number"
           }
         ]
