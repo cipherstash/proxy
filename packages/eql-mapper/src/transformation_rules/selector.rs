@@ -62,9 +62,10 @@ impl<C: Visitable> Selector for MatchTrailing<(C,)> {
         let matcher =
             || -> Option<Self::Matched<'ast>> { Some((source_node.downcast_ref::<C>()?,)) };
 
-        let target_node: &mut Self::Target = target_node.downcast_mut().unwrap();
-
         if let Some(matched) = matcher() {
+            let target_node: &mut Self::Target = target_node
+                .downcast_mut()
+                .expect("matcher succeeded so this cannot fail");
             return (then)(matched, target_node);
         }
 
@@ -92,7 +93,9 @@ impl<P0: Visitable, C: Visitable> Selector for MatchTrailing<(P0, C)> {
         };
 
         if let Some(matched) = matcher() {
-            let target_node: &mut Self::Target = target_node.downcast_mut().unwrap();
+            let target_node: &mut Self::Target = target_node
+                .downcast_mut()
+                .expect("matcher succeeded so this cannot fail");
             return (then)(matched, target_node);
         }
 
@@ -124,7 +127,9 @@ impl<P1: Visitable, P0: Visitable, C: Visitable> Selector for MatchTrailing<(P1,
         };
 
         if let Some(matched) = matcher() {
-            let target_node: &mut Self::Target = target_node.downcast_mut().unwrap();
+            let target_node: &mut Self::Target = target_node
+                .downcast_mut()
+                .expect("matcher succeeded so this cannot fail");
             return (then)(matched, target_node);
         }
 
@@ -158,7 +163,9 @@ impl<P2: Visitable, P1: Visitable, P0: Visitable, C: Visitable> Selector
         };
 
         if let Some(matched) = matcher() {
-            let target_node: &mut Self::Target = target_node.downcast_mut().unwrap();
+            let target_node: &mut Self::Target = target_node
+                .downcast_mut()
+                .expect("matcher succeeded so this cannot fail");
             return (then)(matched, target_node);
         }
 
