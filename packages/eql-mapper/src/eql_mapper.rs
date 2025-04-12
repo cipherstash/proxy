@@ -1,16 +1,15 @@
 use super::importer::{ImportError, Importer};
 use crate::{
-    eql_function_tracker::{EqlFunctionTracker, EqlFunctionTrackerError}, inference::{unifier, TypeError, TypeInferencer}, unifier::{EqlValue, Unifier}, DepMut, EqlColInProjectionAndGroupBy, GroupByEqlCol, PreserveAliases, Projection, Rule, ScopeError, ScopeTracker, TableResolver, Type, TypeRegistry, UseEquivalentSqlFuncForEqlTypes, Value, ValueTracker
+    inference::{unifier, TypeError, TypeInferencer},
+    unifier::{EqlValue, Unifier},
+    DepMut, EqlColInProjectionAndGroupBy, GroupByEqlCol, OrderByExprWithEqlType, PreserveAliases,
+    Projection, ReplacePlaintextEqlLiterals, Rule, ScopeError, ScopeTracker, TableResolver, Type,
+    TypeRegistry, UseEquivalentSqlFuncForEqlTypes, Value, ValueTracker,
 };
-use sqlparser::ast::{self as ast, FunctionArguments, Statement};
+use sqlparser::ast::{self as ast, Statement};
 use sqltk::{AsNodeKey, Break, Context, NodeKey, Transform, Transformable, Visitable, Visitor};
 use std::{
-    cell::RefCell,
-    collections::{HashMap, HashSet},
-    marker::PhantomData,
-    ops::ControlFlow,
-    rc::Rc,
-    sync::Arc,
+    cell::RefCell, collections::HashMap, marker::PhantomData, ops::ControlFlow, rc::Rc, sync::Arc,
 };
 
 /// Validates that a SQL statement is well-typed with respect to a database schema that contains zero or more columns with
@@ -44,7 +43,7 @@ pub fn type_check<'ast>(
             let literals = mapper.literal_types();
             let node_types = mapper.node_types();
 
-            if projection.is_err() || params.is_err() || literals.is_err() {
+            if projection.is_err() || params.is_err() || literals.is_err() || node_types.is_err() {
                 #[cfg(test)]
                 {
                     mapper.inferencer.borrow().dump_registry(statement);
@@ -56,8 +55,7 @@ pub fn type_check<'ast>(
                 projection: projection?,
                 params: params?,
                 literals: literals?,
-                nodes_to_wrap: mapper.nodes_to_wrap(),
-                node_types: node_types?,
+                node_types: Rc::new(node_types?),
             })
         }
         ControlFlow::Break(Break::Err(err)) => {
@@ -113,9 +111,7 @@ pub struct TypedStatement<'ast> {
     /// The types and values of all literals from the SQL statement.
     pub literals: Vec<(EqlValue, &'ast ast::Expr)>,
 
-    pub nodes_to_wrap: HashSet<NodeKey<'ast>>,
-
-    pub node_types: HashMap<NodeKey<'ast>, Type>,
+    pub node_types: Rc<HashMap<NodeKey<'ast>, Type>>,
 }
 
 /// The error type returned by various functions in the `eql_mapper` crate.
@@ -138,9 +134,6 @@ pub enum EqlMapperError {
     /// A type error encountered during type checking
     #[error(transparent)]
     Type(#[from] TypeError),
-
-    #[error(transparent)]
-    EqlFunctionTracker(#[from] EqlFunctionTrackerError),
 }
 
 /// `EqlMapper` can safely convert a SQL statement into an equivalent statement where all of the plaintext literals have
@@ -152,7 +145,6 @@ struct EqlMapper<'ast> {
     inferencer: Rc<RefCell<TypeInferencer<'ast>>>,
     registry: Rc<RefCell<TypeRegistry<'ast>>>,
     value_tracker: Rc<RefCell<ValueTracker<'ast>>>,
-    eql_function_tracker: Rc<RefCell<EqlFunctionTracker<'ast>>>,
     _ast: PhantomData<&'ast ()>,
 }
 
@@ -166,7 +158,6 @@ impl<'ast> EqlMapper<'ast> {
             &registry,
             &scope_tracker,
         ));
-        let eql_function_tracker = DepMut::new(EqlFunctionTracker::new(&registry));
         let unifier = DepMut::new(Unifier::new(&registry));
         let value_tracker = DepMut::new(ValueTracker::new(&registry));
 
@@ -183,7 +174,6 @@ impl<'ast> EqlMapper<'ast> {
             importer: importer.into(),
             inferencer: inferencer.into(),
             registry: registry.into(),
-            eql_function_tracker: eql_function_tracker.into(),
             value_tracker: value_tracker.into(),
             _ast: PhantomData,
         }
@@ -279,12 +269,6 @@ impl<'ast> EqlMapper<'ast> {
 
         Ok(resolved_node_types)
     }
-
-    /// Takes `eql_function_tracker`, consumes it, and returns a `HashSet` of keys for nodes
-    /// that the type checker has marked for wrapping with EQL function calls.
-    fn nodes_to_wrap(&self) -> HashSet<NodeKey<'ast>> {
-        self.eql_function_tracker.take().into_to_wrap()
-    }
 }
 
 impl<'ast> TypedStatement<'ast> {
@@ -301,8 +285,7 @@ impl<'ast> TypedStatement<'ast> {
 
         self.statement.apply_transform(&mut EncryptedStatement::new(
             encrypted_literals,
-            &self.nodes_to_wrap,
-            &self.node_types,
+            Rc::clone(&self.node_types),
         ))
     }
 
@@ -322,29 +305,21 @@ impl<'ast> TypedStatement<'ast> {
             })
             .collect::<Vec<_>>()
     }
-
-    /// Returns `true` if the typed statement has nodes that the type checker has marked for wrapping with EQL function calls.
-    pub fn has_nodes_to_wrap(&self) -> bool {
-        !self.nodes_to_wrap.is_empty()
-    }
 }
 
 #[derive(Debug)]
 struct EncryptedStatement<'ast> {
-    encrypted_literals: HashMap<NodeKey<'ast>, ast::Expr>,
-    nodes_to_wrap: &'ast HashSet<NodeKey<'ast>>,
-    node_types: &'ast HashMap<NodeKey<'ast>, Type>,
+    encrypted_literals: Rc<RefCell<HashMap<NodeKey<'ast>, ast::Expr>>>,
+    node_types: Rc<HashMap<NodeKey<'ast>, Type>>,
 }
 
 impl<'ast> EncryptedStatement<'ast> {
     fn new(
         encrypted_literals: HashMap<NodeKey<'ast>, ast::Expr>,
-        nodes_to_wrap: &'ast HashSet<NodeKey<'ast>>,
-        node_types: &'ast HashMap<NodeKey<'ast>, Type>,
+        node_types: Rc<HashMap<NodeKey<'ast>, Type>>,
     ) -> Self {
         Self {
-            encrypted_literals,
-            nodes_to_wrap,
+            encrypted_literals: Rc::new(RefCell::new(encrypted_literals)),
             node_types,
         }
     }
@@ -364,84 +339,47 @@ impl<'ast> Transform<'ast> for EncryptedStatement<'ast> {
         ctx: &Context<'ast>,
     ) -> Result<N, Self::Error> {
         PreserveAliases.apply(ctx, source_node, &mut target_node)?;
-        EqlColInProjectionAndGroupBy::new(self.node_types).apply(
+        EqlColInProjectionAndGroupBy::new(Rc::clone(&self.node_types)).apply(
             ctx,
             source_node,
             &mut target_node,
         )?;
-        GroupByEqlCol::new(self.node_types).apply(ctx, source_node, &mut target_node)?;
-        UseEquivalentSqlFuncForEqlTypes::new(self.node_types).apply(
+        GroupByEqlCol::new(Rc::clone(&self.node_types)).apply(ctx, source_node, &mut target_node)?;
+        UseEquivalentSqlFuncForEqlTypes::new(Rc::clone(&self.node_types)).apply(
+            ctx,
+            source_node,
+            &mut target_node,
+        )?;
+        OrderByExprWithEqlType::new(Rc::clone(&self.node_types)).apply(ctx, source_node, &mut target_node)?;
+        ReplacePlaintextEqlLiterals::new(Rc::clone(&self.node_types), Rc::clone(&self.encrypted_literals)).apply(
             ctx,
             source_node,
             &mut target_node,
         )?;
 
-        if let Some(target_value) = target_node.downcast_mut::<ast::Expr>() {
-            match source_node.downcast_ref::<ast::Expr>() {
-                Some(original_value) => match original_value {
-                    ast::Expr::Value(ast::Value::Placeholder(_))
-                        if original_value != target_value =>
-                    {
-                        return Err(EqlMapperError::InternalError(
-                            "attempt was made to update placeholder with literal".to_string(),
-                        ));
-                    }
+        // if let Some(target_value) = target_node.downcast_mut::<ast::Expr>() {
+        //     match source_node.downcast_ref::<ast::Expr>() {
+        //         Some(original_value) => match original_value {
+        //             ast::Expr::Value(ast::Value::Placeholder(_))
+        //                 if original_value != target_value =>
+        //             {
+        //                 return Err(EqlMapperError::InternalError(
+        //                     "attempt was made to update placeholder with literal".to_string(),
+        //                 ));
+        //             }
 
-                    ast::Expr::Value(_) => {
-                        if let Some(replacement) = self
-                            .encrypted_literals
-                            .remove(&original_value.as_node_key())
-                        {
-                            *target_value = replacement;
-                        }
-                    }
-
-                    // Wrap identifiers (e.g. `encrypted_col`) and compound identifiers (e.g. `some_tbl.encrypted_col`)
-                    // in an EQL function if the type checker has marked them as nodes that need to be
-                    // wrapped.
-                    //
-                    // For example (assuming that `encrypted_col` is an identifier for an EQL column) transform
-                    // `encrypted_col` to `cs_ore_64_8_v1(encrypted_col)`.
-                    ast::Expr::Identifier(_) | ast::Expr::CompoundIdentifier(_) => {
-                        let node_key = original_value.as_node_key();
-
-                        if self.nodes_to_wrap.contains(&node_key) {
-                            *target_value =
-                                make_eql_function_node("cs_ore_64_8_v1", original_value.clone());
-                        }
-                    }
-
-                    _ => { /* other variants are a no-op and don't require transformation */ }
-                },
-                None => {
-                    return Err(EqlMapperError::Transform(String::from(
-                        "Could not resolve literal node",
-                    )));
-                }
-            }
-        }
+        //             _ => { /* other variants are a no-op and don't require transformation */ }
+        //         },
+        //         None => {
+        //             return Err(EqlMapperError::Transform(String::from(
+        //                 "Could not resolve literal node",
+        //             )));
+        //         }
+        //     }
+        // }
 
         Ok(target_node)
     }
-}
-
-fn make_eql_function_node(function_name: &str, arg: ast::Expr) -> ast::Expr {
-    ast::Expr::Function(ast::Function {
-        parameters: FunctionArguments::None,
-        filter: None,
-        null_treatment: None,
-        over: None,
-        within_group: vec![],
-        name: ast::ObjectName(vec![ast::Ident {
-            value: function_name.to_string(),
-            quote_style: None,
-        }]),
-        args: FunctionArguments::List(ast::FunctionArgumentList {
-            duplicate_treatment: None,
-            clauses: vec![],
-            args: vec![ast::FunctionArg::Unnamed(ast::FunctionArgExpr::Expr(arg))],
-        }),
-    })
 }
 
 /// [`Visitor`] implementation that composes the [`ScopeTracker`] visitor, the [`Importer`] and the [`TypeInferencer`]
@@ -462,11 +400,6 @@ impl<'ast> Visitor<'ast> for EqlMapper<'ast> {
             .enter(node)
             .map_break(Break::convert)?;
 
-        self.eql_function_tracker
-            .borrow_mut()
-            .enter(node)
-            .map_break(Break::convert)?;
-
         self.inferencer
             .borrow_mut()
             .enter(node)
@@ -477,11 +410,6 @@ impl<'ast> Visitor<'ast> for EqlMapper<'ast> {
 
     fn exit<N: Visitable>(&mut self, node: &'ast N) -> ControlFlow<Break<Self::Error>> {
         self.inferencer
-            .borrow_mut()
-            .exit(node)
-            .map_break(Break::convert)?;
-
-        self.eql_function_tracker
             .borrow_mut()
             .exit(node)
             .map_break(Break::convert)?;

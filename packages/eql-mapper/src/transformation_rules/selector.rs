@@ -42,6 +42,9 @@ pub(crate) trait Selector {
 /// Therefore you can think of `MatchTrailing` as matching the last N node types of a path through an AST.
 pub struct MatchTrailing<T>(PhantomData<T>);
 
+/// A [`Selector`] impl that matches target node of a [`sqltk::Transform::transform`] invocation.
+pub struct MatchTarget<T>(PhantomData<T>);
+
 // TODO: write a declarative macro to derive all of these impls.
 
 #[allow(unused)]
@@ -161,6 +164,34 @@ impl<P2: Visitable, P1: Visitable, P0: Visitable, C: Visitable> Selector
                 source_node.downcast_ref::<C>()?,
             ))
         };
+
+        if let Some(matched) = matcher() {
+            let target_node: &mut Self::Target = target_node
+                .downcast_mut()
+                .expect("matcher succeeded so this cannot fail");
+            return (then)(matched, target_node);
+        }
+
+        Ok(())
+    }
+}
+
+impl<C: Visitable> Selector for MatchTarget<C> {
+    type Matched<'a> = &'a C;
+    type Target = C;
+
+    fn on_match_then<'ast, N, F>(
+        _ctx: &Context<'ast>,
+        source_node: &'ast N,
+        target_node: &'ast mut N,
+        then: &mut F,
+    ) -> Result<(), EqlMapperError>
+    where
+        N: Visitable,
+        F: FnMut(&'ast C, &'ast mut C) -> Result<(), EqlMapperError>,
+    {
+        let matcher =
+            || -> Option<Self::Matched<'ast>> { source_node.downcast_ref::<C>() };
 
         if let Some(matched) = matcher() {
             let target_node: &mut Self::Target = target_node

@@ -1,13 +1,13 @@
-use std::{collections::HashMap, rc::Rc};
+use std::{collections::HashMap, mem, rc::Rc};
 
-use sqlparser::ast::{Expr, Ident, ObjectName, Select, SelectItem};
+use sqlparser::ast::{Expr, Ident, ObjectName, OrderByExpr, Select, SelectItem};
 use sqltk::{Context, NodeKey, Visitable};
 
-use crate::{EqlMapperError, Type};
+use crate::{EqlMapperError, Type, Value};
 
 use super::{
     helpers::{is_used_in_group_by_clause, wrap_in_1_arg_function},
-    selector::{MatchTrailing, Selector},
+    selector::{MatchTarget, MatchTrailing, Selector},
     Rule,
 };
 
@@ -27,18 +27,18 @@ use super::{
 /// --                 |                                                    |
 /// --     Changed by this rule                                Changed by rule `GroupByEqlCol`
 /// ```
-pub struct EqlColInProjectionAndGroupBy<'ast> {
+pub struct OrderByExprWithEqlType<'ast> {
     node_types: Rc<HashMap<NodeKey<'ast>, Type>>,
 }
 
-impl<'ast> EqlColInProjectionAndGroupBy<'ast> {
+impl<'ast> OrderByExprWithEqlType<'ast> {
     pub(crate) fn new(node_types: Rc<HashMap<NodeKey<'ast>, Type>>) -> Self {
         Self { node_types }
     }
 }
 
-impl<'ast> Rule<'ast> for EqlColInProjectionAndGroupBy<'ast> {
-    type Sel = MatchTrailing<(Select, Vec<SelectItem>, SelectItem, Expr)>;
+impl<'ast> Rule<'ast> for OrderByExprWithEqlType<'ast> {
+    type Sel = MatchTarget<OrderByExpr>;
 
     fn apply<'ast_new: 'ast, N0: Visitable>(
         &mut self,
@@ -50,12 +50,16 @@ impl<'ast> Rule<'ast> for EqlColInProjectionAndGroupBy<'ast> {
             ctx,
             source_node,
             target_node,
-            &mut |(select, _, _, _), expr| {
-                if is_used_in_group_by_clause(&*self.node_types, &select.group_by, source_node) {
-                    *expr = wrap_in_1_arg_function(
-                        expr.clone(),
-                        ObjectName(vec![Ident::new("CS_GROUPED_VALUE_V1")]),
-                    );
+            &mut |source_order_by_expr, target_order_by_expr| {
+                let node_key = NodeKey::new(source_order_by_expr);
+
+                if let Some(ty) = self.node_types.get(&node_key) {
+                    if matches!(ty, Type::Value(Value::Eql(_))) {
+                        *&mut target_order_by_expr.expr = wrap_in_1_arg_function(
+                            mem::replace(&mut target_order_by_expr.expr, Expr::Wildcard),
+                            ObjectName(vec![Ident::new("CS_ORE_64_8_V1")]),
+                        );
+                    }
                 }
 
                 Ok(())

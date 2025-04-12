@@ -2,7 +2,6 @@
 
 mod arc_ref;
 mod dep;
-mod eql_function_tracker;
 mod eql_mapper;
 mod importer;
 mod inference;

@@ -39,11 +39,11 @@ pub struct PreserveAliases;
 impl<'ast> Rule<'ast> for PreserveAliases {
     type Sel = MatchTrailing<(Select, Vec<SelectItem>, SelectItem)>;
 
-    fn apply<N0: Visitable>(
+    fn apply<'ast_new: 'ast, N0: Visitable>(
         &mut self,
         ctx: &Context<'ast>,
         source_node: &'ast N0,
-        target_node: &mut N0,
+        target_node: &'ast_new mut N0,
     ) -> Result<(), EqlMapperError> {
         Self::Sel::on_match_then(
             ctx,

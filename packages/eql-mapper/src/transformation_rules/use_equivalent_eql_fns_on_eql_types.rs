@@ -1,4 +1,4 @@
-use std::{collections::HashMap};
+use std::{collections::HashMap, rc::Rc};
 
 use sqlparser::ast::{Expr, Function, Ident, Select, SelectItem};
 use sqltk::{Context, NodeKey, Visitable};
@@ -9,24 +9,24 @@ use super::{
     helpers, selector::{MatchTrailing, Selector}, Rule
 };
 
-pub struct UseEquivalentSqlFuncForEqlTypes<'a, 'ast> {
-    node_types: &'a HashMap<NodeKey<'ast>, Type>,
+pub struct UseEquivalentSqlFuncForEqlTypes<'ast> {
+    node_types: Rc<HashMap<NodeKey<'ast>, Type>>,
 }
 
-impl<'a, 'ast> UseEquivalentSqlFuncForEqlTypes<'a, 'ast> {
-    pub fn new(node_types: &'a HashMap<NodeKey<'ast>, Type>) -> Self {
+impl<'ast> UseEquivalentSqlFuncForEqlTypes<'ast> {
+    pub fn new(node_types: Rc<HashMap<NodeKey<'ast>, Type>>) -> Self {
         Self { node_types }
     }
 }
 
-impl<'a, 'ast> Rule<'ast> for UseEquivalentSqlFuncForEqlTypes<'a,'ast> {
+impl<'ast> Rule<'ast> for UseEquivalentSqlFuncForEqlTypes<'ast> {
     type Sel = MatchTrailing<(Select, Vec<SelectItem>, SelectItem, Expr)>;
 
-    fn apply<N0: Visitable>(
+    fn apply<'ast_new: 'ast, N0: Visitable>(
         &mut self,
         ctx: &Context<'ast>,
         original_node: &'ast N0,
-        target_node: &mut N0,
+        target_node: &'ast_new mut N0,
     ) -> Result<(), EqlMapperError> {
         Self::Sel::on_match_then(
             ctx,

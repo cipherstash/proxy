@@ -286,7 +286,7 @@ where
 
             match self.to_encryptable_statement(&typed_statement, vec![])? {
                 Some(statement) => {
-                    if statement.has_literals() || typed_statement.has_nodes_to_wrap() {
+                    if statement.has_literals() {
                         let encrypted_literals = self
                             .encrypt_literals(&typed_statement, &statement.literal_columns)
                             .await?;
@@ -427,11 +427,10 @@ where
 
         debug!(target: MAPPER,
             client_id = self.context.client_id,
-            nodes_to_wrap = typed_statement.nodes_to_wrap.len(),
             literals = encrypted_nodes.len(),
         );
 
-        if !typed_statement.has_nodes_to_wrap() && encrypted_nodes.is_empty() {
+        if encrypted_nodes.is_empty() {
             return Ok(None);
         }
 
@@ -501,7 +500,7 @@ where
 
         match self.to_encryptable_statement(&typed_statement, param_types)? {
             Some(statement) => {
-                if statement.has_literals() || typed_statement.has_nodes_to_wrap() {
+                if statement.has_literals() {
                     let encrypted_literals = self
                         .encrypt_literals(&typed_statement, &statement.literal_columns)
                         .await?;
@@ -621,7 +620,6 @@ where
         if (param_columns.is_empty() || no_encrypted_param_columns)
             && (projection_columns.is_empty() || no_encrypted_projection_columns)
             && literal_columns.is_empty()
-            && !typed_statement.has_nodes_to_wrap()
         {
             return Ok(None);
         }
