@@ -34,9 +34,9 @@ use super::TransformationRule;
 ///    - If the expression in old_col is `Expr::Nested`, it is recursed (repeating all steps of 2.)
 ///    - If the expression in old_col is anything else then the effective alias is `None`
 #[derive(Debug)]
-pub struct PreserveAliases;
+pub struct PreserveEffectiveAliases;
 
-impl<'ast> TransformationRule<'ast> for PreserveAliases {
+impl<'ast> TransformationRule<'ast> for PreserveEffectiveAliases {
     fn apply<N: Visitable>(
         &mut self,
         node_path: &NodePath<'ast>,
@@ -53,7 +53,7 @@ impl<'ast> TransformationRule<'ast> for PreserveAliases {
     }
 }
 
-impl PreserveAliases {
+impl PreserveEffectiveAliases {
     fn preserve_effective_alias_of_select_item(
         source_node: &SelectItem,
         target_node: &mut SelectItem,

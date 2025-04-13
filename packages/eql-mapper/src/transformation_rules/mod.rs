@@ -6,7 +6,7 @@ mod eql_col_in_projection_and_group_by;
 mod fail_on_placeholder_change;
 mod group_by_eql_col;
 mod order_by_expr_with_eql_type;
-mod preserve_aliases;
+mod preserve_effective_aliases;
 mod replace_plaintext_eql_literals;
 mod use_equivalent_eql_fns_on_eql_types;
 
@@ -14,7 +14,7 @@ pub(crate) use eql_col_in_projection_and_group_by::*;
 pub(crate) use fail_on_placeholder_change::*;
 pub(crate) use group_by_eql_col::*;
 pub(crate) use order_by_expr_with_eql_type::*;
-pub(crate) use preserve_aliases::*;
+pub(crate) use preserve_effective_aliases::*;
 pub(crate) use replace_plaintext_eql_literals::*;
 pub(crate) use use_equivalent_eql_fns_on_eql_types::*;
 
