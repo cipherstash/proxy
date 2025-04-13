@@ -44,7 +44,7 @@ impl<'ast> TransformationRule<'ast> for PreserveAliases {
     ) -> Result<(), EqlMapperError> {
         if let Some((_select, _select_items, select_item)) = node_path.last_3_as::<Select, Vec<SelectItem>, SelectItem>() {
             let target_node = target_node.downcast_mut::<SelectItem>().unwrap();
-            self.preserve_effective_alias_of_select_item(select_item, target_node);
+            Self::preserve_effective_alias_of_select_item(select_item, target_node);
         }
 
         Ok(())
@@ -53,12 +53,11 @@ impl<'ast> TransformationRule<'ast> for PreserveAliases {
 
 impl PreserveAliases {
     fn preserve_effective_alias_of_select_item(
-        &self,
         source_node: &SelectItem,
         target_node: &mut SelectItem,
     ) {
-        let effective_source_alias = self.derive_effective_alias(source_node);
-        let effective_target_alias = self.derive_effective_alias(target_node);
+        let effective_source_alias = Self::derive_effective_alias(source_node);
+        let effective_target_alias = Self::derive_effective_alias(target_node);
         match target_node {
             // The captured binding `expr` has type `&mut Expr` but we need an owned `Expr`.  to avoid cloning `expr`
             // (which can be arbitrarily large) we replace it with another which in return provides us with ownership of
@@ -78,20 +77,20 @@ impl PreserveAliases {
         }
     }
 
-    fn derive_effective_alias(&self, node: &SelectItem) -> Option<Ident> {
+    fn derive_effective_alias(node: &SelectItem) -> Option<Ident> {
         match node {
-            SelectItem::UnnamedExpr(expr) => self.derive_effective_alias_for_expr(expr),
+            SelectItem::UnnamedExpr(expr) => Self::derive_effective_alias_for_expr(expr),
             SelectItem::ExprWithAlias { expr: _, alias } => Some(alias.clone()),
             _ => None,
         }
     }
 
-    fn derive_effective_alias_for_expr(&self, expr: &Expr) -> Option<Ident> {
+    fn derive_effective_alias_for_expr(expr: &Expr) -> Option<Ident> {
         match expr {
             Expr::Identifier(ident) => Some(ident.clone()),
             Expr::CompoundIdentifier(idents) => Some(idents.last().unwrap().clone()),
             Expr::Function(Function { name, .. }) => Some(name.0.last().unwrap().clone()),
-            Expr::Nested(expr) => self.derive_effective_alias_for_expr(expr),
+            Expr::Nested(expr) => Self::derive_effective_alias_for_expr(expr),
             _ => None
         }
     }
