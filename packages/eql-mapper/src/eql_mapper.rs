@@ -1,10 +1,6 @@
 use super::importer::{ImportError, Importer};
 use crate::{
-    inference::{unifier, TypeError, TypeInferencer},
-    unifier::{EqlValue, Unifier},
-    DepMut, EqlColInProjectionAndGroupBy, GroupByEqlCol, OrderByExprWithEqlType, PreserveAliases,
-    Projection, ReplacePlaintextEqlLiterals, Rule, ScopeError, ScopeTracker, TableResolver, Type,
-    TypeRegistry, UseEquivalentSqlFuncForEqlTypes, Value, ValueTracker,
+    inference::{unifier, TypeError, TypeInferencer}, unifier::{EqlValue, Unifier}, DepMut, EqlColInProjectionAndGroupBy, FailOnPlaceholderChange, GroupByEqlCol, OrderByExprWithEqlType, PreserveAliases, Projection, ReplacePlaintextEqlLiterals, Rule, ScopeError, ScopeTracker, TableResolver, Type, TypeRegistry, UseEquivalentSqlFuncForEqlTypes, Value, ValueTracker
 };
 use sqlparser::ast::{self as ast, Statement};
 use sqltk::{AsNodeKey, Break, Context, NodeKey, Transform, Transformable, Visitable, Visitor};
@@ -309,8 +305,16 @@ impl<'ast> TypedStatement<'ast> {
 
 #[derive(Debug)]
 struct EncryptedStatement<'ast> {
-    encrypted_literals: Rc<RefCell<HashMap<NodeKey<'ast>, ast::Expr>>>,
     node_types: Rc<HashMap<NodeKey<'ast>, Type>>,
+    transformation_rules: (
+        EqlColInProjectionAndGroupBy<'ast>,
+        GroupByEqlCol<'ast>,
+        OrderByExprWithEqlType<'ast>,
+        PreserveAliases,
+        ReplacePlaintextEqlLiterals<'ast>,
+        UseEquivalentSqlFuncForEqlTypes<'ast>,
+        FailOnPlaceholderChange,
+    ),
 }
 
 impl<'ast> EncryptedStatement<'ast> {
@@ -319,8 +323,16 @@ impl<'ast> EncryptedStatement<'ast> {
         node_types: Rc<HashMap<NodeKey<'ast>, Type>>,
     ) -> Self {
         Self {
-            encrypted_literals: Rc::new(RefCell::new(encrypted_literals)),
-            node_types,
+            node_types: Rc::clone(&node_types),
+            transformation_rules: (
+                EqlColInProjectionAndGroupBy::new(Rc::clone(&node_types)),
+                GroupByEqlCol::new(Rc::clone(&node_types)),
+                OrderByExprWithEqlType::new(Rc::clone(&node_types)),
+                PreserveAliases,
+                ReplacePlaintextEqlLiterals::new(Rc::clone(&node_types), encrypted_literals),
+                UseEquivalentSqlFuncForEqlTypes::new(Rc::clone(&node_types)),
+                FailOnPlaceholderChange,
+            ),
         }
     }
 }
@@ -334,51 +346,11 @@ impl<'ast> Transform<'ast> for EncryptedStatement<'ast> {
 
     fn transform<N: Visitable>(
         &mut self,
-        mut target_node: N,
+        target_node: N,
         source_node: &'ast N,
         ctx: &Context<'ast>,
     ) -> Result<N, Self::Error> {
-        PreserveAliases.apply(ctx, source_node, &mut target_node)?;
-        EqlColInProjectionAndGroupBy::new(Rc::clone(&self.node_types)).apply(
-            ctx,
-            source_node,
-            &mut target_node,
-        )?;
-        GroupByEqlCol::new(Rc::clone(&self.node_types)).apply(ctx, source_node, &mut target_node)?;
-        UseEquivalentSqlFuncForEqlTypes::new(Rc::clone(&self.node_types)).apply(
-            ctx,
-            source_node,
-            &mut target_node,
-        )?;
-        OrderByExprWithEqlType::new(Rc::clone(&self.node_types)).apply(ctx, source_node, &mut target_node)?;
-        ReplacePlaintextEqlLiterals::new(Rc::clone(&self.node_types), Rc::clone(&self.encrypted_literals)).apply(
-            ctx,
-            source_node,
-            &mut target_node,
-        )?;
-
-        // if let Some(target_value) = target_node.downcast_mut::<ast::Expr>() {
-        //     match source_node.downcast_ref::<ast::Expr>() {
-        //         Some(original_value) => match original_value {
-        //             ast::Expr::Value(ast::Value::Placeholder(_))
-        //                 if original_value != target_value =>
-        //             {
-        //                 return Err(EqlMapperError::InternalError(
-        //                     "attempt was made to update placeholder with literal".to_string(),
-        //                 ));
-        //             }
-
-        //             _ => { /* other variants are a no-op and don't require transformation */ }
-        //         },
-        //         None => {
-        //             return Err(EqlMapperError::Transform(String::from(
-        //                 "Could not resolve literal node",
-        //             )));
-        //         }
-        //     }
-        // }
-
-        Ok(target_node)
+        self.transformation_rules.apply(ctx, source_node, target_node)
     }
 }
 

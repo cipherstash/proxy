@@ -1,13 +1,13 @@
 use std::{collections::HashMap, mem, rc::Rc};
 
-use sqlparser::ast::{Expr, Ident, ObjectName, OrderByExpr, Select, SelectItem};
+use sqlparser::ast::{Expr, Ident, ObjectName, OrderByExpr};
 use sqltk::{Context, NodeKey, Visitable};
 
 use crate::{EqlMapperError, Type, Value};
 
 use super::{
-    helpers::{is_used_in_group_by_clause, wrap_in_1_arg_function},
-    selector::{MatchTarget, MatchTrailing, Selector},
+    helpers::{wrap_in_1_arg_function},
+    selector::{MatchTarget, Selector},
     Rule,
 };
 
@@ -27,6 +27,7 @@ use super::{
 /// --                 |                                                    |
 /// --     Changed by this rule                                Changed by rule `GroupByEqlCol`
 /// ```
+#[derive(Debug)]
 pub struct OrderByExprWithEqlType<'ast> {
     node_types: Rc<HashMap<NodeKey<'ast>, Type>>,
 }
@@ -38,19 +39,17 @@ impl<'ast> OrderByExprWithEqlType<'ast> {
 }
 
 impl<'ast> Rule<'ast> for OrderByExprWithEqlType<'ast> {
-    type Sel = MatchTarget<OrderByExpr>;
-
-    fn apply<'ast_new: 'ast, N0: Visitable>(
+    fn apply<N: Visitable>(
         &mut self,
         ctx: &Context<'ast>,
-        source_node: &'ast N0,
-        target_node: &'ast_new mut N0,
-    ) -> Result<(), EqlMapperError> {
-        Self::Sel::on_match_then(
+        source_node: &'ast N,
+        target_node: N,
+    ) -> Result<N, EqlMapperError> {
+        MatchTarget::<OrderByExpr>::on_match_then(
             ctx,
             source_node,
             target_node,
-            &mut |source_order_by_expr, target_order_by_expr| {
+            &mut |source_order_by_expr, mut target_order_by_expr| {
                 let node_key = NodeKey::new(source_order_by_expr);
 
                 if let Some(ty) = self.node_types.get(&node_key) {
@@ -62,7 +61,7 @@ impl<'ast> Rule<'ast> for OrderByExprWithEqlType<'ast> {
                     }
                 }
 
-                Ok(())
+                Ok(target_order_by_expr)
             },
         )
     }

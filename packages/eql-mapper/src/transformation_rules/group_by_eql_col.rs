@@ -11,6 +11,7 @@ use super::{
     Rule,
 };
 
+#[derive(Debug)]
 pub struct GroupByEqlCol<'ast> {
     node_types: Rc<HashMap<NodeKey<'ast>, Type>>,
 }
@@ -22,29 +23,27 @@ impl<'ast> GroupByEqlCol<'ast> {
 }
 
 impl<'ast> Rule<'ast> for GroupByEqlCol<'ast> {
-    type Sel = MatchTrailing<(GroupByExpr, Vec<Expr>, Expr)>;
-
-    fn apply<'ast_new: 'ast, N0: Visitable>(
+    fn apply<N: Visitable>(
         &mut self,
         ctx: &Context<'ast>,
-        original_node: &'ast N0,
-        target_node: &'ast_new mut N0,
-    ) -> Result<(), EqlMapperError> {
-        Self::Sel::on_match_then(
+        original_node: &'ast N,
+        target_node: N,
+    ) -> Result<N, EqlMapperError> {
+        MatchTrailing::<(GroupByExpr, Vec<Expr>, Expr)>::on_match_then(
             ctx,
             original_node,
             target_node,
-            &mut |(_group_by, _exprs, _expr), expr| {
+            &mut |(_group_by, _exprs, _expr), mut expr| {
                 if let Some(Type::Value(Value::Eql(_))) =
                     self.node_types.get(&original_node.as_node_key())
                 {
-                    *expr = helpers::wrap_in_1_arg_function(
+                    *&mut expr = helpers::wrap_in_1_arg_function(
                         expr.clone(),
                         ObjectName(vec![Ident::new("CS_ORE_64_8_V1")]),
                     );
                 }
 
-                Ok(())
+                Ok(expr)
             },
         )
     }

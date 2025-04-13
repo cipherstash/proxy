@@ -25,12 +25,12 @@ pub(crate) trait Selector {
     fn on_match_then<'ast, N, F>(
         ctx: &Context<'ast>,
         source_node: &'ast N,
-        target_node: &'ast mut N,
+        target_node: N,
         then: &mut F,
-    ) -> Result<(), EqlMapperError>
+    ) -> Result<N, EqlMapperError>
     where
         N: Visitable,
-        F: FnMut(Self::Matched<'ast>, &'ast mut Self::Target) -> Result<(), EqlMapperError>;
+        F: FnMut(Self::Matched<'ast>, Self::Target) -> Result<N, EqlMapperError>;
 }
 
 /// A [`Selector`] impl that matches the trailing N AST node types of a path through an AST up to an including the the
@@ -55,24 +55,22 @@ impl<C: Visitable> Selector for MatchTrailing<(C,)> {
     fn on_match_then<'ast, N, F>(
         ctx: &Context<'ast>,
         source_node: &'ast N,
-        target_node: &'ast mut N,
+        target_node: N,
         then: &mut F,
-    ) -> Result<(), EqlMapperError>
+    ) -> Result<N, EqlMapperError>
     where
         N: Visitable,
-        F: FnMut((&'ast C,), &'ast mut C) -> Result<(), EqlMapperError>,
+        F: FnMut(Self::Matched<'ast>, Self::Target) -> Result<N, EqlMapperError>,
     {
         let matcher =
             || -> Option<Self::Matched<'ast>> { Some((source_node.downcast_ref::<C>()?,)) };
 
         if let Some(matched) = matcher() {
-            let target_node: &mut Self::Target = target_node
-                .downcast_mut()
-                .expect("matcher succeeded so this cannot fail");
+            let target_node: Self::Target = unsafe { std::mem::transmute_copy(&target_node)};
             return (then)(matched, target_node);
         }
 
-        Ok(())
+        Ok(target_node)
     }
 }
 
@@ -84,25 +82,22 @@ impl<P0: Visitable, C: Visitable> Selector for MatchTrailing<(P0, C)> {
     fn on_match_then<'ast, N, F>(
         ctx: &Context<'ast>,
         source_node: &'ast N,
-        target_node: &'ast mut N,
+        target_node: N,
         then: &mut F,
-    ) -> Result<(), EqlMapperError>
+    ) -> Result<N, EqlMapperError>
     where
         N: Visitable,
-        F: FnMut(Self::Matched<'ast>, &'ast mut Self::Target) -> Result<(), EqlMapperError>,
+        F: FnMut(Self::Matched<'ast>, Self::Target) -> Result<N, EqlMapperError>,
     {
         let matcher = || -> Option<Self::Matched<'ast>> {
             Some((ctx.nth_last_as(0)?, source_node.downcast_ref::<C>()?))
         };
 
         if let Some(matched) = matcher() {
-            let target_node: &mut Self::Target = target_node
-                .downcast_mut()
-                .expect("matcher succeeded so this cannot fail");
             return (then)(matched, target_node);
         }
 
-        Ok(())
+        Ok(target_node)
     }
 }
 
@@ -114,12 +109,12 @@ impl<P1: Visitable, P0: Visitable, C: Visitable> Selector for MatchTrailing<(P1,
     fn on_match_then<'ast, N, F>(
         ctx: &Context<'ast>,
         source_node: &'ast N,
-        target_node: &'ast mut N,
+        target_node: N,
         then: &mut F,
-    ) -> Result<(), EqlMapperError>
+    ) -> Result<N, EqlMapperError>
     where
         N: Visitable,
-        F: FnMut(Self::Matched<'ast>, &'ast mut Self::Target) -> Result<(), EqlMapperError>,
+        F: FnMut(Self::Matched<'ast>, N) -> Result<N, EqlMapperError>,
     {
         let matcher = || -> Option<Self::Matched<'ast>> {
             Some((
@@ -130,13 +125,10 @@ impl<P1: Visitable, P0: Visitable, C: Visitable> Selector for MatchTrailing<(P1,
         };
 
         if let Some(matched) = matcher() {
-            let target_node: &mut Self::Target = target_node
-                .downcast_mut()
-                .expect("matcher succeeded so this cannot fail");
             return (then)(matched, target_node);
         }
 
-        Ok(())
+        Ok(target_node)
     }
 }
 
@@ -149,12 +141,12 @@ impl<P2: Visitable, P1: Visitable, P0: Visitable, C: Visitable> Selector
     fn on_match_then<'ast, N, F>(
         ctx: &Context<'ast>,
         source_node: &'ast N,
-        target_node: &'ast mut N,
+        target_node: N,
         then: &mut F,
-    ) -> Result<(), EqlMapperError>
+    ) -> Result<N, EqlMapperError>
     where
         N: Visitable,
-        F: FnMut(Self::Matched<'ast>, &'ast mut Self::Target) -> Result<(), EqlMapperError>,
+        F: FnMut(Self::Matched<'ast>, N) -> Result<N, EqlMapperError>,
     {
         let matcher = || -> Option<Self::Matched<'ast>> {
             Some((
@@ -166,13 +158,10 @@ impl<P2: Visitable, P1: Visitable, P0: Visitable, C: Visitable> Selector
         };
 
         if let Some(matched) = matcher() {
-            let target_node: &mut Self::Target = target_node
-                .downcast_mut()
-                .expect("matcher succeeded so this cannot fail");
             return (then)(matched, target_node);
         }
 
-        Ok(())
+        Ok(target_node)
     }
 }
 
@@ -183,23 +172,20 @@ impl<C: Visitable> Selector for MatchTarget<C> {
     fn on_match_then<'ast, N, F>(
         _ctx: &Context<'ast>,
         source_node: &'ast N,
-        target_node: &'ast mut N,
+        target_node: N,
         then: &mut F,
-    ) -> Result<(), EqlMapperError>
+    ) -> Result<N, EqlMapperError>
     where
         N: Visitable,
-        F: FnMut(&'ast C, &'ast mut C) -> Result<(), EqlMapperError>,
+        F: FnMut(&'ast C, N) -> Result<N, EqlMapperError>,
     {
         let matcher =
             || -> Option<Self::Matched<'ast>> { source_node.downcast_ref::<C>() };
 
         if let Some(matched) = matcher() {
-            let target_node: &mut Self::Target = target_node
-                .downcast_mut()
-                .expect("matcher succeeded so this cannot fail");
             return (then)(matched, target_node);
         }
 
-        Ok(())
+        Ok(target_node)
     }
 }

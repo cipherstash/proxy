@@ -34,24 +34,23 @@ use super::Rule;
 ///    - If the expression in old_col is a `Function` then the name of the function becomes the effective identifier.
 ///    - If the expression in old_col is `Expr::Nested`, it is recursed (repeating all steps of 2.)
 ///    - If the expression in old_col is anything else then the effective alias is `None`
+#[derive(Debug)]
 pub struct PreserveAliases;
 
 impl<'ast> Rule<'ast> for PreserveAliases {
-    type Sel = MatchTrailing<(Select, Vec<SelectItem>, SelectItem)>;
-
-    fn apply<'ast_new: 'ast, N0: Visitable>(
+    fn apply<N: Visitable>(
         &mut self,
         ctx: &Context<'ast>,
-        source_node: &'ast N0,
-        target_node: &'ast_new mut N0,
-    ) -> Result<(), EqlMapperError> {
-        Self::Sel::on_match_then(
+        source_node: &'ast N,
+        target_node: N,
+    ) -> Result<N, EqlMapperError> {
+        MatchTrailing::<(Select, Vec<SelectItem>, SelectItem)>::on_match_then(
             ctx,
             source_node,
             target_node,
-            &mut |(_select, _select_items, select_item), target_node| {
-                self.preserve_effective_alias_of_select_item(select_item, target_node);
-                Ok(())
+            &mut |(_select, _select_items, select_item), mut target_node| {
+                self.preserve_effective_alias_of_select_item(select_item, &mut target_node);
+                Ok(target_node)
             },
         )
     }

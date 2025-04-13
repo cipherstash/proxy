@@ -9,6 +9,7 @@ use super::{
     helpers, selector::{MatchTrailing, Selector}, Rule
 };
 
+#[derive(Debug)]
 pub struct UseEquivalentSqlFuncForEqlTypes<'ast> {
     node_types: Rc<HashMap<NodeKey<'ast>, Type>>,
 }
@@ -20,22 +21,20 @@ impl<'ast> UseEquivalentSqlFuncForEqlTypes<'ast> {
 }
 
 impl<'ast> Rule<'ast> for UseEquivalentSqlFuncForEqlTypes<'ast> {
-    type Sel = MatchTrailing<(Select, Vec<SelectItem>, SelectItem, Expr)>;
-
-    fn apply<'ast_new: 'ast, N0: Visitable>(
+    fn apply<N: Visitable>(
         &mut self,
         ctx: &Context<'ast>,
-        original_node: &'ast N0,
-        target_node: &'ast_new mut N0,
-    ) -> Result<(), EqlMapperError> {
-        Self::Sel::on_match_then(
+        original_node: &'ast N,
+        target_node: N,
+    ) -> Result<N, EqlMapperError> {
+        MatchTrailing::<(Select, Vec<SelectItem>, SelectItem, Expr)>::on_match_then(
             ctx,
             original_node,
             target_node,
-            &mut |(select, _, _, _), expr| {
+            &mut |(select, _, _, _), mut expr| {
                 // TODO: drop this IF (being in a GROUP BY should not matter)
                 if !helpers::is_used_in_group_by_clause(&self.node_types, &select.group_by, original_node) {
-                    if let Expr::Function(Function { name, .. }) = expr {
+                    if let Expr::Function(Function { name, .. }) = &mut expr {
                         let f_name = name.0.last_mut().unwrap();
 
                         if SqlIdent(&*f_name) == SqlIdent(Ident::new("MIN")) {
@@ -47,7 +46,7 @@ impl<'ast> Rule<'ast> for UseEquivalentSqlFuncForEqlTypes<'ast> {
                         }
                     }
                 }
-                Ok(())
+                Ok(expr)
             },
         )
     }

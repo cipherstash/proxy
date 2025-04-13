@@ -27,6 +27,7 @@ use super::{
 /// --                 |                                                    |
 /// --     Changed by this rule                                Changed by rule `GroupByEqlCol`
 /// ```
+#[derive(Debug)]
 pub struct EqlColInProjectionAndGroupBy<'ast> {
     node_types: Rc<HashMap<NodeKey<'ast>, Type>>,
 }
@@ -38,27 +39,25 @@ impl<'ast> EqlColInProjectionAndGroupBy<'ast> {
 }
 
 impl<'ast> Rule<'ast> for EqlColInProjectionAndGroupBy<'ast> {
-    type Sel = MatchTrailing<(Select, Vec<SelectItem>, SelectItem, Expr)>;
-
-    fn apply<'ast_new: 'ast, N0: Visitable>(
+    fn apply<N: Visitable>(
         &mut self,
         ctx: &Context<'ast>,
-        source_node: &'ast N0,
-        target_node: &'ast_new mut N0,
-    ) -> Result<(), EqlMapperError> {
-        Self::Sel::on_match_then(
+        source_node: &'ast N,
+        target_node: N,
+    ) -> Result<N, EqlMapperError> {
+        MatchTrailing::<(Select, Vec<SelectItem>, SelectItem, Expr)>::on_match_then(
             ctx,
             source_node,
             target_node,
-            &mut |(select, _, _, _), expr| {
+            &mut |(select, _, _, _), mut expr| {
                 if is_used_in_group_by_clause(&*self.node_types, &select.group_by, source_node) {
-                    *expr = wrap_in_1_arg_function(
+                    *&mut expr = wrap_in_1_arg_function(
                         expr.clone(),
                         ObjectName(vec![Ident::new("CS_GROUPED_VALUE_V1")]),
                     );
                 }
 
-                Ok(())
+                Ok(expr)
             },
         )
     }

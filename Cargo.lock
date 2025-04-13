@@ -1165,6 +1165,7 @@ name = "eql-mapper"
 version = "1.0.0"
 dependencies = [
  "derive_more",
+ "impl-trait-for-tuples",
  "itertools 0.13.0",
  "pretty_assertions",
  "sqlparser",
@@ -1802,6 +1803,17 @@ checksum = "daca1df1c957320b2cf139ac61e7bd64fed304c5040df000a745aa1de3b4ef71"
 dependencies = [
  "icu_normalizer",
  "icu_properties",
+]
+
+[[package]]
+name = "impl-trait-for-tuples"
+version = "0.2.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a0eb5a3343abf848c0984fe4604b2b105da9539376e24fc0a3b0007411ae4fd9"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.98",
 ]
 
 [[package]]
