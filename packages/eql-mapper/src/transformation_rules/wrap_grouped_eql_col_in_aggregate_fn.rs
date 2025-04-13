@@ -27,17 +27,17 @@ use super::{
 /// --     Changed by this rule                                Changed by rule `GroupByEqlCol`
 /// ```
 #[derive(Debug)]
-pub struct EqlColInProjectionAndGroupBy<'ast> {
+pub struct WrapGroupedEqlColInAggregateFn<'ast> {
     node_types: Arc<HashMap<NodeKey<'ast>, Type>>,
 }
 
-impl<'ast> EqlColInProjectionAndGroupBy<'ast> {
+impl<'ast> WrapGroupedEqlColInAggregateFn<'ast> {
     pub(crate) fn new(node_types: Arc<HashMap<NodeKey<'ast>, Type>>) -> Self {
         Self { node_types }
     }
 }
 
-impl<'ast> TransformationRule<'ast> for EqlColInProjectionAndGroupBy<'ast> {
+impl<'ast> TransformationRule<'ast> for WrapGroupedEqlColInAggregateFn<'ast> {
     fn apply<N: Visitable>(
         &mut self,
         node_path: &NodePath<'ast>,

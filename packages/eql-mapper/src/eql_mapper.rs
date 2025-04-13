@@ -2,7 +2,7 @@ use super::importer::{ImportError, Importer};
 use crate::{
     inference::{unifier, TypeError, TypeInferencer},
     unifier::{EqlValue, Unifier},
-    DepMut, EqlColInProjectionAndGroupBy, FailOnPlaceholderChange, GroupByEqlCol,
+    DepMut, WrapGroupedEqlColInAggregateFn, FailOnPlaceholderChange, GroupByEqlCol,
     OrderByExprWithEqlType, PreserveEffectiveAliases, Projection, ReplacePlaintextEqlLiterals, ScopeError,
     ScopeTracker, TableResolver, TransformationRule, Type, TypeRegistry,
     UseEquivalentSqlFuncForEqlTypes, Value, ValueTracker,
@@ -313,7 +313,7 @@ impl<'ast> TypedStatement<'ast> {
 #[derive(Debug)]
 struct EncryptedStatement<'ast> {
     transformation_rules: (
-        EqlColInProjectionAndGroupBy<'ast>,
+        WrapGroupedEqlColInAggregateFn<'ast>,
         GroupByEqlCol<'ast>,
         OrderByExprWithEqlType<'ast>,
         PreserveEffectiveAliases,
@@ -330,7 +330,7 @@ impl<'ast> EncryptedStatement<'ast> {
     ) -> Self {
         Self {
             transformation_rules: (
-                EqlColInProjectionAndGroupBy::new(Arc::clone(&node_types)),
+                WrapGroupedEqlColInAggregateFn::new(Arc::clone(&node_types)),
                 GroupByEqlCol::new(Arc::clone(&node_types)),
                 OrderByExprWithEqlType::new(Arc::clone(&node_types)),
                 PreserveEffectiveAliases,
