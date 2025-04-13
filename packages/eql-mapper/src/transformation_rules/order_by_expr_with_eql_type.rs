@@ -1,15 +1,11 @@
 use std::{collections::HashMap, mem, rc::Rc};
 
 use sqlparser::ast::{Expr, Ident, ObjectName, OrderByExpr};
-use sqltk::{Context, NodeKey, Visitable};
+use sqltk::{NodeKey, NodePath, Visitable};
 
 use crate::{EqlMapperError, Type, Value};
 
-use super::{
-    helpers::{wrap_in_1_arg_function},
-    selector::{MatchTarget, Selector},
-    Rule,
-};
+use super::{helpers::wrap_in_1_arg_function, TransformationRule};
 
 /// When an [`Expr`] of a [`SelectItem`] has an EQL type and that EQL type is used in a `GROUP BY` clause then
 /// this rule wraps the `Expr` in a call to `CS_GROUPED_VALUE_V1`.
@@ -38,31 +34,30 @@ impl<'ast> OrderByExprWithEqlType<'ast> {
     }
 }
 
-impl<'ast> Rule<'ast> for OrderByExprWithEqlType<'ast> {
+impl<'ast> TransformationRule<'ast> for OrderByExprWithEqlType<'ast> {
     fn apply<N: Visitable>(
         &mut self,
-        ctx: &Context<'ast>,
-        source_node: &'ast N,
-        target_node: N,
-    ) -> Result<N, EqlMapperError> {
-        MatchTarget::<OrderByExpr>::on_match_then(
-            ctx,
-            source_node,
-            target_node,
-            &mut |source_order_by_expr, mut target_order_by_expr| {
-                let node_key = NodeKey::new(source_order_by_expr);
+        node_path: &NodePath<'ast>,
+        target_node: &mut N,
+    ) -> Result<(), EqlMapperError> {
+        if let Some((order_by_expr,)) = node_path.last_1_as::<OrderByExpr>() {
+            let node_key = NodeKey::new(order_by_expr);
 
-                if let Some(ty) = self.node_types.get(&node_key) {
-                    if matches!(ty, Type::Value(Value::Eql(_))) {
-                        *&mut target_order_by_expr.expr = wrap_in_1_arg_function(
-                            mem::replace(&mut target_order_by_expr.expr, Expr::Wildcard),
-                            ObjectName(vec![Ident::new("CS_ORE_64_8_V1")]),
-                        );
-                    }
+            if let Some(ty) = self.node_types.get(&node_key) {
+                if matches!(ty, Type::Value(Value::Eql(_))) {
+                    let target_node = target_node.downcast_mut::<OrderByExpr>().unwrap();
+
+                    let expr_to_wrap =
+                        mem::replace(&mut target_node.expr, Expr::Wildcard);
+
+                    *&mut target_node.expr = wrap_in_1_arg_function(
+                        expr_to_wrap,
+                        ObjectName(vec![Ident::new("CS_ORE_64_8_V1")]),
+                    );
                 }
+            }
+        }
 
-                Ok(target_order_by_expr)
-            },
-        )
+        Ok(())
     }
 }

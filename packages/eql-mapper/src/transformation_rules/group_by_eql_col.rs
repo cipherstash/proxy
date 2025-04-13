@@ -1,14 +1,13 @@
-use std::{collections::HashMap, rc::Rc};
+use std::{collections::HashMap, mem, rc::Rc};
 
 use sqlparser::ast::{Expr, GroupByExpr, Ident, ObjectName};
-use sqltk::{Context, NodeKey, Visitable};
+use sqltk::{NodeKey, NodePath, Visitable};
 
 use crate::{EqlMapperError, Type, Value};
 
 use super::{
     helpers,
-    selector::{MatchTrailing, Selector},
-    Rule,
+    TransformationRule,
 };
 
 #[derive(Debug)]
@@ -22,29 +21,32 @@ impl<'ast> GroupByEqlCol<'ast> {
     }
 }
 
-impl<'ast> Rule<'ast> for GroupByEqlCol<'ast> {
+impl<'ast> TransformationRule<'ast> for GroupByEqlCol<'ast> {
     fn apply<N: Visitable>(
         &mut self,
-        ctx: &Context<'ast>,
-        original_node: &'ast N,
-        target_node: N,
-    ) -> Result<N, EqlMapperError> {
-        MatchTrailing::<(GroupByExpr, Vec<Expr>, Expr)>::on_match_then(
-            ctx,
-            original_node,
-            target_node,
-            &mut |(_group_by, _exprs, _expr), mut expr| {
-                if let Some(Type::Value(Value::Eql(_))) =
-                    self.node_types.get(&original_node.as_node_key())
-                {
-                    *&mut expr = helpers::wrap_in_1_arg_function(
-                        expr.clone(),
-                        ObjectName(vec![Ident::new("CS_ORE_64_8_V1")]),
-                    );
-                }
+        node_path: &NodePath<'ast>,
+        target_node: &mut N,
+    ) -> Result<(), EqlMapperError> {
+        if let Some((_group_by_expr, _exprs, expr)) =
+            node_path.last_3_as::<GroupByExpr, Vec<Expr>, Expr>()
+        {
+            if let Some(Type::Value(Value::Eql(_))) =
+                self.node_types.get(&NodeKey::new(expr))
+            {
+                let target_node = target_node.downcast_mut::<Expr>().unwrap();
 
-                Ok(expr)
-            },
-        )
+                // Nodes are modified starting from the leaf nodes, to target_node *is* what we want to be wrapping.
+                // So we steal the existing value and replace the original with a cheap placeholder (Expr::Wildcard).
+                // Stealing the original subtree means we can avoid cloning it.
+                let transformed_expr = mem::replace(target_node, Expr::Wildcard);
+
+                *target_node = helpers::wrap_in_1_arg_function(
+                    transformed_expr,
+                    ObjectName(vec![Ident::new("CS_ORE_64_8_V1")]),
+                );
+            }
+        }
+
+        Ok(())
     }
 }

@@ -1,14 +1,13 @@
 use std::{collections::HashMap, rc::Rc};
 
 use sqlparser::ast::{Expr, Ident, ObjectName, Select, SelectItem};
-use sqltk::{Context, NodeKey, Visitable};
+use sqltk::{NodeKey, NodePath, Visitable};
 
 use crate::{EqlMapperError, Type};
 
 use super::{
     helpers::{is_used_in_group_by_clause, wrap_in_1_arg_function},
-    selector::{MatchTrailing, Selector},
-    Rule,
+    TransformationRule,
 };
 
 /// When an [`Expr`] of a [`SelectItem`] has an EQL type and that EQL type is used in a `GROUP BY` clause then
@@ -38,27 +37,24 @@ impl<'ast> EqlColInProjectionAndGroupBy<'ast> {
     }
 }
 
-impl<'ast> Rule<'ast> for EqlColInProjectionAndGroupBy<'ast> {
+impl<'ast> TransformationRule<'ast> for EqlColInProjectionAndGroupBy<'ast> {
     fn apply<N: Visitable>(
         &mut self,
-        ctx: &Context<'ast>,
-        source_node: &'ast N,
-        target_node: N,
-    ) -> Result<N, EqlMapperError> {
-        MatchTrailing::<(Select, Vec<SelectItem>, SelectItem, Expr)>::on_match_then(
-            ctx,
-            source_node,
-            target_node,
-            &mut |(select, _, _, _), mut expr| {
-                if is_used_in_group_by_clause(&*self.node_types, &select.group_by, source_node) {
-                    *&mut expr = wrap_in_1_arg_function(
-                        expr.clone(),
-                        ObjectName(vec![Ident::new("CS_GROUPED_VALUE_V1")]),
-                    );
-                }
+        node_path: &NodePath<'ast>,
+        target_node: &mut N,
+    ) -> Result<(), EqlMapperError> {
+        if let Some((select, _select_items, _select_item, expr)) =
+            node_path.last_4_as::<Select, Vec<SelectItem>, SelectItem, Expr>()
+        {
+            if is_used_in_group_by_clause(&*self.node_types, &select.group_by, expr) {
+                let target_node: &mut Expr = target_node.downcast_mut().unwrap();
+                *target_node = wrap_in_1_arg_function(
+                    expr.clone(),
+                    ObjectName(vec![Ident::new("CS_GROUPED_VALUE_V1")]),
+                );
+            }
+        }
 
-                Ok(expr)
-            },
-        )
+        Ok(())
     }
 }

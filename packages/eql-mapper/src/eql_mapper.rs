@@ -1,9 +1,14 @@
 use super::importer::{ImportError, Importer};
 use crate::{
-    inference::{unifier, TypeError, TypeInferencer}, unifier::{EqlValue, Unifier}, DepMut, EqlColInProjectionAndGroupBy, FailOnPlaceholderChange, GroupByEqlCol, OrderByExprWithEqlType, PreserveAliases, Projection, ReplacePlaintextEqlLiterals, Rule, ScopeError, ScopeTracker, TableResolver, Type, TypeRegistry, UseEquivalentSqlFuncForEqlTypes, Value, ValueTracker
+    inference::{unifier, TypeError, TypeInferencer},
+    unifier::{EqlValue, Unifier},
+    DepMut, EqlColInProjectionAndGroupBy, FailOnPlaceholderChange, GroupByEqlCol,
+    OrderByExprWithEqlType, PreserveAliases, Projection, ReplacePlaintextEqlLiterals, TransformationRule,
+    ScopeError, ScopeTracker, TableResolver, Type, TypeRegistry, UseEquivalentSqlFuncForEqlTypes,
+    Value, ValueTracker,
 };
 use sqlparser::ast::{self as ast, Statement};
-use sqltk::{AsNodeKey, Break, Context, NodeKey, Transform, Transformable, Visitable, Visitor};
+use sqltk::{AsNodeKey, Break, NodeKey, NodePath, Transform, Transformable, Visitable, Visitor};
 use std::{
     cell::RefCell, collections::HashMap, marker::PhantomData, ops::ControlFlow, rc::Rc, sync::Arc,
 };
@@ -279,10 +284,14 @@ impl<'ast> TypedStatement<'ast> {
             }
         }
 
-        self.statement.apply_transform(&mut EncryptedStatement::new(
+        let mut transformer = EncryptedStatement::new(
             encrypted_literals,
             Rc::clone(&self.node_types),
-        ))
+        );
+
+        let statement = self.statement.apply_transform(&mut transformer)?;
+        transformer.check_postcondition()?;
+        Ok(statement)
     }
 
     pub fn literal_values(&self) -> Vec<&sqlparser::ast::Value> {
@@ -305,7 +314,6 @@ impl<'ast> TypedStatement<'ast> {
 
 #[derive(Debug)]
 struct EncryptedStatement<'ast> {
-    node_types: Rc<HashMap<NodeKey<'ast>, Type>>,
     transformation_rules: (
         EqlColInProjectionAndGroupBy<'ast>,
         GroupByEqlCol<'ast>,
@@ -323,13 +331,12 @@ impl<'ast> EncryptedStatement<'ast> {
         node_types: Rc<HashMap<NodeKey<'ast>, Type>>,
     ) -> Self {
         Self {
-            node_types: Rc::clone(&node_types),
             transformation_rules: (
                 EqlColInProjectionAndGroupBy::new(Rc::clone(&node_types)),
                 GroupByEqlCol::new(Rc::clone(&node_types)),
                 OrderByExprWithEqlType::new(Rc::clone(&node_types)),
                 PreserveAliases,
-                ReplacePlaintextEqlLiterals::new(Rc::clone(&node_types), encrypted_literals),
+                ReplacePlaintextEqlLiterals::new(encrypted_literals),
                 UseEquivalentSqlFuncForEqlTypes::new(Rc::clone(&node_types)),
                 FailOnPlaceholderChange,
             ),
@@ -346,11 +353,17 @@ impl<'ast> Transform<'ast> for EncryptedStatement<'ast> {
 
     fn transform<N: Visitable>(
         &mut self,
-        target_node: N,
-        source_node: &'ast N,
-        ctx: &Context<'ast>,
+        node_path: &NodePath<'ast>,
+        mut target_node: N,
     ) -> Result<N, Self::Error> {
-        self.transformation_rules.apply(ctx, source_node, target_node)
+        self.transformation_rules
+            .apply(node_path, &mut target_node)?;
+
+        Ok(target_node)
+    }
+
+    fn check_postcondition(&self) -> Result<(), Self::Error> {
+        self.transformation_rules .check_postcondition()
     }
 }
 

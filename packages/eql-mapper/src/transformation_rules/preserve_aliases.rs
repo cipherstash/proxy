@@ -1,12 +1,11 @@
 use std::{mem};
 
 use sqlparser::ast::{Expr, Function, Ident, Select, SelectItem};
-use sqltk::{Context, Visitable};
+use sqltk::{NodePath, Visitable};
 
 use crate::EqlMapperError;
 
-use super::selector::{MatchTrailing, Selector};
-use super::Rule;
+use super::TransformationRule;
 
 /// [`Rule`] that ensures that a [`SelectItem`] has the same *effective* alias after EQL mapping that it had before EQL
 /// mapping primarily so that we do not break existing database clients (e.g. ORMs) which expect specific columns to be
@@ -37,22 +36,18 @@ use super::Rule;
 #[derive(Debug)]
 pub struct PreserveAliases;
 
-impl<'ast> Rule<'ast> for PreserveAliases {
+impl<'ast> TransformationRule<'ast> for PreserveAliases {
     fn apply<N: Visitable>(
         &mut self,
-        ctx: &Context<'ast>,
-        source_node: &'ast N,
-        target_node: N,
-    ) -> Result<N, EqlMapperError> {
-        MatchTrailing::<(Select, Vec<SelectItem>, SelectItem)>::on_match_then(
-            ctx,
-            source_node,
-            target_node,
-            &mut |(_select, _select_items, select_item), mut target_node| {
-                self.preserve_effective_alias_of_select_item(select_item, &mut target_node);
-                Ok(target_node)
-            },
-        )
+        node_path: &NodePath<'ast>,
+        target_node: &mut N,
+    ) -> Result<(), EqlMapperError> {
+        if let Some((_select, _select_items, select_item)) = node_path.last_3_as::<Select, Vec<SelectItem>, SelectItem>() {
+            let target_node = target_node.downcast_mut::<SelectItem>().unwrap();
+            self.preserve_effective_alias_of_select_item(select_item, target_node);
+        }
+
+        Ok(())
     }
 }
 

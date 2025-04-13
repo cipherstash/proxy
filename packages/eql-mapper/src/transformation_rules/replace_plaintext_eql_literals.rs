@@ -1,52 +1,47 @@
-use std::{collections::HashMap, rc::Rc};
+use std::{any::type_name, collections::HashMap};
 
 use sqlparser::ast::Expr;
-use sqltk::{Context, NodeKey, Visitable};
+use sqltk::{NodeKey, NodePath, Visitable};
 
-use crate::{EqlMapperError, Type};
+use crate::EqlMapperError;
 
-use super::{
-    selector::{MatchTarget, Selector},
-    Rule,
-};
+use super::TransformationRule;
 
 #[derive(Debug)]
 pub struct ReplacePlaintextEqlLiterals<'ast> {
-    node_types: Rc<HashMap<NodeKey<'ast>, Type>>,
     encrypted_literals: HashMap<NodeKey<'ast>, Expr>,
 }
 
 impl<'ast> ReplacePlaintextEqlLiterals<'ast> {
-    pub fn new(
-        node_types: Rc<HashMap<NodeKey<'ast>, Type>>,
-        encrypted_literals: HashMap<NodeKey<'ast>, Expr>,
-    ) -> Self {
-        Self {
-            node_types,
-            encrypted_literals,
-        }
+    pub fn new(encrypted_literals: HashMap<NodeKey<'ast>, Expr>) -> Self {
+        Self { encrypted_literals }
     }
 }
 
-impl<'ast> Rule<'ast> for ReplacePlaintextEqlLiterals<'ast> {
+impl<'ast> TransformationRule<'ast> for ReplacePlaintextEqlLiterals<'ast> {
     fn apply<N: Visitable>(
         &mut self,
-        ctx: &Context<'ast>,
-        source_node: &'ast N,
-        target_node: N,
-    ) -> Result<N, EqlMapperError> {
-        MatchTarget::<Expr>::on_match_then(
-            ctx,
-            source_node,
-            target_node,
-            &mut |source_expr, mut target_expr| {
-                if let Some(replacement) =
-                    self.encrypted_literals.remove(&NodeKey::new(source_expr))
-                {
-                    *&mut target_expr = replacement;
-                }
-                Ok(target_expr)
-            },
-        )
+        node_path: &NodePath<'ast>,
+        target_node: &mut N,
+    ) -> Result<(), EqlMapperError> {
+        if let Some((expr,)) = node_path.last_1_as::<Expr>() {
+            if let Some(replacement) = self.encrypted_literals.remove(&NodeKey::new(expr)) {
+                let target_node = target_node.downcast_mut::<Expr>().unwrap();
+                *target_node = replacement;
+            }
+        }
+
+        Ok(())
+    }
+
+    fn check_postcondition(&self) -> Result<(), EqlMapperError> {
+        if self.encrypted_literals.len() == 0 {
+            Ok(())
+        } else {
+            Err(EqlMapperError::Transform(format!(
+                "Postcondition failed in {}: unused encrypted literals",
+                type_name::<Self>()
+            )))
+        }
     }
 }
