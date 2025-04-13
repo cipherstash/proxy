@@ -7,8 +7,8 @@ mod importer;
 mod inference;
 mod iterator_ext;
 mod model;
-mod transformation_rules;
 mod scope_tracker;
+mod transformation_rules;
 mod value_tracker;
 
 #[cfg(test)]
@@ -16,13 +16,13 @@ mod test_helpers;
 
 pub use eql_mapper::*;
 pub use model::*;
-pub use unifier::{TableColumn, EqlValue, NativeValue};
+pub use unifier::{EqlValue, NativeValue, TableColumn};
 
 pub(crate) use arc_ref::*;
 pub(crate) use dep::*;
 pub(crate) use inference::*;
-pub(crate) use transformation_rules::*;
 pub(crate) use scope_tracker::*;
+pub(crate) use transformation_rules::*;
 pub(crate) use value_tracker::*;
 
 #[cfg(test)]

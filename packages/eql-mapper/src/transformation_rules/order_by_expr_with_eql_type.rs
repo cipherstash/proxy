@@ -47,8 +47,7 @@ impl<'ast> TransformationRule<'ast> for OrderByExprWithEqlType<'ast> {
                 if matches!(ty, Type::Value(Value::Eql(_))) {
                     let target_node = target_node.downcast_mut::<OrderByExpr>().unwrap();
 
-                    let expr_to_wrap =
-                        mem::replace(&mut target_node.expr, Expr::Wildcard);
+                    let expr_to_wrap = mem::replace(&mut target_node.expr, Expr::Wildcard);
 
                     target_node.expr = wrap_in_1_arg_function(
                         expr_to_wrap,

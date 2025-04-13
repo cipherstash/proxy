@@ -37,8 +37,9 @@ impl<'ast> TypeInferencer<'ast> {
     ) -> Result<(), TypeError> {
         let ty = self.get_type(query);
         if let Type::Constructor(Constructor::Projection(Projection::WithColumns(
-                ProjectionColumns(cols),
-            ))) = &*ty.as_type() {
+            ProjectionColumns(cols),
+        ))) = &*ty.as_type()
+        {
             for col in cols {
                 if let Type::Var(tvar) = &*col.ty.as_type() {
                     if self

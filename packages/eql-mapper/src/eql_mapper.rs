@@ -3,9 +3,9 @@ use crate::{
     inference::{unifier, TypeError, TypeInferencer},
     unifier::{EqlValue, Unifier},
     DepMut, EqlColInProjectionAndGroupBy, FailOnPlaceholderChange, GroupByEqlCol,
-    OrderByExprWithEqlType, PreserveAliases, Projection, ReplacePlaintextEqlLiterals, TransformationRule,
-    ScopeError, ScopeTracker, TableResolver, Type, TypeRegistry, UseEquivalentSqlFuncForEqlTypes,
-    Value, ValueTracker,
+    OrderByExprWithEqlType, PreserveAliases, Projection, ReplacePlaintextEqlLiterals, ScopeError,
+    ScopeTracker, TableResolver, TransformationRule, Type, TypeRegistry,
+    UseEquivalentSqlFuncForEqlTypes, Value, ValueTracker,
 };
 use sqlparser::ast::{self as ast, Statement};
 use sqltk::{AsNodeKey, Break, NodeKey, NodePath, Transform, Transformable, Visitable, Visitor};
@@ -284,10 +284,8 @@ impl<'ast> TypedStatement<'ast> {
             }
         }
 
-        let mut transformer = EncryptedStatement::new(
-            encrypted_literals,
-            Arc::clone(&self.node_types),
-        );
+        let mut transformer =
+            EncryptedStatement::new(encrypted_literals, Arc::clone(&self.node_types));
 
         let statement = self.statement.apply_transform(&mut transformer)?;
         transformer.check_postcondition()?;
@@ -363,7 +361,7 @@ impl<'ast> Transform<'ast> for EncryptedStatement<'ast> {
     }
 
     fn check_postcondition(&self) -> Result<(), Self::Error> {
-        self.transformation_rules .check_postcondition()
+        self.transformation_rules.check_postcondition()
     }
 }
 

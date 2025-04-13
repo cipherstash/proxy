@@ -5,10 +5,7 @@ use sqltk::{NodeKey, NodePath, Visitable};
 
 use crate::{EqlMapperError, Type, Value};
 
-use super::{
-    helpers,
-    TransformationRule,
-};
+use super::{helpers, TransformationRule};
 
 #[derive(Debug)]
 pub struct GroupByEqlCol<'ast> {
@@ -30,9 +27,7 @@ impl<'ast> TransformationRule<'ast> for GroupByEqlCol<'ast> {
         if let Some((_group_by_expr, _exprs, expr)) =
             node_path.last_3_as::<GroupByExpr, Vec<Expr>, Expr>()
         {
-            if let Some(Type::Value(Value::Eql(_))) =
-                self.node_types.get(&NodeKey::new(expr))
-            {
+            if let Some(Type::Value(Value::Eql(_))) = self.node_types.get(&NodeKey::new(expr)) {
                 let target_node = target_node.downcast_mut::<Expr>().unwrap();
 
                 // Nodes are modified starting from the leaf nodes, to target_node *is* what we want to be wrapping.

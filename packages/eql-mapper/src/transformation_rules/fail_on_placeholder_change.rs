@@ -2,9 +2,7 @@ use sqlparser::ast::{Expr, Value};
 
 use crate::EqlMapperError;
 
-use super::{
-    TransformationRule,
-};
+use super::TransformationRule;
 
 /// Rule that fails if an a [`Value::Placeholder`] has been replaced.
 ///
@@ -21,10 +19,8 @@ impl<'ast> TransformationRule<'ast> for FailOnPlaceholderChange {
         if let Some((expr,)) = node_path.last_1_as::<Expr>() {
             let target_node = target_node.downcast_mut::<Expr>().unwrap();
 
-            if let (
-                Expr::Value(source_value @ Value::Placeholder(_)),
-                Expr::Value(target_value),
-            ) = (expr, &*target_node)
+            if let (Expr::Value(source_value @ Value::Placeholder(_)), Expr::Value(target_value)) =
+                (expr, &*target_node)
             {
                 if source_value != target_value {
                     return Err(EqlMapperError::InternalError(

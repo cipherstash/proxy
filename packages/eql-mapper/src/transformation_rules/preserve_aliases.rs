@@ -1,4 +1,4 @@
-use std::{mem};
+use std::mem;
 
 use sqlparser::ast::{Expr, Function, Ident, Select, SelectItem};
 use sqltk::{NodePath, Visitable};
@@ -42,7 +42,9 @@ impl<'ast> TransformationRule<'ast> for PreserveAliases {
         node_path: &NodePath<'ast>,
         target_node: &mut N,
     ) -> Result<(), EqlMapperError> {
-        if let Some((_select, _select_items, select_item)) = node_path.last_3_as::<Select, Vec<SelectItem>, SelectItem>() {
+        if let Some((_select, _select_items, select_item)) =
+            node_path.last_3_as::<Select, Vec<SelectItem>, SelectItem>()
+        {
             let target_node = target_node.downcast_mut::<SelectItem>().unwrap();
             Self::preserve_effective_alias_of_select_item(select_item, target_node);
         }
@@ -63,7 +65,8 @@ impl PreserveAliases {
             // (which can be arbitrarily large) we replace it with another which in return provides us with ownership of
             // the original value. `Expr::Wildcard` is chosen as the throwaway value because it's cheap.
             SelectItem::UnnamedExpr(expr) => {
-                if let (Some(effective_target_alias), Some(effective_source_alias)) = (effective_target_alias, effective_source_alias)
+                if let (Some(effective_target_alias), Some(effective_source_alias)) =
+                    (effective_target_alias, effective_source_alias)
                 {
                     if effective_target_alias != effective_source_alias {
                         *target_node = SelectItem::ExprWithAlias {
@@ -91,7 +94,7 @@ impl PreserveAliases {
             Expr::CompoundIdentifier(idents) => Some(idents.last().unwrap().clone()),
             Expr::Function(Function { name, .. }) => Some(name.0.last().unwrap().clone()),
             Expr::Nested(expr) => Self::derive_effective_alias_for_expr(expr),
-            _ => None
+            _ => None,
         }
     }
 }
