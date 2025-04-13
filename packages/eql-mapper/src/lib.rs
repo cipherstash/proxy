@@ -7,7 +7,6 @@ mod importer;
 mod inference;
 mod iterator_ext;
 mod model;
-mod rc_ref;
 mod transformation_rules;
 mod scope_tracker;
 mod value_tracker;
