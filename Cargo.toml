@@ -35,7 +35,6 @@ strip = "none"
 debug = true
 
 [workspace.dependencies]
-<<<<<<< HEAD
 sqlparser = { version = "^0.52", features = ["bigdecimal", "serde"] }
 # sqltk = { git = "https://github.com/cipherstash/sqltk/", rev = "e16406f" }
 sqltk = { path = "../sqltk/packages/sqltk" }
