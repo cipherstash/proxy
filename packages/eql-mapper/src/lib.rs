@@ -1150,6 +1150,26 @@ mod test {
     }
 
     #[test]
+    fn where_true() {
+        let _ = tracing_subscriber::fmt::try_init();
+
+        let schema = resolver(schema! {
+            tables: {
+                employees: {
+                    id,
+                }
+            }
+        });
+
+        let statement = parse(
+            r#"
+                select id from employees where true;
+            "#,
+        );
+        type_check(schema, &statement).unwrap();
+    }
+
+    #[test]
     fn update_with_concat_regression() {
         let _ = tracing_subscriber::fmt::try_init();
 

@@ -332,7 +332,9 @@ impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
             }
 
             // We do not need to look at a value to determine the type of the expression.
-            Expr::Value(_) => {}
+            Expr::Value(_) => {
+                self.unify_node_with_type(this_expr, self.fresh_tvar())?;
+            }
 
             Expr::IntroducedString { .. } => Err(TypeError::UnsupportedSqlFeature(
                 "MySQL charset introducer".into(),
