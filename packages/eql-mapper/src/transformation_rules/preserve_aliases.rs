@@ -78,7 +78,7 @@ impl PreserveAliases {
         }
     }
 
-    fn derive_effective_alias<'ast>(&self, node: &'ast SelectItem) -> Option<Ident> {
+    fn derive_effective_alias(&self, node: &SelectItem) -> Option<Ident> {
         match node {
             SelectItem::UnnamedExpr(expr) => self.derive_effective_alias_for_expr(expr),
             SelectItem::ExprWithAlias { expr: _, alias } => Some(alias.clone()),
@@ -86,12 +86,12 @@ impl PreserveAliases {
         }
     }
 
-    fn derive_effective_alias_for_expr<'ast>(&self, expr: &'ast Expr) -> Option<Ident> {
+    fn derive_effective_alias_for_expr(&self, expr: &Expr) -> Option<Ident> {
         match expr {
             Expr::Identifier(ident) => Some(ident.clone()),
             Expr::CompoundIdentifier(idents) => Some(idents.last().unwrap().clone()),
             Expr::Function(Function { name, .. }) => Some(name.0.last().unwrap().clone()),
-            Expr::Nested(expr) => self.derive_effective_alias_for_expr(&*expr),
+            Expr::Nested(expr) => self.derive_effective_alias_for_expr(expr),
             _ => None
         }
     }

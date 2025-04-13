@@ -35,7 +35,7 @@ impl<'ast> TransformationRule<'ast> for ReplacePlaintextEqlLiterals<'ast> {
     }
 
     fn check_postcondition(&self) -> Result<(), EqlMapperError> {
-        if self.encrypted_literals.len() == 0 {
+        if self.encrypted_literals.is_empty() {
             Ok(())
         } else {
             Err(EqlMapperError::Transform(format!(

@@ -1,4 +1,4 @@
-use std::{collections::HashMap, mem, rc::Rc};
+use std::{collections::HashMap, mem, sync::Arc};
 
 use sqlparser::ast::{Expr, Ident, ObjectName, OrderByExpr};
 use sqltk::{NodeKey, NodePath, Visitable};
@@ -25,11 +25,11 @@ use super::{helpers::wrap_in_1_arg_function, TransformationRule};
 /// ```
 #[derive(Debug)]
 pub struct OrderByExprWithEqlType<'ast> {
-    node_types: Rc<HashMap<NodeKey<'ast>, Type>>,
+    node_types: Arc<HashMap<NodeKey<'ast>, Type>>,
 }
 
 impl<'ast> OrderByExprWithEqlType<'ast> {
-    pub(crate) fn new(node_types: Rc<HashMap<NodeKey<'ast>, Type>>) -> Self {
+    pub(crate) fn new(node_types: Arc<HashMap<NodeKey<'ast>, Type>>) -> Self {
         Self { node_types }
     }
 }
@@ -50,7 +50,7 @@ impl<'ast> TransformationRule<'ast> for OrderByExprWithEqlType<'ast> {
                     let expr_to_wrap =
                         mem::replace(&mut target_node.expr, Expr::Wildcard);
 
-                    *&mut target_node.expr = wrap_in_1_arg_function(
+                    target_node.expr = wrap_in_1_arg_function(
                         expr_to_wrap,
                         ObjectName(vec![Ident::new("CS_ORE_64_8_V1")]),
                     );

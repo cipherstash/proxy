@@ -1,4 +1,4 @@
-use std::{collections::HashMap, rc::Rc};
+use std::{collections::HashMap, sync::Arc};
 
 use sqlparser::ast::{Expr, Function, Ident, Select, SelectItem};
 use sqltk::{NodeKey, NodePath, Visitable};
@@ -9,11 +9,11 @@ use super::{helpers, TransformationRule};
 
 #[derive(Debug)]
 pub struct UseEquivalentSqlFuncForEqlTypes<'ast> {
-    node_types: Rc<HashMap<NodeKey<'ast>, Type>>,
+    node_types: Arc<HashMap<NodeKey<'ast>, Type>>,
 }
 
 impl<'ast> UseEquivalentSqlFuncForEqlTypes<'ast> {
-    pub fn new(node_types: Rc<HashMap<NodeKey<'ast>, Type>>) -> Self {
+    pub fn new(node_types: Arc<HashMap<NodeKey<'ast>, Type>>) -> Self {
         Self { node_types }
     }
 }

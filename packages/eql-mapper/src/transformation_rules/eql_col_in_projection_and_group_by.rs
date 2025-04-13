@@ -1,4 +1,4 @@
-use std::{collections::HashMap, rc::Rc};
+use std::{collections::HashMap, sync::Arc};
 
 use sqlparser::ast::{Expr, Ident, ObjectName, Select, SelectItem};
 use sqltk::{NodeKey, NodePath, Visitable};
@@ -28,11 +28,11 @@ use super::{
 /// ```
 #[derive(Debug)]
 pub struct EqlColInProjectionAndGroupBy<'ast> {
-    node_types: Rc<HashMap<NodeKey<'ast>, Type>>,
+    node_types: Arc<HashMap<NodeKey<'ast>, Type>>,
 }
 
 impl<'ast> EqlColInProjectionAndGroupBy<'ast> {
-    pub(crate) fn new(node_types: Rc<HashMap<NodeKey<'ast>, Type>>) -> Self {
+    pub(crate) fn new(node_types: Arc<HashMap<NodeKey<'ast>, Type>>) -> Self {
         Self { node_types }
     }
 }
@@ -46,7 +46,7 @@ impl<'ast> TransformationRule<'ast> for EqlColInProjectionAndGroupBy<'ast> {
         if let Some((select, _select_items, _select_item, expr)) =
             node_path.last_4_as::<Select, Vec<SelectItem>, SelectItem, Expr>()
         {
-            if is_used_in_group_by_clause(&*self.node_types, &select.group_by, expr) {
+            if is_used_in_group_by_clause(&self.node_types, &select.group_by, expr) {
                 let target_node: &mut Expr = target_node.downcast_mut().unwrap();
                 *target_node = wrap_in_1_arg_function(
                     expr.clone(),

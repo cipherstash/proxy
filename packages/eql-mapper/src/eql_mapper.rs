@@ -56,7 +56,7 @@ pub fn type_check<'ast>(
                 projection: projection?,
                 params: params?,
                 literals: literals?,
-                node_types: Rc::new(node_types?),
+                node_types: Arc::new(node_types?),
             })
         }
         ControlFlow::Break(Break::Err(err)) => {
@@ -112,7 +112,7 @@ pub struct TypedStatement<'ast> {
     /// The types and values of all literals from the SQL statement.
     pub literals: Vec<(EqlValue, &'ast ast::Expr)>,
 
-    pub node_types: Rc<HashMap<NodeKey<'ast>, Type>>,
+    pub node_types: Arc<HashMap<NodeKey<'ast>, Type>>,
 }
 
 /// The error type returned by various functions in the `eql_mapper` crate.
@@ -286,7 +286,7 @@ impl<'ast> TypedStatement<'ast> {
 
         let mut transformer = EncryptedStatement::new(
             encrypted_literals,
-            Rc::clone(&self.node_types),
+            Arc::clone(&self.node_types),
         );
 
         let statement = self.statement.apply_transform(&mut transformer)?;
@@ -328,16 +328,16 @@ struct EncryptedStatement<'ast> {
 impl<'ast> EncryptedStatement<'ast> {
     fn new(
         encrypted_literals: HashMap<NodeKey<'ast>, ast::Expr>,
-        node_types: Rc<HashMap<NodeKey<'ast>, Type>>,
+        node_types: Arc<HashMap<NodeKey<'ast>, Type>>,
     ) -> Self {
         Self {
             transformation_rules: (
-                EqlColInProjectionAndGroupBy::new(Rc::clone(&node_types)),
-                GroupByEqlCol::new(Rc::clone(&node_types)),
-                OrderByExprWithEqlType::new(Rc::clone(&node_types)),
+                EqlColInProjectionAndGroupBy::new(Arc::clone(&node_types)),
+                GroupByEqlCol::new(Arc::clone(&node_types)),
+                OrderByExprWithEqlType::new(Arc::clone(&node_types)),
                 PreserveAliases,
                 ReplacePlaintextEqlLiterals::new(encrypted_literals),
-                UseEquivalentSqlFuncForEqlTypes::new(Rc::clone(&node_types)),
+                UseEquivalentSqlFuncForEqlTypes::new(Arc::clone(&node_types)),
                 FailOnPlaceholderChange,
             ),
         }

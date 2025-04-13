@@ -1,4 +1,4 @@
-use std::{collections::HashMap, mem, rc::Rc};
+use std::{collections::HashMap, mem, sync::Arc};
 
 use sqlparser::ast::{Expr, GroupByExpr, Ident, ObjectName};
 use sqltk::{NodeKey, NodePath, Visitable};
@@ -12,11 +12,11 @@ use super::{
 
 #[derive(Debug)]
 pub struct GroupByEqlCol<'ast> {
-    node_types: Rc<HashMap<NodeKey<'ast>, Type>>,
+    node_types: Arc<HashMap<NodeKey<'ast>, Type>>,
 }
 
 impl<'ast> GroupByEqlCol<'ast> {
-    pub fn new(node_types: Rc<HashMap<NodeKey<'ast>, Type>>) -> Self {
+    pub fn new(node_types: Arc<HashMap<NodeKey<'ast>, Type>>) -> Self {
         Self { node_types }
     }
 }
