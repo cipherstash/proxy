@@ -3,7 +3,7 @@ use crate::{
     inference::{unifier, TypeError, TypeInferencer},
     unifier::{EqlValue, Unifier},
     DepMut, WrapGroupedEqlColInAggregateFn, FailOnPlaceholderChange, GroupByEqlCol,
-    OrderByExprWithEqlType, PreserveEffectiveAliases, Projection, ReplacePlaintextEqlLiterals, ScopeError,
+    WrapEqlColsInOrderByWithOreFn, PreserveEffectiveAliases, Projection, ReplacePlaintextEqlLiterals, ScopeError,
     ScopeTracker, TableResolver, TransformationRule, Type, TypeRegistry,
     UseEquivalentSqlFuncForEqlTypes, Value, ValueTracker,
 };
@@ -315,7 +315,7 @@ struct EncryptedStatement<'ast> {
     transformation_rules: (
         WrapGroupedEqlColInAggregateFn<'ast>,
         GroupByEqlCol<'ast>,
-        OrderByExprWithEqlType<'ast>,
+        WrapEqlColsInOrderByWithOreFn<'ast>,
         PreserveEffectiveAliases,
         ReplacePlaintextEqlLiterals<'ast>,
         UseEquivalentSqlFuncForEqlTypes<'ast>,
@@ -332,7 +332,7 @@ impl<'ast> EncryptedStatement<'ast> {
             transformation_rules: (
                 WrapGroupedEqlColInAggregateFn::new(Arc::clone(&node_types)),
                 GroupByEqlCol::new(Arc::clone(&node_types)),
-                OrderByExprWithEqlType::new(Arc::clone(&node_types)),
+                WrapEqlColsInOrderByWithOreFn::new(Arc::clone(&node_types)),
                 PreserveEffectiveAliases,
                 ReplacePlaintextEqlLiterals::new(encrypted_literals),
                 UseEquivalentSqlFuncForEqlTypes::new(Arc::clone(&node_types)),

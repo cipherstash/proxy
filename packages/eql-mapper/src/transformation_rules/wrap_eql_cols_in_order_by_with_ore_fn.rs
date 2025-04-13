@@ -24,17 +24,17 @@ use super::{helpers::wrap_in_1_arg_function, TransformationRule};
 /// --     Changed by this rule                                Changed by rule `GroupByEqlCol`
 /// ```
 #[derive(Debug)]
-pub struct OrderByExprWithEqlType<'ast> {
+pub struct WrapEqlColsInOrderByWithOreFn<'ast> {
     node_types: Arc<HashMap<NodeKey<'ast>, Type>>,
 }
 
-impl<'ast> OrderByExprWithEqlType<'ast> {
+impl<'ast> WrapEqlColsInOrderByWithOreFn<'ast> {
     pub(crate) fn new(node_types: Arc<HashMap<NodeKey<'ast>, Type>>) -> Self {
         Self { node_types }
     }
 }
 
-impl<'ast> TransformationRule<'ast> for OrderByExprWithEqlType<'ast> {
+impl<'ast> TransformationRule<'ast> for WrapEqlColsInOrderByWithOreFn<'ast> {
     fn apply<N: Visitable>(
         &mut self,
         node_path: &NodePath<'ast>,
