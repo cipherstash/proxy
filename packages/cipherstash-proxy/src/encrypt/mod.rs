@@ -10,6 +10,7 @@ use crate::{
     Identifier,
 };
 use cipherstash_client::{
+    config::EnvSource,
     credentials::{auto_refresh::AutoRefresh, ServiceCredentials},
     encryption::{
         self, Encrypted, EncryptionError, IndexTerm, Plaintext, PlaintextTarget,
@@ -190,19 +191,32 @@ impl Encrypt {
 
 async fn init_cipher(config: &TandemConfig) -> Result<ScopedCipher, Error> {
     let console_config = ConsoleConfig::builder().with_env().build()?;
-    let cts_config = CtsConfig::builder().with_env().build()?;
+
+    let builder = CtsConfig::builder().with_env();
+    let builder = if let Some(cts_host) = config.cts_host() {
+        builder.base_url(&cts_host)
+    } else {
+        builder
+    };
+    let cts_config = builder.build()?;
 
     // Not using with_env because the proxy config should take precedence
-    let builder = ZeroKMSConfig::builder(); //.with_env();
-
-    let zerokms_config = builder
+    let builder = ZeroKMSConfig::builder()
+        .add_source(EnvSource::default())
         .workspace_id(&config.auth.workspace_id)
         .access_key(&config.auth.client_access_key)
         .try_with_client_id(&config.encrypt.client_id)?
         .try_with_client_key(&config.encrypt.client_key)?
         .console_config(&console_config)
-        .cts_config(&cts_config)
-        .build_with_client_key()?;
+        .cts_config(&cts_config);
+
+    let builder = if let Some(zerokms_host) = config.zerokms_host() {
+        builder.base_url(zerokms_host)
+    } else {
+        builder
+    };
+
+    let zerokms_config = builder.build_with_client_key()?;
 
     let zerokms_client = zerokms_config
         .create_client_with_credentials(AutoRefresh::new(zerokms_config.credentials()));
