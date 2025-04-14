@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1744351866112,
+  "lastUpdate": 1744590868507,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -444,6 +444,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 7.242767,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "5b8c2b481f53b3a6565a7cafeb2cfc53d7211714",
+          "message": "feat(config) add zerokms and cts hosts",
+          "timestamp": "2025-04-11T20:15:13Z",
+          "url": "https://github.com/cipherstash/proxy/pull/205/commits/5b8c2b481f53b3a6565a7cafeb2cfc53d7211714"
+        },
+        "date": 1744590867125,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 6.779364,
             "unit": "Number"
           }
         ]
