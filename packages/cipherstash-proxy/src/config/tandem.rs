@@ -65,6 +65,12 @@ pub struct DevelopmentConfig {
 
     #[serde(default)]
     pub enable_mapping_errors: bool,
+
+    #[serde(default)]
+    pub zerokms_host: Option<String>,
+
+    #[serde(default)]
+    pub cts_host: Option<String>,
 }
 
 /// Config defaults to a file called `tandem` in the current directory.
@@ -196,6 +202,18 @@ impl TandemConfig {
             Some(dev) => dev.enable_mapping_errors,
             None => false,
         }
+    }
+
+    pub fn zerokms_host(&self) -> Option<String> {
+        self.development
+            .as_ref()
+            .and_then(|dev| dev.zerokms_host.clone())
+    }
+
+    pub fn cts_host(&self) -> Option<String> {
+        self.development
+            .as_ref()
+            .and_then(|dev| dev.cts_host.clone())
     }
 
     pub fn use_structured_logging(&self) -> bool {
