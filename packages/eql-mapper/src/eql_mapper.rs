@@ -151,7 +151,7 @@ struct EqlMapper<'ast> {
     importer: Rc<RefCell<Importer<'ast>>>,
     inferencer: Rc<RefCell<TypeInferencer<'ast>>>,
     registry: Rc<RefCell<TypeRegistry<'ast>>>,
-    eql_function_tracker: Rc<RefCell<EqlFunctionTracker<'ast>>>,
+    value_tracker: Rc<RefCell<ValueTracker<'ast>>>,
     _ast: PhantomData<&'ast ()>,
 }
 
@@ -167,11 +167,14 @@ impl<'ast> EqlMapper<'ast> {
         ));
         let eql_function_tracker = DepMut::new(EqlFunctionTracker::new(&registry));
         let unifier = DepMut::new(Unifier::new(&registry));
+        let value_tracker = DepMut::new(ValueTracker::new(&registry));
+
         let inferencer = DepMut::new(TypeInferencer::new(
             table_resolver.clone(),
             &scope_tracker,
             &registry,
             &unifier,
+            &value_tracker,
         ));
 
         Self {
@@ -379,96 +382,63 @@ impl<'ast> Transform<'ast> for EncryptedStatement<'ast> {
 
     fn transform<N: Visitable>(
         &mut self,
-        original_node: &'ast N,
-        mut new_node: N,
+        node_path: &NodePath<'ast>,
+        mut target_node: N,
     ) -> Result<N, Self::Error> {
-        if let Some(target_value) = new_node.downcast_mut::<ast::Expr>() {
-            match original_node.downcast_ref::<ast::Expr>() {
-                Some(original_value) => match original_value {
-                    ast::Expr::Value(ast::Value::Placeholder(_))
-                        if original_value != target_value =>
-                    {
-                        return Err(EqlMapperError::InternalError(
-                            "attempt was made to update placeholder with literal".to_string(),
-                        ));
-                    }
+        self.transformation_rules
+            .apply(node_path, &mut target_node)?;
 
-                    ast::Expr::Value(_) => {
-                        if let Some(replacement) = self
-                            .encrypted_literals
-                            .remove(&NodeKey::new(original_value))
-                        {
-                            *target_value = replacement;
-                        }
-                    }
+        Ok(target_node)
+    }
 
-                    // Wrap identifiers (e.g. `encrypted_col`) and compound identifiers (e.g. `some_tbl.encrypted_col`)
-                    // in an EQL function if the type checker has marked them as nodes that need to be
-                    // wrapped.
-                    //
-                    // For example (assuming that `encrypted_col` is an identifier for an EQL column) transform
-                    // `encrypted_col` to `cs_ore_64_8_v1(encrypted_col)`.
-                    ast::Expr::Identifier(_) | ast::Expr::CompoundIdentifier(_) => {
-                        let node_key = NodeKey::new(original_value);
-
-                        if self.nodes_to_wrap.contains(&node_key) {
-                            *target_value =
-                                make_eql_function_node("cs_ore_64_8_v1", original_value.clone());
-                        }
-                    }
-
-                    _ => { /* other variants are a no-op and don't require transformation */ }
-                },
-                None => {
-                    return Err(EqlMapperError::Transform(String::from(
-                        "Could not resolve literal node",
-                    )));
-                }
-            }
-        }
-
-        Ok(new_node)
+    fn check_postcondition(&self) -> Result<(), Self::Error> {
+        self.transformation_rules.check_postcondition()
     }
 }
 
-fn make_eql_function_node(function_name: &str, arg: ast::Expr) -> ast::Expr {
-    ast::Expr::Function(ast::Function {
-        parameters: ast::FunctionArguments::None,
-        filter: None,
-        null_treatment: None,
-        over: None,
-        within_group: vec![],
-        name: ast::ObjectName(vec![ast::Ident {
-            value: function_name.to_string(),
-            quote_style: None,
-        }]),
-        args: ast::FunctionArguments::List(ast::FunctionArgumentList {
-            duplicate_treatment: None,
-            clauses: vec![],
-            args: vec![ast::FunctionArg::Unnamed(ast::FunctionArgExpr::Expr(arg))],
-        }),
-    })
-}
-
-/// [`Visitor`] implementation that composes the [`Scope`] visitor, the [`Importer`] and the [`TypeInferencer`]
+/// [`Visitor`] implementation that composes the [`ScopeTracker`] visitor, the [`Importer`] and the [`TypeInferencer`]
 /// visitors.
 impl<'ast> Visitor<'ast> for EqlMapper<'ast> {
     type Error = EqlMapperError;
 
     fn enter<N: Visitable>(&mut self, node: &'ast N) -> ControlFlow<Break<Self::Error>> {
-        convert_control_flow(self.scope_tracker.borrow_mut().enter(node))?;
-        convert_control_flow(self.importer.borrow_mut().enter(node))?;
-        convert_control_flow(self.eql_function_tracker.borrow_mut().enter(node))?;
-        convert_control_flow(self.inferencer.borrow_mut().enter(node))?;
+        self.value_tracker.borrow_mut().enter(node);
+
+        self.scope_tracker
+            .borrow_mut()
+            .enter(node)
+            .map_break(Break::convert)?;
+
+        self.importer
+            .borrow_mut()
+            .enter(node)
+            .map_break(Break::convert)?;
+
+        self.inferencer
+            .borrow_mut()
+            .enter(node)
+            .map_break(Break::convert)?;
 
         ControlFlow::Continue(())
     }
 
     fn exit<N: Visitable>(&mut self, node: &'ast N) -> ControlFlow<Break<Self::Error>> {
-        convert_control_flow(self.inferencer.borrow_mut().exit(node))?;
-        convert_control_flow(self.eql_function_tracker.borrow_mut().exit(node))?;
-        convert_control_flow(self.importer.borrow_mut().exit(node))?;
-        convert_control_flow(self.scope_tracker.borrow_mut().exit(node))?;
+        self.inferencer
+            .borrow_mut()
+            .exit(node)
+            .map_break(Break::convert)?;
+
+        self.importer
+            .borrow_mut()
+            .exit(node)
+            .map_break(Break::convert)?;
+
+        self.scope_tracker
+            .borrow_mut()
+            .exit(node)
+            .map_break(Break::convert)?;
+
+        self.value_tracker.borrow_mut().exit(node);
 
         ControlFlow::Continue(())
     }

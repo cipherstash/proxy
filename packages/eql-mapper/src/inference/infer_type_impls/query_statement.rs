@@ -26,11 +26,16 @@ impl<'ast> TypeInferencer<'ast> {
     /// # Background
     ///
     /// Literal expressions (i.e. [`Expr::Value`]) are assigned [`Type::Var`] initially. The unifier can only refine
-    /// its type when it used in another expression. Without this function, unused literals would remain unresolved
-    /// and the type check would fail.
+    /// its type when it used in another expression.
     ///
-    /// This function therefore unifies those unresolved types as "native". It is safe to do so because the unifier
-    /// has already proved
+    /// If the literal is *not* used in another expression that constrains its type and an expression with the same type
+    /// variable as the literal is returned as a projection column then type checking would fail because of the
+    /// post-typecheck invariant that there can be no unresolved type variables remaining.
+    ///
+    /// This function resolves unresolved type variables as `Native` when these conditions are met:
+    ///
+    /// 1. the type variable is the type of one or more projection columns of a `SELECT` statement.
+    /// 2. there exists an `Expr::Value(_)` node in the AST which is assigned the same type variable.
     fn resolve_value_types_in_select_statement_projection(
         &mut self,
         query: &'ast Query,
