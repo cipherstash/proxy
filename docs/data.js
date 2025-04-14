@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1744590868507,
+  "lastUpdate": 1744600842806,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -469,6 +469,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 6.779364,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "toby@cipherstash.com",
+            "name": "Toby Hede",
+            "username": "tobyhede"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "ec0dffcee070d63fe46a40c9f1a6d782fb521810",
+          "message": "Merge pull request #205 from cipherstash/cs-client-env-vars\n\nfeat(config) add zerokms and cts hosts",
+          "timestamp": "2025-04-14T13:17:40+10:00",
+          "tree_id": "d49910ec04401919b044d24ffa33dc3c6c4c38ed",
+          "url": "https://github.com/cipherstash/proxy/commit/ec0dffcee070d63fe46a40c9f1a6d782fb521810"
+        },
+        "date": 1744600841302,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 6.788601,
             "unit": "Number"
           }
         ]
