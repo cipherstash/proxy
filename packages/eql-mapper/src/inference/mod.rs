@@ -6,27 +6,20 @@ mod type_variables;
 
 pub mod unifier;
 
-use unifier::*;
+use unifier::{Unifier, *};
 
 use std::{
-    cell::RefCell,
-    collections::{HashMap, HashSet},
-    fmt::Debug,
-    marker::PhantomData,
-    ops::ControlFlow,
-    rc::Rc,
+    cell::RefCell, collections::HashMap, fmt::Debug, marker::PhantomData, ops::ControlFlow, rc::Rc,
     sync::Arc,
 };
 
-use itertools::Itertools;
-
 use infer_type::InferType;
 use sqlparser::ast::{
-    Delete, Expr, Function, Insert, Query, Select, SelectItem, SetExpr, Statement, Value, Values,
+    Delete, Expr, Function, Insert, Query, Select, SelectItem, SetExpr, Statement, Values,
 };
 use sqltk::{into_control_flow, AsNodeKey, Break, NodeKey, Visitable, Visitor};
 
-use crate::{ScopeTracker, TableResolver, ValueTracker};
+use crate::{ParamTracker, ScopeTracker, TableResolver, ValueTracker};
 
 pub(crate) use registry::*;
 pub(crate) use type_error::*;
@@ -58,16 +51,11 @@ pub struct TypeInferencer<'ast> {
     reg: Rc<RefCell<TypeRegistry<'ast>>>,
 
     /// Implements the type unification algorithm.
-    unifier: Rc<RefCell<unifier::Unifier<'ast>>>,
-
-    /// The parameter identifiers & types of `Expr::Value(Value::Placeholder(_))` nodes found in a [`Statement`].
-    param_types: Vec<(String, TypeCell)>,
-
-    /// References to all of the `Expr::Value(_)` nodes found in a [`Statement`] - except for
-    /// `Expr::Value(Value::Placeholder(_))` nodes.
-    literal_nodes: HashSet<NodeKey<'ast>>,
+    unifier: Rc<RefCell<Unifier<'ast>>>,
 
     value_tracker: Rc<RefCell<ValueTracker<'ast>>>,
+
+    param_tracker: Rc<RefCell<ParamTracker<'ast>>>,
 
     _ast: PhantomData<&'ast ()>,
 }
@@ -78,17 +66,17 @@ impl<'ast> TypeInferencer<'ast> {
         table_resolver: impl Into<Arc<TableResolver>>,
         scope: impl Into<Rc<RefCell<ScopeTracker<'ast>>>>,
         reg: impl Into<Rc<RefCell<TypeRegistry<'ast>>>>,
-        unifier: impl Into<Rc<RefCell<unifier::Unifier<'ast>>>>,
+        unifier: impl Into<Rc<RefCell<Unifier<'ast>>>>,
         value_tracker: impl Into<Rc<RefCell<ValueTracker<'ast>>>>,
+        param_tracker: impl Into<Rc<RefCell<ParamTracker<'ast>>>>,
     ) -> Self {
         Self {
             table_resolver: table_resolver.into(),
             scope_tracker: scope.into(),
             reg: reg.into(),
             unifier: unifier.into(),
-            param_types: Vec::with_capacity(16),
-            literal_nodes: HashSet::with_capacity(64),
             value_tracker: value_tracker.into(),
+            param_tracker: param_tracker.into(),
             _ast: PhantomData,
         }
     }
@@ -103,52 +91,27 @@ impl<'ast> TypeInferencer<'ast> {
     }
 
     pub(crate) fn param_types(&self) -> Result<HashMap<String, unifier::Value>, TypeError> {
-        // For every param node, unify its type with the other param nodes that refer to the same param.
-        let unified_params = self
-            .param_types
-            .iter()
-            .into_grouping_map_by(|&(param, _)| param.clone())
-            .fold_with(
-                |_, _| Ok(self.fresh_tvar()),
-                |acc_ty, _param, (_, param_ty)| {
-                    acc_ty.and_then(|acc_ty| self.unify(acc_ty, param_ty.clone()))
-                },
-            );
-
-        // Filter down to the params that successfully unified
-        let verified_unified_params: HashMap<String, TypeCell> = unified_params
-            .iter()
-            .filter_map(|(param, ty)| ty.as_ref().map(|ty| ((*param).clone(), ty.clone())).ok())
-            .collect();
-
-        // Check we still have the correct number of params
-        if unified_params.len() != verified_unified_params.len() {
-            let mut failed_params: HashSet<String> = HashSet::new();
-            failed_params.extend(unified_params.keys().cloned());
-            failed_params.retain(|param| verified_unified_params.contains_key(param));
-
-            return Err(TypeError::Params(failed_params));
-        };
+        let param_tracker = self.param_tracker.borrow();
+        let param_types = param_tracker.param_types();
 
         // Check that every unified param type is a Scalar
-        let scalars: HashMap<String, unifier::Value> = verified_unified_params
+        let scalars: HashMap<String, unifier::Value> = param_types
             .into_iter()
             .map(|(param, ty)| {
                 if let unifier::Type::Constructor(unifier::Constructor::Value(value)) =
                     &*ty.as_type()
                 {
-                    Ok((param, value.clone()))
+                    Ok((param.to_string(), value.clone()))
                 } else {
-                    Err(TypeError::NonScalarParam(param, ty.as_type().to_string()))
+                    Err(TypeError::NonScalarParam(
+                        param.to_string(),
+                        ty.as_type().to_string(),
+                    ))
                 }
             })
             .collect::<Result<_, _>>()?;
 
         Ok(scalars)
-    }
-
-    pub(crate) fn literal_nodes(&self) -> HashSet<NodeKey<'ast>> {
-        self.literal_nodes.clone()
     }
 
     /// Tries to unify two types but does not record the result.
@@ -218,6 +181,10 @@ impl<'ast> TypeInferencer<'ast> {
     pub(crate) fn fresh_tvar(&self) -> TypeCell {
         self.reg.borrow_mut().fresh_tvar()
     }
+
+    pub(crate) fn node_types(&self) -> HashMap<NodeKey<'ast>, TypeCell> {
+        self.reg.borrow_mut().take_node_types()
+    }
 }
 
 /// # About this [`Visitor`] implementation.
@@ -246,16 +213,6 @@ impl<'ast> Visitor<'ast> for TypeInferencer<'ast> {
 
         if let Some(node) = node.downcast_ref::<Expr>() {
             into_control_flow(self.infer_enter(node))?;
-            if let Expr::Value(value) = node {
-                match value {
-                    Value::Placeholder(param) => {
-                        self.param_types.push((param.clone(), self.get_type(node)));
-                    }
-                    _ => {
-                        self.literal_nodes.insert(node.as_node_key());
-                    }
-                }
-            }
         }
 
         if let Some(node) = node.downcast_ref::<SetExpr>() {

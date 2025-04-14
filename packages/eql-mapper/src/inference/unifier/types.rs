@@ -29,6 +29,17 @@ pub enum Type {
     // TODO: consider including `Error` as a variant
 }
 
+const _: () = {
+    fn assert_send<T: Send>() {}
+    fn assert_sync<T: Sync>() {}
+
+    // RFC 2056
+    fn assert_all() {
+        assert_send::<Type>();
+        assert_sync::<Type>();
+    }
+};
+
 /// A `Constructor` is what is known about a [`Type`].
 #[derive(Debug, Clone, PartialEq, Eq, Display)]
 pub enum Constructor {
@@ -78,7 +89,7 @@ pub struct NativeValue(pub Option<TableColumn>);
 #[derive(Debug, PartialEq, Eq, Clone, Display)]
 #[display("{} {}", *ty.as_type(), self.render_alias())]
 pub struct ProjectionColumn {
-    /// The type of the column
+    /// The type of the column.
     pub ty: TypeCell,
 
     /// The columm alias
@@ -209,10 +220,7 @@ impl ProjectionColumns {
                 Type::Constructor(Constructor::Projection(Projection::WithColumns(nested))) => {
                     output = nested.flatten_impl(output);
                 }
-                _ => output.push(ProjectionColumn {
-                    ty: ty.clone(),
-                    alias: alias.clone(),
-                }),
+                _ => output.push(ProjectionColumn::new(ty.clone(), alias.clone())),
             }
         }
         output
@@ -248,6 +256,7 @@ impl From<Arc<Table>> for ProjectionColumns {
 }
 
 impl ProjectionColumn {
+    /// Returns a new `ProjectionColumn` with type `ty` and optional `alias`.
     pub(crate) fn new(ty: TypeCell, alias: Option<Ident>) -> Self {
         Self { ty, alias }
     }

@@ -33,6 +33,10 @@ impl<'ast> TypeRegistry<'ast> {
         }
     }
 
+    pub(crate) fn take_node_types(&mut self) -> HashMap<NodeKey<'ast>, TypeCell> {
+        std::mem::take(&mut self.node_types)
+    }
+
     pub(crate) fn get_substitution(&self, tvar: TypeVar) -> Option<TypeCell> {
         self.substitutions.get(&tvar).cloned()
     }

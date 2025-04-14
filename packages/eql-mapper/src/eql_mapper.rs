@@ -1,20 +1,16 @@
 use super::importer::{ImportError, Importer};
 use crate::{
-    eql_function_tracker::{EqlFunctionTracker, EqlFunctionTrackerError},
     inference::{unifier, TypeError, TypeInferencer},
     unifier::{EqlValue, Unifier},
-    DepMut, NodeKey, Projection, ProjectionColumn, ScopeError, ScopeTracker, TableResolver,
-    TypeRegistry, Value,
+    DepMut, FailOnPlaceholderChange, GroupByEqlCol, ParamTracker, PreserveEffectiveAliases,
+    Projection, ReplacePlaintextEqlLiterals, ScopeError, ScopeTracker, TableResolver,
+    TransformationRule, Type, TypeRegistry, UseEquivalentSqlFuncForEqlTypes, Value, ValueTracker,
+    WrapEqlColsInOrderByWithOreFn, WrapGroupedEqlColInAggregateFn,
 };
 use sqlparser::ast::{self as ast, Statement};
-use sqltk::{convert_control_flow, Break, Transform, Transformable, Visitable, Visitor};
+use sqltk::{AsNodeKey, Break, NodeKey, NodePath, Transform, Transformable, Visitable, Visitor};
 use std::{
-    cell::RefCell,
-    collections::{HashMap, HashSet},
-    marker::PhantomData,
-    ops::ControlFlow,
-    rc::Rc,
-    sync::Arc,
+    cell::RefCell, collections::HashMap, marker::PhantomData, ops::ControlFlow, rc::Rc, sync::Arc,
 };
 
 /// Validates that a SQL statement is well-typed with respect to a database schema that contains zero or more columns with
@@ -46,8 +42,9 @@ pub fn type_check<'ast>(
             let projection = mapper.statement_type(statement);
             let params = mapper.param_types();
             let literals = mapper.literal_types();
+            let node_types = mapper.node_types();
 
-            if projection.is_err() || params.is_err() || literals.is_err() {
+            if projection.is_err() || params.is_err() || literals.is_err() || node_types.is_err() {
                 #[cfg(test)]
                 {
                     mapper.inferencer.borrow().dump_registry(statement);
@@ -59,7 +56,7 @@ pub fn type_check<'ast>(
                 projection: projection?,
                 params: params?,
                 literals: literals?,
-                nodes_to_wrap: mapper.nodes_to_wrap(),
+                node_types: Arc::new(node_types?),
             })
         }
         ControlFlow::Break(Break::Err(err)) => {
@@ -115,7 +112,7 @@ pub struct TypedStatement<'ast> {
     /// The types and values of all literals from the SQL statement.
     pub literals: Vec<(EqlValue, &'ast ast::Expr)>,
 
-    pub nodes_to_wrap: HashSet<NodeKey<'ast>>,
+    pub node_types: Arc<HashMap<NodeKey<'ast>, Type>>,
 }
 
 /// The error type returned by various functions in the `eql_mapper` crate.
@@ -138,9 +135,6 @@ pub enum EqlMapperError {
     /// A type error encountered during type checking
     #[error(transparent)]
     Type(#[from] TypeError),
-
-    #[error(transparent)]
-    EqlFunctionTracker(#[from] EqlFunctionTrackerError),
 }
 
 /// `EqlMapper` can safely convert a SQL statement into an equivalent statement where all of the plaintext literals have
@@ -152,6 +146,7 @@ struct EqlMapper<'ast> {
     inferencer: Rc<RefCell<TypeInferencer<'ast>>>,
     registry: Rc<RefCell<TypeRegistry<'ast>>>,
     value_tracker: Rc<RefCell<ValueTracker<'ast>>>,
+    param_tracker: Rc<RefCell<ParamTracker<'ast>>>,
     _ast: PhantomData<&'ast ()>,
 }
 
@@ -165,9 +160,9 @@ impl<'ast> EqlMapper<'ast> {
             &registry,
             &scope_tracker,
         ));
-        let eql_function_tracker = DepMut::new(EqlFunctionTracker::new(&registry));
         let unifier = DepMut::new(Unifier::new(&registry));
         let value_tracker = DepMut::new(ValueTracker::new(&registry));
+        let param_tracker = DepMut::new(ParamTracker::new(&registry, &unifier));
 
         let inferencer = DepMut::new(TypeInferencer::new(
             table_resolver.clone(),
@@ -175,6 +170,7 @@ impl<'ast> EqlMapper<'ast> {
             &registry,
             &unifier,
             &value_tracker,
+            &param_tracker,
         ));
 
         Self {
@@ -182,54 +178,26 @@ impl<'ast> EqlMapper<'ast> {
             importer: importer.into(),
             inferencer: inferencer.into(),
             registry: registry.into(),
-            eql_function_tracker: eql_function_tracker.into(),
+            value_tracker: value_tracker.into(),
+            param_tracker: param_tracker.into(),
             _ast: PhantomData,
         }
     }
 
-    /// Asks the [`TypeInferencer`] for a hashmap of node types.
     fn statement_type(
         &self,
         statement: &'ast Statement,
     ) -> Result<Option<Projection>, EqlMapperError> {
-        let reg = self.registry.borrow();
-        match reg.get_type_by_node_key(&NodeKey::new(statement)) {
-            Some(ty_cell) => match ty_cell.resolved(&reg) {
-                Ok(ty_ref) => match &*ty_ref {
-                    unifier::Type::Constructor(unifier::Constructor::Projection(
-                        unifier::Projection::WithColumns(cols),
-                    )) => {
-                        let cols = cols.flatten();
-                        Ok(Some(Projection::WithColumns(
-                            cols.0
-                                .iter()
-                                .map(|col| match &*col.ty.as_type() {
-                                    unifier::Type::Constructor(unifier::Constructor::Value(
-                                        value,
-                                    )) => Ok(ProjectionColumn {
-                                        ty: value.try_into()?,
-                                        alias: col.alias.clone(),
-                                    }),
-                                    ty => Err(EqlMapperError::InternalError(format!(
-                                        "unexpected type {} in projection column",
-                                        ty
-                                    ))),
-                                })
-                                .collect::<Result<Vec<_>, _>>()?,
-                        )))
-                    }
-                    unifier::Type::Constructor(unifier::Constructor::Projection(
-                        unifier::Projection::Empty,
-                    )) => Ok(Some(Projection::Empty)),
-                    unexpected => Err(EqlMapperError::InternalError(format!(
-                        "unexpected type {unexpected} for statement"
-                    ))),
-                },
-                Err(err) => Err(EqlMapperError::from(err)),
-            },
-            None => Err(EqlMapperError::InternalError(
-                "could not find statement type information".to_string(),
-            )),
+        let reg = self.registry.borrow_mut();
+
+        match reg.get_type(statement) {
+            Some(ty) => {
+                let projection = ty.resolved_as::<crate::unifier::Projection>(&reg)?;
+                Ok(Some(Projection::try_from(&*projection)?))
+            }
+            None => Err(EqlMapperError::InternalError(format!(
+                "missing type for statement: {statement}"
+            ))),
         }
     }
 
@@ -262,7 +230,7 @@ impl<'ast> EqlMapper<'ast> {
     /// Asks the [`TypeInferencer`] for a hashmap of literal types, validating that they are all `Scalar` types.
     fn literal_types(&self) -> Result<Vec<(EqlValue, &'ast ast::Expr)>, EqlMapperError> {
         let inferencer = self.inferencer.borrow();
-        let literal_nodes = inferencer.literal_nodes();
+        let literal_nodes = self.value_tracker.borrow().values();
 
         let literals: Vec<(EqlValue, &'ast ast::Expr)> = literal_nodes
             .iter()
@@ -292,44 +260,40 @@ impl<'ast> EqlMapper<'ast> {
         Ok(literals)
     }
 
-    /// Takes `eql_function_tracker`, consumes it, and returns a `HashSet` of keys for nodes
-    /// that the type checker has marked for wrapping with EQL function calls.
-    fn nodes_to_wrap(&self) -> HashSet<NodeKey<'ast>> {
-        self.eql_function_tracker.take().into_to_wrap()
+    fn node_types(&self) -> Result<HashMap<NodeKey<'ast>, Type>, EqlMapperError> {
+        let inferencer = self.inferencer.borrow();
+        let node_types = inferencer.node_types();
+
+        let mut resolved_node_types: HashMap<NodeKey<'ast>, Type> = HashMap::new();
+        for (key, tcell) in node_types {
+            resolved_node_types.insert(
+                key,
+                Type::try_from(&*tcell.resolved(&self.registry.borrow())?)?,
+            );
+        }
+
+        Ok(resolved_node_types)
     }
 }
 
 impl<'ast> TypedStatement<'ast> {
-    /// Some statements do not require transformation and this means the application can choose to skip the
-    /// transformation step (which would be a no-op) and save come CPU cycles.
-    ///
-    /// Note: this check is conservative with respect to params. Some kinds of encrypted params will not require
-    /// statement transformation but we do not currently track that information anywhere so instead we assume the all
-    /// potentially require AST edits.
-    pub fn requires_transform(&self) -> bool {
-        // if there are any literals that require encryption, or any params that require encryption.
-        !self.literals.is_empty()
-            || self
-                .params
-                .iter()
-                .any(|value_ty| matches!(value_ty, Value::Eql(_)))
-    }
-
     /// Transforms the SQL statement by replacing all plaintext literals with EQL equivalents.
     pub fn transform(
         &self,
         encrypted_literals: HashMap<NodeKey<'ast>, ast::Expr>,
     ) -> Result<Statement, EqlMapperError> {
         for (_, target) in self.literals.iter() {
-            if !encrypted_literals.contains_key(&NodeKey::new(*target)) {
+            if !encrypted_literals.contains_key(&target.as_node_key()) {
                 return Err(EqlMapperError::Transform(String::from("encrypted literals refers to a literal node which is not present in the SQL statement")));
             }
         }
 
-        self.statement.apply_transform(&mut EncryptedStatement::new(
-            encrypted_literals,
-            &self.nodes_to_wrap,
-        ))
+        let mut transformer =
+            EncryptedStatement::new(encrypted_literals, Arc::clone(&self.node_types));
+
+        let statement = self.statement.apply_transform(&mut transformer)?;
+        transformer.check_postcondition()?;
+        Ok(statement)
     }
 
     pub fn literal_values(&self) -> Vec<&sqlparser::ast::Value> {
@@ -348,27 +312,36 @@ impl<'ast> TypedStatement<'ast> {
             })
             .collect::<Vec<_>>()
     }
-
-    /// Returns `true` if the typed statement has nodes that the type checker has marked for wrapping with EQL function calls.
-    pub fn has_nodes_to_wrap(&self) -> bool {
-        !self.nodes_to_wrap.is_empty()
-    }
 }
 
 #[derive(Debug)]
 struct EncryptedStatement<'ast> {
-    encrypted_literals: HashMap<NodeKey<'ast>, ast::Expr>,
-    nodes_to_wrap: &'ast HashSet<NodeKey<'ast>>,
+    transformation_rules: (
+        WrapGroupedEqlColInAggregateFn<'ast>,
+        GroupByEqlCol<'ast>,
+        WrapEqlColsInOrderByWithOreFn<'ast>,
+        PreserveEffectiveAliases,
+        ReplacePlaintextEqlLiterals<'ast>,
+        UseEquivalentSqlFuncForEqlTypes<'ast>,
+        FailOnPlaceholderChange,
+    ),
 }
 
 impl<'ast> EncryptedStatement<'ast> {
     fn new(
         encrypted_literals: HashMap<NodeKey<'ast>, ast::Expr>,
-        nodes_to_wrap: &'ast HashSet<NodeKey<'ast>>,
+        node_types: Arc<HashMap<NodeKey<'ast>, Type>>,
     ) -> Self {
         Self {
-            encrypted_literals,
-            nodes_to_wrap,
+            transformation_rules: (
+                WrapGroupedEqlColInAggregateFn::new(Arc::clone(&node_types)),
+                GroupByEqlCol::new(Arc::clone(&node_types)),
+                WrapEqlColsInOrderByWithOreFn::new(Arc::clone(&node_types)),
+                PreserveEffectiveAliases,
+                ReplacePlaintextEqlLiterals::new(encrypted_literals),
+                UseEquivalentSqlFuncForEqlTypes::new(Arc::clone(&node_types)),
+                FailOnPlaceholderChange,
+            ),
         }
     }
 }
@@ -404,6 +377,11 @@ impl<'ast> Visitor<'ast> for EqlMapper<'ast> {
     fn enter<N: Visitable>(&mut self, node: &'ast N) -> ControlFlow<Break<Self::Error>> {
         self.value_tracker.borrow_mut().enter(node);
 
+        self.param_tracker
+            .borrow_mut()
+            .enter(node)
+            .map_break(Break::convert)?;
+
         self.scope_tracker
             .borrow_mut()
             .enter(node)
@@ -434,6 +412,11 @@ impl<'ast> Visitor<'ast> for EqlMapper<'ast> {
             .map_break(Break::convert)?;
 
         self.scope_tracker
+            .borrow_mut()
+            .exit(node)
+            .map_break(Break::convert)?;
+
+        self.param_tracker
             .borrow_mut()
             .exit(node)
             .map_break(Break::convert)?;

@@ -200,10 +200,10 @@ impl<'ast> Unifier<'ast> {
                         .iter()
                         .zip(rhs_projection.columns())
                     {
-                        cols.push(ProjectionColumn {
-                            ty: self.unify(lhs_col.ty.clone(), rhs_col.ty.clone())?,
-                            alias: lhs_col.alias.clone(),
-                        });
+                        cols.push(ProjectionColumn::new(
+                            self.unify(lhs_col.ty.clone(), rhs_col.ty.clone())?,
+                            lhs_col.alias.clone(),
+                        ));
                     }
                     let unified = TypeCell::new(Type::Constructor(Constructor::Projection(
                         Projection::new(cols),
@@ -318,28 +318,22 @@ mod test {
     fn projections_without_wildcards() {
         let left = Type::Constructor(Projection(crate::unifier::Projection::WithColumns(
             ProjectionColumns(vec![
-                ProjectionColumn {
-                    ty: Type::Constructor(Value(Native(NativeValue(None)))).into_type_cell(),
-                    alias: None,
-                },
-                ProjectionColumn {
-                    ty: Type::Var(TypeVar(0)).into_type_cell(),
-                    alias: None,
-                },
+                ProjectionColumn::new(
+                    Type::Constructor(Value(Native(NativeValue(None)))).into_type_cell(),
+                    None,
+                ),
+                ProjectionColumn::new(Type::Var(TypeVar(0)).into_type_cell(), None),
             ]),
         )))
         .into_type_cell();
 
         let right = Type::Constructor(Projection(crate::unifier::Projection::WithColumns(
             ProjectionColumns(vec![
-                ProjectionColumn {
-                    ty: Type::Var(TypeVar(1)).into_type_cell(),
-                    alias: None,
-                },
-                ProjectionColumn {
-                    ty: Type::Constructor(Value(Native(NativeValue(None)))).into_type_cell(),
-                    alias: None,
-                },
+                ProjectionColumn::new(Type::Var(TypeVar(1)).into_type_cell(), None),
+                ProjectionColumn::new(
+                    Type::Constructor(Value(Native(NativeValue(None)))).into_type_cell(),
+                    None,
+                ),
             ]),
         )))
         .into_type_cell();
@@ -351,14 +345,14 @@ mod test {
             unified,
             Type::Constructor(Projection(crate::unifier::Projection::WithColumns(
                 ProjectionColumns(vec![
-                    ProjectionColumn {
-                        ty: Type::Constructor(Value(Native(NativeValue(None)))).into_type_cell(),
-                        alias: None
-                    },
-                    ProjectionColumn {
-                        ty: Type::Constructor(Value(Native(NativeValue(None)))).into_type_cell(),
-                        alias: None
-                    },
+                    ProjectionColumn::new(
+                        Type::Constructor(Value(Native(NativeValue(None)))).into_type_cell(),
+                        None
+                    ),
+                    ProjectionColumn::new(
+                        Type::Constructor(Value(Native(NativeValue(None)))).into_type_cell(),
+                        None
+                    ),
                 ])
             )))
             .into_type_cell()
@@ -369,14 +363,14 @@ mod test {
     fn projections_with_wildcards() {
         let left = Type::Constructor(Projection(crate::unifier::Projection::WithColumns(
             ProjectionColumns(vec![
-                ProjectionColumn {
-                    ty: Type::Constructor(Value(Native(NativeValue(None)))).into_type_cell(),
-                    alias: None,
-                },
-                ProjectionColumn {
-                    ty: Type::Constructor(Value(Native(NativeValue(None)))).into_type_cell(),
-                    alias: None,
-                },
+                ProjectionColumn::new(
+                    Type::Constructor(Value(Native(NativeValue(None)))).into_type_cell(),
+                    None,
+                ),
+                ProjectionColumn::new(
+                    Type::Constructor(Value(Native(NativeValue(None)))).into_type_cell(),
+                    None,
+                ),
             ]),
         )))
         .into_type_cell();
@@ -384,24 +378,22 @@ mod test {
         // The RHS is a single projection that contains a projection column that contains a projection with two
         // projection columns.  This is how wildcard expansions is represented at the type level.
         let right = Type::Constructor(Projection(crate::unifier::Projection::WithColumns(
-            ProjectionColumns(vec![ProjectionColumn {
-                ty: Type::Constructor(Projection(crate::unifier::Projection::WithColumns(
+            ProjectionColumns(vec![ProjectionColumn::new(
+                Type::Constructor(Projection(crate::unifier::Projection::WithColumns(
                     ProjectionColumns(vec![
-                        ProjectionColumn {
-                            ty: Type::Constructor(Value(Native(NativeValue(None))))
-                                .into_type_cell(),
-                            alias: None,
-                        },
-                        ProjectionColumn {
-                            ty: Type::Constructor(Value(Native(NativeValue(None))))
-                                .into_type_cell(),
-                            alias: None,
-                        },
+                        ProjectionColumn::new(
+                            Type::Constructor(Value(Native(NativeValue(None)))).into_type_cell(),
+                            None,
+                        ),
+                        ProjectionColumn::new(
+                            Type::Constructor(Value(Native(NativeValue(None)))).into_type_cell(),
+                            None,
+                        ),
                     ]),
                 )))
                 .into_type_cell(),
-                alias: None,
-            }]),
+                None,
+            )]),
         )))
         .into_type_cell();
 
@@ -412,14 +404,14 @@ mod test {
             unified,
             Type::Constructor(Projection(crate::unifier::Projection::WithColumns(
                 ProjectionColumns(vec![
-                    ProjectionColumn {
-                        ty: Type::Constructor(Value(Native(NativeValue(None)))).into_type_cell(),
-                        alias: None
-                    },
-                    ProjectionColumn {
-                        ty: Type::Constructor(Value(Native(NativeValue(None)))).into_type_cell(),
-                        alias: None
-                    },
+                    ProjectionColumn::new(
+                        Type::Constructor(Value(Native(NativeValue(None)))).into_type_cell(),
+                        None
+                    ),
+                    ProjectionColumn::new(
+                        Type::Constructor(Value(Native(NativeValue(None)))).into_type_cell(),
+                        None
+                    ),
                 ])
             )))
             .into_type_cell()

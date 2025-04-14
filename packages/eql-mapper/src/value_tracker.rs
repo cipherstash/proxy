@@ -38,6 +38,10 @@ impl<'ast> ValueTracker<'ast> {
         }
         false
     }
+
+    pub(crate) fn values(&self) -> Vec<NodeKey<'ast>> {
+        return self.values.clone()
+    }
 }
 
 impl<'ast> Visitor<'ast> for ValueTracker<'ast> {
