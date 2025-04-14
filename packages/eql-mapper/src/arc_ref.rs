@@ -2,9 +2,7 @@ use core::ops::Deref;
 use std::{fmt::Debug, hash::Hash, sync::Arc};
 
 /// An `ArcRef<U>` is a reference to a value owned by an [`Arc<T>`] and is created by calling [`ArcMap::map`] on the
-/// [`ArcMap`] trait. `ArcMap` is implemented only for `Arc`. See [`crate::RcRef`] for the `Arc` equivalent.
-///
-/// More formally, an `ArcRef<U>` is a reference to a `U` owned by the `T` inside an `Arc<T>`.
+/// [`ArcMap`] trait. `ArcMap` is implemented only for `Arc`.
 ///
 /// `ArcRef<U>` implements [`Deref<Target = U>`] so it can be used anywhere a `&U` can be used.
 ///
