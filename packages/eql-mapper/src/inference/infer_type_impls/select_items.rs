@@ -11,38 +11,28 @@ impl<'ast> InferType<'ast, Vec<SelectItem>> for TypeInferencer<'ast> {
         let projection_columns: Vec<ProjectionColumn> = select_items
             .iter()
             .map(|select_item| {
+                let ty = self.get_type(select_item);
                 match select_item {
-                    SelectItem::UnnamedExpr(Expr::Identifier(ident)) => Ok(ProjectionColumn {
-                        ty: self.scope_tracker.borrow().resolve_ident(ident)?,
-                        alias: Some(ident.clone()),
-                    }),
-
-                    SelectItem::UnnamedExpr(Expr::CompoundIdentifier(object_name)) => {
-                        Ok(ProjectionColumn {
-                            ty: self
-                                .scope_tracker
-                                .borrow()
-                                .resolve_compound_ident(object_name)?,
-                            alias: Some(object_name.last().cloned().unwrap()),
-                        })
+                    SelectItem::UnnamedExpr(Expr::Identifier(ident)) => {
+                        Ok(ProjectionColumn::new(ty, Some(ident.clone())))
                     }
+
+                    SelectItem::UnnamedExpr(Expr::CompoundIdentifier(object_name)) => Ok(
+                        ProjectionColumn::new(ty, Some(object_name.last().cloned().unwrap())),
+                    ),
 
                     SelectItem::UnnamedExpr(expr) => match expr {
                         // For an unnamed expression that is a function call the name of the function becomes the alias.
-                        Expr::Function(Function { name, .. }) => Ok(ProjectionColumn {
-                            ty: self.get_type(expr),
-                            alias: Some(name.0.last().unwrap().clone()),
-                        }),
-                        _ => Ok(ProjectionColumn {
-                            ty: self.get_type(expr),
-                            alias: None,
-                        }),
+                        Expr::Function(Function { name, .. }) => Ok(ProjectionColumn::new(
+                            ty,
+                            Some(name.0.last().unwrap().clone()),
+                        )),
+                        _ => Ok(ProjectionColumn::new(ty, None)),
                     },
 
-                    SelectItem::ExprWithAlias { expr, alias } => Ok(ProjectionColumn {
-                        ty: self.get_type(expr),
-                        alias: Some(alias.clone()),
-                    }),
+                    SelectItem::ExprWithAlias { alias, .. } => {
+                        Ok(ProjectionColumn::new(ty, Some(alias.clone())))
+                    }
 
                     #[allow(unused_variables)]
                     SelectItem::QualifiedWildcard(object_name, options) => {
@@ -59,13 +49,7 @@ impl<'ast> InferType<'ast, Vec<SelectItem>> for TypeInferencer<'ast> {
                             ));
                         };
 
-                        Ok(ProjectionColumn {
-                            ty: self
-                                .scope_tracker
-                                .borrow()
-                                .resolve_qualified_wildcard(&object_name.0)?,
-                            alias: None,
-                        })
+                        Ok(ProjectionColumn::new(ty, None))
                     }
 
                     SelectItem::Wildcard(options) => {
@@ -82,10 +66,7 @@ impl<'ast> InferType<'ast, Vec<SelectItem>> for TypeInferencer<'ast> {
                             ));
                         };
 
-                        Ok(ProjectionColumn {
-                            ty: self.scope_tracker.borrow().resolve_wildcard()?,
-                            alias: None,
-                        })
+                        Ok(ProjectionColumn::new(ty, None))
                     }
                 }
             })
