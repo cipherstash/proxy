@@ -1,4 +1,4 @@
-use sqlparser::ast::{Value, Query};
+use sqlparser::ast::{Query, Value};
 
 use crate::{
     inference::{InferType, TypeError},

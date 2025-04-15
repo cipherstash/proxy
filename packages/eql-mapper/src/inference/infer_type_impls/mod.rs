@@ -5,8 +5,8 @@ mod select;
 mod select_item;
 mod select_items;
 mod set_expr;
-mod values;
 mod value;
+mod values;
 
 // Statements
 mod delete_statement;

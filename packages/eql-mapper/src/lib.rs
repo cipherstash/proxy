@@ -18,9 +18,9 @@ mod test_helpers;
 
 pub use eql_mapper::*;
 pub use model::*;
-pub use unifier::{EqlValue, NativeValue, TableColumn};
-pub use typed_statement::*;
 pub use param::*;
+pub use typed_statement::*;
+pub use unifier::{EqlValue, NativeValue, TableColumn};
 
 pub(crate) use arc_ref::*;
 pub(crate) use dep::*;
@@ -28,7 +28,6 @@ pub(crate) use encrypted_statement::*;
 pub(crate) use inference::*;
 pub(crate) use scope_tracker::*;
 pub(crate) use transformation_rules::*;
-
 
 #[cfg(test)]
 mod test {
@@ -108,9 +107,7 @@ mod test {
                         table: id("users"),
                         column: id("email")
                     }),
-                    &ast::Value::SingleQuotedString(
-                        "hello@cipherstash.com".into()
-                    )
+                    &ast::Value::SingleQuotedString("hello@cipherstash.com".into())
                 )));
             }
             Err(err) => panic!("type check failed: {err}"),
@@ -139,9 +136,7 @@ mod test {
                         table: id("users"),
                         column: id("email")
                     }),
-                    &ast::Value::SingleQuotedString(
-                        "hello@cipherstash.com".into()
-                    )
+                    &ast::Value::SingleQuotedString("hello@cipherstash.com".into())
                 )));
             }
             Err(err) => panic!("type check failed: {err}"),
@@ -170,9 +165,7 @@ mod test {
                         table: id("users"),
                         column: id("email")
                     }),
-                    &ast::Value::SingleQuotedString(
-                        "hello@cipherstash.com".into()
-                    )
+                    &ast::Value::SingleQuotedString("hello@cipherstash.com".into())
                 )));
             }
             Err(err) => panic!("type check failed: {err}"),
@@ -202,9 +195,7 @@ mod test {
                         table: id("users"),
                         column: id("email")
                     }),
-                    &ast::Value::SingleQuotedString(
-                        "hello@cipherstash.com".into()
-                    )
+                    &ast::Value::SingleQuotedString("hello@cipherstash.com".into())
                 )));
             }
             Err(err) => panic!("type check failed: {err}"),
@@ -273,7 +264,6 @@ mod test {
                     table: id("users"),
                     column: id("first_name"),
                 })));
-
 
                 assert_eq!(typed.params, vec![(Param(1), a), (Param(2), b)]);
 

@@ -1,7 +1,8 @@
 use sqlparser::ast::Value;
 
 use crate::{
-    inference::{type_error::TypeError, InferType}, TypeInferencer
+    inference::{type_error::TypeError, InferType},
+    TypeInferencer,
 };
 
 /// Handles type inference for [`Value`] nodes - which include *literals* and *placeholders* (SQL param usages).
@@ -18,7 +19,9 @@ impl<'ast> InferType<'ast, Value> for TypeInferencer<'ast> {
                 Some(existing_param_ty) => {
                     drop(reg);
                     // Unify the node's type with the existing param type
-                    self.unifier.borrow_mut().unify(value_ty.clone(), existing_param_ty)?;
+                    self.unifier
+                        .borrow_mut()
+                        .unify(value_ty.clone(), existing_param_ty)?;
                 }
                 None => {
                     // We haven't seen the param before so set the current node's type to a fresh type variable and
