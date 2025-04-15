@@ -1,7 +1,7 @@
 use std::{collections::HashMap, marker::PhantomData};
 
 use sqlparser::ast::Expr;
-use sqltk::{AsNodeKey, NodeKey};
+use sqltk::{AsNodeKey, NodeKey, Visitable};
 
 use crate::inference::unifier::{Type, TypeVar};
 
@@ -13,6 +13,7 @@ pub struct TypeRegistry<'ast> {
     tvar_gen: TypeVarGenerator,
     substitutions: HashMap<TypeVar, TypeCell>,
     node_types: HashMap<NodeKey<'ast>, TypeCell>,
+    params: HashMap<&'ast String, TypeCell>,
     _ast: PhantomData<&'ast ()>,
 }
 
@@ -29,8 +30,36 @@ impl<'ast> TypeRegistry<'ast> {
             tvar_gen: TypeVarGenerator::new(),
             substitutions: HashMap::new(),
             node_types: HashMap::new(),
+            params: HashMap::new(),
             _ast: PhantomData,
         }
+    }
+
+    pub(crate) fn get_nodes_and_types<N: Visitable>(&self) -> Vec<(&'ast N, TypeCell)> {
+        self.node_types
+            .iter()
+            .filter_map(|(key, ty)| key.get_as::<N>().map(|n| (n, ty.clone())))
+            .collect()
+    }
+
+    pub(crate) fn exists_node_with_type<N: Visitable>(&self, needle: &Type) -> bool {
+        self.node_types
+            .iter()
+            .find(|(key, ty)| {
+                key.get_as::<N>().is_some() && needle == &*ty.as_type()
+            }).is_some()
+    }
+
+    pub(crate) fn get_param(&self, param: &'ast String) -> Option<TypeCell> {
+        self.params.get(param).cloned()
+    }
+
+    pub(crate) fn set_param(&mut self, param: &'ast String, ty: TypeCell) {
+        self.params.insert(param, ty);
+    }
+
+    pub(crate) fn get_params(&self) -> &HashMap<&'ast String, TypeCell> {
+        &self.params
     }
 
     pub(crate) fn take_node_types(&mut self) -> HashMap<NodeKey<'ast>, TypeCell> {
@@ -56,13 +85,6 @@ impl<'ast> TypeRegistry<'ast> {
         let tvar = self.fresh_tvar();
 
         self.node_types.entry(node.as_node_key()).or_insert(tvar)
-    }
-
-    pub(crate) fn get_type_by_node_key(&self, key: &NodeKey<'ast>) -> Option<&TypeCell> {
-        match self.node_types.get(key) {
-            Some(ty) => Some(ty),
-            None => None,
-        }
     }
 
     pub(crate) fn fresh_tvar(&mut self) -> TypeCell {

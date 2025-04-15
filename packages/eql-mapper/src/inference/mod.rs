@@ -19,7 +19,7 @@ use sqlparser::ast::{
 };
 use sqltk::{into_control_flow, AsNodeKey, Break, NodeKey, Visitable, Visitor};
 
-use crate::{ParamTracker, ScopeTracker, TableResolver, ValueTracker};
+use crate::{Param, ParamError, ScopeTracker, TableResolver};
 
 pub(crate) use registry::*;
 pub(crate) use type_error::*;
@@ -39,6 +39,7 @@ pub(crate) use type_variables::*;
 /// - [`Vec<SelectItem>`]
 /// - [`Function`]
 /// - [`Values`]
+/// - [`Value`]
 #[derive(Debug)]
 pub struct TypeInferencer<'ast> {
     /// A snapshot of the the database schema - used by `TypeInferencer`'s [`InferType`] impls.
@@ -53,10 +54,6 @@ pub struct TypeInferencer<'ast> {
     /// Implements the type unification algorithm.
     unifier: Rc<RefCell<Unifier<'ast>>>,
 
-    value_tracker: Rc<RefCell<ValueTracker<'ast>>>,
-
-    param_tracker: Rc<RefCell<ParamTracker<'ast>>>,
-
     _ast: PhantomData<&'ast ()>,
 }
 
@@ -67,16 +64,12 @@ impl<'ast> TypeInferencer<'ast> {
         scope: impl Into<Rc<RefCell<ScopeTracker<'ast>>>>,
         reg: impl Into<Rc<RefCell<TypeRegistry<'ast>>>>,
         unifier: impl Into<Rc<RefCell<Unifier<'ast>>>>,
-        value_tracker: impl Into<Rc<RefCell<ValueTracker<'ast>>>>,
-        param_tracker: impl Into<Rc<RefCell<ParamTracker<'ast>>>>,
     ) -> Self {
         Self {
             table_resolver: table_resolver.into(),
             scope_tracker: scope.into(),
             reg: reg.into(),
             unifier: unifier.into(),
-            value_tracker: value_tracker.into(),
-            param_tracker: param_tracker.into(),
             _ast: PhantomData,
         }
     }
@@ -86,32 +79,18 @@ impl<'ast> TypeInferencer<'ast> {
         self.reg.borrow_mut().get_or_init_type(node).clone()
     }
 
-    pub(crate) fn get_type_by_node_key(&self, key: &NodeKey<'ast>) -> Option<TypeCell> {
-        self.reg.borrow_mut().get_type_by_node_key(key).cloned()
-    }
+    pub(crate) fn param_types(&self) -> Result<Vec<(Param, TypeCell)>, ParamError> {
+        let mut params = self
+            .reg
+            .borrow()
+            .get_params()
+            .iter()
+            .map(|(p, ty)| Param::try_from(*p).map(|p| (p, ty.clone())))
+            .collect::<Result<Vec<_>, _>>()?;
 
-    pub(crate) fn param_types(&self) -> Result<HashMap<String, unifier::Value>, TypeError> {
-        let param_tracker = self.param_tracker.borrow();
-        let param_types = param_tracker.param_types();
+        params.sort_by(|(a, _), (b, _)| a.cmp(b));
 
-        // Check that every unified param type is a Scalar
-        let scalars: HashMap<String, unifier::Value> = param_types
-            .into_iter()
-            .map(|(param, ty)| {
-                if let unifier::Type::Constructor(unifier::Constructor::Value(value)) =
-                    &*ty.as_type()
-                {
-                    Ok((param.to_string(), value.clone()))
-                } else {
-                    Err(TypeError::NonScalarParam(
-                        param.to_string(),
-                        ty.as_type().to_string(),
-                    ))
-                }
-            })
-            .collect::<Result<_, _>>()?;
-
-        Ok(scalars)
+        Ok(params)
     }
 
     /// Tries to unify two types but does not record the result.
@@ -239,6 +218,10 @@ impl<'ast> Visitor<'ast> for TypeInferencer<'ast> {
             into_control_flow(self.infer_enter(node))?
         }
 
+        if let Some(node) = node.downcast_ref::<sqlparser::ast::Value>() {
+            into_control_flow(self.infer_enter(node))?
+        }
+
         ControlFlow::Continue(())
     }
 
@@ -284,6 +267,10 @@ impl<'ast> Visitor<'ast> for TypeInferencer<'ast> {
         }
 
         if let Some(node) = node.downcast_ref::<Values>() {
+            into_control_flow(self.infer_exit(node))?
+        }
+
+        if let Some(node) = node.downcast_ref::<sqlparser::ast::Value>() {
             into_control_flow(self.infer_exit(node))?
         }
 

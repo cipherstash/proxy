@@ -2,13 +2,11 @@ use super::importer::{ImportError, Importer};
 use crate::{
     inference::{unifier, TypeError, TypeInferencer},
     unifier::{EqlValue, Unifier},
-    DepMut, FailOnPlaceholderChange, GroupByEqlCol, ParamTracker, PreserveEffectiveAliases,
-    Projection, ReplacePlaintextEqlLiterals, ScopeError, ScopeTracker, TableResolver,
-    TransformationRule, Type, TypeRegistry, UseEquivalentSqlFuncForEqlTypes, Value, ValueTracker,
-    WrapEqlColsInOrderByWithOreFn, WrapGroupedEqlColInAggregateFn,
+    DepMut, Param, ParamError, Projection, ScopeError, ScopeTracker, TableResolver, Type,
+    TypeRegistry, TypedStatement, Value,
 };
 use sqlparser::ast::{self as ast, Statement};
-use sqltk::{AsNodeKey, Break, NodeKey, NodePath, Transform, Transformable, Visitable, Visitor};
+use sqltk::{Break, NodeKey, Visitable, Visitor};
 use std::{
     cell::RefCell, collections::HashMap, marker::PhantomData, ops::ControlFlow, rc::Rc, sync::Arc,
 };
@@ -97,24 +95,6 @@ pub fn requires_type_check(statement: &Statement) -> bool {
     }
 }
 
-/// The result returned from a successful call to [`type_check`].
-#[derive(Debug)]
-pub struct TypedStatement<'ast> {
-    /// The SQL statement which was type-checked against the schema.
-    pub statement: &'ast Statement,
-
-    /// The SQL statement which was type-checked against the schema.
-    pub projection: Option<Projection>,
-
-    /// The types of all params discovered from [`Value::Placeholder`] nodes in the SQL statement.
-    pub params: Vec<Value>,
-
-    /// The types and values of all literals from the SQL statement.
-    pub literals: Vec<(EqlValue, &'ast ast::Expr)>,
-
-    pub node_types: Arc<HashMap<NodeKey<'ast>, Type>>,
-}
-
 /// The error type returned by various functions in the `eql_mapper` crate.
 #[derive(Debug, PartialEq, Eq, thiserror::Error)]
 pub enum EqlMapperError {
@@ -135,6 +115,10 @@ pub enum EqlMapperError {
     /// A type error encountered during type checking
     #[error(transparent)]
     Type(#[from] TypeError),
+
+    /// A [`Param`] could not be parsed
+    #[error(transparent)]
+    Param(#[from] ParamError),
 }
 
 /// `EqlMapper` can safely convert a SQL statement into an equivalent statement where all of the plaintext literals have
@@ -145,8 +129,6 @@ struct EqlMapper<'ast> {
     importer: Rc<RefCell<Importer<'ast>>>,
     inferencer: Rc<RefCell<TypeInferencer<'ast>>>,
     registry: Rc<RefCell<TypeRegistry<'ast>>>,
-    value_tracker: Rc<RefCell<ValueTracker<'ast>>>,
-    param_tracker: Rc<RefCell<ParamTracker<'ast>>>,
     _ast: PhantomData<&'ast ()>,
 }
 
@@ -161,16 +143,12 @@ impl<'ast> EqlMapper<'ast> {
             &scope_tracker,
         ));
         let unifier = DepMut::new(Unifier::new(&registry));
-        let value_tracker = DepMut::new(ValueTracker::new(&registry));
-        let param_tracker = DepMut::new(ParamTracker::new(&registry, &unifier));
 
         let inferencer = DepMut::new(TypeInferencer::new(
             table_resolver.clone(),
             &scope_tracker,
             &registry,
             &unifier,
-            &value_tracker,
-            &param_tracker,
         ));
 
         Self {
@@ -178,8 +156,6 @@ impl<'ast> EqlMapper<'ast> {
             importer: importer.into(),
             inferencer: inferencer.into(),
             registry: registry.into(),
-            value_tracker: value_tracker.into(),
-            param_tracker: param_tracker.into(),
             _ast: PhantomData,
         }
     }
@@ -201,63 +177,49 @@ impl<'ast> EqlMapper<'ast> {
         }
     }
 
-    /// Asks the [`TypeInferencer`] for a hashmap of parameter types.
-    fn param_types(&self) -> Result<Vec<Value>, EqlMapperError> {
-        let param_types = self.inferencer.borrow().param_types()?;
+    fn param_types(&self) -> Result<Vec<(Param, Value)>, EqlMapperError> {
+        let params = self.inferencer.borrow().param_types()?;
 
-        let mut param_types: Vec<(i32, Value)> = param_types
-            .iter()
-            .map(|(param, ty)| {
-                Value::try_from(ty).and_then(|ty| {
-                    param
-                        .replace("$", "")
-                        .parse()
-                        .map(|idx| (idx, ty))
-                        .map_err(|_| {
-                            EqlMapperError::InternalError(format!(
-                                "failed to parse param placeholder '{}'",
-                                param
-                            ))
-                        })
-                })
+        let params = params
+            .into_iter()
+            .map(|(p, ty)| -> Result<(Param, Value), EqlMapperError> {
+                match &*ty.resolved(&self.registry.borrow())? {
+                    unifier::Type::Constructor(unifier::Constructor::Value(value)) => {
+                        Ok((p, Value::try_from(value)?))
+                    }
+                    other => Err(TypeError::Expected(format!(
+                        "expected param '{}' to resolve to a scalar type but got '{}'",
+                        p, other
+                    )))?,
+                }
             })
             .collect::<Result<Vec<_>, _>>()?;
 
-        param_types.sort_by(|(a, _), (b, _)| a.cmp(b));
-        Ok(param_types.into_iter().map(|(_, ty)| ty).collect())
+        Ok(params)
     }
 
     /// Asks the [`TypeInferencer`] for a hashmap of literal types, validating that they are all `Scalar` types.
-    fn literal_types(&self) -> Result<Vec<(EqlValue, &'ast ast::Expr)>, EqlMapperError> {
-        let inferencer = self.inferencer.borrow();
-        let literal_nodes = self.value_tracker.borrow().values();
-
-        let literals: Vec<(EqlValue, &'ast ast::Expr)> = literal_nodes
-            .iter()
-            .map(|node_key| match inferencer.get_type_by_node_key(node_key) {
-                Some(ty) => {
+    fn literal_types(&self) -> Result<Vec<(EqlValue, &'ast ast::Value)>, EqlMapperError> {
+        let literal_nodes: Vec<(EqlValue, &'ast ast::Value)> = self
+            .registry
+            .borrow()
+            .get_nodes_and_types::<ast::Value>()
+            .into_iter()
+            .map(
+                |(node, ty)| -> Result<Option<(EqlValue, &'ast ast::Value)>, TypeError> {
                     if let unifier::Type::Constructor(unifier::Constructor::Value(
-                        eql_ty @ unifier::Value::Eql(_),
+                        unifier::Value::Eql(eql_value),
                     )) = &*ty.resolved(&self.registry.borrow())?
                     {
-                        match node_key.get_as::<ast::Expr>() {
-                            Some(expr) => Ok(Some((EqlValue::try_from(eql_ty)?, expr))),
-                            None => Err(EqlMapperError::InternalError(String::from(
-                                "could not resolve literal node",
-                            ))),
-                        }
-                    } else {
-                        Ok(None)
+                        return Ok(Some((eql_value.clone(), node)));
                     }
-                }
-                None => Err(EqlMapperError::InternalError(String::from(
-                    "failed to get type of literal node",
-                ))),
-            })
+                    Ok(None)
+                },
+            )
             .filter_map(Result::transpose)
             .collect::<Result<Vec<_>, _>>()?;
 
-        Ok(literals)
+        Ok(literal_nodes)
     }
 
     fn node_types(&self) -> Result<HashMap<NodeKey<'ast>, Type>, EqlMapperError> {
@@ -276,112 +238,12 @@ impl<'ast> EqlMapper<'ast> {
     }
 }
 
-impl<'ast> TypedStatement<'ast> {
-    /// Transforms the SQL statement by replacing all plaintext literals with EQL equivalents.
-    pub fn transform(
-        &self,
-        encrypted_literals: HashMap<NodeKey<'ast>, ast::Expr>,
-    ) -> Result<Statement, EqlMapperError> {
-        for (_, target) in self.literals.iter() {
-            if !encrypted_literals.contains_key(&target.as_node_key()) {
-                return Err(EqlMapperError::Transform(String::from("encrypted literals refers to a literal node which is not present in the SQL statement")));
-            }
-        }
-
-        let mut transformer =
-            EncryptedStatement::new(encrypted_literals, Arc::clone(&self.node_types));
-
-        let statement = self.statement.apply_transform(&mut transformer)?;
-        transformer.check_postcondition()?;
-        Ok(statement)
-    }
-
-    pub fn literal_values(&self) -> Vec<&sqlparser::ast::Value> {
-        if self.literals.is_empty() {
-            return vec![];
-        }
-
-        self.literals
-            .iter()
-            .map(|(_eql_value, expr)| {
-                if let sqlparser::ast::Expr::Value(value) = expr {
-                    value
-                } else {
-                    &sqlparser::ast::Value::Null
-                }
-            })
-            .collect::<Vec<_>>()
-    }
-}
-
-#[derive(Debug)]
-struct EncryptedStatement<'ast> {
-    transformation_rules: (
-        WrapGroupedEqlColInAggregateFn<'ast>,
-        GroupByEqlCol<'ast>,
-        WrapEqlColsInOrderByWithOreFn<'ast>,
-        PreserveEffectiveAliases,
-        ReplacePlaintextEqlLiterals<'ast>,
-        UseEquivalentSqlFuncForEqlTypes<'ast>,
-        FailOnPlaceholderChange,
-    ),
-}
-
-impl<'ast> EncryptedStatement<'ast> {
-    fn new(
-        encrypted_literals: HashMap<NodeKey<'ast>, ast::Expr>,
-        node_types: Arc<HashMap<NodeKey<'ast>, Type>>,
-    ) -> Self {
-        Self {
-            transformation_rules: (
-                WrapGroupedEqlColInAggregateFn::new(Arc::clone(&node_types)),
-                GroupByEqlCol::new(Arc::clone(&node_types)),
-                WrapEqlColsInOrderByWithOreFn::new(Arc::clone(&node_types)),
-                PreserveEffectiveAliases,
-                ReplacePlaintextEqlLiterals::new(encrypted_literals),
-                UseEquivalentSqlFuncForEqlTypes::new(Arc::clone(&node_types)),
-                FailOnPlaceholderChange,
-            ),
-        }
-    }
-}
-
-/// Updates all [`Expr::Value`] nodes that:
-///
-/// 1. do not contain a [`Value::Placeholder`], and
-/// 2. have been marked for replacement
-impl<'ast> Transform<'ast> for EncryptedStatement<'ast> {
-    type Error = EqlMapperError;
-
-    fn transform<N: Visitable>(
-        &mut self,
-        node_path: &NodePath<'ast>,
-        mut target_node: N,
-    ) -> Result<N, Self::Error> {
-        self.transformation_rules
-            .apply(node_path, &mut target_node)?;
-
-        Ok(target_node)
-    }
-
-    fn check_postcondition(&self) -> Result<(), Self::Error> {
-        self.transformation_rules.check_postcondition()
-    }
-}
-
 /// [`Visitor`] implementation that composes the [`ScopeTracker`] visitor, the [`Importer`] and the [`TypeInferencer`]
 /// visitors.
 impl<'ast> Visitor<'ast> for EqlMapper<'ast> {
     type Error = EqlMapperError;
 
     fn enter<N: Visitable>(&mut self, node: &'ast N) -> ControlFlow<Break<Self::Error>> {
-        self.value_tracker.borrow_mut().enter(node);
-
-        self.param_tracker
-            .borrow_mut()
-            .enter(node)
-            .map_break(Break::convert)?;
-
         self.scope_tracker
             .borrow_mut()
             .enter(node)
@@ -415,13 +277,6 @@ impl<'ast> Visitor<'ast> for EqlMapper<'ast> {
             .borrow_mut()
             .exit(node)
             .map_break(Break::convert)?;
-
-        self.param_tracker
-            .borrow_mut()
-            .exit(node)
-            .map_break(Break::convert)?;
-
-        self.value_tracker.borrow_mut().exit(node);
 
         ControlFlow::Continue(())
     }

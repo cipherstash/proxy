@@ -1,4 +1,4 @@
-use sqlparser::ast::Query;
+use sqlparser::ast::{self, Query};
 
 use crate::{
     inference::{InferType, TypeError},
@@ -48,9 +48,9 @@ impl<'ast> TypeInferencer<'ast> {
             for col in cols {
                 if let Type::Var(tvar) = &*col.ty.as_type() {
                     if self
-                        .value_tracker
+                        .reg
                         .borrow()
-                        .exists_value_with_type_var(*tvar)
+                        .exists_node_with_type::<ast::Value>(&Type::Var(*tvar))
                     {
                         self.unify(col.ty.clone(), Type::any_native())?;
                     }

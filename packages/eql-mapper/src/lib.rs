@@ -2,15 +2,16 @@
 
 mod arc_ref;
 mod dep;
+mod encrypted_statement;
 mod eql_mapper;
 mod importer;
 mod inference;
 mod iterator_ext;
 mod model;
-mod param_tracker;
+mod param;
 mod scope_tracker;
 mod transformation_rules;
-mod value_tracker;
+mod typed_statement;
 
 #[cfg(test)]
 mod test_helpers;
@@ -18,14 +19,16 @@ mod test_helpers;
 pub use eql_mapper::*;
 pub use model::*;
 pub use unifier::{EqlValue, NativeValue, TableColumn};
+pub use typed_statement::*;
+pub use param::*;
 
 pub(crate) use arc_ref::*;
 pub(crate) use dep::*;
+pub(crate) use encrypted_statement::*;
 pub(crate) use inference::*;
-pub(crate) use param_tracker::*;
 pub(crate) use scope_tracker::*;
 pub(crate) use transformation_rules::*;
-pub(crate) use value_tracker::*;
+
 
 #[cfg(test)]
 mod test {
@@ -33,6 +36,7 @@ mod test {
     use super::type_check;
     use crate::col;
     use crate::projection;
+    use crate::Param;
     use crate::Schema;
     use crate::TableResolver;
     use crate::{
@@ -104,9 +108,9 @@ mod test {
                         table: id("users"),
                         column: id("email")
                     }),
-                    &ast::Expr::Value(ast::Value::SingleQuotedString(
+                    &ast::Value::SingleQuotedString(
                         "hello@cipherstash.com".into()
-                    ))
+                    )
                 )));
             }
             Err(err) => panic!("type check failed: {err}"),
@@ -135,9 +139,9 @@ mod test {
                         table: id("users"),
                         column: id("email")
                     }),
-                    &ast::Expr::Value(ast::Value::SingleQuotedString(
+                    &ast::Value::SingleQuotedString(
                         "hello@cipherstash.com".into()
-                    ))
+                    )
                 )));
             }
             Err(err) => panic!("type check failed: {err}"),
@@ -166,9 +170,9 @@ mod test {
                         table: id("users"),
                         column: id("email")
                     }),
-                    &ast::Expr::Value(ast::Value::SingleQuotedString(
+                    &ast::Value::SingleQuotedString(
                         "hello@cipherstash.com".into()
-                    ))
+                    )
                 )));
             }
             Err(err) => panic!("type check failed: {err}"),
@@ -198,9 +202,9 @@ mod test {
                         table: id("users"),
                         column: id("email")
                     }),
-                    &ast::Expr::Value(ast::Value::SingleQuotedString(
+                    &ast::Value::SingleQuotedString(
                         "hello@cipherstash.com".into()
-                    ))
+                    )
                 )));
             }
             Err(err) => panic!("type check failed: {err}"),
@@ -229,9 +233,9 @@ mod test {
                     column: id("id"),
                 })));
 
-                let param = typed.params.first().unwrap();
+                let (_, param_value) = typed.params.first().unwrap();
 
-                assert_eq!(param, &v);
+                assert_eq!(param_value, &v);
 
                 assert_eq!(
                     typed.projection,
@@ -270,7 +274,8 @@ mod test {
                     column: id("first_name"),
                 })));
 
-                assert_eq!(typed.params, vec![a, b]);
+
+                assert_eq!(typed.params, vec![(Param(1), a), (Param(2), b)]);
 
                 assert_eq!(
                     typed.projection,
@@ -308,7 +313,7 @@ mod test {
                     column: id("email"),
                 })));
 
-                assert_eq!(typed.params, vec![a]);
+                assert_eq!(typed.params, vec![(Param(1), a)]);
 
                 assert_eq!(
                     typed.projection,
@@ -499,7 +504,7 @@ mod test {
                     column: id("first_name"),
                 }));
 
-                assert_eq!(typed.params, vec![a, b]);
+                assert_eq!(typed.params, vec![(Param(1), a), (Param(2), b)]);
 
                 assert_eq!(
                     typed.projection,
@@ -541,7 +546,7 @@ mod test {
                     column: id("age"),
                 }));
 
-                assert_eq!(typed.params, vec![a, b]);
+                assert_eq!(typed.params, vec![(Param(1), a), (Param(2), b)]);
 
                 assert_eq!(
                     typed.projection,
@@ -1025,7 +1030,7 @@ mod test {
                     table: id("employees"),
                     column: id("salary")
                 }),
-                &ast::Expr::Value(ast::Value::Number(200000.into(), false))
+                &ast::Value::Number(200000.into(), false)
             )]
         );
 
@@ -1048,7 +1053,7 @@ mod test {
                 table: id("employees"),
                 column: id("salary")
             }),
-            &ast::Expr::Value(ast::Value::SingleQuotedString("ENCRYPTED".into())),
+            &ast::Value::SingleQuotedString("ENCRYPTED".into()),
         )));
     }
 
@@ -1315,7 +1320,7 @@ mod test {
             column: id("name"),
         })));
 
-        assert_eq!(typed.params, vec![a]);
+        assert_eq!(typed.params, vec![(Param(1), a)]);
 
         assert_eq!(
             typed.projection,

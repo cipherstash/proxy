@@ -820,7 +820,7 @@ where
 
         for param in typed_statement.params.iter() {
             let configured_column = match param {
-                eql_mapper::Value::Eql(EqlValue(TableColumn { table, column })) => {
+                (_, eql_mapper::Value::Eql(EqlValue(TableColumn { table, column }))) => {
                     let identifier = Identifier::from((table, column));
 
                     debug!(
