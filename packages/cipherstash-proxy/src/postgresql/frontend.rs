@@ -30,7 +30,7 @@ use eql_mapper::{self, EqlMapperError, EqlValue, TableColumn, TypedStatement};
 use metrics::{counter, histogram};
 use pg_escape::quote_literal;
 use serde::Serialize;
-use sqlparser::ast::{self, Expr, Value};
+use sqlparser::ast::{self, Value};
 use sqlparser::dialect::PostgreSqlDialect;
 use sqlparser::parser::Parser;
 use sqltk::AsNodeKey;
@@ -968,9 +968,9 @@ fn literals_to_plaintext(
     Ok(plaintexts)
 }
 
-fn to_json_literal_expr<T>(literal: &T) -> Result<Expr, Error>
+fn to_json_literal_expr<T>(literal: &T) -> Result<Value, Error>
 where
     T: ?Sized + Serialize,
 {
-    Ok(serde_json::to_string(literal).map(|json| Expr::Value(Value::SingleQuotedString(json)))?)
+    Ok(serde_json::to_string(literal).map(|json| Value::SingleQuotedString(json))?)
 }

@@ -1,6 +1,6 @@
 use std::{collections::HashMap, sync::Arc};
 
-use sqlparser::ast::{self, Expr, Statement};
+use sqlparser::ast::{self, Statement};
 use sqltk::{AsNodeKey, NodeKey, Transform, Transformable};
 
 use crate::{EncryptedStatement, EqlMapperError, EqlValue, Param, Projection, Type, Value};
@@ -27,7 +27,7 @@ impl<'ast> TypedStatement<'ast> {
     /// Transforms the SQL statement by replacing all plaintext literals with EQL equivalents.
     pub fn transform(
         &self,
-        encrypted_literals: HashMap<NodeKey<'ast>, Expr>,
+        encrypted_literals: HashMap<NodeKey<'ast>, sqlparser::ast::Value>,
     ) -> Result<Statement, EqlMapperError> {
         for (_, target) in self.literals.iter() {
             if !encrypted_literals.contains_key(&target.as_node_key()) {

@@ -1036,7 +1036,7 @@ mod test {
 
         let transformed_statement = match typed.transform(HashMap::from_iter([(
             typed.literals[0].1.as_node_key(),
-            ast::Expr::Value(ast::Value::SingleQuotedString("ENCRYPTED".into())),
+            ast::Value::SingleQuotedString("ENCRYPTED".into()),
         )])) {
             Ok(transformed_statement) => transformed_statement,
             Err(err) => panic!("statement transformation failed: {}", err),

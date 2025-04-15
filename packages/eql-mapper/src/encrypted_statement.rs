@@ -1,6 +1,5 @@
 use std::{collections::HashMap, sync::Arc};
 
-use sqlparser::ast::Expr;
 use sqltk::{NodeKey, NodePath, Transform, Visitable};
 
 use crate::{
@@ -24,7 +23,7 @@ pub(crate) struct EncryptedStatement<'ast> {
 
 impl<'ast> EncryptedStatement<'ast> {
     pub(crate) fn new(
-        encrypted_literals: HashMap<NodeKey<'ast>, Expr>,
+        encrypted_literals: HashMap<NodeKey<'ast>, sqlparser::ast::Value>,
         node_types: Arc<HashMap<NodeKey<'ast>, Type>>,
     ) -> Self {
         Self {
