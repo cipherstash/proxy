@@ -42,9 +42,21 @@ impl<'ast> TypeRegistry<'ast> {
     }
 
     pub(crate) fn exists_node_with_type<N: Visitable>(&self, needle: &Type) -> bool {
-        self.node_types
-            .iter()
-            .any(|(key, ty)| key.get_as::<N>().is_some() && needle == &*ty.as_type())
+        self.first_matching_node_with_type::<N>(needle).is_some()
+    }
+
+    pub(crate) fn first_matching_node_with_type<N: Visitable>(
+        &self,
+        needle: &Type,
+    ) -> Option<(&'ast N, TypeCell)> {
+        self.node_types.iter().find_map(|(key, ty)| {
+            let node = key.get_as::<N>()?;
+            if needle == &*ty.as_type() {
+                Some((node, ty.clone()))
+            } else {
+                None
+            }
+        })
     }
 
     pub(crate) fn get_param(&self, param: &'ast String) -> Option<TypeCell> {
@@ -97,7 +109,6 @@ pub(crate) mod test_util {
     };
     use sqltk::{AsNodeKey, Break, Visitable, Visitor};
     use std::{convert::Infallible, fmt::Debug, ops::ControlFlow};
-    use tracing::error;
 
     use super::TypeRegistry;
 
@@ -107,10 +118,10 @@ pub(crate) mod test_util {
         /// Dumps the type information for a specific AST node to STDERR.
         ///
         /// Useful when debugging tests.
-        pub(crate) fn dump_node<N: Display + AsNodeKey + Debug>(&self, node: &N) {
+        pub(crate) fn dump_node<N: Visitable + Display + AsNodeKey + Debug>(&self, node: &N) {
             let key = node.as_node_key();
             if let Some(ty) = self.node_types.get(&key) {
-                error!(
+                tracing::error!(
                     "TYPE<\nast: {}\nsyn: {}\nty: {}\n>",
                     std::any::type_name::<N>(),
                     node,

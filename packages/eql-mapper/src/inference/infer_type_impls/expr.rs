@@ -332,7 +332,7 @@ impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
             }
 
             Expr::Value(value) => {
-                self.unify_node_with_type(this_expr, self.get_type(value))?;
+                self.unify_nodes(this_expr, value)?;
             }
 
             Expr::IntroducedString { .. } => Err(TypeError::UnsupportedSqlFeature(
