@@ -47,13 +47,7 @@ pub fn type_check<'ast>(
                 })
             };
 
-            build().map_err(|err| {
-                #[cfg(test)]
-                {
-                    mapper.inferencer.borrow().dump_registry(statement);
-                }
-                err
-            })
+            build()
         }
         ControlFlow::Break(Break::Err(err)) => {
             #[cfg(test)]

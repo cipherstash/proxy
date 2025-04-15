@@ -1,5 +1,7 @@
 use std::{any::type_name, sync::Arc, sync::RwLock};
 
+use sqlparser::ast;
+
 use crate::{ArcMap, ArcRef};
 
 use super::{Constructor, NativeValue, Type, TypeError, TypeRegistry, Value};
@@ -102,7 +104,7 @@ impl TypeCell {
             Type::Var(type_var) => match registry.get_substitution(*type_var) {
                 Some(ty_cell) => ty_cell.resolved(registry),
                 None => {
-                    if !registry.value_expr_exists_with_type(self.clone()) {
+                    if !registry.exists_node_with_type::<ast::Value>(&Type::Var(*type_var)) {
                         Err(TypeError::Incomplete(format!(
                             "type {} contains unresolved type variables",
                             *ty

@@ -162,7 +162,7 @@ impl<'ast> TypeInferencer<'ast> {
     }
 
     pub(crate) fn node_types(&self) -> HashMap<NodeKey<'ast>, TypeCell> {
-        self.reg.borrow_mut().take_node_types()
+        self.reg.borrow().node_types().clone()
     }
 }
 
