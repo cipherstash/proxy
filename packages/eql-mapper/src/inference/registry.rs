@@ -1,6 +1,6 @@
 use std::{collections::HashMap, marker::PhantomData};
 
-use sqlparser::ast::Expr;
+use sqlparser::ast::Value;
 use sqltk::{AsNodeKey, NodeKey, Visitable};
 
 use crate::inference::unifier::{Type, TypeVar};
@@ -13,7 +13,7 @@ pub struct TypeRegistry<'ast> {
     tvar_gen: TypeVarGenerator,
     substitutions: HashMap<TypeVar, TypeCell>,
     node_types: HashMap<NodeKey<'ast>, TypeCell>,
-    params: HashMap<&'ast String, TypeCell>,
+    param_types: HashMap<&'ast String, TypeCell>,
     _ast: PhantomData<&'ast ()>,
 }
 
@@ -30,7 +30,7 @@ impl<'ast> TypeRegistry<'ast> {
             tvar_gen: TypeVarGenerator::new(),
             substitutions: HashMap::new(),
             node_types: HashMap::new(),
-            params: HashMap::new(),
+            param_types: HashMap::new(),
             _ast: PhantomData,
         }
     }
@@ -45,21 +45,20 @@ impl<'ast> TypeRegistry<'ast> {
     pub(crate) fn exists_node_with_type<N: Visitable>(&self, needle: &Type) -> bool {
         self.node_types
             .iter()
-            .find(|(key, ty)| {
-                key.get_as::<N>().is_some() && needle == &*ty.as_type()
-            }).is_some()
+            .find(|(key, ty)| key.get_as::<N>().is_some() && needle == &*ty.as_type())
+            .is_some()
     }
 
     pub(crate) fn get_param(&self, param: &'ast String) -> Option<TypeCell> {
-        self.params.get(param).cloned()
+        self.param_types.get(param).cloned()
     }
 
     pub(crate) fn set_param(&mut self, param: &'ast String, ty: TypeCell) {
-        self.params.insert(param, ty);
+        self.param_types.insert(param, ty);
     }
 
     pub(crate) fn get_params(&self) -> &HashMap<&'ast String, TypeCell> {
-        &self.params
+        &self.param_types
     }
 
     pub(crate) fn take_node_types(&mut self) -> HashMap<NodeKey<'ast>, TypeCell> {
@@ -91,11 +90,11 @@ impl<'ast> TypeRegistry<'ast> {
         Type::Var(TypeVar(self.tvar_gen.next_tvar())).into_type_cell()
     }
 
-    /// Checks if any node in the AST that has type `ty` is a literal.
+    /// Checks if any [`Value`] node exists in the AST that has type `ty`.
     pub(crate) fn value_expr_exists_with_type(&self, ty: TypeCell) -> bool {
         for (node_key, node_ty) in self.node_types.iter() {
             if ty == *node_ty {
-                if let Some(Expr::Value(_)) = node_key.get_as::<Expr>() {
+                if let Some(_) = node_key.get_as::<Value>() {
                     return true;
                 }
             }
@@ -109,7 +108,7 @@ impl<'ast> TypeRegistry<'ast> {
 pub(crate) mod test_util {
     use sqlparser::ast::{
         Delete, Expr, Function, FunctionArguments, Insert, Query, Select, SelectItem, SetExpr,
-        Statement,
+        Statement, Value,
     };
     use sqltk::{AsNodeKey, Break, Visitable, Visitor};
     use std::{convert::Infallible, fmt::Debug, ops::ControlFlow};
@@ -185,6 +184,10 @@ pub(crate) mod test_util {
                     }
 
                     if let Some(node) = node.downcast_ref::<FunctionArguments>() {
+                        self.0.dump_node(node);
+                    }
+
+                    if let Some(node) = node.downcast_ref::<Value>() {
                         self.0.dump_node(node);
                     }
 

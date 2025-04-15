@@ -1,4 +1,4 @@
-use sqlparser::ast::{self, Query};
+use sqlparser::ast::{Value, Query};
 
 use crate::{
     inference::{InferType, TypeError},
@@ -25,7 +25,7 @@ impl<'ast> TypeInferencer<'ast> {
     ///
     /// # Background
     ///
-    /// Literal expressions (i.e. [`Expr::Value`]) are assigned [`Type::Var`] initially. The unifier can only refine
+    /// Literal expressions (i.e. [`Value`]) are assigned [`Type::Var`] initially. The unifier can only refine
     /// its type when it used in another expression.
     ///
     /// If the literal is *not* used in another expression that constrains its type and an expression with the same type
@@ -35,7 +35,7 @@ impl<'ast> TypeInferencer<'ast> {
     /// This function resolves unresolved type variables as `Native` when these conditions are met:
     ///
     /// 1. the type variable is the type of one or more projection columns of a `SELECT` statement.
-    /// 2. there exists an `Expr::Value(_)` node in the AST which is assigned the same type variable.
+    /// 2. there exists a `Value` node in the AST which is assigned the same type variable.
     fn resolve_value_types_in_select_statement_projection(
         &mut self,
         query: &'ast Query,
@@ -50,7 +50,7 @@ impl<'ast> TypeInferencer<'ast> {
                     if self
                         .reg
                         .borrow()
-                        .exists_node_with_type::<ast::Value>(&Type::Var(*tvar))
+                        .exists_node_with_type::<Value>(&Type::Var(*tvar))
                     {
                         self.unify(col.ty.clone(), Type::any_native())?;
                     }

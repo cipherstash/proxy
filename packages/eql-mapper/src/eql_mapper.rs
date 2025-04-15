@@ -31,30 +31,28 @@ use std::{
 ///
 /// An [`EqlMapperError`] is returned if type checking fails.
 pub fn type_check<'ast>(
-    schema: Arc<TableResolver>,
+    resolver: Arc<TableResolver>,
     statement: &'ast Statement,
 ) -> Result<TypedStatement<'ast>, EqlMapperError> {
-    let mut mapper = EqlMapper::<'ast>::new_from_schema(schema);
+    let mut mapper = EqlMapper::<'ast>::new_with_resolver(resolver);
     match statement.accept(&mut mapper) {
         ControlFlow::Continue(()) => {
-            let projection = mapper.statement_type(statement);
-            let params = mapper.param_types();
-            let literals = mapper.literal_types();
-            let node_types = mapper.node_types();
+            let build = || -> Result<TypedStatement, EqlMapperError> {
+                Ok(TypedStatement {
+                    statement,
+                    projection: mapper.projection_type(statement)?,
+                    params: mapper.param_types()?,
+                    literals: mapper.literal_types()?,
+                    node_types: Arc::new(mapper.node_types()?),
+                })
+            };
 
-            if projection.is_err() || params.is_err() || literals.is_err() || node_types.is_err() {
+            build().map_err(|err| {
                 #[cfg(test)]
                 {
                     mapper.inferencer.borrow().dump_registry(statement);
                 }
-            }
-
-            Ok(TypedStatement {
-                statement,
-                projection: projection?,
-                params: params?,
-                literals: literals?,
-                node_types: Arc::new(node_types?),
+                err
             })
         }
         ControlFlow::Break(Break::Err(err)) => {
@@ -134,7 +132,7 @@ struct EqlMapper<'ast> {
 
 impl<'ast> EqlMapper<'ast> {
     /// Build an `EqlMapper`, initialising all the other visitor implementations that it depends on.
-    fn new_from_schema(table_resolver: Arc<TableResolver>) -> Self {
+    fn new_with_resolver(table_resolver: Arc<TableResolver>) -> Self {
         let scope_tracker = DepMut::new(ScopeTracker::new());
         let registry = DepMut::new(TypeRegistry::new());
         let importer = DepMut::new(Importer::new(
@@ -160,7 +158,7 @@ impl<'ast> EqlMapper<'ast> {
         }
     }
 
-    fn statement_type(
+    fn projection_type(
         &self,
         statement: &'ast Statement,
     ) -> Result<Option<Projection>, EqlMapperError> {
