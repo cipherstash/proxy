@@ -11,7 +11,7 @@ impl<'ast> InferType<'ast, SelectItem> for TypeInferencer<'ast> {
 
         let ty = match select_item {
             SelectItem::UnnamedExpr(expr) | SelectItem::ExprWithAlias { expr, .. } => {
-                self.get_type(expr)
+                self.get_type_id(expr)
             }
             SelectItem::QualifiedWildcard(object_name, _) => {
                 scope.resolve_qualified_wildcard(&object_name.0)?

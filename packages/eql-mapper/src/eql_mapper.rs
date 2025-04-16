@@ -1,8 +1,8 @@
 use super::importer::{ImportError, Importer};
 use crate::{
-    inference::{unifier, TypeError, TypeInferencer},
+    inference::{TypeError, TypeInferencer},
     unifier::{EqlValue, Unifier},
-    DepMut, Param, ParamError, Projection, ScopeError, ScopeTracker, TableResolver, Type,
+    DepMut, Param, ParamError, ScopeError, ScopeTracker, TableResolver, Type,
     TypeRegistry, TypedStatement, Value,
 };
 use sqlparser::ast::{self as ast, Statement};
@@ -122,20 +122,20 @@ pub enum EqlMapperError {
 
 /// `EqlMapper` can safely convert a SQL statement into an equivalent statement where all of the plaintext literals have
 /// been converted to EQL payloads containing the encrypted literal and/or encrypted representations of those literals.
-#[derive(Debug)]
 struct EqlMapper<'ast> {
     scope_tracker: Rc<RefCell<ScopeTracker<'ast>>>,
     importer: Rc<RefCell<Importer<'ast>>>,
     inferencer: Rc<RefCell<TypeInferencer<'ast>>>,
     registry: Rc<RefCell<TypeRegistry<'ast>>>,
+    unifier: Rc<RefCell<Unifier<'ast>>>,
     _ast: PhantomData<&'ast ()>,
 }
 
 impl<'ast> EqlMapper<'ast> {
     /// Build an `EqlMapper`, initialising all the other visitor implementations that it depends on.
     fn new_with_resolver(table_resolver: Arc<TableResolver>) -> Self {
-        let scope_tracker = DepMut::new(ScopeTracker::new());
         let registry = DepMut::new(TypeRegistry::new());
+        let scope_tracker = DepMut::new(ScopeTracker::new(&registry));
         let importer = DepMut::new(Importer::new(
             table_resolver.clone(),
             &registry,
@@ -155,6 +155,7 @@ impl<'ast> EqlMapper<'ast> {
             importer: importer.into(),
             inferencer: inferencer.into(),
             registry: registry.into(),
+            unifier: unifier.into(),
             _ast: PhantomData,
         }
     }
@@ -162,18 +163,11 @@ impl<'ast> EqlMapper<'ast> {
     fn projection_type(
         &self,
         statement: &'ast Statement,
-    ) -> Result<Option<Projection>, EqlMapperError> {
-        let reg = self.registry.borrow_mut();
+    ) -> Result<crate::Projection, EqlMapperError> {
+        let mut unifier = self.unifier.borrow_mut();
 
-        match reg.get_type(statement) {
-            Some(ty) => {
-                let projection = ty.resolved_as::<crate::unifier::Projection>(&reg)?;
-                Ok(Some(Projection::try_from(&*projection)?))
-            }
-            None => Err(EqlMapperError::InternalError(format!(
-                "missing type for statement: {statement}"
-            ))),
-        }
+        let ty = unifier.lookup(unifier.lookup_node_tid(statement));
+        Ok(ty.resolved_as::<crate::Projection>(&mut unifier)?)
     }
 
     fn param_types(&self) -> Result<Vec<(Param, Value)>, EqlMapperError> {
@@ -182,10 +176,8 @@ impl<'ast> EqlMapper<'ast> {
         let params = params
             .into_iter()
             .map(|(p, ty)| -> Result<(Param, Value), EqlMapperError> {
-                match &*ty.resolved(&self.registry.borrow())? {
-                    unifier::Type::Constructor(unifier::Constructor::Value(value)) => {
-                        Ok((p, Value::try_from(value)?))
-                    }
+                match ty.resolved(&mut self.unifier.borrow_mut())? {
+                    Type::Value(value) => Ok((p, value)),
                     other => Err(TypeError::Expected(format!(
                         "expected param '{}' to resolve to a scalar type but got '{}'",
                         p, other
@@ -206,9 +198,8 @@ impl<'ast> EqlMapper<'ast> {
             .into_iter()
             .map(
                 |(node, ty)| -> Result<Option<(EqlValue, &'ast ast::Value)>, TypeError> {
-                    if let unifier::Type::Constructor(unifier::Constructor::Value(
-                        unifier::Value::Eql(eql_value),
-                    )) = &*ty.resolved(&self.registry.borrow())?
+                    if let crate::Type::Value(crate::Value::Eql(eql_value)) =
+                        &ty.resolved(&mut self.unifier.borrow_mut())?
                     {
                         return Ok(Some((eql_value.clone(), node)));
                     }
@@ -229,7 +220,7 @@ impl<'ast> EqlMapper<'ast> {
         for (key, tcell) in node_types {
             resolved_node_types.insert(
                 key,
-                Type::try_from(&*tcell.resolved(&self.registry.borrow())?)?,
+                tcell.resolved(&mut self.unifier.borrow_mut())?,
             );
         }
 

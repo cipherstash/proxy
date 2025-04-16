@@ -2,7 +2,7 @@ mod infer_type;
 mod infer_type_impls;
 mod registry;
 mod type_error;
-mod type_variables;
+mod sequence;
 
 pub mod unifier;
 
@@ -23,7 +23,7 @@ use crate::{Param, ParamError, ScopeTracker, TableResolver};
 
 pub(crate) use registry::*;
 pub(crate) use type_error::*;
-pub(crate) use type_variables::*;
+pub(crate) use sequence::*;
 
 /// [`Visitor`] implementation that performs type inference on AST nodes.
 ///
@@ -40,7 +40,6 @@ pub(crate) use type_variables::*;
 /// - [`Function`]
 /// - [`Values`]
 /// - [`Value`]
-#[derive(Debug)]
 pub struct TypeInferencer<'ast> {
     /// A snapshot of the the database schema - used by `TypeInferencer`'s [`InferType`] impls.
     table_resolver: Arc<TableResolver>,
@@ -74,12 +73,25 @@ impl<'ast> TypeInferencer<'ast> {
         }
     }
 
-    /// Shorthand for calling `self.reg.borrow_mut().get_type(node)` in [`InferType`] implementations for `TypeInferencer`.
-    pub(crate) fn get_type<N: AsNodeKey>(&self, node: &'ast N) -> TypeCell {
-        self.reg.borrow_mut().get_or_init_type(node).clone()
+    pub(crate) fn register(&self, ty: Type) -> TID {
+        self.unifier.borrow().register(ty)
     }
 
-    pub(crate) fn param_types(&self) -> Result<Vec<(Param, TypeCell)>, ParamError> {
+    /// Shorthand for calling `self.reg.borrow_mut().get_type(node)` in [`InferType`] implementations for `TypeInferencer`.
+    pub(crate) fn get_type_id<N: AsNodeKey>(&self, node: &'ast N) -> TID {
+        self.reg.borrow_mut().get_or_init_type(node)
+    }
+
+    pub(crate) fn get_type_of_node<N: AsNodeKey>(&self, node: &'ast N) -> Type {
+        let tid = self.get_type_id(node);
+        self.reg.borrow().get_type_by_tid(tid)
+    }
+
+    pub(crate) fn get_type_by_tid(&self, tid: TID) -> Type {
+        self.reg.borrow().get_type_by_tid(tid)
+    }
+
+    pub(crate) fn param_types(&self) -> Result<Vec<(Param, Type)>, ParamError> {
         let mut params = self
             .reg
             .borrow()
@@ -96,7 +108,7 @@ impl<'ast> TypeInferencer<'ast> {
     /// Tries to unify two types but does not record the result.
     /// Recording the result is up to the caller.
     #[must_use = "the result of unify must ultimately be associated with an AST node"]
-    fn unify(&self, left: TypeCell, right: TypeCell) -> Result<TypeCell, TypeError> {
+    fn unify(&self, left: TID, right: TID) -> Result<TID, TypeError> {
         self.unifier.borrow_mut().unify(left, right)
     }
 
@@ -106,10 +118,10 @@ impl<'ast> TypeInferencer<'ast> {
         &self,
         left: &'ast N1,
         right: &'ast N2,
-        ty: TypeCell,
-    ) -> Result<TypeCell, TypeError> {
+        ty: TID,
+    ) -> Result<TID, TypeError> {
         let unifier = &mut *self.unifier.borrow_mut();
-        let ty0 = unifier.unify(self.get_type(left), self.get_type(right))?;
+        let ty0 = unifier.unify(self.get_type_id(left), self.get_type_id(right))?;
         let ty1 = unifier.unify(ty0, ty)?;
         Ok(ty1)
     }
@@ -118,10 +130,10 @@ impl<'ast> TypeInferencer<'ast> {
     fn unify_node_with_type<N: AsNodeKey>(
         &self,
         node: &'ast N,
-        ty: TypeCell,
-    ) -> Result<TypeCell, TypeError> {
+        ty: TID,
+    ) -> Result<TID, TypeError> {
         let unifier = &mut *self.unifier.borrow_mut();
-        unifier.unify(self.get_type(node), ty)
+        unifier.unify(self.get_type_id(node), ty)
     }
 
     /// Unifies the types of two nodes with each other.
@@ -130,19 +142,19 @@ impl<'ast> TypeInferencer<'ast> {
         &self,
         left: &'ast N1,
         right: &'ast N2,
-    ) -> Result<TypeCell, TypeError> {
+    ) -> Result<TID, TypeError> {
         match self
             .unifier
             .borrow_mut()
-            .unify(self.get_type(left), self.get_type(right))
+            .unify(self.get_type_id(left), self.get_type_id(right))
         {
             Ok(ty) => Ok(ty),
             Err(err) => Err(TypeError::OnNodes(
                 Box::new(err),
                 format!("{:?}", left),
-                self.get_type(left),
+                self.get_type_of_node(left),
                 format!("{:?}", right),
-                self.get_type(right),
+                self.get_type_of_node(right),
             )),
         }
     }
@@ -150,18 +162,18 @@ impl<'ast> TypeInferencer<'ast> {
     fn unify_all_with_type<N: Debug + AsNodeKey>(
         &self,
         nodes: &'ast [N],
-        ty: TypeCell,
-    ) -> Result<TypeCell, TypeError> {
+        ty: TID,
+    ) -> Result<TID, TypeError> {
         nodes
             .iter()
             .try_fold(ty, |ty, node| self.unify_node_with_type(node, ty))
     }
 
-    pub(crate) fn fresh_tvar(&self) -> TypeCell {
+    pub(crate) fn fresh_tvar(&self) -> TID {
         self.reg.borrow_mut().fresh_tvar()
     }
 
-    pub(crate) fn node_types(&self) -> HashMap<NodeKey<'ast>, TypeCell> {
+    pub(crate) fn node_types(&self) -> HashMap<NodeKey<'ast>, Type> {
         self.reg.borrow().node_types().clone()
     }
 }

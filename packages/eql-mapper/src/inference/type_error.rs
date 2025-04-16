@@ -2,8 +2,6 @@ use std::collections::HashSet;
 
 use crate::{unifier::Type, SchemaError, ScopeError};
 
-use super::TypeCell;
-
 #[derive(Debug, PartialEq, Eq, thiserror::Error)]
 pub enum TypeError {
     #[error("SQL feature {} is not supported", _0)]
@@ -39,8 +37,8 @@ pub enum TypeError {
     #[error("{}", _0)]
     SchemaError(#[from] SchemaError),
 
-    #[error("Cannot unify node types for nodes:\n 1. node: {} type: {}\n 2. node: {} type: {}\n error: {}", _1, *_2.as_type(), _3, *_4.as_type(), _0)]
-    OnNodes(Box<TypeError>, String, TypeCell, String, TypeCell),
+    #[error("Cannot unify node types for nodes:\n 1. node: {} type: {}\n 2. node: {} type: {}\n error: {}", _1, _2, _3, _4, _0)]
+    OnNodes(Box<TypeError>, String, Type, String, Type),
 
     #[error(
         "Cannot unify node with type:\n node: {}\n type: {} error: {}",

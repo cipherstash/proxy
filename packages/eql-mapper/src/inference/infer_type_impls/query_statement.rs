@@ -3,7 +3,7 @@ use sqlparser::ast::{Query, Value};
 use crate::{
     inference::{InferType, TypeError},
     unifier::{Constructor, Projection, ProjectionColumns, Type},
-    TypeInferencer,
+    TypeInferencer, TID,
 };
 
 impl<'ast> InferType<'ast, Query> for TypeInferencer<'ast> {
@@ -40,20 +40,20 @@ impl<'ast> TypeInferencer<'ast> {
         &mut self,
         query: &'ast Query,
     ) -> Result<(), TypeError> {
-        let ty = self.get_type(query);
+        let ty = self.get_type_of_node(query);
         if let Type::Constructor(Constructor::Projection(Projection::WithColumns(
             ProjectionColumns(cols),
-        ))) = &*ty.as_type()
+        ))) = ty
         {
             for col in cols {
-                if let Type::Var(tvar) = &*col.ty.as_type() {
-                    if let Some((_, ty)) = self
+                if let Type::Var(tvar) = self.get_type_by_tid(col.tid) {
+                    if let Some((_, tid, _)) = self
                         .reg
                         .borrow()
-                        .first_matching_node_with_type::<Value>(&Type::Var(*tvar))
+                        .first_matching_node_with_type::<Value>(&Type::Var(tvar))
                     {
-                        let unified = self.unify(col.ty.clone(), ty)?;
-                        self.unify(unified, Type::any_native())?;
+                        let unified = self.unify(col.tid, tid)?;
+                        self.unify(unified, TID::NATIVE)?;
                     }
                 }
             }

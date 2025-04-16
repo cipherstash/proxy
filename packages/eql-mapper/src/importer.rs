@@ -12,7 +12,6 @@ use sqltk::{Break, Visitable, Visitor};
 use std::{cell::RefCell, fmt::Debug, marker::PhantomData, ops::ControlFlow, rc::Rc, sync::Arc};
 
 /// `Importer` is a [`Visitor`] implementation that brings projections (from "FROM" clauses and subqueries) into lexical scope.
-#[derive(Debug)]
 pub struct Importer<'ast> {
     table_resolver: Arc<TableResolver>,
     reg: Rc<RefCell<TypeRegistry<'ast>>>,
@@ -47,10 +46,12 @@ impl<'ast> Importer<'ast> {
 
         self.scope_tracker.borrow_mut().add_relation(Relation {
             name: table_alias.clone(),
-            projection_type: Type::Constructor(Constructor::Projection(Projection::WithColumns(
-                ProjectionColumns::from(table.clone()),
-            )))
-            .into_type_cell(),
+            projection_type: self.reg.borrow_mut().register(Type::Constructor(
+                Constructor::Projection(Projection::WithColumns(ProjectionColumns::new_from_schema_table(
+                    table.clone(),
+                    &mut self.reg.borrow_mut(),
+                ))),
+            )),
         })?;
 
         Ok(())
@@ -103,12 +104,13 @@ impl<'ast> Importer<'ast> {
                 if scope_tracker.resolve_relation(name).is_err() {
                     let table = self.table_resolver.resolve_table(name.0.last().unwrap())?;
 
+                    let cols = ProjectionColumns::new_from_schema_table(table.clone(), &mut self.reg.borrow_mut());
+
                     scope_tracker.add_relation(Relation {
                         name: record_as.cloned().ok(),
-                        projection_type: Type::Constructor(Constructor::Projection(
-                            Projection::WithColumns(ProjectionColumns::from(table.clone())),
-                        ))
-                        .into_type_cell(),
+                        projection_type: self.reg.borrow_mut().register(Type::Constructor(Constructor::Projection(
+                            Projection::WithColumns(cols),
+                        ))),
                     })?;
                 }
             }

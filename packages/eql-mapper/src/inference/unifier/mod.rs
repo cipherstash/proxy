@@ -1,21 +1,19 @@
 use std::{cell::RefCell, rc::Rc};
 
-mod type_cell;
 mod types;
 
 use crate::inference::TypeError;
 
-pub(crate) use type_cell::*;
+use sqltk::Visitable;
 pub(crate) use types::*;
 
 pub use types::{EqlValue, NativeValue, TableColumn};
 
-use super::TypeRegistry;
+use super::{TypeRegistry, TID};
 use tracing::{span, Level};
 
 /// Implements the type unification algorithm and maintains an association of type variables with the type that they
 /// point to.
-#[derive(Debug)]
 pub struct Unifier<'ast> {
     registry: Rc<RefCell<TypeRegistry<'ast>>>,
     depth: usize,
@@ -30,6 +28,28 @@ impl<'ast> Unifier<'ast> {
         }
     }
 
+    /// Registers a [`Type`] and returns its [`TID`].
+    pub(crate) fn register(&self, ty: Type) -> TID {
+        self.registry.borrow_mut().register(ty)
+    }
+
+    /// Looks up a previously registered [`Type`] by its [`TID`].
+    pub(crate) fn lookup(&self, tid: TID) -> Type {
+        self.registry.borrow().get_type_by_tid(tid)
+    }
+
+    pub(crate) fn lookup_node_tid<N: Visitable>(&self, node: &'ast N) -> TID {
+        self.registry.borrow().get_node_tid(node)
+    }
+
+    pub(crate) fn lookup_substitution(&self, tvar: TypeVar) -> TID {
+        self.registry.borrow().get_substitution(tvar)
+    }
+
+    pub(crate) fn exists_node_with_type<N: Visitable>(&self, ty: &Type) -> bool {
+        self.registry.borrow().exists_node_with_type::<N>(ty)
+    }
+
     /// Unifies two [`Type`]s or fails with a [`TypeError`].
     ///
     /// "Type Unification" is a fancy term for finding a set of type variable substitutions for multiple types
@@ -39,7 +59,7 @@ impl<'ast> Unifier<'ast> {
     /// dangling type variables).
     ///
     /// Returns `Ok(ty)` if successful, or `Err(TypeError)` on failure.
-    pub(crate) fn unify(&mut self, left: TypeCell, right: TypeCell) -> Result<TypeCell, TypeError> {
+    pub(crate) fn unify(&mut self, lhs_tid: TID, rhs_tid: TID) -> Result<TID, TypeError> {
         use types::Constructor::*;
         use types::Value::*;
 
@@ -47,50 +67,49 @@ impl<'ast> Unifier<'ast> {
             Level::DEBUG,
             "unify",
             depth = self.depth,
-            left = left.as_type().to_string(),
-            right = right.as_type().to_string()
+            // lhs = lhs,
+            // rhs = rhs,
         );
 
         let _guard = span.enter();
 
         self.depth += 1;
 
-        // Short-circuit the unification when left & right are equal.
-        if left == right {
-            return Ok(left.join(&right));
+        // Short-circuit the unification when lhs & rhs are equal.
+        if lhs_tid == rhs_tid {
+            return Ok(lhs_tid);
         }
 
-        let (a, b) = (left.as_type(), right.as_type());
+        let lhs = self.registry.borrow_mut().get_type_by_tid(lhs_tid);
+        let rhs = self.registry.borrow_mut().get_type_by_tid(rhs_tid);
 
-        let unification = match (&*a, &*b) {
+        let unification = match (&lhs, &rhs) {
             // Two projections unify if they have the same number of columns and all of the paired column types also
             // unify.
             (Type::Constructor(Projection(_)), Type::Constructor(Projection(_))) => {
-                Ok(self.unify_projections(left.clone(), right.clone())?)
+                self.unify_projections(&lhs, &rhs)
             }
 
             // Two arrays unify if the types of their element types unify.
             (
-                Type::Constructor(Value(Array(element_ty_left))),
-                Type::Constructor(Value(Array(element_ty_right))),
+                Type::Constructor(Value(Array(lhs_element_tid))),
+                Type::Constructor(Value(Array(rhs_element_tid))),
             ) => {
-                let element_ty = self.unify(element_ty_left.clone(), element_ty_right.clone())?;
+                let unified_element_tid = self.unify(*lhs_element_tid, *rhs_element_tid)?;
+                let unified_array_tid = self
+                    .registry
+                    .borrow_mut()
+                    .register(Type::Constructor(Value(Array(unified_element_tid))));
 
-                Ok(left.join_all(&[
-                    &right,
-                    &TypeCell::new(Type::Constructor(Value(Array(element_ty)))),
-                ]))
+                Ok(unified_array_tid)
             }
 
             // A Value can unify with a single column projection
             (Type::Constructor(Value(_)), Type::Constructor(Projection(projection))) => {
-                let projection = projection.flatten();
+                let projection = projection.flatten(&self.registry.borrow());
                 let len = projection.len();
                 if len == 1 {
-                    let unified =
-                        self.unify_value_type_with_type(left.clone(), projection[0].ty.clone())?;
-
-                    Ok(TypeCell::join_all(&left, &[&right, &unified]))
+                    self.unify_value_type_with_type(lhs_tid, projection[0].tid)
                 } else {
                     Err(TypeError::Conflict(
                         "cannot unify value type with projection of more than one column"
@@ -100,12 +119,10 @@ impl<'ast> Unifier<'ast> {
             }
 
             (Type::Constructor(Projection(projection)), Type::Constructor(Value(_))) => {
-                let projection = projection.flatten();
+                let projection = projection.flatten(&self.registry.borrow());
                 let len = projection.len();
                 if len == 1 {
-                    let unified =
-                        self.unify_value_type_with_type(right.clone(), projection[0].ty.clone())?;
-                    Ok(TypeCell::join_all(&left, &[&right, &unified]))
+                    self.unify_value_type_with_type(rhs_tid, projection[0].tid)
                 } else {
                     Err(TypeError::Conflict(
                         "cannot unify value type with projection of more than one column"
@@ -115,12 +132,12 @@ impl<'ast> Unifier<'ast> {
             }
 
             (Type::Constructor(Value(Native(_))), Type::Constructor(Value(Native(_)))) => {
-                Ok(left.join(&right))
+                Ok(lhs_tid)
             }
 
-            (Type::Constructor(Value(Eql(lhs))), Type::Constructor(Value(Eql(rhs)))) => {
+            (Type::Constructor(Value(Eql(_))), Type::Constructor(Value(Eql(_)))) => {
                 if lhs == rhs {
-                    Ok(left.join(&right))
+                    Ok(lhs_tid)
                 } else {
                     Err(TypeError::Conflict(format!(
                         "cannot unify different EQL types: {} and {}",
@@ -132,18 +149,12 @@ impl<'ast> Unifier<'ast> {
             // A constructor resolves with a type variable if either:
             // 1. the type variable does not already refer to a constructor (transitively), or
             // 2. it does refer to a constructor and the two constructors unify
-            (_, Type::Var(tvar)) => {
-                let unified = self.unify_with_type_var(left.clone(), *tvar)?;
-                Ok(TypeCell::join_all(&left, &[&right, &unified]))
-            }
+            (_, Type::Var(tvar)) => self.unify_with_type_var(lhs_tid, *tvar),
 
             // A constructor resolves with a type variable if either:
             // 1. the type variable does not already refer to a constructor (transitively), or
             // 2. it does refer to a constructor and the two constructors unify
-            (Type::Var(tvar), _) => {
-                let unified = self.unify_with_type_var(right.clone(), *tvar)?;
-                Ok(TypeCell::join_all(&left, &[&right, &unified]))
-            }
+            (Type::Var(tvar), _) => self.unify_with_type_var(rhs_tid, *tvar),
 
             // Any other combination of types is a type error.
             (lhs, rhs) => Err(TypeError::Conflict(format!(
@@ -162,35 +173,27 @@ impl<'ast> Unifier<'ast> {
     /// Attempts to unify the type with whatever the type variable is pointing to.
     ///
     /// After successful unification `ty_rc` and `tvar_rc` will refer to the same allocation.
-    fn unify_with_type_var(&mut self, ty: TypeCell, tvar: TypeVar) -> Result<TypeCell, TypeError> {
-        let sub = {
+    fn unify_with_type_var(&mut self, tid: TID, tvar: TypeVar) -> Result<TID, TypeError> {
+        let sub_tid = {
             let reg = &*self.registry.borrow();
             reg.get_substitution(tvar)
         };
 
-        let ty = match sub {
-            Some(sub_ty) => self.unify(ty.clone(), sub_ty.clone())?,
-            None => ty.clone(),
-        };
+        let unified_tid = self.unify(tid, sub_tid)?;
+        self.registry.borrow_mut().substitute(tvar, unified_tid);
 
-        self.registry.borrow_mut().substitute(tvar, ty.clone());
-
-        Ok(ty)
+        Ok(unified_tid)
     }
 
     /// Unifies two projection types.
-    fn unify_projections(
-        &mut self,
-        left: TypeCell,
-        right: TypeCell,
-    ) -> Result<TypeCell, TypeError> {
-        match (&*left.as_type(), &*right.as_type()) {
+    fn unify_projections(&mut self, lhs: &Type, rhs: &Type) -> Result<TID, TypeError> {
+        match (lhs, rhs) {
             (
                 Type::Constructor(Constructor::Projection(lhs_projection)),
                 Type::Constructor(Constructor::Projection(rhs_projection)),
             ) => {
-                let lhs_projection = lhs_projection.flatten();
-                let rhs_projection = rhs_projection.flatten();
+                let lhs_projection = lhs_projection.flatten(&self.registry.borrow());
+                let rhs_projection = rhs_projection.flatten(&self.registry.borrow());
 
                 if lhs_projection.len() == rhs_projection.len() {
                     let mut cols: Vec<ProjectionColumn> = Vec::with_capacity(lhs_projection.len());
@@ -200,20 +203,19 @@ impl<'ast> Unifier<'ast> {
                         .iter()
                         .zip(rhs_projection.columns())
                     {
-                        cols.push(ProjectionColumn::new(
-                            self.unify(lhs_col.ty.clone(), rhs_col.ty.clone())?,
-                            lhs_col.alias.clone(),
-                        ));
+                        let unified_tid = self.unify(lhs_col.tid, rhs_col.tid)?;
+                        cols.push(ProjectionColumn::new(unified_tid, lhs_col.alias.clone()));
                     }
-                    let unified = TypeCell::new(Type::Constructor(Constructor::Projection(
-                        Projection::new(cols),
-                    )));
 
-                    Ok(left.join_all(&[&right, &unified]))
+                    let unified_tid = self.registry.borrow_mut().register(Type::Constructor(
+                        Constructor::Projection(Projection::new(cols)),
+                    ));
+
+                    Ok(unified_tid)
                 } else {
                     Err(TypeError::Conflict(format!(
                         "cannot unify projections {} and {} because they have different numbers of columns",
-                        *left.as_type(), *right.as_type()
+                        lhs, rhs
                     )))
                 }
             }
@@ -223,41 +225,40 @@ impl<'ast> Unifier<'ast> {
         }
     }
 
-    fn unify_value_type_with_type(
-        &mut self,
-        value: TypeCell,
-        ty: TypeCell,
-    ) -> Result<TypeCell, TypeError> {
-        let (a, b) = (value.as_type(), ty.as_type());
-
-        match (&*a, &*b) {
+    fn unify_value_type_with_type(&mut self, value: TID, ty: TID) -> Result<TID, TypeError> {
+        let value_ty = self.registry.borrow().get_type_by_tid(value);
+        let ty_ty = self.registry.borrow().get_type_by_tid(ty);
+        match (&value_ty, &ty_ty) {
             (
-                Type::Constructor(Constructor::Value(Value::Eql(left))),
-                Type::Constructor(Constructor::Value(Value::Eql(right))),
-            ) if left == right => Ok(value.join(&ty)),
+                Type::Constructor(Constructor::Value(Value::Eql(lhs))),
+                Type::Constructor(Constructor::Value(Value::Eql(rhs))),
+            ) if lhs == rhs => Ok(value),
             (
                 Type::Constructor(Constructor::Value(Value::Native(_))),
                 Type::Constructor(Constructor::Value(Value::Native(_))),
-            ) => Ok(value.join(&ty)),
+            ) => Ok(value),
             (
-                Type::Constructor(Constructor::Value(Value::Array(left))),
-                Type::Constructor(Constructor::Value(Value::Array(right))),
+                Type::Constructor(Constructor::Value(Value::Array(lhs))),
+                Type::Constructor(Constructor::Value(Value::Array(rhs))),
             ) => {
-                self.unify(left.clone(), right.clone())?;
-                Ok(value.join(&ty))
+                let unified_element_tid = self.unify(*lhs, *rhs)?;
+                let unified_array_tid =
+                    self.registry
+                        .borrow_mut()
+                        .register(Type::Constructor(Constructor::Value(Value::Array(
+                            unified_element_tid,
+                        ))));
+                Ok(unified_array_tid)
             }
             (Type::Constructor(Constructor::Value(Value::Eql(_))), Type::Var(tvar)) => {
-                let unified = self.unify_with_type_var(value.clone(), *tvar)?;
-                Ok(value.join_all(&[&ty, &unified]))
+                self.unify_with_type_var(value, *tvar)
             }
             (Type::Var(tvar), Type::Constructor(Constructor::Value(Value::Eql(_)))) => {
-                let unified = self.unify_with_type_var(value.clone(), *tvar)?;
-                Ok(value.join_all(&[&ty, &unified]))
+                self.unify_with_type_var(value, *tvar)
             }
             _ => Err(TypeError::Conflict(format!(
                 "value type {} cannot be unified with single column projection of {}",
-                *value.as_type(),
-                *ty.as_type()
+                value, ty
             ))),
         }
     }
@@ -271,150 +272,120 @@ mod test {
 
     #[test]
     fn eq_native() {
-        let left = Type::Constructor(Value(Native(NativeValue(None)))).into_type_cell();
-        let right = Type::Constructor(Value(Native(NativeValue(None)))).into_type_cell();
-
         let mut unifier = Unifier::new(DepMut::new(TypeRegistry::new()));
 
-        assert_eq!(unifier.unify(left.clone(), right), Ok(left));
+        let lhs = unifier.register(Type::Constructor(Value(Native(NativeValue(None)))));
+        let rhs = unifier.register(Type::Constructor(Value(Native(NativeValue(None)))));
+
+        assert_eq!(unifier.unify(lhs, rhs), Ok(lhs));
     }
 
     #[ignore = "this is addressed in unmerged PR"]
     #[test]
     fn eq_never() {
-        let left =
-            Type::Constructor(Projection(crate::unifier::Projection::Empty)).into_type_cell();
-        let right =
-            Type::Constructor(Projection(crate::unifier::Projection::Empty)).into_type_cell();
-
         let mut unifier = Unifier::new(DepMut::new(TypeRegistry::new()));
 
-        assert_eq!(unifier.unify(left.clone(), right.clone()), Ok(left));
+        let lhs = unifier.register(Type::Constructor(Projection(
+            crate::unifier::Projection::Empty,
+        )));
+        let rhs = unifier.register(Type::Constructor(Projection(
+            crate::unifier::Projection::Empty,
+        )));
+
+        assert_eq!(unifier.unify(lhs, rhs), Ok(lhs));
     }
 
     #[test]
     fn constructor_with_var() {
-        let left = Type::Constructor(Value(Native(NativeValue(None)))).into_type_cell();
-        let right = Type::Var(TypeVar(0)).into_type_cell();
-
         let mut unifier = Unifier::new(DepMut::new(TypeRegistry::new()));
-        let unified = unifier.unify(left.clone(), right.clone());
 
-        assert_eq!(unified, Ok(left));
+        let lhs = unifier.register(Type::Constructor(Value(Native(NativeValue(None)))));
+        let rhs = unifier.register(Type::Var(TypeVar(0)));
+
+        assert_eq!(unifier.unify(lhs, rhs), Ok(lhs));
     }
 
     #[test]
     fn var_with_constructor() {
-        let left = Type::Var(TypeVar(0)).into_type_cell();
-        let right = Type::Constructor(Value(Native(NativeValue(None)))).into_type_cell();
-
         let mut unifier = Unifier::new(DepMut::new(TypeRegistry::new()));
-        let unified = unifier.unify(left.clone(), right.clone());
 
-        assert_eq!(unified, Ok(right));
+        let lhs = unifier.register(Type::Var(TypeVar(0)));
+        let rhs = unifier.register(Type::Constructor(Value(Native(NativeValue(None)))));
+
+        assert_eq!(unifier.unify(lhs, rhs), Ok(lhs));
     }
 
     #[test]
     fn projections_without_wildcards() {
-        let left = Type::Constructor(Projection(crate::unifier::Projection::WithColumns(
-            ProjectionColumns(vec![
-                ProjectionColumn::new(
-                    Type::Constructor(Value(Native(NativeValue(None)))).into_type_cell(),
-                    None,
-                ),
-                ProjectionColumn::new(Type::Var(TypeVar(0)).into_type_cell(), None),
-            ]),
-        )))
-        .into_type_cell();
-
-        let right = Type::Constructor(Projection(crate::unifier::Projection::WithColumns(
-            ProjectionColumns(vec![
-                ProjectionColumn::new(Type::Var(TypeVar(1)).into_type_cell(), None),
-                ProjectionColumn::new(
-                    Type::Constructor(Value(Native(NativeValue(None)))).into_type_cell(),
-                    None,
-                ),
-            ]),
-        )))
-        .into_type_cell();
-
         let mut unifier = Unifier::new(DepMut::new(TypeRegistry::new()));
-        let unified = unifier.unify(left.clone(), right.clone()).unwrap();
+
+        let native_val = unifier.register(Type::Constructor(Value(Native(NativeValue(None)))));
+
+        let lhs = unifier.register(Type::Constructor(Projection(
+            crate::unifier::Projection::WithColumns(ProjectionColumns(vec![
+                ProjectionColumn::new(native_val, None),
+                ProjectionColumn::new(unifier.register(Type::Var(TypeVar(0))), None),
+            ])),
+        )));
+
+        let rhs = unifier.register(Type::Constructor(Projection(
+            crate::unifier::Projection::WithColumns(ProjectionColumns(vec![
+                ProjectionColumn::new(unifier.register(Type::Var(TypeVar(1))), None),
+                ProjectionColumn::new(native_val, None),
+            ])),
+        )));
+
+        let unified = unifier.unify(lhs, rhs).unwrap();
 
         assert_eq!(
-            unified,
+            unifier.lookup(unified),
             Type::Constructor(Projection(crate::unifier::Projection::WithColumns(
                 ProjectionColumns(vec![
-                    ProjectionColumn::new(
-                        Type::Constructor(Value(Native(NativeValue(None)))).into_type_cell(),
-                        None
-                    ),
-                    ProjectionColumn::new(
-                        Type::Constructor(Value(Native(NativeValue(None)))).into_type_cell(),
-                        None
-                    ),
+                    ProjectionColumn::new(native_val, None),
+                    ProjectionColumn::new(native_val, None),
                 ])
             )))
-            .into_type_cell()
         );
     }
 
     #[test]
     fn projections_with_wildcards() {
-        let left = Type::Constructor(Projection(crate::unifier::Projection::WithColumns(
-            ProjectionColumns(vec![
-                ProjectionColumn::new(
-                    Type::Constructor(Value(Native(NativeValue(None)))).into_type_cell(),
-                    None,
-                ),
-                ProjectionColumn::new(
-                    Type::Constructor(Value(Native(NativeValue(None)))).into_type_cell(),
-                    None,
-                ),
-            ]),
-        )))
-        .into_type_cell();
+        let mut unifier = Unifier::new(DepMut::new(TypeRegistry::new()));
+
+        let native_val = unifier.register(Type::Constructor(Value(Native(NativeValue(None)))));
+
+        let lhs = unifier.register(Type::Constructor(Projection(
+            crate::unifier::Projection::WithColumns(ProjectionColumns(vec![
+                ProjectionColumn::new(native_val, None),
+                ProjectionColumn::new(native_val, None),
+            ])),
+        )));
+
+        let cols = unifier.register(Type::Constructor(Projection(
+            crate::unifier::Projection::WithColumns(ProjectionColumns(vec![
+                ProjectionColumn::new(native_val, None),
+                ProjectionColumn::new(native_val, None),
+            ])),
+        )));
 
         // The RHS is a single projection that contains a projection column that contains a projection with two
         // projection columns.  This is how wildcard expansions is represented at the type level.
-        let right = Type::Constructor(Projection(crate::unifier::Projection::WithColumns(
-            ProjectionColumns(vec![ProjectionColumn::new(
-                Type::Constructor(Projection(crate::unifier::Projection::WithColumns(
-                    ProjectionColumns(vec![
-                        ProjectionColumn::new(
-                            Type::Constructor(Value(Native(NativeValue(None)))).into_type_cell(),
-                            None,
-                        ),
-                        ProjectionColumn::new(
-                            Type::Constructor(Value(Native(NativeValue(None)))).into_type_cell(),
-                            None,
-                        ),
-                    ]),
-                )))
-                .into_type_cell(),
-                None,
-            )]),
-        )))
-        .into_type_cell();
+        let rhs = unifier.register(Type::Constructor(Projection(
+            crate::unifier::Projection::WithColumns(ProjectionColumns(vec![
+                ProjectionColumn::new(cols, None),
+            ])),
+        )));
 
-        let mut unifier = Unifier::new(DepMut::new(TypeRegistry::new()));
-        let unified = unifier.unify(left.clone(), right.clone()).unwrap();
+        let unified = unifier.unify(lhs, rhs).unwrap();
 
         assert_eq!(
-            unified,
+            unifier.lookup(unified),
             Type::Constructor(Projection(crate::unifier::Projection::WithColumns(
                 ProjectionColumns(vec![
-                    ProjectionColumn::new(
-                        Type::Constructor(Value(Native(NativeValue(None)))).into_type_cell(),
-                        None
-                    ),
-                    ProjectionColumn::new(
-                        Type::Constructor(Value(Native(NativeValue(None)))).into_type_cell(),
-                        None
-                    ),
+                    ProjectionColumn::new(native_val, None),
+                    ProjectionColumn::new(native_val, None),
                 ])
             )))
-            .into_type_cell()
         );
     }
 }

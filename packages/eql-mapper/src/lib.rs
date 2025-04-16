@@ -22,7 +22,6 @@ pub use param::*;
 pub use typed_statement::*;
 pub use unifier::{EqlValue, NativeValue, TableColumn};
 
-pub(crate) use arc_ref::*;
 pub(crate) use dep::*;
 pub(crate) use encrypted_statement::*;
 pub(crate) use inference::*;
@@ -73,7 +72,7 @@ mod test {
             Ok(typed) => {
                 assert_eq!(
                     typed.projection,
-                    Some(projection![(NATIVE(users.email) as email)])
+                    projection![(NATIVE(users.email) as email)]
                 )
             }
             Err(err) => panic!("type check failed: {err}"),
@@ -97,10 +96,7 @@ mod test {
 
         match type_check(schema, &statement) {
             Ok(typed) => {
-                assert_eq!(
-                    typed.projection,
-                    Some(projection![(EQL(users.email) as email)])
-                );
+                assert_eq!(typed.projection, projection![(EQL(users.email) as email)]);
 
                 assert!(typed.literals.contains(&(
                     EqlValue(TableColumn {
@@ -230,7 +226,7 @@ mod test {
 
                 assert_eq!(
                     typed.projection,
-                    Some(projection![(NATIVE(users.email) as email)])
+                    projection![(NATIVE(users.email) as email)]
                 );
             }
             Err(err) => panic!("type check failed: {err}"),
@@ -269,11 +265,11 @@ mod test {
 
                 assert_eq!(
                     typed.projection,
-                    Some(projection![
+                    projection![
                         (NATIVE(users.id) as id),
                         (NATIVE(users.email) as email),
                         (NATIVE(users.first_name) as first_name)
-                    ])
+                    ]
                 );
             }
             Err(err) => panic!("type check failed: {err}"),
@@ -307,11 +303,11 @@ mod test {
 
                 assert_eq!(
                     typed.projection,
-                    Some(projection![
+                    projection![
                         (NATIVE(users.id) as id),
                         (NATIVE(users.email) as email),
                         (NATIVE(users.first_name) as first_name)
-                    ])
+                    ]
                 );
             }
             Err(err) => panic!("type check failed: {err}"),
@@ -352,10 +348,7 @@ mod test {
 
         match type_check(schema, &statement) {
             Ok(typed) => {
-                assert_eq!(
-                    typed.projection,
-                    Some(projection![(EQL(users.email) as email)])
-                )
+                assert_eq!(typed.projection, projection![(EQL(users.email) as email)])
             }
             Err(err) => panic!("type check failed: {err}"),
         }
@@ -414,11 +407,11 @@ mod test {
 
         assert_eq!(
             typed.projection,
-            Some(projection![
+            projection![
                 (NATIVE as user_id),
                 (NATIVE as todo_list_item_id),
                 (EQL(todo_list_items.description) as todo_list_item_description)
-            ])
+            ]
         );
     }
 
@@ -457,13 +450,13 @@ mod test {
 
         assert_eq!(
             typed.projection,
-            Some(projection![
+            projection![
                 (NATIVE(users.id) as id),
                 (EQL(users.email) as email),
                 (NATIVE(todo_lists.id) as id),
                 (NATIVE(todo_lists.owner_id) as owner_id),
                 (EQL(todo_lists.secret) as secret)
-            ])
+            ]
         );
     }
 
@@ -498,11 +491,11 @@ mod test {
 
                 assert_eq!(
                     typed.projection,
-                    Some(projection![
+                    projection![
                         (NATIVE(users.id) as id),
                         (EQL(users.email) as email),
                         (EQL(users.first_name) as first_name)
-                    ])
+                    ]
                 );
             }
             Err(err) => panic!("type check failed: {err}"),
@@ -540,11 +533,11 @@ mod test {
 
                 assert_eq!(
                     typed.projection,
-                    Some(projection![
+                    projection![
                         (NATIVE(users.id) as id),
                         (EQL(users.salary) as salary),
                         (EQL(users.age) as age)
-                    ])
+                    ]
                 );
             }
             Err(err) => panic!("type check failed: {err}"),
@@ -584,11 +577,11 @@ mod test {
 
         assert_eq!(
             typed.projection,
-            Some(projection![
+            projection![
                 (NATIVE(employees.first_name) as first_name),
                 (NATIVE(employees.last_name) as last_name),
                 (EQL(employees.salary) as salary)
-            ])
+            ]
         );
     }
 
@@ -628,13 +621,13 @@ mod test {
 
         assert_eq!(
             typed.projection,
-            Some(projection![
+            projection![
                 (NATIVE(employees.first_name) as first_name),
                 (NATIVE(employees.last_name) as last_name),
                 (NATIVE(employees.department_name) as department_name),
                 (EQL(employees.salary) as salary),
                 (NATIVE as rank)
-            ])
+            ]
         );
     }
 
@@ -675,13 +668,13 @@ mod test {
 
         assert_eq!(
             typed.projection,
-            Some(projection![
+            projection![
                 (NATIVE(employees.first_name) as first_name),
                 (NATIVE(employees.last_name) as last_name),
                 (NATIVE(employees.department_name) as department_name),
                 (EQL(employees.salary) as salary),
                 (NATIVE as rank)
-            ])
+            ]
         );
     }
 
@@ -727,13 +720,13 @@ mod test {
 
         assert_eq!(
             typed.projection,
-            Some(projection![
+            projection![
                 (NATIVE(employees.first_name) as first_name),
                 (NATIVE(employees.last_name) as last_name),
                 (NATIVE(employees.department_name) as department_name),
                 (EQL(employees.salary) as salary),
                 (NATIVE as rank)
-            ])
+            ]
         );
     }
 
@@ -769,10 +762,10 @@ mod test {
 
         assert_eq!(
             typed.projection,
-            Some(projection![
+            projection![
                 (NATIVE(employees.age) as max),
                 (EQL(employees.salary) as min)
-            ])
+            ]
         );
     }
 
@@ -804,7 +797,7 @@ mod test {
             Err(err) => panic!("type check failed: {:#?}", err),
         };
 
-        assert_eq!(typed.projection, Some(Projection::Empty));
+        assert_eq!(typed.projection, Projection::Empty);
     }
 
     #[test]
@@ -838,13 +831,13 @@ mod test {
 
         assert_eq!(
             typed.projection,
-            Some(projection![
+            projection![
                 (NATIVE(employees.id) as id),
                 (NATIVE(employees.name) as name),
                 (NATIVE(employees.department) as department),
                 (NATIVE(employees.age) as age),
                 (EQL(employees.salary) as salary)
-            ])
+            ]
         );
     }
 
@@ -875,7 +868,7 @@ mod test {
             Err(err) => panic!("type check failed: {:#?}", err),
         };
 
-        assert_eq!(typed.projection, Some(Projection::Empty));
+        assert_eq!(typed.projection, Projection::Empty);
     }
 
     #[test]
@@ -907,13 +900,13 @@ mod test {
 
         assert_eq!(
             typed.projection,
-            Some(projection![
+            projection![
                 (NATIVE(employees.id) as id),
                 (NATIVE(employees.name) as name),
                 (NATIVE(employees.department) as department),
                 (NATIVE(employees.age) as age),
                 (EQL(employees.salary) as salary)
-            ])
+            ]
         );
     }
 
@@ -944,7 +937,7 @@ mod test {
             Err(err) => panic!("type check failed: {:#?}", err),
         };
 
-        assert_eq!(typed.projection, Some(Projection::Empty));
+        assert_eq!(typed.projection, Projection::Empty);
     }
 
     #[test]
@@ -976,13 +969,13 @@ mod test {
 
         assert_eq!(
             typed.projection,
-            Some(projection![
+            projection![
                 (NATIVE(employees.id) as id),
                 (NATIVE(employees.name) as name),
                 (NATIVE(employees.department) as department),
                 (NATIVE(employees.age) as age),
                 (EQL(employees.salary) as salary)
-            ])
+            ]
         );
     }
 
@@ -1094,14 +1087,14 @@ mod test {
 
         assert_eq!(
             typed.projection,
-            Some(projection![
+            projection![
                 (EQL(employees.salary) as min_salary),
                 (EQL(employees.salary) as y),
                 (NATIVE(employees.id) as id),
                 (NATIVE(employees.department_id) as department_id),
                 (NATIVE(employees.name) as name),
                 (EQL(employees.salary) as salary)
-            ])
+            ]
         );
     }
 
@@ -1124,11 +1117,7 @@ mod test {
         // e.g. `projection![(NATIVE)]`
 
         let projection_type = |statement: &Statement| {
-            type_check(schema.clone(), statement)
-                .unwrap()
-                .projection
-                .as_ref()
-                .map(ignore_aliases)
+            ignore_aliases(&type_check(schema.clone(), statement).unwrap().projection)
         };
 
         assert_transitive_eq(&[
@@ -1139,10 +1128,10 @@ mod test {
             projection_type(&parse("select $1")),
             // projection_type(&parse("select t from (select $1 as t)")),
             // projection_type(&parse("select * from (select $1)")),
-            Some(Projection::WithColumns(vec![ProjectionColumn {
+            Projection::WithColumns(vec![ProjectionColumn {
                 alias: None,
                 ty: Value::Native(NativeValue(None)),
-            }])),
+            }]),
         ]);
     }
 
@@ -1216,10 +1205,10 @@ mod test {
         error!("{:?}", typed.projection);
         assert_eq!(
             typed.projection,
-            Some(projection![
+            projection![
                 (NATIVE as upper),
                 (EQL(employees.salary) as salary)
-            ])
+            ]
         );
     }
 
@@ -1246,10 +1235,10 @@ mod test {
 
         assert_eq!(
             typed.projection,
-            Some(projection![
+            projection![
                 (NATIVE as count),
                 (EQL(employees.salary) as salary)
-            ])
+            ]
         );
     }
 
@@ -1276,10 +1265,10 @@ mod test {
 
         assert_eq!(
             typed.projection,
-            Some(projection![
+            projection![
                 (NATIVE(employees.name) as concat),
                 (EQL(employees.salary) as salary)
-            ])
+            ]
         );
     }
 
@@ -1314,10 +1303,10 @@ mod test {
 
         assert_eq!(
             typed.projection,
-            Some(projection![
+            projection![
                 (NATIVE(employees.name) as concat),
                 (EQL(employees.salary) as salary)
-            ])
+            ]
         );
     }
 

@@ -1,6 +1,6 @@
 use sqlparser::ast::{AssignmentTarget, Statement};
 
-use crate::{inference::infer_type::InferType, unifier::Type, TypeError, TypeInferencer};
+use crate::{inference::infer_type::InferType, TypeError, TypeInferencer, TID};
 
 impl<'ast> InferType<'ast, Statement> for TypeInferencer<'ast> {
     fn infer_exit(&mut self, statement: &'ast Statement) -> Result<(), TypeError> {
@@ -45,7 +45,7 @@ impl<'ast> InferType<'ast, Statement> for TypeInferencer<'ast> {
 
                 match returning {
                     Some(returning) => self.unify_nodes(statement, returning)?,
-                    None => self.unify_node_with_type(statement, Type::empty_projection())?,
+                    None => self.unify_node_with_type(statement, TID::EMPTY_PROJECTION)?,
                 };
             }
 

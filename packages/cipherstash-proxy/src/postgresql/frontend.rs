@@ -780,8 +780,8 @@ where
         typed_statement: &eql_mapper::TypedStatement<'_>,
     ) -> Result<Vec<Option<Column>>, Error> {
         let mut projection_columns = vec![];
-        if let Some(eql_mapper::Projection::WithColumns(columns)) =
-            typed_statement.projection.as_ref()
+        if let eql_mapper::Projection::WithColumns(columns) =
+            &typed_statement.projection
         {
             for col in columns {
                 let eql_mapper::ProjectionColumn { ty, .. } = col;

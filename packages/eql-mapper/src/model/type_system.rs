@@ -6,7 +6,6 @@
 //! be pleasant for public consumption.
 
 use crate::{
-    inference::unifier,
     unifier::{EqlValue, NativeValue},
 };
 use derive_more::Display;
@@ -24,7 +23,7 @@ pub enum Type {
 }
 
 /// A value type (an EQL type, native database type or an array type)
-#[derive(Debug, Clone, Eq, Display)]
+#[derive(Debug, Clone, PartialEq, Eq, Display)]
 pub enum Value {
     /// An encrypted type from a particular table-column in the schema.
     ///
@@ -87,140 +86,172 @@ impl ProjectionColumn {
     }
 }
 
-impl TryFrom<&unifier::Projection> for Projection {
-    type Error = crate::EqlMapperError;
+// impl TryFrom<&unifier::Projection> for Projection {
+//     type Error = crate::TypeError;
 
-    fn try_from(value: &unifier::Projection) -> Result<Self, Self::Error> {
-        match value {
-            unifier::Projection::WithColumns(projection_columns) => Ok(Self::WithColumns(
-                Vec::<ProjectionColumn>::try_from(projection_columns)?,
-            )),
-            unifier::Projection::Empty => Ok(Projection::Empty),
-        }
-    }
-}
+//     fn try_from(value: &unifier::Projection) -> Result<Self, Self::Error> {
+//         match value {
+//             unifier::Projection::WithColumns(projection_columns) => Ok(Self::WithColumns(
+//                 Vec::<ProjectionColumn>::try_from(projection_columns)?,
+//             )),
+//             unifier::Projection::Empty => Ok(Projection::Empty),
+//         }
+//     }
+// }
 
-impl TryFrom<&unifier::ProjectionColumns> for Vec<ProjectionColumn> {
-    type Error = crate::EqlMapperError;
+// impl TryFrom<&unifier::ProjectionColumns> for Vec<ProjectionColumn> {
+//     type Error = crate::TypeError;
 
-    fn try_from(columns: &unifier::ProjectionColumns) -> Result<Self, Self::Error> {
-        let mut pub_columns: Vec<ProjectionColumn> = Vec::with_capacity(columns.len());
-        let columns = columns.flatten();
+//     fn try_from(columns: &unifier::ProjectionColumns) -> Result<Self, Self::Error> {
+//         let mut pub_columns: Vec<ProjectionColumn> = Vec::with_capacity(columns.len());
+//         let columns = columns.flatten();
 
-        for unifier::ProjectionColumn { ty, alias } in columns.0.iter() {
-            let pub_column: ProjectionColumn = match &*ty.as_type() {
-                unifier::Type::Constructor(unifier::Constructor::Value(value)) => {
-                    ProjectionColumn {
-                        ty: value.try_into()?,
-                        alias: alias.clone(),
-                    }
-                }
+//         for unifier::ProjectionColumn { tid: ty, alias } in columns.0.iter() {
+//             let pub_column: ProjectionColumn = match &*ty.as_type() {
+//                 unifier::Type::Constructor(unifier::Constructor::Value(value)) => {
+//                     ProjectionColumn {
+//                         ty: value.try_into()?,
+//                         alias: alias.clone(),
+//                     }
+//                 }
 
-                unexpected => Err(crate::EqlMapperError::InternalError(format!(
-                    "unexpected type {} in projection column",
-                    unexpected
-                )))?,
-            };
+//                 unexpected => Err(crate::TypeError::InternalError(format!(
+//                     "unexpected type {} in projection column",
+//                     unexpected
+//                 )))?,
+//             };
 
-            pub_columns.push(pub_column);
-        }
+//             pub_columns.push(pub_column);
+//         }
 
-        Ok(pub_columns)
-    }
-}
+//         Ok(pub_columns)
+//     }
+// }
 
-impl TryFrom<&unifier::Value> for EqlValue {
-    type Error = crate::EqlMapperError;
+// impl TryFrom<&unifier::Value> for EqlValue {
+//     type Error = crate::TypeError;
 
-    fn try_from(value: &unifier::Value) -> Result<Self, Self::Error> {
-        match value {
-            unifier::Value::Eql(eql_value) => Ok(EqlValue(eql_value.0.clone())),
-            other => Err(crate::EqlMapperError::InternalError(format!(
-                "cannot convert {} into Value",
-                other
-            ))),
-        }
-    }
-}
+//     fn try_from(value: &unifier::Value) -> Result<Self, Self::Error> {
+//         match value {
+//             unifier::Value::Eql(eql_value) => Ok(EqlValue(eql_value.0.clone())),
+//             other => Err(crate::TypeError::InternalError(format!(
+//                 "cannot convert {} into Value",
+//                 other
+//             ))),
+//         }
+//     }
+// }
 
-impl TryFrom<&unifier::Value> for Value {
-    type Error = crate::EqlMapperError;
+// impl TryFrom<&unifier::Value> for NativeValue {
+//     type Error = crate::TypeError;
 
-    fn try_from(value: &unifier::Value) -> Result<Self, Self::Error> {
-        match value {
-            unifier::Value::Eql(eql_value) => Ok(Value::Eql(eql_value.clone())),
-            unifier::Value::Native(native_value) => Ok(Value::Native(native_value.clone())),
-            unifier::Value::Array(element_ty) => {
-                Ok(Value::Array(Box::new((&*element_ty.as_type()).try_into()?)))
-            }
-        }
-    }
-}
+//     fn try_from(value: &unifier::Value) -> Result<Self, Self::Error> {
+//         match value {
+//             unifier::Value::Native(v) => Ok(v.clone()),
+//             other => Err(crate::TypeError::InternalError(format!(
+//                 "cannot convert {} into Value",
+//                 other
+//             ))),
+//         }
+//     }
+// }
 
-impl TryFrom<&unifier::Type> for Type {
-    type Error = crate::EqlMapperError;
+// impl TryFrom<&unifier::Value> for Type {
+//     type Error = crate::TypeError;
 
-    fn try_from(value: &unifier::Type) -> Result<Self, Self::Error> {
-        let unifier::Type::Constructor(constructor) = value else {
-            return Err(crate::EqlMapperError::InternalError(format!(
-                "expected type {} to be resolved",
-                value
-            )));
-        };
+//     fn try_from(value: &unifier::Value) -> Result<Self, Self::Error> {
+//         let v = Value::try_from(value)?;
+//         Ok(Type::Value(v))
+//     }
+// }
 
-        match constructor {
-            unifier::Constructor::Value(value) => Ok(Type::Value(value.try_into()?)),
+// impl TryFrom<&unifier::Projection> for Type {
+//     type Error = crate::TypeError;
 
-            unifier::Constructor::Projection(unifier::Projection::WithColumns(columns)) => {
-                let mut pub_columns: Vec<ProjectionColumn> = Vec::with_capacity(columns.len());
-                let columns = columns.flatten();
+//     fn try_from(value: &unifier::Projection) -> Result<Self, Self::Error> {
+//         let p = Projection::try_from(value)?;
+//         Ok(Type::Projection(p))
+//     }
+// }
 
-                for unifier::ProjectionColumn { ty, alias } in columns.0.iter() {
-                    let pub_column: ProjectionColumn = match &*ty.as_type() {
-                        unifier::Type::Constructor(unifier::Constructor::Value(ty)) => {
-                            ProjectionColumn {
-                                ty: ty.try_into()?,
-                                alias: alias.clone(),
-                            }
-                        }
+// impl TryFrom<&unifier::Value> for Value {
+//     type Error = crate::TypeError;
 
-                        unexpected => Err(crate::EqlMapperError::InternalError(format!(
-                            "unexpected type {} in projection column",
-                            unexpected
-                        )))?,
-                    };
+//     fn try_from(value: &unifier::Value) -> Result<Self, Self::Error> {
+//         match value {
+//             unifier::Value::Eql(eql_value) => Ok(Value::Eql(eql_value.clone())),
+//             unifier::Value::Native(native_value) => Ok(Value::Native(native_value.clone())),
+//             unifier::Value::Array(element_ty) => {
+//                 Ok(Value::Array(Box::new((&*element_ty.as_type()).try_into()?)))
+//             }
+//         }
+//     }
+// }
 
-                    pub_columns.push(pub_column);
-                }
+// impl TryFrom<&unifier::Type> for Type {
+//     type Error = crate::TypeError;
 
-                Ok(Type::Projection(Projection::new(pub_columns)))
-            }
+//     fn try_from(value: &unifier::Type) -> Result<Self, Self::Error> {
+//         let unifier::Type::Constructor(constructor) = value else {
+//             return Err(crate::TypeError::InternalError(format!(
+//                 "expected type {} to be resolved",
+//                 value
+//             )));
+//         };
 
-            unifier::Constructor::Projection(unifier::Projection::Empty) => {
-                Ok(Type::Projection(Projection::Empty))
-            }
-        }
-    }
-}
+//         match constructor {
+//             unifier::Constructor::Value(value) => Ok(Type::Value(value.try_into()?)),
 
-impl TryFrom<&unifier::Value> for ProjectionColumn {
-    type Error = crate::EqlMapperError;
+//             unifier::Constructor::Projection(unifier::Projection::WithColumns(columns)) => {
+//                 let mut pub_columns: Vec<ProjectionColumn> = Vec::with_capacity(columns.len());
+//                 let columns = columns.flatten();
 
-    fn try_from(value: &unifier::Value) -> Result<Self, Self::Error> {
-        Ok(ProjectionColumn {
-            ty: value.try_into()?,
-            alias: None,
-        })
-    }
-}
+//                 for unifier::ProjectionColumn { tid: ty, alias } in columns.0.iter() {
+//                     let pub_column: ProjectionColumn = match &*ty.as_type() {
+//                         unifier::Type::Constructor(unifier::Constructor::Value(ty)) => {
+//                             ProjectionColumn {
+//                                 ty: ty.try_into()?,
+//                                 alias: alias.clone(),
+//                             }
+//                         }
 
-impl PartialEq for Value {
-    fn eq(&self, other: &Self) -> bool {
-        match (self, other) {
-            (Value::Eql(lhs), Value::Eql(rhs)) => lhs == rhs,
-            (Value::Native(_), Value::Native(_)) => true,
-            (Value::Array(lhs), Value::Array(rhs)) => lhs == rhs,
-            (_, _) => false,
-        }
-    }
-}
+//                         unexpected => Err(crate::TypeError::InternalError(format!(
+//                             "unexpected type {} in projection column",
+//                             unexpected
+//                         )))?,
+//                     };
+
+//                     pub_columns.push(pub_column);
+//                 }
+
+//                 Ok(Type::Projection(Projection::new(pub_columns)))
+//             }
+
+//             unifier::Constructor::Projection(unifier::Projection::Empty) => {
+//                 Ok(Type::Projection(Projection::Empty))
+//             }
+//         }
+//     }
+// }
+
+// impl TryFrom<&unifier::Value> for ProjectionColumn {
+//     type Error = crate::TypeError;
+
+//     fn try_from(value: &unifier::Value) -> Result<Self, Self::Error> {
+//         Ok(ProjectionColumn {
+//             ty: value.try_into()?,
+//             alias: None,
+//         })
+//     }
+// }
+
+// impl PartialEq for Value {
+//     fn eq(&self, other: &Self) -> bool {
+//         match (self, other) {
+//             (Value::Eql(lhs), Value::Eql(rhs)) => lhs == rhs,
+//             (Value::Native(_), Value::Native(_)) => true,
+//             (Value::Array(lhs), Value::Array(rhs)) => lhs == rhs,
+//             (_, _) => false,
+//         }
+//     }
+// }

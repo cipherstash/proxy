@@ -1,11 +1,11 @@
-use std::{ops::Index, sync::Arc};
+use std::{any::type_name, ops::Index, sync::Arc};
 
 use derive_more::Display;
-use sqlparser::ast::Ident;
+use sqlparser::ast::{self, Ident};
 
-use crate::{ColumnKind, Table};
+use crate::{ColumnKind, Table, TypeError, TypeRegistry, TID};
 
-use super::TypeCell;
+use super::Unifier;
 
 /// The type of an expression in a SQL statement or the type of a table column from the database schema.
 ///
@@ -26,14 +26,12 @@ pub enum Type {
     /// A type variable representing a placeholder for an unknown type.
     #[display("Var({})", _0)]
     Var(TypeVar),
-    // TODO: consider including `Error` as a variant
 }
 
 const _: () = {
     fn assert_send<T: Send>() {}
     fn assert_sync<T: Sync>() {}
 
-    // RFC 2056
     fn assert_all() {
         assert_send::<Type>();
         assert_sync::<Type>();
@@ -67,8 +65,8 @@ pub enum Value {
     Native(NativeValue),
 
     /// An array type that is parameterized by an element type.
-    #[display("Array({})", *_0.as_type())]
-    Array(TypeCell),
+    #[display("Array({})", _0)]
+    Array(TID),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Display)]
@@ -87,10 +85,10 @@ pub struct NativeValue(pub Option<TableColumn>);
 
 /// A column from a projection.
 #[derive(Debug, PartialEq, Eq, Clone, Display)]
-#[display("{} {}", *ty.as_type(), self.render_alias())]
+#[display("{} {}", self.tid, self.render_alias())]
 pub struct ProjectionColumn {
     /// The type of the column.
-    pub ty: TypeCell,
+    pub tid: TID,
 
     /// The columm alias
     pub alias: Option<Ident>,
@@ -101,24 +99,20 @@ pub struct ProjectionColumn {
 pub struct TypeVar(pub u32);
 
 impl Type {
-    pub(crate) fn into_type_cell(self) -> TypeCell {
-        TypeCell::new(self)
-    }
-
     /// Creates an `Type` containing an empty projection
-    pub(crate) fn empty_projection() -> TypeCell {
-        Type::Constructor(Constructor::Projection(Projection::Empty)).into_type_cell()
+    pub(crate) fn empty_projection() -> Type {
+        Type::Constructor(Constructor::Projection(Projection::Empty))
     }
 
     /// Creates an `Type` containing a `Constructor::Scalar(Scalar::Native(None))`.
-    pub(crate) fn any_native() -> TypeCell {
-        Type::Constructor(Constructor::Value(Value::Native(NativeValue(None)))).into_type_cell()
+    pub(crate) fn any_native() -> Type {
+        Type::Constructor(Constructor::Value(Value::Native(NativeValue(None))))
     }
 
     /// Creates an `Type` containing a `Constructor::Projection`.
-    pub(crate) fn projection(columns: &[(TypeCell, Option<Ident>)]) -> TypeCell {
+    pub(crate) fn projection(columns: &[(TID, Option<Ident>)]) -> Type {
         if columns.is_empty() {
-            Type::Constructor(Constructor::Projection(Projection::Empty)).into_type_cell()
+            Type::Constructor(Constructor::Projection(Projection::Empty))
         } else {
             Type::Constructor(Constructor::Projection(Projection::WithColumns(
                 ProjectionColumns(
@@ -128,13 +122,112 @@ impl Type {
                         .collect(),
                 ),
             )))
-            .into_type_cell()
         }
     }
 
     /// Creates an `Type` containing a `Constructor::Array`.
-    pub(crate) fn array(element_ty: TypeCell) -> TypeCell {
-        Type::Constructor(Constructor::Value(Value::Array(element_ty))).into_type_cell()
+    pub(crate) fn array(element_ty: TID) -> Type {
+        Type::Constructor(Constructor::Value(Value::Array(element_ty)))
+    }
+
+    /// Resolves `self`, returning it as a [`crate::Type`].
+    ///
+    /// A resolved type is one in which all type variables have been resolved, recursively.
+    ///
+    /// Fails with a [`TypeError`] if the stored `Type` cannot be fully resolved.
+    pub fn resolved(&self, unifier: &mut Unifier<'_>) -> Result<crate::Type, TypeError> {
+        match self {
+            Type::Constructor(constructor) => match constructor {
+                Constructor::Value(value) => match value {
+                    Value::Eql(eql_col) => {
+                        Ok(crate::Type::Value(crate::Value::Eql(eql_col.clone())))
+                    }
+                    Value::Native(native_col) => {
+                        Ok(crate::Type::Value(crate::Value::Native(native_col.clone())))
+                    }
+                    Value::Array(element_tid) => {
+                        let element_ty = unifier.lookup(*element_tid);
+                        let resolved = element_ty.resolved(unifier)?;
+                        Ok(crate::Type::Value(crate::Value::Array(resolved.into())))
+                    }
+                },
+                Constructor::Projection(projection) => {
+                    let resolved_cols = projection
+                        .columns()
+                        .iter()
+                        .map(|col| -> Result<crate::ProjectionColumn, TypeError> {
+                            let col_ty = unifier.lookup(col.tid);
+                            let resolved_col_ty = col_ty.resolved(unifier)?;
+                            let crate::Type::Value(value) = resolved_col_ty else {
+                                Err(TypeError::InternalError(format!("expected value")))?
+                            };
+                            Ok(crate::ProjectionColumn {
+                                ty: value,
+                                alias: col.alias.clone(),
+                            })
+                        })
+                        .collect::<Result<Vec<_>, _>>()?;
+
+                    if resolved_cols.len() == 0 {
+                        Ok(crate::Type::Projection(crate::Projection::Empty))
+                    } else {
+                        Ok(crate::Type::Projection(crate::Projection::WithColumns(
+                            resolved_cols,
+                        )))
+                    }
+                }
+            },
+            Type::Var(type_var) => {
+                let sub_tid = unifier.lookup_substitution(*type_var);
+                let sub_ty = unifier.lookup(sub_tid);
+                match sub_ty.resolved(unifier) {
+                    Ok(sub_ty) => Ok(sub_ty),
+                    Err(_) => {
+                        if unifier.exists_node_with_type::<ast::Value>(&Type::Var(*type_var)) {
+                            let unified_tid = unifier.unify(sub_tid, TID::NATIVE)?;
+                            unifier.lookup(unified_tid).resolved(unifier)
+                        } else {
+                            Err(TypeError::Incomplete(format!(
+                                "type {} contains unresolved type variables",
+                                sub_ty
+                            )))
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    pub(crate) fn resolved_as<T: Clone + 'static>(
+        &self,
+        unifier: &mut Unifier<'_>,
+    ) -> Result<T, TypeError> {
+        let resolved_ty: crate::Type = self.resolved(unifier)?;
+
+        let result = match &resolved_ty {
+            crate::Type::Projection(projection) => {
+                if let Some(t) = (projection as &dyn std::any::Any).downcast_ref::<T>() {
+                    return Ok(t.clone());
+                }
+
+                Err(())
+            }
+            crate::Type::Value(value) => {
+                if let Some(t) = (value as &dyn std::any::Any).downcast_ref::<T>() {
+                    return Ok(t.clone());
+                }
+
+                Err(())
+            }
+        };
+
+        result.map_err(|_| {
+            TypeError::InternalError(format!(
+                "could not resolve type {} as {}",
+                resolved_ty,
+                type_name::<T>()
+            ))
+        })
     }
 }
 
@@ -170,10 +263,10 @@ impl Projection {
         }
     }
 
-    pub(crate) fn flatten(&self) -> Self {
+    pub(crate) fn flatten(&self, registry: &TypeRegistry<'_>) -> Self {
         match self {
             Projection::WithColumns(projection_columns) => {
-                Projection::WithColumns(projection_columns.flatten())
+                Projection::WithColumns(projection_columns.flatten(registry))
             }
             Projection::Empty => Projection::Empty,
         }
@@ -210,25 +303,43 @@ impl ProjectionColumns {
         self.0.len()
     }
 
-    pub(crate) fn flatten(&self) -> Self {
-        ProjectionColumns(self.flatten_impl(Vec::with_capacity(self.len())))
+    pub(crate) fn flatten(&self, registry: &TypeRegistry<'_>) -> Self {
+        ProjectionColumns(self.flatten_impl(registry, Vec::with_capacity(self.len())))
     }
 
-    fn flatten_impl(&self, mut output: Vec<ProjectionColumn>) -> Vec<ProjectionColumn> {
-        for ProjectionColumn { ty, alias } in &self.0 {
-            match &*ty.as_type() {
+    fn flatten_impl(
+        &self,
+        registry: &TypeRegistry<'_>,
+        mut output: Vec<ProjectionColumn>,
+    ) -> Vec<ProjectionColumn> {
+        for ProjectionColumn { tid, alias } in &self.0 {
+            match registry.get_type_by_tid(*tid) {
                 Type::Constructor(Constructor::Projection(Projection::WithColumns(nested))) => {
-                    output = nested.flatten_impl(output);
+                    output = nested.flatten_impl(registry, output);
                 }
-                _ => output.push(ProjectionColumn::new(ty.clone(), alias.clone())),
+                _ => output.push(ProjectionColumn::new(*tid, alias.clone())),
             }
         }
         output
     }
 }
 
-impl From<Arc<Table>> for ProjectionColumns {
-    fn from(table: Arc<Table>) -> Self {
+impl ProjectionColumn {
+    /// Returns a new `ProjectionColumn` with type `ty` and optional `alias`.
+    pub(crate) fn new(ty: TID, alias: Option<Ident>) -> Self {
+        Self { tid: ty, alias }
+    }
+
+    fn render_alias(&self) -> String {
+        match &self.alias {
+            Some(name) => name.to_string(),
+            None => String::from("(no-alias)"),
+        }
+    }
+}
+
+impl ProjectionColumns {
+    pub(crate) fn new_from_schema_table(table: Arc<Table>, registry: &mut TypeRegistry<'_>) -> Self {
         ProjectionColumns(
             table
                 .columns
@@ -239,32 +350,19 @@ impl From<Arc<Table>> for ProjectionColumns {
                         column: col.name.clone(),
                     };
 
-                    let value_ty = if col.kind == ColumnKind::Native {
-                        Value::Native(NativeValue(Some(tc)))
+                    let value_tid = if col.kind == ColumnKind::Native {
+                        registry.register(Type::Constructor(Constructor::Value(Value::Native(
+                            NativeValue(Some(tc)),
+                        ))))
                     } else {
-                        Value::Eql(EqlValue(tc))
+                        registry.register(Type::Constructor(Constructor::Value(Value::Eql(
+                            EqlValue(tc),
+                        ))))
                     };
 
-                    ProjectionColumn::new(
-                        Type::Constructor(Constructor::Value(value_ty)).into_type_cell(),
-                        Some(col.name.clone()),
-                    )
+                    ProjectionColumn::new(value_tid, Some(col.name.clone()))
                 })
                 .collect(),
         )
-    }
-}
-
-impl ProjectionColumn {
-    /// Returns a new `ProjectionColumn` with type `ty` and optional `alias`.
-    pub(crate) fn new(ty: TypeCell, alias: Option<Ident>) -> Self {
-        Self { ty, alias }
-    }
-
-    fn render_alias(&self) -> String {
-        match &self.alias {
-            Some(name) => name.to_string(),
-            None => String::from("(no-alias)"),
-        }
     }
 }

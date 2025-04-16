@@ -12,7 +12,7 @@ pub struct TypedStatement<'ast> {
     pub statement: &'ast Statement,
 
     /// The SQL statement which was type-checked against the schema.
-    pub projection: Option<Projection>,
+    pub projection: Projection,
 
     /// The types of all params discovered from [`Value::Placeholder`] nodes in the SQL statement.
     pub params: Vec<(Param, Value)>,
