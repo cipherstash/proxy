@@ -1,8 +1,7 @@
 use sqlparser::ast::Value;
 
 use crate::{
-    inference::{type_error::TypeError, InferType},
-    TypeInferencer,
+    inference::{type_error::TypeError, InferType}, unifier::Type, TypeInferencer
 };
 
 /// Handles type inference for [`Value`] nodes - which include *literals* and *placeholders* (SQL param usages).
@@ -10,13 +9,13 @@ use crate::{
 /// Params are tracked by name and unified against all other usages of themselves.
 impl<'ast> InferType<'ast, Value> for TypeInferencer<'ast> {
     fn infer_exit(&mut self, value: &'ast Value) -> Result<(), TypeError> {
-        let value_ty = self.unify_node_with_type(value, self.fresh_tvar())?;
+        let value_ty = self.unify_node_with_type(value, Type::from(self.fresh_tvar()))?;
 
         if let Value::Placeholder(param) = value {
             let reg = self.reg.borrow();
             // Check if we've seen this param already
             match reg.get_param(param) {
-                Some((existing_param_ty, _)) => {
+                Some(existing_param_ty) => {
                     drop(reg);
                     // Unify the node's type with the existing param type
                     self.unifier
@@ -27,9 +26,8 @@ impl<'ast> InferType<'ast, Value> for TypeInferencer<'ast> {
                     // We haven't seen the param before so set the current node's type to a fresh type variable and
                     // register the param with the same type.
                     drop(reg);
-                    let ty = self.get_type_by_tvar(value_ty);
                     let mut reg = self.reg.borrow_mut();
-                    reg.set_param(param, ty);
+                    reg.set_param(param, value_ty);
                 }
             }
         }

@@ -23,23 +23,23 @@ impl<'ast> InferType<'ast, Values> for TypeInferencer<'ast> {
 
         let column_types = &values.rows[0]
             .iter()
-            .map(|val| self.get_type_var(val))
+            .map(|val| self.get_type_of_node(val))
             .collect::<Vec<_>>();
 
         for row in values.rows.iter() {
             for (idx, val) in row.iter().enumerate() {
-                self.unify(self.get_type_var(val), column_types[idx].clone())?;
+                self.unify(self.get_type_of_node(val), column_types[idx].clone())?;
             }
         }
 
         self.unify_node_with_type(
             values,
-            self.register(Type::projection(
+            Type::projection(
                 &column_types
                     .iter()
                     .map(|ty| (ty.clone(), None))
                     .collect::<Vec<_>>(),
-            )),
+            ),
         )?;
 
         Ok(())

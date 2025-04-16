@@ -7,10 +7,10 @@ use crate::{
 };
 use sqlparser::ast::{self as ast, Statement};
 use sqltk::{Break, NodeKey, Visitable, Visitor};
-use tracing::{span, Level};
 use std::{
     cell::RefCell, collections::HashMap, marker::PhantomData, ops::ControlFlow, rc::Rc, sync::Arc,
 };
+use tracing::{span, Level};
 
 /// Validates that a SQL statement is well-typed with respect to a database schema that contains zero or more columns with
 /// EQL types.
@@ -35,15 +35,14 @@ pub fn type_check<'ast>(
     resolver: Arc<TableResolver>,
     statement: &'ast Statement,
 ) -> Result<TypedStatement<'ast>, EqlMapperError> {
-
     let mut mapper = EqlMapper::<'ast>::new_with_resolver(resolver);
     match statement.accept(&mut mapper) {
         ControlFlow::Continue(()) => {
             let build = || -> Result<TypedStatement, EqlMapperError> {
-                let projection=mapper.projection_type(statement);
-                let params=mapper.param_types();
-                let literals=mapper.literal_types();
-                let node_types=mapper.node_types();
+                let projection = mapper.projection_type(statement);
+                let params = mapper.param_types();
+                let literals = mapper.literal_types();
+                let node_types = mapper.node_types();
 
                 let span = span!(
                     Level::DEBUG,
@@ -219,12 +218,19 @@ impl<'ast> EqlMapper<'ast> {
         let literal_nodes: Vec<(EqlValue, &'ast ast::Value)> = iter
             .map(
                 |(node, ty)| -> Result<Option<(EqlValue, &'ast ast::Value)>, TypeError> {
-                    if let crate::Type::Value(crate::Value::Eql(eql_value)) =
-                        &ty.resolved(&mut self.unifier.borrow_mut())?
-                    {
-                        return Ok(Some((eql_value.clone(), node)));
+                    if let Some(ty) = ty {
+                        if let crate::Type::Value(crate::Value::Eql(eql_value)) =
+                            &ty.resolved(&mut self.unifier.borrow_mut())?
+                        {
+                            return Ok(Some((eql_value.clone(), node)));
+                        }
+                        Ok(None)
+                    } else {
+                        Err(TypeError::InternalError(format!(
+                            "could not resolve type for literal node: {}",
+                            node.to_string()
+                        )))
                     }
-                    Ok(None)
                 },
             )
             .filter_map(Result::transpose)

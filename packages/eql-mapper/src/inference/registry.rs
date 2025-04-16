@@ -1,15 +1,15 @@
-use std::{collections::HashMap, marker::PhantomData};
+use std::{collections::HashMap, marker::PhantomData, sync::Arc};
 
 use sqltk::{AsNodeKey, NodeKey, Visitable};
 
 use crate::inference::unifier::{Type, TypeVar};
 
-use super::{Sequence};
+use super::Sequence;
 
 /// `TypeRegistry` maintains an association between `sqlparser` AST nodes and the node's inferred [`Type`].
 pub struct TypeRegistry<'ast> {
     tvar_seq: Sequence<TypeVar>,
-    types: HashMap<TypeVar, Type>,
+    types: HashMap<TypeVar, Arc<Type>>,
     node_types: HashMap<NodeKey<'ast>, TypeVar>,
     param_types: HashMap<&'ast String, TypeVar>,
     _ast: PhantomData<&'ast ()>,
@@ -33,20 +33,20 @@ impl<'ast> TypeRegistry<'ast> {
         }
     }
 
-    pub(crate) fn get_nodes_and_types<N: Visitable>(&self) -> Vec<(&'ast N, Type)> {
+    pub(crate) fn get_nodes_and_types<N: Visitable>(&self) -> Vec<(&'ast N, Option<Arc<Type>>)> {
         self.node_types
             .iter()
             .filter_map(|(key, tid)| key.get_as::<N>().map(|n| (n, self.get_type_by_tvar(*tid))))
             .collect()
     }
 
-    pub(crate) fn get_type_by_tvar(&self, tvar: TypeVar) -> Type {
-        self.types[&tvar].clone()
+    pub(crate) fn get_type_by_tvar(&self, tvar: TypeVar) -> Option<Arc<Type>> {
+        self.types.get(&tvar).cloned()
     }
 
-    pub(crate) fn register(&mut self, ty: Type) -> TypeVar {
+    pub(crate) fn register(&mut self, ty: impl Into<Arc<Type>>) -> TypeVar {
         let tvar = self.fresh_tvar();
-        self.types.insert(tvar, ty);
+        self.types.insert(tvar, ty.into());
         tvar
     }
 
@@ -57,53 +57,63 @@ impl<'ast> TypeRegistry<'ast> {
     pub(crate) fn first_matching_node_with_type<N: Visitable>(
         &self,
         needle: &Type,
-    ) -> Option<(&'ast N, TypeVar, Type)> {
+    ) -> Option<(&'ast N, TypeVar, Arc<Type>)> {
         self.node_types.iter().find_map(|(key, tvar)| {
             let node = key.get_as::<N>()?;
-            let ty = self.get_type_by_tvar(*tvar);
-            if needle == &ty {
-                Some((node, *tvar, ty))
+            if let Some(ty) = self.get_type_by_tvar(*tvar) {
+                if needle == &*ty {
+                    Some((node, *tvar, ty))
+                } else {
+                    None
+                }
             } else {
                 None
             }
         })
     }
 
-    pub(crate) fn get_param(&self, param: &'ast String) -> Option<(TypeVar, Type)> {
+    pub(crate) fn get_param(&self, param: &'ast String) -> Option<Arc<Type>> {
         let tvar = *self.param_types.get(param)?;
-        let ty = self.get_type_by_tvar(tvar);
-        Some((tvar, ty))
+        self.get_type_by_tvar(tvar)
     }
 
-    pub(crate) fn set_param(&mut self, param: &'ast String, ty: Type) {
+    pub(crate) fn set_param(&mut self, param: &'ast String, ty: impl Into<Arc<Type>>) {
         let tid = self.register(ty);
         self.param_types.insert(param, tid);
     }
 
-    pub(crate) fn get_params(&self) -> HashMap<&'ast String, Type> {
+    pub(crate) fn get_params(&self) -> HashMap<&'ast String, Arc<Type>> {
         self.param_types
             .iter()
-            .map(|(param, tid)| (*param, self.get_type_by_tvar(*tid)))
+            .map(|(param, tvar)| (*param, Type::Var(*tvar).into()))
             .collect()
     }
 
-    pub(crate) fn node_types(&self) -> HashMap<NodeKey<'ast>, Type> {
+    pub(crate) fn node_types(&self) -> HashMap<NodeKey<'ast>, Arc<Type>> {
         self.node_types
             .iter()
-            .map(|(node, tvar)| (*node, self.get_type_by_tvar(*tvar)))
+            .map(|(node, tvar)| {
+                (
+                    *node,
+                    self.get_type_by_tvar(*tvar)
+                        .unwrap_or(Type::Var(*tvar).into()),
+                )
+            })
             .collect()
     }
 
-    pub(crate) fn get_node_type<N: AsNodeKey>(&self, node: &'ast N) -> Type {
+    pub(crate) fn get_node_type<N: AsNodeKey>(&self, node: &'ast N) -> Arc<Type> {
         self.types[&self.node_types[&node.as_node_key()]].clone()
     }
 
-    pub(crate) fn get_substitution(&self, tvar: TypeVar) -> Option<Type> {
+    pub(crate) fn get_substitution(&self, tvar: TypeVar) -> Option<Arc<Type>> {
         self.types.get(&tvar).cloned()
     }
 
-    pub(crate) fn substitute(&mut self, tvar: TypeVar, sub_tvar: TypeVar) {
-        self.types.insert(tvar, Type::Var(sub_tvar));
+    pub(crate) fn substitute(&mut self, tvar: TypeVar, sub_ty: impl Into<Arc<Type>>) -> Arc<Type> {
+        let sub_ty: Arc<_> = sub_ty.into();
+        self.types.insert(tvar, sub_ty.clone());
+        sub_ty
     }
 
     /// Gets (and creates, if required) the [`Type`] associated with a node. If the node does not already have an
@@ -148,7 +158,9 @@ pub(crate) mod test_util {
                     "TYPE<\nast: {}\nsyn: {}\nty: {}\n>",
                     std::any::type_name::<N>(),
                     node,
-                    self.get_type_by_tvar(*tid),
+                    self.get_type_by_tvar(*tid)
+                        .map(|ty| ty.to_string())
+                        .unwrap_or(String::from("<unresolved>")),
                 );
             };
         }

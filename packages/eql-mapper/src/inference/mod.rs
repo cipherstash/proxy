@@ -1,8 +1,8 @@
 mod infer_type;
 mod infer_type_impls;
 mod registry;
-mod type_error;
 mod sequence;
+mod type_error;
 
 pub mod unifier;
 
@@ -22,8 +22,8 @@ use sqltk::{into_control_flow, AsNodeKey, Break, NodeKey, Visitable, Visitor};
 use crate::{Param, ParamError, ScopeTracker, TableResolver};
 
 pub(crate) use registry::*;
-pub(crate) use type_error::*;
 pub(crate) use sequence::*;
+pub(crate) use type_error::*;
 
 /// [`Visitor`] implementation that performs type inference on AST nodes.
 ///
@@ -73,25 +73,17 @@ impl<'ast> TypeInferencer<'ast> {
         }
     }
 
-    pub(crate) fn register(&self, ty: Type) -> TypeVar {
-        self.unifier.borrow().register(ty)
-    }
-
     /// Shorthand for calling `self.reg.borrow_mut().get_type(node)` in [`InferType`] implementations for `TypeInferencer`.
-    pub(crate) fn get_type_var<N: AsNodeKey>(&self, node: &'ast N) -> TypeVar {
+    pub(crate) fn get_type_var_of_node<N: AsNodeKey>(&self, node: &'ast N) -> TypeVar {
         self.reg.borrow_mut().get_or_init_type(node)
     }
 
-    pub(crate) fn get_type_of_node<N: AsNodeKey>(&self, node: &'ast N) -> Type {
-        let tvar = self.get_type_var(node);
-        self.reg.borrow().get_type_by_tvar(tvar)
+    pub(crate) fn get_type_of_node<N: AsNodeKey>(&self, node: &'ast N) -> Arc<Type> {
+        let tvar = self.get_type_var_of_node(node);
+        self.reg.borrow().get_type_by_tvar(tvar).unwrap_or(Arc::new(Type::Var(tvar)))
     }
 
-    pub(crate) fn get_type_by_tvar(&self, tvar: TypeVar) -> Type {
-        self.reg.borrow().get_type_by_tvar(tvar)
-    }
-
-    pub(crate) fn param_types(&self) -> Result<Vec<(Param, Type)>, ParamError> {
+    pub(crate) fn param_types(&self) -> Result<Vec<(Param, Arc<Type>)>, ParamError> {
         let mut params = self
             .reg
             .borrow()
@@ -108,8 +100,12 @@ impl<'ast> TypeInferencer<'ast> {
     /// Tries to unify two types but does not record the result.
     /// Recording the result is up to the caller.
     #[must_use = "the result of unify must ultimately be associated with an AST node"]
-    fn unify(&self, lhs: TypeVar, rhs: TypeVar) -> Result<TypeVar, TypeError> {
-        self.unifier.borrow_mut().unify(lhs, rhs)
+    fn unify(
+        &self,
+        lhs: impl Into<Arc<Type>>,
+        rhs: impl Into<Arc<Type>>,
+    ) -> Result<Arc<Type>, TypeError> {
+        self.unifier.borrow_mut().unify(lhs.into(), rhs.into())
     }
 
     /// Unifies the types of two nodes with a third type and records the unification result.
@@ -118,11 +114,16 @@ impl<'ast> TypeInferencer<'ast> {
         &self,
         lhs: &'ast N1,
         rhs: &'ast N2,
-        tvar: TypeVar,
-    ) -> Result<TypeVar, TypeError> {
+        ty: impl Into<Arc<Type>>,
+    ) -> Result<Arc<Type>, TypeError> {
         let unifier = &mut *self.unifier.borrow_mut();
-        let unified = unifier.unify(self.get_type_var(lhs), self.get_type_var(rhs))?;
-        let unified = unifier.unify(unified, tvar)?;
+        let lhs_tvar = self.get_type_var_of_node(lhs);
+        let rhs_tvar = self.get_type_var_of_node(rhs);
+        let reg = &mut *self.reg.borrow_mut();
+        let unified = unifier.unify(self.get_type_of_node(lhs), self.get_type_of_node(rhs))?;
+        let unified = unifier.unify(unified, ty)?;
+        let unified = reg.substitute(lhs_tvar, unified);
+        let unified = reg.substitute(rhs_tvar, unified);
         Ok(unified)
     }
 
@@ -130,10 +131,14 @@ impl<'ast> TypeInferencer<'ast> {
     fn unify_node_with_type<N: AsNodeKey>(
         &self,
         node: &'ast N,
-        ty: TypeVar,
-    ) -> Result<TypeVar, TypeError> {
+        ty: impl Into<Arc<Type>>,
+    ) -> Result<Arc<Type>, TypeError> {
         let unifier = &mut *self.unifier.borrow_mut();
-        let unified = unifier.unify(self.get_type_var(node), ty)?;
+        let node_tvar = self.get_type_var_of_node(node);
+        let node_ty = self.get_type_of_node(node);
+        let reg = &mut *self.reg.borrow_mut();
+        let unified = unifier.unify(node_ty, ty)?;
+        let unified = reg.substitute(node_tvar, unified);
         Ok(unified)
     }
 
@@ -143,13 +148,15 @@ impl<'ast> TypeInferencer<'ast> {
         &self,
         lhs: &'ast N1,
         rhs: &'ast N2,
-    ) -> Result<TypeVar, TypeError> {
-        match self
-            .unifier
-            .borrow_mut()
-            .unify(self.get_type_var(lhs), self.get_type_var(rhs))
-        {
+    ) -> Result<Arc<Type>, TypeError> {
+        let unifier = &mut *self.unifier.borrow_mut();
+        let lhs_tvar = self.get_type_var_of_node(lhs);
+        let rhs_tvar = self.get_type_var_of_node(rhs);
+        let reg = &mut *self.reg.borrow_mut();
+        match unifier.unify(self.get_type_of_node(lhs), self.get_type_of_node(rhs)) {
             Ok(unified) => {
+                let unified = reg.substitute(lhs_tvar, unified);
+                let unified = reg.substitute(rhs_tvar, unified);
                 Ok(unified)
             }
             Err(err) => Err(TypeError::OnNodes(
@@ -165,11 +172,11 @@ impl<'ast> TypeInferencer<'ast> {
     fn unify_all_with_type<N: Debug + AsNodeKey>(
         &self,
         nodes: &'ast [N],
-        ty: TypeVar,
-    ) -> Result<TypeVar, TypeError> {
+        ty: impl Into<Arc<Type>>,
+    ) -> Result<Arc<Type>, TypeError> {
         let unified = nodes
             .iter()
-            .try_fold(ty, |ty, node| self.unify_node_with_type(node, ty))?;
+            .try_fold(ty.into(), |ty, node| self.unify_node_with_type(node, ty))?;
 
         Ok(unified)
     }
@@ -178,7 +185,7 @@ impl<'ast> TypeInferencer<'ast> {
         self.reg.borrow_mut().fresh_tvar()
     }
 
-    pub(crate) fn node_types(&self) -> HashMap<NodeKey<'ast>, Type> {
+    pub(crate) fn node_types(&self) -> HashMap<NodeKey<'ast>, Arc<Type>> {
         self.reg.borrow().node_types().clone()
     }
 }

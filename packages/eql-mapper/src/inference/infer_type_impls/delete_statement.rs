@@ -16,8 +16,7 @@ impl<'ast> InferType<'ast, Delete> for TypeInferencer<'ast> {
             }
 
             None => {
-                let tvar = self.reg.borrow_mut().register(Type::empty_projection());
-                self.unify_node_with_type(delete, tvar)?;
+                self.unify_node_with_type(delete, Type::empty_projection())?;
             }
         }
 

@@ -44,15 +44,13 @@ impl<'ast> Importer<'ast> {
             .table_resolver
             .resolve_table(table_name.0.last().unwrap())?;
 
-        let mut reg = self.reg.borrow_mut();
-
-        let cols = ProjectionColumns::new_from_schema_table(table.clone(), &mut reg);
+        let cols = ProjectionColumns::new_from_schema_table(table.clone());
 
         self.scope_tracker.borrow_mut().add_relation(Relation {
             name: table_alias.clone(),
-            projection_type: reg.register(Type::Constructor(Constructor::Projection(
+            projection_type: Type::Constructor(Constructor::Projection(
                 Projection::WithColumns(cols),
-            ))),
+            )).into(),
         })?;
 
         Ok(())
@@ -72,12 +70,11 @@ impl<'ast> Importer<'ast> {
             return Err(ImportError::NoColumnsInCte(cte.to_string()));
         }
 
-        let mut reg = self.reg.borrow_mut();
-        let projection_type = reg.get_or_init_type(&**query).clone();
+        let reg = self.reg.borrow_mut();
 
         self.scope_tracker.borrow_mut().add_relation(Relation {
             name: Some(alias.clone()),
-            projection_type,
+            projection_type: reg.get_node_type(query),
         })?;
 
         Ok(())
@@ -107,14 +104,13 @@ impl<'ast> Importer<'ast> {
 
                     let cols = ProjectionColumns::new_from_schema_table(
                         table.clone(),
-                        &mut self.reg.borrow_mut(),
                     );
 
                     scope_tracker.add_relation(Relation {
                         name: record_as.cloned().ok(),
-                        projection_type: self.reg.borrow_mut().register(Type::Constructor(
+                        projection_type: Type::Constructor(
                             Constructor::Projection(Projection::WithColumns(cols)),
-                        )),
+                        ).into(),
                     })?;
                 }
             }
@@ -152,9 +148,7 @@ impl<'ast> Importer<'ast> {
             } => {
                 let projection_type = self
                     .reg
-                    .borrow_mut()
-                    .get_or_init_type(&*subquery.body)
-                    .clone();
+                    .borrow().get_node_type(&*subquery.body);
 
                 self.scope_tracker.borrow_mut().add_relation(Relation {
                     name: alias.clone().map(|a| a.name.clone()),

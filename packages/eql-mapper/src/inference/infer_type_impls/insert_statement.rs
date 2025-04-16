@@ -1,7 +1,9 @@
+use std::sync::Arc;
+
 use crate::{
     inference::{
         type_error::TypeError,
-        unifier::{Constructor, Type, TypeVar},
+        unifier::{Constructor, Type},
         InferType,
     },
     unifier::{EqlValue, NativeValue, Value},
@@ -51,7 +53,7 @@ impl<'ast> InferType<'ast, Insert> for TypeInferencer<'ast> {
                     };
 
                     (
-                        self.register(Type::Constructor(Constructor::Value(value_ty))),
+                        Arc::new(Type::Constructor(Constructor::Value(value_ty))),
                         Some(tc.column.clone()),
                     )
                 })
@@ -59,8 +61,7 @@ impl<'ast> InferType<'ast, Insert> for TypeInferencer<'ast> {
         );
 
         if let Some(source) = source {
-            let tvar = self.reg.borrow_mut().register(target_columns);
-            self.unify_node_with_type(&**source, tvar)?;
+            self.unify_node_with_type(&**source, target_columns)?;
         }
 
         Ok(())
@@ -75,7 +76,7 @@ impl<'ast> InferType<'ast, Insert> for TypeInferencer<'ast> {
             }
 
             None => {
-                self.unify_node_with_type(insert, self.register(Type::empty_projection()))?;
+                self.unify_node_with_type(insert, Type::empty_projection())?;
             }
         }
 

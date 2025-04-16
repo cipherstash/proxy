@@ -8,11 +8,6 @@ pub(crate) struct Sequence<T> {
     _marker: PhantomData<T>,
 }
 
-pub(crate) struct SequenceVal<T> {
-    pub(crate) value: u32,
-    _marker: PhantomData<T>,
-}
-
 impl<T> Sequence<T> {
     pub(crate) fn new() -> Self {
         Self { next_value: 0, _marker: PhantomData }

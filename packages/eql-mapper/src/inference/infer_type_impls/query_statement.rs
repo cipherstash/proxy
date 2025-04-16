@@ -43,16 +43,16 @@ impl<'ast> TypeInferencer<'ast> {
         let ty = self.get_type_of_node(query);
         if let Type::Constructor(Constructor::Projection(Projection::WithColumns(
             ProjectionColumns(cols),
-        ))) = ty
+        ))) = &*ty
         {
             for col in cols {
                 if let Type::Var(tvar) = &*col.ty {
-                    if let Some((_, tvar, _)) = self
+                    if self
                         .reg
                         .borrow()
-                        .first_matching_node_with_type::<Value>(&Type::Var(*tvar))
+                        .first_matching_node_with_type::<Value>(&Type::Var(*tvar)).is_some()
                     {
-                        self.unify(tvar, self.register(Type::any_native()))?;
+                        self.unify(col.ty.clone(), Type::any_native())?;
                     }
                 }
             }

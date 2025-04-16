@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::{collections::HashSet, sync::Arc};
 
 use crate::{unifier::Type, SchemaError, ScopeError};
 
@@ -38,7 +38,7 @@ pub enum TypeError {
     SchemaError(#[from] SchemaError),
 
     #[error("Cannot unify node types for nodes:\n 1. node: {} type: {}\n 2. node: {} type: {}\n error: {}", _1, _2, _3, _4, _0)]
-    OnNodes(Box<TypeError>, String, Type, String, Type),
+    OnNodes(Box<TypeError>, String, Arc<Type>, String, Arc<Type>),
 
     #[error(
         "Cannot unify node with type:\n node: {}\n type: {} error: {}",

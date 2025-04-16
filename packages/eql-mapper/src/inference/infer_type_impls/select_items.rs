@@ -11,7 +11,7 @@ impl<'ast> InferType<'ast, Vec<SelectItem>> for TypeInferencer<'ast> {
         let projection_columns: Vec<ProjectionColumn> = select_items
             .iter()
             .map(|select_item| {
-                let ty = self.get_type_var(select_item);
+                let ty = self.get_type_of_node(select_item);
                 match select_item {
                     SelectItem::UnnamedExpr(Expr::Identifier(ident)) => {
                         Ok(ProjectionColumn::new(ty, Some(ident.clone())))
@@ -74,9 +74,9 @@ impl<'ast> InferType<'ast, Vec<SelectItem>> for TypeInferencer<'ast> {
 
         self.unify_node_with_type(
             select_items,
-            self.register(Type::Constructor(Constructor::Projection(Projection::new(
+            Type::Constructor(Constructor::Projection(Projection::new(
                 projection_columns,
-            )))),
+            ))),
         )?;
 
         Ok(())

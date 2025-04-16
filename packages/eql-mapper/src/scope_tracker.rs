@@ -4,13 +4,14 @@ use crate::inference::TypeError;
 use crate::iterator_ext::IteratorExt;
 use crate::model::SqlIdent;
 use crate::unifier::{Projection, ProjectionColumns};
-use crate::{Relation, TypeRegistry, TypeVar};
+use crate::{Relation, TypeRegistry};
 use sqlparser::ast::{Ident, ObjectName, Query, Statement};
 use sqltk::{into_control_flow, Break, Visitable, Visitor};
 use std::cell::RefCell;
 use std::fmt::Debug;
 use std::ops::ControlFlow;
 use std::rc::Rc;
+use std::sync::Arc;
 
 /// [`Visitor`] implementation that manages creation of lexical [`Scope`]s and the current active lexical scope.
 pub struct ScopeTracker<'ast> {
@@ -32,20 +33,23 @@ impl<'ast> ScopeTracker<'ast> {
 
     /// Resolves an unqualified wildcard. Resolution occurs in the current scope only  (i.e. does not look into parent
     /// scopes).
-    pub(crate) fn resolve_wildcard(&self) -> Result<TypeVar, ScopeError> {
+    pub(crate) fn resolve_wildcard(&self) -> Result<Arc<Type>, ScopeError> {
         self.current_scope()?.borrow().resolve_wildcard()
     }
 
     /// Resolves a qualified wildcard. Resolution occurs in the current scope only (i.e. does not look into parent
     /// scopes).
-    pub(crate) fn resolve_qualified_wildcard(&self, idents: &[Ident]) -> Result<TypeVar, ScopeError> {
+    pub(crate) fn resolve_qualified_wildcard(
+        &self,
+        idents: &[Ident],
+    ) -> Result<Arc<Type>, ScopeError> {
         self.current_scope()?
             .borrow()
             .resolve_qualified_wildcard(idents)
     }
 
     /// Uniquely resolves an identifier against all relations that are in scope.
-    pub(crate) fn resolve_ident(&self, ident: &Ident) -> Result<TypeVar, ScopeError> {
+    pub(crate) fn resolve_ident(&self, ident: &Ident) -> Result<Arc<Type>, ScopeError> {
         self.current_scope()?.borrow().resolve_ident(ident)
     }
 
@@ -53,7 +57,7 @@ impl<'ast> ScopeTracker<'ast> {
     ///
     /// Note that currently only compound identifier of length 2 are supported
     /// and resolution will fail if the identifier has more than two parts.
-    pub(crate) fn resolve_compound_ident(&self, idents: &[Ident]) -> Result<TypeVar, ScopeError> {
+    pub(crate) fn resolve_compound_ident(&self, idents: &[Ident]) -> Result<Arc<Type>, ScopeError> {
         self.current_scope()?
             .borrow()
             .resolve_compound_ident(idents)
@@ -102,7 +106,7 @@ impl<'ast> Scope<'ast> {
         }))
     }
 
-    pub(crate) fn resolve_wildcard(&self) -> Result<TypeVar, ScopeError> {
+    pub(crate) fn resolve_wildcard(&self) -> Result<Arc<Type>, ScopeError> {
         if self.relations.is_empty() {
             match &self.parent {
                 Some(parent) => parent.borrow().resolve_wildcard(),
@@ -112,19 +116,17 @@ impl<'ast> Scope<'ast> {
             let columns: Vec<ProjectionColumn> = self
                 .relations
                 .iter()
-                .map(|r| ProjectionColumn::new(r.projection_type, None))
+                .map(|r| ProjectionColumn::new(r.projection_type.clone(), None))
                 .collect();
 
-            Ok(self
-                .registry
-                .borrow_mut()
-                .register(Type::Constructor(Constructor::Projection(Projection::new(
-                    columns,
-                )))))
+            Ok(Type::Constructor(Constructor::Projection(Projection::new(columns))).into())
         }
     }
 
-    pub(crate) fn resolve_qualified_wildcard(&self, idents: &[Ident]) -> Result<TypeVar, ScopeError> {
+    pub(crate) fn resolve_qualified_wildcard(
+        &self,
+        idents: &[Ident],
+    ) -> Result<Arc<Type>, ScopeError> {
         if idents.len() > 1 {
             return Err(ScopeError::UnsupportedCompoundIdentifierLength(
                 idents
@@ -152,7 +154,7 @@ impl<'ast> Scope<'ast> {
         }
     }
 
-    pub(crate) fn resolve_ident(&self, ident: &Ident) -> Result<TypeVar, ScopeError> {
+    pub(crate) fn resolve_ident(&self, ident: &Ident) -> Result<Arc<Type>, ScopeError> {
         if self.relations.is_empty() {
             match &self.parent {
                 Some(parent) => parent.borrow().resolve_ident(ident),
@@ -194,7 +196,7 @@ impl<'ast> Scope<'ast> {
         }
     }
 
-    pub(crate) fn resolve_compound_ident(&self, idents: &[Ident]) -> Result<TypeVar, ScopeError> {
+    pub(crate) fn resolve_compound_ident(&self, idents: &[Ident]) -> Result<Arc<Type>, ScopeError> {
         if idents.len() != 2 {
             return Err(ScopeError::InvariantFailed(
                 "Unsupported compound identifier length (max = 2)".to_string(),
@@ -261,8 +263,8 @@ impl<'ast> Scope<'ast> {
         }
     }
 
-    fn try_match_projection(&self, tvar: TypeVar) -> Result<ProjectionColumns, TypeError> {
-        match self.registry.borrow().get_type_by_tvar(tvar) {
+    fn try_match_projection(&self, ty: Arc<Type>) -> Result<ProjectionColumns, TypeError> {
+        match &*ty {
             Type::Constructor(Constructor::Projection(projection)) => Ok(ProjectionColumns(
                 Vec::from_iter(projection.columns().iter().cloned()),
             )),

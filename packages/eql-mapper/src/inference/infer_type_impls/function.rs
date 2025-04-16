@@ -35,7 +35,7 @@ impl<'ast> InferType<'ast, Function> for TypeInferencer<'ast> {
                     // call to min/max.
                     self.unify_node_with_type(
                         &**query,
-                        self.register(Type::projection(&[(self.get_type_var(function), None)])),
+                        Type::projection(&[(self.get_type_of_node(function), None)]),
                     )?;
                 }
 
@@ -75,7 +75,7 @@ impl<'ast> InferType<'ast, Function> for TypeInferencer<'ast> {
         } else {
             // All other functions: resolve to native
             // EQL values will be rejected in function calls
-            self.unify_node_with_type(function, self.register(Type::any_native()))?;
+            self.unify_node_with_type(function, Type::any_native())?;
 
             match args {
                 // Function called without any arguments.
@@ -87,12 +87,12 @@ impl<'ast> InferType<'ast, Function> for TypeInferencer<'ast> {
                     // The query must return a single column projection which has the same type as the result of the function
                     self.unify_node_with_type(
                         &**query,
-                        self.register(Type::projection(&[(self.get_type_var(function), None)])),
+                        Type::projection(&[(self.get_type_of_node(function), None)]),
                     )?;
                 }
 
                 FunctionArguments::List(args_list) => {
-                    self.unify_node_with_type(function, self.register(Type::any_native()))?;
+                    self.unify_node_with_type(function, Type::any_native())?;
 
                     for arg in &args_list.args {
                         match arg {
@@ -101,7 +101,7 @@ impl<'ast> InferType<'ast, Function> for TypeInferencer<'ast> {
                                 FunctionArgExpr::Expr(expr) => {
                                     self.unify_node_with_type(
                                         expr,
-                                        self.register(Type::any_native()),
+                                        Type::any_native(),
                                     )?;
                                 }
                                 // Aggregate functions like COUNT(table.*)
