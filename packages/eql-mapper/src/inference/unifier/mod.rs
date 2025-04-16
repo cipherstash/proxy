@@ -41,6 +41,10 @@ impl<'ast> Unifier<'ast> {
         self.registry.borrow().exists_node_with_type::<N>(ty)
     }
 
+    pub(crate) fn substitute(&mut self, tvar: TypeVar, sub_ty: impl Into<Arc<Type>>) -> Arc<Type> {
+        self.registry.borrow_mut().substitute(tvar, sub_ty)
+    }
+
     /// Unifies two [`Type`]s or fails with a [`TypeError`].
     ///
     /// "Type Unification" is a fancy term for finding a set of type variable substitutions for multiple types

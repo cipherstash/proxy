@@ -119,11 +119,10 @@ impl<'ast> TypeInferencer<'ast> {
         let unifier = &mut *self.unifier.borrow_mut();
         let lhs_tvar = self.get_type_var_of_node(lhs);
         let rhs_tvar = self.get_type_var_of_node(rhs);
-        let reg = &mut *self.reg.borrow_mut();
         let unified = unifier.unify(self.get_type_of_node(lhs), self.get_type_of_node(rhs))?;
         let unified = unifier.unify(unified, ty)?;
-        let unified = reg.substitute(lhs_tvar, unified);
-        let unified = reg.substitute(rhs_tvar, unified);
+        let unified = unifier.substitute(lhs_tvar, unified);
+        let unified = unifier.substitute(rhs_tvar, unified);
         Ok(unified)
     }
 
@@ -136,9 +135,8 @@ impl<'ast> TypeInferencer<'ast> {
         let unifier = &mut *self.unifier.borrow_mut();
         let node_tvar = self.get_type_var_of_node(node);
         let node_ty = self.get_type_of_node(node);
-        let reg = &mut *self.reg.borrow_mut();
         let unified = unifier.unify(node_ty, ty)?;
-        let unified = reg.substitute(node_tvar, unified);
+        let unified = unifier.substitute(node_tvar, unified);
         Ok(unified)
     }
 
@@ -152,11 +150,10 @@ impl<'ast> TypeInferencer<'ast> {
         let unifier = &mut *self.unifier.borrow_mut();
         let lhs_tvar = self.get_type_var_of_node(lhs);
         let rhs_tvar = self.get_type_var_of_node(rhs);
-        let reg = &mut *self.reg.borrow_mut();
         match unifier.unify(self.get_type_of_node(lhs), self.get_type_of_node(rhs)) {
             Ok(unified) => {
-                let unified = reg.substitute(lhs_tvar, unified);
-                let unified = reg.substitute(rhs_tvar, unified);
+                let unified = unifier.substitute(lhs_tvar, unified);
+                let unified = unifier.substitute(rhs_tvar, unified);
                 Ok(unified)
             }
             Err(err) => Err(TypeError::OnNodes(
