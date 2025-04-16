@@ -156,9 +156,9 @@ pub enum Value {
     #[display("EQL({_0})")]
     Eql(EqlValue),
 
-    /// A native database type that carries its table & column name.  `Native` & `AnonymousNative` are will successfully
-    /// unify with each other - they are the same type as far as the type system is concerned. `Native` just carries more
-    /// information which makes testing & debugging easier.
+    /// A native database type that carries its table & column name.  `NativeValue(None)` & `NativeValue(Some(_))` are
+    /// will successfully unify with each other - they are the same type as far as the type system is concerned.
+    /// `NativeValue(Some(_))` just carries more information which makes testing & debugging easier.
     #[display("Native")]
     Native(NativeValue),
 
@@ -202,7 +202,7 @@ impl Type {
         Type::Constructor(Constructor::Projection(Projection::Empty))
     }
 
-    /// Creates an `Type` containing a `Constructor::Scalar(Scalar::Native(None))`.
+    /// Creates an `Type` containing a `Constructor::Scalar(Scalar::Native(NativeValue(None)))`.
     pub(crate) fn any_native() -> Type {
         Type::Constructor(Constructor::Value(Value::Native(NativeValue(None))))
     }

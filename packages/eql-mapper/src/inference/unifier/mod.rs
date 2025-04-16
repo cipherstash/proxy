@@ -111,7 +111,7 @@ impl<'ast> Unifier<'ast> {
                 let projection = projection.flatten(self);
                 let len = projection.len();
                 if len == 1 {
-                    self.unify_value_type_with_type(lhs_tid, projection[0].tid)
+                    self.unify_value_type_with_one_col_projection(lhs_tid, projection[0].tid)
                 } else {
                     Err(TypeError::Conflict(
                         "cannot unify value type with projection of more than one column"
@@ -124,7 +124,7 @@ impl<'ast> Unifier<'ast> {
                 let projection = projection.flatten(self);
                 let len = projection.len();
                 if len == 1 {
-                    self.unify_value_type_with_type(rhs_tid, projection[0].tid)
+                    self.unify_value_type_with_one_col_projection(rhs_tid, projection[0].tid)
                 } else {
                     Err(TypeError::Conflict(
                         "cannot unify value type with projection of more than one column"
@@ -133,9 +133,18 @@ impl<'ast> Unifier<'ast> {
                 }
             }
 
-            (Type::Constructor(Value(Native(_))), Type::Constructor(Value(Native(_)))) => {
-                Ok(lhs_tid)
-            }
+            // All native types are considered equal in the type system.  However, for improved test readability the
+            // unifier favours a `NativeValue(Some(_))` over a `NativeValue(None)` because `NativeValue(Some(_))`
+            // carries more information. In a tie, the left hand side wins.
+            (
+                Type::Constructor(Value(Native(native_lhs))),
+                Type::Constructor(Value(Native(native_rhs))),
+            ) => match (native_lhs, native_rhs) {
+                (NativeValue(Some(_)), NativeValue(Some(_))) => Ok(lhs_tid),
+                (NativeValue(Some(_)), NativeValue(None)) => Ok(lhs_tid),
+                (NativeValue(None), NativeValue(Some(_))) => Ok(rhs_tid),
+                _ => Ok(lhs_tid),
+            },
 
             (Type::Constructor(Value(Eql(_))), Type::Constructor(Value(Eql(_)))) => {
                 if lhs == rhs {
@@ -231,7 +240,11 @@ impl<'ast> Unifier<'ast> {
         }
     }
 
-    fn unify_value_type_with_type(&mut self, value: TID, ty: TID) -> Result<TID, TypeError> {
+    fn unify_value_type_with_one_col_projection(
+        &mut self,
+        value: TID,
+        ty: TID,
+    ) -> Result<TID, TypeError> {
         let value_ty = self.registry.borrow().get_type_by_tid(value);
         let ty_ty = self.registry.borrow().get_type_by_tid(ty);
         match (&value_ty, &ty_ty) {
@@ -240,20 +253,22 @@ impl<'ast> Unifier<'ast> {
                 Type::Constructor(Constructor::Value(Value::Eql(rhs))),
             ) if lhs == rhs => Ok(value),
             (
-                Type::Constructor(Constructor::Value(Value::Native(_))),
-                Type::Constructor(Constructor::Value(Value::Native(_))),
-            ) => Ok(value),
+                Type::Constructor(Constructor::Value(Value::Native(lhs))),
+                Type::Constructor(Constructor::Value(Value::Native(rhs))),
+            ) => match (lhs, rhs) {
+                (NativeValue(Some(_)), NativeValue(Some(_))) => Ok(value),
+                (NativeValue(Some(_)), NativeValue(None)) => Ok(value),
+                (NativeValue(None), NativeValue(Some(_))) => Ok(ty),
+                _ => Ok(value),
+            },
             (
                 Type::Constructor(Constructor::Value(Value::Array(lhs))),
                 Type::Constructor(Constructor::Value(Value::Array(rhs))),
             ) => {
                 let unified_element_tid = self.unify(*lhs, *rhs)?;
-                let unified_array_tid =
-                    self.registry
-                        .borrow_mut()
-                        .register(Type::Constructor(Constructor::Value(Value::Array(
-                            unified_element_tid,
-                        ))));
+                let unified_array_tid = self.register(Type::Constructor(Constructor::Value(
+                    Value::Array(unified_element_tid),
+                )));
                 Ok(unified_array_tid)
             }
             (Type::Constructor(Constructor::Value(Value::Eql(_))), Type::Var(tvar)) => {

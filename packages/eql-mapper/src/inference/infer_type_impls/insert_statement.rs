@@ -59,7 +59,8 @@ impl<'ast> InferType<'ast, Insert> for TypeInferencer<'ast> {
         );
 
         if let Some(source) = source {
-            self.unify_node_with_type(&**source, self.reg.borrow_mut().register(target_columns))?;
+            let tid = self.reg.borrow_mut().register(target_columns);
+            self.unify_node_with_type(&**source, tid)?;
         }
 
         Ok(())
