@@ -80,6 +80,10 @@ impl<'ast> TypeRegistry<'ast> {
         self.node_types.get(&node.as_node_key()).cloned().unwrap()
     }
 
+    pub(crate) fn set_node_tid<N: AsNodeKey>(&mut self, node: &'ast N, tid: TID) {
+        self.node_types.insert(node.as_node_key(), tid);
+    }
+
     pub(crate) fn register(&mut self, ty: Type) -> TID {
         let tid = TID::from(self.tid_seq.next_value());
         self.types.insert(tid, ty);

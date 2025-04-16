@@ -63,15 +63,17 @@ impl<'ast> Unifier<'ast> {
         use types::Constructor::*;
         use types::Value::*;
 
-        let span = span!(
+        let span_begin = span!(
             Level::DEBUG,
             "unify",
             depth = self.depth,
-            // lhs = lhs,
-            // rhs = rhs,
+            lhs = lhs_tid.to_string(),
+            rhs = rhs_tid.to_string(),
+            lhs = ?self.lookup(lhs_tid),
+            rhs = ?self.lookup(rhs_tid),
         );
 
-        let _guard = span.enter();
+        let _guard = span_begin.enter();
 
         self.depth += 1;
 
@@ -176,7 +178,32 @@ impl<'ast> Unifier<'ast> {
 
         self.depth -= 1;
 
-        unification
+        match unification {
+            Ok(tid) => {
+                let span_end = span!(
+                    parent: &span_begin,
+                    Level::DEBUG,
+                    "Ok",
+                    unification = ?self.lookup(tid),
+                );
+
+                let _guard = span_end.enter();
+
+                Ok(tid)
+            }
+            Err(err) => {
+                let span_end = span!(
+                    parent: &span_begin,
+                    Level::DEBUG,
+                    "Err",
+                    unification = ?&err
+                );
+
+                let _guard = span_end.enter();
+
+                Err(err)
+            }
+        }
     }
 
     /// Unifies a type with a type variable.

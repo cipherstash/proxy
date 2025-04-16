@@ -7,6 +7,7 @@ use crate::{
 };
 use sqlparser::ast::{self as ast, Statement};
 use sqltk::{Break, NodeKey, Visitable, Visitor};
+use tracing::{span, Level};
 use std::{
     cell::RefCell, collections::HashMap, marker::PhantomData, ops::ControlFlow, rc::Rc, sync::Arc,
 };
@@ -34,24 +35,44 @@ pub fn type_check<'ast>(
     resolver: Arc<TableResolver>,
     statement: &'ast Statement,
 ) -> Result<TypedStatement<'ast>, EqlMapperError> {
+
     let mut mapper = EqlMapper::<'ast>::new_with_resolver(resolver);
     match statement.accept(&mut mapper) {
         ControlFlow::Continue(()) => {
             let build = || -> Result<TypedStatement, EqlMapperError> {
+                let projection=mapper.projection_type(statement);
+                let params=mapper.param_types();
+                let literals=mapper.literal_types();
+                let node_types=mapper.node_types();
+
+                let span = span!(
+                    Level::DEBUG,
+                    "type_check",
+                    projection = ?projection,
+                    params = ?params,
+                    literals = ?literals,
+                    node_types = ?node_types
+                );
+
+                let _guard = span.enter();
+
                 Ok(TypedStatement {
                     statement,
-                    projection: mapper.projection_type(statement)?,
-                    params: mapper.param_types()?,
-                    literals: mapper.literal_types()?,
-                    node_types: Arc::new(mapper.node_types()?),
+                    projection: projection?,
+                    params: params?,
+                    literals: literals?,
+                    node_types: Arc::new(node_types?),
                 })
             };
 
             build().map_err(|err| {
-                #[cfg(test)]
-                {
-                    mapper.inferencer.borrow().dump_registry(statement);
-                }
+                let span = span!(
+                    Level::ERROR,
+                    "type_check",
+                    err = ?err
+                );
+
+                let _guard = span.enter();
 
                 err
             })

@@ -355,7 +355,8 @@ mod test {
 
     #[test]
     fn select_columns_from_subquery() {
-        let _ = tracing_subscriber::fmt::try_init();
+        init_tracing();
+
         let schema = resolver(schema! {
             tables: {
                 users: {

@@ -108,22 +108,24 @@ impl<'ast> TypeInferencer<'ast> {
     /// Tries to unify two types but does not record the result.
     /// Recording the result is up to the caller.
     #[must_use = "the result of unify must ultimately be associated with an AST node"]
-    fn unify(&self, left: TID, right: TID) -> Result<TID, TypeError> {
-        self.unifier.borrow_mut().unify(left, right)
+    fn unify(&self, lhs: TID, rhs: TID) -> Result<TID, TypeError> {
+        self.unifier.borrow_mut().unify(lhs, rhs)
     }
 
     /// Unifies the types of two nodes with a third type and records the unification result.
     /// After a successful unification both nodes will refer to the same type.
     fn unify_nodes_with_type<N1: AsNodeKey, N2: AsNodeKey>(
         &self,
-        left: &'ast N1,
-        right: &'ast N2,
-        ty: TID,
+        lhs: &'ast N1,
+        rhs: &'ast N2,
+        tid: TID,
     ) -> Result<TID, TypeError> {
         let unifier = &mut *self.unifier.borrow_mut();
-        let ty0 = unifier.unify(self.get_type_id(left), self.get_type_id(right))?;
-        let ty1 = unifier.unify(ty0, ty)?;
-        Ok(ty1)
+        let unified = unifier.unify(self.get_type_id(lhs), self.get_type_id(rhs))?;
+        let unified = unifier.unify(unified, tid)?;
+        self.reg.borrow_mut().set_node_tid(lhs, unified);
+        self.reg.borrow_mut().set_node_tid(rhs, unified);
+        Ok(unified)
     }
 
     /// Unifies the type of a node with a second type and records the unification result.
@@ -133,28 +135,34 @@ impl<'ast> TypeInferencer<'ast> {
         ty: TID,
     ) -> Result<TID, TypeError> {
         let unifier = &mut *self.unifier.borrow_mut();
-        unifier.unify(self.get_type_id(node), ty)
+        let unified = unifier.unify(self.get_type_id(node), ty)?;
+        self.reg.borrow_mut().set_node_tid(node, unified);
+        Ok(unified)
     }
 
     /// Unifies the types of two nodes with each other.
     /// After a successful unification both nodes will refer to the same type.
     fn unify_nodes<N1: AsNodeKey + Debug, N2: AsNodeKey + Debug>(
         &self,
-        left: &'ast N1,
-        right: &'ast N2,
+        lhs: &'ast N1,
+        rhs: &'ast N2,
     ) -> Result<TID, TypeError> {
         match self
             .unifier
             .borrow_mut()
-            .unify(self.get_type_id(left), self.get_type_id(right))
+            .unify(self.get_type_id(lhs), self.get_type_id(rhs))
         {
-            Ok(ty) => Ok(ty),
+            Ok(unified) => {
+                self.reg.borrow_mut().set_node_tid(lhs, unified);
+                self.reg.borrow_mut().set_node_tid(rhs, unified);
+                Ok(unified)
+            }
             Err(err) => Err(TypeError::OnNodes(
                 Box::new(err),
-                format!("{:?}", left),
-                self.get_type_of_node(left),
-                format!("{:?}", right),
-                self.get_type_of_node(right),
+                format!("{:?}", lhs),
+                self.get_type_of_node(lhs),
+                format!("{:?}", rhs),
+                self.get_type_of_node(rhs),
             )),
         }
     }
@@ -164,9 +172,15 @@ impl<'ast> TypeInferencer<'ast> {
         nodes: &'ast [N],
         ty: TID,
     ) -> Result<TID, TypeError> {
-        nodes
+        let unified = nodes
             .iter()
-            .try_fold(ty, |ty, node| self.unify_node_with_type(node, ty))
+            .try_fold(ty, |ty, node| self.unify_node_with_type(node, ty))?;
+
+        for node in nodes {
+            self.reg.borrow_mut().set_node_tid(node, unified);
+        }
+
+        Ok(unified)
     }
 
     pub(crate) fn fresh_tvar(&self) -> TID {
