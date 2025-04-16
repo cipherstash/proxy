@@ -9,7 +9,7 @@ pub(crate) use types::*;
 
 pub use types::{EqlValue, NativeValue, TableColumn};
 
-use super::{TypeRegistry, TID};
+use super::{TypeRegistry};
 use tracing::{span, Level};
 
 /// Implements the type unification algorithm and maintains an association of type variables with the type that they
@@ -28,22 +28,18 @@ impl<'ast> Unifier<'ast> {
         }
     }
 
-    /// Registers a [`Type`] and returns its [`TID`].
-    pub(crate) fn register(&self, ty: Type) -> TID {
+    /// Registers a [`Type`] and returns its [`TypeVar`].
+    pub(crate) fn register(&self, ty: Type) -> TypeVar {
         self.registry.borrow_mut().register(ty)
     }
 
-    /// Looks up a previously registered [`Type`] by its [`TID`].
-    pub(crate) fn lookup(&self, tid: TID) -> Type {
-        self.registry.borrow().get_type_by_tid(tid)
+    /// Looks up a previously registered [`Type`] by its [`TypeVar`].
+    pub(crate) fn lookup(&self, tvar: TypeVar) -> Type {
+        self.registry.borrow().get_type_by_tvar(tvar)
     }
 
-    pub(crate) fn lookup_node_tid<N: Visitable>(&self, node: &'ast N) -> TID {
-        self.registry.borrow().get_node_tid(node)
-    }
-
-    pub(crate) fn lookup_substitution(&self, tvar: TypeVar) -> Option<TID> {
-        self.registry.borrow().get_substitution(tvar)
+    pub(crate) fn lookup_type_by_node<N: Visitable>(&self, node: &'ast N) -> Type {
+        self.registry.borrow().get_node_type(node)
     }
 
     pub(crate) fn exists_node_with_type<N: Visitable>(&self, ty: &Type) -> bool {
@@ -59,7 +55,7 @@ impl<'ast> Unifier<'ast> {
     /// dangling type variables).
     ///
     /// Returns `Ok(ty)` if successful, or `Err(TypeError)` on failure.
-    pub(crate) fn unify(&mut self, lhs_tid: TID, rhs_tid: TID) -> Result<TID, TypeError> {
+    pub(crate) fn unify(&mut self, lhs_tvar: TypeVar, rhs_tvar: TypeVar) -> Result<TypeVar, TypeError> {
         use types::Constructor::*;
         use types::Value::*;
 
@@ -67,10 +63,10 @@ impl<'ast> Unifier<'ast> {
             Level::DEBUG,
             "unify",
             depth = self.depth,
-            lhs = lhs_tid.to_string(),
-            rhs = rhs_tid.to_string(),
-            lhs = ?self.lookup(lhs_tid),
-            rhs = ?self.lookup(rhs_tid),
+            lhs = lhs_tvar.to_string(),
+            rhs = rhs_tvar.to_string(),
+            lhs = ?self.lookup(lhs_tvar),
+            rhs = ?self.lookup(rhs_tvar),
         );
 
         let _guard = span_begin.enter();
@@ -78,13 +74,13 @@ impl<'ast> Unifier<'ast> {
         self.depth += 1;
 
         // Short-circuit the unification when lhs & rhs are equal.
-        if lhs_tid == rhs_tid {
-            return Ok(lhs_tid);
+        if lhs_tvar == rhs_tvar {
+            return Ok(lhs_tvar);
         }
 
         let (lhs, rhs) = {
             let reg = self.registry.borrow();
-            (reg.get_type_by_tid(lhs_tid), reg.get_type_by_tid(rhs_tid))
+            (self.lookup(lhs_tvar), self.lookup(rhs_tvar))
         };
 
         let unification = match (&lhs, &rhs) {
@@ -96,16 +92,16 @@ impl<'ast> Unifier<'ast> {
 
             // Two arrays unify if the types of their element types unify.
             (
-                Type::Constructor(Value(Array(lhs_element_tid))),
-                Type::Constructor(Value(Array(rhs_element_tid))),
+                Type::Constructor(Value(Array(lhs_element_ty))),
+                Type::Constructor(Value(Array(rhs_element_ty))),
             ) => {
-                let unified_element_tid = self.unify(*lhs_element_tid, *rhs_element_tid)?;
-                let unified_array_tid = self
+                let unified_element_ty = self.unify(*lhs_element_ty, *rhs_element_ty)?;
+                let unified_array_ty = self
                     .registry
                     .borrow_mut()
-                    .register(Type::Constructor(Value(Array(unified_element_tid))));
+                    .register(Type::Constructor(Value(Array(unified_element_ty))));
 
-                Ok(unified_array_tid)
+                Ok(unified_array_ty)
             }
 
             // A Value can unify with a single column projection
@@ -113,7 +109,7 @@ impl<'ast> Unifier<'ast> {
                 let projection = projection.flatten(self);
                 let len = projection.len();
                 if len == 1 {
-                    self.unify_value_type_with_one_col_projection(lhs_tid, projection[0].tid)
+                    self.unify_value_type_with_one_col_projection(lhs_tvar, projection[0].ty)
                 } else {
                     Err(TypeError::Conflict(
                         "cannot unify value type with projection of more than one column"
@@ -126,7 +122,7 @@ impl<'ast> Unifier<'ast> {
                 let projection = projection.flatten(self);
                 let len = projection.len();
                 if len == 1 {
-                    self.unify_value_type_with_one_col_projection(rhs_tid, projection[0].tid)
+                    self.unify_value_type_with_one_col_projection(rhs_tvar, projection[0].ty)
                 } else {
                     Err(TypeError::Conflict(
                         "cannot unify value type with projection of more than one column"
@@ -142,15 +138,15 @@ impl<'ast> Unifier<'ast> {
                 Type::Constructor(Value(Native(native_lhs))),
                 Type::Constructor(Value(Native(native_rhs))),
             ) => match (native_lhs, native_rhs) {
-                (NativeValue(Some(_)), NativeValue(Some(_))) => Ok(lhs_tid),
-                (NativeValue(Some(_)), NativeValue(None)) => Ok(lhs_tid),
-                (NativeValue(None), NativeValue(Some(_))) => Ok(rhs_tid),
-                _ => Ok(lhs_tid),
+                (NativeValue(Some(_)), NativeValue(Some(_))) => Ok(lhs_tvar),
+                (NativeValue(Some(_)), NativeValue(None)) => Ok(lhs_tvar),
+                (NativeValue(None), NativeValue(Some(_))) => Ok(rhs_tvar),
+                _ => Ok(lhs_tvar),
             },
 
             (Type::Constructor(Value(Eql(_))), Type::Constructor(Value(Eql(_)))) => {
                 if lhs == rhs {
-                    Ok(lhs_tid)
+                    Ok(lhs_tvar)
                 } else {
                     Err(TypeError::Conflict(format!(
                         "cannot unify different EQL types: {} and {}",
@@ -162,12 +158,12 @@ impl<'ast> Unifier<'ast> {
             // A constructor resolves with a type variable if either:
             // 1. the type variable does not already refer to a constructor (transitively), or
             // 2. it does refer to a constructor and the two constructors unify
-            (_, Type::Var(tvar)) => self.unify_with_type_var(lhs_tid, *tvar),
+            (_, Type::Var(tvar)) => self.unify_with_type_var(lhs_tvar, *tvar),
 
             // A constructor resolves with a type variable if either:
             // 1. the type variable does not already refer to a constructor (transitively), or
             // 2. it does refer to a constructor and the two constructors unify
-            (Type::Var(tvar), _) => self.unify_with_type_var(rhs_tid, *tvar),
+            (Type::Var(tvar), _) => self.unify_with_type_var(rhs_tvar, *tvar),
 
             // Any other combination of types is a type error.
             (lhs, rhs) => Err(TypeError::Conflict(format!(
@@ -179,17 +175,17 @@ impl<'ast> Unifier<'ast> {
         self.depth -= 1;
 
         match unification {
-            Ok(tid) => {
+            Ok(tvar) => {
                 let span_end = span!(
                     parent: &span_begin,
                     Level::DEBUG,
                     "Ok",
-                    unification = ?self.lookup(tid),
+                    unification = ?self.lookup(tvar),
                 );
 
                 let _guard = span_end.enter();
 
-                Ok(tid)
+                Ok(tvar)
             }
             Err(err) => {
                 let span_end = span!(
@@ -211,24 +207,24 @@ impl<'ast> Unifier<'ast> {
     /// Attempts to unify the type with whatever the type variable is pointing to.
     ///
     /// After successful unification `ty_rc` and `tvar_rc` will refer to the same allocation.
-    fn unify_with_type_var(&mut self, tid: TID, tvar: TypeVar) -> Result<TID, TypeError> {
-        let sub_tid = {
+    fn unify_with_type_var(&mut self, tvar: TypeVar, tvar: TypeVar) -> Result<TypeVar, TypeError> {
+        let sub_ty = {
             let reg = &*self.registry.borrow();
             reg.get_substitution(tvar)
         };
 
-        let unified_tid = match sub_tid {
-            Some(sub_tid) => self.unify(tid, sub_tid)?,
-            None => tid,
+        let unified_ty = match sub_ty {
+            Some(sub_ty) => self.unify(tvar, sub_ty)?,
+            None => tvar,
         };
 
-        self.registry.borrow_mut().substitute(tvar, unified_tid);
+        self.registry.borrow_mut().substitute(tvar, unified_ty);
 
-        Ok(unified_tid)
+        Ok(unified_ty)
     }
 
     /// Unifies two projection types.
-    fn unify_projections(&mut self, lhs: &Type, rhs: &Type) -> Result<TID, TypeError> {
+    fn unify_projections(&mut self, lhs: &Type, rhs: &Type) -> Result<TypeVar, TypeError> {
         match (lhs, rhs) {
             (
                 Type::Constructor(Constructor::Projection(lhs_projection)),
@@ -245,15 +241,15 @@ impl<'ast> Unifier<'ast> {
                         .iter()
                         .zip(rhs_projection.columns())
                     {
-                        let unified_tid = self.unify(lhs_col.tid, rhs_col.tid)?;
-                        cols.push(ProjectionColumn::new(unified_tid, lhs_col.alias.clone()));
+                        let unified_ty = self.unify(lhs_col.ty, rhs_col.ty)?;
+                        cols.push(ProjectionColumn::new(unified_ty, lhs_col.alias.clone()));
                     }
 
-                    let unified_tid = self.registry.borrow_mut().register(Type::Constructor(
+                    let unified_ty = self.registry.borrow_mut().register(Type::Constructor(
                         Constructor::Projection(Projection::new(cols)),
                     ));
 
-                    Ok(unified_tid)
+                    Ok(unified_ty)
                 } else {
                     Err(TypeError::Conflict(format!(
                         "cannot unify projections {} and {} because they have different numbers of columns",
@@ -269,11 +265,11 @@ impl<'ast> Unifier<'ast> {
 
     fn unify_value_type_with_one_col_projection(
         &mut self,
-        value: TID,
-        ty: TID,
-    ) -> Result<TID, TypeError> {
-        let value_ty = self.registry.borrow().get_type_by_tid(value);
-        let ty_ty = self.registry.borrow().get_type_by_tid(ty);
+        value: TypeVar,
+        ty: TypeVar,
+    ) -> Result<TypeVar, TypeError> {
+        let value_ty = self.registry.borrow().get_type_by_ty(value);
+        let ty_ty = self.registry.borrow().get_type_by_ty(ty);
         match (&value_ty, &ty_ty) {
             (
                 Type::Constructor(Constructor::Value(Value::Eql(lhs))),
@@ -292,11 +288,11 @@ impl<'ast> Unifier<'ast> {
                 Type::Constructor(Constructor::Value(Value::Array(lhs))),
                 Type::Constructor(Constructor::Value(Value::Array(rhs))),
             ) => {
-                let unified_element_tid = self.unify(*lhs, *rhs)?;
-                let unified_array_tid = self.register(Type::Constructor(Constructor::Value(
-                    Value::Array(unified_element_tid),
+                let unified_element_ty = self.unify(*lhs, *rhs)?;
+                let unified_array_ty = self.register(Type::Constructor(Constructor::Value(
+                    Value::Array(unified_element_ty),
                 )));
-                Ok(unified_array_tid)
+                Ok(unified_array_ty)
             }
             (Type::Constructor(Constructor::Value(Value::Eql(_))), Type::Var(tvar)) => {
                 self.unify_with_type_var(value, *tvar)

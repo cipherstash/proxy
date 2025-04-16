@@ -4,7 +4,7 @@ use crate::inference::TypeError;
 use crate::iterator_ext::IteratorExt;
 use crate::model::SqlIdent;
 use crate::unifier::{Projection, ProjectionColumns};
-use crate::{Relation, TypeRegistry, TID};
+use crate::{Relation, TypeRegistry, TypeVar};
 use sqlparser::ast::{Ident, ObjectName, Query, Statement};
 use sqltk::{into_control_flow, Break, Visitable, Visitor};
 use std::cell::RefCell;
@@ -32,20 +32,20 @@ impl<'ast> ScopeTracker<'ast> {
 
     /// Resolves an unqualified wildcard. Resolution occurs in the current scope only  (i.e. does not look into parent
     /// scopes).
-    pub(crate) fn resolve_wildcard(&self) -> Result<TID, ScopeError> {
+    pub(crate) fn resolve_wildcard(&self) -> Result<TypeVar, ScopeError> {
         self.current_scope()?.borrow().resolve_wildcard()
     }
 
     /// Resolves a qualified wildcard. Resolution occurs in the current scope only (i.e. does not look into parent
     /// scopes).
-    pub(crate) fn resolve_qualified_wildcard(&self, idents: &[Ident]) -> Result<TID, ScopeError> {
+    pub(crate) fn resolve_qualified_wildcard(&self, idents: &[Ident]) -> Result<TypeVar, ScopeError> {
         self.current_scope()?
             .borrow()
             .resolve_qualified_wildcard(idents)
     }
 
     /// Uniquely resolves an identifier against all relations that are in scope.
-    pub(crate) fn resolve_ident(&self, ident: &Ident) -> Result<TID, ScopeError> {
+    pub(crate) fn resolve_ident(&self, ident: &Ident) -> Result<TypeVar, ScopeError> {
         self.current_scope()?.borrow().resolve_ident(ident)
     }
 
@@ -53,7 +53,7 @@ impl<'ast> ScopeTracker<'ast> {
     ///
     /// Note that currently only compound identifier of length 2 are supported
     /// and resolution will fail if the identifier has more than two parts.
-    pub(crate) fn resolve_compound_ident(&self, idents: &[Ident]) -> Result<TID, ScopeError> {
+    pub(crate) fn resolve_compound_ident(&self, idents: &[Ident]) -> Result<TypeVar, ScopeError> {
         self.current_scope()?
             .borrow()
             .resolve_compound_ident(idents)
@@ -102,7 +102,7 @@ impl<'ast> Scope<'ast> {
         }))
     }
 
-    pub(crate) fn resolve_wildcard(&self) -> Result<TID, ScopeError> {
+    pub(crate) fn resolve_wildcard(&self) -> Result<TypeVar, ScopeError> {
         if self.relations.is_empty() {
             match &self.parent {
                 Some(parent) => parent.borrow().resolve_wildcard(),
@@ -124,7 +124,7 @@ impl<'ast> Scope<'ast> {
         }
     }
 
-    pub(crate) fn resolve_qualified_wildcard(&self, idents: &[Ident]) -> Result<TID, ScopeError> {
+    pub(crate) fn resolve_qualified_wildcard(&self, idents: &[Ident]) -> Result<TypeVar, ScopeError> {
         if idents.len() > 1 {
             return Err(ScopeError::UnsupportedCompoundIdentifierLength(
                 idents
@@ -152,7 +152,7 @@ impl<'ast> Scope<'ast> {
         }
     }
 
-    pub(crate) fn resolve_ident(&self, ident: &Ident) -> Result<TID, ScopeError> {
+    pub(crate) fn resolve_ident(&self, ident: &Ident) -> Result<TypeVar, ScopeError> {
         if self.relations.is_empty() {
             match &self.parent {
                 Some(parent) => parent.borrow().resolve_ident(ident),
@@ -181,7 +181,7 @@ impl<'ast> Scope<'ast> {
             match all_columns
                 .try_find_unique(&|col| col.alias.as_ref().map(SqlIdent::from) == sql_ident)
             {
-                Ok(Some(col)) => Ok(col.tid),
+                Ok(Some(col)) => Ok(col.ty),
                 Err(_) => Err(ScopeError::AmbiguousMatch(ident.to_string())),
                 Ok(None) => match &self.parent {
                     Some(parent) => parent.borrow().resolve_ident(ident),
@@ -194,7 +194,7 @@ impl<'ast> Scope<'ast> {
         }
     }
 
-    pub(crate) fn resolve_compound_ident(&self, idents: &[Ident]) -> Result<TID, ScopeError> {
+    pub(crate) fn resolve_compound_ident(&self, idents: &[Ident]) -> Result<TypeVar, ScopeError> {
         if idents.len() != 2 {
             return Err(ScopeError::InvariantFailed(
                 "Unsupported compound identifier length (max = 2)".to_string(),
@@ -218,7 +218,7 @@ impl<'ast> Scope<'ast> {
                 match columns.try_find_unique(&|column| {
                     column.alias.as_ref().map(SqlIdent::from).as_ref() == Some(&second_ident)
                 }) {
-                    Ok(Some(projection_column)) => Ok(projection_column.tid.clone()),
+                    Ok(Some(projection_column)) => Ok(projection_column.ty.clone()),
                     Ok(None) | Err(_) => Err(ScopeError::NoMatch(format!(
                         "{}.{}",
                         first_ident, second_ident
@@ -261,8 +261,8 @@ impl<'ast> Scope<'ast> {
         }
     }
 
-    fn try_match_projection(&self, tid: TID) -> Result<ProjectionColumns, TypeError> {
-        match self.registry.borrow().get_type_by_tid(tid) {
+    fn try_match_projection(&self, tvar: TypeVar) -> Result<ProjectionColumns, TypeError> {
+        match self.registry.borrow().get_type_by_tvar(tvar) {
             Type::Constructor(Constructor::Projection(projection)) => Ok(ProjectionColumns(
                 Vec::from_iter(projection.columns().iter().cloned()),
             )),

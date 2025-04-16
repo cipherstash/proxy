@@ -187,7 +187,7 @@ impl<'ast> EqlMapper<'ast> {
     ) -> Result<crate::Projection, EqlMapperError> {
         let mut unifier = self.unifier.borrow_mut();
 
-        let ty = unifier.lookup(unifier.lookup_node_tid(statement));
+        let ty = unifier.lookup_type_by_node(statement);
         Ok(ty.resolved_as::<crate::Projection>(&mut unifier)?)
     }
 

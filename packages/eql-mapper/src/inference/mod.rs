@@ -73,22 +73,22 @@ impl<'ast> TypeInferencer<'ast> {
         }
     }
 
-    pub(crate) fn register(&self, ty: Type) -> TID {
+    pub(crate) fn register(&self, ty: Type) -> TypeVar {
         self.unifier.borrow().register(ty)
     }
 
     /// Shorthand for calling `self.reg.borrow_mut().get_type(node)` in [`InferType`] implementations for `TypeInferencer`.
-    pub(crate) fn get_type_id<N: AsNodeKey>(&self, node: &'ast N) -> TID {
+    pub(crate) fn get_type_var<N: AsNodeKey>(&self, node: &'ast N) -> TypeVar {
         self.reg.borrow_mut().get_or_init_type(node)
     }
 
     pub(crate) fn get_type_of_node<N: AsNodeKey>(&self, node: &'ast N) -> Type {
-        let tid = self.get_type_id(node);
-        self.reg.borrow().get_type_by_tid(tid)
+        let tvar = self.get_type_var(node);
+        self.reg.borrow().get_type_by_tvar(tvar)
     }
 
-    pub(crate) fn get_type_by_tid(&self, tid: TID) -> Type {
-        self.reg.borrow().get_type_by_tid(tid)
+    pub(crate) fn get_type_by_tvar(&self, tvar: TypeVar) -> Type {
+        self.reg.borrow().get_type_by_tvar(tvar)
     }
 
     pub(crate) fn param_types(&self) -> Result<Vec<(Param, Type)>, ParamError> {
@@ -108,7 +108,7 @@ impl<'ast> TypeInferencer<'ast> {
     /// Tries to unify two types but does not record the result.
     /// Recording the result is up to the caller.
     #[must_use = "the result of unify must ultimately be associated with an AST node"]
-    fn unify(&self, lhs: TID, rhs: TID) -> Result<TID, TypeError> {
+    fn unify(&self, lhs: TypeVar, rhs: TypeVar) -> Result<TypeVar, TypeError> {
         self.unifier.borrow_mut().unify(lhs, rhs)
     }
 
@@ -118,13 +118,11 @@ impl<'ast> TypeInferencer<'ast> {
         &self,
         lhs: &'ast N1,
         rhs: &'ast N2,
-        tid: TID,
-    ) -> Result<TID, TypeError> {
+        tvar: TypeVar,
+    ) -> Result<TypeVar, TypeError> {
         let unifier = &mut *self.unifier.borrow_mut();
-        let unified = unifier.unify(self.get_type_id(lhs), self.get_type_id(rhs))?;
-        let unified = unifier.unify(unified, tid)?;
-        self.reg.borrow_mut().set_node_tid(lhs, unified);
-        self.reg.borrow_mut().set_node_tid(rhs, unified);
+        let unified = unifier.unify(self.get_type_var(lhs), self.get_type_var(rhs))?;
+        let unified = unifier.unify(unified, tvar)?;
         Ok(unified)
     }
 
@@ -132,11 +130,10 @@ impl<'ast> TypeInferencer<'ast> {
     fn unify_node_with_type<N: AsNodeKey>(
         &self,
         node: &'ast N,
-        ty: TID,
-    ) -> Result<TID, TypeError> {
+        ty: TypeVar,
+    ) -> Result<TypeVar, TypeError> {
         let unifier = &mut *self.unifier.borrow_mut();
-        let unified = unifier.unify(self.get_type_id(node), ty)?;
-        self.reg.borrow_mut().set_node_tid(node, unified);
+        let unified = unifier.unify(self.get_type_var(node), ty)?;
         Ok(unified)
     }
 
@@ -146,15 +143,13 @@ impl<'ast> TypeInferencer<'ast> {
         &self,
         lhs: &'ast N1,
         rhs: &'ast N2,
-    ) -> Result<TID, TypeError> {
+    ) -> Result<TypeVar, TypeError> {
         match self
             .unifier
             .borrow_mut()
-            .unify(self.get_type_id(lhs), self.get_type_id(rhs))
+            .unify(self.get_type_var(lhs), self.get_type_var(rhs))
         {
             Ok(unified) => {
-                self.reg.borrow_mut().set_node_tid(lhs, unified);
-                self.reg.borrow_mut().set_node_tid(rhs, unified);
                 Ok(unified)
             }
             Err(err) => Err(TypeError::OnNodes(
@@ -170,20 +165,16 @@ impl<'ast> TypeInferencer<'ast> {
     fn unify_all_with_type<N: Debug + AsNodeKey>(
         &self,
         nodes: &'ast [N],
-        ty: TID,
-    ) -> Result<TID, TypeError> {
+        ty: TypeVar,
+    ) -> Result<TypeVar, TypeError> {
         let unified = nodes
             .iter()
             .try_fold(ty, |ty, node| self.unify_node_with_type(node, ty))?;
 
-        for node in nodes {
-            self.reg.borrow_mut().set_node_tid(node, unified);
-        }
-
         Ok(unified)
     }
 
-    pub(crate) fn fresh_tvar(&self) -> TID {
+    pub(crate) fn fresh_tvar(&self) -> TypeVar {
         self.reg.borrow_mut().fresh_tvar()
     }
 

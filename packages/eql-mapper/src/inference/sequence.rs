@@ -1,6 +1,6 @@
 use std::marker::PhantomData;
 
-use super::{unifier::TypeVar, TID};
+use super::{unifier::TypeVar};
 
 #[derive(Debug)]
 pub(crate) struct Sequence<T> {
@@ -22,18 +22,6 @@ impl<T> Sequence<T> {
 impl Sequence<TypeVar> {
     pub(crate) fn next_value(&mut self) -> TypeVar {
         let t = TypeVar(self.next_value);
-        self.next_value += 1;
-        t
-    }
-}
-
-impl Sequence<TID> {
-    pub(crate) fn new_starting_at(id: u32) -> Self {
-        Self { next_value: id, _marker: PhantomData }
-    }
-
-    pub(crate) fn next_value(&mut self) -> SequenceVal<TID> {
-        let t = SequenceVal { value: self.next_value, _marker: PhantomData };
         self.next_value += 1;
         t
     }

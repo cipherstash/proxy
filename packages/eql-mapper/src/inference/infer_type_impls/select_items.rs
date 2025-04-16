@@ -11,7 +11,7 @@ impl<'ast> InferType<'ast, Vec<SelectItem>> for TypeInferencer<'ast> {
         let projection_columns: Vec<ProjectionColumn> = select_items
             .iter()
             .map(|select_item| {
-                let ty = self.get_type_id(select_item);
+                let ty = self.get_type_var(select_item);
                 match select_item {
                     SelectItem::UnnamedExpr(Expr::Identifier(ident)) => {
                         Ok(ProjectionColumn::new(ty, Some(ident.clone())))

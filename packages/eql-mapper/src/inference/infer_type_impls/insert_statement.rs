@@ -1,11 +1,11 @@
 use crate::{
     inference::{
         type_error::TypeError,
-        unifier::{Constructor, Type},
+        unifier::{Constructor, Type, TypeVar},
         InferType,
     },
     unifier::{EqlValue, NativeValue, Value},
-    ColumnKind, TableColumn, TypeInferencer, TID,
+    ColumnKind, TableColumn, TypeInferencer,
 };
 use sqlparser::ast::{Ident, Insert};
 
@@ -59,8 +59,8 @@ impl<'ast> InferType<'ast, Insert> for TypeInferencer<'ast> {
         );
 
         if let Some(source) = source {
-            let tid = self.reg.borrow_mut().register(target_columns);
-            self.unify_node_with_type(&**source, tid)?;
+            let tvar = self.reg.borrow_mut().register(target_columns);
+            self.unify_node_with_type(&**source, tvar)?;
         }
 
         Ok(())
@@ -75,7 +75,7 @@ impl<'ast> InferType<'ast, Insert> for TypeInferencer<'ast> {
             }
 
             None => {
-                self.unify_node_with_type(insert, TID::EMPTY_PROJECTION)?;
+                self.unify_node_with_type(insert, self.register(Type::empty_projection()))?;
             }
         }
 

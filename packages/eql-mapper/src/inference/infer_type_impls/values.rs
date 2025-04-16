@@ -23,12 +23,12 @@ impl<'ast> InferType<'ast, Values> for TypeInferencer<'ast> {
 
         let column_types = &values.rows[0]
             .iter()
-            .map(|val| self.get_type_id(val))
+            .map(|val| self.get_type_var(val))
             .collect::<Vec<_>>();
 
         for row in values.rows.iter() {
             for (idx, val) in row.iter().enumerate() {
-                self.unify(self.get_type_id(val), column_types[idx].clone())?;
+                self.unify(self.get_type_var(val), column_types[idx].clone())?;
             }
         }
 
