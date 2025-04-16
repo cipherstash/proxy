@@ -49,6 +49,86 @@ pub enum Constructor {
     Projection(Projection),
 }
 
+impl Constructor {
+    fn resolve(&self, unifier: &mut Unifier<'_>) -> Result<crate::Type, TypeError> {
+        match self {
+            Constructor::Value(value) => match value {
+                Value::Eql(eql_col) => Ok(crate::Type::Value(crate::Value::Eql(eql_col.clone()))),
+                Value::Native(native_col) => {
+                    Ok(crate::Type::Value(crate::Value::Native(native_col.clone())))
+                }
+                Value::Array(element_tid) => {
+                    let element_ty = unifier.lookup(*element_tid);
+                    let resolved = element_ty.resolved(unifier)?;
+                    Ok(crate::Type::Value(crate::Value::Array(resolved.into())))
+                }
+            },
+            Constructor::Projection(projection) => {
+                let resolved_cols = projection
+                    .flatten(unifier)
+                    .columns()
+                    .iter()
+                    .map(|col| -> Result<crate::ProjectionColumn, TypeError> {
+                        let col_ty = unifier.lookup(col.tid);
+                        let alias = col.alias.clone();
+                        match col_ty {
+                            Type::Constructor(constructor) => match constructor {
+                                Constructor::Value(Value::Eql(eql_col)) => {
+                                    Ok(crate::ProjectionColumn {
+                                        ty: crate::Value::Eql(eql_col),
+                                        alias,
+                                    })
+                                }
+                                Constructor::Value(Value::Native(native_col)) => {
+                                    Ok(crate::ProjectionColumn {
+                                        ty: crate::Value::Native(native_col),
+                                        alias,
+                                    })
+                                }
+                                Constructor::Value(Value::Array(array_tid)) => {
+                                    let array_ty = unifier.lookup(array_tid);
+                                    match array_ty.resolved(unifier)? {
+                                        elem_ty @ crate::Type::Value(_) => {
+                                            Ok(crate::ProjectionColumn {
+                                                ty: crate::Value::Array(elem_ty.into()),
+                                                alias,
+                                            })
+                                        }
+                                        crate::Type::Projection(_) => {
+                                            Err(TypeError::InternalError(format!(
+                                                "projection type as array element"
+                                            )))
+                                        }
+                                    }
+                                }
+                                Constructor::Projection(_) => {
+                                    Err(TypeError::InternalError(format!(
+                                        "projection type as projection column; projections should be flattened during final resolution"
+                                    )))
+                                }
+                            },
+                            Type::Var(tvar) => {
+                                let tid = unifier.lookup_substitution(tvar).ok_or(
+                                    TypeError::InternalError(format!("could not resolve type variable '{}'", tvar)))?;
+                                let value = unifier.lookup(tid).resolved_as::<crate::Value>(unifier)?;
+                                Ok(crate::ProjectionColumn { ty: value, alias })
+                            },
+                        }
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+
+                if resolved_cols.len() == 0 {
+                    Ok(crate::Type::Projection(crate::Projection::Empty))
+                } else {
+                    Ok(crate::Type::Projection(crate::Projection::WithColumns(
+                        resolved_cols,
+                    )))
+                }
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Display)]
 pub enum Value {
     /// An encrypted type from a particular table-column in the schema.
@@ -137,63 +217,27 @@ impl Type {
     /// Fails with a [`TypeError`] if the stored `Type` cannot be fully resolved.
     pub fn resolved(&self, unifier: &mut Unifier<'_>) -> Result<crate::Type, TypeError> {
         match self {
-            Type::Constructor(constructor) => match constructor {
-                Constructor::Value(value) => match value {
-                    Value::Eql(eql_col) => {
-                        Ok(crate::Type::Value(crate::Value::Eql(eql_col.clone())))
-                    }
-                    Value::Native(native_col) => {
-                        Ok(crate::Type::Value(crate::Value::Native(native_col.clone())))
-                    }
-                    Value::Array(element_tid) => {
-                        let element_ty = unifier.lookup(*element_tid);
-                        let resolved = element_ty.resolved(unifier)?;
-                        Ok(crate::Type::Value(crate::Value::Array(resolved.into())))
-                    }
-                },
-                Constructor::Projection(projection) => {
-                    let resolved_cols = projection
-                        .columns()
-                        .iter()
-                        .map(|col| -> Result<crate::ProjectionColumn, TypeError> {
-                            let col_ty = unifier.lookup(col.tid);
-                            let resolved_col_ty = col_ty.resolved(unifier)?;
-                            let crate::Type::Value(value) = resolved_col_ty else {
-                                Err(TypeError::InternalError(format!("expected value")))?
-                            };
-                            Ok(crate::ProjectionColumn {
-                                ty: value,
-                                alias: col.alias.clone(),
-                            })
-                        })
-                        .collect::<Result<Vec<_>, _>>()?;
-
-                    if resolved_cols.len() == 0 {
-                        Ok(crate::Type::Projection(crate::Projection::Empty))
-                    } else {
-                        Ok(crate::Type::Projection(crate::Projection::WithColumns(
-                            resolved_cols,
-                        )))
-                    }
-                }
-            },
+            Type::Constructor(constructor) => constructor.resolve(unifier),
             Type::Var(type_var) => {
-                let sub_tid = unifier.lookup_substitution(*type_var);
-                let sub_ty = unifier.lookup(sub_tid);
-                match sub_ty.resolved(unifier) {
-                    Ok(sub_ty) => Ok(sub_ty),
-                    Err(_) => {
-                        if unifier.exists_node_with_type::<ast::Value>(&Type::Var(*type_var)) {
-                            let unified_tid = unifier.unify(sub_tid, TID::NATIVE)?;
-                            unifier.lookup(unified_tid).resolved(unifier)
-                        } else {
-                            Err(TypeError::Incomplete(format!(
-                                "type {} contains unresolved type variables",
-                                sub_ty
-                            )))
+                if let Some(sub_tid) = unifier.lookup_substitution(*type_var) {
+                    let sub_ty = unifier.lookup(sub_tid);
+                    match sub_ty.resolved(unifier) {
+                        Ok(sub_ty) => return Ok(sub_ty),
+                        Err(err) => {
+                            if unifier.exists_node_with_type::<ast::Value>(&Type::Var(*type_var)) {
+                                let unified_tid = unifier.unify(sub_tid, TID::NATIVE)?;
+                                return unifier.lookup(unified_tid).resolved(unifier);
+                            } else {
+                                return Err(err);
+                            }
                         }
                     }
                 }
+
+                return Err(TypeError::Incomplete(format!(
+                    "there are no substitutions for type var {}",
+                    type_var
+                )));
             }
         }
     }
@@ -263,10 +307,10 @@ impl Projection {
         }
     }
 
-    pub(crate) fn flatten(&self, registry: &TypeRegistry<'_>) -> Self {
+    pub(crate) fn flatten(&self, unifier: &Unifier<'_>) -> Self {
         match self {
             Projection::WithColumns(projection_columns) => {
-                Projection::WithColumns(projection_columns.flatten(registry))
+                Projection::WithColumns(projection_columns.flatten(unifier))
             }
             Projection::Empty => Projection::Empty,
         }
@@ -303,19 +347,19 @@ impl ProjectionColumns {
         self.0.len()
     }
 
-    pub(crate) fn flatten(&self, registry: &TypeRegistry<'_>) -> Self {
-        ProjectionColumns(self.flatten_impl(registry, Vec::with_capacity(self.len())))
+    pub(crate) fn flatten(&self, unifier: &Unifier<'_>) -> Self {
+        ProjectionColumns(self.flatten_impl(unifier, Vec::with_capacity(self.len())))
     }
 
     fn flatten_impl(
         &self,
-        registry: &TypeRegistry<'_>,
+        unifier: &Unifier<'_>,
         mut output: Vec<ProjectionColumn>,
     ) -> Vec<ProjectionColumn> {
         for ProjectionColumn { tid, alias } in &self.0 {
-            match registry.get_type_by_tid(*tid) {
+            match unifier.lookup(*tid) {
                 Type::Constructor(Constructor::Projection(Projection::WithColumns(nested))) => {
-                    output = nested.flatten_impl(registry, output);
+                    output = nested.flatten_impl(unifier, output);
                 }
                 _ => output.push(ProjectionColumn::new(*tid, alias.clone())),
             }
@@ -339,7 +383,10 @@ impl ProjectionColumn {
 }
 
 impl ProjectionColumns {
-    pub(crate) fn new_from_schema_table(table: Arc<Table>, registry: &mut TypeRegistry<'_>) -> Self {
+    pub(crate) fn new_from_schema_table(
+        table: Arc<Table>,
+        registry: &mut TypeRegistry<'_>,
+    ) -> Self {
         ProjectionColumns(
             table
                 .columns

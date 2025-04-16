@@ -130,8 +130,8 @@ impl<'ast> TypeRegistry<'ast> {
             .collect()
     }
 
-    pub(crate) fn get_substitution(&self, tvar: TypeVar) -> TID {
-        *self.substitutions.get(&tvar).expect("type vars should always be resolvable")
+    pub(crate) fn get_substitution(&self, tvar: TypeVar) -> Option<TID> {
+        self.substitutions.get(&tvar).copied()
     }
 
     pub(crate) fn substitute(&mut self, tvar: TypeVar, sub_tid: TID) {

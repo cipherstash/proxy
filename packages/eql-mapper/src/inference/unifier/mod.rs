@@ -42,7 +42,7 @@ impl<'ast> Unifier<'ast> {
         self.registry.borrow().get_node_tid(node)
     }
 
-    pub(crate) fn lookup_substitution(&self, tvar: TypeVar) -> TID {
+    pub(crate) fn lookup_substitution(&self, tvar: TypeVar) -> Option<TID> {
         self.registry.borrow().get_substitution(tvar)
     }
 
@@ -80,8 +80,8 @@ impl<'ast> Unifier<'ast> {
             return Ok(lhs_tid);
         }
 
-        let lhs = self.registry.borrow_mut().get_type_by_tid(lhs_tid);
-        let rhs = self.registry.borrow_mut().get_type_by_tid(rhs_tid);
+        let lhs = self.registry.borrow().get_type_by_tid(lhs_tid);
+        let rhs = self.registry.borrow().get_type_by_tid(rhs_tid);
 
         let unification = match (&lhs, &rhs) {
             // Two projections unify if they have the same number of columns and all of the paired column types also
@@ -106,7 +106,7 @@ impl<'ast> Unifier<'ast> {
 
             // A Value can unify with a single column projection
             (Type::Constructor(Value(_)), Type::Constructor(Projection(projection))) => {
-                let projection = projection.flatten(&self.registry.borrow());
+                let projection = projection.flatten(self);
                 let len = projection.len();
                 if len == 1 {
                     self.unify_value_type_with_type(lhs_tid, projection[0].tid)
@@ -119,7 +119,7 @@ impl<'ast> Unifier<'ast> {
             }
 
             (Type::Constructor(Projection(projection)), Type::Constructor(Value(_))) => {
-                let projection = projection.flatten(&self.registry.borrow());
+                let projection = projection.flatten(self);
                 let len = projection.len();
                 if len == 1 {
                     self.unify_value_type_with_type(rhs_tid, projection[0].tid)
@@ -179,7 +179,11 @@ impl<'ast> Unifier<'ast> {
             reg.get_substitution(tvar)
         };
 
-        let unified_tid = self.unify(tid, sub_tid)?;
+        let unified_tid = match sub_tid {
+            Some(sub_tid) => self.unify(tid, sub_tid)?,
+            None => tid
+        };
+
         self.registry.borrow_mut().substitute(tvar, unified_tid);
 
         Ok(unified_tid)
@@ -192,8 +196,8 @@ impl<'ast> Unifier<'ast> {
                 Type::Constructor(Constructor::Projection(lhs_projection)),
                 Type::Constructor(Constructor::Projection(rhs_projection)),
             ) => {
-                let lhs_projection = lhs_projection.flatten(&self.registry.borrow());
-                let rhs_projection = rhs_projection.flatten(&self.registry.borrow());
+                let lhs_projection = lhs_projection.flatten(self);
+                let rhs_projection = rhs_projection.flatten(self);
 
                 if lhs_projection.len() == rhs_projection.len() {
                     let mut cols: Vec<ProjectionColumn> = Vec::with_capacity(lhs_projection.len());
