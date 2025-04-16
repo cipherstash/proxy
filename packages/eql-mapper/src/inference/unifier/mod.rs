@@ -333,7 +333,7 @@ mod test {
         let lhs = unifier.register(Type::Var(TypeVar(0)));
         let rhs = unifier.register(Type::Constructor(Value(Native(NativeValue(None)))));
 
-        assert_eq!(unifier.unify(lhs, rhs), Ok(lhs));
+        assert_eq!(unifier.unify(lhs, rhs), Ok(rhs));
     }
 
     #[test]
