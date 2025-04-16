@@ -27,8 +27,9 @@ impl<'ast> InferType<'ast, Value> for TypeInferencer<'ast> {
                     // We haven't seen the param before so set the current node's type to a fresh type variable and
                     // register the param with the same type.
                     drop(reg);
+                    let ty = self.get_type_by_tid(value_tid);
                     let mut reg = self.reg.borrow_mut();
-                    reg.set_param(param, self.get_type_by_tid(value_tid));
+                    reg.set_param(param, ty);
                 }
             }
         }

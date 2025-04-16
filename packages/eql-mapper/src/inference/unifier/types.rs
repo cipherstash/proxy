@@ -64,35 +64,45 @@ impl Constructor {
                 }
             },
             Constructor::Projection(projection) => {
-                let resolved_cols = projection
+                Ok(crate::Type::Projection(projection.resolve(unifier)?))
+            }
+        }
+    }
+}
+
+impl Projection {
+    fn resolve(&self, unifier: &mut Unifier<'_>) -> Result<crate::Projection, TypeError> {
+        use itertools::Itertools;
+
+        let resolved_cols =self
                     .flatten(unifier)
                     .columns()
                     .iter()
-                    .map(|col| -> Result<crate::ProjectionColumn, TypeError> {
+                    .map(|col| -> Result<Vec<crate::ProjectionColumn>, TypeError> {
                         let col_ty = unifier.lookup(col.tid);
                         let alias = col.alias.clone();
                         match col_ty {
                             Type::Constructor(constructor) => match constructor {
                                 Constructor::Value(Value::Eql(eql_col)) => {
-                                    Ok(crate::ProjectionColumn {
+                                    Ok(vec![crate::ProjectionColumn {
                                         ty: crate::Value::Eql(eql_col),
                                         alias,
-                                    })
+                                    }])
                                 }
                                 Constructor::Value(Value::Native(native_col)) => {
-                                    Ok(crate::ProjectionColumn {
+                                    Ok(vec![crate::ProjectionColumn {
                                         ty: crate::Value::Native(native_col),
                                         alias,
-                                    })
+                                    }])
                                 }
                                 Constructor::Value(Value::Array(array_tid)) => {
                                     let array_ty = unifier.lookup(array_tid);
                                     match array_ty.resolved(unifier)? {
                                         elem_ty @ crate::Type::Value(_) => {
-                                            Ok(crate::ProjectionColumn {
+                                            Ok(vec![crate::ProjectionColumn {
                                                 ty: crate::Value::Array(elem_ty.into()),
                                                 alias,
-                                            })
+                                            }])
                                         }
                                         crate::Type::Projection(_) => {
                                             Err(TypeError::InternalError(format!(
@@ -110,21 +120,29 @@ impl Constructor {
                             Type::Var(tvar) => {
                                 let tid = unifier.lookup_substitution(tvar).ok_or(
                                     TypeError::InternalError(format!("could not resolve type variable '{}'", tvar)))?;
-                                let value = unifier.lookup(tid).resolved_as::<crate::Value>(unifier)?;
-                                Ok(crate::ProjectionColumn { ty: value, alias })
+                                let ty = unifier.lookup(tid);
+                                if let Type::Constructor(Constructor::Projection(projection)) = ty {
+                                    match projection.resolve(unifier)? {
+                                        crate::Projection::WithColumns(projection_columns) => Ok(projection_columns),
+                                        crate::Projection::Empty => Ok(vec![]),
+                                    }
+                                } else {
+                                    match ty.resolved(unifier)? {
+                                        crate::Type::Value(value) => Ok(vec![crate::ProjectionColumn { ty: value, alias }]),
+                                        crate::Type::Projection(_) => Err(TypeError::InternalError(format!("unexpected projection"))),
+                                    }
+                                }
+
                             },
                         }
                     })
+                    .flatten_ok()
                     .collect::<Result<Vec<_>, _>>()?;
 
-                if resolved_cols.len() == 0 {
-                    Ok(crate::Type::Projection(crate::Projection::Empty))
-                } else {
-                    Ok(crate::Type::Projection(crate::Projection::WithColumns(
-                        resolved_cols,
-                    )))
-                }
-            }
+        if resolved_cols.len() == 0 {
+            Ok(crate::Projection::Empty)
+        } else {
+            Ok(crate::Projection::WithColumns(resolved_cols))
         }
     }
 }

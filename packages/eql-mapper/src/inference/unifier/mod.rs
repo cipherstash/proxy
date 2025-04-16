@@ -80,8 +80,10 @@ impl<'ast> Unifier<'ast> {
             return Ok(lhs_tid);
         }
 
-        let lhs = self.registry.borrow().get_type_by_tid(lhs_tid);
-        let rhs = self.registry.borrow().get_type_by_tid(rhs_tid);
+        let (lhs, rhs) = {
+            let reg = self.registry.borrow();
+            (reg.get_type_by_tid(lhs_tid), reg.get_type_by_tid(rhs_tid))
+        };
 
         let unification = match (&lhs, &rhs) {
             // Two projections unify if they have the same number of columns and all of the paired column types also
@@ -181,7 +183,7 @@ impl<'ast> Unifier<'ast> {
 
         let unified_tid = match sub_tid {
             Some(sub_tid) => self.unify(tid, sub_tid)?,
-            None => tid
+            None => tid,
         };
 
         self.registry.borrow_mut().substitute(tvar, unified_tid);

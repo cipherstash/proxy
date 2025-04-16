@@ -44,14 +44,15 @@ impl<'ast> Importer<'ast> {
             .table_resolver
             .resolve_table(table_name.0.last().unwrap())?;
 
+        let mut reg = self.reg.borrow_mut();
+
+        let cols = ProjectionColumns::new_from_schema_table(table.clone(), &mut reg);
+
         self.scope_tracker.borrow_mut().add_relation(Relation {
             name: table_alias.clone(),
-            projection_type: self.reg.borrow_mut().register(Type::Constructor(
-                Constructor::Projection(Projection::WithColumns(ProjectionColumns::new_from_schema_table(
-                    table.clone(),
-                    &mut self.reg.borrow_mut(),
-                ))),
-            )),
+            projection_type: reg.register(Type::Constructor(Constructor::Projection(
+                Projection::WithColumns(cols),
+            ))),
         })?;
 
         Ok(())
@@ -104,13 +105,16 @@ impl<'ast> Importer<'ast> {
                 if scope_tracker.resolve_relation(name).is_err() {
                     let table = self.table_resolver.resolve_table(name.0.last().unwrap())?;
 
-                    let cols = ProjectionColumns::new_from_schema_table(table.clone(), &mut self.reg.borrow_mut());
+                    let cols = ProjectionColumns::new_from_schema_table(
+                        table.clone(),
+                        &mut self.reg.borrow_mut(),
+                    );
 
                     scope_tracker.add_relation(Relation {
                         name: record_as.cloned().ok(),
-                        projection_type: self.reg.borrow_mut().register(Type::Constructor(Constructor::Projection(
-                            Projection::WithColumns(cols),
-                        ))),
+                        projection_type: self.reg.borrow_mut().register(Type::Constructor(
+                            Constructor::Projection(Projection::WithColumns(cols)),
+                        )),
                     })?;
                 }
             }

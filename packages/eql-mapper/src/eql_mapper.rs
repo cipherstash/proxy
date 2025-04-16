@@ -2,8 +2,8 @@ use super::importer::{ImportError, Importer};
 use crate::{
     inference::{TypeError, TypeInferencer},
     unifier::{EqlValue, Unifier},
-    DepMut, Param, ParamError, ScopeError, ScopeTracker, TableResolver, Type,
-    TypeRegistry, TypedStatement, Value,
+    DepMut, Param, ParamError, ScopeError, ScopeTracker, TableResolver, Type, TypeRegistry,
+    TypedStatement, Value,
 };
 use sqlparser::ast::{self as ast, Statement};
 use sqltk::{Break, NodeKey, Visitable, Visitor};
@@ -191,11 +191,11 @@ impl<'ast> EqlMapper<'ast> {
 
     /// Asks the [`TypeInferencer`] for a hashmap of literal types, validating that they are all `Scalar` types.
     fn literal_types(&self) -> Result<Vec<(EqlValue, &'ast ast::Value)>, EqlMapperError> {
-        let literal_nodes: Vec<(EqlValue, &'ast ast::Value)> = self
-            .registry
-            .borrow()
-            .get_nodes_and_types::<ast::Value>()
-            .into_iter()
+        let iter = {
+            let reg = self.registry.borrow();
+            reg.get_nodes_and_types::<ast::Value>().into_iter()
+        };
+        let literal_nodes: Vec<(EqlValue, &'ast ast::Value)> = iter
             .map(
                 |(node, ty)| -> Result<Option<(EqlValue, &'ast ast::Value)>, TypeError> {
                     if let crate::Type::Value(crate::Value::Eql(eql_value)) =
@@ -218,10 +218,7 @@ impl<'ast> EqlMapper<'ast> {
 
         let mut resolved_node_types: HashMap<NodeKey<'ast>, Type> = HashMap::new();
         for (key, tcell) in node_types {
-            resolved_node_types.insert(
-                key,
-                tcell.resolved(&mut self.unifier.borrow_mut())?,
-            );
+            resolved_node_types.insert(key, tcell.resolved(&mut self.unifier.borrow_mut())?);
         }
 
         Ok(resolved_node_types)
