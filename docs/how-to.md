@@ -4,15 +4,14 @@ This page contains how-to documentation for installing, configuring, and running
 
 ## Table of contents
 
-- [How-to](#how-to)
-  - [Installing Proxy](#installing-proxy)
-  - [Configuring Proxy](#configuring-proxy)
-    - [Configuring Proxy with environment variables](#configuring-proxy-with-environment-variables)
-    - [Configuring Proxy with a TOML file](#configuring-proxy-with-a-toml-file)
-  - [Running Proxy locally](#running-proxy-locally)
-  - [Setting up the database schema](#setting-up-the-database-schema)
-    - [Creating columns with the right types](#creating-columns-with-the-right-types)
-  - [Encrypting data in an existing database](#encrypting-data-in-an-existing-database)
+- [Installing Proxy](#installing-proxy)
+- [Configuring Proxy](#configuring-proxy)
+  - [Configuring Proxy with environment variables](#configuring-proxy-with-environment-variables)
+  - [Configuring Proxy with a TOML file](#configuring-proxy-with-a-toml-file)
+- [Running Proxy locally](#running-proxy-locally)
+- [Setting up the database schema](#setting-up-the-database-schema)
+  - [Creating columns with the right types](#creating-columns-with-the-right-types)
+- [Encrypting data in an existing database](#encrypting-data-in-an-existing-database)
 
 ## Installing Proxy
 
