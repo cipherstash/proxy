@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1744873555110,
+  "lastUpdate": 1744887271779,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -523,6 +523,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 7.137568,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "keandrews@gmail.com",
+            "name": "Kate Andrews",
+            "username": "kateandrews"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "06f90cdb2e30019cfb97fbe458bbd4f3f0956110",
+          "message": "Merge pull request #208 from cipherstash/split-proxy-docs\n\nDocs: Split proxy docs",
+          "timestamp": "2025-04-17T20:51:58+10:00",
+          "tree_id": "f50198f5a09755814bbc6f6d91ec8b28df49b797",
+          "url": "https://github.com/cipherstash/proxy/commit/06f90cdb2e30019cfb97fbe458bbd4f3f0956110"
+        },
+        "date": 1744887270752,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 7.180596,
             "unit": "Number"
           }
         ]
