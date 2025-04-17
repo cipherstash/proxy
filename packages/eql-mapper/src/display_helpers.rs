@@ -1,0 +1,106 @@
+use std::{
+    collections::HashMap,
+    fmt::{Debug, Display},
+};
+
+use sqlparser::ast::{
+    Delete, Expr, Function, Insert, Query, Select, SelectItem, SetExpr, Statement, Value, Values,
+};
+use sqltk::{NodeKey, Visitable};
+
+use crate::{EqlValue, Param, Type};
+
+#[derive(Debug, Clone, Copy, Hash, Eq, PartialEq)]
+pub struct Fmt<T>(pub(crate) T);
+
+impl<'a, 'ast> Display for Fmt<&'a NodeKey<'ast>> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if let Some(node) = self.0.get_as::<Statement>() {
+            return Display::fmt(&node, f);
+        }
+        if let Some(node) = self.0.get_as::<Query>() {
+            return Display::fmt(&node, f);
+        }
+        if let Some(node) = self.0.get_as::<Insert>() {
+            return Display::fmt(&node, f);
+        }
+        if let Some(node) = self.0.get_as::<Delete>() {
+            return Display::fmt(&node, f);
+        }
+        if let Some(node) = self.0.get_as::<Expr>() {
+            return Display::fmt(&node, f);
+        }
+        if let Some(node) = self.0.get_as::<SetExpr>() {
+            return Display::fmt(&node, f);
+        }
+        if let Some(node) = self.0.get_as::<Select>() {
+            return Display::fmt(&node, f);
+        }
+        if let Some(node) = self.0.get_as::<Vec<SelectItem>>() {
+            return Display::fmt(&Fmt(node), f);
+        }
+        if let Some(node) = self.0.get_as::<Function>() {
+            return Display::fmt(&node, f);
+        }
+        if let Some(node) = self.0.get_as::<Values>() {
+            return Display::fmt(&node, f);
+        }
+        if let Some(node) = self.0.get_as::<Value>() {
+            return Display::fmt(&node, f);
+        }
+
+        f.write_str("!! CANNOT RENDER SQL NODE !!!")?;
+
+        Ok(())
+    }
+}
+
+impl<'a, 'ast> Display for Fmt<&'a HashMap<NodeKey<'ast>, Type>> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut out: Vec<String> = Vec::new();
+        out.push("{ ".into());
+        for (k, v) in self.0.iter() {
+            out.push(format!("{}: {}", Fmt(k), v));
+        }
+        out.push(" }".into());
+        f.write_str(&out.join(", "))
+    }
+}
+
+impl<'ast> Display for Fmt<&'ast Vec<SelectItem>> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("[")?;
+        let children = self
+            .0
+            .iter()
+            .map(|n| n.to_string())
+            .collect::<Vec<_>>()
+            .join(", ");
+        f.write_str(&children)?;
+        f.write_str("]")
+    }
+}
+
+impl<'a> Display for Fmt<&'a Vec<(Param, crate::Value)>> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let formatted = self
+            .0
+            .iter()
+            .map(|(p, v)| format!("{}: {}", p, v))
+            .collect::<Vec<_>>()
+            .join(", ");
+        f.write_str(&formatted)
+    }
+}
+
+impl<'a, 'ast> Display for Fmt<&'a Vec<(EqlValue, &'ast sqlparser::ast::Value)>> {
+   fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let formatted = self
+            .0
+            .iter()
+            .map(|(e, n)| format!("{}: {}", n, e))
+            .collect::<Vec<_>>()
+            .join(", ");
+        f.write_str(&formatted)
+   }
+}

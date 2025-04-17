@@ -2,8 +2,8 @@ use super::importer::{ImportError, Importer};
 use crate::{
     inference::{TypeError, TypeInferencer},
     unifier::{EqlValue, Unifier},
-    DepMut, Param, ParamError, ScopeError, ScopeTracker, TableResolver, Type, TypeRegistry,
-    TypedStatement, Value,
+    DepMut, Fmt, Param, ParamError, Projection, ScopeError, ScopeTracker, TableResolver, Type,
+    TypeRegistry, TypedStatement, Value,
 };
 use sqlparser::ast::{self as ast, Statement};
 use sqltk::{Break, NodeKey, Visitable, Visitor};
@@ -37,53 +37,8 @@ pub fn type_check<'ast>(
 ) -> Result<TypedStatement<'ast>, EqlMapperError> {
     let mut mapper = EqlMapper::<'ast>::new_with_resolver(resolver);
     match statement.accept(&mut mapper) {
-        ControlFlow::Continue(()) => {
-            let build = || -> Result<TypedStatement, EqlMapperError> {
-                let projection = mapper.projection_type(statement);
-                let params = mapper.param_types();
-                let literals = mapper.literal_types();
-                let node_types = mapper.node_types();
-
-                let span = span!(
-                    Level::DEBUG,
-                    "type_check",
-                    projection = ?projection,
-                    params = ?params,
-                    literals = ?literals,
-                    node_types = ?node_types
-                );
-
-                let _guard = span.enter();
-
-                Ok(TypedStatement {
-                    statement,
-                    projection: projection?,
-                    params: params?,
-                    literals: literals?,
-                    node_types: Arc::new(node_types?),
-                })
-            };
-
-            build().map_err(|err| {
-                let span = span!(
-                    Level::ERROR,
-                    "type_check",
-                    err = ?err
-                );
-
-                let _guard = span.enter();
-
-                err
-            })
-        }
-        ControlFlow::Break(Break::Err(err)) => {
-            #[cfg(test)]
-            {
-                mapper.inferencer.borrow().dump_registry(statement);
-            }
-
-            Err(err)
-        }
+        ControlFlow::Continue(()) => mapper.resolve(statement),
+        ControlFlow::Break(Break::Err(err)) => Err(err),
         ControlFlow::Break(_) => Err(EqlMapperError::InternalError(String::from(
             "unexpected Break value in type_check",
         ))),
@@ -180,6 +135,72 @@ impl<'ast> EqlMapper<'ast> {
         }
     }
 
+    pub fn resolve(
+        self,
+        statement: &'ast Statement,
+    ) -> Result<TypedStatement<'ast>, EqlMapperError> {
+        let span_begin = span!(
+            Level::TRACE,
+            "resolve",
+            statement = %statement
+        );
+
+        let _guard = span_begin.enter();
+
+        let projection = self.projection_type(statement);
+        let params = self.param_types();
+        let literals = self.literal_types();
+        let node_types = self.node_types();
+
+        let combine_results =
+            || -> Result<_, EqlMapperError> { Ok((projection?, params?, literals?, node_types?)) };
+
+        match combine_results() {
+            Ok((projection, params, literals, node_types)) => {
+                let span_end = span!(
+                    parent: &span_begin,
+                    Level::TRACE,
+                    "resolve Ok",
+                    projection = %&projection,
+                    params = %Fmt(&params),
+                    literals = %Fmt(&literals),
+                    node_types = %Fmt(&node_types)
+                );
+
+                let _guard = span_end.enter();
+
+                Ok(TypedStatement {
+                    statement,
+                    projection,
+                    params,
+                    literals,
+                    node_types: Arc::new(node_types),
+                })
+            }
+            Err(err) => {
+                let projection = self.projection_type(statement);
+                let params = self.param_types();
+                let literals = self.literal_types();
+                let node_types = self.node_types();
+
+                let span_end = span!(
+                    parent: &span_begin,
+                    Level::TRACE,
+                    "resolve Err",
+                    err = ?err,
+                    projection = ?projection,
+                    params = ?params,
+                    literals = ?literals,
+                    node_types = ?node_types
+                );
+
+                let _guard = span_end.enter();
+
+                Err(err)
+            }
+        }
+    }
+
     fn projection_type(
         &self,
         statement: &'ast Statement,
@@ -246,8 +267,14 @@ impl<'ast> EqlMapper<'ast> {
         let mut resolved_node_types: HashMap<NodeKey<'ast>, Type> = HashMap::new();
         for (key, ty) in node_types {
             match ty {
-                Some(ty) => resolved_node_types.insert(key, ty.resolved(&mut self.unifier.borrow_mut())?),
-                None => return Err(EqlMapperError::InternalError(format!("unresolved type for node")))
+                Some(ty) => {
+                    resolved_node_types.insert(key, ty.resolved(&mut self.unifier.borrow_mut())?)
+                }
+                None => {
+                    return Err(EqlMapperError::InternalError(format!(
+                        "unresolved type for node"
+                    )))
+                }
             };
         }
 

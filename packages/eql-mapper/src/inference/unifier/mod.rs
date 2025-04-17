@@ -66,7 +66,7 @@ impl<'ast> Unifier<'ast> {
         let rhs: Arc<Type> = rhs.into();
 
         let span_begin = span!(
-            Level::DEBUG,
+            Level::TRACE,
             "unify",
             depth = self.depth,
             lhs = %lhs,
@@ -173,7 +173,7 @@ impl<'ast> Unifier<'ast> {
             Ok(ty) => {
                 let span_end = span!(
                     parent: &span_begin,
-                    Level::DEBUG,
+                    Level::TRACE,
                     "Ok",
                     unification = %ty,
                 );
@@ -185,7 +185,7 @@ impl<'ast> Unifier<'ast> {
             Err(err) => {
                 let span_end = span!(
                     parent: &span_begin,
-                    Level::DEBUG,
+                    Level::TRACE,
                     "Err",
                     unification = ?&err
                 );

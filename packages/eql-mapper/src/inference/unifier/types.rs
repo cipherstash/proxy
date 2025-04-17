@@ -309,7 +309,7 @@ pub struct ProjectionColumns(pub(crate) Vec<ProjectionColumn>);
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Display, Hash)]
 pub enum Projection {
     /// A projection with columns
-    #[display("Projection::Columns({})", _0)]
+    #[display("COLS[{}]", _0)]
     WithColumns(ProjectionColumns),
 
     /// A projection without columns.
@@ -318,7 +318,7 @@ pub enum Projection {
     ///
     /// Also statements such as `SELECT FROM users` where there are no selected columns or wildcards will have an empty
     /// projection.
-    #[display("Projection::Empty")]
+    #[display("COLS[]")]
     Empty,
 }
 

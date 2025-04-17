@@ -7,6 +7,7 @@ mod importer;
 mod inference;
 mod iterator_ext;
 mod model;
+mod display_helpers;
 mod param;
 mod scope_tracker;
 mod transformation_rules;
@@ -17,6 +18,7 @@ mod test_helpers;
 
 pub use eql_mapper::*;
 pub use model::*;
+pub use display_helpers::*;
 pub use param::*;
 pub use typed_statement::*;
 pub use unifier::{EqlValue, NativeValue, TableColumn};
@@ -1100,7 +1102,7 @@ mod test {
 
     #[test]
     fn literals_or_param_placeholders_in_outermost_projection() {
-        // init_tracing();
+        init_tracing();
 
         let schema = resolver(schema! {
             tables: { }

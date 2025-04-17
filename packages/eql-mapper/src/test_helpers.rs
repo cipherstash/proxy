@@ -17,7 +17,8 @@ pub(crate) fn init_tracing() {
     INIT.call_once(|| {
         tracing_subscriber::fmt()
             .with_max_level(tracing::Level::TRACE)
-            .with_span_events(FmtSpan::ACTIVE)
+            .with_span_events(FmtSpan::EXIT)
+            .pretty()
             .with_test_writer() // ensures it writes to stdout/stderr even during `cargo test`
             .init();
     });
