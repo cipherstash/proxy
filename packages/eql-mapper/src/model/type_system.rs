@@ -87,7 +87,20 @@ impl ProjectionColumn {
     }
 }
 
-impl TryFrom<&unifier::ProjectionColumns> for Type {
+impl TryFrom<&unifier::Projection> for Projection {
+    type Error = crate::EqlMapperError;
+
+    fn try_from(value: &unifier::Projection) -> Result<Self, Self::Error> {
+        match value {
+            unifier::Projection::WithColumns(projection_columns) => Ok(Self::WithColumns(
+                Vec::<ProjectionColumn>::try_from(projection_columns)?,
+            )),
+            unifier::Projection::Empty => Ok(Projection::Empty),
+        }
+    }
+}
+
+impl TryFrom<&unifier::ProjectionColumns> for Vec<ProjectionColumn> {
     type Error = crate::EqlMapperError;
 
     fn try_from(columns: &unifier::ProjectionColumns) -> Result<Self, Self::Error> {
@@ -112,7 +125,7 @@ impl TryFrom<&unifier::ProjectionColumns> for Type {
             pub_columns.push(pub_column);
         }
 
-        Ok(Type::Projection(Projection::new(pub_columns)))
+        Ok(pub_columns)
     }
 }
 

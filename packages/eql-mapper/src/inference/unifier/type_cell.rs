@@ -1,20 +1,30 @@
-use std::{cell::RefCell, rc::Rc};
+use std::{any::type_name, sync::Arc, sync::RwLock};
+
+use crate::{ArcMap, ArcRef};
 
 use super::{Constructor, NativeValue, Type, TypeError, TypeRegistry, Value};
 
 /// `TypeCell` is a shareable mutable container of a [`Type`].
 ///
 /// It used by [`super::Unifier`] to ensure that two successfully unified types share the same allocation.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct TypeCell {
-    shared_ty: Rc<RefCell<SharedTypeMut>>,
+    shared_ty: Arc<RwLock<SharedTypeMut>>,
+}
+
+impl Eq for TypeCell {}
+
+impl PartialEq for TypeCell {
+    fn eq(&self, other: &Self) -> bool {
+        *self.shared_ty.read().unwrap() == *other.shared_ty.read().unwrap()
+    }
 }
 
 impl TypeCell {
     /// Create a new `TypeCell` that owns a [`Type`].
     pub(crate) fn new(ty: Type) -> Self {
         Self {
-            shared_ty: Rc::new(RefCell::new(SharedTypeMut::new(ty))),
+            shared_ty: Arc::new(RwLock::new(SharedTypeMut::new(ty))),
         }
     }
 
@@ -27,7 +37,7 @@ impl TypeCell {
     pub(crate) fn join(&self, other: &TypeCell) -> TypeCell {
         // If allocations are already shared then skip this part (which also prevents BorrowMutError).
         if !self.has_same_pointee(other) {
-            *self.shared_ty.borrow_mut() = other.shared_ty.borrow().clone();
+            *self.shared_ty.write().unwrap() = other.shared_ty.read().unwrap().clone();
         }
 
         self.clone()
@@ -46,12 +56,12 @@ impl TypeCell {
     /// All other `TypeCell`s that `self` has been bound with (see: [`Self::join`]) will also resolve to the same `Type`.
     #[cfg(test)]
     pub(crate) fn set_type(&self, ty: Type) {
-        self.shared_ty.borrow().set_type(ty);
+        self.shared_ty.write().unwrap().set_type(ty);
     }
 
-    /// Returns the [`Rc<Type>`] that underlying `self`.
-    pub fn as_type(&self) -> Rc<Type> {
-        self.shared_ty.borrow().as_type()
+    /// Returns the [`Arc<Type>`] that underlying `self`.
+    pub fn as_type(&self) -> Arc<Type> {
+        self.shared_ty.read().unwrap().as_type()
     }
 
     pub fn is_eql_value(&self) -> bool {
@@ -64,16 +74,17 @@ impl TypeCell {
     /// Tests whether `self` and `other` share a mutable type allocation.
     pub fn has_same_pointee(&self, other: &Self) -> bool {
         self.shared_ty
-            .borrow()
-            .has_same_pointee(&other.shared_ty.borrow())
+            .read()
+            .unwrap()
+            .has_same_pointee(&other.shared_ty.read().unwrap())
     }
 
-    /// Resolves the `Type` stored in `self`, returning it as an [`Rc<Type>`].
+    /// Resolves the `Type` stored in `self`, returning it as an [`Arc<Type>`].
     ///
     /// A resolved type is one in which all type variables have been resolved, recursively.
     ///
     /// Fails with a [`TypeError`] if the stored `Type` cannot be fully resolved.
-    pub fn resolved(&self, registry: &TypeRegistry<'_>) -> Result<Rc<Type>, TypeError> {
+    pub fn resolved(&self, registry: &TypeRegistry<'_>) -> Result<Arc<Type>, TypeError> {
         let ty = self.as_type();
         match &*ty {
             Type::Constructor(constructor) => match constructor {
@@ -106,33 +117,73 @@ impl TypeCell {
             },
         }
     }
+
+    pub fn resolved_as<T: Send + Sync + 'static>(
+        &self,
+        registry: &TypeRegistry<'_>,
+    ) -> Result<ArcRef<T>, TypeError> {
+        let resolved = &self.resolved(registry)?;
+        resolved
+            .try_map(|ty| match ty {
+                Type::Constructor(Constructor::Projection(projection)) => {
+                    if let Some(t) = (projection as &dyn std::any::Any).downcast_ref::<T>() {
+                        return Ok(t);
+                    }
+
+                    Err(())
+                }
+                Type::Constructor(Constructor::Value(value)) => {
+                    if let Some(t) = (value as &dyn std::any::Any).downcast_ref::<T>() {
+                        return Ok(t);
+                    }
+
+                    Err(())
+                }
+                Type::Var(_) => Err(()),
+            })
+            .map_err(|_| {
+                TypeError::InternalError(format!(
+                    "could not resolve type {} as {}",
+                    resolved,
+                    type_name::<T>()
+                ))
+            })
+    }
 }
 
-type SharedType = Rc<Type>;
+type SharedType = Arc<Type>;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 struct SharedTypeMut {
-    alloc: Rc<RefCell<SharedType>>,
+    alloc: Arc<RwLock<SharedType>>,
+}
+
+impl Eq for SharedTypeMut {}
+
+impl PartialEq for SharedTypeMut {
+    fn eq(&self, other: &Self) -> bool {
+        *self.alloc.read().unwrap() == *other.alloc.read().unwrap()
+    }
 }
 
 impl SharedTypeMut {
     fn new(ty: Type) -> Self {
         Self {
-            alloc: Rc::new(RefCell::new(SharedType::new(ty))),
+            alloc: Arc::new(RwLock::new(SharedType::new(ty))),
         }
     }
 
     #[cfg(test)]
     fn set_type(&self, ty: Type) {
-        *self.alloc.borrow_mut() = SharedType::new(ty);
+        *self.alloc.write().unwrap() = SharedType::new(ty);
     }
 
-    fn as_type(&self) -> Rc<Type> {
-        self.alloc.borrow().clone()
+    fn as_type(&self) -> Arc<Type> {
+        self.alloc.read().unwrap().clone()
     }
 
     fn has_same_pointee(&self, other: &Self) -> bool {
-        Rc::ptr_eq(&self.alloc.borrow(), &other.alloc.borrow())
+        Arc::ptr_eq(&*self.alloc.read().unwrap(), &*other.alloc.read().unwrap())
     }
 }
 

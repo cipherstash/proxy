@@ -41,6 +41,7 @@ serde = "1.0"
 serde_json = "1.0"
 socket2 = "0.5.7"
 sqlparser = { workspace = true }
+sqltk = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 tokio-postgres = { version = "0.7", features = [

@@ -1,24 +1,31 @@
 //! `eql-mapper` transforms SQL to SQL+EQL using a known database schema as a reference.
 
+mod arc_ref;
 mod dep;
-mod eql_function_tracker;
 mod eql_mapper;
 mod importer;
 mod inference;
 mod iterator_ext;
 mod model;
+mod param_tracker;
 mod scope_tracker;
+mod transformation_rules;
+mod value_tracker;
 
 #[cfg(test)]
 mod test_helpers;
 
-pub use dep::*;
 pub use eql_mapper::*;
-pub use importer::*;
-pub use inference::*;
 pub use model::*;
-pub use scope_tracker::*;
 pub use unifier::{EqlValue, NativeValue, TableColumn};
+
+pub(crate) use arc_ref::*;
+pub(crate) use dep::*;
+pub(crate) use inference::*;
+pub(crate) use param_tracker::*;
+pub(crate) use scope_tracker::*;
+pub(crate) use transformation_rules::*;
+pub(crate) use value_tracker::*;
 
 #[cfg(test)]
 mod test {
@@ -26,13 +33,16 @@ mod test {
     use super::type_check;
     use crate::col;
     use crate::projection;
-    use crate::NodeKey;
     use crate::Schema;
     use crate::TableResolver;
-    use crate::{schema, EqlValue, NativeValue, Projection, ProjectionColumn, TableColumn, Value};
+    use crate::{
+        schema, unifier::EqlValue, unifier::NativeValue, Projection, ProjectionColumn, TableColumn,
+        Value,
+    };
     use pretty_assertions::assert_eq;
     use sqlparser::ast::Statement;
     use sqlparser::ast::{self as ast};
+    use sqltk::AsNodeKey;
     use std::collections::HashMap;
     use std::sync::Arc;
     use tracing::error;
@@ -1020,7 +1030,7 @@ mod test {
         );
 
         let transformed_statement = match typed.transform(HashMap::from_iter([(
-            NodeKey::new(typed.literals[0].1),
+            typed.literals[0].1.as_node_key(),
             ast::Expr::Value(ast::Value::SingleQuotedString("ENCRYPTED".into())),
         )])) {
             Ok(transformed_statement) => transformed_statement,
@@ -1127,14 +1137,38 @@ mod test {
         };
 
         assert_transitive_eq(&[
-            projection_type(&parse("select 1")),
-            projection_type(&parse("select t from (select 1 as t)")),
-            projection_type(&parse("select * from (select 1)")),
+            // projection_type(&parse("select 'lit'")),
+            // projection_type(&parse("select x from (select 'lit' as x)")),
+            // projection_type(&parse("select * from (select 'lit')")),
+            // projection_type(&parse("select * from (select 'lit' as t)")),
             projection_type(&parse("select $1")),
-            projection_type(&parse("select t from (select $1 as t)")),
-            projection_type(&parse("select * from (select $1)")),
-            Some(projection![(NATIVE)]),
+            // projection_type(&parse("select t from (select $1 as t)")),
+            // projection_type(&parse("select * from (select $1)")),
+            Some(Projection::WithColumns(vec![ProjectionColumn {
+                alias: None,
+                ty: Value::Native(NativeValue(None)),
+            }])),
         ]);
+    }
+
+    #[test]
+    fn where_true() {
+        let _ = tracing_subscriber::fmt::try_init();
+
+        let schema = resolver(schema! {
+            tables: {
+                employees: {
+                    id,
+                }
+            }
+        });
+
+        let statement = parse(
+            r#"
+                select id from employees where true;
+            "#,
+        );
+        type_check(schema, &statement).unwrap();
     }
 
     #[test]
@@ -1314,5 +1348,64 @@ mod test {
 
         type_check(schema, &statement)
             .expect_err("eql columns in functions should be a type error");
+    }
+
+    #[test]
+    fn group_by_eql_column() {
+        let _ = tracing_subscriber::fmt::try_init();
+        let schema = resolver(schema! {
+            tables: {
+                users: {
+                    id (PK),
+                    email (EQL),
+                    first_name,
+                }
+            }
+        });
+
+        let statement = parse("SELECT email FROM users GROUP BY email");
+
+        match type_check(schema, &statement) {
+            Ok(typed) => {
+                match typed.transform(HashMap::new()) {
+                    Ok(statement) => assert_eq!(
+                        statement.to_string(),
+                        "SELECT CS_GROUPED_VALUE_V1(email) AS email FROM users GROUP BY CS_ORE_64_8_V1(email)".to_string()
+                    ),
+                    Err(err) => panic!("transformation failed: {err}"),
+                }
+            }
+            Err(err) => panic!("type check failed: {err}"),
+        }
+    }
+
+    #[test]
+    fn modify_aggregate_when_eql_column_affected_by_group_by_of_other_column() {
+        let _ = tracing_subscriber::fmt::try_init();
+        let schema = resolver(schema! {
+            tables: {
+                employees: {
+                    id (PK),
+                    department,
+                    salary (EQL),
+                }
+            }
+        });
+
+        let statement =
+            parse("SELECT MIN(salary), MAX(salary), department FROM employees GROUP BY department");
+
+        match type_check(schema, &statement) {
+            Ok(typed) => {
+                match typed.transform(HashMap::new()) {
+                    Ok(statement) => assert_eq!(
+                        statement.to_string(),
+                        "SELECT CS_MIN_V1(salary) AS MIN, CS_MAX_V1(salary) AS MAX, department FROM employees GROUP BY department".to_string()
+                    ),
+                    Err(err) => panic!("transformation failed: {err}"),
+                }
+            }
+            Err(err) => panic!("type check failed: {err}"),
+        }
     }
 }

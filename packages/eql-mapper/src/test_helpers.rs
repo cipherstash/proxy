@@ -86,7 +86,7 @@ pub fn ignore_aliases(t: &Projection) -> Projection {
                 })
                 .collect(),
         ),
-        Projection::Empty => t.clone(),
+        Projection::Empty => Projection::Empty,
     }
 }
 
