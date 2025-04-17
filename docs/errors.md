@@ -2,33 +2,33 @@
 
 # Errors
 
-## Table of Contents
+## Table of contents
 
-- Authentication Errors:
+- Authentication errors:
   - [Database](#authentication-failed-database)
   - [Client](#authentication-failed-client)
 
-- Mapping Errors:
+- Mapping errors:
   - [Invalid parameter](#mapping-invalid-parameter)
   - [Invalid SQL statement](#mapping-invalid-sql-statement)
   - [Unsupported parameter type](#mapping-unsupported-parameter-type)
   - [Statement could not be type checked](#mapping-statement-could-not-be-type-checked)
   - [Internal Error](#mapping-internal-error)
 
-- Encrypt Errors:
+- Encrypt errors:
   - [Column could not be encrypted](#encrypt-column-could-not-be-encrypted)
   - [Plaintext could not be encoded](#encrypt-plaintext-could-not-be-encoded)
   - [Unknown column](#encrypt-unknown-column)
   - [Unknown table](#encrypt-unknown-table)
   - [Unknown index term](#encrypt-unknown-index-term)
 
-- Configuration Errors:
+- Configuration errors:
   - [Missing or invalid TLS configuration](#config-missing-or-invalid-tls)
 <!-- ---------------------------------------------------------------------------------------------------- -->
 
 <!-- ---------------------------------------------------------------------------------------------------- -->
 
-# Authentication Errors
+# Authentication errors
 
 
 ## Database <a id='authentication-failed-database'></a>
@@ -42,7 +42,7 @@ Authentication failed when connecting to the database.
 Database authentication failed: check username and password
 ```
 
-### How to Fix
+### How to fix
 
 Check the configured username and password are correct and can connect to the database.
 
@@ -72,7 +72,7 @@ Authentication failed when connecting a client to the proxy.
 Client authentication failed: check username and password
 ```
 
-### How to Fix
+### How to fix
 
 Check the configured username and password are correct.
 
@@ -84,7 +84,7 @@ Check the configured username and password are correct.
 
 <!-- ---------------------------------------------------------------------------------------------------- -->
 
-# Mapping Errors
+# Mapping errors
 
 
 ## Invalid parameter <a id='mapping-invalid-parameter'></a>
@@ -111,7 +111,7 @@ In some cases, parameter types can be converted.
 For example PostgreSQL `INT2`, `INT4` and `INT8` will all be converted into encrypted `SmallInt`, `Int`, or `BigInt` types.
 
 
-### How to Fix
+### How to fix
 
 Check the parameter or literal is of the appropriate type for the configured encrypted column.
 
@@ -141,9 +141,9 @@ As SQL is a vast, sprawling language, the proxy may fail to parse some valid SQL
 Please contact CipherStash if you think your SQL is correct and the parser is wrong.
 
 
-### How to Fix
+### How to fix
 
-Check the sql is a valid PostgreSQL SQL statement.
+Check the SQL is a valid PostgreSQL SQL statement.
 
 
 <!-- ---------------------------------------------------------------------------------------------------- -->
@@ -160,7 +160,7 @@ The parameter type is not supported.
 Encryption of PostgreSQL {name} (OID {oid}) types is not currently supported.
 ```
 
-### How to Fix
+### How to fix
 
 Check the supported types for encrypted columns.
 
@@ -204,7 +204,7 @@ CONTEXT:  PL/pgSQL function _cs_encrypted_check_v(jsonb) line 6 at RAISE
 SQL function "cs_check_encrypted_v1" statement 1
 ```
 
-### How to Fix
+### How to fix
 
 In most cases, this error will occur if the statement contains invalid or unsupported syntax.
 
@@ -228,7 +228,7 @@ This could be due to an internal invariant failure, or because of a specific fra
 Statement encountered an internal error. This may be a bug in the statement mapping module of CipherStash Proxy.
 ```
 
-### How to Fix
+### How to fix
 
 Check if you are running the latest version of CipherStash Proxy, and update to the latest version if not.
 
@@ -239,7 +239,7 @@ If the error persists, please contact CipherStash [support](https://cipherstash.
 <!-- ---------------------------------------------------------------------------------------------------- -->
 
 
-# Encrypt Errors
+# Encrypt errors
 
 
 ## Column could not be encrypted <a id='encrypt-column-could-not-be-encrypted'></a>
@@ -304,7 +304,7 @@ For example:
 - error as existing records stored as `text` data cannot be decrypted, cast and encoded as `int`
 
 
-### How to Fix
+### How to fix
 
 1. Check the encrypted configuration has the correct type.
 1. Check that the configuration has not changed.
@@ -327,7 +327,7 @@ Column 'column_name' in table 'table_name' has no Encrypt configuration
 ```
 
 
-### How to Fix
+### How to fix
 
 1. Define the encrypted configuration using [EQL](https://github.com/cipherstash/encrypt-query-language).
    <!-- TODO: link to doc -->
@@ -353,7 +353,7 @@ Any data is unprotected and unencrypted.
 Table 'table_name' has no Encrypt configuration
 ```
 
-### How to Fix
+### How to fix
 
 1. Define the encrypted configuration using [EQL](https://github.com/cipherstash/encrypt-query-language).
    <!-- TODO: link to doc -->
@@ -382,7 +382,7 @@ Unknown Index Term for column '{column_name}' in table '{table_name}'.
 ```
 
 
-### How to Fix
+### How to fix
 
 1. Check the Encrypt configuration for the column.
 1. Define the encrypted configuration using [EQL](https://github.com/cipherstash/encrypt-query-language).
@@ -394,7 +394,7 @@ Unknown Index Term for column '{column_name}' in table '{table_name}'.
 
 <!-- ---------------------------------------------------------------------------------------------------- -->
 
-# Configuration Errors
+# Configuration errors
 
 
 ## Database <a id='config-missing-or-invalid-tls'></a>
@@ -414,7 +414,7 @@ Missing Transport Layer Security (TLS) certificate at path: {path}.
 Missing Transport Layer Security (TLS) private key at path: {path}.
 ```
 
-### How to Fix
+### How to fix
 
 If using path-based configuration:
 Check that the certificate and private key exists at the specified path.
