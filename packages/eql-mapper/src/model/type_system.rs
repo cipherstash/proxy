@@ -83,9 +83,4 @@ impl ProjectionColumn {
             None => String::from(""),
         }
     }
-
-    fn render_projection(projection: &[ProjectionColumn]) -> String {
-        let ty_strings: Vec<String> = projection.iter().map(|col| col.ty.to_string()).collect();
-        format!("[{}]", ty_strings.join(", "))
-    }
 }

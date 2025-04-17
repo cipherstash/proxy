@@ -36,7 +36,7 @@ impl<'ast> TypeRegistry<'ast> {
     pub(crate) fn get_nodes_and_types<N: Visitable>(&self) -> Vec<(&'ast N, Option<Arc<Type>>)> {
         self.node_types
             .iter()
-            .filter_map(|(key, tid)| key.get_as::<N>().map(|n| (n, self.get_type_by_tvar(*tid))))
+            .filter_map(|(key, tvar)| key.get_as::<N>().map(|n| (n, self.get_type_by_tvar(*tvar))))
             .collect()
     }
 
@@ -57,12 +57,12 @@ impl<'ast> TypeRegistry<'ast> {
     pub(crate) fn first_matching_node_with_type<N: Visitable>(
         &self,
         needle: &Type,
-    ) -> Option<(&'ast N, TypeVar, Arc<Type>)> {
+    ) -> Option<(&'ast N, Arc<Type>)> {
         self.node_types.iter().find_map(|(key, tvar)| {
             let node = key.get_as::<N>()?;
             if let Some(ty) = self.get_type_by_tvar(*tvar) {
                 if needle == &*ty {
-                    Some((node, *tvar, ty))
+                    Some((node, ty))
                 } else {
                     None
                 }
@@ -78,8 +78,8 @@ impl<'ast> TypeRegistry<'ast> {
     }
 
     pub(crate) fn set_param(&mut self, param: &'ast String, ty: impl Into<Arc<Type>>) {
-        let tid = self.register(ty);
-        self.param_types.insert(param, tid);
+        let tvar = self.register(ty);
+        self.param_types.insert(param, tvar);
     }
 
     pub(crate) fn get_params(&self) -> HashMap<&'ast String, Arc<Type>> {
@@ -136,14 +136,14 @@ impl<'ast> TypeRegistry<'ast> {
     }
 }
 
-#[cfg(test)]
 pub(crate) mod test_util {
     use sqlparser::ast::{
         Delete, Expr, Function, FunctionArguments, Insert, Query, Select, SelectItem, SetExpr,
-        Statement, Value,
+        Statement, Value, Values,
     };
     use sqltk::{AsNodeKey, Break, Visitable, Visitor};
-    use std::{convert::Infallible, fmt::Debug, ops::ControlFlow};
+    use tracing::Level;
+    use std::{any::type_name, convert::Infallible, fmt::Debug, ops::ControlFlow};
 
     use super::TypeRegistry;
 
@@ -155,15 +155,20 @@ pub(crate) mod test_util {
         /// Useful when debugging tests.
         pub(crate) fn dump_node<N: Visitable + Display + AsNodeKey + Debug>(&self, node: &N) {
             let key = node.as_node_key();
-            if let Some(tid) = self.node_types.get(&key) {
-                tracing::error!(
-                    "TYPE<\nast: {}\nsyn: {}\nty: {}\n>",
-                    std::any::type_name::<N>(),
-                    node,
-                    self.get_type_by_tvar(*tid)
+            if let Some(tvar) = self.node_types.get(&key) {
+                let ty_name = type_name::<N>();
+
+                let span = tracing::span!(
+                    Level::TRACE,
+                    "Node+Type",
+                    ast_ty = ty_name,
+                    node = %node,
+                    ty = self.get_type_by_tvar(*tvar)
                         .map(|ty| ty.to_string())
                         .unwrap_or(String::from("<unresolved>")),
                 );
+
+                let _guard = span.enter();
             };
         }
 
@@ -217,6 +222,10 @@ pub(crate) mod test_util {
                     }
 
                     if let Some(node) = node.downcast_ref::<FunctionArguments>() {
+                        self.0.dump_node(node);
+                    }
+
+                    if let Some(node) = node.downcast_ref::<Values>() {
                         self.0.dump_node(node);
                     }
 

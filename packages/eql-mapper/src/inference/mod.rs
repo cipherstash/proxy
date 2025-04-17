@@ -108,6 +108,10 @@ impl<'ast> TypeInferencer<'ast> {
         self.unifier.borrow_mut().unify(lhs.into(), rhs.into())
     }
 
+    fn substitute(&self, tvar: TypeVar, sub_ty: impl Into<Arc<Type>>) -> Arc<Type> {
+        self.unifier.borrow_mut().substitute(tvar, sub_ty)
+    }
+
     /// Unifies the types of two nodes with a third type and records the unification result.
     /// After a successful unification both nodes will refer to the same type.
     fn unify_nodes_with_type<N1: AsNodeKey, N2: AsNodeKey>(
@@ -116,13 +120,12 @@ impl<'ast> TypeInferencer<'ast> {
         rhs: &'ast N2,
         ty: impl Into<Arc<Type>>,
     ) -> Result<Arc<Type>, TypeError> {
-        let unifier = &mut *self.unifier.borrow_mut();
         let lhs_tvar = self.get_type_var_of_node(lhs);
         let rhs_tvar = self.get_type_var_of_node(rhs);
-        let unified = unifier.unify(self.get_type_of_node(lhs), self.get_type_of_node(rhs))?;
-        let unified = unifier.unify(unified, ty)?;
-        let unified = unifier.substitute(lhs_tvar, unified);
-        let unified = unifier.substitute(rhs_tvar, unified);
+        let unified = self.unify(self.get_type_of_node(lhs), self.get_type_of_node(rhs))?;
+        let unified = self.unify(unified, ty)?;
+        let unified = self.substitute(lhs_tvar, unified);
+        let unified = self.substitute(rhs_tvar, unified);
         Ok(unified)
     }
 
@@ -132,11 +135,10 @@ impl<'ast> TypeInferencer<'ast> {
         node: &'ast N,
         ty: impl Into<Arc<Type>>,
     ) -> Result<Arc<Type>, TypeError> {
-        let unifier = &mut *self.unifier.borrow_mut();
         let node_tvar = self.get_type_var_of_node(node);
         let node_ty = self.get_type_of_node(node);
-        let unified = unifier.unify(node_ty, ty)?;
-        let unified = unifier.substitute(node_tvar, unified);
+        let unified = self.unify(node_ty, ty)?;
+        let unified = self.substitute(node_tvar, unified);
         Ok(unified)
     }
 
@@ -147,13 +149,12 @@ impl<'ast> TypeInferencer<'ast> {
         lhs: &'ast N1,
         rhs: &'ast N2,
     ) -> Result<Arc<Type>, TypeError> {
-        let unifier = &mut *self.unifier.borrow_mut();
         let lhs_tvar = self.get_type_var_of_node(lhs);
         let rhs_tvar = self.get_type_var_of_node(rhs);
-        match unifier.unify(self.get_type_of_node(lhs), self.get_type_of_node(rhs)) {
+        match self.unify(self.get_type_of_node(lhs), self.get_type_of_node(rhs)) {
             Ok(unified) => {
-                let unified = unifier.substitute(lhs_tvar, unified);
-                let unified = unifier.substitute(rhs_tvar, unified);
+                let unified = self.substitute(lhs_tvar, unified);
+                let unified = self.substitute(rhs_tvar, unified);
                 Ok(unified)
             }
             Err(err) => Err(TypeError::OnNodes(
@@ -299,8 +300,6 @@ impl<'ast> Visitor<'ast> for TypeInferencer<'ast> {
     }
 }
 
-#[cfg(test)]
-#[allow(dead_code)]
 pub(crate) mod test_util {
     use sqltk::Visitable;
 

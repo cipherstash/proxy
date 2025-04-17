@@ -300,7 +300,7 @@ impl Type {
 }
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Display, Hash)]
-#[display("[{}]", _0.iter().map(|pc| pc.to_string()).collect::<Vec<_>>().join(", "))]
+#[display("COLS[{}]", _0.iter().map(|pc| pc.to_string()).collect::<Vec<_>>().join(", "))]
 pub struct ProjectionColumns(pub(crate) Vec<ProjectionColumn>);
 
 /// The type of an [`sqlparser::ast::Expr`] or [`sqlparser::ast::Statement`] that returns a projection.
@@ -309,7 +309,7 @@ pub struct ProjectionColumns(pub(crate) Vec<ProjectionColumn>);
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Display, Hash)]
 pub enum Projection {
     /// A projection with columns
-    #[display("COLS[{}]", _0)]
+    #[display("{}", _0)]
     WithColumns(ProjectionColumns),
 
     /// A projection without columns.

@@ -6,7 +6,7 @@ use std::{
 use sqlparser::ast::{
     Delete, Expr, Function, Insert, Query, Select, SelectItem, SetExpr, Statement, Value, Values,
 };
-use sqltk::{NodeKey, Visitable};
+use sqltk::NodeKey;
 
 use crate::{EqlValue, Param, Type};
 
@@ -94,7 +94,7 @@ impl<'a> Display for Fmt<&'a Vec<(Param, crate::Value)>> {
 }
 
 impl<'a, 'ast> Display for Fmt<&'a Vec<(EqlValue, &'ast sqlparser::ast::Value)>> {
-   fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let formatted = self
             .0
             .iter()
@@ -102,5 +102,5 @@ impl<'a, 'ast> Display for Fmt<&'a Vec<(EqlValue, &'ast sqlparser::ast::Value)>>
             .collect::<Vec<_>>()
             .join(", ");
         f.write_str(&formatted)
-   }
+    }
 }

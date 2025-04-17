@@ -2,7 +2,7 @@ use super::importer::{ImportError, Importer};
 use crate::{
     inference::{TypeError, TypeInferencer},
     unifier::{EqlValue, Unifier},
-    DepMut, Fmt, Param, ParamError, Projection, ScopeError, ScopeTracker, TableResolver, Type,
+    DepMut, Fmt, Param, ParamError, ScopeError, ScopeTracker, TableResolver, Type,
     TypeRegistry, TypedStatement, Value,
 };
 use sqlparser::ast::{self as ast, Statement};
@@ -178,6 +178,9 @@ impl<'ast> EqlMapper<'ast> {
                 })
             }
             Err(err) => {
+                let inferencer = &*self.inferencer.borrow();
+                inferencer.dump_registry(statement);
+
                 let projection = self.projection_type(statement);
                 let params = self.param_types();
                 let literals = self.literal_types();
