@@ -62,7 +62,7 @@ impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
             | Expr::IsNotUnknown(expr) => {
                 self.unify_node_with_type(
                     this_expr,
-                    self.unify(self.get_type_of_node(&**expr), Type::any_native())?,
+                    self.unify(self.force_get_type_of_node(&**expr), Type::any_native())?,
                 )?;
             }
 
@@ -80,8 +80,8 @@ impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
                 self.unify_node_with_type(
                     &**expr,
                     list.iter()
-                        .try_fold(self.get_type_of_node(&**expr), |a, b| {
-                            self.unify(a, self.get_type_of_node(b))
+                        .try_fold(self.force_get_type_of_node(&**expr), |a, b| {
+                            self.unify(a, self.force_get_type_of_node(b))
                         })?,
                 )?;
             }
@@ -92,7 +92,7 @@ impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
                 negated: _,
             } => {
                 self.unify_node_with_type(this_expr, Type::any_native())?;
-                let ty = Type::projection(&[(self.get_type_of_node(&**expr), None)]);
+                let ty = Type::projection(&[(self.force_get_type_of_node(&**expr), None)]);
                 self.unify_node_with_type(&**subquery, ty)?;
             }
 
@@ -351,7 +351,7 @@ impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
 
             // The return type of this function and the return type of this expression must be the same type.
             Expr::Function(function) => {
-                self.unify_node_with_type(this_expr, self.get_type_of_node(function))?;
+                self.unify_node_with_type(this_expr, self.force_get_type_of_node(function))?;
             }
 
             // When operand is Some(operand), all conditions must be of type expr and expr must support equality

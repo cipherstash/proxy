@@ -178,7 +178,7 @@ pub struct TableColumn {
 pub struct EqlValue(pub TableColumn);
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Display, Hash)]
-#[display("NATIVE({})", _0.as_ref().map(|tc| tc.to_string()).unwrap_or(String::from("?")))]
+#[display("NATIVE{}", _0.as_ref().map(|tc| format!("({})", tc)).unwrap_or(String::from("")))]
 pub struct NativeValue(pub Option<TableColumn>);
 
 /// A column from a projection.
@@ -194,7 +194,7 @@ pub struct ProjectionColumn {
 
 /// A placeholder for an unknown type.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Display)]
-#[display("${}", _0)]
+#[display("?{}", _0)]
 pub struct TypeVar(pub u32);
 
 impl From<TypeVar> for Type {

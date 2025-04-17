@@ -104,3 +104,12 @@ impl<'a, 'ast> Display for Fmt<&'a Vec<(EqlValue, &'ast sqlparser::ast::Value)>>
         f.write_str(&formatted)
     }
 }
+
+impl<T: Display> Display for Fmt<Option<T>> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match &self.0 {
+            Some(t) => t.fmt(f),
+            None => Display::fmt("<not initialised>", f)
+        }
+    }
+}

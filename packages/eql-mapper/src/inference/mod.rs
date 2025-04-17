@@ -6,11 +6,11 @@ mod type_error;
 
 pub mod unifier;
 
+use tracing::{span, Level};
 use unifier::{Unifier, *};
 
 use std::{
-    cell::RefCell, collections::HashMap, fmt::Debug, marker::PhantomData, ops::ControlFlow, rc::Rc,
-    sync::Arc,
+    any::type_name, cell::RefCell, collections::HashMap, fmt::Debug, marker::PhantomData, ops::ControlFlow, rc::Rc, sync::Arc
 };
 
 use infer_type::InferType;
@@ -19,7 +19,7 @@ use sqlparser::ast::{
 };
 use sqltk::{into_control_flow, AsNodeKey, Break, NodeKey, Visitable, Visitor};
 
-use crate::{Param, ParamError, ScopeTracker, TableResolver};
+use crate::{Fmt, Param, ParamError, ScopeTracker, TableResolver};
 
 pub(crate) use registry::*;
 pub(crate) use sequence::*;
@@ -78,9 +78,14 @@ impl<'ast> TypeInferencer<'ast> {
         self.reg.borrow_mut().get_or_init_type(node)
     }
 
-    pub(crate) fn get_type_of_node<N: AsNodeKey>(&self, node: &'ast N) -> Arc<Type> {
+    pub(crate) fn force_get_type_of_node<N: AsNodeKey>(&self, node: &'ast N) -> Arc<Type> {
         let tvar = self.get_type_var_of_node(node);
         self.reg.borrow().get_type_by_tvar(tvar).unwrap_or(Arc::new(Type::Var(tvar)))
+    }
+
+    pub(crate) fn get_type_of_node<N: AsNodeKey>(&self, node: &'ast N) -> Option<Arc<Type>> {
+        let tvar = self.get_type_var_of_node(node);
+        self.reg.borrow().get_type_by_tvar(tvar)
     }
 
     pub(crate) fn param_types(&self) -> Result<Vec<(Param, Arc<Type>)>, ParamError> {
@@ -122,7 +127,7 @@ impl<'ast> TypeInferencer<'ast> {
     ) -> Result<Arc<Type>, TypeError> {
         let lhs_tvar = self.get_type_var_of_node(lhs);
         let rhs_tvar = self.get_type_var_of_node(rhs);
-        let unified = self.unify(self.get_type_of_node(lhs), self.get_type_of_node(rhs))?;
+        let unified = self.unify(self.force_get_type_of_node(lhs), self.force_get_type_of_node(rhs))?;
         let unified = self.unify(unified, ty)?;
         let unified = self.substitute(lhs_tvar, unified);
         let unified = self.substitute(rhs_tvar, unified);
@@ -136,7 +141,7 @@ impl<'ast> TypeInferencer<'ast> {
         ty: impl Into<Arc<Type>>,
     ) -> Result<Arc<Type>, TypeError> {
         let node_tvar = self.get_type_var_of_node(node);
-        let node_ty = self.get_type_of_node(node);
+        let node_ty = self.force_get_type_of_node(node);
         let unified = self.unify(node_ty, ty)?;
         let unified = self.substitute(node_tvar, unified);
         Ok(unified)
@@ -151,7 +156,7 @@ impl<'ast> TypeInferencer<'ast> {
     ) -> Result<Arc<Type>, TypeError> {
         let lhs_tvar = self.get_type_var_of_node(lhs);
         let rhs_tvar = self.get_type_var_of_node(rhs);
-        match self.unify(self.get_type_of_node(lhs), self.get_type_of_node(rhs)) {
+        match self.unify(self.force_get_type_of_node(lhs), self.force_get_type_of_node(rhs)) {
             Ok(unified) => {
                 let unified = self.substitute(lhs_tvar, unified);
                 let unified = self.substitute(rhs_tvar, unified);
@@ -160,9 +165,9 @@ impl<'ast> TypeInferencer<'ast> {
             Err(err) => Err(TypeError::OnNodes(
                 Box::new(err),
                 format!("{:?}", lhs),
-                self.get_type_of_node(lhs),
+                self.force_get_type_of_node(lhs),
                 format!("{:?}", rhs),
-                self.get_type_of_node(rhs),
+                self.force_get_type_of_node(rhs),
             )),
         }
     }
@@ -188,6 +193,31 @@ impl<'ast> TypeInferencer<'ast> {
     }
 }
 
+macro_rules! dispatch {
+    ($self:ident, $method:ident, $node:ident, $ty:ty) => {
+        if let Some($node) = $node.downcast_ref::<$ty>() {
+            into_control_flow($self.$method($node))?;
+        }
+    };
+}
+
+macro_rules! dispatch_all {
+    ($self:ident, $method:ident, $node:ident) => {
+        dispatch!($self, $method, $node, Statement);
+        dispatch!($self, $method, $node, Query);
+        dispatch!($self, $method, $node, Insert);
+        dispatch!($self, $method, $node, Delete);
+        dispatch!($self, $method, $node, Expr);
+        dispatch!($self, $method, $node, SetExpr);
+        dispatch!($self, $method, $node, Select);
+        dispatch!($self, $method, $node, Vec<SelectItem>);
+        dispatch!($self, $method, $node, SelectItem);
+        dispatch!($self, $method, $node, Function);
+        dispatch!($self, $method, $node, Values);
+        dispatch!($self, $method, $node, sqlparser::ast::Value);
+    };
+}
+
 /// # About this [`Visitor`] implementation.
 ///
 /// On [`Visitor::enter`] invokes [`InferType::infer_enter`].
@@ -196,105 +226,46 @@ impl<'ast> Visitor<'ast> for TypeInferencer<'ast> {
     type Error = TypeError;
 
     fn enter<N: Visitable>(&mut self, node: &'ast N) -> ControlFlow<Break<Self::Error>> {
-        if let Some(node) = node.downcast_ref::<Statement>() {
-            into_control_flow(self.infer_enter(node))?
-        }
+        let span_outer = span!(
+            Level::TRACE,
+            "node",
+            node_ty = type_name::<N>(),
+            node = %Fmt(&NodeKey::new(node)),
+        );
+        let _guard_outer = span_outer.enter();
 
-        if let Some(node) = node.downcast_ref::<Query>() {
-            into_control_flow(self.infer_enter(node))?
-        }
+        dispatch_all!(self, infer_enter, node);
 
-        if let Some(node) = node.downcast_ref::<Insert>() {
-            into_control_flow(self.infer_enter(node))?
-        }
-
-        if let Some(node) = node.downcast_ref::<Delete>() {
-            into_control_flow(self.infer_enter(node))?
-        }
-
-        if let Some(node) = node.downcast_ref::<Expr>() {
-            into_control_flow(self.infer_enter(node))?;
-        }
-
-        if let Some(node) = node.downcast_ref::<SetExpr>() {
-            into_control_flow(self.infer_enter(node))?
-        }
-
-        if let Some(node) = node.downcast_ref::<Select>() {
-            into_control_flow(self.infer_enter(node))?
-        }
-
-        if let Some(node) = node.downcast_ref::<Vec<SelectItem>>() {
-            into_control_flow(self.infer_enter(node))?
-        }
-
-        if let Some(node) = node.downcast_ref::<SelectItem>() {
-            into_control_flow(self.infer_enter(node))?
-        }
-
-        if let Some(node) = node.downcast_ref::<Function>() {
-            into_control_flow(self.infer_enter(node))?
-        }
-
-        if let Some(node) = node.downcast_ref::<Values>() {
-            into_control_flow(self.infer_enter(node))?
-        }
-
-        if let Some(node) = node.downcast_ref::<sqlparser::ast::Value>() {
-            into_control_flow(self.infer_enter(node))?
-        }
+        let span_inner = span!(
+            parent: &span_outer,
+            Level::TRACE,
+            "result",
+            inferred = %Fmt(self.get_type_of_node(node)),
+        );
+        let _guard_inner = span_inner.enter();
 
         ControlFlow::Continue(())
     }
 
     fn exit<N: Visitable>(&mut self, node: &'ast N) -> ControlFlow<Break<Self::Error>> {
-        if let Some(node) = node.downcast_ref::<Statement>() {
-            into_control_flow(self.infer_exit(node))?
-        }
+        let span_outer = span!(
+            Level::TRACE,
+            "node",
+            node_ty = type_name::<N>(),
+            node = %Fmt(&NodeKey::new(node)),
+        );
 
-        if let Some(node) = node.downcast_ref::<Query>() {
-            into_control_flow(self.infer_exit(node))?
-        }
+        let _guard_outer = span_outer.enter();
 
-        if let Some(node) = node.downcast_ref::<Insert>() {
-            into_control_flow(self.infer_exit(node))?
-        }
+        dispatch_all!(self, infer_exit, node);
 
-        if let Some(node) = node.downcast_ref::<Delete>() {
-            into_control_flow(self.infer_exit(node))?
-        }
-
-        if let Some(node) = node.downcast_ref::<Expr>() {
-            into_control_flow(self.infer_exit(node))?
-        }
-
-        if let Some(node) = node.downcast_ref::<SetExpr>() {
-            into_control_flow(self.infer_exit(node))?
-        }
-
-        if let Some(node) = node.downcast_ref::<Select>() {
-            into_control_flow(self.infer_exit(node))?
-        }
-
-        if let Some(node) = node.downcast_ref::<Vec<SelectItem>>() {
-            into_control_flow(self.infer_exit(node))?
-        }
-
-        if let Some(node) = node.downcast_ref::<SelectItem>() {
-            into_control_flow(self.infer_exit(node))?
-        }
-
-        if let Some(node) = node.downcast_ref::<Function>() {
-            into_control_flow(self.infer_exit(node))?
-        }
-
-        if let Some(node) = node.downcast_ref::<Values>() {
-            into_control_flow(self.infer_exit(node))?
-        }
-
-        if let Some(node) = node.downcast_ref::<sqlparser::ast::Value>() {
-            into_control_flow(self.infer_exit(node))?
-        }
+        let span_inner = span!(
+            parent: &span_outer,
+            Level::TRACE,
+            "result",
+            inferred = %Fmt(self.get_type_of_node(node)),
+        );
+        let _guard_inner = span_inner.enter();
 
         ControlFlow::Continue(())
     }

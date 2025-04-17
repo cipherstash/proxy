@@ -1,4 +1,5 @@
 use sqlparser::ast::SelectItem;
+use tracing::{span, Level};
 
 use crate::{
     inference::{type_error::TypeError, InferType},
@@ -11,7 +12,7 @@ impl<'ast> InferType<'ast, SelectItem> for TypeInferencer<'ast> {
 
         let ty = match select_item {
             SelectItem::UnnamedExpr(expr) | SelectItem::ExprWithAlias { expr, .. } => {
-                self.get_type_of_node(expr)
+                self.force_get_type_of_node(expr)
             }
             SelectItem::QualifiedWildcard(object_name, _) => {
                 scope.resolve_qualified_wildcard(&object_name.0)?
