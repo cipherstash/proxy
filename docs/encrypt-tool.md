@@ -1,4 +1,4 @@
-# The `encrypt` tool
+# `encrypt` tool guide
 
 CipherStash Proxy includes an `encrypt` tool – a CLI application to encrypt existing data, or to apply index changes after changes to the encryption configuration of a protected database.
 
