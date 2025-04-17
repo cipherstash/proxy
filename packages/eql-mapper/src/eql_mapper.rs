@@ -244,8 +244,11 @@ impl<'ast> EqlMapper<'ast> {
         let node_types = inferencer.node_types();
 
         let mut resolved_node_types: HashMap<NodeKey<'ast>, Type> = HashMap::new();
-        for (key, tcell) in node_types {
-            resolved_node_types.insert(key, tcell.resolved(&mut self.unifier.borrow_mut())?);
+        for (key, ty) in node_types {
+            match ty {
+                Some(ty) => resolved_node_types.insert(key, ty.resolved(&mut self.unifier.borrow_mut())?),
+                None => return Err(EqlMapperError::InternalError(format!("unresolved type for node")))
+            };
         }
 
         Ok(resolved_node_types)

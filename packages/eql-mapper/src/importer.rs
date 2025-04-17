@@ -70,7 +70,7 @@ impl<'ast> Importer<'ast> {
             return Err(ImportError::NoColumnsInCte(cte.to_string()));
         }
 
-        let reg = self.reg.borrow_mut();
+        let mut reg = self.reg.borrow_mut();
 
         self.scope_tracker.borrow_mut().add_relation(Relation {
             name: Some(alias.clone()),
@@ -148,7 +148,7 @@ impl<'ast> Importer<'ast> {
             } => {
                 let projection_type = self
                     .reg
-                    .borrow().get_node_type(&*subquery.body);
+                    .borrow_mut().get_node_type(&*subquery.body);
 
                 self.scope_tracker.borrow_mut().add_relation(Relation {
                     name: alias.clone().map(|a| a.name.clone()),

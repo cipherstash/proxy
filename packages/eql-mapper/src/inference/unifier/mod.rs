@@ -34,7 +34,7 @@ impl<'ast> Unifier<'ast> {
     }
 
     pub(crate) fn lookup_type_by_node<N: Visitable>(&self, node: &'ast N) -> Arc<Type> {
-        self.registry.borrow().get_node_type(node)
+        self.registry.borrow_mut().get_node_type(node)
     }
 
     pub(crate) fn exists_node_with_type<N: Visitable>(&self, ty: &Type) -> bool {

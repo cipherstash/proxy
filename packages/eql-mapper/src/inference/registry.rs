@@ -89,21 +89,21 @@ impl<'ast> TypeRegistry<'ast> {
             .collect()
     }
 
-    pub(crate) fn node_types(&self) -> HashMap<NodeKey<'ast>, Arc<Type>> {
+    pub(crate) fn node_types(&self) -> HashMap<NodeKey<'ast>, Option<Arc<Type>>> {
         self.node_types
             .iter()
             .map(|(node, tvar)| {
                 (
                     *node,
                     self.get_type_by_tvar(*tvar)
-                        .unwrap_or(Type::Var(*tvar).into()),
                 )
             })
             .collect()
     }
 
-    pub(crate) fn get_node_type<N: AsNodeKey>(&self, node: &'ast N) -> Arc<Type> {
-        self.types[&self.node_types[&node.as_node_key()]].clone()
+    pub(crate) fn get_node_type<N: AsNodeKey>(&mut self, node: &'ast N) -> Arc<Type> {
+        let tvar = self.get_or_init_type(node);
+        self.get_type_by_tvar(tvar).unwrap()
     }
 
     pub(crate) fn get_substitution(&self, tvar: TypeVar) -> Option<Arc<Type>> {
@@ -122,9 +122,11 @@ impl<'ast> TypeRegistry<'ast> {
         match self.node_types.get(&node.as_node_key()) {
             Some(tvar) => *tvar,
             None => {
-                let tvar = self.fresh_tvar();
-                self.node_types.insert(node.as_node_key(), tvar);
-                tvar
+                let node_tvar = self.fresh_tvar();
+                self.node_types.insert(node.as_node_key(), node_tvar);
+                let dangling_tvar = self.fresh_tvar();
+                self.types.insert(node_tvar, Type::Var(dangling_tvar).into());
+                node_tvar
             }
         }
     }
