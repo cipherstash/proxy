@@ -1234,7 +1234,7 @@ mod test {
         assert_eq!(
             typed.projection,
             projection![
-                (NATIVE(employees.name) as concat),
+                (NATIVE as concat),
                 (EQL(employees.salary) as salary)
             ]
         );
@@ -1262,17 +1262,14 @@ mod test {
 
         let typed = type_check(schema, &statement).unwrap();
 
-        let a = Value::Native(NativeValue(Some(TableColumn {
-            table: id("employees"),
-            column: id("name"),
-        })));
+        let a = Value::Native(NativeValue(None));
 
         assert_eq!(typed.params, vec![(Param(1), a)]);
 
         assert_eq!(
             typed.projection,
             projection![
-                (NATIVE(employees.name) as concat),
+                (NATIVE as concat),
                 (EQL(employees.salary) as salary)
             ]
         );
