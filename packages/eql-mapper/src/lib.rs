@@ -54,7 +54,7 @@ mod test {
 
     #[test]
     fn basic() {
-        let _ = tracing_subscriber::fmt::try_init();
+        // init_tracing();
         let schema = resolver(schema! {
             tables: {
                 users: {
@@ -80,7 +80,7 @@ mod test {
 
     #[test]
     fn basic_with_value() {
-        let _ = tracing_subscriber::fmt::try_init();
+        // init_tracing();
         let schema = resolver(schema! {
             tables: {
                 users: {
@@ -111,7 +111,7 @@ mod test {
 
     #[test]
     fn insert_with_value() {
-        let _ = tracing_subscriber::fmt::try_init();
+        // init_tracing();
         let schema = resolver(schema! {
             tables: {
                 users: {
@@ -140,7 +140,7 @@ mod test {
 
     #[test]
     fn insert_with_values_no_explicit_columns() {
-        let _ = tracing_subscriber::fmt::try_init();
+        // init_tracing();
         let schema = resolver(schema! {
             tables: {
                 users: {
@@ -169,7 +169,7 @@ mod test {
 
     #[test]
     fn insert_with_values_no_explicit_columns_but_has_default() {
-        let _ = tracing_subscriber::fmt::try_init();
+        // init_tracing();
         let schema = resolver(schema! {
             tables: {
                 users: {
@@ -199,7 +199,7 @@ mod test {
 
     #[test]
     fn basic_with_placeholder() {
-        let _ = tracing_subscriber::fmt::try_init();
+        // init_tracing();
         let schema = resolver(schema! {
             tables: {
                 users: {
@@ -234,7 +234,7 @@ mod test {
 
     #[test]
     fn select_with_multiple_placeholder() {
-        let _ = tracing_subscriber::fmt::try_init();
+        // init_tracing();
         let schema = resolver(schema! {
             tables: {
                 users: {
@@ -277,7 +277,7 @@ mod test {
 
     #[test]
     fn select_with_multiple_instances_of_placeholder() {
-        let _ = tracing_subscriber::fmt::try_init();
+        // init_tracing();
         let schema = resolver(schema! {
             tables: {
                 users: {
@@ -315,7 +315,7 @@ mod test {
 
     #[test]
     fn select_columns_from_multiple_tables() {
-        let _ = tracing_subscriber::fmt::try_init();
+        // init_tracing();
         let schema = resolver(schema! {
             tables: {
                 users: {
@@ -417,7 +417,7 @@ mod test {
 
     #[test]
     fn wildcard_expansion() {
-        let _ = tracing_subscriber::fmt::try_init();
+        // init_tracing();
         let schema = resolver(schema! {
             tables: {
                 users: {
@@ -462,7 +462,7 @@ mod test {
 
     #[test]
     fn select_with_multiple_placeholder_and_wildcard_expansion() {
-        let _ = tracing_subscriber::fmt::try_init();
+        // init_tracing();
         let schema = resolver(schema! {
             tables: {
                 users: {
@@ -504,7 +504,7 @@ mod test {
 
     #[test]
     fn select_with_multiple_placeholder_boolean_operators_and_wildcard_expansion() {
-        let _ = tracing_subscriber::fmt::try_init();
+        // init_tracing();
         let schema = resolver(schema! {
             tables: {
                 users: {
@@ -587,7 +587,7 @@ mod test {
 
     #[test]
     fn window_function() {
-        let _ = tracing_subscriber::fmt::try_init();
+        // init_tracing();
 
         let schema = resolver(schema! {
             tables: {
@@ -633,7 +633,7 @@ mod test {
 
     #[test]
     fn window_function_with_forward_reference() {
-        let _ = tracing_subscriber::fmt::try_init();
+        // init_tracing();
 
         let schema = resolver(schema! {
             tables: {
@@ -680,7 +680,7 @@ mod test {
 
     #[test]
     fn common_table_expressions() {
-        let _ = tracing_subscriber::fmt::try_init();
+        // init_tracing();
 
         let schema = resolver(schema! {
             tables: {
@@ -732,7 +732,7 @@ mod test {
 
     #[test]
     fn aggregates() {
-        let _ = tracing_subscriber::fmt::try_init();
+        // init_tracing();
 
         let schema = resolver(schema! {
             tables: {
@@ -771,7 +771,7 @@ mod test {
 
     #[test]
     fn insert() {
-        let _ = tracing_subscriber::fmt::try_init();
+        // init_tracing();
 
         let schema = resolver(schema! {
             tables: {
@@ -802,7 +802,7 @@ mod test {
 
     #[test]
     fn insert_with_returning_clause() {
-        let _ = tracing_subscriber::fmt::try_init();
+        // init_tracing();
 
         let schema = resolver(schema! {
             tables: {
@@ -843,7 +843,7 @@ mod test {
 
     #[test]
     fn update() {
-        let _ = tracing_subscriber::fmt::try_init();
+        // init_tracing();
 
         let schema = resolver(schema! {
             tables: {
@@ -873,7 +873,7 @@ mod test {
 
     #[test]
     fn update_with_returning_clause() {
-        let _ = tracing_subscriber::fmt::try_init();
+        // init_tracing();
 
         let schema = resolver(schema! {
             tables: {
@@ -912,7 +912,7 @@ mod test {
 
     #[test]
     fn delete() {
-        let _ = tracing_subscriber::fmt::try_init();
+        // init_tracing();
 
         let schema = resolver(schema! {
             tables: {
@@ -942,7 +942,7 @@ mod test {
 
     #[test]
     fn delete_with_returning_clause() {
-        let _ = tracing_subscriber::fmt::try_init();
+        // init_tracing();
 
         let schema = resolver(schema! {
             tables: {
@@ -981,7 +981,7 @@ mod test {
 
     #[test]
     fn select_with_literal_subsitution() {
-        let _ = tracing_subscriber::fmt::try_init();
+        // init_tracing();
 
         let schema = resolver(schema! {
             tables: {
@@ -1042,7 +1042,7 @@ mod test {
 
     #[test]
     fn pathologically_complex_sql_statement() {
-        let _ = tracing_subscriber::fmt::try_init();
+        // init_tracing();
 
         let schema = resolver(schema! {
             tables: {
@@ -1100,7 +1100,7 @@ mod test {
 
     #[test]
     fn literals_or_param_placeholders_in_outermost_projection() {
-        let _ = tracing_subscriber::fmt::try_init();
+        // init_tracing();
 
         let schema = resolver(schema! {
             tables: { }
@@ -1137,7 +1137,7 @@ mod test {
 
     #[test]
     fn where_true() {
-        let _ = tracing_subscriber::fmt::try_init();
+        // init_tracing();
 
         let schema = resolver(schema! {
             tables: {
@@ -1157,7 +1157,7 @@ mod test {
 
     #[test]
     fn function_with_literal() {
-        let _ = tracing_subscriber::fmt::try_init();
+        // init_tracing();
 
         let schema = resolver(schema! {
             tables: {
@@ -1185,7 +1185,7 @@ mod test {
 
     #[test]
     fn function_with_wildcard() {
-        let _ = tracing_subscriber::fmt::try_init();
+        // init_tracing();
 
         let schema = resolver(schema! {
             tables: {
@@ -1212,7 +1212,7 @@ mod test {
 
     #[test]
     fn function_with_column_and_literal() {
-        init_tracing();
+        // init_tracing();
 
         let schema = resolver(schema! {
             tables: {
@@ -1242,7 +1242,7 @@ mod test {
 
     #[test]
     fn function_with_param() {
-        let _ = tracing_subscriber::fmt::try_init();
+        // init_tracing();
 
         let schema = resolver(schema! {
             tables: {
@@ -1280,7 +1280,7 @@ mod test {
 
     #[test]
     fn function_with_eql_column_and_literal() {
-        let _ = tracing_subscriber::fmt::try_init();
+        // init_tracing();
 
         let schema = resolver(schema! {
             tables: {
@@ -1304,7 +1304,7 @@ mod test {
 
     #[test]
     fn group_by_eql_column() {
-        let _ = tracing_subscriber::fmt::try_init();
+        // init_tracing();
         let schema = resolver(schema! {
             tables: {
                 users: {
@@ -1333,7 +1333,7 @@ mod test {
 
     #[test]
     fn modify_aggregate_when_eql_column_affected_by_group_by_of_other_column() {
-        let _ = tracing_subscriber::fmt::try_init();
+        // init_tracing();
         let schema = resolver(schema! {
             tables: {
                 employees: {
