@@ -445,7 +445,7 @@ This loads and activates the encrypted indexes.
 
 You must run the `cs_encrypt_v1()` and `cs_activate_v1()` functions after any modifications to the encrypted indexes.
 
-> ![IMPORTANT]
+> [!IMPORTANT]
 > Adding, updating, or deleting encrypted indexes on columns that already contain encrypted data will not re-index that data. To use the new indexes, you must `SELECT` the data out of the column, and `UPDATE` it again.
 
 To learn how to use encrypted indexes for other encrypted data types like `text`, `int`, `boolean`, `date`, and `jsonb`, see the [EQL documentation](https://github.com/cipherstash/encrypt-query-language/blob/main/docs/reference/INDEX.md).
