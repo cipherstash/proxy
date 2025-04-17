@@ -36,19 +36,14 @@ impl<'ast> TypeRegistry<'ast> {
     pub(crate) fn get_nodes_and_types<N: Visitable>(&self) -> Vec<(&'ast N, Option<Arc<Type>>)> {
         self.node_types
             .iter()
-            .filter_map(|(key, tvar)| key.get_as::<N>().map(|n| (n, self.get_type_by_tvar(*tvar))))
+            .filter_map(|(key, tvar)| key.get_as::<N>().map(|n| (n, self.get_type(*tvar))))
             .collect()
     }
 
-    pub(crate) fn get_type_by_tvar(&self, tvar: TypeVar) -> Option<Arc<Type>> {
+    pub(crate) fn get_type(&self, tvar: TypeVar) -> Option<Arc<Type>> {
         self.types.get(&tvar).cloned()
     }
 
-    pub(crate) fn register(&mut self, ty: impl Into<Arc<Type>>) -> TypeVar {
-        let tvar = self.fresh_tvar();
-        self.types.insert(tvar, ty.into());
-        tvar
-    }
 
     pub(crate) fn exists_node_with_type<N: Visitable>(&self, needle: &Type) -> bool {
         self.first_matching_node_with_type::<N>(needle).is_some()
@@ -60,7 +55,7 @@ impl<'ast> TypeRegistry<'ast> {
     ) -> Option<(&'ast N, Arc<Type>)> {
         self.node_types.iter().find_map(|(key, tvar)| {
             let node = key.get_as::<N>()?;
-            if let Some(ty) = self.get_type_by_tvar(*tvar) {
+            if let Some(ty) = self.get_type(*tvar) {
                 if needle == &*ty {
                     Some((node, ty))
                 } else {
@@ -74,7 +69,7 @@ impl<'ast> TypeRegistry<'ast> {
 
     pub(crate) fn get_param(&self, param: &'ast String) -> Option<Arc<Type>> {
         let tvar = *self.param_types.get(param)?;
-        self.get_type_by_tvar(tvar)
+        self.get_type(tvar)
     }
 
     pub(crate) fn set_param(&mut self, param: &'ast String, ty: impl Into<Arc<Type>>) {
@@ -95,19 +90,19 @@ impl<'ast> TypeRegistry<'ast> {
             .map(|(node, tvar)| {
                 (
                     *node,
-                    self.get_type_by_tvar(*tvar)
+                    self.get_type(*tvar)
                 )
             })
             .collect()
     }
 
     pub(crate) fn get_node_type<N: AsNodeKey>(&mut self, node: &'ast N) -> Arc<Type> {
-        let tvar = self.get_or_init_type(node);
-        self.get_type_by_tvar(tvar).unwrap()
+        self.get_or_init_type(node)
     }
 
-    pub(crate) fn get_substitution(&self, tvar: TypeVar) -> Option<Arc<Type>> {
-        self.types.get(&tvar).cloned()
+    pub(crate) fn get_node_type_var<N: AsNodeKey>(&mut self, node: &'ast N) -> TypeVar {
+        self.get_or_init_type(node);
+        self.node_types[&node.as_node_key()]
     }
 
     pub(crate) fn substitute(&mut self, tvar: TypeVar, sub_ty: impl Into<Arc<Type>>) -> Arc<Type> {
@@ -116,17 +111,28 @@ impl<'ast> TypeRegistry<'ast> {
         sub_ty
     }
 
+    fn register(&mut self, ty: impl Into<Arc<Type>>) -> TypeVar {
+        let tvar = self.fresh_tvar();
+        self.types.insert(tvar, ty.into());
+        tvar
+    }
+
     /// Gets (and creates, if required) the [`Type`] associated with a node. If the node does not already have an
     /// associated `Type` then a [`Type::Var`] will be assigned to the node with a fresh [`TypeVar`].
-    pub(crate) fn get_or_init_type<N: AsNodeKey>(&mut self, node: &'ast N) -> TypeVar {
+    fn get_or_init_type<N: AsNodeKey>(&mut self, node: &'ast N) -> Arc<Type> {
         match self.node_types.get(&node.as_node_key()) {
-            Some(tvar) => *tvar,
+            Some(tvar) => Arc::clone(&self.types[tvar]),
             None => {
-                let node_tvar = self.fresh_tvar();
+                let ty = Arc::new(Type::Var(self.fresh_tvar()));
+                let node_tvar = self.register(ty.clone());
                 self.node_types.insert(node.as_node_key(), node_tvar);
-                let dangling_tvar = self.fresh_tvar();
-                self.types.insert(node_tvar, Type::Var(dangling_tvar).into());
-                node_tvar
+                ty
+
+                // let node_tvar = self.fresh_tvar();
+                // self.node_types.insert(node.as_node_key(), node_tvar);
+                // let dangling = Arc::new(Type::Var(self.fresh_tvar()));
+                // self.types.insert(node_tvar, dangling.clone());
+                // dangling
             }
         }
     }
@@ -163,7 +169,7 @@ pub(crate) mod test_util {
                     "Node+Type",
                     ast_ty = ty_name,
                     node = %node,
-                    ty = self.get_type_by_tvar(*tvar)
+                    ty = self.get_type(*tvar)
                         .map(|ty| ty.to_string())
                         .unwrap_or(String::from("<unresolved>")),
                 );

@@ -30,7 +30,7 @@ impl<'ast> Unifier<'ast> {
 
     /// Looks up a previously registered [`Type`] by its [`TypeVar`].
     pub(crate) fn lookup(&self, tvar: TypeVar) -> Option<Arc<Type>> {
-        self.registry.borrow().get_type_by_tvar(tvar)
+        self.registry.borrow().get_type(tvar)
     }
 
     pub(crate) fn lookup_type_by_node<N: Visitable>(&self, node: &'ast N) -> Arc<Type> {
@@ -205,7 +205,7 @@ impl<'ast> Unifier<'ast> {
     fn unify_with_type_var(&mut self, ty: Arc<Type>, tvar: TypeVar) -> Result<Arc<Type>, TypeError> {
         let sub_ty = {
             let reg = &*self.registry.borrow();
-            reg.get_substitution(tvar)
+            reg.get_type(tvar)
         };
 
         let unified_ty: Arc<Type> = match sub_ty {

@@ -40,7 +40,7 @@ impl<'ast> TypeInferencer<'ast> {
         &mut self,
         query: &'ast Query,
     ) -> Result<(), TypeError> {
-        let ty = self.force_get_type_of_node(query);
+        let ty = self.get_node_type(query);
         if let Type::Constructor(Constructor::Projection(Projection::WithColumns(
             ProjectionColumns(cols),
         ))) = &*ty

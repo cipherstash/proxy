@@ -73,19 +73,12 @@ impl<'ast> TypeInferencer<'ast> {
         }
     }
 
-    /// Shorthand for calling `self.reg.borrow_mut().get_type(node)` in [`InferType`] implementations for `TypeInferencer`.
-    pub(crate) fn get_type_var_of_node<N: AsNodeKey>(&self, node: &'ast N) -> TypeVar {
-        self.reg.borrow_mut().get_or_init_type(node)
+    pub(crate) fn get_node_type<N: AsNodeKey>(&self, node: &'ast N) -> Arc<Type> {
+        self.reg.borrow_mut().get_node_type(node)
     }
 
-    pub(crate) fn force_get_type_of_node<N: AsNodeKey>(&self, node: &'ast N) -> Arc<Type> {
-        let tvar = self.get_type_var_of_node(node);
-        self.reg.borrow().get_type_by_tvar(tvar).unwrap_or(Arc::new(Type::Var(tvar)))
-    }
-
-    pub(crate) fn get_type_of_node<N: AsNodeKey>(&self, node: &'ast N) -> Option<Arc<Type>> {
-        let tvar = self.get_type_var_of_node(node);
-        self.reg.borrow().get_type_by_tvar(tvar)
+    pub(crate) fn get_node_type_var<N: AsNodeKey>(&self, node: &'ast N) -> TypeVar {
+        self.reg.borrow_mut().get_node_type_var(node)
     }
 
     pub(crate) fn param_types(&self) -> Result<Vec<(Param, Arc<Type>)>, ParamError> {
@@ -125,9 +118,9 @@ impl<'ast> TypeInferencer<'ast> {
         rhs: &'ast N2,
         ty: impl Into<Arc<Type>>,
     ) -> Result<Arc<Type>, TypeError> {
-        let lhs_tvar = self.get_type_var_of_node(lhs);
-        let rhs_tvar = self.get_type_var_of_node(rhs);
-        let unified = self.unify(self.force_get_type_of_node(lhs), self.force_get_type_of_node(rhs))?;
+        let lhs_tvar = self.get_node_type_var(lhs);
+        let rhs_tvar = self.get_node_type_var(rhs);
+        let unified = self.unify(self.get_node_type(lhs), self.get_node_type(rhs))?;
         let unified = self.unify(unified, ty)?;
         let unified = self.substitute(lhs_tvar, unified);
         let unified = self.substitute(rhs_tvar, unified);
@@ -140,8 +133,8 @@ impl<'ast> TypeInferencer<'ast> {
         node: &'ast N,
         ty: impl Into<Arc<Type>>,
     ) -> Result<Arc<Type>, TypeError> {
-        let node_tvar = self.get_type_var_of_node(node);
-        let node_ty = self.force_get_type_of_node(node);
+        let node_tvar = self.get_node_type_var(node);
+        let node_ty = self.get_node_type(node);
         let unified = self.unify(node_ty, ty)?;
         let unified = self.substitute(node_tvar, unified);
         Ok(unified)
@@ -154,9 +147,9 @@ impl<'ast> TypeInferencer<'ast> {
         lhs: &'ast N1,
         rhs: &'ast N2,
     ) -> Result<Arc<Type>, TypeError> {
-        let lhs_tvar = self.get_type_var_of_node(lhs);
-        let rhs_tvar = self.get_type_var_of_node(rhs);
-        match self.unify(self.force_get_type_of_node(lhs), self.force_get_type_of_node(rhs)) {
+        let lhs_tvar = self.get_node_type_var(lhs);
+        let rhs_tvar = self.get_node_type_var(rhs);
+        match self.unify(self.get_node_type(lhs), self.get_node_type(rhs)) {
             Ok(unified) => {
                 let unified = self.substitute(lhs_tvar, unified);
                 let unified = self.substitute(rhs_tvar, unified);
@@ -165,9 +158,9 @@ impl<'ast> TypeInferencer<'ast> {
             Err(err) => Err(TypeError::OnNodes(
                 Box::new(err),
                 format!("{:?}", lhs),
-                self.force_get_type_of_node(lhs),
+                self.get_node_type(lhs),
                 format!("{:?}", rhs),
-                self.force_get_type_of_node(rhs),
+                self.get_node_type(rhs),
             )),
         }
     }
@@ -240,7 +233,7 @@ impl<'ast> Visitor<'ast> for TypeInferencer<'ast> {
             parent: &span_outer,
             Level::TRACE,
             "result",
-            inferred = %Fmt(self.get_type_of_node(node)),
+            inferred = %self.get_node_type(node),
         );
         let _guard_inner = span_inner.enter();
 
@@ -263,7 +256,7 @@ impl<'ast> Visitor<'ast> for TypeInferencer<'ast> {
             parent: &span_outer,
             Level::TRACE,
             "result",
-            inferred = %Fmt(self.get_type_of_node(node)),
+            inferred = %self.get_node_type(node),
         );
         let _guard_inner = span_inner.enter();
 

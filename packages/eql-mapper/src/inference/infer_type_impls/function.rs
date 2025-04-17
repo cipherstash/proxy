@@ -35,7 +35,7 @@ impl<'ast> InferType<'ast, Function> for TypeInferencer<'ast> {
                     // call to min/max.
                     self.unify_node_with_type(
                         &**query,
-                        Type::projection(&[(self.force_get_type_of_node(function), None)]),
+                        Type::projection(&[(self.get_node_type(function), None)]),
                     )?;
                 }
 
@@ -87,7 +87,7 @@ impl<'ast> InferType<'ast, Function> for TypeInferencer<'ast> {
                     // The query must return a single column projection which has the same type as the result of the function
                     self.unify_node_with_type(
                         &**query,
-                        Type::projection(&[(self.force_get_type_of_node(function), None)]),
+                        Type::projection(&[(self.get_node_type(function), None)]),
                     )?;
                 }
 
