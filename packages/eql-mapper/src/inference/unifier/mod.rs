@@ -210,7 +210,7 @@ impl<'ast> Unifier<'ast> {
 
         let unified_ty: Arc<Type> = match sub_ty {
             Some(sub_ty) => self.unify(ty, sub_ty)?,
-            None => Type::from(tvar).into(),
+            None => ty,
         };
 
         self.registry.borrow_mut().substitute(tvar, unified_ty.clone());

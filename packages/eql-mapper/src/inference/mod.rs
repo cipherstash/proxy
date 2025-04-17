@@ -80,7 +80,10 @@ impl<'ast> TypeInferencer<'ast> {
 
     pub(crate) fn get_type_of_node<N: AsNodeKey>(&self, node: &'ast N) -> Arc<Type> {
         let tvar = self.get_type_var_of_node(node);
-        self.reg.borrow().get_type_by_tvar(tvar).unwrap_or(Arc::new(Type::Var(tvar)))
+        self.reg
+            .borrow()
+            .get_type_by_tvar(tvar)
+            .unwrap_or(Arc::new(Type::Var(tvar)))
     }
 
     pub(crate) fn param_types(&self) -> Result<Vec<(Param, Arc<Type>)>, ParamError> {
