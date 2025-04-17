@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1744600842806,
+  "lastUpdate": 1744873555110,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -498,6 +498,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 6.788601,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "5cc1466bc4f1ca309f26a77321425863f711d9da",
+          "message": "Docs: Split proxy docs",
+          "timestamp": "2025-04-14T03:17:44Z",
+          "url": "https://github.com/cipherstash/proxy/pull/208/commits/5cc1466bc4f1ca309f26a77321425863f711d9da"
+        },
+        "date": 1744873554066,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 7.137568,
             "unit": "Number"
           }
         ]
