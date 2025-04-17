@@ -93,7 +93,6 @@ impl<'ast> InferType<'ast, Function> for TypeInferencer<'ast> {
 
                 FunctionArguments::List(args_list) => {
                     self.unify_node_with_type(function, Type::any_native())?;
-
                     for arg in &args_list.args {
                         match arg {
                             FunctionArg::Named { arg, .. } | FunctionArg::Unnamed(arg) => match arg

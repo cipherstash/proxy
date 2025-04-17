@@ -19,11 +19,11 @@ use super::Unifier;
 #[display("{self}")]
 pub enum Type {
     /// A specific type constructor with zero or more generic parameters.
-    #[display("Constructor({_0})")]
+    #[display("{}", _0)]
     Constructor(Constructor),
 
     /// A type variable representing a placeholder for an unknown type.
-    #[display("Var({})", _0)]
+    #[display("{}", _0)]
     Var(TypeVar),
 }
 
@@ -41,11 +41,11 @@ const _: () = {
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Display, Hash)]
 pub enum Constructor {
     /// An EQL type, an opaque "database native" type or an array type.
-    #[display("Value({})", _0)]
+    #[display("{}", _0)]
     Value(Value),
 
     /// A projection is a type with a fixed number of columns each of which has a type and optional alias.
-    #[display("Projection({})", _0)]
+    #[display("{}", _0)]
     Projection(Projection),
 }
 
@@ -54,8 +54,11 @@ impl Constructor {
         match self {
             Constructor::Value(value) => match value {
                 Value::Eql(eql_col) => Ok(crate::Type::Value(crate::Value::Eql(eql_col.clone()))),
-                Value::Native(native_col) => {
-                    Ok(crate::Type::Value(crate::Value::Native(native_col.clone())))
+                Value::Native(NativeValue(Some(native_col))) => {
+                    Ok(crate::Type::Value(crate::Value::Native(NativeValue(Some(native_col.clone())))))
+                }
+                Value::Native(NativeValue(None)) => {
+                    Ok(crate::Type::Value(crate::Value::Native(NativeValue(None))))
                 }
                 Value::Array(element_ty) => {
                     let resolved = element_ty.resolved(unifier)?;
@@ -149,17 +152,17 @@ pub enum Value {
     ///
     /// An encrypted column never shares a type with another encrypted column - which is why it is sufficient to
     /// identify the type by its table & column names.
-    #[display("EQL({_0})")]
+    #[display("{}", _0)]
     Eql(EqlValue),
 
     /// A native database type that carries its table & column name.  `NativeValue(None)` & `NativeValue(Some(_))` are
     /// will successfully unify with each other - they are the same type as far as the type system is concerned.
     /// `NativeValue(Some(_))` just carries more information which makes testing & debugging easier.
-    #[display("Native")]
+    #[display("{}", _0)]
     Native(NativeValue),
 
     /// An array type that is parameterized by an element type.
-    #[display("Array({})", _0)]
+    #[display("Array[{}]", _0)]
     Array(Arc<Type>),
 }
 
@@ -171,15 +174,16 @@ pub struct TableColumn {
 }
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Display, Hash)]
+#[display("EQL({})", _0)]
 pub struct EqlValue(pub TableColumn);
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Display, Hash)]
-#[display("Native({})", _0.as_ref().map(|tc| tc.to_string()).unwrap_or(String::from("?")))]
+#[display("NATIVE({})", _0.as_ref().map(|tc| tc.to_string()).unwrap_or(String::from("?")))]
 pub struct NativeValue(pub Option<TableColumn>);
 
 /// A column from a projection.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Display, Hash)]
-#[display("{} {}", self.ty, self.render_alias())]
+#[display("{}{}", self.ty, self.render_alias())]
 pub struct ProjectionColumn {
     /// The type of the column.
     pub ty: Arc<Type>,
@@ -190,6 +194,7 @@ pub struct ProjectionColumn {
 
 /// A placeholder for an unknown type.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Display)]
+#[display("${}", _0)]
 pub struct TypeVar(pub u32);
 
 impl From<TypeVar> for Type {
@@ -199,17 +204,17 @@ impl From<TypeVar> for Type {
 }
 
 impl Type {
-    /// Creates an `Type` containing an empty projection
+    /// Creates a `Type` containing an empty projection
     pub(crate) fn empty_projection() -> Type {
         Type::Constructor(Constructor::Projection(Projection::Empty))
     }
 
-    /// Creates an `Type` containing a `Constructor::Scalar(Scalar::Native(NativeValue(None)))`.
+    /// Creates a `Type` containing a `Constructor::Scalar(Scalar::Native(NativeValue(None)))`.
     pub(crate) fn any_native() -> Type {
         Type::Constructor(Constructor::Value(Value::Native(NativeValue(None))))
     }
 
-    /// Creates an `Type` containing a `Constructor::Projection`.
+    /// Creates a `Type` containing a `Constructor::Projection`.
     pub(crate) fn projection(columns: &[(Arc<Type>, Option<Ident>)]) -> Type {
         if columns.is_empty() {
             Type::Constructor(Constructor::Projection(Projection::Empty))
@@ -225,7 +230,7 @@ impl Type {
         }
     }
 
-    /// Creates an `Type` containing a `Constructor::Array`.
+    /// Creates a `Type` containing a `Constructor::Array`.
     pub(crate) fn array(element_ty: impl Into<Arc<Type>>) -> Arc<Type> {
         Type::Constructor(Constructor::Value(Value::Array(element_ty.into()))).into()
     }
@@ -395,8 +400,8 @@ impl ProjectionColumn {
 
     fn render_alias(&self) -> String {
         match &self.alias {
-            Some(name) => name.to_string(),
-            None => String::from("(no-alias)"),
+            Some(name) => format!(": {name}"),
+            None => String::from(""),
         }
     }
 }

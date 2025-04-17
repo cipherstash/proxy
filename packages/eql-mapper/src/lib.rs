@@ -1212,7 +1212,7 @@ mod test {
 
     #[test]
     fn function_with_column_and_literal() {
-        let _ = tracing_subscriber::fmt::try_init();
+        init_tracing();
 
         let schema = resolver(schema! {
             tables: {

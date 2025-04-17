@@ -69,8 +69,8 @@ impl<'ast> Unifier<'ast> {
             Level::DEBUG,
             "unify",
             depth = self.depth,
-            lhs = ?lhs,
-            rhs = ?rhs,
+            lhs = %lhs,
+            rhs = %rhs,
         );
 
         let _guard = span_begin.enter();
@@ -175,7 +175,7 @@ impl<'ast> Unifier<'ast> {
                     parent: &span_begin,
                     Level::DEBUG,
                     "Ok",
-                    unification = ?ty,
+                    unification = %ty,
                 );
 
                 let _guard = span_end.enter();
@@ -213,7 +213,7 @@ impl<'ast> Unifier<'ast> {
             None => ty,
         };
 
-        self.registry.borrow_mut().substitute(tvar, unified_ty.clone());
+        self.substitute(tvar, unified_ty.clone());
 
         Ok(unified_ty)
     }
