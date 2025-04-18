@@ -12,9 +12,11 @@ use sqltk::{Break, Visitable, Visitor};
 use std::{cell::RefCell, fmt::Debug, marker::PhantomData, ops::ControlFlow, rc::Rc, sync::Arc};
 
 /// `Importer` is a [`Visitor`] implementation that brings projections (from "FROM" clauses and subqueries) into lexical scope.
+// TODO: If Importer was refactored to be a suite of helper functions then the inferencer coud simply ask it to provide Types
+// and we'd remove the "everything is coupled to the TypeRegistry thing"
 pub struct Importer<'ast> {
     table_resolver: Arc<TableResolver>,
-    reg: Rc<RefCell<TypeRegistry<'ast>>>,
+    registry: Rc<RefCell<TypeRegistry<'ast>>>,
     scope_tracker: Rc<RefCell<ScopeTracker<'ast>>>,
     _ast: PhantomData<&'ast ()>,
 }
@@ -22,11 +24,11 @@ pub struct Importer<'ast> {
 impl<'ast> Importer<'ast> {
     pub fn new(
         table_resolver: impl Into<Arc<TableResolver>>,
-        reg: impl Into<Rc<RefCell<TypeRegistry<'ast>>>>,
+        registry: impl Into<Rc<RefCell<TypeRegistry<'ast>>>>,
         scope: impl Into<Rc<RefCell<ScopeTracker<'ast>>>>,
     ) -> Self {
         Self {
-            reg: reg.into(),
+            registry: registry.into(),
             table_resolver: table_resolver.into(),
             scope_tracker: scope.into(),
             _ast: PhantomData,
@@ -70,11 +72,12 @@ impl<'ast> Importer<'ast> {
             return Err(ImportError::NoColumnsInCte(cte.to_string()));
         }
 
-        let mut reg = self.reg.borrow_mut();
+        let mut registry = self.registry.borrow_mut();
+        let query_ty = registry.get_node_type(query);
 
         self.scope_tracker.borrow_mut().add_relation(Relation {
             name: Some(alias.clone()),
-            projection_type: reg.get_node_type(query),
+            projection_type: query_ty,
         })?;
 
         Ok(())
@@ -147,7 +150,7 @@ impl<'ast> Importer<'ast> {
                 alias,
             } => {
                 let projection_type = self
-                    .reg
+                    .registry
                     .borrow_mut().get_node_type(&*subquery.body);
 
                 self.scope_tracker.borrow_mut().add_relation(Relation {

@@ -11,37 +11,27 @@ impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
             // in which case we resolve it to a fresh type variable.
             Expr::Identifier(ident) => {
                 // sqlparser treats the `DEFAULT` keyword in expression position as an identifier.
-                let ty = if SqlIdent(ident) == SqlIdent(&Ident::new("default")) {
-                    Type::from(self.fresh_tvar()).into()
+                if SqlIdent(ident) == SqlIdent(&Ident::new("default")) {
+                    self.unify_node_with_type(this_expr, self.fresh_tvar())?;
                 } else {
-                    self.scope_tracker.borrow().resolve_ident(ident)?
+                    self.unify_node_with_type(this_expr, self.resolve_ident(ident)?)?;
                 };
-
-                self.unify_node_with_type(this_expr, ty)?;
             }
 
             Expr::CompoundIdentifier(idents) => {
-                self.unify_node_with_type(
-                    this_expr,
-                    self.scope_tracker.borrow().resolve_compound_ident(idents)?,
-                )?;
+                self.unify_node_with_type(this_expr, self.resolve_compound_ident(idents)?)?;
             }
 
             #[allow(unused_variables)]
             Expr::Wildcard => {
-                self.unify_node_with_type(
-                    this_expr,
-                    self.scope_tracker.borrow().resolve_wildcard()?,
-                )?;
+                self.unify_node_with_type(this_expr, self.resolve_wildcard()?)?;
             }
 
             #[allow(unused_variables)]
             Expr::QualifiedWildcard(object_name) => {
                 self.unify_node_with_type(
                     this_expr,
-                    self.scope_tracker
-                        .borrow()
-                        .resolve_qualified_wildcard(&object_name.0)?,
+                    self.resolve_qualified_wildcard(&object_name.0)?,
                 )?;
             }
 
@@ -79,10 +69,9 @@ impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
                 self.unify_node_with_type(this_expr, Type::any_native())?;
                 self.unify_node_with_type(
                     &**expr,
-                    list.iter()
-                        .try_fold(self.get_node_type(&**expr), |a, b| {
-                            self.unify(a, self.get_node_type(b))
-                        })?,
+                    list.iter().try_fold(self.get_node_type(&**expr), |a, b| {
+                        self.unify(a, self.get_node_type(b))
+                    })?,
                 )?;
             }
 
@@ -370,7 +359,7 @@ impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
                         self.unify_nodes_with_type(
                             this_expr,
                             &**operand,
-                            self.unify_all_with_type(conditions, Type::from(self.fresh_tvar()))?,
+                            self.unify_all_with_type(conditions, self.fresh_tvar())?,
                         )?;
                     }
                     None => {
@@ -380,7 +369,7 @@ impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
                 }
 
                 // type_rule!( results: [$1], else_result?: $1, this_expr: $1)
-                self.unify_all_with_type(results, Type::from(self.fresh_tvar()))?;
+                self.unify_all_with_type(results, self.fresh_tvar())?;
 
                 if let Some(else_result) = else_result {
                     self.unify_nodes(results, &**else_result)?;
@@ -432,7 +421,7 @@ impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
             // `self.get_type(this_expr)` must be the same as the array element type
             Expr::Subscript { expr, subscript: _ } => {
                 // type_rule!( expr: Array($T), this_expr: $T, subscript: Native )
-                let elem_ty = Type::from(self.fresh_tvar());
+                let elem_ty = self.fresh_tvar();
                 let array_ty = Type::array(elem_ty.clone());
                 self.unify_node_with_type(&**expr, array_ty)?;
                 self.unify_node_with_type(this_expr, elem_ty)?;
@@ -440,7 +429,7 @@ impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
 
             Expr::Array(Array { elem, named: false }) => {
                 // Constrain all elements of the array to be the same type.
-                let elem_ty = self.unify_all_with_type(elem, Type::from(self.fresh_tvar()))?;
+                let elem_ty = self.unify_all_with_type(elem, self.fresh_tvar())?;
                 let array_ty = Type::array(elem_ty);
                 self.unify_node_with_type(this_expr, array_ty)?;
             }

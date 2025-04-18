@@ -2,8 +2,8 @@ use super::importer::{ImportError, Importer};
 use crate::{
     inference::{TypeError, TypeInferencer},
     unifier::{EqlValue, Unifier},
-    DepMut, Fmt, Param, ParamError, ScopeError, ScopeTracker, TableResolver, Type,
-    TypeRegistry, TypedStatement, Value,
+    DepMut, Fmt, Param, ParamError, ScopeError, ScopeTracker, TableResolver, Type, TypeRegistry,
+    TypedStatement, Value,
 };
 use sqlparser::ast::{self as ast, Statement};
 use sqltk::{Break, NodeKey, Visitable, Visitor};
@@ -121,7 +121,6 @@ impl<'ast> EqlMapper<'ast> {
         let inferencer = DepMut::new(TypeInferencer::new(
             table_resolver.clone(),
             &scope_tracker,
-            &registry,
             &unifier,
         ));
 
@@ -178,8 +177,10 @@ impl<'ast> EqlMapper<'ast> {
                 })
             }
             Err(err) => {
-                let inferencer = &*self.inferencer.borrow();
-                inferencer.dump_registry(statement);
+                {
+                    let registry = &*self.registry.borrow();
+                    registry.dump_all_nodes(statement);
+                }
 
                 let projection = self.projection_type(statement);
                 let params = self.param_types();
@@ -210,12 +211,12 @@ impl<'ast> EqlMapper<'ast> {
     ) -> Result<crate::Projection, EqlMapperError> {
         let mut unifier = self.unifier.borrow_mut();
 
-        let ty = unifier.lookup_type_by_node(statement);
+        let ty = unifier.get_node_type(statement);
         Ok(ty.resolved_as::<crate::Projection>(&mut unifier)?)
     }
 
     fn param_types(&self) -> Result<Vec<(Param, Value)>, EqlMapperError> {
-        let params = self.inferencer.borrow().param_types()?;
+        let params = self.registry.borrow().resolved_param_types()?;
 
         let params = params
             .into_iter()
@@ -236,25 +237,18 @@ impl<'ast> EqlMapper<'ast> {
     /// Asks the [`TypeInferencer`] for a hashmap of literal types, validating that they are all `Scalar` types.
     fn literal_types(&self) -> Result<Vec<(EqlValue, &'ast ast::Value)>, EqlMapperError> {
         let iter = {
-            let reg = self.registry.borrow();
-            reg.get_nodes_and_types::<ast::Value>().into_iter()
+            let registry = self.registry.borrow();
+            registry.get_nodes_and_types::<ast::Value>().into_iter()
         };
         let literal_nodes: Vec<(EqlValue, &'ast ast::Value)> = iter
             .map(
                 |(node, ty)| -> Result<Option<(EqlValue, &'ast ast::Value)>, TypeError> {
-                    if let Some(ty) = ty {
-                        if let crate::Type::Value(crate::Value::Eql(eql_value)) =
-                            &ty.resolved(&mut self.unifier.borrow_mut())?
-                        {
-                            return Ok(Some((eql_value.clone(), node)));
-                        }
-                        Ok(None)
-                    } else {
-                        Err(TypeError::InternalError(format!(
-                            "could not resolve type for literal node: {}",
-                            node.to_string()
-                        )))
+                    if let crate::Type::Value(crate::Value::Eql(eql_value)) =
+                        &ty.resolved(&mut self.unifier.borrow_mut())?
+                    {
+                        return Ok(Some((eql_value.clone(), node)));
                     }
+                    Ok(None)
                 },
             )
             .filter_map(Result::transpose)
@@ -264,21 +258,12 @@ impl<'ast> EqlMapper<'ast> {
     }
 
     fn node_types(&self) -> Result<HashMap<NodeKey<'ast>, Type>, EqlMapperError> {
-        let inferencer = self.inferencer.borrow();
-        let node_types = inferencer.node_types();
+        let registry = self.registry.borrow();
+        let node_types = registry.node_types();
 
         let mut resolved_node_types: HashMap<NodeKey<'ast>, Type> = HashMap::new();
         for (key, ty) in node_types {
-            match ty {
-                Some(ty) => {
-                    resolved_node_types.insert(key, ty.resolved(&mut self.unifier.borrow_mut())?)
-                }
-                None => {
-                    return Err(EqlMapperError::InternalError(format!(
-                        "unresolved type for node"
-                    )))
-                }
-            };
+            resolved_node_types.insert(key, ty.resolved(&mut self.unifier.borrow_mut())?);
         }
 
         Ok(resolved_node_types)

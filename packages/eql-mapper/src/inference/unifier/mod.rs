@@ -4,7 +4,7 @@ mod types;
 
 use crate::inference::TypeError;
 
-use sqltk::Visitable;
+use sqltk::AsNodeKey;
 pub(crate) use types::*;
 
 pub use types::{EqlValue, NativeValue, TableColumn};
@@ -21,28 +21,43 @@ pub struct Unifier<'ast> {
 
 impl<'ast> Unifier<'ast> {
     /// Creates a new `Unifier`.
-    pub fn new(reg: impl Into<Rc<RefCell<TypeRegistry<'ast>>>>) -> Self {
+    pub fn new(registry: impl Into<Rc<RefCell<TypeRegistry<'ast>>>>) -> Self {
         Self {
-            registry: reg.into(),
+            registry: registry.into(),
             depth: 0,
         }
     }
 
+    pub(crate) fn fresh_tvar(&self) -> Arc<Type> {
+        Type::Var(self.registry.borrow_mut().fresh_tvar()).into()
+    }
+
     /// Looks up a previously registered [`Type`] by its [`TypeVar`].
-    pub(crate) fn lookup(&self, tvar: TypeVar) -> Option<Arc<Type>> {
+    pub(crate) fn get_type(&self, tvar: TypeVar) -> Option<Arc<Type>> {
         self.registry.borrow().get_type(tvar)
     }
 
-    pub(crate) fn lookup_type_by_node<N: Visitable>(&self, node: &'ast N) -> Arc<Type> {
+    pub(crate) fn get_node_type<N: AsNodeKey>(&self, node: &'ast N) -> Arc<Type> {
         self.registry.borrow_mut().get_node_type(node)
     }
 
-    pub(crate) fn exists_node_with_type<N: Visitable>(&self, ty: &Type) -> bool {
-        self.registry.borrow().exists_node_with_type::<N>(ty)
+    pub(crate) fn get_param_type(&mut self, param: &'ast String) -> Arc<Type> {
+        self.registry.borrow_mut().get_param_type(param)
+    }
+
+    pub(crate) fn node_exists_with_type<N: AsNodeKey>(&self, needle: &Type) -> bool {
+        self.first_matching_node_with_type::<N>(needle).is_some()
     }
 
     pub(crate) fn substitute(&mut self, tvar: TypeVar, sub_ty: impl Into<Arc<Type>>) -> Arc<Type> {
         self.registry.borrow_mut().substitute(tvar, sub_ty)
+    }
+
+    pub(crate) fn first_matching_node_with_type<N: AsNodeKey>(
+        &self,
+        needle: &Type,
+    ) -> Option<(&'ast N, Arc<Type>)> {
+        self.registry.borrow().first_matching_node_with_type(needle)
     }
 
     /// Unifies two [`Type`]s or fails with a [`TypeError`].
@@ -94,7 +109,8 @@ impl<'ast> Unifier<'ast> {
                 Type::Constructor(Value(Array(lhs_element_ty))),
                 Type::Constructor(Value(Array(rhs_element_ty))),
             ) => {
-                let unified_element_ty = self.unify(lhs_element_ty.clone(), rhs_element_ty.clone())?;
+                let unified_element_ty =
+                    self.unify(lhs_element_ty.clone(), rhs_element_ty.clone())?;
                 let unified_array_ty = Type::Constructor(Value(Array(unified_element_ty)));
                 Ok(unified_array_ty.into())
             }
@@ -202,10 +218,14 @@ impl<'ast> Unifier<'ast> {
     /// Attempts to unify the type with whatever the type variable is pointing to.
     ///
     /// After successful unification `ty_rc` and `tvar_rc` will refer to the same allocation.
-    fn unify_with_type_var(&mut self, ty: Arc<Type>, tvar: TypeVar) -> Result<Arc<Type>, TypeError> {
+    fn unify_with_type_var(
+        &mut self,
+        ty: Arc<Type>,
+        tvar: TypeVar,
+    ) -> Result<Arc<Type>, TypeError> {
         let sub_ty = {
-            let reg = &*self.registry.borrow();
-            reg.get_type(tvar)
+            let registry = &*self.registry.borrow();
+            registry.get_type(tvar)
         };
 
         let unified_ty: Arc<Type> = match sub_ty {
@@ -328,12 +348,8 @@ mod test {
     fn eq_never() {
         let mut unifier = Unifier::new(DepMut::new(TypeRegistry::new()));
 
-        let lhs: Arc<_> = Type::Constructor(Projection(
-            crate::unifier::Projection::Empty,
-        )).into();
-        let rhs: Arc<_> = Type::Constructor(Projection(
-            crate::unifier::Projection::Empty,
-        )).into();
+        let lhs: Arc<_> = Type::Constructor(Projection(crate::unifier::Projection::Empty)).into();
+        let rhs: Arc<_> = Type::Constructor(Projection(crate::unifier::Projection::Empty)).into();
 
         assert_eq!(unifier.unify(lhs.clone(), rhs), Ok(lhs));
     }
@@ -362,19 +378,21 @@ mod test {
     fn projections_without_wildcards() {
         let mut unifier = Unifier::new(DepMut::new(TypeRegistry::new()));
 
-        let lhs: Arc<_> = Type::Constructor(Projection(
-            crate::unifier::Projection::WithColumns(ProjectionColumns(vec![
+        let lhs: Arc<_> = Type::Constructor(Projection(crate::unifier::Projection::WithColumns(
+            ProjectionColumns(vec![
                 ProjectionColumn::new(Type::Constructor(Value(Native(NativeValue(None)))), None),
                 ProjectionColumn::new(Type::Var(TypeVar(0)), None),
-            ])),
-        )).into();
+            ]),
+        )))
+        .into();
 
-        let rhs: Arc<_> = Type::Constructor(Projection(
-            crate::unifier::Projection::WithColumns(ProjectionColumns(vec![
+        let rhs: Arc<_> = Type::Constructor(Projection(crate::unifier::Projection::WithColumns(
+            ProjectionColumns(vec![
                 ProjectionColumn::new(Type::Var(TypeVar(1)), None),
                 ProjectionColumn::new(Type::Constructor(Value(Native(NativeValue(None)))), None),
-            ])),
-        )).into();
+            ]),
+        )))
+        .into();
 
         let unified = unifier.unify(lhs, rhs).unwrap();
 
@@ -382,8 +400,14 @@ mod test {
             *unified,
             Type::Constructor(Projection(crate::unifier::Projection::WithColumns(
                 ProjectionColumns(vec![
-                    ProjectionColumn::new(Type::Constructor(Value(Native(NativeValue(None)))), None),
-                    ProjectionColumn::new(Type::Constructor(Value(Native(NativeValue(None)))), None),
+                    ProjectionColumn::new(
+                        Type::Constructor(Value(Native(NativeValue(None)))),
+                        None
+                    ),
+                    ProjectionColumn::new(
+                        Type::Constructor(Value(Native(NativeValue(None)))),
+                        None
+                    ),
                 ])
             )))
         );
@@ -393,28 +417,28 @@ mod test {
     fn projections_with_wildcards() {
         let mut unifier = Unifier::new(DepMut::new(TypeRegistry::new()));
 
+        let lhs: Arc<_> = Type::Constructor(Projection(crate::unifier::Projection::WithColumns(
+            ProjectionColumns(vec![
+                ProjectionColumn::new(Type::Constructor(Value(Native(NativeValue(None)))), None),
+                ProjectionColumn::new(Type::Constructor(Value(Native(NativeValue(None)))), None),
+            ]),
+        )))
+        .into();
 
-        let lhs: Arc<_> = Type::Constructor(Projection(
-            crate::unifier::Projection::WithColumns(ProjectionColumns(vec![
+        let cols: Arc<_> = Type::Constructor(Projection(crate::unifier::Projection::WithColumns(
+            ProjectionColumns(vec![
                 ProjectionColumn::new(Type::Constructor(Value(Native(NativeValue(None)))), None),
                 ProjectionColumn::new(Type::Constructor(Value(Native(NativeValue(None)))), None),
-            ])),
-        )).into();
-
-        let cols: Arc<_> = Type::Constructor(Projection(
-            crate::unifier::Projection::WithColumns(ProjectionColumns(vec![
-                ProjectionColumn::new(Type::Constructor(Value(Native(NativeValue(None)))), None),
-                ProjectionColumn::new(Type::Constructor(Value(Native(NativeValue(None)))), None),
-            ])),
-        )).into();
+            ]),
+        )))
+        .into();
 
         // The RHS is a single projection that contains a projection column that contains a projection with two
         // projection columns.  This is how wildcard expansions is represented at the type level.
-        let rhs: Arc<_> = Type::Constructor(Projection(
-            crate::unifier::Projection::WithColumns(ProjectionColumns(vec![
-                ProjectionColumn::new(cols, None),
-            ])),
-        )).into();
+        let rhs: Arc<_> = Type::Constructor(Projection(crate::unifier::Projection::WithColumns(
+            ProjectionColumns(vec![ProjectionColumn::new(cols, None)]),
+        )))
+        .into();
 
         let unified = unifier.unify(lhs, rhs).unwrap();
 
@@ -422,8 +446,14 @@ mod test {
             *unified,
             Type::Constructor(Projection(crate::unifier::Projection::WithColumns(
                 ProjectionColumns(vec![
-                    ProjectionColumn::new(Type::Constructor(Value(Native(NativeValue(None)))), None),
-                    ProjectionColumn::new(Type::Constructor(Value(Native(NativeValue(None)))), None),
+                    ProjectionColumn::new(
+                        Type::Constructor(Value(Native(NativeValue(None)))),
+                        None
+                    ),
+                    ProjectionColumn::new(
+                        Type::Constructor(Value(Native(NativeValue(None)))),
+                        None
+                    ),
                 ])
             )))
         );

@@ -118,7 +118,7 @@ impl Projection {
                         }
                     },
                     Type::Var(tvar) => {
-                        let ty = unifier.lookup(*tvar).ok_or(
+                        let ty = unifier.get_type(*tvar).ok_or(
                             TypeError::InternalError(format!("could not resolve type variable '{}'", tvar)))?;
                         if let Type::Constructor(Constructor::Projection(projection)) = &*ty {
                             match projection.resolve(unifier)? {
@@ -244,11 +244,11 @@ impl Type {
         match self {
             Type::Constructor(constructor) => constructor.resolve(unifier),
             Type::Var(type_var) => {
-                if let Some(sub_ty) = unifier.lookup(*type_var) {
+                if let Some(sub_ty) = unifier.get_type(*type_var) {
                     match sub_ty.resolved(unifier) {
                         Ok(sub_ty) => return Ok(sub_ty),
                         Err(err) => {
-                            if unifier.exists_node_with_type::<ast::Value>(&Type::Var(*type_var)) {
+                            if unifier.node_exists_with_type::<ast::Value>(&Type::Var(*type_var)) {
                                 let unified_ty = unifier.unify(sub_ty, Type::any_native())?;
                                 return unified_ty.resolved(unifier);
                             } else {

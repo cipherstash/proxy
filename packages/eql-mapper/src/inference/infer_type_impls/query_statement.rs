@@ -47,10 +47,7 @@ impl<'ast> TypeInferencer<'ast> {
         {
             for col in cols {
                 if let Type::Var(tvar) = &*col.ty {
-                    if let Some((node, ty)) = self
-                        .reg
-                        .borrow()
-                        .first_matching_node_with_type::<Value>(&Type::Var(*tvar))
+                    if let Some((node, ty)) = self.first_matching_node_with_type::<Value>(&Type::Var(*tvar))
                     {
                         let unified = self.unify(col.ty.clone(), Type::any_native())?;
                         let unified = self.unify(unified, ty.clone())?;

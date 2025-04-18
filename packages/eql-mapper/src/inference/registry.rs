@@ -1,8 +1,8 @@
 use std::{collections::HashMap, marker::PhantomData, sync::Arc};
 
-use sqltk::{AsNodeKey, NodeKey, Visitable};
+use sqltk::{AsNodeKey, NodeKey};
 
-use crate::inference::unifier::{Type, TypeVar};
+use crate::{inference::unifier::{Type, TypeVar}, Param, ParamError};
 
 use super::Sequence;
 
@@ -10,8 +10,8 @@ use super::Sequence;
 pub struct TypeRegistry<'ast> {
     tvar_seq: Sequence<TypeVar>,
     types: HashMap<TypeVar, Arc<Type>>,
-    node_types: HashMap<NodeKey<'ast>, TypeVar>,
-    param_types: HashMap<&'ast String, TypeVar>,
+    node_types: HashMap<NodeKey<'ast>, Arc<Type>>,
+    param_types: HashMap<&'ast String, Arc<Type>>,
     _ast: PhantomData<&'ast ()>,
 }
 
@@ -33,10 +33,10 @@ impl<'ast> TypeRegistry<'ast> {
         }
     }
 
-    pub(crate) fn get_nodes_and_types<N: Visitable>(&self) -> Vec<(&'ast N, Option<Arc<Type>>)> {
+    pub(crate) fn get_nodes_and_types<N: AsNodeKey>(&self) -> Vec<(&'ast N, Arc<Type>)> {
         self.node_types
             .iter()
-            .filter_map(|(key, tvar)| key.get_as::<N>().map(|n| (n, self.get_type(*tvar))))
+            .filter_map(|(key, ty)| key.get_as::<N>().map(|n| (n, ty.clone())))
             .collect()
     }
 
@@ -44,65 +44,53 @@ impl<'ast> TypeRegistry<'ast> {
         self.types.get(&tvar).cloned()
     }
 
-
-    pub(crate) fn exists_node_with_type<N: Visitable>(&self, needle: &Type) -> bool {
-        self.first_matching_node_with_type::<N>(needle).is_some()
-    }
-
-    pub(crate) fn first_matching_node_with_type<N: Visitable>(
+    pub(crate) fn first_matching_node_with_type<N: AsNodeKey>(
         &self,
         needle: &Type,
     ) -> Option<(&'ast N, Arc<Type>)> {
-        self.node_types.iter().find_map(|(key, tvar)| {
+        self.node_types.iter().find_map(|(key, ty)| {
             let node = key.get_as::<N>()?;
-            if let Some(ty) = self.get_type(*tvar) {
-                if needle == &*ty {
-                    Some((node, ty))
-                } else {
-                    None
-                }
+            if needle == &**ty {
+                Some((node, Arc::clone(&ty)))
             } else {
                 None
             }
         })
     }
 
-    pub(crate) fn get_param(&self, param: &'ast String) -> Option<Arc<Type>> {
-        let tvar = *self.param_types.get(param)?;
-        self.get_type(tvar)
-    }
-
-    pub(crate) fn set_param(&mut self, param: &'ast String, ty: impl Into<Arc<Type>>) {
-        let tvar = self.register(ty);
-        self.param_types.insert(param, tvar);
+    pub(crate) fn get_param_type(&mut self, param: &'ast String) -> Arc<Type> {
+        self.get_or_init_param_type(param)
     }
 
     pub(crate) fn get_params(&self) -> HashMap<&'ast String, Arc<Type>> {
         self.param_types
             .iter()
-            .map(|(param, tvar)| (*param, Type::Var(*tvar).into()))
+            .map(|(param, ty)| (*param, Arc::clone(ty)))
             .collect()
     }
 
-    pub(crate) fn node_types(&self) -> HashMap<NodeKey<'ast>, Option<Arc<Type>>> {
+    // TODO: move this logic to EqlMapper?
+    pub(crate) fn resolved_param_types(&self) -> Result<Vec<(Param, Arc<Type>)>, ParamError> {
+        let mut params = self
+            .get_params()
+            .iter()
+            .map(|(p, ty)| Param::try_from(*p).map(|p| (p, ty.clone())))
+            .collect::<Result<Vec<_>, _>>()?;
+
+        params.sort_by(|(a, _), (b, _)| a.cmp(b));
+
+        Ok(params)
+    }
+
+    pub(crate) fn node_types(&self) -> HashMap<NodeKey<'ast>, Arc<Type>> {
         self.node_types
             .iter()
-            .map(|(node, tvar)| {
-                (
-                    *node,
-                    self.get_type(*tvar)
-                )
-            })
+            .map(|(node, ty)| (*node, Arc::clone(ty)))
             .collect()
     }
 
     pub(crate) fn get_node_type<N: AsNodeKey>(&mut self, node: &'ast N) -> Arc<Type> {
-        self.get_or_init_type(node)
-    }
-
-    pub(crate) fn get_node_type_var<N: AsNodeKey>(&mut self, node: &'ast N) -> TypeVar {
-        self.get_or_init_type(node);
-        self.node_types[&node.as_node_key()]
+        self.get_or_init_node_type(node)
     }
 
     pub(crate) fn substitute(&mut self, tvar: TypeVar, sub_ty: impl Into<Arc<Type>>) -> Arc<Type> {
@@ -111,28 +99,28 @@ impl<'ast> TypeRegistry<'ast> {
         sub_ty
     }
 
-    fn register(&mut self, ty: impl Into<Arc<Type>>) -> TypeVar {
-        let tvar = self.fresh_tvar();
-        self.types.insert(tvar, ty.into());
-        tvar
-    }
-
     /// Gets (and creates, if required) the [`Type`] associated with a node. If the node does not already have an
-    /// associated `Type` then a [`Type::Var`] will be assigned to the node with a fresh [`TypeVar`].
-    fn get_or_init_type<N: AsNodeKey>(&mut self, node: &'ast N) -> Arc<Type> {
-        match self.node_types.get(&node.as_node_key()) {
-            Some(tvar) => Arc::clone(&self.types[tvar]),
+    /// associated `Type` then a fresh [`Type::Var`] will be assigned.
+    fn get_or_init_node_type<N: AsNodeKey>(&mut self, node: &'ast N) -> Arc<Type> {
+        match self.node_types.get(&node.as_node_key()).cloned() {
+            Some(ty) => ty,
             None => {
                 let ty = Arc::new(Type::Var(self.fresh_tvar()));
-                let node_tvar = self.register(ty.clone());
-                self.node_types.insert(node.as_node_key(), node_tvar);
+                self.node_types.insert(node.as_node_key(), ty.clone());
                 ty
+            }
+        }
+    }
 
-                // let node_tvar = self.fresh_tvar();
-                // self.node_types.insert(node.as_node_key(), node_tvar);
-                // let dangling = Arc::new(Type::Var(self.fresh_tvar()));
-                // self.types.insert(node_tvar, dangling.clone());
-                // dangling
+    /// Gets (and creates, if required) the [`Type`] associated with a param. If the param does not already have an
+    /// associated `Type` then a fresh [`Type::Var`] will be assigned.
+    fn get_or_init_param_type(&mut self, param: &'ast String) -> Arc<Type> {
+        match self.param_types.get(&param).cloned() {
+            Some(ty) => ty,
+            None => {
+                let ty = Arc::new(Type::Var(self.fresh_tvar()));
+                self.param_types.insert(param, ty.clone());
+                ty
             }
         }
     }
@@ -148,8 +136,8 @@ pub(crate) mod test_util {
         Statement, Value, Values,
     };
     use sqltk::{AsNodeKey, Break, Visitable, Visitor};
-    use tracing::Level;
     use std::{any::type_name, convert::Infallible, fmt::Debug, ops::ControlFlow};
+    use tracing::Level;
 
     use super::TypeRegistry;
 
@@ -159,9 +147,9 @@ pub(crate) mod test_util {
         /// Dumps the type information for a specific AST node to STDERR.
         ///
         /// Useful when debugging tests.
-        pub(crate) fn dump_node<N: Visitable + Display + AsNodeKey + Debug>(&self, node: &N) {
+        pub(crate) fn dump_node<N: AsNodeKey + Display + AsNodeKey + Debug>(&self, node: &N) {
             let key = node.as_node_key();
-            if let Some(tvar) = self.node_types.get(&key) {
+            if let Some(ty) = self.node_types.get(&key) {
                 let ty_name = type_name::<N>();
 
                 let span = tracing::span!(
@@ -169,9 +157,7 @@ pub(crate) mod test_util {
                     "Node+Type",
                     ast_ty = ty_name,
                     node = %node,
-                    ty = self.get_type(*tvar)
-                        .map(|ty| ty.to_string())
-                        .unwrap_or(String::from("<unresolved>")),
+                    ty = %ty,
                 );
 
                 let _guard = span.enter();

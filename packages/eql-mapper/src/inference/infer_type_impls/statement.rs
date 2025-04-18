@@ -29,9 +29,7 @@ impl<'ast> InferType<'ast, Statement> for TypeInferencer<'ast> {
                         AssignmentTarget::ColumnName(object_name) => {
                             self.unify_node_with_type(
                                 &assignment.value,
-                                self.scope_tracker
-                                    .borrow()
-                                    .resolve_ident(object_name.0.last().unwrap())?,
+                                self.resolve_ident(object_name.0.last().unwrap())?,
                             )?;
                         }
 

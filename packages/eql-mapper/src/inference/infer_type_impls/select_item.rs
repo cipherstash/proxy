@@ -1,5 +1,4 @@
 use sqlparser::ast::SelectItem;
-use tracing::{span, Level};
 
 use crate::{
     inference::{type_error::TypeError, InferType},
@@ -8,19 +7,20 @@ use crate::{
 
 impl<'ast> InferType<'ast, SelectItem> for TypeInferencer<'ast> {
     fn infer_exit(&mut self, select_item: &'ast SelectItem) -> Result<(), TypeError> {
-        let scope = self.scope_tracker.borrow();
-
-        let ty = match select_item {
+        match select_item {
             SelectItem::UnnamedExpr(expr) | SelectItem::ExprWithAlias { expr, .. } => {
-                self.get_node_type(expr)
+                self.unify_node_with_type(select_item, self.get_node_type(expr))?;
             }
             SelectItem::QualifiedWildcard(object_name, _) => {
-                scope.resolve_qualified_wildcard(&object_name.0)?
+                self.unify_node_with_type(
+                    select_item,
+                    self.resolve_qualified_wildcard(&object_name.0)?,
+                )?;
             }
-            SelectItem::Wildcard(_) => scope.resolve_wildcard()?,
-        };
-
-        self.unify_node_with_type(select_item, ty)?;
+            SelectItem::Wildcard(_) => {
+                self.unify_node_with_type(select_item, self.resolve_wildcard()?)?;
+            }
+        }
 
         Ok(())
     }

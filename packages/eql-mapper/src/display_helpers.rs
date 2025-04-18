@@ -15,6 +15,12 @@ pub struct Fmt<T>(pub(crate) T);
 
 impl<'a, 'ast> Display for Fmt<&'a NodeKey<'ast>> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        Display::fmt(&self, f)
+    }
+}
+
+impl<'ast> Display for Fmt<NodeKey<'ast>> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         if let Some(node) = self.0.get_as::<Statement>() {
             return Display::fmt(&node, f);
         }
@@ -109,7 +115,7 @@ impl<T: Display> Display for Fmt<Option<T>> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match &self.0 {
             Some(t) => t.fmt(f),
-            None => Display::fmt("<not initialised>", f)
+            None => Display::fmt("<not initialised>", f),
         }
     }
 }
