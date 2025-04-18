@@ -10,21 +10,15 @@ use tracing::{span, Level};
 use unifier::{Unifier, *};
 
 use std::{
-    any::{type_name, TypeId},
-    cell::RefCell,
-    collections::HashSet,
-    fmt::Debug,
-    marker::PhantomData,
-    ops::ControlFlow,
-    rc::Rc,
-    sync::Arc,
+    any::TypeId, cell::RefCell, collections::HashSet, fmt::Debug, marker::PhantomData,
+    ops::ControlFlow, rc::Rc, sync::Arc,
 };
 
 use infer_type::InferType;
 use sqlparser::ast::{
     Delete, Expr, Function, Ident, Insert, Query, Select, SelectItem, SetExpr, Statement, Values,
 };
-use sqltk::{into_control_flow, AsNodeKey, Break, NodeKey, Visitable, Visitor};
+use sqltk::{into_control_flow, AsNodeKey, Break, Visitable, Visitor};
 
 use crate::{Fmt, ScopeError, ScopeTracker, TableResolver};
 

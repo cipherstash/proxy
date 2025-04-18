@@ -16,7 +16,6 @@ use tracing::{span, Level};
 /// point to.
 pub struct Unifier<'ast> {
     registry: Rc<RefCell<TypeRegistry<'ast>>>,
-    depth: usize,
 }
 
 impl<'ast> Unifier<'ast> {
@@ -24,7 +23,6 @@ impl<'ast> Unifier<'ast> {
     pub fn new(registry: impl Into<Rc<RefCell<TypeRegistry<'ast>>>>) -> Self {
         Self {
             registry: registry.into(),
-            depth: 0,
         }
     }
 
@@ -83,14 +81,12 @@ impl<'ast> Unifier<'ast> {
         let span_begin = span!(
             Level::TRACE,
             "unify",
-            depth = self.depth,
             lhs = %lhs,
             rhs = %rhs,
         );
 
         let _guard = span_begin.enter();
 
-        self.depth += 1;
 
         // Short-circuit the unification when lhs & rhs are equal.
         if lhs == rhs {
@@ -183,7 +179,6 @@ impl<'ast> Unifier<'ast> {
             ))),
         };
 
-        self.depth -= 1;
 
         match unification {
             Ok(ty) => {
