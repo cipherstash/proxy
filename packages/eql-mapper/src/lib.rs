@@ -1332,7 +1332,7 @@ mod test {
 
     #[test]
     fn modify_aggregate_when_eql_column_affected_by_group_by_of_other_column() {
-        // init_tracing();
+        init_tracing();
         let schema = resolver(schema! {
             tables: {
                 employees: {

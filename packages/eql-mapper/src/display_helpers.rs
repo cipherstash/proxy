@@ -13,11 +13,11 @@ use crate::{EqlValue, Param, Type};
 #[derive(Debug, Clone, Copy, Hash, Eq, PartialEq)]
 pub struct Fmt<T>(pub(crate) T);
 
-impl<'a, 'ast> Display for Fmt<&'a NodeKey<'ast>> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        Display::fmt(&self, f)
-    }
-}
+// impl<'a, 'ast> Display for Fmt<&'a NodeKey<'ast>> {
+//     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+//         Display::fmt(&self, f)
+//     }
+// }
 
 impl<'ast> Display for Fmt<NodeKey<'ast>> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -66,7 +66,7 @@ impl<'a, 'ast> Display for Fmt<&'a HashMap<NodeKey<'ast>, Type>> {
         let mut out: Vec<String> = Vec::new();
         out.push("{ ".into());
         for (k, v) in self.0.iter() {
-            out.push(format!("{}: {}", Fmt(k), v));
+            out.push(format!("{}: {}", Fmt(*k), v));
         }
         out.push(" }".into());
         f.write_str(&out.join(", "))

@@ -206,7 +206,7 @@ macro_rules! dispatch_all {
 use std::sync::OnceLock;
 static INTERESTING: OnceLock<HashSet<TypeId>> = OnceLock::new();
 
-fn is_interesting<N: Visitable>() -> bool {
+fn is_type_inferred_from_node<N: Visitable>() -> bool {
     INTERESTING
         .get_or_init(|| {
             HashSet::from_iter(
@@ -238,57 +238,53 @@ impl<'ast> Visitor<'ast> for TypeInferencer<'ast> {
     type Error = TypeError;
 
     fn enter<N: Visitable>(&mut self, node: &'ast N) -> ControlFlow<Break<Self::Error>> {
-        let span_outer = span!(
-            Level::TRACE,
-            "node",
-            node_ty = type_name::<N>(),
-            node = %Fmt(
-                if is_interesting::<N>() {
-                    Some(Fmt(NodeKey::new(node)))
-                } else {
-                    None
-                }
-            ),
-        );
+        let node_ty_pre_dispatch = if is_type_inferred_from_node::<N>() {
+            Some(self.get_node_type(node))
+        } else {
+            None
+        };
 
         dispatch_all!(self, infer_enter, node);
 
-        let span_inner = span!(
-            parent: &span_outer,
-            Level::TRACE,
-            "result",
-            inferred = %Fmt(
-                if is_interesting::<N>() {
-                    Some(self.get_node_type(node))
-                } else {
-                    None
-                }
-            ),
-        );
-        let _guard_inner = span_inner.enter();
+        if is_type_inferred_from_node::<N>() {
+            let node_ty_post_dispatch = self.get_node_type(node);
+
+            if Some(&node_ty_post_dispatch) != node_ty_pre_dispatch.as_ref() {
+                let span = span!(
+                    Level::TRACE,
+                    "enter node (result)",
+                    ty_pre = %Fmt(node_ty_pre_dispatch),
+                    ty_pos = %node_ty_post_dispatch,
+                );
+                let _guard = span.enter();
+            }
+        }
 
         ControlFlow::Continue(())
     }
 
     fn exit<N: Visitable>(&mut self, node: &'ast N) -> ControlFlow<Break<Self::Error>> {
-        let span_outer = span!(
-            Level::TRACE,
-            "node",
-            node_ty = type_name::<N>(),
-            node = %Fmt(&NodeKey::new(node)),
-        );
-
-        let _guard_outer = span_outer.enter();
+        let node_ty_pre_dispatch = if is_type_inferred_from_node::<N>() {
+            Some(self.get_node_type(node))
+        } else {
+            None
+        };
 
         dispatch_all!(self, infer_exit, node);
 
-        let span_inner = span!(
-            parent: &span_outer,
-            Level::TRACE,
-            "result",
-            inferred = %self.get_node_type(node),
-        );
-        let _guard_inner = span_inner.enter();
+        if is_type_inferred_from_node::<N>() {
+            let node_ty_post_dispatch = self.get_node_type(node);
+
+            if Some(&node_ty_post_dispatch) != node_ty_pre_dispatch.as_ref() {
+                let span = span!(
+                    Level::TRACE,
+                    "exit node (result)",
+                    ty_pre = %Fmt(node_ty_pre_dispatch),
+                    ty_pos = %node_ty_post_dispatch,
+                );
+                let _guard = span.enter();
+            }
+        }
 
         ControlFlow::Continue(())
     }
