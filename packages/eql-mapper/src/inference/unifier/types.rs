@@ -300,7 +300,7 @@ impl Type {
 }
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Display, Hash)]
-#[display("COLS[{}]", _0.iter().map(|pc| pc.to_string()).collect::<Vec<_>>().join(", "))]
+#[display("PROJ[{}]", _0.iter().map(|pc| pc.to_string()).collect::<Vec<_>>().join(", "))]
 pub struct ProjectionColumns(pub(crate) Vec<ProjectionColumn>);
 
 /// The type of an [`sqlparser::ast::Expr`] or [`sqlparser::ast::Statement`] that returns a projection.
@@ -318,7 +318,7 @@ pub enum Projection {
     ///
     /// Also statements such as `SELECT FROM users` where there are no selected columns or wildcards will have an empty
     /// projection.
-    #[display("COLS[]")]
+    #[display("PROJ[]")]
     Empty,
 }
 

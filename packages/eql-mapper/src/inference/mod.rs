@@ -18,7 +18,7 @@ use infer_type::InferType;
 use sqlparser::ast::{
     Delete, Expr, Function, Ident, Insert, Query, Select, SelectItem, SetExpr, Statement, Values,
 };
-use sqltk::{into_control_flow, AsNodeKey, Break, Visitable, Visitor};
+use sqltk::{into_control_flow, AsNodeKey, Break, NodeKey, Visitable, Visitor};
 
 use crate::{Fmt, ScopeError, ScopeTracker, TableResolver};
 
@@ -197,31 +197,29 @@ macro_rules! dispatch_all {
     };
 }
 
-use std::sync::OnceLock;
-static INTERESTING: OnceLock<HashSet<TypeId>> = OnceLock::new();
+use std::sync::LazyLock;
+static INTERESTING: LazyLock<HashSet<TypeId>> = LazyLock::new(|| {
+    HashSet::from_iter(
+        vec![
+            TypeId::of::<Statement>(),
+            TypeId::of::<Query>(),
+            TypeId::of::<Insert>(),
+            TypeId::of::<Delete>(),
+            TypeId::of::<Expr>(),
+            TypeId::of::<SetExpr>(),
+            TypeId::of::<Select>(),
+            TypeId::of::<Vec<SelectItem>>(),
+            TypeId::of::<SelectItem>(),
+            TypeId::of::<Function>(),
+            TypeId::of::<Values>(),
+            TypeId::of::<sqlparser::ast::Value>(),
+        ]
+        .into_iter(),
+    )
+});
 
 fn is_type_inferred_from_node<N: Visitable>() -> bool {
-    INTERESTING
-        .get_or_init(|| {
-            HashSet::from_iter(
-                vec![
-                    TypeId::of::<Statement>(),
-                    TypeId::of::<Query>(),
-                    TypeId::of::<Insert>(),
-                    TypeId::of::<Delete>(),
-                    TypeId::of::<Expr>(),
-                    TypeId::of::<SetExpr>(),
-                    TypeId::of::<Select>(),
-                    TypeId::of::<Vec<SelectItem>>(),
-                    TypeId::of::<SelectItem>(),
-                    TypeId::of::<Function>(),
-                    TypeId::of::<Values>(),
-                    TypeId::of::<sqlparser::ast::Value>(),
-                ]
-                .into_iter(),
-            )
-        })
-        .contains(&TypeId::of::<N>())
+    INTERESTING.contains(&TypeId::of::<N>())
 }
 
 /// # About this [`Visitor`] implementation.
@@ -247,6 +245,7 @@ impl<'ast> Visitor<'ast> for TypeInferencer<'ast> {
                 let span = span!(
                     Level::TRACE,
                     "enter node (result)",
+                    node = %Fmt(NodeKey::new(node)),
                     ty_pre = %Fmt(node_ty_pre_dispatch),
                     ty_pos = %node_ty_post_dispatch,
                 );
@@ -273,6 +272,7 @@ impl<'ast> Visitor<'ast> for TypeInferencer<'ast> {
                 let span = span!(
                     Level::TRACE,
                     "exit node (result)",
+                    node = %Fmt(NodeKey::new(node)),
                     ty_pre = %Fmt(node_ty_pre_dispatch),
                     ty_pos = %node_ty_post_dispatch,
                 );

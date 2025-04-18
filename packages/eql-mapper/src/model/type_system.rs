@@ -48,10 +48,10 @@ pub enum Value {
 #[derive(Debug, Clone, PartialEq, Eq, Display)]
 #[display("{self}")]
 pub enum Projection {
-    #[display("COLS[{}]", _0.iter().map(|pc| pc.to_string()).collect::<Vec<_>>().join(", "))]
+    #[display("PROJ[{}]", _0.iter().map(|pc| pc.to_string()).collect::<Vec<_>>().join(", "))]
     WithColumns(Vec<ProjectionColumn>),
 
-    #[display("COLS[]")]
+    #[display("PROJ[]")]
     Empty,
 }
 
