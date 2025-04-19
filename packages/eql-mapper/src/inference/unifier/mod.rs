@@ -10,10 +10,11 @@ pub(crate) use types::*;
 pub use types::{EqlValue, NativeValue, TableColumn};
 
 use super::TypeRegistry;
-use tracing::{span, Level};
+use tracing::{instrument, span, Level};
 
 /// Implements the type unification algorithm and maintains an association of type variables with the type that they
 /// point to.
+#[derive(Debug)]
 pub struct Unifier<'ast> {
     registry: Rc<RefCell<TypeRegistry<'ast>>>,
 }
@@ -39,6 +40,10 @@ impl<'ast> Unifier<'ast> {
         self.registry.borrow_mut().get_node_type(node)
     }
 
+    pub(crate) fn peek_node_type<N: AsNodeKey>(&self, node: &'ast N) -> Option<Arc<Type>> {
+        self.registry.borrow_mut().peek_node_type(node)
+    }
+
     pub(crate) fn get_param_type(&mut self, param: &'ast String) -> Arc<Type> {
         self.registry.borrow_mut().get_param_type(param)
     }
@@ -47,7 +52,11 @@ impl<'ast> Unifier<'ast> {
         self.first_matching_node_with_type::<N>(needle).is_some()
     }
 
-    pub(crate) fn substitute(&mut self, tvar: TypeVar, sub_ty: impl Into<Arc<Type>>) -> Arc<Type> {
+    #[instrument(skip(self), fields(
+        tvar = %tvar,
+        sub_ty = %sub_ty,
+    ))]
+    pub(crate) fn substitute(&mut self, tvar: TypeVar, sub_ty: Arc<Type>) -> Arc<Type> {
         self.registry.borrow_mut().substitute(tvar, sub_ty)
     }
 
@@ -67,10 +76,14 @@ impl<'ast> Unifier<'ast> {
     /// dangling type variables).
     ///
     /// Returns `Ok(ty)` if successful, or `Err(TypeError)` on failure.
+    #[instrument(skip(self), ret(Display), err(Debug), fields(
+        lhs = %lhs,
+        rhs = %rhs,
+    ))]
     pub(crate) fn unify(
         &mut self,
-        lhs: impl Into<Arc<Type>>,
-        rhs: impl Into<Arc<Type>>,
+        lhs: Arc<Type>,
+        rhs: Arc<Type>,
     ) -> Result<Arc<Type>, TypeError> {
         use types::Constructor::*;
         use types::Value::*;
@@ -236,11 +249,9 @@ impl<'ast> Unifier<'ast> {
     /// Unifies two projection types.
     fn unify_projections(
         &mut self,
-        lhs: impl Into<Arc<Type>>,
-        rhs: impl Into<Arc<Type>>,
+        lhs: Arc<Type>,
+        rhs: Arc<Type>,
     ) -> Result<Arc<Type>, TypeError> {
-        let lhs = lhs.into();
-        let rhs = rhs.into();
         match (&*lhs, &*rhs) {
             (
                 Type::Constructor(Constructor::Projection(lhs_projection)),

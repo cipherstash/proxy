@@ -7,6 +7,7 @@ use crate::{inference::unifier::{Type, TypeVar}, Param, ParamError};
 use super::Sequence;
 
 /// `TypeRegistry` maintains an association between `sqlparser` AST nodes and the node's inferred [`Type`].
+#[derive(Debug)]
 pub struct TypeRegistry<'ast> {
     tvar_seq: Sequence<TypeVar>,
     types: HashMap<TypeVar, Arc<Type>>,
@@ -93,6 +94,10 @@ impl<'ast> TypeRegistry<'ast> {
         self.get_or_init_node_type(node)
     }
 
+    pub(crate) fn peek_node_type<N: AsNodeKey>(&self, node: &'ast N) -> Option<Arc<Type>> {
+        self.node_types.get(&node.as_node_key()).cloned()
+    }
+
     pub(crate) fn substitute(&mut self, tvar: TypeVar, sub_ty: impl Into<Arc<Type>>) -> Arc<Type> {
         let sub_ty: Arc<_> = sub_ty.into();
         self.types.insert(tvar, sub_ty.clone());
@@ -102,7 +107,7 @@ impl<'ast> TypeRegistry<'ast> {
     /// Gets (and creates, if required) the [`Type`] associated with a node. If the node does not already have an
     /// associated `Type` then a fresh [`Type::Var`] will be assigned.
     fn get_or_init_node_type<N: AsNodeKey>(&mut self, node: &'ast N) -> Arc<Type> {
-        match self.node_types.get(&node.as_node_key()).cloned() {
+        match self.peek_node_type(node) {
             Some(ty) => ty,
             None => {
                 let ty = Arc::new(Type::Var(self.fresh_tvar()));

@@ -2,6 +2,7 @@ use std::{any::type_name, ops::Index, sync::Arc};
 
 use derive_more::Display;
 use sqlparser::ast::{self, Ident};
+use tracing::instrument;
 
 use crate::{ColumnKind, Table, TypeError};
 
@@ -249,7 +250,7 @@ impl Type {
                         Ok(sub_ty) => return Ok(sub_ty),
                         Err(err) => {
                             if unifier.node_exists_with_type::<ast::Value>(&Type::Var(*type_var)) {
-                                let unified_ty = unifier.unify(sub_ty, Type::any_native())?;
+                                let unified_ty = unifier.unify(sub_ty, Type::any_native().into())?;
                                 return unified_ty.resolved(unifier);
                             } else {
                                 return Err(err);
@@ -266,6 +267,7 @@ impl Type {
         }
     }
 
+    #[instrument(skip(self))]
     pub(crate) fn resolved_as<T: Clone + 'static>(
         &self,
         unifier: &mut Unifier<'_>,

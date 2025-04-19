@@ -14,6 +14,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 /// [`Visitor`] implementation that manages creation of lexical [`Scope`]s and the current active lexical scope.
+#[derive(Debug)]
 pub struct ScopeTracker<'ast> {
     registry: Rc<RefCell<TypeRegistry<'ast>>>,
     stack: Vec<Rc<RefCell<Scope<'ast>>>>,
@@ -74,6 +75,7 @@ impl<'ast> ScopeTracker<'ast> {
 }
 
 /// A lexical scope.
+#[derive(Debug)]
 pub(crate) struct Scope<'ast> {
     registry: Rc<RefCell<TypeRegistry<'ast>>>,
 

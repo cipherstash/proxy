@@ -1,5 +1,4 @@
 use sqlparser::ast::Values;
-
 use crate::{
     inference::type_error::TypeError, inference::unifier::Type, inference::InferType,
     TypeInferencer,

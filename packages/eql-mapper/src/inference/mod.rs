@@ -6,7 +6,7 @@ mod type_error;
 
 pub mod unifier;
 
-use tracing::{span, Level};
+use tracing::instrument;
 use unifier::{Unifier, *};
 
 use std::{
@@ -41,6 +41,7 @@ pub(crate) use type_error::*;
 /// - [`Function`]
 /// - [`Values`]
 /// - [`Value`]
+#[derive(Debug)]
 pub struct TypeInferencer<'ast> {
     /// A snapshot of the the database schema - used by `TypeInferencer`'s [`InferType`] impls.
     table_resolver: Arc<TableResolver>,
@@ -72,6 +73,14 @@ impl<'ast> TypeInferencer<'ast> {
     pub(crate) fn get_node_type<N: AsNodeKey>(&self, node: &'ast N) -> Arc<Type> {
         self.unifier.borrow_mut().get_node_type(node)
     }
+
+    pub(crate) fn peek_node_type<N: AsNodeKey>(&self, node: &'ast N) -> Option<Arc<Type>> {
+        self.unifier.borrow_mut().peek_node_type(node)
+    }
+
+    // pub(crate) fn get_type(&self, tvar: TypeVar) -> Option<Arc<Type>> {
+    //     self.unifier.borrow().get_type(tvar)
+    // }
 
     pub(crate) fn get_param_type(&self, param: &'ast String) -> Arc<Type> {
         self.unifier.borrow_mut().get_param_type(param)
@@ -198,6 +207,7 @@ macro_rules! dispatch_all {
 }
 
 use std::sync::LazyLock;
+#[allow(unused)]
 static INTERESTING: LazyLock<HashSet<TypeId>> = LazyLock::new(|| {
     HashSet::from_iter(
         vec![
@@ -218,6 +228,7 @@ static INTERESTING: LazyLock<HashSet<TypeId>> = LazyLock::new(|| {
     )
 });
 
+#[allow(unused)]
 fn is_type_inferred_from_node<N: Visitable>() -> bool {
     INTERESTING.contains(&TypeId::of::<N>())
 }
@@ -229,56 +240,74 @@ fn is_type_inferred_from_node<N: Visitable>() -> bool {
 impl<'ast> Visitor<'ast> for TypeInferencer<'ast> {
     type Error = TypeError;
 
+    #[instrument(
+        level = "trace",
+        skip(self, node),
+        fields(
+            ty = node.type_name(),
+            ast = Fmt(NodeKey::new(node)).to_string(),
+            inferred_ty = self.peek_node_type(node).map(|n| n.to_string()).unwrap_or("<no-type>".to_owned())),
+        ret(Debug)
+    )]
     fn enter<N: Visitable>(&mut self, node: &'ast N) -> ControlFlow<Break<Self::Error>> {
-        let node_ty_pre_dispatch = if is_type_inferred_from_node::<N>() {
-            Some(self.get_node_type(node))
-        } else {
-            None
-        };
+        // let node_ty_pre_dispatch = if is_type_inferred_from_node::<N>() {
+        //     Some(self.get_node_type(node))
+        // } else {
+        //     None
+        // };
 
         dispatch_all!(self, infer_enter, node);
 
-        if is_type_inferred_from_node::<N>() {
-            let node_ty_post_dispatch = self.get_node_type(node);
+        // if is_type_inferred_from_node::<N>() {
+        //     let node_ty_post_dispatch = self.get_node_type(node);
 
-            if Some(&node_ty_post_dispatch) != node_ty_pre_dispatch.as_ref() {
-                let span = span!(
-                    Level::TRACE,
-                    "enter node (result)",
-                    node = %Fmt(NodeKey::new(node)),
-                    ty_pre = %Fmt(node_ty_pre_dispatch),
-                    ty_pos = %node_ty_post_dispatch,
-                );
-                let _guard = span.enter();
-            }
-        }
+        //     if Some(&node_ty_post_dispatch) != node_ty_pre_dispatch.as_ref() {
+        //         let span = span!(
+        //             Level::TRACE,
+        //             "enter node (result)",
+        //             node = %Fmt(NodeKey::new(node)),
+        //             ty_pre = %Fmt(node_ty_pre_dispatch),
+        //             ty_pos = %node_ty_post_dispatch,
+        //         );
+        //         let _guard = span.enter();
+        //     }
+        // }
 
         ControlFlow::Continue(())
     }
 
+    #[instrument(
+        level = "trace",
+        skip(self, node),
+        fields(
+            ty = node.type_name(),
+            ast = Fmt(NodeKey::new(node)).to_string(),
+            inferred_ty = self.peek_node_type(node).map(|n| n.to_string()).unwrap_or("<no-type>".to_owned())),
+        ret(Debug)
+    )]
     fn exit<N: Visitable>(&mut self, node: &'ast N) -> ControlFlow<Break<Self::Error>> {
-        let node_ty_pre_dispatch = if is_type_inferred_from_node::<N>() {
-            Some(self.get_node_type(node))
-        } else {
-            None
-        };
+        // let node_ty_pre_dispatch = if is_type_inferred_from_node::<N>() {
+        //     Some(self.get_node_type(node))
+        // } else {
+        //     None
+        // };
 
         dispatch_all!(self, infer_exit, node);
 
-        if is_type_inferred_from_node::<N>() {
-            let node_ty_post_dispatch = self.get_node_type(node);
+        // if is_type_inferred_from_node::<N>() {
+        //     let node_ty_post_dispatch = self.get_node_type(node);
 
-            if Some(&node_ty_post_dispatch) != node_ty_pre_dispatch.as_ref() {
-                let span = span!(
-                    Level::TRACE,
-                    "exit node (result)",
-                    node = %Fmt(NodeKey::new(node)),
-                    ty_pre = %Fmt(node_ty_pre_dispatch),
-                    ty_pos = %node_ty_post_dispatch,
-                );
-                let _guard = span.enter();
-            }
-        }
+        //     if Some(&node_ty_post_dispatch) != node_ty_pre_dispatch.as_ref() {
+        //         let span = span!(
+        //             Level::TRACE,
+        //             "exit node (result)",
+        //             node = %Fmt(NodeKey::new(node)),
+        //             ty_pre = %Fmt(node_ty_pre_dispatch),
+        //             ty_pos = %node_ty_post_dispatch,
+        //         );
+        //         let _guard = span.enter();
+        //     }
+        // }
 
         ControlFlow::Continue(())
     }
