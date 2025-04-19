@@ -5,6 +5,10 @@ use syn::{
     ImplItemFn, ItemImpl, Pat, PatType, Signature, Type, TypePath, TypeReference,
 };
 
+/// This macro generates consistently defined `#[tracing::instrument]` attributes for `InferType::infer_enter` &
+/// `InferType::infer_enter` implementations on `TypeInferencer`.
+///
+/// This attribute MUST be defined on the trait `impl` itself (not the trait method impls).
 #[proc_macro_attribute]
 pub fn trace_infer(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let mut input = parse_macro_input!(item as ItemImpl);
@@ -47,7 +51,8 @@ pub fn trace_infer(_attr: TokenStream, item: TokenStream) -> TokenStream {
                                 let last_segment_arguments = if last_segment.arguments.is_empty() {
                                     None
                                 }  else {
-                                    Some(quote!(<#last_segment.arguments>))
+                                    let args = &last_segment.arguments;
+                                    Some(quote!(<#args>))
                                 };
                                 match last_segment_ident {
                                     ident if ident.to_string() == vec_ident.to_string() => {
@@ -74,9 +79,9 @@ pub fn trace_infer(_attr: TokenStream, item: TokenStream) -> TokenStream {
                             level = "trace",
                             skip(self, #node_ident),
                             fields(
-                                ty = #node_ty_abbrev,
+                                ast_ty = #node_ty_abbrev,
                                 ast = %#formatter(#node_ident),
-                                inferred_ty = self.peek_node_type(#node_ident).map(|n| n.to_string()).unwrap_or("<no-type>".to_owned())
+                                inferred = self.peek_node_type(#node_ident).map(|n| n.to_string()).unwrap_or("<no-type>".to_owned())
                             ),
                             ret(Debug)
                         )]
