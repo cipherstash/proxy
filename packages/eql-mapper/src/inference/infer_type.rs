@@ -1,6 +1,6 @@
 use super::type_error::TypeError;
 
-/// Trait for inferring the [`Type`] of an AST node.
+/// Trait for inferring the [`crate::Type`] of an AST node.
 ///
 /// This trait is implemented only on [`crate::TypeInferencer`] for each relevant `sqlparser` AST node.
 ///

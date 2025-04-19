@@ -9,7 +9,7 @@ pub mod unifier;
 use unifier::{Unifier, *};
 
 use std::{
-    any::TypeId, cell::RefCell, collections::HashSet, fmt::Debug, marker::PhantomData,
+    cell::RefCell, fmt::Debug, marker::PhantomData,
     ops::ControlFlow, rc::Rc, sync::Arc,
 };
 
@@ -204,34 +204,6 @@ macro_rules! dispatch_all {
         dispatch!($self, $method, $node, sqlparser::ast::Value);
     };
 }
-
-use std::sync::LazyLock;
-#[allow(unused)]
-static INTERESTING: LazyLock<HashSet<TypeId>> = LazyLock::new(|| {
-    HashSet::from_iter(
-        vec![
-            TypeId::of::<Statement>(),
-            TypeId::of::<Query>(),
-            TypeId::of::<Insert>(),
-            TypeId::of::<Delete>(),
-            TypeId::of::<Expr>(),
-            TypeId::of::<SetExpr>(),
-            TypeId::of::<Select>(),
-            TypeId::of::<Vec<SelectItem>>(),
-            TypeId::of::<SelectItem>(),
-            TypeId::of::<Function>(),
-            TypeId::of::<Values>(),
-            TypeId::of::<sqlparser::ast::Value>(),
-        ]
-        .into_iter(),
-    )
-});
-
-#[allow(unused)]
-fn is_type_inferred_from_node<N: Visitable>() -> bool {
-    INTERESTING.contains(&TypeId::of::<N>())
-}
-
 
 /// # About this [`Visitor`] implementation.
 ///
