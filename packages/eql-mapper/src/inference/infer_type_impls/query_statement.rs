@@ -1,3 +1,4 @@
+use eql_mapper_macros::trace_infer;
 use sqlparser::ast::{Query, Value};
 
 use crate::{
@@ -6,6 +7,7 @@ use crate::{
     TypeInferencer,
 };
 
+#[trace_infer]
 impl<'ast> InferType<'ast, Query> for TypeInferencer<'ast> {
     fn infer_exit(&mut self, query: &'ast Query) -> Result<(), TypeError> {
         let Query { body, .. } = query;

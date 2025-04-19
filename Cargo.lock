@@ -1165,6 +1165,7 @@ name = "eql-mapper"
 version = "1.0.0"
 dependencies = [
  "derive_more",
+ "eql-mapper-macros",
  "impl-trait-for-tuples",
  "itertools 0.13.0",
  "pretty_assertions",
@@ -1173,6 +1174,15 @@ dependencies = [
  "thiserror 2.0.12",
  "tracing",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "eql-mapper-macros"
+version = "2.0.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.100",
 ]
 
 [[package]]

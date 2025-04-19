@@ -13,46 +13,46 @@ use crate::{EqlValue, Param, Type};
 #[derive(Debug, Clone, Copy, Hash, Eq, PartialEq)]
 pub struct Fmt<T>(pub(crate) T);
 
-// impl<'a, 'ast> Display for Fmt<&'a NodeKey<'ast>> {
-//     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-//         Display::fmt(&self, f)
-//     }
-// }
+#[derive(Debug, Clone, Copy, Hash, Eq, PartialEq)]
+pub struct FmtAst<T>(pub(crate) T);
+
+#[derive(Debug, Clone, Copy, Hash, Eq, PartialEq)]
+pub struct FmtAstVec<T>(pub(crate) T);
 
 impl<'ast> Display for Fmt<NodeKey<'ast>> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         if let Some(node) = self.0.get_as::<Statement>() {
-            return Display::fmt(&node, f);
+            return Display::fmt(&FmtAst(node), f);
         }
         if let Some(node) = self.0.get_as::<Query>() {
-            return Display::fmt(&node, f);
+            return Display::fmt(&FmtAst(node), f);
         }
         if let Some(node) = self.0.get_as::<Insert>() {
-            return Display::fmt(&node, f);
+            return Display::fmt(&FmtAst(node), f);
         }
         if let Some(node) = self.0.get_as::<Delete>() {
-            return Display::fmt(&node, f);
+            return Display::fmt(&FmtAst(node), f);
         }
         if let Some(node) = self.0.get_as::<Expr>() {
-            return Display::fmt(&node, f);
+            return Display::fmt(&FmtAst(node), f);
         }
         if let Some(node) = self.0.get_as::<SetExpr>() {
-            return Display::fmt(&node, f);
+            return Display::fmt(&FmtAst(node), f);
         }
         if let Some(node) = self.0.get_as::<Select>() {
-            return Display::fmt(&node, f);
+            return Display::fmt(&FmtAst(node), f);
         }
         if let Some(node) = self.0.get_as::<Vec<SelectItem>>() {
-            return Display::fmt(&Fmt(node), f);
+            return Display::fmt(&FmtAstVec(node), f);
         }
         if let Some(node) = self.0.get_as::<Function>() {
-            return Display::fmt(&node, f);
+            return Display::fmt(&FmtAst(node), f);
         }
         if let Some(node) = self.0.get_as::<Values>() {
-            return Display::fmt(&node, f);
+            return Display::fmt(&FmtAst(node), f);
         }
         if let Some(node) = self.0.get_as::<Value>() {
-            return Display::fmt(&node, f);
+            return Display::fmt(&FmtAst(node), f);
         }
 
         f.write_str("!! CANNOT RENDER SQL NODE !!!")?;
@@ -73,9 +73,9 @@ impl<'a, 'ast> Display for Fmt<&'a HashMap<NodeKey<'ast>, Type>> {
     }
 }
 
-impl<'ast> Display for Fmt<&'ast Vec<SelectItem>> {
+impl<'ast, T: Display> Display for FmtAstVec<&'ast Vec<T>> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("[")?;
+        f.write_str("![")?;
         let children = self
             .0
             .iter()
@@ -83,7 +83,13 @@ impl<'ast> Display for Fmt<&'ast Vec<SelectItem>> {
             .collect::<Vec<_>>()
             .join(", ");
         f.write_str(&children)?;
-        f.write_str("]")
+        f.write_str("]!")
+    }
+}
+
+impl<'ast, T: Display> Display for FmtAst<&'ast T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        T::fmt(&self.0, f)
     }
 }
 

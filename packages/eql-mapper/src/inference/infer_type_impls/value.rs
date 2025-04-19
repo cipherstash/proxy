@@ -1,3 +1,4 @@
+use eql_mapper_macros::trace_infer;
 use sqlparser::ast::Value;
 
 use crate::{
@@ -7,6 +8,7 @@ use crate::{
 /// Handles type inference for [`Value`] nodes - which include *literals* and *placeholders* (SQL param usages).
 ///
 /// Params are tracked by name and unified against all other usages of themselves.
+#[trace_infer]
 impl<'ast> InferType<'ast, Value> for TypeInferencer<'ast> {
     fn infer_exit(&mut self, value: &'ast Value) -> Result<(), TypeError> {
         if let Value::Placeholder(param) = value {

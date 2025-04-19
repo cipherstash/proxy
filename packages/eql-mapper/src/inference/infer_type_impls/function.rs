@@ -1,3 +1,4 @@
+use eql_mapper_macros::trace_infer;
 use sqlparser::ast::{Function, FunctionArg, FunctionArgExpr, FunctionArguments, Ident};
 
 use crate::{
@@ -6,6 +7,7 @@ use crate::{
     SqlIdent, TypeInferencer,
 };
 
+#[trace_infer]
 impl<'ast> InferType<'ast, Function> for TypeInferencer<'ast> {
     fn infer_exit(&mut self, function: &'ast Function) -> Result<(), TypeError> {
         if !matches!(function.parameters, FunctionArguments::None) {

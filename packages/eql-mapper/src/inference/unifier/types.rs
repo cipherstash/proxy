@@ -2,7 +2,6 @@ use std::{any::type_name, ops::Index, sync::Arc};
 
 use derive_more::Display;
 use sqlparser::ast::{self, Ident};
-use tracing::instrument;
 
 use crate::{ColumnKind, Table, TypeError};
 
@@ -267,7 +266,6 @@ impl Type {
         }
     }
 
-    #[instrument(skip(self))]
     pub(crate) fn resolved_as<T: Clone + 'static>(
         &self,
         unifier: &mut Unifier<'_>,

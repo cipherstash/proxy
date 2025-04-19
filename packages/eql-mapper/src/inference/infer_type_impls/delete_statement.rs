@@ -1,3 +1,4 @@
+use eql_mapper_macros::trace_infer;
 use sqlparser::ast::Delete;
 
 use crate::{
@@ -6,6 +7,7 @@ use crate::{
     TypeInferencer,
 };
 
+#[trace_infer]
 impl<'ast> InferType<'ast, Delete> for TypeInferencer<'ast> {
     fn infer_exit(&mut self, delete: &'ast Delete) -> Result<(), TypeError> {
         let Delete { returning, .. } = delete;

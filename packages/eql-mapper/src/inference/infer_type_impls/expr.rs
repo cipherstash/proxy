@@ -2,8 +2,10 @@ use crate::{
     inference::{unifier::Type, InferType, TypeError},
     SqlIdent, TypeInferencer,
 };
+use eql_mapper_macros::trace_infer;
 use sqlparser::ast::{Array, BinaryOperator, Expr, Ident};
 
+#[trace_infer]
 impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
     fn infer_exit(&mut self, this_expr: &'ast Expr) -> Result<(), TypeError> {
         match this_expr {

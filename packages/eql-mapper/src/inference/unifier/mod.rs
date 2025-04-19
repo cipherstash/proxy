@@ -52,7 +52,7 @@ impl<'ast> Unifier<'ast> {
         self.first_matching_node_with_type::<N>(needle).is_some()
     }
 
-    #[instrument(skip(self), fields(
+    #[instrument(skip(self), level = "trace", fields(
         tvar = %tvar,
         sub_ty = %sub_ty,
     ))]
@@ -76,7 +76,7 @@ impl<'ast> Unifier<'ast> {
     /// dangling type variables).
     ///
     /// Returns `Ok(ty)` if successful, or `Err(TypeError)` on failure.
-    #[instrument(skip(self), ret(Display), err(Debug), fields(
+    #[instrument(skip(self), level = "trace", ret(Display), err(Debug), fields(
         lhs = %lhs,
         rhs = %rhs,
     ))]

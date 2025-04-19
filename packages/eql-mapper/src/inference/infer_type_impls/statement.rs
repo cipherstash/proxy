@@ -1,7 +1,9 @@
+use eql_mapper_macros::trace_infer;
 use sqlparser::ast::{AssignmentTarget, Statement};
 
 use crate::{inference::infer_type::InferType, unifier::Type, TypeError, TypeInferencer};
 
+#[trace_infer]
 impl<'ast> InferType<'ast, Statement> for TypeInferencer<'ast> {
     fn infer_exit(&mut self, statement: &'ast Statement) -> Result<(), TypeError> {
         match statement {
