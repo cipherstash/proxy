@@ -73,6 +73,7 @@ impl<'ast> TypeInferencer<'ast> {
         self.unifier.borrow_mut().get_node_type(node)
     }
 
+    #[allow(unused)]
     pub(crate) fn peek_node_type<N: AsNodeKey>(&self, node: &'ast N) -> Option<Arc<Type>> {
         self.unifier.borrow_mut().peek_node_type(node)
     }

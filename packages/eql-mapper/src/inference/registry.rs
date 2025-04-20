@@ -154,15 +154,16 @@ pub(crate) mod test_util {
         /// Useful when debugging tests.
         pub(crate) fn dump_node<N: AsNodeKey + Display + AsNodeKey + Debug>(&self, node: &N) {
             let key = node.as_node_key();
-            if let Some(ty) = self.node_types.get(&key) {
-                let ty_name = type_name::<N>();
+            if let Some(ty) = self.node_types.get(&key).cloned() {
+                let resolved_ty = ty.follow_tvars(self);
+                let ast_ty = type_name::<N>();
 
                 event!(
                     target: "eql-mapper::DUMP_NODE",
                     Level::TRACE,
-                    ast_ty = ty_name,
+                    ast_ty = ast_ty,
                     node = %node,
-                    ty = %ty,
+                    ty = %resolved_ty
                 );
             };
         }

@@ -3,7 +3,7 @@ use std::{any::type_name, ops::Index, sync::Arc};
 use derive_more::Display;
 use sqlparser::ast::{self, Ident};
 
-use crate::{ColumnKind, Table, TypeError};
+use crate::{ColumnKind, Table, TypeError, TypeRegistry};
 
 use super::Unifier;
 
@@ -54,9 +54,9 @@ impl Constructor {
         match self {
             Constructor::Value(value) => match value {
                 Value::Eql(eql_col) => Ok(crate::Type::Value(crate::Value::Eql(eql_col.clone()))),
-                Value::Native(NativeValue(Some(native_col))) => {
-                    Ok(crate::Type::Value(crate::Value::Native(NativeValue(Some(native_col.clone())))))
-                }
+                Value::Native(NativeValue(Some(native_col))) => Ok(crate::Type::Value(
+                    crate::Value::Native(NativeValue(Some(native_col.clone()))),
+                )),
                 Value::Native(NativeValue(None)) => {
                     Ok(crate::Type::Value(crate::Value::Native(NativeValue(None))))
                 }
@@ -199,7 +199,7 @@ pub struct TypeVar(pub u32);
 
 impl From<TypeVar> for Type {
     fn from(tvar: TypeVar) -> Self {
-       Type::Var(tvar)
+        Type::Var(tvar)
     }
 }
 
@@ -235,6 +235,45 @@ impl Type {
         Type::Constructor(Constructor::Value(Value::Array(element_ty.into()))).into()
     }
 
+    /// Follows [`Type::Var`] types until a [`Type::Constructor`] is reached.  Aborts and returns the last resolved type
+    /// when either a type variable has no substitution or it resolves to a constructor is found.
+    pub(crate) fn follow_tvars(self: Arc<Self>, registry: &TypeRegistry<'_>) -> Arc<Type> {
+        let mut current_ty = self;
+
+        loop {
+            match &*current_ty {
+                Type::Constructor(Constructor::Projection(Projection::WithColumns(
+                    ProjectionColumns(cols),
+                ))) => {
+                    let cols = cols
+                        .iter()
+                        .map(|col| ProjectionColumn {
+                            ty: col.ty.clone().follow_tvars(registry),
+                            alias: col.alias.clone(),
+                        })
+                        .collect();
+                    return Arc::new(Type::Constructor(Constructor::Projection(
+                        Projection::WithColumns(ProjectionColumns(cols)),
+                    )));
+                }
+                Type::Constructor(Constructor::Projection(Projection::Empty)) => return current_ty,
+                Type::Constructor(Constructor::Value(Value::Array(ty))) => {
+                    return Arc::new(Type::Constructor(Constructor::Value(Value::Array(
+                        ty.clone().follow_tvars(registry),
+                    ))))
+                }
+                Type::Constructor(Constructor::Value(_)) => return current_ty,
+                Type::Var(tvar) => {
+                    if let Some(ty) = registry.get_type(*tvar) {
+                        current_ty = ty.follow_tvars(registry);
+                    } else {
+                        return current_ty;
+                    }
+                }
+            }
+        }
+    }
+
     /// Resolves `self`, returning it as a [`crate::Type`].
     ///
     /// A resolved type is one in which all type variables have been resolved, recursively.
@@ -249,7 +288,8 @@ impl Type {
                         Ok(sub_ty) => return Ok(sub_ty),
                         Err(err) => {
                             if unifier.node_exists_with_type::<ast::Value>(&Type::Var(*type_var)) {
-                                let unified_ty = unifier.unify(sub_ty, Type::any_native().into())?;
+                                let unified_ty =
+                                    unifier.unify(sub_ty, Type::any_native().into())?;
                                 return unified_ty.resolved(unifier);
                             } else {
                                 return Err(err);
@@ -395,7 +435,10 @@ impl ProjectionColumns {
 impl ProjectionColumn {
     /// Returns a new `ProjectionColumn` with type `ty` and optional `alias`.
     pub(crate) fn new(ty: impl Into<Arc<Type>>, alias: Option<Ident>) -> Self {
-        Self { ty: ty.into(), alias }
+        Self {
+            ty: ty.into(),
+            alias,
+        }
     }
 
     fn render_alias(&self) -> String {
@@ -407,9 +450,7 @@ impl ProjectionColumn {
 }
 
 impl ProjectionColumns {
-    pub(crate) fn new_from_schema_table(
-        table: Arc<Table>,
-    ) -> Self {
+    pub(crate) fn new_from_schema_table(table: Arc<Table>) -> Self {
         ProjectionColumns(
             table
                 .columns
@@ -421,13 +462,9 @@ impl ProjectionColumns {
                     };
 
                     let value_ty = if col.kind == ColumnKind::Native {
-                        Type::Constructor(Constructor::Value(Value::Native(
-                            NativeValue(Some(tc)),
-                        )))
+                        Type::Constructor(Constructor::Value(Value::Native(NativeValue(Some(tc)))))
                     } else {
-                        Type::Constructor(Constructor::Value(Value::Eql(
-                            EqlValue(tc),
-                        )))
+                        Type::Constructor(Constructor::Value(Value::Eql(EqlValue(tc))))
                     };
 
                     ProjectionColumn::new(value_ty, Some(col.name.clone()))

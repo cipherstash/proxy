@@ -71,7 +71,7 @@ pub fn trace_infer(_attr: TokenStream, item: TokenStream) -> TokenStream {
                         .to_string()
                         .replace(" ", "");
 
-                    let target = format!("eql-mapper::{}", method).to_uppercase();
+                    let target = format!("eql-mapper::{}", method.to_string().to_uppercase());
 
                     let attr: TracingInstrumentAttr = syn::parse2(quote!{
                         #[tracing::instrument(
@@ -81,12 +81,12 @@ pub fn trace_infer(_attr: TokenStream, item: TokenStream) -> TokenStream {
                             fields(
                                 ast_ty = #node_ty_abbrev,
                                 ast = %#formatter(#node_ident),
-                                inferred = self.peek_node_type(#node_ident).map(|n| n.to_string()).unwrap_or("<no-type>".to_owned())
                             ),
                             ret(Debug)
                         )]
                     }).unwrap();
                     attrs.push(attr.attr);
+
                 }
                 None => {
                     return quote!(compile_error!(
