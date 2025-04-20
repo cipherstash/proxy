@@ -13,6 +13,8 @@ impl<'ast> InferType<'ast, Value> for TypeInferencer<'ast> {
     fn infer_exit(&mut self, value: &'ast Value) -> Result<(), TypeError> {
         if let Value::Placeholder(param) = value {
             self.unify(self.get_node_type(value), self.get_param_type(param))?;
+        } else {
+            // self.unify(self.get_node_type(value), self.fresh_tvar())?;
         }
 
         Ok(())

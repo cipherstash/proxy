@@ -10,7 +10,7 @@ use sqltk::{Break, NodeKey, Visitable, Visitor};
 use std::{
     cell::RefCell, collections::HashMap, marker::PhantomData, ops::ControlFlow, rc::Rc, sync::Arc,
 };
-use tracing::{span, Level};
+use tracing::{event, span, Level};
 
 /// Validates that a SQL statement is well-typed with respect to a database schema that contains zero or more columns with
 /// EQL types.
@@ -139,6 +139,7 @@ impl<'ast> EqlMapper<'ast> {
         statement: &'ast Statement,
     ) -> Result<TypedStatement<'ast>, EqlMapperError> {
         let span_begin = span!(
+            target: "eqlmapper::spans",
             Level::TRACE,
             "resolve",
             statement = %statement
@@ -156,17 +157,15 @@ impl<'ast> EqlMapper<'ast> {
 
         match combine_results() {
             Ok((projection, params, literals, node_types)) => {
-                let span_end = span!(
+                event!(
+                    target: "eql-mapper::EVENT_RESOLVE_OK",
                     parent: &span_begin,
                     Level::TRACE,
-                    "resolve Ok",
                     projection = %&projection,
                     params = %Fmt(&params),
                     literals = %Fmt(&literals),
                     node_types = %Fmt(&node_types)
                 );
-
-                let _guard = span_end.enter();
 
                 Ok(TypedStatement {
                     statement,
@@ -187,18 +186,16 @@ impl<'ast> EqlMapper<'ast> {
                 let literals = self.literal_types();
                 let node_types = self.node_types();
 
-                let span_end = span!(
+                event!(
+                    target: "eql-mapper::EVENT_RESOLVE_ERR",
                     parent: &span_begin,
                     Level::TRACE,
-                    "resolve Err",
                     err = ?err,
                     projection = ?projection,
                     params = ?params,
                     literals = ?literals,
                     node_types = ?node_types
                 );
-
-                let _guard = span_end.enter();
 
                 Err(err)
             }

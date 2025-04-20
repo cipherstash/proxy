@@ -10,7 +10,7 @@ pub(crate) use types::*;
 pub use types::{EqlValue, NativeValue, TableColumn};
 
 use super::TypeRegistry;
-use tracing::{instrument, span, Level};
+use tracing::{event, instrument, Level};
 
 /// Implements the type unification algorithm and maintains an association of type variables with the type that they
 /// point to.
@@ -52,11 +52,14 @@ impl<'ast> Unifier<'ast> {
         self.first_matching_node_with_type::<N>(needle).is_some()
     }
 
-    #[instrument(skip(self), level = "trace", fields(
-        tvar = %tvar,
-        sub_ty = %sub_ty,
-    ))]
     pub(crate) fn substitute(&mut self, tvar: TypeVar, sub_ty: Arc<Type>) -> Arc<Type> {
+        event!(
+            target: "eql-mapper::EVENT_SUBSTITUTE",
+            Level::TRACE,
+            tvar = %tvar,
+            sub_ty = %sub_ty,
+        );
+
         self.registry.borrow_mut().substitute(tvar, sub_ty)
     }
 
@@ -76,10 +79,17 @@ impl<'ast> Unifier<'ast> {
     /// dangling type variables).
     ///
     /// Returns `Ok(ty)` if successful, or `Err(TypeError)` on failure.
-    #[instrument(skip(self), level = "trace", ret(Display), err(Debug), fields(
-        lhs = %lhs,
-        rhs = %rhs,
-    ))]
+    #[instrument(
+        target = "eql-mapper::UNIFY",
+        skip(self),
+        level = "trace",
+        ret(Display),
+        err(Debug),
+        fields(
+            lhs = %lhs,
+            rhs = %rhs,
+        )
+    )]
     pub(crate) fn unify(
         &mut self,
         lhs: Arc<Type>,
@@ -90,16 +100,6 @@ impl<'ast> Unifier<'ast> {
 
         let lhs: Arc<Type> = lhs.into();
         let rhs: Arc<Type> = rhs.into();
-
-        let span_begin = span!(
-            Level::TRACE,
-            "unify",
-            lhs = %lhs,
-            rhs = %rhs,
-        );
-
-        let _guard = span_begin.enter();
-
 
         // Short-circuit the unification when lhs & rhs are equal.
         if lhs == rhs {
@@ -195,26 +195,22 @@ impl<'ast> Unifier<'ast> {
 
         match unification {
             Ok(ty) => {
-                let span_end = span!(
-                    parent: &span_begin,
+                event!(
+                    name: "UNIFY::OK",
+                    target: "eql-mapper::EVENT_UNIFY_OK",
                     Level::TRACE,
-                    "Ok",
-                    unification = %ty,
+                    ty = %ty,
                 );
-
-                let _guard = span_end.enter();
 
                 Ok(ty)
             }
             Err(err) => {
-                let span_end = span!(
-                    parent: &span_begin,
+                event!(
+                    name: "UNIFY::ERR",
+                    target: "eql-mapper::EVENT_UNIFY_ERR",
                     Level::TRACE,
-                    "Err",
-                    unification = ?&err
+                    err = ?&err
                 );
-
-                let _guard = span_end.enter();
 
                 Err(err)
             }

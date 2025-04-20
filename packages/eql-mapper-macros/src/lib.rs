@@ -71,11 +71,11 @@ pub fn trace_infer(_attr: TokenStream, item: TokenStream) -> TokenStream {
                         .to_string()
                         .replace(" ", "");
 
-                    let name = format!("{}", method);
+                    let target = format!("eql-mapper::{}", method).to_uppercase();
 
                     let attr: TracingInstrumentAttr = syn::parse2(quote!{
                         #[tracing::instrument(
-                            name = #name,
+                            target = #target,
                             level = "trace",
                             skip(self, #node_ident),
                             fields(

@@ -142,7 +142,7 @@ pub(crate) mod test_util {
     };
     use sqltk::{AsNodeKey, Break, Visitable, Visitor};
     use std::{any::type_name, convert::Infallible, fmt::Debug, ops::ControlFlow};
-    use tracing::Level;
+    use tracing::{event, Level};
 
     use super::TypeRegistry;
 
@@ -157,15 +157,13 @@ pub(crate) mod test_util {
             if let Some(ty) = self.node_types.get(&key) {
                 let ty_name = type_name::<N>();
 
-                let span = tracing::span!(
+                event!(
+                    target: "eql-mapper::DUMP_NODE",
                     Level::TRACE,
-                    "Node+Type",
                     ast_ty = ty_name,
                     node = %node,
                     ty = %ty,
                 );
-
-                let _guard = span.enter();
             };
         }
 
