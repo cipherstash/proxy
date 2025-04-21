@@ -110,7 +110,7 @@ impl<'ast> EqlMapper<'ast> {
     /// Build an `EqlMapper`, initialising all the other visitor implementations that it depends on.
     fn new_with_resolver(table_resolver: Arc<TableResolver>) -> Self {
         let registry = DepMut::new(TypeRegistry::new());
-        let scope_tracker = DepMut::new(ScopeTracker::new(&registry));
+        let scope_tracker = DepMut::new(ScopeTracker::new());
         let importer = DepMut::new(Importer::new(
             table_resolver.clone(),
             &registry,

@@ -4,7 +4,7 @@ use crate::inference::TypeError;
 use crate::iterator_ext::IteratorExt;
 use crate::model::SqlIdent;
 use crate::unifier::{Projection, ProjectionColumns};
-use crate::{Relation, TypeRegistry};
+use crate::Relation;
 use sqlparser::ast::{Ident, ObjectName, Query, Statement};
 use sqltk::{into_control_flow, Break, Visitable, Visitor};
 use std::cell::RefCell;
@@ -16,14 +16,12 @@ use std::sync::Arc;
 /// [`Visitor`] implementation that manages creation of lexical [`Scope`]s and the current active lexical scope.
 #[derive(Debug)]
 pub struct ScopeTracker<'ast> {
-    registry: Rc<RefCell<TypeRegistry<'ast>>>,
     stack: Vec<Rc<RefCell<Scope<'ast>>>>,
 }
 
 impl<'ast> ScopeTracker<'ast> {
-    pub fn new(registry: impl Into<Rc<RefCell<TypeRegistry<'ast>>>>) -> Self {
+    pub fn new() -> Self {
         Self {
-            registry: registry.into(),
             stack: Vec::with_capacity(64),
         }
     }
@@ -77,8 +75,6 @@ impl<'ast> ScopeTracker<'ast> {
 /// A lexical scope.
 #[derive(Debug)]
 pub(crate) struct Scope<'ast> {
-    registry: Rc<RefCell<TypeRegistry<'ast>>>,
-
     /// The items in scope.
     ///
     /// This is a `Vec` because the order of relations is important to be compatible with how databases deal with
@@ -92,9 +88,8 @@ pub(crate) struct Scope<'ast> {
 }
 
 impl<'ast> Scope<'ast> {
-    fn new_root(registry: Rc<RefCell<TypeRegistry<'ast>>>) -> Rc<RefCell<Self>> {
+    fn new_root() -> Rc<RefCell<Self>> {
         Rc::new(RefCell::new(Self {
-            registry,
             relations: Vec::new(),
             parent: None,
         }))
@@ -102,7 +97,6 @@ impl<'ast> Scope<'ast> {
 
     fn new_child(parent: &Rc<RefCell<Scope<'ast>>>) -> Rc<RefCell<Self>> {
         Rc::new(RefCell::new(Self {
-            registry: parent.borrow().registry.clone(),
             relations: Vec::new(),
             parent: Some(parent.clone()),
         }))
@@ -306,7 +300,7 @@ impl<'ast> Visitor<'ast> for ScopeTracker<'ast> {
 
     fn enter<N: Visitable>(&mut self, node: &'ast N) -> ControlFlow<Break<Self::Error>> {
         if node.downcast_ref::<Statement>().is_some() {
-            let root = Scope::new_root(self.registry.clone());
+            let root = Scope::new_root();
             self.stack.push(root.clone());
             return ControlFlow::Continue(());
         }
