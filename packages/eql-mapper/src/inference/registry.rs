@@ -4,7 +4,8 @@ use sqltk::{AsNodeKey, NodeKey};
 use tracing::{span, Level};
 
 use crate::{
-    inference::unifier::{Type, TypeVar}, Param, ParamError
+    inference::unifier::{Type, TypeVar},
+    Param, ParamError,
 };
 
 use super::Sequence;
@@ -14,8 +15,8 @@ use super::Sequence;
 pub struct TypeRegistry<'ast> {
     tvar_seq: Sequence<TypeVar>,
     substitutions: HashMap<TypeVar, Arc<Type>>,
-    node_types: HashMap<NodeKey<'ast>, Arc<Type>>,
-    param_types: HashMap<&'ast String, Arc<Type>>,
+    node_types: HashMap<NodeKey<'ast>, TypeVar>,
+    param_types: HashMap<&'ast String, TypeVar>,
     _ast: PhantomData<&'ast ()>,
 }
 
@@ -40,7 +41,17 @@ impl<'ast> TypeRegistry<'ast> {
     pub(crate) fn get_nodes_and_types<N: AsNodeKey>(&self) -> Vec<(&'ast N, Arc<Type>)> {
         self.node_types
             .iter()
-            .filter_map(|(key, ty)| key.get_as::<N>().map(|n| (n, ty.clone())))
+            .filter_map(|(key, tvar)| {
+                key.get_as::<N>().map(|n| {
+                    (
+                        n,
+                        self.substitutions
+                            .get(tvar)
+                            .cloned()
+                            .unwrap_or(Arc::new(Type::Var(*tvar))),
+                    )
+                })
+            })
             .collect()
     }
 
@@ -60,7 +71,15 @@ impl<'ast> TypeRegistry<'ast> {
     pub(crate) fn get_params(&self) -> HashMap<&'ast String, Arc<Type>> {
         self.param_types
             .iter()
-            .map(|(param, ty)| (*param, Arc::clone(ty)))
+            .map(|(param, tvar)| {
+                (
+                    *param,
+                    self.substitutions
+                        .get(tvar)
+                        .cloned()
+                        .unwrap_or(Arc::new(Type::Var(*tvar))),
+                )
+            })
             .collect()
     }
 
@@ -80,7 +99,15 @@ impl<'ast> TypeRegistry<'ast> {
     pub(crate) fn node_types(&self) -> HashMap<NodeKey<'ast>, Arc<Type>> {
         self.node_types
             .iter()
-            .map(|(node, ty)| (*node, Arc::clone(ty)))
+            .map(|(node, tvar)| {
+                (
+                    *node,
+                    self.substitutions
+                        .get(tvar)
+                        .cloned()
+                        .unwrap_or(Arc::new(Type::Var(*tvar))),
+                )
+            })
             .collect()
     }
 
@@ -89,7 +116,15 @@ impl<'ast> TypeRegistry<'ast> {
     }
 
     pub(crate) fn peek_node_type<N: AsNodeKey>(&self, node: &'ast N) -> Option<Arc<Type>> {
-        self.node_types.get(&node.as_node_key()).cloned()
+        self.node_types
+            .get(&node.as_node_key())
+            .cloned()
+            .map(|tvar| {
+                self.substitutions
+                    .get(&tvar)
+                    .cloned()
+                    .unwrap_or(Arc::new(Type::Var(tvar)))
+            })
     }
 
     pub(crate) fn substitute(&mut self, tvar: TypeVar, sub_ty: impl Into<Arc<Type>>) -> Arc<Type> {
@@ -105,9 +140,8 @@ impl<'ast> TypeRegistry<'ast> {
             Some(ty) => ty,
             None => {
                 let tvar = self.fresh_tvar();
-                let ty = Arc::new(Type::Var(tvar));
-                self.node_types.insert(node.as_node_key(), ty.clone());
-                ty
+                self.node_types.insert(node.as_node_key(), tvar);
+                Type::Var(tvar).into()
             }
         }
     }
@@ -116,11 +150,11 @@ impl<'ast> TypeRegistry<'ast> {
     /// associated `Type` then a fresh [`Type::Var`] will be assigned.
     fn get_or_init_param_type(&mut self, param: &'ast String) -> Arc<Type> {
         match self.param_types.get(&param).cloned() {
-            Some(ty) => ty,
+            Some(tvar) => Type::Var(tvar).into(),
             None => {
-                let ty = Arc::new(Type::Var(self.fresh_tvar()));
-                self.param_types.insert(param, ty.clone());
-                ty
+                let tvar = self.fresh_tvar();
+                self.param_types.insert(param, tvar);
+                Type::Var(tvar).into()
             }
         }
     }
@@ -133,4 +167,3 @@ impl<'ast> TypeRegistry<'ast> {
         next
     }
 }
-

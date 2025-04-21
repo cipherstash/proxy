@@ -41,7 +41,8 @@ impl<'ast> Unifier<'ast> {
     }
 
     pub(crate) fn get_node_type<N: AsNodeKey>(&self, node: &'ast N) -> Arc<Type> {
-        self.registry.borrow_mut().get_node_type(node)
+        let node_type = { self.registry.borrow_mut().get_node_type(node) };
+        node_type.follow_tvars(self)
     }
 
     pub(crate) fn peek_node_type<N: AsNodeKey>(&self, node: &'ast N) -> Option<Arc<Type>> {

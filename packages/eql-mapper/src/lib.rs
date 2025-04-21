@@ -1123,13 +1123,13 @@ mod test {
         };
 
         assert_transitive_eq(&[
-            // projection_type(&parse("select 'lit'")),
-            // projection_type(&parse("select x from (select 'lit' as x)")),
-            // projection_type(&parse("select * from (select 'lit')")),
-            // projection_type(&parse("select * from (select 'lit' as t)")),
+            projection_type(&parse("select 'lit'")),
+            projection_type(&parse("select x from (select 'lit' as x)")),
+            projection_type(&parse("select * from (select 'lit')")),
+            projection_type(&parse("select * from (select 'lit' as t)")),
             projection_type(&parse("select $1")),
-            // projection_type(&parse("select t from (select $1 as t)")),
-            // projection_type(&parse("select * from (select $1)")),
+            projection_type(&parse("select t from (select $1 as t)")),
+            projection_type(&parse("select * from (select $1)")),
             Projection::WithColumns(vec![ProjectionColumn {
                 alias: None,
                 ty: Value::Native(NativeValue(None)),
