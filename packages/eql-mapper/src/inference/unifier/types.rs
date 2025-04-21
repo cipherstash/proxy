@@ -1,9 +1,9 @@
 use std::{any::type_name, ops::Index, sync::Arc};
 
 use derive_more::Display;
-use sqlparser::ast::{self, Ident};
+use sqlparser::ast::{Ident};
 
-use crate::{ColumnKind, Table, TypeError, TypeRegistry};
+use crate::{ColumnKind, Table, TypeError};
 
 use super::Unifier;
 
@@ -195,7 +195,7 @@ pub struct ProjectionColumn {
 /// A placeholder for an unknown type.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Display)]
 #[display("?{}", _0)]
-pub struct TypeVar(pub u32);
+pub struct TypeVar(pub usize);
 
 impl From<TypeVar> for Type {
     fn from(tvar: TypeVar) -> Self {
@@ -237,7 +237,7 @@ impl Type {
 
     /// Follows [`Type::Var`] types until a [`Type::Constructor`] is reached.  Aborts and returns the last resolved type
     /// when either a type variable has no substitution or it resolves to a constructor is found.
-    pub(crate) fn follow_tvars(self: Arc<Self>, registry: &TypeRegistry<'_>) -> Arc<Type> {
+    pub(crate) fn follow_tvars(self: Arc<Self>, unifier: &Unifier<'_>) -> Arc<Type> {
         let mut current_ty = self;
 
         loop {
@@ -248,7 +248,7 @@ impl Type {
                     let cols = cols
                         .iter()
                         .map(|col| ProjectionColumn {
-                            ty: col.ty.clone().follow_tvars(registry),
+                            ty: col.ty.clone().follow_tvars(unifier),
                             alias: col.alias.clone(),
                         })
                         .collect();
@@ -259,13 +259,13 @@ impl Type {
                 Type::Constructor(Constructor::Projection(Projection::Empty)) => return current_ty,
                 Type::Constructor(Constructor::Value(Value::Array(ty))) => {
                     return Arc::new(Type::Constructor(Constructor::Value(Value::Array(
-                        ty.clone().follow_tvars(registry),
+                        ty.clone().follow_tvars(unifier),
                     ))))
                 }
                 Type::Constructor(Constructor::Value(_)) => return current_ty,
                 Type::Var(tvar) => {
-                    if let Some(ty) = registry.get_type(*tvar) {
-                        current_ty = ty.follow_tvars(registry);
+                    if let Some(ty) = unifier.get_type(*tvar) {
+                        current_ty = ty.follow_tvars(unifier);
                     } else {
                         return current_ty;
                     }
@@ -284,18 +284,7 @@ impl Type {
             Type::Constructor(constructor) => constructor.resolve(unifier),
             Type::Var(type_var) => {
                 if let Some(sub_ty) = unifier.get_type(*type_var) {
-                    match sub_ty.resolved(unifier) {
-                        Ok(sub_ty) => return Ok(sub_ty),
-                        Err(err) => {
-                            if unifier.node_exists_with_type::<ast::Value>(&Type::Var(*type_var)) {
-                                let unified_ty =
-                                    unifier.unify(sub_ty, Type::any_native().into())?;
-                                return unified_ty.resolved(unifier);
-                            } else {
-                                return Err(err);
-                            }
-                        }
-                    }
+                    return sub_ty.resolved(unifier)
                 }
 
                 return Err(TypeError::Incomplete(format!(

@@ -42,6 +42,9 @@ impl<'ast> Display for Fmt<NodeKey<'ast>> {
         if let Some(node) = self.0.get_as::<Select>() {
             return Display::fmt(&FmtAst(node), f);
         }
+        if let Some(node) = self.0.get_as::<SelectItem>() {
+            return Display::fmt(&FmtAst(node), f);
+        }
         if let Some(node) = self.0.get_as::<Vec<SelectItem>>() {
             return Display::fmt(&FmtAstVec(node), f);
         }

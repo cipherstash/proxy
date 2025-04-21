@@ -147,6 +147,8 @@ impl<'ast> EqlMapper<'ast> {
 
         let _guard = span_begin.enter();
 
+        let _ = self.unifier.borrow_mut().resolve_unresolved_value_nodes();
+
         let projection = self.projection_type(statement);
         let params = self.param_types();
         let literals = self.literal_types();
@@ -177,8 +179,9 @@ impl<'ast> EqlMapper<'ast> {
             }
             Err(err) => {
                 {
-                    let registry = &*self.registry.borrow();
-                    registry.dump_all_nodes(statement);
+                    let unifier = &*self.unifier.borrow();
+                    unifier.dump_all_nodes(statement);
+                    unifier.dump_substitutions();
                 }
 
                 let projection = self.projection_type(statement);
@@ -231,11 +234,14 @@ impl<'ast> EqlMapper<'ast> {
         Ok(params)
     }
 
-    /// Asks the [`TypeInferencer`] for a hashmap of literal types, validating that they are all `Scalar` types.
+    /// Asks the [`TypeInferencer`] for a hashmap of literal types, validating that they are all `Value` types.
     fn literal_types(&self) -> Result<Vec<(EqlValue, &'ast ast::Value)>, EqlMapperError> {
         let iter = {
             let registry = self.registry.borrow();
-            registry.get_nodes_and_types::<ast::Value>().into_iter()
+            registry
+                .get_nodes_and_types::<ast::Value>()
+                .into_iter()
+                .filter(|(node, _)| !matches!(node, ast::Value::Placeholder(_)))
         };
         let literal_nodes: Vec<(EqlValue, &'ast ast::Value)> = iter
             .map(

@@ -1,8 +1,11 @@
 use std::{collections::HashMap, marker::PhantomData, sync::Arc};
 
 use sqltk::{AsNodeKey, NodeKey};
+use tracing::{span, Level};
 
-use crate::{inference::unifier::{Type, TypeVar}, Param, ParamError};
+use crate::{
+    inference::unifier::{Type, TypeVar}, Param, ParamError
+};
 
 use super::Sequence;
 
@@ -10,7 +13,7 @@ use super::Sequence;
 #[derive(Debug)]
 pub struct TypeRegistry<'ast> {
     tvar_seq: Sequence<TypeVar>,
-    types: HashMap<TypeVar, Arc<Type>>,
+    substitutions: HashMap<TypeVar, Arc<Type>>,
     node_types: HashMap<NodeKey<'ast>, Arc<Type>>,
     param_types: HashMap<&'ast String, Arc<Type>>,
     _ast: PhantomData<&'ast ()>,
@@ -27,7 +30,7 @@ impl<'ast> TypeRegistry<'ast> {
     pub fn new() -> Self {
         Self {
             tvar_seq: Sequence::new(),
-            types: HashMap::new(),
+            substitutions: HashMap::new(),
             node_types: HashMap::new(),
             param_types: HashMap::new(),
             _ast: PhantomData,
@@ -42,21 +45,12 @@ impl<'ast> TypeRegistry<'ast> {
     }
 
     pub(crate) fn get_type(&self, tvar: TypeVar) -> Option<Arc<Type>> {
-        self.types.get(&tvar).cloned()
+        span!(Level::TRACE, "GET TYPE");
+        self.substitutions.get(&tvar).cloned()
     }
 
-    pub(crate) fn first_matching_node_with_type<N: AsNodeKey>(
-        &self,
-        needle: &Type,
-    ) -> Option<(&'ast N, Arc<Type>)> {
-        self.node_types.iter().find_map(|(key, ty)| {
-            let node = key.get_as::<N>()?;
-            if needle == &**ty {
-                Some((node, Arc::clone(&ty)))
-            } else {
-                None
-            }
-        })
+    pub(crate) fn get_substititions(&self) -> HashMap<TypeVar, Arc<Type>> {
+        self.substitutions.clone()
     }
 
     pub(crate) fn get_param_type(&mut self, param: &'ast String) -> Arc<Type> {
@@ -100,7 +94,7 @@ impl<'ast> TypeRegistry<'ast> {
 
     pub(crate) fn substitute(&mut self, tvar: TypeVar, sub_ty: impl Into<Arc<Type>>) -> Arc<Type> {
         let sub_ty: Arc<_> = sub_ty.into();
-        self.types.insert(tvar, sub_ty.clone());
+        self.substitutions.insert(tvar, sub_ty.clone());
         sub_ty
     }
 
@@ -110,7 +104,8 @@ impl<'ast> TypeRegistry<'ast> {
         match self.peek_node_type(node) {
             Some(ty) => ty,
             None => {
-                let ty = Arc::new(Type::Var(self.fresh_tvar()));
+                let tvar = self.fresh_tvar();
+                let ty = Arc::new(Type::Var(tvar));
                 self.node_types.insert(node.as_node_key(), ty.clone());
                 ty
             }
@@ -131,109 +126,11 @@ impl<'ast> TypeRegistry<'ast> {
     }
 
     pub(crate) fn fresh_tvar(&mut self) -> TypeVar {
-        self.tvar_seq.next_value()
+        let next = self.tvar_seq.next_value();
+        if next == TypeVar(3) {
+            println!("WAT");
+        }
+        next
     }
 }
 
-pub(crate) mod test_util {
-    use sqlparser::ast::{
-        Delete, Expr, Function, FunctionArguments, Insert, Query, Select, SelectItem, SetExpr,
-        Statement, Value, Values,
-    };
-    use sqltk::{AsNodeKey, Break, Visitable, Visitor};
-    use std::{any::type_name, convert::Infallible, fmt::Debug, ops::ControlFlow};
-    use tracing::{event, Level};
-
-    use super::TypeRegistry;
-
-    use std::fmt::Display;
-
-    impl TypeRegistry<'_> {
-        /// Dumps the type information for a specific AST node to STDERR.
-        ///
-        /// Useful when debugging tests.
-        pub(crate) fn dump_node<N: AsNodeKey + Display + AsNodeKey + Debug>(&self, node: &N) {
-            let key = node.as_node_key();
-            if let Some(ty) = self.node_types.get(&key).cloned() {
-                let resolved_ty = ty.follow_tvars(self);
-                let ast_ty = type_name::<N>();
-
-                event!(
-                    target: "eql-mapper::DUMP_NODE",
-                    Level::TRACE,
-                    ast_ty = ast_ty,
-                    node = %node,
-                    ty = %resolved_ty
-                );
-            };
-        }
-
-        /// Dumps the type information for all nodes visited so far to STDERR.
-        ///
-        /// Useful when debugging tests.
-        pub(crate) fn dump_all_nodes<N: Visitable>(&self, root_node: &N) {
-            struct FindNodeFromKeyVisitor<'a>(&'a TypeRegistry<'a>);
-
-            impl<'ast> Visitor<'ast> for FindNodeFromKeyVisitor<'_> {
-                type Error = Infallible;
-
-                fn enter<N: Visitable>(
-                    &mut self,
-                    node: &'ast N,
-                ) -> ControlFlow<Break<Self::Error>> {
-                    if let Some(node) = node.downcast_ref::<Statement>() {
-                        self.0.dump_node(node);
-                    }
-
-                    if let Some(node) = node.downcast_ref::<Query>() {
-                        self.0.dump_node(node);
-                    }
-
-                    if let Some(node) = node.downcast_ref::<Insert>() {
-                        self.0.dump_node(node);
-                    }
-
-                    if let Some(node) = node.downcast_ref::<Delete>() {
-                        self.0.dump_node(node);
-                    }
-
-                    if let Some(node) = node.downcast_ref::<Expr>() {
-                        self.0.dump_node(node);
-                    }
-
-                    if let Some(node) = node.downcast_ref::<SetExpr>() {
-                        self.0.dump_node(node);
-                    }
-
-                    if let Some(node) = node.downcast_ref::<Select>() {
-                        self.0.dump_node(node);
-                    }
-
-                    if let Some(node) = node.downcast_ref::<SelectItem>() {
-                        self.0.dump_node(node);
-                    }
-
-                    if let Some(node) = node.downcast_ref::<Function>() {
-                        self.0.dump_node(node);
-                    }
-
-                    if let Some(node) = node.downcast_ref::<FunctionArguments>() {
-                        self.0.dump_node(node);
-                    }
-
-                    if let Some(node) = node.downcast_ref::<Values>() {
-                        self.0.dump_node(node);
-                    }
-
-                    if let Some(node) = node.downcast_ref::<Value>() {
-                        self.0.dump_node(node);
-                    }
-
-                    ControlFlow::Continue(())
-                }
-            }
-
-            root_node.accept(&mut FindNodeFromKeyVisitor(self));
-        }
-    }
-}

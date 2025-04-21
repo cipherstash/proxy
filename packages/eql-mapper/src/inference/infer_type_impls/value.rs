@@ -14,7 +14,7 @@ impl<'ast> InferType<'ast, Value> for TypeInferencer<'ast> {
         if let Value::Placeholder(param) = value {
             self.unify(self.get_node_type(value), self.get_param_type(param))?;
         } else {
-            // self.unify(self.get_node_type(value), self.fresh_tvar())?;
+            self.unify(self.get_node_type(value), self.fresh_tvar())?;
         }
 
         Ok(())

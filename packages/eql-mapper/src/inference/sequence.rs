@@ -4,7 +4,7 @@ use super::{unifier::TypeVar};
 
 #[derive(Debug)]
 pub(crate) struct Sequence<T> {
-    next_value: u32,
+    next_value: usize,
     _marker: PhantomData<T>,
 }
 

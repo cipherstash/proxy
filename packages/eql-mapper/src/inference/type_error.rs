@@ -22,9 +22,6 @@ pub enum TypeError {
     #[error("One or more params failed to unify: {}", _0.iter().cloned().collect::<Vec<String>>().join(", "))]
     Params(HashSet<String>),
 
-    #[error("Expected scalar type for param {} but got type {}", _0, _1)]
-    NonScalarParam(String, String),
-
     #[error("Expected param count to be {}, but got {}", _0, _1)]
     ParamCount(usize, usize),
 

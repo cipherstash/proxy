@@ -78,19 +78,8 @@ impl<'ast> TypeInferencer<'ast> {
         self.unifier.borrow_mut().peek_node_type(node)
     }
 
-    // pub(crate) fn get_type(&self, tvar: TypeVar) -> Option<Arc<Type>> {
-    //     self.unifier.borrow().get_type(tvar)
-    // }
-
     pub(crate) fn get_param_type(&self, param: &'ast String) -> Arc<Type> {
         self.unifier.borrow_mut().get_param_type(param)
-    }
-
-    pub(crate) fn first_matching_node_with_type<N: AsNodeKey>(
-        &self,
-        needle: &Type,
-    ) -> Option<(&'ast N, Arc<Type>)> {
-        self.unifier.borrow().first_matching_node_with_type(needle)
     }
 
     /// Tries to unify two types but does not record the result.
