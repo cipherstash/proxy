@@ -1,13 +1,13 @@
 //! `eql-mapper` transforms SQL to SQL+EQL using a known database schema as a reference.
 
 mod dep;
+mod display_helpers;
 mod encrypted_statement;
 mod eql_mapper;
 mod importer;
 mod inference;
 mod iterator_ext;
 mod model;
-mod display_helpers;
 mod param;
 mod scope_tracker;
 mod transformation_rules;
@@ -16,9 +16,9 @@ mod typed_statement;
 #[cfg(test)]
 mod test_helpers;
 
+pub use display_helpers::*;
 pub use eql_mapper::*;
 pub use model::*;
-pub use display_helpers::*;
 pub use param::*;
 pub use typed_statement::*;
 pub use unifier::{EqlValue, NativeValue, TableColumn};
@@ -1235,10 +1235,7 @@ mod test {
 
         assert_eq!(
             typed.projection,
-            projection![
-                (NATIVE as concat),
-                (EQL(employees.salary) as salary)
-            ]
+            projection![(NATIVE as concat), (EQL(employees.salary) as salary)]
         );
     }
 
@@ -1270,10 +1267,7 @@ mod test {
 
         assert_eq!(
             typed.projection,
-            projection![
-                (NATIVE as concat),
-                (EQL(employees.salary) as salary)
-            ]
+            projection![(NATIVE as concat), (EQL(employees.salary) as salary)]
         );
     }
 

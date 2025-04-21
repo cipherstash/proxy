@@ -1,6 +1,6 @@
 use std::marker::PhantomData;
 
-use super::{unifier::TypeVar};
+use super::unifier::TypeVar;
 
 #[derive(Debug)]
 pub(crate) struct Sequence<T> {
@@ -10,7 +10,10 @@ pub(crate) struct Sequence<T> {
 
 impl<T> Sequence<T> {
     pub(crate) fn new() -> Self {
-        Self { next_value: 0, _marker: PhantomData }
+        Self {
+            next_value: 0,
+            _marker: PhantomData,
+        }
     }
 }
 

@@ -1,9 +1,9 @@
-use eql_mapper_macros::trace_infer;
-use sqlparser::ast::Values;
 use crate::{
     inference::type_error::TypeError, inference::unifier::Type, inference::InferType,
     TypeInferencer,
 };
+use eql_mapper_macros::trace_infer;
+use sqlparser::ast::Values;
 
 #[trace_infer]
 impl<'ast> InferType<'ast, Values> for TypeInferencer<'ast> {

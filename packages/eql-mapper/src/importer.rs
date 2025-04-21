@@ -50,9 +50,10 @@ impl<'ast> Importer<'ast> {
 
         self.scope_tracker.borrow_mut().add_relation(Relation {
             name: table_alias.clone(),
-            projection_type: Type::Constructor(Constructor::Projection(
-                Projection::WithColumns(cols),
-            )).into(),
+            projection_type: Type::Constructor(Constructor::Projection(Projection::WithColumns(
+                cols,
+            )))
+            .into(),
         })?;
 
         Ok(())
@@ -105,15 +106,14 @@ impl<'ast> Importer<'ast> {
                 if scope_tracker.resolve_relation(name).is_err() {
                     let table = self.table_resolver.resolve_table(name.0.last().unwrap())?;
 
-                    let cols = ProjectionColumns::new_from_schema_table(
-                        table.clone(),
-                    );
+                    let cols = ProjectionColumns::new_from_schema_table(table.clone());
 
                     scope_tracker.add_relation(Relation {
                         name: record_as.cloned().ok(),
-                        projection_type: Type::Constructor(
-                            Constructor::Projection(Projection::WithColumns(cols)),
-                        ).into(),
+                        projection_type: Type::Constructor(Constructor::Projection(
+                            Projection::WithColumns(cols),
+                        ))
+                        .into(),
                     })?;
                 }
             }
@@ -149,9 +149,7 @@ impl<'ast> Importer<'ast> {
                 subquery,
                 alias,
             } => {
-                let projection_type = self
-                    .registry
-                    .borrow_mut().get_node_type(&*subquery.body);
+                let projection_type = self.registry.borrow_mut().get_node_type(&*subquery.body);
 
                 self.scope_tracker.borrow_mut().add_relation(Relation {
                     name: alias.clone().map(|a| a.name.clone()),

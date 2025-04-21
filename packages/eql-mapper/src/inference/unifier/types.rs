@@ -1,7 +1,7 @@
 use std::{any::type_name, ops::Index, sync::Arc};
 
 use derive_more::Display;
-use sqlparser::ast::{Ident};
+use sqlparser::ast::Ident;
 
 use crate::{ColumnKind, Table, TypeError};
 
@@ -284,7 +284,7 @@ impl Type {
             Type::Constructor(constructor) => constructor.resolve(unifier),
             Type::Var(type_var) => {
                 if let Some(sub_ty) = unifier.get_type(*type_var) {
-                    return sub_ty.resolved(unifier)
+                    return sub_ty.resolved(unifier);
                 }
 
                 return Err(TypeError::Incomplete(format!(

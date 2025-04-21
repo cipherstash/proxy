@@ -76,9 +76,7 @@ impl<'ast> InferType<'ast, Vec<SelectItem>> for TypeInferencer<'ast> {
 
         self.unify_node_with_type(
             select_items,
-            Type::Constructor(Constructor::Projection(Projection::new(
-                projection_columns,
-            ))),
+            Type::Constructor(Constructor::Projection(Projection::new(projection_columns))),
         )?;
 
         Ok(())

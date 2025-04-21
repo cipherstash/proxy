@@ -5,9 +5,7 @@
 //! `eql_mapper`'s internal representation of the type system contains additional implementation details which would not
 //! be pleasant for public consumption.
 
-use crate::{
-    unifier::{EqlValue, NativeValue},
-};
+use crate::unifier::{EqlValue, NativeValue};
 use derive_more::Display;
 use sqlparser::ast::Ident;
 

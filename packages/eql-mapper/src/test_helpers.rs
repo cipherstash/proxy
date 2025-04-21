@@ -5,8 +5,8 @@ use sqlparser::{
     dialect::PostgreSqlDialect,
     parser::Parser,
 };
-use tracing_subscriber::fmt::format::{FmtSpan};
 use tracing_subscriber::fmt::format;
+use tracing_subscriber::fmt::format::FmtSpan;
 
 use std::sync::Once;
 

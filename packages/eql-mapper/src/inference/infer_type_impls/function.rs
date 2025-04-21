@@ -100,10 +100,7 @@ impl<'ast> InferType<'ast, Function> for TypeInferencer<'ast> {
                             FunctionArg::Named { arg, .. } | FunctionArg::Unnamed(arg) => match arg
                             {
                                 FunctionArgExpr::Expr(expr) => {
-                                    self.unify_node_with_type(
-                                        expr,
-                                        Type::any_native(),
-                                    )?;
+                                    self.unify_node_with_type(expr, Type::any_native())?;
                                 }
                                 // Aggregate functions like COUNT(table.*)
                                 FunctionArgExpr::QualifiedWildcard(_) => {}

@@ -8,10 +8,7 @@ pub mod unifier;
 
 use unifier::{Unifier, *};
 
-use std::{
-    cell::RefCell, fmt::Debug, marker::PhantomData,
-    ops::ControlFlow, rc::Rc, sync::Arc,
-};
+use std::{cell::RefCell, fmt::Debug, marker::PhantomData, ops::ControlFlow, rc::Rc, sync::Arc};
 
 use infer_type::InferType;
 use sqlparser::ast::{

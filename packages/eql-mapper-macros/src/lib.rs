@@ -1,8 +1,8 @@
 use proc_macro::TokenStream;
 use quote::{quote, ToTokens};
 use syn::{
-    parse::Parse, parse_macro_input, parse_quote, Attribute, FnArg, Ident, ImplItem,
-    ImplItemFn, ItemImpl, Pat, PatType, Signature, Type, TypePath, TypeReference,
+    parse::Parse, parse_macro_input, parse_quote, Attribute, FnArg, Ident, ImplItem, ImplItemFn,
+    ItemImpl, Pat, PatType, Signature, Type, TypePath, TypeReference,
 };
 
 /// This macro generates consistently defined `#[tracing::instrument]` attributes for `InferType::infer_enter` &
@@ -73,7 +73,7 @@ pub fn trace_infer(_attr: TokenStream, item: TokenStream) -> TokenStream {
 
                     let target = format!("eql-mapper::{}", method.to_string().to_uppercase());
 
-                    let attr: TracingInstrumentAttr = syn::parse2(quote!{
+                    let attr: TracingInstrumentAttr = syn::parse2(quote! {
                         #[tracing::instrument(
                             target = #target,
                             level = "trace",
@@ -84,9 +84,9 @@ pub fn trace_infer(_attr: TokenStream, item: TokenStream) -> TokenStream {
                             ),
                             ret(Debug)
                         )]
-                    }).unwrap();
+                    })
+                    .unwrap();
                     attrs.push(attr.attr);
-
                 }
                 None => {
                     return quote!(compile_error!(
