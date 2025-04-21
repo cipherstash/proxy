@@ -970,5 +970,5 @@ fn to_json_literal_expr<T>(literal: &T) -> Result<Value, Error>
 where
     T: ?Sized + Serialize,
 {
-    Ok(serde_json::to_string(literal).map(|json| Value::SingleQuotedString(json))?)
+    Ok(serde_json::to_string(literal).map(Value::SingleQuotedString)?)
 }

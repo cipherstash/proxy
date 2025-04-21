@@ -112,8 +112,8 @@ impl<'ast> Unifier<'ast> {
         use types::Constructor::*;
         use types::Value::*;
 
-        let lhs: Arc<Type> = lhs.into();
-        let rhs: Arc<Type> = rhs.into();
+        let lhs: Arc<Type> = lhs;
+        let rhs: Arc<Type> = rhs;
 
         // Short-circuit the unification when lhs & rhs are equal.
         if lhs == rhs {
@@ -140,7 +140,7 @@ impl<'ast> Unifier<'ast> {
 
             // A Value can unify with a single column projection
             (Type::Constructor(Value(_)), Type::Constructor(Projection(projection))) => {
-                let projection = projection.flatten(self);
+                let projection = projection.flatten();
                 let len = projection.len();
                 if len == 1 {
                     self.unify_value_type_with_one_col_projection(lhs, projection[0].ty.clone())
@@ -153,7 +153,7 @@ impl<'ast> Unifier<'ast> {
             }
 
             (Type::Constructor(Projection(projection)), Type::Constructor(Value(_))) => {
-                let projection = projection.flatten(self);
+                let projection = projection.flatten();
                 let len = projection.len();
                 if len == 1 {
                     self.unify_value_type_with_one_col_projection(rhs, projection[0].ty.clone())
@@ -266,8 +266,8 @@ impl<'ast> Unifier<'ast> {
                 Type::Constructor(Constructor::Projection(lhs_projection)),
                 Type::Constructor(Constructor::Projection(rhs_projection)),
             ) => {
-                let lhs_projection = lhs_projection.flatten(self);
-                let rhs_projection = rhs_projection.flatten(self);
+                let lhs_projection = lhs_projection.flatten();
+                let rhs_projection = rhs_projection.flatten();
 
                 if lhs_projection.len() == rhs_projection.len() {
                     let mut cols: Vec<ProjectionColumn> = Vec::with_capacity(lhs_projection.len());
@@ -388,7 +388,7 @@ pub(crate) mod test_util {
         pub(crate) fn dump_all_nodes<N: Visitable>(&self, root_node: &'ast N) {
             struct FindNodeFromKeyVisitor<'a, 'ast>(&'a Unifier<'ast>);
 
-            impl<'a, 'ast> Visitor<'ast> for FindNodeFromKeyVisitor<'a, 'ast> {
+            impl<'ast> Visitor<'ast> for FindNodeFromKeyVisitor<'_, 'ast> {
                 type Error = Infallible;
 
                 fn enter<N: Visitable>(

@@ -439,7 +439,7 @@ impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
             Expr::Array(Array {
                 elem: _,
                 named: true,
-            }) => Err(TypeError::UnsupportedSqlFeature(format!("named arrays")))?,
+            }) => Err(TypeError::UnsupportedSqlFeature("named arrays".to_string()))?,
 
             // interval is unmapped, value is unmapped
             Expr::Interval(interval) => {

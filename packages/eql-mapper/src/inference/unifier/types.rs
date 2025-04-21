@@ -77,7 +77,7 @@ impl Projection {
         use itertools::Itertools;
 
         let resolved_cols = self
-            .flatten(unifier)
+            .flatten()
             .columns()
             .iter()
             .map(|col| -> Result<Vec<crate::ProjectionColumn>, TypeError> {
@@ -105,16 +105,12 @@ impl Projection {
                                     }])
                                 }
                                 crate::Type::Projection(_) => {
-                                    Err(TypeError::InternalError(format!(
-                                        "projection type as array element"
-                                    )))
+                                    Err(TypeError::InternalError("projection type as array element".to_string()))
                                 }
                             }
                         }
                         Constructor::Projection(_) => {
-                            Err(TypeError::InternalError(format!(
-                                "projection type as projection column; projections should be flattened during final resolution"
-                            )))
+                            Err(TypeError::InternalError("projection type as projection column; projections should be flattened during final resolution".to_string()))
                         }
                     },
                     Type::Var(tvar) => {
@@ -128,7 +124,7 @@ impl Projection {
                         } else {
                             match ty.resolved(unifier)? {
                                 crate::Type::Value(value) => Ok(vec![crate::ProjectionColumn { ty: value, alias }]),
-                                crate::Type::Projection(_) => Err(TypeError::InternalError(format!("unexpected projection"))),
+                                crate::Type::Projection(_) => Err(TypeError::InternalError("unexpected projection".to_string())),
                             }
                         }
 
@@ -138,7 +134,7 @@ impl Projection {
             .flatten_ok()
             .collect::<Result<Vec<_>, _>>()?;
 
-        if resolved_cols.len() == 0 {
+        if resolved_cols.is_empty() {
             Ok(crate::Projection::Empty)
         } else {
             Ok(crate::Projection::WithColumns(resolved_cols))
@@ -287,10 +283,10 @@ impl Type {
                     return sub_ty.resolved(unifier);
                 }
 
-                return Err(TypeError::Incomplete(format!(
+                Err(TypeError::Incomplete(format!(
                     "there are no substitutions for type var {}",
                     type_var
-                )));
+                )))
             }
         }
     }
@@ -360,10 +356,10 @@ impl Projection {
         }
     }
 
-    pub(crate) fn flatten(&self, unifier: &Unifier<'_>) -> Self {
+    pub(crate) fn flatten(&self) -> Self {
         match self {
             Projection::WithColumns(projection_columns) => {
-                Projection::WithColumns(projection_columns.flatten(unifier))
+                Projection::WithColumns(projection_columns.flatten())
             }
             Projection::Empty => Projection::Empty,
         }
@@ -400,19 +396,18 @@ impl ProjectionColumns {
         self.0.len()
     }
 
-    pub(crate) fn flatten(&self, unifier: &Unifier<'_>) -> Self {
-        ProjectionColumns(self.flatten_impl(unifier, Vec::with_capacity(self.len())))
+    pub(crate) fn flatten(&self) -> Self {
+        ProjectionColumns(self.flatten_impl(Vec::with_capacity(self.len())))
     }
 
     fn flatten_impl(
         &self,
-        unifier: &Unifier<'_>,
         mut output: Vec<ProjectionColumn>,
     ) -> Vec<ProjectionColumn> {
         for ProjectionColumn { ty, alias } in &self.0 {
             match &**ty {
                 Type::Constructor(Constructor::Projection(Projection::WithColumns(nested))) => {
-                    output = nested.flatten_impl(unifier, output);
+                    output = nested.flatten_impl(output);
                 }
                 _ => output.push(ProjectionColumn::new(ty.clone(), alias.clone())),
             }

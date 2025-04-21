@@ -19,7 +19,7 @@ pub struct FmtAst<T>(pub(crate) T);
 #[derive(Debug, Clone, Copy, Hash, Eq, PartialEq)]
 pub struct FmtAstVec<T>(pub(crate) T);
 
-impl<'ast> Display for Fmt<NodeKey<'ast>> {
+impl Display for Fmt<NodeKey<'_>> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         if let Some(node) = self.0.get_as::<Statement>() {
             return Display::fmt(&FmtAst(node), f);
@@ -64,7 +64,7 @@ impl<'ast> Display for Fmt<NodeKey<'ast>> {
     }
 }
 
-impl<'a, 'ast> Display for Fmt<&'a HashMap<NodeKey<'ast>, Type>> {
+impl Display for Fmt<&HashMap<NodeKey<'_>, Type>> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut out: Vec<String> = Vec::new();
         out.push("{ ".into());
@@ -76,7 +76,7 @@ impl<'a, 'ast> Display for Fmt<&'a HashMap<NodeKey<'ast>, Type>> {
     }
 }
 
-impl<'ast, T: Display> Display for FmtAstVec<&'ast Vec<T>> {
+impl<T: Display> Display for FmtAstVec<&Vec<T>> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("![")?;
         let children = self
@@ -90,13 +90,13 @@ impl<'ast, T: Display> Display for FmtAstVec<&'ast Vec<T>> {
     }
 }
 
-impl<'ast, T: Display> Display for FmtAst<&'ast T> {
+impl<T: Display> Display for FmtAst<&T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        T::fmt(&self.0, f)
+        T::fmt(self.0, f)
     }
 }
 
-impl<'a> Display for Fmt<&'a Vec<(Param, crate::Value)>> {
+impl Display for Fmt<&Vec<(Param, crate::Value)>> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let formatted = self
             .0
@@ -108,7 +108,7 @@ impl<'a> Display for Fmt<&'a Vec<(Param, crate::Value)>> {
     }
 }
 
-impl<'a, 'ast> Display for Fmt<&'a Vec<(EqlValue, &'ast sqlparser::ast::Value)>> {
+impl Display for Fmt<&Vec<(EqlValue, &sqlparser::ast::Value)>> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let formatted = self
             .0

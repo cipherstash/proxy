@@ -31,7 +31,7 @@ pub fn trace_infer(_attr: TokenStream, item: TokenStream) -> TokenStream {
                 })) = inputs.get(1)
                 {
                     if let Pat::Ident(pat_ident) = &**pat {
-                        Some((&pat_ident.ident, &node_ty))
+                        Some((&pat_ident.ident, node_ty))
                     } else {
                         None
                     }
@@ -55,7 +55,7 @@ pub fn trace_infer(_attr: TokenStream, item: TokenStream) -> TokenStream {
                                     Some(quote!(<#args>))
                                 };
                                 match last_segment_ident {
-                                    ident if ident.to_string() == vec_ident.to_string() => {
+                                    ident if vec_ident == *ident => {
                                         (quote!(crate::FmtAstVec), quote!(#last_segment_ident #last_segment_arguments))
                                     }
                                     _ => (quote!(crate::FmtAst), quote!(#last_segment_ident #last_segment_arguments))
@@ -109,7 +109,7 @@ struct TracingInstrumentAttr {
 impl Parse for TracingInstrumentAttr {
     fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
         Ok(Self {
-            attr: Attribute::parse_outer(input)?.get(0).unwrap().clone(),
+            attr: Attribute::parse_outer(input)?.first().unwrap().clone(),
         })
     }
 }
