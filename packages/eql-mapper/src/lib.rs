@@ -410,8 +410,8 @@ mod test {
         assert_eq!(
             typed.projection,
             projection![
-                (NATIVE as user_id),
-                (NATIVE as todo_list_item_id),
+                (NATIVE(users.id) as user_id),
+                (NATIVE(todo_list_items.id) as todo_list_item_id),
                 (EQL(todo_list_items.description) as todo_list_item_description)
             ]
         );
