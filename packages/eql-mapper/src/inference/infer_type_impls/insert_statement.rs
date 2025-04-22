@@ -9,9 +9,10 @@ use crate::{
     unifier::{EqlValue, NativeValue, Value},
     ColumnKind, TableColumn, TypeInferencer,
 };
-
+use eql_mapper_macros::trace_infer;
 use sqltk_parser::ast::{Ident, Insert};
 
+#[trace_infer]
 impl<'ast> InferType<'ast, Insert> for TypeInferencer<'ast> {
     fn infer_enter(&mut self, insert: &'ast Insert) -> Result<(), TypeError> {
         let Insert {

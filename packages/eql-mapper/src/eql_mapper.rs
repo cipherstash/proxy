@@ -2,7 +2,7 @@ use super::importer::{ImportError, Importer};
 use crate::{
     inference::{TypeError, TypeInferencer},
     unifier::{EqlValue, Unifier},
-    DepMut, Param, ParamError, ScopeError, ScopeTracker, TableResolver, Type, TypeRegistry,
+    DepMut, Fmt, Param, ParamError, ScopeError, ScopeTracker, TableResolver, Type, TypeRegistry,
     TypedStatement, Value,
 };
 use sqltk::{Break, NodeKey, Visitable, Visitor};
@@ -10,7 +10,7 @@ use sqltk_parser::ast::{self as ast, Statement};
 use std::{
     cell::RefCell, collections::HashMap, marker::PhantomData, ops::ControlFlow, rc::Rc, sync::Arc,
 };
-use tracing::{span, Level};
+use tracing::{event, span, Level};
 
 /// Validates that a SQL statement is well-typed with respect to a database schema that contains zero or more columns with
 /// EQL types.
@@ -158,14 +158,50 @@ impl<'ast> EqlMapper<'ast> {
             || -> Result<_, EqlMapperError> { Ok((projection?, params?, literals?, node_types?)) };
 
         match combine_results() {
-            Ok((projection, params, literals, node_types)) => Ok(TypedStatement {
-                statement,
-                projection,
-                params,
-                literals,
-                node_types: Arc::new(node_types),
-            }),
-            Err(err) => Err(err),
+            Ok((projection, params, literals, node_types)) => {
+                event!(
+                    target: "eql-mapper::EVENT_RESOLVE_OK",
+                    parent: &span_begin,
+                    Level::TRACE,
+                    projection = %&projection,
+                    params = %Fmt(&params),
+                    literals = %Fmt(&literals),
+                    node_types = %Fmt(&node_types)
+                );
+
+                Ok(TypedStatement {
+                    statement,
+                    projection,
+                    params,
+                    literals,
+                    node_types: Arc::new(node_types),
+                })
+            }
+            Err(err) => {
+                {
+                    let unifier = &*self.unifier.borrow();
+                    unifier.dump_all_nodes(statement);
+                    unifier.dump_substitutions();
+                }
+
+                let projection = self.projection_type(statement);
+                let params = self.param_types();
+                let literals = self.literal_types();
+                let node_types = self.node_types();
+
+                event!(
+                    target: "eql-mapper::EVENT_RESOLVE_ERR",
+                    parent: &span_begin,
+                    Level::TRACE,
+                    err = ?err,
+                    projection = ?projection,
+                    params = ?params,
+                    literals = ?literals,
+                    node_types = ?node_types
+                );
+
+                Err(err)
+            }
         }
     }
 

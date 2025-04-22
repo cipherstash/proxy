@@ -2,9 +2,10 @@ use crate::{
     inference::type_error::TypeError, inference::unifier::Type, inference::InferType,
     TypeInferencer,
 };
-
+use eql_mapper_macros::trace_infer;
 use sqltk_parser::ast::Values;
 
+#[trace_infer]
 impl<'ast> InferType<'ast, Values> for TypeInferencer<'ast> {
     fn infer_exit(&mut self, values: &'ast Values) -> Result<(), TypeError> {
         if values.rows.is_empty() {
