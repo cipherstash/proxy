@@ -108,6 +108,7 @@ run = "docker compose rm --stop --force proxy proxy-tls"
 alias = ['t', 'ci']
 description = "Runs all tests (hygiene, unit, integration)"
 run = """
+mise run rust:version
 mise run test:check
 mise run test:format
 mise run test:clippy
@@ -368,6 +369,15 @@ mise --env tls run proxy:down
 [tasks."test:nextest"]
 description = "Runs cargo nextest, skipping integration tests"
 run = 'cargo nextest run --no-fail-fast --nocapture -E "not package(cipherstash-proxy-integration)" {{arg(name="test",default="")}}'
+
+[tasks."rust:version"]
+description = "Outputs rust toolchain version info"
+run = """
+echo "rustc --version         = " $(rustc --version)
+echo "cargo --version         = " $(cargo --version)
+echo "cargo fmt --version     = " $(cargo fmt --version)
+echo "cargo clippy --version  = " $(cargo clippy --version)
+"""
 
 [tasks."test:format"]
 description = "Runs cargo fmt"
