@@ -1,18 +1,22 @@
-use std::{collections::HashMap, marker::PhantomData};
+use std::{collections::HashMap, marker::PhantomData, sync::Arc};
 
-use sqlparser::ast::Expr;
-use sqltk::Semantic;
+use sqltk::{AsNodeKey, NodeKey};
+use tracing::{span, Level};
 
-use crate::inference::unifier::{Type, TypeVar};
+use crate::{
+    inference::unifier::{Type, TypeVar},
+    Param, ParamError,
+};
 
-use super::{NodeKey, TypeCell, TypeVarGenerator};
+use super::Sequence;
 
-/// `TypeRegistry` maintains an association between `sqlparser` AST nodes and the node's inferred [`Type`].
+/// `TypeRegistry` maintains an association between `sqltk_parser` AST nodes and the node's inferred [`Type`].
 #[derive(Debug)]
 pub struct TypeRegistry<'ast> {
-    tvar_gen: TypeVarGenerator,
-    substitutions: HashMap<TypeVar, TypeCell>,
-    node_types: HashMap<NodeKey<'ast>, TypeCell>,
+    tvar_seq: Sequence<TypeVar>,
+    substitutions: HashMap<TypeVar, Arc<Type>>,
+    node_types: HashMap<NodeKey<'ast>, TypeVar>,
+    param_types: HashMap<&'ast String, TypeVar>,
     _ast: PhantomData<&'ast ()>,
 }
 
@@ -26,145 +30,136 @@ impl<'ast> TypeRegistry<'ast> {
     /// Creates a new, empty `TypeRegistry`.
     pub fn new() -> Self {
         Self {
-            tvar_gen: TypeVarGenerator::new(),
+            tvar_seq: Sequence::new(),
             substitutions: HashMap::new(),
             node_types: HashMap::new(),
+            param_types: HashMap::new(),
             _ast: PhantomData,
         }
     }
 
-    pub(crate) fn get_substitution(&self, tvar: TypeVar) -> Option<TypeCell> {
+    pub(crate) fn get_nodes_and_types<N: AsNodeKey>(&self) -> Vec<(&'ast N, Arc<Type>)> {
+        self.node_types
+            .iter()
+            .filter_map(|(key, tvar)| {
+                key.get_as::<N>().map(|n| {
+                    (
+                        n,
+                        self.substitutions
+                            .get(tvar)
+                            .cloned()
+                            .unwrap_or(Arc::new(Type::Var(*tvar))),
+                    )
+                })
+            })
+            .collect()
+    }
+
+    pub(crate) fn get_type(&self, tvar: TypeVar) -> Option<Arc<Type>> {
+        span!(Level::TRACE, "GET TYPE");
         self.substitutions.get(&tvar).cloned()
     }
 
-    pub(crate) fn substitute(&mut self, tvar: TypeVar, sub: TypeCell) {
-        self.substitutions.insert(tvar, sub);
+    pub(crate) fn get_param_type(&mut self, param: &'ast String) -> Arc<Type> {
+        self.get_or_init_param_type(param)
     }
 
-    /// Gets (and creates, if required) the [`Type`] associated with a node (which must be an AST node type that
-    /// implements [`Semantic`]). If the node does not already have an associated `Type` then a
-    /// `Type(Def::Var(TypeVar::Fresh))` will be associated with the node and returned.
-    ///
-    /// This method is idempotent and further calls will return the same type.
-    pub(crate) fn get_type<N: Semantic>(&mut self, node: &'ast N) -> &TypeCell {
-        let tvar = self.fresh_tvar();
-
-        self.node_types.entry(NodeKey::new(node)).or_insert(tvar)
+    pub(crate) fn get_params(&self) -> HashMap<&'ast String, Arc<Type>> {
+        self.param_types
+            .iter()
+            .map(|(param, tvar)| {
+                (
+                    *param,
+                    self.substitutions
+                        .get(tvar)
+                        .cloned()
+                        .unwrap_or(Arc::new(Type::Var(*tvar))),
+                )
+            })
+            .collect()
     }
 
-    pub(crate) fn get_type_by_node_key(&self, key: &NodeKey<'ast>) -> Option<&TypeCell> {
-        match self.node_types.get(key) {
-            Some(ty) => Some(ty),
-            None => None,
-        }
+    // TODO: move this logic to EqlMapper?
+    pub(crate) fn resolved_param_types(&self) -> Result<Vec<(Param, Arc<Type>)>, ParamError> {
+        let mut params = self
+            .get_params()
+            .iter()
+            .map(|(p, ty)| Param::try_from(*p).map(|p| (p, ty.clone())))
+            .collect::<Result<Vec<_>, _>>()?;
+
+        params.sort_by(|(a, _), (b, _)| a.cmp(b));
+
+        Ok(params)
     }
 
-    pub(crate) fn fresh_tvar(&mut self) -> TypeCell {
-        Type::Var(TypeVar(self.tvar_gen.next_tvar())).into_type_cell()
+    pub(crate) fn node_types(&self) -> HashMap<NodeKey<'ast>, Arc<Type>> {
+        self.node_types
+            .iter()
+            .map(|(node, tvar)| {
+                (
+                    *node,
+                    self.substitutions
+                        .get(tvar)
+                        .cloned()
+                        .unwrap_or(Arc::new(Type::Var(*tvar))),
+                )
+            })
+            .collect()
     }
 
-    /// Checks if any node in the AST that has type `ty` is a literal.
-    pub(crate) fn value_expr_exists_with_type(&self, ty: TypeCell) -> bool {
-        for (node_key, node_ty) in self.node_types.iter() {
-            if ty == *node_ty {
-                if let Some(Expr::Value(_)) = node_key.get_as::<Expr>() {
-                    return true;
-                }
+    pub(crate) fn get_node_type<N: AsNodeKey>(&mut self, node: &'ast N) -> Arc<Type> {
+        self.get_or_init_node_type(node)
+    }
+
+    pub(crate) fn peek_node_type<N: AsNodeKey>(&self, node: &'ast N) -> Option<Arc<Type>> {
+        self.node_types
+            .get(&node.as_node_key())
+            .cloned()
+            .map(|tvar| {
+                self.substitutions
+                    .get(&tvar)
+                    .cloned()
+                    .unwrap_or(Arc::new(Type::Var(tvar)))
+            })
+    }
+
+    pub(crate) fn substitute(&mut self, tvar: TypeVar, sub_ty: impl Into<Arc<Type>>) -> Arc<Type> {
+        let sub_ty: Arc<_> = sub_ty.into();
+        self.substitutions.insert(tvar, sub_ty.clone());
+        sub_ty
+    }
+
+    /// Gets (and creates, if required) the [`Type`] associated with a node. If the node does not already have an
+    /// associated `Type` then a fresh [`Type::Var`] will be assigned.
+    fn get_or_init_node_type<N: AsNodeKey>(&mut self, node: &'ast N) -> Arc<Type> {
+        match self.peek_node_type(node) {
+            Some(ty) => ty,
+            None => {
+                let tvar = self.fresh_tvar();
+                self.node_types.insert(node.as_node_key(), tvar);
+                Type::Var(tvar).into()
             }
         }
-
-        false
     }
-}
 
-#[cfg(test)]
-pub(crate) mod test_util {
-    use sqlparser::ast::{
-        Delete, Expr, Function, FunctionArguments, Insert, Query, Select, SelectItem, SetExpr,
-        Statement,
-    };
-    use sqltk::{Break, Visitable, Visitor};
-    use std::{convert::Infallible, fmt::Debug, ops::ControlFlow};
-    use tracing::error;
-
-    use super::{NodeKey, TypeRegistry};
-
-    use std::fmt::Display;
-
-    impl TypeRegistry<'_> {
-        /// Dumps the type information for a specific AST node to STDERR.
-        ///
-        /// Useful when debugging tests.
-        pub(crate) fn dump_node<N: Display + Visitable + Debug>(&self, node: &N) {
-            let key = NodeKey::new_from_visitable(node);
-            if let Some(ty) = self.node_types.get(&key) {
-                error!(
-                    "TYPE<\nast: {}\nsyn: {}\nty: {}\n>",
-                    std::any::type_name::<N>(),
-                    node,
-                    &*ty.as_type(),
-                );
-            };
-        }
-
-        /// Dumps the type information for all nodes visited so far to STDERR.
-        ///
-        /// Useful when debugging tests.
-        pub(crate) fn dump_all_nodes<N: Visitable>(&self, root_node: &N) {
-            struct FindNodeFromKeyVisitor<'a>(&'a TypeRegistry<'a>);
-
-            impl<'ast> Visitor<'ast> for FindNodeFromKeyVisitor<'_> {
-                type Error = Infallible;
-
-                fn enter<N: Visitable>(
-                    &mut self,
-                    node: &'ast N,
-                ) -> ControlFlow<Break<Self::Error>> {
-                    if let Some(node) = node.downcast_ref::<Statement>() {
-                        self.0.dump_node(node);
-                    }
-
-                    if let Some(node) = node.downcast_ref::<Query>() {
-                        self.0.dump_node(node);
-                    }
-
-                    if let Some(node) = node.downcast_ref::<Insert>() {
-                        self.0.dump_node(node);
-                    }
-
-                    if let Some(node) = node.downcast_ref::<Delete>() {
-                        self.0.dump_node(node);
-                    }
-
-                    if let Some(node) = node.downcast_ref::<Expr>() {
-                        self.0.dump_node(node);
-                    }
-
-                    if let Some(node) = node.downcast_ref::<SetExpr>() {
-                        self.0.dump_node(node);
-                    }
-
-                    if let Some(node) = node.downcast_ref::<Select>() {
-                        self.0.dump_node(node);
-                    }
-
-                    if let Some(node) = node.downcast_ref::<SelectItem>() {
-                        self.0.dump_node(node);
-                    }
-
-                    if let Some(node) = node.downcast_ref::<Function>() {
-                        self.0.dump_node(node);
-                    }
-
-                    if let Some(node) = node.downcast_ref::<FunctionArguments>() {
-                        self.0.dump_node(node);
-                    }
-
-                    ControlFlow::Continue(())
-                }
+    /// Gets (and creates, if required) the [`Type`] associated with a param. If the param does not already have an
+    /// associated `Type` then a fresh [`Type::Var`] will be assigned.
+    fn get_or_init_param_type(&mut self, param: &'ast String) -> Arc<Type> {
+        match self.param_types.get(&param).cloned() {
+            Some(tvar) => Type::Var(tvar).into(),
+            None => {
+                let tvar = self.fresh_tvar();
+                self.param_types.insert(param, tvar);
+                Type::Var(tvar).into()
             }
-
-            root_node.accept(&mut FindNodeFromKeyVisitor(self));
         }
+    }
+
+    pub(crate) fn fresh_tvar(&mut self) -> TypeVar {
+        let next = self.tvar_seq.next_value();
+        if next == TypeVar(3) {
+            println!("WAT");
+        }
+        next
     }
 }

@@ -6,7 +6,7 @@ use super::sql_ident::*;
 use crate::iterator_ext::IteratorExt;
 use core::fmt::Debug;
 use derive_more::Display;
-use sqlparser::ast::Ident;
+use sqltk_parser::ast::Ident;
 use std::sync::Arc;
 use thiserror::Error;
 
@@ -228,7 +228,7 @@ macro_rules! schema {
         $schema.add_table(
             {
 
-                let mut $table = $crate::model::Table::new(::sqlparser::ast::Ident::new(stringify!($table_name)));
+                let mut $table = $crate::model::Table::new(::sqltk_parser::ast::Ident::new(stringify!($table_name)));
                 schema!(@add_columns $table $($columns)*);
                 $table
             }
@@ -239,14 +239,14 @@ macro_rules! schema {
     };
     (@add_column $table:ident $column_name:ident (EQL) ) => {
         $table.add_column(std::sync::Arc::new($crate::model::Column::eql(
-            ::sqlparser::ast::Ident::new(stringify!($column_name))
+            ::sqltk_parser::ast::Ident::new(stringify!($column_name))
         )), false);
     };
     (@add_column $table:ident $column_name:ident (PK) ) => {
         $table.add_column(
             std::sync::Arc::new(
                 $crate::model::Column::native(
-                    ::sqlparser::ast::Ident::new(stringify!($column_name))
+                    ::sqltk_parser::ast::Ident::new(stringify!($column_name))
                 )
             ),
             true
@@ -256,10 +256,10 @@ macro_rules! schema {
         $table.add_column(
             std::sync::Arc::new(
                 $crate::model::Column::new(
-                    ::sqlparser::ast::Ident::new(stringify!($column_name)),
+                    ::sqltk_parser::ast::Ident::new(stringify!($column_name)),
                     $crate::constraints::Scalar::Native {
                         table: $table.name.clone(),
-                        column: ::sqlparser::ast::Ident::new(stringify!($column_name))
+                        column: ::sqltk_parser::ast::Ident::new(stringify!($column_name))
                     }
                 )
             ),
@@ -270,7 +270,7 @@ macro_rules! schema {
         $table.add_column(
             std::sync::Arc::new(
                 $crate::model::Column::native(
-                    ::sqlparser::ast::Ident::new(stringify!($column_name)),
+                    ::sqltk_parser::ast::Ident::new(stringify!($column_name)),
                 )
             ),
             false

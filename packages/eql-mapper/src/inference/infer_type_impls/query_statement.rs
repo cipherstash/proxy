@@ -1,6 +1,9 @@
-use sqlparser::ast::Query;
+use sqltk_parser::ast::Query;
 
-use crate::{inference::InferType, inference::TypeError, TypeInferencer};
+use crate::{
+    inference::{InferType, TypeError},
+    TypeInferencer,
+};
 
 impl<'ast> InferType<'ast, Query> for TypeInferencer<'ast> {
     fn infer_exit(&mut self, query: &'ast Query) -> Result<(), TypeError> {

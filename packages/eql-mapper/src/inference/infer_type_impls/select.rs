@@ -1,4 +1,4 @@
-use sqlparser::ast::Select;
+use sqltk_parser::ast::Select;
 
 use crate::{
     inference::{type_error::TypeError, InferType},

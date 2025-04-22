@@ -1,38 +1,26 @@
 mod infer_type;
 mod infer_type_impls;
-mod node_key;
 mod registry;
+mod sequence;
 mod type_error;
-mod type_variables;
 
 pub mod unifier;
 
-use unifier::*;
+use unifier::{Unifier, *};
 
-use std::{
-    cell::RefCell,
-    collections::{HashMap, HashSet},
-    fmt::Debug,
-    marker::PhantomData,
-    ops::ControlFlow,
-    rc::Rc,
-    sync::Arc,
-};
-
-use itertools::Itertools;
+use std::{cell::RefCell, fmt::Debug, marker::PhantomData, ops::ControlFlow, rc::Rc, sync::Arc};
 
 use infer_type::InferType;
-use sqlparser::ast::{
-    Delete, Expr, Function, Insert, Query, Select, SelectItem, SetExpr, Statement, Value, Values,
+use sqltk::{into_control_flow, AsNodeKey, Break, Visitable, Visitor};
+use sqltk_parser::ast::{
+    Delete, Expr, Function, Ident, Insert, Query, Select, SelectItem, SetExpr, Statement, Values,
 };
-use sqltk::{into_control_flow, Break, Semantic, Visitable, Visitor};
 
-use crate::{ScopeTracker, TableResolver};
+use crate::{ScopeError, ScopeTracker, TableResolver};
 
-pub use node_key::*;
 pub(crate) use registry::*;
+pub(crate) use sequence::*;
 pub(crate) use type_error::*;
-pub(crate) use type_variables::*;
 
 /// [`Visitor`] implementation that performs type inference on AST nodes.
 ///
@@ -48,6 +36,7 @@ pub(crate) use type_variables::*;
 /// - [`Vec<SelectItem>`]
 /// - [`Function`]
 /// - [`Values`]
+/// - [`Value`]
 #[derive(Debug)]
 pub struct TypeInferencer<'ast> {
     /// A snapshot of the the database schema - used by `TypeInferencer`'s [`InferType`] impls.
@@ -56,18 +45,8 @@ pub struct TypeInferencer<'ast> {
     // The lexical scope - for resolving projection columns & expanding wildcards.
     scope_tracker: Rc<RefCell<ScopeTracker<'ast>>>,
 
-    /// Associates types with AST nodes.
-    reg: Rc<RefCell<TypeRegistry<'ast>>>,
-
     /// Implements the type unification algorithm.
-    unifier: Rc<RefCell<unifier::Unifier<'ast>>>,
-
-    /// The parameter identifiers & types of `Expr::Value(Value::Placeholder(_))` nodes found in a [`Statement`].
-    param_types: Vec<(String, TypeCell)>,
-
-    /// References to all of the `Expr::Value(_)` nodes found in a [`Statement`] - except for
-    /// `Expr::Value(Value::Placeholder(_))` nodes.
-    literal_nodes: HashSet<NodeKey<'ast>>,
+    unifier: Rc<RefCell<Unifier<'ast>>>,
 
     _ast: PhantomData<&'ast ()>,
 }
@@ -77,145 +56,140 @@ impl<'ast> TypeInferencer<'ast> {
     pub fn new(
         table_resolver: impl Into<Arc<TableResolver>>,
         scope: impl Into<Rc<RefCell<ScopeTracker<'ast>>>>,
-        reg: impl Into<Rc<RefCell<TypeRegistry<'ast>>>>,
-        unifier: impl Into<Rc<RefCell<unifier::Unifier<'ast>>>>,
+        unifier: impl Into<Rc<RefCell<Unifier<'ast>>>>,
     ) -> Self {
         Self {
             table_resolver: table_resolver.into(),
             scope_tracker: scope.into(),
-            reg: reg.into(),
             unifier: unifier.into(),
-            param_types: Vec::with_capacity(16),
-            literal_nodes: HashSet::with_capacity(64),
             _ast: PhantomData,
         }
     }
 
-    /// Shorthand for calling `self.reg.borrow_mut().get_type(node)` in [`InferType`] implementations for `TypeInferencer`.
-    pub(crate) fn get_type<N: Semantic>(&self, node: &'ast N) -> TypeCell {
-        self.reg.borrow_mut().get_type(node).clone()
+    pub(crate) fn get_node_type<N: AsNodeKey>(&self, node: &'ast N) -> Arc<Type> {
+        self.unifier.borrow_mut().get_node_type(node)
     }
 
-    pub(crate) fn get_type_by_node_key(&self, key: &NodeKey<'ast>) -> Option<TypeCell> {
-        self.reg.borrow_mut().get_type_by_node_key(key).cloned()
+    #[allow(unused)]
+    pub(crate) fn peek_node_type<N: AsNodeKey>(&self, node: &'ast N) -> Option<Arc<Type>> {
+        self.unifier.borrow_mut().peek_node_type(node)
     }
 
-    pub(crate) fn param_types(&self) -> Result<HashMap<String, unifier::Value>, TypeError> {
-        // For every param node, unify its type with the other param nodes that refer to the same param.
-        let unified_params = self
-            .param_types
-            .iter()
-            .into_grouping_map_by(|&(param, _)| param.clone())
-            .fold_with(
-                |_, _| Ok(self.fresh_tvar()),
-                |acc_ty, _param, (_, param_ty)| {
-                    acc_ty.and_then(|acc_ty| self.unify(acc_ty, param_ty.clone()))
-                },
-            );
-
-        // Filter down to the params that successfully unified
-        let verified_unified_params: HashMap<String, TypeCell> = unified_params
-            .iter()
-            .filter_map(|(param, ty)| ty.as_ref().map(|ty| ((*param).clone(), ty.clone())).ok())
-            .collect();
-
-        // Check we still have the correct number of params
-        if unified_params.len() != verified_unified_params.len() {
-            let mut failed_params: HashSet<String> = HashSet::new();
-            failed_params.extend(unified_params.keys().cloned());
-            failed_params.retain(|param| verified_unified_params.contains_key(param));
-
-            return Err(TypeError::Params(failed_params));
-        };
-
-        // Check that every unified param type is a Scalar
-        let scalars: HashMap<String, unifier::Value> = verified_unified_params
-            .into_iter()
-            .map(|(param, ty)| {
-                if let unifier::Type::Constructor(unifier::Constructor::Value(value)) =
-                    &*ty.as_type()
-                {
-                    Ok((param, value.clone()))
-                } else {
-                    Err(TypeError::NonScalarParam(param, ty.as_type().to_string()))
-                }
-            })
-            .collect::<Result<_, _>>()?;
-
-        Ok(scalars)
-    }
-
-    pub(crate) fn literal_nodes(&self) -> HashSet<NodeKey<'ast>> {
-        self.literal_nodes.clone()
+    pub(crate) fn get_param_type(&self, param: &'ast String) -> Arc<Type> {
+        self.unifier.borrow_mut().get_param_type(param)
     }
 
     /// Tries to unify two types but does not record the result.
     /// Recording the result is up to the caller.
     #[must_use = "the result of unify must ultimately be associated with an AST node"]
-    fn unify(&self, left: TypeCell, right: TypeCell) -> Result<TypeCell, TypeError> {
-        self.unifier.borrow_mut().unify(left, right)
+    fn unify(
+        &self,
+        lhs: impl Into<Arc<Type>>,
+        rhs: impl Into<Arc<Type>>,
+    ) -> Result<Arc<Type>, TypeError> {
+        self.unifier.borrow_mut().unify(lhs.into(), rhs.into())
     }
 
     /// Unifies the types of two nodes with a third type and records the unification result.
     /// After a successful unification both nodes will refer to the same type.
-    fn unify_nodes_with_type<N1: Semantic, N2: Semantic>(
+    fn unify_nodes_with_type<N1: AsNodeKey, N2: AsNodeKey>(
         &self,
-        left: &'ast N1,
-        right: &'ast N2,
-        ty: TypeCell,
-    ) -> Result<TypeCell, TypeError> {
-        let unifier = &mut *self.unifier.borrow_mut();
-        let ty0 = unifier.unify(self.get_type(left), self.get_type(right))?;
-        let ty1 = unifier.unify(ty0, ty)?;
-        Ok(ty1)
+        lhs: &'ast N1,
+        rhs: &'ast N2,
+        ty: impl Into<Arc<Type>>,
+    ) -> Result<Arc<Type>, TypeError> {
+        self.unify(
+            ty,
+            self.unify(self.get_node_type(lhs), self.get_node_type(rhs))?,
+        )
     }
 
     /// Unifies the type of a node with a second type and records the unification result.
-    fn unify_node_with_type<N: Semantic>(
+    fn unify_node_with_type<N: AsNodeKey>(
         &self,
         node: &'ast N,
-        ty: TypeCell,
-    ) -> Result<TypeCell, TypeError> {
-        let unifier = &mut *self.unifier.borrow_mut();
-        unifier.unify(self.get_type(node), ty)
+        ty: impl Into<Arc<Type>>,
+    ) -> Result<Arc<Type>, TypeError> {
+        self.unify(self.get_node_type(node), ty)
     }
 
     /// Unifies the types of two nodes with each other.
     /// After a successful unification both nodes will refer to the same type.
-    fn unify_nodes<N1: Semantic + Debug, N2: Semantic + Debug>(
+    fn unify_nodes<N1: AsNodeKey + Debug, N2: AsNodeKey + Debug>(
         &self,
-        left: &'ast N1,
-        right: &'ast N2,
-    ) -> Result<TypeCell, TypeError> {
-        match self
-            .unifier
-            .borrow_mut()
-            .unify(self.get_type(left), self.get_type(right))
-        {
-            Ok(ty) => Ok(ty),
+        lhs: &'ast N1,
+        rhs: &'ast N2,
+    ) -> Result<Arc<Type>, TypeError> {
+        match self.unify(self.get_node_type(lhs), self.get_node_type(rhs)) {
+            Ok(unified) => Ok(unified),
             Err(err) => Err(TypeError::OnNodes(
                 Box::new(err),
-                format!("{:?}", left),
-                self.get_type(left),
-                format!("{:?}", right),
-                self.get_type(right),
+                format!("{:?}", lhs),
+                self.get_node_type(lhs),
+                format!("{:?}", rhs),
+                self.get_node_type(rhs),
             )),
         }
     }
 
-    fn unify_all_with_type<N: Semantic + Debug>(
+    fn unify_all_with_type<N: Debug + AsNodeKey>(
         &self,
         nodes: &'ast [N],
-        ty: TypeCell,
-    ) -> Result<TypeCell, TypeError> {
-        nodes
+        ty: impl Into<Arc<Type>>,
+    ) -> Result<Arc<Type>, TypeError> {
+        let unified = nodes
             .iter()
-            .try_fold(ty, |ty, node| self.unify_node_with_type(node, ty))
+            .try_fold(ty.into(), |ty, node| self.unify_node_with_type(node, ty))?;
+
+        Ok(unified)
     }
 
-    pub(crate) fn fresh_tvar(&self) -> TypeCell {
-        self.reg.borrow_mut().fresh_tvar()
+    fn fresh_tvar(&self) -> Arc<Type> {
+        self.unifier.borrow_mut().fresh_tvar()
     }
+
+    fn resolve_ident(&self, ident: &Ident) -> Result<Arc<Type>, ScopeError> {
+        self.scope_tracker.borrow().resolve_ident(ident)
+    }
+
+    fn resolve_compound_ident(&self, idents: &[Ident]) -> Result<Arc<Type>, ScopeError> {
+        self.scope_tracker.borrow().resolve_compound_ident(idents)
+    }
+
+    fn resolve_wildcard(&self) -> Result<Arc<Type>, ScopeError> {
+        self.scope_tracker.borrow().resolve_wildcard()
+    }
+
+    fn resolve_qualified_wildcard(&self, idents: &[Ident]) -> Result<Arc<Type>, ScopeError> {
+        self.scope_tracker
+            .borrow()
+            .resolve_qualified_wildcard(idents)
+    }
+}
+
+macro_rules! dispatch {
+    ($self:ident, $method:ident, $node:ident, $ty:ty) => {
+        if let Some($node) = $node.downcast_ref::<$ty>() {
+            into_control_flow($self.$method($node))?;
+        }
+    };
+}
+
+macro_rules! dispatch_all {
+    ($self:ident, $method:ident, $node:ident) => {
+        dispatch!($self, $method, $node, Statement);
+        dispatch!($self, $method, $node, Query);
+        dispatch!($self, $method, $node, Insert);
+        dispatch!($self, $method, $node, Delete);
+        dispatch!($self, $method, $node, Expr);
+        dispatch!($self, $method, $node, SetExpr);
+        dispatch!($self, $method, $node, Select);
+        dispatch!($self, $method, $node, Vec<SelectItem>);
+        dispatch!($self, $method, $node, SelectItem);
+        dispatch!($self, $method, $node, Function);
+        dispatch!($self, $method, $node, Values);
+        dispatch!($self, $method, $node, sqltk_parser::ast::Value);
+    };
 }
 
 /// # About this [`Visitor`] implementation.
@@ -226,115 +200,12 @@ impl<'ast> Visitor<'ast> for TypeInferencer<'ast> {
     type Error = TypeError;
 
     fn enter<N: Visitable>(&mut self, node: &'ast N) -> ControlFlow<Break<Self::Error>> {
-        if let Some(node) = node.downcast_ref::<Statement>() {
-            into_control_flow(self.infer_enter(node))?
-        }
-
-        if let Some(node) = node.downcast_ref::<Query>() {
-            into_control_flow(self.infer_enter(node))?
-        }
-
-        if let Some(node) = node.downcast_ref::<Insert>() {
-            into_control_flow(self.infer_enter(node))?
-        }
-
-        if let Some(node) = node.downcast_ref::<Delete>() {
-            into_control_flow(self.infer_enter(node))?
-        }
-
-        if let Some(node) = node.downcast_ref::<Expr>() {
-            into_control_flow(self.infer_enter(node))?;
-            if let Expr::Value(value) = node {
-                match value {
-                    Value::Placeholder(param) => {
-                        self.param_types.push((param.clone(), self.get_type(node)));
-                    }
-                    _ => {
-                        self.literal_nodes.insert(NodeKey::new(node));
-                    }
-                }
-            }
-        }
-
-        if let Some(node) = node.downcast_ref::<SetExpr>() {
-            into_control_flow(self.infer_enter(node))?
-        }
-
-        if let Some(node) = node.downcast_ref::<Select>() {
-            into_control_flow(self.infer_enter(node))?
-        }
-
-        if let Some(node) = node.downcast_ref::<Vec<SelectItem>>() {
-            into_control_flow(self.infer_enter(node))?
-        }
-
-        if let Some(node) = node.downcast_ref::<Function>() {
-            into_control_flow(self.infer_enter(node))?
-        }
-
-        if let Some(node) = node.downcast_ref::<Values>() {
-            into_control_flow(self.infer_enter(node))?
-        }
-
+        dispatch_all!(self, infer_enter, node);
         ControlFlow::Continue(())
     }
 
     fn exit<N: Visitable>(&mut self, node: &'ast N) -> ControlFlow<Break<Self::Error>> {
-        if let Some(node) = node.downcast_ref::<Statement>() {
-            into_control_flow(self.infer_exit(node))?
-        }
-
-        if let Some(node) = node.downcast_ref::<Query>() {
-            into_control_flow(self.infer_exit(node))?
-        }
-
-        if let Some(node) = node.downcast_ref::<Insert>() {
-            into_control_flow(self.infer_exit(node))?
-        }
-
-        if let Some(node) = node.downcast_ref::<Delete>() {
-            into_control_flow(self.infer_exit(node))?
-        }
-
-        if let Some(node) = node.downcast_ref::<Expr>() {
-            into_control_flow(self.infer_exit(node))?
-        }
-
-        if let Some(node) = node.downcast_ref::<SetExpr>() {
-            into_control_flow(self.infer_exit(node))?
-        }
-
-        if let Some(node) = node.downcast_ref::<Select>() {
-            into_control_flow(self.infer_exit(node))?
-        }
-
-        if let Some(node) = node.downcast_ref::<Vec<SelectItem>>() {
-            into_control_flow(self.infer_exit(node))?
-        }
-
-        if let Some(node) = node.downcast_ref::<Function>() {
-            into_control_flow(self.infer_exit(node))?
-        }
-
-        if let Some(node) = node.downcast_ref::<Values>() {
-            into_control_flow(self.infer_exit(node))?
-        }
-
+        dispatch_all!(self, infer_exit, node);
         ControlFlow::Continue(())
-    }
-}
-
-#[cfg(test)]
-#[allow(dead_code)]
-pub(crate) mod test_util {
-    use sqltk::Visitable;
-
-    use super::TypeInferencer;
-
-    impl TypeInferencer<'_> {
-        /// Dump all nodes from the registry to STDERR. Useful for debugging failing tests.
-        pub(crate) fn dump_registry<N: Visitable>(&self, root_node: &N) {
-            self.reg.borrow().dump_all_nodes(root_node);
-        }
     }
 }

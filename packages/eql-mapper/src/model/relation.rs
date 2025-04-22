@@ -1,9 +1,11 @@
-use sqlparser::ast::Ident;
+use std::sync::Arc;
 
-use crate::unifier::TypeCell;
+use sqltk_parser::ast::Ident;
+
+use crate::unifier::Type;
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub(crate) struct Relation {
-    pub(crate) projection_type: TypeCell,
+    pub(crate) projection_type: Arc<Type>,
     pub(crate) name: Option<Ident>,
 }

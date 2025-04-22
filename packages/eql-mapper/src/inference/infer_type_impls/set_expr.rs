@@ -1,4 +1,4 @@
-use sqlparser::ast::SetExpr;
+use sqltk_parser::ast::SetExpr;
 
 use crate::{inference::type_error::TypeError, inference::InferType, TypeInferencer};
 

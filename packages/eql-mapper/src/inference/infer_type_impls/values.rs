@@ -1,9 +1,9 @@
-use sqlparser::ast::Values;
-
 use crate::{
     inference::type_error::TypeError, inference::unifier::Type, inference::InferType,
     TypeInferencer,
 };
+
+use sqltk_parser::ast::Values;
 
 impl<'ast> InferType<'ast, Values> for TypeInferencer<'ast> {
     fn infer_exit(&mut self, values: &'ast Values) -> Result<(), TypeError> {
@@ -23,12 +23,12 @@ impl<'ast> InferType<'ast, Values> for TypeInferencer<'ast> {
 
         let column_types = &values.rows[0]
             .iter()
-            .map(|val| self.get_type(val))
+            .map(|val| self.get_node_type(val))
             .collect::<Vec<_>>();
 
         for row in values.rows.iter() {
             for (idx, val) in row.iter().enumerate() {
-                self.unify(self.get_type(val), column_types[idx].clone())?;
+                self.unify(self.get_node_type(val), column_types[idx].clone())?;
             }
         }
 
