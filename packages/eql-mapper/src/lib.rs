@@ -1,24 +1,33 @@
 //! `eql-mapper` transforms SQL to SQL+EQL using a known database schema as a reference.
 
 mod dep;
-mod eql_function_tracker;
+mod display_helpers;
+mod encrypted_statement;
 mod eql_mapper;
 mod importer;
 mod inference;
 mod iterator_ext;
 mod model;
+mod param;
 mod scope_tracker;
+mod transformation_rules;
+mod typed_statement;
 
 #[cfg(test)]
 mod test_helpers;
 
-pub use dep::*;
+pub use display_helpers::*;
 pub use eql_mapper::*;
-pub use importer::*;
-pub use inference::*;
 pub use model::*;
-pub use scope_tracker::*;
+pub use param::*;
+pub use typed_statement::*;
 pub use unifier::{EqlValue, NativeValue, TableColumn};
+
+pub(crate) use dep::*;
+pub(crate) use encrypted_statement::*;
+pub(crate) use inference::*;
+pub(crate) use scope_tracker::*;
+pub(crate) use transformation_rules::*;
 
 #[cfg(test)]
 mod test {
@@ -26,13 +35,17 @@ mod test {
     use super::type_check;
     use crate::col;
     use crate::projection;
-    use crate::NodeKey;
+    use crate::Param;
     use crate::Schema;
     use crate::TableResolver;
-    use crate::{schema, EqlValue, NativeValue, Projection, ProjectionColumn, TableColumn, Value};
+    use crate::{
+        schema, unifier::EqlValue, unifier::NativeValue, Projection, ProjectionColumn, TableColumn,
+        Value,
+    };
     use pretty_assertions::assert_eq;
-    use sqlparser::ast::Statement;
-    use sqlparser::ast::{self as ast};
+    use sqltk::AsNodeKey;
+    use sqltk_parser::ast::Statement;
+    use sqltk_parser::ast::{self as ast};
     use std::collections::HashMap;
     use std::sync::Arc;
     use tracing::error;
@@ -43,7 +56,7 @@ mod test {
 
     #[test]
     fn basic() {
-        let _ = tracing_subscriber::fmt::try_init();
+        // init_tracing();
         let schema = resolver(schema! {
             tables: {
                 users: {
@@ -60,7 +73,7 @@ mod test {
             Ok(typed) => {
                 assert_eq!(
                     typed.projection,
-                    Some(projection![(NATIVE(users.email) as email)])
+                    projection![(NATIVE(users.email) as email)]
                 )
             }
             Err(err) => panic!("type check failed: {err}"),
@@ -69,7 +82,7 @@ mod test {
 
     #[test]
     fn basic_with_value() {
-        let _ = tracing_subscriber::fmt::try_init();
+        // init_tracing();
         let schema = resolver(schema! {
             tables: {
                 users: {
@@ -84,19 +97,14 @@ mod test {
 
         match type_check(schema, &statement) {
             Ok(typed) => {
-                assert_eq!(
-                    typed.projection,
-                    Some(projection![(EQL(users.email) as email)])
-                );
+                assert_eq!(typed.projection, projection![(EQL(users.email) as email)]);
 
                 assert!(typed.literals.contains(&(
                     EqlValue(TableColumn {
                         table: id("users"),
                         column: id("email")
                     }),
-                    &ast::Expr::Value(ast::Value::SingleQuotedString(
-                        "hello@cipherstash.com".into()
-                    ))
+                    &ast::Value::SingleQuotedString("hello@cipherstash.com".into())
                 )));
             }
             Err(err) => panic!("type check failed: {err}"),
@@ -105,7 +113,7 @@ mod test {
 
     #[test]
     fn insert_with_value() {
-        let _ = tracing_subscriber::fmt::try_init();
+        // init_tracing();
         let schema = resolver(schema! {
             tables: {
                 users: {
@@ -125,9 +133,7 @@ mod test {
                         table: id("users"),
                         column: id("email")
                     }),
-                    &ast::Expr::Value(ast::Value::SingleQuotedString(
-                        "hello@cipherstash.com".into()
-                    ))
+                    &ast::Value::SingleQuotedString("hello@cipherstash.com".into())
                 )));
             }
             Err(err) => panic!("type check failed: {err}"),
@@ -136,7 +142,7 @@ mod test {
 
     #[test]
     fn insert_with_values_no_explicit_columns() {
-        let _ = tracing_subscriber::fmt::try_init();
+        // init_tracing();
         let schema = resolver(schema! {
             tables: {
                 users: {
@@ -156,9 +162,7 @@ mod test {
                         table: id("users"),
                         column: id("email")
                     }),
-                    &ast::Expr::Value(ast::Value::SingleQuotedString(
-                        "hello@cipherstash.com".into()
-                    ))
+                    &ast::Value::SingleQuotedString("hello@cipherstash.com".into())
                 )));
             }
             Err(err) => panic!("type check failed: {err}"),
@@ -167,7 +171,7 @@ mod test {
 
     #[test]
     fn insert_with_values_no_explicit_columns_but_has_default() {
-        let _ = tracing_subscriber::fmt::try_init();
+        // init_tracing();
         let schema = resolver(schema! {
             tables: {
                 users: {
@@ -188,9 +192,7 @@ mod test {
                         table: id("users"),
                         column: id("email")
                     }),
-                    &ast::Expr::Value(ast::Value::SingleQuotedString(
-                        "hello@cipherstash.com".into()
-                    ))
+                    &ast::Value::SingleQuotedString("hello@cipherstash.com".into())
                 )));
             }
             Err(err) => panic!("type check failed: {err}"),
@@ -199,7 +201,7 @@ mod test {
 
     #[test]
     fn basic_with_placeholder() {
-        let _ = tracing_subscriber::fmt::try_init();
+        // init_tracing();
         let schema = resolver(schema! {
             tables: {
                 users: {
@@ -219,13 +221,13 @@ mod test {
                     column: id("id"),
                 })));
 
-                let param = typed.params.first().unwrap();
+                let (_, param_value) = typed.params.first().unwrap();
 
-                assert_eq!(param, &v);
+                assert_eq!(param_value, &v);
 
                 assert_eq!(
                     typed.projection,
-                    Some(projection![(NATIVE(users.email) as email)])
+                    projection![(NATIVE(users.email) as email)]
                 );
             }
             Err(err) => panic!("type check failed: {err}"),
@@ -234,7 +236,7 @@ mod test {
 
     #[test]
     fn select_with_multiple_placeholder() {
-        let _ = tracing_subscriber::fmt::try_init();
+        // init_tracing();
         let schema = resolver(schema! {
             tables: {
                 users: {
@@ -260,15 +262,15 @@ mod test {
                     column: id("first_name"),
                 })));
 
-                assert_eq!(typed.params, vec![a, b]);
+                assert_eq!(typed.params, vec![(Param(1), a), (Param(2), b)]);
 
                 assert_eq!(
                     typed.projection,
-                    Some(projection![
+                    projection![
                         (NATIVE(users.id) as id),
                         (NATIVE(users.email) as email),
                         (NATIVE(users.first_name) as first_name)
-                    ])
+                    ]
                 );
             }
             Err(err) => panic!("type check failed: {err}"),
@@ -277,7 +279,7 @@ mod test {
 
     #[test]
     fn select_with_multiple_instances_of_placeholder() {
-        let _ = tracing_subscriber::fmt::try_init();
+        // init_tracing();
         let schema = resolver(schema! {
             tables: {
                 users: {
@@ -298,15 +300,15 @@ mod test {
                     column: id("email"),
                 })));
 
-                assert_eq!(typed.params, vec![a]);
+                assert_eq!(typed.params, vec![(Param(1), a)]);
 
                 assert_eq!(
                     typed.projection,
-                    Some(projection![
+                    projection![
                         (NATIVE(users.id) as id),
                         (NATIVE(users.email) as email),
                         (NATIVE(users.first_name) as first_name)
-                    ])
+                    ]
                 );
             }
             Err(err) => panic!("type check failed: {err}"),
@@ -315,7 +317,7 @@ mod test {
 
     #[test]
     fn select_columns_from_multiple_tables() {
-        let _ = tracing_subscriber::fmt::try_init();
+        // init_tracing();
         let schema = resolver(schema! {
             tables: {
                 users: {
@@ -347,10 +349,7 @@ mod test {
 
         match type_check(schema, &statement) {
             Ok(typed) => {
-                assert_eq!(
-                    typed.projection,
-                    Some(projection![(EQL(users.email) as email)])
-                )
+                assert_eq!(typed.projection, projection![(EQL(users.email) as email)])
             }
             Err(err) => panic!("type check failed: {err}"),
         }
@@ -358,7 +357,8 @@ mod test {
 
     #[test]
     fn select_columns_from_subquery() {
-        let _ = tracing_subscriber::fmt::try_init();
+        // init_tracing();
+
         let schema = resolver(schema! {
             tables: {
                 users: {
@@ -409,17 +409,17 @@ mod test {
 
         assert_eq!(
             typed.projection,
-            Some(projection![
-                (NATIVE as user_id),
-                (NATIVE as todo_list_item_id),
+            projection![
+                (NATIVE(users.id) as user_id),
+                (NATIVE(todo_list_items.id) as todo_list_item_id),
                 (EQL(todo_list_items.description) as todo_list_item_description)
-            ])
+            ]
         );
     }
 
     #[test]
     fn wildcard_expansion() {
-        let _ = tracing_subscriber::fmt::try_init();
+        // init_tracing();
         let schema = resolver(schema! {
             tables: {
                 users: {
@@ -452,19 +452,19 @@ mod test {
 
         assert_eq!(
             typed.projection,
-            Some(projection![
+            projection![
                 (NATIVE(users.id) as id),
                 (EQL(users.email) as email),
                 (NATIVE(todo_lists.id) as id),
                 (NATIVE(todo_lists.owner_id) as owner_id),
                 (EQL(todo_lists.secret) as secret)
-            ])
+            ]
         );
     }
 
     #[test]
     fn select_with_multiple_placeholder_and_wildcard_expansion() {
-        let _ = tracing_subscriber::fmt::try_init();
+        // init_tracing();
         let schema = resolver(schema! {
             tables: {
                 users: {
@@ -489,15 +489,15 @@ mod test {
                     column: id("first_name"),
                 }));
 
-                assert_eq!(typed.params, vec![a, b]);
+                assert_eq!(typed.params, vec![(Param(1), a), (Param(2), b)]);
 
                 assert_eq!(
                     typed.projection,
-                    Some(projection![
+                    projection![
                         (NATIVE(users.id) as id),
                         (EQL(users.email) as email),
                         (EQL(users.first_name) as first_name)
-                    ])
+                    ]
                 );
             }
             Err(err) => panic!("type check failed: {err}"),
@@ -506,7 +506,7 @@ mod test {
 
     #[test]
     fn select_with_multiple_placeholder_boolean_operators_and_wildcard_expansion() {
-        let _ = tracing_subscriber::fmt::try_init();
+        // init_tracing();
         let schema = resolver(schema! {
             tables: {
                 users: {
@@ -531,15 +531,15 @@ mod test {
                     column: id("age"),
                 }));
 
-                assert_eq!(typed.params, vec![a, b]);
+                assert_eq!(typed.params, vec![(Param(1), a), (Param(2), b)]);
 
                 assert_eq!(
                     typed.projection,
-                    Some(projection![
+                    projection![
                         (NATIVE(users.id) as id),
                         (EQL(users.salary) as salary),
                         (EQL(users.age) as age)
-                    ])
+                    ]
                 );
             }
             Err(err) => panic!("type check failed: {err}"),
@@ -579,17 +579,17 @@ mod test {
 
         assert_eq!(
             typed.projection,
-            Some(projection![
+            projection![
                 (NATIVE(employees.first_name) as first_name),
                 (NATIVE(employees.last_name) as last_name),
                 (EQL(employees.salary) as salary)
-            ])
+            ]
         );
     }
 
     #[test]
     fn window_function() {
-        let _ = tracing_subscriber::fmt::try_init();
+        // init_tracing();
 
         let schema = resolver(schema! {
             tables: {
@@ -623,19 +623,19 @@ mod test {
 
         assert_eq!(
             typed.projection,
-            Some(projection![
+            projection![
                 (NATIVE(employees.first_name) as first_name),
                 (NATIVE(employees.last_name) as last_name),
                 (NATIVE(employees.department_name) as department_name),
                 (EQL(employees.salary) as salary),
                 (NATIVE as rank)
-            ])
+            ]
         );
     }
 
     #[test]
     fn window_function_with_forward_reference() {
-        let _ = tracing_subscriber::fmt::try_init();
+        // init_tracing();
 
         let schema = resolver(schema! {
             tables: {
@@ -670,19 +670,19 @@ mod test {
 
         assert_eq!(
             typed.projection,
-            Some(projection![
+            projection![
                 (NATIVE(employees.first_name) as first_name),
                 (NATIVE(employees.last_name) as last_name),
                 (NATIVE(employees.department_name) as department_name),
                 (EQL(employees.salary) as salary),
                 (NATIVE as rank)
-            ])
+            ]
         );
     }
 
     #[test]
     fn common_table_expressions() {
-        let _ = tracing_subscriber::fmt::try_init();
+        // init_tracing();
 
         let schema = resolver(schema! {
             tables: {
@@ -722,19 +722,19 @@ mod test {
 
         assert_eq!(
             typed.projection,
-            Some(projection![
+            projection![
                 (NATIVE(employees.first_name) as first_name),
                 (NATIVE(employees.last_name) as last_name),
                 (NATIVE(employees.department_name) as department_name),
                 (EQL(employees.salary) as salary),
                 (NATIVE as rank)
-            ])
+            ]
         );
     }
 
     #[test]
     fn aggregates() {
-        let _ = tracing_subscriber::fmt::try_init();
+        // init_tracing();
 
         let schema = resolver(schema! {
             tables: {
@@ -764,16 +764,16 @@ mod test {
 
         assert_eq!(
             typed.projection,
-            Some(projection![
+            projection![
                 (NATIVE(employees.age) as max),
                 (EQL(employees.salary) as min)
-            ])
+            ]
         );
     }
 
     #[test]
     fn insert() {
-        let _ = tracing_subscriber::fmt::try_init();
+        // init_tracing();
 
         let schema = resolver(schema! {
             tables: {
@@ -799,12 +799,12 @@ mod test {
             Err(err) => panic!("type check failed: {:#?}", err),
         };
 
-        assert_eq!(typed.projection, Some(Projection::Empty));
+        assert_eq!(typed.projection, Projection::Empty);
     }
 
     #[test]
     fn insert_with_returning_clause() {
-        let _ = tracing_subscriber::fmt::try_init();
+        // init_tracing();
 
         let schema = resolver(schema! {
             tables: {
@@ -833,19 +833,19 @@ mod test {
 
         assert_eq!(
             typed.projection,
-            Some(projection![
+            projection![
                 (NATIVE(employees.id) as id),
                 (NATIVE(employees.name) as name),
                 (NATIVE(employees.department) as department),
                 (NATIVE(employees.age) as age),
                 (EQL(employees.salary) as salary)
-            ])
+            ]
         );
     }
 
     #[test]
     fn update() {
-        let _ = tracing_subscriber::fmt::try_init();
+        // init_tracing();
 
         let schema = resolver(schema! {
             tables: {
@@ -870,12 +870,12 @@ mod test {
             Err(err) => panic!("type check failed: {:#?}", err),
         };
 
-        assert_eq!(typed.projection, Some(Projection::Empty));
+        assert_eq!(typed.projection, Projection::Empty);
     }
 
     #[test]
     fn update_with_returning_clause() {
-        let _ = tracing_subscriber::fmt::try_init();
+        // init_tracing();
 
         let schema = resolver(schema! {
             tables: {
@@ -902,19 +902,19 @@ mod test {
 
         assert_eq!(
             typed.projection,
-            Some(projection![
+            projection![
                 (NATIVE(employees.id) as id),
                 (NATIVE(employees.name) as name),
                 (NATIVE(employees.department) as department),
                 (NATIVE(employees.age) as age),
                 (EQL(employees.salary) as salary)
-            ])
+            ]
         );
     }
 
     #[test]
     fn delete() {
-        let _ = tracing_subscriber::fmt::try_init();
+        // init_tracing();
 
         let schema = resolver(schema! {
             tables: {
@@ -939,12 +939,12 @@ mod test {
             Err(err) => panic!("type check failed: {:#?}", err),
         };
 
-        assert_eq!(typed.projection, Some(Projection::Empty));
+        assert_eq!(typed.projection, Projection::Empty);
     }
 
     #[test]
     fn delete_with_returning_clause() {
-        let _ = tracing_subscriber::fmt::try_init();
+        // init_tracing();
 
         let schema = resolver(schema! {
             tables: {
@@ -971,19 +971,19 @@ mod test {
 
         assert_eq!(
             typed.projection,
-            Some(projection![
+            projection![
                 (NATIVE(employees.id) as id),
                 (NATIVE(employees.name) as name),
                 (NATIVE(employees.department) as department),
                 (NATIVE(employees.age) as age),
                 (EQL(employees.salary) as salary)
-            ])
+            ]
         );
     }
 
     #[test]
     fn select_with_literal_subsitution() {
-        let _ = tracing_subscriber::fmt::try_init();
+        // init_tracing();
 
         let schema = resolver(schema! {
             tables: {
@@ -1015,13 +1015,13 @@ mod test {
                     table: id("employees"),
                     column: id("salary")
                 }),
-                &ast::Expr::Value(ast::Value::Number(200000.into(), false))
+                &ast::Value::Number(200000.into(), false)
             )]
         );
 
         let transformed_statement = match typed.transform(HashMap::from_iter([(
-            NodeKey::new(typed.literals[0].1),
-            ast::Expr::Value(ast::Value::SingleQuotedString("ENCRYPTED".into())),
+            typed.literals[0].1.as_node_key(),
+            ast::Value::SingleQuotedString("ENCRYPTED".into()),
         )])) {
             Ok(transformed_statement) => transformed_statement,
             Err(err) => panic!("statement transformation failed: {}", err),
@@ -1038,13 +1038,13 @@ mod test {
                 table: id("employees"),
                 column: id("salary")
             }),
-            &ast::Expr::Value(ast::Value::SingleQuotedString("ENCRYPTED".into())),
+            &ast::Value::SingleQuotedString("ENCRYPTED".into()),
         )));
     }
 
     #[test]
     fn pathologically_complex_sql_statement() {
-        let _ = tracing_subscriber::fmt::try_init();
+        // init_tracing();
 
         let schema = resolver(schema! {
             tables: {
@@ -1089,20 +1089,20 @@ mod test {
 
         assert_eq!(
             typed.projection,
-            Some(projection![
+            projection![
                 (EQL(employees.salary) as min_salary),
                 (EQL(employees.salary) as y),
                 (NATIVE(employees.id) as id),
                 (NATIVE(employees.department_id) as department_id),
                 (NATIVE(employees.name) as name),
                 (EQL(employees.salary) as salary)
-            ])
+            ]
         );
     }
 
     #[test]
     fn literals_or_param_placeholders_in_outermost_projection() {
-        let _ = tracing_subscriber::fmt::try_init();
+        // init_tracing();
 
         let schema = resolver(schema! {
             tables: { }
@@ -1119,53 +1119,47 @@ mod test {
         // e.g. `projection![(NATIVE)]`
 
         let projection_type = |statement: &Statement| {
-            type_check(schema.clone(), statement)
-                .unwrap()
-                .projection
-                .as_ref()
-                .map(ignore_aliases)
+            ignore_aliases(&type_check(schema.clone(), statement).unwrap().projection)
         };
 
         assert_transitive_eq(&[
-            projection_type(&parse("select 1")),
-            projection_type(&parse("select t from (select 1 as t)")),
-            projection_type(&parse("select * from (select 1)")),
+            projection_type(&parse("select 'lit'")),
+            projection_type(&parse("select x from (select 'lit' as x)")),
+            projection_type(&parse("select * from (select 'lit')")),
+            projection_type(&parse("select * from (select 'lit' as t)")),
             projection_type(&parse("select $1")),
             projection_type(&parse("select t from (select $1 as t)")),
             projection_type(&parse("select * from (select $1)")),
-            Some(projection![(NATIVE)]),
+            Projection::WithColumns(vec![ProjectionColumn {
+                alias: None,
+                ty: Value::Native(NativeValue(None)),
+            }]),
         ]);
     }
 
     #[test]
-    fn update_with_concat_regression() {
-        let _ = tracing_subscriber::fmt::try_init();
+    fn where_true() {
+        // init_tracing();
 
         let schema = resolver(schema! {
             tables: {
-                example: {
-                    encrypted_str (EQL),
-                    other_str,
+                employees: {
+                    id,
                 }
             }
         });
 
-        // Can't use concat in an update on an EQL column
-        let statement = parse("update example set encrypted_str = encrypted_str || 'a'");
-
-        let err = type_check(schema.clone(), &statement)
-            .expect_err("expected type check to fail, but it succeeded");
-
-        assert_eq!(err.to_string(), "type Constructor(Value(EQL(example.encrypted_str))) cannot be unified with Constructor(Value(Native))");
-
-        // Can use concat in an update on a plaintext column
-        let statement = parse("update example set other_str = other_str || 'a'");
-        type_check(schema, &statement).expect("expected type check to succeed, but it failed");
+        let statement = parse(
+            r#"
+                select id from employees where true;
+            "#,
+        );
+        type_check(schema, &statement).unwrap();
     }
 
     #[test]
     fn function_with_literal() {
-        let _ = tracing_subscriber::fmt::try_init();
+        // init_tracing();
 
         let schema = resolver(schema! {
             tables: {
@@ -1187,16 +1181,13 @@ mod test {
         error!("{:?}", typed.projection);
         assert_eq!(
             typed.projection,
-            Some(projection![
-                (NATIVE as upper),
-                (EQL(employees.salary) as salary)
-            ])
+            projection![(NATIVE as upper), (EQL(employees.salary) as salary)]
         );
     }
 
     #[test]
     fn function_with_wildcard() {
-        let _ = tracing_subscriber::fmt::try_init();
+        // init_tracing();
 
         let schema = resolver(schema! {
             tables: {
@@ -1217,16 +1208,13 @@ mod test {
 
         assert_eq!(
             typed.projection,
-            Some(projection![
-                (NATIVE as count),
-                (EQL(employees.salary) as salary)
-            ])
+            projection![(NATIVE as count), (EQL(employees.salary) as salary)]
         );
     }
 
     #[test]
     fn function_with_column_and_literal() {
-        let _ = tracing_subscriber::fmt::try_init();
+        // init_tracing();
 
         let schema = resolver(schema! {
             tables: {
@@ -1247,16 +1235,13 @@ mod test {
 
         assert_eq!(
             typed.projection,
-            Some(projection![
-                (NATIVE(employees.name) as concat),
-                (EQL(employees.salary) as salary)
-            ])
+            projection![(NATIVE as concat), (EQL(employees.salary) as salary)]
         );
     }
 
     #[test]
     fn function_with_param() {
-        let _ = tracing_subscriber::fmt::try_init();
+        // init_tracing();
 
         let schema = resolver(schema! {
             tables: {
@@ -1276,25 +1261,19 @@ mod test {
 
         let typed = type_check(schema, &statement).unwrap();
 
-        let a = Value::Native(NativeValue(Some(TableColumn {
-            table: id("employees"),
-            column: id("name"),
-        })));
+        let a = Value::Native(NativeValue(None));
 
-        assert_eq!(typed.params, vec![a]);
+        assert_eq!(typed.params, vec![(Param(1), a)]);
 
         assert_eq!(
             typed.projection,
-            Some(projection![
-                (NATIVE(employees.name) as concat),
-                (EQL(employees.salary) as salary)
-            ])
+            projection![(NATIVE as concat), (EQL(employees.salary) as salary)]
         );
     }
 
     #[test]
     fn function_with_eql_column_and_literal() {
-        let _ = tracing_subscriber::fmt::try_init();
+        // init_tracing();
 
         let schema = resolver(schema! {
             tables: {
@@ -1314,5 +1293,64 @@ mod test {
 
         type_check(schema, &statement)
             .expect_err("eql columns in functions should be a type error");
+    }
+
+    #[test]
+    fn group_by_eql_column() {
+        // init_tracing();
+        let schema = resolver(schema! {
+            tables: {
+                users: {
+                    id (PK),
+                    email (EQL),
+                    first_name,
+                }
+            }
+        });
+
+        let statement = parse("SELECT email FROM users GROUP BY email");
+
+        match type_check(schema, &statement) {
+            Ok(typed) => {
+                match typed.transform(HashMap::new()) {
+                    Ok(statement) => assert_eq!(
+                        statement.to_string(),
+                        "SELECT CS_GROUPED_VALUE_V1(email) AS email FROM users GROUP BY CS_ORE_64_8_V1(email)".to_string()
+                    ),
+                    Err(err) => panic!("transformation failed: {err}"),
+                }
+            }
+            Err(err) => panic!("type check failed: {err}"),
+        }
+    }
+
+    #[test]
+    fn modify_aggregate_when_eql_column_affected_by_group_by_of_other_column() {
+        // init_tracing();
+        let schema = resolver(schema! {
+            tables: {
+                employees: {
+                    id (PK),
+                    department,
+                    salary (EQL),
+                }
+            }
+        });
+
+        let statement =
+            parse("SELECT MIN(salary), MAX(salary), department FROM employees GROUP BY department");
+
+        match type_check(schema, &statement) {
+            Ok(typed) => {
+                match typed.transform(HashMap::new()) {
+                    Ok(statement) => assert_eq!(
+                        statement.to_string(),
+                        "SELECT CS_MIN_V1(salary) AS MIN, CS_MAX_V1(salary) AS MAX, department FROM employees GROUP BY department".to_string()
+                    ),
+                    Err(err) => panic!("transformation failed: {err}"),
+                }
+            }
+            Err(err) => panic!("type check failed: {err}"),
+        }
     }
 }

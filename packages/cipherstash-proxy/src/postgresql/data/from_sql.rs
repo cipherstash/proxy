@@ -11,7 +11,7 @@ use cipherstash_config::ColumnType;
 use postgres_types::FromSql;
 use postgres_types::Type;
 use rust_decimal::Decimal;
-use sqlparser::ast::Value;
+use sqltk_parser::ast::Value;
 use std::str::FromStr;
 use tracing::debug;
 

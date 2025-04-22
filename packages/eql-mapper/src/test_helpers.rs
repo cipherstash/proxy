@@ -1,12 +1,31 @@
 use std::fmt::Debug;
 
-use sqlparser::{
+use sqltk_parser::{
     ast::{self as ast, Statement},
     dialect::PostgreSqlDialect,
     parser::Parser,
 };
+use tracing_subscriber::fmt::format;
+use tracing_subscriber::fmt::format::FmtSpan;
+
+use std::sync::Once;
 
 use crate::{Projection, ProjectionColumn};
+
+#[allow(unused)]
+pub(crate) fn init_tracing() {
+    static INIT: Once = Once::new();
+    INIT.call_once(|| {
+        tracing_subscriber::fmt()
+            .with_max_level(tracing::Level::TRACE)
+            .with_span_events(FmtSpan::ACTIVE)
+            .with_file(true)
+            .event_format(format().pretty())
+            .pretty()
+            .with_test_writer() // ensures it writes to stdout/stderr even during `cargo test`
+            .init();
+    });
+}
 
 pub(crate) fn parse(statement: &'static str) -> Statement {
     Parser::parse_sql(&PostgreSqlDialect {}, statement).unwrap()[0].clone()
@@ -86,7 +105,7 @@ pub fn ignore_aliases(t: &Projection) -> Projection {
                 })
                 .collect(),
         ),
-        Projection::Empty => t.clone(),
+        Projection::Empty => Projection::Empty,
     }
 }
 

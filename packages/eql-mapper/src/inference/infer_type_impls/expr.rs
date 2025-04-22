@@ -2,7 +2,8 @@ use crate::{
     inference::{unifier::Type, InferType, TypeError},
     SqlIdent, TypeInferencer,
 };
-use sqlparser::ast::{BinaryOperator, Expr, Ident};
+
+use sqltk_parser::ast::{Array, BinaryOperator, Expr, Ident};
 
 impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
     fn infer_exit(&mut self, this_expr: &'ast Expr) -> Result<(), TypeError> {
@@ -10,38 +11,28 @@ impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
             // Resolve an identifier using the scope, except if it happens to to be the DEFAULT keyword
             // in which case we resolve it to a fresh type variable.
             Expr::Identifier(ident) => {
-                // sqlparser treats the `DEFAULT` keyword in expression position as an identifier.
-                let ty = if SqlIdent(ident) == SqlIdent(&Ident::new("default")) {
-                    self.fresh_tvar()
+                // sqltk_parser treats the `DEFAULT` keyword in expression position as an identifier.
+                if SqlIdent(ident) == SqlIdent(&Ident::new("default")) {
+                    self.unify_node_with_type(this_expr, self.fresh_tvar())?;
                 } else {
-                    self.scope_tracker.borrow().resolve_ident(ident)?
+                    self.unify_node_with_type(this_expr, self.resolve_ident(ident)?)?;
                 };
-
-                self.unify_node_with_type(this_expr, ty)?;
             }
 
             Expr::CompoundIdentifier(idents) => {
-                self.unify_node_with_type(
-                    this_expr,
-                    self.scope_tracker.borrow().resolve_compound_ident(idents)?,
-                )?;
+                self.unify_node_with_type(this_expr, self.resolve_compound_ident(idents)?)?;
             }
 
             #[allow(unused_variables)]
             Expr::Wildcard => {
-                self.unify_node_with_type(
-                    this_expr,
-                    self.scope_tracker.borrow().resolve_wildcard()?,
-                )?;
+                self.unify_node_with_type(this_expr, self.resolve_wildcard()?)?;
             }
 
             #[allow(unused_variables)]
             Expr::QualifiedWildcard(object_name) => {
                 self.unify_node_with_type(
                     this_expr,
-                    self.scope_tracker
-                        .borrow()
-                        .resolve_qualified_wildcard(&object_name.0)?,
+                    self.resolve_qualified_wildcard(&object_name.0)?,
                 )?;
             }
 
@@ -62,7 +53,7 @@ impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
             | Expr::IsNotUnknown(expr) => {
                 self.unify_node_with_type(
                     this_expr,
-                    self.unify(self.get_type(&**expr), Type::any_native())?,
+                    self.unify(self.get_node_type(&**expr), Type::any_native())?,
                 )?;
             }
 
@@ -79,8 +70,8 @@ impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
                 self.unify_node_with_type(this_expr, Type::any_native())?;
                 self.unify_node_with_type(
                     &**expr,
-                    list.iter().try_fold(self.get_type(&**expr), |a, b| {
-                        self.unify(a, self.get_type(b))
+                    list.iter().try_fold(self.get_node_type(&**expr), |a, b| {
+                        self.unify(a, self.get_node_type(b))
                     })?,
                 )?;
             }
@@ -91,10 +82,8 @@ impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
                 negated: _,
             } => {
                 self.unify_node_with_type(this_expr, Type::any_native())?;
-                self.unify_node_with_type(
-                    &**subquery,
-                    Type::projection(&[(self.get_type(&**expr), None)]),
-                )?;
+                let ty = Type::projection(&[(self.get_node_type(&**expr), None)]);
+                self.unify_node_with_type(&**subquery, ty)?;
             }
 
             Expr::InUnnest { .. } => {
@@ -331,8 +320,9 @@ impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
                 self.unify_nodes(this_expr, &**expr)?;
             }
 
-            // We do not need to look at a value to determine the type of the expression.
-            Expr::Value(_) => {}
+            Expr::Value(value) => {
+                self.unify_nodes(this_expr, value)?;
+            }
 
             Expr::IntroducedString { .. } => Err(TypeError::UnsupportedSqlFeature(
                 "MySQL charset introducer".into(),
@@ -351,7 +341,7 @@ impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
 
             // The return type of this function and the return type of this expression must be the same type.
             Expr::Function(function) => {
-                self.unify_node_with_type(this_expr, self.get_type(function))?;
+                self.unify_node_with_type(this_expr, self.get_node_type(function))?;
             }
 
             // When operand is Some(operand), all conditions must be of type expr and expr must support equality
@@ -366,6 +356,7 @@ impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
             } => {
                 match operand {
                     Some(operand) => {
+                        // type_rule!( operand: $1, conditions: [$1], this_expr: $1 )
                         self.unify_nodes_with_type(
                             this_expr,
                             &**operand,
@@ -373,10 +364,12 @@ impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
                         )?;
                     }
                     None => {
+                        // type_rule!( conditions: [NATIVE] )
                         self.unify_all_with_type(conditions, Type::any_native())?;
                     }
                 }
 
+                // type_rule!( results: [$1], else_result?: $1, this_expr: $1)
                 self.unify_all_with_type(results, self.fresh_tvar())?;
 
                 if let Some(else_result) = else_result {
@@ -428,18 +421,24 @@ impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
             // `expr` must be an array
             // `self.get_type(this_expr)` must be the same as the array element type
             Expr::Subscript { expr, subscript: _ } => {
-                let elem_type = self.fresh_tvar();
-                self.unify_node_with_type(&**expr, Type::array(elem_type.clone()))?;
-                self.unify_node_with_type(this_expr, elem_type)?;
+                // type_rule!( expr: Array($T), this_expr: $T, subscript: Native )
+                let elem_ty = self.fresh_tvar();
+                let array_ty = Type::array(elem_ty.clone());
+                self.unify_node_with_type(&**expr, array_ty)?;
+                self.unify_node_with_type(this_expr, elem_ty)?;
             }
 
-            Expr::Array(array) => {
+            Expr::Array(Array { elem, named: false }) => {
                 // Constrain all elements of the array to be the same type.
-                self.unify_node_with_type(
-                    this_expr,
-                    Type::array(self.unify_all_with_type(&array.elem, self.fresh_tvar())?),
-                )?;
+                let elem_ty = self.unify_all_with_type(elem, self.fresh_tvar())?;
+                let array_ty = Type::array(elem_ty);
+                self.unify_node_with_type(this_expr, array_ty)?;
             }
+
+            Expr::Array(Array {
+                elem: _,
+                named: true,
+            }) => Err(TypeError::UnsupportedSqlFeature("named arrays".to_string()))?,
 
             // interval is unmapped, value is unmapped
             Expr::Interval(interval) => {

@@ -4,7 +4,7 @@ use crate::error::Error;
 use crate::{connect, log::SCHEMA};
 use arc_swap::ArcSwap;
 use eql_mapper::{Column, Schema, Table};
-use sqlparser::ast::Ident;
+use sqltk_parser::ast::Ident;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::{task::JoinHandle, time};

@@ -1,4 +1,4 @@
-use sqlparser::ast::Delete;
+use sqltk_parser::ast::Delete;
 
 use crate::{
     inference::unifier::Type,
