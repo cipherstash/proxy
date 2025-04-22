@@ -1,3 +1,4 @@
+use eql_mapper_macros::trace_infer;
 use sqltk_parser::ast::SelectItem;
 
 use crate::{
@@ -5,6 +6,7 @@ use crate::{
     TypeInferencer,
 };
 
+#[trace_infer]
 impl<'ast> InferType<'ast, SelectItem> for TypeInferencer<'ast> {
     fn infer_exit(&mut self, select_item: &'ast SelectItem) -> Result<(), TypeError> {
         match select_item {

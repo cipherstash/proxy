@@ -60,6 +60,10 @@ impl<'ast> TypeRegistry<'ast> {
         self.substitutions.get(&tvar).cloned()
     }
 
+    pub(crate) fn get_substititions(&self) -> HashMap<TypeVar, Arc<Type>> {
+        self.substitutions.clone()
+    }
+
     pub(crate) fn get_param_type(&mut self, param: &'ast String) -> Arc<Type> {
         self.get_or_init_param_type(param)
     }
@@ -156,10 +160,6 @@ impl<'ast> TypeRegistry<'ast> {
     }
 
     pub(crate) fn fresh_tvar(&mut self) -> TypeVar {
-        let next = self.tvar_seq.next_value();
-        if next == TypeVar(3) {
-            println!("WAT");
-        }
-        next
+        self.tvar_seq.next_value()
     }
 }

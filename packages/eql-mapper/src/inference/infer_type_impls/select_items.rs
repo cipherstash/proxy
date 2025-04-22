@@ -1,3 +1,4 @@
+use eql_mapper_macros::trace_infer;
 use sqltk_parser::ast::{Expr, Function, SelectItem, WildcardAdditionalOptions};
 
 use crate::{
@@ -6,6 +7,7 @@ use crate::{
     TypeInferencer,
 };
 
+#[trace_infer]
 impl<'ast> InferType<'ast, Vec<SelectItem>> for TypeInferencer<'ast> {
     fn infer_exit(&mut self, select_items: &'ast Vec<SelectItem>) -> Result<(), TypeError> {
         let projection_columns: Vec<ProjectionColumn> = select_items

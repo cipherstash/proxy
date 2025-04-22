@@ -1,4 +1,4 @@
-use std::{cell::RefCell, rc::Rc, sync::Arc};
+use std::{cell::RefCell, collections::HashMap, rc::Rc, sync::Arc};
 
 mod types;
 
@@ -10,6 +10,7 @@ pub(crate) use types::*;
 pub use types::{EqlValue, NativeValue, TableColumn};
 
 use super::TypeRegistry;
+use tracing::{event, instrument, Level};
 
 /// Implements the type unification algorithm and maintains an association of type variables with the type that they
 /// point to.
@@ -28,6 +29,10 @@ impl<'ast> Unifier<'ast> {
 
     pub(crate) fn fresh_tvar(&self) -> Arc<Type> {
         Type::Var(self.registry.borrow_mut().fresh_tvar()).into()
+    }
+
+    pub(crate) fn get_substitutions(&self) -> HashMap<TypeVar, Arc<Type>> {
+        self.registry.borrow().get_substititions()
     }
 
     /// Looks up a previously registered [`Type`] by its [`TypeVar`].
@@ -73,6 +78,13 @@ impl<'ast> Unifier<'ast> {
     }
 
     pub(crate) fn substitute(&mut self, tvar: TypeVar, sub_ty: Arc<Type>) -> Arc<Type> {
+        event!(
+            target: "eql-mapper::EVENT_SUBSTITUTE",
+            Level::TRACE,
+            tvar = %tvar,
+            sub_ty = %sub_ty,
+        );
+
         self.registry.borrow_mut().substitute(tvar, sub_ty)
     }
 
@@ -85,6 +97,17 @@ impl<'ast> Unifier<'ast> {
     /// dangling type variables).
     ///
     /// Returns `Ok(ty)` if successful, or `Err(TypeError)` on failure.
+    #[instrument(
+        target = "eql-mapper::UNIFY",
+        skip(self),
+        level = "trace",
+        ret(Display),
+        err(Debug),
+        fields(
+            lhs = %lhs,
+            rhs = %rhs,
+        )
+    )]
     pub(crate) fn unify(&mut self, lhs: Arc<Type>, rhs: Arc<Type>) -> Result<Arc<Type>, TypeError> {
         use types::Constructor::*;
         use types::Value::*;
@@ -97,9 +120,7 @@ impl<'ast> Unifier<'ast> {
             return Ok(lhs.clone());
         }
 
-        
-
-        match (&*lhs, &*rhs) {
+        let unification = match (&*lhs, &*rhs) {
             // Two projections unify if they have the same number of columns and all of the paired column types also
             // unify.
             (Type::Constructor(Projection(_)), Type::Constructor(Projection(_))) => {
@@ -183,6 +204,29 @@ impl<'ast> Unifier<'ast> {
                 "type {} cannot be unified with {}",
                 lhs, rhs
             ))),
+        };
+
+        match unification {
+            Ok(ty) => {
+                event!(
+                    name: "UNIFY::OK",
+                    target: "eql-mapper::EVENT_UNIFY_OK",
+                    Level::TRACE,
+                    ty = %ty,
+                );
+
+                Ok(ty)
+            }
+            Err(err) => {
+                event!(
+                    name: "UNIFY::ERR",
+                    target: "eql-mapper::EVENT_UNIFY_ERR",
+                    Level::TRACE,
+                    err = ?&err
+                );
+
+                Err(err)
+            }
         }
     }
 
@@ -292,6 +336,118 @@ impl<'ast> Unifier<'ast> {
                 "value type {} cannot be unified with single column projection of {}",
                 value_ty, projection_ty
             ))),
+        }
+    }
+}
+
+pub(crate) mod test_util {
+    use sqltk::{AsNodeKey, Break, Visitable, Visitor};
+    use sqltk_parser::ast::{
+        Delete, Expr, Function, FunctionArguments, Insert, Query, Select, SelectItem, SetExpr,
+        Statement, Value, Values,
+    };
+    use std::{any::type_name, convert::Infallible, fmt::Debug, ops::ControlFlow};
+    use tracing::{event, Level};
+
+    use crate::unifier::Unifier;
+
+    use std::fmt::Display;
+
+    impl<'ast> super::Unifier<'ast> {
+        pub(crate) fn dump_substitutions(&self) {
+            for (tvar, ty) in self.get_substitutions().iter() {
+                event!(
+                    target: "eql-mapper::DUMP_SUB",
+                    Level::TRACE,
+                    sub = format!("{} => {}", tvar, ty)
+                );
+            }
+        }
+
+        /// Dumps the type information for a specific AST node to STDERR.
+        ///
+        /// Useful when debugging tests.
+        pub(crate) fn dump_node<N: AsNodeKey + Display + AsNodeKey + Debug>(&self, node: &'ast N) {
+            let root_ty = self.get_node_type(node).clone();
+            let found_ty = root_ty.clone().follow_tvars(self);
+            let ast_ty = type_name::<N>();
+
+            event!(
+                target: "eql-mapper::DUMP_NODE",
+                Level::TRACE,
+                ast_ty = ast_ty,
+                node = %node,
+                root_ty = %root_ty,
+                found_ty = %found_ty
+            );
+        }
+
+        /// Dumps the type information for all nodes visited so far to STDERR.
+        ///
+        /// Useful when debugging tests.
+        pub(crate) fn dump_all_nodes<N: Visitable>(&self, root_node: &'ast N) {
+            struct FindNodeFromKeyVisitor<'a, 'ast>(&'a Unifier<'ast>);
+
+            impl<'ast> Visitor<'ast> for FindNodeFromKeyVisitor<'_, 'ast> {
+                type Error = Infallible;
+
+                fn enter<N: Visitable>(
+                    &mut self,
+                    node: &'ast N,
+                ) -> ControlFlow<Break<Self::Error>> {
+                    if let Some(node) = node.downcast_ref::<Statement>() {
+                        self.0.dump_node(node);
+                    }
+
+                    if let Some(node) = node.downcast_ref::<Query>() {
+                        self.0.dump_node(node);
+                    }
+
+                    if let Some(node) = node.downcast_ref::<Insert>() {
+                        self.0.dump_node(node);
+                    }
+
+                    if let Some(node) = node.downcast_ref::<Delete>() {
+                        self.0.dump_node(node);
+                    }
+
+                    if let Some(node) = node.downcast_ref::<Expr>() {
+                        self.0.dump_node(node);
+                    }
+
+                    if let Some(node) = node.downcast_ref::<SetExpr>() {
+                        self.0.dump_node(node);
+                    }
+
+                    if let Some(node) = node.downcast_ref::<Select>() {
+                        self.0.dump_node(node);
+                    }
+
+                    if let Some(node) = node.downcast_ref::<SelectItem>() {
+                        self.0.dump_node(node);
+                    }
+
+                    if let Some(node) = node.downcast_ref::<Function>() {
+                        self.0.dump_node(node);
+                    }
+
+                    if let Some(node) = node.downcast_ref::<FunctionArguments>() {
+                        self.0.dump_node(node);
+                    }
+
+                    if let Some(node) = node.downcast_ref::<Values>() {
+                        self.0.dump_node(node);
+                    }
+
+                    if let Some(node) = node.downcast_ref::<Value>() {
+                        self.0.dump_node(node);
+                    }
+
+                    ControlFlow::Continue(())
+                }
+            }
+
+            root_node.accept(&mut FindNodeFromKeyVisitor(self));
         }
     }
 }
