@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1745303796046,
+  "lastUpdate": 1745324173453,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -577,6 +577,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 7.24965,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "2e23096fb8dc36dc8fb1b25ff3d8c747435f29c8",
+          "message": "feat: SQL transformations related to `GROUP BY`",
+          "timestamp": "2025-04-17T10:52:03Z",
+          "url": "https://github.com/cipherstash/proxy/pull/209/commits/2e23096fb8dc36dc8fb1b25ff3d8c747435f29c8"
+        },
+        "date": 1745324172366,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 7.184274,
             "unit": "Number"
           }
         ]
