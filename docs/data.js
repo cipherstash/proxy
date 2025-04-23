@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1745366473948,
+  "lastUpdate": 1745370514855,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -652,6 +652,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 6.903168,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "toby@cipherstash.com",
+            "name": "Toby Hede",
+            "username": "tobyhede"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "71a6655ec11c9b0534b7f1e7ccd0dc4b00ad7f30",
+          "message": "Merge pull request #210 from cipherstash/update-deps\n\nUpdate various dependencies",
+          "timestamp": "2025-04-23T11:05:48+10:00",
+          "tree_id": "02cb0c458f155c73d666f1577beb2e69be6abdb3",
+          "url": "https://github.com/cipherstash/proxy/commit/71a6655ec11c9b0534b7f1e7ccd0dc4b00ad7f30"
+        },
+        "date": 1745370513361,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 6.981841,
             "unit": "Number"
           }
         ]
