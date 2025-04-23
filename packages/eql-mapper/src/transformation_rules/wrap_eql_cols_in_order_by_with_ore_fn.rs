@@ -39,24 +39,34 @@ impl<'ast> TransformationRule<'ast> for WrapEqlColsInOrderByWithOreFn<'ast> {
         &mut self,
         node_path: &NodePath<'ast>,
         target_node: &mut N,
-    ) -> Result<(), EqlMapperError> {
+    ) -> Result<bool, EqlMapperError> {
+        if self.would_edit(node_path, target_node) {
+            if let Some((_order_by_expr,)) = node_path.last_1_as::<OrderByExpr>() {
+                let target_node = target_node.downcast_mut::<OrderByExpr>().unwrap();
+
+                let expr_to_wrap = mem::replace(&mut target_node.expr, Expr::Wildcard);
+
+                target_node.expr = wrap_in_1_arg_function(
+                    expr_to_wrap,
+                    ObjectName(vec![Ident::new("CS_ORE_64_8_V1")]),
+                );
+
+                return Ok(true);
+            }
+        }
+
+        Ok(false)
+    }
+
+    fn would_edit<N: Visitable>(&mut self, node_path: &NodePath<'ast>, _target_node: &N) -> bool {
         if let Some((order_by_expr,)) = node_path.last_1_as::<OrderByExpr>() {
             let node_key = NodeKey::new(&order_by_expr.expr);
 
             if let Some(ty) = self.node_types.get(&node_key) {
-                if matches!(ty, Type::Value(Value::Eql(_))) {
-                    let target_node = target_node.downcast_mut::<OrderByExpr>().unwrap();
-
-                    let expr_to_wrap = mem::replace(&mut target_node.expr, Expr::Wildcard);
-
-                    target_node.expr = wrap_in_1_arg_function(
-                        expr_to_wrap,
-                        ObjectName(vec![Ident::new("CS_ORE_64_8_V1")]),
-                    );
-                }
+                return matches!(ty, Type::Value(Value::Eql(_)));
             }
         }
 
-        Ok(())
+        false
     }
 }

@@ -26,11 +26,11 @@ use crate::prometheus::{
 use crate::Encrypted;
 use bytes::BytesMut;
 use cipherstash_client::encryption::Plaintext;
-use eql_mapper::{self, EqlMapperError, EqlValue, TableColumn, TypedStatement};
+use eql_mapper::{self, EqlMapperError, EqlValue, TableColumn, TypeCheckedStatement};
 use metrics::{counter, histogram};
 use pg_escape::quote_literal;
 use serde::Serialize;
-use sqltk::AsNodeKey;
+use sqltk::NodeKey;
 use sqltk_parser::ast::{self, Value};
 use sqltk_parser::dialect::PostgreSqlDialect;
 use sqltk_parser::parser::Parser;
@@ -286,22 +286,23 @@ where
 
             match self.to_encryptable_statement(&typed_statement, vec![])? {
                 Some(statement) => {
-                    let encrypted_literals = self
-                        .encrypt_literals(&typed_statement, &statement.literal_columns)
-                        .await?;
+                    if typed_statement.requires_transform() {
+                        let encrypted_literals = self
+                            .encrypt_literals(&typed_statement, &statement.literal_columns)
+                            .await?;
 
-                    if let Some(transformed_statement) = self
-                        .transform_statement(&typed_statement, &encrypted_literals)
-                        .await?
-                    {
-                        debug!(target: MAPPER,
-                            client_id = self.context.client_id,
-                            transformed_statement = ?transformed_statement,
-                            transformed_statement_text = %transformed_statement,
-                        );
+                        if let Some(transformed_statement) = self
+                            .transform_statement(&typed_statement, &encrypted_literals)
+                            .await?
+                        {
+                            debug!(target: MAPPER,
+                                client_id = self.context.client_id,
+                                transformed_statement = ?transformed_statement,
+                            );
 
-                        transformed_statements.push(transformed_statement);
-                        encrypted = true;
+                            transformed_statements.push(transformed_statement);
+                            encrypted = true;
+                        }
                     }
                     debug!(target: MAPPER,
                         client_id = self.context.client_id,
@@ -356,7 +357,7 @@ where
     ///
     async fn encrypt_literals(
         &mut self,
-        typed_statement: &TypedStatement<'_>,
+        typed_statement: &TypeCheckedStatement<'_>,
         literal_columns: &Vec<Option<Column>>,
     ) -> Result<Vec<Option<Encrypted>>, Error> {
         let literal_values = typed_statement.literal_values();
@@ -402,14 +403,14 @@ where
     ///
     async fn transform_statement(
         &mut self,
-        typed_statement: &TypedStatement<'_>,
+        typed_statement: &TypeCheckedStatement<'_>,
         encrypted_literals: &Vec<Option<Encrypted>>,
     ) -> Result<Option<ast::Statement>, Error> {
         // Convert literals to ast Expr
         let mut encrypted_expressions = vec![];
         for encrypted in encrypted_literals {
             let e = match encrypted {
-                Some(en) => Some(to_json_literal_expr(&en)?),
+                Some(en) => Some(to_json_literal_value(&en)?),
                 None => None,
             };
             encrypted_expressions.push(e);
@@ -421,13 +422,17 @@ where
             .literals
             .iter()
             .zip(encrypted_expressions.into_iter())
-            .filter_map(|((_, original_node), en)| en.map(|en| (original_node.as_node_key(), en)))
+            .filter_map(|((_, original_node), en)| en.map(|en| (NodeKey::new(*original_node), en)))
             .collect::<HashMap<_, _>>();
 
         debug!(target: MAPPER,
             client_id = self.context.client_id,
             literals = encrypted_nodes.len(),
         );
+
+        if !typed_statement.requires_transform() {
+            return Ok(None);
+        }
 
         let transformed_statement = typed_statement
             .transform(encrypted_nodes)
@@ -495,21 +500,22 @@ where
 
         match self.to_encryptable_statement(&typed_statement, param_types)? {
             Some(statement) => {
-                let encrypted_literals = self
-                    .encrypt_literals(&typed_statement, &statement.literal_columns)
-                    .await?;
+                if typed_statement.requires_transform() {
+                    let encrypted_literals = self
+                        .encrypt_literals(&typed_statement, &statement.literal_columns)
+                        .await?;
 
-                if let Some(transformed_statement) = self
-                    .transform_statement(&typed_statement, &encrypted_literals)
-                    .await?
-                {
-                    debug!(target: MAPPER,
-                        client_id = self.context.client_id,
-                        transformed_statement = ?transformed_statement,
-                        transformed_statement_text = %transformed_statement,
-                    );
+                    if let Some(transformed_statement) = self
+                        .transform_statement(&typed_statement, &encrypted_literals)
+                        .await?
+                    {
+                        debug!(target: MAPPER,
+                            client_id = self.context.client_id,
+                            transformed_statement = ?transformed_statement,
+                        );
 
-                    message.rewrite_statement(transformed_statement.to_string());
+                        message.rewrite_statement(transformed_statement.to_string());
+                    }
                 }
 
                 counter!(STATEMENTS_ENCRYPTED_TOTAL).increment(1);
@@ -526,14 +532,19 @@ where
                 counter!(STATEMENTS_PASSTHROUGH_TOTAL).increment(1);
             }
         }
-        let bytes = BytesMut::try_from(message)?;
 
-        debug!(target: MAPPER,
+        if message.requires_rewrite() {
+            let bytes = BytesMut::try_from(message)?;
+
+            debug!(target: MAPPER,
                 client_id = self.context.client_id,
                 msg = "Rewrite Parse",
                 bytes = ?bytes);
 
-        Ok(Some(bytes))
+            Ok(Some(bytes))
+        } else {
+            Ok(None)
+        }
     }
 
     ///
@@ -596,12 +607,22 @@ where
     ///
     fn to_encryptable_statement(
         &self,
-        typed_statement: &TypedStatement<'_>,
+        typed_statement: &TypeCheckedStatement<'_>,
         param_types: Vec<i32>,
     ) -> Result<Option<Statement>, Error> {
         let param_columns = self.get_param_columns(typed_statement)?;
         let projection_columns = self.get_projection_columns(typed_statement)?;
         let literal_columns = self.get_literal_columns(typed_statement)?;
+
+        let no_encrypted_param_columns = param_columns.iter().all(|c| c.is_none());
+        let no_encrypted_projection_columns = projection_columns.iter().all(|c| c.is_none());
+
+        if (param_columns.is_empty() || no_encrypted_param_columns)
+            && (projection_columns.is_empty() || no_encrypted_projection_columns)
+            && !typed_statement.requires_transform()
+        {
+            return Ok(None);
+        }
 
         debug!(target: MAPPER,
             client_id = self.context.client_id,
@@ -713,7 +734,10 @@ where
         Ok(encrypted)
     }
 
-    fn type_check<'a>(&self, statement: &'a ast::Statement) -> Result<TypedStatement<'a>, Error> {
+    fn type_check<'a>(
+        &self,
+        statement: &'a ast::Statement,
+    ) -> Result<TypeCheckedStatement<'a>, Error> {
         match eql_mapper::type_check(self.context.get_table_resolver(), statement) {
             Ok(typed_statement) => {
                 debug!(target: MAPPER,
@@ -756,7 +780,7 @@ where
     ///
     fn get_projection_columns(
         &self,
-        typed_statement: &eql_mapper::TypedStatement<'_>,
+        typed_statement: &eql_mapper::TypeCheckedStatement<'_>,
     ) -> Result<Vec<Option<Column>>, Error> {
         let mut projection_columns = vec![];
         if let eql_mapper::Projection::WithColumns(columns) = &typed_statement.projection {
@@ -791,7 +815,7 @@ where
     ///
     fn get_param_columns(
         &self,
-        typed_statement: &eql_mapper::TypedStatement<'_>,
+        typed_statement: &eql_mapper::TypeCheckedStatement<'_>,
     ) -> Result<Vec<Option<Column>>, Error> {
         let mut param_columns = vec![];
 
@@ -819,7 +843,7 @@ where
 
     fn get_literal_columns(
         &self,
-        typed_statement: &eql_mapper::TypedStatement<'_>,
+        typed_statement: &eql_mapper::TypeCheckedStatement<'_>,
     ) -> Result<Vec<Option<Column>>, Error> {
         let mut literal_columns = vec![];
 
@@ -945,7 +969,7 @@ fn literals_to_plaintext(
     Ok(plaintexts)
 }
 
-fn to_json_literal_expr<T>(literal: &T) -> Result<Value, Error>
+fn to_json_literal_value<T>(literal: &T) -> Result<Value, Error>
 where
     T: ?Sized + Serialize,
 {

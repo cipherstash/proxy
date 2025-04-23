@@ -23,15 +23,25 @@ impl<'ast> TransformationRule<'ast> for ReplacePlaintextEqlLiterals<'ast> {
         &mut self,
         node_path: &NodePath<'ast>,
         target_node: &mut N,
-    ) -> Result<(), EqlMapperError> {
-        if let Some((value,)) = node_path.last_1_as::<Value>() {
-            if let Some(replacement) = self.encrypted_literals.remove(&NodeKey::new(value)) {
-                let target_node = target_node.downcast_mut::<Value>().unwrap();
-                *target_node = replacement;
+    ) -> Result<bool, EqlMapperError> {
+        if self.would_edit(node_path, target_node) {
+            if let Some((value,)) = node_path.last_1_as::<Value>() {
+                if let Some(replacement) = self.encrypted_literals.remove(&NodeKey::new(value)) {
+                    let target_node = target_node.downcast_mut::<Value>().unwrap();
+                    *target_node = replacement;
+                    return Ok(true);
+                }
             }
         }
 
-        Ok(())
+        Ok(false)
+    }
+
+    fn would_edit<N: Visitable>(&mut self, node_path: &NodePath<'ast>, _target_node: &N) -> bool {
+        if let Some((value,)) = node_path.last_1_as::<Value>() {
+            return self.encrypted_literals.contains_key(&NodeKey::new(value));
+        }
+        false
     }
 
     fn check_postcondition(&self) -> Result<(), EqlMapperError> {

@@ -1,6 +1,7 @@
 use crate::{postgresql::Column, Identifier};
 use bytes::BytesMut;
 use cipherstash_client::encryption;
+use eql_mapper::EqlMapperError;
 use metrics_exporter_prometheus::BuildError;
 use std::{io, time::Duration};
 use thiserror::Error;
@@ -92,6 +93,9 @@ pub enum MappingError {
 
     #[error("Statement encountered an internal error. This may be a bug in the statement mapping module of CipherStash Proxy. Please visit {}#mapping-internal-error for more information.", ERROR_DOC_BASE_URL)]
     Internal(String),
+
+    #[error(transparent)]
+    EqlMapper(#[from] EqlMapperError),
 }
 
 #[derive(Error, Debug)]

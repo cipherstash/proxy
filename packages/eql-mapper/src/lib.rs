@@ -2,7 +2,6 @@
 
 mod dep;
 mod display_helpers;
-mod encrypted_statement;
 mod eql_mapper;
 mod importer;
 mod inference;
@@ -11,7 +10,7 @@ mod model;
 mod param;
 mod scope_tracker;
 mod transformation_rules;
-mod typed_statement;
+mod type_checked_statement;
 
 #[cfg(test)]
 mod test_helpers;
@@ -20,11 +19,10 @@ pub use display_helpers::*;
 pub use eql_mapper::*;
 pub use model::*;
 pub use param::*;
-pub use typed_statement::*;
+pub use type_checked_statement::*;
 pub use unifier::{EqlValue, NativeValue, TableColumn};
 
 pub(crate) use dep::*;
-pub(crate) use encrypted_statement::*;
 pub(crate) use inference::*;
 pub(crate) use scope_tracker::*;
 pub(crate) use transformation_rules::*;

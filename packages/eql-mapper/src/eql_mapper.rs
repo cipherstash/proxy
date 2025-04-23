@@ -2,8 +2,8 @@ use super::importer::{ImportError, Importer};
 use crate::{
     inference::{TypeError, TypeInferencer},
     unifier::{EqlValue, Unifier},
-    DepMut, Fmt, Param, ParamError, ScopeError, ScopeTracker, TableResolver, Type, TypeRegistry,
-    TypedStatement, Value,
+    DepMut, Fmt, Param, ParamError, ScopeError, ScopeTracker, TableResolver, Type,
+    TypeCheckedStatement, TypeRegistry, Value,
 };
 use sqltk::{Break, NodeKey, Visitable, Visitor};
 use sqltk_parser::ast::{self as ast, Statement};
@@ -22,11 +22,11 @@ use tracing::{event, span, Level};
 /// - all operators and functions used with literals destined to be transformed to EQL types are semantically valid for
 ///   that EQL type
 ///
-/// A successful type check will return a [`TypedStatement`] which can be interrogated to discover the required params
+/// A successful type check will return a [`TypeCheckedStatement`] which can be interrogated to discover the required params
 /// and their types, the types and plaintext values of all literals, and an optional projection type (the optionality
 /// depending on the specific statement).
 ///
-/// Invoking [`TypedStatement::transform`] will return an updated [`Statement`] where all plaintext literals have been
+/// Invoking [`TypeCheckedStatement::transform`] will return an updated [`Statement`] where all plaintext literals have been
 /// replaced with their EQL (encrypted) equivalent and specific SQL operators and functions will have been rewritten to
 /// invoke the EQL equivalents.
 ///
@@ -34,7 +34,7 @@ use tracing::{event, span, Level};
 pub fn type_check<'ast>(
     resolver: Arc<TableResolver>,
     statement: &'ast Statement,
-) -> Result<TypedStatement<'ast>, EqlMapperError> {
+) -> Result<TypeCheckedStatement<'ast>, EqlMapperError> {
     let mut mapper = EqlMapper::<'ast>::new_with_resolver(resolver);
     match statement.accept(&mut mapper) {
         ControlFlow::Continue(()) => mapper.resolve(statement),
@@ -137,7 +137,7 @@ impl<'ast> EqlMapper<'ast> {
     pub fn resolve(
         self,
         statement: &'ast Statement,
-    ) -> Result<TypedStatement<'ast>, EqlMapperError> {
+    ) -> Result<TypeCheckedStatement<'ast>, EqlMapperError> {
         let span_begin = span!(
             target: "eqlmapper::spans",
             Level::TRACE,
@@ -169,7 +169,7 @@ impl<'ast> EqlMapper<'ast> {
                     node_types = %Fmt(&node_types)
                 );
 
-                Ok(TypedStatement {
+                Ok(TypeCheckedStatement {
                     statement,
                     projection,
                     params,

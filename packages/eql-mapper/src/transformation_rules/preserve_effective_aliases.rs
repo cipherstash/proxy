@@ -7,8 +7,8 @@ use crate::EqlMapperError;
 
 use super::TransformationRule;
 
-/// [`Rule`] that ensures that a [`SelectItem`] has the same *effective* alias after EQL mapping that it had before EQL
-/// mapping primarily so that we do not break existing database clients (e.g. ORMs) which expect specific columns to be
+/// Ensures that a [`SelectItem`] has the same *effective* alias after EQL mapping that it had before EQL mapping
+/// primarily so that we do not break existing database clients (e.g. ORMs) which expect specific columns to be
 /// returned, but also we need to not break expected projection column names between outer queries and subqueries.
 ///
 /// # Definitions:
@@ -41,23 +41,58 @@ impl<'ast> TransformationRule<'ast> for PreserveEffectiveAliases {
         &mut self,
         node_path: &NodePath<'ast>,
         target_node: &mut N,
-    ) -> Result<(), EqlMapperError> {
+    ) -> Result<bool, EqlMapperError> {
+        if self.would_edit(node_path, target_node) {
+            if let Some((_select, _select_items, select_item)) =
+                node_path.last_3_as::<Select, Vec<SelectItem>, SelectItem>()
+            {
+                let target_node = target_node.downcast_mut::<SelectItem>().unwrap();
+                return Ok(Self::preserve_effective_alias_of_select_item(
+                    select_item,
+                    target_node,
+                ));
+            }
+        }
+
+        Ok(false)
+    }
+
+    fn would_edit<N: Visitable>(&mut self, node_path: &NodePath<'ast>, target_node: &N) -> bool {
         if let Some((_select, _select_items, select_item)) =
             node_path.last_3_as::<Select, Vec<SelectItem>, SelectItem>()
         {
-            let target_node = target_node.downcast_mut::<SelectItem>().unwrap();
-            Self::preserve_effective_alias_of_select_item(select_item, target_node);
+            let target_node = target_node.downcast_ref::<SelectItem>().unwrap();
+            return Self::effective_aliases_differ(select_item, target_node);
         }
-
-        Ok(())
+        false
     }
 }
 
 impl PreserveEffectiveAliases {
+    fn effective_aliases_differ(source_node: &SelectItem, target_node: &SelectItem) -> bool {
+        let effective_source_alias = Self::derive_effective_alias(source_node);
+        let effective_target_alias = Self::derive_effective_alias(target_node);
+        match target_node {
+            // The captured binding `expr` has type `&mut Expr` but we need an owned `Expr`.  to avoid cloning `expr`
+            // (which can be arbitrarily large) we replace it with another which in return provides us with ownership of
+            // the original value. `Expr::Wildcard` is chosen as the throwaway value because it's cheap.
+            SelectItem::UnnamedExpr(_) => {
+                if let (Some(effective_target_alias), Some(effective_source_alias)) =
+                    (effective_target_alias, effective_source_alias)
+                {
+                    return effective_target_alias != effective_source_alias;
+                }
+            }
+            _ => {}
+        }
+
+        false
+    }
+
     fn preserve_effective_alias_of_select_item(
         source_node: &SelectItem,
         target_node: &mut SelectItem,
-    ) {
+    ) -> bool {
         let effective_source_alias = Self::derive_effective_alias(source_node);
         let effective_target_alias = Self::derive_effective_alias(target_node);
         match target_node {
@@ -72,12 +107,16 @@ impl PreserveEffectiveAliases {
                         *target_node = SelectItem::ExprWithAlias {
                             expr: mem::replace(expr, Expr::Wildcard),
                             alias: effective_source_alias,
-                        }
+                        };
+
+                        return true;
                     }
                 }
             }
             _ => {}
         }
+
+        false
     }
 
     fn derive_effective_alias(node: &SelectItem) -> Option<Ident> {
