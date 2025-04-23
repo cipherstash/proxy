@@ -286,23 +286,22 @@ where
 
             match self.to_encryptable_statement(&typed_statement, vec![])? {
                 Some(statement) => {
-                    if statement.has_literals() {
-                        let encrypted_literals = self
-                            .encrypt_literals(&typed_statement, &statement.literal_columns)
-                            .await?;
+                    let encrypted_literals = self
+                        .encrypt_literals(&typed_statement, &statement.literal_columns)
+                        .await?;
 
-                        if let Some(transformed_statement) = self
-                            .transform_statement(&typed_statement, &encrypted_literals)
-                            .await?
-                        {
-                            debug!(target: MAPPER,
-                                client_id = self.context.client_id,
-                                transformed_statement = ?transformed_statement,
-                            );
+                    if let Some(transformed_statement) = self
+                        .transform_statement(&typed_statement, &encrypted_literals)
+                        .await?
+                    {
+                        debug!(target: MAPPER,
+                            client_id = self.context.client_id,
+                            transformed_statement = ?transformed_statement,
+                            transformed_statement_text = %transformed_statement,
+                        );
 
-                            transformed_statements.push(transformed_statement);
-                            encrypted = true;
-                        }
+                        transformed_statements.push(transformed_statement);
+                        encrypted = true;
                     }
                     debug!(target: MAPPER,
                         client_id = self.context.client_id,
@@ -430,10 +429,6 @@ where
             literals = encrypted_nodes.len(),
         );
 
-        if encrypted_nodes.is_empty() {
-            return Ok(None);
-        }
-
         let transformed_statement = typed_statement
             .transform(encrypted_nodes)
             .map_err(|e| MappingError::StatementCouldNotBeTransformed(e.to_string()))?;
@@ -500,22 +495,21 @@ where
 
         match self.to_encryptable_statement(&typed_statement, param_types)? {
             Some(statement) => {
-                if statement.has_literals() {
-                    let encrypted_literals = self
-                        .encrypt_literals(&typed_statement, &statement.literal_columns)
-                        .await?;
+                let encrypted_literals = self
+                    .encrypt_literals(&typed_statement, &statement.literal_columns)
+                    .await?;
 
-                    if let Some(transformed_statement) = self
-                        .transform_statement(&typed_statement, &encrypted_literals)
-                        .await?
-                    {
-                        debug!(target: MAPPER,
-                            client_id = self.context.client_id,
-                            transformed_statement = ?transformed_statement,
-                        );
+                if let Some(transformed_statement) = self
+                    .transform_statement(&typed_statement, &encrypted_literals)
+                    .await?
+                {
+                    debug!(target: MAPPER,
+                        client_id = self.context.client_id,
+                        transformed_statement = ?transformed_statement,
+                        transformed_statement_text = %transformed_statement,
+                    );
 
-                        message.rewrite_statement(transformed_statement.to_string());
-                    }
+                    message.rewrite_statement(transformed_statement.to_string());
                 }
 
                 counter!(STATEMENTS_ENCRYPTED_TOTAL).increment(1);
@@ -532,19 +526,14 @@ where
                 counter!(STATEMENTS_PASSTHROUGH_TOTAL).increment(1);
             }
         }
+        let bytes = BytesMut::try_from(message)?;
 
-        if message.requires_rewrite() {
-            let bytes = BytesMut::try_from(message)?;
-
-            debug!(target: MAPPER,
+        debug!(target: MAPPER,
                 client_id = self.context.client_id,
                 msg = "Rewrite Parse",
                 bytes = ?bytes);
 
-            Ok(Some(bytes))
-        } else {
-            Ok(None)
-        }
+        Ok(Some(bytes))
     }
 
     ///
@@ -613,16 +602,6 @@ where
         let param_columns = self.get_param_columns(typed_statement)?;
         let projection_columns = self.get_projection_columns(typed_statement)?;
         let literal_columns = self.get_literal_columns(typed_statement)?;
-
-        let no_encrypted_param_columns = param_columns.iter().all(|c| c.is_none());
-        let no_encrypted_projection_columns = projection_columns.iter().all(|c| c.is_none());
-
-        if (param_columns.is_empty() || no_encrypted_param_columns)
-            && (projection_columns.is_empty() || no_encrypted_projection_columns)
-            && literal_columns.is_empty()
-        {
-            return Ok(None);
-        }
 
         debug!(target: MAPPER,
             client_id = self.context.client_id,
