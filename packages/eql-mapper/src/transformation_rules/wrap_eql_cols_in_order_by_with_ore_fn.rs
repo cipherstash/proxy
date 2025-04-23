@@ -41,7 +41,7 @@ impl<'ast> TransformationRule<'ast> for WrapEqlColsInOrderByWithOreFn<'ast> {
         target_node: &mut N,
     ) -> Result<(), EqlMapperError> {
         if let Some((order_by_expr,)) = node_path.last_1_as::<OrderByExpr>() {
-            let node_key = NodeKey::new(order_by_expr);
+            let node_key = NodeKey::new(&order_by_expr.expr);
 
             if let Some(ty) = self.node_types.get(&node_key) {
                 if matches!(ty, Type::Value(Value::Eql(_))) {
