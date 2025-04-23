@@ -29,8 +29,12 @@ impl<'ast> TypedStatement<'ast> {
         &self,
         encrypted_literals: HashMap<NodeKey<'ast>, sqltk_parser::ast::Value>,
     ) -> Result<Statement, EqlMapperError> {
-        for (_, target) in self.literals.iter() {
-            if !encrypted_literals.contains_key(&target.as_node_key()) {
+        for (key, _) in encrypted_literals.iter() {
+            if !self
+                .literals
+                .iter()
+                .any(|(_, node)| &node.as_node_key() == key)
+            {
                 return Err(EqlMapperError::Transform(String::from("encrypted literals refers to a literal node which is not present in the SQL statement")));
             }
         }
