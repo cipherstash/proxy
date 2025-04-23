@@ -11,7 +11,7 @@ pub struct TypedStatement<'ast> {
     /// The SQL statement which was type-checked against the schema.
     pub statement: &'ast Statement,
 
-    /// The SQL statement which was type-checked against the schema.
+    /// The return type of the statement
     pub projection: Projection,
 
     /// The types of all params discovered from [`Value::Placeholder`] nodes in the SQL statement.
