@@ -24,5 +24,13 @@ tracing-subscriber = { workspace = true }
 webpki-roots = "0.26.7"
 
 [dev-dependencies]
+# cipherstash-client = { version = "0.18.0-pre.1", features = ["tokio"] }
+cipherstash-client = { path = "/Users/tobyhede/src/cipherstash-suite/packages/cipherstash-client", features = [
+    "tokio",
+] }
+# cipherstash-config = "0.2.3"
+cipherstash-config = { path = "/Users/tobyhede/src/cipherstash-suite/packages/cipherstash-config" }
 clap = "4.5.32"
-fake = { version = "4", features = ["derive"] }
+fake = { version = "4", features = ["chrono", "derive"] }
+hex = "0.4.3"
+uuid = { version = "1.11.0", features = ["serde", "v4"] }
