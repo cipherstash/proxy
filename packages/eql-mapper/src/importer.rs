@@ -7,15 +7,16 @@ use crate::{
     unifier::{Projection, ProjectionColumns},
     Relation, ScopeError, ScopeTracker,
 };
-use sqlparser::ast::{Cte, Ident, Insert, TableAlias, TableFactor};
 use sqltk::{Break, Visitable, Visitor};
+use sqltk_parser::ast::{Cte, Ident, Insert, TableAlias, TableFactor};
 use std::{cell::RefCell, fmt::Debug, marker::PhantomData, ops::ControlFlow, rc::Rc, sync::Arc};
 
 /// `Importer` is a [`Visitor`] implementation that brings projections (from "FROM" clauses and subqueries) into lexical scope.
-#[derive(Debug)]
+// TODO: If Importer was refactored to be a suite of helper functions then the inferencer coud simply ask it to provide Types
+// and we'd remove the "everything is coupled to the TypeRegistry thing"
 pub struct Importer<'ast> {
     table_resolver: Arc<TableResolver>,
-    reg: Rc<RefCell<TypeRegistry<'ast>>>,
+    registry: Rc<RefCell<TypeRegistry<'ast>>>,
     scope_tracker: Rc<RefCell<ScopeTracker<'ast>>>,
     _ast: PhantomData<&'ast ()>,
 }
@@ -23,11 +24,11 @@ pub struct Importer<'ast> {
 impl<'ast> Importer<'ast> {
     pub fn new(
         table_resolver: impl Into<Arc<TableResolver>>,
-        reg: impl Into<Rc<RefCell<TypeRegistry<'ast>>>>,
+        registry: impl Into<Rc<RefCell<TypeRegistry<'ast>>>>,
         scope: impl Into<Rc<RefCell<ScopeTracker<'ast>>>>,
     ) -> Self {
         Self {
-            reg: reg.into(),
+            registry: registry.into(),
             table_resolver: table_resolver.into(),
             scope_tracker: scope.into(),
             _ast: PhantomData,
@@ -45,12 +46,14 @@ impl<'ast> Importer<'ast> {
             .table_resolver
             .resolve_table(table_name.0.last().unwrap())?;
 
+        let cols = ProjectionColumns::new_from_schema_table(table.clone());
+
         self.scope_tracker.borrow_mut().add_relation(Relation {
             name: table_alias.clone(),
             projection_type: Type::Constructor(Constructor::Projection(Projection::WithColumns(
-                ProjectionColumns::from(table.clone()),
+                cols,
             )))
-            .into_type_cell(),
+            .into(),
         })?;
 
         Ok(())
@@ -70,12 +73,12 @@ impl<'ast> Importer<'ast> {
             return Err(ImportError::NoColumnsInCte(cte.to_string()));
         }
 
-        let mut reg = self.reg.borrow_mut();
-        let projection_type = reg.get_type(&**query).clone();
+        let mut registry = self.registry.borrow_mut();
+        let query_ty = registry.get_node_type(query);
 
         self.scope_tracker.borrow_mut().add_relation(Relation {
             name: Some(alias.clone()),
-            projection_type,
+            projection_type: query_ty,
         })?;
 
         Ok(())
@@ -103,12 +106,14 @@ impl<'ast> Importer<'ast> {
                 if scope_tracker.resolve_relation(name).is_err() {
                     let table = self.table_resolver.resolve_table(name.0.last().unwrap())?;
 
+                    let cols = ProjectionColumns::new_from_schema_table(table.clone());
+
                     scope_tracker.add_relation(Relation {
                         name: record_as.cloned().ok(),
                         projection_type: Type::Constructor(Constructor::Projection(
-                            Projection::WithColumns(ProjectionColumns::from(table.clone())),
+                            Projection::WithColumns(cols),
                         ))
-                        .into_type_cell(),
+                        .into(),
                     })?;
                 }
             }
@@ -144,7 +149,7 @@ impl<'ast> Importer<'ast> {
                 subquery,
                 alias,
             } => {
-                let projection_type = self.reg.borrow_mut().get_type(&*subquery.body).clone();
+                let projection_type = self.registry.borrow_mut().get_node_type(&*subquery.body);
 
                 self.scope_tracker.borrow_mut().add_relation(Relation {
                     name: alias.clone().map(|a| a.name.clone()),
@@ -302,7 +307,7 @@ impl<'ast> Visitor<'ast> for Importer<'ast> {
         // Most nodes that bring relations into scope use `exit` but in Insert's case we need to use `enter` because
         //
         // 1. There is no approprate child AST node of [`Insert`] on which to listen for an `exit` from except
-        // [`sqlparser::ast::ObjectName`], and `ObjectName` is used in contexts where it *should not* bring anything in
+        // [`sqltk_parser::ast::ObjectName`], and `ObjectName` is used in contexts where it *should not* bring anything in
         // to scope (it is not only used to identify tables).
         //
         // 2. Child nodes of the `Insert` need to resolve identifiers in the context of the scope, so exit would be too

@@ -1,4 +1,5 @@
-use sqlparser::ast::{Function, FunctionArg, FunctionArgExpr, FunctionArguments, Ident};
+use eql_mapper_macros::trace_infer;
+use sqltk_parser::ast::{Function, FunctionArg, FunctionArgExpr, FunctionArguments, Ident};
 
 use crate::{
     inference::{type_error::TypeError, InferType},
@@ -6,6 +7,7 @@ use crate::{
     SqlIdent, TypeInferencer,
 };
 
+#[trace_infer]
 impl<'ast> InferType<'ast, Function> for TypeInferencer<'ast> {
     fn infer_exit(&mut self, function: &'ast Function) -> Result<(), TypeError> {
         if !matches!(function.parameters, FunctionArguments::None) {
@@ -35,7 +37,7 @@ impl<'ast> InferType<'ast, Function> for TypeInferencer<'ast> {
                     // call to min/max.
                     self.unify_node_with_type(
                         &**query,
-                        Type::projection(&[(self.get_type(function), None)]),
+                        Type::projection(&[(self.get_node_type(function), None)]),
                     )?;
                 }
 
@@ -87,13 +89,12 @@ impl<'ast> InferType<'ast, Function> for TypeInferencer<'ast> {
                     // The query must return a single column projection which has the same type as the result of the function
                     self.unify_node_with_type(
                         &**query,
-                        Type::projection(&[(self.get_type(function), None)]),
+                        Type::projection(&[(self.get_node_type(function), None)]),
                     )?;
                 }
 
                 FunctionArguments::List(args_list) => {
                     self.unify_node_with_type(function, Type::any_native())?;
-
                     for arg in &args_list.args {
                         match arg {
                             FunctionArg::Named { arg, .. } | FunctionArg::Unnamed(arg) => match arg

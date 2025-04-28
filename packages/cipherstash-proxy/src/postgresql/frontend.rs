@@ -26,13 +26,14 @@ use crate::prometheus::{
 use crate::Encrypted;
 use bytes::BytesMut;
 use cipherstash_client::encryption::Plaintext;
-use eql_mapper::{self, EqlMapperError, EqlValue, NodeKey, TableColumn, TypedStatement};
+use eql_mapper::{self, EqlMapperError, EqlValue, TableColumn, TypeCheckedStatement};
 use metrics::{counter, histogram};
 use pg_escape::quote_literal;
 use serde::Serialize;
-use sqlparser::ast::{self, Expr, Value};
-use sqlparser::dialect::PostgreSqlDialect;
-use sqlparser::parser::Parser;
+use sqltk::NodeKey;
+use sqltk_parser::ast::{self, Value};
+use sqltk_parser::dialect::PostgreSqlDialect;
+use sqltk_parser::parser::Parser;
 use std::collections::HashMap;
 use std::time::Instant;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
@@ -285,7 +286,7 @@ where
 
             match self.to_encryptable_statement(&typed_statement, vec![])? {
                 Some(statement) => {
-                    if statement.has_literals() || typed_statement.has_nodes_to_wrap() {
+                    if typed_statement.requires_transform() {
                         let encrypted_literals = self
                             .encrypt_literals(&typed_statement, &statement.literal_columns)
                             .await?;
@@ -356,7 +357,7 @@ where
     ///
     async fn encrypt_literals(
         &mut self,
-        typed_statement: &TypedStatement<'_>,
+        typed_statement: &TypeCheckedStatement<'_>,
         literal_columns: &Vec<Option<Column>>,
     ) -> Result<Vec<Option<Encrypted>>, Error> {
         let literal_values = typed_statement.literal_values();
@@ -402,14 +403,14 @@ where
     ///
     async fn transform_statement(
         &mut self,
-        typed_statement: &TypedStatement<'_>,
+        typed_statement: &TypeCheckedStatement<'_>,
         encrypted_literals: &Vec<Option<Encrypted>>,
     ) -> Result<Option<ast::Statement>, Error> {
         // Convert literals to ast Expr
         let mut encrypted_expressions = vec![];
         for encrypted in encrypted_literals {
             let e = match encrypted {
-                Some(en) => Some(to_json_literal_expr(&en)?),
+                Some(en) => Some(to_json_literal_value(&en)?),
                 None => None,
             };
             encrypted_expressions.push(e);
@@ -426,11 +427,10 @@ where
 
         debug!(target: MAPPER,
             client_id = self.context.client_id,
-            nodes_to_wrap = typed_statement.nodes_to_wrap.len(),
             literals = encrypted_nodes.len(),
         );
 
-        if !typed_statement.has_nodes_to_wrap() && encrypted_nodes.is_empty() {
+        if !typed_statement.requires_transform() {
             return Ok(None);
         }
 
@@ -500,7 +500,7 @@ where
 
         match self.to_encryptable_statement(&typed_statement, param_types)? {
             Some(statement) => {
-                if statement.has_literals() || typed_statement.has_nodes_to_wrap() {
+                if typed_statement.requires_transform() {
                     let encrypted_literals = self
                         .encrypt_literals(&typed_statement, &statement.literal_columns)
                         .await?;
@@ -607,7 +607,7 @@ where
     ///
     fn to_encryptable_statement(
         &self,
-        typed_statement: &TypedStatement<'_>,
+        typed_statement: &TypeCheckedStatement<'_>,
         param_types: Vec<i32>,
     ) -> Result<Option<Statement>, Error> {
         let param_columns = self.get_param_columns(typed_statement)?;
@@ -619,8 +619,7 @@ where
 
         if (param_columns.is_empty() || no_encrypted_param_columns)
             && (projection_columns.is_empty() || no_encrypted_projection_columns)
-            && literal_columns.is_empty()
-            && !typed_statement.has_nodes_to_wrap()
+            && !typed_statement.requires_transform()
         {
             return Ok(None);
         }
@@ -735,7 +734,10 @@ where
         Ok(encrypted)
     }
 
-    fn type_check<'a>(&self, statement: &'a ast::Statement) -> Result<TypedStatement<'a>, Error> {
+    fn type_check<'a>(
+        &self,
+        statement: &'a ast::Statement,
+    ) -> Result<TypeCheckedStatement<'a>, Error> {
         match eql_mapper::type_check(self.context.get_table_resolver(), statement) {
             Ok(typed_statement) => {
                 debug!(target: MAPPER,
@@ -778,10 +780,10 @@ where
     ///
     fn get_projection_columns(
         &self,
-        typed_statement: &eql_mapper::TypedStatement<'_>,
+        typed_statement: &eql_mapper::TypeCheckedStatement<'_>,
     ) -> Result<Vec<Option<Column>>, Error> {
         let mut projection_columns = vec![];
-        if let Some(eql_mapper::Projection::WithColumns(columns)) = &typed_statement.projection {
+        if let eql_mapper::Projection::WithColumns(columns) = &typed_statement.projection {
             for col in columns {
                 let eql_mapper::ProjectionColumn { ty, .. } = col;
                 let configured_column = match ty {
@@ -813,13 +815,13 @@ where
     ///
     fn get_param_columns(
         &self,
-        typed_statement: &eql_mapper::TypedStatement<'_>,
+        typed_statement: &eql_mapper::TypeCheckedStatement<'_>,
     ) -> Result<Vec<Option<Column>>, Error> {
         let mut param_columns = vec![];
 
         for param in typed_statement.params.iter() {
             let configured_column = match param {
-                eql_mapper::Value::Eql(EqlValue(TableColumn { table, column })) => {
+                (_, eql_mapper::Value::Eql(EqlValue(TableColumn { table, column }))) => {
                     let identifier = Identifier::from((table, column));
 
                     debug!(
@@ -841,7 +843,7 @@ where
 
     fn get_literal_columns(
         &self,
-        typed_statement: &eql_mapper::TypedStatement<'_>,
+        typed_statement: &eql_mapper::TypeCheckedStatement<'_>,
     ) -> Result<Vec<Option<Column>>, Error> {
         let mut literal_columns = vec![];
 
@@ -967,9 +969,9 @@ fn literals_to_plaintext(
     Ok(plaintexts)
 }
 
-fn to_json_literal_expr<T>(literal: &T) -> Result<Expr, Error>
+fn to_json_literal_value<T>(literal: &T) -> Result<Value, Error>
 where
     T: ?Sized + Serialize,
 {
-    Ok(serde_json::to_string(literal).map(|json| Expr::Value(Value::SingleQuotedString(json)))?)
+    Ok(serde_json::to_string(literal).map(Value::SingleQuotedString)?)
 }

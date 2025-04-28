@@ -1,9 +1,9 @@
-use sqlparser::ast::{AssignmentTarget, Statement};
+use eql_mapper_macros::trace_infer;
+use sqltk_parser::ast::{AssignmentTarget, Statement};
 
-use crate::{
-    inference::infer_type::InferType, inference::unifier::Type, TypeError, TypeInferencer,
-};
+use crate::{inference::infer_type::InferType, unifier::Type, TypeError, TypeInferencer};
 
+#[trace_infer]
 impl<'ast> InferType<'ast, Statement> for TypeInferencer<'ast> {
     fn infer_exit(&mut self, statement: &'ast Statement) -> Result<(), TypeError> {
         match statement {
@@ -31,9 +31,7 @@ impl<'ast> InferType<'ast, Statement> for TypeInferencer<'ast> {
                         AssignmentTarget::ColumnName(object_name) => {
                             self.unify_node_with_type(
                                 &assignment.value,
-                                self.scope_tracker
-                                    .borrow()
-                                    .resolve_ident(object_name.0.last().unwrap())?,
+                                self.resolve_ident(object_name.0.last().unwrap())?,
                             )?;
                         }
 
@@ -46,13 +44,9 @@ impl<'ast> InferType<'ast, Statement> for TypeInferencer<'ast> {
                 }
 
                 match returning {
-                    Some(returning) => {
-                        self.unify_nodes(statement, returning)?;
-                    }
-                    None => {
-                        self.unify_node_with_type(statement, Type::empty_projection())?;
-                    }
-                }
+                    Some(returning) => self.unify_nodes(statement, returning)?,
+                    None => self.unify_node_with_type(statement, Type::empty_projection())?,
+                };
             }
 
             Statement::Merge {
@@ -78,7 +72,7 @@ impl<'ast> InferType<'ast, Statement> for TypeInferencer<'ast> {
             }
 
             _ => {}
-        }
+        };
 
         Ok(())
     }

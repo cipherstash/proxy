@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use crate::{
     inference::{
         type_error::TypeError,
@@ -7,8 +9,10 @@ use crate::{
     unifier::{EqlValue, NativeValue, Value},
     ColumnKind, TableColumn, TypeInferencer,
 };
-use sqlparser::ast::{Ident, Insert};
+use eql_mapper_macros::trace_infer;
+use sqltk_parser::ast::{Ident, Insert};
 
+#[trace_infer]
 impl<'ast> InferType<'ast, Insert> for TypeInferencer<'ast> {
     fn infer_enter(&mut self, insert: &'ast Insert) -> Result<(), TypeError> {
         let Insert {
@@ -51,7 +55,7 @@ impl<'ast> InferType<'ast, Insert> for TypeInferencer<'ast> {
                     };
 
                     (
-                        Type::Constructor(Constructor::Value(value_ty)).into_type_cell(),
+                        Arc::new(Type::Constructor(Constructor::Value(value_ty))),
                         Some(tc.column.clone()),
                     )
                 })
