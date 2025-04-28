@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1745725311801,
+  "lastUpdate": 1745884448683,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -756,6 +756,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 7.195698,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "james@cipherstash.com",
+            "name": "James Sadler",
+            "username": "freshtonic"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "7f95c7a06b32d21dfa138f74e06e036668825595",
+          "message": "Merge pull request #209 from cipherstash/feat/mapper/group-by\n\nfeat: SQL transformations related to `GROUP BY`",
+          "timestamp": "2025-04-29T09:50:29+10:00",
+          "tree_id": "02dcc57bcf505135ebaa3525c6f7801b008d7f88",
+          "url": "https://github.com/cipherstash/proxy/commit/7f95c7a06b32d21dfa138f74e06e036668825595"
+        },
+        "date": 1745884447606,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 7.199993,
             "unit": "Number"
           }
         ]
