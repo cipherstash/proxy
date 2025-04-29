@@ -5,8 +5,8 @@ mod tests {
     use cipherstash_client::credentials::auto_refresh::AutoRefresh;
     use cipherstash_client::ejsonpath::Selector;
     use cipherstash_client::encryption::{
-        Encrypted, EncryptedEntry, EncryptedSteVecTerm, JsonIndexer, Plaintext, PlaintextTarget,
-        QueryBuilder, ReferencedPendingPipeline,
+        Encrypted, EncryptedEntry, EncryptedSteVecTerm, JsonIndexer, JsonIndexerOptions, OreTerm,
+        Plaintext, PlaintextTarget, QueryBuilder, ReferencedPendingPipeline,
     };
     use cipherstash_client::{
         encryption::{ScopedCipher, SteVec},
@@ -69,8 +69,8 @@ mod tests {
         #[serde(rename = "s")]
         selector: Option<String>,
 
-        #[serde(rename = "mac")]
-        mac_index: Option<String>,
+        #[serde(rename = "b")]
+        blake3_index: Option<String>,
 
         #[serde(rename = "ocf")]
         ore_cclw_fixed_index: Option<String>,
@@ -78,11 +78,26 @@ mod tests {
         ore_cclw_var_index: Option<String>,
 
         #[serde(rename = "sv")]
-        ste_vec_index: Option<Vec<EqlEncrypted>>,
+        ste_vec_index: Option<Vec<EqlSteVecEncrypted>>,
+    }
+
+    #[derive(Debug, Deserialize, Serialize)]
+    pub struct EqlSteVecEncrypted {
+        #[serde(rename = "c", with = "option_mp_base85")]
+        ciphertext: Option<EncryptedRecord>,
+
+        #[serde(rename = "s")]
+        selector: Option<String>,
+        #[serde(rename = "b")]
+        blake3_index: Option<String>,
+        #[serde(rename = "ocf")]
+        ore_cclw_fixed_index: Option<String>,
+        #[serde(rename = "ocv")]
+        ore_cclw_var_index: Option<String>,
     }
 
     impl EqlEncrypted {
-        pub fn ste_vec(ste_vec_index: Vec<EqlEncrypted>) -> Self {
+        pub fn ste_vec(ste_vec_index: Vec<EqlSteVecEncrypted>) -> Self {
             Self {
                 ste_vec_index: Some(ste_vec_index),
                 ciphertext: None,
@@ -97,26 +112,18 @@ mod tests {
                 selector: None,
                 ore_cclw_fixed_index: None,
                 ore_cclw_var_index: None,
-                mac_index: None,
+                blake3_index: None,
             }
         }
-
+    }
+    impl EqlSteVecEncrypted {
         pub fn ste_vec_element(selector: String, record: EncryptedRecord) -> Self {
             Self {
                 ciphertext: Some(record),
-                identifier: Identifier {
-                    table: "blah".to_string(),
-                    column: "vtha".to_string(),
-                },
-                version: 1,
-                ore_index: None,
-                match_index: None,
-                unique_index: None,
                 selector: Some(selector),
                 ore_cclw_fixed_index: None,
                 ore_cclw_var_index: None,
-                mac_index: None,
-                ste_vec_index: None,
+                blake3_index: None,
             }
         }
     }
@@ -151,10 +158,28 @@ mod tests {
 
         let column_config = ColumnConfig::build("column_name".to_string())
             .casts_as(ColumnType::JsonB)
-            .add_index(Index::new(IndexType::SteVec { prefix }));
+            .add_index(Index::new(IndexType::SteVec {
+                prefix: prefix.to_owned(),
+            }));
+
+        // let mut value =
+        //     serde_json::from_str::<serde_json::Value>("{\"hello\": \"one\", \"n\": 10}").unwrap();
+
+        // let mut value =
+        //     serde_json::from_str::<serde_json::Value>("{\"hello\": \"two\", \"n\": 20}").unwrap();
 
         let mut value =
-            serde_json::from_str::<serde_json::Value>("{\"hello\": \"world\", \"n\": 42}").unwrap();
+            serde_json::from_str::<serde_json::Value>("{\"hello\": \"two\", \"n\": 30}").unwrap();
+
+        // let mut value =
+        //     serde_json::from_str::<serde_json::Value>("{\"hello\": \"world\", \"n\": 42}").unwrap();
+
+        // let mut value =
+        //     serde_json::from_str::<serde_json::Value>("{\"hello\": \"world\", \"n\": 42}").unwrap();
+
+        // let mut value =
+        //     serde_json::from_str::<serde_json::Value>("{\"blah\": { \"vtha\": 42 }}").unwrap();
+
         let plaintext = Plaintext::JsonB(Some(value));
 
         let idx = 0;
@@ -174,11 +199,11 @@ mod tests {
                 let term = entry.1;
                 let record = entry.2;
 
-                let mut e = EqlEncrypted::ste_vec_element(selector, record);
+                let mut e = EqlSteVecEncrypted::ste_vec_element(selector, record);
 
                 match term {
                     EncryptedSteVecTerm::Mac(items) => {
-                        e.mac_index = Some(hex::encode(&items));
+                        e.blake3_index = Some(hex::encode(&items));
                     }
                     EncryptedSteVecTerm::OreFixed(o) => {
                         e.ore_cclw_fixed_index = Some(hex::encode(o.bytes));
@@ -190,25 +215,51 @@ mod tests {
 
                 encrypteds.push(e);
             }
-
-            // info!("{:?}" = ?sv);
+            // info!("{:?}" = encrypteds);
         }
 
-        let e = EqlEncrypted::ste_vec(encrypteds);
+        info!("---------------------------------------------");
 
+        let e = EqlEncrypted::ste_vec(encrypteds);
         info!("{:?}" = ?e);
 
         let json = serde_json::to_value(e).unwrap();
-
         info!("{}", json);
 
-        let indexer = JsonIndexer::new(prefix);
+        let indexer = JsonIndexer::new(JsonIndexerOptions { prefix });
 
-        let path: String = "$.hello".to_string();
-        let selector = Selector::parse(&path)?;
-        let selector = indexer.generate_selector(selector, cipher.index_key());
-        let selector = hex::encode(selector);
+        info!("---------------------------------------------");
 
-        info!("{}", selector);
+        // Path
+        // let path: String = "$.blah.vtha".to_string();
+        // let selector = Selector::parse(&path).unwrap();
+        // let selector = indexer.generate_selector(selector, cipher.index_key());
+        // let selector = hex::encode(selector.0);
+        // info!("{}", selector);
+
+        // Comparison
+        let n = 30;
+        let term = OreTerm::Number(n);
+
+        let term = indexer.generate_term(term, cipher.index_key()).unwrap();
+
+        match term {
+            EncryptedSteVecTerm::Mac(items) => todo!(),
+            EncryptedSteVecTerm::OreFixed(ore_cllw8_v1) => {
+                let term = hex::encode(ore_cllw8_v1.bytes);
+                info!("{n}: {term}");
+            }
+            EncryptedSteVecTerm::OreVariable(ore_cllw8_variable_v1) => todo!(),
+        }
+
+        // if let Some(ste_vec_index) = e.ste_vec_index {
+        //     for e in ste_vec_index {
+        //         info!("{}", e);
+        //         if let Some(ct) = e.ciphertext {
+        //             let decrypted = cipher.decrypt(encrypted).await?;
+        //             info!("{}", decrypted);
+        //         }
+        //     }
+        // }
     }
 }
