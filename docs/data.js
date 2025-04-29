@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1745909640826,
+  "lastUpdate": 1745910065144,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -810,6 +810,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 6.599551,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "keandrews@gmail.com",
+            "name": "Kate Andrews",
+            "username": "kateandrews"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "dea0c7f6b955329f6af38fff07cfec6eccc21d22",
+          "message": "Merge pull request #211 from cipherstash/encrypt-tool-toc-fix\n\nFix: encrypt tool Table of Content links",
+          "timestamp": "2025-04-29T16:58:12+10:00",
+          "tree_id": "de0a2be027ef6e09f957184ed6931fcb379d763a",
+          "url": "https://github.com/cipherstash/proxy/commit/dea0c7f6b955329f6af38fff07cfec6eccc21d22"
+        },
+        "date": 1745910064086,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 7.062851,
             "unit": "Number"
           }
         ]
