@@ -4,10 +4,10 @@ CipherStash Proxy includes an `encrypt` tool – a CLI application to encrypt ex
 
 ## Table of contents
 
-- [Using the `encrypt` tool](using-the-encrypt-tool)
-- [How the `encrypt` tool works](how-the-encrypt-tool-works)
-- [Configuring the `encrypt` tool](configuring-the-encrypt-tool)
-- [Example `encrypt` tool usage](example-encrypt-tool-usage)
+- [Using the `encrypt` tool](#using-the-encrypt-tool)
+- [How the `encrypt` tool works](#how-the-encrypt-tool-works)
+- [Configuring the `encrypt` tool](#configuring-the-encrypt-tool)
+- [Example `encrypt` tool usage](#example-encrypt-tool-usage)
 
 ## Using the `encrypt` tool
 
