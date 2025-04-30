@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1745988119298,
+  "lastUpdate": 1745989172186,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -914,6 +914,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 6.723089,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "robin@rhoward.id.au",
+            "name": "Robin Howard",
+            "username": "damncabbage"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "3a74ec7fc55f314bec8a51a71561f5e054ed18d0",
+          "message": "Merge pull request #212 from cipherstash/rh/bump-sqltk\n\nfeat: Upgrades to sqltk v0.6.0",
+          "timestamp": "2025-04-30T14:56:28+10:00",
+          "tree_id": "87a70aeb01db9d98bfabacfed12a8e489da56ad5",
+          "url": "https://github.com/cipherstash/proxy/commit/3a74ec7fc55f314bec8a51a71561f5e054ed18d0"
+        },
+        "date": 1745989171106,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 7.1078,
             "unit": "Number"
           }
         ]
