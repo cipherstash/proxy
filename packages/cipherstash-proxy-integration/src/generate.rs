@@ -50,7 +50,6 @@ mod tests {
     }
 
     #[derive(Debug, Deserialize, Serialize)]
-
     pub struct EqlEncrypted {
         #[serde(rename = "c", with = "option_mp_base85")]
         ciphertext: Option<EncryptedRecord>,
