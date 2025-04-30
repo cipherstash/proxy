@@ -7,8 +7,8 @@ use crate::{
     unifier::{Projection, ProjectionColumns},
     Relation, ScopeError, ScopeTracker,
 };
+use sqltk::parser::ast::{Cte, Ident, Insert, TableAlias, TableFactor};
 use sqltk::{Break, Visitable, Visitor};
-use sqltk_parser::ast::{Cte, Ident, Insert, TableAlias, TableFactor};
 use std::{cell::RefCell, fmt::Debug, marker::PhantomData, ops::ControlFlow, rc::Rc, sync::Arc};
 
 /// `Importer` is a [`Visitor`] implementation that brings projections (from "FROM" clauses and subqueries) into lexical scope.
@@ -221,6 +221,18 @@ impl<'ast> Importer<'ast> {
             }
 
             #[allow(unused_variables)]
+            TableFactor::OpenJsonTable {
+                json_expr,
+                json_path,
+                columns,
+                alias,
+            } => {
+                return Err(ImportError::UnsupportedTableFactorVariant(
+                    "OpenJsonTable".to_owned(),
+                ))
+            }
+
+            #[allow(unused_variables)]
             TableFactor::Pivot {
                 table,
                 aggregate_functions,
@@ -307,7 +319,7 @@ impl<'ast> Visitor<'ast> for Importer<'ast> {
         // Most nodes that bring relations into scope use `exit` but in Insert's case we need to use `enter` because
         //
         // 1. There is no approprate child AST node of [`Insert`] on which to listen for an `exit` from except
-        // [`sqltk_parser::ast::ObjectName`], and `ObjectName` is used in contexts where it *should not* bring anything in
+        // [`sqltk::parser::ast::ObjectName`], and `ObjectName` is used in contexts where it *should not* bring anything in
         // to scope (it is not only used to identify tables).
         //
         // 2. Child nodes of the `Insert` need to resolve identifiers in the context of the scope, so exit would be too

@@ -35,8 +35,7 @@ strip = "none"
 debug = true
 
 [workspace.dependencies]
-sqltk = { version = "0.5.0" }
-sqltk-parser = { version = "0.52.0" }
+sqltk = { version = "0.6.0" }
 thiserror = "2.0.9"
 tokio = { version = "1.44", features = ["full"] }
 tracing = "0.1"

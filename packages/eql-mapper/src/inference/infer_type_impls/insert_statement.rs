@@ -10,7 +10,7 @@ use crate::{
     ColumnKind, TableColumn, TypeInferencer,
 };
 use eql_mapper_macros::trace_infer;
-use sqltk_parser::ast::{Ident, Insert};
+use sqltk::parser::ast::{Ident, Insert};
 
 #[trace_infer]
 impl<'ast> InferType<'ast, Insert> for TypeInferencer<'ast> {

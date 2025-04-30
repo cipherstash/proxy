@@ -16,7 +16,6 @@ derive_more = { version = "^1.0", features = ["display", "constructor"] }
 impl-trait-for-tuples = "0.2.3"
 itertools = "^0.13"
 sqltk = { workspace = true }
-sqltk-parser = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }

@@ -3,7 +3,7 @@ use crate::{
     SqlIdent, TypeInferencer,
 };
 use eql_mapper_macros::trace_infer;
-use sqltk_parser::ast::{Array, BinaryOperator, Expr, Ident};
+use sqltk::parser::ast::{Array, BinaryOperator, Expr, Ident};
 
 #[trace_infer]
 impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
@@ -25,12 +25,12 @@ impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
             }
 
             #[allow(unused_variables)]
-            Expr::Wildcard => {
+            Expr::Wildcard(_) => {
                 self.unify_node_with_type(this_expr, self.resolve_wildcard()?)?;
             }
 
             #[allow(unused_variables)]
-            Expr::QualifiedWildcard(object_name) => {
+            Expr::QualifiedWildcard(object_name, _) => {
                 self.unify_node_with_type(
                     this_expr,
                     self.resolve_qualified_wildcard(&object_name.0)?,
@@ -343,6 +343,13 @@ impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
             // The return type of this function and the return type of this expression must be the same type.
             Expr::Function(function) => {
                 self.unify_node_with_type(this_expr, self.get_node_type(function))?;
+            }
+
+            // `<arbitrary-expr>.<function-call>.<function-call-expr>...`
+            Expr::Method(_) => {
+                return Err(TypeError::UnsupportedSqlFeature(
+                    "MSSQL Expression Method".into(),
+                ))
             }
 
             // When operand is Some(operand), all conditions must be of type expr and expr must support equality

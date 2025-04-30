@@ -1,6 +1,6 @@
 use std::sync::{Arc, RwLock};
 
-use sqltk_parser::ast::Ident;
+use sqltk::parser::ast::Ident;
 
 use super::{Schema, SchemaError, SchemaTableColumn, SchemaWithEdits, Table};
 

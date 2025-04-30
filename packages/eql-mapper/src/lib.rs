@@ -41,9 +41,9 @@ mod test {
         Value,
     };
     use pretty_assertions::assert_eq;
+    use sqltk::parser::ast::Statement;
+    use sqltk::parser::ast::{self as ast};
     use sqltk::AsNodeKey;
-    use sqltk_parser::ast::Statement;
-    use sqltk_parser::ast::{self as ast};
     use std::collections::HashMap;
     use std::sync::Arc;
     use tracing::error;

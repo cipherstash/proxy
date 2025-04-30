@@ -1,7 +1,7 @@
 use std::{any::type_name, ops::Index, sync::Arc};
 
 use derive_more::Display;
-use sqltk_parser::ast::Ident;
+use sqltk::parser::ast::Ident;
 
 use crate::{ColumnKind, Table, TypeError};
 
@@ -11,8 +11,8 @@ use super::Unifier;
 ///
 /// An expression can be:
 ///
-/// - a [`sqltk_parser::ast::Expr`] node
-/// - a [`sqltk_parser::ast::Statement`] or any other SQL AST node that produces a projection.
+/// - a [`sqltk::parser::ast::Expr`] node
+/// - a [`sqltk::parser::ast::Statement`] or any other SQL AST node that produces a projection.
 ///
 /// A `Type` is either a [`Constructor`] (fully or partially known type) or a [`TypeVar`] (a placeholder for an unknown type).
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Display, Hash)]
@@ -328,7 +328,7 @@ impl Type {
 #[display("PROJ[{}]", _0.iter().map(|pc| pc.to_string()).collect::<Vec<_>>().join(", "))]
 pub struct ProjectionColumns(pub(crate) Vec<ProjectionColumn>);
 
-/// The type of an [`sqltk_parser::ast::Expr`] or [`sqltk_parser::ast::Statement`] that returns a projection.
+/// The type of an [`sqltk::parser::ast::Expr`] or [`sqltk::parser::ast::Statement`] that returns a projection.
 ///
 /// It represents an ordered list of zero or more optionally aliased columns types.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Display, Hash)]

@@ -1,6 +1,6 @@
 use std::fmt::Debug;
 
-use sqltk_parser::{
+use sqltk::parser::{
     ast::{self as ast, Statement},
     dialect::PostgreSqlDialect,
     parser::Parser,

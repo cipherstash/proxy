@@ -3,7 +3,7 @@ use crate::{
     TypeInferencer,
 };
 use eql_mapper_macros::trace_infer;
-use sqltk_parser::ast::Values;
+use sqltk::parser::ast::Values;
 
 #[trace_infer]
 impl<'ast> InferType<'ast, Values> for TypeInferencer<'ast> {

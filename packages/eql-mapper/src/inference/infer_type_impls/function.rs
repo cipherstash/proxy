@@ -1,5 +1,5 @@
 use eql_mapper_macros::trace_infer;
-use sqltk_parser::ast::{Function, FunctionArg, FunctionArgExpr, FunctionArguments, Ident};
+use sqltk::parser::ast::{Function, FunctionArg, FunctionArgExpr, FunctionArguments, Ident};
 
 use crate::{
     inference::{type_error::TypeError, InferType},
@@ -44,7 +44,7 @@ impl<'ast> InferType<'ast, Function> for TypeInferencer<'ast> {
                 FunctionArguments::List(args_list) => {
                     if args_list.args.len() == 1 {
                         match &args_list.args[0] {
-                            FunctionArg::Named { .. } => {
+                            FunctionArg::Named { .. } | FunctionArg::ExprNamed { .. } => {
                                 return Err(TypeError::FunctionCall(format!(
                                     "{} cannot be called with named arguments",
                                     fn_name.last().unwrap(),
@@ -97,6 +97,22 @@ impl<'ast> InferType<'ast, Function> for TypeInferencer<'ast> {
                     self.unify_node_with_type(function, Type::any_native())?;
                     for arg in &args_list.args {
                         match arg {
+                            FunctionArg::ExprNamed {
+                                name,
+                                arg,
+                                operator: _,
+                            } => {
+                                self.unify_node_with_type(name, Type::any_native())?;
+                                match arg {
+                                    FunctionArgExpr::Expr(expr) => {
+                                        self.unify_node_with_type(expr, Type::any_native())?;
+                                    }
+                                    // Aggregate functions like COUNT(table.*)
+                                    FunctionArgExpr::QualifiedWildcard(_) => {}
+                                    // Aggregate functions like COUNT(*)
+                                    FunctionArgExpr::Wildcard => {}
+                                }
+                            }
                             FunctionArg::Named { arg, .. } | FunctionArg::Unnamed(arg) => match arg
                             {
                                 FunctionArgExpr::Expr(expr) => {

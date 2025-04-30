@@ -30,10 +30,10 @@ use eql_mapper::{self, EqlMapperError, EqlValue, TableColumn, TypeCheckedStateme
 use metrics::{counter, histogram};
 use pg_escape::quote_literal;
 use serde::Serialize;
+use sqltk::parser::ast::{self, Value};
+use sqltk::parser::dialect::PostgreSqlDialect;
+use sqltk::parser::parser::Parser;
 use sqltk::NodeKey;
-use sqltk_parser::ast::{self, Value};
-use sqltk_parser::dialect::PostgreSqlDialect;
-use sqltk_parser::parser::Parser;
 use std::collections::HashMap;
 use std::time::Instant;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};

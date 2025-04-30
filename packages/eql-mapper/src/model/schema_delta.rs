@@ -5,7 +5,7 @@ use std::{
     sync::{Arc, RwLock},
 };
 
-use sqltk_parser::ast::{
+use sqltk::parser::ast::{
     AlterTableOperation, ColumnDef, CreateTable, Ident, ObjectName, ObjectType, Statement,
     ViewColumnDef,
 };

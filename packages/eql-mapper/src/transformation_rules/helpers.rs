@@ -1,10 +1,10 @@
 use std::{collections::HashMap, convert::Infallible, ops::ControlFlow};
 
-use sqltk::{AsNodeKey, Break, NodeKey, Visitable, Visitor};
-use sqltk_parser::ast::{
+use sqltk::parser::ast::{
     Expr, Function, FunctionArg, FunctionArgExpr, FunctionArgumentList, FunctionArguments,
     GroupByExpr, ObjectName,
 };
+use sqltk::{AsNodeKey, Break, NodeKey, Visitable, Visitor};
 
 use crate::{Type, Value};
 
@@ -44,6 +44,7 @@ pub(crate) fn wrap_in_1_arg_function(expr: Expr, name: ObjectName) -> Expr {
         null_treatment: None,
         over: None,
         within_group: vec![],
+        uses_odbc_syntax: false,
     })
 }
 

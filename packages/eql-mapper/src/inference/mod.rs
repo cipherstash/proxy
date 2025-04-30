@@ -11,10 +11,10 @@ use unifier::{Unifier, *};
 use std::{cell::RefCell, fmt::Debug, marker::PhantomData, ops::ControlFlow, rc::Rc, sync::Arc};
 
 use infer_type::InferType;
-use sqltk::{into_control_flow, AsNodeKey, Break, Visitable, Visitor};
-use sqltk_parser::ast::{
+use sqltk::parser::ast::{
     Delete, Expr, Function, Ident, Insert, Query, Select, SelectItem, SetExpr, Statement, Values,
 };
+use sqltk::{into_control_flow, AsNodeKey, Break, Visitable, Visitor};
 
 use crate::{ScopeError, ScopeTracker, TableResolver};
 
@@ -188,7 +188,7 @@ macro_rules! dispatch_all {
         dispatch!($self, $method, $node, SelectItem);
         dispatch!($self, $method, $node, Function);
         dispatch!($self, $method, $node, Values);
-        dispatch!($self, $method, $node, sqltk_parser::ast::Value);
+        dispatch!($self, $method, $node, sqltk::parser::ast::Value);
     };
 }
 

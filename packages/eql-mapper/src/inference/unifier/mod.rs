@@ -53,7 +53,7 @@ impl<'ast> Unifier<'ast> {
         self.registry.borrow_mut().get_param_type(param)
     }
 
-    /// [`sqltk_parser::ast::Value`] nodes with type `Type::Var(_)` after the inference phase is complete will be unified
+    /// [`sqltk::parser::ast::Value`] nodes with type `Type::Var(_)` after the inference phase is complete will be unified
     /// with [`NativeValue`].
     ///
     /// This can happen when a literal or param is never used in an expression that would constrain its type.
@@ -64,7 +64,7 @@ impl<'ast> Unifier<'ast> {
         let unresolved_value_nodes: Vec<_> = self
             .registry
             .borrow()
-            .get_nodes_and_types::<sqltk_parser::ast::Value>()
+            .get_nodes_and_types::<sqltk::parser::ast::Value>()
             .into_iter()
             .map(|(node, ty)| (node, ty.follow_tvars(&*self)))
             .filter(|(_, ty)| matches!(&**ty, Type::Var(_)))
@@ -341,11 +341,11 @@ impl<'ast> Unifier<'ast> {
 }
 
 pub(crate) mod test_util {
-    use sqltk::{AsNodeKey, Break, Visitable, Visitor};
-    use sqltk_parser::ast::{
+    use sqltk::parser::ast::{
         Delete, Expr, Function, FunctionArguments, Insert, Query, Select, SelectItem, SetExpr,
         Statement, Value, Values,
     };
+    use sqltk::{AsNodeKey, Break, Visitable, Visitor};
     use std::{any::type_name, convert::Infallible, fmt::Debug, ops::ControlFlow};
     use tracing::{event, Level};
 

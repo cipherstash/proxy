@@ -1,5 +1,5 @@
 use eql_mapper_macros::trace_infer;
-use sqltk_parser::ast::{Expr, Function, SelectItem, WildcardAdditionalOptions};
+use sqltk::parser::ast::{Expr, Function, SelectItem, WildcardAdditionalOptions};
 
 use crate::{
     inference::{type_error::TypeError, unifier::Type, InferType},
@@ -39,6 +39,7 @@ impl<'ast> InferType<'ast, Vec<SelectItem>> for TypeInferencer<'ast> {
                     #[allow(unused_variables)]
                     SelectItem::QualifiedWildcard(object_name, options) => {
                         let WildcardAdditionalOptions {
+                            wildcard_token: _,
                             opt_ilike: None,
                             opt_exclude: None,
                             opt_except: None,
@@ -56,6 +57,7 @@ impl<'ast> InferType<'ast, Vec<SelectItem>> for TypeInferencer<'ast> {
 
                     SelectItem::Wildcard(options) => {
                         let WildcardAdditionalOptions {
+                            wildcard_token: _,
                             opt_ilike: None,
                             opt_exclude: None,
                             opt_except: None,

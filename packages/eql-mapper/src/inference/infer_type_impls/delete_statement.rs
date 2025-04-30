@@ -1,5 +1,5 @@
 use eql_mapper_macros::trace_infer;
-use sqltk_parser::ast::Delete;
+use sqltk::parser::ast::Delete;
 
 use crate::{
     inference::unifier::Type,
