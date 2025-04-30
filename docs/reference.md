@@ -8,6 +8,7 @@ This page contains reference documentation for configuring CipherStash Proxy and
   - [Recommended settings for development](#recommended-settings-for-development)
 - [Prometheus metrics](#prometheus-metrics)
   - [Available metrics](#available-metrics)
+- [Supported architectures](#supported-architectures)
 
 
 ## Proxy config options
@@ -265,6 +266,14 @@ If the proxy is running on a host other than localhost, access on that host.
 | `cipherstash_proxy_statements_passthrough_total`      | Counter   | Number of SQL statements that did not require encryption                    |
 | `cipherstash_proxy_statements_total`                  | Counter   | Total number of SQL statements processed by CipherStash Proxy               |
 | `cipherstash_proxy_statements_unmappable_total`       | Counter   | Total number of unmappable SQL statements processed by CipherStash Proxy    |
+
+## Supported architectures
+
+CipherStash Proxy provides Docker images for `linux/arm64` architectures.
+
+If you're interested in a Docker image for other architectures (like `linux/amd64`), upvote [this idea](https://github.com/cipherstash/proxy/discussions/214).
+
+
 
 ---
 
