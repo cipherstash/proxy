@@ -158,7 +158,7 @@ impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
                     | BinaryOperator::HashArrow
                     | BinaryOperator::HashLongArrow
                     | BinaryOperator::AtAt
-                    | BinaryOperator::HashMinus
+                    | BinaryOperator::HashMinus // TODO do not support for EQL
                     | BinaryOperator::AtQuestion
                     | BinaryOperator::Question
                     | BinaryOperator::QuestionAnd
