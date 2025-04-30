@@ -33,6 +33,7 @@ mod test {
     use super::type_check;
     use crate::col;
     use crate::projection;
+    use crate::test_helpers;
     use crate::Param;
     use crate::Schema;
     use crate::TableResolver;
@@ -1344,6 +1345,87 @@ mod test {
                     Ok(statement) => assert_eq!(
                         statement.to_string(),
                         "SELECT CS_MIN_V1(salary) AS MIN, CS_MAX_V1(salary) AS MAX, department FROM employees GROUP BY department".to_string()
+                    ),
+                    Err(err) => panic!("transformation failed: {err}"),
+                }
+            }
+            Err(err) => panic!("type check failed: {err}"),
+        }
+    }
+
+    #[test]
+    fn jsonb_operator_arrow() {
+        test_jsonb_operator("->");
+    }
+
+    #[test]
+    fn jsonb_operator_long_arrow() {
+        test_jsonb_operator("->>");
+    }
+
+    #[test]
+    fn jsonb_operator_hash_arrow() {
+        test_jsonb_operator("#>");
+    }
+
+    #[test]
+    fn jsonb_operator_hash_long_arrow() {
+        test_jsonb_operator("#>>");
+    }
+
+    #[test]
+    fn jsonb_operator_hash_at_at() {
+        test_jsonb_operator("@@");
+    }
+
+    #[test]
+    fn jsonb_operator_at_question() {
+        test_jsonb_operator("@?");
+    }
+
+    #[test]
+    fn jsonb_operator_question() {
+        test_jsonb_operator("?");
+    }
+
+    #[test]
+    fn jsonb_operator_question_and() {
+        test_jsonb_operator("?&");
+    }
+
+    #[test]
+    fn jsonb_operator_question_pipe() {
+        test_jsonb_operator("?|");
+    }
+
+    #[test]
+    fn jsonb_operator_at_arrow() {
+        test_jsonb_operator("@>");
+    }
+
+    #[test]
+    fn jsonb_operator_arrow_at() {
+        test_jsonb_operator("<@");
+    }
+
+    fn test_jsonb_operator(op: &'static str) {
+        let schema = resolver(schema! {
+            tables: {
+                patients: {
+                    id (PK),
+                    notes (EQL),
+                }
+            }
+        });
+
+        let statement = parse(&format!("SELECT id, notes {} 'medications' AS meds FROM patients", op));
+
+        match type_check(schema, &statement) {
+            Ok(typed) => {
+                match typed.transform(test_helpers::dummy_encrypted_json_selector(&typed, "medications")) {
+                    Ok(statement) => assert_eq!(
+                        statement.to_string(),
+                        format!("SELECT id, notes {} '<encrypted-selector(medications)>' AS meds FROM patients", op)
                     ),
                     Err(err) => panic!("transformation failed: {err}"),
                 }

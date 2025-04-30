@@ -1,16 +1,19 @@
-use std::fmt::Debug;
+use std::{collections::HashMap, fmt::Debug};
 
-use sqltk::parser::{
-    ast::{self as ast, Statement},
-    dialect::PostgreSqlDialect,
-    parser::Parser,
+use sqltk::{
+    parser::{
+        ast::{self as ast, Statement},
+        dialect::PostgreSqlDialect,
+        parser::Parser,
+    },
+    NodeKey,
 };
 use tracing_subscriber::fmt::format;
 use tracing_subscriber::fmt::format::FmtSpan;
 
 use std::sync::Once;
 
-use crate::{Projection, ProjectionColumn};
+use crate::{Projection, ProjectionColumn, TypeCheckedStatement};
 
 #[allow(unused)]
 pub(crate) fn init_tracing() {
@@ -27,12 +30,31 @@ pub(crate) fn init_tracing() {
     });
 }
 
-pub(crate) fn parse(statement: &'static str) -> Statement {
+pub(crate) fn parse(statement: &str) -> Statement {
     Parser::parse_sql(&PostgreSqlDialect {}, statement).unwrap()[0].clone()
 }
 
 pub(crate) fn id(ident: &str) -> ast::Ident {
     ast::Ident::from(ident)
+}
+
+pub(crate) fn get_node_key_of_json_selector<'ast>(
+    typed: &TypeCheckedStatement<'ast>,
+    selector: &'static str,
+) -> NodeKey<'ast> {
+    typed
+        .find_nodekey_for_value_node(ast::Value::SingleQuotedString(selector.into()))
+        .expect("could not find selector Value node")
+}
+
+pub(crate) fn dummy_encrypted_json_selector<'ast>(
+    typed: &TypeCheckedStatement<'ast>,
+    selector: &'static str,
+) -> HashMap<NodeKey<'ast>, ast::Value> {
+    HashMap::from_iter(vec![(
+        get_node_key_of_json_selector(typed, selector),
+        ast::Value::SingleQuotedString(format!("<encrypted-selector({})>", selector)),
+    )])
 }
 
 #[macro_export]

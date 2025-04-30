@@ -1,7 +1,10 @@
+use std::any::TypeId;
+use std::convert::Infallible;
+use std::ops::ControlFlow;
 use std::{collections::HashMap, sync::Arc};
 
-use sqltk::parser::ast::{self, Statement};
-use sqltk::{AsNodeKey, NodeKey, Transformable};
+use sqltk::parser::ast::{self, Query, SetExpr, Statement};
+use sqltk::{AsNodeKey, Break, NodeKey, Transformable, Visitable, Visitor};
 
 use crate::{
     DryRunnable, EqlMapperError, EqlValue, FailOnPlaceholderChange, GroupByEqlCol, Param,
@@ -81,6 +84,34 @@ impl<'ast> TypeCheckedStatement<'ast> {
         self.statement.apply_transform(&mut transformer)
     }
 
+    /// Utility for finding the [`NodeKey`] of a [`Value`] node in `statement` by providing a `matching` equal node to search for.
+    #[cfg(test)]
+    pub(crate) fn find_nodekey_for_value_node(&self, matching: ast::Value) -> Option<NodeKey<'ast>> {
+        struct FindNode<'ast> {
+            needle: ast::Value,
+            found: Option<NodeKey<'ast>>,
+        }
+
+        impl<'a> Visitor<'a> for FindNode<'a> {
+            type Error = Infallible;
+
+            fn enter<N: Visitable>(&mut self, node: &'a N) -> ControlFlow<Break<Self::Error>> {
+                if let Some(haystack) = node.downcast_ref::<ast::Value>() {
+                    if haystack == &self.needle {
+                        self.found = Some(haystack.as_node_key());
+                        return ControlFlow::Break(Break::Finished)
+                    }
+                }
+                ControlFlow::Continue(())
+            }
+        }
+
+        let mut visitor = FindNode{ needle: matching, found: None };
+        self.statement.accept(&mut visitor);
+
+        visitor.found
+    }
+
     pub fn literal_values(&self) -> Vec<&sqltk::parser::ast::Value> {
         self.literals
             .iter()
@@ -113,17 +144,19 @@ impl<'ast> TypeCheckedStatement<'ast> {
         }
 
         for (key, _) in encrypted_literals.iter() {
-            if !self
-                .literals
-                .iter()
-                .any(|(_, node)| &node.as_node_key() == key)
-            {
+            if !self.literal_exists_for_node_key(*key) {
                 return Err(EqlMapperError::Transform(String::from(
                     "encrypted literals refers to a literal node which is not present in the SQL statement"
                 )));
             }
         }
         Ok(())
+    }
+
+    fn literal_exists_for_node_key(&self, key: NodeKey<'ast>) -> bool {
+        self.literals
+            .iter()
+            .any(|(_, node)| node.as_node_key() == key)
     }
 
     fn count_not_null_literals(&self) -> usize {

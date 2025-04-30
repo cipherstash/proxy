@@ -61,6 +61,13 @@ impl Projection {
             Projection::WithColumns(columns)
         }
     }
+
+    pub fn type_at_col_index(&self, index: usize) -> Option<&Value> {
+        match self {
+            Projection::WithColumns(cols) => cols.get(index).map(|col| &col.ty),
+            Projection::Empty => None,
+        }
+    }
 }
 
 /// A column from a projection which has a type and an optional alias.
