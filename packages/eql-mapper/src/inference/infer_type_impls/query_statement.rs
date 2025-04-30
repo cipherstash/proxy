@@ -1,5 +1,5 @@
 use eql_mapper_macros::trace_infer;
-use sqltk_parser::ast::Query;
+use sqltk::parser::ast::Query;
 
 use crate::{
     inference::{InferType, TypeError},

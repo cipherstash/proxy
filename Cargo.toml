@@ -36,7 +36,6 @@ debug = true
 
 [workspace.dependencies]
 sqltk = { version = "0.6.0" }
-sqltk-parser = { version = "0.53.0-cipherstash.1" }
 thiserror = "2.0.9"
 tokio = { version = "1.44", features = ["full"] }
 tracing = "0.1"

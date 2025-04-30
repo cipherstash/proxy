@@ -5,8 +5,8 @@ use crate::{
     DepMut, Fmt, Param, ParamError, ScopeError, ScopeTracker, TableResolver, Type,
     TypeCheckedStatement, TypeRegistry, Value,
 };
+use sqltk::parser::ast::{self as ast, Statement};
 use sqltk::{Break, NodeKey, Visitable, Visitor};
-use sqltk_parser::ast::{self as ast, Statement};
 use std::{
     cell::RefCell, collections::HashMap, marker::PhantomData, ops::ControlFlow, rc::Rc, sync::Arc,
 };

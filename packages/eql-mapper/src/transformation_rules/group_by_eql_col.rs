@@ -1,10 +1,10 @@
 use std::{collections::HashMap, mem, sync::Arc};
 
-use sqltk::{NodeKey, NodePath, Visitable};
-use sqltk_parser::ast::{
+use sqltk::parser::ast::{
     helpers::attached_token::AttachedToken, Expr, GroupByExpr, Ident, ObjectName,
 };
-use sqltk_parser::tokenizer::{Span, Token, TokenWithSpan};
+use sqltk::parser::tokenizer::{Span, Token, TokenWithSpan};
+use sqltk::{NodeKey, NodePath, Visitable};
 
 use crate::{EqlMapperError, Type, Value};
 

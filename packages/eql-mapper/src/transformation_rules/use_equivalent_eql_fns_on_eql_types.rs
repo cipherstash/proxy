@@ -1,7 +1,7 @@
 use std::{collections::HashMap, sync::Arc};
 
+use sqltk::parser::ast::{Expr, Function, Ident, Select, SelectItem};
 use sqltk::{NodeKey, NodePath, Visitable};
-use sqltk_parser::ast::{Expr, Function, Ident, Select, SelectItem};
 
 use crate::{EqlMapperError, SqlIdent, Type};
 

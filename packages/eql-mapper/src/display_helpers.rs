@@ -3,10 +3,10 @@ use std::{
     fmt::{Debug, Display},
 };
 
-use sqltk::NodeKey;
-use sqltk_parser::ast::{
+use sqltk::parser::ast::{
     Delete, Expr, Function, Insert, Query, Select, SelectItem, SetExpr, Statement, Value, Values,
 };
+use sqltk::NodeKey;
 
 use crate::{EqlValue, Param, Type};
 
@@ -108,7 +108,7 @@ impl Display for Fmt<&Vec<(Param, crate::Value)>> {
     }
 }
 
-impl Display for Fmt<&Vec<(EqlValue, &sqltk_parser::ast::Value)>> {
+impl Display for Fmt<&Vec<(EqlValue, &sqltk::parser::ast::Value)>> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let formatted = self
             .0

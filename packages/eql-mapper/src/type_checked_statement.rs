@@ -1,7 +1,7 @@
 use std::{collections::HashMap, sync::Arc};
 
+use sqltk::parser::ast::{self, Statement};
 use sqltk::{AsNodeKey, NodeKey, Transformable};
-use sqltk_parser::ast::{self, Statement};
 
 use crate::{
     DryRunnable, EqlMapperError, EqlValue, FailOnPlaceholderChange, GroupByEqlCol, Param,
@@ -73,7 +73,7 @@ impl<'ast> TypeCheckedStatement<'ast> {
     /// and inserting EQL helper functions where necessary.
     pub fn transform(
         &self,
-        encrypted_literals: HashMap<NodeKey<'ast>, sqltk_parser::ast::Value>,
+        encrypted_literals: HashMap<NodeKey<'ast>, sqltk::parser::ast::Value>,
     ) -> Result<Statement, EqlMapperError> {
         self.check_all_encrypted_literals_provided(&encrypted_literals)?;
         let mut transformer = self.make_transformer(encrypted_literals);
@@ -81,7 +81,7 @@ impl<'ast> TypeCheckedStatement<'ast> {
         self.statement.apply_transform(&mut transformer)
     }
 
-    pub fn literal_values(&self) -> Vec<&sqltk_parser::ast::Value> {
+    pub fn literal_values(&self) -> Vec<&sqltk::parser::ast::Value> {
         self.literals
             .iter()
             .map(|(_, value)| *value)
@@ -102,7 +102,7 @@ impl<'ast> TypeCheckedStatement<'ast> {
 
     fn check_all_encrypted_literals_provided(
         &self,
-        encrypted_literals: &HashMap<NodeKey<'ast>, sqltk_parser::ast::Value>,
+        encrypted_literals: &HashMap<NodeKey<'ast>, sqltk::parser::ast::Value>,
     ) -> Result<(), EqlMapperError> {
         if self.count_not_null_literals() != encrypted_literals.len() {
             return Err(EqlMapperError::Transform(format!(
@@ -135,7 +135,7 @@ impl<'ast> TypeCheckedStatement<'ast> {
 
     fn make_transformer(
         &self,
-        encrypted_literals: HashMap<NodeKey<'ast>, sqltk_parser::ast::Value>,
+        encrypted_literals: HashMap<NodeKey<'ast>, sqltk::parser::ast::Value>,
     ) -> DryRunnable<impl TransformationRule<'_>> {
         DryRunnable::new((
             WrapGroupedEqlColInAggregateFn::new(Arc::clone(&self.node_types)),

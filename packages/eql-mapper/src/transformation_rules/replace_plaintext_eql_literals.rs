@@ -1,7 +1,7 @@
 use std::{any::type_name, collections::HashMap};
 
+use sqltk::parser::ast::Value;
 use sqltk::{NodeKey, NodePath, Visitable};
-use sqltk_parser::ast::Value;
 
 use crate::EqlMapperError;
 

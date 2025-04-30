@@ -3,7 +3,7 @@ use cipherstash_client::{
     zerokms::{encrypted_record, EncryptedRecord},
 };
 use serde::{Deserialize, Serialize};
-use sqltk_parser::ast::Ident;
+use sqltk::parser::ast::Ident;
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct Plaintext {

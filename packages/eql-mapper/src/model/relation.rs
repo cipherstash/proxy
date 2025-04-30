@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use sqltk_parser::ast::Ident;
+use sqltk::parser::ast::Ident;
 
 use crate::unifier::Type;
 

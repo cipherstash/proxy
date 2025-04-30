@@ -3,7 +3,7 @@ use std::fmt::Debug;
 use std::hash::{Hash, Hasher};
 
 use derive_more::Display;
-use sqltk_parser::ast::Ident;
+use sqltk::parser::ast::Ident;
 
 /// `SqlIdent` wraps an [`Ident`] (or `&Ident`) and defines a [`PartialEq`] implementation that respects the
 /// case-insensitive versus case-sensitive comparison rules for SQL identifiers depending on whether the identifier is
@@ -127,7 +127,7 @@ impl From<Ident> for SqlIdent<Ident> {
 
 #[cfg(test)]
 mod test {
-    use sqltk_parser::ast::Ident;
+    use sqltk::parser::ast::Ident;
 
     use crate::SqlIdent;
 

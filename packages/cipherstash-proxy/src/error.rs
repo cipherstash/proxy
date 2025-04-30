@@ -324,8 +324,8 @@ impl From<serde_json::Error> for Error {
     }
 }
 
-impl From<sqltk_parser::parser::ParserError> for Error {
-    fn from(e: sqltk_parser::parser::ParserError) -> Self {
+impl From<sqltk::parser::parser::ParserError> for Error {
+    fn from(e: sqltk::parser::parser::ParserError) -> Self {
         Error::Mapping(MappingError::InvalidSqlStatement(e.to_string()))
     }
 }

@@ -7,9 +7,9 @@
 
 use crate::unifier::{EqlValue, NativeValue};
 use derive_more::Display;
-use sqltk_parser::ast::Ident;
+use sqltk::parser::ast::Ident;
 
-/// The resolved type of a [`sqltk_parser::ast::Expr`] node.
+/// The resolved type of a [`sqltk::parser::ast::Expr`] node.
 #[derive(Debug, Clone, PartialEq, Eq, Display)]
 #[display("{self}")]
 pub enum Type {

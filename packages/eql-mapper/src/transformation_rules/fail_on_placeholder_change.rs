@@ -1,6 +1,6 @@
 use std::marker::PhantomData;
 
-use sqltk_parser::ast::{Expr, Value};
+use sqltk::parser::ast::{Expr, Value};
 
 use crate::EqlMapperError;
 

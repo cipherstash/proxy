@@ -1,10 +1,10 @@
 use std::mem;
 
-use sqltk::{NodePath, Visitable};
-use sqltk_parser::ast::{
+use sqltk::parser::ast::{
     helpers::attached_token::AttachedToken, Expr, Function, Ident, Select, SelectItem,
 };
-use sqltk_parser::tokenizer::{Span, Token, TokenWithSpan};
+use sqltk::parser::tokenizer::{Span, Token, TokenWithSpan};
+use sqltk::{NodePath, Visitable};
 
 use crate::EqlMapperError;
 
