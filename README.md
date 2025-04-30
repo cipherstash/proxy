@@ -54,6 +54,10 @@ Behind the scenes, it uses the [Encrypt Query Language](https://github.com/ciphe
 > [!IMPORTANT]
 > **Prerequisites:** Before you start you need to have this software installed:
 >  - [Docker](https://www.docker.com/) — see Docker's [documentation for installing](https://docs.docker.com/get-started/get-docker/)
+> 
+> **Supported architectures:** We currently support `arm64v8` architectures. If you're interested in a `x86_64` Docker image, upvote [this idea](https://github.com/cipherstash/proxy/discussions/214).
+
+ 
 
 Get up and running in local dev in < 5 minutes:
 
