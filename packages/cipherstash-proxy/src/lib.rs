@@ -15,7 +15,7 @@ pub use crate::cli::Args;
 pub use crate::cli::Migrate;
 pub use crate::config::{DatabaseConfig, ServerConfig, TandemConfig, TlsConfig};
 pub use crate::encrypt::Encrypt;
-pub use crate::eql::{Encrypted, ForQuery, Identifier, Plaintext};
+pub use crate::eql::{EqlEncrypted, ForQuery, Identifier, Plaintext};
 pub use crate::log::init;
 
 use std::mem;
