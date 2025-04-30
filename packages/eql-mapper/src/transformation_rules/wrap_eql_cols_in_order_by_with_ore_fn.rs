@@ -1,7 +1,10 @@
 use std::{collections::HashMap, mem, sync::Arc};
 
 use sqltk::{NodeKey, NodePath, Visitable};
-use sqltk_parser::ast::{Expr, Ident, ObjectName, OrderByExpr};
+use sqltk_parser::ast::{
+    helpers::attached_token::AttachedToken, Expr, Ident, ObjectName, OrderByExpr,
+};
+use sqltk_parser::tokenizer::{Span, Token, TokenWithSpan};
 
 use crate::{EqlMapperError, Type, Value};
 
@@ -44,7 +47,10 @@ impl<'ast> TransformationRule<'ast> for WrapEqlColsInOrderByWithOreFn<'ast> {
             if let Some((_order_by_expr,)) = node_path.last_1_as::<OrderByExpr>() {
                 let target_node = target_node.downcast_mut::<OrderByExpr>().unwrap();
 
-                let expr_to_wrap = mem::replace(&mut target_node.expr, Expr::Wildcard);
+                let expr_to_wrap = mem::replace(
+                    &mut target_node.expr,
+                    Expr::Wildcard(AttachedToken(TokenWithSpan::new(Token::EOF, Span::empty()))),
+                );
 
                 target_node.expr = wrap_in_1_arg_function(
                     expr_to_wrap,

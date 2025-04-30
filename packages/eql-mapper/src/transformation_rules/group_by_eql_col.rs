@@ -1,7 +1,10 @@
 use std::{collections::HashMap, mem, sync::Arc};
 
 use sqltk::{NodeKey, NodePath, Visitable};
-use sqltk_parser::ast::{Expr, GroupByExpr, Ident, ObjectName};
+use sqltk_parser::ast::{
+    helpers::attached_token::AttachedToken, Expr, GroupByExpr, Ident, ObjectName,
+};
+use sqltk_parser::tokenizer::{Span, Token, TokenWithSpan};
 
 use crate::{EqlMapperError, Type, Value};
 
@@ -30,7 +33,10 @@ impl<'ast> TransformationRule<'ast> for GroupByEqlCol<'ast> {
             // Nodes are modified starting from the leaf nodes, to target_node *is* what we want to be wrapping.
             // So we steal the existing value and replace the original with a cheap placeholder (Expr::Wildcard).
             // Stealing the original subtree means we can avoid cloning it.
-            let transformed_expr = mem::replace(target_node, Expr::Wildcard);
+            let transformed_expr = mem::replace(
+                target_node,
+                Expr::Wildcard(AttachedToken(TokenWithSpan::new(Token::EOF, Span::empty()))),
+            );
 
             *target_node = helpers::wrap_in_1_arg_function(
                 transformed_expr,

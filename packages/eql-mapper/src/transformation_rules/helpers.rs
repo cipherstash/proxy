@@ -44,6 +44,7 @@ pub(crate) fn wrap_in_1_arg_function(expr: Expr, name: ObjectName) -> Expr {
         null_treatment: None,
         over: None,
         within_group: vec![],
+        uses_odbc_syntax: false,
     })
 }
 

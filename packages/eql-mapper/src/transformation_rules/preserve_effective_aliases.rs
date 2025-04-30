@@ -1,7 +1,10 @@
 use std::mem;
 
 use sqltk::{NodePath, Visitable};
-use sqltk_parser::ast::{Expr, Function, Ident, Select, SelectItem};
+use sqltk_parser::ast::{
+    helpers::attached_token::AttachedToken, Expr, Function, Ident, Select, SelectItem,
+};
+use sqltk_parser::tokenizer::{Span, Token, TokenWithSpan};
 
 use crate::EqlMapperError;
 
@@ -105,7 +108,13 @@ impl PreserveEffectiveAliases {
                 {
                     if effective_target_alias != effective_source_alias {
                         *target_node = SelectItem::ExprWithAlias {
-                            expr: mem::replace(expr, Expr::Wildcard),
+                            expr: mem::replace(
+                                expr,
+                                Expr::Wildcard(AttachedToken(TokenWithSpan::new(
+                                    Token::EOF,
+                                    Span::empty(),
+                                ))),
+                            ),
                             alias: effective_source_alias,
                         };
 
