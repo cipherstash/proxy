@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1746053838564,
+  "lastUpdate": 1746062767560,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -1018,6 +1018,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 7.291788,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "b87a1bbb2a421c270569302cf37e2ee8e060d58e",
+          "message": "Docs: Add link to request x86_64 Docker image",
+          "timestamp": "2025-04-30T04:56:32Z",
+          "url": "https://github.com/cipherstash/proxy/pull/215/commits/b87a1bbb2a421c270569302cf37e2ee8e060d58e"
+        },
+        "date": 1746062766201,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 6.744563,
             "unit": "Number"
           }
         ]
