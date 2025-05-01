@@ -271,7 +271,7 @@ fn to_eql_encrypted(
                             ore_cclw_var_index = Some(hex::encode(ore.bytes))
                         }
                     },
-                    IndexTerm::SteQueryVec(query) => {} // TODO: what do we do here?
+                    IndexTerm::SteQueryVec(_query) => {} // TODO: what do we do here?
                     IndexTerm::Null => {}
                 };
             }

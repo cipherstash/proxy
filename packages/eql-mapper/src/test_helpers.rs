@@ -1,19 +1,19 @@
-use std::{collections::HashMap, fmt::Debug};
+use std::{collections::HashMap, convert::Infallible, fmt::Debug, ops::ControlFlow};
 
 use sqltk::{
     parser::{
-        ast::{self as ast, Statement},
+        ast::{self as ast, Statement, Value},
         dialect::PostgreSqlDialect,
         parser::Parser,
     },
-    NodeKey,
+    AsNodeKey, Break, NodeKey, Visitable, Visitor,
 };
 use tracing_subscriber::fmt::format;
 use tracing_subscriber::fmt::format::FmtSpan;
 
 use std::sync::Once;
 
-use crate::{Projection, ProjectionColumn, TypeCheckedStatement};
+use crate::{Projection, ProjectionColumn};
 
 #[allow(unused)]
 pub(crate) fn init_tracing() {
@@ -39,24 +39,60 @@ pub(crate) fn id(ident: &str) -> ast::Ident {
 }
 
 pub(crate) fn get_node_key_of_json_selector<'ast>(
-    typed: &TypeCheckedStatement<'ast>,
-    selector: &'static str,
+    statement: &'ast Statement,
+    selector: &Value,
 ) -> NodeKey<'ast> {
-    typed
-        .find_nodekey_for_value_node(ast::Value::SingleQuotedString(selector.into()))
+    find_nodekey_for_value_node(statement, selector.clone())
         .expect("could not find selector Value node")
 }
 
 pub(crate) fn dummy_encrypted_json_selector<'ast>(
-    typed: &TypeCheckedStatement<'ast>,
-    selector: &'static str,
+    statement: &'ast Statement,
+    selector: Value,
 ) -> HashMap<NodeKey<'ast>, ast::Value> {
-    HashMap::from_iter(vec![(
-        get_node_key_of_json_selector(typed, selector),
-        ast::Value::SingleQuotedString(format!("<encrypted-selector({})>", selector)),
-    )])
+    if let Value::SingleQuotedString(s) = &selector {
+        return HashMap::from_iter(vec![(
+            get_node_key_of_json_selector(statement, &selector),
+            ast::Value::SingleQuotedString(format!("<encrypted-selector({})>", s)),
+        )])
+    } else {
+        panic!("dummy_encrypted_json_selector only works on Value::SingleQuotedString")
+    }
 }
 
+/// Utility for finding the [`NodeKey`] of a [`Value`] node in `statement` by providing a `matching` equal node to search for.
+pub(crate) fn find_nodekey_for_value_node<'ast>(
+    statement: &'ast Statement,
+    matching: ast::Value,
+) -> Option<NodeKey<'ast>> {
+    struct FindNode<'ast> {
+        needle: ast::Value,
+        found: Option<NodeKey<'ast>>,
+    }
+
+    impl<'a> Visitor<'a> for FindNode<'a> {
+        type Error = Infallible;
+
+        fn enter<N: Visitable>(&mut self, node: &'a N) -> ControlFlow<Break<Self::Error>> {
+            if let Some(haystack) = node.downcast_ref::<ast::Value>() {
+                if haystack == &self.needle {
+                    self.found = Some(haystack.as_node_key());
+                    return ControlFlow::Break(Break::Finished);
+                }
+            }
+            ControlFlow::Continue(())
+        }
+    }
+
+    let mut visitor = FindNode {
+        needle: matching,
+        found: None,
+    };
+
+    statement.accept(&mut visitor);
+
+    visitor.found
+}
 #[macro_export]
 macro_rules! col {
     ((NATIVE)) => {
