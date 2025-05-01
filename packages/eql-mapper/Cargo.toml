@@ -19,6 +19,7 @@ sqltk = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
+vec1 = "1.12.1"
 
 [dev-dependencies]
 pretty_assertions = "^1.0"
