@@ -269,7 +269,7 @@ If the proxy is running on a host other than localhost, access on that host.
 
 ## Supported architectures
 
-CipherStash Proxy provides Docker images for `linux/arm64` architectures.
+CipherStash Proxy is [available as a Docker container image](https://hub.docker.com/r/cipherstash/proxy) for `linux/arm64` architectures.
 
 If you're interested in a Docker image for other architectures (like `linux/amd64`), upvote [this idea](https://github.com/cipherstash/proxy/discussions/214).
 
