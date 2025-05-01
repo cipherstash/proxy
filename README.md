@@ -54,6 +54,7 @@ Behind the scenes, it uses the [Encrypt Query Language](https://github.com/ciphe
 > [!IMPORTANT]
 > **Prerequisites:** Before you start you need to have this software installed:
 >  - [Docker](https://www.docker.com/) — see Docker's [documentation for installing](https://docs.docker.com/get-started/get-docker/)
+ 
 
 Get up and running in local dev in < 5 minutes:
 
