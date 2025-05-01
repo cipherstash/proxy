@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1746062767560,
+  "lastUpdate": 1746062773061,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -1043,6 +1043,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 6.744563,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "keandrews@gmail.com",
+            "name": "Kate Andrews",
+            "username": "kateandrews"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "0e2aa2b309e849b01b1c6b0fb80b86b964b42a1c",
+          "message": "Merge pull request #215 from cipherstash/request-x86_64-docker-image\n\nDocs: Add link to request x86_64 Docker image",
+          "timestamp": "2025-05-01T11:23:15+10:00",
+          "tree_id": "4980a03b3269b6a09475998670d2cd70fc42c3a7",
+          "url": "https://github.com/cipherstash/proxy/commit/0e2aa2b309e849b01b1c6b0fb80b86b964b42a1c"
+        },
+        "date": 1746062771634,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 6.732823,
             "unit": "Number"
           }
         ]
