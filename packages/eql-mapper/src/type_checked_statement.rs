@@ -1,10 +1,7 @@
-use std::any::TypeId;
-use std::convert::Infallible;
-use std::ops::ControlFlow;
 use std::{collections::HashMap, sync::Arc};
 
-use sqltk::parser::ast::{self, Query, SetExpr, Statement};
-use sqltk::{AsNodeKey, Break, NodeKey, Transformable, Visitable, Visitor};
+use sqltk::parser::ast::{self, Statement};
+use sqltk::{AsNodeKey, NodeKey, Transformable};
 
 use crate::{
     DryRunnable, EqlMapperError, EqlValue, FailOnPlaceholderChange, GroupByEqlCol, Param,
@@ -82,34 +79,6 @@ impl<'ast> TypeCheckedStatement<'ast> {
         let mut transformer = self.make_transformer(encrypted_literals);
         transformer.set_real_run_mode();
         self.statement.apply_transform(&mut transformer)
-    }
-
-    /// Utility for finding the [`NodeKey`] of a [`Value`] node in `statement` by providing a `matching` equal node to search for.
-    #[cfg(test)]
-    pub(crate) fn find_nodekey_for_value_node(&self, matching: ast::Value) -> Option<NodeKey<'ast>> {
-        struct FindNode<'ast> {
-            needle: ast::Value,
-            found: Option<NodeKey<'ast>>,
-        }
-
-        impl<'a> Visitor<'a> for FindNode<'a> {
-            type Error = Infallible;
-
-            fn enter<N: Visitable>(&mut self, node: &'a N) -> ControlFlow<Break<Self::Error>> {
-                if let Some(haystack) = node.downcast_ref::<ast::Value>() {
-                    if haystack == &self.needle {
-                        self.found = Some(haystack.as_node_key());
-                        return ControlFlow::Break(Break::Finished)
-                    }
-                }
-                ControlFlow::Continue(())
-            }
-        }
-
-        let mut visitor = FindNode{ needle: matching, found: None };
-        self.statement.accept(&mut visitor);
-
-        visitor.found
     }
 
     pub fn literal_values(&self) -> Vec<&sqltk::parser::ast::Value> {

@@ -42,9 +42,11 @@ mod test {
         Value,
     };
     use pretty_assertions::assert_eq;
+    use sqltk::parser::ast::Ident;
     use sqltk::parser::ast::Statement;
     use sqltk::parser::ast::{self as ast};
     use sqltk::AsNodeKey;
+    use sqltk::NodeKey;
     use std::collections::HashMap;
     use std::sync::Arc;
     use tracing::error;
@@ -1419,7 +1421,83 @@ mod test {
         test_jsonb_operator("<@");
     }
 
-    fn test_jsonb_operator(op: &'static str) {
+    #[test]
+    fn jsonb_function_jsonb_path_query() {
+        test_jsonb_function(
+            "jsonb_path_query",
+            vec![
+                ast::Expr::Identifier(Ident::new("notes")),
+                ast::Expr::Value(ast::Value::SingleQuotedString("$.medications".to_owned())),
+            ],
+        );
+    }
+
+    // TODO: do we need to check that the RHS of JSON operators MUST be a Value node
+    // and not an arbitrary expression?
+
+    fn test_jsonb_function(fn_name: &str, args: Vec<ast::Expr>) {
+        let schema = resolver(schema! {
+            tables: {
+                patients: {
+                    id (PK),
+                    notes (EQL),
+                }
+            }
+        });
+
+        let args_in = args
+            .iter()
+            .map(|expr| expr.to_string())
+            .collect::<Vec<_>>()
+            .join(", ");
+
+        let statement = parse(&format!(
+            "SELECT id, {}({}) AS meds FROM patients",
+            fn_name, args_in
+        ));
+
+        let args_encrypted = args
+            .iter()
+            .map(|expr| match expr {
+                ast::Expr::Identifier(ident) => ident.to_string(),
+                ast::Expr::Value(ast::Value::SingleQuotedString(s)) => {
+                    format!("ROW('<encrypted-selector({})>'::JSONB)", s)
+                }
+                _ => panic!("unsupported expr type in test util"),
+            })
+            .collect::<Vec<String>>()
+            .join(", ");
+
+        let mut encrypted_literals: HashMap<NodeKey<'_>, ast::Value> = HashMap::new();
+
+        for arg in args.iter() {
+            if let ast::Expr::Value(value) = arg {
+                encrypted_literals.extend(test_helpers::dummy_encrypted_json_selector(
+                    &statement,
+                    value.clone(),
+                ));
+            }
+        }
+
+        match type_check(schema, &statement) {
+            Ok(typed) => match typed.transform(encrypted_literals) {
+                Ok(statement) => {
+                    let rewritten_fn_name = format!("eql_v1.{fn_name}");
+                    assert_eq!(
+                        statement.to_string(),
+                        format!(
+                            "SELECT id, {}({}) AS meds FROM patients",
+                            rewritten_fn_name, args_encrypted
+                        )
+                    )
+                }
+                Err(err) => panic!("transformation failed: {err}"),
+            },
+            Err(err) => panic!("type check failed: {err}"),
+        }
+    }
+
+    fn test_jsonb_operator(op: &str) {
         let schema = resolver(schema! {
             tables: {
                 patients: {
@@ -1436,10 +1514,10 @@ mod test {
 
         match type_check(schema, &statement) {
             Ok(typed) => {
-                match typed.transform(test_helpers::dummy_encrypted_json_selector(&typed, "medications")) {
+                match typed.transform(test_helpers::dummy_encrypted_json_selector(&statement, ast::Value::SingleQuotedString("medications".to_owned()))) {
                     Ok(statement) => assert_eq!(
                         statement.to_string(),
-                        format!("SELECT id, notes {} '<encrypted-selector(medications)>' AS meds FROM patients", op)
+                        format!("SELECT id, notes {} ROW('<encrypted-selector(medications)>'::JSONB) AS meds FROM patients", op)
                     ),
                     Err(err) => panic!("transformation failed: {err}"),
                 }

@@ -1,22 +1,17 @@
 #[cfg(test)]
 mod tests {
-    use crate::common::{clear, connect_with_tls, id, trace, PROXY};
+    use crate::common::trace;
     use cipherstash_client::config::EnvSource;
     use cipherstash_client::credentials::auto_refresh::AutoRefresh;
-    use cipherstash_client::ejsonpath::Selector;
     use cipherstash_client::encryption::{
-        Encrypted, EncryptedEntry, EncryptedSteVecTerm, JsonIndexer, JsonIndexerOptions, OreTerm,
-        Plaintext, PlaintextTarget, QueryBuilder, ReferencedPendingPipeline,
+        Encrypted, EncryptedSteVecTerm, JsonIndexer, JsonIndexerOptions, OreTerm, Plaintext,
+        PlaintextTarget, ReferencedPendingPipeline,
     };
-    use cipherstash_client::{
-        encryption::{ScopedCipher, SteVec},
-        zerokms::{encrypted_record, EncryptedRecord},
-    };
+    use cipherstash_client::{encryption::ScopedCipher, zerokms::EncryptedRecord};
     use cipherstash_client::{ConsoleConfig, CtsConfig, ZeroKMSConfig};
     use cipherstash_config::column::{Index, IndexType};
-    use cipherstash_config::{ColumnConfig, ColumnMode, ColumnType};
+    use cipherstash_config::{ColumnConfig, ColumnType};
     use cipherstash_proxy::Identifier;
-    use rustls::unbuffered::EncodeError;
     use serde::{Deserialize, Serialize};
     use std::sync::Arc;
     use tracing::info;
@@ -25,7 +20,7 @@ mod tests {
     pub mod option_mp_base85 {
         use cipherstash_client::zerokms::encrypted_record::formats::mp_base85;
         use cipherstash_client::zerokms::EncryptedRecord;
-        use serde::{Deserialize, Deserializer, Serialize, Serializer};
+        use serde::{Deserialize, Deserializer, Serializer};
 
         pub fn serialize<S>(
             value: &Option<EncryptedRecord>,
@@ -167,7 +162,7 @@ mod tests {
         // let mut value =
         //     serde_json::from_str::<serde_json::Value>("{\"hello\": \"two\", \"n\": 20}").unwrap();
 
-        let mut value =
+        let value =
             serde_json::from_str::<serde_json::Value>("{\"hello\": \"two\", \"n\": 30}").unwrap();
 
         // let mut value =
@@ -243,12 +238,12 @@ mod tests {
         let term = indexer.generate_term(term, cipher.index_key()).unwrap();
 
         match term {
-            EncryptedSteVecTerm::Mac(items) => todo!(),
+            EncryptedSteVecTerm::Mac(_) => todo!(),
             EncryptedSteVecTerm::OreFixed(ore_cllw8_v1) => {
                 let term = hex::encode(ore_cllw8_v1.bytes);
                 info!("{n}: {term}");
             }
-            EncryptedSteVecTerm::OreVariable(ore_cllw8_variable_v1) => todo!(),
+            EncryptedSteVecTerm::OreVariable(_) => todo!(),
         }
 
         // if let Some(ste_vec_index) = e.ste_vec_index {
