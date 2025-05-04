@@ -1339,14 +1339,14 @@ mod test {
         });
 
         let statement =
-            parse("SELECT MIN(salary), MAX(salary), department FROM employees GROUP BY department");
+            parse("SELECT min(salary), max(salary), department FROM employees GROUP BY department");
 
         match type_check(schema, &statement) {
             Ok(typed) => {
                 match typed.transform(HashMap::new()) {
                     Ok(statement) => assert_eq!(
                         statement.to_string(),
-                        "SELECT CS_MIN_V1(salary) AS MIN, CS_MAX_V1(salary) AS MAX, department FROM employees GROUP BY department".to_string()
+                        "SELECT CS_MIN_V1(salary) AS min, CS_MAX_V1(salary) AS max, department FROM employees GROUP BY department".to_string()
                     ),
                     Err(err) => panic!("transformation failed: {err}"),
                 }
