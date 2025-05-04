@@ -102,14 +102,28 @@ impl SqlIdent<Ident> {
     }
 }
 
-// This manual Hash implementation is required to prevent a clippy error:
-// "error: you are deriving `Hash` but have implemented `PartialEq` explicitly"
-impl<T> Hash for SqlIdent<T>
-where
-    T: Hash,
-{
+// This Hash implementation (and the following) one is required in order to be consistent with PartialEq.
+impl Hash for SqlIdent<&Ident> {
     fn hash<H: Hasher>(&self, state: &mut H) {
-        self.0.hash(state)
+        match self.0.quote_style {
+            Some(ch) => {
+                state.write_u8(1);
+                state.write_u32(ch as u32);
+                state.write(self.0.value.as_bytes());
+            },
+            None => {
+                state.write_u8(0);
+                for ch in self.0.value.chars().map(|ch| ch.to_lowercase()).flatten() {
+                    state.write_u32(ch as u32);
+                }
+            },
+        }
+    }
+}
+
+impl Hash for SqlIdent<Ident> {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+       SqlIdent(&self.0).hash(state)
     }
 }
 
