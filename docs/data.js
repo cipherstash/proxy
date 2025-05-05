@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1746062773061,
+  "lastUpdate": 1746430887150,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -1072,6 +1072,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 6.732823,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "cc3f9bff160a6139cbfb136b8a8c1b4c6cfff690",
+          "message": "chore(eql): Update test schema to use EQL 2.0",
+          "timestamp": "2025-05-01T01:23:19Z",
+          "url": "https://github.com/cipherstash/proxy/pull/216/commits/cc3f9bff160a6139cbfb136b8a8c1b4c6cfff690"
+        },
+        "date": 1746430885726,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 6.86085,
             "unit": "Number"
           }
         ]
