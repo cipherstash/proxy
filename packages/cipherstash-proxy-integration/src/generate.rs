@@ -189,7 +189,7 @@ mod tests {
         let mut result = pipeline.encrypt(None).await.unwrap();
         if let Some(Encrypted::SteVec(ste_vec)) = result.remove(idx) {
             for entry in ste_vec {
-                let selector = hex::encode(entry.0 .0);
+                let selector = hex::encode(entry.0.as_bytes());
                 let term = entry.1;
                 let record = entry.2;
 
@@ -200,10 +200,10 @@ mod tests {
                         e.blake3_index = Some(hex::encode(&items));
                     }
                     EncryptedSteVecTerm::OreFixed(o) => {
-                        e.ore_cclw_fixed_index = Some(hex::encode(o.bytes));
+                        e.ore_cclw_fixed_index = Some(hex::encode(&o));
                     }
                     EncryptedSteVecTerm::OreVariable(o) => {
-                        e.ore_cclw_var_index = Some(hex::encode(o.bytes));
+                        e.ore_cclw_var_index = Some(hex::encode(&o));
                     }
                 }
 

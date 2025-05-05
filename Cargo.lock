@@ -681,7 +681,7 @@ dependencies = [
  "percent-encoding",
  "rand 0.8.5",
  "rand_chacha 0.3.1",
- "recipher 0.1.3",
+ "recipher",
  "reqwest",
  "reqwest-middleware",
  "reqwest-retry",
@@ -709,6 +709,8 @@ dependencies = [
 [[package]]
 name = "cipherstash-config"
 version = "0.2.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "30104045751da6e528e83804f4b22d0cddcb27aacce0e1c79604872ddb076bbf"
 dependencies = [
  "serde",
  "thiserror 1.0.69",
@@ -717,6 +719,8 @@ dependencies = [
 [[package]]
 name = "cipherstash-core"
 version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dd56dfac0a35146968ef6696fb822b22f70a664a8739874385876d5452844b7a"
 dependencies = [
  "hmac",
  "lazy_static",
@@ -751,7 +755,7 @@ dependencies = [
  "postgres-protocol",
  "postgres-types",
  "rand 0.9.0",
- "recipher 0.1.3 (registry+https://github.com/rust-lang/crates.io-index)",
+ "recipher",
  "regex",
  "ring",
  "rust_decimal",
@@ -788,7 +792,7 @@ dependencies = [
  "fake 4.2.0",
  "hex",
  "rand 0.9.0",
- "recipher 0.1.3 (registry+https://github.com/rust-lang/crates.io-index)",
+ "recipher",
  "rustls",
  "serde",
  "serde_json",
@@ -857,6 +861,8 @@ checksum = "f46ad14479a25103f283c0f10005961cf086d8dc42205bb44c46ac563475dca6"
 [[package]]
 name = "cllw-ore"
 version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d1b01c26e11101044f85802e31d842483ef983a890c03472d9489f6969cf865a"
 dependencies = [
  "bit-vec",
  "bitvec",
@@ -2948,25 +2954,6 @@ dependencies = [
 [[package]]
 name = "recipher"
 version = "0.1.3"
-dependencies = [
- "aes",
- "async-trait",
- "cmac",
- "hex",
- "hex-literal",
- "opaque-debug",
- "rand 0.8.5",
- "rand_chacha 0.3.1",
- "serde",
- "serde_cbor",
- "sha2",
- "thiserror 1.0.69",
- "zeroize",
-]
-
-[[package]]
-name = "recipher"
-version = "0.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "72aa0940c8f5b753bfd3ed212d60896760579324c59194b7e51fcec35e5c1b0f"
 dependencies = [
@@ -5041,6 +5028,8 @@ dependencies = [
 [[package]]
 name = "zerokms-protocol"
 version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "01a9d0d8103cfa862b451f2c35144301df25a233f7fae041666b890a1578c3b1"
 dependencies = [
  "async-trait",
  "base64",

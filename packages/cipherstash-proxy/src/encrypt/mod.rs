@@ -260,15 +260,15 @@ fn to_eql_encrypted(
                     }
                     IndexTerm::BinaryVec(_) => todo!(),
                     IndexTerm::SteVecSelector(s) => {
-                        selector = Some(hex::encode(s.0));
+                        selector = Some(hex::encode(s.as_bytes()));
                     }
                     IndexTerm::SteVecTerm(ste_vec_term) => match ste_vec_term {
                         EncryptedSteVecTerm::Mac(bytes) => blake3_index = Some(hex::encode(bytes)),
                         EncryptedSteVecTerm::OreFixed(ore) => {
-                            ore_cclw_fixed_index = Some(hex::encode(ore.bytes))
+                            ore_cclw_fixed_index = Some(hex::encode(&ore))
                         }
                         EncryptedSteVecTerm::OreVariable(ore) => {
-                            ore_cclw_var_index = Some(hex::encode(ore.bytes))
+                            ore_cclw_var_index = Some(hex::encode(&ore))
                         }
                     },
                     IndexTerm::SteQueryVec(_query) => {} // TODO: what do we do here?
@@ -302,18 +302,18 @@ fn to_eql_encrypted(
                 .map(|EncryptedEntry(selector, term, ciphertext)| {
                     let indexes = match term {
                         EncryptedSteVecTerm::Mac(bytes) => EqlEncryptedIndexes {
-                            selector: Some(hex::encode(selector.0)),
+                            selector: Some(hex::encode(selector.as_bytes())),
                             blake3_index: Some(hex::encode(bytes)),
                             ..Default::default()
                         },
                         EncryptedSteVecTerm::OreFixed(ore) => EqlEncryptedIndexes {
-                            selector: Some(hex::encode(selector.0)),
-                            ore_cclw_fixed_index: Some(hex::encode(ore.bytes)),
+                            selector: Some(hex::encode(selector.as_bytes())),
+                            ore_cclw_fixed_index: Some(hex::encode(&ore)),
                             ..Default::default()
                         },
                         EncryptedSteVecTerm::OreVariable(ore) => EqlEncryptedIndexes {
-                            selector: Some(hex::encode(selector.0)),
-                            ore_cclw_var_index: Some(hex::encode(ore.bytes)),
+                            selector: Some(hex::encode(selector.as_bytes())),
+                            ore_cclw_var_index: Some(hex::encode(&ore)),
                             ..Default::default()
                         },
                     };
