@@ -13,15 +13,23 @@ use crate::{sql_fn, unifier::Type, SqlIdent, TypeInferencer};
 
 use super::TypeError;
 
+/// The identifier and type signature of a SQL function.
+///
+/// See [`SQL_FUNCTION_SIGNATURES`].
 #[derive(Debug)]
 pub(crate) struct SqlFunction(CompoundIdent, FunctionSig);
 
+/// A representation of the type of an argument or return type in a SQL function.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub(crate) enum Kind {
+    /// A type that mjust be a native type
     Native,
+
+    /// A type that can be a native or EQL type. The `str` is the generic variable name.
     Generic(&'static str),
 }
 
+/// The type signature of a SQL functon (excluding its name).
 #[derive(Debug, Clone)]
 pub(crate) struct FunctionSig {
     args: Vec<Kind>,
@@ -29,6 +37,8 @@ pub(crate) struct FunctionSig {
     generics: HashSet<&'static str>,
 }
 
+/// A function signature but filled in with fresh type variables that correspond with the [`Kind`] or each argument and
+/// return type.
 #[derive(Debug, Clone)]
 pub(crate) struct InstantiatedSig {
     args: Vec<Arc<Type>>,
@@ -56,6 +66,7 @@ impl FunctionSig {
         }
     }
 
+    /// Checks if `self` is applicable to a particular piece of SQL function invocation syntax.
     pub(crate) fn is_applicable_to_args(&self, fn_args_syntax: &FunctionArguments) -> bool {
         match fn_args_syntax {
             FunctionArguments::None => self.args.is_empty(),
@@ -64,6 +75,7 @@ impl FunctionSig {
         }
     }
 
+    /// Creates an [`InstantiatedSig`] from `self`, filling in the [`Kind`]s with fresh type variables.
     pub(crate) fn instantiate(&self, inferencer: &TypeInferencer<'_>) -> InstantiatedSig {
         let mut generics: HashMap<&'static str, Arc<Type>> = HashMap::new();
 
@@ -88,6 +100,8 @@ impl FunctionSig {
         }
     }
 
+    /// For functions that do not have special case handling we synthesise an [`InstatiatedSig`] from the SQL function
+    /// invocation synta where all arguments and the return types are native.
     pub(crate) fn instantiate_native(function: &Function) -> InstantiatedSig {
         let arg_count = match &function.args {
             FunctionArguments::None => 0,
@@ -108,14 +122,13 @@ impl FunctionSig {
 }
 
 impl InstantiatedSig {
+    /// Applies the type constraints of the function to to the AST.
     pub(crate) fn apply_constraints<'ast>(
         &self,
         inferencer: &mut TypeInferencer<'ast>,
         function: &'ast Function,
     ) -> Result<(), TypeError> {
         let fn_name = CompoundIdent::from(&function.name.0);
-
-        // let function_ty = inferencer.get_node_type(function);
 
         inferencer.unify_node_with_type(function, self.return_type.clone())?;
 
@@ -189,6 +202,7 @@ impl From<&Vec<Ident>> for CompoundIdent {
     }
 }
 
+/// SQL functions that are handled with special case type checking rules.
 static SQL_FUNCTION_SIGNATURES: LazyLock<HashMap<CompoundIdent, Vec<FunctionSig>>> = LazyLock::new(|| {
     // Notation: a single uppercase letter denotes an unknown type. Matching letters in a signature will be assigned
     // *the same type variable* and thus must resolve to the same type. (🙏 Haskell)
@@ -200,6 +214,8 @@ static SQL_FUNCTION_SIGNATURES: LazyLock<HashMap<CompoundIdent, Vec<FunctionSig>
         sql_fn!(min(T) -> T),
         sql_fn!(max(T) -> T),
         sql_fn!(jsonb_path_query(T, T) -> T),
+        sql_fn!(jsonb_path_query_first(T, T) -> T),
+        sql_fn!(jsonb_path_exists(T, T) -> T),
     ];
 
     let mut sql_fns_by_name: HashMap<CompoundIdent, Vec<FunctionSig>> = HashMap::new();
