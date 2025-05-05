@@ -110,20 +110,20 @@ impl Hash for SqlIdent<&Ident> {
                 state.write_u8(1);
                 state.write_u32(ch as u32);
                 state.write(self.0.value.as_bytes());
-            },
+            }
             None => {
                 state.write_u8(0);
-                for ch in self.0.value.chars().map(|ch| ch.to_lowercase()).flatten() {
+                for ch in self.0.value.chars().flat_map(|ch| ch.to_lowercase()) {
                     state.write_u32(ch as u32);
                 }
-            },
+            }
         }
     }
 }
 
 impl Hash for SqlIdent<Ident> {
     fn hash<H: Hasher>(&self, state: &mut H) {
-       SqlIdent(&self.0).hash(state)
+        SqlIdent(&self.0).hash(state)
     }
 }
 
