@@ -1,4 +1,4 @@
-DROP TABLE IF EXISTS cs_configuration_v1;
+DROP TABLE IF EXISTS public.eql_v1_configuration;
 
 -- Regular old table
 DROP TABLE IF EXISTS plaintext;

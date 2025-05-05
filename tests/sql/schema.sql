@@ -1,4 +1,4 @@
-TRUNCATE TABLE cs_configuration_v1;
+TRUNCATE TABLE public.eql_v1_configuration;
 
 -- Regular old table
 DROP TABLE IF EXISTS plaintext;
