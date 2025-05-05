@@ -110,7 +110,6 @@ impl FunctionSig {
         };
 
         let args: Vec<Arc<Type>> = (0..arg_count)
-            .into_iter()
             .map(|_| Arc::new(Type::any_native()))
             .collect();
 
@@ -134,7 +133,7 @@ impl InstantiatedSig {
 
         match &function.args {
             FunctionArguments::None => {
-                if self.args.len() == 0 {
+                if self.args.is_empty() {
                     Ok(())
                 } else {
                     Err(TypeError::Conflict(format!(
@@ -197,38 +196,39 @@ impl From<&str> for CompoundIdent {
 impl From<&Vec<Ident>> for CompoundIdent {
     fn from(value: &Vec<Ident>) -> Self {
         let mut idents = Vec1::<SqlIdent<Ident>>::new(SqlIdent(value[0].clone()));
-        idents.extend(value[1..].into_iter().cloned().map(SqlIdent));
+        idents.extend(value[1..].iter().cloned().map(SqlIdent));
         CompoundIdent(idents)
     }
 }
 
 /// SQL functions that are handled with special case type checking rules.
-static SQL_FUNCTION_SIGNATURES: LazyLock<HashMap<CompoundIdent, Vec<FunctionSig>>> = LazyLock::new(|| {
-    // Notation: a single uppercase letter denotes an unknown type. Matching letters in a signature will be assigned
-    // *the same type variable* and thus must resolve to the same type. (🙏 Haskell)
-    //
-    // Eventually we should type check EQL types against their configured indexes instead of leaving that to the EQL
-    // extension in the database. I can imagine supporting type bounds in signatures here, such as: `T: Eq`
-    let sql_fns = vec![
-        sql_fn!(count(T) -> NATIVE),
-        sql_fn!(min(T) -> T),
-        sql_fn!(max(T) -> T),
-        sql_fn!(jsonb_path_query(T, T) -> T),
-        sql_fn!(jsonb_path_query_first(T, T) -> T),
-        sql_fn!(jsonb_path_exists(T, T) -> T),
-    ];
+static SQL_FUNCTION_SIGNATURES: LazyLock<HashMap<CompoundIdent, Vec<FunctionSig>>> =
+    LazyLock::new(|| {
+        // Notation: a single uppercase letter denotes an unknown type. Matching letters in a signature will be assigned
+        // *the same type variable* and thus must resolve to the same type. (🙏 Haskell)
+        //
+        // Eventually we should type check EQL types against their configured indexes instead of leaving that to the EQL
+        // extension in the database. I can imagine supporting type bounds in signatures here, such as: `T: Eq`
+        let sql_fns = vec![
+            sql_fn!(count(T) -> NATIVE),
+            sql_fn!(min(T) -> T),
+            sql_fn!(max(T) -> T),
+            sql_fn!(jsonb_path_query(T, T) -> T),
+            sql_fn!(jsonb_path_query_first(T, T) -> T),
+            sql_fn!(jsonb_path_exists(T, T) -> T),
+        ];
 
-    let mut sql_fns_by_name: HashMap<CompoundIdent, Vec<FunctionSig>> = HashMap::new();
+        let mut sql_fns_by_name: HashMap<CompoundIdent, Vec<FunctionSig>> = HashMap::new();
 
-    for (key, chunk) in &sql_fns.into_iter().chunk_by(|sql_fn| sql_fn.0.clone()) {
-        sql_fns_by_name.insert(
-            key.clone(),
-            chunk.into_iter().map(|sql_fn| sql_fn.1).collect(),
-        );
-    }
+        for (key, chunk) in &sql_fns.into_iter().chunk_by(|sql_fn| sql_fn.0.clone()) {
+            sql_fns_by_name.insert(
+                key.clone(),
+                chunk.into_iter().map(|sql_fn| sql_fn.1).collect(),
+            );
+        }
 
-    sql_fns_by_name
-});
+        sql_fns_by_name
+    });
 
 pub(crate) fn get_type_signature_for_special_cased_sql_function(
     fn_name: &CompoundIdent,
