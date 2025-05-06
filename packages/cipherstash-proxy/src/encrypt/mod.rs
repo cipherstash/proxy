@@ -57,10 +57,11 @@ impl Encrypt {
 
         let eql_version = {
             let client = connect::database(&config.database).await?;
-            let rows = client.query("SELECT cs_eql_version();", &[]).await;
+            let rows = client.query("SELECT eql_v1.version() AS version;", &[]).await;
+            // let rows = client.query("SELECT 'WAT' AS version;", &[]).await;
 
             match rows {
-                Ok(rows) => rows.first().map(|row| row.get("cs_eql_version")),
+                Ok(rows) => rows.first().map(|row| row.get("version")),
                 Err(err) => {
                     warn!(
                         msg = "Could not query EQL version from database",
