@@ -27,7 +27,6 @@ impl<'ast> TransformationRule<'ast> for ReplacePlaintextEqlLiterals<'ast> {
         node_path: &NodePath<'ast>,
         target_node: &mut N,
     ) -> Result<bool, EqlMapperError> {
-        if let Some((Expr::Value(value),)) = node_path.last_1_as::<Expr>() {
         if self.would_edit(node_path, target_node) {
             if let Some((Expr::Value(value),)) = node_path.last_1_as::<Expr>() {
                 if let Some(replacement) = self.encrypted_literals.remove(&NodeKey::new(value)) {
