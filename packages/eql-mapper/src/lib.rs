@@ -1498,7 +1498,7 @@ mod test {
             .map(|expr| match expr {
                 ast::Expr::Identifier(ident) => ident.to_string(),
                 ast::Expr::Value(ast::Value::SingleQuotedString(s)) => {
-                    format!("'<encrypted-selector({})>'", s)
+                    format!("ROW('<encrypted-selector({})>'::JSONB)", s)
                 }
                 _ => panic!("unsupported expr type in test util"),
             })
@@ -1553,7 +1553,7 @@ mod test {
                 match typed.transform(test_helpers::dummy_encrypted_json_selector(&statement, ast::Value::SingleQuotedString("medications".to_owned()))) {
                     Ok(statement) => assert_eq!(
                         statement.to_string(),
-                        format!("SELECT id, notes {} '<encrypted-selector(medications)>' AS meds FROM patients", op)
+                        format!("SELECT id, notes {} ROW('<encrypted-selector(medications)>'::JSONB) AS meds FROM patients", op)
                     ),
                     Err(err) => panic!("transformation failed: {err}"),
                 }
