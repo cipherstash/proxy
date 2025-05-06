@@ -1,1 +1,1 @@
-SELECT data FROM cs_configuration_v1 WHERE state = 'active' LIMIT 1;
+SELECT data FROM public.eql_v1_configuration WHERE state = 'active' LIMIT 1;

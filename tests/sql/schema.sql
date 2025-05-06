@@ -1,4 +1,4 @@
-TRUNCATE TABLE cs_configuration_v1;
+TRUNCATE TABLE public.eql_v1_configuration;
 
 -- Regular old table
 DROP TABLE IF EXISTS plaintext;
@@ -13,95 +13,95 @@ DROP TABLE IF EXISTS encrypted;
 CREATE TABLE encrypted (
     id bigint,
     plaintext text,
-    encrypted_text cs_encrypted_v1,
-    encrypted_bool cs_encrypted_v1,
-    encrypted_int2 cs_encrypted_v1,
-    encrypted_int4 cs_encrypted_v1,
-    encrypted_int8 cs_encrypted_v1,
-    encrypted_float8 cs_encrypted_v1,
-    encrypted_date cs_encrypted_v1,
-    encrypted_jsonb cs_encrypted_v1,
+    encrypted_text eql_v1_encrypted,
+    encrypted_bool eql_v1_encrypted,
+    encrypted_int2 eql_v1_encrypted,
+    encrypted_int4 eql_v1_encrypted,
+    encrypted_int8 eql_v1_encrypted,
+    encrypted_float8 eql_v1_encrypted,
+    encrypted_date eql_v1_encrypted,
+    encrypted_jsonb eql_v1_encrypted,
     PRIMARY KEY(id)
 );
 
 DROP TABLE IF EXISTS unconfigured;
 CREATE TABLE unconfigured (
     id bigint,
-    encrypted_unconfigured cs_encrypted_v1,
+    encrypted_unconfigured eql_v1_encrypted,
     PRIMARY KEY(id)
 );
 
-SELECT cs_add_index_v1(
+SELECT eql_v1.add_index(
   'encrypted',
   'encrypted_text',
   'unique',
   'text'
 );
 
-SELECT cs_add_index_v1(
+SELECT eql_v1.add_index(
   'encrypted',
   'encrypted_text',
   'match',
   'text'
 );
 
-SELECT cs_add_index_v1(
+SELECT eql_v1.add_index(
   'encrypted',
   'encrypted_text',
   'ore',
   'text'
 );
 
-SELECT cs_add_index_v1(
+SELECT eql_v1.add_index(
   'encrypted',
   'encrypted_bool',
   'unique',
   'boolean'
 );
 
-SELECT cs_add_index_v1(
+SELECT eql_v1.add_index(
   'encrypted',
   'encrypted_bool',
   'ore',
   'boolean'
 );
 
-SELECT cs_add_index_v1(
+SELECT eql_v1.add_index(
   'encrypted',
   'encrypted_int2',
   'unique',
   'small_int'
 );
 
-SELECT cs_add_index_v1(
+SELECT eql_v1.add_index(
   'encrypted',
   'encrypted_int2',
   'ore',
   'small_int'
 );
 
-SELECT cs_add_index_v1(
+SELECT eql_v1.add_index(
   'encrypted',
   'encrypted_int4',
   'unique',
   'int'
 );
 
-SELECT cs_add_index_v1(
+SELECT eql_v1.add_index(
   'encrypted',
   'encrypted_int4',
   'ore',
   'int'
 );
 
-SELECT cs_add_index_v1(
+SELECT eql_v1.add_index(
   'encrypted',
   'encrypted_int8',
   'unique',
   'big_int'
 );
 
-SELECT cs_add_index_v1(
+SELECT eql_v1.add_index(
   'encrypted',
   'encrypted_int8',
   'ore',
@@ -109,35 +109,35 @@ SELECT cs_add_index_v1(
 );
 
 
-SELECT cs_add_index_v1(
+SELECT eql_v1.add_index(
   'encrypted',
   'encrypted_float8',
   'unique',
   'double'
 );
 
-SELECT cs_add_index_v1(
+SELECT eql_v1.add_index(
   'encrypted',
   'encrypted_float8',
   'ore',
   'double'
 );
 
-SELECT cs_add_index_v1(
+SELECT eql_v1.add_index(
   'encrypted',
   'encrypted_date',
   'unique',
   'date'
 );
 
-SELECT cs_add_index_v1(
+SELECT eql_v1.add_index(
   'encrypted',
   'encrypted_date',
   'ore',
   'date'
 );
 
-SELECT cs_add_index_v1(
+SELECT eql_v1.add_index(
   'encrypted',
   'encrypted_jsonb',
   'ste_vec',
@@ -145,5 +145,5 @@ SELECT cs_add_index_v1(
   '{"prefix": "encrypted/encrypted_jsonb"}'
 );
 
-SELECT cs_encrypt_v1();
-SELECT cs_activate_v1();
+SELECT eql_v1.encrypt();
+SELECT eql_v1.activate();
