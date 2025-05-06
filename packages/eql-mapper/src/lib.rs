@@ -1020,27 +1020,63 @@ mod test {
             )]
         );
 
-        let transformed_statement = match typed.transform(HashMap::from_iter([(
+        match typed.transform(HashMap::from_iter([(
             typed.literals[0].1.as_node_key(),
             ast::Value::SingleQuotedString("ENCRYPTED".into()),
         )])) {
-            Ok(transformed_statement) => transformed_statement,
+            Ok(transformed_statement) => assert_eq!(
+                transformed_statement.to_string(),
+                "SELECT * FROM employees WHERE salary > ROW('ENCRYPTED'::JSONB)"
+            ),
             Err(err) => panic!("statement transformation failed: {}", err),
         };
+    }
 
-        // This type checks the transformed statement so we can get hold of the encrypted literal.
-        let typed = match type_check(schema, &transformed_statement) {
+    #[test]
+    fn insert_with_literal_subsitution() {
+        // init_tracing();
+
+        let schema = resolver(schema! {
+            tables: {
+                employees: {
+                    id,
+                    salary (EQL),
+                }
+            }
+        });
+
+        let statement = parse(
+            r#"
+                insert into employees (salary) values (20000)
+            "#,
+        );
+
+        let typed = match type_check(schema.clone(), &statement) {
             Ok(typed) => typed,
             Err(err) => panic!("type check failed: {:#?}", err),
         };
 
-        assert!(typed.literals.contains(&(
-            EqlValue(TableColumn {
-                table: id("employees"),
-                column: id("salary")
-            }),
-            &ast::Value::SingleQuotedString("ENCRYPTED".into()),
-        )));
+        assert_eq!(
+            typed.literals,
+            vec![(
+                EqlValue(TableColumn {
+                    table: id("employees"),
+                    column: id("salary")
+                }),
+                &ast::Value::Number(20000.into(), false)
+            )]
+        );
+
+        match typed.transform(HashMap::from_iter([(
+            typed.literals[0].1.as_node_key(),
+            ast::Value::SingleQuotedString("ENCRYPTED".into()),
+        )])) {
+            Ok(transformed_statement) => assert_eq!(
+                transformed_statement.to_string(),
+                "INSERT INTO employees (salary) VALUES (ROW('ENCRYPTED'::JSONB))"
+            ),
+            Err(err) => panic!("statement transformation failed: {}", err),
+        };
     }
 
     #[test]
