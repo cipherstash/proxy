@@ -143,8 +143,8 @@ pub async fn load_schema(config: &DatabaseConfig) -> Result<Schema, Error> {
             let ident = Ident::with_quote('"', col);
 
             let column = match domain.as_deref() {
-                Some("cs_encrypted_v1") => {
-                    debug!(target: SCHEMA, msg = "cs_encrypted_v1 column", table = table_name, column = col);
+                Some("eql_v1_encrypted") => {
+                    debug!(target: SCHEMA, msg = "eql_v1_encrypted column", table = table_name, column = col);
                     Column::eql(ident)
                 }
                 _ => Column::native(ident),
