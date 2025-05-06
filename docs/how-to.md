@@ -162,22 +162,22 @@ This will output the version of EQL installed.
 
 In your existing PostgreSQL database, you store your data in tables and columns.
 Those columns have types like `integer`, `text`, `timestamp`, and `boolean`.
-When storing encrypted data in PostgreSQL with Proxy, you use a special column type called `cs_encrypted_v1`, which is [provided by EQL](#setting-up-the-database-schema).
-`cs_encrypted_v1` is a container column type that can be used for any type of encrypted data you want to store or search, whether they are numbers (`int`, `small_int`, `big_int`), text (`text`), dates and times (`date`), or booleans (`boolean`).
+When storing encrypted data in PostgreSQL with Proxy, you use a special column type called `eql_v1_encrypted`, which is [provided by EQL](#setting-up-the-database-schema).
+`eql_v1_encrypted` is a container column type that can be used for any type of encrypted data you want to store or search, whether they are numbers (`int`, `small_int`, `big_int`), text (`text`), dates and times (`date`), or booleans (`boolean`).
 
 Create a table with an encrypted column for `email`:
 
 ```sql
 CREATE TABLE users (
     id SERIAL PRIMARY KEY,
-    email cs_encrypted_v1
+    email eql_v1_encrypted
 )
 ```
 
 This creates a `users` table with two columns:
 
  - `id`, an autoincrementing integer column that is the primary key for the record
- - `email`, a `cs_encrypted_v1` column
+ - `email`, a `eql_v1_encrypted` column
 
 There are important differences between the plaintext columns you've traditionally used in PostgreSQL and encrypted columns with CipherStash Proxy:
 
