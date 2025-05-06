@@ -153,7 +153,7 @@ You can also install EQL by running [the installation script](https://github.com
 Once you have installed EQL, you can see what version is installed by querying the database:
 
 ```sql
-SELECT cs_eql_version();
+SELECT eql_v1.version();
 ```
 
 This will output the version of EQL installed.
