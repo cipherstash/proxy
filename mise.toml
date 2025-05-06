@@ -409,27 +409,28 @@ fi
 """
 
 [tasks."postgres:setup"]
-alias = 's'
 depends = ["postgres:eql:teardown"]
+alias = 's'
 description = "Installs EQL and applies schema to database"
 run = """
 #!/bin/bash
 cd tests
 mise run postgres:fail_if_not_running
-mise run postgres:eql:download
-cat sql/cipherstash-encrypt.sql | docker exec -i postgres${CONTAINER_SUFFIX} psql postgresql://${CS_DATABASE__USERNAME}:${CS_DATABASE__PASSWORD}@${CS_DATABASE__HOST}:${CS_DATABASE__PORT}/${CS_DATABASE__NAME} -f-
+cat sql/schema-uninstall.sql | docker exec -i postgres${CONTAINER_SUFFIX} psql postgresql://${CS_DATABASE__USERNAME}:${CS_DATABASE__PASSWORD}@${CS_DATABASE__HOST}:${CS_DATABASE__PORT}/${CS_DATABASE__NAME} -f-
+cat ../cipherstash-encrypt-uninstall.sql | docker exec -i postgres${CONTAINER_SUFFIX} psql postgresql://${CS_DATABASE__USERNAME}:${CS_DATABASE__PASSWORD}@${CS_DATABASE__HOST}:${CS_DATABASE__PORT}/${CS_DATABASE__NAME} -f-
+cat ../cipherstash-encrypt.sql | docker exec -i postgres${CONTAINER_SUFFIX} psql postgresql://${CS_DATABASE__USERNAME}:${CS_DATABASE__PASSWORD}@${CS_DATABASE__HOST}:${CS_DATABASE__PORT}/${CS_DATABASE__NAME} -f-
 cat sql/schema.sql | docker exec -i postgres${CONTAINER_SUFFIX} psql postgresql://${CS_DATABASE__USERNAME}:${CS_DATABASE__PASSWORD}@${CS_DATABASE__HOST}:${CS_DATABASE__PORT}/${CS_DATABASE__NAME} -f-
 """
 
 [tasks."postgres:eql:teardown"]
+depends = ["eql:download"]
 description = "Uninstalls EQL and removes schema from database"
 run = """
 #!/bin/bash
 cd tests
 mise run postgres:fail_if_not_running
-mise run postgres:eql:download
 cat sql/schema-uninstall.sql | docker exec -i postgres${CONTAINER_SUFFIX} psql postgresql://${CS_DATABASE__USERNAME}:${CS_DATABASE__PASSWORD}@${CS_DATABASE__HOST}:${CS_DATABASE__PORT}/${CS_DATABASE__NAME} -f-
-cat sql/cipherstash-encrypt-uninstall.sql | docker exec -i postgres${CONTAINER_SUFFIX} psql postgresql://${CS_DATABASE__USERNAME}:${CS_DATABASE__PASSWORD}@${CS_DATABASE__HOST}:${CS_DATABASE__PORT}/${CS_DATABASE__NAME} -f-
+cat ../cipherstash-encrypt-uninstall.sql | docker exec -i postgres${CONTAINER_SUFFIX} psql postgresql://${CS_DATABASE__USERNAME}:${CS_DATABASE__PASSWORD}@${CS_DATABASE__HOST}:${CS_DATABASE__PORT}/${CS_DATABASE__NAME} -f-
 """
 
 [tasks."postgres:up"]
@@ -490,33 +491,31 @@ for d in tests/pg/data-*; do
 done
 """
 
-
-[tasks."postgres:eql:download"]
+[tasks."eql:download"]
 alias = 'e'
-description = "Download latest EQL release"
+description = "Download latest EQL release or use local copy"
 dir = "{{config_root}}/tests"
 outputs = [
-  "{{config_root}}/tests/sql/cipherstash-encrypt.sql",
-  "{{config_root}}/tests/sql/cipherstash-encrypt-uninstall.sql",
+  "{{config_root}}/cipherstash-encrypt.sql",
+  "{{config_root}}/cipherstash-encrypt-uninstall.sql",
 ]
 run = """
 # install script
 if [ -z "$CS_EQL_PATH" ]; then
-  curl -sLo sql/cipherstash-encrypt.sql https://github.com/cipherstash/encrypt-query-language/releases/download/${CS_EQL_VERSION}/cipherstash-encrypt.sql
+  curl -sLo "{{config_root}}/cipherstash-encrypt.sql" https://github.com/cipherstash/encrypt-query-language/releases/download/${CS_EQL_VERSION}/cipherstash-encrypt.sql
 else
-  echo "Using EQL: ${CS_EQL_PATH}"
-  cp "$CS_EQL_PATH" sql/cipherstash-encrypt.sql
+  echo "Using EQL: ${CS_EQL_PATH}/cipherstash-encrypt.sql"
+  cp "$CS_EQL_PATH/cipherstash-encrypt.sql" "{{config_root}}/cipherstash-encrypt.sql"
 fi
 
 # uninstall script
-if [ -z "$CS_EQL_UNINSTALL_PATH" ]; then
-  curl -sLo sql/cipherstash-encrypt-uninstall.sql https://github.com/cipherstash/encrypt-query-language/releases/download/${CS_EQL_VERSION}/cipherstash-encrypt-uninstall.sql
+if [ -z "$CS_EQL_PATH" ]; then
+  curl -sLo   "{{config_root}}/cipherstash-encrypt-uninstall.sql" https://github.com/cipherstash/encrypt-query-language/releases/download/${CS_EQL_VERSION}/cipherstash-encrypt-uninstall.sql
 else
-  echo "Using EQL: ${CS_EQL_UNINSTALL_PATH}"
-  cp "$CS_EQL_UNINSTALL_PATH" sql/cipherstash-encrypt-uninstall.sql
+  echo "Using EQL: ${CS_EQL_PATH}/cipherstash-encrypt-uninstall.sql"
+  cp "$CS_EQL_PATH/cipherstash-encrypt-uninstall.sql"   "{{config_root}}/cipherstash-encrypt-uninstall.sql"
 fi
 """
-
 
 [tasks."python:test"]
 dir = "{{config_root}}/tests"
@@ -567,7 +566,7 @@ cp -v {{config_root}}/target/{{ target }}/release/cipherstash-proxy {{config_roo
 """
 
 [tasks."build:docker"]
-depends = ["postgres:eql:download"]
+depends = ["eql:download"]
 description = "Build a Docker image for cipherstash-proxy"
 run = """
 {% set default_platform = "linux/" ~ arch() | replace(from="x86_64", to="amd64") %}
@@ -580,6 +579,16 @@ docker build . \
   --platform {{option(name="platform",default=default_platform)}} \
 """
 
+[tasks."build:docker:fetch_eql"]
+description = "Fetch the EQL installation script"
+run = """
+if [ ! -e "cipherstash-eql.sql" ]; then
+  echo "Fetching: cipherstash-eql.sql"
+  curl -sLo cipherstash-eql.sql https://github.com/cipherstash/encrypt-query-language/releases/download/${CS_EQL_VERSION}/cipherstash-encrypt.sql
+else
+  echo "Prefetched: cipherstash-eql.sql"
+fi
+"""
 
 [tasks.release]
 description = "Publish release artifacts"
