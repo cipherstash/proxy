@@ -421,7 +421,7 @@ cat sql/schema.sql | docker exec -i postgres${CONTAINER_SUFFIX} psql postgresql:
 """
 
 [tasks."postgres:eql:teardown"]
-alias = 's'
+alias = 'teardown'
 description = "Uninstalls EQL and removes schema from database"
 run = """
 #!/bin/bash
@@ -512,7 +512,7 @@ fi
 if [ -z "$CS_EQL_UNINSTALL_PATH" ]; then
   curl -sLo sql/cipherstash-encrypt-uninstall.sql https://github.com/cipherstash/encrypt-query-language/releases/download/${CS_EQL_VERSION}/cipherstash-encrypt-uninstall.sql
 else
-  echo "Using EQL: ${CS_EQL_PATH}"
+  echo "Using EQL: ${CS_EQL_UNINSTALL_PATH}"
   cp "$CS_EQL_UNINSTALL_PATH" sql/cipherstash-encrypt-uninstall.sql
 fi
 """
