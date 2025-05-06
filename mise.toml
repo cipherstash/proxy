@@ -410,6 +410,7 @@ fi
 
 [tasks."postgres:setup"]
 alias = 's'
+depends = ["postgres:eql:teardown"]
 description = "Installs EQL and applies schema to database"
 run = """
 #!/bin/bash
@@ -421,7 +422,6 @@ cat sql/schema.sql | docker exec -i postgres${CONTAINER_SUFFIX} psql postgresql:
 """
 
 [tasks."postgres:eql:teardown"]
-alias = 'teardown'
 description = "Uninstalls EQL and removes schema from database"
 run = """
 #!/bin/bash
