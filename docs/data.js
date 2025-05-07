@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1746577240741,
+  "lastUpdate": 1746577728582,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -1122,6 +1122,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 7.202527,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "lindsay@cipherstash.com",
+            "name": "Lindsay Holmwood",
+            "username": "auxesis"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "3ab0c7cc2f9e1a808a1efef01b087cda8e5fd978",
+          "message": "Merge pull request #207 from cipherstash/dependabot/go_modules/tests/integration/golang/golang.org/x/crypto-0.35.0\n\nbuild(deps): bump golang.org/x/crypto from 0.31.0 to 0.35.0 in /tests/integration/golang",
+          "timestamp": "2025-05-07T10:25:50+10:00",
+          "tree_id": "420453f086e09da71bafc86225a899772aa42906",
+          "url": "https://github.com/cipherstash/proxy/commit/3ab0c7cc2f9e1a808a1efef01b087cda8e5fd978"
+        },
+        "date": 1746577727199,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 6.929173,
             "unit": "Number"
           }
         ]
