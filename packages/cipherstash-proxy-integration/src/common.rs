@@ -36,6 +36,9 @@ pub async fn clear() {
 
     let sql = "TRUNCATE encrypted";
     client.simple_query(sql).await.unwrap();
+
+    let sql = "TRUNCATE plaintext";
+    client.simple_query(sql).await.unwrap();
 }
 
 pub async fn reset_schema() {
