@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1746595371983,
+  "lastUpdate": 1746599182004,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -1176,6 +1176,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 6.783511,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "toby@cipherstash.com",
+            "name": "Toby Hede",
+            "username": "tobyhede"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "7c7dd9345b37b31eb9fa639db09e906a2118b0f4",
+          "message": "Merge pull request #217 from cipherstash/passthrough-permutations\n\nExpand passthrough test cases",
+          "timestamp": "2025-05-07T16:23:16+10:00",
+          "tree_id": "573584a744d33c57be552e42625fa3c9d19e81e7",
+          "url": "https://github.com/cipherstash/proxy/commit/7c7dd9345b37b31eb9fa639db09e906a2118b0f4"
+        },
+        "date": 1746599180958,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 7.205424,
             "unit": "Number"
           }
         ]
