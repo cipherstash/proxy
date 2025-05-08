@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1746705648123,
+  "lastUpdate": 1746746988521,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -1338,6 +1338,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 6.884753,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "lindsay@cipherstash.com",
+            "name": "Lindsay Holmwood",
+            "username": "auxesis"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "da187839b874fadb4f3f898e2e9bccc4fe32c77d",
+          "message": "Merge pull request #220 from cipherstash/dependabot/cargo/tokio-1.44.2",
+          "timestamp": "2025-05-09T09:26:36+10:00",
+          "tree_id": "8f10f5c50e4e2e7fbfdee56543ed27fde020152c",
+          "url": "https://github.com/cipherstash/proxy/commit/da187839b874fadb4f3f898e2e9bccc4fe32c77d"
+        },
+        "date": 1746746986781,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 6.804842,
             "unit": "Number"
           }
         ]
