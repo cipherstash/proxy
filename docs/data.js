@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1746670570756,
+  "lastUpdate": 1746671384697,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -1284,6 +1284,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 6.781972,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "james@cipherstash.com",
+            "name": "James Sadler",
+            "username": "freshtonic"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "986f8efe841ecded168fbf18da40028b0e667ef4",
+          "message": "Merge pull request #219 from cipherstash/fix/eql-mapper/named-arrays\n\nfix(mapper): support named arrays",
+          "timestamp": "2025-05-08T12:26:47+10:00",
+          "tree_id": "d63a95c83f8b7f5522388581adc61787f8f26fe3",
+          "url": "https://github.com/cipherstash/proxy/commit/986f8efe841ecded168fbf18da40028b0e667ef4"
+        },
+        "date": 1746671383043,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 6.847786,
             "unit": "Number"
           }
         ]
