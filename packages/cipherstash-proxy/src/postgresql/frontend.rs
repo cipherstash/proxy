@@ -23,7 +23,7 @@ use crate::prometheus::{
     STATEMENTS_ENCRYPTED_TOTAL, STATEMENTS_PASSTHROUGH_TOTAL, STATEMENTS_TOTAL,
     STATEMENTS_UNMAPPABLE_TOTAL,
 };
-use crate::Encrypted;
+use crate::EqlEncrypted;
 use bytes::BytesMut;
 use cipherstash_client::encryption::Plaintext;
 use eql_mapper::{self, EqlMapperError, EqlValue, TableColumn, TypeCheckedStatement};
@@ -359,7 +359,7 @@ where
         &mut self,
         typed_statement: &TypeCheckedStatement<'_>,
         literal_columns: &Vec<Option<Column>>,
-    ) -> Result<Vec<Option<Encrypted>>, Error> {
+    ) -> Result<Vec<Option<EqlEncrypted>>, Error> {
         let literal_values = typed_statement.literal_values();
         if literal_values.is_empty() {
             debug!(target: MAPPER,
@@ -404,7 +404,7 @@ where
     async fn transform_statement(
         &mut self,
         typed_statement: &TypeCheckedStatement<'_>,
-        encrypted_literals: &Vec<Option<Encrypted>>,
+        encrypted_literals: &Vec<Option<EqlEncrypted>>,
     ) -> Result<Option<ast::Statement>, Error> {
         // Convert literals to ast Expr
         let mut encrypted_expressions = vec![];
@@ -704,7 +704,7 @@ where
         &mut self,
         bind: &Bind,
         statement: &Statement,
-    ) -> Result<Vec<Option<crate::Encrypted>>, Error> {
+    ) -> Result<Vec<Option<crate::EqlEncrypted>>, Error> {
         let plaintexts =
             bind.to_plaintext(&statement.param_columns, &statement.postgres_param_types)?;
 

@@ -195,8 +195,7 @@ pub async fn load_encrypt_config(config: &DatabaseConfig) -> Result<EncryptConfi
         }
     }
 }
-
 fn configuration_table_not_found(e: &tokio_postgres::Error) -> bool {
     let msg = e.to_string();
-    msg.contains("cs_configuration_v1") && msg.contains("does not exist")
+    msg.contains("eql_v1_configuration") && msg.contains("does not exist")
 }

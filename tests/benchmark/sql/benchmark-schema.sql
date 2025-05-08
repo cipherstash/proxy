@@ -1,4 +1,4 @@
-TRUNCATE TABLE cs_configuration_v1;
+TRUNCATE TABLE public.eql_v1_configuration;
 
 DROP TABLE IF EXISTS benchmark_plaintext;
 CREATE TABLE benchmark_plaintext (

@@ -76,7 +76,7 @@ impl Bind {
         Ok(plaintexts)
     }
 
-    pub fn rewrite(&mut self, encrypted: Vec<Option<eql::Encrypted>>) -> Result<(), Error> {
+    pub fn rewrite(&mut self, encrypted: Vec<Option<eql::EqlEncrypted>>) -> Result<(), Error> {
         for (idx, ct) in encrypted.iter().enumerate() {
             if let Some(ct) = ct {
                 let json = serde_json::to_value(ct)?;
