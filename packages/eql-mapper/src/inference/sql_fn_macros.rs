@@ -39,7 +39,7 @@ macro_rules! sql_fn {
 
     ($schema:ident . $name:ident $args:tt -> $return_kind:ident, rewrite) => {
         $crate::SqlFunction::new(
-            stringify!($schema . $name),
+            stringify!($schema.$name),
             FunctionSig::new($crate::sql_fn_args!($args), $crate::to_kind!($return_kind)),
             $crate::RewriteRule::AsEqlFunction,
         )
@@ -47,7 +47,7 @@ macro_rules! sql_fn {
 
     ($schema:ident . $name:ident $args:tt -> $return_kind:ident) => {
         $crate::SqlFunction::new(
-            stringify!($schema . $name),
+            stringify!($schema.$name),
             FunctionSig::new($crate::sql_fn_args!($args), $crate::to_kind!($return_kind)),
             $crate::RewriteRule::Ignore,
         )
