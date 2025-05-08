@@ -24,12 +24,10 @@ impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
                 self.unify_node_with_type(this_expr, self.resolve_compound_ident(idents)?)?;
             }
 
-            #[allow(unused_variables)]
             Expr::Wildcard(_) => {
                 self.unify_node_with_type(this_expr, self.resolve_wildcard()?)?;
             }
 
-            #[allow(unused_variables)]
             Expr::QualifiedWildcard(object_name, _) => {
                 self.unify_node_with_type(
                     this_expr,
