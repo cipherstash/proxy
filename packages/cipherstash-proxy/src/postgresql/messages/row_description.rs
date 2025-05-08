@@ -2,6 +2,7 @@ use std::{ffi::CString, io::Cursor};
 
 use bytes::{Buf, BufMut, BytesMut};
 use postgres_types::Type;
+use tracing::info;
 
 use crate::{
     error::{Error, ProtocolError},
@@ -123,6 +124,8 @@ impl TryFrom<&mut Cursor<&BytesMut>> for RowDescriptionField {
         let table_oid = cursor.get_i32();
         let table_column = cursor.get_i16();
         let type_oid = cursor.get_i32();
+
+        info!("type_oid {:?}", type_oid);
 
         let type_oid = postgres_types::Type::from_oid(type_oid as u32)
             .unwrap_or(postgres_types::Type::UNKNOWN);

@@ -26,6 +26,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     log::init(config.log.clone());
 
+    info!(config = ?config);
+
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(config.server.worker_threads)
         .thread_stack_size(config.thread_stack_size())

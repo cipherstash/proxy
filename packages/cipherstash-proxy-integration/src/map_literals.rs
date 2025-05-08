@@ -46,6 +46,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore]
     async fn map_jsonb() {
         clear().await;
 

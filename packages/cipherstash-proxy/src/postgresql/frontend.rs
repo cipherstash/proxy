@@ -35,6 +35,7 @@ use sqltk::parser::dialect::PostgreSqlDialect;
 use sqltk::parser::parser::Parser;
 use sqltk::NodeKey;
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::Instant;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use tracing::{debug, error, warn};
@@ -311,7 +312,7 @@ where
                     counter!(STATEMENTS_ENCRYPTED_TOTAL).increment(1);
 
                     // Set Encrypted portal
-                    portal = Portal::encrypted_text();
+                    portal = Portal::encrypted(Arc::new(statement));
                 }
                 None => {
                     debug!(target: MAPPER,
@@ -500,6 +501,11 @@ where
 
         match self.to_encryptable_statement(&typed_statement, param_types)? {
             Some(statement) => {
+                debug!(target: MAPPER,
+                    client_id = self.context.client_id,
+                    requires_transform = typed_statement.requires_transform()
+                );
+
                 if typed_statement.requires_transform() {
                     let encrypted_literals = self
                         .encrypt_literals(&typed_statement, &statement.literal_columns)
@@ -671,7 +677,10 @@ where
                 bind.rewrite(encrypted)?;
             }
             if statement.has_projection() {
-                portal = Portal::encrypted(statement, bind.result_columns_format_codes.to_owned());
+                portal = Portal::encrypted_with_format_codes(
+                    statement,
+                    bind.result_columns_format_codes.to_owned(),
+                );
             }
         };
 

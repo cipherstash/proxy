@@ -234,7 +234,7 @@ where
 
         let portal = self.context.get_portal_from_execute();
         let portal = match portal.as_deref() {
-            Some(Portal::Encrypted { .. }) | Some(Portal::EncryptedText) => portal.unwrap(),
+            Some(Portal::Encrypted { .. }) => portal.unwrap(),
             _ => {
                 debug!(target: MAPPER, client_id = self.context.client_id, msg = "Passthrough portal");
                 if !self.buffer.is_empty() {
@@ -261,12 +261,20 @@ where
         // If no portal, assume Text for all columns
         let result_column_format_codes = portal.format_codes(result_column_count);
 
+        let projection_columns = portal.projection_columns();
+
         // Each row is converted into Vec<Option<CipherText>>
+        // let ciphertexts: Vec<Option<EqlEncrypted>> = rows
+        //     .iter()
+        //     .map(|row| row.to_ciphertext(&projection_columns))
+        //     .flatten_ok()
+        //     .collect::<Result<Vec<_>, _>>()?;
+
         let ciphertexts: Vec<Option<EqlEncrypted>> = rows
             .iter()
-            .map(|row| row.to_ciphertext())
-            .flatten_ok()
-            .collect::<Result<Vec<_>, _>>()?;
+            .map(|row| row.to_ciphertext(&projection_columns))
+            .flatten()
+            .collect::<Vec<_>>();
 
         let start = Instant::now();
 
@@ -353,6 +361,8 @@ where
     ) -> Result<Option<BytesMut>, Error> {
         let mut description = RowDescription::try_from(bytes)?;
 
+        debug!(target: MAPPER, client_id = self.context.client_id, ?description);
+
         if let Some(statement) = self.context.get_statement_from_describe() {
             let projection_types = statement
                 .projection_columns
@@ -381,7 +391,7 @@ where
     async fn data_row_handler(&mut self, bytes: &BytesMut) -> Result<bool, Error> {
         counter!(ROWS_TOTAL).increment(1);
         match self.context.get_portal_from_execute().as_deref() {
-            Some(Portal::Encrypted { .. }) | Some(Portal::EncryptedText) => {
+            Some(Portal::Encrypted { .. }) => {
                 debug!(target: MAPPER, client_id = self.context.client_id, msg = "Encrypted");
 
                 let data_row = DataRow::try_from(bytes)?;

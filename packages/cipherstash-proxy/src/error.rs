@@ -202,6 +202,12 @@ pub enum EncryptError {
     #[error(transparent)]
     CiphertextCouldNotBeSerialised(#[from] serde_json::Error),
 
+    #[error("Encrypted column could not be parsed")]
+    ColumnCouldNotBeParsed,
+
+    #[error("Column '{column}' in table '{table}' could not be deserialised. For help visit {}#encrypt-column-could-not-be-deserialised", ERROR_DOC_BASE_URL)]
+    ColumnCouldNotBeDeserialised { table: String, column: String },
+
     #[error("Column '{column}' in table '{table}' could not be encrypted. For help visit {}#encrypt-column-could-not-be-encrypted", ERROR_DOC_BASE_URL)]
     ColumnCouldNotBeEncrypted { table: String, column: String },
 
