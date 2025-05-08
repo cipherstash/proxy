@@ -1351,4 +1351,16 @@ mod test {
             Err(err) => panic!("type check failed: {err}"),
         }
     }
+
+    #[test]
+    fn supports_named_arrays() {
+        let schema = resolver(schema! {
+            tables: {
+            }
+        });
+
+        let statement = parse("SELECT ARRAY[1, 2, 3]");
+
+        type_check(schema, &statement).expect("named arrays should be supported");
+    }
 }

@@ -436,17 +436,12 @@ impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
                 self.unify_node_with_type(this_expr, elem_ty)?;
             }
 
-            Expr::Array(Array { elem, named: false }) => {
+            Expr::Array(Array { elem, named: _ }) => {
                 // Constrain all elements of the array to be the same type.
                 let elem_ty = self.unify_all_with_type(elem, self.fresh_tvar())?;
                 let array_ty = Type::array(elem_ty);
                 self.unify_node_with_type(this_expr, array_ty)?;
             }
-
-            Expr::Array(Array {
-                elem: _,
-                named: true,
-            }) => Err(TypeError::UnsupportedSqlFeature("named arrays".to_string()))?,
 
             // interval is unmapped, value is unmapped
             Expr::Interval(interval) => {
