@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1746671384697,
+  "lastUpdate": 1746705648123,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -1313,6 +1313,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 6.847786,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "dd0e28e2581db7ba296dc2d22624b4eba9c30933",
+          "message": "build(deps): bump tokio from 1.44.1 to 1.44.2",
+          "timestamp": "2025-05-08T02:26:51Z",
+          "url": "https://github.com/cipherstash/proxy/pull/220/commits/dd0e28e2581db7ba296dc2d22624b4eba9c30933"
+        },
+        "date": 1746705646363,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 6.884753,
             "unit": "Number"
           }
         ]
