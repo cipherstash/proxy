@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1746669988677,
+  "lastUpdate": 1746670570756,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -1259,6 +1259,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 6.979743,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "2337278b4278d6740d05ac25740db26cb531c9ed",
+          "message": "fix(mapper): support named arrays",
+          "timestamp": "2025-05-08T02:03:29Z",
+          "url": "https://github.com/cipherstash/proxy/pull/219/commits/2337278b4278d6740d05ac25740db26cb531c9ed"
+        },
+        "date": 1746670569083,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 6.781972,
             "unit": "Number"
           }
         ]
