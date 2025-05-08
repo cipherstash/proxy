@@ -651,6 +651,8 @@ dependencies = [
 [[package]]
 name = "cipherstash-client"
 version = "0.20.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8fe21509165da6daf50b84d4dc9bc46b558e5afb34db75dbd2371b963faabe4d"
 dependencies = [
  "aes-gcm-siv",
  "anyhow",
@@ -1021,6 +1023,8 @@ dependencies = [
 [[package]]
 name = "cts-common"
 version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "938da7d14d05c2769bf7ae33c5a395eb6a34ffdd25ec286e97702ae563314f9b"
 dependencies = [
  "arrayvec",
  "axum",

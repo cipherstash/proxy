@@ -5,9 +5,9 @@ use sqltk::{AsNodeKey, NodeKey, Transformable};
 
 use crate::{
     DryRunnable, EqlMapperError, EqlValue, FailOnPlaceholderChange, GroupByEqlCol, Param,
-    PreserveEffectiveAliases, Projection, ReplacePlaintextEqlLiterals, TransformationRule, Type,
-    UseEquivalentSqlFuncForEqlTypes, Value, WrapEqlColsInOrderByWithOreFn,
-    WrapGroupedEqlColInAggregateFn,
+    PreserveEffectiveAliases, Projection, ReplacePlaintextEqlLiterals,
+    RewriteStandardSqlFnsOnEqlTypes, TransformationRule, Type, Value,
+    WrapEqlColsInOrderByWithOreFn, WrapGroupedEqlColInAggregateFn,
 };
 
 /// A `TypeCheckedStatement` is returned from a successful call to [`crate::type_check`].
@@ -140,12 +140,12 @@ impl<'ast> TypeCheckedStatement<'ast> {
         encrypted_literals: HashMap<NodeKey<'ast>, sqltk::parser::ast::Value>,
     ) -> DryRunnable<impl TransformationRule<'_>> {
         DryRunnable::new((
+            RewriteStandardSqlFnsOnEqlTypes::new(Arc::clone(&self.node_types)),
             WrapGroupedEqlColInAggregateFn::new(Arc::clone(&self.node_types)),
             GroupByEqlCol::new(Arc::clone(&self.node_types)),
             WrapEqlColsInOrderByWithOreFn::new(Arc::clone(&self.node_types)),
             PreserveEffectiveAliases,
             ReplacePlaintextEqlLiterals::new(encrypted_literals),
-            UseEquivalentSqlFuncForEqlTypes::new(Arc::clone(&self.node_types)),
             FailOnPlaceholderChange::new(),
         ))
     }

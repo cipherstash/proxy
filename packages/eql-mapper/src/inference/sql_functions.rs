@@ -17,12 +17,22 @@ use super::TypeError;
 ///
 /// See [`SQL_FUNCTION_SIGNATURES`].
 #[derive(Debug)]
-pub(crate) struct SqlFunction(CompoundIdent, FunctionSig);
+pub(crate) struct SqlFunction {
+    pub(crate) name: CompoundIdent,
+    pub(crate) sig: FunctionSig,
+    pub(crate) rewrite_rule: RewriteRule,
+}
+
+#[derive(Debug)]
+pub(crate) enum RewriteRule {
+    Ignore,
+    AsEqlFunction,
+}
 
 /// A representation of the type of an argument or return type in a SQL function.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub(crate) enum Kind {
-    /// A type that mjust be a native type
+    /// A type that must be a native type
     Native,
 
     /// A type that can be a native or EQL type. The `str` is the generic variable name.
@@ -178,8 +188,12 @@ fn get_function_arg_expr(fn_arg: &FunctionArg) -> &FunctionArgExpr {
 }
 
 impl SqlFunction {
-    fn new(ident: &str, sig: FunctionSig) -> Self {
-        Self(CompoundIdent::from(ident), sig)
+    fn new(ident: &str, sig: FunctionSig, rewrite_rule: RewriteRule) -> Self {
+        Self {
+            name: CompoundIdent::from(ident),
+            sig,
+            rewrite_rule,
+        }
     }
 }
 
@@ -202,38 +216,51 @@ impl From<&Vec<Ident>> for CompoundIdent {
 }
 
 /// SQL functions that are handled with special case type checking rules.
-static SQL_FUNCTION_SIGNATURES: LazyLock<HashMap<CompoundIdent, Vec<FunctionSig>>> =
-    LazyLock::new(|| {
-        // Notation: a single uppercase letter denotes an unknown type. Matching letters in a signature will be assigned
-        // *the same type variable* and thus must resolve to the same type. (🙏 Haskell)
-        //
-        // Eventually we should type check EQL types against their configured indexes instead of leaving that to the EQL
-        // extension in the database. I can imagine supporting type bounds in signatures here, such as: `T: Eq`
-        let sql_fns = vec![
-            sql_fn!(count(T) -> NATIVE),
-            sql_fn!(min(T) -> T),
-            sql_fn!(max(T) -> T),
-            sql_fn!(jsonb_path_query(T, T) -> T),
-            sql_fn!(jsonb_path_query_first(T, T) -> T),
-            sql_fn!(jsonb_path_exists(T, T) -> T),
-        ];
+static SQL_FUNCTIONS: LazyLock<HashMap<CompoundIdent, Vec<SqlFunction>>> = LazyLock::new(|| {
+    // Notation: a single uppercase letter denotes an unknown type. Matching letters in a signature will be assigned
+    // *the same type variable* and thus must resolve to the same type. (🙏 Haskell)
+    //
+    // Eventually we should type check EQL types against their configured indexes instead of leaving that to the EQL
+    // extension in the database. I can imagine supporting type bounds in signatures here, such as: `T: Eq`
+    let sql_fns = vec![
+        // TODO: when search_path support is added to the resolver we should change these
+        // to their fully-qualified names.
+        sql_fn!(count(T) -> NATIVE),
+        sql_fn!(min(T) -> T, rewrite),
+        sql_fn!(max(T) -> T, rewrite),
+        sql_fn!(jsonb_path_query(T, T) -> T, rewrite),
+        sql_fn!(jsonb_path_query_first(T, T) -> T, rewrite),
+        sql_fn!(jsonb_path_exists(T, T) -> T, rewrite),
+        sql_fn!(jsonb_array_length(T) -> T, rewrite),
+        sql_fn!(jsonb_array_elements(T) -> T, rewrite),
+        sql_fn!(jsonb_array_elements_text(T) -> T, rewrite),
+        // These are typings for when customer SQL already contains references to EQL functions.
+        // They must be type checked but not rewritten.
+        sql_fn!(eql_v1.min(T) -> T),
+        sql_fn!(eql_v1.max(T) -> T),
+        sql_fn!(eql_v1.jsonb_path_query(T, T) -> T),
+        sql_fn!(eql_v1.jsonb_path_query_first(T, T) -> T),
+        sql_fn!(eql_v1.jsonb_path_exists(T, T) -> T),
+        sql_fn!(eql_v1.jsonb_array_length(T) -> T),
+        sql_fn!(eql_v1.jsonb_array_elements(T) -> T),
+        sql_fn!(eql_v1.jsonb_array_elements_text(T) -> T),
+    ];
 
-        let mut sql_fns_by_name: HashMap<CompoundIdent, Vec<FunctionSig>> = HashMap::new();
+    let mut sql_fns_by_name: HashMap<CompoundIdent, Vec<SqlFunction>> = HashMap::new();
 
-        for (key, chunk) in &sql_fns.into_iter().chunk_by(|sql_fn| sql_fn.0.clone()) {
-            sql_fns_by_name.insert(
-                key.clone(),
-                chunk.into_iter().map(|sql_fn| sql_fn.1).collect(),
-            );
-        }
+    for (key, chunk) in &sql_fns.into_iter().chunk_by(|sql_fn| sql_fn.name.clone()) {
+        sql_fns_by_name.insert(key.clone(), chunk.into_iter().collect());
+    }
 
-        sql_fns_by_name
-    });
+    sql_fns_by_name
+});
 
-pub(crate) fn get_type_signature_for_special_cased_sql_function(
+pub(crate) fn get_sql_function_def(
     fn_name: &CompoundIdent,
     args: &FunctionArguments,
-) -> Option<&'static FunctionSig> {
-    let sigs = SQL_FUNCTION_SIGNATURES.get(fn_name)?;
-    sigs.iter().find(|sig| sig.is_applicable_to_args(args))
+) -> Option<&'static SqlFunction> {
+    let sql_fns = SQL_FUNCTIONS.get(fn_name)?;
+    sql_fns
+        .iter()
+        .find(|sql_fn| sql_fn.sig.is_applicable_to_args(args))
 }

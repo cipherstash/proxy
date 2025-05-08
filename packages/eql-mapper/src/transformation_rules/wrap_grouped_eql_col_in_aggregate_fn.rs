@@ -20,11 +20,11 @@ use super::{
 /// SELECT eql_col FROM some_table GROUP BY eql_col;
 ///
 /// -- after mapping
-/// SELECT CS_GROUPED_VALUE_V1(eql_col) FROM some_table GROUP BY CS_ORE_64_8_V1(eql_col);
-/// --     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^                          ^^^^^^^^^^^^^^^^^^^^^^^
-/// --                 ^                                                    ^
-/// --                 |                                                    |
-/// --     Changed by this rule                                Changed by rule `GroupByEqlCol`
+/// SELECT eql_v1.grouped_value(eql_col) AS eql_col FROM some_table GROUP BY eql_v1.ore_64_8_v1(eql_col);
+/// --     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^     ^^^^^^^                          ^^^^^^^^^^^^^^^^^^^^^^^
+/// --                 ^                       ^                                      ^
+/// --                 |                       |                                      |
+/// --       Changed by this rule     PreserveEffectiveAliases                  GroupByEqlCol
 /// ```
 #[derive(Debug)]
 pub struct WrapGroupedEqlColInAggregateFn<'ast> {
@@ -50,7 +50,7 @@ impl<'ast> TransformationRule<'ast> for WrapGroupedEqlColInAggregateFn<'ast> {
                 let target_node: &mut Expr = target_node.downcast_mut().unwrap();
                 *target_node = wrap_in_1_arg_function(
                     expr.clone(),
-                    ObjectName(vec![Ident::new("CS_GROUPED_VALUE_V1")]),
+                    ObjectName(vec![Ident::new("eql_v1"), Ident::new("cs_grouped_value")]),
                 );
 
                 return Ok(true);
