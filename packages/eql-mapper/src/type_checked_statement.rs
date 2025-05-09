@@ -113,17 +113,19 @@ impl<'ast> TypeCheckedStatement<'ast> {
         }
 
         for (key, _) in encrypted_literals.iter() {
-            if !self
-                .literals
-                .iter()
-                .any(|(_, node)| &node.as_node_key() == key)
-            {
+            if !self.literal_exists_for_node_key(*key) {
                 return Err(EqlMapperError::Transform(String::from(
                     "encrypted literals refers to a literal node which is not present in the SQL statement"
                 )));
             }
         }
         Ok(())
+    }
+
+    fn literal_exists_for_node_key(&self, key: NodeKey<'ast>) -> bool {
+        self.literals
+            .iter()
+            .any(|(_, node)| node.as_node_key() == key)
     }
 
     fn count_not_null_literals(&self) -> usize {

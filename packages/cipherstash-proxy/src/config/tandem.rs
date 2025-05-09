@@ -191,10 +191,11 @@ impl TandemConfig {
     }
 
     pub fn mapping_disabled(&self) -> bool {
-        match &self.development {
-            Some(dev) => dev.disable_mapping,
-            None => false,
-        }
+        // match &self.development {
+        //     Some(dev) => dev.disable_mapping,
+        //     None => false,
+        // }
+        true
     }
 
     pub fn mapping_errors_enabled(&self) -> bool {

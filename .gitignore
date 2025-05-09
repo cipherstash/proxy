@@ -4,8 +4,6 @@
 /cipherstash-proxy.local.toml
 mise.local.toml
 tests/pg/data**
-tests/sql/cipherstash-encrypt.sql
-tests/sql/cipherstash-encrypt-uninstall.sql
 .vscode
 
 rust-toolchain.toml
@@ -13,8 +11,9 @@ rust-toolchain.toml
 
 # release artifacts
 /cipherstash-proxy
-/cipherstash-eql.sql
 /packages/cipherstash-proxy/eql-version-at-build-time.txt
+/cipherstash-encrypt.sql
+/cipherstash-encrypt-uninstall.sql
 
 # credentials for local dev
 .env.proxy.docker

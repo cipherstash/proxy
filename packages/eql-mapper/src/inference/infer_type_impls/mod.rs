@@ -1,6 +1,7 @@
 // General AST nodes
 mod expr;
 mod function;
+mod function_arg_expr;
 mod select;
 mod select_item;
 mod select_items;
