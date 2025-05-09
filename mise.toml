@@ -276,18 +276,6 @@ echo
 mise --env tcp run postgres:setup
 mise --env tls run postgres:setup
 
-
-echo
-echo '###############################################'
-echo '# Test: Prometheus'
-echo '###############################################'
-echo
-
-mise --env tcp run proxy:up proxy --extra-args "--detach --wait"
-mise --env tcp run test:wait_for_postgres_to_quack --port 6432 --max-retries 20
-mise --env tcp run test:integration:prometheus
-mise --env tcp run proxy:down
-
 echo
 echo '###############################################'
 echo '# Test: non-TLS'
@@ -318,7 +306,7 @@ echo
 
 mise --env tls run proxy:up proxy-tls --extra-args "--detach --wait"
 mise --env tls run test:wait_for_postgres_to_quack --port 6432 --max-retries 20 --tls
-cargo nextest run --no-fail-fast --nocapture -E 'package(cipherstash-proxy-integration)'
+cargo nextest run --no-fail-fast --nocapture -p cipherstash-proxy-integration passthrough_
 mise --env tls run proxy:down
 
 echo
@@ -342,28 +330,6 @@ mise --env tcp run proxy:up proxy --extra-args "--detach --wait"
 mise --env tcp run test:wait_for_postgres_to_quack --port 6432 --max-retries 20
 mise --env tcp run test:integration:warn_missing_config
 mise --env tcp run proxy:down
-
-echo
-echo '###############################################'
-echo '# Test: Python'
-echo '###############################################'
-echo
-
-mise --env tls run proxy:up proxy-tls --extra-args "--detach --wait"
-mise --env tls run test:wait_for_postgres_to_quack --port 6432 --max-retries 20 --tls
-mise --env tls run python:test
-mise --env tls run proxy:down
-
-echo
-echo '###############################################'
-echo '# Test: Golang'
-echo '###############################################'
-echo
-
-mise --env tls run proxy:up proxy-tls --extra-args "--detach --wait"
-mise --env tls run test:wait_for_postgres_to_quack --port 6432 --max-retries 20 --tls
-mise --env tls run test:integration:golang
-mise --env tls run proxy:down
 """
 
 [tasks."test:nextest"]

@@ -703,7 +703,7 @@ dependencies = [
  "tracing",
  "url",
  "uuid",
- "winnow",
+ "winnow 0.6.26",
  "zeroize",
  "zerokms-protocol",
 ]
@@ -926,7 +926,7 @@ dependencies = [
  "serde",
  "serde_json",
  "toml",
- "winnow",
+ "winnow 0.7.10",
 ]
 
 [[package]]
@@ -4066,7 +4066,7 @@ dependencies = [
  "serde",
  "serde_spanned",
  "toml_datetime",
- "winnow",
+ "winnow 0.7.10",
 ]
 
 [[package]]
@@ -4840,6 +4840,15 @@ name = "windows_x86_64_msvc"
 version = "0.53.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "271414315aff87387382ec3d271b52d7ae78726f5d44ac98b4f4030c91880486"
+
+[[package]]
+name = "winnow"
+version = "0.6.26"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1e90edd2ac1aa278a5c4599b1d89cf03074b610800f866d4026dc199d7929a28"
+dependencies = [
+ "memchr",
+]
 
 [[package]]
 name = "winnow"

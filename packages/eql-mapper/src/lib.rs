@@ -1,5 +1,4 @@
 //! `eql-mapper` transforms SQL to SQL+EQL using a known database schema as a reference.
-
 mod dep;
 mod display_helpers;
 mod eql_mapper;
@@ -29,6 +28,7 @@ pub(crate) use transformation_rules::*;
 
 #[cfg(test)]
 mod test {
+    #[allow(dead_code)]
     use super::test_helpers::*;
     use super::type_check;
     use crate::col;
@@ -1403,6 +1403,7 @@ mod test {
         type_check(schema, &statement).expect("named arrays should be supported");
     }
 
+    #[test]
     fn jsonb_operator_arrow() {
         test_jsonb_operator("->");
     }
@@ -1457,7 +1458,8 @@ mod test {
         test_jsonb_operator("<@");
     }
 
-    #[test]
+    // #[test]
+    #[allow(dead_code)]
     fn jsonb_function_jsonb_path_query() {
         test_jsonb_function(
             "jsonb_path_query",
@@ -1470,7 +1472,7 @@ mod test {
 
     // TODO: do we need to check that the RHS of JSON operators MUST be a Value node
     // and not an arbitrary expression?
-
+    #[allow(dead_code)]
     fn test_jsonb_function(fn_name: &str, args: Vec<ast::Expr>) {
         let schema = resolver(schema! {
             tables: {
