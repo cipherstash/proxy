@@ -17,9 +17,9 @@ use cipherstash_client::{
         self, Encrypted, EncryptedEntry, EncryptedSteVecTerm, IndexTerm, Plaintext,
         PlaintextTarget, ReferencedPendingPipeline,
     },
+    schema::ColumnConfig,
     ConsoleConfig, CtsConfig, ZeroKMSConfig,
 };
-use cipherstash_config::ColumnConfig;
 use config::EncryptConfigManager;
 use schema::SchemaManager;
 use std::{sync::Arc, vec};
@@ -201,7 +201,14 @@ async fn init_cipher(config: &TandemConfig) -> Result<ScopedCipher, Error> {
     // Not using with_env because the proxy config should take precedence
     let builder = ZeroKMSConfig::builder()
         .add_source(EnvSource::default())
-        .workspace_id(&config.auth.workspace_id)
+        .workspace_id(
+            config
+                .auth
+                .workspace_id
+                .to_owned()
+                .try_into()
+                .map_err(cipherstash_client::config::ConfigError::from)?,
+        )
         .access_key(&config.auth.client_access_key)
         .try_with_client_id(&config.encrypt.client_id)?
         .try_with_client_key(&config.encrypt.client_key)?

@@ -6,8 +6,7 @@ use crate::{
 use bigdecimal::BigDecimal;
 use bytes::BytesMut;
 use chrono::NaiveDate;
-use cipherstash_client::encryption::Plaintext;
-use cipherstash_config::ColumnType;
+use cipherstash_client::{encryption::Plaintext, schema::ColumnType};
 use postgres_types::FromSql;
 use postgres_types::Type;
 use rust_decimal::Decimal;
@@ -342,8 +341,10 @@ mod tests {
     };
     use bytes::{BufMut, BytesMut};
     use chrono::NaiveDate;
-    use cipherstash_client::encryption::Plaintext;
-    use cipherstash_config::{ColumnConfig, ColumnMode, ColumnType};
+    use cipherstash_client::{
+        encryption::Plaintext,
+        schema::{ColumnConfig, ColumnMode, ColumnType},
+    };
     use postgres_types::{ToSql, Type};
 
     fn to_message(s: &[u8]) -> BytesMut {

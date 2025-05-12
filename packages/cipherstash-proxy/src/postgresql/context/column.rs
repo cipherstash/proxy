@@ -1,4 +1,4 @@
-use cipherstash_config::{ColumnConfig, ColumnType};
+use cipherstash_client::schema::{ColumnConfig, ColumnType};
 use postgres_types::Type;
 
 use crate::Identifier;
