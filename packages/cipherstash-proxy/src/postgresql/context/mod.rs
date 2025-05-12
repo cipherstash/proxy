@@ -74,18 +74,7 @@ pub enum Portal {
         format_codes: Vec<FormatCode>,
         statement: Arc<Statement>,
     },
-    EncryptedText,
     Passthrough,
-}
-
-///
-/// Portal is a Statement with Bound variables
-/// An Execute message will execute the statement with the variables associated during a Bind.
-///
-#[derive(Clone, Debug)]
-pub struct EncryptedPortal {
-    pub format_codes: Vec<FormatCode>,
-    pub statement: Arc<Statement>,
 }
 
 impl Context {
@@ -200,7 +189,6 @@ impl Context {
 
         match portal.as_ref() {
             Portal::Encrypted { statement, .. } => Some(statement.clone()),
-            Portal::EncryptedText => None,
             Portal::Passthrough => None,
         }
     }
@@ -303,7 +291,18 @@ impl<T> Queue<T> {
 }
 
 impl Portal {
-    pub fn encrypted(statement: Arc<Statement>, format_codes: Vec<FormatCode>) -> Portal {
+    pub fn encrypted_with_format_codes(
+        statement: Arc<Statement>,
+        format_codes: Vec<FormatCode>,
+    ) -> Portal {
+        Portal::Encrypted {
+            statement,
+            format_codes,
+        }
+    }
+
+    pub fn encrypted(statement: Arc<Statement>) -> Portal {
+        let format_codes = vec![];
         Portal::Encrypted {
             statement,
             format_codes,
@@ -314,8 +313,12 @@ impl Portal {
         Portal::Passthrough
     }
 
-    pub fn encrypted_text() -> Portal {
-        Portal::EncryptedText
+    pub fn projection_columns(&self) -> &Vec<Option<Column>> {
+        static EMPTY: Vec<Option<Column>> = vec![];
+        match self {
+            Portal::Encrypted { statement, .. } => &statement.projection_columns,
+            _ => &EMPTY,
+        }
     }
 
     // FormatCodes should not be None at this point
@@ -336,7 +339,6 @@ impl Portal {
                 }
                 _ => format_codes.clone(),
             },
-            Portal::EncryptedText => vec![FormatCode::Text; row_len],
             Portal::Passthrough => {
                 unreachable!()
             }
@@ -365,7 +367,7 @@ mod tests {
     }
 
     fn portal(statement: &Arc<Statement>) -> Portal {
-        Portal::encrypted(statement.clone(), vec![])
+        Portal::encrypted_with_format_codes(statement.clone(), vec![])
     }
 
     fn get_statement(portal: Arc<Portal>) -> Arc<Statement> {

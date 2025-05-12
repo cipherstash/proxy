@@ -18,6 +18,7 @@ pub const AUTHENTICATION: &str = "authentication";
 pub const CONFIG: &str = "config";
 pub const CONTEXT: &str = "context";
 pub const ENCRYPT: &str = "encrypt";
+pub const DECRYPT: &str = "decrypt";
 pub const ENCODING: &str = "encoding";
 pub const ENCRYPT_CONFIG: &str = "encrypt_config";
 pub const KEYSET: &str = "keyset";
@@ -128,6 +129,7 @@ mod tests {
             encoding_level: LogLevel::Error,
             encrypt_level: LogLevel::Error,
             encrypt_config_level: LogLevel::Error,
+            decrypt_level: LogLevel::Error,
             keyset_level: LogLevel::Trace,
             migrate_level: LogLevel::Trace,
             protocol_level: LogLevel::Info,
