@@ -194,7 +194,7 @@ dependencies = [
  "asn1-rs-derive",
  "asn1-rs-impl",
  "displaydoc",
- "nom 7.1.3",
+ "nom",
  "num-traits",
  "rusticata-macros",
  "thiserror 2.0.12",
@@ -599,7 +599,7 @@ version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6fac387a98bb7c37292057cffc56d62ecb629900026402633ae9160df93a8766"
 dependencies = [
- "nom 7.1.3",
+ "nom",
 ]
 
 [[package]]
@@ -651,6 +651,8 @@ dependencies = [
 [[package]]
 name = "cipherstash-client"
 version = "0.20.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8fe21509165da6daf50b84d4dc9bc46b558e5afb34db75dbd2371b963faabe4d"
 dependencies = [
  "aes-gcm-siv",
  "anyhow",
@@ -662,7 +664,7 @@ dependencies = [
  "blake3",
  "cfg-if",
  "chrono",
- "cipherstash-config 0.2.3",
+ "cipherstash-config",
  "cipherstash-core",
  "cllw-ore",
  "cts-common",
@@ -681,7 +683,7 @@ dependencies = [
  "percent-encoding",
  "rand 0.8.5",
  "rand_chacha 0.3.1",
- "recipher 0.1.3",
+ "recipher",
  "reqwest",
  "reqwest-middleware",
  "reqwest-retry",
@@ -709,14 +711,6 @@ dependencies = [
 [[package]]
 name = "cipherstash-config"
 version = "0.2.3"
-dependencies = [
- "serde",
- "thiserror 1.0.69",
-]
-
-[[package]]
-name = "cipherstash-config"
-version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "30104045751da6e528e83804f4b22d0cddcb27aacce0e1c79604872ddb076bbf"
 dependencies = [
@@ -727,6 +721,8 @@ dependencies = [
 [[package]]
 name = "cipherstash-core"
 version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dd56dfac0a35146968ef6696fb822b22f70a664a8739874385876d5452844b7a"
 dependencies = [
  "hmac",
  "lazy_static",
@@ -760,7 +756,7 @@ dependencies = [
  "postgres-protocol",
  "postgres-types",
  "rand 0.9.0",
- "recipher 0.1.3 (registry+https://github.com/rust-lang/crates.io-index)",
+ "recipher",
  "regex",
  "ring",
  "rust_decimal",
@@ -791,13 +787,13 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "cipherstash-client",
- "cipherstash-config 0.2.3 (registry+https://github.com/rust-lang/crates.io-index)",
+ "cipherstash-config",
  "cipherstash-proxy",
  "clap",
  "fake 4.2.0",
  "hex",
  "rand 0.9.0",
- "recipher 0.1.3 (registry+https://github.com/rust-lang/crates.io-index)",
+ "recipher",
  "rustls",
  "serde",
  "serde_json",
@@ -866,6 +862,8 @@ checksum = "f46ad14479a25103f283c0f10005961cf086d8dc42205bb44c46ac563475dca6"
 [[package]]
 name = "cllw-ore"
 version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d1b01c26e11101044f85802e31d842483ef983a890c03472d9489f6969cf865a"
 dependencies = [
  "bit-vec",
  "bitvec",
@@ -1024,6 +1022,8 @@ dependencies = [
 [[package]]
 name = "cts-common"
 version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "938da7d14d05c2769bf7ae33c5a395eb6a34ffdd25ec286e97702ae563314f9b"
 dependencies = [
  "arrayvec",
  "axum",
@@ -1032,7 +1032,6 @@ dependencies = [
  "fake 3.1.0",
  "http",
  "miette",
- "nom 8.0.0",
  "rand 0.8.5",
  "regex",
  "serde",
@@ -1111,7 +1110,7 @@ checksum = "07da5016415d5a3c4dd39b11ed26f915f52fc4e0dc197d87908bc916e51bc1a6"
 dependencies = [
  "asn1-rs",
  "displaydoc",
- "nom 7.1.3",
+ "nom",
  "num-bigint",
  "num-traits",
  "rusticata-macros",
@@ -2355,15 +2354,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "nom"
-version = "8.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "df9761775871bdef83bee530e60050f7e54b1105350d6884eb0fb4f46c2f9405"
-dependencies = [
- "memchr",
-]
-
-[[package]]
 name = "nu-ansi-term"
 version = "0.46.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2967,25 +2957,6 @@ dependencies = [
 [[package]]
 name = "recipher"
 version = "0.1.3"
-dependencies = [
- "aes",
- "async-trait",
- "cmac",
- "hex",
- "hex-literal",
- "opaque-debug",
- "rand 0.8.5",
- "rand_chacha 0.3.1",
- "serde",
- "serde_cbor",
- "sha2",
- "thiserror 1.0.69",
- "zeroize",
-]
-
-[[package]]
-name = "recipher"
-version = "0.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "72aa0940c8f5b753bfd3ed212d60896760579324c59194b7e51fcec35e5c1b0f"
 dependencies = [
@@ -3284,7 +3255,7 @@ version = "4.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "faf0c4a6ece9950b9abdb62b1cfcf2a68b3b67a10ba445b3bb85be2a293d0632"
 dependencies = [
- "nom 7.1.3",
+ "nom",
 ]
 
 [[package]]
@@ -4939,7 +4910,7 @@ dependencies = [
  "data-encoding",
  "der-parser",
  "lazy_static",
- "nom 7.1.3",
+ "nom",
  "oid-registry",
  "rusticata-macros",
  "thiserror 2.0.12",
@@ -5060,10 +5031,12 @@ dependencies = [
 [[package]]
 name = "zerokms-protocol"
 version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "01a9d0d8103cfa862b451f2c35144301df25a233f7fae041666b890a1578c3b1"
 dependencies = [
  "async-trait",
  "base64",
- "cipherstash-config 0.2.3",
+ "cipherstash-config",
  "fake 2.10.0",
  "opaque-debug",
  "rand 0.8.5",
