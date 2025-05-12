@@ -24,7 +24,7 @@ tracing-subscriber = { workspace = true }
 webpki-roots = "0.26.7"
 
 [dev-dependencies]
-cipherstash-client = { version = "0.20.0", features = ["tokio"] }
+cipherstash-client = { version = "0.21.0", features = ["tokio"] }
 cipherstash-config = "0.2.3"
 clap = "4.5.32"
 fake = { version = "4", features = ["chrono", "derive"] }
