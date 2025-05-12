@@ -19,7 +19,6 @@ use crate::prometheus::{
     ROWS_PASSTHROUGH_TOTAL, ROWS_TOTAL, SERVER_BYTES_RECEIVED_TOTAL,
 };
 use bytes::BytesMut;
-use itertools::Itertools;
 use metrics::{counter, histogram};
 use std::time::Instant;
 use tokio::io::AsyncRead;
@@ -234,7 +233,7 @@ where
 
         let portal = self.context.get_portal_from_execute();
         let portal = match portal.as_deref() {
-            Some(Portal::Encrypted { .. }) | Some(Portal::EncryptedText) => portal.unwrap(),
+            Some(Portal::Encrypted { .. }) => portal.unwrap(),
             _ => {
                 debug!(target: MAPPER, client_id = self.context.client_id, msg = "Passthrough portal");
                 if !self.buffer.is_empty() {
@@ -261,12 +260,13 @@ where
         // If no portal, assume Text for all columns
         let result_column_format_codes = portal.format_codes(result_column_count);
 
+        let projection_columns = portal.projection_columns();
+
         // Each row is converted into Vec<Option<CipherText>>
         let ciphertexts: Vec<Option<EqlEncrypted>> = rows
             .iter()
-            .map(|row| row.to_ciphertext())
-            .flatten_ok()
-            .collect::<Result<Vec<_>, _>>()?;
+            .flat_map(|row| row.to_ciphertext(projection_columns))
+            .collect::<Vec<_>>();
 
         let start = Instant::now();
 
@@ -381,7 +381,7 @@ where
     async fn data_row_handler(&mut self, bytes: &BytesMut) -> Result<bool, Error> {
         counter!(ROWS_TOTAL).increment(1);
         match self.context.get_portal_from_execute().as_deref() {
-            Some(Portal::Encrypted { .. }) | Some(Portal::EncryptedText) => {
+            Some(Portal::Encrypted { .. }) => {
                 debug!(target: MAPPER, client_id = self.context.client_id, msg = "Encrypted");
 
                 let data_row = DataRow::try_from(bytes)?;

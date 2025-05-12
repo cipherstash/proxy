@@ -6,11 +6,14 @@ use tracing_subscriber::fmt::writer::BoxMakeWriter;
 use tracing_subscriber::fmt::SubscriberBuilder;
 use tracing_subscriber::FmtSubscriber;
 
+use super::DECRYPT;
+
 fn log_targets() -> Vec<&'static str> {
     vec![
         DEVELOPMENT,
         AUTHENTICATION,
         CONTEXT,
+        DECRYPT,
         ENCRYPT,
         KEYSET,
         PROTOCOL,
@@ -24,6 +27,7 @@ fn log_level_for(config: &LogConfig, target: &str) -> LogLevel {
         DEVELOPMENT => config.development_level,
         AUTHENTICATION => config.authentication_level,
         CONTEXT => config.context_level,
+        DECRYPT => config.decrypt_level,
         ENCRYPT => config.encrypt_level,
         KEYSET => config.keyset_level,
         PROTOCOL => config.protocol_level,

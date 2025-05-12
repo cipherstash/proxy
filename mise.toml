@@ -22,8 +22,10 @@ CS_DATABASE__PORT = "5532"
 # Default configuration for dev cipherstash-proxy run using 'mise run proxy:up'
 CS_PROXY__HOST = "proxy"
 # Misc
-DOCKER_CLI_HINTS = "false"   # Please don't show us What's Next.
-CS_EQL_VERSION = "eql-1.0.1"
+DOCKER_CLI_HINTS = "false" # Please don't show us What's Next.
+
+# CS_EQL_VERSION = "eql-1.0.1"
+CS_EQL_VERSION = "eql-2.0.0-alpha.1"
 
 [tools]
 "cargo:cargo-binstall" = "latest"
@@ -502,6 +504,7 @@ outputs = [
 run = """
 # install script
 if [ -z "$CS_EQL_PATH" ]; then
+  echo "Downloading ${CS_EQL_VERSION} install"
   curl -sLo "{{config_root}}/cipherstash-encrypt.sql" https://github.com/cipherstash/encrypt-query-language/releases/download/${CS_EQL_VERSION}/cipherstash-encrypt.sql
 else
   echo "Using EQL: ${CS_EQL_PATH}/cipherstash-encrypt.sql"
@@ -510,6 +513,7 @@ fi
 
 # uninstall script
 if [ -z "$CS_EQL_PATH" ]; then
+  echo "Downloading ${CS_EQL_VERSION} uninstall"
   curl -sLo   "{{config_root}}/cipherstash-encrypt-uninstall.sql" https://github.com/cipherstash/encrypt-query-language/releases/download/${CS_EQL_VERSION}/cipherstash-encrypt-uninstall.sql
 else
   echo "Using EQL: ${CS_EQL_PATH}/cipherstash-encrypt-uninstall.sql"
