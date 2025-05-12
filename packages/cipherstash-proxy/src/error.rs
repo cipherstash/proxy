@@ -104,7 +104,7 @@ pub enum ConfigError {
     Certificate(#[from] rustls_pki_types::pem::Error),
 
     #[error(transparent)]
-    EncryptConfig(#[from] cipherstash_config::errors::ConfigError),
+    EncryptConfig(#[from] cipherstash_client::config::errors::ConfigError),
 
     #[error(transparent)]
     Database(#[from] tokio_postgres::Error),
@@ -281,12 +281,6 @@ pub enum ProtocolError {
 
 impl From<config::ConfigError> for Error {
     fn from(e: config::ConfigError) -> Self {
-        Error::Config(e.into())
-    }
-}
-
-impl From<cipherstash_config::errors::ConfigError> for Error {
-    fn from(e: cipherstash_config::errors::ConfigError) -> Self {
         Error::Config(e.into())
     }
 }

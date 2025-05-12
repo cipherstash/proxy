@@ -7,7 +7,7 @@ use crate::{
     log::ENCRYPT_CONFIG,
 };
 use arc_swap::ArcSwap;
-use cipherstash_config::ColumnConfig;
+use cipherstash_client::schema::ColumnConfig;
 use serde_json::Value;
 use std::{collections::HashMap, sync::Arc, time::Duration};
 use tokio::{task::JoinHandle, time};

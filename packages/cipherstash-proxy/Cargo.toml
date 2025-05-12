@@ -9,7 +9,6 @@ arc-swap = "1.7.1"
 bytes = { version = "1.9", default-features = false }
 chrono = { version = "0.4.39", features = ["clock"] }
 cipherstash-client = { version = "0.20.0", features = ["tokio"] }
-cipherstash-config = "0.2.3"
 clap = { version = "4.5.31", features = ["derive", "env"] }
 config = { version = "0.15", features = [
     "async",

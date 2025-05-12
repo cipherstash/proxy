@@ -123,7 +123,7 @@ mod tests {
         Identifier,
     };
     use bytes::BytesMut;
-    use cipherstash_config::{ColumnConfig, ColumnType};
+    use cipherstash_client::schema::{ColumnConfig, ColumnType};
 
     fn to_message(s: &[u8]) -> BytesMut {
         BytesMut::from(s)
