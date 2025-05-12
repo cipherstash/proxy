@@ -1,8 +1,8 @@
 use std::{collections::HashMap, convert::Infallible, ops::ControlFlow};
 
 use sqltk::parser::ast::{
-    Expr, Function, FunctionArg, FunctionArgExpr, FunctionArgumentList, FunctionArguments,
-    GroupByExpr, ObjectName,
+    CastKind, DataType, Expr, Function, FunctionArg, FunctionArgExpr, FunctionArgumentList,
+    FunctionArguments, GroupByExpr, Ident, ObjectName,
 };
 use sqltk::{AsNodeKey, Break, NodeKey, Visitable, Visitor};
 
@@ -45,6 +45,28 @@ pub(crate) fn wrap_in_1_arg_function(expr: Expr, name: ObjectName) -> Expr {
         over: None,
         within_group: vec![],
         uses_odbc_syntax: false,
+    })
+}
+
+pub(crate) fn make_row_expression(wrapped: sqltk::parser::ast::Value) -> Expr {
+    Expr::Function(Function {
+        name: ObjectName(vec![Ident::new("ROW")]),
+        uses_odbc_syntax: false,
+        parameters: FunctionArguments::None,
+        args: FunctionArguments::List(FunctionArgumentList {
+            duplicate_treatment: None,
+            clauses: vec![],
+            args: vec![FunctionArg::Unnamed(FunctionArgExpr::Expr(Expr::Cast {
+                kind: CastKind::DoubleColon,
+                expr: Box::new(Expr::Value(wrapped)),
+                data_type: DataType::JSONB,
+                format: None,
+            }))],
+        }),
+        filter: None,
+        null_treatment: None,
+        over: None,
+        within_group: vec![],
     })
 }
 
