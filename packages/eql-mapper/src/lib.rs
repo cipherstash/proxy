@@ -1392,6 +1392,39 @@ mod test {
     }
 
     #[test]
+    fn eql_params_are_wrapped_in_row() {
+        // init_tracing();
+        let schema = resolver(schema! {
+            tables: {
+                employees: {
+                    id (PK),
+                    eql_col (EQL),
+                    native_col,
+                }
+            }
+        });
+
+        let statement = parse(
+            "
+            SELECT * FROM employees WHERE eql_col = $1 AND native_col = $2;
+        ",
+        );
+
+        match type_check(schema, &statement) {
+            Ok(typed) => match typed.transform(HashMap::new()) {
+                Ok(statement) => {
+                    assert_eq!(
+                            statement.to_string(),
+                            "SELECT * FROM employees WHERE eql_col = ROW($1::JSONB) AND native_col = $2"
+                        );
+                }
+                Err(err) => panic!("transformation failed: {err}"),
+            },
+            Err(err) => panic!("type check failed: {err}"),
+        }
+    }
+
+    #[test]
     fn rewrite_standard_sql_fns_on_eql_types() {
         // init_tracing();
         let schema = resolver(schema! {

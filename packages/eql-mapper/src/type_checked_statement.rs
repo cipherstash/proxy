@@ -7,7 +7,7 @@ use crate::{
     DryRunnable, EqlMapperError, EqlValue, FailOnPlaceholderChange, GroupByEqlCol, Param,
     PreserveEffectiveAliases, Projection, ReplacePlaintextEqlLiterals,
     RewriteStandardSqlFnsOnEqlTypes, TransformationRule, Type, Value,
-    WrapEqlColsInOrderByWithOreFn, WrapGroupedEqlColInAggregateFn,
+    WrapEqlColsInOrderByWithOreFn, WrapEqlParamsInRow, WrapGroupedEqlColInAggregateFn,
 };
 
 /// A `TypeCheckedStatement` is returned from a successful call to [`crate::type_check`].
@@ -147,6 +147,7 @@ impl<'ast> TypeCheckedStatement<'ast> {
             PreserveEffectiveAliases,
             ReplacePlaintextEqlLiterals::new(encrypted_literals),
             FailOnPlaceholderChange::new(),
+            WrapEqlParamsInRow::new(Arc::clone(&self.node_types)),
         ))
     }
 }

@@ -17,6 +17,7 @@ mod preserve_effective_aliases;
 mod replace_plaintext_eql_literals;
 mod rewrite_standard_sql_fns_on_eql_types;
 mod wrap_eql_cols_in_order_by_with_ore_fn;
+mod wrap_eql_params_in_row;
 mod wrap_grouped_eql_col_in_aggregate_fn;
 
 use std::marker::PhantomData;
@@ -27,6 +28,7 @@ pub(crate) use preserve_effective_aliases::*;
 pub(crate) use replace_plaintext_eql_literals::*;
 pub(crate) use rewrite_standard_sql_fns_on_eql_types::*;
 pub(crate) use wrap_eql_cols_in_order_by_with_ore_fn::*;
+pub(crate) use wrap_eql_params_in_row::*;
 pub(crate) use wrap_grouped_eql_col_in_aggregate_fn::*;
 
 use crate::EqlMapperError;
