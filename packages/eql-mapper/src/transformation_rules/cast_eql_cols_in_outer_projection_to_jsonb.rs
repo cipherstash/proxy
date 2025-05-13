@@ -1,10 +1,10 @@
 use std::{collections::HashMap, sync::Arc};
 
-use sqltk::parser::ast::Expr;
 use sqltk::parser::ast::{self, CastKind, DataType, Query, Select, SelectItem, SetExpr, Statement};
-use sqltk::{NodeKey, NodePath, Visitable};
+use sqltk::parser::ast::{Expr, WildcardAdditionalOptions};
+use sqltk::{AsNodeKey, NodeKey, NodePath, Visitable};
 
-use crate::{EqlMapperError, Type, Value};
+use crate::{EqlMapperError, Projection, Type, Value};
 
 use super::TransformationRule;
 
@@ -30,29 +30,60 @@ impl<'ast> TransformationRule<'ast> for CastEqlColsInOuterProjectionToJsonb<'ast
                 node_path.last_5_as::<Statement, Query, SetExpr, Select, Vec<SelectItem>>()
             {
                 if let Some(select_items) = target_node.downcast_mut::<Vec<SelectItem>>() {
+                    let mut new_select_items: Vec<SelectItem> =
+                        Vec::with_capacity(select_items.len());
+
                     for (original_select_item, select_item) in
-                        original_select_items.iter().zip(select_items)
+                        original_select_items.iter().zip(select_items.iter_mut())
                     {
+                        let mut detached: SelectItem = std::mem::replace(
+                            select_item,
+                            SelectItem::Wildcard(WildcardAdditionalOptions::default()),
+                        );
+
                         if matches!(
                             self.node_types.get(&NodeKey::new(&*original_select_item)),
                             Some(Type::Value(Value::Eql(_)))
                         ) {
-                            match select_item {
+                            match &mut detached {
                                 SelectItem::UnnamedExpr(expr)
                                 | SelectItem::ExprWithAlias { expr, alias: _ } => {
                                     *expr = cast_expr_to_jsonb(std::mem::replace(
                                         expr,
                                         Expr::Value(ast::Value::Null),
-                                    ))
+                                    ));
+                                    new_select_items.push(detached);
                                 }
-                                SelectItem::QualifiedWildcard(
-                                    object_name,
-                                    wildcard_additional_options,
-                                ) => todo!(),
-                                SelectItem::Wildcard(wildcard_additional_options) => todo!(),
+                                SelectItem::Wildcard(_) => {
+                                    if let Some(Type::Projection(projection)) =
+                                        self.node_types.get(&NodeKey::new(select_item))
+                                    {
+                                        match projection {
+                                            Projection::WithColumns(cols) => {
+                                                for col in cols {
+                                                    match &col.alias {
+                                                        Some(alias) => new_select_items.push(
+                                                            SelectItem::UnnamedExpr(
+                                                                Expr::Identifier(alias.clone()),
+                                                            ),
+                                                        ),
+                                                        None => {
+                                                            panic!("Dammit cannot handle this case you muppets")
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                            Projection::Empty => {}
+                                        }
+                                    }
+                                }
+                                SelectItem::QualifiedWildcard(object_name, _) => todo!(),
                             }
+                        } else {
+                            new_select_items.push(detached);
                         }
                     }
+                    *select_items = new_select_items;
                 }
             }
         }
