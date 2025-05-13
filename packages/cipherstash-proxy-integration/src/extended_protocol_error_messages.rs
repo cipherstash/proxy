@@ -70,7 +70,7 @@ mod tests {
             // returns eql_v1_encrypted and the client cannot convert to a string.
             // If mapping errors are enabled (enable_mapping_errors or CS_DEVELOPMENT__ENABLE_MAPPING_ERRORS),
             // then Proxy will return an error that says "Column X in table Y has no Encrypt configuration"
-            assert_eq!(msg, "error serializing parameter 1: cannot convert between the Rust type `&str` and the Postgres type `eql_v1_encrypted`");
+            assert_eq!(msg, "error serializing parameter 1: cannot convert between the Rust type `&str` and the Postgres type `jsonb`");
         } else {
             unreachable!();
         }
