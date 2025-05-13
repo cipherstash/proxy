@@ -21,6 +21,8 @@ jobs:
       - run: |
           mise run postgres:up --extra-args "--detach --wait"
       - env:
+          # REMEMBER TO ADD ENVIRONMENT VARIABLES TO tests/docker-compose.yml
+          # The tests/docker-compose.yml config passes the ENV vars into the container
           CS_WORKSPACE_ID: ${{ secrets.CS_WORKSPACE_ID }}
           CS_CLIENT_ACCESS_KEY: ${{ secrets.CS_CLIENT_ACCESS_KEY }}
           CS_DEFAULT_KEYSET_ID: ${{ secrets.CS_DEFAULT_KEYSET_ID }}
