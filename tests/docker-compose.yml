@@ -64,6 +64,7 @@ services:
       - CS_CLIENT_ID=${CS_CLIENT_ID}
       - CS_PROMETHEUS__ENABLED=${CS_PROMETHEUS__ENABLED:-true}
       - CS_SERVER__WORKER_THREADS=${CS_SERVER__WORKER_THREADS:-4}
+      - CS_REGION=${CS_REGION}
     networks:
       - postgres
     deploy:
@@ -99,6 +100,7 @@ services:
       - CS_TLS__PRIVATE_KEY_PATH=${CS_TLS__PRIVATE_KEY:-/etc/cipherstash-proxy/server.key}
       - CS_SERVER__REQUIRE_TLS=true
       - CS_PROMETHEUS__ENABLED=${CS_PROMETHEUS__ENABLED:-true}
+      - CS_REGION=${CS_REGION}
 
     volumes:
       - ./tls/server.cert:/etc/cipherstash-proxy/server.cert
