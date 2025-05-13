@@ -246,7 +246,7 @@ where
             }
         };
 
-        let rows: Vec<DataRow> = self.buffer.drain().into_iter().collect();
+        let mut rows: Vec<DataRow> = self.buffer.drain().into_iter().collect();
         debug!(target: DEVELOPMENT, client_id = self.context.client_id, rows = rows.len());
 
         let result_column_count = match rows.first() {
@@ -264,7 +264,7 @@ where
 
         // Each row is converted into Vec<Option<CipherText>>
         let ciphertexts: Vec<Option<EqlEncrypted>> = rows
-            .iter()
+            .iter_mut()
             .flat_map(|row| row.to_ciphertext(projection_columns))
             .collect::<Vec<_>>();
 
