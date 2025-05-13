@@ -1,15 +1,12 @@
-use std::{collections::HashMap, mem, sync::Arc};
+use std::{collections::HashMap, sync::Arc};
 
-use sqltk::parser::ast::{self, CastKind, DataType, Select, SelectItem};
-use sqltk::parser::ast::{
-    helpers::attached_token::AttachedToken, Expr, GroupByExpr, Ident, ObjectName,
-};
-use sqltk::parser::tokenizer::{Span, Token, TokenWithSpan};
-use sqltk::{AsNodeKey, NodeKey, NodePath, Visitable};
+use sqltk::parser::ast::Expr;
+use sqltk::parser::ast::{self, CastKind, DataType, Query, Select, SelectItem, SetExpr, Statement};
+use sqltk::{NodeKey, NodePath, Visitable};
 
 use crate::{EqlMapperError, Type, Value};
 
-use super::{helpers, TransformationRule};
+use super::TransformationRule;
 
 #[derive(Debug)]
 pub struct CastEqlColsInOuterProjectionToJsonb<'ast> {
@@ -29,15 +26,20 @@ impl<'ast> TransformationRule<'ast> for CastEqlColsInOuterProjectionToJsonb<'ast
         target_node: &mut N,
     ) -> Result<bool, EqlMapperError> {
         if self.would_edit(node_path, &*target_node) {
-            if let Some((original_select_items,)) = node_path.last_1_as::<Vec<SelectItem>>() {
+            if let Some((_, _, _, _, original_select_items)) =
+                node_path.last_5_as::<Statement, Query, SetExpr, Select, Vec<SelectItem>>()
+            {
                 if let Some(select_items) = target_node.downcast_mut::<Vec<SelectItem>>() {
-                    for (original_select_item, select_item) in original_select_items.iter().zip(select_items) {
+                    for (original_select_item, select_item) in
+                        original_select_items.iter().zip(select_items)
+                    {
                         if matches!(
                             self.node_types.get(&NodeKey::new(&*original_select_item)),
                             Some(Type::Value(Value::Eql(_)))
                         ) {
                             match select_item {
-                                SelectItem::UnnamedExpr(expr) | SelectItem::ExprWithAlias { expr, alias: _ } => {
+                                SelectItem::UnnamedExpr(expr)
+                                | SelectItem::ExprWithAlias { expr, alias: _ } => {
                                     *expr = cast_expr_to_jsonb(std::mem::replace(
                                         expr,
                                         Expr::Value(ast::Value::Null),

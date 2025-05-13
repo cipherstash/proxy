@@ -1485,14 +1485,14 @@ mod test {
             }
         });
 
-        let statement = parse("SELECT eql_col, native_col FROM employees");
+        let statement = parse("SELECT eql_col, native_col FROM (SELECT eql_col, native_col FROM employees)");
 
         match type_check(schema, &statement) {
             Ok(typed) => match typed.transform(HashMap::new()) {
                 Ok(statement) => {
                     assert_eq!(
                             statement.to_string(),
-                            "SELECT eql_col::JSONB, native_col FROM employees"
+                            "SELECT eql_col::JSONB, native_col FROM (SELECT eql_col, native_col FROM employees)"
                         );
                 }
                 Err(err) => panic!("transformation failed: {err}"),
