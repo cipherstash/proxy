@@ -205,6 +205,9 @@ pub enum EncryptError {
     #[error("Encrypted column could not be parsed")]
     ColumnCouldNotBeParsed,
 
+    #[error("Encrypted column is null")]
+    ColumnIsNull,
+
     #[error("Column '{column}' in table '{table}' could not be deserialised. For help visit {}#encrypt-column-could-not-be-deserialised", ERROR_DOC_BASE_URL)]
     ColumnCouldNotBeDeserialised { table: String, column: String },
 
