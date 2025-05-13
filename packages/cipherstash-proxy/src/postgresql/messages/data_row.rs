@@ -230,8 +230,6 @@ impl TryFrom<&DataColumn> for eql::EqlEncrypted {
 
 #[cfg(test)]
 mod tests {
-    use std::io::Cursor;
-
     use super::DataRow;
     use crate::{
         config::{LogConfig, LogLevel},
@@ -240,7 +238,6 @@ mod tests {
     };
     use crate::{EqlEncrypted, Identifier};
     use bytes::BytesMut;
-    use tracing::info;
 
     fn to_message(s: &[u8]) -> BytesMut {
         BytesMut::from(s)

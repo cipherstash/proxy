@@ -11,6 +11,7 @@
 
 mod helpers;
 
+mod cast_eql_cols_in_outer_projection_to_jsonb;
 mod fail_on_placeholder_change;
 mod group_by_eql_col;
 mod preserve_effective_aliases;
@@ -22,6 +23,7 @@ mod wrap_grouped_eql_col_in_aggregate_fn;
 
 use std::marker::PhantomData;
 
+pub(crate) use cast_eql_cols_in_outer_projection_to_jsonb::*;
 pub(crate) use fail_on_placeholder_change::*;
 pub(crate) use group_by_eql_col::*;
 pub(crate) use preserve_effective_aliases::*;

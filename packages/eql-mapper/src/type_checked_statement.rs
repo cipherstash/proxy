@@ -4,10 +4,7 @@ use sqltk::parser::ast::{self, Statement};
 use sqltk::{AsNodeKey, NodeKey, Transformable};
 
 use crate::{
-    DryRunnable, EqlMapperError, EqlValue, FailOnPlaceholderChange, GroupByEqlCol, Param,
-    PreserveEffectiveAliases, Projection, ReplacePlaintextEqlLiterals,
-    RewriteStandardSqlFnsOnEqlTypes, TransformationRule, Type, Value,
-    WrapEqlColsInOrderByWithOreFn, WrapEqlParamsInRow, WrapGroupedEqlColInAggregateFn,
+    CastEqlColsInOuterProjectionToJsonb, DryRunnable, EqlMapperError, EqlValue, FailOnPlaceholderChange, GroupByEqlCol, Param, PreserveEffectiveAliases, Projection, ReplacePlaintextEqlLiterals, RewriteStandardSqlFnsOnEqlTypes, TransformationRule, Type, Value, WrapEqlColsInOrderByWithOreFn, WrapEqlParamsInRow, WrapGroupedEqlColInAggregateFn
 };
 
 /// A `TypeCheckedStatement` is returned from a successful call to [`crate::type_check`].
@@ -140,6 +137,7 @@ impl<'ast> TypeCheckedStatement<'ast> {
         encrypted_literals: HashMap<NodeKey<'ast>, sqltk::parser::ast::Value>,
     ) -> DryRunnable<impl TransformationRule<'_>> {
         DryRunnable::new((
+            CastEqlColsInOuterProjectionToJsonb::new(Arc::clone(&self.node_types)),
             RewriteStandardSqlFnsOnEqlTypes::new(Arc::clone(&self.node_types)),
             WrapGroupedEqlColInAggregateFn::new(Arc::clone(&self.node_types)),
             GroupByEqlCol::new(Arc::clone(&self.node_types)),

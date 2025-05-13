@@ -1473,6 +1473,64 @@ mod test {
     }
 
     #[test]
+    fn outermost_projection_is_returned_as_jsonb() {
+        // init_tracing();
+        let schema = resolver(schema! {
+            tables: {
+                employees: {
+                    id (PK),
+                    eql_col (EQL),
+                    native_col,
+                }
+            }
+        });
+
+        let statement = parse("SELECT eql_col, native_col FROM employees");
+
+        match type_check(schema, &statement) {
+            Ok(typed) => match typed.transform(HashMap::new()) {
+                Ok(statement) => {
+                    assert_eq!(
+                            statement.to_string(),
+                            "SELECT eql_col::JSONB, native_col FROM employees"
+                        );
+                }
+                Err(err) => panic!("transformation failed: {err}"),
+            },
+            Err(err) => panic!("type check failed: {err}"),
+        }
+    }
+
+    #[test]
+    fn outermost_projection_is_returned_as_jsonb_when_projection_is_wildcard() {
+        // init_tracing();
+        let schema = resolver(schema! {
+            tables: {
+                employees: {
+                    id (PK),
+                    eql_col (EQL),
+                    native_col,
+                }
+            }
+        });
+
+        let statement = parse("SELECT * FROM employees");
+
+        match type_check(schema, &statement) {
+            Ok(typed) => match typed.transform(HashMap::new()) {
+                Ok(statement) => {
+                    assert_eq!(
+                            statement.to_string(),
+                            "SELECT id, eql_col::JSONB, native_col FROM employees"
+                        );
+                }
+                Err(err) => panic!("transformation failed: {err}"),
+            },
+            Err(err) => panic!("type check failed: {err}"),
+        }
+    }
+
+    #[test]
     fn jsonb_operator_arrow() {
         test_jsonb_operator("->");
     }
