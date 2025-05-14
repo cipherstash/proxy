@@ -34,6 +34,7 @@ jobs:
           CS_DEFAULT_KEYSET_ID: ${{ secrets.CS_DEFAULT_KEYSET_ID }}
           CS_CLIENT_ID: ${{ secrets.CS_CLIENT_ID }}
           CS_CLIENT_KEY: ${{ secrets.CS_CLIENT_KEY }}
+          CS_REGION: "ap-southeast-2.aws"
           RUST_BACKTRACE: "1"
         run: mise run benchmark:continuous
       # Download previous benchmark result from cache (if exists)
