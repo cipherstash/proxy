@@ -24,8 +24,7 @@ CS_PROXY__HOST = "proxy"
 # Misc
 DOCKER_CLI_HINTS = "false" # Please don't show us What's Next.
 
-# CS_EQL_VERSION = "eql-1.0.1"
-CS_EQL_VERSION = "eql-2.0.0-alpha.1"
+CS_EQL_VERSION = "eql-2.0.0-alpha.2"
 
 [tools]
 "cargo:cargo-binstall" = "latest"
