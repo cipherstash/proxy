@@ -1,27 +1,25 @@
 use std::{any::type_name, collections::HashMap};
 
-use sqltk::parser::ast::{
-    CastKind, DataType, Expr, Function, FunctionArg, FunctionArgExpr, FunctionArgumentList,
-    FunctionArguments, Ident, ObjectName, Value,
-};
+use sqltk::parser::ast::{Expr, Value};
 use sqltk::{NodeKey, NodePath, Visitable};
 
 use crate::EqlMapperError;
 
+use super::helpers::cast_as_encrypted;
 use super::TransformationRule;
 
 #[derive(Debug)]
-pub struct ReplacePlaintextEqlLiterals<'ast> {
+pub struct CastLiteralsAsEncrypted<'ast> {
     encrypted_literals: HashMap<NodeKey<'ast>, Value>,
 }
 
-impl<'ast> ReplacePlaintextEqlLiterals<'ast> {
+impl<'ast> CastLiteralsAsEncrypted<'ast> {
     pub fn new(encrypted_literals: HashMap<NodeKey<'ast>, Value>) -> Self {
         Self { encrypted_literals }
     }
 }
 
-impl<'ast> TransformationRule<'ast> for ReplacePlaintextEqlLiterals<'ast> {
+impl<'ast> TransformationRule<'ast> for CastLiteralsAsEncrypted<'ast> {
     fn apply<N: Visitable>(
         &mut self,
         node_path: &NodePath<'ast>,
@@ -31,7 +29,7 @@ impl<'ast> TransformationRule<'ast> for ReplacePlaintextEqlLiterals<'ast> {
             if let Some((Expr::Value(value),)) = node_path.last_1_as::<Expr>() {
                 if let Some(replacement) = self.encrypted_literals.remove(&NodeKey::new(value)) {
                     let target_node = target_node.downcast_mut::<Expr>().unwrap();
-                    *target_node = make_row_expression(replacement);
+                    *target_node = cast_as_encrypted(replacement);
                     return Ok(true);
                 }
             }
@@ -57,26 +55,4 @@ impl<'ast> TransformationRule<'ast> for ReplacePlaintextEqlLiterals<'ast> {
             )))
         }
     }
-}
-
-fn make_row_expression(replacement: Value) -> Expr {
-    Expr::Function(Function {
-        name: ObjectName(vec![Ident::new("ROW")]),
-        uses_odbc_syntax: false,
-        parameters: FunctionArguments::None,
-        args: FunctionArguments::List(FunctionArgumentList {
-            duplicate_treatment: None,
-            clauses: vec![],
-            args: vec![FunctionArg::Unnamed(FunctionArgExpr::Expr(Expr::Cast {
-                kind: CastKind::DoubleColon,
-                expr: Box::new(Expr::Value(replacement)),
-                data_type: DataType::JSONB,
-                format: None,
-            }))],
-        }),
-        filter: None,
-        null_treatment: None,
-        over: None,
-        within_group: vec![],
-    })
 }

@@ -4,10 +4,10 @@ use sqltk::parser::ast::{self, Statement};
 use sqltk::{AsNodeKey, NodeKey, Transformable};
 
 use crate::{
-    DryRunnable, EqlMapperError, EqlValue, FailOnPlaceholderChange, GroupByEqlCol, Param,
-    PreserveEffectiveAliases, Projection, ReplacePlaintextEqlLiterals,
+    CastLiteralsAsEncrypted, CastParamsAsEncrypted, DryRunnable, EqlMapperError, EqlValue,
+    FailOnPlaceholderChange, GroupByEqlCol, Param, PreserveEffectiveAliases, Projection,
     RewriteStandardSqlFnsOnEqlTypes, TransformationRule, Type, Value,
-    WrapEqlColsInOrderByWithOreFn, WrapEqlParamsInRow, WrapGroupedEqlColInAggregateFn,
+    WrapEqlColsInOrderByWithOreFn, WrapGroupedEqlColInAggregateFn,
 };
 
 /// A `TypeCheckedStatement` is returned from a successful call to [`crate::type_check`].
@@ -145,9 +145,9 @@ impl<'ast> TypeCheckedStatement<'ast> {
             GroupByEqlCol::new(Arc::clone(&self.node_types)),
             WrapEqlColsInOrderByWithOreFn::new(Arc::clone(&self.node_types)),
             PreserveEffectiveAliases,
-            ReplacePlaintextEqlLiterals::new(encrypted_literals),
+            CastLiteralsAsEncrypted::new(encrypted_literals),
             FailOnPlaceholderChange::new(),
-            WrapEqlParamsInRow::new(Arc::clone(&self.node_types)),
+            CastParamsAsEncrypted::new(Arc::clone(&self.node_types)),
         ))
     }
 }

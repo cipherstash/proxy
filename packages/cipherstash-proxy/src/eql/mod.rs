@@ -84,25 +84,25 @@ pub struct EqlEncryptedBody {
 
 #[derive(Debug, Deserialize, Serialize, Default)]
 pub struct EqlEncryptedIndexes {
-    #[serde(rename = "o")]
+    #[serde(rename = "o", skip_serializing_if = "Option::is_none")]
     pub(crate) ore_index: Option<Vec<String>>,
-    #[serde(rename = "m")]
+    #[serde(rename = "m", skip_serializing_if = "Option::is_none")]
     pub(crate) match_index: Option<Vec<u16>>,
-    #[serde(rename = "u")]
+    #[serde(rename = "u", skip_serializing_if = "Option::is_none")]
     pub(crate) unique_index: Option<String>,
 
-    #[serde(rename = "s")]
+    #[serde(rename = "s", skip_serializing_if = "Option::is_none")]
     pub(crate) selector: Option<String>,
 
-    #[serde(rename = "b")]
+    #[serde(rename = "b", skip_serializing_if = "Option::is_none")]
     pub(crate) blake3_index: Option<String>,
 
-    #[serde(rename = "ocf")]
+    #[serde(rename = "ocf", skip_serializing_if = "Option::is_none")]
     pub(crate) ore_cclw_fixed_index: Option<String>,
-    #[serde(rename = "ocv")]
+    #[serde(rename = "ocv", skip_serializing_if = "Option::is_none")]
     pub(crate) ore_cclw_var_index: Option<String>,
 
-    #[serde(rename = "sv")]
+    #[serde(rename = "sv", skip_serializing_if = "Option::is_none")]
     pub(crate) ste_vec_index: Option<Vec<EqlEncryptedBody>>,
 }
 

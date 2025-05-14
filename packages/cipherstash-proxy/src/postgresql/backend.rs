@@ -265,7 +265,7 @@ where
         // Each row is converted into Vec<Option<CipherText>>
         let ciphertexts: Vec<Option<EqlEncrypted>> = rows
             .iter_mut()
-            .flat_map(|row| row.to_ciphertext(projection_columns))
+            .flat_map(|row| row.as_ciphertext(projection_columns))
             .collect::<Vec<_>>();
 
         let start = Instant::now();

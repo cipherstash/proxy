@@ -20,7 +20,7 @@ pub struct DataColumn {
 }
 
 impl DataRow {
-    pub fn to_ciphertext(
+    pub fn as_ciphertext(
         &mut self,
         column_configuration: &Vec<Option<Column>>,
     ) -> Vec<Option<eql::EqlEncrypted>> {
@@ -240,7 +240,7 @@ mod tests {
     use crate::{
         config::{LogConfig, LogLevel},
         log,
-        postgresql::{data, messages::data_row::DataColumn, Column},
+        postgresql::{messages::data_row::DataColumn, Column},
     };
     use bytes::BytesMut;
     use cipherstash_client::schema::{ColumnConfig, ColumnType};
@@ -270,7 +270,7 @@ mod tests {
         let mut data_row = DataRow::try_from(&bytes).unwrap();
 
         let column_config = column_config_with_id("encrypted_text");
-        let encrypted = data_row.to_ciphertext(&column_config);
+        let encrypted = data_row.as_ciphertext(&column_config);
 
         assert_eq!(encrypted.len(), 2);
 
@@ -299,7 +299,7 @@ mod tests {
         assert!(data_row.columns[1].bytes.is_some());
 
         let column_config = column_config_with_id("encrypted_text");
-        let encrypted = data_row.to_ciphertext(&column_config);
+        let encrypted = data_row.as_ciphertext(&column_config);
 
         assert_eq!(encrypted.len(), 2);
 
@@ -322,7 +322,7 @@ mod tests {
         assert!(data_row.columns[0].bytes.is_some());
 
         let column_config = vec![column_config("encrypted_jsonb")];
-        let encrypted = data_row.to_ciphertext(&column_config);
+        let encrypted = data_row.as_ciphertext(&column_config);
 
         assert_eq!(encrypted.len(), 1);
         assert!(encrypted[0].is_some());
@@ -358,7 +358,7 @@ mod tests {
             column_config("encrypted_jsonb"),
         ];
 
-        let encrypted = data_row.to_ciphertext(&column_config);
+        let encrypted = data_row.as_ciphertext(&column_config);
 
         assert_eq!(encrypted.len(), 10);
 

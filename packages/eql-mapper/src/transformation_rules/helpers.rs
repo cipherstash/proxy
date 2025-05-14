@@ -48,26 +48,22 @@ pub(crate) fn wrap_in_1_arg_function(expr: Expr, name: ObjectName) -> Expr {
     })
 }
 
-pub(crate) fn make_row_expression(wrapped: sqltk::parser::ast::Value) -> Expr {
-    Expr::Function(Function {
-        name: ObjectName(vec![Ident::new("ROW")]),
-        uses_odbc_syntax: false,
-        parameters: FunctionArguments::None,
-        args: FunctionArguments::List(FunctionArgumentList {
-            duplicate_treatment: None,
-            clauses: vec![],
-            args: vec![FunctionArg::Unnamed(FunctionArgExpr::Expr(Expr::Cast {
-                kind: CastKind::DoubleColon,
-                expr: Box::new(Expr::Value(wrapped)),
-                data_type: DataType::JSONB,
-                format: None,
-            }))],
-        }),
-        filter: None,
-        null_treatment: None,
-        over: None,
-        within_group: vec![],
-    })
+pub(crate) fn cast_as_encrypted(wrapped: sqltk::parser::ast::Value) -> Expr {
+    let cast_jsonb = Expr::Cast {
+        kind: CastKind::DoubleColon,
+        expr: Box::new(Expr::Value(wrapped)),
+        data_type: DataType::JSONB,
+        format: None,
+    };
+
+    let encrypted_type = ObjectName(vec![Ident::new("eql_v1_encrypted")]);
+
+    Expr::Cast {
+        kind: CastKind::DoubleColon,
+        expr: Box::new(cast_jsonb),
+        data_type: DataType::Custom(encrypted_type, vec![]),
+        format: None,
+    }
 }
 
 struct ContainsExprWithType<'ast, 't> {

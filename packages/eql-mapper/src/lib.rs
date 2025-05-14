@@ -983,7 +983,7 @@ mod test {
     }
 
     #[test]
-    fn select_with_literal_subsitution() {
+    fn select_with_literal_cast_as_encrypted() {
         // init_tracing();
 
         let schema = resolver(schema! {
@@ -1026,14 +1026,14 @@ mod test {
         )])) {
             Ok(transformed_statement) => assert_eq!(
                 transformed_statement.to_string(),
-                "SELECT * FROM employees WHERE salary > ROW('ENCRYPTED'::JSONB)"
+                "SELECT * FROM employees WHERE salary > 'ENCRYPTED'::JSONB::eql_v1_encrypted"
             ),
             Err(err) => panic!("statement transformation failed: {}", err),
         };
     }
 
     #[test]
-    fn insert_with_literal_subsitution() {
+    fn insert_with_literal_cast_as_encrypted() {
         // init_tracing();
 
         let schema = resolver(schema! {
@@ -1073,7 +1073,7 @@ mod test {
         )])) {
             Ok(transformed_statement) => assert_eq!(
                 transformed_statement.to_string(),
-                "INSERT INTO employees (salary) VALUES (ROW('ENCRYPTED'::JSONB))"
+                "INSERT INTO employees (salary) VALUES ('ENCRYPTED'::JSONB::eql_v1_encrypted)"
             ),
             Err(err) => panic!("statement transformation failed: {}", err),
         };
@@ -1392,7 +1392,7 @@ mod test {
     }
 
     #[test]
-    fn eql_params_are_wrapped_in_row() {
+    fn select_with_params_cast_as_encrypted() {
         // init_tracing();
         let schema = resolver(schema! {
             tables: {
@@ -1415,7 +1415,7 @@ mod test {
                 Ok(statement) => {
                     assert_eq!(
                             statement.to_string(),
-                            "SELECT * FROM employees WHERE eql_col = ROW($1::JSONB) AND native_col = $2"
+                            "SELECT * FROM employees WHERE eql_col = $1::JSONB::eql_v1_encrypted AND native_col = $2"
                         );
                 }
                 Err(err) => panic!("transformation failed: {err}"),
@@ -1450,7 +1450,7 @@ mod test {
                     Ok(statement) => {
                         assert_eq!(
                             statement.to_string(),
-                            "SELECT eql_v1.jsonb_path_query(eql_col, ROW('<encrypted-selector($.secret)>'::JSONB)), jsonb_path_query(native_col, '$.not-secret') FROM employees"
+                            "SELECT eql_v1.jsonb_path_query(eql_col, '<encrypted-selector($.secret)>'::JSONB::eql_v1_encrypted), jsonb_path_query(native_col, '$.not-secret') FROM employees"
                         );
                     }
                     Err(err) => panic!("transformation failed: {err}"),
@@ -1567,7 +1567,7 @@ mod test {
             .map(|expr| match expr {
                 ast::Expr::Identifier(ident) => ident.to_string(),
                 ast::Expr::Value(ast::Value::SingleQuotedString(s)) => {
-                    format!("ROW('<encrypted-selector({})>'::JSONB)", s)
+                    format!("'<encrypted-selector({})>'::JSONB::eql_v1_encrypted", s)
                 }
                 _ => panic!("unsupported expr type in test util"),
             })
@@ -1623,7 +1623,7 @@ mod test {
                 match typed.transform(test_helpers::dummy_encrypted_json_selector(&statement, ast::Value::SingleQuotedString("medications".to_owned()))) {
                     Ok(statement) => assert_eq!(
                         statement.to_string(),
-                        format!("SELECT id, notes {} ROW('<encrypted-selector(medications)>'::JSONB) AS meds FROM patients", op)
+                        format!("SELECT id, notes {} '<encrypted-selector(medications)>'::JSONB::eql_v1_encrypted AS meds FROM patients", op)
                     ),
                     Err(err) => panic!("transformation failed: {err}"),
                 }

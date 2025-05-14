@@ -1,26 +1,23 @@
+use super::helpers::cast_as_encrypted;
+use super::TransformationRule;
+use crate::{EqlMapperError, Type};
+use sqltk::parser::ast::{Expr, Value};
+use sqltk::{NodeKey, NodePath, Visitable};
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use sqltk::parser::ast::{Expr, Value};
-use sqltk::{NodeKey, NodePath, Visitable};
-
-use crate::{EqlMapperError, Type};
-
-use super::helpers::make_row_expression;
-use super::TransformationRule;
-
 #[derive(Debug)]
-pub struct WrapEqlParamsInRow<'ast> {
+pub struct CastParamsAsEncrypted<'ast> {
     node_types: Arc<HashMap<NodeKey<'ast>, Type>>,
 }
 
-impl<'ast> WrapEqlParamsInRow<'ast> {
+impl<'ast> CastParamsAsEncrypted<'ast> {
     pub fn new(node_types: Arc<HashMap<NodeKey<'ast>, Type>>) -> Self {
         Self { node_types }
     }
 }
 
-impl<'ast> TransformationRule<'ast> for WrapEqlParamsInRow<'ast> {
+impl<'ast> TransformationRule<'ast> for CastParamsAsEncrypted<'ast> {
     fn apply<N: Visitable>(
         &mut self,
         node_path: &NodePath<'ast>,
@@ -33,7 +30,7 @@ impl<'ast> TransformationRule<'ast> for WrapEqlParamsInRow<'ast> {
                     unreachable!("the Expr is known to be Expr::Value(Value::Placeholder(_))")
                 };
 
-                *expr = make_row_expression(value);
+                *expr = cast_as_encrypted(value);
                 return Ok(true);
             }
         }
