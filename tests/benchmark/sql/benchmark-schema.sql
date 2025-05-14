@@ -11,13 +11,14 @@ DROP TABLE IF EXISTS benchmark_encrypted;
 CREATE TABLE benchmark_encrypted (
     id serial primary key,
     username text,
-    email cs_encrypted_v1
+    email eql_v1_encrypted
 );
 
-SELECT cs_add_column_v1(
+SELECT eql_v1.add_column(
   'benchmark_encrypted',
   'email'
 );
 
-SELECT cs_encrypt_v1();
-SELECT cs_activate_v1();
+SELECT eql_v1.encrypt();
+SELECT eql_v1.activate();
+
