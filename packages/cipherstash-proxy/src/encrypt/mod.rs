@@ -60,7 +60,6 @@ impl Encrypt {
             let rows = client
                 .query("SELECT eql_v1.version() AS version;", &[])
                 .await;
-            // let rows = client.query("SELECT 'WAT' AS version;", &[]).await;
 
             match rows {
                 Ok(rows) => rows.first().map(|row| row.get("version")),
