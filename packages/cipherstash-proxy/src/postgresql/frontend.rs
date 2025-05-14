@@ -894,15 +894,11 @@ where
                     msg = "Configured column not found. Encryption configuration may have been deleted.",
                     ?identifier,
                 );
-                if self.encrypt.config.mapping_errors_enabled() {
-                    Err(EncryptError::UnknownColumn {
-                        table: identifier.table.to_owned(),
-                        column: identifier.column.to_owned(),
-                    }
-                    .into())
-                } else {
-                    Ok(None)
+                Err(EncryptError::UnknownColumn {
+                    table: identifier.table.to_owned(),
+                    column: identifier.column.to_owned(),
                 }
+                .into())
             }
         }
     }
