@@ -4,11 +4,12 @@ use super::message_buffer::MessageBuffer;
 use super::messages::error_response::ErrorResponse;
 use super::messages::row_description::RowDescription;
 use super::messages::BackendCode;
+use super::Column;
 use crate::connect::Sender;
 use crate::encrypt::Encrypt;
 use crate::eql::EqlEncrypted;
-use crate::error::Error;
-use crate::log::{DEVELOPMENT, MAPPER, PROTOCOL};
+use crate::error::{EncryptError, Error};
+use crate::log::{DECRYPT, DEVELOPMENT, MAPPER, PROTOCOL};
 use crate::postgresql::context::Portal;
 use crate::postgresql::messages::data_row::DataRow;
 use crate::postgresql::messages::param_description::ParamDescription;
@@ -270,6 +271,8 @@ where
 
         let start = Instant::now();
 
+        self.check_column_config(projection_columns, &ciphertexts)?;
+
         // Decrypt CipherText -> Plaintext
         let plaintexts = self.encrypt.decrypt(ciphertexts).await.inspect_err(|_| {
             counter!(DECRYPTION_ERROR_TOTAL).increment(1);
@@ -310,6 +313,39 @@ where
             self.write(bytes).await?;
         }
 
+        Ok(())
+    }
+
+    fn check_column_config(
+        &mut self,
+        projection_columns: &[Option<Column>],
+        ciphertexts: &[Option<EqlEncrypted>],
+    ) -> Result<(), Error> {
+        for (col, ct) in projection_columns.iter().zip(ciphertexts) {
+            match (col, ct) {
+                (Some(col), Some(ct)) => {
+                    if col.identifier != ct.identifier {
+                        return Err(EncryptError::ColumnConfigurationMismatch {
+                            table: col.identifier.table.to_owned(),
+                            column: col.identifier.column.to_owned(),
+                        }
+                        .into());
+                    }
+                }
+                // configured column with NULL ciphertext
+                (Some(_), None) => {}
+                // unconfigured column *should* have no ciphertext,
+                (None, None) => {}
+                // ciphertext with no column configuration is bad
+                (None, Some(ct)) => {
+                    return Err(EncryptError::ColumnConfigurationMismatch {
+                        table: ct.identifier.table.to_owned(),
+                        column: ct.identifier.column.to_owned(),
+                    }
+                    .into());
+                }
+            }
+        }
         Ok(())
     }
 

@@ -163,7 +163,7 @@ This will output the version of EQL installed.
 In your existing PostgreSQL database, you store your data in tables and columns.
 Those columns have types like `integer`, `text`, `timestamp`, and `boolean`.
 When storing encrypted data in PostgreSQL with Proxy, you use a special column type called `eql_v1_encrypted`, which is [provided by EQL](#setting-up-the-database-schema).
-`eql_v1_encrypted` is a container column type that can be used for any type of encrypted data you want to store or search, whether they are numbers (`int`, `small_int`, `big_int`), text (`text`), dates and times (`date`), or booleans (`boolean`).
+`eql_v1_encrypted` is a container column type that can be used for any type of encrypted data you want to store or search, whether they are numbers (`int`, `small_int`, `big_int`), text (`text`), dates and times (`date`. `timestamp`), or booleans (`boolean`).
 
 Create a table with an encrypted column for `email`:
 
