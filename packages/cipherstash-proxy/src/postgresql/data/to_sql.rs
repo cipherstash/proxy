@@ -1,9 +1,11 @@
 use crate::error::EncryptError;
 use crate::{error::Error, postgresql::format_code::FormatCode};
+use bigdecimal::FromPrimitive;
 use bytes::BytesMut;
 use cipherstash_client::encryption::Plaintext;
 use postgres_types::ToSql;
 use postgres_types::Type;
+use rust_decimal::Decimal;
 
 pub fn to_sql(plaintext: &Plaintext, format_code: &FormatCode) -> Result<Option<BytesMut>, Error> {
     let bytes = match format_code {
@@ -47,8 +49,10 @@ fn binary_to_sql(plaintext: &Plaintext) -> Result<BytesMut, Error> {
         Plaintext::Utf8Str(x) => x.to_sql_checked(&Type::TEXT, &mut bytes),
         Plaintext::JsonB(x) => x.to_sql_checked(&Type::JSONB, &mut bytes),
         Plaintext::Decimal(x) => x.to_sql_checked(&Type::NUMERIC, &mut bytes),
-        // TODO: Implement these
-        Plaintext::BigUInt(_x) => unimplemented!(),
+        Plaintext::BigUInt(x) => {
+            let d = x.map(|x| Decimal::from_u64(x)).flatten();
+            d.to_sql_checked(&Type::NUMERIC, &mut bytes)
+        }
     };
 
     match result {
