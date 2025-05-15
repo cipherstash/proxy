@@ -22,6 +22,9 @@
   - [Unknown table](#encrypt-unknown-table)
   - [Unknown index term](#encrypt-unknown-index-term)
 
+- Decrypt errors:
+   - [Column could not be deserialised](#encrypt-column-could-not-be-deserialised)
+
 - Configuration errors:
   - [Missing or invalid TLS configuration](#config-missing-or-invalid-tls)
 <!-- ---------------------------------------------------------------------------------------------------- -->
@@ -263,9 +266,9 @@ The most likely cause is network access to the ZeroKMS service.
 ### How to Fix
 
 1. Check that CipherStash ZeroKMS is available at [the status page](https://status.cipherstash.com/).
-1. Check that CipherStash Proxy has network access to ZeroKMS in the appropriate region.
+2. Check that CipherStash Proxy has network access to ZeroKMS in the appropriate region.
 <!-- TODO: Link to ZeroKMS Doc -->
-1. Check that the encrypted configuration `cast` matches the expected type.
+3. Check that the encrypted configuration `cast` matches the expected type.
 <!-- TODO: Link to config -->
 
 
@@ -307,8 +310,8 @@ For example:
 ### How to fix
 
 1. Check the encrypted configuration has the correct type.
-1. Check that the configuration has not changed.
-1. Check [EQL](https://github.com/cipherstash/encrypt-query-language).
+2. Check that the configuration has not changed.
+3. Check [EQL](https://github.com/cipherstash/encrypt-query-language).
 
 <!-- ---------------------------------------------------------------------------------------------------- -->
 
@@ -331,7 +334,7 @@ Column 'column_name' in table 'table_name' has no Encrypt configuration
 
 1. Define the encrypted configuration using [EQL](https://github.com/cipherstash/encrypt-query-language).
    <!-- TODO: link to doc -->
-1. Add `users.email` as an encrypted column:
+2. Add `users.email` as an encrypted column:
    ```sql
    SELECT cs_add_column_v1('users', 'email');
    ```
@@ -357,7 +360,7 @@ Table 'table_name' has no Encrypt configuration
 
 1. Define the encrypted configuration using [EQL](https://github.com/cipherstash/encrypt-query-language).
    <!-- TODO: link to doc -->
-1. Add `users.email` as an encrypted column:
+2. Add `users.email` as an encrypted column:
    ```sql
    SELECT cs_add_column_v1('users', 'email');
    ```
@@ -385,10 +388,52 @@ Unknown Index Term for column '{column_name}' in table '{table_name}'.
 ### How to fix
 
 1. Check the Encrypt configuration for the column.
-1. Define the encrypted configuration using [EQL](https://github.com/cipherstash/encrypt-query-language).
+2. Define the encrypted configuration using [EQL](https://github.com/cipherstash/encrypt-query-language).
 
 
 <!-- ---------------------------------------------------------------------------------------------------- -->
+
+
+
+
+<!-- ---------------------------------------------------------------------------------------------------- -->
+
+
+# Decrypt errors
+
+
+## Column could not be deserialised <a id='encrypt-column-could-not-be-deserialised'></a>
+
+The column could not be deserialised for decryption.
+
+
+### Error message
+
+```
+Column 'column_name' in table 'table_name' could not be deserialised.
+```
+
+### Notes
+
+CipherStash Proxy stores encrypted data and search terms as `jsonb`. The structure is defined as part of EQL.
+
+The error indicates an internal issue has occurred deserialising and extracting the ciphertext data for decryption.
+It may be caused if the the encrypted data has been altered by another process or application.
+
+If the error persists, please contact CipherStash [support](https://cipherstash.com/support).
+
+
+### How to Fix
+
+1. Check that the data in the encrypted column is in correct format [EQL](https://github.com/cipherstash/encrypt-query-language).
+
+<!-- TODO: Link to EQL Doc on storage format-->
+
+
+
+
+<!-- ---------------------------------------------------------------------------------------------------- -->
+
 
 
 
