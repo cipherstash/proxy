@@ -1,7 +1,7 @@
 #[cfg(test)]
 mod tests {
     use crate::common::{connect_with_tls, id, reset_schema, trace, PROXY};
-    use chrono::NaiveDate;
+    use chrono::prelude::*;
 
     #[tokio::test]
     async fn map_text() {
@@ -179,6 +179,35 @@ mod tests {
 
             assert_eq!(id, result_id);
             assert_eq!(encrypted_date, result);
+        }
+    }
+
+    #[tokio::test]
+    async fn map_timestamp() {
+        trace();
+
+        let client = connect_with_tls(PROXY).await;
+
+        let id = id();
+        let encrypted_timestamp = "2000-10-01T17:30:00Z".parse::<DateTime<Utc>>().unwrap();
+
+        let sql = "INSERT INTO encrypted (id, encrypted_timestamp) VALUES ($1, $2)";
+        client
+            .query(sql, &[&id, &encrypted_timestamp])
+            .await
+            .unwrap();
+
+        let sql = "SELECT id, encrypted_timestamp FROM encrypted WHERE id = $1";
+        let rows = client.query(sql, &[&id]).await.unwrap();
+
+        assert_eq!(rows.len(), 1);
+
+        for row in rows {
+            let result_id: i64 = row.get("id");
+            let result: DateTime<Utc> = row.get("encrypted_timestamp");
+
+            assert_eq!(id, result_id);
+            assert_eq!(encrypted_timestamp, result);
         }
     }
 

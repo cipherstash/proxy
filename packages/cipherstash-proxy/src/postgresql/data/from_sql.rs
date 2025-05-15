@@ -5,7 +5,7 @@ use crate::{
 };
 use bigdecimal::BigDecimal;
 use bytes::BytesMut;
-use chrono::NaiveDate;
+use chrono::{DateTime, NaiveDate, Utc};
 use cipherstash_client::{encryption::Plaintext, schema::ColumnType};
 use postgres_types::FromSql;
 use postgres_types::Type;
@@ -153,9 +153,10 @@ fn text_from_sql(
             .map_err(|_| MappingError::CouldNotParseParameter)
             .map(Plaintext::new),
 
-        (&Type::TIMESTAMPTZ, _) => {
-            unimplemented!("TIMESTAMPTZ")
-        }
+        (&Type::TIMESTAMP | &Type::TIMESTAMPTZ, ColumnType::Timestamp) => val
+            .parse::<DateTime<Utc>>()
+            .map_err(|_| MappingError::CouldNotParseParameter)
+            .map(Plaintext::new),
         (&Type::TEXT | &Type::JSONB, ColumnType::JsonB) => {
             serde_json::from_str::<serde_json::Value>(val)
                 .map_err(|_| MappingError::CouldNotParseParameter)
@@ -237,8 +238,9 @@ fn binary_from_sql(
         (&Type::TEXT, _) => parse_bytes_from_sql::<String>(bytes, pg_type)
             .and_then(|val| text_from_sql(&val, pg_type, col_type)),
 
-        // TODO: timestamps
-        (_, ColumnType::Timestamp) => unimplemented!("TIMESTAMPTZ"),
+        (&Type::TIMESTAMP | &Type::TIMESTAMPTZ, ColumnType::Timestamp) => {
+            parse_bytes_from_sql::<DateTime<Utc>>(bytes, pg_type).map(Plaintext::new)
+        }
 
         // Unsupported
         (ty, _) => Err(MappingError::UnsupportedParameterType {
