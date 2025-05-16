@@ -21,6 +21,7 @@
   - [Unknown column](#encrypt-unknown-column)
   - [Unknown table](#encrypt-unknown-table)
   - [Unknown index term](#encrypt-unknown-index-term)
+  - [Column configuration mismatch](#encrypt-column-config-mismatch)
 
 - Decrypt errors:
    - [Column could not be deserialised](#encrypt-column-could-not-be-deserialised)
@@ -390,6 +391,34 @@ Unknown Index Term for column '{column_name}' in table '{table_name}'.
 1. Check the Encrypt configuration for the column.
 2. Define the encrypted configuration using [EQL](https://github.com/cipherstash/encrypt-query-language).
 
+
+<!-- ---------------------------------------------------------------------------------------------------- -->
+<!-- ---------------------------------------------------------------------------------------------------- -->
+
+
+## Column configuration mismatch <a id='encrypt-column-config-mismatch'></a>
+
+A returned encrypted column does not match the column configuration.
+
+### Error message
+
+```
+Column configuration for column '{column_name}' in table '{table_name}' does not match the encrypted column.
+```
+
+### Notes
+
+CipherStash Proxy validates that encrypted columns match the configuration before decrypting any data.
+If the table and column are not the same, this error is returned.
+The check is there to help prevent "confused deputy" issues and the error should *never* appear during normal operation.
+
+If the error persists, please contact CipherStash [support](https://cipherstash.com/support).
+
+
+### Further reading
+
+[AWS: The confused deputy problem](https://docs.aws.amazon.com/IAM/latest/UserGuide/confused-deputy.html)
+[Wikipedia: Confused deputy problem](https://en.wikipedia.org/wiki/Confused_deputy_problem)
 
 <!-- ---------------------------------------------------------------------------------------------------- -->
 

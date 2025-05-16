@@ -214,6 +214,9 @@ pub enum EncryptError {
     #[error("Column '{column}' in table '{table}' could not be encrypted. For help visit {}#encrypt-column-could-not-be-encrypted", ERROR_DOC_BASE_URL)]
     ColumnCouldNotBeEncrypted { table: String, column: String },
 
+    #[error("Column configuration for column '{column}' in table '{table}' does not match the encrypted column. For help visit {}#encrypt-column-config-mismatch", ERROR_DOC_BASE_URL)]
+    ColumnConfigurationMismatch { table: String, column: String },
+
     /// This should in practice be unreachable
     #[error("Missing encrypt configuration for column type `{plaintext_type}`. For help visit {}#encrypt-missing-encrypt-configuration", ERROR_DOC_BASE_URL)]
     MissingEncryptConfiguration { plaintext_type: String },
