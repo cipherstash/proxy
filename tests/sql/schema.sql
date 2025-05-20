@@ -18,6 +18,7 @@ CREATE TABLE encrypted (
     encrypted_int2 eql_v1_encrypted,
     encrypted_int4 eql_v1_encrypted,
     encrypted_int8 eql_v1_encrypted,
+    encrypted_int8_as_biguint eql_v1_encrypted,
     encrypted_float8 eql_v1_encrypted,
     encrypted_date eql_v1_encrypted,
     encrypted_jsonb eql_v1_encrypted,
@@ -108,6 +109,12 @@ SELECT eql_v1.add_index(
   'big_int'
 );
 
+SELECT eql_v1.add_index(
+  'encrypted',
+  'encrypted_int8_as_biguint',
+  'unique',
+  'big_uint'
+);
 
 SELECT eql_v1.add_index(
   'encrypted',

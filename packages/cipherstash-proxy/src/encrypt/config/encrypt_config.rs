@@ -61,6 +61,8 @@ pub enum CastAs {
     Double,
     Int,
     SmallInt,
+    #[serde(rename = "big_uint")]
+    BigUInt,
     #[default]
     Text,
     #[serde(rename = "jsonb")]
@@ -130,6 +132,7 @@ impl From<CastAs> for ColumnType {
             CastAs::Timestamp => ColumnType::Timestamp,
             CastAs::Real | CastAs::Double => ColumnType::Float,
             CastAs::Text => ColumnType::Utf8Str,
+            CastAs::BigUInt => ColumnType::BigUInt,
             CastAs::JsonB => ColumnType::JsonB,
         }
     }

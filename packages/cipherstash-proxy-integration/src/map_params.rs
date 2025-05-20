@@ -131,6 +131,32 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn map_int8_as_biguint() {
+        trace();
+
+        let client = connect_with_tls(PROXY).await;
+
+        let id = id();
+        let encrypted_int8: i64 = 42;
+
+        let sql = "INSERT INTO encrypted (id, encrypted_int8_as_biguint) VALUES ($1, $2)";
+        client.query(sql, &[&id, &encrypted_int8]).await.unwrap();
+
+        let sql = "SELECT id, encrypted_int8_as_biguint FROM encrypted WHERE id = $1";
+        let rows = client.query(sql, &[&id]).await.unwrap();
+
+        assert_eq!(rows.len(), 1);
+
+        for row in rows {
+            let result_id: i64 = row.get("id");
+            let result_int: i64 = row.get("encrypted_int8_as_biguint");
+
+            assert_eq!(id, result_id);
+            assert_eq!(encrypted_int8, result_int);
+        }
+    }
+
+    #[tokio::test]
     async fn map_float8() {
         trace();
 
@@ -185,6 +211,37 @@ mod tests {
     #[tokio::test]
     async fn map_timestamp() {
         trace();
+
+        let client = connect_with_tls(PROXY).await;
+
+        let id = id();
+        let encrypted_timestamp = "2000-10-01T17:30:00Z".parse::<DateTime<Utc>>().unwrap();
+
+        let sql = "INSERT INTO encrypted (id, encrypted_timestamp) VALUES ($1, $2)";
+        client
+            .query(sql, &[&id, &encrypted_timestamp])
+            .await
+            .unwrap();
+
+        let sql = "SELECT id, encrypted_timestamp FROM encrypted WHERE id = $1";
+        let rows = client.query(sql, &[&id]).await.unwrap();
+
+        assert_eq!(rows.len(), 1);
+
+        for row in rows {
+            let result_id: i64 = row.get("id");
+            let result: DateTime<Utc> = row.get("encrypted_timestamp");
+
+            assert_eq!(id, result_id);
+            assert_eq!(encrypted_timestamp, result);
+        }
+    }
+
+    #[tokio::test]
+    async fn map_timestamp_with_tz() {
+        trace();
+
+        use chrono_tz::Australia::Sydney;
 
         let client = connect_with_tls(PROXY).await;
 
