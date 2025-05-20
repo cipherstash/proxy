@@ -318,24 +318,24 @@ fn to_eql_encrypted(
                      }| {
                         let indexes = match term {
                             EncryptedSteVecTerm::Mac(bytes) => EqlEncryptedIndexes {
-                                selector: Some(hex::encode(selector.as_bytes())),
+                                selector: Some(hex::encode(tokenized_selector.as_bytes())),
                                 blake3_index: Some(hex::encode(bytes)),
                                 ..Default::default()
                             },
                             EncryptedSteVecTerm::OreFixed(ore) => EqlEncryptedIndexes {
-                                selector: Some(hex::encode(selector.as_bytes())),
+                                selector: Some(hex::encode(tokenized_selector.as_bytes())),
                                 ore_cclw_fixed_index: Some(hex::encode(&ore)),
                                 ..Default::default()
                             },
                             EncryptedSteVecTerm::OreVariable(ore) => EqlEncryptedIndexes {
-                                selector: Some(hex::encode(selector.as_bytes())),
+                                selector: Some(hex::encode(tokenized_selector.as_bytes())),
                                 ore_cclw_var_index: Some(hex::encode(&ore)),
                                 ..Default::default()
                             },
                         };
 
                         eql::EqlEncryptedBody {
-                            ciphertext,
+                            ciphertext: record,
                             indexes,
                             is_array_item: Some(parent_is_array),
                         }

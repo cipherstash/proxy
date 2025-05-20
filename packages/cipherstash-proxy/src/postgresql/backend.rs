@@ -9,7 +9,7 @@ use crate::connect::Sender;
 use crate::encrypt::Encrypt;
 use crate::eql::EqlEncrypted;
 use crate::error::{EncryptError, Error};
-use crate::log::{DECRYPT, DEVELOPMENT, MAPPER, PROTOCOL};
+use crate::log::{DEVELOPMENT, MAPPER, PROTOCOL};
 use crate::postgresql::context::Portal;
 use crate::postgresql::messages::data_row::DataRow;
 use crate::postgresql::messages::param_description::ParamDescription;
