@@ -80,6 +80,9 @@ pub struct EqlEncryptedBody {
 
     #[serde(flatten)]
     pub(crate) indexes: EqlEncryptedIndexes,
+
+    #[serde(rename = "a", skip_serializing_if = "Option::is_none")]
+    pub(crate) is_array_item: Option<bool>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Default)]
@@ -163,6 +166,7 @@ mod tests {
                     ore_cclw_var_index: None,
                     ste_vec_index: None,
                 },
+                is_array_item: None,
             },
         };
 

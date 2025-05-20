@@ -300,6 +300,7 @@ fn to_eql_encrypted(
                         selector,
                         ste_vec_index: None,
                     },
+                    is_array_item: None,
                 },
             })
         }
@@ -308,30 +309,38 @@ fn to_eql_encrypted(
 
             let ste_vec_index: Vec<EqlEncryptedBody> = ste_vec
                 .into_iter()
-                .map(|EncryptedEntry(selector, term, ciphertext)| {
-                    let indexes = match term {
-                        EncryptedSteVecTerm::Mac(bytes) => EqlEncryptedIndexes {
-                            selector: Some(hex::encode(selector.as_bytes())),
-                            blake3_index: Some(hex::encode(bytes)),
-                            ..Default::default()
-                        },
-                        EncryptedSteVecTerm::OreFixed(ore) => EqlEncryptedIndexes {
-                            selector: Some(hex::encode(selector.as_bytes())),
-                            ore_cclw_fixed_index: Some(hex::encode(&ore)),
-                            ..Default::default()
-                        },
-                        EncryptedSteVecTerm::OreVariable(ore) => EqlEncryptedIndexes {
-                            selector: Some(hex::encode(selector.as_bytes())),
-                            ore_cclw_var_index: Some(hex::encode(&ore)),
-                            ..Default::default()
-                        },
-                    };
+                .map(
+                    |EncryptedEntry {
+                         tokenized_selector,
+                         term,
+                         record,
+                         parent_is_array,
+                     }| {
+                        let indexes = match term {
+                            EncryptedSteVecTerm::Mac(bytes) => EqlEncryptedIndexes {
+                                selector: Some(hex::encode(selector.as_bytes())),
+                                blake3_index: Some(hex::encode(bytes)),
+                                ..Default::default()
+                            },
+                            EncryptedSteVecTerm::OreFixed(ore) => EqlEncryptedIndexes {
+                                selector: Some(hex::encode(selector.as_bytes())),
+                                ore_cclw_fixed_index: Some(hex::encode(&ore)),
+                                ..Default::default()
+                            },
+                            EncryptedSteVecTerm::OreVariable(ore) => EqlEncryptedIndexes {
+                                selector: Some(hex::encode(selector.as_bytes())),
+                                ore_cclw_var_index: Some(hex::encode(&ore)),
+                                ..Default::default()
+                            },
+                        };
 
-                    eql::EqlEncryptedBody {
-                        ciphertext,
-                        indexes,
-                    }
-                })
+                        eql::EqlEncryptedBody {
+                            ciphertext,
+                            indexes,
+                            is_array_item: Some(parent_is_array),
+                        }
+                    },
+                )
                 .collect();
 
             // FIXME: I'm unsure if I've handled the root ciphertext correctly
@@ -351,6 +360,7 @@ fn to_eql_encrypted(
                         selector: None,
                         ste_vec_index: Some(ste_vec_index),
                     },
+                    is_array_item: None,
                 },
             })
         }
