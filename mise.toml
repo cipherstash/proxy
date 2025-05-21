@@ -529,8 +529,15 @@ echo docker compose run --rm --no-TTY --build python {{option(name="extra-args",
 [tasks.build]
 description = "Build releasable artifacts"
 run = """
+{# Target for rust build #}
+{% set default_target_arch = arch() | replace(from="arm64", to="aarch64") | replace(from="x64", to="x86_64") %}
+{% set default_target_os = os() | replace(from="linux", to="unknown-linux-gnu") | replace(from="macos", to="apple-darwin") %}
+{% set default_target = default_target_arch ~ "-" ~ default_target_os %}
+
+{# Platform for Docker image build #}
 {% set default_platform = "linux/" ~ arch() | replace(from="x86_64", to="amd64") %}
-mise run build:binary
+
+mise run build:binary --target {{option(name="target", default=default_target)}}
 mise run build:docker --platform {{option(name="platform",default=default_platform)}}
 """
 

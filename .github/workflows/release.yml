@@ -10,6 +10,9 @@ on:
       - .github/workflows/release.yml
   workflow_dispatch:
 
+env:
+  REGISTRY_IMAGE: cipherstash/proxy
+
 jobs:
   build:
     name: 🏗️ Build binaries + Docker images
@@ -17,8 +20,8 @@ jobs:
       fail-fast: false
       matrix:
         build:
-          #- { os: buildjet-16vcpu-ubuntu-2204, arch: linux/amd64, cache-provider: buildjet }
-          - { os: linux-arm64-public,          arch: linux/arm64, cache-provider: github }
+          - { os: ubuntu-latest-m,    docker_platform: linux/amd64, rust_target: "x86_64-unknown-linux-gnu",  cache-provider: github }
+          - { os: linux-arm64-public, docker_platform: linux/arm64, rust_target: "aarch64-unknown-linux-gnu", cache-provider: github }
     runs-on: ${{matrix.build.os}}
     steps:
       - uses: actions/checkout@v4
@@ -33,14 +36,97 @@ jobs:
           install: true # [default: true] run `mise install`
           cache: true # [default: true] cache mise using GitHub's cache
       - run: |
-          mise run build --platform ${{matrix.build.arch}}
+          mise run build --platform ${{matrix.build.docker_platform}} --target ${{matrix.build.rust_target}}
+
       - uses: actions/upload-artifact@v4
         with:
-          name: cipherstash-proxy-${{matrix.build.arch == 'linux/amd64' && 'linux_amd64' || 'linux_arm64'}}
+          name: cipherstash-proxy-${{matrix.build.docker_platform == 'linux/amd64' && 'linux_amd64' || 'linux_arm64'}}
           path: cipherstash-proxy
-      - if: github.event_name != 'pull_request'
-        env:
-          DOCKER_HUB_USERNAME: ${{ secrets.DOCKER_HUB_USERNAME }}
-          DOCKER_HUB_PERSONAL_ACCESS_TOKEN: ${{ secrets.DOCKER_HUB_PERSONAL_ACCESS_TOKEN }}
+
+      - name: Prepare
         run: |
-          mise run release --platform ${{matrix.build.arch}}
+          platform=${{ matrix.build.docker_platform }}
+          echo "PLATFORM_PAIR=${platform//\//-}" >> $GITHUB_ENV
+
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY_IMAGE }}
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_HUB_USERNAME }}
+          password: ${{ secrets.DOCKER_HUB_PERSONAL_ACCESS_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push by digest
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: proxy.Dockerfile
+          platforms: ${{ matrix.build.docker_platform }}
+          labels: ${{ steps.meta.outputs.labels }}
+          tags: ${{ env.REGISTRY_IMAGE }}
+          outputs: type=image,push-by-digest=true,name-canonical=true,push=true
+
+      - name: Export digest
+        run: |
+          mkdir -p ${{ runner.temp }}/digests
+          digest="${{ steps.build.outputs.digest }}"
+          touch "${{ runner.temp }}/digests/${digest#sha256:}"
+
+      - name: Upload digest
+        uses: actions/upload-artifact@v4
+        with:
+          name: digests-${{ env.PLATFORM_PAIR }}
+          path: ${{ runner.temp }}/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  merge:
+    name: Publish multi-platform image
+    runs-on: linux-arm64-public
+    needs:
+      - build
+    steps:
+      - name: Download digests
+        uses: actions/download-artifact@v4
+        with:
+          path: ${{ runner.temp }}/digests
+          pattern: digests-*
+          merge-multiple: true
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_HUB_USERNAME }}
+          password: ${{ secrets.DOCKER_HUB_PERSONAL_ACCESS_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY_IMAGE }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+
+      - name: Create manifest list and push
+        working-directory: ${{ runner.temp }}/digests
+        run: |
+          docker buildx imagetools create $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
+            $(printf '${{ env.REGISTRY_IMAGE }}@sha256:%s ' *)
+
+      - name: Inspect image
+        run: |
+          docker buildx imagetools inspect ${{ env.REGISTRY_IMAGE }}:${{ steps.meta.outputs.version }}
