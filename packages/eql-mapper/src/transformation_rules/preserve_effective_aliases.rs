@@ -75,18 +75,16 @@ impl PreserveEffectiveAliases {
     fn effective_aliases_differ(source_node: &SelectItem, target_node: &SelectItem) -> bool {
         let effective_source_alias = Self::derive_effective_alias(source_node);
         let effective_target_alias = Self::derive_effective_alias(target_node);
-        match target_node {
-            // The captured binding `expr` has type `&mut Expr` but we need an owned `Expr`.  to avoid cloning `expr`
-            // (which can be arbitrarily large) we replace it with another which in return provides us with ownership of
-            // the original value. `Expr::Wildcard` is chosen as the throwaway value because it's cheap.
-            SelectItem::UnnamedExpr(_) => {
-                if let (Some(effective_target_alias), Some(effective_source_alias)) =
-                    (effective_target_alias, effective_source_alias)
-                {
-                    return effective_target_alias != effective_source_alias;
-                }
+
+        // The captured binding `expr` has type `&mut Expr` but we need an owned `Expr`.  to avoid cloning `expr`
+        // (which can be arbitrarily large) we replace it with another which in return provides us with ownership of
+        // the original value. `Expr::Wildcard` is chosen as the throwaway value because it's cheap.
+        if let SelectItem::UnnamedExpr(_) = target_node {
+            if let (Some(effective_target_alias), Some(effective_source_alias)) =
+                (effective_target_alias, effective_source_alias)
+            {
+                return effective_target_alias != effective_source_alias;
             }
-            _ => {}
         }
 
         false
@@ -98,31 +96,29 @@ impl PreserveEffectiveAliases {
     ) -> bool {
         let effective_source_alias = Self::derive_effective_alias(source_node);
         let effective_target_alias = Self::derive_effective_alias(target_node);
-        match target_node {
-            // The captured binding `expr` has type `&mut Expr` but we need an owned `Expr`.  to avoid cloning `expr`
-            // (which can be arbitrarily large) we replace it with another which in return provides us with ownership of
-            // the original value. `Expr::Wildcard` is chosen as the throwaway value because it's cheap.
-            SelectItem::UnnamedExpr(expr) => {
-                if let (Some(effective_target_alias), Some(effective_source_alias)) =
-                    (effective_target_alias, effective_source_alias)
-                {
-                    if effective_target_alias != effective_source_alias {
-                        *target_node = SelectItem::ExprWithAlias {
-                            expr: mem::replace(
-                                expr,
-                                Expr::Wildcard(AttachedToken(TokenWithSpan::new(
-                                    Token::EOF,
-                                    Span::empty(),
-                                ))),
-                            ),
-                            alias: effective_source_alias,
-                        };
 
-                        return true;
-                    }
+        // The captured binding `expr` has type `&mut Expr` but we need an owned `Expr`.  to avoid cloning `expr`
+        // (which can be arbitrarily large) we replace it with another which in return provides us with ownership of
+        // the original value. `Expr::Wildcard` is chosen as the throwaway value because it's cheap.
+        if let SelectItem::UnnamedExpr(expr) = target_node {
+            if let (Some(effective_target_alias), Some(effective_source_alias)) =
+                (effective_target_alias, effective_source_alias)
+            {
+                if effective_target_alias != effective_source_alias {
+                    *target_node = SelectItem::ExprWithAlias {
+                        expr: mem::replace(
+                            expr,
+                            Expr::Wildcard(AttachedToken(TokenWithSpan::new(
+                                Token::EOF,
+                                Span::empty(),
+                            ))),
+                        ),
+                        alias: effective_source_alias,
+                    };
+
+                    return true;
                 }
             }
-            _ => {}
         }
 
         false

@@ -1,12 +1,12 @@
-TRUNCATE TABLE public.eql_v1_configuration;
+TRUNCATE TABLE public.eql_v2_configuration;
 
 -- Exciting cipherstash table
 DROP TABLE IF EXISTS users;
 CREATE TABLE users (
     id SERIAL PRIMARY KEY,
-    encrypted_email eql_v1_encrypted,
-    encrypted_dob eql_v1_encrypted,
-    encrypted_salary eql_v1_encrypted
+    encrypted_email eql_v2_encrypted,
+    encrypted_dob eql_v2_encrypted,
+    encrypted_salary eql_v2_encrypted
 );
 
 SELECT cs_add_index_v1(

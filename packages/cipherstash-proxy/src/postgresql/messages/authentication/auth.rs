@@ -56,9 +56,9 @@ impl Authentication {
 
     pub fn is_scram_sha_256_plus(&self) -> bool {
         match self.method {
-            AuthenticationMethod::Sasl { ref mechanisms } => mechanisms
-                .iter()
-                .any(|m| *m == SaslMechanism::ScramSha256Plus),
+            AuthenticationMethod::Sasl { ref mechanisms } => {
+                mechanisms.contains(&SaslMechanism::ScramSha256Plus)
+            }
             _ => false,
         }
     }

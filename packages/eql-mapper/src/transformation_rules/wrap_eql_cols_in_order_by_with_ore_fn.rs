@@ -11,7 +11,7 @@ use crate::{EqlMapperError, Type, Value};
 use super::{helpers::wrap_in_1_arg_function, TransformationRule};
 
 /// When an [`Expr`] of a [`SelectItem`] has an EQL type and that EQL type is used in a `GROUP BY` clause then
-/// this rule wraps the `Expr` in a call to `eql_v1.grouped_value`.
+/// this rule wraps the `Expr` in a call to `eql_v2.grouped_value`.
 ///
 /// # Example
 ///
@@ -20,7 +20,7 @@ use super::{helpers::wrap_in_1_arg_function, TransformationRule};
 /// SELECT eql_col FROM some_table GROUP BY eql_col;
 ///
 /// -- after mapping
-/// SELECT eql_v1.grouped_value(eql_col) AS eql_col FROM some_table GROUP BY eql_v1.cs_ore_64_8(eql_col);
+/// SELECT eql_v2.grouped_value(eql_col) AS eql_col FROM some_table GROUP BY eql_v2.cs_ore_64_8(eql_col);
 /// --     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^     ^^^^^^^                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^
 /// --                 ^                       ^                                       ^
 /// --                 |                       |                                       |
@@ -54,7 +54,7 @@ impl<'ast> TransformationRule<'ast> for WrapEqlColsInOrderByWithOreFn<'ast> {
 
                 target_node.expr = wrap_in_1_arg_function(
                     expr_to_wrap,
-                    ObjectName(vec![Ident::new("eql_v1"), Ident::new("ore_64_8_v1")]),
+                    ObjectName(vec![Ident::new("eql_v2"), Ident::new("ore_64_8_v2")]),
                 );
 
                 return Ok(true);

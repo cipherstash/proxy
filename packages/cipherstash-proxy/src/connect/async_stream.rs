@@ -23,7 +23,7 @@ use x509_parser::prelude::{FromDer, X509Certificate};
 #[derive(Debug)]
 pub enum AsyncStream {
     Tcp(TcpStream),
-    Tls(TlsStream<TcpStream>),
+    Tls(Box<TlsStream<TcpStream>>),
 }
 
 impl AsyncStream {

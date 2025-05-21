@@ -236,14 +236,14 @@ static SQL_FUNCTIONS: LazyLock<HashMap<CompoundIdent, Vec<SqlFunction>>> = LazyL
         sql_fn!(jsonb_array_elements_text(T) -> T, rewrite),
         // These are typings for when customer SQL already contains references to EQL functions.
         // They must be type checked but not rewritten.
-        sql_fn!(eql_v1.min(T) -> T),
-        sql_fn!(eql_v1.max(T) -> T),
-        sql_fn!(eql_v1.jsonb_path_query(T, T) -> T),
-        sql_fn!(eql_v1.jsonb_path_query_first(T, T) -> T),
-        sql_fn!(eql_v1.jsonb_path_exists(T, T) -> T),
-        sql_fn!(eql_v1.jsonb_array_length(T) -> T),
-        sql_fn!(eql_v1.jsonb_array_elements(T) -> T),
-        sql_fn!(eql_v1.jsonb_array_elements_text(T) -> T),
+        sql_fn!(eql_v2.min(T) -> T),
+        sql_fn!(eql_v2.max(T) -> T),
+        sql_fn!(eql_v2.jsonb_path_query(T, T) -> T),
+        sql_fn!(eql_v2.jsonb_path_query_first(T, T) -> T),
+        sql_fn!(eql_v2.jsonb_path_exists(T, T) -> T),
+        sql_fn!(eql_v2.jsonb_array_length(T) -> T),
+        sql_fn!(eql_v2.jsonb_array_elements(T) -> T),
+        sql_fn!(eql_v2.jsonb_array_elements_text(T) -> T),
     ];
 
     let mut sql_fns_by_name: HashMap<CompoundIdent, Vec<SqlFunction>> = HashMap::new();

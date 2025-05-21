@@ -42,7 +42,7 @@ impl<'ast> TransformationRule<'ast> for RewriteStandardSqlFnsOnEqlTypes<'ast> {
                     {
                         let function = target_node.downcast_mut::<Function>().unwrap();
                         let mut existing_name = mem::take(&mut function.name.0);
-                        existing_name.insert(0, Ident::new("eql_v1"));
+                        existing_name.insert(0, Ident::new("eql_v2"));
                         function.name = ObjectName(existing_name);
                     }
                 }

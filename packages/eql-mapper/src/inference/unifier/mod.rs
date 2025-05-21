@@ -447,7 +447,7 @@ pub(crate) mod test_util {
                 }
             }
 
-            root_node.accept(&mut FindNodeFromKeyVisitor(self));
+            let _ = root_node.accept(&mut FindNodeFromKeyVisitor(self));
         }
     }
 }
