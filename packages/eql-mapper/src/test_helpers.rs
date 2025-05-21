@@ -89,7 +89,7 @@ pub(crate) fn find_nodekey_for_value_node(
         found: None,
     };
 
-    statement.accept(&mut visitor);
+    let _ = statement.accept(&mut visitor);
 
     visitor.found
 }

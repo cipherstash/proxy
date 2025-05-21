@@ -23,7 +23,7 @@ pub(crate) fn is_used_in_group_by_clause<'ast, N: AsNodeKey>(
                     ty: needle,
                     found: false,
                 };
-                exprs.accept(&mut visitor);
+                let _ = exprs.accept(&mut visitor);
                 visitor.found
             }
         },
