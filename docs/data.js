@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1747836127604,
+  "lastUpdate": 1747837153500,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -1596,6 +1596,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 6.801187,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "39113b836a1427921b1461c4e87011c9b22d052f",
+          "message": "feat(docker): add builds for multi-platform docker images",
+          "timestamp": "2025-05-21T07:01:53Z",
+          "url": "https://github.com/cipherstash/proxy/pull/234/commits/39113b836a1427921b1461c4e87011c9b22d052f"
+        },
+        "date": 1747837152390,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 7.06627,
             "unit": "Number"
           }
         ]
