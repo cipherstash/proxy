@@ -33,6 +33,7 @@ mod test {
     use super::type_check;
     use crate::col;
     use crate::projection;
+    use crate::test_helpers;
     use crate::Param;
     use crate::Schema;
     use crate::TableResolver;
@@ -41,9 +42,11 @@ mod test {
         Value,
     };
     use pretty_assertions::assert_eq;
+    use sqltk::parser::ast::Ident;
     use sqltk::parser::ast::Statement;
     use sqltk::parser::ast::{self as ast};
     use sqltk::AsNodeKey;
+    use sqltk::NodeKey;
     use std::collections::HashMap;
     use std::sync::Arc;
     use tracing::error;
@@ -980,7 +983,7 @@ mod test {
     }
 
     #[test]
-    fn select_with_literal_subsitution() {
+    fn select_with_literal_cast_as_encrypted() {
         // init_tracing();
 
         let schema = resolver(schema! {
@@ -1017,27 +1020,63 @@ mod test {
             )]
         );
 
-        let transformed_statement = match typed.transform(HashMap::from_iter([(
+        match typed.transform(HashMap::from_iter([(
             typed.literals[0].1.as_node_key(),
             ast::Value::SingleQuotedString("ENCRYPTED".into()),
         )])) {
-            Ok(transformed_statement) => transformed_statement,
+            Ok(transformed_statement) => assert_eq!(
+                transformed_statement.to_string(),
+                "SELECT * FROM employees WHERE salary > 'ENCRYPTED'::JSONB::eql_v2_encrypted"
+            ),
             Err(err) => panic!("statement transformation failed: {}", err),
         };
+    }
 
-        // This type checks the transformed statement so we can get hold of the encrypted literal.
-        let typed = match type_check(schema, &transformed_statement) {
+    #[test]
+    fn insert_with_literal_cast_as_encrypted() {
+        // init_tracing();
+
+        let schema = resolver(schema! {
+            tables: {
+                employees: {
+                    id,
+                    salary (EQL),
+                }
+            }
+        });
+
+        let statement = parse(
+            r#"
+                insert into employees (salary) values (20000)
+            "#,
+        );
+
+        let typed = match type_check(schema.clone(), &statement) {
             Ok(typed) => typed,
             Err(err) => panic!("type check failed: {:#?}", err),
         };
 
-        assert!(typed.literals.contains(&(
-            EqlValue(TableColumn {
-                table: id("employees"),
-                column: id("salary")
-            }),
-            &ast::Value::SingleQuotedString("ENCRYPTED".into()),
-        )));
+        assert_eq!(
+            typed.literals,
+            vec![(
+                EqlValue(TableColumn {
+                    table: id("employees"),
+                    column: id("salary")
+                }),
+                &ast::Value::Number(20000.into(), false)
+            )]
+        );
+
+        match typed.transform(HashMap::from_iter([(
+            typed.literals[0].1.as_node_key(),
+            ast::Value::SingleQuotedString("ENCRYPTED".into()),
+        )])) {
+            Ok(transformed_statement) => assert_eq!(
+                transformed_statement.to_string(),
+                "INSERT INTO employees (salary) VALUES ('ENCRYPTED'::JSONB::eql_v2_encrypted)"
+            ),
+            Err(err) => panic!("statement transformation failed: {}", err),
+        };
     }
 
     #[test]
@@ -1313,7 +1352,7 @@ mod test {
                 match typed.transform(HashMap::new()) {
                     Ok(statement) => assert_eq!(
                         statement.to_string(),
-                        "SELECT CS_GROUPED_VALUE_V1(email) AS email FROM users GROUP BY CS_ORE_64_8_V1(email)".to_string()
+                        "SELECT eql_v2.grouped_value(email) AS email FROM users GROUP BY eql_v2.ore_64_8_v2(email)".to_string()
                     ),
                     Err(err) => panic!("transformation failed: {err}"),
                 }
@@ -1336,15 +1375,84 @@ mod test {
         });
 
         let statement =
-            parse("SELECT MIN(salary), MAX(salary), department FROM employees GROUP BY department");
+            parse("SELECT min(salary), max(salary), department FROM employees GROUP BY department");
 
         match type_check(schema, &statement) {
             Ok(typed) => {
                 match typed.transform(HashMap::new()) {
                     Ok(statement) => assert_eq!(
                         statement.to_string(),
-                        "SELECT CS_MIN_V1(salary) AS MIN, CS_MAX_V1(salary) AS MAX, department FROM employees GROUP BY department".to_string()
+                        "SELECT eql_v2.min(salary), eql_v2.max(salary), department FROM employees GROUP BY department".to_string()
                     ),
+                    Err(err) => panic!("transformation failed: {err}"),
+                }
+            }
+            Err(err) => panic!("type check failed: {err}"),
+        }
+    }
+
+    #[test]
+    fn select_with_params_cast_as_encrypted() {
+        // init_tracing();
+        let schema = resolver(schema! {
+            tables: {
+                employees: {
+                    id (PK),
+                    eql_col (EQL),
+                    native_col,
+                }
+            }
+        });
+
+        let statement = parse(
+            "
+            SELECT * FROM employees WHERE eql_col = $1 AND native_col = $2;
+        ",
+        );
+
+        match type_check(schema, &statement) {
+            Ok(typed) => match typed.transform(HashMap::new()) {
+                Ok(statement) => {
+                    assert_eq!(
+                            statement.to_string(),
+                            "SELECT * FROM employees WHERE eql_col = $1::JSONB::eql_v2_encrypted AND native_col = $2"
+                        );
+                }
+                Err(err) => panic!("transformation failed: {err}"),
+            },
+            Err(err) => panic!("type check failed: {err}"),
+        }
+    }
+
+    #[test]
+    fn rewrite_standard_sql_fns_on_eql_types() {
+        // init_tracing();
+        let schema = resolver(schema! {
+            tables: {
+                employees: {
+                    id (PK),
+                    eql_col (EQL),
+                    native_col,
+                }
+            }
+        });
+
+        let statement = parse("
+            SELECT jsonb_path_query(eql_col, '$.secret'), jsonb_path_query(native_col, '$.not-secret') FROM employees
+        ");
+
+        match type_check(schema, &statement) {
+            Ok(typed) => {
+                match typed.transform(test_helpers::dummy_encrypted_json_selector(
+                    &statement,
+                    ast::Value::SingleQuotedString("$.secret".into()),
+                )) {
+                    Ok(statement) => {
+                        assert_eq!(
+                            statement.to_string(),
+                            "SELECT eql_v2.jsonb_path_query(eql_col, '<encrypted-selector($.secret)>'::JSONB::eql_v2_encrypted), jsonb_path_query(native_col, '$.not-secret') FROM employees"
+                        );
+                    }
                     Err(err) => panic!("transformation failed: {err}"),
                 }
             }
@@ -1362,5 +1470,165 @@ mod test {
         let statement = parse("SELECT ARRAY[1, 2, 3]");
 
         type_check(schema, &statement).expect("named arrays should be supported");
+    }
+
+    #[test]
+    fn jsonb_operator_arrow() {
+        test_jsonb_operator("->");
+    }
+
+    #[test]
+    fn jsonb_operator_long_arrow() {
+        test_jsonb_operator("->>");
+    }
+
+    #[test]
+    fn jsonb_operator_hash_arrow() {
+        test_jsonb_operator("#>");
+    }
+
+    #[test]
+    fn jsonb_operator_hash_long_arrow() {
+        test_jsonb_operator("#>>");
+    }
+
+    #[test]
+    fn jsonb_operator_hash_at_at() {
+        test_jsonb_operator("@@");
+    }
+
+    #[test]
+    fn jsonb_operator_at_question() {
+        test_jsonb_operator("@?");
+    }
+
+    #[test]
+    fn jsonb_operator_question() {
+        test_jsonb_operator("?");
+    }
+
+    #[test]
+    fn jsonb_operator_question_and() {
+        test_jsonb_operator("?&");
+    }
+
+    #[test]
+    fn jsonb_operator_question_pipe() {
+        test_jsonb_operator("?|");
+    }
+
+    #[test]
+    fn jsonb_operator_at_arrow() {
+        test_jsonb_operator("@>");
+    }
+
+    #[test]
+    fn jsonb_operator_arrow_at() {
+        test_jsonb_operator("<@");
+    }
+
+    #[test]
+    fn jsonb_function_jsonb_path_query() {
+        test_jsonb_function(
+            "jsonb_path_query",
+            vec![
+                ast::Expr::Identifier(Ident::new("notes")),
+                ast::Expr::Value(ast::Value::SingleQuotedString("$.medications".to_owned())),
+            ],
+        );
+    }
+
+    // TODO: do we need to check that the RHS of JSON operators MUST be a Value node
+    // and not an arbitrary expression?
+
+    fn test_jsonb_function(fn_name: &str, args: Vec<ast::Expr>) {
+        let schema = resolver(schema! {
+            tables: {
+                patients: {
+                    id (PK),
+                    notes (EQL),
+                }
+            }
+        });
+
+        let args_in = args
+            .iter()
+            .map(|expr| expr.to_string())
+            .collect::<Vec<_>>()
+            .join(", ");
+
+        let statement = parse(&format!(
+            "SELECT id, {}({}) AS meds FROM patients",
+            fn_name, args_in
+        ));
+
+        let args_encrypted = args
+            .iter()
+            .map(|expr| match expr {
+                ast::Expr::Identifier(ident) => ident.to_string(),
+                ast::Expr::Value(ast::Value::SingleQuotedString(s)) => {
+                    format!("'<encrypted-selector({})>'::JSONB::eql_v2_encrypted", s)
+                }
+                _ => panic!("unsupported expr type in test util"),
+            })
+            .collect::<Vec<String>>()
+            .join(", ");
+
+        let mut encrypted_literals: HashMap<NodeKey<'_>, ast::Value> = HashMap::new();
+
+        for arg in args.iter() {
+            if let ast::Expr::Value(value) = arg {
+                encrypted_literals.extend(test_helpers::dummy_encrypted_json_selector(
+                    &statement,
+                    value.clone(),
+                ));
+            }
+        }
+
+        match type_check(schema, &statement) {
+            Ok(typed) => match typed.transform(encrypted_literals) {
+                Ok(statement) => {
+                    let rewritten_fn_name = format!("eql_v2.{fn_name}");
+                    assert_eq!(
+                        statement.to_string(),
+                        format!(
+                            "SELECT id, {}({}) AS meds FROM patients",
+                            rewritten_fn_name, args_encrypted
+                        )
+                    )
+                }
+                Err(err) => panic!("transformation failed: {err}"),
+            },
+            Err(err) => panic!("type check failed: {err}"),
+        }
+    }
+
+    fn test_jsonb_operator(op: &str) {
+        let schema = resolver(schema! {
+            tables: {
+                patients: {
+                    id (PK),
+                    notes (EQL),
+                }
+            }
+        });
+
+        let statement = parse(&format!(
+            "SELECT id, notes {} 'medications' AS meds FROM patients",
+            op
+        ));
+
+        match type_check(schema, &statement) {
+            Ok(typed) => {
+                match typed.transform(test_helpers::dummy_encrypted_json_selector(&statement, ast::Value::SingleQuotedString("medications".to_owned()))) {
+                    Ok(statement) => assert_eq!(
+                        statement.to_string(),
+                        format!("SELECT id, notes {} '<encrypted-selector(medications)>'::JSONB::eql_v2_encrypted AS meds FROM patients", op)
+                    ),
+                    Err(err) => panic!("transformation failed: {err}"),
+                }
+            }
+            Err(err) => panic!("type check failed: {err}"),
+        }
     }
 }

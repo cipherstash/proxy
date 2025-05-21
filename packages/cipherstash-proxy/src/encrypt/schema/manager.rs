@@ -132,19 +132,18 @@ pub async fn load_schema(config: &DatabaseConfig) -> Result<Schema, Error> {
         let table_name: String = table.get("table_name");
         let primary_keys: Vec<Option<String>> = table.get("primary_keys");
         let columns: Vec<String> = table.get("columns");
-        let _types: Vec<Option<String>> = table.get("column_types");
-        let domains: Vec<Option<String>> = table.get("column_domains");
+        let column_type_names: Vec<Option<String>> = table.get("column_type_names");
 
         let mut table = Table::new(Ident::new(&table_name));
 
-        columns.iter().zip(domains).for_each(|(col, domain)| {
+        columns.iter().zip(column_type_names).for_each(|(col, column_type_name)| {
             let is_primary_key = primary_keys.contains(&Some(col.to_string()));
 
             let ident = Ident::with_quote('"', col);
 
-            let column = match domain.as_deref() {
-                Some("cs_encrypted_v1") => {
-                    debug!(target: SCHEMA, msg = "cs_encrypted_v1 column", table = table_name, column = col);
+            let column = match column_type_name.as_deref() {
+                Some("eql_v2_encrypted") => {
+                    debug!(target: SCHEMA, msg = "eql_v2_encrypted column", table = table_name, column = col);
                     Column::eql(ident)
                 }
                 _ => Column::native(ident),

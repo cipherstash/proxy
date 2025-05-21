@@ -21,8 +21,12 @@ tokio-postgres-rustls = "0.13.0"
 tokio-rustls = "0.26.0"
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
-webpki-roots = "0.26.7"
+webpki-roots = "1.0"
 
 [dev-dependencies]
+cipherstash-client = { version = "0.22.0", features = ["tokio"] }
+cipherstash-config = "0.2.3"
 clap = "4.5.32"
-fake = { version = "4", features = ["derive"] }
+fake = { version = "4", features = ["chrono", "derive"] }
+hex = "0.4.3"
+uuid = { version = "1.11.0", features = ["serde", "v4"] }

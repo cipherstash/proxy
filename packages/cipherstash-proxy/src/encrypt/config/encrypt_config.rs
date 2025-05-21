@@ -3,7 +3,7 @@ use crate::{
     error::{ConfigError, Error},
     log::KEYSET,
 };
-use cipherstash_config::{
+use cipherstash_client::schema::{
     column::{Index, IndexType, TokenFilter, Tokenizer},
     ColumnConfig, ColumnType,
 };

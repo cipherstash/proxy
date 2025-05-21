@@ -84,7 +84,7 @@ pub async fn handler(
                         AsyncStream::Tcp(stream) => {
                             // The Client is connecting to our Server
                             let tls_stream = tls::server(stream, tls).await?;
-                            client_stream = AsyncStream::Tls(tls_stream);
+                            client_stream = AsyncStream::Tls(Box::new(tls_stream));
                         }
                         AsyncStream::Tls(_) => {
                             unreachable!();

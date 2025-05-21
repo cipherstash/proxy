@@ -21,6 +21,10 @@
   - [Unknown column](#encrypt-unknown-column)
   - [Unknown table](#encrypt-unknown-table)
   - [Unknown index term](#encrypt-unknown-index-term)
+  - [Column configuration mismatch](#encrypt-column-config-mismatch)
+
+- Decrypt errors:
+   - [Column could not be deserialised](#encrypt-column-could-not-be-deserialised)
 
 - Configuration errors:
   - [Missing or invalid TLS configuration](#config-missing-or-invalid-tls)
@@ -263,9 +267,9 @@ The most likely cause is network access to the ZeroKMS service.
 ### How to Fix
 
 1. Check that CipherStash ZeroKMS is available at [the status page](https://status.cipherstash.com/).
-1. Check that CipherStash Proxy has network access to ZeroKMS in the appropriate region.
+2. Check that CipherStash Proxy has network access to ZeroKMS in the appropriate region.
 <!-- TODO: Link to ZeroKMS Doc -->
-1. Check that the encrypted configuration `cast` matches the expected type.
+3. Check that the encrypted configuration `cast` matches the expected type.
 <!-- TODO: Link to config -->
 
 
@@ -307,14 +311,14 @@ For example:
 ### How to fix
 
 1. Check the encrypted configuration has the correct type.
-1. Check that the configuration has not changed.
-1. Check [EQL](https://github.com/cipherstash/encrypt-query-language).
+2. Check that the configuration has not changed.
+3. Check [EQL](https://github.com/cipherstash/encrypt-query-language).
 
 <!-- ---------------------------------------------------------------------------------------------------- -->
 
 ## Unknown Column <a id='encrypt-unknown-column'></a>
 
-The column has an encrypted type (PostgreSQL `cs_encrypted_v1` type ) with no encryption configuration.
+The column has an encrypted type (PostgreSQL `eql_v2_encrypted` type ) with no encryption configuration.
 
 Without the configuration, Cipherstash Proxy does not know how to encrypt the column.
 Any data is unprotected and unencrypted.
@@ -331,7 +335,7 @@ Column 'column_name' in table 'table_name' has no Encrypt configuration
 
 1. Define the encrypted configuration using [EQL](https://github.com/cipherstash/encrypt-query-language).
    <!-- TODO: link to doc -->
-1. Add `users.email` as an encrypted column:
+2. Add `users.email` as an encrypted column:
    ```sql
    SELECT cs_add_column_v1('users', 'email');
    ```
@@ -341,7 +345,7 @@ Column 'column_name' in table 'table_name' has no Encrypt configuration
 
 ## Unknown Table <a id='encrypt-unknown-table'></a>
 
-The table has one or more encrypted columns (PostgreSQL `cs_encrypted_v1` type ) with no encryption configuration.
+The table has one or more encrypted columns (PostgreSQL `eql_v2_encrypted` type ) with no encryption configuration.
 
 Without the configuration, Cipherstash Proxy does not know how to encrypt the column.
 Any data is unprotected and unencrypted.
@@ -357,7 +361,7 @@ Table 'table_name' has no Encrypt configuration
 
 1. Define the encrypted configuration using [EQL](https://github.com/cipherstash/encrypt-query-language).
    <!-- TODO: link to doc -->
-1. Add `users.email` as an encrypted column:
+2. Add `users.email` as an encrypted column:
    ```sql
    SELECT cs_add_column_v1('users', 'email');
    ```
@@ -385,10 +389,80 @@ Unknown Index Term for column '{column_name}' in table '{table_name}'.
 ### How to fix
 
 1. Check the Encrypt configuration for the column.
-1. Define the encrypted configuration using [EQL](https://github.com/cipherstash/encrypt-query-language).
+2. Define the encrypted configuration using [EQL](https://github.com/cipherstash/encrypt-query-language).
 
 
 <!-- ---------------------------------------------------------------------------------------------------- -->
+<!-- ---------------------------------------------------------------------------------------------------- -->
+
+
+## Column configuration mismatch <a id='encrypt-column-config-mismatch'></a>
+
+A returned encrypted column does not match the column configuration.
+
+### Error message
+
+```
+Column configuration for column '{column_name}' in table '{table_name}' does not match the encrypted column.
+```
+
+### Notes
+
+CipherStash Proxy validates that encrypted columns match the configuration before decrypting any data.
+If the table and column are not the same, this error is returned.
+The check is there to help prevent "confused deputy" issues and the error should *never* appear during normal operation.
+
+If the error persists, please contact CipherStash [support](https://cipherstash.com/support).
+
+
+### Further reading
+
+[AWS: The confused deputy problem](https://docs.aws.amazon.com/IAM/latest/UserGuide/confused-deputy.html)
+[Wikipedia: Confused deputy problem](https://en.wikipedia.org/wiki/Confused_deputy_problem)
+
+<!-- ---------------------------------------------------------------------------------------------------- -->
+
+
+
+
+<!-- ---------------------------------------------------------------------------------------------------- -->
+
+
+# Decrypt errors
+
+
+## Column could not be deserialised <a id='encrypt-column-could-not-be-deserialised'></a>
+
+The column could not be deserialised for decryption.
+
+
+### Error message
+
+```
+Column 'column_name' in table 'table_name' could not be deserialised.
+```
+
+### Notes
+
+CipherStash Proxy stores encrypted data and search terms as `jsonb`. The structure is defined as part of EQL.
+
+The error indicates an internal issue has occurred deserialising and extracting the ciphertext data for decryption.
+It may be caused if the the encrypted data has been altered by another process or application.
+
+If the error persists, please contact CipherStash [support](https://cipherstash.com/support).
+
+
+### How to Fix
+
+1. Check that the data in the encrypted column is in correct format [EQL](https://github.com/cipherstash/encrypt-query-language).
+
+<!-- TODO: Link to EQL Doc on storage format-->
+
+
+
+
+<!-- ---------------------------------------------------------------------------------------------------- -->
+
 
 
 

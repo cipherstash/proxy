@@ -11,21 +11,23 @@
 
 mod helpers;
 
+mod cast_literals_as_encrypted;
+mod cast_params_as_encrypted;
 mod fail_on_placeholder_change;
 mod group_by_eql_col;
 mod preserve_effective_aliases;
-mod replace_plaintext_eql_literals;
-mod use_equivalent_eql_fns_on_eql_types;
+mod rewrite_standard_sql_fns_on_eql_types;
 mod wrap_eql_cols_in_order_by_with_ore_fn;
 mod wrap_grouped_eql_col_in_aggregate_fn;
 
 use std::marker::PhantomData;
 
+pub(crate) use cast_literals_as_encrypted::*;
+pub(crate) use cast_params_as_encrypted::*;
 pub(crate) use fail_on_placeholder_change::*;
 pub(crate) use group_by_eql_col::*;
 pub(crate) use preserve_effective_aliases::*;
-pub(crate) use replace_plaintext_eql_literals::*;
-pub(crate) use use_equivalent_eql_fns_on_eql_types::*;
+pub(crate) use rewrite_standard_sql_fns_on_eql_types::*;
 pub(crate) use wrap_eql_cols_in_order_by_with_ore_fn::*;
 pub(crate) use wrap_grouped_eql_col_in_aggregate_fn::*;
 

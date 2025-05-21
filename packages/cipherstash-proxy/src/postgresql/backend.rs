@@ -4,10 +4,11 @@ use super::message_buffer::MessageBuffer;
 use super::messages::error_response::ErrorResponse;
 use super::messages::row_description::RowDescription;
 use super::messages::BackendCode;
+use super::Column;
 use crate::connect::Sender;
 use crate::encrypt::Encrypt;
-use crate::eql::Encrypted;
-use crate::error::Error;
+use crate::eql::EqlEncrypted;
+use crate::error::{EncryptError, Error};
 use crate::log::{DEVELOPMENT, MAPPER, PROTOCOL};
 use crate::postgresql::context::Portal;
 use crate::postgresql::messages::data_row::DataRow;
@@ -19,7 +20,6 @@ use crate::prometheus::{
     ROWS_PASSTHROUGH_TOTAL, ROWS_TOTAL, SERVER_BYTES_RECEIVED_TOTAL,
 };
 use bytes::BytesMut;
-use itertools::Itertools;
 use metrics::{counter, histogram};
 use std::time::Instant;
 use tokio::io::AsyncRead;
@@ -234,7 +234,7 @@ where
 
         let portal = self.context.get_portal_from_execute();
         let portal = match portal.as_deref() {
-            Some(Portal::Encrypted { .. }) | Some(Portal::EncryptedText) => portal.unwrap(),
+            Some(Portal::Encrypted { .. }) => portal.unwrap(),
             _ => {
                 debug!(target: MAPPER, client_id = self.context.client_id, msg = "Passthrough portal");
                 if !self.buffer.is_empty() {
@@ -247,7 +247,7 @@ where
             }
         };
 
-        let rows: Vec<DataRow> = self.buffer.drain().into_iter().collect();
+        let mut rows: Vec<DataRow> = self.buffer.drain().into_iter().collect();
         debug!(target: DEVELOPMENT, client_id = self.context.client_id, rows = rows.len());
 
         let result_column_count = match rows.first() {
@@ -261,14 +261,17 @@ where
         // If no portal, assume Text for all columns
         let result_column_format_codes = portal.format_codes(result_column_count);
 
+        let projection_columns = portal.projection_columns();
+
         // Each row is converted into Vec<Option<CipherText>>
-        let ciphertexts: Vec<Option<Encrypted>> = rows
-            .iter()
-            .map(|row| row.to_ciphertext())
-            .flatten_ok()
-            .collect::<Result<Vec<_>, _>>()?;
+        let ciphertexts: Vec<Option<EqlEncrypted>> = rows
+            .iter_mut()
+            .flat_map(|row| row.as_ciphertext(projection_columns))
+            .collect::<Vec<_>>();
 
         let start = Instant::now();
+
+        self.check_column_config(projection_columns, &ciphertexts)?;
 
         // Decrypt CipherText -> Plaintext
         let plaintexts = self.encrypt.decrypt(ciphertexts).await.inspect_err(|_| {
@@ -310,6 +313,39 @@ where
             self.write(bytes).await?;
         }
 
+        Ok(())
+    }
+
+    fn check_column_config(
+        &mut self,
+        projection_columns: &[Option<Column>],
+        ciphertexts: &[Option<EqlEncrypted>],
+    ) -> Result<(), Error> {
+        for (col, ct) in projection_columns.iter().zip(ciphertexts) {
+            match (col, ct) {
+                (Some(col), Some(ct)) => {
+                    if col.identifier != ct.identifier {
+                        return Err(EncryptError::ColumnConfigurationMismatch {
+                            table: col.identifier.table.to_owned(),
+                            column: col.identifier.column.to_owned(),
+                        }
+                        .into());
+                    }
+                }
+                // configured column with NULL ciphertext
+                (Some(_), None) => {}
+                // unconfigured column *should* have no ciphertext,
+                (None, None) => {}
+                // ciphertext with no column configuration is bad
+                (None, Some(ct)) => {
+                    return Err(EncryptError::ColumnConfigurationMismatch {
+                        table: ct.identifier.table.to_owned(),
+                        column: ct.identifier.column.to_owned(),
+                    }
+                    .into());
+                }
+            }
+        }
         Ok(())
     }
 
@@ -381,7 +417,7 @@ where
     async fn data_row_handler(&mut self, bytes: &BytesMut) -> Result<bool, Error> {
         counter!(ROWS_TOTAL).increment(1);
         match self.context.get_portal_from_execute().as_deref() {
-            Some(Portal::Encrypted { .. }) | Some(Portal::EncryptedText) => {
+            Some(Portal::Encrypted { .. }) => {
                 debug!(target: MAPPER, client_id = self.context.client_id, msg = "Encrypted");
 
                 let data_row = DataRow::try_from(bytes)?;

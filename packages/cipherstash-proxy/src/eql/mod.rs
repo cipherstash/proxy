@@ -1,7 +1,4 @@
-use cipherstash_client::{
-    encryption::SteVec,
-    zerokms::{encrypted_record, EncryptedRecord},
-};
+use cipherstash_client::zerokms::{encrypted_record, EncryptedRecord};
 use serde::{Deserialize, Serialize};
 use sqltk::parser::ast::Ident;
 
@@ -16,6 +13,7 @@ pub struct Plaintext {
     #[serde(rename = "q")]
     pub for_query: Option<ForQuery>,
 }
+
 #[derive(Clone, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
 pub struct Identifier {
     #[serde(rename = "t")]
@@ -65,54 +63,60 @@ pub enum ForQuery {
 }
 
 #[derive(Debug, Deserialize, Serialize)]
-#[serde(tag = "k")]
-pub enum Encrypted {
-    #[serde(rename = "ct")]
-    Ciphertext {
-        #[serde(rename = "c", with = "encrypted_record::formats::mp_base85")]
-        ciphertext: EncryptedRecord,
-        #[serde(rename = "o")]
-        ore_index: Option<Vec<String>>,
-        #[serde(rename = "m")]
-        match_index: Option<Vec<u16>>,
-        #[serde(rename = "u")]
-        unique_index: Option<String>,
-        #[serde(rename = "i")]
-        identifier: Identifier,
-        #[serde(rename = "v")]
-        version: u16,
-    },
-    #[serde(rename = "sv")]
-    SteVec {
-        #[serde(rename = "sv")]
-        ste_vec_index: SteVec<16>,
-        #[serde(rename = "i")]
-        identifier: Identifier,
-        #[serde(rename = "v")]
-        version: u16,
-    },
+pub struct EqlEncrypted {
+    #[serde(rename = "i")]
+    pub(crate) identifier: Identifier,
+    #[serde(rename = "v")]
+    pub(crate) version: u16,
+
+    #[serde(flatten)]
+    pub(crate) body: EqlEncryptedBody,
 }
 
-// fn ident_de<'de, D>(deserializer: D) -> Result<Ident, D::Error>
-// where
-//     D: serde::Deserializer<'de>,
-// {
-//     let s = String::deserialize(deserializer)?;
-//     Ok(Ident::with_quote('"', s))
-// }
+#[derive(Debug, Deserialize, Serialize)]
+pub struct EqlEncryptedBody {
+    #[serde(rename = "c", with = "encrypted_record::formats::mp_base85")]
+    pub(crate) ciphertext: EncryptedRecord,
 
-// fn ident_se<S>(ident: &Ident, serializer: S) -> Result<S::Ok, S::Error>
-// where
-//     S: Serializer,
-// {
-//     let s = ident.to_string();
-//     serializer.serialize_str(&s)
-// }
+    #[serde(flatten)]
+    pub(crate) indexes: EqlEncryptedIndexes,
+
+    #[serde(rename = "a", skip_serializing_if = "Option::is_none")]
+    pub(crate) is_array_item: Option<bool>,
+}
+
+#[derive(Debug, Deserialize, Serialize, Default)]
+pub struct EqlEncryptedIndexes {
+    #[serde(rename = "o", skip_serializing_if = "Option::is_none")]
+    pub(crate) ore_index: Option<Vec<String>>,
+    #[serde(rename = "m", skip_serializing_if = "Option::is_none")]
+    pub(crate) match_index: Option<Vec<u16>>,
+    #[serde(rename = "u", skip_serializing_if = "Option::is_none")]
+    pub(crate) unique_index: Option<String>,
+
+    #[serde(rename = "s", skip_serializing_if = "Option::is_none")]
+    pub(crate) selector: Option<String>,
+
+    #[serde(rename = "b", skip_serializing_if = "Option::is_none")]
+    pub(crate) blake3_index: Option<String>,
+
+    #[serde(rename = "ocf", skip_serializing_if = "Option::is_none")]
+    pub(crate) ore_cclw_fixed_index: Option<String>,
+    #[serde(rename = "ocv", skip_serializing_if = "Option::is_none")]
+    pub(crate) ore_cclw_var_index: Option<String>,
+
+    #[serde(rename = "sv", skip_serializing_if = "Option::is_none")]
+    pub(crate) ste_vec_index: Option<Vec<EqlEncryptedBody>>,
+}
 
 #[cfg(test)]
 mod tests {
+    use crate::{
+        eql::{EqlEncryptedBody, EqlEncryptedIndexes},
+        EqlEncrypted,
+    };
+
     use super::{Identifier, Plaintext};
-    use crate::Encrypted;
     use cipherstash_client::zerokms::EncryptedRecord;
     use recipher::key::Iv;
     use uuid::Uuid;
@@ -141,20 +145,29 @@ mod tests {
     pub fn ciphertext_json() {
         let expected = Identifier::new("table", "column");
 
-        let ct = Encrypted::Ciphertext {
+        let ct = EqlEncrypted {
             identifier: expected.clone(),
             version: 1,
-            ciphertext: EncryptedRecord {
-                iv: Iv::default(),
-                ciphertext: vec![1; 32],
-                tag: vec![1; 16],
-                descriptor: "ciphertext".to_string(),
-                dataset_id: Some(Uuid::new_v4()),
+            body: EqlEncryptedBody {
+                ciphertext: EncryptedRecord {
+                    iv: Iv::default(),
+                    ciphertext: vec![1; 32],
+                    tag: vec![1; 16],
+                    descriptor: "ciphertext".to_string(),
+                    dataset_id: Some(Uuid::new_v4()),
+                },
+                indexes: EqlEncryptedIndexes {
+                    ore_index: None,
+                    match_index: None,
+                    unique_index: None,
+                    blake3_index: None,
+                    selector: None,
+                    ore_cclw_fixed_index: None,
+                    ore_cclw_var_index: None,
+                    ste_vec_index: None,
+                },
+                is_array_item: None,
             },
-
-            ore_index: None,
-            match_index: None,
-            unique_index: None,
         };
 
         let value = serde_json::to_value(&ct).unwrap();
@@ -163,12 +176,7 @@ mod tests {
         let t = &i["t"];
         assert_eq!(t, "table");
 
-        let result: Encrypted = serde_json::from_value(value).unwrap();
-
-        if let Encrypted::Ciphertext { identifier, .. } = result {
-            assert_eq!(expected, identifier);
-        } else {
-            panic!("Expected Encrypted::Ciphertext");
-        }
+        let result: EqlEncrypted = serde_json::from_value(value).unwrap();
+        assert_eq!(expected, result.identifier);
     }
 }

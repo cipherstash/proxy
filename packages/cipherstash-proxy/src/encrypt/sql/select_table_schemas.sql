@@ -3,8 +3,7 @@ SELECT
     t.table_name,
     array_agg(distinct k.column_name)::text[] AS primary_keys,
     array_agg(c.column_name)::text[] AS columns,
-    array_agg(c.data_type)::text[] AS column_types,
-    array_agg(c.domain_name)::text[] AS column_domains
+    array_agg(c.udt_name)::text[] AS column_type_names
 FROM
     information_schema.tables t
 LEFT JOIN
@@ -24,3 +23,6 @@ GROUP BY
     t.table_schema, t.table_name
 ORDER BY
     t.table_schema, t.table_name;
+
+
+

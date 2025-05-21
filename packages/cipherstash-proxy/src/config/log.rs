@@ -36,6 +36,9 @@ pub struct LogConfig {
     pub encrypt_level: LogLevel,
 
     #[serde(default = "LogConfig::default_log_level")]
+    pub decrypt_level: LogLevel,
+
+    #[serde(default = "LogConfig::default_log_level")]
     pub encrypt_config_level: LogLevel,
 
     #[serde(default = "LogConfig::default_log_level")]
@@ -107,24 +110,7 @@ impl Display for LogLevel {
 
 impl Default for LogConfig {
     fn default() -> Self {
-        LogConfig {
-            format: LogConfig::default_log_format(),
-            output: LogConfig::default_log_output(),
-            ansi_enabled: LogConfig::default_ansi_enabled(),
-            level: LogConfig::default_log_level(),
-            development_level: LogConfig::default_log_level(),
-            authentication_level: LogConfig::default_log_level(),
-            context_level: LogConfig::default_log_level(),
-            encrypt_level: LogConfig::default_log_level(),
-            encoding_level: LogConfig::default_log_level(),
-            encrypt_config_level: LogConfig::default_log_level(),
-            keyset_level: LogConfig::default_log_level(),
-            migrate_level: LogConfig::default_log_level(),
-            protocol_level: LogConfig::default_log_level(),
-            mapper_level: LogConfig::default_log_level(),
-            schema_level: LogConfig::default_log_level(),
-            config_level: LogConfig::default_log_level(),
-        }
+        Self::with_level(LogConfig::default_log_level())
     }
 }
 
@@ -141,6 +127,7 @@ impl LogConfig {
             encoding_level: level,
             encrypt_level: level,
             encrypt_config_level: level,
+            decrypt_level: level,
             keyset_level: level,
             migrate_level: level,
             protocol_level: level,

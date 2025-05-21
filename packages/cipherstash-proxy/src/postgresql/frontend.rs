@@ -23,7 +23,7 @@ use crate::prometheus::{
     STATEMENTS_ENCRYPTED_TOTAL, STATEMENTS_PASSTHROUGH_TOTAL, STATEMENTS_TOTAL,
     STATEMENTS_UNMAPPABLE_TOTAL,
 };
-use crate::Encrypted;
+use crate::EqlEncrypted;
 use bytes::BytesMut;
 use cipherstash_client::encryption::Plaintext;
 use eql_mapper::{self, EqlMapperError, EqlValue, TableColumn, TypeCheckedStatement};
@@ -35,6 +35,7 @@ use sqltk::parser::dialect::PostgreSqlDialect;
 use sqltk::parser::parser::Parser;
 use sqltk::NodeKey;
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::Instant;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use tracing::{debug, error, warn};
@@ -311,7 +312,7 @@ where
                     counter!(STATEMENTS_ENCRYPTED_TOTAL).increment(1);
 
                     // Set Encrypted portal
-                    portal = Portal::encrypted_text();
+                    portal = Portal::encrypted(Arc::new(statement));
                 }
                 None => {
                     debug!(target: MAPPER,
@@ -359,7 +360,7 @@ where
         &mut self,
         typed_statement: &TypeCheckedStatement<'_>,
         literal_columns: &Vec<Option<Column>>,
-    ) -> Result<Vec<Option<Encrypted>>, Error> {
+    ) -> Result<Vec<Option<EqlEncrypted>>, Error> {
         let literal_values = typed_statement.literal_values();
         if literal_values.is_empty() {
             debug!(target: MAPPER,
@@ -404,7 +405,7 @@ where
     async fn transform_statement(
         &mut self,
         typed_statement: &TypeCheckedStatement<'_>,
-        encrypted_literals: &Vec<Option<Encrypted>>,
+        encrypted_literals: &Vec<Option<EqlEncrypted>>,
     ) -> Result<Option<ast::Statement>, Error> {
         // Convert literals to ast Expr
         let mut encrypted_expressions = vec![];
@@ -671,7 +672,10 @@ where
                 bind.rewrite(encrypted)?;
             }
             if statement.has_projection() {
-                portal = Portal::encrypted(statement, bind.result_columns_format_codes.to_owned());
+                portal = Portal::encrypted_with_format_codes(
+                    statement,
+                    bind.result_columns_format_codes.to_owned(),
+                );
             }
         };
 
@@ -704,7 +708,7 @@ where
         &mut self,
         bind: &Bind,
         statement: &Statement,
-    ) -> Result<Vec<Option<crate::Encrypted>>, Error> {
+    ) -> Result<Vec<Option<crate::EqlEncrypted>>, Error> {
         let plaintexts =
             bind.to_plaintext(&statement.param_columns, &statement.postgres_param_types)?;
 
@@ -890,15 +894,11 @@ where
                     msg = "Configured column not found. Encryption configuration may have been deleted.",
                     ?identifier,
                 );
-                if self.encrypt.config.mapping_errors_enabled() {
-                    Err(EncryptError::UnknownColumn {
-                        table: identifier.table.to_owned(),
-                        column: identifier.column.to_owned(),
-                    }
-                    .into())
-                } else {
-                    Ok(None)
+                Err(EncryptError::UnknownColumn {
+                    table: identifier.table.to_owned(),
+                    column: identifier.column.to_owned(),
                 }
+                .into())
             }
         }
     }

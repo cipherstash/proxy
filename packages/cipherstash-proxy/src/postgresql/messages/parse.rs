@@ -24,11 +24,11 @@ impl Parse {
     }
 
     ///
-    /// Encrypted columns are the cs_encrypted_v1 Domain Type
-    /// cs_encrypted_v1 wraps JSONB
+    /// Encrypted columns are the eql_v2_encrypted Domain Type
+    /// eql_v2_encrypted wraps JSONB
     ///
-    /// Using JSONB to avoid the complexity of loading the OID of cs_encrypted_v1
-    /// PostgreSQL will coerce JSONB to cs_encrypted_v1 if it passes the constaint check
+    /// Using JSONB to avoid the complexity of loading the OID of eql_v2_encrypted
+    /// PostgreSQL will coerce JSONB to eql_v2_encrypted if it passes the constaint check
     ///
     pub fn rewrite_param_types(&mut self, columns: &[Option<Column>]) {
         for (idx, col) in columns.iter().enumerate() {
@@ -123,7 +123,7 @@ mod tests {
         Identifier,
     };
     use bytes::BytesMut;
-    use cipherstash_config::{ColumnConfig, ColumnType};
+    use cipherstash_client::schema::{ColumnConfig, ColumnType};
 
     fn to_message(s: &[u8]) -> BytesMut {
         BytesMut::from(s)

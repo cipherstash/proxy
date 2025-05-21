@@ -196,7 +196,7 @@ pub fn collect_ddl(table_resolver: Arc<TableResolver>, statement: &Statement) ->
             schema: schema_with_edits,
             changed: false,
         };
-        statement.accept(&mut visitor);
+        let _ = statement.accept(&mut visitor);
         return visitor.changed;
     }
 

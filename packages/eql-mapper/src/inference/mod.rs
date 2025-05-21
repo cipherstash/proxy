@@ -2,6 +2,8 @@ mod infer_type;
 mod infer_type_impls;
 mod registry;
 mod sequence;
+mod sql_fn_macros;
+mod sql_functions;
 mod type_error;
 
 pub mod unifier;
@@ -12,7 +14,8 @@ use std::{cell::RefCell, fmt::Debug, marker::PhantomData, ops::ControlFlow, rc::
 
 use infer_type::InferType;
 use sqltk::parser::ast::{
-    Delete, Expr, Function, Ident, Insert, Query, Select, SelectItem, SetExpr, Statement, Values,
+    Delete, Expr, Function, FunctionArgExpr, Ident, Insert, Query, Select, SelectItem, SetExpr,
+    Statement, Values,
 };
 use sqltk::{into_control_flow, AsNodeKey, Break, Visitable, Visitor};
 
@@ -20,6 +23,7 @@ use crate::{ScopeError, ScopeTracker, TableResolver};
 
 pub(crate) use registry::*;
 pub(crate) use sequence::*;
+pub(crate) use sql_functions::*;
 pub(crate) use type_error::*;
 
 /// [`Visitor`] implementation that performs type inference on AST nodes.
@@ -123,11 +127,11 @@ impl<'ast> TypeInferencer<'ast> {
         match self.unify(self.get_node_type(lhs), self.get_node_type(rhs)) {
             Ok(unified) => Ok(unified),
             Err(err) => Err(TypeError::OnNodes(
-                Box::new(err),
                 format!("{:?}", lhs),
                 self.get_node_type(lhs),
                 format!("{:?}", rhs),
                 self.get_node_type(rhs),
+                err.to_string(),
             )),
         }
     }
@@ -187,6 +191,7 @@ macro_rules! dispatch_all {
         dispatch!($self, $method, $node, Vec<SelectItem>);
         dispatch!($self, $method, $node, SelectItem);
         dispatch!($self, $method, $node, Function);
+        dispatch!($self, $method, $node, FunctionArgExpr);
         dispatch!($self, $method, $node, Values);
         dispatch!($self, $method, $node, sqltk::parser::ast::Value);
     };

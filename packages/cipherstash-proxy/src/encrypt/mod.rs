@@ -3,7 +3,8 @@ mod schema;
 
 use crate::{
     config::TandemConfig,
-    connect, eql,
+    connect,
+    eql::{self, EqlEncryptedBody, EqlEncryptedIndexes},
     error::{EncryptError, Error},
     log::ENCRYPT,
     postgresql::Column,
@@ -13,13 +14,12 @@ use cipherstash_client::{
     config::EnvSource,
     credentials::{auto_refresh::AutoRefresh, ServiceCredentials},
     encryption::{
-        self, Encrypted, EncryptionError, IndexTerm, Plaintext, PlaintextTarget,
-        ReferencedPendingPipeline,
+        self, Encrypted, EncryptedEntry, EncryptedSteVecTerm, IndexTerm, Plaintext,
+        PlaintextTarget, ReferencedPendingPipeline,
     },
-    zerokms::EncryptedRecord,
+    schema::ColumnConfig,
     ConsoleConfig, CtsConfig, ZeroKMSConfig,
 };
-use cipherstash_config::ColumnConfig;
 use config::EncryptConfigManager;
 use schema::SchemaManager;
 use std::{sync::Arc, vec};
@@ -57,10 +57,12 @@ impl Encrypt {
 
         let eql_version = {
             let client = connect::database(&config.database).await?;
-            let rows = client.query("SELECT cs_eql_version();", &[]).await;
+            let rows = client
+                .query("SELECT eql_v2.version() AS version;", &[])
+                .await;
 
             match rows {
-                Ok(rows) => rows.first().map(|row| row.get("cs_eql_version")),
+                Ok(rows) => rows.first().map(|row| row.get("version")),
                 Err(err) => {
                     warn!(
                         msg = "Could not query EQL version from database",
@@ -88,7 +90,7 @@ impl Encrypt {
         &self,
         plaintexts: Vec<Option<Plaintext>>,
         columns: &[Option<Column>],
-    ) -> Result<Vec<Option<eql::Encrypted>>, Error> {
+    ) -> Result<Vec<Option<eql::EqlEncrypted>>, Error> {
         let mut pipeline = ReferencedPendingPipeline::new(self.cipher.clone());
 
         for (idx, item) in plaintexts.into_iter().zip(columns.iter()).enumerate() {
@@ -141,22 +143,17 @@ impl Encrypt {
     ///
     pub async fn decrypt(
         &self,
-        ciphertexts: Vec<Option<eql::Encrypted>>,
+        ciphertexts: Vec<Option<eql::EqlEncrypted>>,
     ) -> Result<Vec<Option<Plaintext>>, Error> {
         // Create a mutable vector to hold the decrypted results
         let mut results = vec![None; ciphertexts.len()];
 
         // Collect the index and ciphertext details for every Some(ciphertext)
-        let (indices, encrypted) = ciphertexts
+        let (indices, encrypted): (Vec<_>, Vec<_>) = ciphertexts
             .into_iter()
             .enumerate()
-            .filter_map(|(idx, opt)| {
-                opt.map(|ct| {
-                    eql_encrypted_to_encrypted_record(ct)
-                        .map(|encrypted_record| (idx, encrypted_record))
-                })
-            })
-            .collect::<Result<(Vec<_>, Vec<_>), _>>()?;
+            .filter_map(|(idx, eql)| Some((idx, eql?.body.ciphertext)))
+            .collect::<_>();
 
         // Decrypt the ciphertexts
         let decrypted = self.cipher.decrypt(encrypted).await?;
@@ -203,7 +200,14 @@ async fn init_cipher(config: &TandemConfig) -> Result<ScopedCipher, Error> {
     // Not using with_env because the proxy config should take precedence
     let builder = ZeroKMSConfig::builder()
         .add_source(EnvSource::default())
-        .workspace_id(&config.auth.workspace_id)
+        .workspace_id(
+            config
+                .auth
+                .workspace_id
+                .to_owned()
+                .try_into()
+                .map_err(cipherstash_client::config::ConfigError::from)?,
+        )
         .access_key(&config.auth.client_access_key)
         .try_with_client_id(&config.encrypt.client_id)?
         .try_with_client_key(&config.encrypt.client_key)?
@@ -236,56 +240,130 @@ async fn init_cipher(config: &TandemConfig) -> Result<ScopedCipher, Error> {
 fn to_eql_encrypted(
     encrypted: Encrypted,
     identifier: &Identifier,
-) -> Result<eql::Encrypted, Error> {
+) -> Result<eql::EqlEncrypted, Error> {
     debug!(target: ENCRYPT, msg = "Encrypted to EQL", ?identifier);
     match encrypted {
         Encrypted::Record(ciphertext, terms) => {
-            struct Indexes {
-                match_index: Option<Vec<u16>>,
-                ore_index: Option<Vec<String>>,
-                unique_index: Option<String>,
-            }
-
-            let mut indexes = Indexes {
-                match_index: None,
-                ore_index: None,
-                unique_index: None,
-            };
+            let mut match_index: Option<Vec<u16>> = None;
+            let mut ore_index: Option<Vec<String>> = None;
+            let mut unique_index: Option<String> = None;
+            let mut blake3_index: Option<String> = None;
+            let mut ore_cclw_fixed_index: Option<String> = None;
+            let mut ore_cclw_var_index: Option<String> = None;
+            let mut selector: Option<String> = None;
 
             for index_term in terms {
                 match index_term {
                     IndexTerm::Binary(bytes) => {
-                        indexes.unique_index = Some(format_index_term_binary(&bytes))
+                        unique_index = Some(format_index_term_binary(&bytes))
                     }
-                    IndexTerm::BitMap(inner) => indexes.match_index = Some(inner),
-                    IndexTerm::OreArray(vec_of_bytes) => {
-                        indexes.ore_index = Some(format_index_term_ore_array(&vec_of_bytes));
+                    IndexTerm::BitMap(inner) => match_index = Some(inner),
+                    IndexTerm::OreArray(bytes) => {
+                        ore_index = Some(format_index_term_ore_array(&bytes));
                     }
                     IndexTerm::OreFull(bytes) => {
-                        indexes.ore_index = Some(format_index_term_ore(&bytes));
+                        ore_index = Some(format_index_term_ore(&bytes));
                     }
                     IndexTerm::OreLeft(bytes) => {
-                        indexes.ore_index = Some(format_index_term_ore(&bytes));
+                        ore_index = Some(format_index_term_ore(&bytes));
                     }
+                    IndexTerm::BinaryVec(_) => todo!(),
+                    IndexTerm::SteVecSelector(s) => {
+                        selector = Some(hex::encode(s.as_bytes()));
+                    }
+                    IndexTerm::SteVecTerm(ste_vec_term) => match ste_vec_term {
+                        EncryptedSteVecTerm::Mac(bytes) => blake3_index = Some(hex::encode(bytes)),
+                        EncryptedSteVecTerm::OreFixed(ore) => {
+                            ore_cclw_fixed_index = Some(hex::encode(&ore))
+                        }
+                        EncryptedSteVecTerm::OreVariable(ore) => {
+                            ore_cclw_var_index = Some(hex::encode(&ore))
+                        }
+                    },
+                    IndexTerm::SteQueryVec(_query) => {} // TODO: what do we do here?
                     IndexTerm::Null => {}
-                    _ => return Err(EncryptError::UnknownIndexTerm(identifier.to_owned()).into()),
                 };
             }
 
-            Ok(eql::Encrypted::Ciphertext {
-                ciphertext,
+            Ok(eql::EqlEncrypted {
                 identifier: identifier.to_owned(),
-                match_index: indexes.match_index,
-                ore_index: indexes.ore_index,
-                unique_index: indexes.unique_index,
                 version: 1,
+                body: EqlEncryptedBody {
+                    ciphertext,
+                    indexes: EqlEncryptedIndexes {
+                        match_index,
+                        ore_index,
+                        unique_index,
+                        blake3_index,
+                        ore_cclw_fixed_index,
+                        ore_cclw_var_index,
+                        selector,
+                        ste_vec_index: None,
+                    },
+                    is_array_item: None,
+                },
             })
         }
-        Encrypted::SteVec(ste_vec_index) => Ok(eql::Encrypted::SteVec {
-            identifier: identifier.to_owned(),
-            ste_vec_index,
-            version: 1,
-        }),
+        Encrypted::SteVec(ste_vec) => {
+            let ciphertext = ste_vec.root_ciphertext()?.clone();
+
+            let ste_vec_index: Vec<EqlEncryptedBody> = ste_vec
+                .into_iter()
+                .map(
+                    |EncryptedEntry {
+                         tokenized_selector,
+                         term,
+                         record,
+                         parent_is_array,
+                     }| {
+                        let indexes = match term {
+                            EncryptedSteVecTerm::Mac(bytes) => EqlEncryptedIndexes {
+                                selector: Some(hex::encode(tokenized_selector.as_bytes())),
+                                blake3_index: Some(hex::encode(bytes)),
+                                ..Default::default()
+                            },
+                            EncryptedSteVecTerm::OreFixed(ore) => EqlEncryptedIndexes {
+                                selector: Some(hex::encode(tokenized_selector.as_bytes())),
+                                ore_cclw_fixed_index: Some(hex::encode(&ore)),
+                                ..Default::default()
+                            },
+                            EncryptedSteVecTerm::OreVariable(ore) => EqlEncryptedIndexes {
+                                selector: Some(hex::encode(tokenized_selector.as_bytes())),
+                                ore_cclw_var_index: Some(hex::encode(&ore)),
+                                ..Default::default()
+                            },
+                        };
+
+                        eql::EqlEncryptedBody {
+                            ciphertext: record,
+                            indexes,
+                            is_array_item: Some(parent_is_array),
+                        }
+                    },
+                )
+                .collect();
+
+            // FIXME: I'm unsure if I've handled the root ciphertext correctly
+            // The way it's implemented right now is that it will be repeated one in the ste_vec_index.
+            Ok(eql::EqlEncrypted {
+                identifier: identifier.to_owned(),
+                version: 1,
+                body: EqlEncryptedBody {
+                    ciphertext: ciphertext.clone(),
+                    indexes: EqlEncryptedIndexes {
+                        match_index: None,
+                        ore_index: None,
+                        unique_index: None,
+                        blake3_index: None,
+                        ore_cclw_fixed_index: None,
+                        ore_cclw_var_index: None,
+                        selector: None,
+                        ste_vec_index: Some(ste_vec_index),
+                    },
+                    is_array_item: None,
+                },
+            })
+        }
     }
 }
 
@@ -312,15 +390,6 @@ fn format_index_term_ore_array(vec_of_bytes: &[Vec<u8>]) -> Vec<String> {
 ///
 fn format_index_term_ore(bytes: &Vec<u8>) -> Vec<String> {
     vec![format_index_term_ore_bytea(bytes)]
-}
-
-fn eql_encrypted_to_encrypted_record(
-    eql_encrypted: eql::Encrypted,
-) -> Result<EncryptedRecord, EncryptionError> {
-    match eql_encrypted {
-        eql::Encrypted::Ciphertext { ciphertext, .. } => Ok(ciphertext),
-        eql::Encrypted::SteVec { ste_vec_index, .. } => ste_vec_index.into_root_ciphertext(),
-    }
 }
 
 fn plaintext_type_name(pt: Plaintext) -> String {

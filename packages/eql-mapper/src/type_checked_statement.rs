@@ -4,10 +4,10 @@ use sqltk::parser::ast::{self, Statement};
 use sqltk::{AsNodeKey, NodeKey, Transformable};
 
 use crate::{
-    DryRunnable, EqlMapperError, EqlValue, FailOnPlaceholderChange, GroupByEqlCol, Param,
-    PreserveEffectiveAliases, Projection, ReplacePlaintextEqlLiterals, TransformationRule, Type,
-    UseEquivalentSqlFuncForEqlTypes, Value, WrapEqlColsInOrderByWithOreFn,
-    WrapGroupedEqlColInAggregateFn,
+    CastLiteralsAsEncrypted, CastParamsAsEncrypted, DryRunnable, EqlMapperError, EqlValue,
+    FailOnPlaceholderChange, GroupByEqlCol, Param, PreserveEffectiveAliases, Projection,
+    RewriteStandardSqlFnsOnEqlTypes, TransformationRule, Type, Value,
+    WrapEqlColsInOrderByWithOreFn, WrapGroupedEqlColInAggregateFn,
 };
 
 /// A `TypeCheckedStatement` is returned from a successful call to [`crate::type_check`].
@@ -113,17 +113,19 @@ impl<'ast> TypeCheckedStatement<'ast> {
         }
 
         for (key, _) in encrypted_literals.iter() {
-            if !self
-                .literals
-                .iter()
-                .any(|(_, node)| &node.as_node_key() == key)
-            {
+            if !self.literal_exists_for_node_key(*key) {
                 return Err(EqlMapperError::Transform(String::from(
                     "encrypted literals refers to a literal node which is not present in the SQL statement"
                 )));
             }
         }
         Ok(())
+    }
+
+    fn literal_exists_for_node_key(&self, key: NodeKey<'ast>) -> bool {
+        self.literals
+            .iter()
+            .any(|(_, node)| node.as_node_key() == key)
     }
 
     fn count_not_null_literals(&self) -> usize {
@@ -138,13 +140,14 @@ impl<'ast> TypeCheckedStatement<'ast> {
         encrypted_literals: HashMap<NodeKey<'ast>, sqltk::parser::ast::Value>,
     ) -> DryRunnable<impl TransformationRule<'_>> {
         DryRunnable::new((
+            RewriteStandardSqlFnsOnEqlTypes::new(Arc::clone(&self.node_types)),
             WrapGroupedEqlColInAggregateFn::new(Arc::clone(&self.node_types)),
             GroupByEqlCol::new(Arc::clone(&self.node_types)),
             WrapEqlColsInOrderByWithOreFn::new(Arc::clone(&self.node_types)),
             PreserveEffectiveAliases,
-            ReplacePlaintextEqlLiterals::new(encrypted_literals),
-            UseEquivalentSqlFuncForEqlTypes::new(Arc::clone(&self.node_types)),
+            CastLiteralsAsEncrypted::new(encrypted_literals),
             FailOnPlaceholderChange::new(),
+            CastParamsAsEncrypted::new(Arc::clone(&self.node_types)),
         ))
     }
 }

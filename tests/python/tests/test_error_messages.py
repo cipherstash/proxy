@@ -54,10 +54,7 @@ def test_encrypted_column_with_no_configuration():
 
                 sql = "INSERT INTO unconfigured (id, encrypted_unconfigured) VALUES (%s, %s)"
 
-                # This is EQL catching the error and returning it. Details are in docs/errors.md
-                # When mapping errors are enabled, (enable_mapping_errors or CS_DEVELOPMENT__ENABLE_MAPPING_ERRORS)
-                # Proxy will return an error that says "Column X in table Y has no Encrypt configuration"
-                with pytest.raises(psycopg.Error, match=r"Encrypted column missing \w+ \(\w+\) field"):
+                with pytest.raises(psycopg.Error, match=r"Column 'encrypted_unconfigured' in table 'unconfigured' has no Encrypt configuration."):
                     cursor.execute(sql, [id, val])
 
 

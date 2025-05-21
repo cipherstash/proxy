@@ -104,7 +104,7 @@ pub enum ConfigError {
     Certificate(#[from] rustls_pki_types::pem::Error),
 
     #[error(transparent)]
-    EncryptConfig(#[from] cipherstash_config::errors::ConfigError),
+    EncryptConfig(#[from] cipherstash_client::config::errors::ConfigError),
 
     #[error(transparent)]
     Database(#[from] tokio_postgres::Error),
@@ -202,8 +202,20 @@ pub enum EncryptError {
     #[error(transparent)]
     CiphertextCouldNotBeSerialised(#[from] serde_json::Error),
 
+    #[error("Encrypted column could not be parsed")]
+    ColumnCouldNotBeParsed,
+
+    #[error("Encrypted column is null")]
+    ColumnIsNull,
+
+    #[error("Column '{column}' in table '{table}' could not be deserialised. For help visit {}#encrypt-column-could-not-be-deserialised", ERROR_DOC_BASE_URL)]
+    ColumnCouldNotBeDeserialised { table: String, column: String },
+
     #[error("Column '{column}' in table '{table}' could not be encrypted. For help visit {}#encrypt-column-could-not-be-encrypted", ERROR_DOC_BASE_URL)]
     ColumnCouldNotBeEncrypted { table: String, column: String },
+
+    #[error("Column configuration for column '{column}' in table '{table}' does not match the encrypted column. For help visit {}#encrypt-column-config-mismatch", ERROR_DOC_BASE_URL)]
+    ColumnConfigurationMismatch { table: String, column: String },
 
     /// This should in practice be unreachable
     #[error("Missing encrypt configuration for column type `{plaintext_type}`. For help visit {}#encrypt-missing-encrypt-configuration", ERROR_DOC_BASE_URL)]
@@ -281,12 +293,6 @@ pub enum ProtocolError {
 
 impl From<config::ConfigError> for Error {
     fn from(e: config::ConfigError) -> Self {
-        Error::Config(e.into())
-    }
-}
-
-impl From<cipherstash_config::errors::ConfigError> for Error {
-    fn from(e: cipherstash_config::errors::ConfigError) -> Self {
         Error::Config(e.into())
     }
 }

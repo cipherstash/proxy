@@ -30,7 +30,7 @@ pub async fn with_tls(stream: AsyncStream, config: &TandemConfig) -> Result<Asyn
             match server_supports_ssl {
                 true => {
                     let tls_stream = tls::client(tcp_stream, config).await?;
-                    Ok(AsyncStream::Tls(tls_stream))
+                    Ok(AsyncStream::Tls(Box::new(tls_stream)))
                 }
                 false => {
                     warn!(msg = "Connecting to database without Transport Layer Security (TLS)");

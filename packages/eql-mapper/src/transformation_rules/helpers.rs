@@ -1,8 +1,8 @@
 use std::{collections::HashMap, convert::Infallible, ops::ControlFlow};
 
 use sqltk::parser::ast::{
-    Expr, Function, FunctionArg, FunctionArgExpr, FunctionArgumentList, FunctionArguments,
-    GroupByExpr, ObjectName,
+    CastKind, DataType, Expr, Function, FunctionArg, FunctionArgExpr, FunctionArgumentList,
+    FunctionArguments, GroupByExpr, Ident, ObjectName,
 };
 use sqltk::{AsNodeKey, Break, NodeKey, Visitable, Visitor};
 
@@ -23,7 +23,7 @@ pub(crate) fn is_used_in_group_by_clause<'ast, N: AsNodeKey>(
                     ty: needle,
                     found: false,
                 };
-                exprs.accept(&mut visitor);
+                let _ = exprs.accept(&mut visitor);
                 visitor.found
             }
         },
@@ -46,6 +46,24 @@ pub(crate) fn wrap_in_1_arg_function(expr: Expr, name: ObjectName) -> Expr {
         within_group: vec![],
         uses_odbc_syntax: false,
     })
+}
+
+pub(crate) fn cast_as_encrypted(wrapped: sqltk::parser::ast::Value) -> Expr {
+    let cast_jsonb = Expr::Cast {
+        kind: CastKind::DoubleColon,
+        expr: Box::new(Expr::Value(wrapped)),
+        data_type: DataType::JSONB,
+        format: None,
+    };
+
+    let encrypted_type = ObjectName(vec![Ident::new("eql_v2_encrypted")]);
+
+    Expr::Cast {
+        kind: CastKind::DoubleColon,
+        expr: Box::new(cast_jsonb),
+        data_type: DataType::Custom(encrypted_type, vec![]),
+        format: None,
+    }
 }
 
 struct ContainsExprWithType<'ast, 't> {

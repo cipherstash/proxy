@@ -7,7 +7,7 @@ use crate::{
     log::ENCRYPT_CONFIG,
 };
 use arc_swap::ArcSwap;
-use cipherstash_config::ColumnConfig;
+use cipherstash_client::schema::ColumnConfig;
 use serde_json::Value;
 use std::{collections::HashMap, sync::Arc, time::Duration};
 use tokio::{task::JoinHandle, time};
@@ -195,8 +195,7 @@ pub async fn load_encrypt_config(config: &DatabaseConfig) -> Result<EncryptConfi
         }
     }
 }
-
 fn configuration_table_not_found(e: &tokio_postgres::Error) -> bool {
     let msg = e.to_string();
-    msg.contains("cs_configuration_v1") && msg.contains("does not exist")
+    msg.contains("eql_v2_configuration") && msg.contains("does not exist")
 }
