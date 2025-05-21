@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1747837153500,
+  "lastUpdate": 1747837782143,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -1621,6 +1621,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 7.06627,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "lindsay@cipherstash.com",
+            "name": "Lindsay Holmwood",
+            "username": "auxesis"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "3f9bcd230320c294f05c0a066b34c2d9e9a245b0",
+          "message": "Merge pull request #234 from cipherstash/feat/multi-platform-docker-images\n\nfeat(docker): add builds for multi-platform docker images",
+          "timestamp": "2025-05-22T00:25:49+10:00",
+          "tree_id": "1f163c6fd050e4ae22516d82449f8c17633ccd48",
+          "url": "https://github.com/cipherstash/proxy/commit/3f9bcd230320c294f05c0a066b34c2d9e9a245b0"
+        },
+        "date": 1747837780997,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 7.123637,
             "unit": "Number"
           }
         ]
