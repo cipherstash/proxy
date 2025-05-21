@@ -20,7 +20,7 @@ use super::{
 /// SELECT eql_col FROM some_table GROUP BY eql_col;
 ///
 /// -- after mapping
-/// SELECT eql_v1.grouped_value(eql_col) AS eql_col FROM some_table GROUP BY eql_v1.ore_64_8_v1(eql_col);
+/// SELECT eql_v2.grouped_value(eql_col) AS eql_col FROM some_table GROUP BY eql_v2.ore_64_8_v2(eql_col);
 /// --     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^     ^^^^^^^                          ^^^^^^^^^^^^^^^^^^^^^^^
 /// --                 ^                       ^                                      ^
 /// --                 |                       |                                      |
@@ -50,7 +50,7 @@ impl<'ast> TransformationRule<'ast> for WrapGroupedEqlColInAggregateFn<'ast> {
                 let target_node: &mut Expr = target_node.downcast_mut().unwrap();
                 *target_node = wrap_in_1_arg_function(
                     expr.clone(),
-                    ObjectName(vec![Ident::new("eql_v1"), Ident::new("cs_grouped_value")]),
+                    ObjectName(vec![Ident::new("eql_v2"), Ident::new("grouped_value")]),
                 );
 
                 return Ok(true);

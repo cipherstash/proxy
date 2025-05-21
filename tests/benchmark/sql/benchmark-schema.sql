@@ -1,4 +1,4 @@
-TRUNCATE TABLE public.eql_v1_configuration;
+TRUNCATE TABLE public.eql_v2_configuration;
 
 DROP TABLE IF EXISTS benchmark_plaintext;
 CREATE TABLE benchmark_plaintext (
@@ -11,14 +11,14 @@ DROP TABLE IF EXISTS benchmark_encrypted;
 CREATE TABLE benchmark_encrypted (
     id serial primary key,
     username text,
-    email eql_v1_encrypted
+    email eql_v2_encrypted
 );
 
-SELECT eql_v1.add_column(
+SELECT eql_v2.add_column(
   'benchmark_encrypted',
   'email'
 );
 
-SELECT eql_v1.encrypt();
-SELECT eql_v1.activate();
+SELECT eql_v2.encrypt();
+SELECT eql_v2.activate();
 

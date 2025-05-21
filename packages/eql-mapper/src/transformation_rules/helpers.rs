@@ -56,7 +56,7 @@ pub(crate) fn cast_as_encrypted(wrapped: sqltk::parser::ast::Value) -> Expr {
         format: None,
     };
 
-    let encrypted_type = ObjectName(vec![Ident::new("eql_v1_encrypted")]);
+    let encrypted_type = ObjectName(vec![Ident::new("eql_v2_encrypted")]);
 
     Expr::Cast {
         kind: CastKind::DoubleColon,

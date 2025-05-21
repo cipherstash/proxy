@@ -1026,7 +1026,7 @@ mod test {
         )])) {
             Ok(transformed_statement) => assert_eq!(
                 transformed_statement.to_string(),
-                "SELECT * FROM employees WHERE salary > 'ENCRYPTED'::JSONB::eql_v1_encrypted"
+                "SELECT * FROM employees WHERE salary > 'ENCRYPTED'::JSONB::eql_v2_encrypted"
             ),
             Err(err) => panic!("statement transformation failed: {}", err),
         };
@@ -1073,7 +1073,7 @@ mod test {
         )])) {
             Ok(transformed_statement) => assert_eq!(
                 transformed_statement.to_string(),
-                "INSERT INTO employees (salary) VALUES ('ENCRYPTED'::JSONB::eql_v1_encrypted)"
+                "INSERT INTO employees (salary) VALUES ('ENCRYPTED'::JSONB::eql_v2_encrypted)"
             ),
             Err(err) => panic!("statement transformation failed: {}", err),
         };
@@ -1352,7 +1352,7 @@ mod test {
                 match typed.transform(HashMap::new()) {
                     Ok(statement) => assert_eq!(
                         statement.to_string(),
-                        "SELECT eql_v1.cs_grouped_value(email) AS email FROM users GROUP BY eql_v1.ore_64_8_v1(email)".to_string()
+                        "SELECT eql_v2.grouped_value(email) AS email FROM users GROUP BY eql_v2.ore_64_8_v2(email)".to_string()
                     ),
                     Err(err) => panic!("transformation failed: {err}"),
                 }
@@ -1382,7 +1382,7 @@ mod test {
                 match typed.transform(HashMap::new()) {
                     Ok(statement) => assert_eq!(
                         statement.to_string(),
-                        "SELECT eql_v1.min(salary), eql_v1.max(salary), department FROM employees GROUP BY department".to_string()
+                        "SELECT eql_v2.min(salary), eql_v2.max(salary), department FROM employees GROUP BY department".to_string()
                     ),
                     Err(err) => panic!("transformation failed: {err}"),
                 }
@@ -1415,7 +1415,7 @@ mod test {
                 Ok(statement) => {
                     assert_eq!(
                             statement.to_string(),
-                            "SELECT * FROM employees WHERE eql_col = $1::JSONB::eql_v1_encrypted AND native_col = $2"
+                            "SELECT * FROM employees WHERE eql_col = $1::JSONB::eql_v2_encrypted AND native_col = $2"
                         );
                 }
                 Err(err) => panic!("transformation failed: {err}"),
@@ -1450,7 +1450,7 @@ mod test {
                     Ok(statement) => {
                         assert_eq!(
                             statement.to_string(),
-                            "SELECT eql_v1.jsonb_path_query(eql_col, '<encrypted-selector($.secret)>'::JSONB::eql_v1_encrypted), jsonb_path_query(native_col, '$.not-secret') FROM employees"
+                            "SELECT eql_v2.jsonb_path_query(eql_col, '<encrypted-selector($.secret)>'::JSONB::eql_v2_encrypted), jsonb_path_query(native_col, '$.not-secret') FROM employees"
                         );
                     }
                     Err(err) => panic!("transformation failed: {err}"),
@@ -1567,7 +1567,7 @@ mod test {
             .map(|expr| match expr {
                 ast::Expr::Identifier(ident) => ident.to_string(),
                 ast::Expr::Value(ast::Value::SingleQuotedString(s)) => {
-                    format!("'<encrypted-selector({})>'::JSONB::eql_v1_encrypted", s)
+                    format!("'<encrypted-selector({})>'::JSONB::eql_v2_encrypted", s)
                 }
                 _ => panic!("unsupported expr type in test util"),
             })
@@ -1588,7 +1588,7 @@ mod test {
         match type_check(schema, &statement) {
             Ok(typed) => match typed.transform(encrypted_literals) {
                 Ok(statement) => {
-                    let rewritten_fn_name = format!("eql_v1.{fn_name}");
+                    let rewritten_fn_name = format!("eql_v2.{fn_name}");
                     assert_eq!(
                         statement.to_string(),
                         format!(
@@ -1623,7 +1623,7 @@ mod test {
                 match typed.transform(test_helpers::dummy_encrypted_json_selector(&statement, ast::Value::SingleQuotedString("medications".to_owned()))) {
                     Ok(statement) => assert_eq!(
                         statement.to_string(),
-                        format!("SELECT id, notes {} '<encrypted-selector(medications)>'::JSONB::eql_v1_encrypted AS meds FROM patients", op)
+                        format!("SELECT id, notes {} '<encrypted-selector(medications)>'::JSONB::eql_v2_encrypted AS meds FROM patients", op)
                     ),
                     Err(err) => panic!("transformation failed: {err}"),
                 }

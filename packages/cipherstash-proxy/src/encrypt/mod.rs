@@ -58,7 +58,7 @@ impl Encrypt {
         let eql_version = {
             let client = connect::database(&config.database).await?;
             let rows = client
-                .query("SELECT eql_v1.version() AS version;", &[])
+                .query("SELECT eql_v2.version() AS version;", &[])
                 .await;
 
             match rows {

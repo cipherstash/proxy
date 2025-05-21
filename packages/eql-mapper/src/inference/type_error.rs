@@ -31,8 +31,6 @@ pub enum TypeError {
     #[error("{}", _0)]
     SchemaError(#[from] SchemaError),
 
-    // #[error("Cannot unify node types for nodes:\n 1. node: {} type: {}\n 2. node: {} type: {}\n error: {}", _1, _2, _3, _4, _0)]
-    // OnNodes(Box<TypeError>, String, Arc<Type>, String, Arc<Type>),
     #[error(
         "Cannot unify node types for nodes:\n 1. node: {} type: {}\n 2. node: {} type: {}\n error: {}",
         _0,
