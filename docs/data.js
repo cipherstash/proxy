@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1747806277864,
+  "lastUpdate": 1747811152928,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -1467,6 +1467,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 7.134254,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "toby@cipherstash.com",
+            "name": "Toby Hede",
+            "username": "tobyhede"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "f1417c7f018906d584cd11753a17f28a85d73ece",
+          "message": "Merge pull request #222 from cipherstash/feat/proxy-eql-v2-integration\n\nIntegration branch for Proxy + EQL V2",
+          "timestamp": "2025-05-21T17:01:43+10:00",
+          "tree_id": "89925b8911034a0e1faefad34cca073677883dc4",
+          "url": "https://github.com/cipherstash/proxy/commit/f1417c7f018906d584cd11753a17f28a85d73ece"
+        },
+        "date": 1747811151884,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 7.123375,
             "unit": "Number"
           }
         ]
