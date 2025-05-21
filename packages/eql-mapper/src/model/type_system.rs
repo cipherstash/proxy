@@ -5,7 +5,7 @@
 //! `eql_mapper`'s internal representation of the type system contains additional implementation details which would not
 //! be pleasant for public consumption.
 
-use crate::unifier::{EqlValue, NativeValue};
+use crate::unifier::{EqlTerm, NativeValue};
 use derive_more::Display;
 use sqltk::parser::ast::Ident;
 
@@ -31,7 +31,7 @@ pub enum Value {
     /// An encrypted column never shares a type with another encrypted column - which is why it is sufficient to
     /// identify the type by its table & column names.
     #[display("{}", _0)]
-    Eql(EqlValue),
+    Eql(EqlTerm),
 
     /// A native database type.
     #[display("{}", _0)]
@@ -53,6 +53,25 @@ pub enum Projection {
     Empty,
 }
 
+impl Type {
+    pub fn contains_eql(&self) -> bool {
+        match self {
+            Type::Value(value) => value.contains_eql(),
+            Type::Projection(projection) => projection.contains_eql(),
+        }
+    }
+}
+
+impl Value {
+    pub fn contains_eql(&self) -> bool {
+        match self {
+            Value::Eql(_) => true,
+            Value::Native(_) => false,
+            Value::Array(inner) => inner.contains_eql(),
+        }
+    }
+}
+
 impl Projection {
     pub fn new(columns: Vec<ProjectionColumn>) -> Self {
         if columns.is_empty() {
@@ -66,6 +85,13 @@ impl Projection {
         match self {
             Projection::WithColumns(cols) => cols.get(index).map(|col| &col.ty),
             Projection::Empty => None,
+        }
+    }
+
+    pub fn contains_eql(&self) -> bool {
+        match self {
+            Projection::WithColumns(cols) => cols.iter().any(|col| col.ty.contains_eql()),
+            Projection::Empty => false,
         }
     }
 }

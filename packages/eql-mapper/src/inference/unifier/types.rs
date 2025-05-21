@@ -3,9 +3,9 @@ use std::{any::type_name, ops::Index, sync::Arc};
 use derive_more::Display;
 use sqltk::parser::ast::Ident;
 
-use crate::{ColumnKind, Table, TypeError};
+use crate::{EqlTraitImpls, ColumnKind, Table, TypeError};
 
-use super::Unifier;
+use super::{Bounds, Unifier};
 
 /// The type of an expression in a SQL statement or the type of a table column from the database schema.
 ///
@@ -15,7 +15,7 @@ use super::Unifier;
 /// - a [`sqltk::parser::ast::Statement`] or any other SQL AST node that produces a projection.
 ///
 /// A `Type` is either a [`Constructor`] (fully or partially known type) or a [`TypeVar`] (a placeholder for an unknown type).
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Display, Hash)]
+#[derive(Debug, PartialEq, PartialOrd, Ord, Eq, Clone, Display, Hash)]
 #[display("{self}")]
 pub enum Type {
     /// A specific type constructor with zero or more generic parameters.
@@ -24,8 +24,15 @@ pub enum Type {
 
     /// A type variable representing a placeholder for an unknown type.
     #[display("{}", _0)]
-    Var(TypeVar),
+    Var(Var),
 }
+
+#[derive(Debug, PartialEq, PartialOrd, Ord, Eq, Clone, Display, Hash)]
+#[display("{}: {}", _0, _1)]
+pub struct Var(
+    pub TypeVar,
+    pub Bounds
+);
 
 const _: () = {
     fn assert_send<T: Send>() {}
@@ -36,6 +43,8 @@ const _: () = {
         assert_sync::<Type>();
     }
 };
+
+
 
 /// A `Constructor` is what is known about a [`Type`].
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Display, Hash)]
@@ -53,7 +62,7 @@ impl Constructor {
     fn resolve(&self, unifier: &mut Unifier<'_>) -> Result<crate::Type, TypeError> {
         match self {
             Constructor::Value(value) => match value {
-                Value::Eql(eql_col) => Ok(crate::Type::Value(crate::Value::Eql(eql_col.clone()))),
+                Value::Eql(eql_term) => Ok(crate::Type::Value(crate::Value::Eql(eql_term.clone()))),
                 Value::Native(NativeValue(Some(native_col))) => Ok(crate::Type::Value(
                     crate::Value::Native(NativeValue(Some(native_col.clone()))),
                 )),
@@ -113,7 +122,7 @@ impl Projection {
                             Err(TypeError::InternalError("projection type as projection column; projections should be flattened during final resolution".to_string()))
                         }
                     },
-                    Type::Var(tvar) => {
+                    Type::Var(Var(tvar, _)) => {
                         let ty = unifier.get_type(*tvar).ok_or(
                             TypeError::InternalError(format!("could not resolve type variable '{}'", tvar)))?;
                         if let Type::Constructor(Constructor::Projection(projection)) = &*ty {
@@ -140,6 +149,7 @@ impl Projection {
             Ok(crate::Projection::WithColumns(resolved_cols))
         }
     }
+
 }
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Display, Hash)]
@@ -149,7 +159,7 @@ pub enum Value {
     /// An encrypted column never shares a type with another encrypted column - which is why it is sufficient to
     /// identify the type by its table & column names.
     #[display("{}", _0)]
-    Eql(EqlValue),
+    Eql(EqlTerm),
 
     /// A native database type that carries its table & column name.  `NativeValue(None)` & `NativeValue(Some(_))` are
     /// will successfully unify with each other - they are the same type as far as the type system is concerned.
@@ -162,6 +172,40 @@ pub enum Value {
     Array(Arc<Type>),
 }
 
+/// An `EqlTerm` is a type associated with a particular EQL type, i.e. an [`EqlValue`].
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Display, Hash)]
+pub enum EqlTerm {
+    /// This type represents the entire EQL payload (ciphertext + all encrypted search terms).  It us suitable both for
+    /// `INSERT`ing new records and for querying against.
+    ///
+    /// A `Whole` type can always successfully unified with a `Partial` type when they have the same underlying EQL column.
+    #[display("EQL:Whole({})", _0)]
+    Whole(EqlValue),
+
+    /// This type represents a an EQL payload with exactly the encrypted search terms required in order to satisy its
+    /// [`Bounds`].
+    ///
+    /// A `Partial` type can become a `Whole` type during unification.
+    #[display("EQL:Partial({} where {}))", _0, _1)]
+    Partial(EqlValue, Bounds),
+
+    /// This type represents a an EQL payload with exactly the encrypted search terms required in order to satisy its
+    /// [`Bounds`].
+    ///
+    /// It *cannot* be unified with `Whole` or `Partial` because it is used in situations where the whole payload would
+    /// not be representable in SQL.
+    ///
+    /// For example, imagine `patients.medications` is an EQL JSONB column and `'sensitive_medication'` would be converted
+    /// to an encrypted selector. That selector would be of type `EqlTerm::FixedPartial`. It would be impossible to replace
+    /// the selector with the whole of the `patients.medications` JSONB payload at that syntax location.
+    ///
+    /// ```sql
+    /// SELECT patients.medications -> 'sensitive_medication' FROM patients;
+    /// ``
+    #[display("EQL:FixedPartial({} where {}))", _0, _1)]
+    FixedPartial(EqlValue, Bounds),
+}
+
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Display, Hash)]
 #[display("{}.{}", table, column)]
 pub struct TableColumn {
@@ -171,7 +215,7 @@ pub struct TableColumn {
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Display, Hash)]
 #[display("EQL({})", _0)]
-pub struct EqlValue(pub TableColumn);
+pub struct EqlValue(pub TableColumn, pub EqlTraitImpls);
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Display, Hash)]
 #[display("NATIVE{}", _0.as_ref().map(|tc| format!("({})", tc)).unwrap_or(String::from("")))]
@@ -195,18 +239,18 @@ pub struct TypeVar(pub usize);
 
 impl From<TypeVar> for Type {
     fn from(tvar: TypeVar) -> Self {
-        Type::Var(tvar)
+        Type::Var(Var(tvar, Bounds::none()))
     }
 }
 
 impl Type {
     /// Creates a `Type` containing an empty projection
-    pub(crate) fn empty_projection() -> Type {
+    pub(crate) const fn empty_projection() -> Type {
         Type::Constructor(Constructor::Projection(Projection::Empty))
     }
 
     /// Creates a `Type` containing a `Constructor::Scalar(Scalar::Native(NativeValue(None)))`.
-    pub(crate) fn any_native() -> Type {
+    pub(crate) const fn native() -> Type {
         Type::Constructor(Constructor::Value(Value::Native(NativeValue(None))))
     }
 
@@ -259,7 +303,7 @@ impl Type {
                     ))))
                 }
                 Type::Constructor(Constructor::Value(_)) => return current_ty,
-                Type::Var(tvar) => {
+                Type::Var(Var(tvar, _)) => {
                     if let Some(ty) = unifier.get_type(*tvar) {
                         current_ty = ty.follow_tvars(unifier);
                     } else {
@@ -278,7 +322,7 @@ impl Type {
     pub fn resolved(&self, unifier: &mut Unifier<'_>) -> Result<crate::Type, TypeError> {
         match self {
             Type::Constructor(constructor) => constructor.resolve(unifier),
-            Type::Var(type_var) => {
+            Type::Var(Var(type_var, _)) => {
                 if let Some(sub_ty) = unifier.get_type(*type_var) {
                     return sub_ty.resolved(unifier);
                 }
@@ -321,6 +365,16 @@ impl Type {
                 type_name::<T>()
             ))
         })
+    }
+}
+
+impl EqlValue {
+    pub fn table_column(&self) -> &TableColumn {
+        &self.0
+    }
+
+    pub fn trait_impls(&self) -> &EqlTraitImpls {
+        &self.1
     }
 }
 
@@ -442,15 +496,107 @@ impl ProjectionColumns {
                         column: col.name.clone(),
                     };
 
-                    let value_ty = if col.kind == ColumnKind::Native {
-                        Type::Constructor(Constructor::Value(Value::Native(NativeValue(Some(tc)))))
-                    } else {
-                        Type::Constructor(Constructor::Value(Value::Eql(EqlValue(tc))))
+                    let value_ty = match &col.kind {
+                        ColumnKind::Native => Type::Constructor(Constructor::Value(Value::Native(
+                            NativeValue(Some(tc)),
+                        ))),
+                        ColumnKind::Eql(features) => Type::Constructor(Constructor::Value(
+                            Value::Eql(EqlTerm::Whole(EqlValue(tc, *features))),
+                        )),
                     };
 
                     ProjectionColumn::new(value_ty, Some(col.name.clone()))
                 })
                 .collect(),
         )
+    }
+}
+
+// impl From<Constructor> for Arc<Type> {
+//     fn from(constructor: Constructor) -> Self {
+//         Arc::new(Type::from(constructor))
+//     }
+// }
+
+// impl From<Value> for Arc<Type> {
+//     fn from(value: Value) -> Self {
+//         Arc::new(Type::from(value))
+//     }
+// }
+
+// impl From<EqlTerm> for Arc<Type> {
+//     fn from(eql_term: EqlTerm) -> Self {
+//         Arc::new(Type::from(eql_term))
+//     }
+// }
+
+// impl From<Var> for Arc<Type> {
+//     fn from(var: Var) -> Self {
+//         Arc::new(Type::from(var))
+//     }
+// }
+
+// impl From<Projection> for Arc<Type> {
+//     fn from(projection: Projection) -> Self {
+//         Arc::new(Type::from(projection))
+//     }
+// }
+
+// impl From<NativeValue> for Arc<Type> {
+//     fn from(native: NativeValue) -> Self {
+//         Arc::new(Type::from(native))
+//     }
+// }
+
+macro_rules! impl_from_for_arc_type {
+    ($ty:ty) => {
+        impl From<$ty> for Arc<Type> {
+            fn from(value: $ty) -> Self {
+                Arc::new(Type::from(value))
+            }
+        }
+    };
+}
+
+impl_from_for_arc_type!(NativeValue);
+impl_from_for_arc_type!(Projection);
+impl_from_for_arc_type!(Var);
+impl_from_for_arc_type!(EqlTerm);
+impl_from_for_arc_type!(Constructor);
+impl_from_for_arc_type!(Value);
+
+impl From<Constructor> for Type {
+    fn from(constructor: Constructor) -> Self {
+        Type::Constructor(constructor)
+    }
+}
+
+impl From<Value> for Type {
+    fn from(value: Value) -> Self {
+        Type::Constructor(Constructor::Value(value))
+    }
+}
+
+impl From<EqlTerm> for Type {
+    fn from(eql_term: EqlTerm) -> Self {
+        Type::Constructor(Constructor::Value(Value::Eql(eql_term)))
+    }
+}
+
+impl From<Var> for Type {
+    fn from(var: Var) -> Self {
+        Type::Var(var)
+    }
+}
+
+impl From<Projection> for Type {
+    fn from(projection: Projection) -> Self {
+        Type::Constructor(Constructor::Projection(projection))
+    }
+}
+
+impl From<NativeValue> for Type {
+    fn from(native: NativeValue) -> Self {
+        Type::Constructor(Constructor::Value(Value::Native(native)))
     }
 }

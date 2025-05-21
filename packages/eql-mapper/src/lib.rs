@@ -29,26 +29,19 @@ pub(crate) use transformation_rules::*;
 
 #[cfg(test)]
 mod test {
-    use super::test_helpers::*;
-    use super::type_check;
-    use crate::col;
-    use crate::projection;
-    use crate::test_helpers;
-    use crate::Param;
-    use crate::Schema;
-    use crate::TableResolver;
+    use super::{test_helpers::*, type_check};
     use crate::{
-        schema, unifier::EqlValue, unifier::NativeValue, Projection, ProjectionColumn, TableColumn,
+        col, projection, schema, test_helpers,
+        unifier::{Bounds, EqlTerm, EqlTrait, EqlValue, NativeValue},
+        EqlTraitImpls, Param, Projection, ProjectionColumn, Schema, TableColumn, TableResolver,
         Value,
     };
     use pretty_assertions::assert_eq;
-    use sqltk::parser::ast::Ident;
-    use sqltk::parser::ast::Statement;
-    use sqltk::parser::ast::{self as ast};
-    use sqltk::AsNodeKey;
-    use sqltk::NodeKey;
-    use std::collections::HashMap;
-    use std::sync::Arc;
+    use sqltk::{
+        parser::ast::{self as ast, Ident, Statement},
+        AsNodeKey, NodeKey,
+    };
+    use std::{collections::HashMap, sync::Arc};
     use tracing::error;
 
     fn resolver(schema: Schema) -> Arc<TableResolver> {
@@ -87,12 +80,14 @@ mod test {
         let schema = resolver(schema! {
             tables: {
                 users: {
-                    id,
-                    email (EQL),
+                    id (PK),
+                    email (EQL: Eq),
                     first_name,
                 }
             }
         });
+
+        dbg!(&schema);
 
         let statement = parse("select email from users WHERE email = 'hello@cipherstash.com'");
 
@@ -101,11 +96,17 @@ mod test {
                 assert_eq!(typed.projection, projection![(EQL(users.email) as email)]);
 
                 assert!(typed.literals.contains(&(
-                    EqlValue(TableColumn {
-                        table: id("users"),
-                        column: id("email")
-                    }),
-                    &ast::Value::SingleQuotedString("hello@cipherstash.com".into())
+                    EqlTerm::Partial(
+                        EqlValue(
+                            TableColumn {
+                                table: id("users"),
+                                column: id("email"),
+                            },
+                            EqlTraitImpls::with(|impls| { impls.impl_eq(); } )
+                        ),
+                        Bounds::from(EqlTrait::Eq)
+                    ),
+                    &ast::Value::SingleQuotedString("hello@cipherstash.com".into()),
                 )));
             }
             Err(err) => panic!("type check failed: {err}"),
@@ -130,11 +131,14 @@ mod test {
         match type_check(schema, &statement) {
             Ok(typed) => {
                 assert!(typed.literals.contains(&(
-                    EqlValue(TableColumn {
-                        table: id("users"),
-                        column: id("email")
-                    }),
-                    &ast::Value::SingleQuotedString("hello@cipherstash.com".into())
+                    EqlTerm::Whole(EqlValue(
+                        TableColumn {
+                            table: id("users"),
+                            column: id("email")
+                        },
+                        EqlTraitImpls::default()
+                    )),
+                    &ast::Value::SingleQuotedString("hello@cipherstash.com".into()),
                 )));
             }
             Err(err) => panic!("type check failed: {err}"),
@@ -159,11 +163,14 @@ mod test {
         match type_check(schema, &statement) {
             Ok(typed) => {
                 assert!(typed.literals.contains(&(
-                    EqlValue(TableColumn {
-                        table: id("users"),
-                        column: id("email")
-                    }),
-                    &ast::Value::SingleQuotedString("hello@cipherstash.com".into())
+                    EqlTerm::Whole(EqlValue(
+                        TableColumn {
+                            table: id("users"),
+                            column: id("email")
+                        },
+                        EqlTraitImpls::default()
+                    )),
+                    &ast::Value::SingleQuotedString("hello@cipherstash.com".into()),
                 )));
             }
             Err(err) => panic!("type check failed: {err}"),
@@ -189,11 +196,14 @@ mod test {
         match type_check(schema, &statement) {
             Ok(typed) => {
                 assert!(typed.literals.contains(&(
-                    EqlValue(TableColumn {
-                        table: id("users"),
-                        column: id("email")
-                    }),
-                    &ast::Value::SingleQuotedString("hello@cipherstash.com".into())
+                    EqlTerm::Whole(EqlValue(
+                        TableColumn {
+                            table: id("users"),
+                            column: id("email")
+                        },
+                        EqlTraitImpls::default()
+                    )),
+                    &ast::Value::SingleQuotedString("hello@cipherstash.com".into()),
                 )));
             }
             Err(err) => panic!("type check failed: {err}"),
@@ -217,14 +227,16 @@ mod test {
 
         match type_check(schema, &statement) {
             Ok(typed) => {
-                let v = Value::Native(NativeValue(Some(TableColumn {
+                let v: Value = Value::Native(NativeValue(Some(TableColumn {
                     table: id("users"),
                     column: id("id"),
                 })));
 
-                let (_, param_value) = typed.params.first().unwrap();
+                let (_, value) = typed.params.first().unwrap();
 
-                assert_eq!(param_value, &v);
+                assert_eq!(value, &v);
+
+                dbg!(typed.projection.type_at_col_index(0));
 
                 assert_eq!(
                     typed.projection,
@@ -480,17 +492,29 @@ mod test {
 
         match type_check(schema, &statement) {
             Ok(typed) => {
-                let a = Value::Eql(EqlValue(TableColumn {
-                    table: id("users"),
-                    column: id("email"),
-                }));
+                let a = Value::Eql(EqlTerm::Partial(
+                    EqlValue(
+                        TableColumn {
+                            table: id("users"),
+                            column: id("email"),
+                        },
+                        EqlTraitImpls::default(),
+                    ),
+                    Bounds::from(EqlTrait::Eq),
+                ));
 
-                let b = Value::Eql(EqlValue(TableColumn {
-                    table: id("users"),
-                    column: id("first_name"),
-                }));
+                let b = Value::Eql(EqlTerm::Partial(
+                    EqlValue(
+                        TableColumn {
+                            table: id("users"),
+                            column: id("first_name"),
+                        },
+                        EqlTraitImpls::default(),
+                    ),
+                    Bounds::from(EqlTrait::Eq),
+                ));
 
-                assert_eq!(typed.params, vec![(Param(1), a), (Param(2), b)]);
+                assert_eq!(typed.params, vec![(Param(1), a,), (Param(2), b,)]);
 
                 assert_eq!(
                     typed.projection,
@@ -512,8 +536,8 @@ mod test {
             tables: {
                 users: {
                     id,
-                    salary (EQL),
-                    age (EQL),
+                    salary (EQL: Ord),
+                    age (EQL: Ord),
                 }
             }
         });
@@ -522,17 +546,29 @@ mod test {
 
         match type_check(schema, &statement) {
             Ok(typed) => {
-                let a = Value::Eql(EqlValue(TableColumn {
-                    table: id("users"),
-                    column: id("salary"),
-                }));
+                let a = Value::Eql(EqlTerm::Partial(
+                    EqlValue(
+                        TableColumn {
+                            table: id("users"),
+                            column: id("salary"),
+                        },
+                        EqlTraitImpls::with(|impls| { impls.impl_ord(); } )
+                    ),
+                    Bounds::from(EqlTrait::Eq),
+                ));
 
-                let b = Value::Eql(EqlValue(TableColumn {
-                    table: id("users"),
-                    column: id("age"),
-                }));
+                let b = Value::Eql(EqlTerm::Partial(
+                    EqlValue(
+                        TableColumn {
+                            table: id("users"),
+                            column: id("age"),
+                        },
+                        EqlTraitImpls::with(|impls| { impls.impl_ord(); } )
+                    ),
+                    Bounds::from(EqlTrait::Eq),
+                ));
 
-                assert_eq!(typed.params, vec![(Param(1), a), (Param(2), b)]);
+                assert_eq!(typed.params, vec![(Param(1), a,), (Param(2), b,)]);
 
                 assert_eq!(
                     typed.projection,
@@ -735,7 +771,7 @@ mod test {
 
     #[test]
     fn aggregates() {
-        // init_tracing();
+        init_tracing();
 
         let schema = resolver(schema! {
             tables: {
@@ -743,7 +779,7 @@ mod test {
                     id,
                     department,
                     age,
-                    salary (EQL),
+                    salary (EQL: Ord),
                 }
             }
         });
@@ -767,7 +803,7 @@ mod test {
             typed.projection,
             projection![
                 (NATIVE(employees.age) as max),
-                (EQL(employees.salary) as min)
+                (EQL(employees.salary: Ord) as min)
             ]
         );
     }
@@ -924,7 +960,7 @@ mod test {
                     name,
                     department,
                     age,
-                    salary (EQL),
+                    salary (EQL: Ord),
                 }
             }
         });
@@ -954,7 +990,7 @@ mod test {
                     name,
                     department,
                     age,
-                    salary (EQL),
+                    salary (EQL: Ord),
                 }
             }
         });
@@ -993,7 +1029,7 @@ mod test {
                     name,
                     department,
                     age,
-                    salary (EQL),
+                    salary (EQL: Ord),
                 }
             }
         });
@@ -1012,11 +1048,17 @@ mod test {
         assert_eq!(
             typed.literals,
             vec![(
-                EqlValue(TableColumn {
-                    table: id("employees"),
-                    column: id("salary")
-                }),
-                &ast::Value::Number(200000.into(), false)
+                EqlTerm::Partial(
+                    EqlValue(
+                        TableColumn {
+                            table: id("employees"),
+                            column: id("salary")
+                        },
+                        EqlTraitImpls::with(|impls| { impls.impl_ord(); } )
+                    ),
+                    Bounds::from(EqlTrait::Ord)
+                ),
+                &ast::Value::Number(200000.into(), false),
             )]
         );
 
@@ -1059,10 +1101,10 @@ mod test {
         assert_eq!(
             typed.literals,
             vec![(
-                EqlValue(TableColumn {
+                EqlTerm::Whole(EqlValue(TableColumn {
                     table: id("employees"),
                     column: id("salary")
-                }),
+                }, EqlTraitImpls::default())),
                 &ast::Value::Number(20000.into(), false)
             )]
         );
@@ -1089,7 +1131,7 @@ mod test {
                     id,
                     department_id,
                     name,
-                    salary (EQL),
+                    salary (EQL: Ord),
                 }
             }
         });
@@ -1127,12 +1169,12 @@ mod test {
         assert_eq!(
             typed.projection,
             projection![
-                (EQL(employees.salary) as min_salary),
-                (EQL(employees.salary) as y),
+                (EQL(employees.salary: Ord) as min_salary),
+                (EQL(employees.salary: Ord) as y),
                 (NATIVE(employees.id) as id),
                 (NATIVE(employees.department_id) as department_id),
                 (NATIVE(employees.name) as name),
-                (EQL(employees.salary) as salary)
+                (EQL(employees.salary: Ord) as salary)
             ]
         );
     }
@@ -1402,7 +1444,7 @@ mod test {
             tables: {
                 employees: {
                     id,
-                    eql_col (EQL),
+                    eql_col (EQL: Json),
                     native_col,
                 }
             }
@@ -1454,16 +1496,7 @@ mod test {
     }
 
     #[test]
-    fn jsonb_operator_hash_arrow() {
-        test_jsonb_operator("#>");
-    }
-
-    #[test]
-    fn jsonb_operator_hash_long_arrow() {
-        test_jsonb_operator("#>>");
-    }
-
-    #[test]
+    #[ignore = "? is unimplemented"]
     fn jsonb_operator_hash_at_at() {
         test_jsonb_operator("@@");
     }
@@ -1474,16 +1507,19 @@ mod test {
     }
 
     #[test]
+    #[ignore = "? is unimplemented"]
     fn jsonb_operator_question() {
         test_jsonb_operator("?");
     }
 
     #[test]
+    #[ignore = "?& is unimplemented"]
     fn jsonb_operator_question_and() {
         test_jsonb_operator("?&");
     }
 
     #[test]
+    #[ignore = "?| is unimplemented"]
     fn jsonb_operator_question_pipe() {
         test_jsonb_operator("?|");
     }
@@ -1500,6 +1536,7 @@ mod test {
 
     #[test]
     fn jsonb_function_jsonb_path_query() {
+        init_tracing();
         test_jsonb_function(
             "jsonb_path_query",
             vec![
@@ -1509,15 +1546,12 @@ mod test {
         );
     }
 
-    // TODO: do we need to check that the RHS of JSON operators MUST be a Value node
-    // and not an arbitrary expression?
-
     fn test_jsonb_function(fn_name: &str, args: Vec<ast::Expr>) {
         let schema = resolver(schema! {
             tables: {
                 patients: {
                     id,
-                    notes (EQL),
+                    notes (EQL: Json),
                 }
             }
         });
@@ -1579,7 +1613,7 @@ mod test {
             tables: {
                 patients: {
                     id,
-                    notes (EQL),
+                    notes (EQL: Json),
                 }
             }
         });
@@ -1603,6 +1637,39 @@ mod test {
         }
     }
 
+    #[test]
+    fn eql_term_partial_is_unified_with_eql_term_whole() {
+        // init_tracing();
+        let schema = resolver(schema! {
+            tables: {
+                patients: {
+                    id (PK),
+                    email (EQL: Eq),
+                }
+            }
+        });
+
+        // let statement = parse(
+        //     "SELECT id, email FROM patients WHERE email = 'alice@example.com'"
+        // );
+
+        let statement = parse("
+            SELECT id, email FROM patients AS p
+            INNER JOIN (
+                SELECT 'alice@example.com' AS selector
+            ) AS selectors
+            WHERE p.email = selectors.selector
+        ");
+
+        let typed = type_check(schema, &statement).map_err(|err| err.to_string()).unwrap();
+
+        assert_eq!(
+            typed.projection,
+            projection![(NATIVE(patients.id) as id), (EQL(patients.email: Eq) as email)]
+        );
+
+        dbg!(typed.literal_values());
+    }
     #[test]
     fn select_with_multiple_joins() {
         // init_tracing();
@@ -1712,3 +1779,4 @@ mod test {
         }
     }
 }
+

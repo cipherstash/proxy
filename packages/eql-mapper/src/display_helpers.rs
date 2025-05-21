@@ -8,7 +8,7 @@ use sqltk::parser::ast::{
 };
 use sqltk::NodeKey;
 
-use crate::{EqlValue, Param, Type};
+use crate::{unifier::EqlTerm, Param, Type};
 
 #[derive(Debug, Clone, Copy, Hash, Eq, PartialEq)]
 pub struct Fmt<T>(pub(crate) T);
@@ -108,12 +108,12 @@ impl Display for Fmt<&Vec<(Param, crate::Value)>> {
     }
 }
 
-impl Display for Fmt<&Vec<(EqlValue, &sqltk::parser::ast::Value)>> {
+impl Display for Fmt<&Vec<(EqlTerm, &sqltk::parser::ast::Value)>> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let formatted = self
             .0
             .iter()
-            .map(|(e, n)| format!("{}: {}", n, e))
+            .map(|(e, n)| format!("{}: {}", e, n))
             .collect::<Vec<_>>()
             .join(", ");
         f.write_str(&formatted)

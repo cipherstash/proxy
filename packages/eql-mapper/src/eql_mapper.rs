@@ -1,9 +1,9 @@
 use super::importer::{ImportError, Importer};
 use crate::{
     inference::{TypeError, TypeInferencer},
-    unifier::{EqlValue, Unifier},
-    DepMut, Fmt, Param, ParamError, ScopeError, ScopeTracker, TableResolver, Type,
-    TypeCheckedStatement, TypeRegistry, Value,
+    unifier::{EqlTerm, Unifier},
+    DepMut, Param, ParamError, ScopeError, ScopeTracker, TableResolver, Type, TypeCheckedStatement,
+    TypeRegistry, Value,
 };
 use sqltk::parser::ast::{self as ast, Statement};
 use sqltk::{Break, NodeKey, Visitable, Visitor};
@@ -159,15 +159,15 @@ impl<'ast> EqlMapper<'ast> {
 
         match combine_results() {
             Ok((projection, params, literals, node_types)) => {
-                event!(
-                    target: "eql-mapper::EVENT_RESOLVE_OK",
-                    parent: &span_begin,
-                    Level::TRACE,
-                    projection = %&projection,
-                    params = %Fmt(&params),
-                    literals = %Fmt(&literals),
-                    node_types = %Fmt(&node_types)
-                );
+                // event!(
+                //     target: "eql-mapper::EVENT_RESOLVE_OK",
+                //     parent: &span_begin,
+                //     Level::TRACE,
+                //     projection = %&projection,
+                //     params = %Fmt(&params),
+                //     literals = %Fmt(&literals),
+                //     node_types = %Fmt(&node_types)
+                // );
 
                 Ok(TypeCheckedStatement {
                     statement,
@@ -222,7 +222,8 @@ impl<'ast> EqlMapper<'ast> {
             .into_iter()
             .map(|(p, ty)| -> Result<(Param, Value), EqlMapperError> {
                 match ty.resolved(&mut self.unifier.borrow_mut())? {
-                    Type::Value(value) => Ok((p, value)),
+                    Type::Value(value) if value.contains_eql() => Ok((p, value)),
+                    Type::Value(value) if !value.contains_eql() => Ok((p, value)),
                     other => Err(TypeError::Expected(format!(
                         "expected param '{}' to resolve to a scalar type but got '{}'",
                         p, other
@@ -235,21 +236,22 @@ impl<'ast> EqlMapper<'ast> {
     }
 
     /// Asks the [`TypeInferencer`] for a hashmap of literal types, validating that they are all `Value` types.
-    fn literal_types(&self) -> Result<Vec<(EqlValue, &'ast ast::Value)>, EqlMapperError> {
-        let iter = {
+    fn literal_types(&self) -> Result<Vec<(EqlTerm, &'ast ast::Value)>, EqlMapperError> {
+        let literals = {
             let registry = self.registry.borrow();
             registry
                 .get_nodes_and_types::<ast::Value>()
                 .into_iter()
                 .filter(|(node, _)| !matches!(node, ast::Value::Placeholder(_)))
         };
-        let literal_nodes: Vec<(EqlValue, &'ast ast::Value)> = iter
+
+        let literal_nodes: Vec<(EqlTerm, &'ast ast::Value)> = literals
             .map(
-                |(node, ty)| -> Result<Option<(EqlValue, &'ast ast::Value)>, TypeError> {
-                    if let crate::Type::Value(crate::Value::Eql(eql_value)) =
+                |(node, ty)| -> Result<Option<(EqlTerm, &'ast ast::Value)>, TypeError> {
+                    if let crate::Type::Value(crate::Value::Eql(eql_term)) =
                         &ty.resolved(&mut self.unifier.borrow_mut())?
                     {
-                        return Ok(Some((eql_value.clone(), node)));
+                        return Ok(Some((eql_term.clone(), node)));
                     }
                     Ok(None)
                 },

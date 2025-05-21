@@ -370,7 +370,7 @@ where
             return Ok(vec![]);
         }
 
-        let plaintexts = literals_to_plaintext(&literal_values, literal_columns)?;
+        let plaintexts = literals_to_plaintext(literal_values, literal_columns)?;
 
         let start = Instant::now();
 
@@ -948,7 +948,7 @@ where
 }
 
 fn literals_to_plaintext(
-    literals: &Vec<&ast::Value>,
+    literals: &Vec<(EqlTerm, &ast::Value)>,
     literal_columns: &Vec<Option<Column>>,
 ) -> Result<Vec<Option<Plaintext>>, Error> {
     let plaintexts = literals

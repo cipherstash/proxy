@@ -2,6 +2,8 @@ use std::sync::Arc;
 
 use crate::{unifier::Type, SchemaError, ScopeError};
 
+use super::unifier::Bounds;
+
 #[derive(Debug, PartialEq, Eq, thiserror::Error)]
 pub enum TypeError {
     #[error("SQL feature {} is not supported", _0)]
@@ -12,6 +14,9 @@ pub enum TypeError {
 
     #[error("{}", _0)]
     Conflict(String),
+
+    #[error("Type `{}` does not satisfy bounds `{}`", _0, _1)]
+    UnsatisfiedBounds(Type, Bounds),
 
     #[error("unified type contains unresolved type variable: {}", _0)]
     Incomplete(String),
@@ -40,4 +45,10 @@ pub enum TypeError {
         _4
     )]
     OnNodes(String, Arc<Type>, String, Arc<Type>, String),
+
+    #[error("Cannot parse placeholder syntax '{}'", _0)]
+    ParamSyntax(String),
+
+    #[error("{}", _0)]
+    TypeSignature(String),
 }

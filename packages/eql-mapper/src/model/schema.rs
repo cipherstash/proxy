@@ -41,14 +41,109 @@ pub struct Column {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Display, Hash)]
 pub enum ColumnKind {
     Native,
-    Eql,
+    Eql(EqlTraitImpls),
+}
+
+/// The "traits" implemented by an EQL column which are derived from the index config for the column.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+pub struct EqlTraitImpls {
+    /// The EQL column implements equality between its values using the `=` operator.
+    eq: bool,
+
+    /// The EQL column implements comparison of its values using `>`, `>=`, `=`, `<=`, `<`.
+    /// `ord` implies `eq`.
+    ord: bool,
+
+    /// The EQL column implements textual substring search using `LIKE`.
+    bloom: bool,
+
+    /// The EQL column implements a subset of the SQL JSON API (querying only).
+    json: bool,
+}
+
+impl EqlTraitImpls {
+    pub fn new(eq: bool, ord: bool, bloom: bool, json: bool) -> Self {
+        Self { eq, ord, bloom, json }
+    }
+
+    pub fn implements_eq(&self) -> bool {
+        self.eq || self.ord
+    }
+
+    pub fn implements_ord(&self) -> bool {
+        self.ord
+    }
+
+    pub fn implements_bloom(&self) -> bool {
+        self.bloom
+    }
+
+    pub fn implements_json(&self) -> bool {
+        self.json
+    }
+
+    #[cfg(test)]
+    pub(crate) fn impl_eq(&mut self) {
+        self.eq = true;
+    }
+
+    #[cfg(test)]
+    // Ord implies Eq.
+    pub(crate) fn impl_ord(&mut self) {
+        self.eq = true;
+        self.ord = true;
+    }
+
+    #[cfg(test)]
+    pub(crate) fn impl_bloom(&mut self) {
+        self.bloom = true;
+    }
+
+    #[cfg(test)]
+    pub(crate) fn impl_json(&mut self) {
+        self.json = true;
+    }
+}
+
+impl EqlTraitImpls {
+    pub fn with<F>(f: F) -> Self where F: Fn(&mut Self) {
+        let mut new = Self::default();
+        f(&mut new);
+        new
+    }
+}
+
+impl Display for EqlTraitImpls {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut indexes: Vec<String> = vec![];
+
+        if self.eq {
+            indexes.push("Eq".into());
+        }
+
+        if self.ord {
+            indexes.push("Ord".into());
+        }
+
+        if self.bloom {
+            indexes.push("Bloom".into());
+        }
+
+        if self.json {
+            indexes.push("Json".into());
+        }
+
+        f.write_str(&indexes.join("+"))?;
+
+        Ok(())
+    }
 }
 
 impl Column {
-    pub fn eql(name: Ident) -> Self {
+    pub fn eql(name: Ident, features: EqlTraitImpls) -> Self {
         Self {
             name,
-            kind: ColumnKind::Eql,
+            kind: ColumnKind::Eql(features),
         }
     }
 
@@ -179,6 +274,40 @@ impl Table {
     }
 }
 
+#[macro_export]
+macro_rules! to_eql_trait_impls {
+    ($($indexes:ident)*) => {
+        {
+            #[allow(unused_mut)]
+            let mut impls = $crate::EqlTraitImpls::default();
+            $crate::to_eql_trait_impls!(@flags impls $($indexes)*);
+            impls
+        }
+    };
+
+    (@flags $impls:ident Eq $($indexes:ident)*) => {
+        $impls.impl_eq();
+        $crate::to_eql_trait_impls!(@flags $impls $($indexes)*);
+    };
+
+    (@flags $impls:ident Ord $($indexes:ident)*) => {
+        $impls.impl_ord();
+        $crate::to_eql_trait_impls!(@flags $impls $($indexes)*);
+    };
+
+    (@flags $impls:ident Bloom $($indexes:ident)*) => {
+        $impls.impl_bloom();
+        $crate::to_eql_trait_impls!(@flags $impls $($indexes)*);
+    };
+
+    (@flags $impls:ident Json $($indexes:ident)*) => {
+        $impls.impl_json();
+        $crate::to_eql_trait_impls!(@flags $impls $($indexes)*);
+    };
+
+    (@flags $impls:ident) => {}
+}
+
 /// A DSL to create a [`Schema`] for testing purposes.
 // #[cfg(test)]
 #[macro_export]
@@ -222,10 +351,21 @@ macro_rules! schema {
     (@add_columns $table:ident $( $column_name:ident $(($($options:tt)+))? , )* ) => {
         $( schema!(@add_column $table $column_name $(($($options)*))? ); )*
     };
-    (@add_column $table:ident $column_name:ident (EQL) ) => {
+    (@add_column $table:ident $column_name:ident (EQL $(: $trait_:ident $(+ $trait_rest:ident)*)?) ) => {
         $table.add_column(std::sync::Arc::new($crate::model::Column::eql(
-            ::sqltk::parser::ast::Ident::new(stringify!($column_name))
-        )));
+            ::sqltk::parser::ast::Ident::new(stringify!($column_name)),
+            $crate::to_eql_trait_impls!($($trait_ $($($trait_rest)+)?)?)
+        )), false);
+    };
+    (@add_column $table:ident $column_name:ident (PK) ) => {
+        $table.add_column(
+            std::sync::Arc::new(
+                $crate::model::Column::native(
+                    ::sqltk::parser::ast::Ident::new(stringify!($column_name))
+                )
+            ),
+            true
+        );
     };
     (@add_column $table:ident $column_name:ident () ) => {
         $table.add_column(
