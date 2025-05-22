@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1747912422302,
+  "lastUpdate": 1747916441826,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -1775,6 +1775,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 6.760938,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "toby@cipherstash.com",
+            "name": "Toby Hede",
+            "username": "tobyhede"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "1e869fbfe4975a4f9a6fd43094bf42857836b5e2",
+          "message": "Merge pull request #236 from cipherstash/rename-eql-fields\n\nUpdate to use EQL 2.0.1\nPR_BYPASS: update to EQL 2.0.1 with new EQL.json structure for customer demo",
+          "timestamp": "2025-05-22T22:16:11+10:00",
+          "tree_id": "734e65f92779d0e4fba07513dfbcd32a20959461",
+          "url": "https://github.com/cipherstash/proxy/commit/1e869fbfe4975a4f9a6fd43094bf42857836b5e2"
+        },
+        "date": 1747916440243,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 6.802291,
             "unit": "Number"
           }
         ]
