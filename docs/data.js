@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1747905143134,
+  "lastUpdate": 1747910321450,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -1675,6 +1675,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 7.071491,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "ff44305a33c58807546ca6483a921d556ea80535",
+          "message": "Rename EqlEncrypted fields",
+          "timestamp": "2025-05-21T14:25:54Z",
+          "url": "https://github.com/cipherstash/proxy/pull/236/commits/ff44305a33c58807546ca6483a921d556ea80535"
+        },
+        "date": 1747910319653,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 6.592267,
             "unit": "Number"
           }
         ]
