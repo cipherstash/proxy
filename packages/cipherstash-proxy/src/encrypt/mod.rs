@@ -291,12 +291,12 @@ fn to_eql_encrypted(
                 body: EqlEncryptedBody {
                     ciphertext,
                     indexes: EqlEncryptedIndexes {
-                        match_index,
-                        ore_index,
-                        unique_index,
-                        blake3_index,
-                        ore_cclw_fixed_index,
-                        ore_cclw_var_index,
+                        bloom_filter: match_index,
+                        ore_block_u64_8_256: ore_index,
+                        hmac_256: unique_index,
+                        blake3: blake3_index,
+                        ore_cllw_u64_8: ore_cclw_fixed_index,
+                        ore_cllw_var_8: ore_cclw_var_index,
                         selector,
                         ste_vec_index: None,
                     },
@@ -319,17 +319,17 @@ fn to_eql_encrypted(
                         let indexes = match term {
                             EncryptedSteVecTerm::Mac(bytes) => EqlEncryptedIndexes {
                                 selector: Some(hex::encode(tokenized_selector.as_bytes())),
-                                blake3_index: Some(hex::encode(bytes)),
+                                blake3: Some(hex::encode(bytes)),
                                 ..Default::default()
                             },
                             EncryptedSteVecTerm::OreFixed(ore) => EqlEncryptedIndexes {
                                 selector: Some(hex::encode(tokenized_selector.as_bytes())),
-                                ore_cclw_fixed_index: Some(hex::encode(&ore)),
+                                ore_cllw_u64_8: Some(hex::encode(&ore)),
                                 ..Default::default()
                             },
                             EncryptedSteVecTerm::OreVariable(ore) => EqlEncryptedIndexes {
                                 selector: Some(hex::encode(tokenized_selector.as_bytes())),
-                                ore_cclw_var_index: Some(hex::encode(&ore)),
+                                ore_cllw_var_8: Some(hex::encode(&ore)),
                                 ..Default::default()
                             },
                         };
@@ -351,12 +351,12 @@ fn to_eql_encrypted(
                 body: EqlEncryptedBody {
                     ciphertext: ciphertext.clone(),
                     indexes: EqlEncryptedIndexes {
-                        match_index: None,
-                        ore_index: None,
-                        unique_index: None,
-                        blake3_index: None,
-                        ore_cclw_fixed_index: None,
-                        ore_cclw_var_index: None,
+                        bloom_filter: None,
+                        ore_block_u64_8_256: None,
+                        hmac_256: None,
+                        blake3: None,
+                        ore_cllw_u64_8: None,
+                        ore_cllw_var_8: None,
                         selector: None,
                         ste_vec_index: Some(ste_vec_index),
                     },

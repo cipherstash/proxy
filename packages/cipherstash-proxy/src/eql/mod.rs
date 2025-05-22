@@ -85,25 +85,32 @@ pub struct EqlEncryptedBody {
     pub(crate) is_array_item: Option<bool>,
 }
 
+///
+/// EqlEncryptedIndexes
+///   - null values should not be serialized
+///   - the null carries through to the database as this is the EQL JSON format
 #[derive(Debug, Deserialize, Serialize, Default)]
 pub struct EqlEncryptedIndexes {
-    #[serde(rename = "o", skip_serializing_if = "Option::is_none")]
-    pub(crate) ore_index: Option<Vec<String>>,
-    #[serde(rename = "m", skip_serializing_if = "Option::is_none")]
-    pub(crate) match_index: Option<Vec<u16>>,
-    #[serde(rename = "u", skip_serializing_if = "Option::is_none")]
-    pub(crate) unique_index: Option<String>,
+    #[serde(rename = "ob", skip_serializing_if = "Option::is_none")]
+    pub(crate) ore_block_u64_8_256: Option<Vec<String>>,
+
+    #[serde(rename = "bf", skip_serializing_if = "Option::is_none")]
+    pub(crate) bloom_filter: Option<Vec<u16>>,
+
+    #[serde(rename = "hm", skip_serializing_if = "Option::is_none")]
+    pub(crate) hmac_256: Option<String>,
 
     #[serde(rename = "s", skip_serializing_if = "Option::is_none")]
     pub(crate) selector: Option<String>,
 
-    #[serde(rename = "b", skip_serializing_if = "Option::is_none")]
-    pub(crate) blake3_index: Option<String>,
+    #[serde(rename = "b3", skip_serializing_if = "Option::is_none")]
+    pub(crate) blake3: Option<String>,
 
     #[serde(rename = "ocf", skip_serializing_if = "Option::is_none")]
-    pub(crate) ore_cclw_fixed_index: Option<String>,
+    pub(crate) ore_cllw_u64_8: Option<String>,
+
     #[serde(rename = "ocv", skip_serializing_if = "Option::is_none")]
-    pub(crate) ore_cclw_var_index: Option<String>,
+    pub(crate) ore_cllw_var_8: Option<String>,
 
     #[serde(rename = "sv", skip_serializing_if = "Option::is_none")]
     pub(crate) ste_vec_index: Option<Vec<EqlEncryptedBody>>,
@@ -157,13 +164,13 @@ mod tests {
                     dataset_id: Some(Uuid::new_v4()),
                 },
                 indexes: EqlEncryptedIndexes {
-                    ore_index: None,
-                    match_index: None,
-                    unique_index: None,
-                    blake3_index: None,
+                    ore_block_u64_8_256: None,
+                    bloom_filter: None,
+                    hmac_256: None,
+                    blake3: None,
                     selector: None,
-                    ore_cclw_fixed_index: None,
-                    ore_cclw_var_index: None,
+                    ore_cllw_u64_8: None,
+                    ore_cllw_var_8: None,
                     ste_vec_index: None,
                 },
                 is_array_item: None,
