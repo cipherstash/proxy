@@ -516,6 +516,15 @@ mod tests {
         env_map.into_iter().collect()
     }
 
+    fn with_no_cs_vars<F: FnOnce() -> R, R>(f: F) -> R {
+        let cs_vars = std::env::vars()
+            .map(|(k, _v)| k)
+            .filter(|k| k.starts_with("CS_"))
+            .collect::<Vec<_>>();
+
+        temp_env::with_vars_unset(&cs_vars, f)
+    }
+
     #[test]
     fn missing_auth_config() {
         // Missing both workspace id and client_access_key
@@ -525,31 +534,35 @@ mod tests {
             ("CS_CLIENT_ACCESS_KEY", None),
         ]);
 
-        temp_env::with_vars(env, || {
-            let result = TandemConfig::build("tests/config/unknown.toml");
-            assert!(result.is_err());
+        with_no_cs_vars(|| {
+            temp_env::with_vars(env, || {
+                let result = TandemConfig::build("tests/config/unknown.toml");
+                assert!(result.is_err());
 
-            if let Err(err) = result {
-                assert!(err.to_string().contains("Missing [auth] configuration"));
-            } else {
-                unreachable!();
-            }
+                if let Err(err) = result {
+                    assert!(err.to_string().contains("Missing [auth] configuration"));
+                } else {
+                    unreachable!();
+                }
+            })
         });
 
         // Missing client_access_key
         let env = merge_env_vars(vec![("CS_CLIENT_ACCESS_KEY", None)]);
 
-        temp_env::with_vars(env, || {
-            let result = TandemConfig::build("tests/config/unknown.toml");
-            assert!(result.is_err());
+        with_no_cs_vars(|| {
+            temp_env::with_vars(env, || {
+                let result = TandemConfig::build("tests/config/unknown.toml");
+                assert!(result.is_err());
 
-            if let Err(err) = result {
-                assert!(err
-                    .to_string()
-                    .contains("Missing client_access_key from [auth] configuration."));
-            } else {
-                unreachable!();
-            }
+                if let Err(err) = result {
+                    assert!(err
+                        .to_string()
+                        .contains("Missing client_access_key from [auth] configuration."));
+                } else {
+                    unreachable!();
+                }
+            })
         });
     }
 
@@ -562,31 +575,35 @@ mod tests {
             ("CS_DEFAULT_KEYSET_ID", None),
         ]);
 
-        temp_env::with_vars(env, || {
-            let result = TandemConfig::build("tests/config/unknown.toml");
-            assert!(result.is_err());
+        with_no_cs_vars(|| {
+            temp_env::with_vars(env, || {
+                let result = TandemConfig::build("tests/config/unknown.toml");
+                assert!(result.is_err());
 
-            if let Err(err) = result {
-                assert!(err.to_string().contains("Missing [encrypt] configuration"));
-            } else {
-                unreachable!();
-            }
+                if let Err(err) = result {
+                    assert!(err.to_string().contains("Missing [encrypt] configuration"));
+                } else {
+                    unreachable!();
+                }
+            })
         });
 
         // Missing client_id
         let env = merge_env_vars(vec![("CS_CLIENT_ID", None)]);
 
-        temp_env::with_vars(env, || {
-            let result = TandemConfig::build("tests/config/unknown.toml");
-            assert!(result.is_err());
+        with_no_cs_vars(|| {
+            temp_env::with_vars(env, || {
+                let result = TandemConfig::build("tests/config/unknown.toml");
+                assert!(result.is_err());
 
-            if let Err(err) = result {
-                assert!(err
-                    .to_string()
-                    .contains("Missing client_id from [encrypt] configuration."));
-            } else {
-                unreachable!();
-            }
+                if let Err(err) = result {
+                    assert!(err
+                        .to_string()
+                        .contains("Missing client_id from [encrypt] configuration."));
+                } else {
+                    unreachable!();
+                }
+            })
         });
     }
 
@@ -602,31 +619,35 @@ mod tests {
             ("CS_DATABASE__PORT", None),
         ]);
 
-        temp_env::with_vars(env, || {
-            let result = TandemConfig::build("tests/config/unknown.toml");
-            assert!(result.is_err());
+        with_no_cs_vars(|| {
+            temp_env::with_vars(env, || {
+                let result = TandemConfig::build("tests/config/unknown.toml");
+                assert!(result.is_err());
 
-            if let Err(err) = result {
-                assert!(err.to_string().contains("Missing [database] configuration"));
-            } else {
-                unreachable!();
-            }
+                if let Err(err) = result {
+                    assert!(err.to_string().contains("Missing [database] configuration"));
+                } else {
+                    unreachable!();
+                }
+            })
         });
 
         // Missing name
         let env = merge_env_vars(vec![("CS_DATABASE__NAME", None)]);
 
-        temp_env::with_vars(env, || {
-            let result = TandemConfig::build("tests/config/unknown.toml");
-            assert!(result.is_err());
+        with_no_cs_vars(|| {
+            temp_env::with_vars(env, || {
+                let result = TandemConfig::build("tests/config/unknown.toml");
+                assert!(result.is_err());
 
-            if let Err(err) = result {
-                assert!(err
-                    .to_string()
-                    .contains("Missing name from [database] configuration."));
-            } else {
-                unreachable!();
-            }
+                if let Err(err) = result {
+                    assert!(err
+                        .to_string()
+                        .contains("Missing name from [database] configuration."));
+                } else {
+                    unreachable!();
+                }
+            })
         });
     }
 }
