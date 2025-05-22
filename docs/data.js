@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1747837782143,
+  "lastUpdate": 1747905143134,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -1650,6 +1650,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 7.123637,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "77d1475610559034cb2b95875cb7cbe6c9a78a9c",
+          "message": "fix: make tests ignore CS_ vars when testing for missing config",
+          "timestamp": "2025-05-21T14:25:54Z",
+          "url": "https://github.com/cipherstash/proxy/pull/235/commits/77d1475610559034cb2b95875cb7cbe6c9a78a9c"
+        },
+        "date": 1747905142105,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 7.071491,
             "unit": "Number"
           }
         ]
