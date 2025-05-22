@@ -1352,7 +1352,7 @@ mod test {
                 match typed.transform(HashMap::new()) {
                     Ok(statement) => assert_eq!(
                         statement.to_string(),
-                        "SELECT eql_v2.grouped_value(email) AS email FROM users GROUP BY eql_v2.ore_64_8_v2(email)".to_string()
+                        "SELECT eql_v2.grouped_value(email) AS email FROM users GROUP BY eql_v2.ore_block_u64_8_256(email)".to_string()
                     ),
                     Err(err) => panic!("transformation failed: {err}"),
                 }

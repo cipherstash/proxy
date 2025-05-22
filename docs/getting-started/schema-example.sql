@@ -9,35 +9,35 @@ CREATE TABLE users (
     encrypted_salary eql_v2_encrypted
 );
 
-SELECT cs_add_index_v1(
+SELECT eql_v2.add_search_config(
   'users',
   'encrypted_email',
   'unique',
   'text'
 );
 
-SELECT cs_add_index_v1(
+SELECT eql_v2.add_search_config(
   'users',
   'encrypted_email',
   'match',
   'text'
 );
 
-SELECT cs_add_index_v1(
+SELECT eql_v2.add_search_config(
   'users',
   'encrypted_email',
   'ore',
   'text'
 );
 
-SELECT cs_add_index_v1(
+SELECT eql_v2.add_search_config(
   'users',
   'encrypted_salary',
   'ore',
   'int'
 );
 
-SELECT cs_add_index_v1(
+SELECT eql_v2.add_search_config(
   'users',
   'encrypted_dob',
   'ore',

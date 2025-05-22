@@ -40,7 +40,10 @@ impl<'ast> TransformationRule<'ast> for GroupByEqlCol<'ast> {
 
             *target_node = helpers::wrap_in_1_arg_function(
                 transformed_expr,
-                ObjectName(vec![Ident::new("eql_v2"), Ident::new("ore_64_8_v2")]),
+                ObjectName(vec![
+                    Ident::new("eql_v2"),
+                    Ident::new("ore_block_u64_8_256"),
+                ]),
             );
 
             return Ok(true);
