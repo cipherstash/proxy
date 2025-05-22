@@ -189,7 +189,7 @@ In the previous step we created a table with an encrypted column, but without an
 Now you can add an encrypted index for that encrypted column:
 
 ```sql
-SELECT cs_add_index_v1(
+SELECT eql_v2.add_search_config(
   'users',
   'email',
   'unique',
@@ -204,14 +204,14 @@ This statement adds a `unique` index for the `email` column in the `users` table
 There are two other types of encrypted indexes you can use on `text` data:
 
 ```sql
-SELECT cs_add_index_v1(
+SELECT eql_v2.add_search_config(
   'users',
   'email',
   'match',
   'text'
 );
 
-SELECT cs_add_index_v1(
+SELECT eql_v2.add_search_config(
   'users',
   'email',
   'ore',

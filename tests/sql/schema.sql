@@ -31,77 +31,77 @@ CREATE TABLE unconfigured (
     PRIMARY KEY(id)
 );
 
-SELECT eql_v2.add_index(
+SELECT eql_v2.add_search_config(
   'encrypted',
   'encrypted_text',
   'unique',
   'text'
 );
 
-SELECT eql_v2.add_index(
+SELECT eql_v2.add_search_config(
   'encrypted',
   'encrypted_text',
   'match',
   'text'
 );
 
-SELECT eql_v2.add_index(
+SELECT eql_v2.add_search_config(
   'encrypted',
   'encrypted_text',
   'ore',
   'text'
 );
 
-SELECT eql_v2.add_index(
+SELECT eql_v2.add_search_config(
   'encrypted',
   'encrypted_bool',
   'unique',
   'boolean'
 );
 
-SELECT eql_v2.add_index(
+SELECT eql_v2.add_search_config(
   'encrypted',
   'encrypted_bool',
   'ore',
   'boolean'
 );
 
-SELECT eql_v2.add_index(
+SELECT eql_v2.add_search_config(
   'encrypted',
   'encrypted_int2',
   'unique',
   'small_int'
 );
 
-SELECT eql_v2.add_index(
+SELECT eql_v2.add_search_config(
   'encrypted',
   'encrypted_int2',
   'ore',
   'small_int'
 );
 
-SELECT eql_v2.add_index(
+SELECT eql_v2.add_search_config(
   'encrypted',
   'encrypted_int4',
   'unique',
   'int'
 );
 
-SELECT eql_v2.add_index(
+SELECT eql_v2.add_search_config(
   'encrypted',
   'encrypted_int4',
   'ore',
   'int'
 );
 
-SELECT eql_v2.add_index(
+SELECT eql_v2.add_search_config(
   'encrypted',
   'encrypted_int8',
   'unique',
   'big_int'
 );
 
-SELECT eql_v2.add_index(
+SELECT eql_v2.add_search_config(
   'encrypted',
   'encrypted_int8',
   'ore',
@@ -109,35 +109,35 @@ SELECT eql_v2.add_index(
 );
 
 
-SELECT eql_v2.add_index(
+SELECT eql_v2.add_search_config(
   'encrypted',
   'encrypted_float8',
   'unique',
   'double'
 );
 
-SELECT eql_v2.add_index(
+SELECT eql_v2.add_search_config(
   'encrypted',
   'encrypted_float8',
   'ore',
   'double'
 );
 
-SELECT eql_v2.add_index(
+SELECT eql_v2.add_search_config(
   'encrypted',
   'encrypted_date',
   'unique',
   'date'
 );
 
-SELECT eql_v2.add_index(
+SELECT eql_v2.add_search_config(
   'encrypted',
   'encrypted_date',
   'ore',
   'date'
 );
 
-SELECT eql_v2.add_index(
+SELECT eql_v2.add_search_config(
   'encrypted',
   'encrypted_jsonb',
   'ste_vec',
