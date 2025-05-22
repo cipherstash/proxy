@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1747916441826,
+  "lastUpdate": 1747925988894,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -1804,6 +1804,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 6.802291,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "yujiyokoo@gmail.com",
+            "name": "Yuji Yokoo",
+            "username": "yujiyokoo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "ad1a33e8f8ec08b72ba68b8f6be27b8b726dce79",
+          "message": "Merge pull request #235 from cipherstash/fix/ignore-existing-cs-env-vars-in-tests\n\nfix: make tests ignore CS_ vars when testing for missing config",
+          "timestamp": "2025-05-23T00:26:39+09:30",
+          "tree_id": "d1cdebaea10cdad46936262393c06389f217ec77",
+          "url": "https://github.com/cipherstash/proxy/commit/ad1a33e8f8ec08b72ba68b8f6be27b8b726dce79"
+        },
+        "date": 1747925987614,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 6.749675,
             "unit": "Number"
           }
         ]
