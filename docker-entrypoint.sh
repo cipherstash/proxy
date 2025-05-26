@@ -1,14 +1,28 @@
 #!/usr/bin/env bash
 set -eu
 
-DATABASE_URL="postgresql://${CS_DATABASE__USERNAME}:${CS_DATABASE__PASSWORD}@${CS_DATABASE__HOST}:${CS_DATABASE__PORT}/${CS_DATABASE__NAME}"
-
 postgres_ready () {
   psql ${DATABASE_URL} -c "SELECT 1" > /dev/null 2>&1
 }
 
+# Taken from: https://github.com/SixArm/urlencode.sh/blob/f43155fed3b6399f3a07d974f12beb7097f9c447/urlencode.sh
+urlencode() {
+  local length="${#1}"
+  for ((i = 0; i < length; i++)); do
+    local c="${1:i:1}"
+    case $c in
+      [a-zA-Z0-9.~_-])
+        printf '%s' "$c"
+        ;;
+      *)
+        printf '%%%02X' "'$c"
+        ;;
+    esac
+  done
+}
+
 wait_for_postgres_or_exit() {
-  host=${CS_DATABASE__HOST}
+  host=${CS_DATABASE__HOST}x
   port=${CS_DATABASE__PORT}
   max_retries=20
   interval=0.5
@@ -28,6 +42,9 @@ wait_for_postgres_or_exit() {
   done
   echo "Connected to ${host}:${port} after ${attempt} attempts"
 }
+
+encoded_password=$(urlencode "${CS_DATABASE__PASSWORD}")
+DATABASE_URL="postgresql://${CS_DATABASE__USERNAME}:${encoded_password}@${CS_DATABASE__HOST}:${CS_DATABASE__PORT}/${CS_DATABASE__NAME}"
 
 : "${CS_DATABASE__AWS_BUNDLE_PATH:=./aws-rds-global-bundle.pem}"
 

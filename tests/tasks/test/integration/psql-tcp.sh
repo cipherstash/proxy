@@ -6,24 +6,29 @@
 set -e
 set -x
 
+source "$(dirname "${BASH_SOURCE[0]}")/url_encode.sh"
+
+encoded_password=$(urlencode "${CS_DATABASE__PASSWORD}")
+
+
 # sanity check direct connections
-docker exec -i postgres${CONTAINER_SUFFIX} psql postgresql://${CS_DATABASE__USERNAME}:${CS_DATABASE__PASSWORD}@${CS_DATABASE__HOST}:${CS_DATABASE__PORT}/cipherstash <<-EOF
+docker exec -i postgres${CONTAINER_SUFFIX} psql postgresql://${CS_DATABASE__USERNAME}:${encoded_password}@${CS_DATABASE__HOST}:${CS_DATABASE__PORT}/cipherstash <<-EOF
 SELECT 1;
 EOF
 
 # Connect to the proxy
-docker exec -i postgres psql postgresql://cipherstash:password@proxy:6432/cipherstash <<-EOF
+docker exec -i postgres psql postgresql://cipherstash:${encoded_password}@proxy:6432/cipherstash <<-EOF
 SELECT 1;
 EOF
 
 # Connect to the proxy
-docker exec -i postgres psql 'postgresql://cipherstash:password@proxy:6432/cipherstash' <<-EOF
+docker exec -i postgres psql 'postgresql://cipherstash:${encoded_password}@proxy:6432/cipherstash' <<-EOF
 SELECT 1;
 EOF
 
 # Attempt with TLS
 set +e
-docker exec -i postgres psql 'postgresql://cipherstash:password@proxy:6432/cipherstash?sslmode=require' <<-EOF
+docker exec -i postgres psql 'postgresql://cipherstash:${encoded_password}@proxy:6432/cipherstash?sslmode=require' <<-EOF
 SELECT 1;
 EOF
 if [ $? -eq 0 ]; then
@@ -32,7 +37,7 @@ if [ $? -eq 0 ]; then
 fi
 
 # Attempt with an invalid password
-docker exec -i postgres psql postgresql://cipherstash:not-the-password@proxy:6432/cipherstash <<-EOF
+docker exec -i postgres psql postgresql://cipherstash:not-the-p%40ssword@proxy:6432/cipherstash <<-EOF
 SELECT 1;
 EOF
 

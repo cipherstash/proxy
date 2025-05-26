@@ -64,24 +64,31 @@ pub fn trace() {
     });
 }
 
-pub fn connection_string(port: u16) -> String {
+pub fn connection_config(port: u16) -> tokio_postgres::Config {
+    let mut db_config = tokio_postgres::Config::new();
+
     let host = "localhost".to_string();
     let name = "cipherstash".to_string();
     let username = "cipherstash".to_string();
-    let password = "password".to_string();
+    let password = "p@ssword".to_string();
 
-    format!(
-        "postgres://{}:{}@{}:{}/{}",
-        username, password, host, port, name
-    )
+    db_config
+        .host(&host)
+        .port(port)
+        .user(&username)
+        .password(&password)
+        .dbname(&name);
+
+    db_config
 }
 
 pub async fn connect_with_tls(port: u16) -> Client {
     let tls_config = configure_test_client();
     let tls = tokio_postgres_rustls::MakeRustlsConnect::new(tls_config);
 
-    let connection_string = connection_string(port);
-    let (client, connection) = tokio_postgres::connect(&connection_string, tls)
+    let connection_config = connection_config(port);
+    let (client, connection) = connection_config
+        .connect(tls)
         .await
         .expect("connection to database to succeed");
 
@@ -94,10 +101,8 @@ pub async fn connect_with_tls(port: u16) -> Client {
 }
 
 pub async fn connect(port: u16) -> Client {
-    let connection_string = connection_string(port);
-    let (client, connection) = tokio_postgres::connect(&connection_string, NoTls)
-        .await
-        .unwrap();
+    let connection_config = connection_config(port);
+    let (client, connection) = connection_config.connect(NoTls).await.unwrap();
 
     tokio::spawn(async move {
         if let Err(e) = connection.await {

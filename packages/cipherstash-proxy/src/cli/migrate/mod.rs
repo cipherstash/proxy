@@ -65,19 +65,21 @@ impl Migrate {
     /// Run the encryption migration process
     ///
     pub async fn run(&self, config: TandemConfig) -> Result<(), Error> {
-        let connection_string = format!(
-            "postgresql://{}:{}@{}:{}/{}",
-            config.database.username,
-            config.database.risky_password(),
-            config.server.host,
-            config.server.port,
-            config.database.name
-        );
-
         debug!(target: MIGRATE, ?config);
 
+        // Important!!
+        // Migrator connects to the the Proxy, not the database directly
+        // Build the Proxy connection config from the TandemConfig
+        let mut connection_config = tokio_postgres::Config::new();
+        connection_config
+            .host(&config.server.host) // Proxy/Server host
+            .port(config.server.port) // Proxy/Server port
+            .user(&config.database.username)
+            .password(config.database.password())
+            .dbname(&config.database.name);
+
         let client =
-            connect_with_tls(&connection_string, config.database.with_tls_verification).await?;
+            connect_with_tls(connection_config, config.database.with_tls_verification).await?;
 
         info!(
             target: MIGRATE,
@@ -251,7 +253,7 @@ where
 }
 
 pub async fn connect_with_tls(
-    connection_string: &str,
+    connection_config: tokio_postgres::Config,
     with_tls_verification: bool,
 ) -> Result<Client, Error> {
     let mut tls_config = ClientConfig::with_platform_verifier();
@@ -262,11 +264,9 @@ pub async fn connect_with_tls(
     }
 
     let tls = tokio_postgres_rustls::MakeRustlsConnect::new(tls_config);
-    let (client, connection) = tokio_postgres::connect(connection_string, tls)
-        .await
-        .inspect_err(|_| {
-            error!(target: MIGRATE, msg = "Error connecting Encryption Migrator to Proxy");
-        })?;
+    let (client, connection) = connection_config.connect(tls).await.inspect_err(|_| {
+        error!(target: MIGRATE, msg = "Error connecting Encryption Migrator to Proxy");
+    })?;
 
     tokio::spawn(async move {
         if let Err(err) = connection.await {

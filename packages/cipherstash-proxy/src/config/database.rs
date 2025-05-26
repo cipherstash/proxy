@@ -52,18 +52,25 @@ impl DatabaseConfig {
         format!("{}:{}", self.host, self.port)
     }
 
-    pub fn to_connection_string(&self) -> String {
-        format!(
-            "postgres://{}:{}@{}:{}/{}",
-            self.username,
-            self.risky_password(),
-            self.host,
-            self.port,
-            self.name
-        )
+    pub fn to_connection_config(&self) -> tokio_postgres::Config {
+        let mut db_config = tokio_postgres::Config::new();
+        let password = self.password();
+        db_config
+            .host(&self.host)
+            .port(self.port)
+            .user(&self.username)
+            .password(password)
+            .dbname(&self.name);
+
+        db_config
     }
 
-    pub fn risky_password(&self) -> String {
+    pub fn encoded_password(&self) -> String {
+        let password = self.password();
+        urlencoding::encode(&password).into_owned()
+    }
+
+    pub fn password(&self) -> String {
         self.password.to_owned().risky_unwrap()
     }
 
