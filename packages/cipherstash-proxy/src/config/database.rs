@@ -65,11 +65,6 @@ impl DatabaseConfig {
         db_config
     }
 
-    pub fn encoded_password(&self) -> String {
-        let password = self.password();
-        urlencoding::encode(&password).into_owned()
-    }
-
     pub fn password(&self) -> String {
         self.password.to_owned().risky_unwrap()
     }

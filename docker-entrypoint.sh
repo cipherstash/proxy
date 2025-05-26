@@ -22,7 +22,7 @@ urlencode() {
 }
 
 wait_for_postgres_or_exit() {
-  host=${CS_DATABASE__HOST}x
+  host=${CS_DATABASE__HOST}
   port=${CS_DATABASE__PORT}
   max_retries=20
   interval=0.5
