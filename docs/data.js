@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1748238465572,
+  "lastUpdate": 1748238821662,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -2320,6 +2320,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 6.831729,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "b7660471e7bd6ea005ff6a907ab552871c6c7703",
+          "message": "Fix for \"Error: insufficient data left in message\" with null values",
+          "timestamp": "2025-05-26T05:41:24Z",
+          "url": "https://github.com/cipherstash/proxy/pull/239/commits/b7660471e7bd6ea005ff6a907ab552871c6c7703"
+        },
+        "date": 1748238820308,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 6.828862,
             "unit": "Number"
           }
         ]
