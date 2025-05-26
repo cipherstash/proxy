@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1748242616037,
+  "lastUpdate": 1748242801318,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -2395,6 +2395,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 7.145073,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "7faf18bf13dc33a3980f08d55df9a71f6e578c70",
+          "message": "fix: don't use caches when building release artifacts",
+          "timestamp": "2025-05-26T05:41:24Z",
+          "url": "https://github.com/cipherstash/proxy/pull/241/commits/7faf18bf13dc33a3980f08d55df9a71f6e578c70"
+        },
+        "date": 1748242799847,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 6.729532,
             "unit": "Number"
           }
         ]
