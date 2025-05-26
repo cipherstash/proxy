@@ -667,6 +667,8 @@ where
         let mut portal = Portal::passthrough();
 
         if let Some(statement) = self.context.get_statement(&bind.prepared_statement) {
+            debug!(target:MAPPER, client_id = self.context.client_id, ?statement);
+
             if statement.has_params() {
                 let encrypted = self.encrypt_params(&bind, &statement).await?;
                 bind.rewrite(encrypted)?;

@@ -13,6 +13,7 @@ DROP TABLE IF EXISTS encrypted;
 CREATE TABLE encrypted (
     id bigint,
     plaintext text,
+    plaintext_date date,
     encrypted_text eql_v2_encrypted,
     encrypted_bool eql_v2_encrypted,
     encrypted_int2 eql_v2_encrypted,
