@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1748224300932,
+  "lastUpdate": 1748224767470,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -1983,6 +1983,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 6.845166,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "15d2442968ca629b1a01c9d90ca392d3c5ac2d70",
+          "message": "Add env debugging to release-aws-marketplace workflow",
+          "timestamp": "2025-05-22T14:56:44Z",
+          "url": "https://github.com/cipherstash/proxy/pull/238/commits/15d2442968ca629b1a01c9d90ca392d3c5ac2d70"
+        },
+        "date": 1748224765946,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 6.813299,
             "unit": "Number"
           }
         ]
