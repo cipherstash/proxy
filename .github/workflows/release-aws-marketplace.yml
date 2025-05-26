@@ -47,6 +47,31 @@ jobs:
           - { os: linux-arm64-public, arch: linux/arm64, tag: linux-arm64, cache-provider: github }
     runs-on: ${{matrix.build.os}}
     steps:
+      # print OIDC claim
+      - name: print oidc token claims
+        run: |
+            IDTOKEN=$(curl -s -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" "$ACTIONS_ID_TOKEN_REQUEST_URL" -H "Accept: application/json; api-version=2.0" -H "Content-Type: application/json"  | jq -r '.value')
+            jwtd() {
+              if [[ -x $(command -v jq) ]]; then
+                  jq -R 'split(".") | .[1] | @base64d | fromjson' <<< "${1}" > jwt_claims.json
+                  cat jwt_claims.json
+                  echo ${{ env.ACTIONS_ID_TOKEN_REQUEST_URL}}
+              fi
+            }
+            jwtd $IDTOKEN
+
+      # print GitHub environment variables
+      - name: echo-default-env-variables
+        run: |
+            echo "Home: ${HOME}"
+            echo "GITHUB_WORKFLOW: ${GITHUB_WORKFLOW}"
+            echo "GITHUB_ACTIONS: ${GITHUB_ACTIONS}"
+            echo "GITHUB_ACTOR: ${GITHUB_ACTOR}"
+            echo "GITHUB_REPOSITORY: ${GITHUB_REPOSITORY}"
+            echo "GITHUB_EVENT_NAME: ${GITHUB_EVENT_NAME}"
+            echo "GITHUB_WORKSPACE: ${GITHUB_WORKSPACE}"
+            echo "GITHUB_SHA: ${GITHUB_SHA}"
+            echo "GITHUB_REF: ${GITHUB_REF}"
 
       - name: install-aws-cli
         uses: unfor19/install-aws-cli-action@v1
@@ -55,32 +80,7 @@ jobs:
             version: 2                         # default
             verbose: false                     # default
             arch: arm64                        # allowed values: amd64, arm64
-  # print oidc token claims manually
-    - name: print oidc token claims
-      run: |
-          IDTOKEN=$(curl -s -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" "$ACTIONS_ID_TOKEN_REQUEST_URL" -H "Accept: application/json; api-version=2.0" -H "Content-Type: application/json"  | jq -r '.value')
-          jwtd() {
-            if [[ -x $(command -v jq) ]]; then
-                jq -R 'split(".") | .[1] | @base64d | fromjson' <<< "${1}" > jwt_claims.json
-                cat jwt_claims.json
-                echo ${{ env.ACTIONS_ID_TOKEN_REQUEST_URL}}
-            fi
-          }
-          jwtd $IDTOKEN
-
-    # print GitHub environment variables
-    - name: echo-default-env-variables
-      run: |
-          echo "Home: ${HOME}"
-          echo "GITHUB_WORKFLOW: ${GITHUB_WORKFLOW}"
-          echo "GITHUB_ACTIONS: ${GITHUB_ACTIONS}"
-          echo "GITHUB_ACTOR: ${GITHUB_ACTOR}"
-          echo "GITHUB_REPOSITORY: ${GITHUB_REPOSITORY}"
-          echo "GITHUB_EVENT_NAME: ${GITHUB_EVENT_NAME}"
-          echo "GITHUB_WORKSPACE: ${GITHUB_WORKSPACE}"
-          echo "GITHUB_SHA: ${GITHUB_SHA}"
-          echo "GITHUB_REF: ${GITHUB_REF}"
-
+  
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
