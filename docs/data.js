@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1748237912134,
+  "lastUpdate": 1748238244765,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -2266,6 +2266,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 7.306167,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "162514328+cisopaul@users.noreply.github.com",
+            "name": "Paul",
+            "username": "cisopaul"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "8fef39821dd3ff0dcca162bc8ee72f06bdc567f2",
+          "message": "Merge pull request #240 from cipherstash/OIDC\n\nRemove overly verbose debug & only run an AWS container push on merge.",
+          "timestamp": "2025-05-26T15:41:19+10:00",
+          "tree_id": "ecc1cef24f706ba0d571a96fd017007b7b7f91dd",
+          "url": "https://github.com/cipherstash/proxy/commit/8fef39821dd3ff0dcca162bc8ee72f06bdc567f2"
+        },
+        "date": 1748238243683,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 7.091412,
             "unit": "Number"
           }
         ]
