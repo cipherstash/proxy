@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1748224999146,
+  "lastUpdate": 1748225375625,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -2033,6 +2033,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 6.792372,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "162514328+cisopaul@users.noreply.github.com",
+            "name": "Paul",
+            "username": "cisopaul"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "a058431586c778f445dd01c5d334380a0ee4fb71",
+          "message": "Merge pull request #238 from cipherstash/OIDC\n\nAdd env debugging to release-aws-marketplace workflow\n\nPR_BYPASS - fixed the formatting that was stopping the workflow running.",
+          "timestamp": "2025-05-26T12:06:29+10:00",
+          "tree_id": "0706a97311f0072b2d5510bb8e4f1d9faaea035c",
+          "url": "https://github.com/cipherstash/proxy/commit/a058431586c778f445dd01c5d334380a0ee4fb71"
+        },
+        "date": 1748225374485,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 7.193645,
             "unit": "Number"
           }
         ]
