@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1748244269257,
+  "lastUpdate": 1748244667976,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -2470,6 +2470,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 6.743988,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "toby@cipherstash.com",
+            "name": "Toby Hede",
+            "username": "tobyhede"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "ecabb6dc9abee32560bf11f553a5c97b79ffa773",
+          "message": "Merge pull request #239 from cipherstash/fix-error-insufficient-data-left-in-message\n\nFix for \"Error: insufficient data left in message\" with null values",
+          "timestamp": "2025-05-26T17:27:16+10:00",
+          "tree_id": "c1ee83632a6a01d3f3f4ebc52ca53a14d689f7bc",
+          "url": "https://github.com/cipherstash/proxy/commit/ecabb6dc9abee32560bf11f553a5c97b79ffa773"
+        },
+        "date": 1748244666562,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 6.884568,
             "unit": "Number"
           }
         ]
