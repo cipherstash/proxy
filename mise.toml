@@ -96,9 +96,18 @@ echo docker compose up {{arg(name="service",default="proxy")}} {{option(name="ex
 
 [tasks."proxy:psql"]
 description = "Run psql (interactively) against the proxy; assumes the proxy is already up"
+alias = "psql"
 run = """
 set -eu
 docker exec -it postgres${CONTAINER_SUFFIX:-} psql "postgresql://${CS_DATABASE__USERNAME}:${CS_DATABASE__PASSWORD_ESCAPED_FOR_TESTS}@${CS_PROXY__HOST}:6432/${CS_DATABASE__NAME}"
+"""
+
+[tasks."proxy:local:psql"]
+description = "Run psql (interactively) against a local (non docker) proxy; assumes the proxy is already up"
+alias = "lpsql"
+run = """
+set -eu
+psql "postgresql://${CS_DATABASE__USERNAME}:${CS_DATABASE__PASSWORD_ESCAPED_FOR_TESTS}@localhost:6432/${CS_DATABASE__NAME}"
 """
 
 [tasks."proxy:down"]

@@ -119,8 +119,25 @@ impl BindParam {
         }
     }
 
-    pub fn len(&self) -> usize {
+    ///
+    /// Returns the actual length of the param bytes
+    /// The actual byte length needs to be used when calculating the Bind message length
+    /// If NULL returns 0 as the actual byte length
+    /// Not to be confused with the *param* len as encoded in the Bind message
+    ///
+    pub fn byte_len(&self) -> usize {
         self.bytes.len()
+    }
+
+    ///
+    /// Returns the length of the param for representation in the Bind message
+    /// If NULL returns -1 as required by the PostgreSQL protocol
+    ///
+    pub fn len(&self) -> i32 {
+        if self.is_null() {
+            return NULL;
+        }
+        self.bytes.len() as i32
     }
 
     pub fn rewrite(&mut self, bytes: &[u8]) {
@@ -292,18 +309,19 @@ impl TryFrom<Bind> for BytesMut {
             return Err(err.into());
         }
 
-        let param_len = &bind
+        // sum of param byte_lens (the *actual* byte lengths of the parameters)
+        let param_byte_len = &bind
             .param_values
             .iter()
-            .fold(0, |acc, param| acc + SIZE_I32 + param.len());
+            .fold(0, |acc, param| acc + SIZE_I32 + param.byte_len());
 
-        let len = SIZE_I32 // self
+        let len = SIZE_I32 // self/len of len
             + portal.len()
             + prepared_statement.len()
             + SIZE_I16 // num_param_format_codes
             + SIZE_I16 * bind.num_param_format_codes as usize // num_param_format_codes
-            + SIZE_I16
-            + param_len // num_param_values
+            + SIZE_I16  // num_param_values
+            + param_byte_len // parameter bytes
             + SIZE_I16 // num_result_column_format_codes
             + SIZE_I16 * bind.num_result_column_format_codes as usize;
 
@@ -320,7 +338,9 @@ impl TryFrom<Bind> for BytesMut {
         bytes.put_i16(num_param_values);
 
         for p in bind.param_values {
-            bytes.put_i32(p.len() as i32);
+            // len is not the same as byte_len
+            // A NULL param len is -1
+            bytes.put_i32(p.len());
             bytes.put_slice(&p.bytes);
         }
 
@@ -359,6 +379,24 @@ mod tests {
 
         assert_eq!(bind.param_values.len(), 1);
         assert_eq!(bind.result_columns_format_codes[0], FormatCode::Binary);
+
+        let bytes = BytesMut::try_from(bind).unwrap();
+        assert_eq!(bytes, expected);
+    }
+
+    #[test]
+    pub fn parse_bind_with_null_param() {
+        log::init(LogConfig::default());
+
+        // Bind message from statement INSERT INTO encrypted (id, plaintext, plaintext_date, encrypted_text) VALUES ($1, $2, $3, $4)
+        let bytes =
+            to_message(b"B\0\0\0N\0s0\0\0\x04\0\x01\0\x01\0\x01\0\x01\0\x04\0\0\0\x084\xd8\x1d@\x83U\x0em\0\0\0\tplaintext\xff\xff\xff\xff\0\0\0\x15hello@cipherstash.com\0\x01\0\x01");
+
+        let expected = bytes.clone();
+
+        let bind = Bind::try_from(&bytes).unwrap();
+
+        assert_eq!(bind.param_values.len(), 4);
 
         let bytes = BytesMut::try_from(bind).unwrap();
         assert_eq!(bytes, expected);
