@@ -5,9 +5,14 @@
 
 set -e
 
+source "$(dirname "${BASH_SOURCE[0]}")/url_encode.sh"
+
+encoded_password=""$(urlencode "${CS_DATABASE__PASSWORD}")
+
+
 
 # Connect to the proxy
-docker exec -i postgres${CONTAINER_SUFFIX} psql postgresql://cipherstash:password@proxy:6432/cipherstash <<-EOF
+docker exec -i postgres${CONTAINER_SUFFIX} psql postgresql://cipherstash:${encoded_password}@proxy:6432/cipherstash <<-EOF
 SELECT 1;
 EOF
 
@@ -31,7 +36,7 @@ fi
 
 id=$(( RANDOM % 100 + 1 ))
 
-docker exec -i postgres${CONTAINER_SUFFIX} psql postgresql://cipherstash:password@proxy:6432/cipherstash <<-EOF
+docker exec -i postgres${CONTAINER_SUFFIX} psql postgresql://cipherstash:${encoded_password}@proxy:6432/cipherstash <<-EOF
 INSERT INTO encrypted (id, encrypted_text) VALUES (${id}, 'hello@cipherstash.com')
 EOF
 
@@ -53,7 +58,7 @@ if [[ $response != *"cipherstash_proxy_encrypted_values_total 1"* ]]; then
 fi
 
 
-docker exec -i postgres${CONTAINER_SUFFIX} psql postgresql://cipherstash:password@proxy:6432/cipherstash <<-EOF
+docker exec -i postgres${CONTAINER_SUFFIX} psql postgresql://cipherstash:${encoded_password}@proxy:6432/cipherstash <<-EOF
 SELECT id, encrypted_text FROM encrypted;
 EOF
 

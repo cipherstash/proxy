@@ -132,7 +132,7 @@ async fn read<S: AsyncRead + Unpin>(
     // Len must be at least 4 bytes (4 bytes for len/i32)
     if (len as usize) < SIZE_I32 {
         error!(
-            msg = "Unexpected ProstgreSQL message length",
+            msg = "Unexpected PostgreSQL message length",
             code = code,
             len = len
         );

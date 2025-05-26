@@ -139,7 +139,7 @@ mise run benchmark:plot
 
 [tasks."benchmark:setup"]
 run = """
-cat sql/benchmark-schema.sql | docker exec -i postgres${CONTAINER_SUFFIX} psql postgresql://${CS_DATABASE__USERNAME}:${CS_DATABASE__PASSWORD}@${CS_DATABASE__HOST}:${CS_DATABASE__PORT}/${CS_DATABASE__NAME} -f-
+cat sql/benchmark-schema.sql | docker exec -i postgres${CONTAINER_SUFFIX} psql postgresql://${CS_DATABASE__USERNAME}:${CS_DATABASE__PASSWORD_ESCAPED_FOR_TESTS}@${CS_DATABASE__HOST}:${CS_DATABASE__PORT}/${CS_DATABASE__NAME} -f-
 
 # Initialize pgbench
 docker compose run --rm postgres${CONTAINER_SUFFIX:-} pgbench --host=host.docker.internal --port=${CS_DATABASE__PORT} --scale=1 -i --no-vacuum

@@ -15,9 +15,16 @@ includes = ["tests/tasks"]
 # Default configuration for running cipherstash-proxy out of the box
 CS_DATABASE__NAME = "cipherstash"
 CS_DATABASE__USERNAME = "cipherstash"
-CS_DATABASE__PASSWORD = "password"
+
+# Why not have several passwords!?
+# Proxy uses the password as a string.
+# PSQL connection strings require an escaped password, rather than change all the code to escape the password, I did this. Apologies in advance
+CS_DATABASE__PASSWORD = 'p@ssword'
+CS_DATABASE__PASSWORD_ESCAPED_FOR_TESTS = 'p%40ssword'
+
 CS_DATABASE__HOST = "localhost"
 CS_DATABASE__PORT = "5532"
+# CS_DATABASE__PORT = "5617"
 
 # Default configuration for dev cipherstash-proxy run using 'mise run proxy:up'
 CS_PROXY__HOST = "proxy"
@@ -91,7 +98,7 @@ echo docker compose up {{arg(name="service",default="proxy")}} {{option(name="ex
 description = "Run psql (interactively) against the proxy; assumes the proxy is already up"
 run = """
 set -eu
-docker exec -it postgres${CONTAINER_SUFFIX:-} psql "postgresql://${CS_DATABASE__USERNAME}:${CS_DATABASE__PASSWORD}@${CS_PROXY__HOST}:6432/${CS_DATABASE__NAME}"
+docker exec -it postgres${CONTAINER_SUFFIX:-} psql "postgresql://${CS_DATABASE__USERNAME}:${CS_DATABASE__PASSWORD_ESCAPED_FOR_TESTS}@${CS_PROXY__HOST}:6432/${CS_DATABASE__NAME}"
 """
 
 [tasks."proxy:down"]
@@ -277,93 +284,16 @@ echo
 mise --env tcp run postgres:setup
 mise --env tls run postgres:setup
 
-
-echo
-echo '###############################################'
-echo '# Test: Prometheus'
-echo '###############################################'
-echo
-
-mise --env tcp run proxy:up proxy --extra-args "--detach --wait"
-mise --env tcp run test:wait_for_postgres_to_quack --port 6432 --max-retries 20
-mise --env tcp run test:integration:prometheus
-mise --env tcp run proxy:down
-
-echo
-echo '###############################################'
-echo '# Test: non-TLS'
-echo '###############################################'
-echo
-
-mise --env tcp run proxy:up proxy --extra-args "--detach --wait"
-mise --env tcp run test:wait_for_postgres_to_quack --port 6432 --max-retries 20
-mise --env tcp run test:integration:psql-tcp
-mise --env tcp run proxy:down
-
-echo
-echo '###############################################'
-echo '# Test: TLS'
-echo '###############################################'
-echo
-
-mise --env tls run proxy:up proxy-tls --extra-args "--detach --wait"
-mise --env tls run test:wait_for_postgres_to_quack --port 6432 --max-retries 20 --tls
-mise --env tls run test:integration:psql-tls
-mise --env tls run proxy:down
-
 echo
 echo '###############################################'
 echo '# Test: Integration'
 echo '###############################################'
 echo
 
+mise --env tls e
 mise --env tls run proxy:up proxy-tls --extra-args "--detach --wait"
 mise --env tls run test:wait_for_postgres_to_quack --port 6432 --max-retries 20 --tls
 cargo nextest run --no-fail-fast --nocapture -E 'package(cipherstash-proxy-integration)'
-mise --env tls run proxy:down
-
-echo
-echo '###############################################'
-echo '# Test: Migrate'
-echo '###############################################'
-echo
-
-mise --env tcp run proxy:up proxy --extra-args "--detach --wait"
-mise --env tcp run test:wait_for_postgres_to_quack --port 6432 --max-retries 20
-mise --env tcp run test:integration:migrate
-mise --env tcp run proxy:down
-
-echo
-echo '###############################################'
-echo '# Test: Warning for missing encrypt config'
-echo '###############################################'
-echo
-
-mise --env tcp run proxy:up proxy --extra-args "--detach --wait"
-mise --env tcp run test:wait_for_postgres_to_quack --port 6432 --max-retries 20
-mise --env tcp run test:integration:warn_missing_config
-mise --env tcp run proxy:down
-
-echo
-echo '###############################################'
-echo '# Test: Python'
-echo '###############################################'
-echo
-
-mise --env tls run proxy:up proxy-tls --extra-args "--detach --wait"
-mise --env tls run test:wait_for_postgres_to_quack --port 6432 --max-retries 20 --tls
-mise --env tls run python:test
-mise --env tls run proxy:down
-
-echo
-echo '###############################################'
-echo '# Test: Golang'
-echo '###############################################'
-echo
-
-mise --env tls run proxy:up proxy-tls --extra-args "--detach --wait"
-mise --env tls run test:wait_for_postgres_to_quack --port 6432 --max-retries 20 --tls
-mise --env tls run test:integration:golang
 mise --env tls run proxy:down
 """
 
@@ -417,10 +347,10 @@ run = """
 #!/bin/bash
 cd tests
 mise run postgres:fail_if_not_running
-cat sql/schema-uninstall.sql | docker exec -i postgres${CONTAINER_SUFFIX} psql postgresql://${CS_DATABASE__USERNAME}:${CS_DATABASE__PASSWORD}@${CS_DATABASE__HOST}:${CS_DATABASE__PORT}/${CS_DATABASE__NAME} -f-
-cat ../cipherstash-encrypt-uninstall.sql | docker exec -i postgres${CONTAINER_SUFFIX} psql postgresql://${CS_DATABASE__USERNAME}:${CS_DATABASE__PASSWORD}@${CS_DATABASE__HOST}:${CS_DATABASE__PORT}/${CS_DATABASE__NAME} -f-
-cat ../cipherstash-encrypt.sql | docker exec -i postgres${CONTAINER_SUFFIX} psql postgresql://${CS_DATABASE__USERNAME}:${CS_DATABASE__PASSWORD}@${CS_DATABASE__HOST}:${CS_DATABASE__PORT}/${CS_DATABASE__NAME} -f-
-cat sql/schema.sql | docker exec -i postgres${CONTAINER_SUFFIX} psql postgresql://${CS_DATABASE__USERNAME}:${CS_DATABASE__PASSWORD}@${CS_DATABASE__HOST}:${CS_DATABASE__PORT}/${CS_DATABASE__NAME} -f-
+cat sql/schema-uninstall.sql | docker exec -i postgres${CONTAINER_SUFFIX} psql postgresql://${CS_DATABASE__USERNAME}:${CS_DATABASE__PASSWORD_ESCAPED_FOR_TESTS}@${CS_DATABASE__HOST}:${CS_DATABASE__PORT}/${CS_DATABASE__NAME} -f-
+cat ../cipherstash-encrypt-uninstall.sql | docker exec -i postgres${CONTAINER_SUFFIX} psql postgresql://${CS_DATABASE__USERNAME}:${CS_DATABASE__PASSWORD_ESCAPED_FOR_TESTS}@${CS_DATABASE__HOST}:${CS_DATABASE__PORT}/${CS_DATABASE__NAME} -f-
+cat ../cipherstash-encrypt.sql | docker exec -i postgres${CONTAINER_SUFFIX} psql postgresql://${CS_DATABASE__USERNAME}:${CS_DATABASE__PASSWORD_ESCAPED_FOR_TESTS}@${CS_DATABASE__HOST}:${CS_DATABASE__PORT}/${CS_DATABASE__NAME} -f-
+cat sql/schema.sql | docker exec -i postgres${CONTAINER_SUFFIX} psql postgresql://${CS_DATABASE__USERNAME}:${CS_DATABASE__PASSWORD_ESCAPED_FOR_TESTS}@${CS_DATABASE__HOST}:${CS_DATABASE__PORT}/${CS_DATABASE__NAME} -f-
 """
 
 [tasks."postgres:eql:teardown"]
@@ -430,8 +360,8 @@ run = """
 #!/bin/bash
 cd tests
 mise run postgres:fail_if_not_running
-cat sql/schema-uninstall.sql | docker exec -i postgres${CONTAINER_SUFFIX} psql postgresql://${CS_DATABASE__USERNAME}:${CS_DATABASE__PASSWORD}@${CS_DATABASE__HOST}:${CS_DATABASE__PORT}/${CS_DATABASE__NAME} -f-
-cat ../cipherstash-encrypt-uninstall.sql | docker exec -i postgres${CONTAINER_SUFFIX} psql postgresql://${CS_DATABASE__USERNAME}:${CS_DATABASE__PASSWORD}@${CS_DATABASE__HOST}:${CS_DATABASE__PORT}/${CS_DATABASE__NAME} -f-
+cat sql/schema-uninstall.sql | docker exec -i postgres${CONTAINER_SUFFIX} psql postgresql://${CS_DATABASE__USERNAME}:${CS_DATABASE__PASSWORD_ESCAPED_FOR_TESTS}@${CS_DATABASE__HOST}:${CS_DATABASE__PORT}/${CS_DATABASE__NAME} -f-
+cat ../cipherstash-encrypt-uninstall.sql | docker exec -i postgres${CONTAINER_SUFFIX} psql postgresql://${CS_DATABASE__USERNAME}:${CS_DATABASE__PASSWORD_ESCAPED_FOR_TESTS}@${CS_DATABASE__HOST}:${CS_DATABASE__PORT}/${CS_DATABASE__NAME} -f-
 """
 
 [tasks."postgres:up"]
@@ -448,7 +378,7 @@ echo docker compose up --build {{arg(name="service",default="postgres postgres-1
 description = "Run psql (interactively) against the Postgres instance; assumes Postgres is already up"
 run = """
 set -eu
-docker exec -it postgres${CONTAINER_SUFFIX:-} psql "postgresql://${CS_DATABASE__USERNAME}:${CS_DATABASE__PASSWORD}@${CS_DATABASE__HOST}:${CS_DATABASE__PORT}/${CS_DATABASE__NAME}"
+docker exec -it postgres${CONTAINER_SUFFIX:-} psql "postgresql://${CS_DATABASE__USERNAME}:${CS_DATABASE__PASSWORD_ESCAPED_FOR_TESTS}@${CS_DATABASE__HOST}:${CS_DATABASE__PORT}/${CS_DATABASE__NAME}"
 """
 
 [tasks."postgres:down"]

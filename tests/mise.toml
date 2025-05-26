@@ -1,4 +1,4 @@
 [env]
 CS_DATABASE__NAME = "cipherstash"
 CS_DATABASE__USERNAME = "cipherstash"
-CS_DATABASE__PASSWORD = "password"
+CS_DATABASE__PASSWORD = 'p@ssword'
