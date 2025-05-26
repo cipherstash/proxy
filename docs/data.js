@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1748230195551,
+  "lastUpdate": 1748233496234,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -2087,6 +2087,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 6.733229,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "toby@cipherstash.com",
+            "name": "Toby Hede",
+            "username": "tobyhede"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "21bf08de665b869856ecc70f42166765c5e2c539",
+          "message": "Merge pull request #237 from cipherstash/fix/pg-connection-string-with-characters\n\nHandle special characters in db config values.",
+          "timestamp": "2025-05-26T14:20:54+10:00",
+          "tree_id": "963acfdca135a2cc1f3ade1a92ad93585bcd7a79",
+          "url": "https://github.com/cipherstash/proxy/commit/21bf08de665b869856ecc70f42166765c5e2c539"
+        },
+        "date": 1748233494805,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 6.582239,
             "unit": "Number"
           }
         ]
