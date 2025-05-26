@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1748244667976,
+  "lastUpdate": 1748301596426,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -2499,6 +2499,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 6.884568,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "lindsay@cipherstash.com",
+            "name": "Lindsay Holmwood",
+            "username": "auxesis"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "400f3635d7614ca6e86f0689a0621276874ae7dd",
+          "message": "Merge pull request #241 from cipherstash/fix/do-not-use-caches-when-building-release-artifacts\n\nfix: don't use caches when building release artifacts",
+          "timestamp": "2025-05-27T09:17:06+10:00",
+          "tree_id": "5af91671f971dcd5571f2d93bab0c4085cd5a605",
+          "url": "https://github.com/cipherstash/proxy/commit/400f3635d7614ca6e86f0689a0621276874ae7dd"
+        },
+        "date": 1748301595311,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 7.181964,
             "unit": "Number"
           }
         ]
