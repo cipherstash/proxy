@@ -46,7 +46,6 @@ fn deserialise_auth_config<'de, D>(deserializer: D) -> Result<AuthConfig, D::Err
 where
     D: serde::Deserializer<'de>,
 {
-    // TODO: rename
     #[derive(Deserialize)]
     struct AuthConfigRaw {
         workspace_crn: Option<String>,
