@@ -32,7 +32,7 @@ host = "0.0.0.0"
 # Env: CS_SERVER__PORT
 port = "6432"
 
-# Enforce TLS connections
+# Enforce TLS connections from the Client to Proxy
 # Optional
 # Default: `false`
 # Env: CS_SERVER__REQUIRE_TLS
@@ -57,7 +57,7 @@ worker_threads = "4"
 # Env: CS_SERVER__THREAD_STACK_SIZE
 thread_stack_size = "2097152"
 
-
+### Proxy -> Backing Database connection settings
 [database]
 # Database host address
 # Optional
@@ -92,7 +92,7 @@ password = "password"
 # Env: CS_DATABASE__CONNECTION_TIMEOUT
 connection_timeout = "300000"
 
-# Enable TLS verification
+# Enable TLS verification between Proxy and the backing database.
 # Optional
 # Default: `false`
 # Env: CS_DATABASE__WITH_TLS_VERIFICATION
@@ -115,22 +115,30 @@ config_reload_interval = "60"
 schema_reload_interval = "60"
 
 
+### Client->Proxy TLS Settings:
+# This section configures how the Proxy accepts connections from your client.
+# A Public Certificate and Private Key pair is required to correctly enable TLS.
+# Fill out:
+# - a Certificate Path and a Private Key Path, *or*
+# - a Certificate PEM string and a Private Key PEM string, *or*
+# - neither, removing this section, to disable Client->Proxy TLS.
+#   (This is a misconfiguration if `require_tls` above is enabled.)
 [tls]
-# Certificate path
+# Path to the Public Certificate .crt file.
 # Env: CS_TLS__CERTIFICATE_PATH
-certificate_path = "./server.cert"
+certificate_path = "./server.crt"
 
-# Private Key path
+# Path to the Private Key file.
 # Env: CS_TLS__PRIVATE_KEY_PATH
 private_key_path = "./server.key"
 
-# Certificate path
+# The Public Certificate PEM as a string.
 # Env: CS_TLS__CERTIFICATE_PEM
-certificate_pem = "..."
+certificate_pem = "-----BEGIN CERTIFICATE----- ... -----END CERTIFICATE-----"
 
-# Private Key path
+# The Private Key as a string.
 # Env: CS_TLS__PRIVATE_KEY_PEM
-private_key_pem = "..."
+private_key_pem = "-----BEGIN RSA PRIVATE KEY----- ... -----END RSA PRIVATE KEY-----"
 
 
 [auth]
