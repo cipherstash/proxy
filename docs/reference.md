@@ -6,6 +6,7 @@ This page contains reference documentation for configuring CipherStash Proxy and
 
 - [Proxy config options](#proxy-config-options)
   - [Recommended settings for development](#recommended-settings-for-development)
+  - [Docker-specific configuration](#docker-specific-configuration)
 - [Prometheus metrics](#prometheus-metrics)
   - [Available metrics](#available-metrics)
 - [Supported architectures](#supported-architectures)
@@ -57,7 +58,7 @@ worker_threads = "4"
 # Env: CS_SERVER__THREAD_STACK_SIZE
 thread_stack_size = "2097152"
 
-### Proxy -> Backing Database connection settings
+### Proxy -> Backing database connection settings
 [database]
 # Database host address
 # Optional
@@ -226,9 +227,9 @@ CS_DATABASE__CONFIG_RELOAD_INTERVAL="10"
 CS_DATABASE__SCHEMA_RELOAD_INTERVAL="10"
 ```
 
-### Docker-specific Configuration
+### Docker-specific configuration
 
-As a convenience for development, if you use [Proxy's Docker container](../proxy.Dockerfile) with its default entrypoint and the below environment variables set, the EQL SQL will be applied to the database, and an example schema (eg. with the `users` table, from the [README Getting Started example](../README.md#getting-started)) will be loaded. These are turned on by default in the [development `docker-compose.yml`](../docker-compose.yml):
+As a convenience for development, if you use [Proxy's Docker container](../proxy.Dockerfile) with its default entrypoint and the below environment variables set, the EQL SQL will be applied to the database, and an example schema (for example, with the `users` table, from the [README Getting Started example](../README.md#getting-started)) will be loaded. These are turned on by default in the [development `docker-compose.yml`](../docker-compose.yml):
 
 (It is not recommended to use either of these in production.)
 
@@ -237,7 +238,7 @@ CS_DATABASE__INSTALL_EQL="true"
 CS_DATABASE__INSTALL_EXAMPLE_SCHEMA="true"
 ```
 
-As a convenience for production, if you use [Proxy's Docker container](../proxy.Dockerfile) with the default entrypoint and the below environment variable set, the AWS RDS global certificate bundle will be added to the OS' set of trusted certificates. This is recommended when running Proxy on AWS.
+As a convenience for production, if you use [Proxy's Docker container](../proxy.Dockerfile) with the default entrypoint and the below environment variable set, the AWS RDS global certificate bundle will be added to the operating system's set of trusted certificates. This is recommended when running Proxy on AWS.
 
 ```bash
 CS_DATABASE__INSTALL_AWS_RDS_CERT_BUNDLE="true"
