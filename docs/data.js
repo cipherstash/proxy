@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1748321983426,
+  "lastUpdate": 1748325087549,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -2682,6 +2682,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 6.791935,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "toby@cipherstash.com",
+            "name": "Toby Hede",
+            "username": "tobyhede"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "8ecb4486b455c9cf5d5f2837ade08293cd7ad749",
+          "message": "Merge pull request #243 from cipherstash/disable-the-wrapping-of-order-by-and-group-by-expressions-in-eql\n\nRemove order and group transformers",
+          "timestamp": "2025-05-27T15:48:34+10:00",
+          "tree_id": "fa77fac11b1ba1a9900c8d23d1bfce25332917f9",
+          "url": "https://github.com/cipherstash/proxy/commit/8ecb4486b455c9cf5d5f2837ade08293cd7ad749"
+        },
+        "date": 1748325086189,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 6.729687,
             "unit": "Number"
           }
         ]
