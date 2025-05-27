@@ -43,8 +43,9 @@ wait_for_postgres_or_exit() {
   echo "Connected to ${host}:${port} after ${attempt} attempts"
 }
 
+encoded_username=$(urlencode "${CS_DATABASE__USERNAME}")
 encoded_password=$(urlencode "${CS_DATABASE__PASSWORD}")
-DATABASE_URL="postgresql://${CS_DATABASE__USERNAME}:${encoded_password}@${CS_DATABASE__HOST}:${CS_DATABASE__PORT}/${CS_DATABASE__NAME}"
+DATABASE_URL="postgresql://${encoded_username}:${encoded_password}@${CS_DATABASE__HOST}:${CS_DATABASE__PORT}/${CS_DATABASE__NAME}"
 
 : "${CS_DATABASE__AWS_BUNDLE_PATH:=./aws-rds-global-bundle.pem}"
 
