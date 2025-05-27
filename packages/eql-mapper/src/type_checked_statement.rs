@@ -7,7 +7,6 @@ use crate::{
     CastLiteralsAsEncrypted, CastParamsAsEncrypted, DryRunnable, EqlMapperError, EqlValue,
     FailOnPlaceholderChange, GroupByEqlCol, Param, PreserveEffectiveAliases, Projection,
     RewriteStandardSqlFnsOnEqlTypes, TransformationRule, Type, Value,
-    WrapEqlColsInOrderByWithOreFn, WrapGroupedEqlColInAggregateFn,
 };
 
 /// A `TypeCheckedStatement` is returned from a successful call to [`crate::type_check`].
@@ -141,9 +140,9 @@ impl<'ast> TypeCheckedStatement<'ast> {
     ) -> DryRunnable<impl TransformationRule<'_>> {
         DryRunnable::new((
             RewriteStandardSqlFnsOnEqlTypes::new(Arc::clone(&self.node_types)),
-            WrapGroupedEqlColInAggregateFn::new(Arc::clone(&self.node_types)),
+            // WrapGroupedEqlColInAggregateFn::new(Arc::clone(&self.node_types)),
             GroupByEqlCol::new(Arc::clone(&self.node_types)),
-            WrapEqlColsInOrderByWithOreFn::new(Arc::clone(&self.node_types)),
+            // WrapEqlColsInOrderByWithOreFn::new(Arc::clone(&self.node_types)),
             PreserveEffectiveAliases,
             CastLiteralsAsEncrypted::new(encrypted_literals),
             FailOnPlaceholderChange::new(),
