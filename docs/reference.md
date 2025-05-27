@@ -207,16 +207,34 @@ Although Proxy attempts to detect the environment and set a sensible default for
 To turn on human-friendly logging:
 
 ```bash
-CS_LOG__FORMAT = "pretty"
-CS_LOG__ANSI_ENABLED = "true"
+CS_LOG__FORMAT="pretty"
+CS_LOG__ANSI_ENABLED="true"
 ```
 
 If you are frequently changing the database schema or making updates to the column encryption configuration, it can be useful to reload the config and schema more frequently:
 
 ```bash
-CS_DATABASE__CONFIG_RELOAD_INTERVAL = "10"
-CS_DATABASE__SCHEMA_RELOAD_INTERVAL = "10"
+CS_DATABASE__CONFIG_RELOAD_INTERVAL="10"
+CS_DATABASE__SCHEMA_RELOAD_INTERVAL="10"
 ```
+
+### Docker-specific Configuration
+
+As a convenience for development, if you use [Proxy's Docker container](../proxy.Dockerfile) with its default entrypoint and the below environment variables set, the EQL SQL will be applied to the database, and an example schema (eg. with the `users` table, from the [README Getting Started example](../README.md#getting-started)) will be loaded. These are turned on by default in the [development `docker-compose.yml`](../docker-compose.yml):
+
+(It is not recommended to use either of these in production.)
+
+```bash
+CS_DATABASE__INSTALL_EQL="true"
+CS_DATABASE__INSTALL_EXAMPLE_SCHEMA="true"
+```
+
+As a convenience for production, if you use [Proxy's Docker container](../proxy.Dockerfile) with the default entrypoint and the below environment variable set, the AWS RDS global certificate bundle will be added to the OS' set of trusted certificates. This is recommended when running Proxy on AWS.
+
+```bash
+CS_DATABASE__INSTALL_AWS_RDS_CERT_BUNDLE="true"
+```
+
 
 ## Prometheus metrics
 
