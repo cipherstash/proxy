@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1748301596426,
+  "lastUpdate": 1748314230905,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -2528,6 +2528,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 7.181964,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "297fe0d18b269a0a20c9b363555129f845dc0ddd",
+          "message": "fix: url encode username in docker endpoint",
+          "timestamp": "2025-05-26T23:17:10Z",
+          "url": "https://github.com/cipherstash/proxy/pull/242/commits/297fe0d18b269a0a20c9b363555129f845dc0ddd"
+        },
+        "date": 1748314229610,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 6.739642,
             "unit": "Number"
           }
         ]
