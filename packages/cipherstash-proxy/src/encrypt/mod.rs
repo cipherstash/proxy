@@ -202,16 +202,6 @@ fn build_zerokms_config(config: &TandemConfig) -> Result<ZeroKMSConfigWithClient
     let builder = ZeroKMSConfig::builder()
         .add_source(EnvSource::default())
         .workspace_crn(config.auth.workspace_crn.clone())
-        .workspace_id(
-            config
-                .auth
-                .workspace_crn
-                .workspace_id
-                .to_string()
-                .to_owned()
-                .try_into()
-                .map_err(cipherstash_client::config::ConfigError::from)?,
-        )
         .access_key(&config.auth.client_access_key)
         .try_with_client_id(&config.encrypt.client_id)?
         .try_with_client_key(&config.encrypt.client_key)?
