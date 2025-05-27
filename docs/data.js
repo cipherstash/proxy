@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1748330247551,
+  "lastUpdate": 1748385576138,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -2736,6 +2736,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 6.747146,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "35ba8fe78b47c99f7113adea56ca83ee4301dee3",
+          "message": "docs: Adds TLS and Docker configuration docs.",
+          "timestamp": "2025-05-27T05:48:37Z",
+          "url": "https://github.com/cipherstash/proxy/pull/244/commits/35ba8fe78b47c99f7113adea56ca83ee4301dee3"
+        },
+        "date": 1748385575039,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 7.109815,
             "unit": "Number"
           }
         ]
