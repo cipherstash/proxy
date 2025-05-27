@@ -7,7 +7,7 @@ CS_DATABASE__HOST = "localhost" # optional
 CS_DATABASE__PORT = "5532"      # optional
 CS_DATABASE__WITH_TLS = false   # optional
 
-CS_WORKSPACE_CRN = "crn:region.cloud-provider:workspace-id"
+CS_WORKSPACE_CRN = "crn:region.provider:workspace-id"
 CS_CLIENT_ACCESS_KEY = "client-access-key"
 
 CS_DEFAULT_KEYSET_ID = "default-keyset-id"

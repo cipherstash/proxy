@@ -43,8 +43,8 @@ services:
       - CS_DATABASE__PASSWORD=${CS_DATABASE__PASSWORD}
       # The database name on the Postgres database server connections will be proxied to
       - CS_DATABASE__NAME=${CS_DATABASE__NAME}
-      # The CipherStash workspace ID for making requests for encryption keys
-      - CS_WORKSPACE_ID=${CS_WORKSPACE_ID}
+      # The CipherStash workspace CRN for making requests for encryption keys
+      - CS_WORKSPACE_CRN=${CS_WORKSPACE_CRN}
       # The CipherStash client access key for making requests for encryption keys
       - CS_CLIENT_ACCESS_KEY=${CS_CLIENT_ACCESS_KEY}
       # The CipherStash dataset ID for generating and retrieving encryption keys
@@ -99,7 +99,7 @@ If you are configuring Proxy with environment variables, these are the minimum e
 CS_DATABASE__NAME
 CS_DATABASE__USERNAME
 CS_DATABASE__PASSWORD
-CS_WORKSPACE_ID
+CS_WORKSPACE_CRN
 CS_CLIENT_ACCESS_KEY
 CS_DEFAULT_KEYSET_ID
 CS_CLIENT_ID
