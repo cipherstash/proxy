@@ -7,11 +7,11 @@ use crate::config::LogFormat;
 use crate::error::{ConfigError, Error};
 use crate::Args;
 use cipherstash_client::config::vars::{
-    CS_CLIENT_ACCESS_KEY, CS_CLIENT_ID, CS_CLIENT_KEY, CS_DEFAULT_KEYSET_ID, CS_WORKSPACE_CRN,
-    CS_WORKSPACE_ID,
+    CS_CLIENT_ACCESS_KEY, CS_CLIENT_ID, CS_CLIENT_KEY, CS_DEFAULT_KEYSET_ID, CS_REGION,
+    CS_WORKSPACE_CRN, CS_WORKSPACE_ID,
 };
 use config::{Config, Environment};
-use cts_common::Crn;
+use cts_common::{Crn, Region, WorkspaceId};
 use regex::Regex;
 use serde::Deserialize;
 use std::collections::HashMap;
@@ -25,6 +25,7 @@ pub struct TandemConfig {
     #[serde(default)]
     pub server: ServerConfig,
     pub database: DatabaseConfig,
+    #[serde(deserialize_with = "deserialise_auth_config")]
     pub auth: AuthConfig,
     pub encrypt: EncryptConfig,
     pub tls: Option<TlsConfig>,
@@ -37,8 +38,49 @@ pub struct TandemConfig {
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct AuthConfig {
-    pub workspace_id: String,
+    pub workspace_crn: Crn,
     pub client_access_key: String,
+}
+
+fn deserialise_auth_config<'de, D>(deserializer: D) -> Result<AuthConfig, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    // TODO: rename
+    #[derive(Deserialize)]
+    struct AuthConfig_ {
+        workspace_crn: Option<String>,
+        workspace_id: Option<String>,
+        region: Option<String>,
+        client_access_key: String,
+    }
+
+    let auth_config_ = AuthConfig_::deserialize(deserializer)?;
+
+    let workspace_crn = match (auth_config_.workspace_crn, auth_config_.workspace_id, auth_config_.region) {
+        (Some(crn), None, None) => crn.parse::<Crn>().unwrap(),
+        // TODO: unwraps
+        (None, Some(ws_id), Some(region)) => Crn::new(Region::new(region.as_str()).unwrap(), WorkspaceId::try_from(ws_id).unwrap()),
+        (None, ws_id, region) => Err(
+            serde::de::Error::custom(
+            format!(
+                    "When workspace_crn is not provided, workspace_id ({}) and region ({}) must be provided",
+                    ws_id.map(|w| w.to_string()).unwrap_or("<not provided>".to_string()),
+                    region.map(|r| r.to_string()).unwrap_or("<not provided>".to_string())))
+                )?,
+        (Some(crn), ws_id, region) =>
+            Err(serde::de::Error::custom(
+                format!("workspace_crn ({}) cannot be used with workspace_id ({}) and/or region ({})",
+                        crn,
+                        ws_id.map(|w| w.to_string()).unwrap_or("<not provided>".to_string()),
+                        region.map(|r| r.to_string()).unwrap_or("<not provided>".to_string())))
+            )?,
+    };
+
+    Ok(AuthConfig {
+        workspace_crn,
+        client_access_key: auth_config_.client_access_key,
+    })
 }
 
 #[derive(Debug, Deserialize, Clone, PartialEq)]
@@ -139,12 +181,17 @@ impl TandemConfig {
                     env.insert("CS_ENCRYPT__DEFAULT_KEYSET_ID".into(), value);
                 }
 
-                // CS_WORKSPACE_CRN takes precedence over CS_WORKSPACE_ID for the workspace id
                 if let Ok(Ok(value)) = std::env::var(CS_WORKSPACE_CRN).map(|crn| crn.parse::<Crn>())
                 {
-                    env.insert("CS_AUTH__WORKSPACE_ID".into(), value.workspace_id.into());
-                } else if let Ok(value) = std::env::var(CS_WORKSPACE_ID) {
+                    env.insert("CS_AUTH__WORKSPACE_CRN".into(), value.to_string());
+                }
+
+                if let Ok(value) = std::env::var(CS_WORKSPACE_ID) {
                     env.insert("CS_AUTH__WORKSPACE_ID".into(), value);
+                }
+
+                if let Ok(value) = std::env::var(CS_REGION) {
+                    env.insert("CS_AUTH__REGION".into(), value);
                 }
 
                 if let Ok(value) = std::env::var(CS_CLIENT_ACCESS_KEY) {
@@ -340,6 +387,7 @@ mod tests {
     use cipherstash_client::config::vars::{
         CS_CLIENT_ACCESS_KEY, CS_CLIENT_ID, CS_CLIENT_KEY, CS_DEFAULT_KEYSET_ID, CS_WORKSPACE_ID,
     };
+    use regex::Regex;
     use std::collections::HashMap;
     use uuid::Uuid;
 
@@ -359,7 +407,7 @@ mod tests {
                     CS_DEFAULT_KEYSET_ID,
                     Some("dd0a239f-02e2-4c8e-ba20-d9f0f85af9ac"),
                 ),
-                (CS_WORKSPACE_ID, Some("CS_WORKSPACE_ID")),
+                (CS_WORKSPACE_ID, Some("BVXAY5Z23CGVY6JF")),
                 (CS_CLIENT_ACCESS_KEY, Some("CS_CLIENT_ACCESS_KEY")),
             ],
             || {
@@ -382,7 +430,6 @@ mod tests {
     }
 
     #[test]
-
     fn with_extended_env_naming() {
         temp_env::with_vars(
             [
@@ -432,7 +479,9 @@ mod tests {
 
     #[test]
     fn prometheus_config() {
-        let config = TandemConfig::build("tests/config/cipherstash-proxy-test.toml").unwrap();
+        let config = with_no_cs_vars(|| {
+            TandemConfig::build("tests/config/cipherstash-proxy-test.toml").unwrap()
+        });
         assert!(!config.prometheus_enabled());
 
         temp_env::with_vars([("CS_PROMETHEUS__ENABLED", Some("true"))], || {
@@ -501,7 +550,8 @@ mod tests {
                 "CS_DEFAULT_KEYSET_ID",
                 Some("00000000-0000-0000-0000-000000000000"),
             ),
-            ("CS_WORKSPACE_ID", Some("CS_WORKSPACE_ID")),
+            ("CS_WORKSPACE_ID", Some("FM2U2JUERZM24LPN")),
+            ("CS_REGION", Some("us-west-1.aws")),
             ("CS_CLIENT_ACCESS_KEY", Some("CS_CLIENT_ACCESS_KEY")),
             ("CS_DATABASE__USERNAME", Some("CS_DATABASE__USERNAME")),
             ("CS_DATABASE__PASSWORD", Some("CS_DATABASE__PASSWORD")),
@@ -522,6 +572,7 @@ mod tests {
         env_map.into_iter().collect()
     }
 
+    // copy-pasted to tandem.rs
     fn with_no_cs_vars<F: FnOnce() -> R, R>(f: F) -> R {
         let cs_vars = std::env::vars()
             .map(|(k, _v)| k)
@@ -545,7 +596,10 @@ mod tests {
         with_no_cs_vars(|| {
             temp_env::with_vars(env, || {
                 let config = TandemConfig::build("tests/config/unknown.toml").unwrap();
-                assert_eq!("E4UMRN47WJNSMAKR", config.auth.workspace_id);
+                assert_eq!(
+                    "E4UMRN47WJNSMAKR",
+                    config.auth.workspace_crn.workspace_id.to_string()
+                );
             })
         });
 
@@ -556,18 +610,24 @@ mod tests {
                 "CS_WORKSPACE_CRN",
                 Some("crn:us-west-1.aws:E4UMRN47WJNSMAKR"),
             ),
+            ("CS_WORKSPACE_ID", None),
+            ("CS_REGION", None),
         ]);
 
         with_no_cs_vars(|| {
             temp_env::with_vars(env, || {
-                let config = TandemConfig::build("tests/config/unknown.toml").unwrap();
-                assert_eq!("E4UMRN47WJNSMAKR", config.auth.workspace_id);
+                let config = TandemConfig::build("tests/config/unknown.toml");
+
+                assert_eq!(
+                    "E4UMRN47WJNSMAKR",
+                    config.unwrap().auth.workspace_crn.workspace_id.to_string()
+                );
             })
         })
     }
 
     #[test]
-    fn without_crn_workspace_id_is_required() {
+    fn without_crn_workspace_id_and_region_are_required() {
         let env = merge_env_vars(vec![
             ("CS_WORKSPACE_ID", None),
             ("CS_REGION", None),
@@ -578,34 +638,41 @@ mod tests {
             temp_env::with_vars(env, || {
                 let config = TandemConfig::build("tests/config/unknown.toml");
                 assert!(config.is_err());
+
                 if let Err(e) = config {
                     assert!(e
                         .to_string()
-                        .contains("Missing workspace_id from [auth] configuration"));
+                        .contains("When workspace_crn is not provided, workspace_id (<not provided>) and region (<not provided>) must be provided"));
                 }
             })
         });
 
         let env = merge_env_vars(vec![
             ("CS_WORKSPACE_ID", Some("DCMBTGHEX5R2RMR4")),
-            ("CS_REGION", None),
+            ("CS_REGION", Some("us-east-1.aws")),
             ("CS_WORKSPACE_CRN", None),
         ]);
 
         with_no_cs_vars(|| {
             temp_env::with_vars(env, || {
                 let config = TandemConfig::build("tests/config/unknown.toml").unwrap();
-                assert_eq!("DCMBTGHEX5R2RMR4", config.auth.workspace_id);
+                assert_eq!(
+                    "DCMBTGHEX5R2RMR4",
+                    config.auth.workspace_crn.workspace_id.to_string()
+                );
+                assert_eq!(
+                    "us-east-1.aws",
+                    config.auth.workspace_crn.region.to_string()
+                );
             })
         });
     }
 
     #[test]
     fn missing_auth_config() {
-        // Missing both workspace id and client_access_key
-
         let env = merge_env_vars(vec![
             ("CS_WORKSPACE_ID", None),
+            ("CS_REGION", None),
             ("CS_CLIENT_ACCESS_KEY", None),
         ]);
 
@@ -692,6 +759,12 @@ mod tests {
             ("CS_DATABASE__NAME", None),
             ("CS_DATABASE__HOST", None),
             ("CS_DATABASE__PORT", None),
+            (
+                "CS_WORKSPACE_CRN",
+                Some("crn:us-west-1.aws:E4UMRN47WJNSMAKR"),
+            ),
+            ("CS_WORKSPACE_ID", None),
+            ("CS_REGION", None),
         ]);
 
         with_no_cs_vars(|| {
@@ -723,6 +796,51 @@ mod tests {
                     unreachable!();
                 }
             })
+        });
+    }
+
+    #[test]
+    fn crn_can_load_from_toml() {
+        with_no_cs_vars(|| {
+            let config =
+                TandemConfig::build("tests/config/cipherstash-proxy-with-crn.toml").unwrap();
+            assert_eq!(
+                "E4UMRN47WJNSMAKR",
+                config.auth.workspace_crn.workspace_id.to_string()
+            );
+            assert_eq!(
+                "us-west-1.aws",
+                config.auth.workspace_crn.region.to_string()
+            );
+        })
+    }
+
+    #[test]
+    fn crn_cannot_be_used_with_workspace_id_or_region_env_vars() {
+        let env = merge_env_vars(vec![
+            ("CS_WORKSPACE_ID", Some("DCMBTGHEX5R2RMR4")),
+            ("CS_REGION", Some("us-west-1")),
+        ]);
+
+        with_no_cs_vars(|| {
+            temp_env::with_vars(env, || {
+                let config = TandemConfig::build("tests/config/cipherstash-proxy-with-crn.toml");
+                assert!(config.is_err());
+                let pattern = Regex::new(r"workspace_crn \(.*\) cannot be used with workspace_id \(.*\) and/or region \(.*\)").unwrap();
+                assert!(pattern.is_match(&config.unwrap_err().to_string()));
+            })
+        });
+    }
+
+    #[test]
+    fn crn_cannot_be_used_with_workspace_id_or_region_in_toml() {
+        with_no_cs_vars(|| {
+            let config =
+                TandemConfig::build("tests/config/cipherstash-proxy-with-crn-and-region.toml");
+            assert!(config.is_err());
+
+            let pattern = Regex::new(r"workspace_crn \(.*\) cannot be used with workspace_id \(.*\) and/or region \(.*\)").unwrap();
+            assert!(pattern.is_match(&config.unwrap_err().to_string()));
         });
     }
 }

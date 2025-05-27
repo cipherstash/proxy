@@ -10,6 +10,7 @@ use crate::{
     postgresql::Column,
     Identifier,
 };
+use cipherstash_client::config::{ConfigError, ZeroKMSConfigWithClientKey};
 use cipherstash_client::{
     config::EnvSource,
     credentials::{auto_refresh::AutoRefresh, ServiceCredentials},
@@ -186,7 +187,7 @@ impl Encrypt {
     }
 }
 
-async fn init_cipher(config: &TandemConfig) -> Result<ScopedCipher, Error> {
+fn build_zerokms_config(config: &TandemConfig) -> Result<ZeroKMSConfigWithClientKey, ConfigError> {
     let console_config = ConsoleConfig::builder().with_env().build()?;
 
     let builder = CtsConfig::builder().with_env();
@@ -200,10 +201,13 @@ async fn init_cipher(config: &TandemConfig) -> Result<ScopedCipher, Error> {
     // Not using with_env because the proxy config should take precedence
     let builder = ZeroKMSConfig::builder()
         .add_source(EnvSource::default())
+        .workspace_crn(config.auth.workspace_crn.clone())
         .workspace_id(
             config
                 .auth
+                .workspace_crn
                 .workspace_id
+                .to_string()
                 .to_owned()
                 .try_into()
                 .map_err(cipherstash_client::config::ConfigError::from)?,
@@ -220,7 +224,11 @@ async fn init_cipher(config: &TandemConfig) -> Result<ScopedCipher, Error> {
         builder
     };
 
-    let zerokms_config = builder.build_with_client_key()?;
+    builder.build_with_client_key()
+}
+
+async fn init_cipher(config: &TandemConfig) -> Result<ScopedCipher, Error> {
+    let zerokms_config = build_zerokms_config(config)?;
 
     let zerokms_client = zerokms_config
         .create_client_with_credentials(AutoRefresh::new(zerokms_config.credentials()));
@@ -405,5 +413,114 @@ fn plaintext_type_name(pt: Plaintext) -> String {
         Plaintext::Timestamp(_) => "Timestamp".to_string(),
         Plaintext::Utf8Str(_) => "Utf8Str".to_string(),
         Plaintext::JsonB(_) => "JsonB".to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use cts_common::WorkspaceId;
+
+    // copy-pasted from tandem.rs
+    fn with_no_cs_vars<F: FnOnce() -> R, R>(f: F) -> R {
+        let cs_vars = std::env::vars()
+            .map(|(k, _v)| k)
+            .filter(|k| k.starts_with("CS_"))
+            .collect::<Vec<_>>();
+
+        temp_env::with_vars_unset(&cs_vars, f)
+    }
+
+    fn build_tandem_config(env: Vec<(&str, Option<&str>)>) -> TandemConfig {
+        with_no_cs_vars(|| {
+            temp_env::with_vars(env, || {
+                TandemConfig::build("tests/config/unknown.toml").unwrap()
+            })
+        })
+    }
+
+    fn default_env_vars() -> Vec<(&'static str, Option<&'static str>)> {
+        vec![
+            ("CS_DATABASE__USERNAME", Some("postgres")),
+            ("CS_DATABASE__PASSWORD", Some("password")),
+            ("CS_DATABASE__NAME", Some("db")),
+            ("CS_DATABASE__HOST", Some("localhost")),
+            ("CS_DATABASE__PORT", Some("5432")),
+            ("CS_ENCRYPT__KEYSET_ID", Some("c50d8463-60e9-41a5-86cd-5782e03a503c")),
+            ("CS_ENCRYPT__CLIENT_ID", Some("e40f1692-6bb7-4bbd-a552-4c0f155be073")),
+            ("CS_ENCRYPT__CLIENT_KEY", Some("a4627031a16b7065726d75746174696f6e90090e0805000b0d0c0106040f0a0302076770325f66726f6da16b7065726d75746174696f6e9007060a0b02090d080c00040f0305010e6570325f746fa16b7065726d75746174696f6e900a0206090b04050c070f0e010d030800627033a16b7065726d75746174696f6e98210514181d0818200a18190b1112181809130f15181a0717181e000e0103181f0d181c1602040c181b1006")),
+        ]
+    }
+
+    #[test]
+    fn build_zerokms_config_with_workspace_id_region_no_crn() {
+        let mut env = default_env_vars();
+        env.push(("CS_WORKSPACE_ID", Some("3KISDURL3ZCWYZ2O")));
+        env.push(("CS_REGION", Some("ap-southeast-2.aws")));
+        env.push(("CS_CLIENT_ACCESS_KEY", Some("client-access-key")));
+
+        let tandem_config = build_tandem_config(env);
+
+        let zerokms_config = build_zerokms_config(&tandem_config).unwrap();
+
+        assert_eq!(
+            WorkspaceId::try_from("3KISDURL3ZCWYZ2O").unwrap(),
+            zerokms_config.workspace_id()
+        );
+        assert!(zerokms_config
+            .base_url()
+            .to_string()
+            .contains("ap-southeast-2.aws"));
+        // If this works, remove wokspace_id from L206
+        // If that works, remove attrs
+    }
+
+    #[test]
+    fn build_zerokms_config_only_with_crn() {
+        let mut env = default_env_vars();
+        env.push((
+            "CS_WORKSPACE_CRN",
+            Some("crn:ap-southeast-2.aws:3KISDURL3ZCWYZ2O"),
+        ));
+
+        let tandem_config = build_tandem_config(env);
+
+        let zerokms_config = build_zerokms_config(&tandem_config).unwrap();
+
+        assert_eq!(
+            WorkspaceId::try_from("3KISDURL3ZCWYZ2O").unwrap(),
+            zerokms_config.workspace_id()
+        );
+        assert!(zerokms_config
+            .base_url()
+            .to_string()
+            .contains("ap-southeast-2.aws"));
+
+        // If this works, remove wokspace_id from L206
+        // If that works, remove attrs
+    }
+
+    #[test]
+    fn build_zerokms_config_with_crn_with_region_or_workspace_id() {
+        let mut env = default_env_vars();
+        env.push(("CS_WORKSPACE_ID", Some("3KISDURL3ZCWYZ2O")));
+        env.push(("CS_REGION", Some("ap-southeast-2.aws")));
+        env.push(("CS_CLIENT_ACCESS_KEY", Some("client-access-key")));
+        env.push((
+            "CS_WORKSPACE_CRN",
+            Some("crn:ap-southeast-2.aws:3KISDURL3ZCWYZ2O"),
+        ));
+
+        let tandem_config = build_tandem_config(env);
+
+        let zerokms_config = build_zerokms_config(&tandem_config);
+        assert!(zerokms_config.is_err());
+
+        let error_message = zerokms_config.unwrap_err().to_string();
+        assert!(
+            error_message.contains(
+                "workspace_crn (crn:ap-southeast-2.aws:3KISDURL3ZCWYZ2O) cannot be used with workspace_id (3KISDURL3ZCWYZ2O) and/or region (ap-southeast-2.aws)"
+            )
+        );
     }
 }
