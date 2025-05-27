@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1748321782240,
+  "lastUpdate": 1748321983426,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -2657,6 +2657,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 6.732422,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "0dc4a56c539f77f279b0d469f8d18c80bd56406c",
+          "message": "Remove order and group transformers",
+          "timestamp": "2025-05-27T03:06:38Z",
+          "url": "https://github.com/cipherstash/proxy/pull/243/commits/0dc4a56c539f77f279b0d469f8d18c80bd56406c"
+        },
+        "date": 1748321982051,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 6.791935,
             "unit": "Number"
           }
         ]
