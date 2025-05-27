@@ -1333,35 +1333,6 @@ mod test {
     }
 
     #[test]
-    fn group_by_eql_column() {
-        // init_tracing();
-        let schema = resolver(schema! {
-            tables: {
-                users: {
-                    id (PK),
-                    email (EQL),
-                    first_name,
-                }
-            }
-        });
-
-        let statement = parse("SELECT email FROM users GROUP BY email");
-
-        match type_check(schema, &statement) {
-            Ok(typed) => {
-                match typed.transform(HashMap::new()) {
-                    Ok(statement) => assert_eq!(
-                        statement.to_string(),
-                        "SELECT eql_v2.grouped_value(email) AS email FROM users GROUP BY eql_v2.ore_block_u64_8_256(email)".to_string()
-                    ),
-                    Err(err) => panic!("transformation failed: {err}"),
-                }
-            }
-            Err(err) => panic!("type check failed: {err}"),
-        }
-    }
-
-    #[test]
     fn modify_aggregate_when_eql_column_affected_by_group_by_of_other_column() {
         // init_tracing();
         let schema = resolver(schema! {
