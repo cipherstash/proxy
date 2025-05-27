@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1748314313252,
+  "lastUpdate": 1748315398291,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -2578,6 +2578,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 7.314517,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "toby@cipherstash.com",
+            "name": "Toby Hede",
+            "username": "tobyhede"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "da0f655e34585d1afa4ed162fe1771a68926db8b",
+          "message": "Merge pull request #242 from cipherstash/escape-username-in-docker-entrypoint\n\nfix: url encode username in docker entrypoint",
+          "timestamp": "2025-05-27T13:06:34+10:00",
+          "tree_id": "0aa0b44f8682a3e15507573a1c6fb5904074cb8a",
+          "url": "https://github.com/cipherstash/proxy/commit/da0f655e34585d1afa4ed162fe1771a68926db8b"
+        },
+        "date": 1748315396865,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 6.761901,
             "unit": "Number"
           }
         ]
