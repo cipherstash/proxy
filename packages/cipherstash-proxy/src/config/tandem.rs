@@ -48,19 +48,22 @@ where
 {
     // TODO: rename
     #[derive(Deserialize)]
-    struct AuthConfig_ {
+    struct AuthConfigRaw {
         workspace_crn: Option<String>,
         workspace_id: Option<String>,
         region: Option<String>,
         client_access_key: String,
     }
 
-    let auth_config_ = AuthConfig_::deserialize(deserializer)?;
+    let auth_config_raw = AuthConfigRaw::deserialize(deserializer)?;
 
-    let workspace_crn = match (auth_config_.workspace_crn, auth_config_.workspace_id, auth_config_.region) {
-        (Some(crn), None, None) => crn.parse::<Crn>().unwrap(),
-        // TODO: unwraps
-        (None, Some(ws_id), Some(region)) => Crn::new(Region::new(region.as_str()).unwrap(), WorkspaceId::try_from(ws_id).unwrap()),
+    let workspace_crn = match (auth_config_raw.workspace_crn, auth_config_raw.workspace_id, auth_config_raw.region) {
+        (Some(crn), None, None) => crn.parse::<Crn>().map_err(|e| serde::de::Error::custom(format!("Invalid workspace CRN: {}", e)))?,
+        (None, Some(ws_id), Some(region)) =>
+            Crn::new(
+                Region::new(region.as_str()).map_err(|e| serde::de::Error::custom(format!("Invalid region: {}", e)))?,
+                WorkspaceId::try_from(ws_id).map_err(|e| serde::de::Error::custom(format!("Invalid workspace_id: {}", e)))?,
+            ),
         (None, ws_id, region) => Err(
             serde::de::Error::custom(
             format!(
@@ -79,7 +82,7 @@ where
 
     Ok(AuthConfig {
         workspace_crn,
-        client_access_key: auth_config_.client_access_key,
+        client_access_key: auth_config_raw.client_access_key,
     })
 }
 
