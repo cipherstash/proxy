@@ -25,3 +25,6 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const SIZE_U8: usize = mem::size_of::<u8>();
 pub const SIZE_I16: usize = mem::size_of::<i16>();
 pub const SIZE_I32: usize = mem::size_of::<i32>();
+
+#[cfg(test)]
+pub mod test_helpers;

@@ -382,6 +382,7 @@ fn extract_invalid_field(input: &str) -> (String, String) {
 
 #[cfg(test)]
 mod tests {
+    use crate::test_helpers::with_no_cs_vars;
     use crate::{
         config::{tandem::extract_missing_field_and_key, TandemConfig},
         error::Error,
@@ -575,15 +576,6 @@ mod tests {
     }
 
     // copy-pasted to tandem.rs
-    fn with_no_cs_vars<F: FnOnce() -> R, R>(f: F) -> R {
-        let cs_vars = std::env::vars()
-            .map(|(k, _v)| k)
-            .filter(|k| k.starts_with("CS_"))
-            .collect::<Vec<_>>();
-
-        temp_env::with_vars_unset(&cs_vars, f)
-    }
-
     #[test]
     fn with_crn_ignores_workspace_id() {
         let env = merge_env_vars(vec![

@@ -409,17 +409,8 @@ fn plaintext_type_name(pt: Plaintext) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_helpers::with_no_cs_vars;
     use cts_common::WorkspaceId;
-
-    // copy-pasted from tandem.rs
-    fn with_no_cs_vars<F: FnOnce() -> R, R>(f: F) -> R {
-        let cs_vars = std::env::vars()
-            .map(|(k, _v)| k)
-            .filter(|k| k.starts_with("CS_"))
-            .collect::<Vec<_>>();
-
-        temp_env::with_vars_unset(&cs_vars, f)
-    }
 
     fn build_tandem_config(env: Vec<(&str, Option<&str>)>) -> TandemConfig {
         with_no_cs_vars(|| {
@@ -457,6 +448,7 @@ mod tests {
             WorkspaceId::try_from("3KISDURL3ZCWYZ2O").unwrap(),
             zerokms_config.workspace_id()
         );
+
         assert!(zerokms_config
             .base_url()
             .to_string()
@@ -480,6 +472,7 @@ mod tests {
             WorkspaceId::try_from("3KISDURL3ZCWYZ2O").unwrap(),
             zerokms_config.workspace_id()
         );
+
         assert!(zerokms_config
             .base_url()
             .to_string()
