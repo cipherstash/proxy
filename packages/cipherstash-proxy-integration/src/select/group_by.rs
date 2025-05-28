@@ -1,11 +1,17 @@
 #[cfg(test)]
 mod tests {
-    use crate::common::{clear, connect_with_tls, random_id, trace, PROXY};
+    use crate::common::{clear, insert, query, random_id, simple_query, trace};
+    use chrono::NaiveDate;
 
     macro_rules! value_for_type {
         (String, $i:expr) => {
             format!("group_{}", $i)
         };
+
+        (NaiveDate, $i:expr) => {
+            NaiveDate::parse_from_str(&format!("2023-01-{}", $i), "%Y-%m-%d").unwrap()
+        };
+
         ($type:ident, $i:expr) => {
             $i as $type
         };
@@ -18,7 +24,6 @@ mod tests {
                 trace();
 
                 clear().await;
-                let client = connect_with_tls(PROXY).await;
 
                 let encrypted_col = format!("encrypted_{}", stringify!($pg_type));
 
@@ -30,20 +35,26 @@ mod tests {
                         let id = random_id();
                         let sql =
                             format!("INSERT INTO encrypted (id, {encrypted_col}) VALUES ($1, $2)");
-
-                        client.query(&sql, &[&id, &encrypted_val]).await.unwrap();
+                        insert(&sql, &[&id, &encrypted_val]).await;
                     }
                 }
 
                 // Validate that there are 20 records in the encrypted table
-                let sql = "SELECT * FROM encrypted";
-                let rows = client.query(sql, &[]).await.unwrap();
+                let sql = format!("SELECT {encrypted_col} FROM encrypted");
+
+                let rows = query::<$type>(&sql).await;
+                assert_eq!(rows.len(), 20);
+
+                let rows = simple_query::<$type>(&sql).await;
                 assert_eq!(rows.len(), 20);
 
                 // GROUP BY should return 10 records, each representing two records with the same encrypted_int4 value
-                let sql = format!("SELECT array_agg(id) FROM encrypted GROUP BY {encrypted_col}");
+                let sql = format!("SELECT COUNT(*) FROM encrypted GROUP BY {encrypted_col}");
 
-                let rows = client.query(&sql, &[]).await.unwrap();
+                let rows = query::<i64>(&sql).await;
+                assert_eq!(rows.len(), 10);
+
+                let rows = simple_query::<i64>(&sql).await;
                 assert_eq!(rows.len(), 10);
             }
         };
@@ -54,4 +65,5 @@ mod tests {
     test_group_by!(group_by_int8, i64, int8);
     test_group_by!(group_by_float8, f64, float8);
     test_group_by!(group_by_text, String, text);
+    test_group_by!(group_by_date, NaiveDate, date);
 }

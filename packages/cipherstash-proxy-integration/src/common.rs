@@ -6,7 +6,7 @@ use rustls::{
     pki_types::CertificateDer, ClientConfig,
 };
 use std::sync::{Arc, Once};
-use tokio_postgres::{Client, NoTls};
+use tokio_postgres::{types::ToSql, Client, NoTls};
 use tracing_subscriber::{filter::Directive, EnvFilter, FmtSubscriber};
 
 pub const PROXY: u16 = 6432;
@@ -111,6 +111,36 @@ pub async fn connect(port: u16) -> Client {
     });
 
     client
+}
+
+pub async fn insert(sql: &str, params: &[&(dyn ToSql + Sync)]) {
+    let client = connect_with_tls(PROXY).await;
+    client.query(sql, params).await.unwrap();
+}
+
+pub async fn query<T: for<'a> tokio_postgres::types::FromSql<'a> + Send + Sync>(
+    sql: &str,
+) -> Vec<T> {
+    let client = connect_with_tls(PROXY).await;
+    let rows = client.query(sql, &[]).await.unwrap();
+    rows.iter().map(|row| row.get(0)).collect::<Vec<T>>()
+}
+
+pub async fn simple_query<T: std::str::FromStr>(sql: &str) -> Vec<T>
+where
+    <T as std::str::FromStr>::Err: std::fmt::Debug,
+{
+    let client = connect_with_tls(PROXY).await;
+    let rows = client.simple_query(sql).await.unwrap();
+    rows.iter()
+        .filter_map(|row| {
+            if let tokio_postgres::SimpleQueryMessage::Row(r) = row {
+                r.get(0).and_then(|val| val.parse::<T>().ok())
+            } else {
+                None
+            }
+        })
+        .collect()
 }
 
 ///
