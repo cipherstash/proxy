@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1748398270465,
+  "lastUpdate": 1748399677080,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -2786,6 +2786,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 6.659081,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "2bd8038e6ac9daa5fb1ec82f92e7ca6828c33df2",
+          "message": "Feature/prefer crn over workspace_id and region",
+          "timestamp": "2025-05-27T05:48:37Z",
+          "url": "https://github.com/cipherstash/proxy/pull/245/commits/2bd8038e6ac9daa5fb1ec82f92e7ca6828c33df2"
+        },
+        "date": 1748399675916,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 7.046672,
             "unit": "Number"
           }
         ]
