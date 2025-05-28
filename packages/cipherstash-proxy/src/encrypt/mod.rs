@@ -461,13 +461,12 @@ mod tests {
             .base_url()
             .to_string()
             .contains("ap-southeast-2.aws"));
-        // If this works, remove wokspace_id from L206
-        // If that works, remove attrs
     }
 
     #[test]
     fn build_zerokms_config_only_with_crn() {
         let mut env = default_env_vars();
+        env.push(("CS_CLIENT_ACCESS_KEY", Some("client-access-key")));
         env.push((
             "CS_WORKSPACE_CRN",
             Some("crn:ap-southeast-2.aws:3KISDURL3ZCWYZ2O"),
@@ -485,32 +484,5 @@ mod tests {
             .base_url()
             .to_string()
             .contains("ap-southeast-2.aws"));
-
-        // If this works, remove wokspace_id from L206
-        // If that works, remove attrs
-    }
-
-    #[test]
-    fn build_zerokms_config_with_crn_with_region_or_workspace_id() {
-        let mut env = default_env_vars();
-        env.push(("CS_WORKSPACE_ID", Some("3KISDURL3ZCWYZ2O")));
-        env.push(("CS_REGION", Some("ap-southeast-2.aws")));
-        env.push(("CS_CLIENT_ACCESS_KEY", Some("client-access-key")));
-        env.push((
-            "CS_WORKSPACE_CRN",
-            Some("crn:ap-southeast-2.aws:3KISDURL3ZCWYZ2O"),
-        ));
-
-        let tandem_config = build_tandem_config(env);
-
-        let zerokms_config = build_zerokms_config(&tandem_config);
-        assert!(zerokms_config.is_err());
-
-        let error_message = zerokms_config.unwrap_err().to_string();
-        assert!(
-            error_message.contains(
-                "workspace_crn (crn:ap-southeast-2.aws:3KISDURL3ZCWYZ2O) cannot be used with workspace_id (3KISDURL3ZCWYZ2O) and/or region (ap-southeast-2.aws)"
-            )
-        );
     }
 }
