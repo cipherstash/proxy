@@ -12,7 +12,7 @@ mod tests {
 
         let client = connect_with_tls(PROXY).await;
 
-        let id = id();
+        let id = random_id();
         let plaintext = "plaintext";
         let plaintext_date: Option<NaiveDate> = None;
         let encrypted_text = "hello@cipherstash.com";
@@ -61,7 +61,7 @@ mod tests {
 
         let client = connect_with_tls(PROXY).await;
 
-        let id = id();
+        let id = random_id();
         let plaintext = "plaintext";
         let encrypted_text = "hello@cipherstash.com";
 
@@ -103,7 +103,7 @@ mod tests {
 
         let client = connect_with_tls(PROXY).await;
 
-        let id = id();
+        let id = random_id();
         let plaintext = "plaintext";
         let encrypted_text = "hello@cipherstash.com";
 
