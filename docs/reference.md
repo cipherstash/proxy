@@ -229,7 +229,7 @@ CS_DATABASE__SCHEMA_RELOAD_INTERVAL="10"
 
 ### Docker-specific configuration
 
-As a convenience for development, if you use [Proxy's Docker container](../proxy.Dockerfile) with its default entrypoint and the below environment variables set, the EQL SQL will be applied to the database, and an example schema (for example, with the `users` table, from the [README Getting Started example](../README.md#getting-started)) will be loaded. These are turned on by default in the [development `docker-compose.yml`](../docker-compose.yml):
+As a convenience for local development, if you use [Proxy's Docker container](../proxy.Dockerfile) with its default entrypoint and the below environment variables set, the EQL SQL will be applied to the database, and an example schema (for example, with the `users` table, from the [README Getting Started example](../README.md#getting-started)) will be loaded. These are turned on by default in the [development `docker-compose.yml`](../docker-compose.yml):
 
 (It is not recommended to use either of these in production.)
 
@@ -238,7 +238,7 @@ CS_DATABASE__INSTALL_EQL="true"
 CS_DATABASE__INSTALL_EXAMPLE_SCHEMA="true"
 ```
 
-As a convenience for production, if you use [Proxy's Docker container](../proxy.Dockerfile) with the default entrypoint and the below environment variable set, the AWS RDS global certificate bundle will be added to the operating system's set of trusted certificates. This is recommended when running Proxy on AWS.
+As a convenience for production deployments, with the below environment variable set, the Proxy container will add the AWS RDS global certificate bundle to the operating system's set of trusted certificates. This is recommended when running Proxy on AWS.
 
 ```bash
 CS_DATABASE__INSTALL_AWS_RDS_CERT_BUNDLE="true"
