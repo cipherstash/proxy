@@ -22,7 +22,7 @@ pub const STATEMENTS_PASSTHROUGH_MAPPING_DISABLED_TOTAL: &str =
     "cipherstash_proxy_statements_passthrough_mapping_disabled_total";
 pub const STATEMENTS_PASSTHROUGH_TOTAL: &str = "cipherstash_proxy_statements_passthrough_total";
 pub const STATEMENTS_UNMAPPABLE_TOTAL: &str = "cipherstash_proxy_statements_unmappable_total";
-pub const STATEMENTS_DURATION_SECONDS: &str = "cipherstash_proxy_statements_duration_seconds";
+pub const STATEMENTS_EXECUTION_DURATION_SECONDS: &str = "cipherstash_proxy_statements_execution_duration_seconds";
 
 pub const ROWS_TOTAL: &str = "cipherstash_proxy_rows_total";
 pub const ROWS_ENCRYPTED_TOTAL: &str = "cipherstash_proxy_rows_encrypted_total";
@@ -100,7 +100,7 @@ pub fn start(host: String, port: u16) -> Result<(), Error> {
         "Total number of unmappable SQL statements processed by CipherStash Proxy"
     );
     describe_histogram!(
-        STATEMENTS_DURATION_SECONDS,
+        STATEMENTS_EXECUTION_DURATION_SECONDS,
         Unit::Seconds,
         "Duration of time CipherStash Proxy spent executing SQL statements"
     );

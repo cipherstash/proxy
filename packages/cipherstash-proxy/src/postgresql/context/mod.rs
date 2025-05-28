@@ -8,7 +8,7 @@ use super::{
     },
     Column,
 };
-use crate::{log::CONTEXT, prometheus::STATEMENTS_DURATION_SECONDS};
+use crate::{log::CONTEXT, prometheus::STATEMENTS_EXECUTION_DURATION_SECONDS};
 use eql_mapper::{Schema, TableResolver};
 use metrics::histogram;
 use sqltk::parser::ast::{Expr, Ident, ObjectName, ObjectNamePart, Set, Value, ValueWithSpan};
@@ -129,7 +129,7 @@ impl Context {
         debug!(target: CONTEXT, client_id = self.client_id, msg = "Execute complete");
 
         if let Some(execute) = self.get_execute() {
-            histogram!(STATEMENTS_DURATION_SECONDS).record(execute.duration());
+            histogram!(STATEMENTS_EXECUTION_DURATION_SECONDS).record(execute.duration());
             if execute.name.is_unnamed() {
                 self.close_portal(&execute.name);
             }
