@@ -136,6 +136,9 @@ impl Context {
         }
 
         let _ = self.execute.write().map(|mut queue| queue.complete());
+
+        // TODO: histogram!()s for the other P8s durations
+        // TODO: complete_command()? i unno
     }
 
     pub fn add_statement(&mut self, name: Name, statement: Statement) {
