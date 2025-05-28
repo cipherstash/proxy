@@ -17,7 +17,7 @@ pub const TEST_SCHEMA_SQL: &str = include_str!(concat!("../../../tests/sql/schem
 
 static INIT: Once = Once::new();
 
-pub fn id() -> i64 {
+pub fn random_id() -> i64 {
     use rand::Rng;
     let mut rng = rand::rng();
     rng.random_range(1..=i64::MAX)

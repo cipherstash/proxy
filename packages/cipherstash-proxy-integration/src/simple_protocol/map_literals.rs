@@ -1,13 +1,13 @@
 #[cfg(test)]
 mod tests {
-    use crate::common::{clear, connect_with_tls, id, PROXY};
+    use crate::common::{clear, connect_with_tls, random_id, PROXY};
     use chrono::NaiveDate;
     use tokio_postgres::SimpleQueryMessage::{CommandComplete, Row};
 
     #[tokio::test]
     async fn simple_protocol_without_encryption() {
         let client = connect_with_tls(PROXY).await;
-        let id = id();
+        let id = random_id();
         let sql = format!("INSERT INTO encrypted (id, plaintext) VALUES ({id}, 'plain')");
         client
             .simple_query(&sql)
@@ -30,7 +30,7 @@ mod tests {
     async fn simple_protocol_text() {
         let client = connect_with_tls(PROXY).await;
 
-        let id = id();
+        let id = random_id();
         let encrypted_text = "hello@cipherstash.com";
 
         let sql =
@@ -70,7 +70,7 @@ mod tests {
     async fn simple_protocol_int2() {
         let client = connect_with_tls(PROXY).await;
 
-        let id = id();
+        let id = random_id();
         let encrypted_int2: i16 = 42;
 
         let sql =
@@ -110,7 +110,7 @@ mod tests {
     async fn simple_protocol_date() {
         let client = connect_with_tls(PROXY).await;
 
-        let id = id();
+        let id = random_id();
         let encrypted_date = NaiveDate::parse_from_str("2025-01-01", "%Y-%m-%d").unwrap();
 
         let sql =
@@ -151,7 +151,7 @@ mod tests {
     async fn simple_protocol_date_with_iso() {
         let client = connect_with_tls(PROXY).await;
 
-        let id = id();
+        let id = random_id();
         let encrypted_date =
             NaiveDate::parse_from_str("2025-01-01T13:00:00+10:00", "%Y-%m-%dT%H:%M:%S%z").unwrap();
 
@@ -193,7 +193,7 @@ mod tests {
     async fn simple_protocol_int4() {
         let client = connect_with_tls(PROXY).await;
 
-        let id = id();
+        let id = random_id();
         let encrypted_int4: i32 = 42;
 
         let statements = vec![
@@ -248,7 +248,7 @@ mod tests {
         // Statement has the wrong column name
         let sql = format!(
             "INSERT INTO encrypted (id, encrypted) VALUES ({}, 'foo@example.net')",
-            id()
+            random_id()
         );
 
         let result = client.simple_query(&sql).await;
@@ -262,7 +262,7 @@ mod tests {
         // And we can still use the connection
         let sql = format!(
             "INSERT INTO encrypted (id, encrypted_text) VALUES ({}, 'foo@example.net')",
-            id()
+            random_id()
         );
         let result = client.simple_query(&sql).await;
 

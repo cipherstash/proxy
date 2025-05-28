@@ -1,6 +1,6 @@
 #[cfg(test)]
 mod tests {
-    use crate::common::{clear, connect_with_tls, id, random_string, PROXY};
+    use crate::common::{clear, connect_with_tls, random_id, random_string, PROXY};
     use rand::Rng;
     use std::error::Error;
 
@@ -10,7 +10,7 @@ mod tests {
 
         clear().await;
 
-        let id = id();
+        let id = random_id();
         let encrypted_text = "hello@cipherstash.com";
 
         let sql = "INSERT INTO plaintext (id, plaintext) VALUES ($1, $2)";
@@ -59,7 +59,7 @@ mod tests {
                 let client = connect_with_tls(PROXY).await;
 
                 for _x in 1..10 {
-                    let id = id();
+                    let id = random_id();
                     let encrypted_text = random_string();
 
                     let sql = "INSERT INTO plaintext (id,  plaintext) VALUES ($1, $2)";
@@ -91,7 +91,7 @@ mod tests {
         clear().await;
 
         // Setup data
-        let id_1 = id();
+        let id_1 = random_id();
         let plaintext = "hello@cipherstash.com";
 
         let sql = "INSERT INTO plaintext (id, plaintext) VALUES ($1, $2)";
@@ -123,13 +123,13 @@ mod tests {
         clear().await;
 
         // Setup data
-        let id_1 = id();
+        let id_1 = random_id();
         let plaintext = "hello@cipherstash.com";
 
         let sql = "INSERT INTO plaintext (id, plaintext) VALUES ($1, $2)";
         client.query(sql, &[&id_1, &plaintext]).await.unwrap();
 
-        let id_2 = id();
+        let id_2 = random_id();
 
         // Insert value is selected from the record we just created
         let select = "SELECT plaintext FROM plaintext WHERE id = $2";
@@ -154,7 +154,7 @@ mod tests {
         clear().await;
 
         // Setup data
-        let id = id();
+        let id = random_id();
         let plaintext = "hello@cipherstash.com";
 
         let sql = "INSERT INTO plaintext (id, plaintext) VALUES ($1, $2) RETURNING *";
@@ -175,13 +175,13 @@ mod tests {
         clear().await;
 
         // Setup data
-        let id_1 = id();
+        let id_1 = random_id();
         let plaintext = "hello@cipherstash.com";
 
         let sql = "INSERT INTO plaintext (id, plaintext) VALUES ($1, $2)";
         client.query(sql, &[&id_1, &plaintext]).await.unwrap();
 
-        let id_2 = id();
+        let id_2 = random_id();
 
         let sql = "INSERT INTO plaintext (id) VALUES ($1)";
         client.query(sql, &[&id_2]).await.unwrap();
@@ -203,13 +203,13 @@ mod tests {
         clear().await;
 
         // Setup data
-        let id_1 = id();
+        let id_1 = random_id();
         let plaintext = "one@cipherstash.com";
 
         let sql = "INSERT INTO plaintext (id, plaintext) VALUES ($1, $2)";
         client.query(sql, &[&id_1, &plaintext]).await.unwrap();
 
-        let id_2 = id();
+        let id_2 = random_id();
         let plaintext = "two@cipherstash.com";
 
         let sql = "INSERT INTO plaintext (id, plaintext) VALUES ($1, $2)";

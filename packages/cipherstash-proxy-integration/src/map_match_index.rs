@@ -1,6 +1,6 @@
 #[cfg(test)]
 mod tests {
-    use crate::common::{clear, connect_with_tls, id, trace, PROXY};
+    use crate::common::{clear, connect_with_tls, random_id, trace, PROXY};
 
     #[tokio::test]
     async fn map_match_index_text() {
@@ -10,7 +10,7 @@ mod tests {
 
         let client = connect_with_tls(PROXY).await;
 
-        let id = id();
+        let id = random_id();
         let encrypted_text = "hello@cipherstash.com";
 
         let sql = "INSERT INTO encrypted (id, encrypted_text) VALUES ($1, $2)";

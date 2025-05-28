@@ -2,7 +2,7 @@
 mod tests {
     use tracing::{debug, info};
 
-    use crate::common::{clear, connect_with_tls, id, reset_schema, trace, PROXY};
+    use crate::common::{clear, connect_with_tls, random_id, reset_schema, trace, PROXY};
 
     struct Reset;
 
@@ -24,7 +24,7 @@ mod tests {
 
         let _reset = Reset;
 
-        let id = id();
+        let id = random_id();
 
         let client = connect_with_tls(PROXY).await;
 
@@ -55,7 +55,7 @@ mod tests {
 
         // Create a record
         // If select returns no results, no configuration is required
-        let id = id();
+        let id = random_id();
         let encrypted_text = "hello@cipherstash.com";
 
         let sql = "INSERT INTO unconfigured (id, encrypted_unconfigured) VALUES ($1, $2)";
@@ -82,7 +82,7 @@ mod tests {
 
         let client = connect_with_tls(PROXY).await;
 
-        let id = id();
+        let id = random_id();
         // let encrypted_date = NaiveDate::parse_from_str("2025-01-01", "%Y-%m-%d").unwrap();
         let encrypted_date: i32 = 2025;
 
@@ -111,7 +111,7 @@ mod tests {
 
         // Create a record
         // If select returns no results, no configuration is required
-        let id = id();
+        let id = random_id();
         let encrypted_text = "hello@cipherstash.com";
 
         let sql = "INSERT INTO encrypted id, encrypted_text VALUES ($1, $2)";

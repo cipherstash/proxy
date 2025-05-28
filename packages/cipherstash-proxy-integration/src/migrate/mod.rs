@@ -2,7 +2,7 @@
 mod tests {
     use std::ops::Deref;
 
-    use crate::common::{clear, connect_with_tls, id, trace, PROXY};
+    use crate::common::{clear, connect_with_tls, random_id, trace, PROXY};
     use cipherstash_proxy::{
         config::{LogFormat, LogLevel},
         Args, Migrate, TandemConfig,
@@ -55,7 +55,7 @@ mod tests {
         let client = connect_with_tls(PROXY).await;
 
         for _ in 1..10 {
-            let id = id();
+            let id = random_id();
             let plaintext = Faker.fake::<String>();
 
             let sql = "INSERT INTO encrypted (id, plaintext) VALUES ($1, $2)";

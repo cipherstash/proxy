@@ -2,7 +2,7 @@
 mod tests {
     use tokio_postgres::SimpleQueryMessage;
 
-    use crate::common::{clear, connect_with_tls, id, trace, PROXY};
+    use crate::common::{clear, connect_with_tls, random_id, trace, PROXY};
 
     #[tokio::test]
     async fn map_ore_order_text() {
@@ -22,7 +22,17 @@ mod tests {
         ";
 
         client
-            .query(sql, &[&id(), &s_two, &id(), &s_one, &id(), &s_three])
+            .query(
+                sql,
+                &[
+                    &random_id(),
+                    &s_two,
+                    &random_id(),
+                    &s_one,
+                    &random_id(),
+                    &s_three,
+                ],
+            )
             .await
             .unwrap();
 
@@ -53,7 +63,17 @@ mod tests {
         ";
 
         client
-            .query(sql, &[&id(), &s_two, &id(), &s_one, &id(), &s_three])
+            .query(
+                sql,
+                &[
+                    &random_id(),
+                    &s_two,
+                    &random_id(),
+                    &s_one,
+                    &random_id(),
+                    &s_three,
+                ],
+            )
             .await
             .unwrap();
 
@@ -78,7 +98,7 @@ mod tests {
         let s_two = "b";
 
         client
-            .query("INSERT INTO encrypted (id) values ($1)", &[&id()])
+            .query("INSERT INTO encrypted (id) values ($1)", &[&random_id()])
             .await
             .unwrap();
 
@@ -88,7 +108,7 @@ mod tests {
         ";
 
         client
-            .query(sql, &[&id(), &s_one, &id(), &s_two])
+            .query(sql, &[&random_id(), &s_one, &random_id(), &s_two])
             .await
             .unwrap();
 
@@ -121,12 +141,12 @@ mod tests {
         ";
 
         client
-            .query(sql, &[&id(), &s_one, &id(), &s_two])
+            .query(sql, &[&random_id(), &s_one, &random_id(), &s_two])
             .await
             .unwrap();
 
         client
-            .query("INSERT INTO encrypted (id) values ($1)", &[&id()])
+            .query("INSERT INTO encrypted (id) values ($1)", &[&random_id()])
             .await
             .unwrap();
 
@@ -160,7 +180,17 @@ mod tests {
         ";
 
         client
-            .query(sql, &[&id(), &s_two, &id(), &s_one, &id(), &s_three])
+            .query(
+                sql,
+                &[
+                    &random_id(),
+                    &s_two,
+                    &random_id(),
+                    &s_one,
+                    &random_id(),
+                    &s_three,
+                ],
+            )
             .await
             .unwrap();
 
@@ -191,7 +221,17 @@ mod tests {
         ";
 
         client
-            .query(sql, &[&id(), &s_two, &id(), &s_one, &id(), &s_three])
+            .query(
+                sql,
+                &[
+                    &random_id(),
+                    &s_two,
+                    &random_id(),
+                    &s_one,
+                    &random_id(),
+                    &s_three,
+                ],
+            )
             .await
             .unwrap();
 
@@ -212,11 +252,11 @@ mod tests {
 
         let client = connect_with_tls(PROXY).await;
 
-        let id_one = id();
+        let id_one = random_id();
         let s_one = "a";
-        let id_two = id();
+        let id_two = random_id();
         let s_two = "b";
-        let id_three = id();
+        let id_three = random_id();
         let s_three = "c";
 
         let sql = "
@@ -259,7 +299,17 @@ mod tests {
         ";
 
         client
-            .query(sql, &[&id(), &s_two, &id(), &s_one, &id(), &s_three])
+            .query(
+                sql,
+                &[
+                    &random_id(),
+                    &s_two,
+                    &random_id(),
+                    &s_one,
+                    &random_id(),
+                    &s_three,
+                ],
+            )
             .await
             .unwrap();
 
@@ -297,13 +347,13 @@ mod tests {
             .query(
                 sql,
                 &[
-                    &id(),
+                    &random_id(),
                     &s_plaintext_two,
                     &s_encrypted_two,
-                    &id(),
+                    &random_id(),
                     &s_plaintext_one,
                     &s_enctrypted_one,
-                    &id(),
+                    &random_id(),
                     &s_plaintext_three,
                     &s_encrypted_three,
                 ],
@@ -339,9 +389,9 @@ mod tests {
 
         let sql = format!(
             "INSERT INTO encrypted (id, encrypted_text) VALUES ({}, 'y'), ({}, 'x'), ({}, 'z')",
-            id(),
-            id(),
-            id()
+            random_id(),
+            random_id(),
+            random_id()
         );
 
         client.simple_query(&sql).await.unwrap();
@@ -383,7 +433,17 @@ mod tests {
         ";
 
         client
-            .query(sql, &[&id(), &n_two, &id(), &n_one, &id(), &n_three])
+            .query(
+                sql,
+                &[
+                    &random_id(),
+                    &n_two,
+                    &random_id(),
+                    &n_one,
+                    &random_id(),
+                    &n_three,
+                ],
+            )
             .await
             .unwrap();
 
@@ -414,7 +474,17 @@ mod tests {
         ";
 
         client
-            .query(sql, &[&id(), &n_two, &id(), &n_one, &id(), &n_three])
+            .query(
+                sql,
+                &[
+                    &random_id(),
+                    &n_two,
+                    &random_id(),
+                    &n_one,
+                    &random_id(),
+                    &n_three,
+                ],
+            )
             .await
             .unwrap();
 
@@ -445,7 +515,17 @@ mod tests {
         ";
 
         client
-            .query(sql, &[&id(), &n_two, &id(), &n_one, &id(), &n_three])
+            .query(
+                sql,
+                &[
+                    &random_id(),
+                    &n_two,
+                    &random_id(),
+                    &n_one,
+                    &random_id(),
+                    &n_three,
+                ],
+            )
             .await
             .unwrap();
 
@@ -476,7 +556,17 @@ mod tests {
         ";
 
         client
-            .query(sql, &[&id(), &n_two, &id(), &n_one, &id(), &n_three])
+            .query(
+                sql,
+                &[
+                    &random_id(),
+                    &n_two,
+                    &random_id(),
+                    &n_one,
+                    &random_id(),
+                    &n_three,
+                ],
+            )
             .await
             .unwrap();
 

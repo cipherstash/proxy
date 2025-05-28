@@ -1,6 +1,6 @@
 #[cfg(test)]
 mod tests {
-    use crate::common::{clear, connect_with_tls, id, trace, PROXY};
+    use crate::common::{clear, connect_with_tls, random_id, trace, PROXY};
     use fake::{Fake, Faker};
     use tokio_postgres::SimpleQueryMessage::CommandComplete;
 
@@ -12,7 +12,7 @@ mod tests {
         let client = connect_with_tls(PROXY).await;
 
         let data = (0..5)
-            .map(|_| (id(), Faker.fake::<String>()))
+            .map(|_| (random_id(), Faker.fake::<String>()))
             .collect::<Vec<_>>();
 
         // Build SQL string containing multiple statements;
@@ -56,7 +56,7 @@ mod tests {
         let client = connect_with_tls(PROXY).await;
 
         let data = (0..5)
-            .map(|_| (id(), Faker.fake::<String>(), Faker.fake::<String>()))
+            .map(|_| (random_id(), Faker.fake::<String>(), Faker.fake::<String>()))
             .collect::<Vec<_>>();
 
         // Build SQL string containing multiple statements;

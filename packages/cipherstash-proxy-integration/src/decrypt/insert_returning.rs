@@ -2,7 +2,7 @@
 mod tests {
     use chrono::NaiveDate;
 
-    use crate::common::{clear, connect_with_tls, id, trace, PROXY};
+    use crate::common::{clear, connect_with_tls, random_id, trace, PROXY};
 
     #[tokio::test]
     async fn decrypt_insert_returning_with_different_column_order() {
