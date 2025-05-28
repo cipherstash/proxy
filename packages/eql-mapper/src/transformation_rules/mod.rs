@@ -14,7 +14,6 @@ mod helpers;
 mod cast_literals_as_encrypted;
 mod cast_params_as_encrypted;
 mod fail_on_placeholder_change;
-mod group_by_eql_col;
 mod preserve_effective_aliases;
 mod rewrite_standard_sql_fns_on_eql_types;
 
@@ -23,7 +22,6 @@ use std::marker::PhantomData;
 pub(crate) use cast_literals_as_encrypted::*;
 pub(crate) use cast_params_as_encrypted::*;
 pub(crate) use fail_on_placeholder_change::*;
-pub(crate) use group_by_eql_col::*;
 pub(crate) use preserve_effective_aliases::*;
 pub(crate) use rewrite_standard_sql_fns_on_eql_types::*;
 
