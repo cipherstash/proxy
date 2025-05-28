@@ -202,6 +202,8 @@ fn build_zerokms_config(config: &TandemConfig) -> Result<ZeroKMSConfigWithClient
     let builder = ZeroKMSConfig::builder()
         .add_source(EnvSource::default())
         .workspace_crn(config.auth.workspace_crn.clone())
+        .workspace_id(config.auth.workspace_crn.workspace_id)
+        .region(config.auth.workspace_crn.region)
         .access_key(&config.auth.client_access_key)
         .try_with_client_id(&config.encrypt.client_id)?
         .try_with_client_key(&config.encrypt.client_key)?
@@ -442,10 +444,12 @@ mod tests {
 
         let tandem_config = build_tandem_config(env);
 
-        let workspace_id = WorkspaceId::try_from("3KISDURL3ZCWYZ2O").unwrap();
         let zerokms_config = build_zerokms_config(&tandem_config).unwrap();
 
-        assert_eq!(workspace_id, zerokms_config.workspace_id());
+        assert_eq!(
+            WorkspaceId::try_from("3KISDURL3ZCWYZ2O").unwrap(),
+            zerokms_config.workspace_id()
+        );
 
         assert!(zerokms_config
             .base_url()
@@ -464,10 +468,12 @@ mod tests {
 
         let tandem_config = build_tandem_config(env);
 
-        let workspace_id = WorkspaceId::try_from("3KISDURL3ZCWYZ2O").unwrap();
         let zerokms_config = build_zerokms_config(&tandem_config).unwrap();
 
-        assert_eq!(workspace_id, zerokms_config.workspace_id());
+        assert_eq!(
+            WorkspaceId::try_from("3KISDURL3ZCWYZ2O").unwrap(),
+            zerokms_config.workspace_id()
+        );
 
         assert!(zerokms_config
             .base_url()
