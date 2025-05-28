@@ -442,12 +442,10 @@ mod tests {
 
         let tandem_config = build_tandem_config(env);
 
+        let workspace_id = WorkspaceId::try_from("3KISDURL3ZCWYZ2O").unwrap();
         let zerokms_config = build_zerokms_config(&tandem_config).unwrap();
 
-        assert_eq!(
-            WorkspaceId::try_from("3KISDURL3ZCWYZ2O").unwrap(),
-            zerokms_config.workspace_id()
-        );
+        assert_eq!(workspace_id, zerokms_config.workspace_id());
 
         assert!(zerokms_config
             .base_url()
@@ -466,12 +464,10 @@ mod tests {
 
         let tandem_config = build_tandem_config(env);
 
+        let workspace_id = WorkspaceId::try_from("3KISDURL3ZCWYZ2O").unwrap();
         let zerokms_config = build_zerokms_config(&tandem_config).unwrap();
 
-        assert_eq!(
-            WorkspaceId::try_from("3KISDURL3ZCWYZ2O").unwrap(),
-            zerokms_config.workspace_id()
-        );
+        assert_eq!(workspace_id, zerokms_config.workspace_id());
 
         assert!(zerokms_config
             .base_url()
