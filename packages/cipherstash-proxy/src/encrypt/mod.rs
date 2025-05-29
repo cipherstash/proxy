@@ -436,11 +436,15 @@ mod tests {
     }
 
     #[test]
-    fn build_zerokms_config_with_workspace_id_region_no_crn() {
+    fn build_zerokms_config_with_workspace_id_region_crn() {
         with_no_cs_vars(|| {
             let mut env = default_env_vars();
-            env.push(("CS_WORKSPACE_ID", Some("3KISDURL3ZCWYZ2O")));
-            env.push(("CS_REGION", Some("ap-southeast-2.aws")));
+            env.push(("CS_WORKSPACE_ID", Some("workspace id ignored")));
+            env.push(("CS_REGION", Some("region ignored")));
+            env.push((
+                "CS_WORKSPACE_CRN",
+                Some("crn:ap-southeast-2.aws:3KISDURL3ZCWYZ2O"),
+            ));
             env.push(("CS_CLIENT_ACCESS_KEY", Some("client-access-key")));
 
             let tandem_config = build_tandem_config(env);
@@ -460,7 +464,7 @@ mod tests {
     }
 
     #[test]
-    fn build_zerokms_config_only_with_crn() {
+    fn build_zerokms_config_only_crn() {
         with_no_cs_vars(|| {
             let mut env = default_env_vars();
             env.push(("CS_CLIENT_ACCESS_KEY", Some("client-access-key")));

@@ -173,6 +173,8 @@ async fn init(mut config: TandemConfig) -> Encrypt {
         warn!(msg = "Mapping is not enabled");
     }
 
+    config.check_obsolete_config();
+
     match config.tls {
         Some(ref mut tls) => {
             _ = tls.check_cert().inspect_err(|err| {

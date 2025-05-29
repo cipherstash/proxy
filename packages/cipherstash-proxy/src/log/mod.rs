@@ -58,9 +58,9 @@ mod tests {
     use crate::config::LogLevel;
 
     use super::*;
+    use crate::test_helpers::MockMakeWriter;
     use tracing::dispatcher::set_default;
     use tracing::{debug, error, info, trace, warn};
-    use crate::test_helpers::MockMakeWriter;
 
     #[test]
     fn test_simple_log() {

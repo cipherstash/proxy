@@ -17,7 +17,7 @@ pub(crate) fn with_no_cs_vars<F: FnOnce() -> R, R>(f: F) -> R {
 // Mock Writer for flexibly testing the logging behaviour, copy-pasted from
 // tracing_subscriber's internal test code (with JSON functionality deleted).
 // https://github.com/tokio-rs/tracing/blob/b02a700ba6850ad813f77e65144114f866074a8f/tracing-subscriber/src/fmt/mod.rs#L1247-L1314
-pub(crate) struct MockWriter {
+pub struct MockWriter {
     buf: Arc<Mutex<Vec<u8>>>,
 }
 
@@ -49,7 +49,7 @@ impl io::Write for MockWriter {
 }
 
 #[derive(Clone, Default)]
-pub(crate) struct MockMakeWriter {
+pub struct MockMakeWriter {
     buf: Arc<Mutex<Vec<u8>>>,
 }
 
