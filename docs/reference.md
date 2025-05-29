@@ -134,9 +134,9 @@ private_key_pem = "..."
 
 
 [auth]
-# CipherStash Workspace ID
-# Env: CS_WORKSPACE_ID
-workspace_id = "cipherstash-workspace-id"
+# CipherStash Workspace CRN
+# Env: CS_WORKSPACE_CRN
+workspace_crn = "cipherstash-workspace-crn"
 
 # CipherStash Client Access Key
 # Env: CS_CLIENT_ACCESS_KEY

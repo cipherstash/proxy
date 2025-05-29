@@ -202,8 +202,6 @@ fn build_zerokms_config(config: &TandemConfig) -> Result<ZeroKMSConfigWithClient
     let builder = ZeroKMSConfig::builder()
         .add_source(EnvSource::default())
         .workspace_crn(config.auth.workspace_crn.clone())
-        .workspace_id(config.auth.workspace_crn.workspace_id)
-        .region(config.auth.workspace_crn.region)
         .access_key(&config.auth.client_access_key)
         .try_with_client_id(&config.encrypt.client_id)?
         .try_with_client_key(&config.encrypt.client_key)?
@@ -436,35 +434,7 @@ mod tests {
     }
 
     #[test]
-    fn build_zerokms_config_with_workspace_id_region_crn() {
-        with_no_cs_vars(|| {
-            let mut env = default_env_vars();
-            env.push(("CS_WORKSPACE_ID", Some("workspace id ignored")));
-            env.push(("CS_REGION", Some("region ignored")));
-            env.push((
-                "CS_WORKSPACE_CRN",
-                Some("crn:ap-southeast-2.aws:3KISDURL3ZCWYZ2O"),
-            ));
-            env.push(("CS_CLIENT_ACCESS_KEY", Some("client-access-key")));
-
-            let tandem_config = build_tandem_config(env);
-
-            let zerokms_config = build_zerokms_config(&tandem_config).unwrap();
-
-            assert_eq!(
-                WorkspaceId::try_from("3KISDURL3ZCWYZ2O").unwrap(),
-                zerokms_config.workspace_id()
-            );
-
-            assert!(zerokms_config
-                .base_url()
-                .to_string()
-                .contains("ap-southeast-2.aws"));
-        });
-    }
-
-    #[test]
-    fn build_zerokms_config_only_crn() {
+    fn build_zerokms_config_with_crn() {
         with_no_cs_vars(|| {
             let mut env = default_env_vars();
             env.push(("CS_CLIENT_ACCESS_KEY", Some("client-access-key")));

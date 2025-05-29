@@ -119,7 +119,7 @@ username = "cipherstash"
 password = "password"
 
 [auth]
-workspace_id = "cipherstash-workspace-id"
+workspace_crn = "cipherstash-workspace-crn"
 client_access_key = "cipherstash-client-access-key"
 
 [encrypt]

@@ -20,7 +20,7 @@ password = "password"
 with_tls = true
 
 [auth]
-workspace_id = "workspace_id"
+workspace_crn = "workspace_crn"
 client_access_key = "client_access_key"
 
 [encrypt]

@@ -401,7 +401,7 @@ mod tests {
         error::Error,
     };
     use cipherstash_client::config::vars::{
-        CS_CLIENT_ACCESS_KEY, CS_CLIENT_ID, CS_CLIENT_KEY, CS_DEFAULT_KEYSET_ID, CS_WORKSPACE_ID,
+        CS_CLIENT_ACCESS_KEY, CS_CLIENT_ID, CS_CLIENT_KEY, CS_DEFAULT_KEYSET_ID,
     };
     use std::collections::HashMap;
     use tracing::dispatcher::set_default;
@@ -425,7 +425,6 @@ mod tests {
                         CS_DEFAULT_KEYSET_ID,
                         Some("dd0a239f-02e2-4c8e-ba20-d9f0f85af9ac"),
                     ),
-                    (CS_WORKSPACE_ID, Some("BVXAY5Z23CGVY6JF")),
                     (CS_CLIENT_ACCESS_KEY, Some("CS_CLIENT_ACCESS_KEY")),
                 ],
                 || {
@@ -577,8 +576,6 @@ mod tests {
                 "CS_DEFAULT_KEYSET_ID",
                 Some("00000000-0000-0000-0000-000000000000"),
             ),
-            ("CS_WORKSPACE_ID", Some("FM2U2JUERZM24LPN")),
-            ("CS_REGION", Some("us-west-1.aws")),
             ("CS_CLIENT_ACCESS_KEY", Some("CS_CLIENT_ACCESS_KEY")),
             ("CS_DATABASE__USERNAME", Some("CS_DATABASE__USERNAME")),
             ("CS_DATABASE__PASSWORD", Some("CS_DATABASE__PASSWORD")),
@@ -602,14 +599,10 @@ mod tests {
     // copy-pasted to tandem.rs
     #[test]
     fn with_crn_ignores_workspace_id() {
-        let env = merge_env_vars(vec![
-            ("CS_WORKSPACE_ID", None),
-            ("CS_REGION", None),
-            (
-                "CS_WORKSPACE_CRN",
-                Some("crn:us-west-1.aws:E4UMRN47WJNSMAKR"),
-            ),
-        ]);
+        let env = merge_env_vars(vec![(
+            "CS_WORKSPACE_CRN",
+            Some("crn:us-west-1.aws:E4UMRN47WJNSMAKR"),
+        )]);
 
         with_no_cs_vars(|| {
             temp_env::with_vars(env, || {
@@ -623,13 +616,10 @@ mod tests {
 
         let env = merge_env_vars(vec![
             ("CS_WORKSPACE_ID", Some("DCMBTGHEX5R2RMR4")),
-            ("CS_REGION", None),
             (
                 "CS_WORKSPACE_CRN",
                 Some("crn:us-west-1.aws:E4UMRN47WJNSMAKR"),
             ),
-            ("CS_WORKSPACE_ID", None),
-            ("CS_REGION", None),
         ]);
 
         with_no_cs_vars(|| {
@@ -645,12 +635,8 @@ mod tests {
     }
 
     #[test]
-    fn no_workspace_crn_provided() {
-        let env = merge_env_vars(vec![
-            ("CS_WORKSPACE_ID", None),
-            ("CS_REGION", None),
-            ("CS_WORKSPACE_CRN", None),
-        ]);
+    fn no_crn_provided() {
+        let env = merge_env_vars(vec![("CS_WORKSPACE_CRN", None)]);
 
         with_no_cs_vars(|| {
             temp_env::with_vars(env, || {
@@ -668,11 +654,7 @@ mod tests {
 
     #[test]
     fn missing_auth_config() {
-        let env = merge_env_vars(vec![
-            ("CS_WORKSPACE_ID", None),
-            ("CS_REGION", None),
-            ("CS_CLIENT_ACCESS_KEY", None),
-        ]);
+        let env = merge_env_vars(vec![("CS_CLIENT_ACCESS_KEY", None)]);
 
         with_no_cs_vars(|| {
             temp_env::with_vars(env, || {
@@ -777,8 +759,6 @@ mod tests {
                 "CS_WORKSPACE_CRN",
                 Some("crn:us-west-1.aws:E4UMRN47WJNSMAKR"),
             ),
-            ("CS_WORKSPACE_ID", None),
-            ("CS_REGION", None),
         ]);
 
         with_no_cs_vars(|| {
@@ -867,11 +847,13 @@ mod tests {
     }
 
     #[test]
-    fn crn_cannot_be_used_with_workspace_id_or_region_in_toml() {
+    fn crn_with_workspace_id_or_region_in_toml() {
         with_no_cs_vars(|| {
-            let config =
-                TandemConfig::build("tests/config/cipherstash-proxy-with-crn-and-region.toml")
-                    .unwrap();
+            // CRN in toml is used
+            let config = TandemConfig::build(
+                "tests/config/cipherstash-proxy-with-crn-region-workspace-id.toml",
+            )
+            .unwrap();
             assert_eq!(
                 "E4UMRN47WJNSMAKR",
                 config.auth.workspace_crn.workspace_id.to_string()
@@ -881,6 +863,7 @@ mod tests {
                 config.auth.workspace_crn.region.to_string()
             );
 
+            // workspace_id and region in toml are obsolete
             assert_eq!(
                 config.auth.obsolete,
                 ObsoleteAuthConfig {
@@ -901,9 +884,10 @@ mod tests {
         let _default = set_default(&subscriber.into());
 
         with_no_cs_vars(|| {
-            let tandem_config =
-                TandemConfig::build("tests/config/cipherstash-proxy-with-crn-and-region.toml")
-                    .unwrap();
+            let tandem_config = TandemConfig::build(
+                "tests/config/cipherstash-proxy-with-crn-region-workspace-id.toml",
+            )
+            .unwrap();
 
             tandem_config.check_obsolete_config();
         });
