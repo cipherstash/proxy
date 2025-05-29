@@ -816,6 +816,28 @@ mod tests {
     }
 
     #[test]
+    fn crn_can_load_from_env_vars() {
+        let env = merge_env_vars(vec![(
+            "CS_WORKSPACE_CRN",
+            Some("crn:us-west-1.aws:E4UMRN47WJNSMAKR"),
+        )]);
+
+        with_no_cs_vars(|| {
+            temp_env::with_vars(env, || {
+                let config = TandemConfig::build("tests/config/unknown.toml").unwrap();
+                assert_eq!(
+                    "E4UMRN47WJNSMAKR",
+                    config.auth.workspace_crn.workspace_id.to_string()
+                );
+                assert_eq!(
+                    "us-west-1.aws",
+                    config.auth.workspace_crn.region.to_string()
+                );
+            })
+        })
+    }
+
+    #[test]
     fn crn_from_toml_with_workspace_id_and_region_env_vars() {
         let env = merge_env_vars(vec![
             ("CS_WORKSPACE_ID", Some("DCMBTGHEX5R2RMR4")),
@@ -824,6 +846,7 @@ mod tests {
 
         with_no_cs_vars(|| {
             temp_env::with_vars(env, || {
+                // CRN in toml is used
                 let config =
                     TandemConfig::build("tests/config/cipherstash-proxy-with-crn.toml").unwrap();
 
@@ -835,6 +858,8 @@ mod tests {
                     "us-west-1.aws",
                     config.auth.workspace_crn.region.to_string()
                 );
+
+                // workspace_id and region in env vars are obsolete
                 assert_eq!(
                     config.auth.obsolete,
                     ObsoleteAuthConfig {
