@@ -148,8 +148,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// Init the Encrypt service
 ///
 async fn init(mut config: TandemConfig) -> Encrypt {
-
-    error!(msg = "in init");
     if config.encrypt.default_keyset_id.is_none() {
         info!(msg = "Encrypt using default dataset");
     }
