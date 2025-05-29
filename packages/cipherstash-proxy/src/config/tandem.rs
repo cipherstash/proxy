@@ -11,13 +11,14 @@ use cipherstash_client::config::vars::{
     CS_WORKSPACE_CRN, CS_WORKSPACE_ID,
 };
 use config::{Config, Environment};
-use cts_common::{Crn, Region, WorkspaceId};
+use cts_common::Crn;
 use regex::Regex;
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::env;
 use std::path::PathBuf;
 use std::sync::LazyLock;
+use tracing::{error, warn};
 use uuid::Uuid;
 
 #[derive(Clone, Debug, Deserialize)]
@@ -25,7 +26,6 @@ pub struct TandemConfig {
     #[serde(default)]
     pub server: ServerConfig,
     pub database: DatabaseConfig,
-    #[serde(deserialize_with = "deserialise_auth_config")]
     pub auth: AuthConfig,
     pub encrypt: EncryptConfig,
     pub tls: Option<TlsConfig>,
@@ -56,28 +56,25 @@ where
 
     let auth_config_raw = AuthConfigRaw::deserialize(deserializer)?;
 
-    let workspace_crn = match (auth_config_raw.workspace_crn, auth_config_raw.workspace_id, auth_config_raw.region) {
-        (Some(crn), None, None) => crn.parse::<Crn>().map_err(|e| serde::de::Error::custom(format!("Invalid workspace CRN: {}", e)))?,
-        (None, Some(ws_id), Some(region)) =>
-            Crn::new(
-                Region::new(region.as_str()).map_err(|e| serde::de::Error::custom(format!("Invalid region: {}", e)))?,
-                WorkspaceId::try_from(ws_id).map_err(|e| serde::de::Error::custom(format!("Invalid workspace_id: {}", e)))?,
-            ),
-        (None, ws_id, region) => Err(
-            serde::de::Error::custom(
-            format!(
-                    "When workspace_crn is not provided, workspace_id ({}) and region ({}) must be provided",
-                    ws_id.map(|w| w.to_string()).unwrap_or("<not provided>".to_string()),
-                    region.map(|r| r.to_string()).unwrap_or("<not provided>".to_string())))
-                )?,
-        (Some(crn), ws_id, region) =>
-            Err(serde::de::Error::custom(
-                format!("workspace_crn ({}) cannot be used with workspace_id ({}) and/or region ({})",
-                        crn,
-                        ws_id.map(|w| w.to_string()).unwrap_or("<not provided>".to_string()),
-                        region.map(|r| r.to_string()).unwrap_or("<not provided>".to_string())))
-            )?,
+    let workspace_crn = if let Some(crn) = auth_config_raw.workspace_crn {
+        crn.parse::<Crn>().map_err(|e| serde::de::Error::custom(format!("Invalid workspace CRN: {}", e)))?
+    } else {
+        Err(serde::de::Error::custom(
+            "Missing workspace_crn. Set 'workspace_crn' in the [auth] section of the configuration file or the CS_WORKSPACE_CRN environment variable."
+        ))?
     };
+
+    if let Some(ws_id) = auth_config_raw.workspace_id {
+        warn!(
+            msg = "Setting 'workspace id' ({}) directly is no longer supported. Set 'workspace_crn' in the [auth] section of the configuration file or the CS_WORKSPACE_CRN environment variable", ws_id
+        );
+    }
+
+    if let Some(region) = auth_config_raw.region {
+        warn!(
+            msg = "Setting 'region' ({}) directly is no longer supported. Set 'workspace_crn' in the [auth] section of the configuration file or the CS_WORKSPACE_CRN environment variable", region
+        );
+    }
 
     Ok(AuthConfig {
         workspace_crn,
@@ -157,6 +154,7 @@ impl TandemConfig {
     }
 
     pub fn build(path: &str) -> Result<Self, Error> {
+        error!(msg = "in build");
         // For parsing top-level values such as CS_HOST, CS_PORT
         // and for parsing nested env values such as CS_DATABASE__HOST, CS_DATABASE__PORT
         let cs_env_source = Environment::with_prefix(CS_PREFIX)
@@ -382,7 +380,7 @@ fn extract_invalid_field(input: &str) -> (String, String) {
 
 #[cfg(test)]
 mod tests {
-    use crate::test_helpers::with_no_cs_vars;
+    use crate::test_helpers::{with_no_cs_vars, MockMakeWriter};
     use crate::{
         config::{tandem::extract_missing_field_and_key, TandemConfig},
         error::Error,
@@ -390,9 +388,12 @@ mod tests {
     use cipherstash_client::config::vars::{
         CS_CLIENT_ACCESS_KEY, CS_CLIENT_ID, CS_CLIENT_KEY, CS_DEFAULT_KEYSET_ID, CS_WORKSPACE_ID,
     };
-    use regex::Regex;
     use std::collections::HashMap;
+    use tracing::dispatcher::set_default;
+    use tracing_subscriber::fmt::writer::BoxMakeWriter;
     use uuid::Uuid;
+    use crate::config::{LogConfig, LogLevel};
+    use crate::log::{set_format, subscriber};
 
     const CS_PREFIX: &str = "CS_TEST";
 
@@ -631,7 +632,7 @@ mod tests {
     }
 
     #[test]
-    fn without_crn_workspace_id_and_region_are_required() {
+    fn no_workspace_crn_provided() {
         let env = merge_env_vars(vec![
             ("CS_WORKSPACE_ID", None),
             ("CS_REGION", None),
@@ -646,28 +647,8 @@ mod tests {
                 if let Err(e) = config {
                     assert!(e
                         .to_string()
-                        .contains("When workspace_crn is not provided, workspace_id (<not provided>) and region (<not provided>) must be provided"));
+                        .contains("Missing workspace_crn. Set 'workspace_crn' in the [auth] section of the configuration file or the CS_WORKSPACE_CRN environment variable."));
                 }
-            })
-        });
-
-        let env = merge_env_vars(vec![
-            ("CS_WORKSPACE_ID", Some("DCMBTGHEX5R2RMR4")),
-            ("CS_REGION", Some("us-east-1.aws")),
-            ("CS_WORKSPACE_CRN", None),
-        ]);
-
-        with_no_cs_vars(|| {
-            temp_env::with_vars(env, || {
-                let config = TandemConfig::build("tests/config/unknown.toml").unwrap();
-                assert_eq!(
-                    "DCMBTGHEX5R2RMR4",
-                    config.auth.workspace_crn.workspace_id.to_string()
-                );
-                assert_eq!(
-                    "us-east-1.aws",
-                    config.auth.workspace_crn.region.to_string()
-                );
             })
         });
     }
@@ -719,6 +700,7 @@ mod tests {
             ("CS_CLIENT_ID", None),
             ("CS_CLIENT_KEY", None),
             ("CS_DEFAULT_KEYSET_ID", None),
+            ("CS_WORKSPACE_CRN", Some("crn:us-west-1.aws:E4UMRN47WJNSMAKR")),
         ]);
 
         with_no_cs_vars(|| {
@@ -735,7 +717,10 @@ mod tests {
         });
 
         // Missing client_id
-        let env = merge_env_vars(vec![("CS_CLIENT_ID", None)]);
+        let env = merge_env_vars(vec![
+            ("CS_CLIENT_ID", None),
+            ("CS_WORKSPACE_CRN", Some("crn:us-west-1.aws:E4UMRN47WJNSMAKR")),
+        ]);
 
         with_no_cs_vars(|| {
             temp_env::with_vars(env, || {
@@ -785,7 +770,13 @@ mod tests {
         });
 
         // Missing name
-        let env = merge_env_vars(vec![("CS_DATABASE__NAME", None)]);
+        let env = merge_env_vars(vec![
+            ("CS_DATABASE__NAME", None),
+            (
+                "CS_WORKSPACE_CRN",
+                Some("crn:us-west-1.aws:E4UMRN47WJNSMAKR"),
+            ),
+        ]);
 
         with_no_cs_vars(|| {
             temp_env::with_vars(env, || {
@@ -820,7 +811,18 @@ mod tests {
     }
 
     #[test]
-    fn crn_cannot_be_used_with_workspace_id_or_region_env_vars() {
+    fn crn_from_toml_with_workspace_id_and_region_env_vars() {
+        let make_writer = MockMakeWriter::default();
+
+        let log_config = LogConfig::with_level(LogLevel::Warn);
+
+        let subscriber =
+            subscriber::builder(&log_config).with_writer(BoxMakeWriter::new(make_writer.clone()));
+
+        let subscriber = set_format(&log_config, subscriber);
+
+        let _default = set_default(&subscriber.into());
+
         let env = merge_env_vars(vec![
             ("CS_WORKSPACE_ID", Some("DCMBTGHEX5R2RMR4")),
             ("CS_REGION", Some("us-west-1")),
@@ -828,23 +830,52 @@ mod tests {
 
         with_no_cs_vars(|| {
             temp_env::with_vars(env, || {
-                let config = TandemConfig::build("tests/config/cipherstash-proxy-with-crn.toml");
-                assert!(config.is_err());
-                let pattern = Regex::new(r"workspace_crn \(.*\) cannot be used with workspace_id \(.*\) and/or region \(.*\)").unwrap();
-                assert!(pattern.is_match(&config.unwrap_err().to_string()));
+                let config = TandemConfig::build("tests/config/cipherstash-proxy-with-crn.toml").unwrap();
+
+                assert_eq!(
+                    "E4UMRN47WJNSMAKR",
+                    config.auth.workspace_crn.workspace_id.to_string()
+                );
+                assert_eq!(
+                    "us-west-1.aws",
+                    config.auth.workspace_crn.region.to_string()
+                );
             })
         });
+
+        let log_contents = make_writer.get_string();
+        assert!(log_contents.contains("Setting 'workspace id' (DCMBTGHEX5R2RMR4) directly is no longer supported. Set 'workspace_crn' in the [auth] section of the configuration file or the CS_WORKSPACE_CRN environment variable"));
+        assert!(log_contents.contains("Setting 'region' (us-west-1) directly is no longer supported. Set 'workspace_crn' in the [auth] section of the configuration file or the CS_WORKSPACE_CRN environment variable"));
     }
 
     #[test]
     fn crn_cannot_be_used_with_workspace_id_or_region_in_toml() {
+        let make_writer = MockMakeWriter::default();
+
+        let log_config = LogConfig::with_level(LogLevel::Warn);
+
+        let subscriber =
+            subscriber::builder(&log_config).with_writer(BoxMakeWriter::new(make_writer.clone()));
+
+        let subscriber = set_format(&log_config, subscriber);
+
+        let _default = set_default(&subscriber.into());
+
         with_no_cs_vars(|| {
             let config =
-                TandemConfig::build("tests/config/cipherstash-proxy-with-crn-and-region.toml");
-            assert!(config.is_err());
-
-            let pattern = Regex::new(r"workspace_crn \(.*\) cannot be used with workspace_id \(.*\) and/or region \(.*\)").unwrap();
-            assert!(pattern.is_match(&config.unwrap_err().to_string()));
+                TandemConfig::build("tests/config/cipherstash-proxy-with-crn-and-region.toml").unwrap();
+            assert_eq!(
+                "E4UMRN47WJNSMAKR",
+                config.auth.workspace_crn.workspace_id.to_string()
+            );
+            assert_eq!(
+                "us-west-1.aws",
+                config.auth.workspace_crn.region.to_string()
+            );
         });
+        let log_contents = make_writer.get_string();
+
+        assert!(log_contents.contains("Setting 'workspace id' (DCMBTGHEX5R2RMR4) directly is no longer supported. Set 'workspace_crn' in the [auth] section of the configuration file or the CS_WORKSPACE_CRN environment variable"));
+        assert!(log_contents.contains("Setting 'region' (ap-southeast-2.aws) directly is no longer supported. Set 'workspace_crn' in the [auth] section of the configuration file or the CS_WORKSPACE_CRN environment variable"));
     }
 }

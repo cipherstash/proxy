@@ -10,8 +10,7 @@ username = "cipherstash"
 password = "password"
 
 [auth]
-workspace_id = "E4UMRN47WJNSMAKR"
-region = "ap-southeast-2.aws"
+workspace_crn = "crn:ap-southeast-2.aws:E4UMRN47WJNSMAKR"
 client_access_key = "client_access_key"
 
 [encrypt]

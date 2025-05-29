@@ -1,6 +1,7 @@
 [auth]
 workspace_crn = "crn:us-west-1.aws:E4UMRN47WJNSMAKR"
 region = "ap-southeast-2.aws"
+workspace_id = "DCMBTGHEX5R2RMR4"
 client_access_key = "client_access_key"
 
 [database]
