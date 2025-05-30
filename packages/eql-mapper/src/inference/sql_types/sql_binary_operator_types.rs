@@ -1,22 +1,15 @@
-use sqltk::parser::ast::{BinaryOperator, Expr};
+use sqltk::parser::ast::Expr;
 
-use crate::{unifier::{Type, TypeArg, TypeEnv}, TypeError, TypeInferencer};
-
-#[derive(Debug)]
-pub(crate) struct ExplicitBinaryOpRule {
-    #[allow(unused)]
-    op: BinaryOperator,
-    env: TypeEnv,
-    lhs_type_arg: TypeArg,
-    rhs_type_arg: TypeArg,
-    return_type_arg: TypeArg,
-}
+use crate::{
+    unifier::{BinaryOpSpec, Type},
+    TypeError, TypeInferencer,
+};
 
 /// A rule for determining how to apply typing rules to a SQL binary operator expression.
 #[derive(Debug)]
 pub(crate) enum SqlBinaryOp {
     /// An explicit predefined rule for handling EQL types in the expression.
-    Explicit(&'static ExplicitBinaryOpRule),
+    Explicit(&'static BinaryOpSpec),
 
     /// The fallback rule for when there is no explicit rule for a given operator.  This rule will force the left and
     /// right expressions of the operator and its return value to resolve to [`Type::native()`].
@@ -31,12 +24,18 @@ impl SqlBinaryOp {
         op_expr: &'ast Expr,
         rhs: &'ast Expr,
     ) -> Result<(), TypeError> {
+        let mut unifier = inferencer.unifier.borrow_mut();
         match self {
             SqlBinaryOp::Explicit(rule) => {
-                let instantiated = rule.env.instantiate(&mut inferencer.unifier.borrow_mut())?;
-                inferencer.unify_node_with_type(lhs, instantiated[&rule.lhs_type_arg].clone())?;
-                inferencer.unify_node_with_type(op_expr, instantiated[&rule.return_type_arg].clone())?;
-                inferencer.unify_node_with_type(rhs, instantiated[&rule.rhs_type_arg].clone())?;
+                let lhs_ty = inferencer.get_node_type(lhs);
+                let rhs_ty = inferencer.get_node_type(rhs);
+                let ret_ty = inferencer.get_node_type(rhs);
+
+                rule.inner.init(
+                    &mut unifier,
+                    &[lhs_ty, rhs_ty],
+                    ret_ty
+                )?;
             }
 
             SqlBinaryOp::Fallback => {
@@ -47,27 +46,5 @@ impl SqlBinaryOp {
         }
 
         Ok(())
-    }
-}
-
-impl ExplicitBinaryOpRule {
-    pub(crate) fn new(
-        operator: BinaryOperator,
-        type_env: TypeEnv,
-        lhs_ty: TypeArg,
-        rhs_ty: TypeArg,
-        ret_ty: TypeArg,
-    ) -> Self {
-        assert!(type_env.contains_key(&lhs_ty));
-        assert!(type_env.contains_key(&rhs_ty));
-        assert!(type_env.contains_key(&ret_ty));
-
-        Self {
-            op: operator,
-            lhs_type_arg: lhs_ty,
-            rhs_type_arg: rhs_ty,
-            return_type_arg: ret_ty,
-            env: type_env,
-        }
     }
 }

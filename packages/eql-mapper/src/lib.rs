@@ -1,4 +1,4 @@
-//! `eql-mapper` transforms SQL to SQL+EQL using a known database schema as a reference.
+//! teql-mapper` transforms SQL to SQL+EQL using a known database schema as a reference.
 
 mod dep;
 mod display_helpers;
@@ -31,10 +31,9 @@ pub(crate) use transformation_rules::*;
 mod test {
     use super::{test_helpers::*, type_check};
     use crate::{
-        col, projection, schema, test_helpers,
-        unifier::{Bounds, EqlTerm, EqlTrait, EqlValue, NativeValue},
-        EqlTraitImpls, Param, Projection, ProjectionColumn, Schema, TableColumn, TableResolver,
-        Value,
+        projection, schema, test_helpers,
+        unifier::{EqlTerm, EqlTrait, EqlTraits, EqlValue, NativeValue},
+        Param, Projection, ProjectionColumn, Schema, TableColumn, TableResolver, Value,
     };
     use pretty_assertions::assert_eq;
     use sqltk::{
@@ -102,9 +101,9 @@ mod test {
                                 table: id("users"),
                                 column: id("email"),
                             },
-                            EqlTraitImpls::with(|impls| { impls.impl_eq(); } )
+                            EqlTraits::from(EqlTrait::Eq)
                         ),
-                        Bounds::from(EqlTrait::Eq)
+                        EqlTraits::from(EqlTrait::Eq)
                     ),
                     &ast::Value::SingleQuotedString("hello@cipherstash.com".into()),
                 )));
@@ -131,12 +130,12 @@ mod test {
         match type_check(schema, &statement) {
             Ok(typed) => {
                 assert!(typed.literals.contains(&(
-                    EqlTerm::Whole(EqlValue(
+                    EqlTerm::Full(EqlValue(
                         TableColumn {
                             table: id("users"),
                             column: id("email")
                         },
-                        EqlTraitImpls::default()
+                        EqlTraits::default()
                     )),
                     &ast::Value::SingleQuotedString("hello@cipherstash.com".into()),
                 )));
@@ -163,12 +162,12 @@ mod test {
         match type_check(schema, &statement) {
             Ok(typed) => {
                 assert!(typed.literals.contains(&(
-                    EqlTerm::Whole(EqlValue(
+                    EqlTerm::Full(EqlValue(
                         TableColumn {
                             table: id("users"),
                             column: id("email")
                         },
-                        EqlTraitImpls::default()
+                        EqlTraits::default()
                     )),
                     &ast::Value::SingleQuotedString("hello@cipherstash.com".into()),
                 )));
@@ -196,12 +195,12 @@ mod test {
         match type_check(schema, &statement) {
             Ok(typed) => {
                 assert!(typed.literals.contains(&(
-                    EqlTerm::Whole(EqlValue(
+                    EqlTerm::Full(EqlValue(
                         TableColumn {
                             table: id("users"),
                             column: id("email")
                         },
-                        EqlTraitImpls::default()
+                        EqlTraits::default()
                     )),
                     &ast::Value::SingleQuotedString("hello@cipherstash.com".into()),
                 )));
@@ -498,9 +497,9 @@ mod test {
                             table: id("users"),
                             column: id("email"),
                         },
-                        EqlTraitImpls::default(),
+                        EqlTraits::default(),
                     ),
-                    Bounds::from(EqlTrait::Eq),
+                    EqlTraits::from(EqlTrait::Eq),
                 ));
 
                 let b = Value::Eql(EqlTerm::Partial(
@@ -509,9 +508,9 @@ mod test {
                             table: id("users"),
                             column: id("first_name"),
                         },
-                        EqlTraitImpls::default(),
+                        EqlTraits::default(),
                     ),
-                    Bounds::from(EqlTrait::Eq),
+                    EqlTraits::from(EqlTrait::Eq),
                 ));
 
                 assert_eq!(typed.params, vec![(Param(1), a,), (Param(2), b,)]);
@@ -552,9 +551,9 @@ mod test {
                             table: id("users"),
                             column: id("salary"),
                         },
-                        EqlTraitImpls::with(|impls| { impls.impl_ord(); } )
+                        EqlTraits::from(EqlTrait::Ord),
                     ),
-                    Bounds::from(EqlTrait::Eq),
+                    EqlTraits::from(EqlTrait::Eq),
                 ));
 
                 let b = Value::Eql(EqlTerm::Partial(
@@ -563,9 +562,9 @@ mod test {
                             table: id("users"),
                             column: id("age"),
                         },
-                        EqlTraitImpls::with(|impls| { impls.impl_ord(); } )
+                        EqlTraits::from(EqlTrait::Ord),
                     ),
-                    Bounds::from(EqlTrait::Eq),
+                    EqlTraits::from(EqlTrait::Eq),
                 ));
 
                 assert_eq!(typed.params, vec![(Param(1), a,), (Param(2), b,)]);
@@ -1054,9 +1053,9 @@ mod test {
                             table: id("employees"),
                             column: id("salary")
                         },
-                        EqlTraitImpls::with(|impls| { impls.impl_ord(); } )
+                        EqlTraits::from(EqlTrait::Ord)
                     ),
-                    Bounds::from(EqlTrait::Ord)
+                    EqlTraits::from(EqlTrait::Ord)
                 ),
                 &ast::Value::Number(200000.into(), false),
             )]
@@ -1101,10 +1100,13 @@ mod test {
         assert_eq!(
             typed.literals,
             vec![(
-                EqlTerm::Whole(EqlValue(TableColumn {
-                    table: id("employees"),
-                    column: id("salary")
-                }, EqlTraitImpls::default())),
+                EqlTerm::Full(EqlValue(
+                    TableColumn {
+                        table: id("employees"),
+                        column: id("salary")
+                    },
+                    EqlTraits::default()
+                )),
                 &ast::Value::Number(20000.into(), false)
             )]
         );
@@ -1652,15 +1654,19 @@ mod test {
         //     "SELECT id, email FROM patients WHERE email = 'alice@example.com'"
         // );
 
-        let statement = parse("
+        let statement = parse(
+            "
             SELECT id, email FROM patients AS p
             INNER JOIN (
                 SELECT 'alice@example.com' AS selector
             ) AS selectors
             WHERE p.email = selectors.selector
-        ");
+        ",
+        );
 
-        let typed = type_check(schema, &statement).map_err(|err| err.to_string()).unwrap();
+        let typed = type_check(schema, &statement)
+            .map_err(|err| err.to_string())
+            .unwrap();
 
         assert_eq!(
             typed.projection,
@@ -1778,4 +1784,3 @@ mod test {
         }
     }
 }
-

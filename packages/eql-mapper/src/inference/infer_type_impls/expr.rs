@@ -1,5 +1,7 @@
 use crate::{
-    get_sql_binop_rule, inference::{unifier::Type, InferType, TypeError}, SqlIdent, TypeInferencer
+    get_sql_binop_rule,
+    inference::{unifier::Type, InferType, TypeError},
+    SqlIdent, TypeInferencer,
 };
 use eql_mapper_macros::trace_infer;
 use sqltk::parser::ast::{Array, Expr, Ident};

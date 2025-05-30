@@ -8,7 +8,8 @@ use std::sync::Arc;
 use crate::TypeError;
 
 use super::{
-    Constructor, EqlTerm, NativeValue, Projection, ProjectionColumn, Type, Unifier, Value, Var,
+    Array, Constructor, EqlTerm, NativeValue, Projection, ProjectionColumn, Type, Unifier, Value,
+    Var,
 };
 
 /// Trait for unifying two types.
@@ -70,7 +71,7 @@ impl UnifyTypes<Value, Value> for Unifier<'_> {
 
             (Value::Native(lhs), Value::Native(rhs)) => self.unify_types(lhs, rhs),
 
-            (Value::Array(lhs), Value::Array(rhs)) => self.unify(lhs.clone(), rhs.clone()),
+            (Value::Array(lhs), Value::Array(rhs)) => self.unify_types(lhs, rhs),
 
             (lhs, rhs) => Err(TypeError::Conflict(format!(
                 "cannot unify values {} and {}",
@@ -80,30 +81,26 @@ impl UnifyTypes<Value, Value> for Unifier<'_> {
     }
 }
 
+impl UnifyTypes<Array, Array> for Unifier<'_> {
+    fn unify_types(&mut self, lhs: &Array, rhs: &Array) -> Result<Arc<Type>, TypeError> {
+        let Array(lhs_element_ty) = lhs;
+        let Array(rhs_element_ty) = rhs;
+
+        self.unify(lhs_element_ty.clone(), rhs_element_ty.clone())
+    }
+}
+
 impl UnifyTypes<EqlTerm, EqlTerm> for Unifier<'_> {
     fn unify_types(&mut self, lhs: &EqlTerm, rhs: &EqlTerm) -> Result<Arc<Type>, TypeError> {
         match (lhs, rhs) {
-            (EqlTerm::Whole(lhs), EqlTerm::Whole(rhs)) if lhs == rhs => {
-                Ok(EqlTerm::Whole(lhs.clone()).into())
+            (EqlTerm::Full(lhs), EqlTerm::Full(rhs)) if lhs == rhs => {
+                Ok(EqlTerm::Full(lhs.clone()).into())
             }
 
-            (EqlTerm::Whole(whole), EqlTerm::Partial(partial, bounds))
-            | (EqlTerm::Partial(partial, bounds), EqlTerm::Whole(whole))
-                if whole == partial =>
+            (EqlTerm::Partial(lhs_eql, lhs_bounds), EqlTerm::Partial(rhs_eql, rhs_bounds))
+                if lhs_eql == rhs_eql =>
             {
-                let unified = Arc::<Type>::from(EqlTerm::Whole(whole.clone()));
-                // self.substitute_all_tvars_pointing_to_target(
-                //     EqlTerm::Partial(partial.clone(), bounds.clone()).into(),
-                //     unified.clone(),
-                // );
-                Ok(unified)
-            }
-
-            (
-                EqlTerm::FixedPartial(lhs_eql_value, lhs_bounds),
-                EqlTerm::FixedPartial(rhs_eql_value, rhs_bounds),
-            ) if lhs_eql_value == rhs_eql_value && lhs_bounds == rhs_bounds => {
-                Ok(EqlTerm::FixedPartial(lhs_eql_value.clone(), lhs_bounds.clone()).into())
+                Ok(EqlTerm::Partial(lhs_eql.clone(), lhs_bounds.union(&rhs_bounds)).into())
             }
 
             (_, _) => Err(TypeError::Conflict(format!(
@@ -129,28 +126,28 @@ impl UnifyTypes<Var, Var> for Unifier<'_> {
         let Var(lhs_tvar, lhs_bounds) = lhs;
         let Var(rhs_tvar, rhs_bounds) = rhs;
 
-        let merged_bounds = lhs_bounds.union(&rhs_bounds);
-
         match (self.get_type(*lhs_tvar), self.get_type(*rhs_tvar)) {
             (None, None) => {
+                let merged_bounds = lhs_bounds.union(&rhs_bounds);
                 let unified = self.fresh_bounded_tvar(merged_bounds);
                 self.substitute(*lhs_tvar, unified.clone());
                 self.substitute(*rhs_tvar, unified.clone());
                 Ok(unified)
-            },
+            }
+
             (None, Some(rhs)) => {
                 self.satisfy_bounds(&*rhs, lhs_bounds)?;
                 self.substitute(*lhs_tvar, rhs.clone());
                 Ok(rhs)
-            },
+            }
+
             (Some(lhs), None) => {
                 self.satisfy_bounds(&*lhs, rhs_bounds)?;
                 self.substitute(*rhs_tvar, lhs.clone());
                 Ok(lhs)
-            },
-            (Some(lhs), Some(rhs)) => {
-               self.unify(lhs, rhs)
-            },
+            }
+
+            (Some(lhs), Some(rhs)) => self.unify(lhs, rhs),
         }
     }
 }

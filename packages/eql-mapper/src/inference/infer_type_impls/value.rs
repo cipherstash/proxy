@@ -2,7 +2,8 @@ use eql_mapper_macros::trace_infer;
 use sqltk::parser::ast::Value;
 
 use crate::{
-    inference::{type_error::TypeError, InferType}, TypeInferencer
+    inference::{type_error::TypeError, InferType},
+    TypeInferencer,
 };
 
 /// Handles type inference for [`Value`] nodes - which include *literals* and *placeholders* (SQL param usages).

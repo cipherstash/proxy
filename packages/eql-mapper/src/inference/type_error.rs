@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use crate::{unifier::Type, SchemaError, ScopeError};
 
-use super::unifier::Bounds;
+use super::unifier::EqlTraits;
 
 #[derive(Debug, PartialEq, Eq, thiserror::Error)]
 pub enum TypeError {
@@ -16,7 +16,7 @@ pub enum TypeError {
     Conflict(String),
 
     #[error("Type `{}` does not satisfy bounds `{}`", _0, _1)]
-    UnsatisfiedBounds(Type, Bounds),
+    UnsatisfiedBounds(Type, EqlTraits),
 
     #[error("unified type contains unresolved type variable: {}", _0)]
     Incomplete(String),

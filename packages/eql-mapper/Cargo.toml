@@ -20,6 +20,10 @@ thiserror = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 vec1 = "1.12.1"
+syn = "2.0.101"
+quote = "1.0.40"
+topological-sort = "0.2.2"
+proc-macro2 = "1.0.95"
 
 [dev-dependencies]
 pretty_assertions = "^1.0"

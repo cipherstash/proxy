@@ -13,6 +13,13 @@ use sqltk::parser::ast::Ident;
 #[derive(Debug, Clone, PartialEq, Eq, Display)]
 #[display("{self}")]
 pub enum Type {
+    #[display("{}", _0)]
+    Constructor(Constructor),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Display)]
+#[display("{self}")]
+pub enum Constructor {
     /// A value type (an EQL type, native database type or an array type)
     #[display("{}", _0)]
     Value(Value),
@@ -39,8 +46,11 @@ pub enum Value {
 
     /// An array type that is parameterized by an element type.
     #[display("Array[{}]", _0)]
-    Array(Box<Type>),
+    Array(Array),
 }
+
+#[derive(Debug, Clone, PartialEq, Eq, Display)]
+pub struct Array(pub Box<Type>);
 
 /// A projection type that is parameterized by a list of projection column types.
 #[derive(Debug, Clone, PartialEq, Eq, Display)]
@@ -56,8 +66,16 @@ pub enum Projection {
 impl Type {
     pub fn contains_eql(&self) -> bool {
         match self {
-            Type::Value(value) => value.contains_eql(),
-            Type::Projection(projection) => projection.contains_eql(),
+            Type::Constructor(constructor) => constructor.contains_eql(),
+        }
+    }
+}
+
+impl Constructor {
+    pub fn contains_eql(&self) -> bool {
+        match self {
+            Constructor::Value(value) => value.contains_eql(),
+            Constructor::Projection(projection) => projection.contains_eql(),
         }
     }
 }
@@ -69,6 +87,13 @@ impl Value {
             Value::Native(_) => false,
             Value::Array(inner) => inner.contains_eql(),
         }
+    }
+}
+
+impl Array {
+    pub fn contains_eql(&self) -> bool {
+        let Array(element_ty) = self;
+        element_ty.contains_eql()
     }
 }
 
@@ -113,5 +138,41 @@ impl ProjectionColumn {
             Some(name) => format!(": {}", name),
             None => String::from(""),
         }
+    }
+}
+
+impl From<Constructor> for Type {
+    fn from(constructor: Constructor) -> Self {
+        Type::Constructor(constructor)
+    }
+}
+
+impl From<Value> for Type {
+    fn from(value: Value) -> Self {
+        Type::Constructor(Constructor::Value(value))
+    }
+}
+
+impl From<Array> for Type {
+    fn from(array: Array) -> Self {
+        Type::Constructor(Constructor::Value(Value::Array(array)))
+    }
+}
+
+impl From<EqlTerm> for Type {
+    fn from(eql_term: EqlTerm) -> Self {
+        Type::Constructor(Constructor::Value(Value::Eql(eql_term)))
+    }
+}
+
+impl From<Projection> for Type {
+    fn from(projection: Projection) -> Self {
+        Type::Constructor(Constructor::Projection(projection))
+    }
+}
+
+impl From<NativeValue> for Type {
+    fn from(native: NativeValue) -> Self {
+        Type::Constructor(Constructor::Value(Value::Native(native)))
     }
 }

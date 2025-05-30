@@ -1,13 +1,17 @@
 use std::{cell::RefCell, collections::HashMap, rc::Rc, sync::Arc};
 
 mod bounds;
+mod parse;
+mod resolve_type;
 mod type_env;
 mod types;
+mod type_specs;
 mod unify_types;
 
 use crate::inference::TypeError;
 
 pub use bounds::*;
+pub(crate) use type_specs::*;
 
 use unify_types::UnifyTypes;
 
@@ -21,6 +25,10 @@ use super::TypeRegistry;
 use tracing::{event, instrument, Level};
 
 /// Implements the type unification algorithm.
+///
+/// Type unification is the process of determining a type variable substitution that makes two type expressions
+/// identical. It involves solving equations between types, by recursively comparing their structure and binding type
+/// variables to concrete types or other variables.
 #[derive(Debug)]
 pub struct Unifier<'ast> {
     registry: Rc<RefCell<TypeRegistry<'ast>>>,
@@ -34,21 +42,11 @@ impl<'ast> Unifier<'ast> {
         }
     }
 
-    // pub(crate) fn substitute_all_tvars_pointing_to_target(
-    //     &self,
-    //     target: TypeVar,
-    //     replacement: Arc<Type>,
-    // ) -> Arc<Type> {
-    //     self.registry
-    //         .borrow_mut()
-    //         .substitute_all_tvars_pointing_to_target(target, replacement)
-    // }
-
     pub(crate) fn fresh_tvar(&self) -> Arc<Type> {
-        self.fresh_bounded_tvar(Bounds::none())
+        self.fresh_bounded_tvar(EqlTraits::none())
     }
 
-    pub(crate) fn fresh_bounded_tvar(&self, bounds: Bounds) -> Arc<Type> {
+    pub(crate) fn fresh_bounded_tvar(&self, bounds: EqlTraits) -> Arc<Type> {
         Type::Var(Var(self.registry.borrow_mut().fresh_tvar(), bounds)).into()
     }
 
@@ -136,15 +134,19 @@ impl<'ast> Unifier<'ast> {
         } else {
             match (&*lhs, &*rhs) {
                 (Type::Constructor(lhs_c), Type::Constructor(rhs_c)) => {
-                    Ok(self.unify_types(lhs_c, rhs_c)?)
+                    self.unify_types(lhs_c, rhs_c)
                 }
 
                 (Type::Var(var), Type::Constructor(constructor))
                 | (Type::Constructor(constructor), Type::Var(var)) => {
-                    Ok(self.unify_types(constructor, var)?)
+                    self.unify_types(constructor, var)
                 }
 
-                (Type::Var(lhs_v), Type::Var(rhs_v)) => Ok(self.unify_types(lhs_v, rhs_v)?),
+                (Type::Var(lhs_v), Type::Var(rhs_v)) => self.unify_types(lhs_v, rhs_v),
+
+                (ty, Type::Associated(associated)) | (Type::Associated(associated), ty) => {
+                    self.unify(ty.clone().into(), associated.on_type())
+                }
             }
         }
     }
@@ -156,7 +158,7 @@ impl<'ast> Unifier<'ast> {
         &mut self,
         ty: Arc<Type>,
         tvar: TypeVar,
-        tvar_bounds: &Bounds,
+        tvar_bounds: &EqlTraits,
     ) -> Result<Arc<Type>, TypeError> {
         let unified = match self.get_type(tvar) {
             Some(sub_ty) => {
@@ -191,7 +193,7 @@ impl<'ast> Unifier<'ast> {
     /// 4. Projections satisfy the intersection of the bounds of their columns.
     ///     a. However, empty projections satisfy all possible bounds.
     /// 5. Type variables satisfy all bounds that they carry.
-    fn satisfy_bounds(&mut self, ty: &Type, bounds: &Bounds) -> Result<(), TypeError> {
+    fn satisfy_bounds(&mut self, ty: &Type, bounds: &EqlTraits) -> Result<(), TypeError> {
         if let Type::Var(_) = &*ty {
             return Ok(());
         }
@@ -199,9 +201,6 @@ impl<'ast> Unifier<'ast> {
         if &bounds.intersection(&ty.effective_bounds()) == bounds {
             return Ok(());
         } else {
-            dbg!(&bounds);
-            dbg!(&ty.effective_bounds());
-            dbg!(&bounds.intersection(&ty.effective_bounds()));
             Err(TypeError::UnsatisfiedBounds(
                 ty.clone(),
                 bounds.difference(&ty.effective_bounds()),
@@ -327,7 +326,7 @@ mod test {
     use std::sync::Arc;
 
     use crate::unifier::{
-        Bounds, EqlTrait, NativeValue, Projection, ProjectionColumn, Type, TypeVar, Var,
+        EqlTrait, EqlTraits, NativeValue, Projection, ProjectionColumn, Type, TypeVar, Var,
     };
     use crate::unifier::{ProjectionColumns, Unifier};
     use crate::{DepMut, TypeRegistry};
@@ -347,7 +346,7 @@ mod test {
         let mut unifier = Unifier::new(DepMut::new(TypeRegistry::new()));
 
         let lhs: Arc<Type> = NativeValue(None).into();
-        let rhs: Arc<Type> = Var(TypeVar(0), Bounds::None).into();
+        let rhs: Arc<Type> = Var(TypeVar(0), EqlTraits::default()).into();
 
         assert_eq!(unifier.unify(lhs.clone(), rhs), Ok(lhs));
     }
@@ -356,7 +355,7 @@ mod test {
     fn var_with_constructor() {
         let mut unifier = Unifier::new(DepMut::new(TypeRegistry::new()));
 
-        let lhs: Arc<Type> = Var(TypeVar(0), Bounds::None).into();
+        let lhs: Arc<Type> = Var(TypeVar(0), EqlTraits::default()).into();
         let rhs: Arc<Type> = NativeValue(None).into();
 
         assert_eq!(unifier.unify(lhs, rhs.clone()), Ok(rhs));
@@ -368,12 +367,12 @@ mod test {
 
         let lhs: Arc<Type> = Projection::WithColumns(ProjectionColumns(vec![
             ProjectionColumn::new(NativeValue(None), None),
-            ProjectionColumn::new(Var(TypeVar(0), Bounds::None), None),
+            ProjectionColumn::new(Var(TypeVar(0), EqlTraits::default()), None),
         ]))
         .into();
 
         let rhs: Arc<Type> = Projection::WithColumns(ProjectionColumns(vec![
-            ProjectionColumn::new(Var(TypeVar(1), Bounds::None), None),
+            ProjectionColumn::new(Var(TypeVar(1), EqlTraits::default()), None),
             ProjectionColumn::new(NativeValue(None), None),
         ]))
         .into();
@@ -427,26 +426,26 @@ mod test {
     fn type_var_bounds_are_unified() {
         let mut unifier = Unifier::new(DepMut::new(TypeRegistry::new()));
 
-        let lhs: Arc<Type> = Var(TypeVar(0), Bounds::None).into();
-        let rhs: Arc<Type> = Var(TypeVar(1), Bounds::None).into();
+        let lhs: Arc<Type> = Var(TypeVar(0), EqlTraits::default()).into();
+        let rhs: Arc<Type> = Var(TypeVar(1), EqlTraits::default()).into();
 
         let unified = unifier.unify(lhs, rhs).unwrap();
-        assert!(matches!(&*unified, Type::Var(Var(_, Bounds::None))));
+        assert_eq!(unified.effective_bounds(), EqlTraits::default());
 
         let mut unifier = Unifier::new(DepMut::new(TypeRegistry::new()));
-        let lhs: Arc<Type> = Var(TypeVar(0), Bounds::None).into();
-        let rhs: Arc<Type> = Var(TypeVar(1), Bounds::from(EqlTrait::Eq)).into();
+        let lhs: Arc<Type> = Var(TypeVar(0), EqlTraits::default()).into();
+        let rhs: Arc<Type> = Var(TypeVar(1), EqlTraits::from(EqlTrait::Eq)).into();
 
         if let Type::Var(Var(_, bounds)) = &*unifier.unify(lhs, rhs).unwrap() {
-            assert_eq!(bounds, &Bounds::from(EqlTrait::Eq));
+            assert_eq!(bounds, &EqlTraits::from(EqlTrait::Eq));
         }
 
         let mut unifier = Unifier::new(DepMut::new(TypeRegistry::new()));
-        let lhs: Arc<Type> = Var(TypeVar(0), Bounds::from(EqlTrait::Eq)).into();
-        let rhs: Arc<Type> = Var(TypeVar(1), Bounds::None).into();
+        let lhs: Arc<Type> = Var(TypeVar(0), EqlTraits::from(EqlTrait::Eq)).into();
+        let rhs: Arc<Type> = Var(TypeVar(1), EqlTraits::default()).into();
 
         if let Type::Var(Var(_, bounds)) = &*unifier.unify(lhs, rhs).unwrap() {
-            assert_eq!(bounds, &Bounds::from(EqlTrait::Eq));
+            assert_eq!(bounds, &EqlTraits::from(EqlTrait::Eq));
         }
     }
 }

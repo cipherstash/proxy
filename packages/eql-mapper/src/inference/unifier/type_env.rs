@@ -1,88 +1,112 @@
-use std::{collections::HashMap, hash::Hash, sync::Arc};
+//! Type definitions for constructing a [`TypeEnv`] and subsequently an [`InstantiatedTypeEnv`] from [`TypeSpec`]s.
+//!
+//! A `TypeEnv` is an environment containing `TypeSpec`s. A `TypeSpec` is a mirror of [`Type`] but works symbollically
+//! and supports being able to define types with dedicated syntax so that constraints can be built declaratively rather
+//! than programatically.
+#![allow(unused)]
+
+use std::{collections::HashMap, sync::Arc};
 
 use derive_more::derive::Deref;
+use proc_macro2::TokenStream;
+use syn::parse::{Parse, Parser};
+use topological_sort::TopologicalSort;
 
 use crate::TypeError;
 
-use super::{Bounds, EqlTrait, Type, Unifier};
+use super::{InitType, TVar};
+use super::{ArraySpec, ProjectionColumnSpec, ProjectionSpec, Type, TypeSpec, Unifier, VarSpec};
 
-/// A `TypeArg` is a symbolic placeholder for a [`Type`] and can represent a concrete type (i.e. `Native`) or a generic type.
-///
-/// A `TypeArg` can be associated with one or more [`TraitBound`]s when added to a [`TypeEnv`].
-///
-/// There is no enum variant for an `EqlTerm` concrete type because there are no SQL functions/operators that operate on
-/// specific EQL types: the trait bounds mechanism handles this case for us.
-#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord, derive_more::Display)]
-pub(crate) enum TypeArg {
-    /// A placeholder representing the native type.
-    #[display("Native")]
-    Native,
-
-    /// A generic type.
-    #[display("{}", _0)]
-    Generic(&'static str),
-}
-
-/// Represents the type arguments (if any) required to fully define a trait signature.
-///
-/// A `TraitBound` bridges between *symbolic* type representations and [`Type::Var`]s, which only exist during a
-/// unification run.
-#[derive(Debug, Clone, Hash, PartialEq, Eq)]
-pub(crate) enum TraitBound {
-    /// A bound for a trait that needs no type arguments (e.g. [`EqlTrait::Eq`]).
-    WithoutParam(EqlTrait),
-
-    /// A bound for a trait that needs one type argument (e.g. [`EqlTrait::JsonAccessor`]).  The [`TypeArg`] is a type
-    /// argument in a [`TypeEnv`] (which may have its own bounds).  The function is used to build the [`EqlTrait`] after
-    /// the `TypeArg` has been assigned a [`Type::Var`].
-    WithOneParam(TypeArg, fn(Arc<Type>) -> EqlTrait),
-}
-
-/// A collection of [`TypeArg`]s and their associated [`TraitBound`]s.
-#[derive(Debug, Clone, Deref)]
+/// A collection of [`TypeSpec`]s and their associated [`Bound`]s.
+#[derive(Debug, Clone)]
 pub(crate) struct TypeEnv {
-    env: HashMap<TypeArg, Vec<TraitBound>>,
+    specs: HashMap<TVar, TypeSpec>,
 }
 
 #[derive(Debug, Clone, Deref)]
 pub(crate) struct InstantiatedTypeEnv {
-    env: HashMap<TypeArg, Arc<Type>>,
+    env: HashMap<TVar, Arc<Type>>,
+}
+
+impl InstantiatedTypeEnv {
+    pub(crate) fn get_type(&self, var: &TVar) -> Result<Arc<Type>, TypeError> {
+        self.env
+            .get(var)
+            .cloned()
+            .ok_or(TypeError::Expected(format!(
+                "expected type spec {} to exist in the instantiated type environment",
+                &var
+            )))
+    }
+}
+
+impl TypeSpec {
+    fn depends_on<'a>(&'a self, env: &'a TypeEnv) -> Vec<&'a TVar> {
+        match self {
+            TypeSpec::Var(_) | TypeSpec::Native(_) | TypeSpec::Eql(_) => vec![],
+
+            TypeSpec::AssociatedType(associated_type_spec) => {
+                vec![associated_type_spec.depends_on()]
+            }
+
+            TypeSpec::Array(ArraySpec(spec)) => spec.depends_on(env),
+
+            TypeSpec::Projection(ProjectionSpec(cols)) => {
+                let mut depends: Vec<_> = vec![];
+                depends.extend(
+                    cols.iter()
+                        .flat_map(|ProjectionColumnSpec(spec, _)| spec.depends_on(env)),
+                );
+                depends
+            }
+        }
+    }
+
+    pub(crate) fn from_tokens(tokens: TokenStream) -> syn::Result<Self> {
+        TypeSpec::parse.parse2(tokens)
+    }
 }
 
 impl TypeEnv {
     pub(crate) fn new() -> Self {
         Self {
-            env: HashMap::new(),
+            specs: HashMap::new(),
         }
     }
 
-    pub(crate) fn add_type_arg(&mut self, arg: TypeArg, bound: Option<TraitBound>) {
-        let for_insert = bound.clone().map(|bound| vec![bound]).unwrap_or(vec![]);
-        self.env
-            .entry(arg)
-            .and_modify(move |bounds| {
-                if let Some(bound) = bound {
-                    if !bounds.contains(&bound) {
-                        bounds.push(bound)
-                    }
-                }
-            })
-            .or_insert(for_insert);
+    pub(crate) fn add(&mut self, var: &TVar, spec: TypeSpec) -> Result<(), TypeError> {
+        match self.specs.insert(var.clone(), spec) {
+            Some(_) => Err(TypeError::InternalError(format!(
+                "type var '{}' has already been added to the type env",
+                var
+            ))),
+            None => Ok(()),
+        }
     }
 
-    pub(crate) fn get_bounds(&self, arg: &TypeArg) -> Result<&Vec<TraitBound>, TypeError> {
-        match self.env.get(arg) {
-            Some(bounds) => Ok(bounds),
+    pub(crate) fn get(&self, var: &TVar) -> Result<&TypeSpec, TypeError> {
+        match self.specs.get(var) {
+            Some(spec) => Ok(spec),
             None => Err(TypeError::InternalError(format!(
-                "Undeclared type argument `{}`",
-                arg
+                "unknown type var '{}'",
+                var
             ))),
         }
     }
 
-    /// Tries to instantiate a well-formed type environment.
-    ///
-    /// "well-formed" means:
+    // pub(crate) fn add_bounds(&mut self, var: &VarSpec, additional_bounds: EqlTraits) -> Result<(), TypeError> {
+    //     // let bounds = &self.specs[spec];
+    //     // let bounds = bounds.union(&additional_bounds);
+    //     // self.specs.insert(spec.clone(), bounds);
+
+    //     self.specs.entry(var).and_modify(|bounds| )
+    // }
+
+    // pub(crate) fn get_bounds(&self, spec: &TypeSpec) -> &EqlTraits {
+    //     &self.specs[spec]
+    // }
+
+    /// Builds an [`InstantiatedTypeEnv`] or fails with a [`TypeError`].
     ///
     /// 1. All referenced type arguments be be defined in the env.
     /// 2. All trait bounds must unify (e.g. the type argument to [`EqlTrait::JsonAccessor`]) must have a
@@ -91,47 +115,152 @@ impl TypeEnv {
         &self,
         unifier: &mut Unifier<'_>,
     ) -> Result<InstantiatedTypeEnv, TypeError> {
-        // First pass: initialise unbound type variables.
-        let types_first_pass: HashMap<TypeArg, Arc<Type>> =
-            HashMap::from_iter(self.env.keys().copied().map(|type_arg| match type_arg {
-                TypeArg::Native => (type_arg, Arc::new(Type::native())),
-                TypeArg::Generic(_) => (type_arg, unifier.fresh_tvar()),
-            }));
+        // Initialise the TypeSpecs based on their topological sort order.
+        let mut topo_sort = TopologicalSort::<&TVar>::new();
 
-        // Second pass: initialise new type variables with bounds.
-        let types_second_pass: HashMap<TypeArg, Arc<Type>> =
-            HashMap::from_iter(types_first_pass.iter().map(|(type_arg, _)| {
-                match type_arg {
-                    TypeArg::Native => (*type_arg, Arc::new(Type::native())),
-                    TypeArg::Generic(_) => {
-                        let mut bounds = Bounds::None;
-                        for bound in self.get_bounds(type_arg).unwrap() {
-                            match bound {
-                                TraitBound::WithoutParam(eql_trait) => {
-                                    bounds = bounds.union(&Bounds::from(eql_trait.clone()))
-                                }
-                                TraitBound::WithOneParam(param, ctor) => {
-                                    bounds = bounds.union(&Bounds::from(ctor(
-                                        types_first_pass[param].clone(),
-                                    )))
-                                }
-                            };
-                        }
+        for (var_spec, dependencies) in self
+            .specs
+            .iter()
+            .map(|(var_spec, type_spec)| (var_spec, type_spec.depends_on(self)))
+        {
+            topo_sort.insert(var_spec);
 
-                        (*type_arg, unifier.fresh_bounded_tvar(bounds))
-                    },
-                }
-            }));
+            for dep in dependencies {
+                topo_sort.insert(dep);
+                topo_sort.add_dependency(var_spec, dep);
+            }
+        }
 
-        // Third pass: unify the corresponding type variables
-        let mut env: HashMap<TypeArg, Arc<Type>> = HashMap::new();
+        let mut env: HashMap<TVar, Arc<Type>> = HashMap::new();
 
-        for (type_arg, ty_a) in types_first_pass {
-            let ty_b = &types_second_pass[&type_arg];
-            let ty_unified = unifier.unify(ty_a.clone(), ty_b.clone())?;
-            env.insert(type_arg, ty_unified);
+        while let Some(tvar) = topo_sort.pop() {
+            env.insert(tvar.clone(), self.specs.get(tvar).unwrap().init_type(self, unifier)?);
         }
 
         Ok(InstantiatedTypeEnv { env })
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use std::{cell::RefCell, rc::Rc, sync::Arc};
+
+    use crate::{
+        unifier::{
+            Array, AssociatedType, Constructor, EqlTerm, EqlTrait, EqlTraits, EqlValue,
+            JsonQueryType, Type, Unifier, Value,
+        },
+        NativeValue, TableColumn, TypeError, TypeRegistry,
+    };
+
+    use super::TypeEnv;
+    use pretty_assertions::assert_eq;
+    use syn::parse_quote as ty;
+
+    fn make_unifier<'a>() -> Unifier<'a> {
+        Unifier::new(Rc::new(RefCell::new(TypeRegistry::new())))
+    }
+
+    #[test]
+    fn infer_array() -> Result<(), TypeError> {
+        let mut env = TypeEnv::new();
+
+        env.add(&ty!(A), ty!([E]))?;
+        env.add(&ty!(E), ty!(T))?;
+        env.add(&ty!(T), ty!(Native))?;
+
+        let mut unifier = make_unifier();
+        let instance = env.instantiate(&mut unifier).unwrap();
+
+        let array_ty = instance.get_type(&ty!(A))?;
+
+        assert_eq!(
+            &*array_ty,
+            &Type::Constructor(Constructor::Value(Value::Array(Array(Arc::new(
+                Type::native()
+            )))))
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn infer_projection() -> Result<(), TypeError> {
+        let mut env = TypeEnv::new();
+
+        env.add(&ty!(P), ty!({A as id, B as name, C as email}))?;
+        env.add(&ty!(A), ty!(Native(customer.id)))?;
+        env.add(&ty!(B), ty!(EQL(customer.name Eq)))?;
+        env.add(&ty!(C), ty!(EQL(customer.email Eq)))?;
+
+        let mut unifier = make_unifier();
+        let instance = env.instantiate(&mut unifier).unwrap();
+
+        assert_eq!(
+            &*instance.get_type(&ty!(P))?,
+            &Type::projection(&[
+                (
+                    Type::Constructor(Constructor::Value(Value::Native(NativeValue(Some(
+                        TableColumn {
+                            table: "customer".into(),
+                            column: "id".into()
+                        }
+                    )))))
+                    .into(),
+                    Some("id".into())
+                ),
+                (
+                    Type::Constructor(Constructor::Value(Value::Eql(EqlTerm::Full(EqlValue(
+                        TableColumn {
+                            table: "customer".into(),
+                            column: "name".into()
+                        },
+                        EqlTraits::from(EqlTrait::Eq)
+                    )))))
+                    .into(),
+                    Some("name".into())
+                ),
+                (
+                    Type::Constructor(Constructor::Value(Value::Eql(EqlTerm::Full(EqlValue(
+                        TableColumn {
+                            table: "customer".into(),
+                            column: "email".into()
+                        },
+                        EqlTraits::from(EqlTrait::Eq)
+                    )))))
+                    .into(),
+                    Some("email".into())
+                ),
+            ])
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn infer_associated_type() -> Result<(), TypeError> {
+        let mut env = TypeEnv::new();
+
+        env.add(&ty!(E), ty!(EQL(customer.name Json)))?;
+        env.add(&ty!(A), ty!(E::Containment))?;
+
+        let mut unifier = make_unifier();
+        let instance = env.instantiate(&mut unifier).unwrap();
+
+        assert_eq!(
+            &*instance.get_type(&ty!(A))?,
+            &Type::Associated(AssociatedType::Json(JsonQueryType::Containment(
+                Type::Constructor(Constructor::Value(Value::Eql(EqlTerm::Full(EqlValue(
+                    TableColumn {
+                        table: "customer".into(),
+                        column: "name".into()
+                    },
+                    EqlTraits::from(EqlTrait::Json)
+                )))))
+                .into()
+            )))
+        );
+
+        Ok(())
     }
 }

@@ -130,61 +130,39 @@ macro_rules! col {
         }
     };
 
-    ((EQL($table:ident . $column:ident $(: $($features:tt)*)?))) => {
+    ((EQL($table:ident . $column:ident $(: $($eql_traits:ident)*)?))) => {
         ProjectionColumn {
-            ty: Value::Eql(EqlTerm::Whole(EqlValue(TableColumn {
+            ty: Value::Eql(EqlTerm::Full(EqlValue(TableColumn {
                 table: id(stringify!($table)),
                 column: id(stringify!($column)),
-            }, $crate::to_column_features!($($($features)*)?)))),
+            }, $crate::to_eql_traits!($($($eql_traits)*)?)))),
             alias: None,
         }
     };
 
-    ((EQL($table:ident . $column:ident $(: $($features:tt)*)?) as $alias:ident)) => {
+    ((EQL($table:ident . $column:ident $(: $($eql_traits:ident)*)?) as $alias:ident)) => {
         ProjectionColumn {
-            ty: Value::Eql(EqlTerm::Whole(EqlValue(TableColumn {
+            ty: Value::Eql(EqlTerm::Full(EqlValue(TableColumn {
                 table: id(stringify!($table)),
                 column: id(stringify!($column)),
-            }, $crate::to_column_features!($($($features)*)?)))),
+            }, $crate::to_eql_traits!($($($eql_traits)*)?)))),
             alias: Some(id(stringify!($alias))),
         }
     };
 }
 
 #[macro_export]
-macro_rules! to_column_features {
-    () => { $crate::EqlTraitImpls::default() };
+macro_rules! to_eql_traits {
+    () => { $crate::unifier::EqlTraits::default() };
 
-    ($first:ident $(+ $rest:ident)*) => {
-        $crate::EqlTraitImpls::with(|new| {
-            $crate::to_column_features!(@add [] new $first $($rest)*);
-        })
+    ($($traits:ident)*) => {
+        EqlTraits::from_iter(vec![$($crate::unifier::EqlTrait::$traits,)*])
     };
-
-    (@add [$($($acc:tt)+)?] $new:ident Eq $(+ $rest:ident)*) => {
-        $crate::to_column_features!(@add [$($($acc)+;)? $new.impl_eq()] $new $($rest)*)
-    };
-
-    (@add [$($($acc:tt)+)?] $new:ident Ord $(+ $rest:ident)*) => {
-        $crate::to_column_features!(@add [$($($acc)+;)? $new.impl_ord()] $new $($rest)*)
-    };
-
-    (@add [$($($acc:tt)+)?] $new:ident Bloom $(+ $rest:ident)*) => {
-        $crate::to_column_features!(@add [$($($acc)+;)? $new.impl_bloom()] $new $($rest)*)
-    };
-
-    (@add [$($($acc:tt)+)?] $new:ident Json $(+ $rest:ident)*) => {
-        $crate::to_column_features!(@add [$($($acc)+;)? $new.impl_json()] $new $($rest)*)
-    };
-
-    (@add [$($($acc:tt)+)?] $new:ident) => {
-        $($($acc)+)?
-     };
 }
 
 #[macro_export]
 macro_rules! projection {
-    [$($column:tt),*] => { Projection::new(vec![$(col!($column)),*]) };
+    [$($column:tt),*] => { Projection::new(vec![$($crate::col!($column)),*]) };
 }
 
 pub fn ignore_aliases(t: &Projection) -> Projection {

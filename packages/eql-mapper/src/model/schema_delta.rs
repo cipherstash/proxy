@@ -360,7 +360,10 @@ mod test {
     use std::sync::Arc;
 
     use crate::{
-        schema, test_helpers::{id, parse}, EqlTraitImpls, ColumnKind, SchemaError, SchemaTableColumn, TableResolver
+        schema,
+        test_helpers::{id, parse},
+        unifier::EqlTraits,
+        ColumnKind, SchemaError, SchemaTableColumn, TableResolver,
     };
 
     #[test]
@@ -440,7 +443,7 @@ mod test {
             Ok(SchemaTableColumn {
                 table: id("users"),
                 column: id("primary_email"),
-                kind: ColumnKind::Eql(EqlTraitImpls::default())
+                kind: ColumnKind::Eql(EqlTraits::default())
             })
         )
     }
@@ -472,7 +475,7 @@ mod test {
             Ok(SchemaTableColumn {
                 table: id("app_users"),
                 column: id("email"),
-                kind: ColumnKind::Eql(EqlTraitImpls::default())
+                kind: ColumnKind::Eql(EqlTraits::default())
             })
         )
     }
@@ -522,7 +525,7 @@ mod test {
             Ok(SchemaTableColumn {
                 table: id("users"),
                 column: id("email"),
-                kind: ColumnKind::Eql(EqlTraitImpls::default())
+                kind: ColumnKind::Eql(EqlTraits::default())
             })
         );
 

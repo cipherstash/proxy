@@ -1,157 +1,25 @@
 use std::sync::Arc;
 
-use derive_more::derive::Display;
-use sqltk::parser::ast::{Function, FunctionArg, FunctionArgExpr, FunctionArguments, Ident};
-use vec1::Vec1;
+use sqltk::parser::ast::{Function, FunctionArg, FunctionArgExpr, FunctionArguments};
 
 use crate::{
-    unifier::{Type, TypeArg, TypeEnv},
-    SqlIdent, TypeError, TypeInferencer,
+    unifier::{FunctionSpec, Type, Unifier},
+    TypeError, TypeInferencer,
 };
 
-/// The identifier and type signature of a SQL function.
-///
-/// See [`SQL_FUNCTION_SIGNATURES`].
+/// Either explicit typing rules for a function that supports EQL, or a fallback where the typing rules force all
+/// function argument types and the return type to be native.
 #[derive(Debug)]
 pub(crate) enum SqlFunction {
-    Explicit(&'static ExplicitSqlFunctionRule),
+    Explicit(&'static FunctionSpec),
     Fallback,
 }
 
-#[derive(Debug)]
-pub(crate) struct ExplicitSqlFunctionRule {
-    #[allow(unused)]
-    pub(crate) name: CompoundIdent,
-    pub(crate) sig: FunctionSig,
-    pub(crate) rewrite_rule: RewriteRule,
-}
-
-impl ExplicitSqlFunctionRule {
-    pub(crate) fn new(name: CompoundIdent, sig: FunctionSig) -> Self {
-        Self {
-            rewrite_rule: {
-                // The logic here is that if there are no bounds on the function then the correct operation of the
-                // function does not depend on custom handling of EQL types and the built-in SQL function will work just
-                // fine.  SQL's `count` function is an example of this.
-                if name.0.first() == &SqlIdent(Ident::new("pg_catalog"))
-                    && sig.type_env.iter().all(|(_, bounds)| bounds.len() == 0)
-                {
-                    RewriteRule::Ignore
-                } else {
-                    RewriteRule::UseEqlSchema
-                }
-            },
-            name,
-            sig,
-        }
-    }
-}
-
-#[derive(Debug)]
-pub(crate) enum RewriteRule {
-    Ignore,
-    UseEqlSchema,
-}
-
-/// The type signature of a SQL functon (excluding its name).
-#[derive(Debug)]
-pub(crate) struct FunctionSig {
-    args: Vec<TypeArg>,
-    return_type: TypeArg,
-    type_env: TypeEnv,
-}
-
-/// A function signature but filled in with fresh type variables that correspond with the [`TypeArg`] or each argument and
-/// return type.
-#[derive(Debug, Clone)]
-struct InstantiatedSig {
-    args: Vec<Arc<Type>>,
-    return_type: Arc<Type>,
-}
-
-impl FunctionSig {
-    pub(crate) fn new(args: Vec<TypeArg>, return_type: TypeArg, type_env: TypeEnv) -> Self {
-        for arg in &args {
-            assert!(type_env.contains_key(arg));
-        }
-        assert!(type_env.contains_key(&return_type));
-
-        Self {
-            args,
-            return_type,
-            type_env,
-        }
-    }
-
-    /// Creates an [`InstantiatedSig`] from `self`, filling in the [`TypeArg`]s with fresh type variables.
-    fn instantiate(&self, inferencer: &TypeInferencer<'_>) -> Result<InstantiatedSig, TypeError> {
-        let env = self
-            .type_env
-            .instantiate(&mut inferencer.unifier.borrow_mut())?;
-
-        Ok(InstantiatedSig {
-            args: self
-                .args
-                .iter()
-                .map(|type_arg| {
-                    env.get(&type_arg)
-                        .cloned()
-                        .expect("TypeArg should be present in TypeEnv")
-                })
-                .collect(),
-
-            return_type: env
-                .get(&self.return_type)
-                .cloned()
-                .expect("TypeArg should be present in TypeEnv"),
-        })
-    }
-
-    /// Applies the type constraints of the function to to the AST.
-    fn apply_constraints<'ast>(
-        &self,
-        inferencer: &mut TypeInferencer<'ast>,
-        function: &'ast Function,
-    ) -> Result<(), TypeError> {
-        let InstantiatedSig { args, return_type } = self.instantiate(inferencer)?;
-        let fn_name = CompoundIdent::from(&function.name.0);
-
-        inferencer.unify_node_with_type(function, return_type.clone())?;
-
-        match &function.args {
-            FunctionArguments::None => {
-                if args.is_empty() {
-                    Ok(())
-                } else {
-                    Err(TypeError::Conflict(format!(
-                        "expected {} args to function {}; got 0",
-                        self.args.len(),
-                        fn_name
-                    )))
-                }
-            }
-
-            FunctionArguments::Subquery(query) => {
-                if self.args.len() == 1 {
-                    inferencer.unify_node_with_type(&**query, args[0].clone())?;
-                    Ok(())
-                } else {
-                    Err(TypeError::Conflict(format!(
-                        "expected {} args to function {}; got 0",
-                        args.len(),
-                        fn_name
-                    )))
-                }
-            }
-
-            FunctionArguments::List(list) => {
-                for (sig_arg, fn_arg) in args.iter().zip(list.args.iter()) {
-                    let farg_expr = get_function_arg_expr(fn_arg);
-                    inferencer.unify_node_with_type(farg_expr, sig_arg.clone())?;
-                }
-
-                Ok(())
-            }
+impl SqlFunction {
+    pub(crate) fn should_rewrite(&self) -> bool {
+        match self {
+            SqlFunction::Explicit(function_spec) => &function_spec.name.0[0].value == "pg_catalog",
+            SqlFunction::Fallback => false,
         }
     }
 }
@@ -170,42 +38,90 @@ impl SqlFunction {
         inferencer: &mut TypeInferencer<'ast>,
         function: &'ast Function,
     ) -> Result<(), TypeError> {
+        let mut unifier = inferencer.unifier.borrow_mut();
+        let ret_type = inferencer.get_node_type(function);
         match self {
-            SqlFunction::Explicit(rule) => rule.sig.apply_constraints(inferencer, function),
-            SqlFunction::Fallback => {
-                match &function.args {
-                    FunctionArguments::None => {}
-                    FunctionArguments::Subquery(query) => {
-                        inferencer.unify_node_with_type(&**query, Arc::new(Type::native()))?;
-                    }
+            SqlFunction::Explicit(rule) => {
+                let _env = match &function.args {
+                    FunctionArguments::None => rule.inner.init(&mut unifier, &[], ret_type)?,
+                    FunctionArguments::Subquery(query) => rule.inner.init(
+                        &mut unifier,
+                        &[inferencer.get_node_type(&**query)],
+                        ret_type,
+                    )?,
                     FunctionArguments::List(list) => {
-                        for arg in &list.args {
-                            let farg_expr = match arg {
-                                FunctionArg::Named { arg, .. } => arg,
-                                FunctionArg::ExprNamed { arg, .. } => arg,
-                                FunctionArg::Unnamed(arg) => arg,
-                            };
-
-                            inferencer.unify_node_with_type(farg_expr, Arc::new(Type::native()))?;
-                        }
+                        let args: Vec<Arc<Type>> = list
+                            .args
+                            .iter()
+                            .map(|arg| inferencer.get_node_type(get_function_arg_expr(arg)))
+                            .collect();
+                        rule.inner.init(&mut unifier, &args, ret_type)?
                     }
-                }
+                };
 
-                inferencer.unify_node_with_type(function, Arc::new(Type::native()))?;
+                Ok(())
+            }
+            SqlFunction::Fallback => {
+                let _env = match &function.args {
+                    FunctionArguments::None => {
+                        NativeFunction::new(0).apply_constraints(&mut unifier, &[], ret_type)?
+                    }
+                    FunctionArguments::Subquery(query) => NativeFunction::new(1)
+                        .apply_constraints(
+                            &mut unifier,
+                            &[inferencer.get_node_type(&**query)],
+                            ret_type,
+                        )?,
+
+                    FunctionArguments::List(list) => {
+                        let args: Vec<Arc<Type>> = list
+                            .args
+                            .iter()
+                            .map(|arg| inferencer.get_node_type(get_function_arg_expr(arg)))
+                            .collect();
+                        NativeFunction::new(args.len() as u8).apply_constraints(
+                            &mut unifier,
+                            &args,
+                            ret_type,
+                        )?
+                    }
+                };
+
                 Ok(())
             }
         }
     }
 }
 
-#[derive(Debug, Eq, PartialEq, PartialOrd, Ord, Hash, Clone, Display)]
-#[display("{}", _0.iter().map(SqlIdent::to_string).collect::<Vec<_>>().join("."))]
-pub(crate) struct CompoundIdent(pub(crate) Vec1<SqlIdent<Ident>>);
+pub(crate) struct NativeFunction {
+    arg_count: u8,
+}
 
-impl From<&Vec<Ident>> for CompoundIdent {
-    fn from(value: &Vec<Ident>) -> Self {
-        let mut idents = Vec1::<SqlIdent<Ident>>::new(SqlIdent(value[0].clone()));
-        idents.extend(value[1..].iter().cloned().map(SqlIdent));
-        CompoundIdent(idents)
+impl NativeFunction {
+    pub fn new(arg_count: u8) -> Self {
+        Self { arg_count }
+    }
+
+    pub(crate) fn apply_constraints(
+        &self,
+        unifier: &mut Unifier<'_>,
+        args: &[Arc<Type>],
+        ret: Arc<Type>,
+    ) -> Result<(), TypeError> {
+        if args.len() != self.arg_count as usize {
+            return Err(TypeError::Expected(format!(
+                "expected {} function arguments but for {}",
+                self.arg_count,
+                args.len()
+            )));
+        }
+
+        for arg in args.iter() {
+            unifier.unify(arg.clone(), Type::native().into())?;
+        }
+
+        unifier.unify(ret.clone(), Type::native().into())?;
+
+        Ok(())
     }
 }

@@ -4,10 +4,7 @@ use std::{collections::HashMap, sync::Arc};
 use sqltk::parser::ast::{Expr, Function, Ident, ObjectName};
 use sqltk::{AsNodeKey, NodeKey, NodePath, Visitable};
 
-use crate::{
-    get_sql_function, EqlMapperError, ExplicitSqlFunctionRule,
-    RewriteRule, SqlFunction, Type, Value,
-};
+use crate::{get_sql_function, Constructor, EqlMapperError, Type, Value};
 
 use super::TransformationRule;
 
@@ -32,13 +29,10 @@ impl<'ast> TransformationRule<'ast> for RewriteStandardSqlFnsOnEqlTypes<'ast> {
             if let Some((_expr, function)) = node_path.last_2_as::<Expr, Function>() {
                 if matches!(
                     self.node_types.get(&function.as_node_key()),
-                    Some(Type::Value(Value::Eql(_)))
+                    Some(Type::Constructor(Constructor::Value(Value::Eql(_))))
                 ) {
-                    if let SqlFunction::Explicit(ExplicitSqlFunctionRule {
-                        rewrite_rule: RewriteRule::UseEqlSchema,
-                        ..
-                    }) = get_sql_function(&function.name)
-                    {
+                    let rule = get_sql_function(&function.name);
+                    if rule.should_rewrite() {
                         let function = target_node.downcast_mut::<Function>().unwrap();
                         let mut existing_name = mem::take(&mut function.name.0);
                         existing_name.insert(0, Ident::new("eql_v2"));
@@ -55,15 +49,9 @@ impl<'ast> TransformationRule<'ast> for RewriteStandardSqlFnsOnEqlTypes<'ast> {
         if let Some((_expr, function)) = node_path.last_2_as::<Expr, Function>() {
             if matches!(
                 self.node_types.get(&function.as_node_key()),
-                Some(Type::Value(Value::Eql(_)))
+                Some(Type::Constructor(Constructor::Value(Value::Eql(_))))
             ) {
-                if let SqlFunction::Explicit(ExplicitSqlFunctionRule {
-                    rewrite_rule: RewriteRule::UseEqlSchema,
-                    ..
-                }) = get_sql_function(&function.name)
-                {
-                    return true;
-                }
+                return get_sql_function(&function.name).should_rewrite();
             }
         }
 

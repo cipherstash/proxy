@@ -1,13 +1,12 @@
-use std::{cmp::Ordering, collections::BTreeSet, sync::Arc};
-
 use derive_more::derive::Display;
 
-use crate::EqlTraitImpls;
-
-use super::{Constructor, EqlTerm, EqlValue, Projection, Type, Value, Var};
+use super::{
+    Array, AssociatedType, Constructor, EqlTerm, EqlValue, JsonQueryType, Projection, Type, Value,
+    Var,
+};
 
 /// Represents the supported operations on an EQL type
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Display, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Display, Hash)]
 pub enum EqlTrait {
     #[display("Eq")]
     Eq,
@@ -17,18 +16,6 @@ pub enum EqlTrait {
     Bloom,
     #[display("Json")]
     Json,
-    #[display("JsonAccessor")]
-    JsonQuery(Arc<Type>),
-}
-
-impl EqlTrait {
-    pub(crate) fn implied(&self) -> Vec<EqlTrait> {
-        if let EqlTrait::Ord = self {
-            vec![EqlTrait::Eq]
-        } else {
-            vec![]
-        }
-    }
 }
 
 /// Represents the set of "traits" implemented by a [`Type`].
@@ -41,165 +28,137 @@ impl EqlTrait {
 /// how to encrypt literals and params whether for storage or querying.
 ///
 /// [`Bounds`] values always successfully unify into a superset of traits.
-#[derive(Debug, PartialEq, Eq, PartialOrd, Clone, Default, Hash)]
-pub enum Bounds {
-    /// No trait bounds
-    #[default]
-    None,
-    /// All trait bounds (Native types always pass trait bounds checks and this is how they're handled)
-    All,
-    /// These specific traits are defined as bounds.
-    Explicit(BTreeSet<EqlTrait>),
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Default, Hash)]
+pub struct EqlTraits {
+    /// The column implements equality between its values using the `=` operator.
+    pub eq: bool,
+
+    /// The column implements comparison of its values using `>`, `>=`, `=`, `<=`, `<`.
+    /// `ord` implies `eq`.
+    pub ord: bool,
+
+    /// The column implements textual substring search using `LIKE`.
+    pub bloom: bool,
+
+    /// The column implements a subset of the SQL JSON API (querying only).
+    pub json: bool,
 }
 
-impl From<Vec<EqlTrait>> for Bounds {
-    fn from(eql_traits: Vec<EqlTrait>) -> Self {
-        let mut bounds = Bounds::None;
+pub const ALL_TRAITS: EqlTraits = EqlTraits {
+    eq: true,
+    ord: true,
+    bloom: true,
+    json: true,
+};
 
-        for eql_trait in eql_traits {
-            bounds = bounds.union(&Bounds::from(eql_trait))
-        }
-
-        bounds
-    }
-}
-
-impl From<EqlTrait> for Bounds {
+impl From<EqlTrait> for EqlTraits {
     fn from(eql_trait: EqlTrait) -> Self {
-        let mut bounds = BTreeSet::new();
-
-        // Deals with traits that imply another: e.g. Ord implies Eq.
-        for implied_eql_trait in eql_trait.implied() {
-            bounds.insert(implied_eql_trait);
-        }
-
-        bounds.insert(eql_trait);
-
-        Self::Explicit(bounds)
+        let mut traits = EqlTraits::default();
+        traits.add_mut(eql_trait);
+        traits
     }
 }
 
-impl Bounds {
+impl FromIterator<EqlTrait> for EqlTraits {
+    fn from_iter<T: IntoIterator<Item = EqlTrait>>(iter: T) -> Self {
+        let mut traits = EqlTraits::default();
+        for t in iter {
+            traits.add_mut(t)
+        }
+        traits
+    }
+}
+
+impl EqlTraits {
     pub(crate) fn none() -> Self {
         Self::default()
     }
 
-    pub(crate) fn union(&self, other: &Self) -> Self {
-        match (self, other) {
-            (Bounds::None, Bounds::None) => Bounds::None,
-            (Bounds::None, Bounds::All) => Bounds::All,
-            (Bounds::None, Bounds::Explicit(bounds)) => Bounds::Explicit(bounds.clone()),
-            (Bounds::All, Bounds::None) => Bounds::All,
-            (Bounds::All, Bounds::All) => Bounds::All,
-            (Bounds::All, Bounds::Explicit(_)) => Bounds::All,
-            (Bounds::Explicit(bounds), Bounds::None) => Bounds::Explicit(bounds.clone()),
-            (Bounds::Explicit(_), Bounds::All) => Bounds::All,
-            (Bounds::Explicit(bounds_a), Bounds::Explicit(bounds_b)) => {
-                Bounds::Explicit(BTreeSet::from_iter(bounds_a.union(bounds_b).cloned()))
+    pub(crate) fn add_mut(&mut self, eql_trait: EqlTrait) {
+        match eql_trait {
+            EqlTrait::Eq => self.eq = true,
+            // Ord implies Eq
+            EqlTrait::Ord => {
+                self.eq = true;
+                self.ord = true;
             }
+            EqlTrait::Bloom => self.bloom = true,
+            EqlTrait::Json => self.json = true,
+        }
+    }
+
+    pub(crate) fn union(&self, other: &Self) -> Self {
+        EqlTraits {
+            eq: self.eq || other.eq,
+            ord: self.ord || other.ord,
+            bloom: self.bloom || other.bloom,
+            json: self.json || other.json,
         }
     }
 
     pub(crate) fn intersection(&self, other: &Self) -> Self {
-        match (self, other) {
-            (Bounds::None, _) => Bounds::None,
-            (_, Bounds::None) => Bounds::None,
-            (Bounds::All, Bounds::All) => Bounds::All,
-            (Bounds::All, Bounds::Explicit(eql_traits)) => Bounds::Explicit(eql_traits.clone()),
-            (Bounds::Explicit(eql_traits), Bounds::All) => Bounds::Explicit(eql_traits.clone()),
-            (Bounds::Explicit(a), Bounds::Explicit(b)) => Bounds::Explicit(
-                a.intersection(b).cloned().collect()
-            ),
+        EqlTraits {
+            eq: self.eq && other.eq,
+            ord: self.ord && other.ord,
+            bloom: self.bloom && other.bloom,
+            json: self.json && other.json,
         }
     }
 
     pub(crate) fn difference(&self, other: &Self) -> Self {
-        match (self, other) {
-            (Bounds::None, _) => Bounds::None,
-            (Bounds::All, Bounds::All) => Bounds::None,
-            (Bounds::All, _) => Bounds::All,
-            (Bounds::Explicit(_), Bounds::None) => self.clone(),
-            (Bounds::Explicit(_), Bounds::All) => Bounds::All,
-            (Bounds::Explicit(a), Bounds::Explicit(b)) => {
-                Bounds::Explicit(a.difference(b).cloned().collect())
-            }
+        EqlTraits {
+            eq: self.eq ^ other.eq,
+            ord: self.ord ^ other.ord,
+            bloom: self.bloom ^ other.bloom,
+            json: self.json ^ other.json,
         }
     }
 }
 
-impl std::fmt::Display for Bounds {
+impl std::fmt::Display for EqlTraits {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Bounds::None => Ok(()),
-            Bounds::All => f.write_str("ALL"),
-            Bounds::Explicit(bounds) if bounds.len() == 1 => bounds.first().unwrap().fmt(f),
-            Bounds::Explicit(bounds) => {
-                let mut is_first = true;
-                for bound in bounds {
-                    if is_first {
-                        bound.fmt(f)?;
-                        is_first = false;
-                    } else {
-                        f.write_fmt(format_args!("+ {}", bound))?;
-                    }
-                }
-                Ok(())
-            }
-        }
-    }
-}
+        const EQ: &'static str = "Eq";
+        const ORD: &'static str = "Ord";
+        const BLOOM: &'static str = "Bloom";
+        const JSON: &'static str = "Json";
 
-impl Ord for Bounds {
-    fn cmp(&self, other: &Self) -> Ordering {
-        match (self, other) {
-            (Bounds::None, Bounds::None) => Ordering::Equal,
-            (Bounds::None, Bounds::All) => Ordering::Less,
-            (Bounds::None, Bounds::Explicit(bounds)) if bounds.len() == 0 => Ordering::Equal,
-            (Bounds::None, Bounds::Explicit(_)) => Ordering::Less,
-            (Bounds::All, Bounds::None) => Ordering::Greater,
-            (Bounds::All, Bounds::All) => Ordering::Equal,
-            (Bounds::All, Bounds::Explicit(_)) => Ordering::Greater,
-            (Bounds::Explicit(bounds), Bounds::None) if bounds.len() == 0 => Ordering::Equal,
-            (Bounds::Explicit(_), Bounds::None) => Ordering::Greater,
-            (Bounds::Explicit(_), Bounds::All) => Ordering::Less,
-            (Bounds::Explicit(bounds_a), Bounds::Explicit(bounds_b)) if bounds_a == bounds_b => {
-                Ordering::Equal
-            }
-            (Bounds::Explicit(bounds_a), Bounds::Explicit(bounds_b))
-                if bounds_a.len() > bounds_b.len() =>
-            {
-                Ordering::Greater
-            }
-            (Bounds::Explicit(bounds_a), Bounds::Explicit(bounds_b))
-                if bounds_a.len() < bounds_b.len() =>
-            {
-                Ordering::Less
-            }
-            (Bounds::Explicit(bounds_a), Bounds::Explicit(bounds_b)) => {
-                for (a, b) in bounds_a.iter().zip(bounds_b) {
-                    if a < b {
-                        return Ordering::Less;
-                    } else if a > b {
-                        return Ordering::Greater;
-                    }
-                }
-                Ordering::Equal
-            }
+        let mut traits: Vec<&'static str> = Vec::new();
+        if self.eq {
+            traits.push(EQ)
         }
+        if self.ord {
+            traits.push(ORD)
+        }
+        if self.bloom {
+            traits.push(BLOOM)
+        }
+        if self.json {
+            traits.push(JSON)
+        }
+
+        f.write_str(&traits.join("+"))?;
+
+        Ok(())
     }
 }
 
 impl Type {
-    pub(crate) fn effective_bounds(&self) -> Bounds {
+    pub(crate) fn effective_bounds(&self) -> EqlTraits {
         match self {
             Type::Constructor(constructor) => constructor.effective_bounds(),
             Type::Var(Var(_, bounds)) => bounds.clone(),
+            Type::Associated(AssociatedType::Json(JsonQueryType::Containment(ty))) => {
+                ty.effective_bounds()
+            }
+            Type::Associated(AssociatedType::Json(JsonQueryType::FieldAccess(ty))) => {
+                ty.effective_bounds()
+            }
         }
     }
 }
 
 impl Constructor {
-    pub(crate) fn effective_bounds(&self) -> Bounds {
+    pub(crate) fn effective_bounds(&self) -> EqlTraits {
         match self {
             Constructor::Value(value) => value.effective_bounds(),
             Constructor::Projection(projection) => projection.effective_bounds(),
@@ -208,17 +167,24 @@ impl Constructor {
 }
 
 impl Value {
-    pub(crate) fn effective_bounds(&self) -> Bounds {
+    pub(crate) fn effective_bounds(&self) -> EqlTraits {
         match self {
             Value::Eql(eql_term) => eql_term.effective_bounds(),
-            Value::Native(_) => Bounds::All,
+            Value::Native(_) => ALL_TRAITS, // 💪
             Value::Array(ty) => ty.effective_bounds(),
         }
     }
 }
 
+impl Array {
+    pub(crate) fn effective_bounds(&self) -> EqlTraits {
+        let Array(element_ty) = self;
+        element_ty.effective_bounds()
+    }
+}
+
 impl Projection {
-    pub(crate) fn effective_bounds(&self) -> Bounds {
+    pub(crate) fn effective_bounds(&self) -> EqlTraits {
         match self {
             Projection::WithColumns(cols) => {
                 if let Some((first, rest)) = cols.0.split_first() {
@@ -230,47 +196,22 @@ impl Projection {
                 }
                 unreachable!("there is always at least one column in Projection::WithColumns")
             }
-            Projection::Empty => Bounds::All,
+            Projection::Empty => ALL_TRAITS,
         }
     }
 }
 
 impl EqlTerm {
-    pub(crate) fn effective_bounds(&self) -> Bounds {
+    pub(crate) fn effective_bounds(&self) -> EqlTraits {
         match self {
-            EqlTerm::Whole(eql_value) => eql_value.effective_bounds(),
+            EqlTerm::Full(eql_value) => eql_value.effective_bounds(),
             EqlTerm::Partial(_, bounds) => bounds.clone(),
-            EqlTerm::FixedPartial(_, bounds) => bounds.clone(),
         }
     }
 }
 
 impl EqlValue {
-    pub(crate) fn effective_bounds(&self) -> Bounds {
-        Bounds::from(self.trait_impls())
-    }
-}
-
-impl From<&EqlTraitImpls> for Bounds {
-    fn from(impls: &EqlTraitImpls) -> Self {
-        let mut bounds = Bounds::None;
-
-        if impls.implements_eq() {
-            bounds = bounds.union(&Bounds::from(EqlTrait::Eq));
-        }
-
-        if impls.implements_ord() {
-            bounds = bounds.union(&Bounds::from(EqlTrait::Ord));
-        }
-
-        if impls.implements_bloom() {
-            bounds = bounds.union(&Bounds::from(EqlTrait::Bloom));
-        }
-
-        if impls.implements_json() {
-            bounds = bounds.union(&Bounds::from(EqlTrait::Json));
-        }
-
-        bounds
+    pub(crate) fn effective_bounds(&self) -> EqlTraits {
+        self.trait_impls()
     }
 }

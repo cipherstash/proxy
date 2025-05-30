@@ -51,7 +51,7 @@ impl<'ast> InferType<'ast, Insert> for TypeInferencer<'ast> {
                     let value_ty = match &stc.kind {
                         ColumnKind::Native => Value::Native(NativeValue(Some(tc.clone()))),
                         ColumnKind::Eql(features) => {
-                            Value::Eql(EqlTerm::Whole(EqlValue(tc.clone(), *features)))
+                            Value::Eql(EqlTerm::Full(EqlValue(tc.clone(), *features)))
                         }
                     };
 

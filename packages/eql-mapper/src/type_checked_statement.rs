@@ -12,9 +12,6 @@ use crate::{
 };
 
 /// A `TypeCheckedStatement` is returned from a successful call to [`crate::type_check`].
-///
-/// It stores a reference to the type-checked [`Statement`], the type of the
-///
 #[derive(Debug)]
 pub struct TypeCheckedStatement<'ast> {
     /// A reference to the original unmodified [`Statement`].
@@ -49,9 +46,7 @@ pub struct TypeCheckedStatement<'ast> {
 impl<'ast> TypeCheckedStatement<'ast> {
     /// Returns `true` if one or more SQL param placeholders in the body has an EQL type, otherwise returns `false`.
     pub fn params_contain_eql(&self) -> bool {
-        self.params
-            .iter()
-            .any(|p| matches!(p.1, Value::Eql(_)))
+        self.params.iter().any(|p| matches!(p.1, Value::Eql(_)))
     }
 
     /// Tests if a statement transformation is required. This works by executing all of the transformation rules but
@@ -102,6 +97,8 @@ impl<'ast> TypeCheckedStatement<'ast> {
         &self,
         encrypted_literals: &HashMap<NodeKey<'ast>, sqltk::parser::ast::Value>,
     ) -> Result<(), EqlMapperError> {
+        dbg!(&encrypted_literals);
+        dbg!(&self.literals);
         if self.count_not_null_literals() != encrypted_literals.len() {
             return Err(EqlMapperError::Transform(format!(
                 "the number of encrypted literals is incorrect; expected {}, got {}",
