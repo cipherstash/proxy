@@ -5,7 +5,7 @@ mod order_by_with_null;
 #[macro_export]
 macro_rules! value_for_type {
     (String, $i:expr) => {
-        format!("group_{}", $i)
+        ((b'A' + ($i - 1) as u8) as char).to_string()
     };
 
     (NaiveDate, $i:expr) => {
