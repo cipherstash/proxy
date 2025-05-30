@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1748577297802,
+  "lastUpdate": 1748585217824,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -3315,6 +3315,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 7.144442,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "7c893664b02ff3c6dc4c02204e91c0f256cc67db",
+          "message": "Refactor insert with param tests ",
+          "timestamp": "2025-05-30T03:50:17Z",
+          "url": "https://github.com/cipherstash/proxy/pull/247/commits/7c893664b02ff3c6dc4c02204e91c0f256cc67db"
+        },
+        "date": 1748585216745,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 7.080984,
             "unit": "Number"
           }
         ]
