@@ -2,6 +2,7 @@ mod common;
 mod decrypt;
 mod empty_result;
 mod extended_protocol_error_messages;
+mod jsonb;
 mod map_concat;
 mod map_literals;
 mod map_match_index;
