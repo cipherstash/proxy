@@ -143,6 +143,22 @@ where
         .collect()
 }
 
+// Returns a vector of `Option<String>` for each row in the result set.
+// Nulls are represented as `None`, and non-null values are converted to `Some(String)`.
+pub async fn simple_query_with_null(sql: &str) -> Vec<Option<String>> {
+    let client = connect_with_tls(PROXY).await;
+    let rows = client.simple_query(sql).await.unwrap();
+    rows.iter()
+        .filter_map(|row| {
+            if let tokio_postgres::SimpleQueryMessage::Row(r) = row {
+                Some(r.get(0).map(|val| val.to_string()))
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
 ///
 /// Configure the client TLS settings.
 /// These are the settings for connecting to the database with TLS.

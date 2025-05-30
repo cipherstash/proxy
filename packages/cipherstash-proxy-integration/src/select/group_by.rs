@@ -3,20 +3,6 @@ mod tests {
     use crate::common::{clear, insert, query, random_id, simple_query, trace};
     use chrono::NaiveDate;
 
-    macro_rules! value_for_type {
-        (String, $i:expr) => {
-            format!("group_{}", $i)
-        };
-
-        (NaiveDate, $i:expr) => {
-            NaiveDate::parse_from_str(&format!("2023-01-{}", $i), "%Y-%m-%d").unwrap()
-        };
-
-        ($type:ident, $i:expr) => {
-            $i as $type
-        };
-    }
-
     macro_rules! test_group_by {
         ($name: ident, $type: ident, $pg_type: ident) => {
             #[tokio::test]
@@ -28,7 +14,7 @@ mod tests {
                 let encrypted_col = format!("encrypted_{}", stringify!($pg_type));
 
                 for i in 1..=10 {
-                    let encrypted_val = value_for_type!($type, i);
+                    let encrypted_val = crate::value_for_type!($type, i);
 
                     // Create two records with the same encrypted_int4 value
                     for _ in 1..=2 {
