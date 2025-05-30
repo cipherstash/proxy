@@ -16,7 +16,7 @@ mod tests {
                 for i in 1..=10 {
                     let encrypted_val = crate::value_for_type!($type, i);
 
-                    // Create two records with the same encrypted_int4 value
+                    // Create two records with the same value
                     for _ in 1..=2 {
                         let id = random_id();
                         let sql =
@@ -52,4 +52,7 @@ mod tests {
     test_group_by!(group_by_float8, f64, float8);
     test_group_by!(group_by_text, String, text);
     test_group_by!(group_by_date, NaiveDate, date);
+
+    // Bool breaks the macro logic, will come to figure it out
+    // test_group_by!(group_by_bool, bool, bool);
 }
