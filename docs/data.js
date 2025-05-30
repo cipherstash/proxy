@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1748576244466,
+  "lastUpdate": 1748577297802,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -3286,6 +3286,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 6.805225,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "toby@cipherstash.com",
+            "name": "Toby Hede",
+            "username": "tobyhede"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "ff0533abfad4f92842785a5c4855ec4cc6cb9ce4",
+          "message": "Merge pull request #246 from cipherstash/expand-test-coverage\n\nAdditional test coverage for order and group",
+          "timestamp": "2025-05-30T13:50:13+10:00",
+          "tree_id": "d7c9b62ea6ee94caa3142d840aff1f389480e5a8",
+          "url": "https://github.com/cipherstash/proxy/commit/ff0533abfad4f92842785a5c4855ec4cc6cb9ce4"
+        },
+        "date": 1748577296760,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 7.144442,
             "unit": "Number"
           }
         ]
