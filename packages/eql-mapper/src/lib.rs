@@ -1536,7 +1536,6 @@ mod test {
 
     #[test]
     fn jsonb_function_jsonb_path_query() {
-        init_tracing();
         test_jsonb_function(
             "jsonb_path_query",
             vec![

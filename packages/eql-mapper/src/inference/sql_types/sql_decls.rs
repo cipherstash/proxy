@@ -1,10 +1,12 @@
 use std::{collections::HashMap, sync::LazyLock};
 
-use sqltk::parser::ast::BinaryOperator;
+use sqltk::parser::{ast::{BinaryOperator, Ident, ObjectName}, tokenizer::Span};
+
+use vec1::vec1;
 
 use crate::{
     binop, sql_fn,
-    unifier::{EqlTrait, TraitBound, TypeArg},
+    unifier::{EqlTrait, TraitBound, TypeArg}, SqlIdent,
 };
 
 use super::{
@@ -26,15 +28,31 @@ static SQL_BINARY_OPERATORS: LazyLock<HashMap<BinaryOperator, ExplicitBinaryOpRu
             binop!( (T >= T) -> Native where T: Ord ),
             binop!( (T < T) -> Native where T: Ord ),
             binop!( (T > T) -> Native where T: Ord ),
-            binop!( (J (->) A) -> J where J: Json, A: JsonAccessor<J> ),
-            binop!( (J (->>) A) -> J where J: Json, A: JsonAccessor<J> ),
-            binop!( (J (@>) A) -> Native where J: Json ),
-            binop!( (J (<@) A) -> Native where J: Json ),
-            binop!( (J (@?) A) -> Native where J: Json ),
+            binop!( (J (->) A) -> J where J: Json, A: JsonQuery<J> ),
+            binop!( (J (->>) A) -> J where J: Json, A: JsonQuery<J> ),
+            binop!( (J (@>) A) -> Native where J: Json, A: JsonQuery<J> ),
+            binop!( (J (<@) A) -> Native where J: Json, A: JsonQuery<J> ),
+            binop!( (J (@?) A) -> Native where J: Json, A: JsonQuery<J> ),
         ]
         .into_iter()
         .collect()
     });
+/*
+
+binops!{
+    (T = T) -> Native where T: Eq;
+    (T (<>) T) -> Native where T: Eq;
+    (T <= T) -> Native where T: Ord;
+    (T >= T) -> Native where T: Ord;
+    (T < T) -> Native where T: Ord;
+    (T > T) -> Native where T: Ord;
+    (J (->) Q) -> J where J: Json, Q: JsonQuery<J>;
+    (J (->>) Q) -> J where J: Json, Q: JsonQuery<J>;
+    (J (@>) Q) -> Native where J: Json;
+    (J (<@) Q) -> Native where J: Json;
+    (J (@?) Q) -> Native where J: Json;
+}
+*/
 
 pub(crate) fn get_sql_binop_rule(op: &BinaryOperator) -> SqlBinaryOp {
     SQL_BINARY_OPERATORS
@@ -48,7 +66,7 @@ static SQL_FUNCTION_TYPES: LazyLock<HashMap<CompoundIdent, ExplicitSqlFunctionRu
     LazyLock::new(|| {
         // # SQL function declations.
         //
-        // A single uppercase lettter such as `T` or `U` denotes a type variable. During type unification a type
+        // A single uppercase letter such as `T` or `U` denotes a type variable. During type unification a type
         // variable must resolve to the same type at every location it is used (just like in Rust).
         //
         // `Native` literally means `Type::Constructor(Constructor::Value(Value::Native(_)))`. From the perspective of
@@ -69,17 +87,17 @@ static SQL_FUNCTION_TYPES: LazyLock<HashMap<CompoundIdent, ExplicitSqlFunctionRu
             sql_fn!(pg_catalog.count(T) -> Native),
             sql_fn!(pg_catalog.min(T) -> T where T: Ord),
             sql_fn!(pg_catalog.max(T) -> T where T: Ord),
-            sql_fn!(pg_catalog.jsonb_path_query(T, U) -> T where T: Json, U: JsonAccessor<T>),
-            sql_fn!(pg_catalog.jsonb_path_query_first(T, U) -> T where T: Json, U: JsonAccessor<T>),
-            sql_fn!(pg_catalog.jsonb_path_exists(T, U) -> Native where T: Json, U: JsonAccessor<T>),
+            sql_fn!(pg_catalog.jsonb_path_query(T, U) -> T where T: Json, U: JsonQuery<T>),
+            sql_fn!(pg_catalog.jsonb_path_query_first(T, U) -> T where T: Json, U: JsonQuery<T>),
+            sql_fn!(pg_catalog.jsonb_path_exists(T, U) -> Native where T: Json, U: JsonQuery<T>),
             sql_fn!(pg_catalog.jsonb_array_length(T) -> Native where T: Json),
             sql_fn!(pg_catalog.jsonb_array_elements(T) -> T where T: Json),
             sql_fn!(pg_catalog.jsonb_array_elements_text(T) -> T where T: Json),
             sql_fn!(eql_v1.min(T) -> T where T: Ord),
             sql_fn!(eql_v1.max(T) -> T where T: Ord),
-            sql_fn!(eql_v1.jsonb_path_query(T, U) -> T where T: Json, U: JsonAccessor<T>),
-            sql_fn!(eql_v1.jsonb_path_query_first(T, U) -> T where T: Json, U: JsonAccessor<T>),
-            sql_fn!(eql_v1.jsonb_path_exists(T, U) -> Native where T: Json, U: JsonAccessor<T>),
+            sql_fn!(eql_v1.jsonb_path_query(T, U) -> T where T: Json, U: JsonQuery<T>),
+            sql_fn!(eql_v1.jsonb_path_query_first(T, U) -> T where T: Json, U: JsonQuery<T>),
+            sql_fn!(eql_v1.jsonb_path_exists(T, U) -> Native where T: Json, U: JsonQuery<T>),
             sql_fn!(eql_v1.jsonb_array_length(T) -> Native where T: Json),
             sql_fn!(eql_v1.jsonb_array_elements(T) -> T where T: Json),
             sql_fn!(eql_v1.jsonb_array_elements_text(T) -> T where T: Json),
@@ -88,9 +106,20 @@ static SQL_FUNCTION_TYPES: LazyLock<HashMap<CompoundIdent, ExplicitSqlFunctionRu
         HashMap::from_iter(sql_fns.into_iter().map(|rule| (rule.name.clone(), rule)))
     });
 
-pub(crate) fn get_sql_function(fn_name: &CompoundIdent) -> SqlFunction {
+
+pub(crate) fn get_sql_function(fn_name: &ObjectName) -> SqlFunction {
+    // FIXME: this is a hack and we need proper schema resolution logic
+    let fully_qualified_fn_name = if fn_name.0.len() == 1 {
+        CompoundIdent::from(&vec![
+            Ident::new("pg_catalog"),
+            fn_name.0[0].clone()
+        ])
+    } else {
+        CompoundIdent::from(&fn_name.0)
+    };
+
     SQL_FUNCTION_TYPES
-        .get(fn_name)
+        .get(&fully_qualified_fn_name)
         .map(SqlFunction::Explicit)
         .unwrap_or(SqlFunction::Fallback)
 }

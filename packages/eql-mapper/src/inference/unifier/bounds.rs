@@ -1,4 +1,3 @@
-use itertools::Itertools;
 use std::{cmp::Ordering, collections::BTreeSet, sync::Arc};
 
 use derive_more::derive::Display;
@@ -19,7 +18,7 @@ pub enum EqlTrait {
     #[display("Json")]
     Json,
     #[display("JsonAccessor")]
-    JsonAccessor(Arc<Type>),
+    JsonQuery(Arc<Type>),
 }
 
 impl EqlTrait {

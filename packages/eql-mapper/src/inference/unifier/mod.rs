@@ -34,15 +34,15 @@ impl<'ast> Unifier<'ast> {
         }
     }
 
-    pub(crate) fn substitute_all_tvars_pointing_to_target(
-        &self,
-        target: TypeVar,
-        replacement: Arc<Type>,
-    ) -> Arc<Type> {
-        self.registry
-            .borrow_mut()
-            .substitute_all_tvars_pointing_to_target(target, replacement)
-    }
+    // pub(crate) fn substitute_all_tvars_pointing_to_target(
+    //     &self,
+    //     target: TypeVar,
+    //     replacement: Arc<Type>,
+    // ) -> Arc<Type> {
+    //     self.registry
+    //         .borrow_mut()
+    //         .substitute_all_tvars_pointing_to_target(target, replacement)
+    // }
 
     pub(crate) fn fresh_tvar(&self) -> Arc<Type> {
         self.fresh_bounded_tvar(Bounds::none())

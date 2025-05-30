@@ -36,9 +36,9 @@ impl ExplicitSqlFunctionRule {
                 if name.0.first() == &SqlIdent(Ident::new("pg_catalog"))
                     && sig.type_env.iter().all(|(_, bounds)| bounds.len() == 0)
                 {
-                    RewriteRule::UseEqlSchema
-                } else {
                     RewriteRule::Ignore
+                } else {
+                    RewriteRule::UseEqlSchema
                 }
             },
             name,
@@ -200,7 +200,7 @@ impl SqlFunction {
 
 #[derive(Debug, Eq, PartialEq, PartialOrd, Ord, Hash, Clone, Display)]
 #[display("{}", _0.iter().map(SqlIdent::to_string).collect::<Vec<_>>().join("."))]
-pub(crate) struct CompoundIdent(Vec1<SqlIdent<Ident>>);
+pub(crate) struct CompoundIdent(pub(crate) Vec1<SqlIdent<Ident>>);
 
 impl From<&Vec<Ident>> for CompoundIdent {
     fn from(value: &Vec<Ident>) -> Self {

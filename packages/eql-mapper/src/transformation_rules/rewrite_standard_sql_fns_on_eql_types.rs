@@ -5,7 +5,7 @@ use sqltk::parser::ast::{Expr, Function, Ident, ObjectName};
 use sqltk::{AsNodeKey, NodeKey, NodePath, Visitable};
 
 use crate::{
-    get_sql_function, CompoundIdent, EqlMapperError, ExplicitSqlFunctionRule,
+    get_sql_function, EqlMapperError, ExplicitSqlFunctionRule,
     RewriteRule, SqlFunction, Type, Value,
 };
 
@@ -34,12 +34,10 @@ impl<'ast> TransformationRule<'ast> for RewriteStandardSqlFnsOnEqlTypes<'ast> {
                     self.node_types.get(&function.as_node_key()),
                     Some(Type::Value(Value::Eql(_)))
                 ) {
-                    let function_name = CompoundIdent::from(&function.name.0);
-
                     if let SqlFunction::Explicit(ExplicitSqlFunctionRule {
                         rewrite_rule: RewriteRule::UseEqlSchema,
                         ..
-                    }) = get_sql_function(&function_name)
+                    }) = get_sql_function(&function.name)
                     {
                         let function = target_node.downcast_mut::<Function>().unwrap();
                         let mut existing_name = mem::take(&mut function.name.0);
@@ -59,12 +57,10 @@ impl<'ast> TransformationRule<'ast> for RewriteStandardSqlFnsOnEqlTypes<'ast> {
                 self.node_types.get(&function.as_node_key()),
                 Some(Type::Value(Value::Eql(_)))
             ) {
-                let function_name = CompoundIdent::from(&function.name.0);
-
                 if let SqlFunction::Explicit(ExplicitSqlFunctionRule {
                     rewrite_rule: RewriteRule::UseEqlSchema,
                     ..
-                }) = get_sql_function(&function_name)
+                }) = get_sql_function(&function.name)
                 {
                     return true;
                 }

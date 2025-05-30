@@ -1,11 +1,7 @@
 use eql_mapper_macros::trace_infer;
-use sqltk::parser::ast::{Function, FunctionArguments, Ident};
+use sqltk::parser::ast::{Function, FunctionArguments};
 
-use crate::{
-    get_sql_function,
-    inference::{infer_type::InferType, sql_types::CompoundIdent},
-    TypeError, TypeInferencer,
-};
+use crate::{get_sql_function, inference::infer_type::InferType, TypeError, TypeInferencer};
 
 /// Looks up the function signature.
 ///
@@ -21,12 +17,6 @@ impl<'ast> InferType<'ast, Function> for TypeInferencer<'ast> {
             ));
         }
 
-        let fully_qualified_fn_name = if function.name.0.len() == 1 {
-            CompoundIdent::from(&vec![Ident::new("pg_catalog"), function.name.0[0].clone()])
-        } else {
-            CompoundIdent::from(&function.name.0)
-        };
-
-        get_sql_function(&fully_qualified_fn_name).apply_constraints(self, function)
+        get_sql_function(&function.name).apply_constraints(self, function)
     }
 }

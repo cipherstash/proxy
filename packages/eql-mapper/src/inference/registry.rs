@@ -41,28 +41,28 @@ impl<'ast> TypeRegistry<'ast> {
         }
     }
 
-    pub(crate) fn substitute_all_tvars_pointing_to_target(
-        &mut self,
-        target: TypeVar,
-        replacement: Arc<Type>,
-    ) -> Arc<Type> {
-        for tvar in self
-            .substitutions
-            .iter()
-            .filter(move |(_, ty)| {
-                if let Type::Var(Var(found, _)) = &***ty {
-                    *found == target
-                } else {
-                    false
-                }
-            })
-            .map(|(tvar, _)| *tvar)
-            .collect::<Vec<_>>()
-        {
-            self.substitute(tvar, replacement.clone());
-        }
-        replacement
-    }
+    // pub(crate) fn substitute_all_tvars_pointing_to_target(
+    //     &mut self,
+    //     target: TypeVar,
+    //     replacement: Arc<Type>,
+    // ) -> Arc<Type> {
+    //     for tvar in self
+    //         .substitutions
+    //         .iter()
+    //         .filter(move |(_, ty)| {
+    //             if let Type::Var(Var(found, _)) = &***ty {
+    //                 *found == target
+    //             } else {
+    //                 false
+    //             }
+    //         })
+    //         .map(|(tvar, _)| *tvar)
+    //         .collect::<Vec<_>>()
+    //     {
+    //         self.substitute(tvar, replacement.clone());
+    //     }
+    //     replacement
+    // }
 
     pub(crate) fn get_nodes_and_types<N: AsNodeKey>(&self) -> Vec<(&'ast N, Arc<Type>)> {
         self.node_types
