@@ -6,7 +6,7 @@ use rustls::{
     pki_types::CertificateDer, ClientConfig,
 };
 use std::sync::{Arc, Once};
-use tokio_postgres::{Client, NoTls};
+use tokio_postgres::{types::ToSql, Client, NoTls};
 use tracing_subscriber::{filter::Directive, EnvFilter, FmtSubscriber};
 
 pub const PROXY: u16 = 6432;
@@ -17,7 +17,7 @@ pub const TEST_SCHEMA_SQL: &str = include_str!(concat!("../../../tests/sql/schem
 
 static INIT: Once = Once::new();
 
-pub fn id() -> i64 {
+pub fn random_id() -> i64 {
     use rand::Rng;
     let mut rng = rand::rng();
     rng.random_range(1..=i64::MAX)
@@ -111,6 +111,52 @@ pub async fn connect(port: u16) -> Client {
     });
 
     client
+}
+
+pub async fn insert(sql: &str, params: &[&(dyn ToSql + Sync)]) {
+    let client = connect_with_tls(PROXY).await;
+    client.query(sql, params).await.unwrap();
+}
+
+pub async fn query<T: for<'a> tokio_postgres::types::FromSql<'a> + Send + Sync>(
+    sql: &str,
+) -> Vec<T> {
+    let client = connect_with_tls(PROXY).await;
+    let rows = client.query(sql, &[]).await.unwrap();
+    rows.iter().map(|row| row.get(0)).collect::<Vec<T>>()
+}
+
+pub async fn simple_query<T: std::str::FromStr>(sql: &str) -> Vec<T>
+where
+    <T as std::str::FromStr>::Err: std::fmt::Debug,
+{
+    let client = connect_with_tls(PROXY).await;
+    let rows = client.simple_query(sql).await.unwrap();
+    rows.iter()
+        .filter_map(|row| {
+            if let tokio_postgres::SimpleQueryMessage::Row(r) = row {
+                r.get(0).and_then(|val| val.parse::<T>().ok())
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
+// Returns a vector of `Option<String>` for each row in the result set.
+// Nulls are represented as `None`, and non-null values are converted to `Some(String)`.
+pub async fn simple_query_with_null(sql: &str) -> Vec<Option<String>> {
+    let client = connect_with_tls(PROXY).await;
+    let rows = client.simple_query(sql).await.unwrap();
+    rows.iter()
+        .filter_map(|row| {
+            if let tokio_postgres::SimpleQueryMessage::Row(r) = row {
+                Some(r.get(0).map(|val| val.to_string()))
+            } else {
+                None
+            }
+        })
+        .collect()
 }
 
 ///

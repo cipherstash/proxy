@@ -1,6 +1,6 @@
 #[cfg(test)]
 mod tests {
-    use crate::common::{clear, connect_with_tls, id, trace, PROXY};
+    use crate::common::{clear, connect_with_tls, random_id, trace, PROXY};
     use chrono::NaiveDate;
     use tokio_postgres::types::{FromSql, ToSql};
     use tokio_postgres::Client;
@@ -59,14 +59,17 @@ mod tests {
         let sql = format!("INSERT INTO encrypted (id, {col_name}) VALUES ($1, $2)");
         for val in [low.clone(), high.clone()] {
             client
-                .query(&sql, &[&id(), &val])
+                .query(&sql, &[&random_id(), &val])
                 .await
                 .expect("insert failed");
         }
 
         // NULL record
         let sql = format!("INSERT INTO encrypted (id, {col_name}) VALUES ($1, null)");
-        client.query(&sql, &[&id()]).await.expect("insert failed");
+        client
+            .query(&sql, &[&random_id()])
+            .await
+            .expect("insert failed");
 
         // GT: given [1, 3], `> 1` returns [3]
         let sql = format!("SELECT {col_name} FROM encrypted WHERE {col_name} > $1");

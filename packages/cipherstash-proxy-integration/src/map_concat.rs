@@ -1,6 +1,6 @@
 #[cfg(test)]
 mod tests {
-    use crate::common::{clear, connect_with_tls, id, PROXY};
+    use crate::common::{clear, connect_with_tls, random_id, PROXY};
 
     #[tokio::test]
     async fn map_concat_regression() {
@@ -8,7 +8,7 @@ mod tests {
 
         clear().await;
 
-        let id = id();
+        let id = random_id();
         let encrypted_text = "hello@cipherstash.com";
 
         let sql = "INSERT INTO encrypted (id, encrypted_text) VALUES ($1, $2)";

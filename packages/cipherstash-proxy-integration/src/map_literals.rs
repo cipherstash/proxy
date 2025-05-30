@@ -1,6 +1,6 @@
 #[cfg(test)]
 mod tests {
-    use crate::common::{clear, connect_with_tls, id, PROXY};
+    use crate::common::{clear, connect_with_tls, random_id, PROXY};
 
     #[tokio::test]
     async fn map_literal() {
@@ -8,7 +8,7 @@ mod tests {
 
         let client = connect_with_tls(PROXY).await;
 
-        let id = id();
+        let id = random_id();
         let encrypted_text = "hello@cipherstash.com";
 
         let sql =
@@ -28,7 +28,7 @@ mod tests {
 
         let client = connect_with_tls(PROXY).await;
 
-        let id = id();
+        let id = random_id();
         let encrypted_text = "hello@cipherstash.com";
         let int2: i16 = 1;
 
@@ -51,7 +51,7 @@ mod tests {
 
         let client = connect_with_tls(PROXY).await;
 
-        let id = id();
+        let id = random_id();
         let encrypted_jsonb = serde_json::json!({"key": "value"});
 
         let sql = format!(
@@ -80,7 +80,7 @@ mod tests {
 
         let client = connect_with_tls(PROXY).await;
 
-        let id = id();
+        let id = random_id();
 
         let sql =
             format!("INSERT INTO encrypted (id, encrypted_int8) VALUES ({id}, {id}) RETURNING id, encrypted_int8");
@@ -103,7 +103,7 @@ mod tests {
         let client = connect_with_tls(PROXY).await;
 
         let sql =
-            format!("INSERT INTO encrypted (id, encrypted_text) VALUES ({}, 'a'), ({}, 'a') RETURNING encrypted_text", id(), id());
+            format!("INSERT INTO encrypted (id, encrypted_text) VALUES ({}, 'a'), ({}, 'a') RETURNING encrypted_text", random_id(), random_id());
         let rows = client.query(&sql, &[]).await.unwrap();
 
         let actual = rows.iter().map(|row| row.get(0)).collect::<Vec<&str>>();

@@ -1,6 +1,6 @@
 #[cfg(test)]
 mod tests {
-    use crate::common::{clear, connect_with_tls, id, reset_schema, trace, PROXY};
+    use crate::common::{clear, connect_with_tls, random_id, reset_schema, trace, PROXY};
     use chrono::NaiveDate;
 
     #[tokio::test]
@@ -11,7 +11,7 @@ mod tests {
 
         let client = connect_with_tls(PROXY).await;
 
-        let id = id();
+        let id = random_id();
         let encrypted_text = "hello@cipherstash.com";
 
         let sql = "INSERT INTO encrypted (id, encrypted_text) VALUES ($1, $2)";
@@ -36,7 +36,7 @@ mod tests {
 
         let client = connect_with_tls(PROXY).await;
 
-        let id = id();
+        let id = random_id();
         let encrypted_bool: bool = true;
 
         let sql = "INSERT INTO encrypted (id, encrypted_bool) VALUES ($1, $2)";
@@ -64,7 +64,7 @@ mod tests {
 
         let client = connect_with_tls(PROXY).await;
 
-        let id = id();
+        let id = random_id();
         let encrypted_int2: i16 = 42;
 
         let sql = "INSERT INTO encrypted (id, encrypted_int2) VALUES ($1, $2)";
@@ -92,7 +92,7 @@ mod tests {
 
         let client = connect_with_tls(PROXY).await;
 
-        let id = id();
+        let id = random_id();
         let encrypted_int4: i32 = 42;
 
         let sql = "INSERT INTO encrypted (id, encrypted_int4) VALUES ($1, $2)";
@@ -120,7 +120,7 @@ mod tests {
 
         let client = connect_with_tls(PROXY).await;
 
-        let id = id();
+        let id = random_id();
         let encrypted_int8: i64 = 42;
 
         let sql = "INSERT INTO encrypted (id, encrypted_int8) VALUES ($1, $2)";
@@ -148,7 +148,7 @@ mod tests {
 
         let client = connect_with_tls(PROXY).await;
 
-        let id = id();
+        let id = random_id();
         let encrypted_float8: f64 = 42.00;
 
         let sql = "INSERT INTO encrypted (id, encrypted_float8) VALUES ($1, $2)";
@@ -176,7 +176,7 @@ mod tests {
 
         let client = connect_with_tls(PROXY).await;
 
-        let id = id();
+        let id = random_id();
         let encrypted_date = NaiveDate::parse_from_str("2025-01-01", "%Y-%m-%d").unwrap();
 
         let sql = "INSERT INTO encrypted (id, encrypted_date) VALUES ($1, $2)";
@@ -204,7 +204,7 @@ mod tests {
 
         let client = connect_with_tls(PROXY).await;
 
-        let id = id();
+        let id = random_id();
         let plaintext = "hello@cipherstash.com";
 
         let sql = "INSERT INTO encrypted (id, plaintext) VALUES ($1, $2)";
@@ -229,7 +229,7 @@ mod tests {
 
         let client = connect_with_tls(PROXY).await;
 
-        let id = id();
+        let id = random_id();
         let plaintext = "hello@cipherstash.com";
         let encrypted_text = "hello@cipherstash.com";
         let encrypted_bool = false;

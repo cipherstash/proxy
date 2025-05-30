@@ -1,6 +1,6 @@
 #[cfg(test)]
 mod tests {
-    use crate::common::{connect_with_tls, id, PROXY};
+    use crate::common::{connect_with_tls, random_id, PROXY};
 
     #[tokio::test]
     async fn frontend_error_does_not_crash_connection() {
@@ -9,7 +9,7 @@ mod tests {
         // Statement has the wrong column name
         let sql = format!(
             "INSERT INTO encrypted (id, encrypted) VALUES ({}, 'foo@example.net')",
-            id()
+            random_id()
         );
 
         let result = client.simple_query(&sql).await;
@@ -23,7 +23,7 @@ mod tests {
         // And we can still use the connection
         let sql = format!(
             "INSERT INTO encrypted (id, encrypted_text) VALUES ({}, 'foo@example.net')",
-            id()
+            random_id()
         );
         let result = client.simple_query(&sql).await;
 

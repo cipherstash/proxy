@@ -1,8 +1,7 @@
 #[cfg(test)]
 mod tests {
+    use crate::common::{clear, connect_with_tls, random_id, trace, PROXY};
     use chrono::NaiveDate;
-
-    use crate::common::{clear, connect_with_tls, id, trace, PROXY};
 
     #[tokio::test]
     async fn map_insert_null_param() {
@@ -10,7 +9,7 @@ mod tests {
 
         let client = connect_with_tls(PROXY).await;
 
-        let id = id();
+        let id = random_id();
         let encrypted_text: Option<String> = None;
 
         let sql = "INSERT INTO encrypted (id, encrypted_text) VALUES ($1, $2)";
@@ -33,7 +32,7 @@ mod tests {
 
         let client = connect_with_tls(PROXY).await;
 
-        let id = id();
+        let id = random_id();
         let encrypted_text = "hello@cipherstash.com";
 
         let sql = "INSERT INTO encrypted (id, encrypted_text) VALUES ($1, $2)";
@@ -71,7 +70,7 @@ mod tests {
 
         let client = connect_with_tls(PROXY).await;
 
-        let id = id();
+        let id = random_id();
 
         let sql = "INSERT INTO encrypted (id, encrypted_text) VALUES ($1, NULL)";
         client.query(sql, &[&id]).await.unwrap();
@@ -96,7 +95,7 @@ mod tests {
 
         let client = connect_with_tls(PROXY).await;
 
-        let id = id();
+        let id = random_id();
         let encrypted_int2: i16 = 42;
 
         let sql =
@@ -128,7 +127,7 @@ mod tests {
 
         let client = connect_with_tls(PROXY).await;
 
-        let id = id();
+        let id = random_id();
         let plaintext: Option<String> = None;
         let plaintext_date: Option<NaiveDate> = None;
         let encrypted_text: Option<String> = None;

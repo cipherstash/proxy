@@ -2,7 +2,7 @@
 mod tests {
     use chrono::NaiveDate;
 
-    use crate::common::{clear, connect_with_tls, id, trace, PROXY};
+    use crate::common::{clear, connect_with_tls, random_id, trace, PROXY};
 
     #[tokio::test]
     async fn decrypt_insert_returning_with_different_column_order() {
@@ -12,7 +12,7 @@ mod tests {
 
         let client = connect_with_tls(PROXY).await;
 
-        let id = id();
+        let id = random_id();
         let plaintext = "plaintext";
         let plaintext_date: Option<NaiveDate> = None;
         let encrypted_text = "hello@cipherstash.com";
@@ -61,7 +61,7 @@ mod tests {
 
         let client = connect_with_tls(PROXY).await;
 
-        let id = id();
+        let id = random_id();
         let plaintext = "plaintext";
         let encrypted_text = "hello@cipherstash.com";
 
@@ -103,7 +103,7 @@ mod tests {
 
         let client = connect_with_tls(PROXY).await;
 
-        let id = id();
+        let id = random_id();
         let plaintext = "plaintext";
         let encrypted_text = "hello@cipherstash.com";
 

@@ -8,7 +8,7 @@ use crate::{
     error::{EncryptError, Error},
     log::ENCRYPT,
     postgresql::Column,
-    Identifier,
+    Identifier, EQL_SCHEMA_VERSION,
 };
 use cipherstash_client::{
     config::EnvSource,
@@ -287,7 +287,7 @@ fn to_eql_encrypted(
 
             Ok(eql::EqlEncrypted {
                 identifier: identifier.to_owned(),
-                version: 1,
+                version: EQL_SCHEMA_VERSION,
                 body: EqlEncryptedBody {
                     ciphertext,
                     indexes: EqlEncryptedIndexes {
@@ -347,7 +347,7 @@ fn to_eql_encrypted(
             // The way it's implemented right now is that it will be repeated one in the ste_vec_index.
             Ok(eql::EqlEncrypted {
                 identifier: identifier.to_owned(),
-                version: 1,
+                version: EQL_SCHEMA_VERSION,
                 body: EqlEncryptedBody {
                     ciphertext: ciphertext.clone(),
                     indexes: EqlEncryptedIndexes {

@@ -14,4 +14,5 @@ mod migrate;
 mod passthrough;
 mod pipeline;
 mod schema_change;
+mod select;
 mod simple_protocol;

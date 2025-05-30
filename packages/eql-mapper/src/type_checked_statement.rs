@@ -5,7 +5,7 @@ use sqltk::{AsNodeKey, NodeKey, Transformable};
 
 use crate::{
     CastLiteralsAsEncrypted, CastParamsAsEncrypted, DryRunnable, EqlMapperError, EqlValue,
-    FailOnPlaceholderChange, GroupByEqlCol, Param, PreserveEffectiveAliases, Projection,
+    FailOnPlaceholderChange, Param, PreserveEffectiveAliases, Projection,
     RewriteStandardSqlFnsOnEqlTypes, TransformationRule, Type, Value,
 };
 
@@ -140,9 +140,6 @@ impl<'ast> TypeCheckedStatement<'ast> {
     ) -> DryRunnable<impl TransformationRule<'_>> {
         DryRunnable::new((
             RewriteStandardSqlFnsOnEqlTypes::new(Arc::clone(&self.node_types)),
-            // WrapGroupedEqlColInAggregateFn::new(Arc::clone(&self.node_types)),
-            GroupByEqlCol::new(Arc::clone(&self.node_types)),
-            // WrapEqlColsInOrderByWithOreFn::new(Arc::clone(&self.node_types)),
             PreserveEffectiveAliases,
             CastLiteralsAsEncrypted::new(encrypted_literals),
             FailOnPlaceholderChange::new(),

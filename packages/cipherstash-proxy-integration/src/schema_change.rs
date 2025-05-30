@@ -1,12 +1,12 @@
 #[cfg(test)]
 mod tests {
-    use crate::common::{connect_with_tls, id, PROXY};
+    use crate::common::{connect_with_tls, random_id, PROXY};
 
     #[tokio::test]
     async fn schema_change_reloads_schema() {
         let client = connect_with_tls(PROXY).await;
 
-        let id = id();
+        let id = random_id();
 
         let sql = format!(
             "CREATE TABLE table_{id} (

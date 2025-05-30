@@ -1,6 +1,6 @@
 #[cfg(test)]
 mod tests {
-    use crate::common::{clear, connect_with_tls, id, trace, PROXY};
+    use crate::common::{clear, connect_with_tls, random_id, trace, PROXY};
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     ///
@@ -20,7 +20,7 @@ mod tests {
 
         let counter = AtomicUsize::new(0);
 
-        let text_id = id();
+        let text_id = random_id();
         let encrypted_text = "hello@cipherstash.com";
 
         let text = async {
@@ -33,7 +33,7 @@ mod tests {
             let _ = counter.fetch_add(1, Ordering::SeqCst);
         };
 
-        let int2_id = id();
+        let int2_id = random_id();
         let encrypted_int2: i16 = 16;
 
         let int2 = async {
@@ -46,7 +46,7 @@ mod tests {
             let _ = counter.fetch_add(1, Ordering::SeqCst);
         };
 
-        let int4_id = id();
+        let int4_id = random_id();
         let encrypted_int4: i32 = 32;
 
         let int4 = async {
@@ -59,7 +59,7 @@ mod tests {
             let _ = counter.fetch_add(1, Ordering::SeqCst);
         };
 
-        let plaintext_id = id();
+        let plaintext_id = random_id();
         let plaintext_text = "blahvtha";
 
         let plaintext = async {
