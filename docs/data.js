@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1748586892136,
+  "lastUpdate": 1748684697621,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -3390,6 +3390,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 6.398857,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "yujiyokoo@gmail.com",
+            "name": "Yuji Yokoo",
+            "username": "yujiyokoo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "7b40e182be468d02cd27f5fafbc13884c228a34c",
+          "message": "Merge pull request #245 from cipherstash/feature/prefer-crn-over-wsid-and-region\n\nFeature/prefer crn over workspace_id and region",
+          "timestamp": "2025-05-31T19:41:15+10:00",
+          "tree_id": "da85316ba78676be4b96237b1fba585625b3ebfb",
+          "url": "https://github.com/cipherstash/proxy/commit/7b40e182be468d02cd27f5fafbc13884c228a34c"
+        },
+        "date": 1748684696241,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 6.760877,
             "unit": "Number"
           }
         ]
