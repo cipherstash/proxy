@@ -1,0 +1,14 @@
+[auth]
+workspace_crn = "crn:us-west-1.aws:E4UMRN47WJNSMAKR"
+region = "ap-southeast-2.aws"
+workspace_id = "DCMBTGHEX5R2RMR4"
+client_access_key = "client_access_key"
+
+[database]
+name = "cipherstash"
+username = "cipherstash"
+password = "password"
+
+[encrypt]
+client_id = "5912717c-2c3b-4fb6-a051-0a8e71cd9e37"  # generated guid for validation
+client_key = "client_key"

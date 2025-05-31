@@ -34,7 +34,7 @@ mise run postgres:setup
 #  - `stash login`
 
 # Create minimal mise.local.toml
-# CS_WORKSPACE_ID
+# CS_WORKSPACE_CRN
 # CS_CLIENT_ACCESS_KEY
 # CS_DEFAULT_KEYSET_ID
 # CS_CLIENT_KEY
@@ -42,7 +42,8 @@ mise run postgres:setup
 
 # Get the workspace ID
 stash workspaces
-# add to CS_WORKSPACE_ID
+# add to CS_WORKSPACE_CRN in the format: "crn:region:workspace-id" - eg. "crn:ap-southeast-2.aws:7WXWMKXKQU42PDB4"
+# NOTE: this is going to change so `stash workspaces` will return CRNs instead of IDs
 
 # Create an access key
 stash access-keys create proxy
@@ -600,7 +601,7 @@ The benchmark setup includes the database configuration, but does requires acces
 
 ### Required environment variables
 ```
-CS_WORKSPACE_ID
+CS_WORKSPACE_CRN
 CS_CLIENT_ACCESS_KEY
 CS_DEFAULT_KEYSET_ID
 CS_CLIENT_ID

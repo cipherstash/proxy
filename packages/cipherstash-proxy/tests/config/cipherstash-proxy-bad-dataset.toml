@@ -1,5 +1,5 @@
 [auth]
-workspace_id = "5482b7bc-9460-4e0d-afdf-d157f6843d57"
+workspace_crn = "5482b7bc-9460-4e0d-afdf-d157f6843d57"
 client_access_key = "e0ef15b0-7826-4e33-a434-1535080f95ca"
 
 [encrypt]

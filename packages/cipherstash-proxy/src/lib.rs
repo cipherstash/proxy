@@ -27,3 +27,6 @@ pub const EQL_SCHEMA_VERSION: u16 = 2;
 pub const SIZE_U8: usize = mem::size_of::<u8>();
 pub const SIZE_I16: usize = mem::size_of::<i16>();
 pub const SIZE_I32: usize = mem::size_of::<i32>();
+
+#[cfg(test)]
+pub mod test_helpers;
