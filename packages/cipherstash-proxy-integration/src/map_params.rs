@@ -1,7 +1,6 @@
 #[cfg(test)]
 mod tests {
     use crate::common::{connect_with_tls, random_id, reset_schema, trace, PROXY};
-    use chrono::NaiveDate;
 
     #[tokio::test]
     async fn map_all_with_wildcard() {

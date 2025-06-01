@@ -1,9 +1,8 @@
 #[cfg(test)]
 mod tests {
-    use crate::common::{clear, insert, query, query_by, random, random_id, trace};
+    use crate::common::{clear, insert, query_by, random_id, trace};
     use chrono::NaiveDate;
     use serde_json::Value;
-    use tracing::info;
 
     macro_rules! test_insert_with_null_literal {
         ($name: ident, $type: ident, $pg_type: ident) => {
@@ -45,23 +44,21 @@ mod tests {
 
     /// Sanity check insert of unencrypted literal value
     #[tokio::test]
-    pub async fn insert_with_literal_plaintext() {
+    pub async fn insert_with_null_literal_plaintext() {
         trace();
 
         clear().await;
 
         let id = random_id();
 
-        let encrypted_val = crate::value_for_type!(String, random());
+        let expected: Vec<Option<String>> = vec![None];
 
-        let sql = format!("INSERT INTO encrypted (id, plaintext) VALUES ($1, NULL");
-        insert(&sql, &[&id]).await;
+        let sql = "INSERT INTO encrypted (id, plaintext) VALUES ($1, NULL)";
+        insert(sql, &[&id]).await;
 
-        let expected = vec![encrypted_val];
+        let sql = "SELECT plaintext FROM encrypted WHERE id = $1";
 
-        let sql = format!("SELECT plaintext FROM encrypted WHERE id = $1");
-
-        let actual = query_by::<String>(&sql, &id).await;
+        let actual = query_by::<Option<String>>(sql, &id).await;
 
         assert_eq!(expected, actual);
     }

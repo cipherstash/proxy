@@ -24,7 +24,7 @@ pub fn random_id() -> i64 {
 }
 
 // Limited by valid data range
-pub fn random() -> i32 {
+pub fn random_limited() -> i32 {
     use rand::Rng;
     let mut rng = rand::rng();
     rng.random_range(1..=31)

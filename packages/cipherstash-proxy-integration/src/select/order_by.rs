@@ -2,7 +2,6 @@
 mod tests {
     use crate::common::{clear, insert, query, random_id, simple_query, trace};
     use chrono::NaiveDate;
-    use tracing::info;
 
     macro_rules! test_order_by {
         ($name: ident, $type: ident, $pg_type: ident) => {

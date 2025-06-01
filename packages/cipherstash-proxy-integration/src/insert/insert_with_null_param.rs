@@ -1,9 +1,8 @@
 #[cfg(test)]
 mod tests {
-    use crate::common::{clear, insert, query, query_by, random_id, trace};
+    use crate::common::{clear, insert, query_by, random_id, trace};
     use chrono::NaiveDate;
     use serde_json::Value;
-    use tracing::info;
 
     macro_rules! test_insert_with_null_param {
         ($name: ident, $type: ident, $pg_type: ident) => {
