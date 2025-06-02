@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1748856143321,
+  "lastUpdate": 1748907082223,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -3968,6 +3968,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 7.015853,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "d702f62dbd1d106394bd93947092d334b4224315",
+          "message": "fix: make schema column names distinct",
+          "timestamp": "2025-06-02T06:12:42Z",
+          "url": "https://github.com/cipherstash/proxy/pull/253/commits/d702f62dbd1d106394bd93947092d334b4224315"
+        },
+        "date": 1748907080784,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 6.630955,
             "unit": "Number"
           }
         ]
