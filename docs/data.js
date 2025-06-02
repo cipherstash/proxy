@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1748830365807,
+  "lastUpdate": 1748830797736,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -3756,6 +3756,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 7.109163,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "c1f381cc6f9c97d2a8932f94a32a390022f7b609",
+          "message": "build: use faster x86_64 runners from BuildJet",
+          "timestamp": "2025-06-02T01:35:45Z",
+          "url": "https://github.com/cipherstash/proxy/pull/250/commits/c1f381cc6f9c97d2a8932f94a32a390022f7b609"
+        },
+        "date": 1748830796216,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 6.713111,
             "unit": "Number"
           }
         ]
