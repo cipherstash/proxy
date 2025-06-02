@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1748828235768,
+  "lastUpdate": 1748828319269,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -3677,6 +3677,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 7.085691,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "toby@cipherstash.com",
+            "name": "Toby Hede",
+            "username": "tobyhede"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "2fce71d2da854d648f2e4d02b8569fb4bb0ce190",
+          "message": "Merge pull request #247 from cipherstash/refactor-param-tests\n\nRefactor insert tests",
+          "timestamp": "2025-06-02T11:35:41+10:00",
+          "tree_id": "84186bd3e445d607466955ca04fb7977217b5846",
+          "url": "https://github.com/cipherstash/proxy/commit/2fce71d2da854d648f2e4d02b8569fb4bb0ce190"
+        },
+        "date": 1748828317866,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 6.769355,
             "unit": "Number"
           }
         ]
