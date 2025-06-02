@@ -18,8 +18,8 @@ jobs:
       fail-fast: false
       matrix:
         build:
-          - { os: ubuntu-latest-m,    docker_platform: linux/amd64, rust_target: "x86_64-unknown-linux-gnu",  cache-provider: github }
-          - { os: linux-arm64-public, docker_platform: linux/arm64, rust_target: "aarch64-unknown-linux-gnu", cache-provider: github }
+          - { os: buildjet-16vcpu-ubuntu-2204, docker_platform: linux/amd64, rust_target: "x86_64-unknown-linux-gnu",  cache-provider: buildjet }
+          - { os: linux-arm64-public,          docker_platform: linux/arm64, rust_target: "aarch64-unknown-linux-gnu", cache-provider: github }
     runs-on: ${{matrix.build.os}}
     steps:
       - uses: actions/checkout@v4
