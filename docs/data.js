@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1748842046125,
+  "lastUpdate": 1748842174097,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -3835,6 +3835,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 7.318342,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "lindsay@cipherstash.com",
+            "name": "Lindsay Holmwood",
+            "username": "auxesis"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "19a71397cd58f6e653894cdb3afb01286001fba9",
+          "message": "Merge pull request #250 from cipherstash/chore/use-faster-x86_64-build-runners\n\nbuild: use faster x86_64 runners from BuildJet",
+          "timestamp": "2025-06-02T15:24:35+10:00",
+          "tree_id": "4ebc8bc62a06c16fcee5bf5cc5ad48a81392236e",
+          "url": "https://github.com/cipherstash/proxy/commit/19a71397cd58f6e653894cdb3afb01286001fba9"
+        },
+        "date": 1748842172606,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 6.872999,
             "unit": "Number"
           }
         ]
