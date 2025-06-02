@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1748842693837,
+  "lastUpdate": 1748844919864,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -3914,6 +3914,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 6.861768,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "toby@cipherstash.com",
+            "name": "Toby Hede",
+            "username": "tobyhede"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "e289805f307e4d4955e24d67dc087dd9b1536c6d",
+          "message": "Merge pull request #252 from cipherstash/remove-auto-build-on-branch\n\nchore: remove release on branch",
+          "timestamp": "2025-06-02T16:12:38+10:00",
+          "tree_id": "d7c6b8f7f22ca4684ff2f950f7b393024cda838e",
+          "url": "https://github.com/cipherstash/proxy/commit/e289805f307e4d4955e24d67dc087dd9b1536c6d"
+        },
+        "date": 1748844918767,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 7.162694,
             "unit": "Number"
           }
         ]
