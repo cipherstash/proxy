@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1748830797736,
+  "lastUpdate": 1748841954075,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -3781,6 +3781,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 6.713111,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "95c4f5d31361a52d75b4e8f79a4e9893a30cf527",
+          "message": "Add source schema to table resolution",
+          "timestamp": "2025-06-02T01:35:45Z",
+          "url": "https://github.com/cipherstash/proxy/pull/251/commits/95c4f5d31361a52d75b4e8f79a4e9893a30cf527"
+        },
+        "date": 1748841952670,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 6.805304,
             "unit": "Number"
           }
         ]
