@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1748823725455,
+  "lastUpdate": 1748824959692,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -3548,6 +3548,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 6.777086,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "def8d8a8a5c3df29c591b0df9c86daac0be8828d",
+          "message": "fix: restore accidentally removed tests",
+          "timestamp": "2025-06-02T00:19:12Z",
+          "url": "https://github.com/cipherstash/proxy/pull/248/commits/def8d8a8a5c3df29c591b0df9c86daac0be8828d"
+        },
+        "date": 1748824958328,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 6.744536,
             "unit": "Number"
           }
         ]
