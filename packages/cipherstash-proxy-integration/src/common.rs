@@ -125,6 +125,11 @@ pub async fn insert(sql: &str, params: &[&(dyn ToSql + Sync)]) {
     client.query(sql, params).await.unwrap();
 }
 
+pub async fn insert_simple_query(sql: &str) {
+    let client = connect_with_tls(PROXY).await;
+    client.simple_query(sql).await.unwrap();
+}
+
 pub async fn query<T: for<'a> tokio_postgres::types::FromSql<'a> + Send + Sync>(
     sql: &str,
 ) -> Vec<T> {
