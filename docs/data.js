@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1748822962222,
+  "lastUpdate": 1748823725455,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -3519,6 +3519,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 6.777099,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "robin@rhoward.id.au",
+            "name": "Robin Howard",
+            "username": "damncabbage"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "dd4cf663bc83ac684d2628708cb974709ee31830",
+          "message": "Merge pull request #244 from cipherstash/rh/tls-docs\n\ndocs: Adds TLS and Docker configuration docs.",
+          "timestamp": "2025-06-02T10:19:08+10:00",
+          "tree_id": "959227416afd8cae0da9038fd0e1252a2937360a",
+          "url": "https://github.com/cipherstash/proxy/commit/dd4cf663bc83ac684d2628708cb974709ee31830"
+        },
+        "date": 1748823724073,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 6.777086,
             "unit": "Number"
           }
         ]
