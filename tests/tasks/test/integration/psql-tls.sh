@@ -21,13 +21,13 @@ SELECT 1;
 EOF
 
 # Connect to the proxy forcing TLS
-docker exec -i postgres${CONTAINER_SUFFIX} psql 'postgresql://cipherstash:${encoded_password}@proxy:6432/cipherstash?sslmode=require' <<-EOF
+docker exec -i postgres${CONTAINER_SUFFIX} psql postgresql://cipherstash:${encoded_password}@proxy:6432/cipherstash?sslmode=require <<-EOF
 SELECT 1;
 EOF
 
 # Connect without TLS
 set +e
-OUTPUT="$(docker exec -i postgres${CONTAINER_SUFFIX} psql 'postgresql://cipherstash:${encoded_password}@proxy:6432/cipherstash?sslmode=disable' --command 'SELECT 1' 2>&1)"
+OUTPUT="$(docker exec -i postgres${CONTAINER_SUFFIX} psql postgresql://cipherstash:${encoded_password}@proxy:6432/cipherstash?sslmode=disable --command 'SELECT 1' 2>&1)"
 retval=$?
 if echo ${OUTPUT} | grep -v 'Transport Layer Security (TLS) connection is required'; then
     echo "error: did not see string in output: \"Transport Layer Security (TLS) connection is required\""
