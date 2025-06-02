@@ -23,6 +23,13 @@ pub fn random_id() -> i64 {
     rng.random_range(1..=i64::MAX)
 }
 
+// Limited by valid data range
+pub fn random_limited() -> i32 {
+    use rand::Rng;
+    let mut rng = rand::rng();
+    rng.random_range(1..=31)
+}
+
 pub fn random_string() -> String {
     rand::rng()
         .sample_iter(&Alphanumeric)
@@ -123,6 +130,15 @@ pub async fn query<T: for<'a> tokio_postgres::types::FromSql<'a> + Send + Sync>(
 ) -> Vec<T> {
     let client = connect_with_tls(PROXY).await;
     let rows = client.query(sql, &[]).await.unwrap();
+    rows.iter().map(|row| row.get(0)).collect::<Vec<T>>()
+}
+
+pub async fn query_by<T>(sql: &str, param: &(dyn ToSql + Sync)) -> Vec<T>
+where
+    T: for<'a> tokio_postgres::types::FromSql<'a> + Send + Sync,
+{
+    let client = connect_with_tls(PROXY).await;
+    let rows = client.query(sql, &[param]).await.unwrap();
     rows.iter().map(|row| row.get(0)).collect::<Vec<T>>()
 }
 

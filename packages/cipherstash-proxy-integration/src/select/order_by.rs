@@ -28,6 +28,7 @@ mod tests {
                     format!("SELECT {encrypted_col} FROM encrypted ORDER BY {encrypted_col} ASC");
 
                 let actual = query::<$type>(&sql).await;
+
                 assert_eq!(expected, actual);
 
                 let actual = simple_query::<$type>(&sql).await;
@@ -53,4 +54,7 @@ mod tests {
     test_order_by!(order_by_float8, f64, float8);
     test_order_by!(order_by_text, String, text);
     test_order_by!(order_by_date, NaiveDate, date);
+
+    // Bool breaks the macro logic, will come to figure it out
+    // test_order_by!(order_by_bool, bool, bool);
 }
