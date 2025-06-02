@@ -7,10 +7,10 @@ use crate::{
         InferType,
     },
     unifier::{EqlValue, NativeValue, Value},
-    ColumnKind, TableColumn, TypeInferencer,
+    ColumnKind, Table, TableColumn, TypeInferencer,
 };
 use eql_mapper_macros::trace_infer;
-use sqltk::parser::ast::{Ident, Insert};
+use sqltk::parser::ast::Insert;
 
 #[trace_infer]
 impl<'ast> InferType<'ast, Insert> for TypeInferencer<'ast> {
@@ -27,15 +27,19 @@ impl<'ast> InferType<'ast, Insert> for TypeInferencer<'ast> {
             return Err(TypeError::UnsupportedSqlFeature("INSERT with ALIAS".into()));
         }
 
-        let table_name: &Ident = table_name.0.last().unwrap();
+        let (table_name, source_schema) = Table::get_table_name_and_source_schema(table_name);
 
         let table_columns = if columns.is_empty() {
             // When no columns are specified, the source must unify with a projection of ALL table columns.
-            self.table_resolver.resolve_table_columns(table_name)?
+            self.table_resolver
+                .resolve_table_columns(&table_name, &source_schema)?
         } else {
             columns
                 .iter()
-                .map(|c| self.table_resolver.resolve_table_column(table_name, c))
+                .map(|c| {
+                    self.table_resolver
+                        .resolve_table_column(&table_name, &source_schema, c)
+                })
                 .collect::<Result<Vec<_>, _>>()?
         };
 

@@ -35,41 +35,50 @@ impl TableResolver {
         }
     }
 
-    pub fn resolve_table(&self, name: &Ident) -> Result<Arc<Table>, SchemaError> {
+    pub fn resolve_table(
+        &self,
+        table_name: &Ident,
+        source_schema: &Ident,
+    ) -> Result<Arc<Table>, SchemaError> {
         match self {
-            TableResolver::ViaSchema(schema) => schema.resolve_table(name),
-            TableResolver::ViaSchemaWithEdits(schema_with_edits) => {
-                schema_with_edits.read().unwrap().resolve_table(name)
-            }
+            TableResolver::ViaSchema(schema) => schema.resolve_table(table_name, source_schema),
+            TableResolver::ViaSchemaWithEdits(schema_with_edits) => schema_with_edits
+                .read()
+                .unwrap()
+                .resolve_table(table_name, source_schema),
         }
     }
 
     pub fn resolve_table_columns(
         &self,
         table_name: &Ident,
+        source_schema: &Ident,
     ) -> Result<Vec<SchemaTableColumn>, SchemaError> {
         match self {
-            TableResolver::ViaSchema(schema) => schema.resolve_table_columns(table_name),
+            TableResolver::ViaSchema(schema) => {
+                schema.resolve_table_columns(table_name, source_schema)
+            }
             TableResolver::ViaSchemaWithEdits(schema_with_edits) => schema_with_edits
                 .read()
                 .unwrap()
-                .resolve_table_columns(table_name),
+                .resolve_table_columns(table_name, source_schema),
         }
     }
 
     pub fn resolve_table_column(
         &self,
         table_name: &Ident,
+        source_schema: &Ident,
         column_name: &Ident,
     ) -> Result<SchemaTableColumn, SchemaError> {
         match self {
             TableResolver::ViaSchema(schema) => {
-                schema.resolve_table_column(table_name, column_name)
+                schema.resolve_table_column(table_name, source_schema, column_name)
             }
             TableResolver::ViaSchemaWithEdits(schema_with_edits) => schema_with_edits
                 .read()
                 .unwrap()
-                .resolve_table_column(table_name, column_name),
+                .resolve_table_column(table_name, source_schema, column_name),
         }
     }
 }

@@ -6,7 +6,7 @@ use super::sql_ident::*;
 use crate::iterator_ext::IteratorExt;
 use core::fmt::Debug;
 use derive_more::Display;
-use sqltk::parser::ast::Ident;
+use sqltk::parser::ast::{Ident, ObjectName};
 use std::sync::Arc;
 use thiserror::Error;
 
@@ -23,9 +23,16 @@ pub struct Schema {
 /// A table (or view).
 ///
 /// It has a name and some columns
+///
+/// The source_schema is the schema that the table "physically" belongs to
+/// A user-visible schema can provide permissions across many source schemas.
+/// ie, the "information_schema" and "pg_catalog" schemas are both included in the cidde loaded schema
+///
 #[derive(Debug, Clone, PartialEq, Eq, Display, Hash)]
 #[display("Table<{}>", name)]
 pub struct Table {
+    // The schema this table belongs to (e.g. "public", "information_schema", "pg_catalog")
+    pub source_schema: Ident,
     pub name: Ident,
     pub columns: Vec<Arc<Column>>,
     // Stores indices into the columns Vec.
@@ -102,19 +109,27 @@ impl Schema {
 
     /// Resolves a table by `Ident`, which takes into account the SQL rules
     /// of quoted and new identifier matching.
-    pub fn resolve_table(&self, name: &Ident) -> Result<Arc<Table>, SchemaError> {
+    pub fn resolve_table(
+        &self,
+        table_name: &Ident,
+        source_schema: &Ident,
+    ) -> Result<Arc<Table>, SchemaError> {
         let mut haystack = self.tables.iter();
         haystack
-            .find_unique(&|table| SqlIdent::from(&table.name) == SqlIdent::from(name))
+            .find_unique(&|table| {
+                SqlIdent::from(&table.name) == SqlIdent::from(table_name)
+                    && SqlIdent::from(&table.source_schema) == SqlIdent::from(source_schema)
+            })
             .cloned()
-            .map_err(|_| SchemaError::TableNotFound(name.to_string()))
+            .map_err(|_| SchemaError::TableNotFound(table_name.to_string()))
     }
 
     pub fn resolve_table_columns(
         &self,
         table_name: &Ident,
+        source_schema: &Ident,
     ) -> Result<Vec<SchemaTableColumn>, SchemaError> {
-        let table = self.resolve_table(table_name)?;
+        let table = self.resolve_table(table_name, source_schema)?;
         Ok(table
             .columns
             .iter()
@@ -129,12 +144,14 @@ impl Schema {
     pub fn resolve_table_column(
         &self,
         table_name: &Ident,
+        source_schema: &Ident,
         column_name: &Ident,
     ) -> Result<SchemaTableColumn, SchemaError> {
         let mut haystack = self.tables.iter();
-        match haystack
-            .find_unique(&|table| SqlIdent::from(&table.name) == SqlIdent::from(table_name))
-        {
+        match haystack.find_unique(&|table| {
+            SqlIdent::from(&table.name) == SqlIdent::from(table_name)
+                && SqlIdent::from(&table.source_schema) == SqlIdent::from(source_schema)
+        }) {
             Ok(table) => match table.get_column(column_name) {
                 Ok(column) => Ok(SchemaTableColumn {
                     table: table.name.clone(),
@@ -153,9 +170,10 @@ impl Schema {
 
 impl Table {
     /// Create a new named table with no columns.
-    pub fn new(name: Ident) -> Self {
+    pub fn new(name: Ident, source_schema: Ident) -> Self {
         Self {
             name,
+            source_schema,
             primary_key: Vec::with_capacity(1),
             columns: Vec::with_capacity(16),
         }
@@ -192,6 +210,18 @@ impl Table {
             .cloned()
             .collect()
     }
+
+    // ObjectName is a list of identifiers, the last entry is always the table name
+    pub fn get_table_name_and_source_schema(name: &ObjectName) -> (Ident, Ident) {
+        let idents = &name.0;
+        let table_name = idents.last().unwrap().clone();
+        let source_schema = if idents.len() == 2 {
+            idents.first().unwrap().clone()
+        } else {
+            Ident::new("public")
+        };
+        (table_name, source_schema)
+    }
 }
 
 /// A DSL to create a [`Schema`] for testing purposes.
@@ -227,8 +257,8 @@ macro_rules! schema {
     (@add_table $schema:ident $table_name:ident $table:ident { $($columns:tt)* }) => {
         $schema.add_table(
             {
-
-                let mut $table = $crate::model::Table::new(::sqltk::parser::ast::Ident::new(stringify!($table_name)));
+                let source_schema = ::sqltk::parser::ast::Ident::new("public");
+                let mut $table = $crate::model::Table::new(::sqltk::parser::ast::Ident::new(stringify!($table_name)), source_schema);
                 schema!(@add_columns $table $($columns)*);
                 $table
             }

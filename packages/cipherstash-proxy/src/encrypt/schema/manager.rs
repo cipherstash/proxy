@@ -129,12 +129,13 @@ pub async fn load_schema(config: &DatabaseConfig) -> Result<Schema, Error> {
     };
 
     for table in tables {
+        let table_schema: String = table.get("table_schema");
         let table_name: String = table.get("table_name");
         let primary_keys: Vec<Option<String>> = table.get("primary_keys");
         let columns: Vec<String> = table.get("columns");
         let column_type_names: Vec<Option<String>> = table.get("column_type_names");
 
-        let mut table = Table::new(Ident::new(&table_name));
+        let mut table = Table::new(Ident::new(&table_name), Ident::new(&table_schema));
 
         columns.iter().zip(column_type_names).for_each(|(col, column_type_name)| {
             let is_primary_key = primary_keys.contains(&Some(col.to_string()));

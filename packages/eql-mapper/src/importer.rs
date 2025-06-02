@@ -5,7 +5,7 @@ use crate::{
     },
     model::{SchemaError, TableResolver},
     unifier::{Projection, ProjectionColumns},
-    Relation, ScopeError, ScopeTracker,
+    Relation, ScopeError, ScopeTracker, Table,
 };
 use sqltk::parser::ast::{Cte, Ident, Insert, TableAlias, TableFactor};
 use sqltk::{Break, Visitable, Visitor};
@@ -42,9 +42,11 @@ impl<'ast> Importer<'ast> {
             ..
         } = insert;
 
+        let (table_name, source_schema) = Table::get_table_name_and_source_schema(table_name);
+
         let table = self
             .table_resolver
-            .resolve_table(table_name.0.last().unwrap())?;
+            .resolve_table(&table_name, &source_schema)?;
 
         let cols = ProjectionColumns::new_from_schema_table(table.clone());
 
@@ -103,8 +105,12 @@ impl<'ast> Importer<'ast> {
 
                 let mut scope_tracker = self.scope_tracker.borrow_mut();
 
+                let (table_name, source_schema) = Table::get_table_name_and_source_schema(name);
+
                 if scope_tracker.resolve_relation(name).is_err() {
-                    let table = self.table_resolver.resolve_table(name.0.last().unwrap())?;
+                    let table = self
+                        .table_resolver
+                        .resolve_table(&table_name, &source_schema)?;
 
                     let cols = ProjectionColumns::new_from_schema_table(table.clone());
 
