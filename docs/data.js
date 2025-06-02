@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1748841954075,
+  "lastUpdate": 1748842046125,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -3806,6 +3806,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 6.805304,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "toby@cipherstash.com",
+            "name": "Toby Hede",
+            "username": "tobyhede"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "0882f65c54d59e016c497ff1f0cb543be935fd33",
+          "message": "Merge pull request #249 from cipherstash/add-simple-query-insert-literal-tests\n\ntest: add simple query to insert literal tests",
+          "timestamp": "2025-06-02T15:23:30+10:00",
+          "tree_id": "d342ebe4a0f7b0b3f2c761f58f022e2707ccde39",
+          "url": "https://github.com/cipherstash/proxy/commit/0882f65c54d59e016c497ff1f0cb543be935fd33"
+        },
+        "date": 1748842044979,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 7.318342,
             "unit": "Number"
           }
         ]
