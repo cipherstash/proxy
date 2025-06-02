@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1748826138112,
+  "lastUpdate": 1748828235768,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -3648,6 +3648,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 6.785704,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "toby@cipherstash.com",
+            "name": "Toby Hede",
+            "username": "tobyhede"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "97923d6796a8271154abb6266dae15a204f33815",
+          "message": "Merge pull request #248 from cipherstash/fix-tests\n\nfix: restore accidentally removed tests",
+          "timestamp": "2025-06-02T11:33:49+10:00",
+          "tree_id": "22eab7e10080a05daa26d60e3bccb618999bb398",
+          "url": "https://github.com/cipherstash/proxy/commit/97923d6796a8271154abb6266dae15a204f33815"
+        },
+        "date": 1748828234646,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 7.085691,
             "unit": "Number"
           }
         ]
