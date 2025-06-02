@@ -124,7 +124,6 @@ enum Overlay {
 struct OverlayTable {
     pub name: Ident,
     pub columns: Vec<Column>,
-    pub primary_key: Vec<usize>,
 }
 
 impl OverlayTable {
@@ -132,7 +131,6 @@ impl OverlayTable {
         Self {
             name,
             columns: Vec::new(),
-            primary_key: Vec::new(),
         }
     }
 
@@ -141,13 +139,7 @@ impl OverlayTable {
     }
 
     fn remove_column(&mut self, name: &Ident) {
-        if let Some((idx, _)) = self
-            .columns
-            .iter()
-            .enumerate()
-            .find(|(_, col)| col.name == *name)
-        {
-            self.primary_key.retain(|col| *col != idx);
+        if self.columns.iter().any(|col| col.name == *name) {
             self.columns.retain(|col| col.name != *name);
         }
     }
@@ -172,7 +164,6 @@ impl From<&Table> for OverlayTable {
         Self {
             name: value.name.clone(),
             columns: value.columns.iter().map(|col| (**col).clone()).collect(),
-            primary_key: value.primary_key.clone(),
         }
     }
 }
@@ -182,7 +173,6 @@ impl From<&OverlayTable> for Table {
         Self {
             name: value.name.clone(),
             columns: value.columns.iter().cloned().map(Arc::new).collect(),
-            primary_key: value.primary_key.clone(),
         }
     }
 }
@@ -380,7 +370,7 @@ mod test {
         let schema = Arc::new(schema! {
             tables: {
                 users: {
-                    id (PK),
+                    id,
                     email,
                 }
             }
@@ -407,7 +397,7 @@ mod test {
         let schema = Arc::new(schema! {
             tables: {
                 users: {
-                    id (PK),
+                    id,
                     email,
                 }
             }
@@ -430,7 +420,7 @@ mod test {
         let schema = Arc::new(schema! {
             tables: {
                 users: {
-                    id (PK),
+                    id,
                     email (EQL),
                 }
             }
@@ -462,7 +452,7 @@ mod test {
         let schema = Arc::new(schema! {
             tables: {
                 users: {
-                    id (PK),
+                    id,
                     email (EQL),
                 }
             }
@@ -521,7 +511,7 @@ mod test {
         let schema = Arc::new(schema! {
             tables: {
                 users: {
-                    id (PK),
+                    id,
                     email (EQL),
                 }
             }

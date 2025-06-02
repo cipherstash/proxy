@@ -61,7 +61,7 @@ mod test {
         let schema = resolver(schema! {
             tables: {
                 users: {
-                    id (PK),
+                    id,
                     email,
                     first_name,
                 }
@@ -87,7 +87,7 @@ mod test {
         let schema = resolver(schema! {
             tables: {
                 users: {
-                    id (PK),
+                    id,
                     email (EQL),
                     first_name,
                 }
@@ -118,7 +118,7 @@ mod test {
         let schema = resolver(schema! {
             tables: {
                 users: {
-                    id (PK),
+                    id,
                     email (EQL),
                     first_name,
                 }
@@ -147,7 +147,7 @@ mod test {
         let schema = resolver(schema! {
             tables: {
                 users: {
-                    id (PK),
+                    id,
                     email (EQL),
                     first_name,
                 }
@@ -176,7 +176,7 @@ mod test {
         let schema = resolver(schema! {
             tables: {
                 users: {
-                    id (PK),
+                    id,
                     email (EQL),
                     first_name,
                 }
@@ -206,7 +206,7 @@ mod test {
         let schema = resolver(schema! {
             tables: {
                 users: {
-                    id (PK),
+                    id,
                     email,
                     first_name,
                 }
@@ -241,7 +241,7 @@ mod test {
         let schema = resolver(schema! {
             tables: {
                 users: {
-                    id (PK),
+                    id,
                     email,
                     first_name,
                 }
@@ -284,7 +284,7 @@ mod test {
         let schema = resolver(schema! {
             tables: {
                 users: {
-                    id (PK),
+                    id,
                     email,
                     first_name,
                 }
@@ -322,12 +322,12 @@ mod test {
         let schema = resolver(schema! {
             tables: {
                 users: {
-                    id (PK),
+                    id,
                     email (EQL),
                     first_name,
                 }
                 todo_lists: {
-                    id (PK),
+                    id,
                     name,
                     owner_id,
                     created_at,
@@ -469,7 +469,7 @@ mod test {
         let schema = resolver(schema! {
             tables: {
                 users: {
-                    id (PK),
+                    id,
                     email (EQL),
                     first_name (EQL),
                 }
@@ -511,7 +511,7 @@ mod test {
         let schema = resolver(schema! {
             tables: {
                 users: {
-                    id (PK),
+                    id,
                     salary (EQL),
                     age (EQL),
                 }
@@ -1338,7 +1338,7 @@ mod test {
         let schema = resolver(schema! {
             tables: {
                 employees: {
-                    id (PK),
+                    id,
                     department,
                     salary (EQL),
                 }
@@ -1368,7 +1368,7 @@ mod test {
         let schema = resolver(schema! {
             tables: {
                 employees: {
-                    id (PK),
+                    id,
                     eql_col (EQL),
                     native_col,
                 }
@@ -1401,7 +1401,7 @@ mod test {
         let schema = resolver(schema! {
             tables: {
                 employees: {
-                    id (PK),
+                    id,
                     eql_col (EQL),
                     native_col,
                 }
@@ -1516,7 +1516,7 @@ mod test {
         let schema = resolver(schema! {
             tables: {
                 patients: {
-                    id (PK),
+                    id,
                     notes (EQL),
                 }
             }
@@ -1578,7 +1578,7 @@ mod test {
         let schema = resolver(schema! {
             tables: {
                 patients: {
-                    id (PK),
+                    id,
                     notes (EQL),
                 }
             }
