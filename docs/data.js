@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1748917791145,
+  "lastUpdate": 1748918000640,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -4197,6 +4197,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 6.73144,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "toby@cipherstash.com",
+            "name": "Toby Hede",
+            "username": "tobyhede"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "dfd87527e7639cb1e25fb08dca1eb5fb41873a91",
+          "message": "Merge pull request #253 from cipherstash/make-schema-columns-distinct\n\nEnsure schema column names distinct",
+          "timestamp": "2025-06-03T12:29:29+10:00",
+          "tree_id": "f76b5fca0f16eddba278d9ec2e56d2f103325a67",
+          "url": "https://github.com/cipherstash/proxy/commit/dfd87527e7639cb1e25fb08dca1eb5fb41873a91"
+        },
+        "date": 1748917999220,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 6.796591,
             "unit": "Number"
           }
         ]
