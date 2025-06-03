@@ -409,7 +409,12 @@ The integration tests have several runtime dependencies:
 - Running PostgreSQL instances (that can be started with `mise run postgres:up`)
 - Credentials for CipherStash ZeroKMS (which can be found in the [quickstart](#developing) section)
 
+##### Language-specific integration tests
 
+To run language-specific integration tests, call:
+
+- `mise run test:integration:lang:golang`
+- `mise run test:integration:lang:python`
 
 
 ### Working with Encrypt Query Language (EQL)

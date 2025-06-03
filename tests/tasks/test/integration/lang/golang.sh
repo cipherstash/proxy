@@ -5,7 +5,12 @@
 
 set -e
 
-source "$(dirname "${BASH_SOURCE[0]}")/url_encode.sh"
+mise --env tls run postgres:up --extra-args "--detach --wait"
+mise --env tls run postgres:setup
+mise --env tls run proxy:down proxy-tls
+mise --env tls run proxy:up --extra-args "--detach --wait"
+
+source "$(dirname "${BASH_SOURCE[0]}")/../url_encode.sh"
 
 encoded_password=$(urlencode "${CS_DATABASE__PASSWORD}")
 

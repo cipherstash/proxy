@@ -499,6 +499,7 @@ run = """
 set -e
 mise --env tls run postgres:up --extra-args "--detach --wait"
 mise --env tls run postgres:setup
+mise --env tls run proxy:down
 mise --env tls run proxy:up proxy-tls --extra-args "--detach --wait"
 echo docker compose run --rm --no-TTY --build python {{option(name="extra-args",default="")}} | bash
 """
