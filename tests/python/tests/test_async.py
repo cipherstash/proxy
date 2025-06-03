@@ -5,13 +5,16 @@ from psycopg.types import TypeInfo
 import random
 import pytest
 
-username = os.environ.get("CS_DATABASE__USERNAME")
-password = os.environ.get("CS_DATABASE__PASSWORD")
-database = os.environ.get("CS_DATABASE__NAME")
-host = os.environ.get("CS_DATABASE__HOST")
-port = 6432
 
-connection_str = "postgres://{}:{}@{}:{}/{}".format(username, password, host, port, database)
+conn_params = {
+    "user": os.environ.get("CS_DATABASE__USERNAME"),
+    "password": os.environ.get("CS_DATABASE__PASSWORD"),
+    "dbname": os.environ.get("CS_DATABASE__NAME"),
+    "host": os.environ.get("CS_DATABASE__HOST"),
+    "port": 6432,
+}
+
+connection_str = psycopg.conninfo.make_conninfo(**conn_params)
 print("Connection to Tandem with {}".format(connection_str))
 
 

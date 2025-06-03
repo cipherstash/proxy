@@ -81,7 +81,7 @@ services:
 
   proxy-tls:
     image: cipherstash/proxy:latest
-    container_name: proxy
+    container_name: proxy-tls
     ports:
       - 6432:6432
     environment:
