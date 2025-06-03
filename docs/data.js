@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1748929097519,
+  "lastUpdate": 1748931139493,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -4305,6 +4305,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 6.765005,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "yujiyokoo@gmail.com",
+            "name": "Yuji Yokoo",
+            "username": "yujiyokoo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "ed66b089581c5b149d8963a73b746ec67e101968",
+          "message": "Merge pull request #256 from cipherstash/fix/golang-integration-test\n\nFix/golang integration test",
+          "timestamp": "2025-06-03T15:09:09+09:00",
+          "tree_id": "5faa5bb7762ba2d5ea9579078f334f110eee2acc",
+          "url": "https://github.com/cipherstash/proxy/commit/ed66b089581c5b149d8963a73b746ec67e101968"
+        },
+        "date": 1748931138312,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 7.245226,
             "unit": "Number"
           }
         ]
