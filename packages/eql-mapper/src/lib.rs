@@ -1602,4 +1602,113 @@ mod test {
             Err(err) => panic!("type check failed: {err}"),
         }
     }
+
+    #[test]
+    fn select_with_multiple_joins() {
+        // init_tracing();
+        let schema = resolver(schema! {
+            tables: {
+                workspace: {
+                    id,
+                    resource_id,
+                }
+                workspace_entity: {
+                    id,
+                    workspace_id,
+                    entity_id,
+                }
+                entity: {
+                    id,
+                    resource_id,
+                    deleted_at,
+                }
+            }
+        });
+
+        let statement = parse(
+            r#"
+                SELECT
+                    ARRAY_REMOVE(
+                        ARRAY_AGG(e.resource_id), NULL
+                    )::text [] AS entity_resource_ids,
+                    workspace.*
+                FROM workspace
+                LEFT JOIN workspace_entity AS we ON workspace.id = we.workspace_id
+                LEFT JOIN entity AS e ON we.entity_id = e.id
+                WHERE
+                    workspace.resource_id = $1
+                    AND e.deleted_at IS NULL
+                GROUP BY workspace.id;
+            "#,
+        );
+
+        match type_check(schema.clone(), &statement) {
+            Ok(typed) => {
+                assert_eq!(
+                    typed.projection,
+                    projection![
+                        (NATIVE as entity_resource_ids),
+                        (NATIVE(workspace.id) as id),
+                        (NATIVE(workspace.resource_id) as resource_id)
+                    ]
+                )
+            }
+            Err(err) => panic!("type check failed: {err}"),
+        }
+
+        let statement = parse(
+            r#"
+                SELECT
+                    ARRAY_REMOVE(
+                        ARRAY_AGG(e.resource_id), NULL
+                    )::text [] AS entity_resource_ids,
+                    workspace.id,
+                    workspace.resource_id
+                FROM workspace
+                LEFT JOIN workspace_entity AS we ON workspace.id = we.workspace_id
+                LEFT JOIN entity AS e ON we.entity_id = e.id
+                WHERE
+                    workspace.id < $1
+                    AND (
+                        CARDINALITY($2::text []) = 0
+                        OR e.resource_id = ANY($3::text [])
+                    )
+                GROUP BY workspace.id
+                ORDER BY workspace.id DESC
+                LIMIT
+                    $4
+                    OFFSET $5;
+            "#,
+        );
+
+        match type_check(schema.clone(), &statement) {
+            Ok(typed) => {
+                assert_eq!(
+                    typed.projection,
+                    projection![
+                        (NATIVE as entity_resource_ids),
+                        (NATIVE(workspace.id) as id),
+                        (NATIVE(workspace.resource_id) as resource_id)
+                    ]
+                )
+            }
+            Err(err) => panic!("type check failed: {err}"),
+        }
+
+        let statement = parse(
+            r#"
+                SELECT COUNT(*) FROM workspace
+                JOIN workspace_entity AS we ON workspace.id = we.workspace_id
+                JOIN entity AS e on e.id = we.entity_id
+                WHERE e.resource_id = ANY($1::varchar[]);
+            "#,
+        );
+
+        match type_check(schema.clone(), &statement) {
+            Ok(typed) => {
+                assert_eq!(typed.projection, projection![(NATIVE as COUNT)])
+            }
+            Err(err) => panic!("type check failed: {err}"),
+        }
+    }
 }
