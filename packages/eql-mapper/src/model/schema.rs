@@ -28,8 +28,6 @@ pub struct Schema {
 pub struct Table {
     pub name: Ident,
     pub columns: Vec<Arc<Column>>,
-    // Stores indices into the columns Vec.
-    pub primary_key: Vec<usize>,
 }
 
 /// A column.
@@ -156,17 +154,13 @@ impl Table {
     pub fn new(name: Ident) -> Self {
         Self {
             name,
-            primary_key: Vec::with_capacity(1),
             columns: Vec::with_capacity(16),
         }
     }
 
     /// Adds a column to the table.
-    pub fn add_column(&mut self, column: Arc<Column>, part_of_primary_key: bool) -> Arc<Column> {
+    pub fn add_column(&mut self, column: Arc<Column>) -> Arc<Column> {
         self.columns.push(column);
-        if part_of_primary_key {
-            self.primary_key.push(self.columns.len() - 1);
-        }
         self.columns[self.columns.len() - 1].clone()
     }
 
@@ -182,15 +176,6 @@ impl Table {
             .find_unique(&|column| SqlIdent::from(&column.name) == SqlIdent::from(name))
             .cloned()
             .map_err(|_| SchemaError::ColumnNotFound(self.name.to_string(), name.to_string()))
-    }
-
-    /// Gets all the primary key columns in the table.
-    pub fn get_primary_key_columns(&self) -> Vec<Arc<Column>> {
-        self.primary_key
-            .iter()
-            .filter_map(|index| self.columns.get(*index))
-            .cloned()
-            .collect()
     }
 }
 
@@ -240,17 +225,7 @@ macro_rules! schema {
     (@add_column $table:ident $column_name:ident (EQL) ) => {
         $table.add_column(std::sync::Arc::new($crate::model::Column::eql(
             ::sqltk::parser::ast::Ident::new(stringify!($column_name))
-        )), false);
-    };
-    (@add_column $table:ident $column_name:ident (PK) ) => {
-        $table.add_column(
-            std::sync::Arc::new(
-                $crate::model::Column::native(
-                    ::sqltk::parser::ast::Ident::new(stringify!($column_name))
-                )
-            ),
-            true
-        );
+        )));
     };
     (@add_column $table:ident $column_name:ident () ) => {
         $table.add_column(
@@ -262,8 +237,7 @@ macro_rules! schema {
                         column: ::sqltk::parser::ast::Ident::new(stringify!($column_name))
                     }
                 )
-            ),
-            false
+            )
         );
     };
     (@add_column $table:ident $column_name:ident ) => {
@@ -272,8 +246,7 @@ macro_rules! schema {
                 $crate::model::Column::native(
                     ::sqltk::parser::ast::Ident::new(stringify!($column_name)),
                 )
-            ),
-            false
+            )
         );
     };
     // Main macro entry points
