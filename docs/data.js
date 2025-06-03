@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1748918217304,
+  "lastUpdate": 1748919321146,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -4251,6 +4251,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 7.161871,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "toby@cipherstash.com",
+            "name": "Toby Hede",
+            "username": "tobyhede"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "6997dff4145da2eadadc51f51f4fb541fa518f41",
+          "message": "Merge pull request #255 from cipherstash/unmappable-statement-no-matches-for-identifier\n\ntest: additional \"real-world\" statement tests",
+          "timestamp": "2025-06-03T12:52:44+10:00",
+          "tree_id": "e277d45a2538961b7f47316e7a226dc2ea97fea8",
+          "url": "https://github.com/cipherstash/proxy/commit/6997dff4145da2eadadc51f51f4fb541fa518f41"
+        },
+        "date": 1748919320011,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 7.107992,
             "unit": "Number"
           }
         ]
