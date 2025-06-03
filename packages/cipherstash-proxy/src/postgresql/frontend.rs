@@ -116,7 +116,12 @@ where
                     // No mapping needed, don't change the bytes
                     Ok(None) => (),
                     Err(err) => {
-                        bytes = self.to_database_exception(err)?;
+                        warn!(
+                                client_id = self.context.client_id,
+                                msg = "Query Error",
+                                error = ?err.to_string(),
+                        );
+                        self.error_handler(err).await?;
                     }
                 }
             }
@@ -131,39 +136,14 @@ where
                     Ok(Some(mapped)) => bytes = mapped,
                     // No mapping needed, don't change the bytes
                     Ok(None) => (),
-                    Err(err) => match err {
-                        Error::Mapping(MappingError::InvalidSqlStatement(_)) => {
-                            warn!(target: PROTOCOL,
+                    Err(err) => {
+                        warn!(
                                 client_id = self.context.client_id,
-                                msg = "MappingError::SqlParse",
-                                error = ?err,
-                            );
-
-                            let error_response =
-                                ErrorResponse::invalid_sql_statement(err.to_string());
-
-                            self.send_error_response(error_response)?;
-                        }
-                        Error::Encrypt(EncryptError::UnknownColumn {
-                            ref table,
-                            ref column,
-                        }) => {
-                            warn!(target: PROTOCOL,
-                                client_id = self.context.client_id,
-                                msg = "EncryptError::UnknownColumn",
-                            );
-                            let error_response =
-                                ErrorResponse::unknown_column(err.to_string(), table, column);
-                            self.send_error_response(error_response)?;
-                        }
-                        _ => {
-                            warn!(target: PROTOCOL,
-                                client_id = self.context.client_id,
-                                msg = "build_frontend_exception",
-                            );
-                            bytes = self.to_database_exception(err)?;
-                        }
-                    },
+                                msg = "Parse Error",
+                                error = ?err.to_string(),
+                        );
+                        self.error_handler(err).await?;
+                    }
                 }
             }
             Code::Bind => {
@@ -213,6 +193,19 @@ where
         }
 
         self.write_to_server(bytes).await?;
+        Ok(())
+    }
+
+    pub async fn error_handler(&mut self, err: Error) -> Result<(), Error> {
+        let error_response = match err {
+            Error::Mapping(err) => ErrorResponse::invalid_sql_statement(err.to_string()),
+            Error::Encrypt(EncryptError::UnknownColumn {
+                ref table,
+                ref column,
+            }) => ErrorResponse::unknown_column(err.to_string(), table, column),
+            _ => ErrorResponse::system_error(err.to_string()),
+        };
+        self.send_error_response(error_response)?;
         Ok(())
     }
 

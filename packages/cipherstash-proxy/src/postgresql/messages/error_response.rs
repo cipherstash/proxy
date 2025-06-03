@@ -17,6 +17,7 @@ pub const CODE_RAISE_EXCEPTION: &str = "P0001";
 pub const CODE_SYNTAX_ERROR: &str = "42601";
 pub const CODE_INVALID_TEXT_REPRESENTATION: &str = "22P02";
 pub const CODE_IDLE_SESSION_TIMEOUT: &str = "57P05";
+pub const CODE_SYSTEM_ERROR: &str = "58000";
 
 ///
 /// ErrorResponse (B)
@@ -82,7 +83,7 @@ impl ErrorResponse {
         }
     }
 
-    pub fn invalid_password(message: &str) -> Self {
+    pub fn invalid_password(message: String) -> Self {
         Self {
             fields: vec![
                 Field {
@@ -99,7 +100,7 @@ impl ErrorResponse {
                 },
                 Field {
                     code: ErrorResponseCode::Message,
-                    value: message.to_string(),
+                    value: message,
                 },
             ],
         }
@@ -233,6 +234,29 @@ impl ErrorResponse {
                 Field {
                     code: ErrorResponseCode::Routine,
                     value: "cipherstash-proxy".to_string(),
+                },
+            ],
+        }
+    }
+
+    pub fn system_error(message: String) -> Self {
+        Self {
+            fields: vec![
+                Field {
+                    code: ErrorResponseCode::Severity,
+                    value: "FATAL".to_string(),
+                },
+                Field {
+                    code: ErrorResponseCode::SeverityLegacy,
+                    value: "FATAL".to_string(),
+                },
+                Field {
+                    code: ErrorResponseCode::Code,
+                    value: CODE_SYSTEM_ERROR.to_string(),
+                },
+                Field {
+                    code: ErrorResponseCode::Message,
+                    value: message,
                 },
             ],
         }
