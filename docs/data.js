@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1748914190362,
+  "lastUpdate": 1748914870990,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -4143,6 +4143,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 6.847987,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "yujiyokoo@gmail.com",
+            "name": "Yuji Yokoo",
+            "username": "yujiyokoo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "c6bc1c4889f922177aa7f0e05e4d60bf74b089be",
+          "message": "Merge pull request #254 from cipherstash/fix/update-python-test\n\nFix/update python test",
+          "timestamp": "2025-06-03T10:37:39+09:00",
+          "tree_id": "e3a97c824018e98585cd5743193be4bc577ee7a7",
+          "url": "https://github.com/cipherstash/proxy/commit/c6bc1c4889f922177aa7f0e05e4d60bf74b089be"
+        },
+        "date": 1748914869796,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 7.214215,
             "unit": "Number"
           }
         ]
