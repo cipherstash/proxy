@@ -23,8 +23,8 @@ defmodule ElixirTest.MixProject do
   defp deps do
     [
       {:ecto_sql, "~> 3.12"},
-      {:postgrex, "~> 0.20"}
-      # {:dep_from_git, git: "https://github.com/elixir-lang/my_dep.git", tag: "0.1.0"}
+      {:postgrex, "~> 0.20"},
+      {:jason, "~> 1.4"}
     ]
   end
 end
