@@ -129,10 +129,6 @@ pub enum EqlTerm {
     /// A `Partial` type can become a `Whole` type during unification.
     #[display("EQL:Partial({}: {})", _0, _1)]
     Partial(EqlValue, EqlTraits),
-
-    FixedPartial(JsonQueryType)
-
-    // The column
 }
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Display, Hash)]

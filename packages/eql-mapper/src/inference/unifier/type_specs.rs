@@ -176,7 +176,7 @@ impl InitType for AssociatedTypeSpec {
 }
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
-pub(crate) struct Bounded(pub(crate) TVar, pub(crate) EqlTraits);
+pub(crate) struct Bounded(pub(crate) TypeSpec, pub(crate) EqlTraits);
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct FunctionSpec {

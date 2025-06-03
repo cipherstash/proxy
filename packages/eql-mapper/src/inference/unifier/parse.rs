@@ -358,13 +358,13 @@ impl Parse for FunctionSpec {
 }
 
 struct GenericArgs {
-    vars: Vec<VarSpec>,
+    vars: Vec<TVar>,
 }
 
 impl Parse for GenericArgs {
     fn parse(input: ParseStream) -> Result<Self> {
         let _: token::Lt = input.parse()?;
-        let vars: Vec<VarSpec> = Punctuated::<VarSpec, Token![,]>::parse_separated_nonempty(input)?
+        let vars: Vec<TVar> = Punctuated::<TVar, Token![,]>::parse_separated_nonempty(input)?
             .into_iter()
             .collect();
         let _: token::Gt = input.parse()?;
