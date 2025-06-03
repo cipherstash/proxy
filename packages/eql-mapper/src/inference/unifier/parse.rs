@@ -44,7 +44,7 @@ impl Parse for TypeSpec {
 
         Err(syn::Error::new(
             input.span(),
-            format!("could not input parse as TypeSpec"),
+            format!("could not parse as TypeSpec"),
         ))
     }
 }

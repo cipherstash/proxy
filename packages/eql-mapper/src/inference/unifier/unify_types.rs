@@ -73,6 +73,10 @@ impl UnifyTypes<Value, Value> for Unifier<'_> {
 
             (Value::Array(lhs), Value::Array(rhs)) => self.unify_types(lhs, rhs),
 
+            (Value::Associated(lhs), Value::Associated(rhs)) => {
+                self.unify(lhs.on_type(), rhs.on_type())
+            }
+
             (lhs, rhs) => Err(TypeError::Conflict(format!(
                 "cannot unify values {} and {}",
                 lhs, rhs

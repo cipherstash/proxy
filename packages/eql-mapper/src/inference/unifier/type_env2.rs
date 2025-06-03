@@ -239,7 +239,7 @@ mod test {
 
         assert_eq!(
             &*instance.get_type(&ty!(A))?,
-            &Type::Associated(AssociatedType::Json(JsonQueryType::Containment(
+            &Type::Constructor(Constructor::Value(Value::Associated(AssociatedType::Json(JsonQueryType::Containment(
                 Type::Constructor(Constructor::Value(Value::Eql(EqlTerm::Full(EqlValue(
                     TableColumn {
                         table: "customer".into(),
@@ -248,7 +248,7 @@ mod test {
                     EqlTraits::from(EqlTrait::Json)
                 )))))
                 .into()
-            )))
+            )))))
         );
 
         Ok(())

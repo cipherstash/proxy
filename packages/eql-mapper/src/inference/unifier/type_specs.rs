@@ -161,15 +161,15 @@ impl InitType for AssociatedTypeSpec {
     fn init_type(&self, env: &TypeEnv, unifier: &mut Unifier<'_>) -> Result<Arc<Type>, TypeError> {
         match self {
             AssociatedTypeSpec::JsonContainment(tvar) => {
-                Ok(Arc::new(Type::Associated(AssociatedType::Json(
+                Ok(Arc::new(Type::Constructor(Constructor::Value(Value::Associated(AssociatedType::Json(
                     JsonQueryType::Containment(env.get(tvar)?.init_type(env, unifier)?),
-                ))))
+                ))))))
             }
 
             AssociatedTypeSpec::JsonFieldAccess(tvar) => {
-                Ok(Arc::new(Type::Associated(AssociatedType::Json(
+                Ok(Arc::new(Type::Constructor(Constructor::Value(Value::Associated(AssociatedType::Json(
                     JsonQueryType::FieldAccess(env.get(tvar)?.init_type(env, unifier)?),
-                ))))
+                ))))))
             }
         }
     }

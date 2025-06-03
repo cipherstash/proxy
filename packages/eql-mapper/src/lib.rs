@@ -79,14 +79,12 @@ mod test {
         let schema = resolver(schema! {
             tables: {
                 users: {
-                    id (PK),
+                    id,
                     email (EQL: Eq),
                     first_name,
                 }
             }
         });
-
-        dbg!(&schema);
 
         let statement = parse("select email from users WHERE email = 'hello@cipherstash.com'");
 
@@ -1644,7 +1642,7 @@ mod test {
         let schema = resolver(schema! {
             tables: {
                 patients: {
-                    id (PK),
+                    id,
                     email (EQL: Eq),
                 }
             }

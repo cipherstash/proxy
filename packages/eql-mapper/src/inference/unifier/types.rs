@@ -28,13 +28,6 @@ pub enum Type {
     #[display("{}", _0)]
     Var(Var),
 
-    /// A type associated with another type.
-    ///
-    /// Currently only used to support representation of encrypted EQL query-only terms (such as the right hand side of
-    /// the `->` binary operator). In that particular case, the left hand side type would be an EQL type with a JSON
-    /// trait which has an associated type called `FieldAccess`.
-    #[display("{}", _0)]
-    Associated(AssociatedType),
 }
 
 /// An associated type.
@@ -48,8 +41,8 @@ pub enum AssociatedType {
 impl AssociatedType {
     pub(crate) fn on_type(&self) -> Arc<Type> {
         match self {
-            AssociatedType::Json(JsonQueryType::Containment(on_ty)) => on_ty.clone(),
-            AssociatedType::Json(JsonQueryType::FieldAccess(on_ty)) => on_ty.clone(),
+            AssociatedType::Json(JsonQueryType::Containment(on)) => on.clone(),
+            AssociatedType::Json(JsonQueryType::FieldAccess(on)) => on.clone(),
         }
     }
 }
@@ -110,6 +103,14 @@ pub enum Value {
     /// An array type that is parameterized by an element type.
     #[display("Array[{}]", _0)]
     Array(Array),
+
+    /// A type associated with another type.
+    ///
+    /// Currently only used to support representation of encrypted EQL query-only terms (such as the right hand side of
+    /// the `->` binary operator). In that particular case, the left hand side type would be an EQL type with a JSON
+    /// trait which has an associated type called `FieldAccess`.
+    #[display("{}", _0)]
+    Associated(AssociatedType),
 }
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Display, Hash)]
@@ -237,7 +238,6 @@ impl Type {
                     }
                 }
             }
-            Type::Associated(associated) => associated.on_type().follow_tvars(unifier),
         }
     }
 

@@ -38,8 +38,8 @@ impl SqlFunction {
         inferencer: &mut TypeInferencer<'ast>,
         function: &'ast Function,
     ) -> Result<(), TypeError> {
-        let mut unifier = inferencer.unifier.borrow_mut();
         let ret_type = inferencer.get_node_type(function);
+        let mut unifier = inferencer.unifier.borrow_mut();
         match self {
             SqlFunction::Explicit(rule) => {
                 let _env = match &function.args {

@@ -14,15 +14,15 @@ static SQL_BINARY_OPERATORS: LazyLock<HashMap<BinaryOperator, BinaryOpSpec>> =
     LazyLock::new(|| {
         let items: Punctuated<BinaryOpSpec, Token![;]> = parse_quote! {
             <T>(T = T) -> Native where T: Eq ;
-            <T>(T <> T) -> Native where T: Eq ;
-            <T>(T <= T) -> Native where T: Ord ;
-            <T>(T >= T) -> Native where T: Ord ;
-            <T>(T < T) -> Native where T: Ord ;
-            <T>(T > T) -> Native where T: Ord ;
-            <J>(J -> J::FieldAccess) -> J where J: Json ;
-            <J>(J ->> J::FieldAccess) -> J where J: Json ;
-            <J>(J @> J::Containment) -> Native where J: Json ;
-            <J>(J <@ J::Containment) -> Native where J: Json ;
+            // <T>(T <> T) -> Native where T: Eq ;
+            // <T>(T <= T) -> Native where T: Ord ;
+            // <T>(T >= T) -> Native where T: Ord ;
+            // <T>(T < T) -> Native where T: Ord ;
+            // <T>(T > T) -> Native where T: Ord ;
+            // <J>(J -> J::FieldAccess) -> J where J: Json ;
+            // <J>(J ->> J::FieldAccess) -> J where J: Json ;
+            // <J>(J @> J::Containment) -> Native where J: Json ;
+            // <J>(J <@ J::Containment) -> Native where J: Json ;
         };
         items
             .into_iter()

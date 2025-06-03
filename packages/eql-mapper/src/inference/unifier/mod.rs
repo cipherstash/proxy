@@ -3,7 +3,8 @@ use std::{cell::RefCell, collections::HashMap, rc::Rc, sync::Arc};
 mod bounds;
 mod parse;
 mod resolve_type;
-mod type_env;
+// mod type_env;
+mod type_env2;
 mod types;
 mod type_specs;
 mod unify_types;
@@ -18,7 +19,7 @@ use unify_types::UnifyTypes;
 use sqltk::AsNodeKey;
 pub(crate) use types::*;
 
-pub(crate) use type_env::*;
+pub(crate) use type_env2::*;
 pub use types::{EqlValue, NativeValue, TableColumn};
 
 use super::TypeRegistry;
@@ -143,10 +144,6 @@ impl<'ast> Unifier<'ast> {
                 }
 
                 (Type::Var(lhs_v), Type::Var(rhs_v)) => self.unify_types(lhs_v, rhs_v),
-
-                (ty, Type::Associated(associated)) | (Type::Associated(associated), ty) => {
-                    self.unify(ty.clone().into(), associated.on_type())
-                }
             }
         }
     }

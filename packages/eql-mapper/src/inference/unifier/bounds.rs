@@ -147,12 +147,6 @@ impl Type {
         match self {
             Type::Constructor(constructor) => constructor.effective_bounds(),
             Type::Var(Var(_, bounds)) => bounds.clone(),
-            Type::Associated(AssociatedType::Json(JsonQueryType::Containment(ty))) => {
-                ty.effective_bounds()
-            }
-            Type::Associated(AssociatedType::Json(JsonQueryType::FieldAccess(ty))) => {
-                ty.effective_bounds()
-            }
         }
     }
 }
@@ -172,6 +166,12 @@ impl Value {
             Value::Eql(eql_term) => eql_term.effective_bounds(),
             Value::Native(_) => ALL_TRAITS, // 💪
             Value::Array(ty) => ty.effective_bounds(),
+            Value::Associated(AssociatedType::Json(JsonQueryType::Containment(ty))) => {
+                ty.effective_bounds()
+            }
+            Value::Associated(AssociatedType::Json(JsonQueryType::FieldAccess(ty))) => {
+                ty.effective_bounds()
+            }
         }
     }
 }

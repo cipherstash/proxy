@@ -24,7 +24,6 @@ impl SqlBinaryOp {
         op_expr: &'ast Expr,
         rhs: &'ast Expr,
     ) -> Result<(), TypeError> {
-        let mut unifier = inferencer.unifier.borrow_mut();
         match self {
             SqlBinaryOp::Explicit(rule) => {
                 let lhs_ty = inferencer.get_node_type(lhs);
@@ -32,7 +31,7 @@ impl SqlBinaryOp {
                 let ret_ty = inferencer.get_node_type(rhs);
 
                 rule.inner.init(
-                    &mut unifier,
+                    &mut inferencer.unifier.borrow_mut(),
                     &[lhs_ty, rhs_ty],
                     ret_ty
                 )?;

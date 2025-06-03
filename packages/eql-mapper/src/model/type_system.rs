@@ -47,6 +47,51 @@ pub enum Value {
     /// An array type that is parameterized by an element type.
     #[display("Array[{}]", _0)]
     Array(Array),
+
+    /// A type associated with another type.
+    ///
+    /// Currently only used to support representation of encrypted EQL query-only terms (such as the right hand side of
+    /// the `->` binary operator). In that particular case, the left hand side type would be an EQL type with a JSON
+    /// trait which has an associated type called `FieldAccess`.
+    #[display("{}", _0)]
+    Associated(AssociatedType),
+}
+
+/// An associated type.
+#[derive(Debug, Clone, PartialEq, Eq, Display)]
+pub enum AssociatedType {
+    /// An associated type on a type that implements [`crate::unifier::EqlTrait::Json`].
+    #[display("{}", 0)]
+    Json(JsonQueryType),
+}
+
+impl AssociatedType {
+    fn contains_eql(&self) -> bool {
+        match self {
+            AssociatedType::Json(json_query_type) => json_query_type.contains_eql(),
+        }
+    }
+}
+
+/// The associated types of the [`crate::unifier::EqlTrait::Json`] trait.
+///
+/// The `Arc<Type>` field of the variant refers to the type that the associated type belongs to.
+#[derive(Debug, Clone, PartialEq, Eq, Display)]
+pub enum JsonQueryType {
+    #[display("FieldAccess")]
+    FieldAccess(Box<Value>),
+
+    #[display("Containment")]
+    Containment(Box<Value>),
+}
+
+impl JsonQueryType {
+    fn contains_eql(&self) -> bool {
+        match self {
+            JsonQueryType::FieldAccess(value) => value.contains_eql(),
+            JsonQueryType::Containment(value) => value.contains_eql(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Display)]
@@ -86,6 +131,7 @@ impl Value {
             Value::Eql(_) => true,
             Value::Native(_) => false,
             Value::Array(inner) => inner.contains_eql(),
+            Value::Associated(associated) => associated.contains_eql(),
         }
     }
 }
