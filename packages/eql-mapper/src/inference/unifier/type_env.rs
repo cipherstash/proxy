@@ -94,18 +94,6 @@ impl TypeEnv {
         }
     }
 
-    // pub(crate) fn add_bounds(&mut self, var: &VarSpec, additional_bounds: EqlTraits) -> Result<(), TypeError> {
-    //     // let bounds = &self.specs[spec];
-    //     // let bounds = bounds.union(&additional_bounds);
-    //     // self.specs.insert(spec.clone(), bounds);
-
-    //     self.specs.entry(var).and_modify(|bounds| )
-    // }
-
-    // pub(crate) fn get_bounds(&self, spec: &TypeSpec) -> &EqlTraits {
-    //     &self.specs[spec]
-    // }
-
     /// Builds an [`InstantiatedTypeEnv`] or fails with a [`TypeError`].
     ///
     /// 1. All referenced type arguments be be defined in the env.

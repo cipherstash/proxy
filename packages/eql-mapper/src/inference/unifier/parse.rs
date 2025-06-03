@@ -117,7 +117,7 @@ impl Parse for TypeSpecBounds {
 impl Parse for Bounded {
     fn parse(input: ParseStream) -> Result<Self> {
         let mut traits: Vec<EqlTrait> = vec![];
-        let spec = TypeSpec::parse(input)?;
+        let tvar = TVar::parse(input)?;
         let _: token::Colon = input.parse()?;
 
         loop {
@@ -130,7 +130,7 @@ impl Parse for Bounded {
             let _: token::Plus = input.parse()?;
         }
 
-        Ok(Bounded(spec, EqlTraits::from_iter(traits)))
+        Ok(Bounded(tvar, EqlTraits::from_iter(traits)))
     }
 }
 
@@ -296,8 +296,7 @@ impl Parse for ProjectionSpec {
     fn parse(input: ParseStream) -> Result<Self> {
         let content;
         braced!(content in input);
-        let specs =
-            Punctuated::<ProjectionColumnSpec, Token![,]>::parse_separated_nonempty(&content)?;
+        let specs = Punctuated::<ProjectionColumnSpec, Token![,]>::parse_separated_nonempty(&content)?;
         Ok(ProjectionSpec(Vec::from_iter(specs)))
     }
 }
@@ -335,11 +334,12 @@ impl Parse for FunctionSpec {
 
         let ret = TypeSpec::parse(&content)?;
 
-        let bounds = if input.peek(token::Where) {
+        let bounds: Vec<_> = if input.peek(token::Where) {
             let _: token::Where = input.parse()?;
-            TypeSpecBounds::parse(input)?
+            let boundeds = Punctuated::<Bounded, Token![,]>::parse_separated_nonempty(input)?;
+            boundeds.into_iter().collect()
         } else {
-            TypeSpecBounds(vec![])
+            vec![]
         };
 
         Ok(FunctionSpec {
@@ -389,11 +389,12 @@ impl Parse for BinaryOpSpec {
         let _: token::RArrow = input.parse()?;
         let ret = TypeSpec::parse(&input)?;
 
-        let bounds = if input.peek(token::Where) {
+        let bounds: Vec<_> = if input.peek(token::Where) {
             let _: token::Where = input.parse()?;
-            TypeSpecBounds::parse(input)?
+            let boundeds = Punctuated::<Bounded, Token![,]>::parse_separated_nonempty(input)?;
+            boundeds.into_iter().collect()
         } else {
-            TypeSpecBounds(vec![])
+            vec![]
         };
 
         Ok(BinaryOpSpec {

@@ -260,7 +260,7 @@ macro_rules! schema {
         $table.add_column(std::sync::Arc::new($crate::model::Column::eql(
             ::sqltk::parser::ast::Ident::new(stringify!($column_name)),
             $crate::to_eql_trait_impls!($($trait_ $($($trait_rest)+)?)?)
-        )), false);
+        )));
     };
     (@add_column $table:ident $column_name:ident (PK) ) => {
         $table.add_column(
@@ -269,7 +269,6 @@ macro_rules! schema {
                     ::sqltk::parser::ast::Ident::new(stringify!($column_name))
                 )
             ),
-            true
         );
     };
     (@add_column $table:ident $column_name:ident () ) => {

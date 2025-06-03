@@ -176,7 +176,7 @@ impl InitType for AssociatedTypeSpec {
 }
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
-pub(crate) struct Bounded(pub(crate) TypeSpec, pub(crate) EqlTraits);
+pub(crate) struct Bounded(pub(crate) TVar, pub(crate) EqlTraits);
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct FunctionSpec {
@@ -196,14 +196,18 @@ pub(crate) struct BinaryOpSpec {
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct GeneralizedFunctionSpec {
-    /// The generic args of this function - the generic args are local to this function definition.
+    /// The generic args of this function - the generic args are local to this function definition.  The ONLY type
+    /// variables allowed to be referenced in `args`, `ret` and `bounds`.
     pub(crate) generic_args: Vec<TVar>,
+
     /// The argument types.
     pub(crate) args: Vec<TypeSpec>,
+
     /// The return type.
-    pub(crate) ret: Box<TypeSpec>,
+    pub(crate) ret: TypeSpec,
+
     /// The bounds ('where' clause).
-    pub(crate) bounds: TypeSpecBounds,
+    pub(crate) bounds: Vec<Bounded>,
 }
 
 impl GeneralizedFunctionSpec {
@@ -213,31 +217,86 @@ impl GeneralizedFunctionSpec {
         args: &[Arc<Type>],
         ret: Arc<Type>,
     ) -> Result<InstantiatedTypeEnv, TypeError> {
+        self.check_no_undeclared_generic_args()?;
+        if args.len() != self.args.len() {
+            return Err(TypeError::Expected(format!(
+                "incorrect number of arguments; got {}, expected {}",
+                args.len(),
+                self.args.len()
+            )));
+        }
+
         let mut env = TypeEnv::new();
 
-        for Bounded(tvar, traits) in &self.bounds.0 {
-            let inner_tvar = TVar(format!("{}_inner", tvar));
+        let mut var_counter: usize = 0;
+
+        for Bounded(tvar, traits) in &self.bounds {
             env.add(
                 tvar,
                 TypeSpec::Var(VarSpec {
-                    tvar: inner_tvar,
+                    tvar: TVar(format!("${}", var_counter)),
                     bounds: *traits,
                 }),
             )?;
+
+            var_counter += 1;
         }
+
+        let mut arg_tvars: Vec<TVar> = vec![];
+
+        for (idx, arg) in self.args.iter().enumerate() {
+            arg_tvars.push(TVar(format!("${}", var_counter)));
+            env.add(&arg_tvars[idx], arg.clone())?;
+            var_counter += 1;
+        }
+
+        let ret_tvar = TVar(format!("${}", var_counter));
+        env.add(&ret_tvar, self.ret.clone())?;
 
         let instantiated_env = env.instantiate(unifier)?;
 
-        for (idx, arg) in args.iter().enumerate() {
-            unifier.unify(
-                arg.clone(),
-                instantiated_env.get_type(&self.args[idx], &unifier)?,
-            )?;
+        for (arg, arg_tvar) in args.into_iter().zip(arg_tvars.into_iter()) {
+            unifier.unify(arg.clone(), instantiated_env.get_type(&arg_tvar)?)?;
         }
 
-        // unifier.unify(ret.clone(), instantiated_env.get_type(&self.ret, &unifier)?)?;
+        unifier.unify(ret.clone(), instantiated_env.get_type(&ret_tvar)?)?;
 
         Ok(instantiated_env)
+    }
+
+    fn check_no_undeclared_generic_args<'a>(&'a self) -> Result<(), TypeError> {
+        let is_var = |arg: &'a TypeSpec| {
+            if let TypeSpec::Var(VarSpec { tvar, .. }) = arg {
+                Some(tvar)
+            } else {
+                None
+            }
+        };
+
+        let check_known = |tvar: &TVar| -> Result<(), TypeError> {
+            if self.generic_args.contains(tvar) {
+                Ok(())
+            } else {
+                Err(TypeError::InternalError(format!(
+                    "use of undeclared type var '{}'",
+                    tvar
+                )))
+            }
+        };
+
+        self.args
+            .iter()
+            .filter_map(is_var)
+            .fold(Ok(()), |_, tvar| check_known(tvar))?;
+        self.bounds
+            .iter()
+            .map(|Bounded(tvar, _)| tvar)
+            .fold(Ok(()), |_, tvar| check_known(tvar))?;
+        if let Some(tvar) = is_var(&self.ret) {
+            check_known(tvar)?;
+        }
+
+        Ok(())
     }
 }
 
