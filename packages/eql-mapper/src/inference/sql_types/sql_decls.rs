@@ -14,15 +14,15 @@ static SQL_BINARY_OPERATORS: LazyLock<HashMap<BinaryOperator, BinaryOpSpec>> =
     LazyLock::new(|| {
         let items: Punctuated<BinaryOpSpec, Token![;]> = parse_quote! {
             <T>(T = T) -> Native where T: Eq ;
-            // <T>(T <> T) -> Native where T: Eq ;
-            // <T>(T <= T) -> Native where T: Ord ;
-            // <T>(T >= T) -> Native where T: Ord ;
-            // <T>(T < T) -> Native where T: Ord ;
-            // <T>(T > T) -> Native where T: Ord ;
-            // <J>(J -> J::FieldAccess) -> J where J: Json ;
-            // <J>(J ->> J::FieldAccess) -> J where J: Json ;
-            // <J>(J @> J::Containment) -> Native where J: Json ;
-            // <J>(J <@ J::Containment) -> Native where J: Json ;
+            <T>(T <> T) -> Native where T: Eq ;
+            <T>(T <= T) -> Native where T: Ord ;
+            <T>(T >= T) -> Native where T: Ord ;
+            <T>(T < T) -> Native where T: Ord ;
+            <T>(T > T) -> Native where T: Ord ;
+            <J>(J -> J::JsonFieldAccess) -> J where J: Json ;
+            <J>(J ->> J::JsonFieldAccess) -> J where J: Json ;
+            <J>(J @> J::Containment) -> Native where J: Json ;
+            <J>(J <@ J::Containment) -> Native where J: Json ;
         };
         items
             .into_iter()
@@ -54,17 +54,17 @@ static SQL_FUNCTION_TYPES: LazyLock<HashMap<ObjectName, FunctionSpec>> = LazyLoc
         pg_catalog.count<T>(T) -> Native ;
         pg_catalog.min<T>(T) -> T where T: Ord ;
         pg_catalog.max<T>(T) -> T where T: Ord ;
-        pg_catalog.jsonb_path_query<J>(J, J::FieldAccess) -> J where J: Json ;
-        pg_catalog.jsonb_path_query_first<J>(J, J::FieldAccess) -> J where J: Json ;
-        pg_catalog.jsonb_path_exists<J>(J, J::FieldAccess) -> Native where J: Json ;
+        pg_catalog.jsonb_path_query<J>(J, J::JsonFieldAccess) -> J where J: Json ;
+        pg_catalog.jsonb_path_query_first<J>(J, J::JsonFieldAccess) -> J where J: Json ;
+        pg_catalog.jsonb_path_exists<J>(J, J::JsonFieldAccess) -> Native where J: Json ;
         pg_catalog.jsonb_array_length<J>(J) -> Native where J: Json ;
         pg_catalog.jsonb_array_elements<J>(J) -> J where J: Json ;
         pg_catalog.jsonb_array_elements_text<J>(J) -> J where J: Json ;
         eql_v1.min<T>(T) -> T where T: Ord ;
         eql_v1.max<T>(T) -> T where T: Ord ;
-        eql_v1.jsonb_path_query<J>(J, J::FieldAccess) -> J where J: Json ;
-        eql_v1.jsonb_path_query_first<J>(J, J::FieldAccess) -> J where J: Json ;
-        eql_v1.jsonb_path_exists<J>(J, J::FieldAccess) -> Native where J: Json ;
+        eql_v1.jsonb_path_query<J>(J, J::JsonFieldAccess) -> J where J: Json ;
+        eql_v1.jsonb_path_query_first<J>(J, J::JsonFieldAccess) -> J where J: Json ;
+        eql_v1.jsonb_path_exists<J>(J, J::JsonFieldAccess) -> Native where J: Json ;
         eql_v1.jsonb_array_length<J>(J) -> Native where J: Json ;
         eql_v1.jsonb_array_elements<J>(J) -> J where J: Json ;
         eql_v1.jsonb_array_elements_text<J>(J) -> J where J: Json ;

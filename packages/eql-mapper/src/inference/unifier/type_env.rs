@@ -43,7 +43,9 @@ impl InstantiatedTypeEnv {
 impl TypeSpec {
     fn depends_on<'a>(&'a self, env: &'a TypeEnv) -> Vec<&'a TVar> {
         match self {
-            TypeSpec::Var(_) | TypeSpec::Native(_) | TypeSpec::Eql(_) => vec![],
+            TypeSpec::Var(VarSpec { tvar, .. }) => vec![tvar],
+
+            TypeSpec::Native(_) | TypeSpec::Eql(_) => vec![],
 
             TypeSpec::AssociatedType(associated_type_spec) => {
                 vec![associated_type_spec.depends_on()]
@@ -180,8 +182,8 @@ mod test {
 
         env.add(&ty!(P), ty!({A as id, B as name, C as email}))?;
         env.add(&ty!(A), ty!(Native(customer.id)))?;
-        env.add(&ty!(B), ty!(EQL(customer.name Eq)))?;
-        env.add(&ty!(C), ty!(EQL(customer.email Eq)))?;
+        env.add(&ty!(B), ty!(EQL(customer.name: Eq)))?;
+        env.add(&ty!(C), ty!(EQL(customer.email: Eq)))?;
 
         let mut unifier = make_unifier();
         let instance = env.instantiate(&mut unifier).unwrap();
@@ -233,14 +235,17 @@ mod test {
 
         env.add(&ty!(E), ty!(EQL(customer.name: Json)))?;
         env.add(&ty!(A), ty!(E::Containment))?;
+        env.add(&ty!(F), ty!(A))?;
 
         let mut unifier = make_unifier();
         let instance = env.instantiate(&mut unifier).unwrap();
 
-        eprintln!("ASSOC: {}", &*instance.get_type(&ty!(A))?.follow_tvars(&unifier));
+        // let unified = unifier.unify(instance.get_type(&ty!(F))?, instance.get_type(&ty!(A))?)?;
+
+        // dbg!(&unified);
 
         assert_eq!(
-            &*instance.get_type(&ty!(A))?.follow_tvars(&unifier),
+            &*instance.get_type(&ty!(F))?,
             &Type::Constructor(Constructor::Value(Value::Eql(EqlTerm::Partial(
                 EqlValue(
                     TableColumn {
@@ -249,7 +254,7 @@ mod test {
                     },
                     EqlTraits::from(EqlTrait::Json)
                 ),
-                EqlTraits::from(EqlTrait::Json)
+                EqlTraits::from(EqlTrait::Containment)
             ))))
         );
 

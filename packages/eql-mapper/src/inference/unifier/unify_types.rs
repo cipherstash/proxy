@@ -121,6 +121,25 @@ impl UnifyTypes<Constructor, Var> for Unifier<'_> {
     }
 }
 
+impl UnifyTypes<AssociatedType, Var> for Unifier<'_> {
+    fn unify_types(
+        &mut self,
+        associated: &AssociatedType,
+        var: &Var,
+    ) -> Result<Arc<Type>, TypeError> {
+        if let Some(resolved_constructor) = associated.resolve_constuctor()? {
+            self.unify_types(&resolved_constructor, var)
+        } else {
+            Ok(AssociatedType {
+                parent: associated.parent.clone(),
+                name: associated.name,
+                associated: self.unify(associated.associated.clone(), var.clone().into())?,
+            }
+            .into())
+        }
+    }
+}
+
 impl UnifyTypes<AssociatedType, AssociatedType> for Unifier<'_> {
     fn unify_types(
         &mut self,
