@@ -144,6 +144,7 @@ mod kw {
     syn::custom_keyword!(Bloom);
     syn::custom_keyword!(AND);
     syn::custom_keyword!(OR);
+    syn::custom_keyword!(Json);
     syn::custom_keyword!(Containment);
     syn::custom_keyword!(JsonFieldAccess);
 }
@@ -163,6 +164,11 @@ impl Parse for EqlTrait {
         if input.peek(kw::Bloom) {
             kw::Bloom::parse(input)?;
             return Ok(EqlTrait::Bloom);
+        }
+
+        if input.peek(kw::Json) {
+            kw::Json::parse(input)?;
+            return Ok(EqlTrait::Json);
         }
 
         if input.peek(kw::Containment) {
@@ -500,12 +506,20 @@ impl Parse for EqlTerm {
         let column = Ident::parse(&content)?;
         let column = sqltk::parser::ast::Ident::new(column.to_string());
 
-        let bounds = EqlTraits::parse(&content)?;
+        if content.peek(token::Colon) {
+            let _: token::Colon = content.parse()?;
+            let bounds = EqlTraits::parse(&content)?;
 
-        Ok(EqlTerm::Full(EqlValue(
-            TableColumn { table, column },
-            bounds,
-        )))
+            Ok(EqlTerm::Full(EqlValue(
+                TableColumn { table, column },
+                bounds,
+            )))
+        } else {
+            Ok(EqlTerm::Full(EqlValue(
+                TableColumn { table, column },
+                EqlTraits::none(),
+            )))
+        }
     }
 }
 

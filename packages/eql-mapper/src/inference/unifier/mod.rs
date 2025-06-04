@@ -4,7 +4,7 @@ mod bounds;
 mod parse;
 mod resolve_type;
 // mod type_env;
-mod type_env2;
+mod type_env;
 mod type_specs;
 mod types;
 mod unify_types;
@@ -19,7 +19,7 @@ use unify_types::UnifyTypes;
 use sqltk::AsNodeKey;
 pub(crate) use types::*;
 
-pub(crate) use type_env2::*;
+pub(crate) use type_env::*;
 pub use types::{EqlValue, NativeValue, TableColumn};
 
 use super::TypeRegistry;

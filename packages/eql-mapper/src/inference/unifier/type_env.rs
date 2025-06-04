@@ -14,8 +14,8 @@ use topological_sort::TopologicalSort;
 
 use crate::TypeError;
 
-use super::{InitType, TVar};
 use super::{ArraySpec, ProjectionColumnSpec, ProjectionSpec, Type, TypeSpec, Unifier, VarSpec};
+use super::{InitType, TVar};
 
 /// A collection of [`TypeSpec`]s and their associated [`Bound`]s.
 #[derive(Debug, Clone)]
@@ -138,7 +138,7 @@ mod test {
     use crate::{
         unifier::{
             Array, AssociatedType, Constructor, EqlTerm, EqlTrait, EqlTraits, EqlValue,
-            JsonQueryType, Type, Unifier, Value,
+            Type, Unifier, Value,
         },
         NativeValue, TableColumn, TypeError, TypeRegistry,
     };
@@ -231,24 +231,26 @@ mod test {
     fn infer_associated_type() -> Result<(), TypeError> {
         let mut env = TypeEnv::new();
 
-        env.add(&ty!(E), ty!(EQL(customer.name Json)))?;
+        env.add(&ty!(E), ty!(EQL(customer.name: Json)))?;
         env.add(&ty!(A), ty!(E::Containment))?;
 
         let mut unifier = make_unifier();
         let instance = env.instantiate(&mut unifier).unwrap();
 
+        eprintln!("ASSOC: {}", &*instance.get_type(&ty!(A))?.follow_tvars(&unifier));
+
         assert_eq!(
-            &*instance.get_type(&ty!(A))?,
-            &Type::Associated(AssociatedType::Json(JsonQueryType::Containment(
-                Type::Constructor(Constructor::Value(Value::Eql(EqlTerm::Full(EqlValue(
+            &*instance.get_type(&ty!(A))?.follow_tvars(&unifier),
+            &Type::Constructor(Constructor::Value(Value::Eql(EqlTerm::Partial(
+                EqlValue(
                     TableColumn {
                         table: "customer".into(),
                         column: "name".into()
                     },
                     EqlTraits::from(EqlTrait::Json)
-                )))))
-                .into()
-            )))
+                ),
+                EqlTraits::from(EqlTrait::Json)
+            ))))
         );
 
         Ok(())
