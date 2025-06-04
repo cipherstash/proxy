@@ -1010,7 +1010,7 @@ mod test {
                 (NATIVE(employees.name) as name),
                 (NATIVE(employees.department) as department),
                 (NATIVE(employees.age) as age),
-                (EQL(employees.salary) as salary)
+                (EQL(employees.salary: Ord) as salary)
             ]
         );
     }
@@ -1444,7 +1444,7 @@ mod test {
             tables: {
                 employees: {
                     id,
-                    eql_col (EQL: JsonFieldAccess + Containment),
+                    eql_col (EQL: Json),
                     native_col,
                 }
             }
@@ -1550,7 +1550,7 @@ mod test {
             tables: {
                 patients: {
                     id,
-                    notes (EQL: JsonFieldAccess + Containment),
+                    notes (EQL: Json),
                 }
             }
         });
@@ -1612,7 +1612,7 @@ mod test {
             tables: {
                 patients: {
                     id,
-                    notes (EQL: JsonFieldAccess + Containment),
+                    notes (EQL: Json),
                 }
             }
         });

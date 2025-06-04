@@ -205,8 +205,8 @@ macro_rules! to_eql_trait_impls {
         $crate::to_eql_trait_impls!(@flags $impls $($indexes)*);
     };
 
-    (@flags $impls:ident JsonFieldAccess $($indexes:ident)*) => {
-        $impls.add_mut(EqlTrait::JsonFieldAccess);
+    (@flags $impls:ident Json $($indexes:ident)*) => {
+        $impls.add_mut(EqlTrait::Json);
         $crate::to_eql_trait_impls!(@flags $impls $($indexes)*);
     };
 

@@ -18,8 +18,6 @@ pub enum EqlTrait {
     Json,
     #[display("Containment")]
     Containment,
-    #[display("JsonFieldAccess")]
-    JsonFieldAccess,
 }
 
 /// Represents the set of "traits" implemented by a [`Type`].
@@ -34,24 +32,21 @@ pub enum EqlTrait {
 /// [`Bounds`] values always successfully unify into a superset of traits.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Default, Hash)]
 pub struct EqlTraits {
-    /// The column implements equality between its values using the `=` operator.
+    /// The value implements equality between its values using the `=` operator.
     pub eq: bool,
 
-    /// The column implements comparison of its values using `>`, `>=`, `=`, `<=`, `<`.
+    /// The value implements comparison of its values using `>`, `>=`, `=`, `<=`, `<`.
     /// `ord` implies `eq`.
     pub ord: bool,
 
-    /// The column implements textual substring search using `LIKE`.
+    /// The value implements textual substring search using `LIKE`.
     pub bloom: bool,
 
-    /// The column implements [`EqlTrait::Containment`] & [`EqlTrait::JsonFieldAccess`]
+    /// The value implements containment checking (e.g. `@>` and `<@`) and field selection (e.g. `->`)
     pub json: bool,
 
-    /// The column implements containment checking (e.g. `@>` and `<@`)
+    /// The value implements containment checking (e.g. `@>` and `<@`)
     pub containment: bool,
-
-    /// The column implements JSON field access (`->` etc)
-    pub json_field_access: bool,
 }
 
 pub const ALL_TRAITS: EqlTraits = EqlTraits {
@@ -60,7 +55,6 @@ pub const ALL_TRAITS: EqlTraits = EqlTraits {
     bloom: true,
     json: true,
     containment: true,
-    json_field_access: true,
 };
 
 impl From<EqlTrait> for EqlTraits {
@@ -97,11 +91,9 @@ impl EqlTraits {
             EqlTrait::Bloom => self.bloom = true,
             EqlTrait::Json => {
                 self.json = true;
-                self.json_field_access = true;
                 self.containment = true;
             }
             EqlTrait::Containment => self.containment = true,
-            EqlTrait::JsonFieldAccess => self.json_field_access = true,
         }
     }
 
@@ -112,7 +104,6 @@ impl EqlTraits {
             bloom: self.bloom || other.bloom,
             json: self.json || other.json,
             containment: self.containment || other.containment,
-            json_field_access: self.json_field_access || other.json_field_access,
         }
     }
 
@@ -123,7 +114,6 @@ impl EqlTraits {
             bloom: self.bloom && other.bloom,
             json: self.json && other.json,
             containment: self.containment && other.containment,
-            json_field_access: self.json_field_access && other.json_field_access,
         }
     }
 
@@ -134,7 +124,6 @@ impl EqlTraits {
             bloom: self.bloom ^ other.bloom,
             json: self.json ^ other.json,
             containment: self.containment ^ other.containment,
-            json_field_access: self.json_field_access ^ other.json_field_access,
         }
     }
 }
@@ -145,7 +134,6 @@ impl std::fmt::Display for EqlTraits {
         const ORD: &'static str = "Ord";
         const BLOOM: &'static str = "Bloom";
         const CONTAINMENT: &'static str = "Containment";
-        const JSON_FIELD_ACCESS: &'static str = "JsonFieldAccess";
 
         let mut traits: Vec<&'static str> = Vec::new();
         if self.eq {
@@ -159,9 +147,6 @@ impl std::fmt::Display for EqlTraits {
         }
         if self.containment {
             traits.push(CONTAINMENT)
-        }
-        if self.json_field_access {
-            traits.push(JSON_FIELD_ACCESS)
         }
 
         f.write_str(&traits.join("+"))?;

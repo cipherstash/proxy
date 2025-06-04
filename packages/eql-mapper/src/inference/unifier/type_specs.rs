@@ -81,8 +81,13 @@ pub(crate) struct TVar(#[display("${}", _0)] pub(crate) String);
 impl InitType for VarSpec {
     fn init_type(&self, env: &TypeEnv, unifier: &mut Unifier<'_>) -> Result<Arc<Type>, TypeError> {
         let ty = unifier.fresh_tvar();
-        let other_ty = env.get(&self.tvar)?.init_type(env, unifier)?;
-        unifier.unify(ty, other_ty)
+        match env.get(&self.tvar) {
+            Ok(spec) => {
+                let initialised_ty = spec.init_type(env, unifier)?;
+                unifier.unify(ty.clone(), initialised_ty)
+            }
+            Err(_) => Ok(ty)
+        }
     }
 }
 
@@ -217,30 +222,24 @@ impl GeneralizedFunctionSpec {
 
         let mut env = TypeEnv::new();
 
-        let mut var_counter: usize = 0;
+        let mut arg_tvars: Vec<TVar> = vec![];
+
+        for arg in self.args.iter() {
+            arg_tvars.push(env.add_anonymous(arg.clone())?);
+        }
+
+        let ret_tvar = env.add_anonymous(self.ret.clone())?;
 
         for Bounded(tvar, traits) in &self.bounds {
+            let new_tvar = env.fresh_tvar();
             env.add(
-                tvar,
+                tvar.clone(),
                 TypeSpec::Var(VarSpec {
-                    tvar: TVar(format!("${}", var_counter)),
+                    tvar: new_tvar,
                     bounds: *traits,
                 }),
             )?;
-
-            var_counter += 1;
         }
-
-        let mut arg_tvars: Vec<TVar> = vec![];
-
-        for (idx, arg) in self.args.iter().enumerate() {
-            arg_tvars.push(TVar(format!("${}", var_counter)));
-            env.add(&arg_tvars[idx], arg.clone())?;
-            var_counter += 1;
-        }
-
-        let ret_tvar = TVar(format!("${}", var_counter));
-        env.add(&ret_tvar, self.ret.clone())?;
 
         let instantiated_env = env.instantiate(unifier)?;
 

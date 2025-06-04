@@ -162,7 +162,7 @@ pub enum EqlTerm {
 }
 
 pub const EQL_TERM_ASSOCIATED_TYPE__CONTAINMENT: &'static str = "Containment";
-pub const EQL_TERM_ASSOCIATED_TYPE__JSON_FIELD_ACCESS: &'static str = "JsonFieldAccess";
+pub const EQL_TERM_ASSOCIATED_TYPE__JSON_FIELD_ACCESSOR: &'static str = "JsonFieldAccessor";
 
 impl EqlTerm {
     fn resolve_associated_type(
@@ -196,12 +196,12 @@ impl EqlTerm {
             ));
         }
 
-        if associated_type_name == EQL_TERM_ASSOCIATED_TYPE__JSON_FIELD_ACCESS
-            && !traits.json_field_access
+        if associated_type_name == EQL_TERM_ASSOCIATED_TYPE__JSON_FIELD_ACCESSOR
+            && !traits.json
         {
             return Err(TypeError::UnsatisfiedBounds(
                 self.clone().into(),
-                EqlTraits::from(EqlTrait::JsonFieldAccess),
+                EqlTraits::from(EqlTrait::Json),
             ));
         }
 
@@ -212,8 +212,8 @@ impl EqlTerm {
             ));
         }
 
-        if associated_type_name == EQL_TERM_ASSOCIATED_TYPE__JSON_FIELD_ACCESS
-            && traits.json_field_access
+        if associated_type_name == EQL_TERM_ASSOCIATED_TYPE__JSON_FIELD_ACCESSOR
+            && traits.json
         {
             return Ok(EqlTerm::JsonFieldAccessor(eql_value.clone()));
         }

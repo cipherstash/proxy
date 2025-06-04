@@ -21,6 +21,7 @@ use super::{InitType, TVar};
 #[derive(Debug, Clone)]
 pub(crate) struct TypeEnv {
     specs: HashMap<TVar, TypeSpec>,
+    tvar_counter: usize,
 }
 
 #[derive(Debug, Clone, Deref)]
@@ -73,17 +74,26 @@ impl TypeEnv {
     pub(crate) fn new() -> Self {
         Self {
             specs: HashMap::new(),
+            tvar_counter: 0,
         }
     }
 
-    pub(crate) fn add(&mut self, var: &TVar, spec: TypeSpec) -> Result<(), TypeError> {
-        match self.specs.insert(var.clone(), spec) {
-            Some(_) => Err(TypeError::InternalError(format!(
-                "type var '{}' has already been added to the type env",
-                var
-            ))),
-            None => Ok(()),
+    pub(crate) fn fresh_tvar(&mut self) -> TVar {
+        self.tvar_counter += 1;
+        TVar(format!("${}", self.specs.len()))
+    }
+
+    pub(crate) fn add(&mut self, tvar: TVar, spec: TypeSpec) -> Result<TVar, TypeError> {
+        if self.specs.contains_key(&tvar) {
+            return Err(TypeError::InternalError(format!("cannot overwrite existing tvar {}", tvar)))
         }
+
+        Ok(self.specs.entry(tvar).insert_entry(spec).key().clone())
+    }
+
+    pub(crate) fn add_anonymous(&mut self, mut spec: TypeSpec) -> Result<TVar, TypeError> {
+        let tvar = self.fresh_tvar();
+        self.add(tvar, spec)
     }
 
     pub(crate) fn get(&self, var: &TVar) -> Result<&TypeSpec, TypeError> {
@@ -157,9 +167,9 @@ mod test {
     fn infer_array() -> Result<(), TypeError> {
         let mut env = TypeEnv::new();
 
-        env.add(&ty!(A), ty!([E]))?;
-        env.add(&ty!(E), ty!(T))?;
-        env.add(&ty!(T), ty!(Native))?;
+        env.add(ty!(A), ty!([E]))?;
+        env.add(ty!(E), ty!(T))?;
+        env.add(ty!(T), ty!(Native))?;
 
         let mut unifier = make_unifier();
         let instance = env.instantiate(&mut unifier).unwrap();
@@ -180,10 +190,10 @@ mod test {
     fn infer_projection() -> Result<(), TypeError> {
         let mut env = TypeEnv::new();
 
-        env.add(&ty!(P), ty!({A as id, B as name, C as email}))?;
-        env.add(&ty!(A), ty!(Native(customer.id)))?;
-        env.add(&ty!(B), ty!(EQL(customer.name: Eq)))?;
-        env.add(&ty!(C), ty!(EQL(customer.email: Eq)))?;
+        env.add(ty!(P), ty!({A as id, B as name, C as email}))?;
+        env.add(ty!(A), ty!(Native(customer.id)))?;
+        env.add(ty!(B), ty!(EQL(customer.name: Eq)))?;
+        env.add(ty!(C), ty!(EQL(customer.email: Eq)))?;
 
         let mut unifier = make_unifier();
         let instance = env.instantiate(&mut unifier).unwrap();
@@ -233,16 +243,12 @@ mod test {
     fn infer_associated_type() -> Result<(), TypeError> {
         let mut env = TypeEnv::new();
 
-        env.add(&ty!(E), ty!(EQL(customer.name: Json)))?;
-        env.add(&ty!(A), ty!(E::Containment))?;
-        env.add(&ty!(F), ty!(A))?;
+        env.add(ty!(E), ty!(EQL(customer.name: Json)))?;
+        env.add(ty!(A), ty!(E::Containment))?;
+        env.add(ty!(F), ty!(A))?;
 
         let mut unifier = make_unifier();
         let instance = env.instantiate(&mut unifier).unwrap();
-
-        // let unified = unifier.unify(instance.get_type(&ty!(F))?, instance.get_type(&ty!(A))?)?;
-
-        // dbg!(&unified);
 
         assert_eq!(
             &*instance.get_type(&ty!(F))?,

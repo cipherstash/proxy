@@ -59,19 +59,19 @@ impl Parse for TVar {
 impl Parse for VarSpec {
     fn parse(input: ParseStream) -> Result<Self> {
         let ident = Ident::parse(input)?;
-        if input.peek(Token![where]) {
-            let _: Token![where] = input.parse()?;
-            let bounds: EqlTraits = input.parse()?;
-            Ok(VarSpec {
-                tvar: TVar(ident.to_string()),
-                bounds,
-            })
-        } else {
+        // if input.peek(Token![where]) {
+        //     let _: Token![where] = input.parse()?;
+        //     let bounds: EqlTraits = input.parse()?;
+        //     Ok(VarSpec {
+        //         tvar: TVar(ident.to_string()),
+        //         bounds,
+        //     })
+        // } else {
             Ok(VarSpec {
                 tvar: TVar(ident.to_string()),
                 bounds: EqlTraits::default(),
             })
-        }
+        // }
     }
 }
 
@@ -146,7 +146,7 @@ mod kw {
     syn::custom_keyword!(OR);
     syn::custom_keyword!(Json);
     syn::custom_keyword!(Containment);
-    syn::custom_keyword!(JsonFieldAccess);
+    syn::custom_keyword!(JsonFieldAccessor);
 }
 
 impl Parse for EqlTrait {
@@ -174,11 +174,6 @@ impl Parse for EqlTrait {
         if input.peek(kw::Containment) {
             kw::Containment::parse(input)?;
             return Ok(EqlTrait::Containment);
-        }
-
-        if input.peek(kw::JsonFieldAccess) {
-            kw::Containment::parse(input)?;
-            return Ok(EqlTrait::JsonFieldAccess);
         }
 
         Err(syn::Error::new(
@@ -248,17 +243,17 @@ impl Parse for AssociatedTypeSpecCtor {
             }));
         }
 
-        if input.peek(kw::JsonFieldAccess) {
-            kw::JsonFieldAccess::parse(input)?;
+        if input.peek(kw::JsonFieldAccessor) {
+            kw::JsonFieldAccessor::parse(input)?;
             return Ok(AssociatedTypeSpecCtor(|tvar| AssociatedTypeSpec {
                 parent_tvar: tvar,
-                associated_type_name: crate::unifier::EQL_TERM_ASSOCIATED_TYPE__JSON_FIELD_ACCESS,
+                associated_type_name: crate::unifier::EQL_TERM_ASSOCIATED_TYPE__JSON_FIELD_ACCESSOR,
             }));
         }
 
         return Err(syn::Error::new(
             input.span(),
-            "expected associated type Containment or JsonFieldAccess",
+            "expected associated type Containment or JsonFieldAccessor",
         ));
     }
 }
