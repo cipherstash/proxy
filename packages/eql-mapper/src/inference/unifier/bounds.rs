@@ -1,7 +1,7 @@
 use derive_more::derive::Display;
 
 use super::{
-    Array, AssociatedType, Constructor, EqlTerm, EqlValue, JsonQueryType, Projection, Type, Value,
+    Array,  Constructor, EqlTerm, EqlValue,  Projection, Type, Value,
     Var,
 };
 
@@ -16,6 +16,10 @@ pub enum EqlTrait {
     Bloom,
     #[display("Json")]
     Json,
+    #[display("Containment")]
+    Containment,
+    #[display("JsonFieldAccess")]
+    JsonFieldAccess,
 }
 
 /// Represents the set of "traits" implemented by a [`Type`].
@@ -40,8 +44,14 @@ pub struct EqlTraits {
     /// The column implements textual substring search using `LIKE`.
     pub bloom: bool,
 
-    /// The column implements a subset of the SQL JSON API (querying only).
+    /// The column implements [`EqlTrait::Containment`] & [`EqlTrait::JsonFieldAccess`]
     pub json: bool,
+
+    /// The column implements containment checking (e.g. `@>` and `<@`)
+    pub containment: bool,
+
+    /// The column implements JSON field access (`->` etc)
+    pub json_field_access: bool,
 }
 
 pub const ALL_TRAITS: EqlTraits = EqlTraits {
@@ -49,6 +59,8 @@ pub const ALL_TRAITS: EqlTraits = EqlTraits {
     ord: true,
     bloom: true,
     json: true,
+    containment: true,
+    json_field_access: true,
 };
 
 impl From<EqlTrait> for EqlTraits {
@@ -83,7 +95,13 @@ impl EqlTraits {
                 self.ord = true;
             }
             EqlTrait::Bloom => self.bloom = true,
-            EqlTrait::Json => self.json = true,
+            EqlTrait::Json => {
+                self.json = true;
+                self.json_field_access = true;
+                self.containment = true;
+            }
+            EqlTrait::Containment => self.containment = true,
+            EqlTrait::JsonFieldAccess => self.json_field_access = true,
         }
     }
 
@@ -93,6 +111,8 @@ impl EqlTraits {
             ord: self.ord || other.ord,
             bloom: self.bloom || other.bloom,
             json: self.json || other.json,
+            containment: self.containment || other.containment,
+            json_field_access: self.json_field_access || other.json_field_access,
         }
     }
 
@@ -102,6 +122,8 @@ impl EqlTraits {
             ord: self.ord && other.ord,
             bloom: self.bloom && other.bloom,
             json: self.json && other.json,
+            containment: self.containment && other.containment,
+            json_field_access: self.json_field_access && other.json_field_access,
         }
     }
 
@@ -111,6 +133,8 @@ impl EqlTraits {
             ord: self.ord ^ other.ord,
             bloom: self.bloom ^ other.bloom,
             json: self.json ^ other.json,
+            containment: self.containment ^ other.containment,
+            json_field_access: self.json_field_access ^ other.json_field_access,
         }
     }
 }
@@ -120,7 +144,8 @@ impl std::fmt::Display for EqlTraits {
         const EQ: &'static str = "Eq";
         const ORD: &'static str = "Ord";
         const BLOOM: &'static str = "Bloom";
-        const JSON: &'static str = "Json";
+        const CONTAINMENT: &'static str = "Containment";
+        const JSON_FIELD_ACCESS: &'static str = "JsonFieldAccess";
 
         let mut traits: Vec<&'static str> = Vec::new();
         if self.eq {
@@ -132,8 +157,11 @@ impl std::fmt::Display for EqlTraits {
         if self.bloom {
             traits.push(BLOOM)
         }
-        if self.json {
-            traits.push(JSON)
+        if self.containment {
+            traits.push(CONTAINMENT)
+        }
+        if self.json_field_access {
+            traits.push(JSON_FIELD_ACCESS)
         }
 
         f.write_str(&traits.join("+"))?;
@@ -147,6 +175,7 @@ impl Type {
         match self {
             Type::Constructor(constructor) => constructor.effective_bounds(),
             Type::Var(Var(_, bounds)) => bounds.clone(),
+            Type::Associated(associated_type) => associated_type.associated.effective_bounds()
         }
     }
 }
@@ -166,12 +195,6 @@ impl Value {
             Value::Eql(eql_term) => eql_term.effective_bounds(),
             Value::Native(_) => ALL_TRAITS, // 💪
             Value::Array(ty) => ty.effective_bounds(),
-            Value::Associated(AssociatedType::Json(JsonQueryType::Containment(ty))) => {
-                ty.effective_bounds()
-            }
-            Value::Associated(AssociatedType::Json(JsonQueryType::FieldAccess(ty))) => {
-                ty.effective_bounds()
-            }
         }
     }
 }
@@ -206,6 +229,7 @@ impl EqlTerm {
         match self {
             EqlTerm::Full(eql_value) => eql_value.effective_bounds(),
             EqlTerm::Partial(_, bounds) => bounds.clone(),
+            EqlTerm::JsonFieldAccessor(_) => EqlTraits::none(),
         }
     }
 }

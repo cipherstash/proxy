@@ -5,8 +5,8 @@ mod parse;
 mod resolve_type;
 // mod type_env;
 mod type_env2;
-mod types;
 mod type_specs;
+mod types;
 mod unify_types;
 
 use crate::inference::TypeError;
@@ -137,13 +137,26 @@ impl<'ast> Unifier<'ast> {
                 (Type::Constructor(lhs_c), Type::Constructor(rhs_c)) => {
                     self.unify_types(lhs_c, rhs_c)
                 }
-
                 (Type::Var(var), Type::Constructor(constructor))
                 | (Type::Constructor(constructor), Type::Var(var)) => {
                     self.unify_types(constructor, var)
                 }
-
                 (Type::Var(lhs_v), Type::Var(rhs_v)) => self.unify_types(lhs_v, rhs_v),
+
+                (Type::Constructor(_), Type::Associated(associated_type)) => {
+                    self.unify(lhs, associated_type.associated.clone())
+                }
+                (Type::Associated(associated_type), Type::Constructor(_)) => {
+                    self.unify(associated_type.associated.clone(), rhs)
+                }
+                (Type::Var(Var(tvar, traits)), Type::Associated(associated_type))
+                | (Type::Associated(associated_type), Type::Var(Var(tvar, traits))) => {
+                    self.unify_with_type_var(associated_type.associated.clone(), *tvar, traits)
+                }
+                (Type::Associated(lhs_assoc), Type::Associated(rhs_assoc)) => {
+                    self.unify_types(lhs_assoc, rhs_assoc)
+
+                }
             }
         }
     }

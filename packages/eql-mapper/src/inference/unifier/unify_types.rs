@@ -8,8 +8,8 @@ use std::sync::Arc;
 use crate::TypeError;
 
 use super::{
-    Array, Constructor, EqlTerm, NativeValue, Projection, ProjectionColumn, Type, Unifier, Value,
-    Var,
+    Array, AssociatedType, Constructor, EqlTerm, NativeValue, Projection, ProjectionColumn, Type,
+    Unifier, Value, Var,
 };
 
 /// Trait for unifying two types.
@@ -73,10 +73,6 @@ impl UnifyTypes<Value, Value> for Unifier<'_> {
 
             (Value::Array(lhs), Value::Array(rhs)) => self.unify_types(lhs, rhs),
 
-            (Value::Associated(lhs), Value::Associated(rhs)) => {
-                self.unify(lhs.on_type(), rhs.on_type())
-            }
-
             (lhs, rhs) => Err(TypeError::Conflict(format!(
                 "cannot unify values {} and {}",
                 lhs, rhs
@@ -122,6 +118,43 @@ impl UnifyTypes<Constructor, Var> for Unifier<'_> {
         Var(tvar, bounds): &Var,
     ) -> Result<Arc<Type>, TypeError> {
         Ok(self.unify_with_type_var(Type::Constructor(lhs.clone()).into(), *tvar, bounds)?)
+    }
+}
+
+impl UnifyTypes<AssociatedType, AssociatedType> for Unifier<'_> {
+    fn unify_types(
+        &mut self,
+        _lhs: &AssociatedType,
+        _rhs: &AssociatedType,
+    ) -> Result<Arc<Type>, TypeError> {
+        // let new_lhs: Arc<Type> = if let Type::Constructor(lhs_constructor) = &*lhs {
+        //     lhs_constructor.resolve_associated_type(lhs.name)?.into()
+        // } else {
+        //     lhs.clone().into()
+        // };
+        Err(TypeError::Incomplete(format!("unification of associated types is not implemented")))
+    }
+}
+
+impl UnifyTypes<AssociatedType, Constructor> for Unifier<'_> {
+    fn unify_types(
+        &mut self,
+        assoc: &AssociatedType,
+        constructor: &Constructor,
+    ) -> Result<Arc<Type>, TypeError> {
+        // If the associated type is resolved then unify the resolved constructor with the constructor, else unify to a
+        // new associated type where the unresolved type is unified with the constructor.
+
+        if let Some(resolved_constructor) = assoc.resolve_constuctor()? {
+            return self.unify_types(constructor, &resolved_constructor);
+        }
+
+        Ok(AssociatedType {
+            parent: assoc.parent.clone(),
+            name: assoc.name,
+            associated: self.unify(assoc.associated.clone(), constructor.clone().into())?,
+        }
+        .into())
     }
 }
 

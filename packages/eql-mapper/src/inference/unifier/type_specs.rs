@@ -6,9 +6,8 @@ use sqltk::parser::ast::{BinaryOperator, ObjectName};
 use crate::TypeError;
 
 use super::{
-    AssociatedType, Constructor, EqlTerm, EqlTraits, InstantiatedTypeEnv, JsonQueryType,
-    NativeValue, Projection, ProjectionColumn, ProjectionColumns, TableColumn, Type, TypeEnv,
-    Unifier, Value,
+    AssociatedType, Constructor, EqlTerm, EqlTraits, InstantiatedTypeEnv, NativeValue, Projection,
+    ProjectionColumn, ProjectionColumns, TableColumn, Type, TypeEnv, Unifier, Value,
 };
 
 /// A `TypeSpec` is a symbolic placeholder for a [`Type`] and can represent a concrete type (for example: `Native`) or a
@@ -141,37 +140,27 @@ impl Display for ProjectionColumnSpec {
 }
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord, Display)]
-pub(crate) enum AssociatedTypeSpec {
-    #[display("{}::Containment", _0)]
-    JsonContainment(TVar),
-    #[display("{}::FieldAccess", _0)]
-    JsonFieldAccess(TVar),
+#[display("{}::{}", parent_tvar, associated_type_name)]
+pub(crate) struct AssociatedTypeSpec {
+    pub(crate) parent_tvar: TVar,
+    pub(crate) associated_type_name: &'static str,
 }
 
 impl AssociatedTypeSpec {
     pub(crate) fn depends_on(&self) -> &TVar {
-        match self {
-            Self::JsonContainment(spec) => spec,
-            Self::JsonFieldAccess(spec) => spec,
-        }
+        &self.parent_tvar
     }
 }
 
 impl InitType for AssociatedTypeSpec {
     fn init_type(&self, env: &TypeEnv, unifier: &mut Unifier<'_>) -> Result<Arc<Type>, TypeError> {
-        match self {
-            AssociatedTypeSpec::JsonContainment(tvar) => {
-                Ok(Arc::new(Type::Constructor(Constructor::Value(Value::Associated(AssociatedType::Json(
-                    JsonQueryType::Containment(env.get(tvar)?.init_type(env, unifier)?),
-                ))))))
-            }
+        let parent_ty = env.get(&self.parent_tvar)?.init_type(env, unifier)?;
 
-            AssociatedTypeSpec::JsonFieldAccess(tvar) => {
-                Ok(Arc::new(Type::Constructor(Constructor::Value(Value::Associated(AssociatedType::Json(
-                    JsonQueryType::FieldAccess(env.get(tvar)?.init_type(env, unifier)?),
-                ))))))
-            }
-        }
+        Ok(Arc::new(Type::Associated(AssociatedType {
+            parent: parent_ty,
+            name: self.associated_type_name,
+            associated: unifier.fresh_tvar(),
+        })))
     }
 }
 

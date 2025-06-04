@@ -1444,7 +1444,7 @@ mod test {
             tables: {
                 employees: {
                     id,
-                    eql_col (EQL: Json),
+                    eql_col (EQL: JsonFieldAccess + Containment),
                     native_col,
                 }
             }
@@ -1550,7 +1550,7 @@ mod test {
             tables: {
                 patients: {
                     id,
-                    notes (EQL: Json),
+                    notes (EQL: JsonFieldAccess + Containment),
                 }
             }
         });
@@ -1612,7 +1612,7 @@ mod test {
             tables: {
                 patients: {
                     id,
-                    notes (EQL: Json),
+                    notes (EQL: JsonFieldAccess + Containment),
                 }
             }
         });

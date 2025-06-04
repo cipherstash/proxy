@@ -14,8 +14,8 @@ use topological_sort::TopologicalSort;
 
 use crate::TypeError;
 
-use super::{InitType, TVar};
 use super::{ArraySpec, ProjectionColumnSpec, ProjectionSpec, Type, TypeSpec, Unifier, VarSpec};
+use super::{InitType, TVar};
 
 /// A collection of [`TypeSpec`]s and their associated [`Bound`]s.
 #[derive(Debug, Clone)]
@@ -138,7 +138,7 @@ mod test {
     use crate::{
         unifier::{
             Array, AssociatedType, Constructor, EqlTerm, EqlTrait, EqlTraits, EqlValue,
-            JsonQueryType, Type, Unifier, Value,
+            Type, Unifier, Value,
         },
         NativeValue, TableColumn, TypeError, TypeRegistry,
     };
@@ -239,16 +239,16 @@ mod test {
 
         assert_eq!(
             &*instance.get_type(&ty!(A))?,
-            &Type::Constructor(Constructor::Value(Value::Associated(AssociatedType::Json(JsonQueryType::Containment(
-                Type::Constructor(Constructor::Value(Value::Eql(EqlTerm::Full(EqlValue(
+            &Type::Constructor(Constructor::Value(Value::Eql(EqlTerm::Partial(
+                EqlValue(
                     TableColumn {
                         table: "customer".into(),
                         column: "name".into()
                     },
-                    EqlTraits::from(EqlTrait::Json)
-                )))))
-                .into()
-            )))))
+                    EqlTraits::from(EqlTrait::Containment)
+                ),
+                EqlTraits::from(EqlTrait::Containment)
+            ))))
         );
 
         Ok(())

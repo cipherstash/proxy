@@ -142,11 +142,10 @@ mod kw {
     syn::custom_keyword!(Eq);
     syn::custom_keyword!(Ord);
     syn::custom_keyword!(Bloom);
-    syn::custom_keyword!(Json);
     syn::custom_keyword!(AND);
     syn::custom_keyword!(OR);
     syn::custom_keyword!(Containment);
-    syn::custom_keyword!(FieldAccess);
+    syn::custom_keyword!(JsonFieldAccess);
 }
 
 impl Parse for EqlTrait {
@@ -166,9 +165,14 @@ impl Parse for EqlTrait {
             return Ok(EqlTrait::Bloom);
         }
 
-        if input.peek(kw::Json) {
-            kw::Json::parse(input)?;
-            return Ok(EqlTrait::Json);
+        if input.peek(kw::Containment) {
+            kw::Containment::parse(input)?;
+            return Ok(EqlTrait::Containment);
+        }
+
+        if input.peek(kw::JsonFieldAccess) {
+            kw::Containment::parse(input)?;
+            return Ok(EqlTrait::JsonFieldAccess);
         }
 
         Err(syn::Error::new(
@@ -232,21 +236,23 @@ impl Parse for AssociatedTypeSpecCtor {
     fn parse(input: ParseStream) -> Result<Self> {
         if input.peek(kw::Containment) {
             kw::Containment::parse(input)?;
-            return Ok(AssociatedTypeSpecCtor(|spec| {
-                AssociatedTypeSpec::JsonContainment(spec)
+            return Ok(AssociatedTypeSpecCtor(|tvar| AssociatedTypeSpec {
+                parent_tvar: tvar,
+                associated_type_name: crate::unifier::EQL_TERM_ASSOCIATED_TYPE__CONTAINMENT,
             }));
         }
 
-        if input.peek(kw::FieldAccess) {
-            kw::FieldAccess::parse(input)?;
-            return Ok(AssociatedTypeSpecCtor(|spec| {
-                AssociatedTypeSpec::JsonFieldAccess(spec)
+        if input.peek(kw::JsonFieldAccess) {
+            kw::JsonFieldAccess::parse(input)?;
+            return Ok(AssociatedTypeSpecCtor(|tvar| AssociatedTypeSpec {
+                parent_tvar: tvar,
+                associated_type_name: crate::unifier::EQL_TERM_ASSOCIATED_TYPE__JSON_FIELD_ACCESS,
             }));
         }
 
         return Err(syn::Error::new(
             input.span(),
-            "expected associated type Containment or FieldAccess",
+            "expected associated type Containment or JsonFieldAccess",
         ));
     }
 }
@@ -296,7 +302,8 @@ impl Parse for ProjectionSpec {
     fn parse(input: ParseStream) -> Result<Self> {
         let content;
         braced!(content in input);
-        let specs = Punctuated::<ProjectionColumnSpec, Token![,]>::parse_separated_nonempty(&content)?;
+        let specs =
+            Punctuated::<ProjectionColumnSpec, Token![,]>::parse_separated_nonempty(&content)?;
         Ok(ProjectionSpec(Vec::from_iter(specs)))
     }
 }

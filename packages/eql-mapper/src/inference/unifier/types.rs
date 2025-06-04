@@ -5,7 +5,7 @@ use sqltk::parser::ast::Ident;
 
 use crate::{ColumnKind, Table, TypeError};
 
-use super::{resolve_type::ResolveType, EqlTraits, Unifier};
+use super::{resolve_type::ResolveType, EqlTrait, EqlTraits, Unifier};
 
 /// The [`Type`] enum represents the types used by the [`Unifier`] to represent the SQL & EQL types returned by
 /// expressions, projection-producing statements, built-in database functions & operators, EQL function & operators and
@@ -28,35 +28,33 @@ pub enum Type {
     #[display("{}", _0)]
     Var(Var),
 
+    /// An type that is associated with another type.
+    #[display("{}", _0)]
+    Associated(AssociatedType),
 }
 
 /// An associated type.
+///
+/// This is a type of the form `T::A` - `T` is a parent type and `A` is an associated type (just like in Rust).
 #[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord, derive_more::Display)]
-pub enum AssociatedType {
-    /// An associated type on a type that implements [`crate::unifier::EqlTrait::Json`].
-    #[display("{}", 0)]
-    Json(JsonQueryType),
+#[display("{}::{}", parent, name)]
+pub struct AssociatedType {
+    /// The type that contains the associated type.
+    pub parent: Arc<Type>,
+    /// The name of the associated type
+    pub name: &'static str,
+    /// An initially dangling type variable that will eventually point ot the resolved type.
+    pub associated: Arc<Type>,
 }
 
 impl AssociatedType {
-    pub(crate) fn on_type(&self) -> Arc<Type> {
-        match self {
-            AssociatedType::Json(JsonQueryType::Containment(on)) => on.clone(),
-            AssociatedType::Json(JsonQueryType::FieldAccess(on)) => on.clone(),
+    pub(crate) fn resolve_constuctor(&self) -> Result<Option<Constructor>, TypeError> {
+        if let Type::Constructor(constructor) = &*self.parent {
+            Ok(Some(constructor.resolve_associated_type(&self.name)?))
+        } else {
+            Ok(None)
         }
     }
-}
-
-/// The associated types of the [`crate::unifier::EqlTrait::Json`] trait.
-///
-/// The `Arc<Type>` field of the variant refers to the type that the associated type belongs to.
-#[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord, derive_more::Display)]
-pub enum JsonQueryType {
-    #[display("FieldAccess")]
-    FieldAccess(Arc<Type>),
-
-    #[display("Containment")]
-    Containment(Arc<Type>),
 }
 
 #[derive(Debug, PartialEq, PartialOrd, Ord, Eq, Clone, Display, Hash)]
@@ -85,6 +83,26 @@ pub enum Constructor {
     Projection(Projection),
 }
 
+impl Constructor {
+    fn resolve_associated_type(
+        &self,
+        associated_type_name: &'static str,
+    ) -> Result<Constructor, TypeError> {
+        match self {
+            Constructor::Value(value) => {
+                return Ok(Constructor::Value(
+                    value.resolve_associated_type(associated_type_name)?,
+                ))
+            }
+            Constructor::Projection(_) => {
+                return Err(TypeError::InternalError(format!(
+                    "projections do not support having an associated type"
+                )))
+            }
+        }
+    }
+}
+
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Display, Hash)]
 pub enum Value {
     /// An encrypted type from a particular table-column in the schema.
@@ -103,14 +121,23 @@ pub enum Value {
     /// An array type that is parameterized by an element type.
     #[display("Array[{}]", _0)]
     Array(Array),
+}
 
-    /// A type associated with another type.
-    ///
-    /// Currently only used to support representation of encrypted EQL query-only terms (such as the right hand side of
-    /// the `->` binary operator). In that particular case, the left hand side type would be an EQL type with a JSON
-    /// trait which has an associated type called `FieldAccess`.
-    #[display("{}", _0)]
-    Associated(AssociatedType),
+impl Value {
+    fn resolve_associated_type(
+        &self,
+        associated_type_name: &'static str,
+    ) -> Result<Value, TypeError> {
+        match self {
+            Value::Eql(eql_term) => Ok(Value::Eql(
+                eql_term.resolve_associated_type(associated_type_name)?,
+            )),
+            Value::Native(native_value) => Ok(Value::Native(native_value.clone())),
+            Value::Array(_) => Err(TypeError::InternalError(format!(
+                "arrays do not support having an associated type"
+            ))),
+        }
+    }
 }
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Display, Hash)]
@@ -130,6 +157,72 @@ pub enum EqlTerm {
     /// A `Partial` type can become a `Whole` type during unification.
     #[display("EQL:Partial({}: {})", _0, _1)]
     Partial(EqlValue, EqlTraits),
+
+    JsonFieldAccessor(EqlValue),
+}
+
+pub const EQL_TERM_ASSOCIATED_TYPE__CONTAINMENT: &'static str = "Containment";
+pub const EQL_TERM_ASSOCIATED_TYPE__JSON_FIELD_ACCESS: &'static str = "JsonFieldAccess";
+
+impl EqlTerm {
+    fn resolve_associated_type(
+        &self,
+        associated_type_name: &'static str,
+    ) -> Result<EqlTerm, TypeError> {
+        match self {
+            EqlTerm::Full(eql_value @ EqlValue(_, traits)) => {
+                self.resolve_associated_type_of_eql_value(associated_type_name, traits, eql_value)
+            }
+            EqlTerm::Partial(eql_value, traits) => {
+                self.resolve_associated_type_of_eql_value(associated_type_name, traits, eql_value)
+            }
+            EqlTerm::JsonFieldAccessor(_) => Err(TypeError::InternalError(format!(
+                "type {} has no associated type {}",
+                self, associated_type_name
+            ))),
+        }
+    }
+
+    fn resolve_associated_type_of_eql_value(
+        &self,
+        associated_type_name: &'static str,
+        traits: &EqlTraits,
+        eql_value: &EqlValue,
+    ) -> Result<EqlTerm, TypeError> {
+        if associated_type_name == EQL_TERM_ASSOCIATED_TYPE__CONTAINMENT && !traits.containment {
+            return Err(TypeError::UnsatisfiedBounds(
+                self.clone().into(),
+                EqlTraits::from(EqlTrait::Containment),
+            ));
+        }
+
+        if associated_type_name == EQL_TERM_ASSOCIATED_TYPE__JSON_FIELD_ACCESS
+            && !traits.json_field_access
+        {
+            return Err(TypeError::UnsatisfiedBounds(
+                self.clone().into(),
+                EqlTraits::from(EqlTrait::JsonFieldAccess),
+            ));
+        }
+
+        if associated_type_name == EQL_TERM_ASSOCIATED_TYPE__CONTAINMENT && traits.containment {
+            return Ok(EqlTerm::Partial(
+                eql_value.clone(),
+                EqlTraits::from(EqlTrait::Containment),
+            ));
+        }
+
+        if associated_type_name == EQL_TERM_ASSOCIATED_TYPE__JSON_FIELD_ACCESS
+            && traits.json_field_access
+        {
+            return Ok(EqlTerm::JsonFieldAccessor(eql_value.clone()));
+        }
+
+        Err(TypeError::InternalError(format!(
+            "{} is not an associated type of {}",
+            associated_type_name, self
+        )))
+    }
 }
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Display, Hash)]
@@ -238,6 +331,8 @@ impl Type {
                     }
                 }
             }
+
+            Type::Associated(AssociatedType { associated, .. }) => associated.clone().follow_tvars(unifier)
         }
     }
 
@@ -444,6 +539,13 @@ impl_from_for_arc_type!(EqlTerm);
 impl_from_for_arc_type!(Constructor);
 impl_from_for_arc_type!(Value);
 impl_from_for_arc_type!(Array);
+impl_from_for_arc_type!(AssociatedType);
+
+impl From<AssociatedType> for Type {
+    fn from(associated: AssociatedType) -> Self {
+        Type::Associated(associated)
+    }
+}
 
 impl From<Constructor> for Type {
     fn from(constructor: Constructor) -> Self {

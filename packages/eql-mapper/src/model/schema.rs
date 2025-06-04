@@ -205,8 +205,13 @@ macro_rules! to_eql_trait_impls {
         $crate::to_eql_trait_impls!(@flags $impls $($indexes)*);
     };
 
-    (@flags $impls:ident Json $($indexes:ident)*) => {
-        $impls.add_mut(EqlTrait::Json);
+    (@flags $impls:ident JsonFieldAccess $($indexes:ident)*) => {
+        $impls.add_mut(EqlTrait::JsonFieldAccess);
+        $crate::to_eql_trait_impls!(@flags $impls $($indexes)*);
+    };
+
+    (@flags $impls:ident Containment $($indexes:ident)*) => {
+        $impls.add_mut(EqlTrait::Containment);
         $crate::to_eql_trait_impls!(@flags $impls $($indexes)*);
     };
 
@@ -259,7 +264,7 @@ macro_rules! schema {
     (@add_column $table:ident $column_name:ident (EQL $(: $trait_:ident $(+ $trait_rest:ident)*)?) ) => {
         $table.add_column(std::sync::Arc::new($crate::model::Column::eql(
             ::sqltk::parser::ast::Ident::new(stringify!($column_name)),
-            $crate::to_eql_trait_impls!($($trait_ $($($trait_rest)+)?)?)
+            $crate::to_eql_trait_impls!($($trait_ $($trait_rest)*)?)
         )));
     };
     (@add_column $table:ident $column_name:ident (PK) ) => {

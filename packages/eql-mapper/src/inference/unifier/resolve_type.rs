@@ -1,7 +1,7 @@
 use crate::TypeError;
 
 use super::{
-    type_env2, Array, AssociatedType, Constructor, JsonQueryType, NativeValue, Projection, Type,
+    Array, Constructor, NativeValue, Projection, Type,
     Unifier, Value, Var,
 };
 
@@ -36,6 +36,14 @@ impl ResolveType for Type {
                     type_var
                 )))
             }
+
+            Type::Associated(associated) => {
+                if let Some(constructor) = associated.resolve_constuctor()? {
+                    Ok(constructor.resolve_type(unifier)?.into())
+                } else {
+                    Err(TypeError::InternalError(format!("could not resolve associated type {}", associated)))
+                }
+            }
         }
     }
 }
@@ -64,22 +72,6 @@ impl ResolveType for Constructor {
                         crate::Array(resolved.into()),
                     )))
                 }
-
-                Value::Associated(AssociatedType::Json(JsonQueryType::Containment(on_ty))) => {
-                    Ok(crate::Constructor::Value(crate::Value::Associated(
-                        crate::AssociatedType::Json(crate::JsonQueryType::Containment(Box::new(
-                            on_ty.resolved_as(unifier)?,
-                        ))),
-                    )))
-                }
-
-                Value::Associated(AssociatedType::Json(JsonQueryType::FieldAccess(on_ty))) => {
-                    Ok(crate::Constructor::Value(crate::Value::Associated(
-                        crate::AssociatedType::Json(crate::JsonQueryType::FieldAccess(Box::new(
-                            on_ty.resolved_as(unifier)?,
-                        ))),
-                    )))
-                }
             },
 
             Constructor::Projection(projection) => Ok(crate::Constructor::Projection(
@@ -105,37 +97,6 @@ impl ResolveType for Value {
             Value::Array(Array(element_ty)) => {
                 let resolved = element_ty.resolve_type(unifier)?;
                 Ok(crate::Value::Array(crate::Array(resolved.into())))
-            }
-
-            Value::Associated(associated_ty) => {
-                Ok(crate::Value::Associated(associated_ty.resolve_type(unifier)?))
-            }
-        }
-    }
-}
-
-impl ResolveType for AssociatedType {
-    type Output = crate::AssociatedType;
-
-    fn resolve_type(&self, unifier: &mut Unifier<'_>) -> Result<Self::Output, TypeError> {
-        match self {
-            AssociatedType::Json(json_query_type) => {
-                Ok(crate::AssociatedType::Json(json_query_type.resolve_type(unifier)?))
-            }
-        }
-    }
-}
-
-impl ResolveType for JsonQueryType {
-    type Output = crate::JsonQueryType;
-
-    fn resolve_type(&self, unifier: &mut Unifier<'_>) -> Result<Self::Output, TypeError> {
-        match self {
-            JsonQueryType::FieldAccess(on) => {
-                Ok(crate::JsonQueryType::FieldAccess(on.resolved_as(unifier)?))
-            }
-            JsonQueryType::Containment(on) => {
-                Ok(crate::JsonQueryType::FieldAccess(on.resolved_as(unifier)?))
             }
         }
     }
