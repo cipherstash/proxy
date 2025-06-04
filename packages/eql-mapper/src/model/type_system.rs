@@ -49,26 +49,6 @@ pub enum Value {
     Array(Array),
 }
 
-/// An associated type.
-#[derive(Debug, Clone, PartialEq, Eq, Display)]
-pub enum AssociatedType {
-    /// An associated type on a type that implements [`crate::unifier::EqlTrait::Json`].
-    #[display("{}", 0)]
-    Json(JsonQueryType),
-}
-
-/// The associated types of the [`crate::unifier::EqlTrait::Json`] trait.
-///
-/// The `Arc<Type>` field of the variant refers to the type that the associated type belongs to.
-#[derive(Debug, Clone, PartialEq, Eq, Display)]
-pub enum JsonQueryType {
-    #[display("FieldAccess")]
-    FieldAccess(Box<Value>),
-
-    #[display("Containment")]
-    Containment(Box<Value>),
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Display)]
 pub struct Array(pub Box<Type>);
 

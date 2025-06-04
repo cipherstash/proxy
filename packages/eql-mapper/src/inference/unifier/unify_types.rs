@@ -127,12 +127,7 @@ impl UnifyTypes<AssociatedType, AssociatedType> for Unifier<'_> {
         _lhs: &AssociatedType,
         _rhs: &AssociatedType,
     ) -> Result<Arc<Type>, TypeError> {
-        // let new_lhs: Arc<Type> = if let Type::Constructor(lhs_constructor) = &*lhs {
-        //     lhs_constructor.resolve_associated_type(lhs.name)?.into()
-        // } else {
-        //     lhs.clone().into()
-        // };
-        Err(TypeError::Incomplete(format!("unification of associated types is not implemented")))
+        Err(TypeError::Incomplete(format!("unification of associated types is not implemented - there should not be any situation where this can happen")))
     }
 }
 
