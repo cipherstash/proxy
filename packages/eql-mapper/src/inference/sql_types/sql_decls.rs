@@ -50,22 +50,22 @@ static SQL_FUNCTION_TYPES: LazyLock<HashMap<ObjectName, FunctionSpec>> = LazyLoc
 
     let items: Punctuated<FunctionSpec, Token![;]> = parse_quote! {
         pg_catalog.count<T>(T) -> Native ;
-        pg_catalog.min<T>(T) -> T where T: Ord ;
-        pg_catalog.max<T>(T) -> T where T: Ord ;
-        pg_catalog.jsonb_path_query<J>(J, J::JsonFieldAccessor) -> J where J: Json ;
-        pg_catalog.jsonb_path_query_first<J>(J, J::JsonFieldAccessor) -> J where J: Json ;
-        pg_catalog.jsonb_path_exists<J>(J, J::JsonFieldAccessor) -> Native where J: Json ;
-        pg_catalog.jsonb_array_length<J>(J) -> Native where J: Json ;
-        pg_catalog.jsonb_array_elements<J>(J) -> J where J: Json ;
-        pg_catalog.jsonb_array_elements_text<J>(J) -> J where J: Json ;
-        eql_v1.min<T>(T) -> T where T: Ord ;
-        eql_v1.max<T>(T) -> T where T: Ord ;
-        eql_v1.jsonb_path_query<J>(J, J::JsonFieldAccessor) -> J where J: Json ;
-        eql_v1.jsonb_path_query_first<J>(J, J::JsonFieldAccessor) -> J where J: Json ;
-        eql_v1.jsonb_path_exists<J>(J, J::JsonFieldAccessor) -> Native where J: Json ;
-        eql_v1.jsonb_array_length<J>(J) -> Native where J: Json ;
-        eql_v1.jsonb_array_elements<J>(J) -> J where J: Json ;
-        eql_v1.jsonb_array_elements_text<J>(J) -> J where J: Json ;
+        // pg_catalog.min<T>(T) -> T where T: Ord ;
+        // pg_catalog.max<T>(T) -> T where T: Ord ;
+        // pg_catalog.jsonb_path_query<J>(J, J::JsonFieldAccessor) -> J where J: Json ;
+        // pg_catalog.jsonb_path_query_first<J>(J, J::JsonFieldAccessor) -> J where J: Json ;
+        // pg_catalog.jsonb_path_exists<J>(J, J::JsonFieldAccessor) -> Native where J: Json ;
+        // pg_catalog.jsonb_array_length<J>(J) -> Native where J: Json ;
+        // pg_catalog.jsonb_array_elements<J>(J) -> J where J: Json ;
+        // pg_catalog.jsonb_array_elements_text<J>(J) -> J where J: Json ;
+        // eql_v1.min<T>(T) -> T where T: Ord ;
+        // eql_v1.max<T>(T) -> T where T: Ord ;
+        // eql_v1.jsonb_path_query<J>(J, J::JsonFieldAccessor) -> J where J: Json ;
+        // eql_v1.jsonb_path_query_first<J>(J, J::JsonFieldAccessor) -> J where J: Json ;
+        // eql_v1.jsonb_path_exists<J>(J, J::JsonFieldAccessor) -> Native where J: Json ;
+        // eql_v1.jsonb_array_length<J>(J) -> Native where J: Json ;
+        // eql_v1.jsonb_array_elements<J>(J) -> J where J: Json ;
+        // eql_v1.jsonb_array_elements_text<J>(J) -> J where J: Json ;
     };
 
     HashMap::from_iter(
@@ -87,4 +87,19 @@ pub(crate) fn get_sql_function(fn_name: &ObjectName) -> SqlFunction {
         .get(&fully_qualified_fn_name)
         .map(SqlFunction::Explicit)
         .unwrap_or(SqlFunction::Fallback)
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::inference::sql_types::sql_decls::{SQL_BINARY_OPERATORS, SQL_FUNCTION_TYPES};
+
+    #[test]
+    fn binops_load_properly() {
+        let _ = &*SQL_BINARY_OPERATORS;
+    }
+
+    #[test]
+    fn sqlfns_load_properly() {
+        let _ = &*SQL_FUNCTION_TYPES;
+    }
 }
