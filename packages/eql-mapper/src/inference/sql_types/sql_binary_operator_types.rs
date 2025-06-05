@@ -27,8 +27,8 @@ impl SqlBinaryOp {
         match self {
             SqlBinaryOp::Explicit(rule) => {
                 let lhs_ty = inferencer.get_node_type(lhs);
+                let ret_ty = inferencer.get_node_type(op_expr);
                 let rhs_ty = inferencer.get_node_type(rhs);
-                let ret_ty = inferencer.get_node_type(rhs);
 
                 rule.inner.init(
                     &mut inferencer.unifier.borrow_mut(),

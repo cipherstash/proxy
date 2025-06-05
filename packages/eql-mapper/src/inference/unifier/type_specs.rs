@@ -219,6 +219,7 @@ impl GeneralizedFunctionSpec {
 
         self.check_no_undeclared_generic_args()?;
 
+
         if args.len() != self.args.len() {
             return Err(TypeError::Expected(format!(
                 "incorrect number of arguments; got {}, expected {}",
@@ -228,6 +229,15 @@ impl GeneralizedFunctionSpec {
         }
 
         let mut env = TypeEnv::new();
+
+        for generic_arg in &self.generic_args {
+            env.add_spec_anonymously(
+                TypeSpec::Var(VarSpec {
+                    tvar: generic_arg.clone(),
+                    bounds: EqlTraits::default(),
+                }),
+            )?;
+        }
 
         let mut arg_tvars: Vec<TVar> = vec![];
 

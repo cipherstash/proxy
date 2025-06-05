@@ -59,19 +59,10 @@ impl Parse for TVar {
 impl Parse for VarSpec {
     fn parse(input: ParseStream) -> Result<Self> {
         let ident = Ident::parse(input)?;
-        // if input.peek(Token![where]) {
-        //     let _: Token![where] = input.parse()?;
-        //     let bounds: EqlTraits = input.parse()?;
-        //     Ok(VarSpec {
-        //         tvar: TVar(ident.to_string()),
-        //         bounds,
-        //     })
-        // } else {
-            Ok(VarSpec {
-                tvar: TVar(ident.to_string()),
-                bounds: EqlTraits::default(),
-            })
-        // }
+        Ok(VarSpec {
+            tvar: TVar(ident.to_string()),
+            bounds: EqlTraits::default(),
+        })
     }
 }
 
