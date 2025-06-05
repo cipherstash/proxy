@@ -2,7 +2,7 @@ defmodule ElixirTest.Encrypted do
   use Ecto.Schema
   import Ecto.Changeset
 
-  @primary_key {:id, :id, autogenerate: true}
+  @primary_key {:id, :id, autogenerate: false}
   schema "encrypted" do
     field(:plaintext, :string)
     field(:plaintext_date, :date)
