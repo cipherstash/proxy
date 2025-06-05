@@ -86,7 +86,7 @@ impl InitType for VarSpec {
                 let initialised_ty = spec.init_type(env, unifier)?;
                 unifier.unify(ty.clone(), initialised_ty)
             }
-            Err(_) => Ok(ty)
+            Err(_) => Ok(ty),
         }
     }
 }
@@ -152,8 +152,8 @@ pub(crate) struct AssociatedTypeSpec {
 }
 
 impl AssociatedTypeSpec {
-    pub(crate) fn depends_on(&self) -> &TVar {
-        &self.parent_tvar
+    pub(crate) fn depends_on(&self) -> Vec<&TVar> {
+        vec![&self.parent_tvar]
     }
 }
 
@@ -212,6 +212,7 @@ impl GeneralizedFunctionSpec {
         ret: Arc<Type>,
     ) -> Result<InstantiatedTypeEnv, TypeError> {
         self.check_no_undeclared_generic_args()?;
+
         if args.len() != self.args.len() {
             return Err(TypeError::Expected(format!(
                 "incorrect number of arguments; got {}, expected {}",
@@ -225,17 +226,15 @@ impl GeneralizedFunctionSpec {
         let mut arg_tvars: Vec<TVar> = vec![];
 
         for arg in self.args.iter() {
-            arg_tvars.push(env.add_anonymous(arg.clone())?);
+            arg_tvars.push(env.add_spec_anonymously(arg.clone())?);
         }
 
-        let ret_tvar = env.add_anonymous(self.ret.clone())?;
+        let ret_tvar = env.add_spec_anonymously(self.ret.clone())?;
 
         for Bounded(tvar, traits) in &self.bounds {
-            let new_tvar = env.fresh_tvar();
-            env.add(
-                tvar.clone(),
+            env.add_spec_anonymously(
                 TypeSpec::Var(VarSpec {
-                    tvar: new_tvar,
+                    tvar: tvar.clone(),
                     bounds: *traits,
                 }),
             )?;

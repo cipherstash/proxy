@@ -5,22 +5,26 @@
 //! than programatically.
 #![allow(unused)]
 
+use std::hash::Hash;
 use std::{collections::HashMap, sync::Arc};
 
 use derive_more::derive::Deref;
 use proc_macro2::TokenStream;
+use sqltk::parser::ast::Top;
 use syn::parse::{Parse, Parser};
 use topological_sort::TopologicalSort;
 
 use crate::TypeError;
 
-use super::{ArraySpec, ProjectionColumnSpec, ProjectionSpec, Type, TypeSpec, Unifier, VarSpec};
+use super::{
+    ArraySpec, ProjectionColumnSpec, ProjectionSpec, Type, TypeSpec, TypeVar, Unifier, VarSpec,
+};
 use super::{InitType, TVar};
 
-/// A collection of [`TypeSpec`]s and their associated [`Bound`]s.
+/// A collection of [`TypeSpec`]s.
 #[derive(Debug, Clone)]
 pub(crate) struct TypeEnv {
-    specs: HashMap<TVar, TypeSpec>,
+    symbolic_specs: HashMap<TVar, TypeSpec>,
     tvar_counter: usize,
 }
 
@@ -48,9 +52,7 @@ impl TypeSpec {
 
             TypeSpec::Native(_) | TypeSpec::Eql(_) => vec![],
 
-            TypeSpec::AssociatedType(associated_type_spec) => {
-                vec![associated_type_spec.depends_on()]
-            }
+            TypeSpec::AssociatedType(associated_type_spec) => associated_type_spec.depends_on(),
 
             TypeSpec::Array(ArraySpec(spec)) => spec.depends_on(env),
 
@@ -73,31 +75,42 @@ impl TypeSpec {
 impl TypeEnv {
     pub(crate) fn new() -> Self {
         Self {
-            specs: HashMap::new(),
+            symbolic_specs: HashMap::new(),
             tvar_counter: 0,
         }
     }
 
     pub(crate) fn fresh_tvar(&mut self) -> TVar {
         self.tvar_counter += 1;
-        TVar(format!("${}", self.specs.len()))
+        TVar(format!("${}", self.tvar_counter))
     }
 
-    pub(crate) fn add(&mut self, tvar: TVar, spec: TypeSpec) -> Result<TVar, TypeError> {
-        if self.specs.contains_key(&tvar) {
-            return Err(TypeError::InternalError(format!("cannot overwrite existing tvar {}", tvar)))
+    pub(crate) fn add_spec(&mut self, tvar: TVar, spec: TypeSpec) -> Result<(), TypeError> {
+        self.symbolic_specs.insert(tvar, spec);
+
+        Ok(())
+    }
+
+    pub(crate) fn add_spec_anonymously(&mut self, spec: TypeSpec) -> Result<TVar, TypeError> {
+        let new_tvar = self.fresh_tvar();
+
+        if let TypeSpec::Var(VarSpec { tvar, bounds }) = spec {
+            self.symbolic_specs.insert(
+                tvar,
+                TypeSpec::Var(VarSpec {
+                    tvar: new_tvar.clone(),
+                    bounds,
+                }),
+            );
+        } else {
+            self.add_spec(new_tvar.clone(), spec);
         }
 
-        Ok(self.specs.entry(tvar).insert_entry(spec).key().clone())
-    }
-
-    pub(crate) fn add_anonymous(&mut self, mut spec: TypeSpec) -> Result<TVar, TypeError> {
-        let tvar = self.fresh_tvar();
-        self.add(tvar, spec)
+        Ok(new_tvar)
     }
 
     pub(crate) fn get(&self, var: &TVar) -> Result<&TypeSpec, TypeError> {
-        match self.specs.get(var) {
+        match self.symbolic_specs.get(var) {
             Some(spec) => Ok(spec),
             None => Err(TypeError::InternalError(format!(
                 "unknown type var '{}'",
@@ -118,23 +131,23 @@ impl TypeEnv {
         // Initialise the TypeSpecs based on their topological sort order.
         let mut topo_sort = TopologicalSort::<&TVar>::new();
 
-        for (var_spec, dependencies) in self
-            .specs
+        for (tvar, dependencies) in self
+            .symbolic_specs
             .iter()
-            .map(|(var_spec, type_spec)| (var_spec, type_spec.depends_on(self)))
+            .map(|(tvar, type_spec)| (tvar, type_spec.depends_on(self)))
         {
-            topo_sort.insert(var_spec);
+            topo_sort.insert(tvar);
 
-            for dep in dependencies {
-                topo_sort.insert(dep);
-                topo_sort.add_dependency(var_spec, dep);
+            for tvar_dep in dependencies {
+                topo_sort.insert(tvar_dep);
+                topo_sort.add_dependency(tvar, tvar_dep);
             }
         }
 
         let mut env: HashMap<TVar, Arc<Type>> = HashMap::new();
 
         while let Some(tvar) = topo_sort.pop() {
-            if let Some(spec) = self.specs.get(tvar) {
+            if let Some(spec) = self.symbolic_specs.get(tvar) {
                 env.insert(tvar.clone(), spec.init_type(self, unifier)?);
             }
         }
@@ -149,8 +162,8 @@ mod test {
 
     use crate::{
         unifier::{
-            Array, AssociatedType, Constructor, EqlTerm, EqlTrait, EqlTraits, EqlValue,
-            Type, Unifier, Value,
+            Array, AssociatedType, Constructor, EqlTerm, EqlTrait, EqlTraits, EqlValue, Type,
+            Unifier, Value,
         },
         NativeValue, TableColumn, TypeError, TypeRegistry,
     };
@@ -167,9 +180,9 @@ mod test {
     fn infer_array() -> Result<(), TypeError> {
         let mut env = TypeEnv::new();
 
-        env.add(ty!(A), ty!([E]))?;
-        env.add(ty!(E), ty!(T))?;
-        env.add(ty!(T), ty!(Native))?;
+        env.add_spec(ty!(A), ty!([E]))?;
+        env.add_spec(ty!(E), ty!(T))?;
+        env.add_spec(ty!(T), ty!(Native))?;
 
         let mut unifier = make_unifier();
         let instance = env.instantiate(&mut unifier).unwrap();
@@ -190,10 +203,10 @@ mod test {
     fn infer_projection() -> Result<(), TypeError> {
         let mut env = TypeEnv::new();
 
-        env.add(ty!(P), ty!({A as id, B as name, C as email}))?;
-        env.add(ty!(A), ty!(Native(customer.id)))?;
-        env.add(ty!(B), ty!(EQL(customer.name: Eq)))?;
-        env.add(ty!(C), ty!(EQL(customer.email: Eq)))?;
+        env.add_spec(ty!(P), ty!({A as id, B as name, C as email}))?;
+        env.add_spec(ty!(A), ty!(Native(customer.id)))?;
+        env.add_spec(ty!(B), ty!(EQL(customer.name: Eq)))?;
+        env.add_spec(ty!(C), ty!(EQL(customer.email: Eq)))?;
 
         let mut unifier = make_unifier();
         let instance = env.instantiate(&mut unifier).unwrap();
@@ -243,9 +256,9 @@ mod test {
     fn infer_associated_type() -> Result<(), TypeError> {
         let mut env = TypeEnv::new();
 
-        env.add(ty!(E), ty!(EQL(customer.name: Json)))?;
-        env.add(ty!(A), ty!(E::Containment))?;
-        env.add(ty!(F), ty!(A))?;
+        env.add_spec(ty!(E), ty!(EQL(customer.name: Json)))?;
+        env.add_spec(ty!(A), ty!(E::Containment))?;
+        env.add_spec(ty!(F), ty!(A))?;
 
         let mut unifier = make_unifier();
         let instance = env.instantiate(&mut unifier).unwrap();
