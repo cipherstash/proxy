@@ -20,7 +20,7 @@ use sqltk::AsNodeKey;
 pub(crate) use types::*;
 
 pub(crate) use type_env::*;
-pub use types::{EqlValue, NativeValue, TableColumn};
+pub use types::{EqlTerm, EqlValue, NativeValue, TableColumn};
 
 use super::TypeRegistry;
 use tracing::{event, instrument, Level};

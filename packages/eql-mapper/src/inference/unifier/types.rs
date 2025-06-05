@@ -332,7 +332,9 @@ impl Type {
                 }
             }
 
-            Type::Associated(AssociatedType { associated, .. }) => associated.clone().follow_tvars(unifier)
+            Type::Associated(AssociatedType { associated, .. }) => {
+                associated.clone().follow_tvars(unifier)
+            }
         }
     }
 

@@ -1,9 +1,6 @@
 use derive_more::derive::Display;
 
-use super::{
-    Array,  Constructor, EqlTerm, EqlValue,  Projection, Type, Value,
-    Var,
-};
+use super::{Array, Constructor, EqlTerm, EqlValue, Projection, Type, Value, Var};
 
 /// Represents the supported operations on an EQL type
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Display, Hash)]
@@ -160,7 +157,7 @@ impl Type {
         match self {
             Type::Constructor(constructor) => constructor.effective_bounds(),
             Type::Var(Var(_, bounds)) => bounds.clone(),
-            Type::Associated(associated_type) => associated_type.associated.effective_bounds()
+            Type::Associated(associated_type) => associated_type.associated.effective_bounds(),
         }
     }
 }

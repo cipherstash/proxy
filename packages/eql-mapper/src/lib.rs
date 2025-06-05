@@ -20,7 +20,7 @@ pub use eql_mapper::*;
 pub use model::*;
 pub use param::*;
 pub use type_checked_statement::*;
-pub use unifier::{EqlValue, NativeValue, TableColumn};
+pub use unifier::{EqlTerm, EqlTrait, EqlTraits, EqlValue, NativeValue, TableColumn};
 
 pub(crate) use dep::*;
 pub(crate) use inference::*;
