@@ -322,19 +322,14 @@ impl Type {
             Type::Constructor(Constructor::Value(_)) => self,
 
             Type::Var(Var(tvar, _)) => {
-                let mut current_ty = self;
-                loop {
-                    if let Some(ty) = unifier.get_type(*tvar) {
-                        current_ty = ty.follow_tvars(unifier);
-                    } else {
-                        return current_ty;
-                    }
+                if let Some(ty) = unifier.get_type(*tvar) {
+                    ty.follow_tvars(unifier)
+                } else {
+                    self
                 }
             }
 
-            Type::Associated(AssociatedType { associated, .. }) => {
-                associated.clone().follow_tvars(unifier)
-            }
+            Type::Associated(AssociatedType { associated, .. }) => associated.clone().follow_tvars(unifier)
         }
     }
 
