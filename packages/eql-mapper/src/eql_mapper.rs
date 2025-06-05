@@ -258,16 +258,12 @@ impl<'ast> EqlMapper<'ast> {
                     ))) = &resolved_ty
                     {
                         return Ok(Some((eql_term.clone(), node)));
-                    } else {
-                        dbg!(("did not match", resolved_ty));
                     }
                     Ok(None)
                 },
             )
             .filter_map(Result::transpose)
             .collect::<Result<Vec<_>, _>>()?;
-
-        dbg!(("found literals", &literal_nodes));
 
         Ok(literal_nodes)
     }

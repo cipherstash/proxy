@@ -72,8 +72,6 @@ impl TypeEnv {
     }
 
     pub(crate) fn add_spec(&mut self, tvar: TVar, spec: TypeSpec) -> Result<(), TypeError> {
-        eprintln!("added: {} = {}", tvar, &spec);
-
         self.tvar_to_spec.insert(tvar.clone(), spec);
         self.tvar_bounds.entry(tvar.clone()).or_default();
 
@@ -142,7 +140,6 @@ impl TypeEnv {
         let mut env: HashMap<TVar, Arc<Type>> = HashMap::new();
 
         while let Some(tvar) = topo_sort.pop() {
-            eprintln!("Adding {tvar} to env");
             let spec = VarSpec {
                 tvar: tvar.clone(),
                 bounds: EqlTraits::default(),
@@ -150,8 +147,6 @@ impl TypeEnv {
 
             env.insert(tvar.clone(), spec.init_type(self, unifier)?);
         }
-
-        eprintln!("Env size is {}", env.len());
 
         Ok(InstantiatedTypeEnv { env })
     }

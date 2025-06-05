@@ -42,7 +42,6 @@ impl<'ast> TypeRegistry<'ast> {
     }
 
     pub(crate) fn get_nodes_and_types<N: AsNodeKey + Debug>(&self) -> Vec<(&'ast N, Arc<Type>)> {
-        dbg!(("node types", &self.node_types));
         let result = self
             .node_types
             .iter()
@@ -59,7 +58,6 @@ impl<'ast> TypeRegistry<'ast> {
             })
             .collect();
 
-        dbg!(("node type results", &result));
         result
     }
 

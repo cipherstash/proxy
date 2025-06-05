@@ -96,8 +96,6 @@ impl<'ast> TypeCheckedStatement<'ast> {
         &self,
         encrypted_literals: &HashMap<NodeKey<'ast>, sqltk::parser::ast::Value>,
     ) -> Result<(), EqlMapperError> {
-        dbg!(&encrypted_literals);
-        dbg!(&self.literals);
         if self.count_not_null_literals() != encrypted_literals.len() {
             return Err(EqlMapperError::Transform(format!(
                 "the number of encrypted literals is incorrect; expected {}, got {}",

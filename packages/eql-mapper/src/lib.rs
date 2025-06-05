@@ -90,7 +90,7 @@ mod test {
 
         match type_check(schema, &statement) {
             Ok(typed) => {
-                assert_eq!(typed.projection, projection![(EQL(users.email) as email)]);
+                assert_eq!(typed.projection, projection![(EQL(users.email: Eq) as email)]);
 
                 assert!(typed.literals.contains(&(
                     EqlTerm::Partial(
@@ -232,8 +232,6 @@ mod test {
                 let (_, value) = typed.params.first().unwrap();
 
                 assert_eq!(value, &v);
-
-                dbg!(typed.projection.type_at_col_index(0));
 
                 assert_eq!(
                     typed.projection,
@@ -768,7 +766,7 @@ mod test {
 
     #[test]
     fn aggregates() {
-        init_tracing();
+        // init_tracing();
 
         let schema = resolver(schema! {
             tables: {
@@ -1670,8 +1668,6 @@ mod test {
             typed.projection,
             projection![(NATIVE(patients.id) as id), (EQL(patients.email: Eq) as email)]
         );
-
-        dbg!(typed.literal_values());
     }
     #[test]
     fn select_with_multiple_joins() {
