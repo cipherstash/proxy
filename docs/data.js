@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1749092477952,
+  "lastUpdate": 1749093652959,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -4509,6 +4509,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 6.801905,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "toby@cipherstash.com",
+            "name": "Toby Hede",
+            "username": "tobyhede"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "104432670f603df571bc81f99412a104fd2a7084",
+          "message": "Merge pull request #258 from cipherstash/error-handling-tests\n\nRefactor error handling and expand tests",
+          "timestamp": "2025-06-05T13:18:16+10:00",
+          "tree_id": "315683f304ed39966435ea2f012311ad52d1393c",
+          "url": "https://github.com/cipherstash/proxy/commit/104432670f603df571bc81f99412a104fd2a7084"
+        },
+        "date": 1749093651827,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 7.121839,
             "unit": "Number"
           }
         ]
