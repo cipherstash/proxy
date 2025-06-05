@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1749093652959,
+  "lastUpdate": 1749106707247,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -4538,6 +4538,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 7.121839,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "df276d078118994fe5d11e7fba8624c889ee8521",
+          "message": "Feature/elixir integration test",
+          "timestamp": "2025-06-05T03:18:19Z",
+          "url": "https://github.com/cipherstash/proxy/pull/257/commits/df276d078118994fe5d11e7fba8624c889ee8521"
+        },
+        "date": 1749106706128,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 7.123673,
             "unit": "Number"
           }
         ]
