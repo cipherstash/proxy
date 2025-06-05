@@ -1,21 +1,13 @@
 # ElixirTest
 
-**TODO: Add description**
+This directory contains the test project which uses ecto to run some integration tests.
 
-## Installation
+## Running
 
-If [available in Hex](https://hex.pm/docs/publish), the package can be installed
-by adding `elixir_test` to your list of dependencies in `mix.exs`:
+The tests can be run using [mise](https://mise.jdx.dev/).
 
-```elixir
-def deps do
-  [
-    {:elixir_test, "~> 0.1.0"}
-  ]
-end
+From the project root directory, run:
 ```
-
-Documentation can be generated with [ExDoc](https://github.com/elixir-lang/ex_doc)
-and published on [HexDocs](https://hexdocs.pm). Once published, the docs can
-be found at <https://hexdocs.pm/elixir_test>.
+test:integration:lang:elixir
+```
 
