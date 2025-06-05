@@ -325,13 +325,13 @@ impl Parse for FunctionSpec {
         parenthesized!(content in input);
 
         let args: Vec<TypeSpec> =
-            Punctuated::<TypeSpec, Token![,]>::parse_separated_nonempty(input)?
+            Punctuated::<TypeSpec, Token![,]>::parse_separated_nonempty(&content)?
                 .into_iter()
                 .collect();
 
         let _: token::RArrow = input.parse()?;
 
-        let ret = TypeSpec::parse(&content)?;
+        let ret = TypeSpec::parse(&input)?;
 
         let bounds: Vec<_> = if input.peek(token::Where) {
             let _: token::Where = input.parse()?;
