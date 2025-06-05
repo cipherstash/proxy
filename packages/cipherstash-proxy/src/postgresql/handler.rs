@@ -138,7 +138,7 @@ pub async fn handler(
             let message = ProtocolError::ClientAuthenticationFailed.to_string();
             error!(msg = message);
 
-            let message = ErrorResponse::invalid_password(&message);
+            let message = ErrorResponse::invalid_password(message);
             let bytes = BytesMut::try_from(message)?;
             client_stream.write_all(&bytes).await?;
         }
