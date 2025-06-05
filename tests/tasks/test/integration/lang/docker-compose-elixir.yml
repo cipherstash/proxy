@@ -1,0 +1,8 @@
+services:
+  elixir_test:
+    image: elixir:1.18
+    volumes:
+      - ./integration/elixir_test:/src
+    working_dir: /src
+    networks:
+      - postgres

@@ -5,7 +5,7 @@ config :elixir_test, ElixirTest.Repo,
   username: "cipherstash",
   port: 6432,
   password: "p@ssword",
-  hostname: "localhost",
+  hostname: "proxy",
   pool: Ecto.Adapters.SQL.Sandbox
 
 config :elixir_test, ecto_repos: [ElixirTest.Repo]
