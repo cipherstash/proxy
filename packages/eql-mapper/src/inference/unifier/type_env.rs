@@ -17,32 +17,17 @@ use topological_sort::TopologicalSort;
 use crate::TypeError;
 
 use super::{
-    ArraySpec, ProjectionColumnSpec, ProjectionSpec, Type, TypeSpec, TypeVar, Unifier, VarSpec,
+    ArraySpec, EqlTraits, ProjectionColumnSpec, ProjectionSpec, Type, TypeSpec, TypeVar, Unifier,
+    VarSpec,
 };
 use super::{InitType, TVar};
 
 /// A collection of [`TypeSpec`]s.
 #[derive(Debug, Clone)]
 pub(crate) struct TypeEnv {
-    symbolic_specs: HashMap<TVar, TypeSpec>,
+    tvar_to_spec: HashMap<TVar, TypeSpec>,
+    tvar_bounds: HashMap<TVar, EqlTraits>,
     tvar_counter: usize,
-}
-
-#[derive(Debug, Clone, Deref)]
-pub(crate) struct InstantiatedTypeEnv {
-    env: HashMap<TVar, Arc<Type>>,
-}
-
-impl InstantiatedTypeEnv {
-    pub(crate) fn get_type(&self, var: &TVar) -> Result<Arc<Type>, TypeError> {
-        self.env
-            .get(var)
-            .cloned()
-            .ok_or(TypeError::Expected(format!(
-                "expected type spec {} to exist in the instantiated type environment",
-                &var
-            )))
-    }
 }
 
 impl TypeSpec {
@@ -75,7 +60,8 @@ impl TypeSpec {
 impl TypeEnv {
     pub(crate) fn new() -> Self {
         Self {
-            symbolic_specs: HashMap::new(),
+            tvar_to_spec: HashMap::new(),
+            tvar_bounds: HashMap::new(),
             tvar_counter: 0,
         }
     }
@@ -86,32 +72,37 @@ impl TypeEnv {
     }
 
     pub(crate) fn add_spec(&mut self, tvar: TVar, spec: TypeSpec) -> Result<(), TypeError> {
-        self.symbolic_specs.insert(tvar, spec);
+        eprintln!("added: {} = {}", tvar, &spec);
+
+        self.tvar_to_spec.insert(tvar.clone(), spec);
+        self.tvar_bounds.entry(tvar.clone()).or_default();
 
         Ok(())
     }
 
     pub(crate) fn add_spec_anonymously(&mut self, spec: TypeSpec) -> Result<TVar, TypeError> {
-        let new_tvar = self.fresh_tvar();
-
         if let TypeSpec::Var(VarSpec { tvar, bounds }) = spec {
-            self.symbolic_specs.insert(
-                tvar,
-                TypeSpec::Var(VarSpec {
-                    tvar: new_tvar.clone(),
-                    bounds,
-                }),
-            );
+            if let Some(existing_bounds) = self.tvar_bounds.get(&tvar) {
+                self.tvar_bounds
+                    .insert(tvar.clone(), bounds.union(&existing_bounds));
+            } else {
+                self.tvar_bounds.insert(tvar.clone(), bounds);
+            }
+            Ok(tvar)
         } else {
-            self.add_spec(new_tvar.clone(), spec);
+            let tvar = self.fresh_tvar();
+            self.add_spec(tvar.clone(), spec);
+            Ok(tvar)
         }
-
-        Ok(new_tvar)
     }
 
-    pub(crate) fn get(&self, var: &TVar) -> Result<&TypeSpec, TypeError> {
-        match self.symbolic_specs.get(var) {
-            Some(spec) => Ok(spec),
+    pub(crate) fn get_type_spec(&self, var: &TVar) -> Option<&TypeSpec> {
+        self.tvar_to_spec.get(var)
+    }
+
+    pub(crate) fn get_bounds(&self, var: &TVar) -> Result<&EqlTraits, TypeError> {
+        match self.tvar_bounds.get(var) {
+            Some(bounds) => Ok(bounds),
             None => Err(TypeError::InternalError(format!(
                 "unknown type var '{}'",
                 var
@@ -132,7 +123,7 @@ impl TypeEnv {
         let mut topo_sort = TopologicalSort::<&TVar>::new();
 
         for (tvar, dependencies) in self
-            .symbolic_specs
+            .tvar_to_spec
             .iter()
             .map(|(tvar, type_spec)| (tvar, type_spec.depends_on(self)))
         {
@@ -144,15 +135,47 @@ impl TypeEnv {
             }
         }
 
-        let mut env: HashMap<TVar, Arc<Type>> = HashMap::new();
-
-        while let Some(tvar) = topo_sort.pop() {
-            if let Some(spec) = self.symbolic_specs.get(tvar) {
-                env.insert(tvar.clone(), spec.init_type(self, unifier)?);
+        let mut topo_debug = topo_sort.clone();
+        while let Some(tvar) = topo_debug.pop() {
+            if let Some(spec) = self.tvar_to_spec.get(tvar) {
+                eprintln!("{} -> {}", tvar, spec);
+            } else {
+                eprintln!("unresolved tvar {}", tvar);
             }
         }
 
+        let mut env: HashMap<TVar, Arc<Type>> = HashMap::new();
+
+        while let Some(tvar) = topo_sort.pop() {
+            eprintln!("Adding {tvar} to env");
+            let spec = VarSpec {
+                tvar: tvar.clone(),
+                bounds: EqlTraits::default(),
+            };
+
+            env.insert(tvar.clone(), spec.init_type(self, unifier)?);
+        }
+
+        eprintln!("Env size is {}", env.len());
+
         Ok(InstantiatedTypeEnv { env })
+    }
+}
+
+#[derive(Debug, Clone, Deref)]
+pub(crate) struct InstantiatedTypeEnv {
+    env: HashMap<TVar, Arc<Type>>,
+}
+
+impl InstantiatedTypeEnv {
+    pub(crate) fn get_type(&self, var: &TVar) -> Result<Arc<Type>, TypeError> {
+        self.env
+            .get(var)
+            .cloned()
+            .ok_or(TypeError::Expected(format!(
+                "expected type spec {} to exist in the instantiated type environment",
+                &var
+            )))
     }
 }
 

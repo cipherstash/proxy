@@ -80,13 +80,15 @@ pub(crate) struct TVar(#[display("${}", _0)] pub(crate) String);
 
 impl InitType for VarSpec {
     fn init_type(&self, env: &TypeEnv, unifier: &mut Unifier<'_>) -> Result<Arc<Type>, TypeError> {
-        let ty = unifier.fresh_tvar();
-        match env.get(&self.tvar) {
-            Ok(spec) => {
-                let initialised_ty = spec.init_type(env, unifier)?;
-                unifier.unify(ty.clone(), initialised_ty)
-            }
-            Err(_) => Ok(ty),
+        let bounds = env.get_bounds(&self.tvar)?;
+        let target_spec = env.get_type_spec(&self.tvar);
+
+        let ty = unifier.fresh_bounded_tvar(*bounds);
+        if let Some(target_spec) = target_spec {
+            let target_ty = target_spec.init_type(env, unifier)?;
+            Ok(unifier.unify(ty, target_ty)?)
+        } else {
+            Ok(ty)
         }
     }
 }
@@ -159,7 +161,8 @@ impl AssociatedTypeSpec {
 
 impl InitType for AssociatedTypeSpec {
     fn init_type(&self, env: &TypeEnv, unifier: &mut Unifier<'_>) -> Result<Arc<Type>, TypeError> {
-        let parent_ty = env.get(&self.parent_tvar)?.init_type(env, unifier)?;
+        // let parent_ty = env.get_type_spec(&self.parent_tvar)?.init_type(env, unifier)?;
+        let parent_ty = TypeSpec::Var(VarSpec { tvar: self.parent_tvar.clone(), bounds: EqlTraits::default() }).init_type(env, unifier)?;
 
         Ok(Arc::new(Type::Associated(AssociatedType {
             parent: parent_ty,
