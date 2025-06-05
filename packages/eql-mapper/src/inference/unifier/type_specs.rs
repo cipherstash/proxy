@@ -214,6 +214,9 @@ impl GeneralizedFunctionSpec {
         args: &[Arc<Type>],
         ret: Arc<Type>,
     ) -> Result<InstantiatedTypeEnv, TypeError> {
+
+        println!("GENFNSPEC: {:#?}", self);
+
         self.check_no_undeclared_generic_args()?;
 
         if args.len() != self.args.len() {
@@ -242,6 +245,8 @@ impl GeneralizedFunctionSpec {
                 }),
             )?;
         }
+
+        println!("GENFNSPEC BUILT ENV: {:#?}", env);
 
         let instantiated_env = env.instantiate(unifier)?;
 

@@ -135,13 +135,8 @@ impl TypeEnv {
             }
         }
 
-        let mut topo_debug = topo_sort.clone();
-        while let Some(tvar) = topo_debug.pop() {
-            if let Some(spec) = self.tvar_to_spec.get(tvar) {
-                eprintln!("{} -> {}", tvar, spec);
-            } else {
-                eprintln!("unresolved tvar {}", tvar);
-            }
+        for (tvar, _) in &self.tvar_bounds {
+            topo_sort.insert(tvar);
         }
 
         let mut env: HashMap<TVar, Arc<Type>> = HashMap::new();
