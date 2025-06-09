@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1749106707247,
+  "lastUpdate": 1749429538968,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -4563,6 +4563,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 7.123673,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "yujiyokoo@gmail.com",
+            "name": "Yuji Yokoo",
+            "username": "yujiyokoo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "32199aafd6e5a9d32a9cb2d8dff332933936da7f",
+          "message": "Merge pull request #257 from cipherstash/feature/elixir-integration-test\n\nFeature/elixir integration test",
+          "timestamp": "2025-06-09T09:36:17+09:00",
+          "tree_id": "509cac221e5047f4022137195be0c4a43b448d85",
+          "url": "https://github.com/cipherstash/proxy/commit/32199aafd6e5a9d32a9cb2d8dff332933936da7f"
+        },
+        "date": 1749429537881,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 7.106344,
             "unit": "Number"
           }
         ]
