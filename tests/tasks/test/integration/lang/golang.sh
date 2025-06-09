@@ -31,9 +31,8 @@ cd tests/integration/golang
 docker build . \
   --tag cipherstash/proxy/test-integration-golang \
   --file Dockerfile \
-  --platform $platform
+  --platform "$platform"
 )
-
 
 echo "-------------------------------------"
 echo "✅ Docker image build complete"
@@ -41,8 +40,8 @@ echo "-------------------------------------"
 
 # Run the integration tests
 docker run \
-  -e DATABASE_URL=$connection_url \
-  --network $network_id \
+  -e DATABASE_URL="$connection_url" \
+  --network "$network_id" \
   cipherstash/proxy/test-integration-golang
 
 
