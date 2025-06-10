@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1749535648268,
+  "lastUpdate": 1749542843801,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -4667,6 +4667,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 7.169794,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "13f82b4edbc4c7b81545b55bca1eda08e8b3a409",
+          "message": "chore: enable language-specific tests in test:integration",
+          "timestamp": "2025-06-09T00:36:23Z",
+          "url": "https://github.com/cipherstash/proxy/pull/260/commits/13f82b4edbc4c7b81545b55bca1eda08e8b3a409"
+        },
+        "date": 1749542842397,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 6.68059,
             "unit": "Number"
           }
         ]
