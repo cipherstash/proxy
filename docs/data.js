@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1749605418662,
+  "lastUpdate": 1749605452762,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -4917,6 +4917,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 6.805157,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "yujiyokoo@gmail.com",
+            "name": "Yuji Yokoo",
+            "username": "yujiyokoo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "2fa870137e29e5bb89c5ef51c2fc0ca98f4fd459",
+          "message": "Merge pull request #260 from cipherstash/chore/enable-language-integration-tests\n\nchore: enable language-specific tests in test:integration",
+          "timestamp": "2025-06-11T10:27:18+09:00",
+          "tree_id": "ad4b5b3b8d55ddedd72b98e28259711d30d13bf9",
+          "url": "https://github.com/cipherstash/proxy/commit/2fa870137e29e5bb89c5ef51c2fc0ca98f4fd459"
+        },
+        "date": 1749605451340,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 6.765012,
             "unit": "Number"
           }
         ]
