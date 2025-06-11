@@ -337,6 +337,15 @@ mise --env tls run proxy:up proxy-tls --extra-args "--detach --wait"
 mise --env tls run test:wait_for_postgres_to_quack --port 6432 --max-retries 20 --tls
 cargo nextest run --no-fail-fast --nocapture -E 'package(cipherstash-proxy-integration)'
 mise --env tls run proxy:down
+
+echo
+echo '###############################################'
+echo '# Test: Language-specific integration'
+echo '###############################################'
+echo
+mise run test:integration:lang:golang
+mise run test:integration:lang:python
+mise run test:integration:lang:elixir
 """
 
 [tasks."test:nextest"]
