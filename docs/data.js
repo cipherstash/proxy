@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1749716716039,
+  "lastUpdate": 1749716796738,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -5429,6 +5429,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 6.868129,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "31afca32166dbe81b957123332fe724fe2a2885c",
+          "message": "fix: set rust version 1.87.0",
+          "timestamp": "2025-06-12T08:21:28Z",
+          "url": "https://github.com/cipherstash/proxy/pull/262/commits/31afca32166dbe81b957123332fe724fe2a2885c"
+        },
+        "date": 1749716795343,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 6.830118,
             "unit": "Number"
           }
         ]
