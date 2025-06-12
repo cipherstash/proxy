@@ -1,3 +1,4 @@
+
 TRUNCATE TABLE public.eql_v2_configuration;
 
 -- Regular old table
@@ -8,12 +9,22 @@ CREATE TABLE plaintext (
     PRIMARY KEY(id)
 );
 
+DO $$
+  BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'domain_type_with_check') THEN
+      CREATE DOMAIN domain_type_with_check AS VARCHAR(2) CHECK (VALUE ~ '^[A-Z]{2}$');
+    END IF;
+  END
+$$;
+
+
 -- Exciting cipherstash table
 DROP TABLE IF EXISTS encrypted;
 CREATE TABLE encrypted (
     id bigint,
     plaintext text,
     plaintext_date date,
+    plaintext_domain domain_type_with_check,
     encrypted_text eql_v2_encrypted,
     encrypted_bool eql_v2_encrypted,
     encrypted_int2 eql_v2_encrypted,

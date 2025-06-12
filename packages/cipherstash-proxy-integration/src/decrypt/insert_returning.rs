@@ -90,7 +90,7 @@ mod tests {
             let encrypted_text_result: String = row.get("encrypted_text");
             assert_eq!(encrypted_text, encrypted_text_result);
 
-            let encrypted_text_result: String = row.get(3);
+            let encrypted_text_result: String = row.get(4);
             assert_eq!(encrypted_text, encrypted_text_result);
         }
     }

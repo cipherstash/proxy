@@ -355,6 +355,8 @@ where
     ) -> Result<Option<BytesMut>, Error> {
         let mut description = ParamDescription::try_from(bytes)?;
 
+        debug!(target: PROTOCOL, client_id = self.context.client_id, ParamDescription = ?description);
+
         if let Some(statement) = self.context.get_statement_from_describe() {
             let param_types = statement
                 .param_columns
@@ -388,6 +390,8 @@ where
         bytes: &BytesMut,
     ) -> Result<Option<BytesMut>, Error> {
         let mut description = RowDescription::try_from(bytes)?;
+
+        debug!(target: PROTOCOL, client_id = self.context.client_id, RowDescription = ?description);
 
         if let Some(statement) = self.context.get_statement_from_describe() {
             let projection_types = statement

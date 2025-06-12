@@ -28,7 +28,7 @@ use std::io::Cursor;
 
 #[derive(Debug)]
 pub struct ParamDescription {
-    pub types: Vec<postgres_types::Type>,
+    pub types: Vec<i32>,
     dirty: bool,
 }
 
@@ -36,7 +36,7 @@ impl ParamDescription {
     pub fn map_types(&mut self, mapped_types: &[Option<Type>]) {
         for (idx, t) in mapped_types.iter().enumerate() {
             if let Some(t) = t {
-                self.types[idx] = t.clone();
+                self.types[idx] = t.oid() as i32;
                 self.dirty = true;
             }
         }
@@ -69,8 +69,6 @@ impl TryFrom<&BytesMut> for ParamDescription {
         let mut types = vec![];
         for _idx in 0..count {
             let type_oid = cursor.get_i32();
-            let type_oid = postgres_types::Type::from_oid(type_oid as u32)
-                .unwrap_or(postgres_types::Type::UNKNOWN);
             types.push(type_oid)
         }
 
@@ -97,7 +95,7 @@ impl TryFrom<ParamDescription> for BytesMut {
         bytes.put_i16(count as i16);
 
         for type_oid in parameter_description.types.into_iter() {
-            bytes.put_i32(type_oid.oid() as i32);
+            bytes.put_i32(type_oid);
         }
 
         Ok(bytes)
@@ -124,9 +122,9 @@ mod tests {
 
         let mut pd = ParamDescription {
             types: vec![
-                postgres_types::Type::TEXT,
-                postgres_types::Type::INT4,
-                postgres_types::Type::INT8,
+                postgres_types::Type::TEXT.oid() as i32,
+                postgres_types::Type::INT4.oid() as i32,
+                postgres_types::Type::INT8.oid() as i32,
             ],
             dirty: false,
         };
@@ -145,9 +143,9 @@ mod tests {
         assert!(pd.requires_rewrite());
 
         let expected = vec![
-            postgres_types::Type::TEXT,
-            postgres_types::Type::INT4,
-            postgres_types::Type::TEXT,
+            postgres_types::Type::TEXT.oid() as i32,
+            postgres_types::Type::INT4.oid() as i32,
+            postgres_types::Type::TEXT.oid() as i32,
         ];
 
         assert_eq!(pd.types, expected);
@@ -165,8 +163,14 @@ mod tests {
         info!("{:?}", description);
 
         assert_eq!(description.types.len(), 2);
-        assert_eq!(description.types[0], postgres_types::Type::INT8);
-        assert_eq!(description.types[1], postgres_types::Type::JSONB);
+        assert_eq!(
+            description.types[0],
+            postgres_types::Type::INT8.oid() as i32
+        );
+        assert_eq!(
+            description.types[1],
+            postgres_types::Type::JSONB.oid() as i32
+        );
 
         let bytes = BytesMut::try_from(description).unwrap();
         assert_eq!(bytes, expected);
