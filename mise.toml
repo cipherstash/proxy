@@ -553,6 +553,7 @@ fi
 {% endif %}
 
 # cross-compile
+rustup update
 rustup target add --toolchain stable {{ target }}
 
 cargo build --locked --target {{ target }} --release --package cipherstash-proxy
