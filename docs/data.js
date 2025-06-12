@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1749708958017,
+  "lastUpdate": 1749709168173,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -5321,6 +5321,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 6.742116,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "08c8c1dada47a5e061b10df12b4af25088cd842e",
+          "message": "Handle PostgreSQL OIDs for custom and domain types",
+          "timestamp": "2025-06-11T01:27:21Z",
+          "url": "https://github.com/cipherstash/proxy/pull/261/commits/08c8c1dada47a5e061b10df12b4af25088cd842e"
+        },
+        "date": 1749709167077,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 7.236653,
             "unit": "Number"
           }
         ]
