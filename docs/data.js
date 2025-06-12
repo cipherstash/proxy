@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1749709168173,
+  "lastUpdate": 1749710038094,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -5346,6 +5346,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 7.236653,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "toby@cipherstash.com",
+            "name": "Toby Hede",
+            "username": "tobyhede"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "95e15efcd34d3221e2e0aec7edb5dd95175a8913",
+          "message": "Merge pull request #261 from cipherstash/fix/handle-domain-type\n\nHandle PostgreSQL OIDs for custom and domain types",
+          "timestamp": "2025-06-12T16:31:13+10:00",
+          "tree_id": "60a35c712b87a04943a8a7626d49591820a21cfb",
+          "url": "https://github.com/cipherstash/proxy/commit/95e15efcd34d3221e2e0aec7edb5dd95175a8913"
+        },
+        "date": 1749710036957,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 7.108921,
             "unit": "Number"
           }
         ]
