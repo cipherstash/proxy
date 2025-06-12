@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1749716258952,
+  "lastUpdate": 1749716716039,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -5400,6 +5400,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 7.102774,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "toby@cipherstash.com",
+            "name": "Toby Hede",
+            "username": "tobyhede"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "a79ec0dc447c39ff4ee6004e7a9b829c6aafed54",
+          "message": "Merge pull request #259 from cipherstash/fix/build-images-in-actions\n\nFix/build images in actions",
+          "timestamp": "2025-06-12T18:21:24+10:00",
+          "tree_id": "4858698ac0e9cebfe616b9b46777d09b9d4d2460",
+          "url": "https://github.com/cipherstash/proxy/commit/a79ec0dc447c39ff4ee6004e7a9b829c6aafed54"
+        },
+        "date": 1749716714599,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 6.868129,
             "unit": "Number"
           }
         ]
