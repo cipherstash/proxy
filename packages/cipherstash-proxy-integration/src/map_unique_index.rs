@@ -1,6 +1,6 @@
 #[cfg(test)]
 mod tests {
-    use crate::common::{clear, connect_with_tls, random_id, reset_schema, trace, PROXY};
+    use crate::common::{clear, connect_with_tls, random_id, trace, PROXY};
     use chrono::NaiveDate;
 
     #[tokio::test]
@@ -225,7 +225,7 @@ mod tests {
     async fn map_unique_index_all_with_wildcard() {
         trace();
 
-        reset_schema().await;
+        clear().await;
 
         let client = connect_with_tls(PROXY).await;
 

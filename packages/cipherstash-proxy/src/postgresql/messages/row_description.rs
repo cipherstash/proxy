@@ -21,7 +21,7 @@ pub struct RowDescriptionField {
     pub name: String,
     pub table_oid: i32,
     pub table_column: i16,
-    pub type_oid: postgres_types::Type,
+    pub type_oid: i32,
     pub type_size: i16,
     pub type_modifier: i32,
     pub format_code: FormatCode,
@@ -46,8 +46,8 @@ impl RowDescription {
 }
 
 impl RowDescriptionField {
-    pub fn rewrite_type_oid(&mut self, type_oid: postgres_types::Type) {
-        self.type_oid = type_oid;
+    pub fn rewrite_type_oid(&mut self, postgres_type: postgres_types::Type) {
+        self.type_oid = postgres_type.oid() as i32;
         self.dirty = true;
     }
 
@@ -124,9 +124,6 @@ impl TryFrom<&mut Cursor<&BytesMut>> for RowDescriptionField {
         let table_column = cursor.get_i16();
         let type_oid = cursor.get_i32();
 
-        let type_oid = postgres_types::Type::from_oid(type_oid as u32)
-            .unwrap_or(postgres_types::Type::UNKNOWN);
-
         let type_size = cursor.get_i16();
         let type_modifier = cursor.get_i32();
         let format_code = cursor.get_i16().into();
@@ -156,7 +153,7 @@ impl TryFrom<RowDescriptionField> for BytesMut {
         bytes.put_slice(name);
         bytes.put_i32(field.table_oid);
         bytes.put_i16(field.table_column);
-        bytes.put_i32(field.type_oid.oid() as i32);
+        bytes.put_i32(field.type_oid);
         bytes.put_i16(field.type_size);
         bytes.put_i32(field.type_modifier);
         bytes.put_i16(field.format_code.into());

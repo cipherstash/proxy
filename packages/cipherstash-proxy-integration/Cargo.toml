@@ -29,5 +29,6 @@ cipherstash-config = "0.2.3"
 clap = "4.5.32"
 fake = { version = "4", features = ["chrono", "derive"] }
 hex = "0.4.3"
+postgres-types = { version = "0.2.9", features = ["derive"] }
 tap = "1.0.1"
 uuid = { version = "1.11.0", features = ["serde", "v4"] }

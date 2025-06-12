@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	// "github.com/jackc/pgx/v5/pgtype"
 	"github.com/stretchr/testify/require"
 )
 
@@ -159,6 +160,39 @@ func TestPgxEncryptedMapFloat(t *testing.T) {
 		})
 	}
 }
+
+func TestPgxInsertEncryptedWithDomainTypeAndReturning(t *testing.T) {
+	conn := setupPgxConnection(t)
+
+	dtypes, err := conn.LoadTypes(context.Background(), []string{"domain_type_with_check"})
+	require.NoError(t, err)
+	conn.TypeMap().RegisterTypes(dtypes)
+
+	encrypted_column_value := "hello, world"
+	plaintext_domain_value := "BV"
+
+	insertStmt := fmt.Sprintf(`INSERT INTO encrypted (id, encrypted_text, plaintext_domain) VALUES ($1, $2, $3) RETURNING id, encrypted_text, plaintext_domain`);
+
+	for _, mode := range modes {
+		id := rand.Int()
+
+		t.Run(mode.String(), func(t *testing.T) {
+			t.Run("insert", func(t *testing.T) {
+				var rid int
+				var rev string
+				var rdv string
+				err := conn.QueryRow(context.Background(), insertStmt, mode, id, encrypted_column_value, plaintext_domain_value).Scan(&rid, &rev, &rdv)
+				require.NoError(t, err)
+				require.Equal(t, id, rid)
+				require.Equal(t, encrypted_column_value, rev)
+				require.Equal(t, plaintext_domain_value, rdv)
+			})
+
+		})
+	}
+}
+
+
 
 /*
 func TestPgxEncryptedMapDate(t *testing.T) {

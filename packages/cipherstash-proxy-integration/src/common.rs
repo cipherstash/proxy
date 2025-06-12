@@ -49,7 +49,11 @@ pub async fn clear() {
 }
 
 pub async fn reset_schema() {
-    let client = connect_with_tls(PROXY).await;
+    let port = std::env::var("CS_DATABASE__PORT")
+        .map(|s| s.parse().unwrap())
+        .unwrap_or(PG_LATEST);
+
+    let client = connect_with_tls(port).await;
     client.simple_query(TEST_SCHEMA_SQL).await.unwrap();
 }
 

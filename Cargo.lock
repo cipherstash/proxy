@@ -793,6 +793,7 @@ dependencies = [
  "clap",
  "fake 4.2.0",
  "hex",
+ "postgres-types",
  "rand 0.9.0",
  "recipher",
  "rustls",

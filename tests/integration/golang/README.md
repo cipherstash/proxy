@@ -13,7 +13,7 @@ mise run postgres:setup
 mise run proxy:up
 
 # run the tests
-mise run test:integration:golang
+mise run test:integration:lang:golang
 ```
 
 This will run the tests inside a Docker container, which is networked with the `proxy` and `postgres` containers.
