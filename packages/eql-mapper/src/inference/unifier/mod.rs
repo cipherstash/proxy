@@ -1,5 +1,9 @@
 use std::{cell::RefCell, collections::HashMap, rc::Rc, sync::Arc};
 
+mod eql_traits;
+mod instantiated_type_env;
+mod type_decl;
+mod type_env;
 mod types;
 
 use crate::inference::TypeError;
