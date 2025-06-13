@@ -99,99 +99,6 @@ pub enum Constructor {
     Projection(Projection),
 }
 
-impl Constructor {
-    fn resolve(&self, unifier: &mut Unifier<'_>) -> Result<crate::Type, TypeError> {
-        match self {
-            Constructor::Value(value) => match value {
-                Value::Eql(eql_col) => Ok(crate::Type::Value(crate::Value::Eql(eql_col.clone()))),
-                Value::Native(NativeValue(Some(native_col))) => Ok(crate::Type::Value(
-                    crate::Value::Native(NativeValue(Some(native_col.clone()))),
-                )),
-                Value::Native(NativeValue(None)) => {
-                    Ok(crate::Type::Value(crate::Value::Native(NativeValue(None))))
-                }
-                Value::Array(element_ty) => {
-                    let resolved = element_ty.resolved(unifier)?;
-                    Ok(crate::Type::Value(crate::Value::Array(resolved.into())))
-                }
-            },
-            Constructor::Projection(projection) => {
-                Ok(crate::Type::Projection(projection.resolve(unifier)?))
-            }
-        }
-    }
-}
-
-impl Projection {
-    fn resolve(&self, unifier: &mut Unifier<'_>) -> Result<crate::Projection, TypeError> {
-        use itertools::Itertools;
-
-        let resolved_cols = self
-            .flatten()
-            .columns()
-            .iter()
-            .map(|col| -> Result<Vec<crate::ProjectionColumn>, TypeError> {
-                let alias = col.alias.clone();
-                match &*col.ty {
-                    Type::Constructor(constructor) => match constructor {
-                        Constructor::Value(Value::Eql(eql_col)) => {
-                            Ok(vec![crate::ProjectionColumn {
-                                ty: crate::Value::Eql(eql_col.clone()),
-                                alias,
-                            }])
-                        }
-                        Constructor::Value(Value::Native(native_col)) => {
-                            Ok(vec![crate::ProjectionColumn {
-                                ty: crate::Value::Native(native_col.clone()),
-                                alias,
-                            }])
-                        }
-                        Constructor::Value(Value::Array(array_ty)) => {
-                            match array_ty.resolved(unifier)? {
-                                elem_ty @ crate::Type::Value(_) => {
-                                    Ok(vec![crate::ProjectionColumn {
-                                        ty: crate::Value::Array(elem_ty.into()),
-                                        alias,
-                                    }])
-                                }
-                                crate::Type::Projection(_) => {
-                                    Err(TypeError::InternalError("projection type as array element".to_string()))
-                                }
-                            }
-                        }
-                        Constructor::Projection(_) => {
-                            Err(TypeError::InternalError("projection type as projection column; projections should be flattened during final resolution".to_string()))
-                        }
-                    },
-                    Type::Var(tvar) => {
-                        let ty = unifier.get_type(*tvar).ok_or(
-                            TypeError::InternalError(format!("could not resolve type variable '{}'", tvar)))?;
-                        if let Type::Constructor(Constructor::Projection(projection)) = &*ty {
-                            match projection.resolve(unifier)? {
-                                crate::Projection::WithColumns(projection_columns) => Ok(projection_columns),
-                                crate::Projection::Empty => Ok(vec![]),
-                            }
-                        } else {
-                            match ty.resolved(unifier)? {
-                                crate::Type::Value(value) => Ok(vec![crate::ProjectionColumn { ty: value, alias }]),
-                                crate::Type::Projection(_) => Err(TypeError::InternalError("unexpected projection".to_string())),
-                            }
-                        }
-
-                    },
-                }
-            })
-            .flatten_ok()
-            .collect::<Result<Vec<_>, _>>()?;
-
-        if resolved_cols.is_empty() {
-            Ok(crate::Projection::Empty)
-        } else {
-            Ok(crate::Projection::WithColumns(resolved_cols))
-        }
-    }
-}
-
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Display, Hash)]
 pub enum Value {
     /// An encrypted type from a particular table-column in the schema.
@@ -308,12 +215,12 @@ impl From<TypeVar> for Type {
 
 impl Type {
     /// Creates a `Type` containing an empty projection
-    pub(crate) fn empty_projection() -> Type {
+    pub(crate) const fn empty_projection() -> Type {
         Type::Constructor(Constructor::Projection(Projection::Empty))
     }
 
     /// Creates a `Type` containing a `Constructor::Scalar(Scalar::Native(NativeValue(None)))`.
-    pub(crate) fn any_native() -> Type {
+    pub(crate) const fn native() -> Type {
         Type::Constructor(Constructor::Value(Value::Native(NativeValue(None))))
     }
 
