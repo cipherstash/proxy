@@ -9,6 +9,13 @@ edition = "2021"
 [profile.dev]
 incremental = true
 debug = true
+opt-level = 0
+split-debuginfo = "unpacked" # or "unpacked" on macOS
+
+[profile.dev.package.sqltk]
+opt-level = 0
+debug = true
+split-debuginfo = "unpacked" # or "unpacked" on macOS
 
 # [profile.dev.package]# aws-lc-sys.opt-level = 3
 # proc-macro2.opt-level = 3
@@ -17,8 +24,8 @@ debug = true
 # sqlparser.opt-level = 3
 # syn.opt-level = 3
 
-[profile.dev.build-override]
-opt-level = 3
+# [profile.dev.build-override]
+# opt-level = 3
 
 [profile.test]
 incremental = true

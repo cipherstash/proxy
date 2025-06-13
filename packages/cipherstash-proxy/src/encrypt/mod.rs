@@ -53,8 +53,9 @@ pub struct Encrypt {
 impl Encrypt {
     pub async fn init(config: TandemConfig) -> Result<Encrypt, Error> {
         let cipher = Arc::new(init_cipher(&config).await?);
-        let schema = SchemaManager::init(&config.database).await?;
         let encrypt_config = EncryptConfigManager::init(&config.database).await?;
+        // TODO: populate EqlTraitImpls based on config
+        let schema = SchemaManager::init(&config.database).await?;
 
         let eql_version = {
             let client = connect::database(&config.database).await?;
