@@ -1,115 +1,143 @@
+//! Defines macros specifically for reducing the amount of boilerplate in `eql-mapper`.
+//!
+//! # Attribute macro
+//!
+//! [`trace_infer`]: generates `[#tracing::instrument(...)]` attributes for `InferType` impls.
+//!
+//! # Function macros
+//!
+//! [`binary_operators`]: parses a list of binary operator declarations returning a `Vec<BinaryOpDecl>`.
+//! [`functions`]: parses a list of SQL function declarations returning a `Vec<FunctionDecl>`.
+//! [`ty`]: parses a `TypeDecl`.
+//! [`tvar`]: parses `TVar`.
+//! [`type_env`]: parses a list of type equations returning a `TypeEnv`.
+
+mod trace_infer;
+use quote::ToTokens;
+use trace_infer::*;
+mod parse_type_spec;
+
 use proc_macro::TokenStream;
-use quote::{quote, ToTokens};
-use syn::{
-    parse::Parse, parse_macro_input, parse_quote, Attribute, FnArg, Ident, ImplItem, ImplItemFn,
-    ItemImpl, Pat, PatType, Signature, Type, TypePath, TypeReference,
+
+use crate::parse_type_spec::{
+    BinaryOpDecls, FunctionSpecs, ShallowInitTypes, TVar, TypeDecl, TypeEnvSpec,
 };
 
-/// This macro generates consistently defined `#[tracing::instrument]` attributes for `InferType::infer_enter` &
-/// `InferType::infer_enter` implementations on `TypeInferencer`.
+/// Generates `#[tracing::instrument]` attributes for `InferType::infer_enter` & `InferType::infer_enter`
+/// implementations on `TypeInferencer`.
 ///
 /// This attribute MUST be defined on the trait `impl` itself (not the trait method impls).
 #[proc_macro_attribute]
 pub fn trace_infer(_attr: TokenStream, item: TokenStream) -> TokenStream {
-    let mut input = parse_macro_input!(item as ItemImpl);
-
-    for item in &mut input.items {
-        if let ImplItem::Fn(ImplItemFn {
-            attrs,
-            sig:
-                Signature {
-                    ident: method,
-                    inputs,
-                    ..
-                },
-            ..
-        }) = item
-        {
-            let node_ident_and_type: Option<(&Ident, &Type)> =
-                if let Some(FnArg::Typed(PatType {
-                    ty: node_ty, pat, ..
-                })) = inputs.get(1)
-                {
-                    if let Pat::Ident(pat_ident) = &**pat {
-                        Some((&pat_ident.ident, node_ty))
-                    } else {
-                        None
-                    }
-                } else {
-                    None
-                };
-
-            let vec_ident: Ident = parse_quote!(Vec);
-
-            match node_ident_and_type {
-                Some((node_ident, node_ty)) => {
-                    let (formatter, node_ty_abbrev) = match node_ty {
-                        Type::Reference(TypeReference { elem, .. }) => match &**elem {
-                            Type::Path(TypePath { path, .. }) => {
-                                let last_segment = path.segments.last().unwrap();
-                                let last_segment_ident = &last_segment.ident;
-                                let last_segment_arguments = if last_segment.arguments.is_empty() {
-                                    None
-                                }  else {
-                                    let args = &last_segment.arguments;
-                                    Some(quote!(<#args>))
-                                };
-                                match last_segment_ident {
-                                    ident if vec_ident == *ident => {
-                                        (quote!(crate::FmtAstVec), quote!(#last_segment_ident #last_segment_arguments))
-                                    }
-                                    _ => (quote!(crate::FmtAst), quote!(#last_segment_ident #last_segment_arguments))
-                                }
-                            },
-                            _ => unreachable!("Infer::infer_enter/infer_exit has sig: infer_..(&mut self, delete: &'ast N) -> Result<(), TypeError>")
-                        },
-                            _ => unreachable!("Infer::infer_enter/infer_exit has sig: infer_..(&mut self, delete: &'ast N) -> Result<(), TypeError>")
-                    };
-
-                    let node_ty_abbrev = node_ty_abbrev
-                        .to_token_stream()
-                        .to_string()
-                        .replace(" ", "");
-
-                    let target = format!("eql-mapper::{}", method.to_string().to_uppercase());
-
-                    let attr: TracingInstrumentAttr = syn::parse2(quote! {
-                        #[tracing::instrument(
-                            target = #target,
-                            level = "trace",
-                            skip(self, #node_ident),
-                            fields(
-                                ast_ty = #node_ty_abbrev,
-                                ast = %#formatter(#node_ident),
-                            ),
-                            ret(Debug)
-                        )]
-                    })
-                    .unwrap();
-                    attrs.push(attr.attr);
-                }
-                None => {
-                    return quote!(compile_error!(
-                        "could not determine name of node argumemt in Infer impl"
-                    ))
-                    .to_token_stream()
-                    .into();
-                }
-            }
-        }
-    }
-
-    input.to_token_stream().into()
+    trace_infer_(_attr, item)
 }
 
-struct TracingInstrumentAttr {
-    attr: Attribute,
+/// Parses a `;`-separated block of binary operator declarations, like this:
+///
+/// ```ignore
+/// let ops: Vec<BinaryOpDecl> = binary_operators! {
+///     <T>(T = T) -> Native where T: Eq;
+///     <T>(T -> <T as JsonLike>::Accessor) -> T where T: JsonLike;
+///     <T>(T <@ T) -> Native where T: Contain;
+///     <T>(T ~~ <T as TokenMatch>::Tokenized) -> Native where T: TokenMatch;
+///     // ...
+/// };
+///
+#[proc_macro]
+pub fn binary_operators(tokens: TokenStream) -> TokenStream {
+    let binops = syn::parse_macro_input!(tokens as BinaryOpDecls);
+    binops.to_token_stream().into()
 }
 
-impl Parse for TracingInstrumentAttr {
-    fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
-        Ok(Self {
-            attr: Attribute::parse_outer(input)?.first().unwrap().clone(),
-        })
-    }
+/// Parses a `;`-separated block of function declarations, like this:
+///
+/// ```ignore
+/// let items: Vec<FunctionDecl> = functions! {
+///     pg_catalog.count<T>(T) -> Native;
+///     pg_catalog.min<T>(T) -> T where T: Ord;
+///     pg_catalog.max<T>(T) -> T where T: Ord;
+///     pg_catalog.jsonb_path_query<J>(J, <J as JsonLike>::Path) -> J where J: JsonLike;
+/// };
+/// ```
+#[proc_macro]
+pub fn functions(tokens: TokenStream) -> TokenStream {
+    let functions = syn::parse_macro_input!(tokens as FunctionSpecs);
+    functions.to_token_stream().into()
+}
+
+/// Builds a concrete type from type declaration syntaxt. Useful for avoiding boilerplate, especially in tests.
+///
+/// WARNING: this macro generates code that will panic if type instantiation fails so limit its usage to setting up
+/// tests.
+///
+/// ```ignore
+/// let eql_ty: Arc<Type> = ty!(EQL(customer.email));
+/// let native: Arc<Type> = ty!(Native);
+/// let projection: Arc<Type> = ty!({Native(customer.id) as id, EQL(customer.email: Eq) as email});
+/// let array: Arc<Type> = ty!([EQL(customer.email: Eq)]);
+/// ```
+#[proc_macro]
+pub fn ty(tokens: TokenStream) -> TokenStream {
+    let type_spec = syn::parse_macro_input!(tokens as TypeDecl);
+    type_spec.to_token_stream().into()
+}
+
+/// Parses a list of pseudo-Rust let bindings where the right hand of the `=` is type declaration syntax (i.e. can be
+/// parsed with [`ty`]) and assigns an initialised `Arc<Type>` to each binding.
+///
+/// WARNING: this macro generates code that will panic if type instantiation fails so limit its usage to setting up
+/// tests.
+///
+/// The type declarations are immediatly converted to `Arc<Type>` values using `InstantiateType::instantiate_shallow`
+/// and assigned to a local variable binding in the current scope.
+///
+/// ```ignore
+/// let mut unifier = Unifier::new(DepMut::new(TypeRegistry::new()));
+///
+/// shallow_init_types! {&mut unifier, {
+///     let lhs = T;
+///     let rhs = Native;
+///     let expected = Native;
+/// }};
+///
+/// let actual = unifier.unify(lhs, rhs).unwrap();
+/// assert_eq!(actual, expected);
+/// ```
+#[proc_macro]
+pub fn shallow_init_types(tokens: TokenStream) -> TokenStream {
+    let shallow_init_types = syn::parse_macro_input!(tokens as ShallowInitTypes);
+    shallow_init_types.to_token_stream().into()
+}
+
+/// Shortcut for creating a named type variable. Does not save much boilerplate but is easier on the eye.
+///
+/// ```ignore
+/// // this:
+/// let var: TVar = tvar!(A);
+///
+/// // is sugar for this:
+/// let var: TVar = TVar("A".into());
+/// ```
+#[proc_macro]
+pub fn tvar(tokens: TokenStream) -> TokenStream {
+    let tvar = syn::parse_macro_input!(tokens as TVar);
+    tvar.to_token_stream().into()
+}
+
+/// Builds a type environment from a set of `;`-separated type equations. This helps to reduce boilerplate in tests.
+///
+/// The left hand side of the equation is always a type variable, the right hand side is any type declaration.
+///
+/// ```ignore
+/// let env = type_env! {
+///     P = {A as id, B as name, C as email};
+///     A = Native(customer.id);
+///     B = EQL(customer.name: Eq);
+///     C = EQL(customer.email: Eq);
+/// };
+/// ```
+#[proc_macro]
+pub fn type_env(tokens: TokenStream) -> TokenStream {
+    let env = syn::parse_macro_input!(tokens as TypeEnvSpec);
+    env.to_token_stream().into()
 }
