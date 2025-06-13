@@ -3,7 +3,7 @@ use quote::{quote, ToTokens, TokenStreamExt};
 use syn::{
     braced, bracketed, parenthesized,
     parse::{Parse, ParseStream},
-    punctuated::{self, Punctuated},
+    punctuated::Punctuated,
     token::{self},
     Ident, Token,
 };
