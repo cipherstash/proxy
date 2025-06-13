@@ -26,7 +26,7 @@ use crate::prometheus::{
 use crate::EqlEncrypted;
 use bytes::BytesMut;
 use cipherstash_client::encryption::Plaintext;
-use eql_mapper::{self, EqlMapperError, EqlValue, TableColumn, TypeCheckedStatement};
+use eql_mapper::{self, EqlMapperError, EqlTerm, EqlValue, TableColumn, TypeCheckedStatement};
 use metrics::{counter, histogram};
 use pg_escape::quote_literal;
 use serde::Serialize;
@@ -376,7 +376,7 @@ where
             return Ok(vec![]);
         }
 
-        let plaintexts = literals_to_plaintext(&literal_values, literal_columns)?;
+        let plaintexts = literals_to_plaintext(literal_values, literal_columns)?;
 
         let start = Instant::now();
 
@@ -818,7 +818,11 @@ where
             for col in columns {
                 let eql_mapper::ProjectionColumn { ty, .. } = col;
                 let configured_column = match ty {
-                    eql_mapper::Value::Eql(EqlValue(TableColumn { table, column })) => {
+                    eql_mapper::Value::Eql(
+                        EqlTerm::Full(EqlValue(TableColumn { table, column }, _))
+                        | EqlTerm::Partial(EqlValue(TableColumn { table, column }, _), _)
+                        | EqlTerm::FieldAccessTerm(EqlValue(TableColumn { table, column }, _)),
+                    ) => {
                         let identifier: Identifier = Identifier::from((table, column));
                         debug!(
                             target: MAPPER,
@@ -852,7 +856,14 @@ where
 
         for param in typed_statement.params.iter() {
             let configured_column = match param {
-                (_, eql_mapper::Value::Eql(EqlValue(TableColumn { table, column }))) => {
+                (
+                    _,
+                    eql_mapper::Value::Eql(
+                        EqlTerm::Full(EqlValue(TableColumn { table, column }, _))
+                        | EqlTerm::Partial(EqlValue(TableColumn { table, column }, _), _)
+                        | EqlTerm::FieldAccessTerm(EqlValue(TableColumn { table, column }, _)),
+                    ),
+                ) => {
                     let identifier = Identifier::from((table, column));
 
                     debug!(
@@ -878,9 +889,11 @@ where
     ) -> Result<Vec<Option<Column>>, Error> {
         let mut literal_columns = vec![];
 
-        for (eql_value, _) in typed_statement.literals.iter() {
-            match eql_value {
-                EqlValue(TableColumn { table, column }) => {
+        for (eql_term, _) in typed_statement.literals.iter() {
+            match eql_term {
+                EqlTerm::Full(EqlValue(TableColumn { table, column }, _))
+                | EqlTerm::Partial(EqlValue(TableColumn { table, column }, _), _)
+                | EqlTerm::FieldAccessTerm(EqlValue(TableColumn { table, column }, _)) => {
                     let identifier = Identifier::from((table, column));
                     debug!(
                         target: MAPPER,
@@ -973,13 +986,13 @@ where
 }
 
 fn literals_to_plaintext(
-    literals: &Vec<&ast::Value>,
+    literals: &Vec<(EqlTerm, &ast::Value)>,
     literal_columns: &Vec<Option<Column>>,
 ) -> Result<Vec<Option<Plaintext>>, Error> {
     let plaintexts = literals
         .iter()
         .zip(literal_columns)
-        .map(|(val, col)| match col {
+        .map(|((_, val), col)| match col {
             Some(col) => literal_from_sql(val, col.cast_type()).map_err(|err| {
                 debug!(
                     target: MAPPER,
