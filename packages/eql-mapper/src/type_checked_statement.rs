@@ -3,16 +3,14 @@ use std::{collections::HashMap, sync::Arc};
 use sqltk::parser::ast::{self, Statement};
 use sqltk::{AsNodeKey, NodeKey, Transformable};
 
+use crate::unifier::EqlTerm;
 use crate::{
-    CastLiteralsAsEncrypted, CastParamsAsEncrypted, DryRunnable, EqlMapperError, EqlValue,
+    CastLiteralsAsEncrypted, CastParamsAsEncrypted, DryRunnable, EqlMapperError,
     FailOnPlaceholderChange, Param, PreserveEffectiveAliases, Projection,
     RewriteStandardSqlFnsOnEqlTypes, TransformationRule, Type, Value,
 };
 
 /// A `TypeCheckedStatement` is returned from a successful call to [`crate::type_check`].
-///
-/// It stores a reference to the type-checked [`Statement`], the type of the
-///
 #[derive(Debug)]
 pub struct TypeCheckedStatement<'ast> {
     /// A reference to the original unmodified [`Statement`].
@@ -24,8 +22,8 @@ pub struct TypeCheckedStatement<'ast> {
     /// The types of all params discovered from [`Value::Placeholder`] nodes in the SQL statement.
     pub params: Vec<(Param, Value)>,
 
-    /// The type ([`EqlValue`]) and reference to an [`ast::Value`] nodes of all EQL literals from the SQL statement.
-    pub literals: Vec<(EqlValue, &'ast ast::Value)>,
+    /// The type ([`EqlTerm`]) and reference to an [`ast::Value`] nodes of all EQL literals from the SQL statement.
+    pub literals: Vec<(EqlTerm, &'ast ast::Value)>,
 
     /// A [`HashMap`] of AST node (using [`NodeKey`] as the key) to [`Type`].  The map contains a `Type` for every node
     /// in the AST with the node type is one of: [`Statement`], [`Query`], [`Insert`], [`Delete`], [`Expr`],
@@ -64,9 +62,7 @@ impl<'ast> TypeCheckedStatement<'ast> {
 
     /// Returns `true` if one or more SQL param placeholders in the body has an EQL type, otherwise returns `false`.
     pub fn params_contain_eql(&self) -> bool {
-        self.params
-            .iter()
-            .any(|p| matches!(p.1, Value::Eql(EqlValue(_))))
+        self.params.iter().any(|p| matches!(p.1, Value::Eql(_)))
     }
 
     /// Tests if a statement transformation is required. This works by executing all of the transformation rules but
@@ -97,11 +93,8 @@ impl<'ast> TypeCheckedStatement<'ast> {
         self.statement.apply_transform(&mut transformer)
     }
 
-    pub fn literal_values(&self) -> Vec<&sqltk::parser::ast::Value> {
-        self.literals
-            .iter()
-            .map(|(_, value)| *value)
-            .collect::<Vec<_>>()
+    pub fn literal_values(&self) -> &Vec<(EqlTerm, &'ast sqltk::parser::ast::Value)> {
+        &self.literals
     }
 
     fn dummy_encrypted_literals(&self) -> HashMap<NodeKey<'ast>, ast::Value> {
