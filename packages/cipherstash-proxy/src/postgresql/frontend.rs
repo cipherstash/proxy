@@ -8,7 +8,7 @@ use super::messages::FrontendCode as Code;
 use super::protocol::{self};
 use crate::connect::Sender;
 use crate::encrypt::Encrypt;
-use crate::eql::Identifier;
+use crate::eql::{Identifier};
 use crate::error::{EncryptError, Error, MappingError};
 use crate::log::{MAPPER, PROTOCOL};
 use crate::postgresql::context::column::Column;
@@ -26,7 +26,7 @@ use crate::prometheus::{
 use crate::EqlEncrypted;
 use bytes::BytesMut;
 use cipherstash_client::encryption::Plaintext;
-use eql_mapper::{self, EqlMapperError, EqlValue, TableColumn, TypeCheckedStatement};
+use eql_mapper::{self, EqlMapperError, EqlTerm, TableColumn, TypeCheckedStatement};
 use metrics::{counter, histogram};
 use pg_escape::quote_literal;
 use serde::Serialize;
@@ -363,7 +363,7 @@ where
             return Ok(vec![]);
         }
 
-        let plaintexts = literals_to_plaintext(&literal_values, literal_columns)?;
+        let plaintexts = literals_to_plaintext(literal_values, literal_columns)?;
 
         let start = Instant::now();
 
@@ -786,7 +786,8 @@ where
             for col in columns {
                 let eql_mapper::ProjectionColumn { ty, .. } = col;
                 let configured_column = match ty {
-                    eql_mapper::Value::Eql(EqlValue(TableColumn { table, column })) => {
+                    eql_mapper::Value::Eql(eql_term) => {
+                        let TableColumn { table, column } = eql_term.table_column();
                         let identifier: Identifier = Identifier::from((table, column));
                         debug!(
                             target: MAPPER,
@@ -820,7 +821,8 @@ where
 
         for param in typed_statement.params.iter() {
             let configured_column = match param {
-                (_, eql_mapper::Value::Eql(EqlValue(TableColumn { table, column }))) => {
+                (_, eql_mapper::Value::Eql(eql_term)) => {
+                    let TableColumn { table, column } = eql_term.table_column();
                     let identifier = Identifier::from((table, column));
 
                     debug!(
@@ -846,21 +848,18 @@ where
     ) -> Result<Vec<Option<Column>>, Error> {
         let mut literal_columns = vec![];
 
-        for (eql_value, _) in typed_statement.literals.iter() {
-            match eql_value {
-                EqlValue(TableColumn { table, column }) => {
-                    let identifier = Identifier::from((table, column));
-                    debug!(
-                        target: MAPPER,
-                        client_id = self.context.client_id,
-                        msg = "Encrypted literal",
-                        identifier = ?identifier
-                    );
-                    let col = self.get_column(identifier)?;
-                    if col.is_some() {
-                        literal_columns.push(col);
-                    }
-                }
+        for (eql_term, _) in typed_statement.literals.iter() {
+            let TableColumn { table, column } = eql_term.table_column();
+            let identifier = Identifier::from((table, column));
+            debug!(
+                target: MAPPER,
+                client_id = self.context.client_id,
+                msg = "Encrypted literal",
+                identifier = ?identifier
+            );
+            let col = self.get_column(identifier)?;
+            if col.is_some() {
+                literal_columns.push(col);
             }
         }
 
@@ -941,13 +940,13 @@ where
 }
 
 fn literals_to_plaintext(
-    literals: &Vec<&ast::Value>,
+    literals: &Vec<(EqlTerm, &ast::Value)>,
     literal_columns: &Vec<Option<Column>>,
 ) -> Result<Vec<Option<Plaintext>>, Error> {
     let plaintexts = literals
         .iter()
         .zip(literal_columns)
-        .map(|(val, col)| match col {
+        .map(|((_, val), col)| match col {
             Some(col) => literal_from_sql(val, col.cast_type()).map_err(|err| {
                 debug!(
                     target: MAPPER,

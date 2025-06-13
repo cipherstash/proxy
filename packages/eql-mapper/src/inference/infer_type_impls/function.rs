@@ -1,10 +1,7 @@
 use eql_mapper_macros::trace_infer;
 use sqltk::parser::ast::{Function, FunctionArguments};
 
-use crate::{
-    get_sql_function_def, inference::infer_type::InferType, CompoundIdent, FunctionSig, TypeError,
-    TypeInferencer,
-};
+use crate::{get_sql_function, inference::infer_type::InferType, TypeError, TypeInferencer};
 
 /// Looks up the function signature.
 ///
@@ -20,21 +17,6 @@ impl<'ast> InferType<'ast, Function> for TypeInferencer<'ast> {
             ));
         }
 
-        let Function { name, args, .. } = function;
-        let fn_name = CompoundIdent::from(&name.0);
-
-        match get_sql_function_def(&fn_name, args) {
-            Some(sql_fn) => {
-                sql_fn
-                    .sig
-                    .instantiate(&*self)
-                    .apply_constraints(self, function)?;
-            }
-            None => {
-                FunctionSig::instantiate_native(function).apply_constraints(self, function)?;
-            }
-        }
-
-        Ok(())
+        get_sql_function(&function.name).apply_constraints(self, function)
     }
 }
