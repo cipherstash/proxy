@@ -2,22 +2,33 @@ use std::{cell::RefCell, collections::HashMap, rc::Rc, sync::Arc};
 
 mod eql_traits;
 mod instantiated_type_env;
+mod resolve_type;
 mod type_decl;
 mod type_env;
 mod types;
+mod unify_types;
 
 use crate::inference::TypeError;
+
+pub use eql_traits::*;
+pub(crate) use type_decl::*;
+
+use unify_types::UnifyTypes;
 
 use sqltk::AsNodeKey;
 pub(crate) use types::*;
 
-pub use types::{EqlValue, NativeValue, TableColumn};
+pub(crate) use type_env::*;
+pub use types::{EqlTerm, EqlValue, NativeValue, TableColumn};
 
 use super::TypeRegistry;
-use tracing::{event, instrument, Level};
+use tracing::{event, instrument, Level, Span};
 
-/// Implements the type unification algorithm and maintains an association of type variables with the type that they
-/// point to.
+/// Implements the type unification algorithm.
+///
+/// Type unification is the process of determining a type variable substitution that makes two type expressions
+/// identical. It involves solving equations between types, by recursively comparing their structure and binding type
+/// variables to concrete types or other variables.
 #[derive(Debug)]
 pub struct Unifier<'ast> {
     registry: Rc<RefCell<TypeRegistry<'ast>>>,
@@ -32,7 +43,11 @@ impl<'ast> Unifier<'ast> {
     }
 
     pub(crate) fn fresh_tvar(&self) -> Arc<Type> {
-        Type::Var(self.registry.borrow_mut().fresh_tvar()).into()
+        self.fresh_bounded_tvar(EqlTraits::none())
+    }
+
+    pub(crate) fn fresh_bounded_tvar(&self, bounds: EqlTraits) -> Arc<Type> {
+        Type::Var(Var(self.registry.borrow_mut().fresh_tvar(), bounds)).into()
     }
 
     pub(crate) fn get_substitutions(&self) -> HashMap<TypeVar, Arc<Type>> {
@@ -75,7 +90,30 @@ impl<'ast> Unifier<'ast> {
             .collect();
 
         for (_, ty) in unresolved_value_nodes {
-            self.unify(ty, Type::any_native().into())?;
+            self.unify(ty, Type::native().into())?;
+        }
+
+        Ok(())
+    }
+
+    pub(crate) fn resolve_unresolved_associated_types(&mut self) -> Result<(), TypeError> {
+        let unresolved_associated_types: Vec<_> = self
+            .registry
+            .borrow()
+            .get_nodes_and_types::<sqltk::parser::ast::Value>()
+            .into_iter()
+            .map(|(node, ty)| (node, ty.follow_tvars(&*self)))
+            .filter_map(|(node, ty)| {
+                if let Type::Associated(associated) = &*ty {
+                    Some((node, associated.clone()))
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        for (_node, associated_ty) in unresolved_associated_types {
+            associated_ty.resolve_selector_target(self)?;
         }
 
         Ok(())
@@ -105,248 +143,118 @@ impl<'ast> Unifier<'ast> {
         target = "eql-mapper::UNIFY",
         skip(self),
         level = "trace",
-        ret(Display),
         err(Debug),
         fields(
             lhs = %lhs,
             rhs = %rhs,
+            return = tracing::field::Empty,
         )
     )]
     pub(crate) fn unify(&mut self, lhs: Arc<Type>, rhs: Arc<Type>) -> Result<Arc<Type>, TypeError> {
-        use types::Constructor::*;
-        use types::Value::*;
+        let span = Span::current();
 
-        let lhs: Arc<Type> = lhs;
-        let rhs: Arc<Type> = rhs;
+        let result = (|| {
+            // Short-circuit the unification when lhs & rhs are equal.
+            if lhs == rhs {
+                Ok(lhs.clone())
+            } else {
+                match (&*lhs, &*rhs) {
+                    (Type::Constructor(lhs_c), Type::Constructor(rhs_c)) => {
+                        self.unify_types(lhs_c, rhs_c)
+                    }
 
-        // Short-circuit the unification when lhs & rhs are equal.
-        if lhs == rhs {
-            return Ok(lhs.clone());
+                    (Type::Var(var), Type::Constructor(constructor))
+                    | (Type::Constructor(constructor), Type::Var(var)) => {
+                        self.unify_types(constructor, var)
+                    }
+
+                    (Type::Var(lhs_v), Type::Var(rhs_v)) => self.unify_types(lhs_v, rhs_v),
+
+                    (Type::Constructor(constructor), Type::Associated(associated_type))
+                    | (Type::Associated(associated_type), Type::Constructor(constructor)) => {
+                        self.unify_types(associated_type, constructor)
+                    }
+
+                    (Type::Var(var), Type::Associated(associated_type))
+                    | (Type::Associated(associated_type), Type::Var(var)) => {
+                        self.unify_types(associated_type, var)
+                    }
+
+                    (Type::Associated(lhs_assoc), Type::Associated(rhs_assoc)) => {
+                        self.unify_types(lhs_assoc, rhs_assoc)
+                    }
+                }
+            }
+        })();
+
+        if let Ok(ref val) = result {
+            span.record("return", tracing::field::display(val));
         }
 
-        let unification = match (&*lhs, &*rhs) {
-            // Two projections unify if they have the same number of columns and all of the paired column types also
-            // unify.
-            (Type::Constructor(Projection(_)), Type::Constructor(Projection(_))) => {
-                self.unify_projections(lhs, rhs)
-            }
-
-            // Two arrays unify if the types of their element types unify.
-            (
-                Type::Constructor(Value(Array(lhs_element_ty))),
-                Type::Constructor(Value(Array(rhs_element_ty))),
-            ) => {
-                let unified_element_ty =
-                    self.unify(lhs_element_ty.clone(), rhs_element_ty.clone())?;
-                let unified_array_ty = Type::Constructor(Value(Array(unified_element_ty)));
-                Ok(unified_array_ty.into())
-            }
-
-            // A Value can unify with a single column projection
-            (Type::Constructor(Value(_)), Type::Constructor(Projection(projection))) => {
-                let projection = projection.flatten();
-                let len = projection.len();
-                if len == 1 {
-                    self.unify_value_type_with_one_col_projection(lhs, projection[0].ty.clone())
-                } else {
-                    Err(TypeError::Conflict(
-                        "cannot unify value type with projection of more than one column"
-                            .to_string(),
-                    ))
-                }
-            }
-
-            (Type::Constructor(Projection(projection)), Type::Constructor(Value(_))) => {
-                let projection = projection.flatten();
-                let len = projection.len();
-                if len == 1 {
-                    self.unify_value_type_with_one_col_projection(rhs, projection[0].ty.clone())
-                } else {
-                    Err(TypeError::Conflict(
-                        "cannot unify value type with projection of more than one column"
-                            .to_string(),
-                    ))
-                }
-            }
-
-            // All native types are considered equal in the type system.  However, for improved test readability the
-            // unifier favours a `NativeValue(Some(_))` over a `NativeValue(None)` because `NativeValue(Some(_))`
-            // carries more information. In a tie, the left hand side wins.
-            (
-                Type::Constructor(Value(Native(native_lhs))),
-                Type::Constructor(Value(Native(native_rhs))),
-            ) => match (native_lhs, native_rhs) {
-                (NativeValue(Some(_)), NativeValue(Some(_))) => Ok(lhs),
-                (NativeValue(Some(_)), NativeValue(None)) => Ok(lhs),
-                (NativeValue(None), NativeValue(Some(_))) => Ok(rhs),
-                _ => Ok(lhs),
-            },
-
-            (Type::Constructor(Value(Eql(_))), Type::Constructor(Value(Eql(_)))) => {
-                if lhs == rhs {
-                    Ok(lhs)
-                } else {
-                    Err(TypeError::Conflict(format!(
-                        "cannot unify different EQL types: {} and {}",
-                        lhs, rhs
-                    )))
-                }
-            }
-
-            // A constructor resolves with a type variable if either:
-            // 1. the type variable does not already refer to a constructor (transitively), or
-            // 2. it does refer to a constructor and the two constructors unify
-            (_, Type::Var(tvar)) => self.unify_with_type_var(lhs, *tvar),
-
-            // A constructor resolves with a type variable if either:
-            // 1. the type variable does not already refer to a constructor (transitively), or
-            // 2. it does refer to a constructor and the two constructors unify
-            (Type::Var(tvar), _) => self.unify_with_type_var(rhs, *tvar),
-
-            // Any other combination of types is a type error.
-            (lhs, rhs) => Err(TypeError::Conflict(format!(
-                "type {} cannot be unified with {}",
-                lhs, rhs
-            ))),
-        };
-
-        match unification {
-            Ok(ty) => {
-                event!(
-                    name: "UNIFY::OK",
-                    target: "eql-mapper::EVENT_UNIFY_OK",
-                    Level::TRACE,
-                    ty = %ty,
-                );
-
-                Ok(ty)
-            }
-            Err(err) => {
-                event!(
-                    name: "UNIFY::ERR",
-                    target: "eql-mapper::EVENT_UNIFY_ERR",
-                    Level::TRACE,
-                    err = ?&err
-                );
-
-                Err(err)
-            }
-        }
+        result
     }
 
     /// Unifies a type with a type variable.
     ///
     /// Attempts to unify the type with whatever the type variable is pointing to.
-    ///
-    /// After successful unification `ty_rc` and `tvar_rc` will refer to the same allocation.
     fn unify_with_type_var(
         &mut self,
         ty: Arc<Type>,
         tvar: TypeVar,
+        tvar_bounds: &EqlTraits,
     ) -> Result<Arc<Type>, TypeError> {
-        let sub_ty = {
-            let registry = &*self.registry.borrow();
-            registry.get_type(tvar)
-        };
-
-        let unified_ty: Arc<Type> = match sub_ty {
-            Some(sub_ty) => self.unify(ty, sub_ty)?,
-            None => ty,
-        };
-
-        self.substitute(tvar, unified_ty.clone());
-
-        Ok(unified_ty)
-    }
-
-    /// Unifies two projection types.
-    fn unify_projections(
-        &mut self,
-        lhs: Arc<Type>,
-        rhs: Arc<Type>,
-    ) -> Result<Arc<Type>, TypeError> {
-        match (&*lhs, &*rhs) {
-            (
-                Type::Constructor(Constructor::Projection(lhs_projection)),
-                Type::Constructor(Constructor::Projection(rhs_projection)),
-            ) => {
-                let lhs_projection = lhs_projection.flatten();
-                let rhs_projection = rhs_projection.flatten();
-
-                if lhs_projection.len() == rhs_projection.len() {
-                    let mut cols: Vec<ProjectionColumn> = Vec::with_capacity(lhs_projection.len());
-
-                    for (lhs_col, rhs_col) in lhs_projection
-                        .columns()
-                        .iter()
-                        .zip(rhs_projection.columns())
-                    {
-                        let unified_ty = self.unify(lhs_col.ty.clone(), rhs_col.ty.clone())?;
-                        cols.push(ProjectionColumn::new(unified_ty, lhs_col.alias.clone()));
+        let unified = match self.get_type(tvar) {
+            Some(sub_ty) => {
+                self.satisfy_bounds(&sub_ty, tvar_bounds)?;
+                self.unify(ty, sub_ty)?
+            }
+            None => {
+                if let Type::Var(Var(_, ty_bounds)) = &*ty {
+                    if ty_bounds != tvar_bounds {
+                        self.fresh_bounded_tvar(tvar_bounds.union(ty_bounds))
+                    } else {
+                        ty.clone()
                     }
-
-                    let unified_ty =
-                        Type::Constructor(Constructor::Projection(Projection::new(cols)));
-
-                    Ok(unified_ty.into())
                 } else {
-                    Err(TypeError::Conflict(format!(
-                        "cannot unify projections {} and {} because they have different numbers of columns",
-                        lhs, rhs
-                    )))
+                    ty.clone()
                 }
             }
-            (_, _) => Err(TypeError::InternalError(
-                "unify_projections expected projection types".to_string(),
-            )),
-        }
+        };
+
+        Ok(self.substitute(tvar, unified))
     }
 
-    fn unify_value_type_with_one_col_projection(
-        &mut self,
-        value_ty: Arc<Type>,
-        projection_ty: Arc<Type>,
-    ) -> Result<Arc<Type>, TypeError> {
-        match (&*value_ty, &*projection_ty) {
-            (
-                Type::Constructor(Constructor::Value(Value::Eql(lhs))),
-                Type::Constructor(Constructor::Value(Value::Eql(rhs))),
-            ) if lhs == rhs => Ok(value_ty.clone()),
-            (
-                Type::Constructor(Constructor::Value(Value::Native(lhs))),
-                Type::Constructor(Constructor::Value(Value::Native(rhs))),
-            ) => match (lhs, rhs) {
-                (NativeValue(Some(_)), NativeValue(Some(_))) => Ok(value_ty.clone()),
-                (NativeValue(Some(_)), NativeValue(None)) => Ok(value_ty.clone()),
-                (NativeValue(None), NativeValue(Some(_))) => Ok(projection_ty.clone()),
-                _ => Ok(value_ty.clone()),
-            },
-            (
-                Type::Constructor(Constructor::Value(Value::Array(lhs))),
-                Type::Constructor(Constructor::Value(Value::Array(rhs))),
-            ) => {
-                let unified_element_ty = self.unify(lhs.clone(), rhs.clone())?;
-                let unified_array_ty =
-                    Type::Constructor(Constructor::Value(Value::Array(unified_element_ty)));
-                Ok(unified_array_ty.into())
-            }
-            (Type::Constructor(Constructor::Value(Value::Eql(_))), Type::Var(tvar)) => {
-                self.unify_with_type_var(value_ty.clone(), *tvar)
-            }
-            (Type::Var(tvar), Type::Constructor(Constructor::Value(Value::Eql(_)))) => {
-                self.unify_with_type_var(projection_ty.clone(), *tvar)
-            }
-            _ => Err(TypeError::Conflict(format!(
-                "value type {} cannot be unified with single column projection of {}",
-                value_ty, projection_ty
-            ))),
+    /// Prove that `ty` satisfies `bounds`.
+    ///
+    /// If `ty` is a [`Type::Var`] this test always passes.
+    ///
+    /// # Rules
+    ///
+    /// 1. Native types satisfy all possible bounds.
+    /// 2. EQL types satisfy bounds that they implement.
+    /// 3. Arrays satisfy all bounds of their element type.
+    /// 4. Projections satisfy the intersection of the bounds of their columns.
+    ///     a. However, empty projections satisfy all possible bounds.
+    /// 5. Type variables satisfy all bounds that they carry.
+    fn satisfy_bounds(&mut self, ty: &Type, bounds: &EqlTraits) -> Result<(), TypeError> {
+        if let Type::Var(_) = ty {
+            return Ok(());
+        }
+
+        if &bounds.intersection(&ty.effective_bounds()) == bounds {
+            Ok(())
+        } else {
+            Err(TypeError::UnsatisfiedBounds(
+                ty.clone(),
+                bounds.difference(&ty.effective_bounds()),
+            ))
         }
     }
 }
 
 pub(crate) mod test_util {
     use sqltk::parser::ast::{
-        Delete, Expr, Function, FunctionArguments, Insert, Query, Select, SelectItem, SetExpr,
+        Delete, Expr, Function, FunctionArgExpr, Insert, Query, Select, SelectItem, SetExpr,
         Statement, Value, Values,
     };
     use sqltk::{AsNodeKey, Break, Visitable, Visitor};
@@ -371,7 +279,7 @@ pub(crate) mod test_util {
         /// Dumps the type information for a specific AST node to STDERR.
         ///
         /// Useful when debugging tests.
-        pub(crate) fn dump_node<N: AsNodeKey + Display + AsNodeKey + Debug>(&self, node: &'ast N) {
+        pub(crate) fn dump_node<N: AsNodeKey + Display + Debug>(&self, node: &'ast N) {
             let root_ty = self.get_node_type(node).clone();
             let found_ty = root_ty.clone().follow_tvars(self);
             let ast_ty = type_name::<N>();
@@ -435,7 +343,7 @@ pub(crate) mod test_util {
                         self.0.dump_node(node);
                     }
 
-                    if let Some(node) = node.downcast_ref::<FunctionArguments>() {
+                    if let Some(node) = node.downcast_ref::<FunctionArgExpr>() {
                         self.0.dump_node(node);
                     }
 
@@ -458,29 +366,20 @@ pub(crate) mod test_util {
 
 #[cfg(test)]
 mod test {
-    use std::sync::Arc;
+    use eql_mapper_macros::shallow_init_types;
 
-    use crate::unifier::{Constructor::*, NativeValue, ProjectionColumn, Type, TypeVar, Value::*};
-    use crate::unifier::{ProjectionColumns, Unifier};
+    use crate::unifier::Unifier;
+    use crate::unifier::{EqlTraits, InstantiateType};
     use crate::{DepMut, TypeRegistry};
 
     #[test]
     fn eq_native() {
         let mut unifier = Unifier::new(DepMut::new(TypeRegistry::new()));
 
-        let lhs: Arc<_> = Type::Constructor(Value(Native(NativeValue(None)))).into();
-        let rhs: Arc<_> = Type::Constructor(Value(Native(NativeValue(None)))).into();
-
-        assert_eq!(unifier.unify(lhs.clone(), rhs), Ok(lhs));
-    }
-
-    #[ignore = "this is addressed in unmerged PR"]
-    #[test]
-    fn eq_never() {
-        let mut unifier = Unifier::new(DepMut::new(TypeRegistry::new()));
-
-        let lhs: Arc<_> = Type::Constructor(Projection(crate::unifier::Projection::Empty)).into();
-        let rhs: Arc<_> = Type::Constructor(Projection(crate::unifier::Projection::Empty)).into();
+        shallow_init_types! {&mut unifier, {
+            let lhs = Native;
+            let rhs = Native;
+        }};
 
         assert_eq!(unifier.unify(lhs.clone(), rhs), Ok(lhs));
     }
@@ -489,8 +388,10 @@ mod test {
     fn constructor_with_var() {
         let mut unifier = Unifier::new(DepMut::new(TypeRegistry::new()));
 
-        let lhs: Arc<_> = Type::Constructor(Value(Native(NativeValue(None)))).into();
-        let rhs: Arc<_> = Type::Var(TypeVar(0)).into();
+        shallow_init_types!{ &mut unifier, {
+            let lhs = Native;
+            let rhs = T;
+        }};
 
         assert_eq!(unifier.unify(lhs.clone(), rhs), Ok(lhs));
     }
@@ -499,94 +400,82 @@ mod test {
     fn var_with_constructor() {
         let mut unifier = Unifier::new(DepMut::new(TypeRegistry::new()));
 
-        let lhs: Arc<_> = Type::Var(TypeVar(0)).into();
-        let rhs: Arc<_> = Type::Constructor(Value(Native(NativeValue(None)))).into();
+        shallow_init_types! {&mut unifier, {
+            let lhs = T;
+            let rhs = Native;
+            let expected = Native;
+        }};
 
-        assert_eq!(unifier.unify(lhs, rhs.clone()), Ok(rhs));
+        let actual = unifier.unify(lhs, rhs).unwrap();
+        assert_eq!(actual, expected);
     }
 
     #[test]
     fn projections_without_wildcards() {
         let mut unifier = Unifier::new(DepMut::new(TypeRegistry::new()));
 
-        let lhs: Arc<_> = Type::Constructor(Projection(crate::unifier::Projection::WithColumns(
-            ProjectionColumns(vec![
-                ProjectionColumn::new(Type::Constructor(Value(Native(NativeValue(None)))), None),
-                ProjectionColumn::new(Type::Var(TypeVar(0)), None),
-            ]),
-        )))
-        .into();
+        shallow_init_types! {&mut unifier, {
+            let lhs = {Native, T};
+            let rhs = {U, Native};
+            let expected = {Native, Native};
+        }};
 
-        let rhs: Arc<_> = Type::Constructor(Projection(crate::unifier::Projection::WithColumns(
-            ProjectionColumns(vec![
-                ProjectionColumn::new(Type::Var(TypeVar(1)), None),
-                ProjectionColumn::new(Type::Constructor(Value(Native(NativeValue(None)))), None),
-            ]),
-        )))
-        .into();
+        let actual = unifier.unify(lhs, rhs).unwrap();
 
-        let unified = unifier.unify(lhs, rhs).unwrap();
-
-        assert_eq!(
-            *unified,
-            Type::Constructor(Projection(crate::unifier::Projection::WithColumns(
-                ProjectionColumns(vec![
-                    ProjectionColumn::new(
-                        Type::Constructor(Value(Native(NativeValue(None)))),
-                        None
-                    ),
-                    ProjectionColumn::new(
-                        Type::Constructor(Value(Native(NativeValue(None)))),
-                        None
-                    ),
-                ])
-            )))
-        );
+        assert_eq!(actual, expected);
     }
 
     #[test]
     fn projections_with_wildcards() {
         let mut unifier = Unifier::new(DepMut::new(TypeRegistry::new()));
 
-        let lhs: Arc<_> = Type::Constructor(Projection(crate::unifier::Projection::WithColumns(
-            ProjectionColumns(vec![
-                ProjectionColumn::new(Type::Constructor(Value(Native(NativeValue(None)))), None),
-                ProjectionColumn::new(Type::Constructor(Value(Native(NativeValue(None)))), None),
-            ]),
-        )))
-        .into();
+        shallow_init_types! {&mut unifier, {
+            let lhs = {Native, Native};
+            // rhs is a single projection that contains a projection column that contains a projection with two
+            // projection columns.  This is how wildcard expansions is represented at the type level.
+            let rhs = {{Native, Native}};
+            let expected = {Native, Native};
+        }};
 
-        let cols: Arc<_> = Type::Constructor(Projection(crate::unifier::Projection::WithColumns(
-            ProjectionColumns(vec![
-                ProjectionColumn::new(Type::Constructor(Value(Native(NativeValue(None)))), None),
-                ProjectionColumn::new(Type::Constructor(Value(Native(NativeValue(None)))), None),
-            ]),
-        )))
-        .into();
+        let actual = unifier.unify(lhs, rhs).unwrap();
 
-        // The RHS is a single projection that contains a projection column that contains a projection with two
-        // projection columns.  This is how wildcard expansions is represented at the type level.
-        let rhs: Arc<_> = Type::Constructor(Projection(crate::unifier::Projection::WithColumns(
-            ProjectionColumns(vec![ProjectionColumn::new(cols, None)]),
-        )))
-        .into();
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn type_var_bounds_are_unified() {
+        let mut unifier = Unifier::new(DepMut::new(TypeRegistry::new()));
+
+        shallow_init_types! {&mut unifier, {
+            let lhs = T;
+            let rhs = U;
+        }};
 
         let unified = unifier.unify(lhs, rhs).unwrap();
+        assert_eq!(unified.effective_bounds(), EqlTraits::default());
 
-        assert_eq!(
-            *unified,
-            Type::Constructor(Projection(crate::unifier::Projection::WithColumns(
-                ProjectionColumns(vec![
-                    ProjectionColumn::new(
-                        Type::Constructor(Value(Native(NativeValue(None)))),
-                        None
-                    ),
-                    ProjectionColumn::new(
-                        Type::Constructor(Value(Native(NativeValue(None)))),
-                        None
-                    ),
-                ])
-            )))
-        );
+        let mut unifier = Unifier::new(DepMut::new(TypeRegistry::new()));
+
+        shallow_init_types! {&mut unifier, {
+            let lhs = T;
+            let rhs = U: Eq;
+            let expected = V: Eq;
+        }};
+
+        let actual = unifier.unify(lhs, rhs).unwrap();
+
+        assert_eq!(actual.effective_bounds(), expected.effective_bounds());
+
+        let mut unifier = Unifier::new(DepMut::new(TypeRegistry::new()));
+
+        shallow_init_types! {&mut unifier, {
+            let lhs = T: Eq;
+            let rhs = U;
+            let expected = V: Eq;
+        }};
+
+        let actual = unifier.unify(lhs, rhs).unwrap();
+
+        assert_eq!(actual.effective_bounds(), expected.effective_bounds());
     }
 }
