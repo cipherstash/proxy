@@ -144,6 +144,18 @@ pub enum EqlTerm {
     Tokenized(EqlValue),
 }
 
+impl EqlTerm {
+    pub fn table_column(&self) -> &TableColumn {
+        match self {
+            EqlTerm::Full(eql_value)
+            | EqlTerm::Partial(eql_value, _)
+            | EqlTerm::JsonAccessor(eql_value)
+            | EqlTerm::JsonPath(eql_value)
+            | EqlTerm::Tokenized(eql_value) => eql_value.table_column(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord, derive_more::Display)]
 #[display("{eql_trait}::{type_name}")]
 pub struct AssociatedTypeSelector {
@@ -169,10 +181,7 @@ impl AssociatedTypeSelector {
     }
 
     pub(crate) fn resolve(&self, ty: Arc<Type>) -> Result<Arc<Type>, TypeError> {
-        Ok(self
-            .eql_trait
-            .resolve_associated_type(ty, self)?
-            .clone())
+        Ok(self.eql_trait.resolve_associated_type(ty, self)?.clone())
     }
 }
 
