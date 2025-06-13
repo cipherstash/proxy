@@ -1,5 +1,5 @@
 use crate::{
-    inference::type_error::TypeError, inference::unifier::Type, inference::InferType,
+    inference::{type_error::TypeError, unifier::Type, InferType},
     TypeInferencer,
 };
 use eql_mapper_macros::trace_infer;
@@ -28,8 +28,8 @@ impl<'ast> InferType<'ast, Values> for TypeInferencer<'ast> {
             .collect::<Vec<_>>();
 
         for row in values.rows.iter() {
-            for (idx, val) in row.iter().enumerate() {
-                self.unify(self.get_node_type(val), column_types[idx].clone())?;
+            for (idx, expr) in row.iter().enumerate() {
+                self.unify(self.get_node_type(expr), column_types[idx].clone())?;
             }
         }
 
