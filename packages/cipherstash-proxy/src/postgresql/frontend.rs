@@ -8,7 +8,7 @@ use super::messages::FrontendCode as Code;
 use super::protocol::{self};
 use crate::connect::Sender;
 use crate::encrypt::Encrypt;
-use crate::eql::Identifier;
+use crate::eql::{Identifier};
 use crate::error::{EncryptError, Error, MappingError};
 use crate::log::{MAPPER, PROTOCOL};
 use crate::postgresql::context::column::Column;
@@ -26,7 +26,7 @@ use crate::prometheus::{
 use crate::EqlEncrypted;
 use bytes::BytesMut;
 use cipherstash_client::encryption::Plaintext;
-use eql_mapper::{self, EqlMapperError, EqlTerm, EqlValue, TableColumn, TypeCheckedStatement};
+use eql_mapper::{self, EqlMapperError, EqlTerm, TableColumn, TypeCheckedStatement};
 use metrics::{counter, histogram};
 use pg_escape::quote_literal;
 use serde::Serialize;
@@ -818,11 +818,8 @@ where
             for col in columns {
                 let eql_mapper::ProjectionColumn { ty, .. } = col;
                 let configured_column = match ty {
-                    eql_mapper::Value::Eql(
-                        EqlTerm::Full(EqlValue(TableColumn { table, column }, _))
-                        | EqlTerm::Partial(EqlValue(TableColumn { table, column }, _), _)
-                        | EqlTerm::FieldAccessTerm(EqlValue(TableColumn { table, column }, _)),
-                    ) => {
+                    eql_mapper::Value::Eql(eql_term) => {
+                        let TableColumn { table, column } = eql_term.table_column();
                         let identifier: Identifier = Identifier::from((table, column));
                         debug!(
                             target: MAPPER,
@@ -856,14 +853,8 @@ where
 
         for param in typed_statement.params.iter() {
             let configured_column = match param {
-                (
-                    _,
-                    eql_mapper::Value::Eql(
-                        EqlTerm::Full(EqlValue(TableColumn { table, column }, _))
-                        | EqlTerm::Partial(EqlValue(TableColumn { table, column }, _), _)
-                        | EqlTerm::FieldAccessTerm(EqlValue(TableColumn { table, column }, _)),
-                    ),
-                ) => {
+                (_, eql_mapper::Value::Eql(eql_term)) => {
+                    let TableColumn { table, column } = eql_term.table_column();
                     let identifier = Identifier::from((table, column));
 
                     debug!(
@@ -890,22 +881,17 @@ where
         let mut literal_columns = vec![];
 
         for (eql_term, _) in typed_statement.literals.iter() {
-            match eql_term {
-                EqlTerm::Full(EqlValue(TableColumn { table, column }, _))
-                | EqlTerm::Partial(EqlValue(TableColumn { table, column }, _), _)
-                | EqlTerm::FieldAccessTerm(EqlValue(TableColumn { table, column }, _)) => {
-                    let identifier = Identifier::from((table, column));
-                    debug!(
-                        target: MAPPER,
-                        client_id = self.context.client_id,
-                        msg = "Encrypted literal",
-                        identifier = ?identifier
-                    );
-                    let col = self.get_column(identifier)?;
-                    if col.is_some() {
-                        literal_columns.push(col);
-                    }
-                }
+            let TableColumn { table, column } = eql_term.table_column();
+            let identifier = Identifier::from((table, column));
+            debug!(
+                target: MAPPER,
+                client_id = self.context.client_id,
+                msg = "Encrypted literal",
+                identifier = ?identifier
+            );
+            let col = self.get_column(identifier)?;
+            if col.is_some() {
+                literal_columns.push(col);
             }
         }
 

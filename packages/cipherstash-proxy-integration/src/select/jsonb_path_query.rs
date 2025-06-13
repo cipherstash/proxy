@@ -1,7 +1,7 @@
 #[cfg(test)]
 mod tests {
     use crate::common::{
-        clear, connect_with_tls, insert, query_by, random_id, simple_query, trace,
+        clear, connect_with_tls, insert, query_by, random_id, trace,
     };
     use serde_json::Value;
     use tracing::info;
