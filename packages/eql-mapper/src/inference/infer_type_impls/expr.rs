@@ -1,9 +1,8 @@
 use crate::{
-    inference::{unifier::Type, InferType, TypeError},
-    SqlIdent, TypeInferencer,
+    get_sql_binop_rule, inference::{unifier::Type, InferType, TypeError}, SqlIdent, TypeInferencer
 };
 use eql_mapper_macros::trace_infer;
-use sqltk::parser::ast::{AccessExpr, Array, BinaryOperator, Expr, Ident, Subscript};
+use sqltk::parser::ast::{AccessExpr, Array, Expr, Ident, Subscript};
 
 #[trace_infer]
 impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
@@ -99,86 +98,7 @@ impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
             }
 
             Expr::BinaryOp { left, op, right } => {
-                match op {
-                    // Operators resolve to boolean (native)
-                    // The left and right need to resolve to the same type
-                    BinaryOperator::And
-                    | BinaryOperator::Eq
-                    | BinaryOperator::Gt
-                    | BinaryOperator::GtEq
-                    | BinaryOperator::Lt
-                    | BinaryOperator::LtEq
-                    | BinaryOperator::NotEq
-                    | BinaryOperator::Or => {
-                        self.unify_node_with_type(this_expr, Type::any_native())?;
-                        self.unify_nodes(&**left, &**right)?;
-                    }
-                    BinaryOperator::Plus
-                    | BinaryOperator::Minus
-                    | BinaryOperator::Multiply
-                    | BinaryOperator::Divide
-                    | BinaryOperator::Modulo
-                    | BinaryOperator::StringConcat
-                    | BinaryOperator::Spaceship
-                    | BinaryOperator::Xor
-                    | BinaryOperator::BitwiseOr
-                    | BinaryOperator::BitwiseAnd
-                    | BinaryOperator::BitwiseXor
-                    | BinaryOperator::DuckIntegerDivide
-                    | BinaryOperator::MyIntegerDivide
-                    | BinaryOperator::Custom(_)
-                    | BinaryOperator::PGBitwiseXor
-                    | BinaryOperator::PGBitwiseShiftLeft
-                    | BinaryOperator::PGBitwiseShiftRight
-                    | BinaryOperator::PGExp
-                    | BinaryOperator::PGOverlap
-                    | BinaryOperator::PGRegexMatch
-                    | BinaryOperator::PGRegexIMatch
-                    | BinaryOperator::PGRegexNotMatch
-                    | BinaryOperator::PGRegexNotIMatch
-                    | BinaryOperator::PGLikeMatch
-                    | BinaryOperator::PGILikeMatch
-                    | BinaryOperator::PGNotLikeMatch
-                    | BinaryOperator::PGNotILikeMatch
-                    | BinaryOperator::PGStartsWith
-                    | BinaryOperator::PGCustomBinaryOperator(_) => {
-                        // EQL columns don't support these operators, so we only care that the output and inputs unify to a native type.
-                        self.unify_node_with_type(&**left, Type::any_native())?;
-                        self.unify_node_with_type(&**right, Type::any_native())?;
-                        self.unify_node_with_type(this_expr, Type::any_native())?;
-                    }
-
-                    // JSON(B) operators.
-                    // Left side is JSON(B) and must unify to Scalar::Native, or Scalar::Encrypted(_).
-                    BinaryOperator::Arrow
-                    | BinaryOperator::LongArrow
-                    | BinaryOperator::HashArrow
-                    | BinaryOperator::HashLongArrow
-                    | BinaryOperator::AtAt
-                    | BinaryOperator::HashMinus // TODO do not support for EQL
-                    | BinaryOperator::AtQuestion
-                    | BinaryOperator::Question
-                    | BinaryOperator::QuestionAnd
-                    | BinaryOperator::QuestionPipe => {
-                        self.unify_node_with_type(this_expr, self.unify_nodes(&**left, &**right)?)?;
-                    }
-
-                    // JSON(B)/Array containment operators (@> and <@)
-                    // Both sides must unify to the same type.
-                    BinaryOperator::AtArrow | BinaryOperator::ArrowAt => {
-                        self.unify_node_with_type(this_expr, self.unify_nodes(&**left,    &**right)?)?;
-                    }
-
-                    BinaryOperator::Overlaps|
-                    BinaryOperator::DoubleHash|
-                    BinaryOperator::LtDashGt
-                    | BinaryOperator::AndLt | BinaryOperator::AndGt | BinaryOperator::LtLtPipe |
-                    BinaryOperator::PipeGtGt | BinaryOperator::AndLtPipe| BinaryOperator::PipeAndGt |
-
-                    BinaryOperator::LtCaret | BinaryOperator::GtCaret | BinaryOperator::QuestionHash |
-                    BinaryOperator::QuestionDash | BinaryOperator::QuestionDashPipe | BinaryOperator::QuestionDoublePipe |
-                    BinaryOperator::At | BinaryOperator::TildeEq |BinaryOperator::Assignment=> { self.unify_node_with_type(this_expr, Type::any_native())?; }
-                }
+                get_sql_binop_rule(op).apply_constraints(self, left, right, this_expr)?;
             }
 
             //customer_name LIKE 'A%';
