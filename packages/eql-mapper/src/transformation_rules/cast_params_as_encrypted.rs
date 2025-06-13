@@ -1,5 +1,6 @@
 use super::helpers::cast_as_encrypted;
 use super::TransformationRule;
+use crate::{Constructor, EqlMapperError, Type};
 use crate::{EqlMapperError, Type};
 use sqltk::parser::ast::{Expr, Value, ValueWithSpan};
 use sqltk::parser::tokenizer::Span;
@@ -56,14 +57,8 @@ impl<'ast> TransformationRule<'ast> for CastParamsAsEncrypted<'ast> {
     }
 
     fn would_edit<N: Visitable>(&mut self, node_path: &NodePath<'ast>, _target_node: &N) -> bool {
-        if let Some((
-            node @ Expr::Value(ValueWithSpan {
-                value: Value::Placeholder(_),
-                ..
-            }),
-        )) = node_path.last_1_as()
-        {
-            if let Some(Type::Value(crate::Value::Eql(_))) =
+        if let Some((node @ Expr::Value(Value::Placeholder(_)),)) = node_path.last_1_as() {
+            if let Some(Type::Constructor(Constructor::Value(crate::Value::Eql(_)))) =
                 self.node_types.get(&NodeKey::new(node))
             {
                 return true;
