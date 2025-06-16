@@ -28,8 +28,7 @@ const ASSOC_TYPES_EQ: &EqlTraitAssociatedTypes = &EqlTraitAssociatedTypes(&["Onl
 
 const ASSOC_TYPES_ORD: &EqlTraitAssociatedTypes = &EqlTraitAssociatedTypes(&["Only"]);
 
-const ASSOC_TYPES_TOKEN_MATCH: &EqlTraitAssociatedTypes =
-    &EqlTraitAssociatedTypes(&["Tokenized"]);
+const ASSOC_TYPES_TOKEN_MATCH: &EqlTraitAssociatedTypes = &EqlTraitAssociatedTypes(&["Tokenized"]);
 
 const ASSOC_TYPES_JSON_LIKE: &EqlTraitAssociatedTypes =
     &EqlTraitAssociatedTypes(&["Path", "Accessor"]);
@@ -173,8 +172,12 @@ impl FromIterator<EqlTrait> for EqlTraits {
 }
 
 impl EqlTraits {
-    pub(crate) fn none() -> Self {
+    pub fn none() -> Self {
         Self::default()
+    }
+
+    pub fn all() -> Self {
+        ALL_TRAITS
     }
 
     pub(crate) fn add_mut(&mut self, eql_trait: EqlTrait) {
