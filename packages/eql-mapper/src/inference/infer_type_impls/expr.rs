@@ -1,5 +1,7 @@
 use crate::{
-    get_sql_binop_rule, inference::{unifier::Type, InferType, TypeError}, SqlIdent, TypeInferencer
+    get_sql_binop_rule,
+    inference::{unifier::Type, InferType, TypeError},
+    SqlIdent, TypeInferencer,
 };
 use eql_mapper_macros::trace_infer;
 use sqltk::parser::ast::{AccessExpr, Array, Expr, Ident, Subscript};
@@ -29,7 +31,7 @@ impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
 
             Expr::QualifiedWildcard(object_name, _) => {
                 self.unify_node_with_type(
-                    this_expr,
+                    return_val,
                     self.resolve_qualified_wildcard(object_name)?,
                 )?;
             }
@@ -98,7 +100,7 @@ impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
             }
 
             Expr::BinaryOp { left, op, right } => {
-                get_sql_binop_rule(op).apply_constraints(self, left, right, this_expr)?;
+                get_sql_binop_rule(op).apply_constraints(self, left, right, return_val)?;
             }
 
             //customer_name LIKE 'A%';
@@ -280,7 +282,7 @@ impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
                     Some(operand) => {
                         for cond_when in conditions {
                             self.unify_nodes_with_type(
-                                this_expr,
+                                return_val,
                                 &**operand,
                                 self.unify_node_with_type(&cond_when.condition, self.fresh_tvar())?,
                             )?;
@@ -288,7 +290,7 @@ impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
                     }
                     None => {
                         for cond_when in conditions {
-                            self.unify_node_with_type(&cond_when.condition, Type::any_native())?;
+                            self.unify_node_with_type(&cond_when.condition, Type::native())?;
                         }
                     }
                 }
@@ -301,7 +303,7 @@ impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
                     self.unify_node_with_type(else_result, result_ty.clone())?;
                 };
 
-                self.unify_node_with_type(this_expr, result_ty)?;
+                self.unify_node_with_type(return_val, result_ty)?;
             }
 
             Expr::Exists {
@@ -355,16 +357,16 @@ impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
                         AccessExpr::Subscript(Subscript::Index { index }) => {
                             access_ty = self.fresh_tvar();
                             root_ty = Type::array(access_ty.clone());
-                            self.unify_node_with_type(index, Type::any_native())?;
+                            self.unify_node_with_type(index, Type::native())?;
                         }
                         AccessExpr::Subscript(Subscript::Slice {
                             lower_bound,
                             upper_bound,
                             stride,
                         }) => {
-                            self.unify_node_with_type(lower_bound, Type::any_native())?;
-                            self.unify_node_with_type(upper_bound, Type::any_native())?;
-                            self.unify_node_with_type(stride, Type::any_native())?;
+                            self.unify_node_with_type(lower_bound, Type::native())?;
+                            self.unify_node_with_type(upper_bound, Type::native())?;
+                            self.unify_node_with_type(stride, Type::native())?;
                             access_ty = self.fresh_tvar();
                             root_ty = Type::array(access_ty.clone());
                         }
@@ -376,7 +378,7 @@ impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
                     }
                 }
 
-                self.unify_node_with_type(this_expr, access_ty)?;
+                self.unify_node_with_type(return_val, access_ty)?;
                 self.unify_node_with_type(&**root, root_ty)?;
             }
 
