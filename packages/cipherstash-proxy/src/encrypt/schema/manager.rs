@@ -142,7 +142,10 @@ pub async fn load_schema(config: &DatabaseConfig) -> Result<Schema, Error> {
             let column = match column_type_name.as_deref() {
                 Some("eql_v2_encrypted") => {
                     debug!(target: SCHEMA, msg = "eql_v2_encrypted column", table = table_name, column = col);
-                    Column::eql(ident, EqlTraits::default())
+
+                    // TODO - map config to the set of implemented traits
+                    let eql_traits =  EqlTraits::all();
+                    Column::eql(ident, eql_traits)
                 }
                 _ => Column::native(ident),
             };
