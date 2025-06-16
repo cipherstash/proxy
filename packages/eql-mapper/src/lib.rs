@@ -1775,4 +1775,28 @@ mod test {
             Err(err) => panic!("type check failed: {err}"),
         }
     }
+
+    #[test]
+    fn jsonb_path_query_param_to_eql() {
+        // init_tracing();
+        let schema = resolver(schema! {
+            tables: {
+                patients: {
+                    id,
+                    notes (EQL: JsonLike),
+                }
+            }
+        });
+
+        let statement = parse("SELECT eql_v2.jsonb_path_query(notes, $1) as notes FROM patients");
+
+        let typed = type_check(schema, &statement)
+            .map_err(|err| err.to_string())
+            .unwrap();
+
+        assert_eq!(
+            typed.projection,
+            projection![(EQL(patients.notes: JsonLike) as notes)]
+        );
+    }
 }

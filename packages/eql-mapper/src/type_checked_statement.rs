@@ -48,7 +48,7 @@ impl<'ast> TypeCheckedStatement<'ast> {
         statement: &'ast Statement,
         projection: Projection,
         params: Vec<(Param, Value)>,
-        literals: Vec<(EqlValue, &'ast ast::Value)>,
+        literals: Vec<(EqlTerm, &'ast ast::Value)>,
         node_types: Arc<HashMap<NodeKey<'ast>, Type>>,
     ) -> Self {
         Self {

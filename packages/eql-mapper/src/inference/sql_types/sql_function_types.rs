@@ -1,6 +1,8 @@
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 
-use sqltk::parser::ast::{Function, FunctionArg, FunctionArgExpr, FunctionArguments};
+use sqltk::parser::ast::{
+    Function, FunctionArg, FunctionArgExpr, FunctionArguments, Ident, ObjectNamePart,
+};
 
 use crate::{
     unifier::{FunctionDecl, Type, Unifier},
@@ -15,10 +17,13 @@ pub(crate) enum SqlFunction {
     Fallback,
 }
 
+static PG_CATALOG: LazyLock<ObjectNamePart> =
+    LazyLock::new(|| ObjectNamePart::Identifier(Ident::new("pg_catalog")));
+
 impl SqlFunction {
     pub(crate) fn should_rewrite(&self) -> bool {
         match self {
-            SqlFunction::Explicit(function_spec) => &function_spec.name.0[0].value == "pg_catalog",
+            SqlFunction::Explicit(function_spec) => function_spec.name.0[0] == *PG_CATALOG,
             SqlFunction::Fallback => false,
         }
     }

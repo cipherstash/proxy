@@ -1,8 +1,6 @@
 #[cfg(test)]
 mod tests {
-    use crate::common::{
-        clear, connect_with_tls, insert, query_by, random_id, trace,
-    };
+    use crate::common::{clear, connect_with_tls, insert, query_by, random_id, trace};
     use serde_json::Value;
     use tracing::info;
 
@@ -45,8 +43,7 @@ mod tests {
         // info!("Results: {:?}", results);
 
         let selector = "$.nested.string";
-        let sql =
-            format!("SELECT eql_v2.jsonb_path_query(encrypted_jsonb, $1)::jsonb FROM encrypted");
+        let sql = format!("SELECT jsonb_path_query(encrypted_jsonb, $1)::jsonb FROM encrypted");
 
         let actual = query_by::<Value>(&sql, &selector).await;
 

@@ -1,12 +1,11 @@
 use std::{collections::HashMap, sync::LazyLock};
 
 use eql_mapper_macros::{binary_operators, functions};
-use sqltk::parser::ast::{BinaryOperator, Ident, ObjectName};
+use sqltk::parser::ast::{BinaryOperator, Ident, ObjectName, ObjectNamePart};
 
 use crate::unifier::{BinaryOpDecl, FunctionDecl};
 
 use super::{SqlBinaryOp, SqlFunction};
-
 
 /// SQL operators that can accept EQL types.
 static SQL_BINARY_OPERATORS: LazyLock<HashMap<BinaryOperator, BinaryOpDecl>> =
@@ -82,7 +81,10 @@ static SQL_FUNCTION_TYPES: LazyLock<HashMap<ObjectName, FunctionDecl>> = LazyLoc
 pub(crate) fn get_sql_function(fn_name: &ObjectName) -> SqlFunction {
     // FIXME: this is a hack and we need proper schema resolution logic
     let fully_qualified_fn_name = if fn_name.0.len() == 1 {
-        &ObjectName(vec![Ident::new("pg_catalog"), fn_name.0[0].clone()])
+        &ObjectName(vec![
+            ObjectNamePart::Identifier(Ident::new("pg_catalog")),
+            fn_name.0[0].clone(),
+        ])
     } else {
         fn_name
     };

@@ -388,7 +388,7 @@ mod test {
     fn constructor_with_var() {
         let mut unifier = Unifier::new(DepMut::new(TypeRegistry::new()));
 
-        shallow_init_types!{ &mut unifier, {
+        shallow_init_types! { &mut unifier, {
             let lhs = Native;
             let rhs = T;
         }};
