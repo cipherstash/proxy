@@ -1,6 +1,6 @@
 use std::marker::PhantomData;
 
-use sqltk::parser::ast::{Expr, Value};
+use sqltk::parser::ast::{Expr, Value, ValueWithSpan};
 
 use crate::EqlMapperError;
 
@@ -30,8 +30,15 @@ impl<'ast> FailOnPlaceholderChange<'ast> {
         if let Some((expr,)) = node_path.last_1_as::<Expr>() {
             let target_node = target_node.downcast_ref::<Expr>().unwrap();
 
-            if let (Expr::Value(source_value @ Value::Placeholder(_)), Expr::Value(target_value)) =
-                (expr, target_node)
+            if let (
+                Expr::Value(
+                    source_value @ ValueWithSpan {
+                        value: Value::Placeholder(_),
+                        ..
+                    },
+                ),
+                Expr::Value(target_value),
+            ) = (expr, target_node)
             {
                 if source_value != target_value {
                     return Err(EqlMapperError::InternalError(

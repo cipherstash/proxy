@@ -14,8 +14,8 @@ use std::{cell::RefCell, fmt::Debug, marker::PhantomData, ops::ControlFlow, rc::
 
 use infer_type::InferType;
 use sqltk::parser::ast::{
-    Delete, Expr, Function, FunctionArgExpr, Ident, Insert, Query, Select, SelectItem, SetExpr,
-    Statement, Values,
+    Delete, Expr, Function, FunctionArgExpr, Ident, Insert, ObjectName, Query, Select, SelectItem,
+    SetExpr, Statement, ValueWithSpan, Values,
 };
 use sqltk::{into_control_flow, AsNodeKey, Break, Visitable, Visitor};
 
@@ -164,7 +164,7 @@ impl<'ast> TypeInferencer<'ast> {
         self.scope_tracker.borrow().resolve_wildcard()
     }
 
-    fn resolve_qualified_wildcard(&self, idents: &[Ident]) -> Result<Arc<Type>, ScopeError> {
+    fn resolve_qualified_wildcard(&self, idents: &ObjectName) -> Result<Arc<Type>, ScopeError> {
         self.scope_tracker
             .borrow()
             .resolve_qualified_wildcard(idents)
@@ -181,6 +181,8 @@ macro_rules! dispatch {
 
 macro_rules! dispatch_all {
     ($self:ident, $method:ident, $node:ident) => {
+        // Thought: as an optimisation this list should be order of most likely to be encountered. Expr & Value should
+        // be tested for first.
         dispatch!($self, $method, $node, Statement);
         dispatch!($self, $method, $node, Query);
         dispatch!($self, $method, $node, Insert);
@@ -193,6 +195,7 @@ macro_rules! dispatch_all {
         dispatch!($self, $method, $node, Function);
         dispatch!($self, $method, $node, FunctionArgExpr);
         dispatch!($self, $method, $node, Values);
+        dispatch!($self, $method, $node, ValueWithSpan);
         dispatch!($self, $method, $node, sqltk::parser::ast::Value);
     };
 }

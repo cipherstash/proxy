@@ -7,7 +7,9 @@ use crate::{
     unifier::{Projection, ProjectionColumns},
     Relation, ScopeError, ScopeTracker,
 };
-use sqltk::parser::ast::{Cte, Ident, Insert, TableAlias, TableFactor};
+use sqltk::parser::ast::{
+    Cte, Ident, Insert, ObjectNamePart, TableAlias, TableFactor, TableObject,
+};
 use sqltk::{Break, Visitable, Visitor};
 use std::{cell::RefCell, fmt::Debug, marker::PhantomData, ops::ControlFlow, rc::Rc, sync::Arc};
 
@@ -36,27 +38,30 @@ impl<'ast> Importer<'ast> {
     }
 
     fn update_scope_for_insert_statement(&mut self, insert: &Insert) -> Result<(), ImportError> {
-        let Insert {
-            table_name,
+        if let Insert {
+            table: TableObject::TableName(table_name),
             table_alias,
             ..
-        } = insert;
+        } = insert
+        {
+            let table = self.table_resolver.resolve_table(table_name)?;
 
-        let table = self
-            .table_resolver
-            .resolve_table(table_name.0.last().unwrap())?;
+            let cols = ProjectionColumns::new_from_schema_table(table.clone());
 
-        let cols = ProjectionColumns::new_from_schema_table(table.clone());
+            self.scope_tracker.borrow_mut().add_relation(Relation {
+                name: table_alias.clone(),
+                projection_type: Type::Constructor(Constructor::Projection(
+                    Projection::WithColumns(cols),
+                ))
+                .into(),
+            })?;
 
-        self.scope_tracker.borrow_mut().add_relation(Relation {
-            name: table_alias.clone(),
-            projection_type: Type::Constructor(Constructor::Projection(Projection::WithColumns(
-                cols,
-            )))
-            .into(),
-        })?;
-
-        Ok(())
+            Ok(())
+        } else {
+            Err(ImportError::Unsupported(
+                "unsupported TableObject variant in Insert".to_string(),
+            ))
+        }
     }
 
     fn update_scope_for_cte(&mut self, cte: &'ast Cte) -> Result<(), ImportError> {
@@ -98,13 +103,16 @@ impl<'ast> Importer<'ast> {
             } => {
                 let record_as = match alias {
                     Some(alias) => Self::validate_table_alias(alias),
-                    None => Ok(name.0.last().unwrap()),
+                    None => {
+                        let ObjectNamePart::Identifier(ident) = name.0.last().unwrap();
+                        Ok(ident)
+                    }
                 };
 
                 let mut scope_tracker = self.scope_tracker.borrow_mut();
 
                 if scope_tracker.resolve_relation(name).is_err() {
-                    let table = self.table_resolver.resolve_table(name.0.last().unwrap())?;
+                    let table = self.table_resolver.resolve_table(name)?;
 
                     let cols = ProjectionColumns::new_from_schema_table(table.clone());
 
@@ -119,19 +127,19 @@ impl<'ast> Importer<'ast> {
             }
 
             TableFactor::Table { with_hints, .. } if !with_hints.is_empty() => {
-                return Err(ImportError::UnsupportedTableFactorVariant(
+                return Err(ImportError::Unsupported(
                     "Table: MySQL 'hints' unsupported".to_owned(),
                 ))
             }
 
             TableFactor::Table { partitions, .. } if !partitions.is_empty() => {
-                return Err(ImportError::UnsupportedTableFactorVariant(
+                return Err(ImportError::Unsupported(
                     "Table: MySQL partition selection unsupported".to_owned(),
                 ))
             }
 
             TableFactor::Table { args: Some(_), .. } => {
-                return Err(ImportError::UnsupportedTableFactorVariant(
+                return Err(ImportError::Unsupported(
                     "Table: table-valued function".to_owned(),
                 ))
             }
@@ -139,7 +147,7 @@ impl<'ast> Importer<'ast> {
             TableFactor::Table {
                 version: Some(_), ..
             } => {
-                return Err(ImportError::UnsupportedTableFactorVariant(
+                return Err(ImportError::Unsupported(
                     "Table: version qualifier".to_owned(),
                 ))
             }
@@ -159,9 +167,7 @@ impl<'ast> Importer<'ast> {
 
             #[allow(unused_variables)]
             TableFactor::TableFunction { expr, alias } => {
-                return Err(ImportError::UnsupportedTableFactorVariant(
-                    "TableFunction".to_owned(),
-                ))
+                return Err(ImportError::Unsupported("TableFunction".to_owned()))
             }
 
             #[allow(unused_variables)]
@@ -170,11 +176,7 @@ impl<'ast> Importer<'ast> {
                 name,
                 args,
                 alias,
-            } => {
-                return Err(ImportError::UnsupportedTableFactorVariant(
-                    "Function".to_owned(),
-                ))
-            }
+            } => return Err(ImportError::Unsupported("Function".to_owned())),
 
             #[allow(unused_variables)]
             TableFactor::UNNEST {
@@ -193,9 +195,18 @@ impl<'ast> Importer<'ast> {
                 //
                 // if alias is Some(_) then that is the projection name
                 // if alias is None then the projection is anonymous, like a wildcard.
-                return Err(ImportError::UnsupportedTableFactorVariant(
-                    "UNNEST".to_owned(),
-                ));
+                return Err(ImportError::Unsupported("UNNEST".to_owned()));
+            }
+
+            #[allow(unused_variables)]
+            TableFactor::XmlTable {
+                namespaces,
+                row_expression,
+                passing,
+                columns,
+                alias,
+            } => {
+                return Err(ImportError::Unsupported("XML table".to_owned()));
             }
 
             #[allow(unused_variables)]
@@ -205,58 +216,7 @@ impl<'ast> Importer<'ast> {
                 columns,
                 alias,
             } => {
-                return Err(ImportError::UnsupportedTableFactorVariant(
-                    "JSON_TABLE".to_owned(),
-                ))
-            }
-
-            #[allow(unused_variables)]
-            TableFactor::NestedJoin {
-                table_with_joins,
-                alias,
-            } => {
-                return Err(ImportError::UnsupportedTableFactorVariant(
-                    "NestedJoin".to_owned(),
-                ))
-            }
-
-            #[allow(unused_variables)]
-            TableFactor::OpenJsonTable {
-                json_expr,
-                json_path,
-                columns,
-                alias,
-            } => {
-                return Err(ImportError::UnsupportedTableFactorVariant(
-                    "OpenJsonTable".to_owned(),
-                ))
-            }
-
-            #[allow(unused_variables)]
-            TableFactor::Pivot {
-                table,
-                aggregate_functions,
-                value_source,
-                default_on_null,
-                value_column,
-                alias,
-            } => {
-                return Err(ImportError::UnsupportedTableFactorVariant(
-                    "PIVOT".to_owned(),
-                ))
-            }
-
-            #[allow(unused_variables)]
-            TableFactor::Unpivot {
-                table,
-                value,
-                name,
-                columns,
-                alias,
-            } => {
-                return Err(ImportError::UnsupportedTableFactorVariant(
-                    "UNPIVOT".to_owned(),
-                ))
+                return Err(ImportError::Unsupported("JSON table".to_owned()));
             }
 
             #[allow(unused_variables)]
@@ -271,9 +231,48 @@ impl<'ast> Importer<'ast> {
                 symbols,
                 alias,
             } => {
-                return Err(ImportError::UnsupportedTableFactorVariant(
-                    "MATCH_RECOGNIZE".to_owned(),
-                ))
+                return Err(ImportError::Unsupported("MATCH RECOGNIZE".to_owned()));
+            }
+
+            #[allow(unused_variables)]
+            TableFactor::OpenJsonTable {
+                json_expr,
+                json_path,
+                columns,
+                alias,
+            } => {
+                return Err(ImportError::Unsupported("OPEN JSON TABLE".to_owned()));
+            }
+
+            #[allow(unused_variables)]
+            TableFactor::NestedJoin {
+                table_with_joins,
+                alias,
+            } => {
+                return Err(ImportError::Unsupported("NESTED JOIN".to_owned()));
+            }
+
+            #[allow(unused_variables)]
+            TableFactor::Pivot {
+                table,
+                aggregate_functions,
+                value_column,
+                value_source,
+                default_on_null,
+                alias,
+            } => {
+                return Err(ImportError::Unsupported("PIVOT".to_owned()));
+            }
+
+            #[allow(unused_variables)]
+            TableFactor::Unpivot {
+                table,
+                value,
+                name,
+                columns,
+                alias,
+            } => {
+                return Err(ImportError::Unsupported("UNPIVOT".to_owned()));
             }
         }
 
@@ -283,7 +282,7 @@ impl<'ast> Importer<'ast> {
     fn validate_table_alias(alias: &TableAlias) -> Result<&Ident, ImportError> {
         match alias {
             TableAlias { name, columns } if columns.is_empty() => Ok(name),
-            _ => Err(ImportError::UnsupportTableAliasVariant(alias.to_string())),
+            _ => Err(ImportError::Unsupported(alias.to_string())),
         }
     }
 }
@@ -293,11 +292,8 @@ pub enum ImportError {
     #[error("Invariant failed: no columns in CTE: {}", _0)]
     NoColumnsInCte(String),
 
-    #[error("Unsupported TableFactor variant: {}", _0)]
-    UnsupportedTableFactorVariant(String),
-
-    #[error("Unsupported TableAlias variant: {}", _0)]
-    UnsupportTableAliasVariant(String),
+    #[error("Unsupported table source: {}", _0)]
+    Unsupported(String),
 
     #[error(transparent)]
     SchemaError(#[from] SchemaError),

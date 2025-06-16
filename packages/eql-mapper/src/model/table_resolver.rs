@@ -1,6 +1,6 @@
 use std::sync::{Arc, RwLock};
 
-use sqltk::parser::ast::Ident;
+use sqltk::parser::ast::{Ident, ObjectName};
 
 use super::{Schema, SchemaError, SchemaTableColumn, SchemaWithEdits, Table};
 
@@ -35,7 +35,7 @@ impl TableResolver {
         }
     }
 
-    pub fn resolve_table(&self, name: &Ident) -> Result<Arc<Table>, SchemaError> {
+    pub fn resolve_table(&self, name: &ObjectName) -> Result<Arc<Table>, SchemaError> {
         match self {
             TableResolver::ViaSchema(schema) => schema.resolve_table(name),
             TableResolver::ViaSchemaWithEdits(schema_with_edits) => {
@@ -46,7 +46,7 @@ impl TableResolver {
 
     pub fn resolve_table_columns(
         &self,
-        table_name: &Ident,
+        table_name: &ObjectName,
     ) -> Result<Vec<SchemaTableColumn>, SchemaError> {
         match self {
             TableResolver::ViaSchema(schema) => schema.resolve_table_columns(table_name),
@@ -59,7 +59,7 @@ impl TableResolver {
 
     pub fn resolve_table_column(
         &self,
-        table_name: &Ident,
+        table_name: &ObjectName,
         column_name: &Ident,
     ) -> Result<SchemaTableColumn, SchemaError> {
         match self {

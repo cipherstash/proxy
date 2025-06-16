@@ -2,7 +2,7 @@ use std::{collections::HashMap, convert::Infallible, fmt::Debug, ops::ControlFlo
 
 use sqltk::{
     parser::{
-        ast::{self as ast, Statement, Value},
+        ast::{self as ast, ObjectNamePart, Statement, Value},
         dialect::PostgreSqlDialect,
         parser::Parser,
     },
@@ -36,6 +36,10 @@ pub(crate) fn parse(statement: &str) -> Statement {
 
 pub(crate) fn id(ident: &str) -> ast::Ident {
     ast::Ident::from(ident)
+}
+
+pub(crate) fn object_name(ident: &str) -> ast::ObjectName {
+    ast::ObjectName(vec![ObjectNamePart::Identifier(ast::Ident::from(ident))])
 }
 
 pub(crate) fn get_node_key_of_json_selector<'ast>(

@@ -1,6 +1,6 @@
 use std::{any::type_name, collections::HashMap};
 
-use sqltk::parser::ast::{Expr, Value};
+use sqltk::parser::ast::{Expr, Value, ValueWithSpan};
 use sqltk::{NodeKey, NodePath, Visitable};
 
 use crate::EqlMapperError;
@@ -26,7 +26,8 @@ impl<'ast> TransformationRule<'ast> for CastLiteralsAsEncrypted<'ast> {
         target_node: &mut N,
     ) -> Result<bool, EqlMapperError> {
         if self.would_edit(node_path, target_node) {
-            if let Some((Expr::Value(value),)) = node_path.last_1_as::<Expr>() {
+            if let Some((Expr::Value(ValueWithSpan { value, .. }),)) = node_path.last_1_as::<Expr>()
+            {
                 if let Some(replacement) = self.encrypted_literals.remove(&NodeKey::new(value)) {
                     let target_node = target_node.downcast_mut::<Expr>().unwrap();
                     *target_node = cast_as_encrypted(replacement);
@@ -39,7 +40,7 @@ impl<'ast> TransformationRule<'ast> for CastLiteralsAsEncrypted<'ast> {
     }
 
     fn would_edit<N: Visitable>(&mut self, node_path: &NodePath<'ast>, _target_node: &N) -> bool {
-        if let Some((Expr::Value(value),)) = node_path.last_1_as::<Expr>() {
+        if let Some((Expr::Value(ValueWithSpan { value, .. }),)) = node_path.last_1_as::<Expr>() {
             return self.encrypted_literals.contains_key(&NodeKey::new(value));
         }
         false

@@ -1,5 +1,5 @@
 use eql_mapper_macros::trace_infer;
-use sqltk::parser::ast::{AssignmentTarget, Statement};
+use sqltk::parser::ast::{AssignmentTarget, ObjectName, ObjectNamePart, Statement};
 
 use crate::{inference::infer_type::InferType, unifier::Type, TypeError, TypeInferencer};
 
@@ -28,11 +28,18 @@ impl<'ast> InferType<'ast, Statement> for TypeInferencer<'ast> {
             } => {
                 for assignment in assignments.iter() {
                     match &assignment.target {
-                        AssignmentTarget::ColumnName(object_name) => {
+                        AssignmentTarget::ColumnName(ObjectName(parts)) if parts.len() == 1 => {
+                            let ObjectNamePart::Identifier(ident) = parts.last().unwrap();
                             self.unify_node_with_type(
                                 &assignment.value,
-                                self.resolve_ident(object_name.0.last().unwrap())?,
+                                self.resolve_ident(ident)?,
                             )?;
+                        }
+
+                        AssignmentTarget::ColumnName(ObjectName(_)) => {
+                            return Err(TypeError::UnsupportedSqlFeature(
+                                "qualified column names".into(),
+                            ));
                         }
 
                         AssignmentTarget::Tuple(_) => {
@@ -55,6 +62,7 @@ impl<'ast> InferType<'ast, Statement> for TypeInferencer<'ast> {
                 source: _,
                 on: _,
                 clauses: _,
+                output: _,
             } => {
                 return Err(TypeError::UnsupportedSqlFeature(
                     "MERGE is not yet supported".into(),
