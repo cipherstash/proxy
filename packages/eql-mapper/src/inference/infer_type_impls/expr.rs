@@ -3,7 +3,7 @@ use crate::{
     SqlIdent, TypeInferencer,
 };
 use eql_mapper_macros::trace_infer;
-use sqltk::parser::ast::{Array, BinaryOperator, Expr, Ident};
+use sqltk::parser::ast::{AccessExpr, Array, BinaryOperator, Expr, Ident, Subscript};
 
 #[trace_infer]
 impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
@@ -31,7 +31,7 @@ impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
             Expr::QualifiedWildcard(object_name, _) => {
                 self.unify_node_with_type(
                     this_expr,
-                    self.resolve_qualified_wildcard(&object_name.0)?,
+                    self.resolve_qualified_wildcard(object_name)?,
                 )?;
             }
 
@@ -41,8 +41,7 @@ impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
                 ))
             }
 
-            Expr::CompositeAccess { expr, key: _ }
-            | Expr::IsFalse(expr)
+            Expr::IsFalse(expr)
             | Expr::IsNotFalse(expr)
             | Expr::IsTrue(expr)
             | Expr::IsNotTrue(expr)
@@ -167,8 +166,18 @@ impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
                     // JSON(B)/Array containment operators (@> and <@)
                     // Both sides must unify to the same type.
                     BinaryOperator::AtArrow | BinaryOperator::ArrowAt => {
-                        self.unify_node_with_type(this_expr, self.unify_nodes(&**left, &**right)?)?;
+                        self.unify_node_with_type(this_expr, self.unify_nodes(&**left,    &**right)?)?;
                     }
+
+                    BinaryOperator::Overlaps|
+                    BinaryOperator::DoubleHash|
+                    BinaryOperator::LtDashGt
+                    | BinaryOperator::AndLt | BinaryOperator::AndGt | BinaryOperator::LtLtPipe |
+                    BinaryOperator::PipeGtGt | BinaryOperator::AndLtPipe| BinaryOperator::PipeAndGt |
+
+                    BinaryOperator::LtCaret | BinaryOperator::GtCaret | BinaryOperator::QuestionHash |
+                    BinaryOperator::QuestionDash | BinaryOperator::QuestionDashPipe | BinaryOperator::QuestionDoublePipe |
+                    BinaryOperator::At | BinaryOperator::TildeEq |BinaryOperator::Assignment=> { self.unify_node_with_type(this_expr, Type::any_native())?; }
                 }
             }
 
@@ -262,6 +271,7 @@ impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
                 substring_from,
                 substring_for,
                 special: _,
+                shorthand: _,
             } => {
                 self.unify_node_with_type(this_expr, Type::any_native())?;
                 self.unify_node_with_type(&**expr, Type::any_native())?;
@@ -323,10 +333,6 @@ impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
                 self.unify_nodes(this_expr, value)?;
             }
 
-            Expr::IntroducedString { .. } => Err(TypeError::UnsupportedSqlFeature(
-                "MySQL charset introducer".into(),
-            ))?,
-
             Expr::TypedString {
                 data_type: _,
                 value: _,
@@ -334,55 +340,48 @@ impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
                 self.unify_node_with_type(this_expr, Type::any_native())?;
             }
 
-            Expr::MapAccess { column: _, keys: _ } => Err(TypeError::UnsupportedSqlFeature(
-                "ClickHouse-style map access".into(),
-            ))?,
-
             // The return type of this function and the return type of this expression must be the same type.
             Expr::Function(function) => {
                 self.unify_node_with_type(this_expr, self.get_node_type(function))?;
             }
 
-            // `<arbitrary-expr>.<function-call>.<function-call-expr>...`
-            Expr::Method(_) => {
-                return Err(TypeError::UnsupportedSqlFeature(
-                    "MSSQL Expression Method".into(),
-                ))
-            }
-
-            // When operand is Some(operand), all conditions must be of type expr and expr must support equality
+            // When operand is Some(operand), all conditions must be of the same type as the operand and much support equality
             // When operand is None, all conditions must be native (they are boolean)
             // The elements of `results` and else_result must be the same type
             // The type of the overall expression is the type of the results/else_result
             Expr::Case {
                 operand,
                 conditions,
-                results,
                 else_result,
             } => {
+                let result_ty = self.fresh_tvar();
+
                 match operand {
                     Some(operand) => {
-                        // type_rule!( operand: $1, conditions: [$1], this_expr: $1 )
-                        self.unify_nodes_with_type(
-                            this_expr,
-                            &**operand,
-                            self.unify_all_with_type(conditions, self.fresh_tvar())?,
-                        )?;
+                        for cond_when in conditions {
+                            self.unify_nodes_with_type(
+                                this_expr,
+                                &**operand,
+                                self.unify_node_with_type(&cond_when.condition, self.fresh_tvar())?,
+                            )?;
+                        }
                     }
                     None => {
-                        // type_rule!( conditions: [NATIVE] )
-                        self.unify_all_with_type(conditions, Type::any_native())?;
+                        for cond_when in conditions {
+                            self.unify_node_with_type(&cond_when.condition, Type::any_native())?;
+                        }
                     }
                 }
 
-                // type_rule!( results: [$1], else_result?: $1, this_expr: $1)
-                self.unify_all_with_type(results, self.fresh_tvar())?;
+                for cond_when in conditions {
+                    self.unify_node_with_type(&cond_when.result, result_ty.clone())?;
+                }
 
                 if let Some(else_result) = else_result {
-                    self.unify_nodes(results, &**else_result)?;
+                    self.unify_node_with_type(else_result, result_ty.clone())?;
                 };
 
-                self.unify_nodes(this_expr, results)?;
+                self.unify_node_with_type(this_expr, result_ty)?;
             }
 
             Expr::Exists {
@@ -423,15 +422,42 @@ impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
                 "DuckDB-specific map/dictionary syntax".into(),
             ))?,
 
-            // This is an array element access by index.
-            // `expr` must be an array
-            // `self.get_type(this_expr)` must be the same as the array element type
-            Expr::Subscript { expr, subscript: _ } => {
-                // type_rule!( expr: Array($T), this_expr: $T, subscript: Native )
-                let elem_ty = self.fresh_tvar();
-                let array_ty = Type::array(elem_ty.clone());
-                self.unify_node_with_type(&**expr, array_ty)?;
-                self.unify_node_with_type(this_expr, elem_ty)?;
+            // This expression type represents a chain of field and/or array subscripting.  EQL Mapper does not support
+            // compound object field access yet so this will fail with a TypeError::Unsupported for object field access.
+            // The type of a CompoundFieldAccess expression is the type of the element returned by the last array access
+            // in the chain.
+            Expr::CompoundFieldAccess { root, access_chain } => {
+                let mut root_ty = self.fresh_tvar();
+                let mut access_ty = self.fresh_tvar();
+
+                for access_expr in access_chain.iter() {
+                    match access_expr {
+                        AccessExpr::Subscript(Subscript::Index { index }) => {
+                            access_ty = self.fresh_tvar();
+                            root_ty = Type::array(access_ty.clone());
+                            self.unify_node_with_type(index, Type::any_native())?;
+                        }
+                        AccessExpr::Subscript(Subscript::Slice {
+                            lower_bound,
+                            upper_bound,
+                            stride,
+                        }) => {
+                            self.unify_node_with_type(lower_bound, Type::any_native())?;
+                            self.unify_node_with_type(upper_bound, Type::any_native())?;
+                            self.unify_node_with_type(stride, Type::any_native())?;
+                            access_ty = self.fresh_tvar();
+                            root_ty = Type::array(access_ty.clone());
+                        }
+                        AccessExpr::Dot(_) => {
+                            return Err(TypeError::UnsupportedSqlFeature(
+                                "field access of compound value".into(),
+                            ))
+                        }
+                    }
+                }
+
+                self.unify_node_with_type(this_expr, access_ty)?;
+                self.unify_node_with_type(&**root, root_ty)?;
             }
 
             Expr::Array(Array { elem, named: _ }) => {
@@ -466,6 +492,21 @@ impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
 
             Expr::Lambda(_) => Err(TypeError::UnsupportedSqlFeature(
                 "Unsupported SQL feature: lambda functions".into(),
+            ))?,
+
+            Expr::IsNormalized {
+                expr: _,
+                form: _,
+                negated: _,
+            } => Err(TypeError::UnsupportedSqlFeature(
+                "Unsupported SQL feature: <expr> IS [ NOT ] [ form ] NORMALIZED".into(),
+            ))?,
+
+            Expr::Prefixed {
+                prefix: _,
+                value: _,
+            } => Err(TypeError::UnsupportedSqlFeature(
+                "Unsupported SQL feature: prefixed expressions".into(),
             ))?,
         }
 

@@ -6,7 +6,7 @@ use super::sql_ident::*;
 use crate::iterator_ext::IteratorExt;
 use core::fmt::Debug;
 use derive_more::Display;
-use sqltk::parser::ast::Ident;
+use sqltk::parser::ast::{Ident, ObjectName, ObjectNamePart};
 use std::sync::Arc;
 use thiserror::Error;
 
@@ -100,17 +100,22 @@ impl Schema {
 
     /// Resolves a table by `Ident`, which takes into account the SQL rules
     /// of quoted and new identifier matching.
-    pub fn resolve_table(&self, name: &Ident) -> Result<Arc<Table>, SchemaError> {
-        let mut haystack = self.tables.iter();
-        haystack
-            .find_unique(&|table| SqlIdent::from(&table.name) == SqlIdent::from(name))
-            .cloned()
-            .map_err(|_| SchemaError::TableNotFound(name.to_string()))
+    pub fn resolve_table(&self, name: &ObjectName) -> Result<Arc<Table>, SchemaError> {
+        if name.0.len() == 1 {
+            let ObjectNamePart::Identifier(name) = name.0.last().unwrap();
+            let mut haystack = self.tables.iter();
+            haystack
+                .find_unique(&|table| SqlIdent::from(&table.name) == SqlIdent::from(name))
+                .cloned()
+                .map_err(|_| SchemaError::TableNotFound(name.to_string()))
+        } else {
+            Err(SchemaError::TableNotFound(format!("{name}")))
+        }
     }
 
     pub fn resolve_table_columns(
         &self,
-        table_name: &Ident,
+        table_name: &ObjectName,
     ) -> Result<Vec<SchemaTableColumn>, SchemaError> {
         let table = self.resolve_table(table_name)?;
         Ok(table
@@ -126,25 +131,33 @@ impl Schema {
 
     pub fn resolve_table_column(
         &self,
-        table_name: &Ident,
+        table_name: &ObjectName,
         column_name: &Ident,
     ) -> Result<SchemaTableColumn, SchemaError> {
-        let mut haystack = self.tables.iter();
-        match haystack
-            .find_unique(&|table| SqlIdent::from(&table.name) == SqlIdent::from(table_name))
-        {
-            Ok(table) => match table.get_column(column_name) {
-                Ok(column) => Ok(SchemaTableColumn {
-                    table: table.name.clone(),
-                    column: column.name.clone(),
-                    kind: column.kind,
-                }),
-                Err(_) => Err(SchemaError::ColumnNotFound(
-                    table_name.to_string(),
-                    column_name.to_string(),
-                )),
-            },
-            Err(_) => Err(SchemaError::TableNotFound(table_name.to_string())),
+        if table_name.0.len() == 1 {
+            let ObjectNamePart::Identifier(table_name) = table_name.0.last().unwrap();
+            let mut haystack = self.tables.iter();
+            match haystack
+                .find_unique(&|table| SqlIdent::from(&table.name) == SqlIdent::from(table_name))
+            {
+                Ok(table) => match table.get_column(column_name) {
+                    Ok(column) => Ok(SchemaTableColumn {
+                        table: table.name.clone(),
+                        column: column.name.clone(),
+                        kind: column.kind,
+                    }),
+                    Err(_) => Err(SchemaError::ColumnNotFound(
+                        table_name.to_string(),
+                        column_name.to_string(),
+                    )),
+                },
+                Err(_) => Err(SchemaError::TableNotFound(table_name.to_string())),
+            }
+        } else {
+            Err(SchemaError::ColumnNotFound(
+                format!("{table_name}"),
+                format!("{}", column_name),
+            ))
         }
     }
 }

@@ -1,5 +1,6 @@
 use std::mem;
 
+use sqltk::parser::ast::ObjectNamePart;
 use sqltk::parser::ast::{
     helpers::attached_token::AttachedToken, Expr, Function, Ident, Select, SelectItem,
 };
@@ -136,7 +137,10 @@ impl PreserveEffectiveAliases {
         match expr {
             Expr::Identifier(ident) => Some(ident.clone()),
             Expr::CompoundIdentifier(idents) => Some(idents.last().unwrap().clone()),
-            Expr::Function(Function { name, .. }) => Some(name.0.last().unwrap().clone()),
+            Expr::Function(Function { name, .. }) => {
+                let ObjectNamePart::Identifier(ident) = name.0.last().unwrap().clone();
+                Some(ident)
+            }
             Expr::Nested(expr) => Self::derive_effective_alias_for_expr(expr),
             _ => None,
         }

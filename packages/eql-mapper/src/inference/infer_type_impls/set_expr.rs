@@ -39,6 +39,10 @@ impl<'ast> InferType<'ast, SetExpr> for TypeInferencer<'ast> {
             SetExpr::Table(table) => {
                 self.unify_nodes(&**table, set_expr)?;
             }
+
+            SetExpr::Delete(statement) => {
+                self.unify_nodes(statement, set_expr)?;
+            }
         }
 
         Ok(())

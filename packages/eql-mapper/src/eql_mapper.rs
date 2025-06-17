@@ -169,13 +169,13 @@ impl<'ast> EqlMapper<'ast> {
                     node_types = %Fmt(&node_types)
                 );
 
-                Ok(TypeCheckedStatement {
+                Ok(TypeCheckedStatement::new(
                     statement,
                     projection,
                     params,
                     literals,
-                    node_types: Arc::new(node_types),
-                })
+                    Arc::new(node_types),
+                ))
             }
             Err(err) => {
                 {

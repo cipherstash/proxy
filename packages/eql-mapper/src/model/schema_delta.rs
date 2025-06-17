@@ -6,8 +6,8 @@ use std::{
 };
 
 use sqltk::parser::ast::{
-    AlterTableOperation, ColumnDef, CreateTable, Ident, ObjectName, ObjectType, Statement,
-    ViewColumnDef,
+    AlterTableOperation, ColumnDef, CreateTable, Ident, ObjectName, ObjectNamePart, ObjectType,
+    Statement, ViewColumnDef,
 };
 
 use sqltk::{Break, Visitable, Visitor};
@@ -26,7 +26,7 @@ use super::{
 #[derive(Debug)]
 pub struct SchemaWithEdits {
     schema: Arc<Schema>,
-    overlays: HashMap<SqlIdent<Ident>, Overlay>,
+    overlays: HashMap<ObjectName, Overlay>,
 }
 
 impl SchemaWithEdits {
@@ -45,7 +45,7 @@ impl SchemaWithEdits {
     ///
     /// If there is no existing overlay for the table, then a new overlay will be created using
     /// `TableOverlay::Table(_)` where the table is copied from the [`Schema`].
-    fn get_overlay_mut(&mut self, table_name: &Ident) -> &mut Overlay {
+    fn get_overlay_mut(&mut self, table_name: &ObjectName) -> &mut Overlay {
         let overlay = {
             let schema_table = self.schema.resolve_table(table_name);
             match schema_table {
@@ -54,13 +54,11 @@ impl SchemaWithEdits {
             }
         };
 
-        self.overlays
-            .entry(SqlIdent(table_name.clone()))
-            .or_insert(overlay)
+        self.overlays.entry(table_name.clone()).or_insert(overlay)
     }
 
-    pub(crate) fn resolve_table(&self, name: &Ident) -> Result<Arc<Table>, SchemaError> {
-        match self.overlays.get(&SqlIdent(name.clone())) {
+    pub(crate) fn resolve_table(&self, name: &ObjectName) -> Result<Arc<Table>, SchemaError> {
+        match self.overlays.get(name) {
             Some(overlay) => match overlay {
                 Overlay::Dropped => Err(SchemaError::TableNotFound(name.to_string())),
                 Overlay::Table(overlay_table) => Ok(Arc::new(overlay_table.into())),
@@ -71,7 +69,7 @@ impl SchemaWithEdits {
 
     pub(crate) fn resolve_table_columns(
         &self,
-        table_name: &Ident,
+        table_name: &ObjectName,
     ) -> Result<Vec<SchemaTableColumn>, SchemaError> {
         let table = self.resolve_table(table_name)?;
         Ok(table
@@ -87,7 +85,7 @@ impl SchemaWithEdits {
 
     pub(crate) fn resolve_table_column(
         &self,
-        table_name: &Ident,
+        table_name: &ObjectName,
         column_name: &Ident,
     ) -> Result<SchemaTableColumn, SchemaError> {
         let table = self.resolve_table(table_name)?;
@@ -96,11 +94,15 @@ impl SchemaWithEdits {
             .iter()
             .find(|col| SqlIdent(&col.name) == SqlIdent(column_name))
         {
-            Some(col) => Ok(SchemaTableColumn {
-                table: table_name.clone(),
-                column: column_name.clone(),
-                kind: col.kind,
-            }),
+            Some(col) => {
+                let ObjectName(parts) = table_name;
+                let ObjectNamePart::Identifier(table_name) = parts.last().unwrap();
+                Ok(SchemaTableColumn {
+                    table: table_name.clone(),
+                    column: column_name.clone(),
+                    kind: col.kind,
+                })
+            }
             None => Err(SchemaError::ColumnNotFound(
                 table_name.to_string(),
                 column_name.to_string(),
@@ -122,12 +124,12 @@ enum Overlay {
 /// A mutable version of [`Table`].
 #[derive(Debug, Clone)]
 struct OverlayTable {
-    pub name: Ident,
+    pub name: ObjectName,
     pub columns: Vec<Column>,
 }
 
 impl OverlayTable {
-    fn new(name: Ident) -> Self {
+    fn new(name: ObjectName) -> Self {
         Self {
             name,
             columns: Vec::new(),
@@ -155,14 +157,16 @@ impl OverlayTable {
     }
 
     fn rename(&mut self, to: Ident) {
-        self.name = to;
+        if let Some(name) = self.name.0.last_mut() {
+            *name = ObjectNamePart::Identifier(to);
+        }
     }
 }
 
 impl From<&Table> for OverlayTable {
     fn from(value: &Table) -> Self {
         Self {
-            name: value.name.clone(),
+            name: ObjectName(vec![ObjectNamePart::Identifier(value.name.clone())]),
             columns: value.columns.iter().map(|col| (**col).clone()).collect(),
         }
     }
@@ -170,8 +174,11 @@ impl From<&Table> for OverlayTable {
 
 impl From<&OverlayTable> for Table {
     fn from(value: &OverlayTable) -> Self {
+        let ObjectName(parts) = &value.name;
+        let ObjectNamePart::Identifier(ident) = parts.last().unwrap();
+
         Self {
-            name: value.name.clone(),
+            name: ident.clone(),
             columns: value.columns.iter().cloned().map(Arc::new).collect(),
         }
     }
@@ -200,7 +207,7 @@ struct DdlCollector {
 
 impl DdlCollector {
     fn capture_create_view(&self, name: &ObjectName, columns: &[ViewColumnDef]) {
-        let name = name.0.last().unwrap().clone();
+        let name = name.clone();
         let mut table = OverlayTable::new(name.clone());
 
         for def in columns {
@@ -214,7 +221,6 @@ impl DdlCollector {
     }
 
     fn capture_create_table(&self, name: &ObjectName, columns: &[ColumnDef]) {
-        let name = name.0.last().unwrap().clone();
         let mut table = OverlayTable::new(name.clone());
 
         for def in columns {
@@ -224,17 +230,15 @@ impl DdlCollector {
             });
         }
 
-        *self.schema.write().unwrap().get_overlay_mut(&name) = Overlay::Table(table)
+        *self.schema.write().unwrap().get_overlay_mut(name) = Overlay::Table(table)
     }
 
     fn capture_alter_table(&self, name: &ObjectName, operations: &[AlterTableOperation]) {
-        let table_name = name.0.last().unwrap();
-
         for op in operations {
             match op {
                 AlterTableOperation::AddColumn { column_def, .. } => {
                     let mut overlay_schema = self.schema.write().unwrap();
-                    let overlay = overlay_schema.get_overlay_mut(table_name);
+                    let overlay = overlay_schema.get_overlay_mut(name);
                     if let Overlay::Table(table) = overlay {
                         table.add_column(Column {
                             name: column_def.name.clone(),
@@ -243,13 +247,9 @@ impl DdlCollector {
                     }
                 }
 
-                AlterTableOperation::DropColumn {
-                    column_name,
-                    cascade: false,
-                    ..
-                } => {
+                AlterTableOperation::DropColumn { column_name, .. } => {
                     let mut overlay_schema = self.schema.write().unwrap();
-                    let overlay = overlay_schema.get_overlay_mut(table_name);
+                    let overlay = overlay_schema.get_overlay_mut(name);
                     if let Overlay::Table(table) = overlay {
                         table.remove_column(column_name);
                     }
@@ -260,7 +260,7 @@ impl DdlCollector {
                     new_column_name,
                 } => {
                     let mut overlay_schema = self.schema.write().unwrap();
-                    let overlay = overlay_schema.get_overlay_mut(table_name);
+                    let overlay = overlay_schema.get_overlay_mut(name);
                     if let Overlay::Table(table) = overlay {
                         table.rename_column(old_column_name, new_column_name);
                     }
@@ -268,8 +268,9 @@ impl DdlCollector {
 
                 AlterTableOperation::RenameTable { table_name: to } => {
                     let mut overlay_schema = self.schema.write().unwrap();
-                    let overlay = overlay_schema.get_overlay_mut(table_name);
-                    let new_name = to.0.last().unwrap().clone();
+                    let overlay = overlay_schema.get_overlay_mut(name);
+                    let new_name = to.clone();
+                    let ObjectNamePart::Identifier(new_name_ident) = new_name.0.last().unwrap();
 
                     let table = match overlay {
                         Overlay::Table(table) => Some(table.clone()),
@@ -279,7 +280,7 @@ impl DdlCollector {
                     if let Some(mut table_to_rename) = table {
                         // Mark old table name as dropped so it no longer resolves
                         *overlay = Overlay::Dropped;
-                        table_to_rename.rename(new_name.clone());
+                        table_to_rename.rename(new_name_ident.clone());
                         // Appease the borrow checker: relinquish the borrow, then reborrow.
                         drop(overlay_schema);
                         let mut overlay_schema = self.schema.write().unwrap();
@@ -293,7 +294,7 @@ impl DdlCollector {
                     old_name, new_name, ..
                 } => {
                     let mut overlay_schema = self.schema.write().unwrap();
-                    let overlay = overlay_schema.get_overlay_mut(table_name);
+                    let overlay = overlay_schema.get_overlay_mut(name);
                     if let Overlay::Table(table) = overlay {
                         table.rename_column(old_name, new_name);
                     }
@@ -308,7 +309,7 @@ impl DdlCollector {
         let mut overlay_schema = self.schema.write().unwrap();
 
         for name in names {
-            let overlay = overlay_schema.get_overlay_mut(&name.0.last().unwrap().clone());
+            let overlay = overlay_schema.get_overlay_mut(name);
             *overlay = Overlay::Dropped;
         }
     }
@@ -361,7 +362,7 @@ mod test {
 
     use crate::{
         schema,
-        test_helpers::{id, parse},
+        test_helpers::{id, object_name, parse},
         ColumnKind, SchemaError, SchemaTableColumn, TableResolver,
     };
 
@@ -383,7 +384,7 @@ mod test {
         crate::collect_ddl(resolver.clone(), &statement);
 
         assert_eq!(
-            resolver.resolve_table_column(&id("users"), &id("age")),
+            resolver.resolve_table_column(&object_name("users"), &id("age")),
             Ok(SchemaTableColumn {
                 table: id("users"),
                 column: id("age"),
@@ -410,7 +411,7 @@ mod test {
         crate::collect_ddl(resolver.clone(), &statement);
 
         assert_eq!(
-            resolver.resolve_table_column(&id("users"), &id("email")),
+            resolver.resolve_table_column(&object_name("users"), &id("email")),
             Err(SchemaError::ColumnNotFound("users".into(), "email".into()))
         )
     }
@@ -433,12 +434,12 @@ mod test {
         crate::collect_ddl(resolver.clone(), &statement);
 
         assert_eq!(
-            resolver.resolve_table_column(&id("users"), &id("email")),
+            resolver.resolve_table_column(&object_name("users"), &id("email")),
             Err(SchemaError::ColumnNotFound("users".into(), "email".into()))
         );
 
         assert_eq!(
-            resolver.resolve_table_column(&id("users"), &id("primary_email")),
+            resolver.resolve_table_column(&object_name("users"), &id("primary_email")),
             Ok(SchemaTableColumn {
                 table: id("users"),
                 column: id("primary_email"),
@@ -465,12 +466,12 @@ mod test {
         crate::collect_ddl(resolver.clone(), &statement);
 
         assert_eq!(
-            resolver.resolve_table_column(&id("users"), &id("email")),
+            resolver.resolve_table_column(&object_name("users"), &id("email")),
             Err(SchemaError::TableNotFound("users".into()))
         );
 
         assert_eq!(
-            resolver.resolve_table_column(&id("app_users"), &id("email")),
+            resolver.resolve_table_column(&object_name("app_users"), &id("email")),
             Ok(SchemaTableColumn {
                 table: id("app_users"),
                 column: id("email"),
@@ -488,7 +489,7 @@ mod test {
         let resolver = Arc::new(TableResolver::new_editable(schema));
 
         assert_eq!(
-            resolver.resolve_table_column(&id("users"), &id("email")),
+            resolver.resolve_table_column(&object_name("users"), &id("email")),
             Err(SchemaError::TableNotFound("users".into()))
         );
 
@@ -497,7 +498,7 @@ mod test {
         crate::collect_ddl(resolver.clone(), &statement);
 
         assert_eq!(
-            resolver.resolve_table_column(&id("users"), &id("email")),
+            resolver.resolve_table_column(&object_name("users"), &id("email")),
             Ok(SchemaTableColumn {
                 table: id("users"),
                 column: id("email"),
@@ -520,7 +521,7 @@ mod test {
         let resolver = Arc::new(TableResolver::new_editable(schema));
 
         assert_eq!(
-            resolver.resolve_table_column(&id("users"), &id("email")),
+            resolver.resolve_table_column(&object_name("users"), &id("email")),
             Ok(SchemaTableColumn {
                 table: id("users"),
                 column: id("email"),
@@ -533,7 +534,7 @@ mod test {
         crate::collect_ddl(resolver.clone(), &statement);
 
         assert_eq!(
-            resolver.resolve_table_column(&id("users"), &id("email")),
+            resolver.resolve_table_column(&object_name("users"), &id("email")),
             Err(SchemaError::TableNotFound("users".into()))
         )
     }

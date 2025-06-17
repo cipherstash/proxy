@@ -1,12 +1,10 @@
 use std::mem;
 use std::{collections::HashMap, sync::Arc};
 
-use sqltk::parser::ast::{Expr, Function, Ident, ObjectName};
+use sqltk::parser::ast::{Expr, Function, Ident, ObjectName, ObjectNamePart};
 use sqltk::{AsNodeKey, NodeKey, NodePath, Visitable};
 
-use crate::{
-    get_sql_function_def, CompoundIdent, EqlMapperError, RewriteRule, SqlFunction, Type, Value,
-};
+use crate::{get_sql_function_def, EqlMapperError, RewriteRule, SqlFunction, Type, Value};
 
 use super::TransformationRule;
 
@@ -33,16 +31,14 @@ impl<'ast> TransformationRule<'ast> for RewriteStandardSqlFnsOnEqlTypes<'ast> {
                     self.node_types.get(&function.as_node_key()),
                     Some(Type::Value(Value::Eql(_)))
                 ) {
-                    let function_name = CompoundIdent::from(&function.name.0);
-
                     if let Some(SqlFunction {
                         rewrite_rule: RewriteRule::AsEqlFunction,
                         ..
-                    }) = get_sql_function_def(&function_name, &function.args)
+                    }) = get_sql_function_def(&function.name, &function.args)
                     {
                         let function = target_node.downcast_mut::<Function>().unwrap();
                         let mut existing_name = mem::take(&mut function.name.0);
-                        existing_name.insert(0, Ident::new("eql_v2"));
+                        existing_name.insert(0, ObjectNamePart::Identifier(Ident::new("eql_v2")));
                         function.name = ObjectName(existing_name);
                     }
                 }
@@ -58,12 +54,10 @@ impl<'ast> TransformationRule<'ast> for RewriteStandardSqlFnsOnEqlTypes<'ast> {
                 self.node_types.get(&function.as_node_key()),
                 Some(Type::Value(Value::Eql(_)))
             ) {
-                let function_name = CompoundIdent::from(&function.name.0);
-
                 if let Some(SqlFunction {
                     rewrite_rule: RewriteRule::AsEqlFunction,
                     ..
-                }) = get_sql_function_def(&function_name, &function.args)
+                }) = get_sql_function_def(&function.name, &function.args)
                 {
                     return true;
                 }

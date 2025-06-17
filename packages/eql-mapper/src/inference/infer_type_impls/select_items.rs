@@ -1,5 +1,7 @@
 use eql_mapper_macros::trace_infer;
-use sqltk::parser::ast::{Expr, Function, SelectItem, WildcardAdditionalOptions};
+use sqltk::parser::ast::{
+    Expr, Function, ObjectName, ObjectNamePart, SelectItem, WildcardAdditionalOptions,
+};
 
 use crate::{
     inference::{type_error::TypeError, unifier::Type, InferType},
@@ -25,10 +27,13 @@ impl<'ast> InferType<'ast, Vec<SelectItem>> for TypeInferencer<'ast> {
 
                     SelectItem::UnnamedExpr(expr) => match expr {
                         // For an unnamed expression that is a function call the name of the function becomes the alias.
-                        Expr::Function(Function { name, .. }) => Ok(ProjectionColumn::new(
-                            ty,
-                            Some(name.0.last().unwrap().clone()),
-                        )),
+                        Expr::Function(Function {
+                            name: ObjectName(parts),
+                            ..
+                        }) => {
+                            let ObjectNamePart::Identifier(ident) = parts.last().unwrap();
+                            Ok(ProjectionColumn::new(ty, Some(ident.clone())))
+                        }
                         _ => Ok(ProjectionColumn::new(ty, None)),
                     },
 

@@ -39,12 +39,29 @@ pub struct TypeCheckedStatement<'ast> {
     /// [`Select`]: sqlparser::ast::Select
     /// [`SelectItem`]: sqlparser::ast::SelectItem
     /// [`Function`]: sqlparser::ast::Function
+    /// [`FunctionArgExpr`]: sqlparser::ast::FunctionArgExpr
     /// [`Values`]: sqlparser::ast::Values
     /// [`Value`]: sqlparser::ast::Value
     pub node_types: Arc<HashMap<NodeKey<'ast>, Type>>,
 }
 
 impl<'ast> TypeCheckedStatement<'ast> {
+    pub(crate) fn new(
+        statement: &'ast Statement,
+        projection: Projection,
+        params: Vec<(Param, Value)>,
+        literals: Vec<(EqlValue, &'ast ast::Value)>,
+        node_types: Arc<HashMap<NodeKey<'ast>, Type>>,
+    ) -> Self {
+        Self {
+            statement,
+            projection,
+            params,
+            literals,
+            node_types,
+        }
+    }
+
     /// Returns `true` if one or more SQL param placeholders in the body has an EQL type, otherwise returns `false`.
     pub fn params_contain_eql(&self) -> bool {
         self.params
@@ -130,7 +147,7 @@ impl<'ast> TypeCheckedStatement<'ast> {
     fn count_not_null_literals(&self) -> usize {
         self.literals
             .iter()
-            .filter(|(_, lit)| !matches!(lit, ast::Value::Null))
+            .filter(|(_, lit)| !matches!(lit, ast::Value::Null,))
             .count()
     }
 

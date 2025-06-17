@@ -5,7 +5,7 @@ use crate::iterator_ext::IteratorExt;
 use crate::model::SqlIdent;
 use crate::unifier::{Projection, ProjectionColumns};
 use crate::Relation;
-use sqltk::parser::ast::{Ident, ObjectName, Query, Statement};
+use sqltk::parser::ast::{Ident, ObjectName, ObjectNamePart, Query, Statement};
 use sqltk::{into_control_flow, Break, Visitable, Visitor};
 use std::cell::RefCell;
 use std::fmt::Debug;
@@ -40,7 +40,7 @@ impl<'ast> ScopeTracker<'ast> {
     /// scopes).
     pub(crate) fn resolve_qualified_wildcard(
         &self,
-        idents: &[Ident],
+        idents: &ObjectName,
     ) -> Result<Arc<Type>, ScopeError> {
         self.current_scope()?
             .borrow()
@@ -121,31 +121,32 @@ impl<'ast> Scope<'ast> {
 
     pub(crate) fn resolve_qualified_wildcard(
         &self,
-        idents: &[Ident],
+        name: &ObjectName,
     ) -> Result<Arc<Type>, ScopeError> {
-        if idents.len() > 1 {
+        if name.0.len() > 1 {
             return Err(ScopeError::UnsupportedCompoundIdentifierLength(
-                idents
-                    .iter()
-                    .map(|id| id.to_string())
-                    .collect::<Vec<_>>()
-                    .join("."),
+                name.to_string(),
             ));
         }
 
         if self.relations.is_empty() {
             match &self.parent {
-                Some(parent) => parent.borrow().resolve_qualified_wildcard(idents),
+                Some(parent) => parent.borrow().resolve_qualified_wildcard(name),
                 None => Err(ScopeError::NoMatch(String::from("empty scope"))),
             }
         } else {
-            let sql_idents = idents.iter().map(SqlIdent::from).collect::<Vec<_>>();
+            let sql_idents = name
+                .0
+                .iter()
+                .map(|ObjectNamePart::Identifier(ident)| ident)
+                .map(SqlIdent::from)
+                .collect::<Vec<_>>();
 
             match self.relations.iter().find_unique(&|r| {
                 r.name.as_ref().map(SqlIdent::from).as_ref() == Some(&sql_idents[0])
             }) {
                 Ok(relation) => Ok(relation.projection_type.clone()),
-                Err(_) => Err(ScopeError::NoMatch(idents[0].to_string())),
+                Err(_) => Err(ScopeError::NoMatch(sql_idents[0].to_string())),
             }
         }
     }
@@ -245,10 +246,11 @@ impl<'ast> Scope<'ast> {
             ));
         }
 
-        let ident = &SqlIdent::from(name.0.last().unwrap());
+        let ObjectNamePart::Identifier(ident) = name.0.last().unwrap();
+        let ident = SqlIdent(ident);
 
         match self.relations.iter().try_find_unique(&|relation| {
-            relation.name.as_ref().map(SqlIdent::from).as_ref() == Some(ident)
+            relation.name.as_ref().map(SqlIdent::from).as_ref() == Some(&ident)
         }) {
             Ok(Some(found)) => Ok(found.clone()),
             Ok(None) => match &self.parent {

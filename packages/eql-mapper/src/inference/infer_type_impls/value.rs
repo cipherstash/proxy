@@ -1,5 +1,5 @@
 use eql_mapper_macros::trace_infer;
-use sqltk::parser::ast::Value;
+use sqltk::parser::ast::{Value, ValueWithSpan};
 
 use crate::{
     inference::{type_error::TypeError, InferType},
@@ -17,6 +17,19 @@ impl<'ast> InferType<'ast, Value> for TypeInferencer<'ast> {
         } else {
             self.unify(self.get_node_type(value), self.fresh_tvar())?;
         }
+
+        Ok(())
+    }
+}
+
+/// Value nodes are wrapped in a [`ValueWithSpan`], so arrange for the type of the [`Value`] to propagate to the parent.
+#[trace_infer]
+impl<'ast> InferType<'ast, ValueWithSpan> for TypeInferencer<'ast> {
+    fn infer_exit(&mut self, value_with_span: &'ast ValueWithSpan) -> Result<(), TypeError> {
+        self.unify(
+            self.get_node_type(value_with_span),
+            self.get_node_type(&value_with_span.value),
+        )?;
 
         Ok(())
     }

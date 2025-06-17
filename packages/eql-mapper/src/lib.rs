@@ -100,6 +100,8 @@ mod test {
             Ok(typed) => {
                 assert_eq!(typed.projection, projection![(EQL(users.email) as email)]);
 
+                eprintln!("TYPED LITS: {:#?}", typed.literals);
+
                 assert!(typed.literals.contains(&(
                     EqlValue(TableColumn {
                         table: id("users"),
@@ -1504,7 +1506,10 @@ mod test {
             "jsonb_path_query",
             vec![
                 ast::Expr::Identifier(Ident::new("notes")),
-                ast::Expr::Value(ast::Value::SingleQuotedString("$.medications".to_owned())),
+                ast::Expr::Value(ast::ValueWithSpan {
+                    value: ast::Value::SingleQuotedString("$.medications".to_owned()),
+                    span: sqltk::parser::tokenizer::Span::empty(),
+                }),
             ],
         );
     }
@@ -1537,7 +1542,10 @@ mod test {
             .iter()
             .map(|expr| match expr {
                 ast::Expr::Identifier(ident) => ident.to_string(),
-                ast::Expr::Value(ast::Value::SingleQuotedString(s)) => {
+                ast::Expr::Value(ast::ValueWithSpan {
+                    value: ast::Value::SingleQuotedString(s),
+                    span: _,
+                }) => {
                     format!("'<encrypted-selector({})>'::JSONB::eql_v2_encrypted", s)
                 }
                 _ => panic!("unsupported expr type in test util"),
@@ -1548,7 +1556,7 @@ mod test {
         let mut encrypted_literals: HashMap<NodeKey<'_>, ast::Value> = HashMap::new();
 
         for arg in args.iter() {
-            if let ast::Expr::Value(value) = arg {
+            if let ast::Expr::Value(ast::ValueWithSpan { value, .. }) = arg {
                 encrypted_literals.extend(test_helpers::dummy_encrypted_json_selector(
                     &statement,
                     value.clone(),

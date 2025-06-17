@@ -3,13 +3,13 @@ use std::{
     sync::{Arc, LazyLock},
 };
 
-use derive_more::derive::Display;
-use sqltk::parser::ast::{Function, FunctionArg, FunctionArgExpr, FunctionArguments, Ident};
+use sqltk::parser::ast::{
+    Function, FunctionArg, FunctionArgExpr, FunctionArguments, Ident, ObjectName, ObjectNamePart,
+};
 
 use itertools::Itertools;
-use vec1::{vec1, Vec1};
 
-use crate::{sql_fn, unifier::Type, SqlIdent, TypeInferencer};
+use crate::{sql_fn, unifier::Type, TypeInferencer};
 
 use super::TypeError;
 
@@ -18,7 +18,7 @@ use super::TypeError;
 /// See [`SQL_FUNCTION_SIGNATURES`].
 #[derive(Debug)]
 pub(crate) struct SqlFunction {
-    pub(crate) name: CompoundIdent,
+    pub(crate) name: ObjectName,
     pub(crate) sig: FunctionSig,
     pub(crate) rewrite_rule: RewriteRule,
 }
@@ -137,8 +137,6 @@ impl InstantiatedSig {
         inferencer: &mut TypeInferencer<'ast>,
         function: &'ast Function,
     ) -> Result<(), TypeError> {
-        let fn_name = CompoundIdent::from(&function.name.0);
-
         inferencer.unify_node_with_type(function, self.return_type.clone())?;
 
         match &function.args {
@@ -149,7 +147,7 @@ impl InstantiatedSig {
                     Err(TypeError::Conflict(format!(
                         "expected {} args to function {}; got 0",
                         self.args.len(),
-                        fn_name
+                        &function.name,
                     )))
                 }
             }
@@ -162,7 +160,7 @@ impl InstantiatedSig {
                     Err(TypeError::Conflict(format!(
                         "expected {} args to function {}; got 0",
                         self.args.len(),
-                        fn_name
+                        &function.name,
                     )))
                 }
             }
@@ -190,33 +188,15 @@ fn get_function_arg_expr(fn_arg: &FunctionArg) -> &FunctionArgExpr {
 impl SqlFunction {
     fn new(ident: &str, sig: FunctionSig, rewrite_rule: RewriteRule) -> Self {
         Self {
-            name: CompoundIdent::from(ident),
+            name: ObjectName(vec![ObjectNamePart::Identifier(Ident::new(ident))]),
             sig,
             rewrite_rule,
         }
     }
 }
 
-#[derive(Debug, Eq, PartialEq, PartialOrd, Ord, Hash, Clone, Display)]
-#[display("{}", _0.iter().map(SqlIdent::to_string).collect::<Vec<_>>().join("."))]
-pub(crate) struct CompoundIdent(Vec1<SqlIdent<Ident>>);
-
-impl From<&str> for CompoundIdent {
-    fn from(value: &str) -> Self {
-        CompoundIdent(vec1![SqlIdent(Ident::new(value))])
-    }
-}
-
-impl From<&Vec<Ident>> for CompoundIdent {
-    fn from(value: &Vec<Ident>) -> Self {
-        let mut idents = Vec1::<SqlIdent<Ident>>::new(SqlIdent(value[0].clone()));
-        idents.extend(value[1..].iter().cloned().map(SqlIdent));
-        CompoundIdent(idents)
-    }
-}
-
 /// SQL functions that are handled with special case type checking rules.
-static SQL_FUNCTIONS: LazyLock<HashMap<CompoundIdent, Vec<SqlFunction>>> = LazyLock::new(|| {
+static SQL_FUNCTIONS: LazyLock<HashMap<ObjectName, Vec<SqlFunction>>> = LazyLock::new(|| {
     // Notation: a single uppercase letter denotes an unknown type. Matching letters in a signature will be assigned
     // *the same type variable* and thus must resolve to the same type. (🙏 Haskell)
     //
@@ -246,7 +226,7 @@ static SQL_FUNCTIONS: LazyLock<HashMap<CompoundIdent, Vec<SqlFunction>>> = LazyL
         sql_fn!(eql_v2.jsonb_array_elements_text(T) -> T),
     ];
 
-    let mut sql_fns_by_name: HashMap<CompoundIdent, Vec<SqlFunction>> = HashMap::new();
+    let mut sql_fns_by_name: HashMap<ObjectName, Vec<SqlFunction>> = HashMap::new();
 
     for (key, chunk) in &sql_fns.into_iter().chunk_by(|sql_fn| sql_fn.name.clone()) {
         sql_fns_by_name.insert(key.clone(), chunk.into_iter().collect());
@@ -256,7 +236,7 @@ static SQL_FUNCTIONS: LazyLock<HashMap<CompoundIdent, Vec<SqlFunction>>> = LazyL
 });
 
 pub(crate) fn get_sql_function_def(
-    fn_name: &CompoundIdent,
+    fn_name: &ObjectName,
     args: &FunctionArguments,
 ) -> Option<&'static SqlFunction> {
     let sql_fns = SQL_FUNCTIONS.get(fn_name)?;
