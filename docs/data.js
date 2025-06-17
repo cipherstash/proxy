@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1750077760012,
+  "lastUpdate": 1750119370895,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -5579,6 +5579,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 6.803331,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "james@cipherstash.com",
+            "name": "James Sadler",
+            "username": "freshtonic"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "09999687dc157b08f1e4cb2015b0eeee21addf8a",
+          "message": "Merge pull request #264 from cipherstash/chore/upgrade-to-sqltk-v0.9.0\n\nchore: fix all breakages due to type changes in sqlparser",
+          "timestamp": "2025-06-17T10:12:57+10:00",
+          "tree_id": "7bf1facd2ba1a954ea04725b78d465ba01fd5bbe",
+          "url": "https://github.com/cipherstash/proxy/commit/09999687dc157b08f1e4cb2015b0eeee21addf8a"
+        },
+        "date": 1750119369388,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 6.711213,
             "unit": "Number"
           }
         ]
