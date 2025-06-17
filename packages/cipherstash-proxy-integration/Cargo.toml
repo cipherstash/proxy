@@ -30,5 +30,9 @@ clap = "4.5.32"
 fake = { version = "4", features = ["chrono", "derive"] }
 hex = "0.4.3"
 postgres-types = { version = "0.2.9", features = ["derive"] }
+prometheus-parse = "0.2.5"
+once_cell = { version = "1", default-features = false, features = ["std"] }
+regex = { version = "1", default-features = false, features = ["std", "perf", "unicode"] }
+reqwest = "0.12.20"
 tap = "1.0.1"
 uuid = { version = "1.11.0", features = ["serde", "v4"] }

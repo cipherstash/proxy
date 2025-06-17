@@ -15,6 +15,7 @@ mod map_unique_index;
 mod migrate;
 mod passthrough;
 mod pipeline;
+mod prometheus;
 mod schema_change;
 mod select;
 mod simple_protocol;
