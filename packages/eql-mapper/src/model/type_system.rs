@@ -27,6 +27,21 @@ pub enum Constructor {
     /// A projection type that is parameterized by a list of projection column types.
     #[display("{}", _0)]
     Projection(Projection),
+
+    /// In PostgreSQL, SETOF is a special return type used in functions to indicate that the function returns a set of
+    /// rows rather than a single value. It allows a function to behave like a table or subquery in SQL, producing
+    /// multiple rows as output.
+    #[display("{}", _0)]
+    SetOf(SetOf),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Display)]
+#[display("SetOf<{}>", _0)]
+pub struct SetOf(pub Box<Type>);
+impl SetOf {
+    fn contains_eql(&self) -> bool {
+        self.0.contains_eql()
+    }
 }
 
 /// A value type (an EQL type, native database type or an array type)
@@ -76,6 +91,7 @@ impl Constructor {
         match self {
             Constructor::Value(value) => value.contains_eql(),
             Constructor::Projection(projection) => projection.contains_eql(),
+            Constructor::SetOf(set_of) => set_of.contains_eql(),
         }
     }
 }

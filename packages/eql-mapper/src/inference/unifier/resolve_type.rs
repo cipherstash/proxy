@@ -1,6 +1,6 @@
-use crate::TypeError;
+use crate::{TypeError};
 
-use super::{Array, Constructor, NativeValue, Projection, Type, Unifier, Value, Var};
+use super::{Array, Constructor, NativeValue, Projection, Type, Unifier, Value, Var, SetOf};
 
 /// A trait for resolving all type variables contained in a [`crate::unifier::Type`] and converting the successfully
 /// resolved type into the publicly exported [`crate::Type`] type representation which is identical except for the
@@ -77,7 +77,19 @@ impl ResolveType for Constructor {
             Constructor::Projection(projection) => Ok(crate::Constructor::Projection(
                 projection.resolve_type(unifier)?,
             )),
+
+            Constructor::SetOf(set_of) => {
+                Ok(crate::Constructor::SetOf(set_of.resolve_type(unifier)?))
+            }
         }
+    }
+}
+
+impl ResolveType for SetOf {
+    type Output = crate::SetOf;
+
+    fn resolve_type(&self, unifier: &mut Unifier<'_>) -> Result<Self::Output, TypeError> {
+        Ok(crate::SetOf(Box::new(self.0.resolve_type(unifier)?)))
     }
 }
 

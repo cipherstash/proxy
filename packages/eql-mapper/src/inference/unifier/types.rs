@@ -97,6 +97,21 @@ pub enum Constructor {
     /// A projection is a type with a fixed number of columns each of which has a type and optional alias.
     #[display("{}", _0)]
     Projection(Projection),
+
+    /// In PostgreSQL, SETOF is a special return type used in functions to indicate that the function returns a set of
+    /// rows rather than a single value. It allows a function to behave like a table or subquery in SQL, producing
+    /// multiple rows as output.
+    #[display("{}", _0)]
+    SetOf(SetOf),
+}
+
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Display, Hash)]
+pub struct SetOf(pub Arc<Type>);
+
+impl SetOf {
+    pub(crate) fn inner_ty(&self) -> Arc<Type> {
+        self.0.clone()
+    }
 }
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Display, Hash)]
@@ -233,6 +248,10 @@ impl Type {
         Type::Constructor(Constructor::Value(Value::Native(NativeValue(None))))
     }
 
+    pub(crate) const fn set_of(ty: Arc<Type>) -> Type {
+        Type::Constructor(Constructor::SetOf(SetOf(ty)))
+    }
+
     /// Creates a `Type` containing a `Constructor::Projection`.
     pub(crate) fn projection(columns: &[(Arc<Type>, Option<Ident>)]) -> Type {
         if columns.is_empty() {
@@ -302,6 +321,8 @@ impl Type {
                 })
                 .into()
             }
+
+            Type::Constructor(Constructor::SetOf(SetOf(ty))) => ty.clone().follow_tvars(unifier),
         }
     }
 
@@ -330,6 +351,13 @@ impl Type {
             }
             crate::Type::Constructor(crate::Constructor::Value(value)) => {
                 if let Some(t) = (value as &dyn std::any::Any).downcast_ref::<T>() {
+                    return Ok(t.clone());
+                }
+
+                Err(())
+            }
+            crate::Type::Constructor(crate::Constructor::SetOf(ty)) => {
+                if let Some(t) = (ty as &dyn std::any::Any).downcast_ref::<T>() {
                     return Ok(t.clone());
                 }
 

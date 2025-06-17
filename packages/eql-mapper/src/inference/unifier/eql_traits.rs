@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use derive_more::derive::{Deref, Display};
 
-use crate::{unifier::AssociatedTypeSelector, TypeError};
+use crate::{unifier::{AssociatedTypeSelector, SetOf}, TypeError};
 
 use super::{Array, Constructor, EqlTerm, EqlValue, Projection, Type, Value, Var};
 
@@ -272,6 +272,7 @@ impl Constructor {
         match self {
             Constructor::Value(value) => value.effective_bounds(),
             Constructor::Projection(projection) => projection.effective_bounds(),
+            Constructor::SetOf(ty) => ty.effective_bounds(),
         }
     }
 }
@@ -290,6 +291,13 @@ impl Array {
     pub(crate) fn effective_bounds(&self) -> EqlTraits {
         let Array(element_ty) = self;
         element_ty.effective_bounds()
+    }
+}
+
+impl SetOf {
+    pub(crate) fn effective_bounds(&self) -> EqlTraits {
+        let SetOf(some_ty) = self;
+        some_ty.effective_bounds()
     }
 }
 

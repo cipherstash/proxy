@@ -39,6 +39,9 @@ pub(crate) enum TypeDecl {
     /// An associated type of a type.
     #[display("{}", _0)]
     AssociatedType(AssociatedTypeDecl),
+    /// A `setof` type
+    #[display("{}", _0)]
+    SetOf(SetOfDecl),
 }
 
 impl TypeDecl {
@@ -55,12 +58,15 @@ impl TypeDecl {
             }
             TypeDecl::Native(_) => vec![],
             TypeDecl::Eql(_) => vec![],
-            TypeDecl::Array(ArrayDecl(spec)) => spec.depends_on(),
+            TypeDecl::Array(ArrayDecl(decl)) => decl.depends_on(),
             TypeDecl::Projection(ProjectionDecl(cols)) => {
                 cols.iter().flat_map(|col| col.0.depends_on()).collect()
             }
-            TypeDecl::AssociatedType(AssociatedTypeDecl { impl_spec, .. }) => {
-                impl_spec.depends_on()
+            TypeDecl::AssociatedType(AssociatedTypeDecl { impl_decl, .. }) => {
+                impl_decl.depends_on()
+            }
+            TypeDecl::SetOf(SetOfDecl(decl)) => {
+                decl.depends_on()
             }
         }
     }
@@ -108,38 +114,41 @@ impl InstantiateType for TypeDecl {
         env: &InstantiatedTypeEnv,
     ) -> Result<Arc<Type>, TypeError> {
         match self {
-            TypeDecl::Var(var_spec) => var_spec.instantiate_in_env(unifier, env),
-            TypeDecl::Native(native_spec) => native_spec.instantiate_in_env(unifier, env),
+            TypeDecl::Var(var_decl) => var_decl.instantiate_in_env(unifier, env),
+            TypeDecl::Native(native_decl) => native_decl.instantiate_in_env(unifier, env),
             TypeDecl::Eql(eql_term) => eql_term.instantiate_in_env(unifier, env),
-            TypeDecl::Array(array_spec) => array_spec.instantiate_in_env(unifier, env),
-            TypeDecl::Projection(projection_spec) => {
-                projection_spec.instantiate_in_env(unifier, env)
+            TypeDecl::Array(array_decl) => array_decl.instantiate_in_env(unifier, env),
+            TypeDecl::Projection(projection_decl) => {
+                projection_decl.instantiate_in_env(unifier, env)
             }
-            TypeDecl::AssociatedType(associated_type_spec) => {
-                associated_type_spec.instantiate_in_env(unifier, env)
+            TypeDecl::AssociatedType(associated_type_decl) => {
+                associated_type_decl.instantiate_in_env(unifier, env)
             }
+            TypeDecl::SetOf(setof_decl) => setof_decl.instantiate_in_env(unifier, env)
         }
     }
 
     fn instantiate_concrete(&self) -> Result<Arc<Type>, TypeError> {
         match self {
-            TypeDecl::Var(spec) => spec.instantiate_concrete(),
-            TypeDecl::Native(spec) => spec.instantiate_concrete(),
-            TypeDecl::Eql(spec) => spec.instantiate_concrete(),
-            TypeDecl::Array(spec) => spec.instantiate_concrete(),
-            TypeDecl::Projection(spec) => spec.instantiate_concrete(),
-            TypeDecl::AssociatedType(spec) => spec.instantiate_concrete(),
+            TypeDecl::Var(decl) => decl.instantiate_concrete(),
+            TypeDecl::Native(decl) => decl.instantiate_concrete(),
+            TypeDecl::Eql(decl) => decl.instantiate_concrete(),
+            TypeDecl::Array(decl) => decl.instantiate_concrete(),
+            TypeDecl::Projection(decl) => decl.instantiate_concrete(),
+            TypeDecl::AssociatedType(decl) => decl.instantiate_concrete(),
+            TypeDecl::SetOf(decl) => decl.instantiate_concrete(),
         }
     }
 
     fn instantiate_shallow(&self, unifier: &mut Unifier<'_>) -> Result<Arc<Type>, TypeError> {
         match self {
-            TypeDecl::Var(spec) => spec.instantiate_shallow(unifier),
-            TypeDecl::Native(spec) => spec.instantiate_shallow(unifier),
-            TypeDecl::Eql(spec) => spec.instantiate_shallow(unifier),
-            TypeDecl::Array(spec) => spec.instantiate_shallow(unifier),
-            TypeDecl::Projection(spec) => spec.instantiate_shallow(unifier),
-            TypeDecl::AssociatedType(spec) => spec.instantiate_shallow(unifier),
+            TypeDecl::Var(decl) => decl.instantiate_shallow(unifier),
+            TypeDecl::Native(decl) => decl.instantiate_shallow(unifier),
+            TypeDecl::Eql(decl) => decl.instantiate_shallow(unifier),
+            TypeDecl::Array(decl) => decl.instantiate_shallow(unifier),
+            TypeDecl::Projection(decl) => decl.instantiate_shallow(unifier),
+            TypeDecl::AssociatedType(decl) => decl.instantiate_shallow(unifier),
+            TypeDecl::SetOf(decl) => decl.instantiate_shallow(unifier),
         }
     }
 }
@@ -200,7 +209,7 @@ impl InstantiateType for VarDecl {
 
     fn instantiate_concrete(&self) -> Result<Arc<Type>, TypeError> {
         Err(TypeError::InternalError(
-            "tried to build a concrete type from a typespec containing a type variable".into(),
+            "tried to build a concrete type from a typedecl containing a type variable".into(),
         ))
     }
 
@@ -210,7 +219,7 @@ impl InstantiateType for VarDecl {
 }
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
-pub(crate) struct ProjectionDecl(pub(crate) Vec<ProjectionColumnSpec>);
+pub(crate) struct ProjectionDecl(pub(crate) Vec<ProjectionColumnDecl>);
 
 impl Display for ProjectionDecl {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -235,10 +244,10 @@ impl InstantiateType for ProjectionDecl {
             Projection::WithColumns(ProjectionColumns(
                 self.0
                     .iter()
-                    .map(|col_spec| -> Result<_, TypeError> {
+                    .map(|col_decl| -> Result<_, TypeError> {
                         Ok(ProjectionColumn::new(
-                            col_spec.0.instantiate_in_env(unifier, env)?,
-                            col_spec.1.clone(),
+                            col_decl.0.instantiate_in_env(unifier, env)?,
+                            col_decl.1.clone(),
                         ))
                     })
                     .collect::<Result<Vec<_>, _>>()?,
@@ -251,10 +260,10 @@ impl InstantiateType for ProjectionDecl {
             Projection::WithColumns(ProjectionColumns(
                 self.0
                     .iter()
-                    .map(|col_spec| -> Result<_, TypeError> {
+                    .map(|col_decl| -> Result<_, TypeError> {
                         Ok(ProjectionColumn::new(
-                            col_spec.0.instantiate_concrete()?,
-                            col_spec.1.clone(),
+                            col_decl.0.instantiate_concrete()?,
+                            col_decl.1.clone(),
                         ))
                     })
                     .collect::<Result<Vec<_>, _>>()?,
@@ -267,10 +276,10 @@ impl InstantiateType for ProjectionDecl {
             Projection::WithColumns(ProjectionColumns(
                 self.0
                     .iter()
-                    .map(|col_spec| -> Result<_, TypeError> {
+                    .map(|col_decl| -> Result<_, TypeError> {
                         Ok(ProjectionColumn::new(
-                            col_spec.0.instantiate_shallow(unifier)?,
-                            col_spec.1.clone(),
+                            col_decl.0.instantiate_shallow(unifier)?,
+                            col_decl.1.clone(),
                         ))
                     })
                     .collect::<Result<Vec<_>, _>>()?,
@@ -280,12 +289,12 @@ impl InstantiateType for ProjectionDecl {
 }
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
-pub(crate) struct ProjectionColumnSpec(
+pub(crate) struct ProjectionColumnDecl(
     pub(crate) Box<TypeDecl>,
     pub(crate) Option<sqltk::parser::ast::Ident>,
 );
 
-impl Display for ProjectionColumnSpec {
+impl Display for ProjectionColumnDecl {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_fmt(format_args!("{}", self.0))?;
         if let Some(alias) = &self.1 {
@@ -296,9 +305,9 @@ impl Display for ProjectionColumnSpec {
 }
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord, Display)]
-#[display("<{} as {}>::{}", impl_spec, as_eql_trait, type_name)]
+#[display("<{} as {}>::{}", impl_decl, as_eql_trait, type_name)]
 pub(crate) struct AssociatedTypeDecl {
-    pub(crate) impl_spec: Box<TypeDecl>,
+    pub(crate) impl_decl: Box<TypeDecl>,
     pub(crate) as_eql_trait: EqlTrait,
     pub(crate) type_name: &'static str,
 }
@@ -309,7 +318,7 @@ impl InstantiateType for AssociatedTypeDecl {
         unifier: &mut Unifier<'_>,
         env: &InstantiatedTypeEnv,
     ) -> Result<Arc<Type>, TypeError> {
-        let impl_ty = self.impl_spec.instantiate_in_env(unifier, env)?;
+        let impl_ty = self.impl_decl.instantiate_in_env(unifier, env)?;
         let resolved_ty = unifier.fresh_tvar();
 
         Ok(Arc::new(Type::Associated(AssociatedType {
@@ -320,7 +329,7 @@ impl InstantiateType for AssociatedTypeDecl {
     }
 
     fn instantiate_concrete(&self) -> Result<Arc<Type>, TypeError> {
-        let impl_ty = self.impl_spec.instantiate_concrete()?;
+        let impl_ty = self.impl_decl.instantiate_concrete()?;
         let selector = AssociatedTypeSelector::new(self.as_eql_trait, self.type_name)?;
         let resolved_ty = selector.resolve(impl_ty.clone())?;
 
@@ -332,7 +341,7 @@ impl InstantiateType for AssociatedTypeDecl {
     }
 
     fn instantiate_shallow(&self, unifier: &mut Unifier<'_>) -> Result<Arc<Type>, TypeError> {
-        let impl_ty = self.impl_spec.instantiate_shallow(unifier)?;
+        let impl_ty = self.impl_decl.instantiate_shallow(unifier)?;
         let selector = AssociatedTypeSelector::new(self.as_eql_trait, self.type_name)?;
         let resolved_ty = selector.resolve(impl_ty.clone())?;
 
@@ -345,13 +354,40 @@ impl InstantiateType for AssociatedTypeDecl {
 }
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) struct SetOfDecl(pub Box<TypeDecl>);
+
+impl Display for SetOfDecl {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_fmt(format_args!("SetOf<{}>", self.0))
+    }
+}
+
+impl InstantiateType for SetOfDecl {
+    fn instantiate_in_env(
+        &self,
+        unifier: &mut Unifier<'_>,
+        env: &InstantiatedTypeEnv,
+    ) -> Result<Arc<Type>, TypeError> {
+        Ok(Type::set_of(self.0.instantiate_in_env(unifier, env)?).into())
+    }
+
+    fn instantiate_concrete(&self) -> Result<Arc<Type>, TypeError> {
+        Ok(Type::set_of(self.0.instantiate_concrete()?).into())
+    }
+
+    fn instantiate_shallow(&self, unifier: &mut Unifier<'_>) -> Result<Arc<Type>, TypeError> {
+        Ok(Type::set_of(self.0.instantiate_shallow(unifier)?).into())
+    }
+}
+
+#[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct BoundsDecl(pub(crate) TVar, pub(crate) EqlTraits);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct FunctionDecl {
     /// The function name.
     pub(crate) name: ObjectName,
-    /// The specification of this function.
+    /// The declaration of this function.
     pub(crate) inner: FunctionSignatureDecl,
 }
 
@@ -359,7 +395,7 @@ pub(crate) struct FunctionDecl {
 pub(crate) struct BinaryOpDecl {
     /// The binary operator.
     pub(crate) op: BinaryOperator,
-    /// The specification of this binary operator as a 2-argument function.
+    /// The declaration of this binary operator as a 2-argument function.
     pub(crate) inner: FunctionSignatureDecl,
 }
 
@@ -381,19 +417,19 @@ impl FunctionSignatureDecl {
     pub(crate) fn new(
         generic_args: Vec<TVar>,
         generic_bounds: Vec<BoundsDecl>,
-        arg_specs: Vec<TypeDecl>,
-        ret_spec: TypeDecl,
+        arg_decls: Vec<TypeDecl>,
+        ret_decl: TypeDecl,
     ) -> Result<Self, TypeError> {
         Self::check_no_undeclared_generic_args(
             &generic_args,
             &generic_bounds,
-            &arg_specs,
-            &ret_spec,
+            &arg_decls,
+            &ret_decl,
         )?;
 
         let (type_env, (arg_tvars, ret_tvar)) = TypeEnv::build(|type_env| {
             for tvar in generic_args {
-                let spec = match generic_bounds.iter().find(|bound| bound.0 == tvar) {
+                let decl = match generic_bounds.iter().find(|bound| bound.0 == tvar) {
                     Some(bounds) => TypeDecl::Var(VarDecl {
                         tvar: type_env.fresh_tvar(),
                         bounds: bounds.1,
@@ -404,15 +440,15 @@ impl FunctionSignatureDecl {
                     }),
                 };
 
-                type_env.add_spec(tvar, spec);
+                type_env.add_decl(tvar, decl);
             }
 
-            let arg_tvars = arg_specs
+            let arg_tvars = arg_decls
                 .into_iter()
-                .map(|spec| -> Result<TVar, TypeError> { type_env.add_spec_with_indirection(spec) })
+                .map(|decl| -> Result<TVar, TypeError> { type_env.add_decl_with_indirection(decl) })
                 .collect::<Result<Vec<_>, _>>()?;
 
-            let ret_tvar = type_env.add_spec_with_indirection(ret_spec)?;
+            let ret_tvar = type_env.add_decl_with_indirection(ret_decl)?;
 
             Ok((arg_tvars, ret_tvar))
         })?;
@@ -494,7 +530,7 @@ impl FunctionSignatureDecl {
         args: &'a Vec<TypeDecl>,
         ret: &'a TypeDecl,
     ) -> Result<(), TypeError> {
-        let is_varspec = |arg: &'a TypeDecl| {
+        let is_vardecl = |arg: &'a TypeDecl| {
             if let TypeDecl::Var(VarDecl { tvar, .. }) = arg {
                 Some(tvar)
             } else {
@@ -514,10 +550,10 @@ impl FunctionSignatureDecl {
         };
 
         args.iter()
-            .filter_map(is_varspec)
+            .filter_map(is_vardecl)
             .fold(Ok(()), |_, tvar| check_known(tvar))?;
 
-        if let Some(tvar) = is_varspec(ret) {
+        if let Some(tvar) = is_vardecl(ret) {
             check_known(tvar)?;
         }
 

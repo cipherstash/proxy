@@ -42,9 +42,9 @@ pub(crate) fn get_sql_binop_rule(op: &BinaryOperator) -> SqlBinaryOp {
 static SQL_FUNCTION_TYPES: LazyLock<HashMap<ObjectName, FunctionDecl>> = LazyLock::new(|| {
     // # SQL function declations.
     //
-    // `Native` automatically satisfies *all* trait bounds. This is the trick that keeps the complexity of EQL
-    // Mapper's type system small enough to be tractable for a small team of engineers. It is a *safe* strategy
-    // because even though EQL Mapper will not catch a type error, Postgres will.
+    // `Native` automatically satisfies *all* trait bounds. This is the trick that keeps the complexity of EQL Mapper's
+    // type system simple enough to be tractable for a small team of engineers. It is a *safe* strategy because even
+    // though EQL Mapper will not catch a type error with incorrect use of native database types, Postgres will.
     //
     // The Postgres versions of `count`, `min`, `max` etc are defined in the `pg_catalog` namespace. `pg_catalog` is
     // prepended to the `search_path` by Postgres. When resolving the names of registered unqualified functions in
@@ -55,20 +55,20 @@ static SQL_FUNCTION_TYPES: LazyLock<HashMap<ObjectName, FunctionDecl>> = LazyLoc
         pg_catalog.count<T>(T) -> Native;
         pg_catalog.min<T>(T) -> T where T: Ord;
         pg_catalog.max<T>(T) -> T where T: Ord;
-        pg_catalog.jsonb_path_query<J>(J, <J as JsonLike>::Path) -> J where J: JsonLike;
-        pg_catalog.jsonb_path_query_first<J>(J, <J as JsonLike>::Path) -> J where J: JsonLike;
-        pg_catalog.jsonb_path_exists<J>(J, <J as JsonLike>::Path) -> Native where J: JsonLike;
-        pg_catalog.jsonb_array_length<J>(J) -> Native where J: JsonLike;
-        pg_catalog.jsonb_array_elements<J>(J) -> J where J: JsonLike;
-        pg_catalog.jsonb_array_elements_text<J>(J) -> J where J: JsonLike;
+        pg_catalog.jsonb_path_query<T>(T, <T as JsonLike>::Path) -> T where T: JsonLike;
+        pg_catalog.jsonb_path_query_first<T>(T, <T as JsonLike>::Path) -> T where T: JsonLike;
+        pg_catalog.jsonb_path_exists<T>(T, <T as JsonLike>::Path) -> Native where T: JsonLike;
+        pg_catalog.jsonb_array_length<T>(T) -> Native where T: JsonLike;
+        pg_catalog.jsonb_array_elements<T>(T) -> SetOf<T> where T: JsonLike;
+        pg_catalog.jsonb_array_elements_text<T>(T) -> SetOf<T> where T: JsonLike;
         eql_v2.min<T>(T) -> T where T: Ord;
         eql_v2.max<T>(T) -> T where T: Ord;
-        eql_v2.jsonb_path_query<J>(J, <J as JsonLike>::Path) -> J where J: JsonLike;
-        eql_v2.jsonb_path_query_first<J>(J, <J as JsonLike>::Path) -> J where J: JsonLike;
-        eql_v2.jsonb_path_exists<J>(J, <J as JsonLike>::Path) -> Native where J: JsonLike;
-        eql_v2.jsonb_array_length<J>(J) -> Native where J: JsonLike;
-        eql_v2.jsonb_array_elements<J>(J) -> J where J: JsonLike;
-        eql_v2.jsonb_array_elements_text<J>(J) -> J where J: JsonLike;
+        eql_v2.jsonb_path_query<T>(T, <T as JsonLike>::Path) -> T where T: JsonLike;
+        eql_v2.jsonb_path_query_first<T>(T, <T as JsonLike>::Path) -> T where T: JsonLike;
+        eql_v2.jsonb_path_exists<T>(T, <T as JsonLike>::Path) -> Native where T: JsonLike;
+        eql_v2.jsonb_array_length<T>(T) -> Native where T: JsonLike;
+        eql_v2.jsonb_array_elements<T>(T) -> SetOf<T> where T: JsonLike;
+        eql_v2.jsonb_array_elements_text<T>(T) -> SetOf<T> where T: JsonLike;
     };
 
     HashMap::from_iter(

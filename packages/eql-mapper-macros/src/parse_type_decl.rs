@@ -20,6 +20,7 @@ mod kw {
     syn::custom_keyword!(Ord);
     syn::custom_keyword!(Partial);
     syn::custom_keyword!(Path);
+    syn::custom_keyword!(SetOf);
     syn::custom_keyword!(TokenMatch);
 }
 
@@ -46,13 +47,14 @@ tokens_of!(EqlTrait);
 tokens_of!(EqlTraits);
 tokens_of!(FunctionDecl);
 tokens_of!(NativeDecl);
-tokens_of!(ProjectionColumnSpec);
+tokens_of!(ProjectionColumnDecl);
 tokens_of!(ProjectionDecl);
+tokens_of!(SetOfDecl);
 tokens_of!(SqltkBinOp);
 tokens_of!(TVar);
 tokens_of!(TableColumn);
+tokens_of!(TypeEquation);
 tokens_of!(TypeEnvDecl);
-tokens_of!(TypeEnvSpec);
 tokens_of!(TypeDecl);
 tokens_of!(VarDecl);
 
@@ -187,7 +189,7 @@ impl Parse for AssociatedTypeDecl {
 
         Ok(Self(quote! {
             crate::inference::unifier::AssociatedTypeDecl {
-                impl_spec: Box::new(crate::inference::unifier::TypeDecl::Var(
+                impl_decl: Box::new(crate::inference::unifier::TypeDecl::Var(
                     crate::inference::unifier::VarDecl{
                         tvar: #impl_tvar,
                         bounds: crate::inference::unifier::EqlTraits::none()
@@ -217,7 +219,7 @@ impl Parse for NativeDecl {
     }
 }
 
-impl Parse for ProjectionColumnSpec {
+impl Parse for ProjectionColumnDecl {
     fn parse(input: ParseStream) -> syn::Result<Self> {
         let spec = TypeDecl::parse(input)?;
         if input.peek(token::As) {
@@ -225,11 +227,11 @@ impl Parse for ProjectionColumnSpec {
             let alias = Ident::parse(input)?;
             let alias = alias.to_string();
             Ok(Self(
-                quote!(crate::inference::unifier::ProjectionColumnSpec(Box::new(#spec), Some(#alias.into()))),
+                quote!(crate::inference::unifier::ProjectionColumnDecl(Box::new(#spec), Some(#alias.into()))),
             ))
         } else {
             Ok(Self(
-                quote!(crate::inference::unifier::ProjectionColumnSpec(Box::new(#spec), None)),
+                quote!(crate::inference::unifier::ProjectionColumnDecl(Box::new(#spec), None)),
             ))
         }
     }
@@ -240,10 +242,10 @@ impl Parse for ProjectionDecl {
         let content;
         braced!(content in input);
 
-        let mut specs: Vec<ProjectionColumnSpec> = Vec::new();
+        let mut specs: Vec<ProjectionColumnDecl> = Vec::new();
 
         loop {
-            specs.push(ProjectionColumnSpec::parse(&content)?);
+            specs.push(ProjectionColumnDecl::parse(&content)?);
 
             if !content.peek(token::Comma) {
                 break;
@@ -255,6 +257,19 @@ impl Parse for ProjectionDecl {
         Ok(Self(quote!(crate::inference::unifier::ProjectionDecl(
             Vec::from_iter(vec![#(#specs,)*])
         ))))
+    }
+}
+
+impl Parse for SetOfDecl {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        let _: kw::SetOf = input.parse()?;
+        let _: Token![<] = input.parse()?;
+        let type_decl = TypeDecl::parse(input)?;
+        let _: Token![>] = input.parse()?;
+
+        Ok(Self(
+            quote!(crate::inference::unifier::SetOfDecl(Box::new(#type_decl))),
+        ))
     }
 }
 
@@ -321,6 +336,13 @@ impl Parse for TypeDecl {
             let inner = AssociatedTypeDecl::parse(input)?;
             return Ok(Self(quote! {
                 crate::inference::unifier::TypeDecl::AssociatedType(#inner)
+            }));
+        }
+
+        if SetOfDecl::parse(&input.fork()).is_ok() {
+            let inner = SetOfDecl::parse(input)?;
+            return Ok(Self(quote! {
+                crate::inference::unifier::TypeDecl::SetOf(#inner)
             }));
         }
 
@@ -581,21 +603,21 @@ impl Parse for BinaryOpDecl {
     }
 }
 
-impl Parse for TypeEnvDecl {
+impl Parse for TypeEquation {
     fn parse(input: ParseStream) -> syn::Result<Self> {
         let tvar = TVar::parse(input)?;
         let _ = token::Eq::parse(input)?;
-        let type_spec = TypeDecl::parse(input)?;
+        let type_decl = TypeDecl::parse(input)?;
 
         Ok(Self(quote! {
-            env.add_spec(#tvar, #type_spec);
+            env.add_decl(#tvar, #type_decl);
         }))
     }
 }
 
-impl Parse for TypeEnvSpec {
+impl Parse for TypeEnvDecl {
     fn parse(input: ParseStream) -> syn::Result<Self> {
-        let decls: Vec<_> = Punctuated::<TypeEnvDecl, Token![;]>::parse_terminated(input)?
+        let decls: Vec<_> = Punctuated::<TypeEquation, Token![;]>::parse_terminated(input)?
             .into_iter()
             .collect();
 
@@ -614,7 +636,7 @@ mod test {
     use quote::quote;
     use syn::parse2;
 
-    use crate::parse_type_spec::{AssociatedTypeDecl, BinaryOpDecl, TVar};
+    use crate::parse_type_decl::{AssociatedTypeDecl, BinaryOpDecl, TVar};
 
     #[test]
     fn parse_tvar() {
@@ -702,18 +724,18 @@ impl Parse for BinaryOpDecls {
     }
 }
 
-pub(crate) struct FunctionSpecs {
+pub(crate) struct FunctionDecls {
     ops: Vec<FunctionDecl>,
 }
 
-impl ToTokens for FunctionSpecs {
+impl ToTokens for FunctionDecls {
     fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
         let ops = &self.ops;
         tokens.append_all(quote!(vec![#(#ops),*]));
     }
 }
 
-impl Parse for FunctionSpecs {
+impl Parse for FunctionDecls {
     fn parse(input: ParseStream) -> syn::Result<Self> {
         let ops = Punctuated::<FunctionDecl, Token![;]>::parse_terminated(input)?
             .into_iter()

@@ -21,7 +21,7 @@ use crate::unifier::instantiated_type_env::InstantiatedTypeEnv;
 use crate::{TypeError, TypeRegistry};
 
 use super::{
-    ArrayDecl, EqlTraits, ProjectionColumnSpec, ProjectionDecl, Type, TypeDecl, TypeVar, Unifier,
+    ArrayDecl, EqlTraits, ProjectionColumnDecl, ProjectionDecl, Type, TypeDecl, TypeVar, Unifier,
     VarDecl,
 };
 use super::{InstantiateType, TVar};
@@ -29,7 +29,7 @@ use super::{InstantiateType, TVar};
 /// A collection of [`TypeDecl`]s.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub(crate) struct TypeEnv {
-    specs: HashMap<TVar, TypeDecl>,
+    decls: HashMap<TVar, TypeDecl>,
     tvar_counter: usize,
 }
 
@@ -37,7 +37,7 @@ impl TypeEnv {
     pub(crate) fn new() -> Self {
         Self {
             /// The [`TypeDecl`]s in the environment.
-            specs: HashMap::new(),
+            decls: HashMap::new(),
             tvar_counter: 0,
         }
     }
@@ -89,12 +89,12 @@ impl TypeEnv {
         tvar
     }
 
-    pub(crate) fn add_spec(&mut self, tvar: TVar, spec: TypeDecl) -> TVar {
-        self.specs.insert(tvar.clone(), spec);
+    pub(crate) fn add_decl(&mut self, tvar: TVar, spec: TypeDecl) -> TVar {
+        self.decls.insert(tvar.clone(), spec);
         tvar
     }
 
-    pub(crate) fn add_spec_with_indirection(&mut self, spec: TypeDecl) -> Result<TVar, TypeError> {
+    pub(crate) fn add_decl_with_indirection(&mut self, spec: TypeDecl) -> Result<TVar, TypeError> {
         match spec {
             TypeDecl::Var(VarDecl { tvar, .. }) => {
                 self.get_spec(&tvar)?;
@@ -102,13 +102,13 @@ impl TypeEnv {
             }
             _ => {
                 let tvar = self.fresh_tvar();
-                Ok(self.add_spec(tvar, spec))
+                Ok(self.add_decl(tvar, spec))
             }
         }
     }
 
     pub(crate) fn get_spec(&self, tvar: &TVar) -> Result<&TypeDecl, TypeError> {
-        match self.specs.get(tvar) {
+        match self.decls.get(tvar) {
             Some(spec) => Ok(spec),
             None => Err(TypeError::InternalError(format!(
                 "unknown typespec {} in type env",
@@ -118,7 +118,7 @@ impl TypeEnv {
     }
 
     pub(crate) fn get_bounds(&self, tvar: &TVar) -> Result<EqlTraits, TypeError> {
-        match self.specs.get(tvar) {
+        match self.decls.get(tvar) {
             Some(TypeDecl::Var(VarDecl { bounds, .. })) => Ok(*bounds),
             Some(_) => Ok(EqlTraits::none()),
             None => Err(TypeError::InternalError(format!(
@@ -149,7 +149,7 @@ impl TypeEnv {
 
         while let Some(tvar) = tvars.pop() {
             let spec = self
-                .specs
+                .decls
                 .get(tvar)
                 .ok_or(TypeError::InternalError(format!(
                     "expected typespec for tvar {tvar} to be in the typeenv"
@@ -165,7 +165,7 @@ impl TypeEnv {
     fn tvars_in_order_of_initialisation(&self) -> TopologicalSort<&TVar> {
         let mut topo = TopologicalSort::<&TVar>::new();
 
-        for (tvar, spec) in self.specs.iter() {
+        for (tvar, spec) in self.decls.iter() {
             topo.insert(tvar);
 
             let dependencies = spec.depends_on();
@@ -181,9 +181,9 @@ impl TypeEnv {
 impl Display for TypeEnv {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("TypeEnv{ ")?;
-        for (idx, (tvar, spec)) in self.specs.iter().enumerate() {
+        for (idx, (tvar, spec)) in self.decls.iter().enumerate() {
             f.write_fmt(format_args!("{tvar} => {spec}"))?;
-            if idx < self.specs.len() - 1 {
+            if idx < self.decls.len() - 1 {
                 f.write_str(", ")?;
             }
         }

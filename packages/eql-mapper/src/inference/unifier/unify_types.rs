@@ -5,7 +5,7 @@
 
 use std::sync::Arc;
 
-use crate::TypeError;
+use crate::{unifier::SetOf, TypeError};
 
 use super::{
     Array, AssociatedType, Constructor, EqlTerm, NativeValue, Projection, ProjectionColumn, Type,
@@ -40,7 +40,19 @@ impl UnifyTypes<Constructor, Constructor> for Unifier<'_> {
             (Constructor::Projection(lhs), Constructor::Projection(rhs)) => {
                 self.unify_types(lhs, rhs)
             }
+
+            (Constructor::SetOf(lhs), Constructor::SetOf(rhs)) => self.unify_types(lhs, rhs),
+
+            (_, _) => Err(TypeError::Conflict(format!(
+                "cannot unify {lhs} with {rhs}"
+            ))),
         }
+    }
+}
+
+impl UnifyTypes<SetOf, SetOf> for Unifier<'_> {
+    fn unify_types(&mut self, lhs: &SetOf, rhs: &SetOf) -> Result<Arc<Type>, TypeError> {
+        Ok(Type::set_of(self.unify(lhs.inner_ty(), rhs.inner_ty())?).into())
     }
 }
 

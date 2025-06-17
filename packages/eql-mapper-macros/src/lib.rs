@@ -15,12 +15,12 @@
 mod trace_infer;
 use quote::ToTokens;
 use trace_infer::*;
-mod parse_type_spec;
+mod parse_type_decl;
 
 use proc_macro::TokenStream;
 
-use crate::parse_type_spec::{
-    BinaryOpDecls, FunctionSpecs, ShallowInitTypes, TVar, TypeDecl, TypeEnvSpec,
+use crate::parse_type_decl::{
+    BinaryOpDecls, FunctionDecls, ShallowInitTypes, TVar, TypeDecl, TypeEnvDecl
 };
 
 /// Generates `#[tracing::instrument]` attributes for `InferType::infer_enter` & `InferType::infer_enter`
@@ -61,7 +61,7 @@ pub fn binary_operators(tokens: TokenStream) -> TokenStream {
 /// ```
 #[proc_macro]
 pub fn functions(tokens: TokenStream) -> TokenStream {
-    let functions = syn::parse_macro_input!(tokens as FunctionSpecs);
+    let functions = syn::parse_macro_input!(tokens as FunctionDecls);
     functions.to_token_stream().into()
 }
 
@@ -78,8 +78,8 @@ pub fn functions(tokens: TokenStream) -> TokenStream {
 /// ```
 #[proc_macro]
 pub fn ty(tokens: TokenStream) -> TokenStream {
-    let type_spec = syn::parse_macro_input!(tokens as TypeDecl);
-    type_spec.to_token_stream().into()
+    let type_decl = syn::parse_macro_input!(tokens as TypeDecl);
+    type_decl.to_token_stream().into()
 }
 
 /// Parses a list of pseudo-Rust let bindings where the right hand of the `=` is type declaration syntax (i.e. can be
@@ -138,6 +138,6 @@ pub fn tvar(tokens: TokenStream) -> TokenStream {
 /// ```
 #[proc_macro]
 pub fn type_env(tokens: TokenStream) -> TokenStream {
-    let env = syn::parse_macro_input!(tokens as TypeEnvSpec);
+    let env = syn::parse_macro_input!(tokens as TypeEnvDecl);
     env.to_token_stream().into()
 }
