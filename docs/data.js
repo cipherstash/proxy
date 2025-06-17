@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1750155262298,
+  "lastUpdate": 1750204716792,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -5683,6 +5683,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 6.851057,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "lindsay@cipherstash.com",
+            "name": "Lindsay Holmwood",
+            "username": "auxesis"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "2a25ba5caa68b1e6a76bb6afaca38b50732d39fd",
+          "message": "Merge pull request #265 from cipherstash/build/trigger-release-workflow-on-release-event\n\nbuild: trigger release workflow on release event",
+          "timestamp": "2025-06-18T09:55:27+10:00",
+          "tree_id": "c80bc18e85e71d385ac9280f8c56e97534d6c39e",
+          "url": "https://github.com/cipherstash/proxy/commit/2a25ba5caa68b1e6a76bb6afaca38b50732d39fd"
+        },
+        "date": 1750204715391,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 6.762345,
             "unit": "Number"
           }
         ]
