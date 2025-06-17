@@ -33,18 +33,32 @@ pub enum Type {
     Associated(AssociatedType),
 }
 
+// Statically assert that `Type` is `Send + Sync`.  If `Type` did not implement `Send` and/or `Sync` this crate would
+// fail to compile anyway but the error message is very obtuse. A failure here makes it obvious.
+const _: () = {
+    fn assert_send<T: Send>() {}
+    fn assert_sync<T: Sync>() {}
+
+    fn assert_all() {
+        assert_send::<Type>();
+        assert_sync::<Type>();
+    }
+};
+
 /// An associated type.
 ///
-/// This is a type of the form `T::A` - `T` is a parent type and `A` is an associated type (just like in Rust).
+/// This is a type of the form `T::A`. `T` is the type that implements a trait that defines the associated type. `A` is
+/// the associated type.
 #[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord, derive_more::Display)]
 #[display("<{} as {}>::{}", impl_ty, selector.eql_trait, selector.type_name)]
 pub struct AssociatedType {
+    /// A value that can resolve the concrete `A` when given a concrete `T`.
     pub selector: AssociatedTypeSelector,
 
-    /// The type that implements the trait and will have defined an associated type.
+    /// The type that implements the trait and will have defined an associated type. In `T::A` `impl_ty` is the `T`.
     pub impl_ty: Arc<Type>,
 
-    /// An initially dangling type variable that will eventually unify with the resolved type.
+    /// The associated type itself. In `T::A` `resolved_ty` is the `A`.
     pub resolved_ty: Arc<Type>,
 }
 
@@ -77,15 +91,6 @@ impl Display for Var {
     }
 }
 
-const _: () = {
-    fn assert_send<T: Send>() {}
-    fn assert_sync<T: Sync>() {}
-
-    fn assert_all() {
-        assert_send::<Type>();
-        assert_sync::<Type>();
-    }
-};
 
 /// A `Constructor` is what is known about a [`Type`].
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Display, Hash)]
