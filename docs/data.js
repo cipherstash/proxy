@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1750204716792,
+  "lastUpdate": 1750206639447,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -5712,6 +5712,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 6.762345,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "lindsay@cipherstash.com",
+            "name": "Lindsay Holmwood",
+            "username": "auxesis"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "1b821c66ff7eaa554f86f4aa75ab33286ce97c9b",
+          "message": "Merge pull request #266 from cipherstash/build/include-more-info-in-cipherstash-client-user-agent\n\nbuild: send version string on requests to ZeroKMS/CTS",
+          "timestamp": "2025-06-18T10:26:38+10:00",
+          "tree_id": "81d715658f6a3c51ac9f15e7a93acd501b18140b",
+          "url": "https://github.com/cipherstash/proxy/commit/1b821c66ff7eaa554f86f4aa75ab33286ce97c9b"
+        },
+        "date": 1750206637891,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 6.79328,
             "unit": "Number"
           }
         ]
