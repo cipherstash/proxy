@@ -5,9 +5,7 @@
 mod tests {
     use std::collections::HashMap;
 
-    use crate::common::{clear, insert, query, query_by, random_id, random_limited, simple_query, trace};
-    //use chrono::NaiveDate;
-    //use serde_json::Value;
+    use crate::common::{clear, insert, query, query_by, random_id, random_limited, trace};
     use once_cell::sync::Lazy;
     use regex::Regex;
 
@@ -23,8 +21,21 @@ mod tests {
         trace();
         clear().await;
 
+        let stats = get_stats().await;
+        let baselines = [
+            "cipherstash_proxy_statements_total",
+            "cipherstash_proxy_rows_passthrough_total",
+            "cipherstash_proxy_rows_total",
+        ]
+        .iter()
+        .fold(HashMap::new(), |map, s| {
+            let stat = s.to_string();
+            map.insert(stat, stats.get(&stat).unwrap().clone()).unwrap();
+            map
+        });
+
         let sql = "SELECT 1";
-        simple_query::<i32>(sql).await;
+        query::<i32>(sql).await;
 
         let tests = [
             ("cipherstash_proxy_statements_total", "1"),
@@ -35,7 +46,7 @@ mod tests {
         let stats = get_stats().await;
         println!("{stats:#?}");
         for (stat, value) in tests {
-            assert_stat(&stats, stat, value);
+            assert_stat(&baselines, &stats, stat, value);
         }
 
         let id = random_id();
@@ -53,7 +64,7 @@ mod tests {
         let stats = get_stats().await;
         //println!("{stats:#?}");
         for (stat, value) in tests {
-            assert_stat(&stats, stat, value);
+            assert_stat(&baselines, &stats, stat, value);
         }
 
         let sql = "SELECT plaintext FROM encrypted WHERE id = $1";
@@ -67,16 +78,29 @@ mod tests {
 
         let stats = get_stats().await;
         for (stat, value) in tests {
-            assert_stat(&stats, stat, value);
+            assert_stat(&baselines, &stats, stat, value);
         }
     }
 
-    fn assert_stat(stats: &HashMap<String, String>, name: &str, expected: &str) {
+    fn assert_stat(
+        //baselines: &HashMap<String, String>,
+        //stats: &HashMap<String, String>,
+        baselines: &HashMap<&str, &str>,
+        stats: &HashMap<&str, &str>,
+        name: &str,
+        expected: &str,
+    ) {
         let stat = stats.get(&name.to_string()).unwrap().clone();
-        assert_eq!(stat, expected.to_string(), "testing stat \"{}\" expecting to be \"{}\"", name, expected);
+        assert_eq!(
+            stat,
+            expected.to_string(),
+            "testing stat \"{}\" expecting to be \"{}\"",
+            name,
+            expected
+        );
     }
 
-    async fn get_stats() -> HashMap<String, String> {
+    async fn get_stats<'a>() -> HashMap<&'a str, &'a str> {
         let mut stats = HashMap::new();
         let body = reqwest::get("http://localhost:9930")
             .await
@@ -89,7 +113,7 @@ mod tests {
         for line in lines {
             if let Some(ref caps) = line {
                 if let (Some(ref name), Some(ref value)) = (caps.name("name"), caps.name("value")) {
-                    stats.insert(name.as_str().to_owned(), value.as_str().to_owned());
+                    stats.insert(name.to_owned().as_str(), value.to_owned().as_str());
                 }
             }
         }

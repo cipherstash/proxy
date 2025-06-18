@@ -12,7 +12,7 @@ use crate::eql::Identifier;
 use crate::error::{EncryptError, Error, MappingError};
 use crate::log::{MAPPER, PROTOCOL};
 use crate::postgresql::context::column::Column;
-use crate::postgresql::context::Portal;
+use crate::postgresql::context::{Portal}; //, SessionMetricsContext};
 use crate::postgresql::data::literal_from_sql;
 use crate::postgresql::messages::error_response::ErrorResponse;
 use crate::postgresql::messages::terminate::Terminate;
@@ -245,6 +245,8 @@ where
     /// And send it on
     ///
     async fn query_handler(&mut self, bytes: &BytesMut) -> Result<Option<BytesMut>, Error> {
+        self.context.start_session();
+
         let mut query = Query::try_from(bytes)?;
 
         // Simple Query may contain many statements
@@ -474,6 +476,8 @@ where
     ///
     ///
     async fn parse_handler(&mut self, bytes: &BytesMut) -> Result<Option<BytesMut>, Error> {
+        self.context.start_session();
+
         let mut message = Parse::try_from(bytes)?;
 
         debug!(
