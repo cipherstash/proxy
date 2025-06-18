@@ -22,6 +22,7 @@ pub(crate) fn init_tracing() {
         tracing_subscriber::fmt()
             .with_max_level(tracing::Level::TRACE)
             .with_span_events(FmtSpan::ACTIVE)
+            // .with_env_filter(EnvFilter::new("eql-mapper::UNIFY=trace,eql-mapper::EVENT_SUBSTITUTE=trace,eql-mapper::INFER_EXIT=trace,eql-mapper::TYPE_ENV=trace"))
             .with_file(true)
             .event_format(format().pretty())
             .pretty()
@@ -134,27 +135,39 @@ macro_rules! col {
         }
     };
 
-    ((EQL($table:ident . $column:ident))) => {
+    ((EQL($table:ident . $column:ident $(: $($eql_traits:ident)*)?))) => {
         ProjectionColumn {
-            ty: Value::Eql(EqlValue::from((stringify!($table), stringify!($column)))),
+            ty: Value::Eql(EqlTerm::Full(EqlValue(TableColumn {
+                table: id(stringify!($table)),
+                column: id(stringify!($column)),
+            }, $crate::to_eql_traits!($($($eql_traits)*)?)))),
             alias: None,
         }
     };
 
-    ((EQL($table:ident . $column:ident) as $alias:ident)) => {
+    ((EQL($table:ident . $column:ident $(: $($eql_traits:ident)*)?) as $alias:ident)) => {
         ProjectionColumn {
-            ty: Value::Eql(EqlValue(TableColumn {
+            ty: Value::Eql(EqlTerm::Full(EqlValue(TableColumn {
                 table: id(stringify!($table)),
                 column: id(stringify!($column)),
-            })),
+            }, $crate::to_eql_traits!($($($eql_traits)*)?)))),
             alias: Some(id(stringify!($alias))),
         }
     };
 }
 
 #[macro_export]
+macro_rules! to_eql_traits {
+    () => { $crate::unifier::EqlTraits::default() };
+
+    ($($traits:ident)*) => {
+        EqlTraits::from_iter(vec![$($crate::unifier::EqlTrait::$traits,)*])
+    };
+}
+
+#[macro_export]
 macro_rules! projection {
-    [$($column:tt),*] => { Projection::new(vec![$(col!($column)),*]) };
+    [$($column:tt),*] => { Projection::new(vec![$($crate::col!($column)),*]) };
 }
 
 pub fn ignore_aliases(t: &Projection) -> Projection {

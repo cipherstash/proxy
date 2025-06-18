@@ -363,6 +363,7 @@ mod test {
     use crate::{
         schema,
         test_helpers::{id, object_name, parse},
+        unifier::EqlTraits,
         ColumnKind, SchemaError, SchemaTableColumn, TableResolver,
     };
 
@@ -443,7 +444,7 @@ mod test {
             Ok(SchemaTableColumn {
                 table: id("users"),
                 column: id("primary_email"),
-                kind: ColumnKind::Eql
+                kind: ColumnKind::Eql(EqlTraits::default())
             })
         )
     }
@@ -475,7 +476,7 @@ mod test {
             Ok(SchemaTableColumn {
                 table: id("app_users"),
                 column: id("email"),
-                kind: ColumnKind::Eql
+                kind: ColumnKind::Eql(EqlTraits::default())
             })
         )
     }
@@ -525,7 +526,7 @@ mod test {
             Ok(SchemaTableColumn {
                 table: id("users"),
                 column: id("email"),
-                kind: ColumnKind::Eql
+                kind: ColumnKind::Eql(EqlTraits::default())
             })
         );
 
