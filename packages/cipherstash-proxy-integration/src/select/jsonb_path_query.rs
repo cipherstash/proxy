@@ -1,17 +1,12 @@
 #[cfg(test)]
 mod tests {
-    use crate::common::{clear, connect_with_tls, insert, query_by, random_id, trace};
-    use serde_json::Value;
+    use crate::common::{clear, insert, query_by, random_id, trace};
+    use crate::support::json_path::JsonPath;
+    use bytes::BytesMut;
+    use serde_json::{Number, Value};
     use tracing::info;
 
-    //   'SELECT eql_v2.jsonb_array_elements(eql_v2.jsonb_path_query(e, ''f510853730e1c3dbd31b86963f029dd5'')) as e FROM encrypted;');
-
-    #[tokio::test]
-    async fn select_jsonb_path_query() {
-        trace();
-
-        clear().await;
-
+    async fn insert_jsonb() -> i64 {
         let encrypted_jsonb = serde_json::json!({
             "string": "hello",
             "number": 42,
@@ -24,32 +19,72 @@ mod tests {
         let id = random_id();
         let sql = format!("INSERT INTO encrypted (id, encrypted_jsonb) VALUES ($1, $2)");
         insert(&sql, &[&id, &encrypted_jsonb]).await;
+        id
+    }
 
-        let sql = format!("SELECT encrypted_jsonb::jsonb FROM encrypted WHERE id = $1");
+    #[tokio::test]
+    async fn select_jsonb_path_query_number() {
+        trace();
 
-        // let actual = query_by::<Value>(&sql, &id).await;
+        clear().await;
 
-        // let expected = vec![encrypted_jsonb];
-        // assert_eq!(actual, expected);
+        let id = insert_jsonb().await;
 
-        let db_port = std::env::var("CS_DATABASE__PORT").unwrap().parse().unwrap();
+        let selector = JsonPath::new("$.number");
+        let sql = format!("SELECT jsonb_path_query(encrypted_jsonb, $1) FROM encrypted");
 
-        let client = connect_with_tls(db_port).await;
-        let rows = client.query(&sql, &[&id]).await.unwrap();
-        let results = rows.iter().map(|row| row.get(0)).collect::<Vec<Value>>();
-        let result = results.first().unwrap();
+        let rows = query_by::<Value>(&sql, &selector).await;
 
-        info!("Results: {:?}", result.get("sv".to_string()));
-        // info!("Results: {:?}", results);
+        assert_eq!(rows.len(), 1);
 
-        let selector = "$.nested.string";
-        let sql = format!("SELECT jsonb_path_query(encrypted_jsonb, $1)::jsonb FROM encrypted");
+        for row in rows {
+            let expected = Value::from(42);
+            assert_eq!(expected, row);
+        }
+    }
 
-        let actual = query_by::<Value>(&sql, &selector).await;
+    #[tokio::test]
+    async fn select_jsonb_path_query_string() {
+        trace();
 
-        info!("Actual: {:?}", actual);
+        clear().await;
 
-        // let expected = vec![encrypted_jsonb];
-        // assert_eq!(actual, expected);
+        let id = insert_jsonb().await;
+
+        let selector = JsonPath::new("$.nested.string");
+        let sql = format!("SELECT jsonb_path_query(encrypted_jsonb, $1) FROM encrypted");
+
+        let rows = query_by::<Value>(&sql, &selector).await;
+
+        assert_eq!(rows.len(), 1);
+
+        for row in rows {
+            let expected = Value::from("world");
+            assert_eq!(expected, row);
+        }
+    }
+
+    #[tokio::test]
+    async fn select_jsonb_path_query_value() {
+        trace();
+
+        clear().await;
+
+        let id = insert_jsonb().await;
+
+        let selector = JsonPath::new("$.nested");
+        let sql = format!("SELECT jsonb_path_query(encrypted_jsonb, $1) FROM encrypted");
+
+        let rows = query_by::<Value>(&sql, &selector).await;
+
+        assert_eq!(rows.len(), 1);
+
+        for row in rows {
+            let expected = serde_json::json!({
+                "number": 1815,
+                "string": "world",
+            });
+            assert_eq!(expected, row);
+        }
     }
 }

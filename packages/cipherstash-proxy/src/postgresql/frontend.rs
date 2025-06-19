@@ -8,7 +8,7 @@ use super::messages::FrontendCode as Code;
 use super::protocol::{self};
 use crate::connect::Sender;
 use crate::encrypt::Encrypt;
-use crate::eql::{Identifier};
+use crate::eql::Identifier;
 use crate::error::{EncryptError, Error, MappingError};
 use crate::log::{MAPPER, PROTOCOL};
 use crate::postgresql::context::column::Column;
@@ -23,12 +23,13 @@ use crate::prometheus::{
     STATEMENTS_ENCRYPTED_TOTAL, STATEMENTS_PASSTHROUGH_MAPPING_DISABLED_TOTAL,
     STATEMENTS_PASSTHROUGH_TOTAL, STATEMENTS_TOTAL, STATEMENTS_UNMAPPABLE_TOTAL,
 };
-use crate::EqlEncrypted;
+use crate::{cli, EqlEncrypted};
 use bytes::BytesMut;
 use cipherstash_client::encryption::Plaintext;
 use eql_mapper::{self, EqlMapperError, EqlTerm, TableColumn, TypeCheckedStatement};
 use metrics::{counter, histogram};
 use pg_escape::quote_literal;
+use postgres_types::Type;
 use serde::Serialize;
 use sqltk::parser::ast::{self, Value};
 use sqltk::parser::dialect::PostgreSqlDialect;
@@ -821,13 +822,15 @@ where
                     eql_mapper::Value::Eql(eql_term) => {
                         let TableColumn { table, column } = eql_term.table_column();
                         let identifier: Identifier = Identifier::from((table, column));
+
                         debug!(
                             target: MAPPER,
                             client_id = self.context.client_id,
                             msg = "Configured column",
-                            column = ?identifier
+                            column = ?identifier,
+                            ?eql_term,
                         );
-                        self.get_column(identifier)?
+                        self.get_column(identifier, eql_term)?
                     }
                     _ => None,
                 };
@@ -845,6 +848,7 @@ where
     ///
     /// Preserves the ordering and semantics of the projection to reduce the complexity of positional encryption.
     ///
+    ///
     fn get_param_columns(
         &self,
         typed_statement: &eql_mapper::TypeCheckedStatement<'_>,
@@ -861,10 +865,11 @@ where
                         target: MAPPER,
                         client_id = self.context.client_id,
                         msg = "Encrypted parameter",
-                        column = ?identifier
+                        column = ?identifier,
+                        ?eql_term,
                     );
 
-                    self.get_column(identifier)?
+                    self.get_column(identifier, eql_term)?
                 }
                 _ => None,
             };
@@ -883,13 +888,15 @@ where
         for (eql_term, _) in typed_statement.literals.iter() {
             let TableColumn { table, column } = eql_term.table_column();
             let identifier = Identifier::from((table, column));
+
             debug!(
                 target: MAPPER,
                 client_id = self.context.client_id,
                 msg = "Encrypted literal",
-                identifier = ?identifier
+                column = ?identifier,
+                ?eql_term,
             );
-            let col = self.get_column(identifier)?;
+            let col = self.get_column(identifier, eql_term)?;
             if col.is_some() {
                 literal_columns.push(col);
             }
@@ -902,7 +909,11 @@ where
     /// Get the column configuration for the Identifier
     /// Returns `EncryptError::UnknownColumn` if configuration cannot be found for the Identified column
     /// if mapping enabled, and None if mapping is disabled. It'll log a warning either way.
-    fn get_column(&self, identifier: Identifier) -> Result<Option<Column>, Error> {
+    fn get_column(
+        &self,
+        identifier: Identifier,
+        eql_term: &EqlTerm,
+    ) -> Result<Option<Column>, Error> {
         match self.encrypt.get_column_config(&identifier) {
             Some(config) => {
                 debug!(
@@ -911,7 +922,16 @@ where
                     msg = "Configured column",
                     column = ?identifier
                 );
-                Ok(Some(Column::new(identifier, config)))
+
+                // IndexTerm::SteVecSelector
+
+                let postgres_type = if matches!(eql_term, EqlTerm::JsonPath(_)) {
+                    Some(Type::JSONPATH)
+                } else {
+                    None
+                };
+
+                Ok(Some(Column::new(identifier, config, postgres_type)))
             }
             None => {
                 warn!(

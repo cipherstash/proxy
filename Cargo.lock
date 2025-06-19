@@ -786,6 +786,7 @@ dependencies = [
 name = "cipherstash-proxy-integration"
 version = "0.1.0"
 dependencies = [
+ "bytes",
  "chrono",
  "cipherstash-client",
  "cipherstash-config",

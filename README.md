@@ -29,17 +29,19 @@
 
 [Read the announcement](https://cipherstash.com/blog/introducing-proxy)
 
+CipherStash Proxy provides transparent, *searchable* encryption for your existing Postgres database.
 
-CipherStash Proxy provides a transparent proxy to your existing Postgres database.
+CipherStash Proxy:
+* Automatically encrypts and decrypts data with zero changes to SQL
+* Supports queries over *encrypted* values:
+   - equality
+   - comparison
+   - ordering
+   - grouping
+* Is written in Rust for high performance and strongly-typed mapping of SQL statements.
+* Manages keys using CipherStash ZeroKMS, offering up to 14x the performance of AWS KMS
 
-Proxy:
-* Automatically encrypts and decrypts the columns you specify
-* Supports most query types over encrypted values
-* Runs in a Docker container
-* Is written in Rust and uses a formal type system for SQL mapping
-* Works with CipherStash ZeroKMS and offers up to 14x the performance of AWS KMS
-
-Behind the scenes, it uses the [Encrypt Query Language](https://github.com/cipherstash/encrypt-query-language/) to index and search encrypted data.
+Behind the scenes, CipherStash Proxy uses the [Encrypt Query Language](https://github.com/cipherstash/encrypt-query-language/) to index and search encrypted data.
 
 ## Table of contents
 
@@ -54,7 +56,7 @@ Behind the scenes, it uses the [Encrypt Query Language](https://github.com/ciphe
 > [!IMPORTANT]
 > **Prerequisites:** Before you start you need to have this software installed:
 >  - [Docker](https://www.docker.com/) — see Docker's [documentation for installing](https://docs.docker.com/get-started/get-docker/)
- 
+
 
 Get up and running in local dev in < 5 minutes:
 

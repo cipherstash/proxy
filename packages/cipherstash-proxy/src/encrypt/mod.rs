@@ -10,21 +10,24 @@ use crate::{
     postgresql::Column,
     Identifier, EQL_SCHEMA_VERSION,
 };
-use cipherstash_client::config::{ConfigError, ZeroKMSConfigWithClientKey};
 use cipherstash_client::{
     config::EnvSource,
     credentials::{auto_refresh::AutoRefresh, ServiceCredentials},
     encryption::{
         self, Encrypted, EncryptedEntry, EncryptedSteVecTerm, IndexTerm, Plaintext,
-        PlaintextTarget, ReferencedPendingPipeline,
+        PlaintextTarget, Queryable, ReferencedPendingPipeline,
     },
     schema::ColumnConfig,
     ConsoleConfig, CtsConfig, ZeroKMSConfig,
 };
+use cipherstash_client::{
+    config::{ConfigError, ZeroKMSConfigWithClientKey},
+    encryption::QueryOp,
+};
 use config::EncryptConfigManager;
 use schema::SchemaManager;
 use std::{sync::Arc, vec};
-use tracing::{debug, warn};
+use tracing::{debug, info, warn};
 
 /// SQL Statement for loading encrypt configuration from database
 const ENCRYPT_CONFIG_QUERY: &str = include_str!("./sql/select_config.sql");
@@ -94,12 +97,20 @@ impl Encrypt {
         columns: &[Option<Column>],
     ) -> Result<Vec<Option<eql::EqlEncrypted>>, Error> {
         let mut pipeline = ReferencedPendingPipeline::new(self.cipher.clone());
+        let mut index_term_plaintexts = vec![None; columns.len()];
 
         for (idx, item) in plaintexts.into_iter().zip(columns.iter()).enumerate() {
             match item {
                 (Some(plaintext), Some(column)) => {
-                    let encryptable = PlaintextTarget::new(plaintext, column.config.clone());
-                    pipeline.add_with_ref::<PlaintextTarget>(encryptable, idx)?;
+                    info!(target: ENCRYPT, msg = "ENCRYPT", idx, ?column, ?plaintext);
+
+                    if column.is_encryptable() {
+                        let encryptable = PlaintextTarget::new(plaintext, column.config.clone());
+                        pipeline.add_with_ref::<PlaintextTarget>(encryptable, idx)?;
+                    } else {
+                        info!(target: ENCRYPT, msg = "Add to index_term_plaintexts", idx, ?column);
+                        index_term_plaintexts[idx] = Some(plaintext);
+                    }
                 }
                 (None, Some(column)) => {
                     // Parameter is NULL
@@ -120,18 +131,35 @@ impl Encrypt {
         }
 
         let mut encrypted_eql = vec![];
-        if !pipeline.is_empty() {
-            let mut result = pipeline.encrypt(None).await?;
+        // if !pipeline.is_empty() { }
 
-            for (idx, opt) in columns.iter().enumerate() {
-                let mut encrypted = None;
-                if let Some(col) = opt {
-                    if let Some(e) = result.remove(idx) {
-                        encrypted = Some(to_eql_encrypted(e, &col.identifier)?);
+        let mut result = pipeline.encrypt(None).await?;
+
+        for (idx, opt) in columns.iter().enumerate() {
+            let mut encrypted = None;
+
+            if let Some(column) = opt {
+                if let Some(e) = result.remove(idx) {
+                    encrypted = Some(to_eql_encrypted(e, &column.identifier)?);
+                } else {
+                    if let Some(plaintext) = index_term_plaintexts[idx].clone() {
+                        let index = column.config.clone().into_ste_vec_index().unwrap();
+                        let op = QueryOp::SteVecSelector;
+
+                        let index_term =
+                            (index, plaintext).build_queryable(self.cipher.clone(), op)?;
+
+                        encrypted = Some(to_eql_encrypted_from_index_term(
+                            index_term,
+                            &column.identifier,
+                        )?);
                     }
                 }
-                encrypted_eql.push(encrypted);
             }
+
+            info!(target: ENCRYPT, msg = "encrypted_eql", idx, ?opt, ?encrypted);
+
+            encrypted_eql.push(encrypted);
         }
 
         Ok(encrypted_eql)
@@ -154,7 +182,7 @@ impl Encrypt {
         let (indices, encrypted): (Vec<_>, Vec<_>) = ciphertexts
             .into_iter()
             .enumerate()
-            .filter_map(|(idx, eql)| Some((idx, eql?.body.ciphertext)))
+            .filter_map(|(idx, eql)| Some((idx, eql?.body.ciphertext.unwrap())))
             .collect::<_>();
 
         // Decrypt the ciphertexts
@@ -236,6 +264,40 @@ async fn init_cipher(config: &TandemConfig) -> Result<ScopedCipher, Error> {
     }
 }
 
+fn to_eql_encrypted_from_index_term(
+    index_term: IndexTerm,
+    identifier: &Identifier,
+) -> Result<eql::EqlEncrypted, Error> {
+    debug!(target: ENCRYPT, msg = "Encrypted to EQL", ?identifier);
+    let mut selector: Option<String> = None;
+
+    match index_term {
+        IndexTerm::SteVecSelector(s) => {
+            selector = Some(hex::encode(s.as_bytes()));
+        }
+        _ => return Err(EncryptError::InvalidIndexTerm.into()),
+    };
+
+    Ok(eql::EqlEncrypted {
+        identifier: identifier.to_owned(),
+        version: EQL_SCHEMA_VERSION,
+        body: EqlEncryptedBody {
+            ciphertext: None,
+            indexes: EqlEncryptedIndexes {
+                bloom_filter: None,
+                ore_block_u64_8_256: None,
+                hmac_256: None,
+                blake3: None,
+                ore_cllw_u64_8: None,
+                ore_cllw_var_8: None,
+                selector,
+                ste_vec_index: None,
+            },
+            is_array_item: None,
+        },
+    })
+}
+
 fn to_eql_encrypted(
     encrypted: Encrypted,
     identifier: &Identifier,
@@ -288,7 +350,7 @@ fn to_eql_encrypted(
                 identifier: identifier.to_owned(),
                 version: EQL_SCHEMA_VERSION,
                 body: EqlEncryptedBody {
-                    ciphertext,
+                    ciphertext: Some(ciphertext),
                     indexes: EqlEncryptedIndexes {
                         bloom_filter: match_index,
                         ore_block_u64_8_256: ore_index,
@@ -334,7 +396,7 @@ fn to_eql_encrypted(
                         };
 
                         eql::EqlEncryptedBody {
-                            ciphertext: record,
+                            ciphertext: Some(record),
                             indexes,
                             is_array_item: Some(parent_is_array),
                         }
@@ -348,7 +410,7 @@ fn to_eql_encrypted(
                 identifier: identifier.to_owned(),
                 version: EQL_SCHEMA_VERSION,
                 body: EqlEncryptedBody {
-                    ciphertext: ciphertext.clone(),
+                    ciphertext: Some(ciphertext.clone()),
                     indexes: EqlEncryptedIndexes {
                         bloom_filter: None,
                         ore_block_u64_8_256: None,

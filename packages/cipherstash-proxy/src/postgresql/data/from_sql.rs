@@ -12,7 +12,7 @@ use postgres_types::Type;
 use rust_decimal::Decimal;
 use sqltk::parser::ast::Value;
 use std::str::FromStr;
-use tracing::debug;
+use tracing::{debug, warn};
 
 pub fn bind_param_from_sql(
     param: &BindParam,
@@ -156,6 +156,8 @@ fn text_from_sql(
         (&Type::TIMESTAMPTZ, _) => {
             unimplemented!("TIMESTAMPTZ")
         }
+        // If JSONB, JSONPATH values are treated as strings
+        (&Type::JSONPATH, ColumnType::JsonB) => Ok(Plaintext::new(val)),
         (&Type::TEXT | &Type::JSONB, ColumnType::JsonB) => {
             serde_json::from_str::<serde_json::Value>(val)
                 .map_err(|_| MappingError::CouldNotParseParameter)
@@ -177,6 +179,9 @@ fn binary_from_sql(
     col_type: ColumnType,
 ) -> Result<Plaintext, MappingError> {
     match (pg_type, col_type) {
+        (&Type::TEXT, ColumnType::Utf8Str) => {
+            parse_bytes_from_sql::<String>(bytes, pg_type).map(Plaintext::new)
+        }
         (&Type::BOOL, ColumnType::Boolean) => {
             parse_bytes_from_sql::<bool>(bytes, pg_type).map(Plaintext::new)
         }
@@ -189,10 +194,6 @@ fn binary_from_sql(
         (&Type::INT2, ColumnType::SmallInt) => {
             parse_bytes_from_sql::<i16>(bytes, pg_type).map(Plaintext::new)
         }
-        (&Type::TEXT, ColumnType::Utf8Str) => {
-            parse_bytes_from_sql::<String>(bytes, pg_type).map(Plaintext::new)
-        }
-
         // INT4 and INT2 can be converted to Int plaintext
         (&Type::INT4, ColumnType::Int) => {
             parse_bytes_from_sql::<i32>(bytes, pg_type).map(Plaintext::new)
@@ -229,6 +230,10 @@ fn binary_from_sql(
             parse_bytes_from_sql::<Decimal>(bytes, pg_type).map(Plaintext::new)
         }
 
+        // If JSONB, JSONPATH values are treated as strings
+        (&Type::JSONPATH, ColumnType::JsonB) => {
+            parse_bytes_from_sql::<String>(bytes, pg_type).map(Plaintext::new)
+        }
         (&Type::JSON | &Type::JSONB | &Type::BYTEA, ColumnType::JsonB) => {
             parse_bytes_from_sql::<serde_json::Value>(bytes, pg_type).map(Plaintext::new)
         }

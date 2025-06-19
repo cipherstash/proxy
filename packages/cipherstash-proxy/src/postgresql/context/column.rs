@@ -11,8 +11,14 @@ pub struct Column {
 }
 
 impl Column {
-    pub fn new(identifier: Identifier, config: ColumnConfig) -> Column {
-        let postgres_type = column_type_to_postgres_type(&config.cast_type);
+    pub fn new(
+        identifier: Identifier,
+        config: ColumnConfig,
+        postgres_type: Option<Type>,
+    ) -> Column {
+        let postgres_type =
+            postgres_type.unwrap_or(column_type_to_postgres_type(&config.cast_type));
+
         Column {
             identifier,
             config,
@@ -42,6 +48,10 @@ impl Column {
 
     pub fn is_param_type(&self, param_type: &Type) -> bool {
         param_type == &self.postgres_type
+    }
+
+    pub fn is_encryptable(&self) -> bool {
+        self.postgres_type != postgres_types::Type::JSONPATH
     }
 }
 
