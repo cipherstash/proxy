@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1750316154787,
+  "lastUpdate": 1750338434032,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -5766,6 +5766,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 6.799321,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "30b8a41624f04a506a98d7446a359815e4580886",
+          "message": "chore: upgrade container base image to Ubuntu 25.10",
+          "timestamp": "2025-06-18T08:27:32Z",
+          "url": "https://github.com/cipherstash/proxy/pull/268/commits/30b8a41624f04a506a98d7446a359815e4580886"
+        },
+        "date": 1750338432911,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 7.088144,
             "unit": "Number"
           }
         ]
