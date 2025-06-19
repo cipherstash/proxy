@@ -260,7 +260,23 @@ where
         let mut encrypted = false;
 
         for statement in parsed_statements {
+            if self
+                .context
+                .maybe_set_unsafe_skip_mapping_next_statement(&statement)
+            {
+                // TODO: it would be ideal if this statement is not even transmitted to the backend.
+                continue;
+            }
+
             self.check_for_schema_change(&statement);
+
+            if !self
+                .context
+                .check_and_reset_unsafe_skip_mapping_next_statement()
+            {
+                counter!(STATEMENTS_PASSTHROUGH_TOTAL).increment(1);
+                continue;
+            }
 
             if !eql_mapper::requires_type_check(&statement) {
                 counter!(STATEMENTS_PASSTHROUGH_TOTAL).increment(1);
@@ -469,7 +485,23 @@ where
             parse = ?message
         );
 
+        if self
+            .context
+            .check_and_reset_unsafe_skip_mapping_next_statement()
+        {
+            counter!(STATEMENTS_PASSTHROUGH_TOTAL).increment(1);
+            return Ok(None);
+        }
+
         let statement = self.parse_statement(&message.statement)?;
+        if self
+            .context
+            .maybe_set_unsafe_skip_mapping_next_statement(&statement)
+        {
+            counter!(STATEMENTS_PASSTHROUGH_TOTAL).increment(1);
+            return Ok(None);
+        }
+
         self.check_for_schema_change(&statement);
 
         if !eql_mapper::requires_type_check(&statement) {

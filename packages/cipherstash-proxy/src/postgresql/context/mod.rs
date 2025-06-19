@@ -11,9 +11,13 @@ use super::{
 use crate::{log::CONTEXT, prometheus::STATEMENTS_DURATION_SECONDS};
 use eql_mapper::{Schema, TableResolver};
 use metrics::histogram;
+use sqltk::parser::{
+    ast::{ContextModifier, Expr, Ident, ObjectName, ObjectNamePart, Set, Value, ValueWithSpan},
+    tokenizer::Span,
+};
 use std::{
     collections::{HashMap, VecDeque},
-    sync::{Arc, RwLock},
+    sync::{Arc, LazyLock, RwLock},
     time::{Duration, Instant},
 };
 use tracing::debug;
@@ -31,6 +35,7 @@ pub struct Context {
     execute: Arc<RwLock<ExecuteQueue>>,
     schema_changed: Arc<RwLock<bool>>,
     table_resolver: Arc<TableResolver>,
+    unsafe_skip_mapping_next_statement: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -87,6 +92,7 @@ impl Context {
             schema_changed: Arc::new(RwLock::from(false)),
             table_resolver: Arc::new(TableResolver::new_editable(schema)),
             client_id,
+            unsafe_skip_mapping_next_statement: false,
         }
     }
 
@@ -235,6 +241,59 @@ impl Context {
 
     pub fn get_table_resolver(&self) -> Arc<TableResolver> {
         self.table_resolver.clone()
+    }
+
+    /// Examines a [`sqltk::parser::ast::Statement`] and if it is precisely equal to `SET LOCAL UNSAFE_SKIP_MAPPING_NEXT_STATEMENT = t;`
+    /// then it sets the flag [`Context::unsafe_skip_mapping_next_statement`] to `true`.
+    ///
+    /// Returns `true` if [`Context::unsafe_skip_mapping_next_statement`] was set to `true`.
+    ///
+    /// Also see: [`Context::check_and_reset_unsafe_skip_mapping_next_statement`].
+    pub fn maybe_set_unsafe_skip_mapping_next_statement(
+        &mut self,
+        statement: &sqltk::parser::ast::Statement,
+    ) -> bool {
+        // The constants avoid the need to allocate 2 Vecs every time we examine the statement.
+        static SQL_SETTING_NAME_UNSAFE_SKIP_MAPPING_NEXT_STATEMENT: LazyLock<ObjectName> =
+            LazyLock::new(|| {
+                ObjectName(vec![ObjectNamePart::Identifier(Ident::new(
+                    "UNSAFE_SKIP_MAPPING_NEXT_STATEMENT",
+                ))])
+            });
+
+        static SQL_SETTING_VALUE_UNSAFE_SKIP_MAPPING_NEXT_STATEMENT_TRUE: LazyLock<Vec<Expr>> =
+            LazyLock::new(|| {
+                vec![Expr::Value(ValueWithSpan {
+                    value: Value::Boolean(true),
+                    span: Span::empty(),
+                })]
+            });
+
+        if let sqltk::parser::ast::Statement::Set(Set::SingleAssignment {
+            scope: Some(ContextModifier::Local),
+            variable,
+            values,
+            hivevar: false,
+        }) = statement
+        {
+            if variable == &*SQL_SETTING_NAME_UNSAFE_SKIP_MAPPING_NEXT_STATEMENT
+                && values == &*SQL_SETTING_VALUE_UNSAFE_SKIP_MAPPING_NEXT_STATEMENT_TRUE
+            {
+                self.unsafe_skip_mapping_next_statement = true;
+            }
+        }
+
+        self.unsafe_skip_mapping_next_statement
+    }
+
+    /// Checks whether to skip mapping the next statement and resets [`Context::unsafe_skip_mapping_next_statement`]
+    /// back to `false`.
+    ///
+    /// Note that due to the implicit reset this method is *not* idempotent.
+    pub fn check_and_reset_unsafe_skip_mapping_next_statement(&mut self) -> bool {
+        let skip = self.unsafe_skip_mapping_next_statement;
+        self.unsafe_skip_mapping_next_statement = false;
+        skip
     }
 }
 
