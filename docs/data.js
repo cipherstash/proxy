@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1750338434032,
+  "lastUpdate": 1750389355907,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -5791,6 +5791,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 7.088144,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "lindsay@cipherstash.com",
+            "name": "Lindsay Holmwood",
+            "username": "auxesis"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "31252bc89f4581b30cb9957281d46a87edefc297",
+          "message": "Merge pull request #268 from cipherstash/chore/upgrade-container-base-image\n\nchore: upgrade container base image to Ubuntu 25.10",
+          "timestamp": "2025-06-20T13:12:46+10:00",
+          "tree_id": "4014b6e8f356de5fdc7e134ededccd60dfb535be",
+          "url": "https://github.com/cipherstash/proxy/commit/31252bc89f4581b30cb9957281d46a87edefc297"
+        },
+        "date": 1750389354386,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 6.671602,
             "unit": "Number"
           }
         ]
