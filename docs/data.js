@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1750392867203,
+  "lastUpdate": 1750404563879,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -5845,6 +5845,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 7.119638,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "lindsay@cipherstash.com",
+            "name": "Lindsay Holmwood",
+            "username": "auxesis"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "dff3fadb725e8aa2af74594d529452dde9d484b1",
+          "message": "Merge pull request #269 from cipherstash/update-sqltk-0.10.0\n\nUpdate sqltk 0.10.0",
+          "timestamp": "2025-06-20T17:25:45+10:00",
+          "tree_id": "f57c4ff1a883009296f4b48c0bb95b1ebd89d4c1",
+          "url": "https://github.com/cipherstash/proxy/commit/dff3fadb725e8aa2af74594d529452dde9d484b1"
+        },
+        "date": 1750404562816,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 7.067378,
             "unit": "Number"
           }
         ]
