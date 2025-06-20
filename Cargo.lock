@@ -3674,9 +3674,9 @@ dependencies = [
 
 [[package]]
 name = "sqltk"
-version = "0.9.0"
+version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d903c7ebd3307b29813468417bbbe17dc9b5554626bbe4a6f9ba174a8a9c6783"
+checksum = "4cc758d129a43b8feae9878eac0edf7d494730d5cb7ea8775b54704c83d0148d"
 dependencies = [
  "bigdecimal",
  "sqltk-parser",
@@ -3684,9 +3684,9 @@ dependencies = [
 
 [[package]]
 name = "sqltk-parser"
-version = "0.56.0-cipherstash.1"
+version = "0.56.0-cipherstash.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fa2b20306e4a01dd981c051e0d3c566367327e82e5cb1408001441ed3d07a642"
+checksum = "624fb59f490cedfefad2feadd5cd0ff275878501a4b200796def81da30f7c1d4"
 dependencies = [
  "bigdecimal",
  "log",
