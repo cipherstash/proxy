@@ -1,6 +1,6 @@
 #[cfg(test)]
 mod tests {
-    use crate::common::{clear, insert, query, random_id, simple_query, trace};
+    use crate::common::{clear, execute_query, query, random_id, simple_query, trace};
     use chrono::NaiveDate;
 
     macro_rules! test_group_by {
@@ -21,7 +21,7 @@ mod tests {
                         let id = random_id();
                         let sql =
                             format!("INSERT INTO encrypted (id, {encrypted_col}) VALUES ($1, $2)");
-                        insert(&sql, &[&id, &encrypted_val]).await;
+                        execute_query(&sql, &[&id, &encrypted_val]).await;
                     }
                 }
 

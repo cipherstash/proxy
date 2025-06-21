@@ -1,6 +1,6 @@
 #[cfg(test)]
 mod tests {
-    use crate::common::{clear, insert, query, random_id, simple_query_with_null, trace};
+    use crate::common::{clear, execute_query, query, random_id, simple_query_with_null, trace};
     use chrono::NaiveDate;
     use tap::prelude::*;
     use tokio_postgres::types::ToSql;
@@ -11,7 +11,7 @@ mod tests {
     {
         let id = random_id();
         let sql = format!("INSERT INTO encrypted (id, {}) VALUES ($1, $2)", col);
-        insert(&sql, &[&id, &val]).await;
+        execute_query(&sql, &[&id, &val]).await;
     }
 
     fn assert_expected<T>(expected: &[Option<T>], actual: &[Option<T>])

@@ -1,6 +1,6 @@
 #[cfg(test)]
 mod tests {
-    use crate::common::{clear, insert, query_by, random_id, trace};
+    use crate::common::{clear, execute_query, query_by, random_id, trace};
     use chrono::NaiveDate;
     use serde_json::Value;
 
@@ -18,7 +18,7 @@ mod tests {
                 let encrypted_val: Option<$type> = None;
 
                 let sql = format!("INSERT INTO encrypted (id, {encrypted_col}) VALUES ($1, $2)");
-                insert(&sql, &[&id, &encrypted_val]).await;
+                execute_query(&sql, &[&id, &encrypted_val]).await;
 
                 let expected = vec![encrypted_val];
 

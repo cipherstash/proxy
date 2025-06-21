@@ -18,6 +18,8 @@ pub const DECRYPTION_DURATION_SECONDS: &str = "cipherstash_proxy_decryption_dura
 
 pub const STATEMENTS_TOTAL: &str = "cipherstash_proxy_statements_total";
 pub const STATEMENTS_ENCRYPTED_TOTAL: &str = "cipherstash_proxy_statements_encrypted_total";
+pub const STATEMENTS_PASSTHROUGH_MAPPING_DISABLED_TOTAL: &str =
+    "cipherstash_proxy_statements_passthrough_mapping_disabled_total";
 pub const STATEMENTS_PASSTHROUGH_TOTAL: &str = "cipherstash_proxy_statements_passthrough_total";
 pub const STATEMENTS_UNMAPPABLE_TOTAL: &str = "cipherstash_proxy_statements_unmappable_total";
 pub const STATEMENTS_DURATION_SECONDS: &str = "cipherstash_proxy_statements_duration_seconds";
@@ -84,6 +86,10 @@ pub fn start(host: String, port: u16) -> Result<(), Error> {
     describe_counter!(
         STATEMENTS_ENCRYPTED_TOTAL,
         "Number of SQL statements that required encryption"
+    );
+    describe_counter!(
+        STATEMENTS_PASSTHROUGH_MAPPING_DISABLED_TOTAL,
+        "Number of SQL statements passed through while mapping was disabled"
     );
     describe_counter!(
         STATEMENTS_PASSTHROUGH_TOTAL,
