@@ -1,5 +1,6 @@
 mod common;
 mod decrypt;
+mod disable_mapping;
 mod empty_result;
 mod extended_protocol_error_messages;
 mod insert;

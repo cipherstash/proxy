@@ -1,8 +1,8 @@
 #[cfg(test)]
 mod tests {
     use crate::common::{
-        clear, insert, insert_simple_query, query_by, random_id, random_limited, simple_query,
-        trace,
+        clear, execute_query, execute_simple_query, query_by, random_id, random_limited,
+        simple_query, trace,
     };
     use chrono::NaiveDate;
     use serde_json::Value;
@@ -25,7 +25,7 @@ mod tests {
                 let insert_sql = format!("INSERT INTO encrypted (id, {encrypted_col}) VALUES ($1, '{encrypted_val}')");
                 let select_sql = format!("SELECT {encrypted_col} FROM encrypted WHERE id = $1");
 
-                insert(&insert_sql, &[&id]).await;
+                execute_query(&insert_sql, &[&id]).await;
                 let actual = query_by::<$type>(&select_sql, &id).await;
 
                 assert_eq!(expected, actual);
@@ -54,7 +54,7 @@ mod tests {
 
                 let expected = vec![encrypted_val];
 
-                insert_simple_query(&insert_sql).await;
+                execute_simple_query(&insert_sql).await;
                 let actual = simple_query::<$type>(&select_sql).await;
 
                 assert_eq!(expected, actual);
@@ -94,7 +94,7 @@ mod tests {
         let encrypted_val = crate::value_for_type!(String, random_limited());
 
         let sql = format!("INSERT INTO encrypted (id, plaintext) VALUES ($1, '{encrypted_val}')");
-        insert(&sql, &[&id]).await;
+        execute_query(&sql, &[&id]).await;
 
         let expected = vec![encrypted_val];
 

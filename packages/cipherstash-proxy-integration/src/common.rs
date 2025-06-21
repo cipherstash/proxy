@@ -124,12 +124,12 @@ pub async fn connect(port: u16) -> Client {
     client
 }
 
-pub async fn insert(sql: &str, params: &[&(dyn ToSql + Sync)]) {
+pub async fn execute_query(sql: &str, params: &[&(dyn ToSql + Sync)]) {
     let client = connect_with_tls(PROXY).await;
     client.query(sql, params).await.unwrap();
 }
 
-pub async fn insert_simple_query(sql: &str) {
+pub async fn execute_simple_query(sql: &str) {
     let client = connect_with_tls(PROXY).await;
     client.simple_query(sql).await.unwrap();
 }

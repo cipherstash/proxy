@@ -1,6 +1,6 @@
 #[cfg(test)]
 mod tests {
-    use crate::common::{connect_with_tls, insert, query_by, random_id, trace, PROXY};
+    use crate::common::{connect_with_tls, execute_query, query_by, random_id, trace, PROXY};
     use tokio_postgres::types::{FromSql, ToSql};
 
     #[derive(Debug, ToSql, FromSql, PartialEq)]
@@ -18,7 +18,7 @@ mod tests {
         let encrypted_domain = Domain("ZZ".to_string());
 
         let sql = "INSERT INTO encrypted (id, plaintext_domain) VALUES ($1, $2)";
-        insert(sql, &[&id, &encrypted_domain]).await;
+        execute_query(sql, &[&id, &encrypted_domain]).await;
 
         let sql = "SELECT plaintext_domain FROM encrypted WHERE id = $1";
         let result = query_by::<Domain>(sql, &id).await;
