@@ -11,10 +11,7 @@ use super::{
 use crate::{log::CONTEXT, prometheus::STATEMENTS_DURATION_SECONDS};
 use eql_mapper::{Schema, TableResolver};
 use metrics::histogram;
-use sqltk::parser::{
-    ast::{ContextModifier, Expr, Ident, ObjectName, ObjectNamePart, Set, Value, ValueWithSpan},
-    tokenizer::Span,
-};
+use sqltk::parser::ast::{Expr, Ident, ObjectName, ObjectNamePart, Set, Value, ValueWithSpan};
 use std::{
     collections::{HashMap, VecDeque},
     sync::{Arc, LazyLock, RwLock},
@@ -35,7 +32,7 @@ pub struct Context {
     execute: Arc<RwLock<ExecuteQueue>>,
     schema_changed: Arc<RwLock<bool>>,
     table_resolver: Arc<TableResolver>,
-    unsafe_skip_mapping_next_statement: bool,
+    unsafe_disable_mapping: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -92,7 +89,7 @@ impl Context {
             schema_changed: Arc::new(RwLock::from(false)),
             table_resolver: Arc::new(TableResolver::new_editable(schema)),
             client_id,
-            unsafe_skip_mapping_next_statement: false,
+            unsafe_disable_mapping: false,
         }
     }
 
@@ -243,57 +240,44 @@ impl Context {
         self.table_resolver.clone()
     }
 
-    /// Examines a [`sqltk::parser::ast::Statement`] and if it is precisely equal to `SET LOCAL UNSAFE_SKIP_MAPPING_NEXT_STATEMENT = t;`
-    /// then it sets the flag [`Context::unsafe_skip_mapping_next_statement`] to `true`.
+    /// Examines a [`sqltk::parser::ast::Statement`] and if it is precisely equal to `SET UNSAFE_DISABLE_MAPPING = {boolean};`
+    /// then it sets the flag [`Context::unsafe_disable_mapping`] to the provided `{boolean}`` value.
     ///
-    /// Returns `true` if [`Context::unsafe_skip_mapping_next_statement`] was set to `true`.
     ///
-    /// Also see: [`Context::check_and_reset_unsafe_skip_mapping_next_statement`].
-    pub fn maybe_set_unsafe_skip_mapping_next_statement(
+    pub fn maybe_set_unsafe_disable_mapping(
         &mut self,
         statement: &sqltk::parser::ast::Statement,
-    ) -> bool {
-        // The constants avoid the need to allocate 2 Vecs every time we examine the statement.
-        static SQL_SETTING_NAME_UNSAFE_SKIP_MAPPING_NEXT_STATEMENT: LazyLock<ObjectName> =
+    ) -> Option<bool> {
+        // The CIPHERSTASH. namespace prevents errors UNSAFE_DISABLE_MAPPING
+        // The constants avoid the need to allocate Vecs every time we examine the statement.
+        static SQL_SETTING_NAME_UNSAFE_DISABLE_MAPPING: LazyLock<ObjectName> =
             LazyLock::new(|| {
-                ObjectName(vec![ObjectNamePart::Identifier(Ident::new(
-                    "UNSAFE_SKIP_MAPPING_NEXT_STATEMENT",
-                ))])
-            });
-
-        static SQL_SETTING_VALUE_UNSAFE_SKIP_MAPPING_NEXT_STATEMENT_TRUE: LazyLock<Vec<Expr>> =
-            LazyLock::new(|| {
-                vec![Expr::Value(ValueWithSpan {
-                    value: Value::Boolean(true),
-                    span: Span::empty(),
-                })]
+                ObjectName(vec![
+                    ObjectNamePart::Identifier(Ident::new("CIPHERSTASH")),
+                    ObjectNamePart::Identifier(Ident::new("UNSAFE_DISABLE_MAPPING")),
+                ])
             });
 
         if let sqltk::parser::ast::Statement::Set(Set::SingleAssignment {
-            scope: Some(ContextModifier::Local),
-            variable,
-            values,
-            hivevar: false,
+            variable, values, ..
         }) = statement
         {
-            if variable == &*SQL_SETTING_NAME_UNSAFE_SKIP_MAPPING_NEXT_STATEMENT
-                && values == &*SQL_SETTING_VALUE_UNSAFE_SKIP_MAPPING_NEXT_STATEMENT_TRUE
-            {
-                self.unsafe_skip_mapping_next_statement = true;
+            if variable == &*SQL_SETTING_NAME_UNSAFE_DISABLE_MAPPING {
+                if let Some(Expr::Value(ValueWithSpan {
+                    value: Value::Boolean(value),
+                    ..
+                })) = values.first()
+                {
+                    self.unsafe_disable_mapping = *value;
+                    return Some(*value);
+                }
             }
         }
-
-        self.unsafe_skip_mapping_next_statement
+        return None;
     }
 
-    /// Checks whether to skip mapping the next statement and resets [`Context::unsafe_skip_mapping_next_statement`]
-    /// back to `false`.
-    ///
-    /// Note that due to the implicit reset this method is *not* idempotent.
-    pub fn check_and_reset_unsafe_skip_mapping_next_statement(&mut self) -> bool {
-        let skip = self.unsafe_skip_mapping_next_statement;
-        self.unsafe_skip_mapping_next_statement = false;
-        skip
+    pub fn unsafe_disable_mapping(&mut self) -> bool {
+        self.unsafe_disable_mapping
     }
 }
 
@@ -414,7 +398,9 @@ mod tests {
         postgresql::messages::{describe::Target, Name},
     };
     use eql_mapper::Schema;
+    use sqltk::parser::{dialect::PostgreSqlDialect, parser::Parser};
     use std::sync::Arc;
+    use tracing::info;
 
     fn statement() -> Statement {
         Statement {
@@ -615,5 +601,53 @@ mod tests {
         let portal = context.get_portal_from_execute().unwrap();
         let statement = get_statement(portal);
         assert_eq!(statement_3, statement);
+    }
+
+    fn parse_statement(sql: &str) -> sqltk::parser::ast::Statement {
+        let statements = Parser::new(&PostgreSqlDialect {})
+            .try_with_sql(sql)
+            .unwrap()
+            .parse_statements()
+            .unwrap();
+
+        statements.first().unwrap().clone()
+    }
+
+    #[test]
+    pub fn disable_mapping() {
+        log::init(LogConfig::default());
+
+        let schema = Arc::new(Schema::new("public"));
+        let mut context = Context::new(1, schema);
+
+        let sql = "SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING = true";
+        let statement = parse_statement(sql);
+
+        context.maybe_set_unsafe_disable_mapping(&statement);
+        assert!(context.unsafe_disable_mapping());
+
+        let sql = "SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING = false";
+        let statement = parse_statement(sql);
+
+        context.maybe_set_unsafe_disable_mapping(&statement);
+        assert!(!context.unsafe_disable_mapping());
+
+        let sql = "SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING = 1";
+        let statement = parse_statement(sql);
+
+        context.maybe_set_unsafe_disable_mapping(&statement);
+        assert!(!context.unsafe_disable_mapping());
+
+        let sql = "SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING = '1'";
+        let statement = parse_statement(sql);
+
+        context.maybe_set_unsafe_disable_mapping(&statement);
+        assert!(!context.unsafe_disable_mapping());
+
+        let sql = "SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING = t";
+        let statement = parse_statement(sql);
+
+        context.maybe_set_unsafe_disable_mapping(&statement);
+        assert!(!context.unsafe_disable_mapping());
     }
 }
