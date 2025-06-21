@@ -157,5 +157,8 @@ SELECT eql_v2.add_search_config(
   '{"prefix": "encrypted/encrypted_jsonb"}'
 );
 
+
+SELECT eql_v2.add_encrypted_constraint('encrypted', 'encrypted_text');
+
 SELECT eql_v2.encrypt();
 SELECT eql_v2.activate();
