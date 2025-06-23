@@ -273,7 +273,7 @@ impl Context {
                 }
             }
         }
-        return None;
+        None
     }
 
     pub fn unsafe_disable_mapping(&mut self) -> bool {
@@ -400,7 +400,6 @@ mod tests {
     use eql_mapper::Schema;
     use sqltk::parser::{dialect::PostgreSqlDialect, parser::Parser};
     use std::sync::Arc;
-    use tracing::info;
 
     fn statement() -> Statement {
         Statement {
