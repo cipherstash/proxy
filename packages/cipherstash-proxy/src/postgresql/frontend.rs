@@ -678,6 +678,13 @@ where
     ///
     ///
     async fn bind_handler(&mut self, bytes: &BytesMut) -> Result<Option<BytesMut>, Error> {
+        if self.context.unsafe_disable_mapping() {
+            warn!(msg = "Encrypted statement mapping is not enabled");
+            counter!(STATEMENTS_PASSTHROUGH_MAPPING_DISABLED_TOTAL).increment(1);
+            counter!(STATEMENTS_PASSTHROUGH_TOTAL).increment(1);
+            return Ok(None);
+        }
+
         let mut bind = Bind::try_from(bytes)?;
 
         debug!(target: PROTOCOL, client_id = self.context.client_id, bind = ?bind);
