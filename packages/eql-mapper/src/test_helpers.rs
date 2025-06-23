@@ -53,16 +53,21 @@ pub(crate) fn get_node_key_of_json_selector<'ast>(
 
 pub(crate) fn dummy_encrypted_json_selector(
     statement: &Statement,
-    selector: Value,
+    selectors: Vec<Value>,
 ) -> HashMap<NodeKey<'_>, ast::Value> {
-    if let Value::SingleQuotedString(s) = &selector {
-        HashMap::from_iter(vec![(
-            get_node_key_of_json_selector(statement, &selector),
-            ast::Value::SingleQuotedString(format!("<encrypted-selector({})>", s)),
-        )])
-    } else {
-        panic!("dummy_encrypted_json_selector only works on Value::SingleQuotedString")
+    let mut dummy_encrypted_values = HashMap::new();
+    for selector in selectors.into_iter() {
+        if let Value::SingleQuotedString(s) = &selector {
+            dummy_encrypted_values.insert(
+                get_node_key_of_json_selector(statement, &selector),
+                ast::Value::SingleQuotedString(format!("<encrypted-selector({})>", s)),
+            );
+        } else {
+            panic!("dummy_encrypted_json_selector only works on Value::SingleQuotedString")
+        }
     }
+
+    dummy_encrypted_values
 }
 
 /// Utility for finding the [`NodeKey`] of a [`Value`] node in `statement` by providing a `matching` equal node to search for.

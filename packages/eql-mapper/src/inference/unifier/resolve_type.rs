@@ -1,6 +1,6 @@
-use crate::{TypeError};
+use crate::TypeError;
 
-use super::{Array, Constructor, NativeValue, Projection, Type, Unifier, Value, Var, SetOf};
+use super::{Array, Constructor, NativeValue, Projection, SetOf, Type, Unifier, Value, Var};
 
 /// A trait for resolving all type variables contained in a [`crate::unifier::Type`] and converting the successfully
 /// resolved type into the publicly exported [`crate::Type`] type representation which is identical except for the

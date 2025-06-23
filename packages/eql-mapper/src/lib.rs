@@ -1438,20 +1438,33 @@ mod test {
             }
         });
 
-        let statement = parse("
-            SELECT jsonb_path_query(eql_col, '$.secret'), jsonb_path_query(native_col, '$.not-secret') FROM employees
-        ");
+        let statement = parse(
+            "
+            SELECT
+                jsonb_path_exists(eql_col, '$.another-secret'),
+                jsonb_path_query(eql_col, '$.secret'),
+                jsonb_path_query(native_col, '$.not-secret')
+            FROM employees
+        ",
+        );
 
         match type_check(schema, &statement) {
             Ok(typed) => {
                 match typed.transform(test_helpers::dummy_encrypted_json_selector(
                     &statement,
-                    ast::Value::SingleQuotedString("$.secret".into()),
+                    vec![
+                        ast::Value::SingleQuotedString("$.secret".into()),
+                        ast::Value::SingleQuotedString("$.another-secret".into()),
+                    ],
                 )) {
                     Ok(statement) => {
                         assert_eq!(
                             statement.to_string(),
-                            "SELECT eql_v2.jsonb_path_query(eql_col, '<encrypted-selector($.secret)>'::JSONB::eql_v2_encrypted), jsonb_path_query(native_col, '$.not-secret') FROM employees"
+                            "SELECT \
+                            eql_v2.jsonb_path_exists(eql_col, '<encrypted-selector($.another-secret)>'::JSONB::eql_v2_encrypted), \
+                            eql_v2.jsonb_path_query(eql_col, '<encrypted-selector($.secret)>'::JSONB::eql_v2_encrypted), \
+                            jsonb_path_query(native_col, '$.not-secret') \
+                            FROM employees"
                         );
                     }
                     Err(err) => panic!("transformation failed: {err}"),
@@ -1580,7 +1593,7 @@ mod test {
             if let ast::Expr::Value(ast::ValueWithSpan { value, .. }) = arg {
                 encrypted_literals.extend(test_helpers::dummy_encrypted_json_selector(
                     &statement,
-                    value.clone(),
+                    vec![value.clone()],
                 ));
             }
         }
@@ -1619,7 +1632,7 @@ mod test {
 
         match type_check(schema, &statement) {
             Ok(typed) => {
-                match typed.transform(test_helpers::dummy_encrypted_json_selector(&statement, ast::Value::SingleQuotedString("medications".to_owned()))) {
+                match typed.transform(test_helpers::dummy_encrypted_json_selector(&statement, vec![ast::Value::SingleQuotedString("medications".to_owned())])) {
                     Ok(statement) => assert_eq!(
                         statement.to_string(),
                         format!("SELECT id, notes {op} '<encrypted-selector(medications)>'::JSONB::eql_v2_encrypted AS meds FROM patients")

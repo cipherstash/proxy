@@ -91,7 +91,6 @@ impl Display for Var {
     }
 }
 
-
 /// A `Constructor` is what is known about a [`Type`].
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Display, Hash)]
 pub enum Constructor {
@@ -384,7 +383,7 @@ impl Type {
             Ok(())
         } else {
             Err(TypeError::UnsatisfiedBounds(
-                self.clone(),
+                Arc::new(self.clone()),
                 self.effective_bounds().difference(bounds),
             ))
         }

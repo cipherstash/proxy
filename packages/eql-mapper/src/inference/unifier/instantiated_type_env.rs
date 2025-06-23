@@ -16,8 +16,7 @@ impl InstantiatedTypeEnv {
     }
 
     pub(crate) fn add_type(&mut self, tvar: TVar, ty: Arc<Type>) -> Result<(), TypeError> {
-        if !self.types.contains_key(&tvar) {
-            self.types.insert(tvar, ty);
+        if self.types.insert(tvar.clone(), ty).is_none() {
             Ok(())
         } else {
             Err(TypeError::InternalError(format!(

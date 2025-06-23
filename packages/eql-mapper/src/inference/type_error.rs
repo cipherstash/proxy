@@ -16,7 +16,7 @@ pub enum TypeError {
     Conflict(String),
 
     #[error("Type `{}` does not satisfy bounds `{}`", _0, _1)]
-    UnsatisfiedBounds(Type, EqlTraits),
+    UnsatisfiedBounds(Arc<Type>, EqlTraits),
 
     #[error("unified type contains unresolved type variable: {}", _0)]
     Incomplete(String),

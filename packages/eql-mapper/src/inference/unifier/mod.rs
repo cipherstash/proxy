@@ -234,7 +234,7 @@ impl<'ast> Unifier<'ast> {
     /// 2. EQL types satisfy bounds that they implement.
     /// 3. Arrays satisfy all bounds of their element type.
     /// 4. Projections satisfy the intersection of the bounds of their columns.
-    ///     a. However, empty projections satisfy all possible bounds.
+    ///    a. However, empty projections satisfy all possible bounds.
     /// 5. Type variables satisfy all bounds that they carry.
     fn satisfy_bounds(&mut self, ty: &Type, bounds: &EqlTraits) -> Result<(), TypeError> {
         if let Type::Var(_) = ty {
@@ -245,7 +245,7 @@ impl<'ast> Unifier<'ast> {
             Ok(())
         } else {
             Err(TypeError::UnsatisfiedBounds(
-                ty.clone(),
+                Arc::new(ty.clone()),
                 bounds.difference(&ty.effective_bounds()),
             ))
         }

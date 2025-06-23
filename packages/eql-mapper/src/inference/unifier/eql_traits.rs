@@ -2,7 +2,10 @@ use std::sync::Arc;
 
 use derive_more::derive::{Deref, Display};
 
-use crate::{unifier::{AssociatedTypeSelector, SetOf}, TypeError};
+use crate::{
+    unifier::{AssociatedTypeSelector, SetOf},
+    TypeError,
+};
 
 use super::{Array, Constructor, EqlTerm, EqlValue, Projection, Type, Value, Var};
 
