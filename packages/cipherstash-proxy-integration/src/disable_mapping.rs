@@ -32,8 +32,8 @@ mod tests {
         let sql = "SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING = true";
         client.query(sql, &[]).await.unwrap();
 
-        let insert_sql = format!("INSERT INTO encrypted (id, encrypted_text) VALUES ($1, $2)");
-        let result = client.query(&insert_sql, &[&id, &encrypted_text]).await;
+        let insert_sql = "INSERT INTO encrypted (id, encrypted_text) VALUES ($1, $2)";
+        let result = client.query(insert_sql, &[&id, &encrypted_text]).await;
 
         // This error is actually a `WrongType` error from the tokio client as encrypted_text is actually eql_v2_encrypted
         assert!(result.is_err());
@@ -43,7 +43,7 @@ mod tests {
             data: Value::from(encrypted_text.to_owned()),
         };
 
-        let result = client.query(&insert_sql, &[&id, &encrypted]).await;
+        let result = client.query(insert_sql, &[&id, &encrypted]).await;
 
         assert!(result.is_err());
 
@@ -60,7 +60,7 @@ mod tests {
         let sql = "SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING = false";
         client.query(sql, &[]).await.unwrap();
 
-        let result = client.query(&insert_sql, &[&id, &encrypted_text]).await;
+        let result = client.query(insert_sql, &[&id, &encrypted_text]).await;
         assert!(result.is_ok());
     }
 
@@ -81,8 +81,8 @@ mod tests {
         let encrypted_text = "hello".to_string();
         let expected = vec![encrypted_text.to_owned()];
 
-        let sql = format!("INSERT INTO encrypted (id, encrypted_text) VALUES ($1, $2)");
-        execute_query(&sql, &[&id, &encrypted_text]).await;
+        let sql = "INSERT INTO encrypted (id, encrypted_text) VALUES ($1, $2)";
+        execute_query(sql, &[&id, &encrypted_text]).await;
 
         let sql = "SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING = true";
         client.query(sql, &[]).await.unwrap();
@@ -131,8 +131,8 @@ mod tests {
         let encrypted_text = "hello".to_string();
         let expected = vec![encrypted_text.to_owned()];
 
-        let sql = format!("INSERT INTO encrypted (id, encrypted_text) VALUES ($1, $2)");
-        execute_query(&sql, &[&id, &encrypted_text]).await;
+        let sql = "INSERT INTO encrypted (id, encrypted_text) VALUES ($1, $2)";
+        execute_query(sql, &[&id, &encrypted_text]).await;
 
         let client = connect_with_tls(PROXY).await;
         let sql = "SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING = true";

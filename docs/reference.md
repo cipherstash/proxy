@@ -245,6 +245,63 @@ CS_DATABASE__INSTALL_AWS_RDS_CERT_BUNDLE="true"
 ```
 
 
+## Disable encrypted mapping
+
+In some circumstances it may be necessary to disable encrypted mapping for one or more sql statements.
+
+A `SET` command can be used to change the `CIPHERSTASH.UNSAFE_DISABLE_MAPPING` configuration parameter.
+
+The parameter is always scoped to the connection `SESSION` - mapping is only ever disabled for the client connection the `SET` command was issued on.
+
+### IMPORTANT!
+
+Care is required.
+If mapping is disabled, sensitive data may not be encrypted and may appear in logs.
+
+CipherStash Proxy and EQL do provide some protection against writing plaintext into and reading plaintext from encrypted columns.
+
+Always use `eql_v2.add_encrypted_constraint(table, column)` when defining encrypted columns to ensure plaintext data cannot be written.
+
+Unmapped `SELECT` statements should always return the encrypted payload.
+If the constraint has been applied, unmapped `INSERT/UPDATE` statements should return a PostgreSQL type error.
+
+
+### Disable mapping
+```
+SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING = true;
+```
+
+### Enable mapping
+```
+SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING = false;
+```
+
+### Note on prepared statements
+
+CipherStash Proxy only decrypts data of SQL statements that it has explicitly checked and mapped.
+
+If mapping is disabled, any subsequent prepare will skip the mapping process.
+
+If mapping is re-enabled for the connection, returned data will not be decrypted.
+
+To enable mapping, encryption and decryption of prepared statements, a new connection is required, or the client needs to prepare the statement again.
+
+This behaviour is expected and a consequence of the PostgreSQL protocol.
+
+To prepare a statement, the client sends the SQL in a `parse` message.
+Once a statement has been prepared, the client skips the `parse` step, and does not send the SQL again, referring to the statement by a specified name.
+If mapping is disabled the CipherStash proxy will not map the statement on `parse`, and data returned from subsequent executions will never be decrypted.
+
+
+- mapping is disabled
+- client sends statement in `parse` message
+- proxy skips statement mapping
+- mapping is enabled
+- client executes the prepared statement
+- as statement was not mapped and the returned data is not decrypted
+
+
+
 ## Prometheus metrics
 
 To enable a Prometheus exporter on the default port (`9930`) use either:
