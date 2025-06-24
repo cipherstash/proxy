@@ -8,8 +8,8 @@ use std::sync::Arc;
 use crate::{unifier::SetOf, TypeError};
 
 use super::{
-    Array, AssociatedType, Constructor, EqlTerm, NativeValue, Projection, ProjectionColumn, Type,
-    Unifier, Value, Var,
+    Array, AssociatedType, EqlTerm, NativeValue, Projection, ProjectionColumn, Type, Unifier,
+    Value, Var,
 };
 
 /// Trait for unifying two types.
@@ -21,41 +21,13 @@ pub(super) trait UnifyTypes<Lhs, Rhs> {
     fn unify_types(&mut self, lhs: &Lhs, rhs: &Rhs) -> Result<Arc<Type>, TypeError>;
 }
 
-impl UnifyTypes<Constructor, Constructor> for Unifier<'_> {
-    fn unify_types(
-        &mut self,
-        lhs: &Constructor,
-        rhs: &Constructor,
-    ) -> Result<Arc<Type>, TypeError> {
-        match (lhs, rhs) {
-            (Constructor::Value(lhs_v), Constructor::Value(rhs_v)) => {
-                self.unify_types(lhs_v, rhs_v)
-            }
-
-            (Constructor::Value(value), Constructor::Projection(projection))
-            | (Constructor::Projection(projection), Constructor::Value(value)) => {
-                self.unify_types(value, projection)
-            }
-
-            (Constructor::Projection(lhs), Constructor::Projection(rhs)) => {
-                self.unify_types(lhs, rhs)
-            }
-
-            (Constructor::SetOf(lhs), Constructor::SetOf(rhs)) => self.unify_types(lhs, rhs),
-
-            (_, _) => Err(TypeError::Conflict(format!(
-                "cannot unify {lhs} with {rhs}"
-            ))),
-        }
-    }
-}
-
 impl UnifyTypes<SetOf, SetOf> for Unifier<'_> {
     fn unify_types(&mut self, lhs: &SetOf, rhs: &SetOf) -> Result<Arc<Type>, TypeError> {
         Ok(Type::set_of(self.unify(lhs.inner_ty(), rhs.inner_ty())?).into())
     }
 }
 
+// A Value can be unified with a single-column Projection.
 impl UnifyTypes<Value, Projection> for Unifier<'_> {
     fn unify_types(&mut self, lhs: &Value, rhs: &Projection) -> Result<Arc<Type>, TypeError> {
         let projection = rhs.flatten();
@@ -85,6 +57,15 @@ impl UnifyTypes<Value, Value> for Unifier<'_> {
             (Value::Native(lhs), Value::Native(rhs)) => self.unify_types(lhs, rhs),
 
             (Value::Array(lhs), Value::Array(rhs)) => self.unify_types(lhs, rhs),
+
+            (Value::Projection(lhs), Value::Projection(rhs)) => self.unify_types(lhs, rhs),
+
+            (Value::SetOf(lhs), Value::SetOf(rhs)) => self.unify_types(lhs, rhs),
+
+            // Special case: a value can be unified with a single-column projection (producing a value).
+            (value, Value::Projection(projection)) | (Value::Projection(projection), value) => {
+                self.unify_types(value, projection)
+            }
 
             (lhs, rhs) => Err(TypeError::Conflict(format!(
                 "cannot unify values {} and {}",
@@ -143,13 +124,13 @@ impl UnifyTypes<EqlTerm, EqlTerm> for Unifier<'_> {
     }
 }
 
-impl UnifyTypes<Constructor, Var> for Unifier<'_> {
+impl UnifyTypes<Value, Var> for Unifier<'_> {
     fn unify_types(
         &mut self,
-        lhs: &Constructor,
+        lhs: &Value,
         Var(tvar, bounds): &Var,
     ) -> Result<Arc<Type>, TypeError> {
-        self.unify_with_type_var(Type::Constructor(lhs.clone()).into(), *tvar, bounds)
+        self.unify_with_type_var(Type::Value(lhs.clone()).into(), *tvar, bounds)
     }
 }
 
@@ -194,22 +175,22 @@ impl UnifyTypes<AssociatedType, AssociatedType> for Unifier<'_> {
     }
 }
 
-impl UnifyTypes<AssociatedType, Constructor> for Unifier<'_> {
+impl UnifyTypes<AssociatedType, Value> for Unifier<'_> {
     fn unify_types(
         &mut self,
         assoc: &AssociatedType,
-        constructor: &Constructor,
+        value: &Value,
     ) -> Result<Arc<Type>, TypeError> {
-        // If the associated type is resolved then unify the resolved constructor with the constructor arg, else unify to a
-        // new associated type where the unresolved type is unified with the constructor.
+        // If the associated type is resolved then unify the resolved value with the value arg, else unify to a
+        // new associated type where the unresolved type is unified with the value.
 
-        if let Some(resolved_constructor) = assoc.resolve_selector_target(self)? {
-            self.unify(constructor.clone().into(), resolved_constructor)
+        if let Some(resolved_value) = assoc.resolve_selector_target(self)? {
+            self.unify(value.clone().into(), resolved_value)
         } else {
             Ok(AssociatedType {
                 impl_ty: assoc.impl_ty.clone(),
                 selector: assoc.selector.clone(),
-                resolved_ty: self.unify(assoc.resolved_ty.clone(), constructor.clone().into())?,
+                resolved_ty: self.unify(assoc.resolved_ty.clone(), value.clone().into())?,
             }
             .into())
         }

@@ -11,28 +11,10 @@ use sqltk::parser::ast::Ident;
 
 /// The resolved type of a [`sqltk::parser::ast::Expr`] node.
 #[derive(Debug, Clone, PartialEq, Eq, Display)]
-#[display("{self}")]
 pub enum Type {
-    #[display("{}", _0)]
-    Constructor(Constructor),
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Display)]
-#[display("{self}")]
-pub enum Constructor {
     /// A value type (an EQL type, native database type or an array type)
     #[display("{}", _0)]
     Value(Value),
-
-    /// A projection type that is parameterized by a list of projection column types.
-    #[display("{}", _0)]
-    Projection(Projection),
-
-    /// In PostgreSQL, SETOF is a special return type used in functions to indicate that the function returns a set of
-    /// rows rather than a single value. It allows a function to behave like a table or subquery in SQL, producing
-    /// multiple rows as output.
-    #[display("{}", _0)]
-    SetOf(SetOf),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Display)]
@@ -46,7 +28,6 @@ impl SetOf {
 
 /// A value type (an EQL type, native database type or an array type)
 #[derive(Debug, Clone, PartialEq, Eq, Display)]
-#[display("{self}")]
 pub enum Value {
     /// An encrypted type from a particular table-column in the schema.
     ///
@@ -62,6 +43,16 @@ pub enum Value {
     /// An array type that is parameterized by an element type.
     #[display("Array[{}]", _0)]
     Array(Array),
+
+    /// A projection type that is parameterized by a list of projection column types.
+    #[display("{}", _0)]
+    Projection(Projection),
+
+    /// In PostgreSQL, SETOF is a special return type used in functions to indicate that the function returns a set of
+    /// rows rather than a single value. It allows a function to behave like a table or subquery in SQL, producing
+    /// multiple rows as output.
+    #[display("{}", _0)]
+    SetOf(SetOf),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Display)]
@@ -69,29 +60,18 @@ pub struct Array(pub Box<Type>);
 
 /// A projection type that is parameterized by a list of projection column types.
 #[derive(Debug, Clone, PartialEq, Eq, Display)]
-#[display("{self}")]
 pub enum Projection {
-    #[display("PROJ[{}]", _0.iter().map(|pc| pc.to_string()).collect::<Vec<_>>().join(", "))]
+    #[display("{{{}}}", _0.iter().map(|pc| pc.to_string()).collect::<Vec<_>>().join(", "))]
     WithColumns(Vec<ProjectionColumn>),
 
-    #[display("PROJ[]")]
+    #[display("{{}}")]
     Empty,
 }
 
 impl Type {
     pub fn contains_eql(&self) -> bool {
         match self {
-            Type::Constructor(constructor) => constructor.contains_eql(),
-        }
-    }
-}
-
-impl Constructor {
-    pub fn contains_eql(&self) -> bool {
-        match self {
-            Constructor::Value(value) => value.contains_eql(),
-            Constructor::Projection(projection) => projection.contains_eql(),
-            Constructor::SetOf(set_of) => set_of.contains_eql(),
+            Type::Value(value) => value.contains_eql(),
         }
     }
 }
@@ -102,6 +82,8 @@ impl Value {
             Value::Eql(_) => true,
             Value::Native(_) => false,
             Value::Array(inner) => inner.contains_eql(),
+            Value::Projection(projection) => projection.contains_eql(),
+            Value::SetOf(set_of) => set_of.contains_eql(),
         }
     }
 }
@@ -157,38 +139,32 @@ impl ProjectionColumn {
     }
 }
 
-impl From<Constructor> for Type {
-    fn from(constructor: Constructor) -> Self {
-        Type::Constructor(constructor)
-    }
-}
-
 impl From<Value> for Type {
     fn from(value: Value) -> Self {
-        Type::Constructor(Constructor::Value(value))
+        Type::Value(value)
     }
 }
 
 impl From<Array> for Type {
     fn from(array: Array) -> Self {
-        Type::Constructor(Constructor::Value(Value::Array(array)))
+        Type::Value(Value::Array(array))
     }
 }
 
 impl From<EqlTerm> for Type {
     fn from(eql_term: EqlTerm) -> Self {
-        Type::Constructor(Constructor::Value(Value::Eql(eql_term)))
+        Type::Value(Value::Eql(eql_term))
     }
 }
 
 impl From<Projection> for Type {
     fn from(projection: Projection) -> Self {
-        Type::Constructor(Constructor::Projection(projection))
+        Type::Value(Value::Projection(projection))
     }
 }
 
 impl From<NativeValue> for Type {
     fn from(native: NativeValue) -> Self {
-        Type::Constructor(Constructor::Value(Value::Native(native)))
+        Type::Value(Value::Native(native))
     }
 }

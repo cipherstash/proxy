@@ -2,8 +2,8 @@ use super::importer::{ImportError, Importer};
 use crate::{
     inference::{TypeError, TypeInferencer},
     unifier::{EqlTerm, Unifier},
-    Constructor, DepMut, Param, ParamError, ScopeError, ScopeTracker, TableResolver, Type,
-    TypeCheckedStatement, TypeRegistry, Value,
+    DepMut, Param, ParamError, ScopeError, ScopeTracker, TableResolver, Type, TypeCheckedStatement,
+    TypeRegistry, Value,
 };
 use sqltk::parser::ast::{self as ast, Statement};
 use sqltk::{Break, NodeKey, Visitable, Visitor};
@@ -228,12 +228,8 @@ impl<'ast> EqlMapper<'ast> {
             .into_iter()
             .map(|(p, ty)| -> Result<(Param, Value), EqlMapperError> {
                 match ty.resolved(&mut self.unifier.borrow_mut())? {
-                    Type::Constructor(Constructor::Value(value)) if value.contains_eql() => {
-                        Ok((p, value))
-                    }
-                    Type::Constructor(Constructor::Value(value)) if !value.contains_eql() => {
-                        Ok((p, value))
-                    }
+                    Type::Value(value) if value.contains_eql() => Ok((p, value)),
+                    Type::Value(value) if !value.contains_eql() => Ok((p, value)),
                     other => Err(TypeError::Expected(format!(
                         "expected param '{}' to resolve to a scalar type but got '{}'",
                         p, other
@@ -259,10 +255,7 @@ impl<'ast> EqlMapper<'ast> {
             .map(
                 |(node, ty)| -> Result<Option<(EqlTerm, &'ast ast::Value)>, TypeError> {
                     let resolved_ty = ty.resolved(&mut self.unifier.borrow_mut())?;
-                    if let crate::Type::Constructor(crate::Constructor::Value(crate::Value::Eql(
-                        eql_term,
-                    ))) = &resolved_ty
-                    {
+                    if let crate::Type::Value(crate::Value::Eql(eql_term)) = &resolved_ty {
                         return Ok(Some((eql_term.clone(), node)));
                     }
                     Ok(None)

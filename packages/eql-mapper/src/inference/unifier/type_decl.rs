@@ -34,7 +34,7 @@ use crate::{
 };
 
 use super::{
-    AssociatedType, Constructor, EqlTerm, EqlTraits, NativeValue, Projection, ProjectionColumn,
+    AssociatedType, EqlTerm, EqlTraits, NativeValue, Projection, ProjectionColumn,
     ProjectionColumns, TableColumn, Type, TypeEnv, Unifier, Value,
 };
 
@@ -272,7 +272,7 @@ impl InstantiateType for ProjectionDecl {
         unifier: &mut Unifier<'_>,
         env: &InstantiatedTypeEnv,
     ) -> Result<Arc<Type>, TypeError> {
-        Ok(Arc::new(Type::Constructor(Constructor::Projection(
+        Ok(Arc::new(Type::Value(Value::Projection(
             Projection::WithColumns(ProjectionColumns(
                 self.0
                     .iter()
@@ -288,7 +288,7 @@ impl InstantiateType for ProjectionDecl {
     }
 
     fn instantiate_concrete(&self) -> Result<Arc<Type>, TypeError> {
-        Ok(Arc::new(Type::Constructor(Constructor::Projection(
+        Ok(Arc::new(Type::Value(Value::Projection(
             Projection::WithColumns(ProjectionColumns(
                 self.0
                     .iter()
@@ -304,7 +304,7 @@ impl InstantiateType for ProjectionDecl {
     }
 
     fn instantiate_shallow(&self, unifier: &mut Unifier<'_>) -> Result<Arc<Type>, TypeError> {
-        Ok(Arc::new(Type::Constructor(Constructor::Projection(
+        Ok(Arc::new(Type::Value(Value::Projection(
             Projection::WithColumns(ProjectionColumns(
                 self.0
                     .iter()
@@ -625,12 +625,10 @@ impl InstantiateType for NativeDecl {
 
     fn instantiate_concrete(&self) -> Result<Arc<Type>, TypeError> {
         match &self.0 {
-            Some(tc) => Ok(Arc::new(Type::Constructor(Constructor::Value(
-                Value::Native(NativeValue(Some(tc.clone()))),
-            )))),
-            None => Ok(Arc::new(Type::Constructor(Constructor::Value(
-                Value::Native(NativeValue(None)),
-            )))),
+            Some(tc) => Ok(Arc::new(Type::Value(Value::Native(NativeValue(Some(
+                tc.clone(),
+            )))))),
+            None => Ok(Arc::new(Type::Value(Value::Native(NativeValue(None))))),
         }
     }
 
@@ -649,9 +647,7 @@ impl InstantiateType for EqlTerm {
     }
 
     fn instantiate_concrete(&self) -> Result<Arc<Type>, TypeError> {
-        Ok(Arc::new(Type::Constructor(Constructor::Value(Value::Eql(
-            self.clone(),
-        )))))
+        Ok(Arc::new(Type::Value(Value::Eql(self.clone()))))
     }
 
     fn instantiate_shallow(&self, _: &mut Unifier<'_>) -> Result<Arc<Type>, TypeError> {

@@ -19,9 +19,9 @@ use super::{resolve_type::ResolveType, EqlTrait, EqlTraits, Unifier};
 /// ergonomic to consume.
 #[derive(Debug, PartialEq, PartialOrd, Ord, Eq, Clone, Display, Hash)]
 pub enum Type {
-    /// A specific type constructor with zero or more generic parameters.
+    /// A value type.
     #[display("{}", _0)]
-    Constructor(Constructor),
+    Value(Value),
 
     /// A type representing a placeholder for an unresolved type.
     #[display("{}", _0)]
@@ -71,7 +71,7 @@ impl AssociatedType {
         unifier: &mut Unifier<'_>,
     ) -> Result<Option<Arc<Type>>, TypeError> {
         let impl_ty = self.impl_ty.clone().follow_tvars(unifier);
-        if let Type::Constructor(_) = &*impl_ty {
+        if let Type::Value(_) = &*impl_ty {
             // The type that implements the EqlTrait is now known, so resolve the selector.
             let ty: Arc<Type> = self.selector.resolve(impl_ty.clone())?;
             Ok(Some(unifier.unify(self.resolved_ty.clone(), ty.clone())?))
@@ -99,24 +99,7 @@ impl Display for Var {
     }
 }
 
-/// A `Constructor` is what is known about a [`Type`].
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Display, Hash)]
-pub enum Constructor {
-    /// An EQL type, an opaque "database native" type or an array type.
-    #[display("{}", _0)]
-    Value(Value),
-
-    /// A projection is a type with a fixed number of columns each of which has a type and optional alias.
-    #[display("{}", _0)]
-    Projection(Projection),
-
-    /// In PostgreSQL, SETOF is a special return type used in functions to indicate that the function returns a set of
-    /// rows rather than a single value. It allows a function to behave like a table or subquery in SQL, producing
-    /// multiple rows as output.
-    #[display("{}", _0)]
-    SetOf(SetOf),
-}
-
+/// Represents a SQL `setof` type. Functions such as `jsonb_array_elements` return a `seto`.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Display, Hash)]
 pub struct SetOf(pub Arc<Type>);
 
@@ -126,6 +109,7 @@ impl SetOf {
     }
 }
 
+/// The type of SQL expression.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Display, Hash)]
 pub enum Value {
     /// An encrypted type from a particular table-column in the schema.
@@ -144,8 +128,19 @@ pub enum Value {
     /// An array type that is parameterized by an element type.
     #[display("Array[{}]", _0)]
     Array(Array),
+
+    /// A projection is a type with a fixed number of columns each of which has a type and optional alias.
+    #[display("{}", _0)]
+    Projection(Projection),
+
+    /// In PostgreSQL, SETOF is a special return type used in functions to indicate that the function returns a set of
+    /// rows rather than a single value. It allows a function to behave like a table or subquery in SQL, producing
+    /// multiple rows as output.
+    #[display("{}", _0)]
+    SetOf(SetOf),
 }
 
+/// An array of some type.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Display, Hash)]
 pub struct Array(pub Arc<Type>);
 
@@ -172,7 +167,7 @@ pub enum EqlTerm {
 
     /// A text value that can be used as the right hand side of `LIKE` or `ILIKE` when the left hand side is an
     /// [`EqlValue`] that implements the EQL trait `TokenMatch`.
-    Tokenized(EqlValue)
+    Tokenized(EqlValue),
 }
 
 impl EqlTerm {
@@ -228,7 +223,7 @@ pub struct TableColumn {
 pub struct EqlValue(pub TableColumn, pub EqlTraits);
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Display, Hash)]
-#[display("NATIVE{}", _0.as_ref().map(|tc| format!("({})", tc)).unwrap_or(String::from("")))]
+#[display("{}", _0.as_ref().map(|tc| format!("({})", tc)).unwrap_or(String::from("")))]
 pub struct NativeValue(pub Option<TableColumn>);
 
 /// A column from a projection.
@@ -254,26 +249,27 @@ impl From<TypeVar> for Type {
 }
 
 impl Type {
-    /// Creates a `Type` containing an empty projection
+    /// Creates a `Type::Value(Projection::Empty)`.
     pub(crate) const fn empty_projection() -> Type {
-        Type::Constructor(Constructor::Projection(Projection::Empty))
+        Type::Value(Value::Projection(Projection::Empty))
     }
 
-    /// Creates a `Type` containing a `Constructor::Scalar(Scalar::Native(NativeValue(None)))`.
+    /// Creates a `Type::Value(Value::Native(NativeValue(None)))`.
     pub(crate) const fn native() -> Type {
-        Type::Constructor(Constructor::Value(Value::Native(NativeValue(None))))
+        Type::Value(Value::Native(NativeValue(None)))
     }
 
+    /// Creates a `Type::Value(Value::SetOf(ty))`.
     pub(crate) const fn set_of(ty: Arc<Type>) -> Type {
-        Type::Constructor(Constructor::SetOf(SetOf(ty)))
+        Type::Value(Value::SetOf(SetOf(ty)))
     }
 
-    /// Creates a `Type` containing a `Constructor::Projection`.
+    /// Creates a `Type::Value(Value::Projection(Projection::WithColumns(columns)))`.
     pub(crate) fn projection(columns: &[(Arc<Type>, Option<Ident>)]) -> Type {
         if columns.is_empty() {
-            Type::Constructor(Constructor::Projection(Projection::Empty))
+            Type::Value(Value::Projection(Projection::Empty))
         } else {
-            Type::Constructor(Constructor::Projection(Projection::WithColumns(
+            Type::Value(Value::Projection(Projection::WithColumns(
                 ProjectionColumns(
                     columns
                         .iter()
@@ -284,16 +280,14 @@ impl Type {
         }
     }
 
-    /// Creates a `Type` containing a `Constructor::Array`.
+    /// Creates a `Type::Value(Value::Array(element_ty))`.
     pub(crate) fn array(element_ty: impl Into<Arc<Type>>) -> Arc<Type> {
-        Type::Constructor(Constructor::Value(Value::Array(Array(element_ty.into())))).into()
+        Type::Value(Value::Array(Array(element_ty.into()))).into()
     }
 
     pub(crate) fn follow_tvars(self: Arc<Self>, unifier: &Unifier<'_>) -> Arc<Type> {
         match &*self.clone() {
-            Type::Constructor(Constructor::Projection(Projection::WithColumns(
-                ProjectionColumns(cols),
-            ))) => {
+            Type::Value(Value::Projection(Projection::WithColumns(ProjectionColumns(cols)))) => {
                 let cols = cols
                     .iter()
                     .map(|col| ProjectionColumn {
@@ -304,15 +298,15 @@ impl Type {
                 Projection::WithColumns(ProjectionColumns(cols)).into()
             }
 
-            Type::Constructor(Constructor::Projection(Projection::Empty)) => self,
+            Type::Value(Value::Projection(Projection::Empty)) => self,
 
-            Type::Constructor(Constructor::Value(Value::Array(Array(ty)))) => {
-                Arc::new(Type::Constructor(Constructor::Value(Value::Array(Array(
-                    ty.clone().follow_tvars(unifier),
-                )))))
-            }
+            Type::Value(Value::Array(Array(ty))) => Arc::new(Type::Value(Value::Array(Array(
+                ty.clone().follow_tvars(unifier),
+            )))),
 
-            Type::Constructor(Constructor::Value(_)) => self,
+            Type::Value(Value::SetOf(SetOf(ty))) => ty.clone().follow_tvars(unifier),
+
+            Type::Value(_) => self,
 
             Type::Var(Var(tvar, _)) => {
                 if let Some(ty) = unifier.get_type(*tvar) {
@@ -337,8 +331,6 @@ impl Type {
                 })
                 .into()
             }
-
-            Type::Constructor(Constructor::SetOf(SetOf(ty))) => ty.clone().follow_tvars(unifier),
         }
     }
 
@@ -358,22 +350,22 @@ impl Type {
         let resolved_ty: crate::Type = self.resolve_type(unifier)?;
 
         let result = match &resolved_ty {
-            crate::Type::Constructor(crate::Constructor::Projection(projection)) => {
+            crate::Type::Value(crate::Value::Projection(projection)) => {
                 if let Some(t) = (projection as &dyn std::any::Any).downcast_ref::<T>() {
                     return Ok(t.clone());
                 }
 
                 Err(())
             }
-            crate::Type::Constructor(crate::Constructor::Value(value)) => {
-                if let Some(t) = (value as &dyn std::any::Any).downcast_ref::<T>() {
+            crate::Type::Value(crate::Value::SetOf(ty)) => {
+                if let Some(t) = (ty as &dyn std::any::Any).downcast_ref::<T>() {
                     return Ok(t.clone());
                 }
 
                 Err(())
             }
-            crate::Type::Constructor(crate::Constructor::SetOf(ty)) => {
-                if let Some(t) = (ty as &dyn std::any::Any).downcast_ref::<T>() {
+            crate::Type::Value(value) => {
+                if let Some(t) = (value as &dyn std::any::Any).downcast_ref::<T>() {
                     return Ok(t.clone());
                 }
 
@@ -491,7 +483,7 @@ impl ProjectionColumns {
     fn flatten_impl(&self, mut output: Vec<ProjectionColumn>) -> Vec<ProjectionColumn> {
         for ProjectionColumn { ty, alias } in &self.0 {
             match &**ty {
-                Type::Constructor(Constructor::Projection(Projection::WithColumns(nested))) => {
+                Type::Value(Value::Projection(Projection::WithColumns(nested))) => {
                     output = nested.flatten_impl(output);
                 }
                 _ => output.push(ProjectionColumn::new(ty.clone(), alias.clone())),
@@ -532,12 +524,10 @@ impl ProjectionColumns {
                     };
 
                     let value_ty = match &col.kind {
-                        ColumnKind::Native => Type::Constructor(Constructor::Value(Value::Native(
-                            NativeValue(Some(tc)),
-                        ))),
-                        ColumnKind::Eql(features) => Type::Constructor(Constructor::Value(
-                            Value::Eql(EqlTerm::Full(EqlValue(tc, *features))),
-                        )),
+                        ColumnKind::Native => Type::Value(Value::Native(NativeValue(Some(tc)))),
+                        ColumnKind::Eql(features) => {
+                            Type::Value(Value::Eql(EqlTerm::Full(EqlValue(tc, *features))))
+                        }
                     };
 
                     ProjectionColumn::new(value_ty, Some(col.name.clone()))
@@ -563,7 +553,6 @@ impl_from_for_arc_type!(NativeValue);
 impl_from_for_arc_type!(Projection);
 impl_from_for_arc_type!(Var);
 impl_from_for_arc_type!(EqlTerm);
-impl_from_for_arc_type!(Constructor);
 impl_from_for_arc_type!(Value);
 impl_from_for_arc_type!(Array);
 impl_from_for_arc_type!(AssociatedType);
@@ -574,21 +563,15 @@ impl From<AssociatedType> for Type {
     }
 }
 
-impl From<Constructor> for Type {
-    fn from(constructor: Constructor) -> Self {
-        Type::Constructor(constructor)
-    }
-}
-
 impl From<Value> for Type {
     fn from(value: Value) -> Self {
-        Type::Constructor(Constructor::Value(value))
+        Type::Value(value)
     }
 }
 
 impl From<EqlTerm> for Type {
     fn from(eql_term: EqlTerm) -> Self {
-        Type::Constructor(Constructor::Value(Value::Eql(eql_term)))
+        Type::Value(Value::Eql(eql_term))
     }
 }
 
@@ -600,18 +583,18 @@ impl From<Var> for Type {
 
 impl From<Projection> for Type {
     fn from(projection: Projection) -> Self {
-        Type::Constructor(Constructor::Projection(projection))
+        Type::Value(Value::Projection(projection))
     }
 }
 
 impl From<NativeValue> for Type {
     fn from(native: NativeValue) -> Self {
-        Type::Constructor(Constructor::Value(Value::Native(native)))
+        Type::Value(Value::Native(native))
     }
 }
 
 impl From<Array> for Type {
     fn from(array: Array) -> Self {
-        Type::Constructor(Constructor::Value(Value::Array(array)))
+        Type::Value(Value::Array(array))
     }
 }

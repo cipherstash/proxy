@@ -1,10 +1,7 @@
 use crate::{
-    inference::{
-        unifier::{Constructor, Type},
-        TypeError, TypeRegistry,
-    },
+    inference::{unifier::Type, TypeError, TypeRegistry},
     model::{SchemaError, TableResolver},
-    unifier::{Projection, ProjectionColumns},
+    unifier::{Projection, ProjectionColumns, Value},
     Relation, ScopeError, ScopeTracker,
 };
 use sqltk::parser::ast::{
@@ -50,10 +47,8 @@ impl<'ast> Importer<'ast> {
 
             self.scope_tracker.borrow_mut().add_relation(Relation {
                 name: table_alias.clone(),
-                projection_type: Type::Constructor(Constructor::Projection(
-                    Projection::WithColumns(cols),
-                ))
-                .into(),
+                projection_type: Type::Value(Value::Projection(Projection::WithColumns(cols)))
+                    .into(),
             })?;
 
             Ok(())
@@ -118,9 +113,9 @@ impl<'ast> Importer<'ast> {
 
                     scope_tracker.add_relation(Relation {
                         name: record_as.cloned().ok(),
-                        projection_type: Type::Constructor(Constructor::Projection(
-                            Projection::WithColumns(cols),
-                        ))
+                        projection_type: Type::Value(Value::Projection(Projection::WithColumns(
+                            cols,
+                        )))
                         .into(),
                     })?;
                 }

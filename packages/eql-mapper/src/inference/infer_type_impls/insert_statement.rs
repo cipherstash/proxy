@@ -1,11 +1,7 @@
 use std::sync::Arc;
 
 use crate::{
-    inference::{
-        type_error::TypeError,
-        unifier::{Constructor, Type},
-        InferType,
-    },
+    inference::{type_error::TypeError, unifier::Type, InferType},
     unifier::{EqlTerm, EqlValue, NativeValue, Value},
     ColumnKind, TableColumn, TypeInferencer,
 };
@@ -53,10 +49,7 @@ impl<'ast> InferType<'ast, Insert> for TypeInferencer<'ast> {
                             }
                         };
 
-                        (
-                            Arc::new(Type::Constructor(Constructor::Value(value_ty))),
-                            Some(tc.column.clone()),
-                        )
+                        (Arc::new(Type::Value(value_ty)), Some(tc.column.clone()))
                     })
                     .collect::<Vec<_>>(),
             );

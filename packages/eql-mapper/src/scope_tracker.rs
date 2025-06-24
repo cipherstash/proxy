@@ -1,9 +1,9 @@
 //! Types for representing and maintaining a lexical scope during AST traversal.
-use crate::inference::unifier::{Constructor, ProjectionColumn, Type};
+use crate::inference::unifier::{ProjectionColumn, Type};
 use crate::inference::TypeError;
 use crate::iterator_ext::IteratorExt;
 use crate::model::SqlIdent;
-use crate::unifier::{Projection, ProjectionColumns};
+use crate::unifier::{Projection, ProjectionColumns, Value};
 use crate::Relation;
 use sqltk::parser::ast::{Ident, ObjectName, ObjectNamePart, Query, Statement};
 use sqltk::{into_control_flow, Break, Visitable, Visitor};
@@ -115,7 +115,7 @@ impl<'ast> Scope<'ast> {
                 .map(|r| ProjectionColumn::new(r.projection_type.clone(), None))
                 .collect();
 
-            Ok(Type::Constructor(Constructor::Projection(Projection::new(columns))).into())
+            Ok(Type::Value(Value::Projection(Projection::new(columns))).into())
         }
     }
 
@@ -263,9 +263,9 @@ impl<'ast> Scope<'ast> {
 
     fn try_match_projection(&self, ty: Arc<Type>) -> Result<ProjectionColumns, TypeError> {
         match &*ty {
-            Type::Constructor(Constructor::Projection(projection)) => Ok(ProjectionColumns(
-                Vec::from_iter(projection.columns().iter().cloned()),
-            )),
+            Type::Value(Value::Projection(projection)) => Ok(ProjectionColumns(Vec::from_iter(
+                projection.columns().iter().cloned(),
+            ))),
             other => Err(TypeError::Expected(format!(
                 "expected projection but got: {other}"
             ))),

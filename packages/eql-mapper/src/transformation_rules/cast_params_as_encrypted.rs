@@ -1,6 +1,6 @@
 use super::helpers::cast_as_encrypted;
 use super::TransformationRule;
-use crate::{Constructor, EqlMapperError, Type};
+use crate::{EqlMapperError, Type};
 use sqltk::parser::ast::{Expr, Value, ValueWithSpan};
 use sqltk::parser::tokenizer::Span;
 use sqltk::{NodeKey, NodePath, Visitable};
@@ -63,7 +63,7 @@ impl<'ast> TransformationRule<'ast> for CastParamsAsEncrypted<'ast> {
             }),
         )) = node_path.last_1_as()
         {
-            if let Some(Type::Constructor(Constructor::Value(crate::Value::Eql(_)))) =
+            if let Some(Type::Value(crate::Value::Eql(_))) =
                 self.node_types.get(&NodeKey::new(node))
             {
                 return true;

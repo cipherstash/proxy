@@ -159,20 +159,17 @@ impl<'ast> Unifier<'ast> {
                 Ok(lhs.clone())
             } else {
                 match (&*lhs, &*rhs) {
-                    (Type::Constructor(lhs_c), Type::Constructor(rhs_c)) => {
-                        self.unify_types(lhs_c, rhs_c)
-                    }
+                    (Type::Value(lhs_c), Type::Value(rhs_c)) => self.unify_types(lhs_c, rhs_c),
 
-                    (Type::Var(var), Type::Constructor(constructor))
-                    | (Type::Constructor(constructor), Type::Var(var)) => {
-                        self.unify_types(constructor, var)
+                    (Type::Var(var), Type::Value(value)) | (Type::Value(value), Type::Var(var)) => {
+                        self.unify_types(value, var)
                     }
 
                     (Type::Var(lhs_v), Type::Var(rhs_v)) => self.unify_types(lhs_v, rhs_v),
 
-                    (Type::Constructor(constructor), Type::Associated(associated_type))
-                    | (Type::Associated(associated_type), Type::Constructor(constructor)) => {
-                        self.unify_types(associated_type, constructor)
+                    (Type::Value(value), Type::Associated(associated_type))
+                    | (Type::Associated(associated_type), Type::Value(value)) => {
+                        self.unify_types(associated_type, value)
                     }
 
                     (Type::Var(var), Type::Associated(associated_type))

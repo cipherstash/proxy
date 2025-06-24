@@ -199,8 +199,8 @@ mod test {
     use crate::{
         test_helpers,
         unifier::{
-            Array, AssociatedType, Constructor, EqlTerm, EqlTrait, EqlTraits, EqlValue,
-            InstantiateType, Type, Unifier, Value,
+            Array, AssociatedType, EqlTerm, EqlTrait, EqlTraits, EqlValue, InstantiateType, Type,
+            Unifier, Value,
         },
         NativeValue, TableColumn, TypeError, TypeRegistry,
     };
@@ -268,15 +268,13 @@ mod test {
         if let Type::Associated(associated) = &*instance.get_type(&tvar!(A))? {
             assert_eq!(
                 associated.resolve_selector_target(&mut unifier)?.as_deref(),
-                Some(&Type::Constructor(Constructor::Value(Value::Eql(
-                    EqlTerm::JsonAccessor(EqlValue(
-                        TableColumn {
-                            table: "customer".into(),
-                            column: "name".into()
-                        },
-                        EqlTraits::from(EqlTrait::JsonLike)
-                    ),)
-                ))))
+                Some(&Type::Value(Value::Eql(EqlTerm::JsonAccessor(EqlValue(
+                    TableColumn {
+                        table: "customer".into(),
+                        column: "name".into()
+                    },
+                    EqlTraits::from(EqlTrait::JsonLike)
+                ),))))
             );
         } else {
             panic!("expected associated type");

@@ -6,7 +6,7 @@ use sqltk::parser::ast::{
 };
 use sqltk::{AsNodeKey, NodeKey, NodePath, Visitable};
 
-use crate::{get_sql_function, Constructor, EqlMapperError, Type, Value};
+use crate::{get_sql_function, EqlMapperError, Type, Value};
 
 use super::TransformationRule;
 
@@ -24,7 +24,7 @@ impl<'ast> RewriteStandardSqlFnsOnEqlTypes<'ast> {
     fn uses_eql_type(&self, function: &Function) -> bool {
         if matches!(
             self.node_types.get(&function.as_node_key()),
-            Some(Type::Constructor(Constructor::Value(Value::Eql(_))))
+            Some(Type::Value(Value::Eql(_)))
         ) {
             return true;
         }
@@ -33,14 +33,14 @@ impl<'ast> RewriteStandardSqlFnsOnEqlTypes<'ast> {
             FunctionArguments::None => false,
             FunctionArguments::Subquery(query) => matches!(
                 self.node_types.get(&query.as_node_key()),
-                Some(Type::Constructor(Constructor::Value(Value::Eql(_))))
+                Some(Type::Value(Value::Eql(_)))
             ),
             FunctionArguments::List(list) => list.args.iter().any(|arg| match arg {
                 FunctionArg::Named { arg, .. }
                 | FunctionArg::ExprNamed { arg, .. }
                 | FunctionArg::Unnamed(arg) => matches!(
                     self.node_types.get(&arg.as_node_key()),
-                    Some(Type::Constructor(Constructor::Value(Value::Eql(_))))
+                    Some(Type::Value(Value::Eql(_)))
                 ),
             }),
         }

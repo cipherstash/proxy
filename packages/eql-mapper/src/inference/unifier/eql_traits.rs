@@ -7,7 +7,7 @@ use crate::{
     TypeError,
 };
 
-use super::{Array, Constructor, EqlTerm, EqlValue, Projection, Type, Value, Var};
+use super::{Array, EqlTerm, EqlValue, Projection, Type, Value, Var};
 
 /// Represents the supported operations on an EQL type
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Display, Hash)]
@@ -63,7 +63,7 @@ impl EqlTrait {
 
         match &*ty {
             // Native satisfies all associated type bounds
-            Type::Constructor(Constructor::Value(Value::Native(_))) => {
+            Type::Value(Value::Native(_)) => {
                 match (self, selector.type_name) {
                     (EqlTrait::Eq, "Only")
                     | (EqlTrait::Ord, "Only")
@@ -77,34 +77,32 @@ impl EqlTrait {
                     ))),
                 }
             }
-            Type::Constructor(Constructor::Value(Value::Eql(EqlTerm::Full(eql_col))))
-            | Type::Constructor(Constructor::Value(Value::Eql(EqlTerm::Partial(eql_col, _)))) => {
+            Type::Value(Value::Eql(EqlTerm::Full(eql_col)))
+            | Type::Value(Value::Eql(EqlTerm::Partial(eql_col, _))) => {
                 match (self, selector.type_name) {
                     (EqlTrait::Eq, "Only") => {
-                        Ok(Arc::new(Type::Constructor(Constructor::Value(Value::Eql(
+                        Ok(Arc::new(Type::Value(Value::Eql(
                             EqlTerm::Partial(eql_col.clone(), EqlTraits::from(EqlTrait::Eq)),
-                        )))))
-                    }
-                    (EqlTrait::Ord, "Only") => {
-                        Ok(Arc::new(Type::Constructor(Constructor::Value(Value::Eql(
-                            EqlTerm::Partial(eql_col.clone(), EqlTraits::from(EqlTrait::Ord)),
-                        )))))
-                    }
-                    (EqlTrait::TokenMatch, "Tokenized") => Ok(Arc::new(Type::Constructor(
-                        Constructor::Value(Value::Eql(EqlTerm::Tokenized(eql_col.clone()))),
-                    ))),
-                    (EqlTrait::JsonLike, "Accessor") => {
-                        Ok(Arc::new(Type::Constructor(Constructor::Value(
-                            Value::Eql(EqlTerm::JsonAccessor(eql_col.clone())),
                         ))))
                     }
-                    (EqlTrait::JsonLike, "Path") => Ok(Arc::new(Type::Constructor(
-                        Constructor::Value(Value::Eql(EqlTerm::JsonPath(eql_col.clone()))),
-                    ))),
+                    (EqlTrait::Ord, "Only") => {
+                        Ok(Arc::new(Type::Value(Value::Eql(
+                            EqlTerm::Partial(eql_col.clone(), EqlTraits::from(EqlTrait::Ord)),
+                        ))))
+                    }
+                    (EqlTrait::TokenMatch, "Tokenized") => Ok(Arc::new(Type::Value(Value::Eql(EqlTerm::Tokenized(eql_col.clone()))),
+                    )),
+                    (EqlTrait::JsonLike, "Accessor") => {
+                        Ok(Arc::new(Type::Value(
+                            Value::Eql(EqlTerm::JsonAccessor(eql_col.clone())),
+                        )))
+                    }
+                    (EqlTrait::JsonLike, "Path") => Ok(Arc::new(Type::Value(Value::Eql(EqlTerm::JsonPath(eql_col.clone()))),
+                    )),
                     (EqlTrait::Contain, "Only") => {
-                        Ok(Arc::new(Type::Constructor(Constructor::Value(Value::Eql(
+                        Ok(Arc::new(Type::Value(Value::Eql(
                             EqlTerm::Partial(eql_col.clone(), EqlTraits::from(EqlTrait::Contain)),
-                        )))))
+                        ))))
                     }
                     (_, unknown_associated_type) => Err(TypeError::InternalError(format!(
                         "Unknown associated type {}::{}",
@@ -266,19 +264,9 @@ impl std::fmt::Display for EqlTraits {
 impl Type {
     pub(crate) fn effective_bounds(&self) -> EqlTraits {
         match self {
-            Type::Constructor(constructor) => constructor.effective_bounds(),
+            Type::Value(value) => value.effective_bounds(),
             Type::Var(Var(_, bounds)) => *bounds,
             Type::Associated(associated_type) => associated_type.resolved_ty.effective_bounds(),
-        }
-    }
-}
-
-impl Constructor {
-    pub(crate) fn effective_bounds(&self) -> EqlTraits {
-        match self {
-            Constructor::Value(value) => value.effective_bounds(),
-            Constructor::Projection(projection) => projection.effective_bounds(),
-            Constructor::SetOf(ty) => ty.effective_bounds(),
         }
     }
 }
@@ -287,8 +275,10 @@ impl Value {
     pub(crate) fn effective_bounds(&self) -> EqlTraits {
         match self {
             Value::Eql(eql_term) => eql_term.effective_bounds(),
-            Value::Native(_) => ALL_TRAITS, // 💪
+            Value::Native(_) => ALL_TRAITS,
             Value::Array(ty) => ty.effective_bounds(),
+            Value::Projection(projection) => projection.effective_bounds(),
+            Value::SetOf(set_of) => set_of.effective_bounds(),
         }
     }
 }
