@@ -18,7 +18,6 @@ use super::{resolve_type::ResolveType, EqlTrait, EqlTraits, Unifier};
 /// exported [`crate::Type`] type, which is a mirror of this enum but without type variables which makes it more
 /// ergonomic to consume.
 #[derive(Debug, PartialEq, PartialOrd, Ord, Eq, Clone, Display, Hash)]
-#[display("{self}")]
 pub enum Type {
     /// A specific type constructor with zero or more generic parameters.
     #[display("{}", _0)]
@@ -63,6 +62,10 @@ pub struct AssociatedType {
 }
 
 impl AssociatedType {
+    /// Tries to resolve the concrete associated type.
+    ///
+    /// If the parent type that the associated type is attached to is not yet resolved then this method will return
+    /// `Ok(None)`.
     pub(crate) fn resolve_selector_target(
         &self,
         unifier: &mut Unifier<'_>,
@@ -78,6 +81,11 @@ impl AssociatedType {
     }
 }
 
+/// A type variable with trait bounds.
+///
+/// Type variables represent an unresolved type. Unification of a concrete type with a type variable will succeed if the
+/// concrete type implements all of the bounds on the type variable. The concrete type is allowed to implement a set of
+/// traits that exceed the requirements of the bounds on the type variable.
 #[derive(Debug, PartialEq, PartialOrd, Ord, Eq, Clone, Hash)]
 pub struct Var(pub TypeVar, pub EqlTraits);
 
@@ -151,16 +159,20 @@ pub enum EqlTerm {
 
     /// This type represents a an EQL payload with exactly the encrypted search terms required in order to satisy its
     /// [`Bounds`].
-    ///
-    /// A `Partial` type can become a `Whole` type during unification.
     #[display("EQL:Partial({}: {})", _0, _1)]
     Partial(EqlValue, EqlTraits),
 
+    /// A JSON field or array index. The inferred type of the right hand side of the `->` operator when the
+    /// left hand side is an [`EqlValue`] that implements the EQL trait `JsonLike`.
     JsonAccessor(EqlValue),
 
+    /// A JSON path. The inferred type of the second argument to functions such `jsonb_path_query` when the first
+    /// argument is an [`EqlValue`] that implements the EQL trait `JsonLike`.
     JsonPath(EqlValue),
 
-    Tokenized(EqlValue),
+    /// A text value that can be used as the right hand side of `LIKE` or `ILIKE` when the left hand side is an
+    /// [`EqlValue`] that implements the EQL trait `TokenMatch`.
+    Tokenized(EqlValue)
 }
 
 impl EqlTerm {
