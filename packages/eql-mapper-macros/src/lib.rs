@@ -1,16 +1,4 @@
 //! Defines macros specifically for reducing the amount of boilerplate in `eql-mapper`.
-//!
-//! # Attribute macro
-//!
-//! [`trace_infer`]: generates `[#tracing::instrument(...)]` attributes for `InferType` impls.
-//!
-//! # Function macros
-//!
-//! [`binary_operators`]: parses a list of binary operator declarations returning a `Vec<BinaryOpDecl>`.
-//! [`functions`]: parses a list of SQL function declarations returning a `Vec<FunctionDecl>`.
-//! [`ty`]: parses a `TypeDecl`.
-//! [`tvar`]: parses `TVar`.
-//! [`type_env`]: parses a list of type equations returning a `TypeEnv`.
 
 mod trace_infer;
 use quote::ToTokens;
@@ -83,7 +71,7 @@ pub fn ty(tokens: TokenStream) -> TokenStream {
 }
 
 /// Parses a list of pseudo-Rust let bindings where the right hand of the `=` is type declaration syntax (i.e. can be
-/// parsed with [`ty`]) and assigns an initialised `Arc<Type>` to each binding.
+/// parsed with [`macro@ty`]) and assigns an initialised `Arc<Type>` to each binding.
 ///
 /// WARNING: this macro generates code that will panic if type instantiation fails so limit its usage to setting up
 /// tests.

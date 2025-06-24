@@ -29,17 +29,17 @@ pub struct TypeCheckedStatement<'ast> {
     /// in the AST with the node type is one of: [`Statement`], [`Query`], [`Insert`], [`Delete`], [`Expr`],
     /// [`SetExpr`], [`Select`], [`SelectItem`], [`Vec<SelectItem>`], [`Function`], [`Values`], [`Value`].
     ///
-    /// [`Query`]: sqlparser::ast::Query
-    /// [`Insert`]: sqlparser::ast::Insert
-    /// [`Delete`]: sqlparser::ast::Delete
-    /// [`Expr`]: sqlparser::ast::Expr
-    /// [`SetExpr`]: sqlparser::ast::SetExpr
-    /// [`Select`]: sqlparser::ast::Select
-    /// [`SelectItem`]: sqlparser::ast::SelectItem
-    /// [`Function`]: sqlparser::ast::Function
-    /// [`FunctionArgExpr`]: sqlparser::ast::FunctionArgExpr
-    /// [`Values`]: sqlparser::ast::Values
-    /// [`Value`]: sqlparser::ast::Value
+    /// [`Query`]: sqltk::parser::ast::Query
+    /// [`Insert`]: sqltk::parser::ast::Insert
+    /// [`Delete`]: sqltk::parser::ast::Delete
+    /// [`Expr`]: sqltk::parser::ast::Expr
+    /// [`SetExpr`]: sqltk::parser::ast::SetExpr
+    /// [`Select`]: sqltk::parser::ast::Select
+    /// [`SelectItem`]: sqltk::parser::ast::SelectItem
+    /// [`Function`]: sqltk::parser::ast::Function
+    /// [`FunctionArgExpr`]: sqltk::parser::ast::FunctionArgExpr
+    /// [`Values`]: sqltk::parser::ast::Values
+    /// [`Value`]: sqltk::parser::ast::Value
     pub node_types: Arc<HashMap<NodeKey<'ast>, Type>>,
 }
 

@@ -1,3 +1,27 @@
+//! # Symbolic type declarations
+//!
+//! [`TypeDecl`] and its variants provide the means to write type declarations symbolically which is much more pleasant
+//! than constructing types by building [`Type`] variants by hand.
+//!
+//! This makes it much simpler (and therefore less of a chore) to write tests for the [`Unifier`] and also for declaring
+//! EQL-compatible functions and operators.
+//!
+//! The [`eql_mapper_macros`] crate provides macros that implement a mini-DSL for declaring types and macros for
+//! instantiating them (converting to [`Type`]s for unification).
+//!
+//! Here is an example of the `type_env` macro in use:
+//!
+//! ```ignore
+//! use eql_mapper_macros::type_env;
+//!
+//! let env = type_env! {
+//!     P = {A as id, B as name, C as email};
+//!     A = Native(customer.id);
+//!     B = EQL(customer.name: Eq);
+//!     C = EQL(customer.email: Eq);
+//! };
+//! ```
+
 use std::{fmt::Display, sync::Arc};
 
 use derive_more::derive::Display;
@@ -14,32 +38,42 @@ use super::{
     ProjectionColumns, TableColumn, Type, TypeEnv, Unifier, Value,
 };
 
-/// A `TypeDecl` is a symbollic representation of [`Type`]. Multiple type declarations can be added to a [`TypeEnv`] and
-/// when the type environment is "instantiated", they become `Arc<Type>` values.
+/// A `TypeDecl` is a symbolic representation of a [`Type`]. Multiple type declarations can be added to a [`TypeEnv`]
+/// and when the type environment is "instantiated" with [`TypeEnv::instantiate`], they become `Arc<Type>` values for
+/// use in the [`Unifier`].
+///
+/// SQL functions & operators also have type decalaration syntax but they do not have corresponding [`TypeDecl`]
+/// variants because functions and operators are not first class values in SQL. See [`FunctionDecl`] & [`BinaryOpDecl`].
 #[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord, Display)]
 pub(crate) enum TypeDecl {
-    /// A type variable.
+    /// A type variable. See [`crate::unifier::Var`].
     #[display("{}", _0)]
     Var(VarDecl),
-    /// A native type with an optional table-column.
+
+    /// A native type with an optional table-column. See [`crate::unifier::NativeValue`].
     #[display("{}", _0)]
     Native(NativeDecl),
-    /// An EQL column with zero or more [`EqlTrait`] implementations.
+
+    /// An EQL column with zero or more [`EqlTrait`] implementations. See [`crate::unifier::EqlTerm`].
     #[display("{}", _0)]
     #[allow(unused)]
     Eql(EqlTerm),
-    /// An array with a generic element type.
+
+    /// An array. See [`crate::unifier::Array`].
     #[display("{}", _0)]
     #[allow(unused)]
     Array(ArrayDecl),
-    /// An projection generic & optionally aliased columns types.
+
+    /// A projection. See [`crate::unifier::Projection`]
     #[display("{}", _0)]
     #[allow(unused)]
     Projection(ProjectionDecl),
-    /// An associated type of a type.
+
+    /// An associated type. See [`crate::unifier::AssociatedType`].
     #[display("{}", _0)]
     AssociatedType(AssociatedTypeDecl),
-    /// A `setof` type
+
+    /// A `setof` type. See [`crate::unifier::SetOf`].
     #[display("{}", _0)]
     SetOf(SetOfDecl),
 }

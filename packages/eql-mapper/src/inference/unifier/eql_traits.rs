@@ -119,7 +119,7 @@ impl EqlTrait {
     }
 }
 
-/// Represents the set of "traits" implemented by a [`Type`].
+/// Represents the set of "traits" implemented by a [`crate::Type`].
 ///
 /// EQL types _and_ native types are tested against the bounds, but the trick is that native types *always* satisfy all
 /// of the bounds (we let the database do its job - it will shout loudly when an expression has been used incorrectly).
@@ -128,7 +128,7 @@ impl EqlTrait {
 /// error messages, but implemented bounds are exposed to consumers [`crate::TypeCheckedStatement`] in order to inform
 /// how to encrypt literals and params whether for storage or querying.
 ///
-/// [`BoundsDecl`] values always successfully unify into a superset of traits.
+/// Two [`EqlTraits`] values always successfully unify by merging their flags.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Default, Hash)]
 pub struct EqlTraits {
     /// The type implements equality between its values using the `=` operator.
@@ -148,6 +148,7 @@ pub struct EqlTraits {
     pub contain: bool,
 }
 
+/// An [`EqlTraits`] with all trait flags set to `true`.
 pub const ALL_TRAITS: EqlTraits = EqlTraits {
     eq: true,
     ord: true,
@@ -175,10 +176,12 @@ impl FromIterator<EqlTrait> for EqlTraits {
 }
 
 impl EqlTraits {
+    /// An `EqlTraits` with all traits flags set to `false`.
     pub fn none() -> Self {
         Self::default()
     }
 
+    /// An `EqlTraits` with all traits flags set to `true`.
     pub fn all() -> Self {
         ALL_TRAITS
     }
@@ -353,8 +356,8 @@ impl EqlValue {
        /// `Self` if they are not going to be used.
        type Only;
 
-       expr BinaryOp (Self = Self) -> Native;
-       expr BinaryOp (Self <> Self) -> Native;
+       binop (Self = Self) -> Native;
+       binop (Self <> Self) -> Native;
    }
 
    /// Trait that corresponds to comparison tests in SQL.
@@ -396,8 +399,8 @@ impl EqlValue {
        fn pg_catalog.jsonb_path_query_first(Self, Self::Path) -> Self;
        fn pg_catalog.jsonb_path_exists(Self, Self::Path) -> Native;
        fn pg_catalog.jsonb_array_length(Self) -> Native;
-       fn pg_catalog.jsonb_array_elements(Self) -> {Self};
-       fn pg_catalog.jsonb_array_elements_text(Self) -> {Self};
+       fn pg_catalog.jsonb_array_elements(Self) -> SetOf<Self>;
+       fn pg_catalog.jsonb_array_elements_text(Self) -> SetOf<Self>;
    }
 
    /// Trait that corresponds to LIKE operations in SQL.
