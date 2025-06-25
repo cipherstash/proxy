@@ -265,7 +265,7 @@ CipherStash Proxy and EQL do provide some protection against writing plaintext i
 Always use `eql_v2.add_encrypted_constraint(table, column)` when defining encrypted columns to ensure plaintext data cannot be written.
 
 Unmapped `SELECT` statements should always return the encrypted payload.
-If the constraint has been applied, unmapped `INSERT/UPDATE` statements should return a PostgreSQL type error.
+If the constraint has been applied, unmapped `INSERT`/`UPDATE` statements should return a PostgreSQL type error.
 
 
 ### Disable mapping
