@@ -247,7 +247,9 @@ CS_DATABASE__INSTALL_AWS_RDS_CERT_BUNDLE="true"
 
 ## Disable encrypted mapping
 
-In some circumstances it may be necessary to disable encrypted mapping for one or more sql statements.
+In some circumstances it may be necessary to disable encrypted mapping for one or more SQL statements.
+
+For example, you are doing a data transformation with complex logic, and you are doing the transformation directly in the database with `plpgsql`.
 
 A `SET` command can be used to change the `CIPHERSTASH.UNSAFE_DISABLE_MAPPING` configuration parameter.
 
