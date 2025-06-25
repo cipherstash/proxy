@@ -282,7 +282,7 @@ SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING = false;
 
 CipherStash Proxy only decrypts data of SQL statements that it has explicitly checked and mapped.
 
-If mapping is disabled, any subsequent prepare will skip the mapping process.
+If mapping is disabled, any subsequent `PREPARE` will skip the mapping process.
 
 If mapping is re-enabled for the connection, returned data will not be decrypted.
 
