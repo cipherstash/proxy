@@ -815,28 +815,28 @@ where
         typed_statement: &eql_mapper::TypeCheckedStatement<'_>,
     ) -> Result<Vec<Option<Column>>, Error> {
         let mut projection_columns = vec![];
-        if let eql_mapper::Projection::WithColumns(columns) = &typed_statement.projection {
-            for col in columns {
-                let eql_mapper::ProjectionColumn { ty, .. } = col;
-                let configured_column = match ty {
-                    eql_mapper::Value::Eql(eql_term) => {
-                        let TableColumn { table, column } = eql_term.table_column();
-                        let identifier: Identifier = Identifier::from((table, column));
 
-                        debug!(
-                            target: MAPPER,
-                            client_id = self.context.client_id,
-                            msg = "Configured column",
-                            column = ?identifier,
-                            ?eql_term,
-                        );
-                        self.get_column(identifier, eql_term)?
-                    }
-                    _ => None,
-                };
-                projection_columns.push(configured_column)
-            }
+        for col in typed_statement.projection.columns() {
+            let eql_mapper::ProjectionColumn { ty, .. } = col;
+            let configured_column = match ty {
+                eql_mapper::Value::Eql(eql_term) => {
+                    let TableColumn { table, column } = eql_term.table_column();
+                    let identifier: Identifier = Identifier::from((table, column));
+
+                    debug!(
+                        target: MAPPER,
+                        client_id = self.context.client_id,
+                        msg = "Configured column",
+                        column = ?identifier,
+                        ?eql_term,
+                    );
+                    self.get_column(identifier, eql_term)?
+                }
+                _ => None,
+            };
+            projection_columns.push(configured_column)
         }
+
         Ok(projection_columns)
     }
 

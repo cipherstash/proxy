@@ -102,6 +102,10 @@ impl Projection {
     pub fn contains_eql(&self) -> bool {
         self.0.iter().any(|col| col.ty.contains_eql())
     }
+
+    pub fn columns(&self) -> &[ProjectionColumn] {
+        &self.0
+    }
 }
 
 /// A column from a projection which has a type and an optional alias.
