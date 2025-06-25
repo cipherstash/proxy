@@ -255,10 +255,10 @@ A `SET` command can be used to change the `CIPHERSTASH.UNSAFE_DISABLE_MAPPING` c
 
 The parameter is always scoped to the connection `SESSION` - mapping is only ever disabled for the client connection the `SET` command was issued on.
 
-### IMPORTANT!
-
-Care is required.
-If mapping is disabled, sensitive data may not be encrypted and may appear in logs.
+> [!IMPORTANT]
+> Extra care is required when using `CIPHERSTASH.UNSAFE_DISABLE_MAPPING`.
+>
+> **If mapping is disabled, sensitive data may not be encrypted and may appear in logs.**
 
 CipherStash Proxy and EQL do provide some protection against writing plaintext into and reading plaintext from encrypted columns.
 
