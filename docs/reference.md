@@ -288,7 +288,7 @@ If mapping is re-enabled for the connection, returned data will not be decrypted
 
 To enable mapping, encryption, and decryption of prepared statements, either:
 
-- a new connection is required, or 
+- a new connection is required, or
 - the client needs to prepare the statement again
 
 This behaviour is expected and a consequence of the PostgreSQL protocol.
@@ -296,15 +296,7 @@ This behaviour is expected and a consequence of the PostgreSQL protocol.
 To prepare a statement, the client sends the SQL in a `parse` message.
 Once a statement has been prepared, the client skips the `parse` step, and does not send the SQL again, referring to the statement by a specified name.
 If mapping is disabled the CipherStash proxy will not map the statement on `parse`, and data returned from subsequent executions will never be decrypted.
-
-
-- mapping is disabled
-- client sends statement in `parse` message
-- proxy skips statement mapping
-- mapping is enabled
-- client executes the prepared statement
-- as statement was not mapped and the returned data is not decrypted
-
+If mapping is enabled on the connection, when the client executes the statement it will reference it by name, (skipping the `parse` step). As the statement was not mapped in the `parse` because mapping was disabled at that point, the returned data will not be decrypted
 
 
 ## Prometheus metrics
