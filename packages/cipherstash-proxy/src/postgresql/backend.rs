@@ -24,7 +24,6 @@ use metrics::{counter, histogram};
 use std::time::Instant;
 use tokio::io::AsyncRead;
 use tracing::{debug, error, info};
-use x509_parser::asn1_rs::ToStatic;
 
 pub struct Backend<R>
 where

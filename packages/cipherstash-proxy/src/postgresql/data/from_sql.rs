@@ -12,7 +12,7 @@ use postgres_types::Type;
 use rust_decimal::Decimal;
 use sqltk::parser::ast::Value;
 use std::str::FromStr;
-use tracing::{debug, warn};
+use tracing::debug;
 
 pub fn bind_param_from_sql(
     param: &BindParam,
@@ -157,12 +157,10 @@ fn text_from_sql(
             unimplemented!("TIMESTAMPTZ")
         }
         // If JSONB, JSONPATH values are treated as strings
-        (&Type::JSONPATH, ColumnType::JsonB) => Ok(Plaintext::new(val)),
-        (&Type::TEXT | &Type::JSONB, ColumnType::JsonB) => {
-            serde_json::from_str::<serde_json::Value>(val)
-                .map_err(|_| MappingError::CouldNotParseParameter)
-                .map(Plaintext::new)
-        }
+        (&Type::TEXT | &Type::JSONPATH, ColumnType::JsonB) => Ok(Plaintext::new(val)),
+        (&Type::JSONB, ColumnType::JsonB) => serde_json::from_str::<serde_json::Value>(val)
+            .map_err(|_| MappingError::CouldNotParseParameter)
+            .map(Plaintext::new),
         (ty, _) => Err(MappingError::UnsupportedParameterType {
             name: ty.name().to_owned(),
             oid: ty.oid(),

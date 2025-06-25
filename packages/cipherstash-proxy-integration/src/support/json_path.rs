@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use bytes::BytesMut;
 use postgres_types::{Format, ToSql, Type};
 use std::{

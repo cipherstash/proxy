@@ -5,6 +5,7 @@ use rustls::{
     client::danger::ServerCertVerifier, crypto::aws_lc_rs::default_provider,
     pki_types::CertificateDer, ClientConfig,
 };
+use serde_json::Value;
 use std::sync::{Arc, Once};
 use tokio_postgres::{types::ToSql, Client, NoTls};
 use tracing_subscriber::{filter::Directive, EnvFilter, FmtSubscriber};
@@ -197,6 +198,25 @@ pub async fn simple_query_with_null(sql: &str) -> Vec<Option<String>> {
             }
         })
         .collect()
+}
+
+pub async fn insert_jsonb() -> Value {
+    let id = random_id();
+
+    let encrypted_jsonb = serde_json::json!({
+        "id": id,
+        "string": "hello",
+        "number": 42,
+        "nested": {
+            "number": 1815,
+            "string": "world",
+        }
+    });
+
+    let sql = format!("INSERT INTO encrypted (id, encrypted_jsonb) VALUES ($1, $2)");
+    insert(&sql, &[&id, &encrypted_jsonb]).await;
+
+    encrypted_jsonb
 }
 
 ///

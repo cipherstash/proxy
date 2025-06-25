@@ -1,8 +1,5 @@
-use cipherstash_client::zerokms::{
-    encrypted_record::{self, formats::mp_base85::serialize},
-    EncryptedRecord,
-};
-use serde::{Deserialize, Serialize, Serializer};
+use cipherstash_client::zerokms::EncryptedRecord;
+use serde::{Deserialize, Serialize};
 use sqltk::parser::ast::Ident;
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]

@@ -269,12 +269,9 @@ fn to_eql_encrypted_from_index_term(
     identifier: &Identifier,
 ) -> Result<eql::EqlEncrypted, Error> {
     debug!(target: ENCRYPT, msg = "Encrypted to EQL", ?identifier);
-    let mut selector: Option<String> = None;
 
-    match index_term {
-        IndexTerm::SteVecSelector(s) => {
-            selector = Some(hex::encode(s.as_bytes()));
-        }
+    let selector = match index_term {
+        IndexTerm::SteVecSelector(s) => Some(hex::encode(s.as_bytes())),
         _ => return Err(EncryptError::InvalidIndexTerm.into()),
     };
 
