@@ -286,7 +286,10 @@ If mapping is disabled, any subsequent prepare will skip the mapping process.
 
 If mapping is re-enabled for the connection, returned data will not be decrypted.
 
-To enable mapping, encryption and decryption of prepared statements, a new connection is required, or the client needs to prepare the statement again.
+To enable mapping, encryption, and decryption of prepared statements, either:
+
+- a new connection is required, or 
+- the client needs to prepare the statement again
 
 This behaviour is expected and a consequence of the PostgreSQL protocol.
 
