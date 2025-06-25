@@ -476,6 +476,53 @@ mod test {
     }
 
     #[test]
+    fn wildcard_expansion_2() {
+        // init_tracing();
+        let schema = resolver(schema! {
+            tables: {
+                users: {
+                    id,
+                    email (EQL),
+                }
+                todo_lists: {
+                    id,
+                    owner_id,
+                    secret (EQL),
+                }
+            }
+        });
+
+        let statement = parse(
+            r#"
+                select * from (
+                    select
+                        u.*,
+                        tl.*
+                    from
+                        users as u
+                    inner join todo_lists as tl on tl.owner_id = u.id
+                )
+            "#,
+        );
+
+        let typed = match type_check(schema, &statement) {
+            Ok(typed) => typed,
+            Err(err) => panic!("type check failed: {:#?}", err),
+        };
+
+        assert_eq!(
+            typed.projection,
+            projection![
+                (NATIVE(users.id) as id),
+                (EQL(users.email) as email),
+                (NATIVE(todo_lists.id) as id),
+                (NATIVE(todo_lists.owner_id) as owner_id),
+                (EQL(todo_lists.secret) as secret)
+            ]
+        );
+    }
+
+    #[test]
     fn select_with_multiple_placeholder_and_wildcard_expansion() {
         // init_tracing();
         let schema = resolver(schema! {
@@ -824,7 +871,7 @@ mod test {
             Err(err) => panic!("type check failed: {:#?}", err),
         };
 
-        assert_eq!(typed.projection, Projection::Empty);
+        assert_eq!(typed.projection, Projection(vec![]));
     }
 
     #[test]
@@ -895,7 +942,7 @@ mod test {
             Err(err) => panic!("type check failed: {:#?}", err),
         };
 
-        assert_eq!(typed.projection, Projection::Empty);
+        assert_eq!(typed.projection, Projection(vec![]));
     }
 
     #[test]
@@ -964,7 +1011,7 @@ mod test {
             Err(err) => panic!("type check failed: {:#?}", err),
         };
 
-        assert_eq!(typed.projection, Projection::Empty);
+        assert_eq!(typed.projection, Projection(vec![]));
     }
 
     #[test]
@@ -1197,7 +1244,7 @@ mod test {
             projection_type(&parse("select $1")),
             projection_type(&parse("select t from (select $1 as t)")),
             projection_type(&parse("select * from (select $1)")),
-            Projection::WithColumns(vec![ProjectionColumn {
+            Projection(vec![ProjectionColumn {
                 alias: None,
                 ty: Value::Native(NativeValue(None)),
             }]),

@@ -34,8 +34,8 @@ use crate::{
 };
 
 use super::{
-    AssociatedType, EqlTerm, EqlTraits, NativeValue, Projection, ProjectionColumn,
-    ProjectionColumns, TableColumn, Type, TypeEnv, Unifier, Value,
+    AssociatedType, EqlTerm, EqlTraits, NativeValue, Projection, ProjectionColumn, TableColumn,
+    Type, TypeEnv, Unifier, Value,
 };
 
 /// A `TypeDecl` is a symbolic representation of a [`Type`]. Multiple type declarations can be added to a [`TypeEnv`]
@@ -272,51 +272,45 @@ impl InstantiateType for ProjectionDecl {
         unifier: &mut Unifier<'_>,
         env: &InstantiatedTypeEnv,
     ) -> Result<Arc<Type>, TypeError> {
-        Ok(Arc::new(Type::Value(Value::Projection(
-            Projection::WithColumns(ProjectionColumns(
-                self.0
-                    .iter()
-                    .map(|col_decl| -> Result<_, TypeError> {
-                        Ok(ProjectionColumn::new(
-                            col_decl.0.instantiate_in_env(unifier, env)?,
-                            col_decl.1.clone(),
-                        ))
-                    })
-                    .collect::<Result<Vec<_>, _>>()?,
-            )),
-        ))))
+        Ok(Arc::new(Type::Value(Value::Projection(Projection(
+            self.0
+                .iter()
+                .map(|col_decl| -> Result<_, TypeError> {
+                    Ok(ProjectionColumn::new(
+                        col_decl.0.instantiate_in_env(unifier, env)?,
+                        col_decl.1.clone(),
+                    ))
+                })
+                .collect::<Result<Vec<_>, _>>()?,
+        )))))
     }
 
     fn instantiate_concrete(&self) -> Result<Arc<Type>, TypeError> {
-        Ok(Arc::new(Type::Value(Value::Projection(
-            Projection::WithColumns(ProjectionColumns(
-                self.0
-                    .iter()
-                    .map(|col_decl| -> Result<_, TypeError> {
-                        Ok(ProjectionColumn::new(
-                            col_decl.0.instantiate_concrete()?,
-                            col_decl.1.clone(),
-                        ))
-                    })
-                    .collect::<Result<Vec<_>, _>>()?,
-            )),
-        ))))
+        Ok(Arc::new(Type::Value(Value::Projection(Projection(
+            self.0
+                .iter()
+                .map(|col_decl| -> Result<_, TypeError> {
+                    Ok(ProjectionColumn::new(
+                        col_decl.0.instantiate_concrete()?,
+                        col_decl.1.clone(),
+                    ))
+                })
+                .collect::<Result<Vec<_>, _>>()?,
+        )))))
     }
 
     fn instantiate_shallow(&self, unifier: &mut Unifier<'_>) -> Result<Arc<Type>, TypeError> {
-        Ok(Arc::new(Type::Value(Value::Projection(
-            Projection::WithColumns(ProjectionColumns(
-                self.0
-                    .iter()
-                    .map(|col_decl| -> Result<_, TypeError> {
-                        Ok(ProjectionColumn::new(
-                            col_decl.0.instantiate_shallow(unifier)?,
-                            col_decl.1.clone(),
-                        ))
-                    })
-                    .collect::<Result<Vec<_>, _>>()?,
-            )),
-        ))))
+        Ok(Arc::new(Type::Value(Value::Projection(Projection(
+            self.0
+                .iter()
+                .map(|col_decl| -> Result<_, TypeError> {
+                    Ok(ProjectionColumn::new(
+                        col_decl.0.instantiate_shallow(unifier)?,
+                        col_decl.1.clone(),
+                    ))
+                })
+                .collect::<Result<Vec<_>, _>>()?,
+        )))))
     }
 }
 

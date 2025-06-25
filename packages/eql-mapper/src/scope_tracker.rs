@@ -3,7 +3,7 @@ use crate::inference::unifier::{ProjectionColumn, Type};
 use crate::inference::TypeError;
 use crate::iterator_ext::IteratorExt;
 use crate::model::SqlIdent;
-use crate::unifier::{Projection, ProjectionColumns, Value};
+use crate::unifier::{Projection, Value};
 use crate::Relation;
 use sqltk::parser::ast::{Ident, ObjectName, ObjectNamePart, Query, Statement};
 use sqltk::{into_control_flow, Break, Visitable, Visitor};
@@ -169,7 +169,7 @@ impl<'ast> Scope<'ast> {
                     |mut acc, columns| {
                         columns
                             .map(|columns| {
-                                acc.extend(columns.0.iter().cloned());
+                                acc.extend(columns.iter().cloned());
                                 acc
                             })
                             .map_err(|err| ScopeError::TypeError(Box::new(err)))
@@ -212,7 +212,7 @@ impl<'ast> Scope<'ast> {
                 let columns = self
                     .try_match_projection(named_relation.projection_type.clone())
                     .map_err(|err| ScopeError::TypeError(Box::new(err)))?;
-                let mut columns = columns.0.iter();
+                let mut columns = columns.iter();
 
                 match columns.try_find_unique(&|column| {
                     column.alias.as_ref().map(SqlIdent::from).as_ref() == Some(&second_ident)
@@ -261,11 +261,11 @@ impl<'ast> Scope<'ast> {
         }
     }
 
-    fn try_match_projection(&self, ty: Arc<Type>) -> Result<ProjectionColumns, TypeError> {
+    fn try_match_projection(&self, ty: Arc<Type>) -> Result<Vec<ProjectionColumn>, TypeError> {
         match &*ty {
-            Type::Value(Value::Projection(projection)) => Ok(ProjectionColumns(Vec::from_iter(
+            Type::Value(Value::Projection(projection)) => Ok(Vec::from_iter(
                 projection.columns().iter().cloned(),
-            ))),
+            )),
             other => Err(TypeError::Expected(format!(
                 "expected projection but got: {other}"
             ))),

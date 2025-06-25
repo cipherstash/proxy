@@ -299,18 +299,14 @@ impl SetOf {
 
 impl Projection {
     pub(crate) fn effective_bounds(&self) -> EqlTraits {
-        match self {
-            Projection::WithColumns(cols) => {
-                if let Some((first, rest)) = cols.0.split_first() {
-                    let mut acc = first.ty.effective_bounds();
-                    for col in rest {
-                        acc = acc.intersection(&col.ty.effective_bounds())
-                    }
-                    return acc;
-                }
-                unreachable!("there is always at least one column in Projection::WithColumns")
+        if let Some((first, rest)) = self.columns().split_first() {
+            let mut acc = first.ty.effective_bounds();
+            for col in rest {
+                acc = acc.intersection(&col.ty.effective_bounds())
             }
-            Projection::Empty => ALL_TRAITS,
+            acc
+        } else {
+            EqlTraits::none()
         }
     }
 }

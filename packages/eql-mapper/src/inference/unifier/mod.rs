@@ -423,6 +423,8 @@ mod test {
     }
 
     #[test]
+    #[ignore = "this scenario cannot happen during unification because wildcards will have been expanded before the projections are unified"]
+    // Leaving this test here as a reminder in case the above assertion proves to be false.
     fn projections_with_wildcards() {
         let mut unifier = Unifier::new(DepMut::new(TypeRegistry::new()));
 

@@ -251,7 +251,7 @@ impl From<TypeVar> for Type {
 impl Type {
     /// Creates a `Type::Value(Projection::Empty)`.
     pub(crate) const fn empty_projection() -> Type {
-        Type::Value(Value::Projection(Projection::Empty))
+        Type::Value(Value::Projection(Projection(vec![])))
     }
 
     /// Creates a `Type::Value(Value::Native(NativeValue(None)))`.
@@ -266,18 +266,12 @@ impl Type {
 
     /// Creates a `Type::Value(Value::Projection(Projection::WithColumns(columns)))`.
     pub(crate) fn projection(columns: &[(Arc<Type>, Option<Ident>)]) -> Type {
-        if columns.is_empty() {
-            Type::Value(Value::Projection(Projection::Empty))
-        } else {
-            Type::Value(Value::Projection(Projection::WithColumns(
-                ProjectionColumns(
-                    columns
-                        .iter()
-                        .map(|(c, n)| ProjectionColumn::new(c.clone(), n.clone()))
-                        .collect(),
-                ),
-            )))
-        }
+        Type::Value(Value::Projection(Projection(
+            columns
+                .iter()
+                .map(|(c, n)| ProjectionColumn::new(c.clone(), n.clone()))
+                .collect(),
+        )))
     }
 
     /// Creates a `Type::Value(Value::Array(element_ty))`.
@@ -287,7 +281,7 @@ impl Type {
 
     pub(crate) fn follow_tvars(self: Arc<Self>, unifier: &Unifier<'_>) -> Arc<Type> {
         match &*self.clone() {
-            Type::Value(Value::Projection(Projection::WithColumns(ProjectionColumns(cols)))) => {
+            Type::Value(Value::Projection(Projection(cols))) => {
                 let cols = cols
                     .iter()
                     .map(|col| ProjectionColumn {
@@ -295,10 +289,8 @@ impl Type {
                         alias: col.alias.clone(),
                     })
                     .collect();
-                Projection::WithColumns(ProjectionColumns(cols)).into()
+                Projection(cols).into()
             }
-
-            Type::Value(Value::Projection(Projection::Empty)) => self,
 
             Type::Value(Value::Array(Array(ty))) => Arc::new(Type::Value(Value::Array(Array(
                 ty.clone().follow_tvars(unifier),
@@ -404,116 +396,37 @@ impl EqlValue {
     }
 }
 
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Display, Hash)]
-#[display("PROJ[{}]", _0.iter().map(|pc| pc.to_string()).collect::<Vec<_>>().join(", "))]
-pub struct ProjectionColumns(pub(crate) Vec<ProjectionColumn>);
-
 /// The type of an [`sqltk::parser::ast::Expr`] or [`sqltk::parser::ast::Statement`] that returns a projection.
 ///
 /// It represents an ordered list of zero or more optionally aliased columns types.
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Display, Hash)]
-pub enum Projection {
-    /// A projection with columns
-    #[display("{}", _0)]
-    WithColumns(ProjectionColumns),
+///
+/// An `INSERT`, `UPDATE` or `DELETE` statement without a `RETURNING` clause will have an empty projection.
+///
+/// Also statements such as `SELECT FROM users` where there are no selected columns or wildcards will have an empty
+/// projection.
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Hash)]
+pub struct Projection(pub Vec<ProjectionColumn>);
 
-    /// A projection without columns.
-    ///
-    /// An `INSERT`, `UPDATE` or `DELETE` statement without a `RETURNING` clause will have an empty projection.
-    ///
-    /// Also statements such as `SELECT FROM users` where there are no selected columns or wildcards will have an empty
-    /// projection.
-    #[display("PROJ[]")]
-    Empty,
+impl Display for Projection {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("{")?;
+        for (idx, col) in self.0.iter().enumerate() {
+            col.fmt(f)?;
+            if idx < self.0.len() - 1 {
+                f.write_str(", ")?;
+            }
+        }
+        f.write_str("}")
+    }
 }
 
 impl Projection {
     pub fn new(columns: Vec<ProjectionColumn>) -> Self {
-        if columns.is_empty() {
-            Projection::Empty
-        } else {
-            Projection::WithColumns(ProjectionColumns(Vec::from_iter(columns.iter().cloned())))
-        }
+        Self(columns)
     }
 
-    pub(crate) fn flatten(&self) -> Self {
-        match self {
-            Projection::WithColumns(projection_columns) => {
-                Projection::WithColumns(projection_columns.flatten())
-            }
-            Projection::Empty => Projection::Empty,
-        }
-    }
-
-    pub(crate) fn len(&self) -> usize {
-        match self {
-            Projection::WithColumns(projection_columns) => projection_columns.len(),
-            Projection::Empty => 0,
-        }
-    }
-
-    pub(crate) fn columns(&self) -> &[ProjectionColumn] {
-        match self {
-            Projection::WithColumns(projection_columns) => projection_columns.0.as_slice(),
-            Projection::Empty => &[],
-        }
-    }
-}
-
-impl Index<usize> for Projection {
-    type Output = ProjectionColumn;
-
-    fn index(&self, index: usize) -> &Self::Output {
-        match self {
-            Projection::WithColumns(projection_columns) => &projection_columns.0[index],
-            Projection::Empty => panic!("cannot index into an empty projection"),
-        }
-    }
-}
-
-impl ProjectionColumns {
-    pub(crate) fn len(&self) -> usize {
-        self.0.len()
-    }
-
-    pub(crate) fn flatten(&self) -> Self {
-        ProjectionColumns(self.flatten_impl(Vec::with_capacity(self.len())))
-    }
-
-    fn flatten_impl(&self, mut output: Vec<ProjectionColumn>) -> Vec<ProjectionColumn> {
-        for ProjectionColumn { ty, alias } in &self.0 {
-            match &**ty {
-                Type::Value(Value::Projection(Projection::WithColumns(nested))) => {
-                    output = nested.flatten_impl(output);
-                }
-                _ => output.push(ProjectionColumn::new(ty.clone(), alias.clone())),
-            }
-        }
-        output
-    }
-}
-
-impl ProjectionColumn {
-    /// Returns a new `ProjectionColumn` with type `ty` and optional `alias`.
-    pub(crate) fn new(ty: impl Into<Arc<Type>>, alias: Option<Ident>) -> Self {
-        let ty: Arc<Type> = ty.into();
-        Self {
-            ty: ty.clone(),
-            alias,
-        }
-    }
-
-    fn render_alias(&self) -> String {
-        match &self.alias {
-            Some(name) => format!(": {name}"),
-            None => String::from(""),
-        }
-    }
-}
-
-impl ProjectionColumns {
     pub(crate) fn new_from_schema_table(table: Arc<Table>) -> Self {
-        let cols = ProjectionColumns(
+        Self(
             table
                 .columns
                 .iter()
@@ -533,9 +446,41 @@ impl ProjectionColumns {
                     ProjectionColumn::new(value_ty, Some(col.name.clone()))
                 })
                 .collect(),
-        );
+        )
+    }
 
-        cols
+    pub(crate) fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    pub(crate) fn columns(&self) -> &[ProjectionColumn] {
+        &self.0
+    }
+}
+
+impl Index<usize> for Projection {
+    type Output = ProjectionColumn;
+
+    fn index(&self, index: usize) -> &Self::Output {
+        &self.0[index]
+    }
+}
+
+impl ProjectionColumn {
+    /// Returns a new `ProjectionColumn` with type `ty` and optional `alias`.
+    pub(crate) fn new(ty: impl Into<Arc<Type>>, alias: Option<Ident>) -> Self {
+        let ty: Arc<Type> = ty.into();
+        Self {
+            ty: ty.clone(),
+            alias,
+        }
+    }
+
+    fn render_alias(&self) -> String {
+        match &self.alias {
+            Some(name) => format!(": {name}"),
+            None => String::from(""),
+        }
     }
 }
 

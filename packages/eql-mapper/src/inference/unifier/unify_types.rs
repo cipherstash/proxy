@@ -30,14 +30,13 @@ impl UnifyTypes<SetOf, SetOf> for Unifier<'_> {
 // A Value can be unified with a single-column Projection.
 impl UnifyTypes<Value, Projection> for Unifier<'_> {
     fn unify_types(&mut self, lhs: &Value, rhs: &Projection) -> Result<Arc<Type>, TypeError> {
-        let projection = rhs.flatten();
-        let len = projection.len();
+        let len = rhs.len();
         if len == 1 {
-            self.unify_types(lhs, &projection[0].ty)
+            self.unify_types(lhs, &rhs[0].ty)
         } else {
             Err(TypeError::Conflict(format!(
                 "cannot unify value type {} with projection with > 1 column (it has {} columns) {}",
-                lhs, len, projection
+                lhs, len, rhs
             )))
         }
     }
@@ -230,16 +229,13 @@ impl UnifyTypes<Var, Var> for Unifier<'_> {
 
 impl UnifyTypes<Projection, Projection> for Unifier<'_> {
     fn unify_types(&mut self, lhs: &Projection, rhs: &Projection) -> Result<Arc<Type>, TypeError> {
-        let lhs_projection = lhs.flatten();
-        let rhs_projection = rhs.flatten();
+        if lhs.len() == rhs.len() {
+            let mut cols: Vec<ProjectionColumn> = Vec::with_capacity(lhs.len());
 
-        if lhs_projection.len() == rhs_projection.len() {
-            let mut cols: Vec<ProjectionColumn> = Vec::with_capacity(lhs_projection.len());
-
-            for (lhs_col, rhs_col) in lhs_projection
+            for (lhs_col, rhs_col) in lhs
                 .columns()
                 .iter()
-                .zip(rhs_projection.columns())
+                .zip(rhs.columns())
             {
                 let unified_ty = self.unify(lhs_col.ty.clone(), rhs_col.ty.clone())?;
                 cols.push(ProjectionColumn::new(unified_ty, lhs_col.alias.clone()));

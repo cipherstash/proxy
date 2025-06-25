@@ -60,13 +60,8 @@ pub struct Array(pub Box<Type>);
 
 /// A projection type that is parameterized by a list of projection column types.
 #[derive(Debug, Clone, PartialEq, Eq, Display)]
-pub enum Projection {
-    #[display("{{{}}}", _0.iter().map(|pc| pc.to_string()).collect::<Vec<_>>().join(", "))]
-    WithColumns(Vec<ProjectionColumn>),
-
-    #[display("{{}}")]
-    Empty,
-}
+#[display("{{{}}}", _0.iter().map(|pc| pc.to_string()).collect::<Vec<_>>().join(", "))]
+pub struct Projection(pub Vec<ProjectionColumn>);
 
 impl Type {
     pub fn contains_eql(&self) -> bool {
@@ -97,25 +92,15 @@ impl Array {
 
 impl Projection {
     pub fn new(columns: Vec<ProjectionColumn>) -> Self {
-        if columns.is_empty() {
-            Projection::Empty
-        } else {
-            Projection::WithColumns(columns)
-        }
+        Self(columns)
     }
 
     pub fn type_at_col_index(&self, index: usize) -> Option<&Value> {
-        match self {
-            Projection::WithColumns(cols) => cols.get(index).map(|col| &col.ty),
-            Projection::Empty => None,
-        }
+        self.0.get(index).map(|col| &col.ty)
     }
 
     pub fn contains_eql(&self) -> bool {
-        match self {
-            Projection::WithColumns(cols) => cols.iter().any(|col| col.ty.contains_eql()),
-            Projection::Empty => false,
-        }
+        self.0.iter().any(|col| col.ty.contains_eql())
     }
 }
 

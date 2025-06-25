@@ -87,29 +87,20 @@ impl ResolveType for Projection {
 
     fn resolve_type(&self, unifier: &mut Unifier<'_>) -> Result<Self::Output, TypeError> {
         let resolved_cols = self
-            .flatten()
             .columns()
             .iter()
-            .map(|col| -> Result<crate::ProjectionColumn, TypeError> {
+            .try_fold(vec![], |mut acc, col| -> Result<Vec<crate::ProjectionColumn>, TypeError> {
                 let alias = col.alias.clone();
-                let ty = col.ty.resolve_type(unifier)?;
-
-                if let crate::Type::Value(crate::Value::Projection(projection)) = ty {
-                    return Err(TypeError::Expected(format!(
-                        "projection not flattened: {}",
-                        projection
-                    )));
+                if let Type::Value(Value::Projection(projection)) = &*col.ty {
+                    let resolved = projection.resolve_type(unifier)?;
+                    acc.extend(resolved.0.into_iter());
+                } else {
+                    let crate::Type::Value(value) = col.ty.resolve_type(unifier)?;
+                    acc.push(crate::ProjectionColumn { ty: value, alias });
                 }
+                Ok(acc)
+            })?;
 
-                let crate::Type::Value(value) = ty;
-                Ok(crate::ProjectionColumn { ty: value, alias })
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-
-        if resolved_cols.is_empty() {
-            Ok(crate::Projection::Empty)
-        } else {
-            Ok(crate::Projection::WithColumns(resolved_cols))
-        }
+        Ok(crate::Projection(resolved_cols))
     }
 }

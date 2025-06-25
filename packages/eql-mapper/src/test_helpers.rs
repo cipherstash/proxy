@@ -176,18 +176,14 @@ macro_rules! projection {
 }
 
 pub fn ignore_aliases(t: &Projection) -> Projection {
-    match t {
-        Projection::WithColumns(columns) => Projection::WithColumns(
-            columns
-                .iter()
-                .map(|pc| ProjectionColumn {
-                    ty: pc.ty.clone(),
-                    alias: None,
-                })
-                .collect(),
-        ),
-        Projection::Empty => Projection::Empty,
-    }
+    Projection(
+        t.0.iter()
+            .map(|pc| ProjectionColumn {
+                ty: pc.ty.clone(),
+                alias: None,
+            })
+            .collect(),
+    )
 }
 
 pub fn assert_transitive_eq<T: Eq + Debug>(items: &[T]) {
