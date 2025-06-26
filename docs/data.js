@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1750902784730,
+  "lastUpdate": 1750903825731,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -6374,6 +6374,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 6.737675,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "lindsay@cipherstash.com",
+            "name": "Lindsay Holmwood",
+            "username": "auxesis"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "470d997e571fd616a06f199aa1f56f865c35939c",
+          "message": "Merge pull request #267 from cipherstash/fix/prevent-unsupported-sql-syntax-from-breaking-migrations\n\nSET command to disable mapping",
+          "timestamp": "2025-06-26T12:07:27+10:00",
+          "tree_id": "5a6be2e0456387bdc5fd66e6a5cc6a67e3935e44",
+          "url": "https://github.com/cipherstash/proxy/commit/470d997e571fd616a06f199aa1f56f865c35939c"
+        },
+        "date": 1750903824606,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 6.914775,
             "unit": "Number"
           }
         ]
