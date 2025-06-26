@@ -245,7 +245,10 @@ CS_DATABASE__INSTALL_AWS_RDS_CERT_BUNDLE="true"
 ```
 
 
-## Disable encrypted mapping
+## Disabling encrypted mapping
+Transforming SQL statements is core to how CipherStash Proxy works. 
+Internally, Proxy takes the plaintext SQL statements issued by your application, and transforms them into statements on [EQL](https://github.com/cipherstash/encrypt-query-language/) columns. 
+Proxy does this through an internal process called _encrypted mapping_, or just _mapping_ for short. 
 
 In some circumstances it may be necessary to disable encrypted mapping for one or more SQL statements.
 
@@ -278,7 +281,7 @@ SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING = true;
 SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING = false;
 ```
 
-### Note on prepared statements
+### Note on prepared statements and mapping
 
 CipherStash Proxy only decrypts data of SQL statements that it has explicitly checked and mapped.
 
@@ -295,8 +298,9 @@ This behaviour is expected and a consequence of the PostgreSQL protocol.
 
 To prepare a statement, the client sends the SQL in a `parse` message.
 Once a statement has been prepared, the client skips the `parse` step, and does not send the SQL again, referring to the statement by a specified name.
-If mapping is disabled the CipherStash proxy will not map the statement on `parse`, and data returned from subsequent executions will never be decrypted.
-If mapping is enabled on the connection, when the client executes the statement it will reference it by name, (skipping the `parse` step). As the statement was not mapped in the `parse` because mapping was disabled at that point, the returned data will not be decrypted
+If mapping is disabled, Proxy will not map the statement on `parse`, and data returned from subsequent executions will never be decrypted.
+If mapping is enabled on the connection, when the client executes the statement it will reference it by name, skipping the `parse` step. 
+As the statement was not mapped in the `parse` because mapping was disabled at that point, the returned data will not be decrypted
 
 
 ## Prometheus metrics
