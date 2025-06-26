@@ -8,7 +8,10 @@ use super::{
     },
     Column,
 };
-use crate::{log::CONTEXT, prometheus::{STATEMENTS_DURATION_SECONDS, STATEMENTS_EXECUTION_DURATION_SECONDS}};
+use crate::{
+    log::CONTEXT,
+    prometheus::{STATEMENTS_DURATION_SECONDS, STATEMENTS_EXECUTION_DURATION_SECONDS},
+};
 use eql_mapper::{Schema, TableResolver};
 use metrics::histogram;
 use sqltk::parser::ast::{Expr, Ident, ObjectName, ObjectNamePart, Set, Value, ValueWithSpan};

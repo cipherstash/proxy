@@ -12,7 +12,7 @@ use crate::eql::Identifier;
 use crate::error::{EncryptError, Error, MappingError};
 use crate::log::{MAPPER, PROTOCOL};
 use crate::postgresql::context::column::Column;
-use crate::postgresql::context::{Portal}; //, SessionMetricsContext};
+use crate::postgresql::context::Portal;
 use crate::postgresql::data::literal_from_sql;
 use crate::postgresql::messages::error_response::ErrorResponse;
 use crate::postgresql::messages::terminate::Terminate;

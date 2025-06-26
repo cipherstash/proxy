@@ -22,8 +22,10 @@ pub const STATEMENTS_PASSTHROUGH_MAPPING_DISABLED_TOTAL: &str =
     "cipherstash_proxy_statements_passthrough_mapping_disabled_total";
 pub const STATEMENTS_PASSTHROUGH_TOTAL: &str = "cipherstash_proxy_statements_passthrough_total";
 pub const STATEMENTS_UNMAPPABLE_TOTAL: &str = "cipherstash_proxy_statements_unmappable_total";
-pub const STATEMENTS_DURATION_SECONDS: &str = "cipherstash_proxy_statements_session_duration_seconds"; // TODO: rename these
-pub const STATEMENTS_EXECUTION_DURATION_SECONDS: &str = "cipherstash_proxy_statements_execution_duration_seconds";
+pub const STATEMENTS_DURATION_SECONDS: &str =
+    "cipherstash_proxy_statements_session_duration_seconds"; // TODO: rename these
+pub const STATEMENTS_EXECUTION_DURATION_SECONDS: &str =
+    "cipherstash_proxy_statements_execution_duration_seconds";
 
 pub const ROWS_TOTAL: &str = "cipherstash_proxy_rows_total";
 pub const ROWS_ENCRYPTED_TOTAL: &str = "cipherstash_proxy_rows_encrypted_total";
