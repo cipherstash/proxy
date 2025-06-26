@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1750915249449,
+  "lastUpdate": 1750918176012,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -6428,6 +6428,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 6.962688,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "90daa7f08446db8be7b4c724cd9011c1cefb6018",
+          "message": "Add collection of processing and execution duration metrics for Prometheus reporting",
+          "timestamp": "2025-06-26T02:07:32Z",
+          "url": "https://github.com/cipherstash/proxy/pull/270/commits/90daa7f08446db8be7b4c724cd9011c1cefb6018"
+        },
+        "date": 1750918174533,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 6.662486,
             "unit": "Number"
           }
         ]
