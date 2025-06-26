@@ -383,7 +383,7 @@ impl Parse for TypeDecl {
 
         Err(syn::Error::new(
             input.span(),
-            format!("could not parse as TypeDecl"),
+            "could not parse as TypeDecl".to_string(),
         ))
     }
 }
@@ -417,7 +417,7 @@ impl Parse for FunctionDecl {
 
         let _: token::RArrow = input.parse()?;
 
-        let ret = TypeDecl::parse(&input)?;
+        let ret = TypeDecl::parse(input)?;
 
         let bounds: Vec<_> = if input.peek(token::Where) {
             let _: token::Where = input.parse()?;
@@ -446,10 +446,10 @@ impl Parse for FunctionDecl {
 
 impl Parse for TableColumn {
     fn parse(input: ParseStream) -> syn::Result<Self> {
-        let table = Ident::parse(&input)?;
+        let table = Ident::parse(input)?;
         let table = table.to_string();
         let _: token::Dot = input.parse()?;
-        let column = Ident::parse(&input)?;
+        let column = Ident::parse(input)?;
         let column = column.to_string();
 
         Ok(Self(quote! {
@@ -552,9 +552,7 @@ impl Parse for SqltkBinOp {
 
         Err(syn::Error::new(
             input.span(),
-            format!(
-                "Expected an operator corresponding to one of the EQL traits Eq, Ord, TokenMatch or JsonLike"
-            ),
+            "Expected an operator corresponding to one of the EQL traits Eq, Ord, TokenMatch or JsonLike".to_string(),
         ))
     }
 }
@@ -579,7 +577,7 @@ impl Parse for BinaryOpDecl {
         let rhs = TypeDecl::parse(&content)?;
 
         let _: token::RArrow = input.parse()?;
-        let ret = TypeDecl::parse(&input)?;
+        let ret = TypeDecl::parse(input)?;
 
         let bounds: Vec<_> = if input.peek(token::Where) {
             let _: token::Where = input.parse()?;
@@ -628,85 +626,6 @@ impl Parse for TypeEnvDecl {
                 env
             }
         }))
-    }
-}
-
-#[cfg(test)]
-mod test {
-    use quote::quote;
-    use syn::parse2;
-    use pretty_assertions::assert_eq;
-
-    use crate::parse_type_decl::{AssociatedTypeDecl, BinaryOpDecl, TVar};
-
-    #[test]
-    fn parse_tvar() {
-        let parsed: TVar = parse2(quote!(T)).unwrap();
-
-        assert_eq!(
-            parsed.0.to_string(),
-            quote!(crate::inference::unifier::TVar("T".to_string())).to_string()
-        );
-    }
-
-    #[test]
-    fn parse_associated_type() {
-        let parsed: AssociatedTypeDecl = parse2(quote!(<T as JsonLike>::Accessor)).unwrap();
-
-        assert_eq!(
-            parsed.0.to_string(),
-            quote!(crate::inference::unifier::AssociatedTypeDecl {
-                impl_decl: Box::new(crate::inference::unifier::TypeDecl::Var(
-                    crate::inference::unifier::VarDecl{
-                        tvar: crate::inference::unifier::TVar("T".to_string()),
-                        bounds: crate::inference::unifier::EqlTraits::none()
-                    }
-                )),
-                as_eql_trait: crate::inference::unifier::EqlTrait::JsonLike,
-                type_name: "Accessor",
-            })
-            .to_string()
-        );
-    }
-
-    #[test]
-    fn parse_binary_operators() {
-        let parsed: BinaryOpDecl = parse2(quote!(<T>(T = T) -> Native where T: Eq)).unwrap();
-
-        assert_eq!(
-            parsed.0.to_string(),
-            quote!(crate::inference::unifier::BinaryOpDecl {
-                op: ::sqltk::parser::ast::BinaryOperator::Eq,
-                inner: crate::inference::unifier::FunctionSignatureDecl::new(
-                    vec![crate::inference::unifier::TVar("T".to_string())],
-                    vec![crate::inference::unifier::BoundsDecl(
-                        crate::inference::unifier::TVar("T".to_string()),
-                        crate::inference::unifier::EqlTraits::from_iter(vec![
-                            crate::inference::unifier::EqlTrait::Eq
-                        ])
-                    )],
-                    vec![
-                        crate::inference::unifier::TypeDecl::Var(
-                            crate::inference::unifier::VarDecl {
-                                tvar: crate::inference::unifier::TVar("T".to_string()),
-                                bounds: crate::inference::unifier::EqlTraits::default(),
-                            }
-                        ),
-                        crate::inference::unifier::TypeDecl::Var(
-                            crate::inference::unifier::VarDecl {
-                                tvar: crate::inference::unifier::TVar("T".to_string()),
-                                bounds: crate::inference::unifier::EqlTraits::default(),
-                            }
-                        )
-                    ],
-                    crate::inference::unifier::TypeDecl::Native(
-                        crate::inference::unifier::NativeDecl(None)
-                    ),
-                )
-                .expect("FunctionSignatureDecl creation failed due to a type error"),
-            })
-            .to_string()
-        );
     }
 }
 
@@ -823,5 +742,84 @@ impl ToTokens for Binding {
         tokens.append_all(quote! {
             let #var = #type_decl
         });
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use quote::quote;
+    use syn::parse2;
+    use pretty_assertions::assert_eq;
+
+    use crate::parse_type_decl::{AssociatedTypeDecl, BinaryOpDecl, TVar};
+
+    #[test]
+    fn parse_tvar() {
+        let parsed: TVar = parse2(quote!(T)).unwrap();
+
+        assert_eq!(
+            parsed.0.to_string(),
+            quote!(crate::inference::unifier::TVar("T".to_string())).to_string()
+        );
+    }
+
+    #[test]
+    fn parse_associated_type() {
+        let parsed: AssociatedTypeDecl = parse2(quote!(<T as JsonLike>::Accessor)).unwrap();
+
+        assert_eq!(
+            parsed.0.to_string(),
+            quote!(crate::inference::unifier::AssociatedTypeDecl {
+                impl_decl: Box::new(crate::inference::unifier::TypeDecl::Var(
+                    crate::inference::unifier::VarDecl{
+                        tvar: crate::inference::unifier::TVar("T".to_string()),
+                        bounds: crate::inference::unifier::EqlTraits::none()
+                    }
+                )),
+                as_eql_trait: crate::inference::unifier::EqlTrait::JsonLike,
+                type_name: "Accessor",
+            })
+            .to_string()
+        );
+    }
+
+    #[test]
+    fn parse_binary_operators() {
+        let parsed: BinaryOpDecl = parse2(quote!(<T>(T = T) -> Native where T: Eq)).unwrap();
+
+        assert_eq!(
+            parsed.0.to_string(),
+            quote!(crate::inference::unifier::BinaryOpDecl {
+                op: ::sqltk::parser::ast::BinaryOperator::Eq,
+                inner: crate::inference::unifier::FunctionSignatureDecl::new(
+                    vec![crate::inference::unifier::TVar("T".to_string())],
+                    vec![crate::inference::unifier::BoundsDecl(
+                        crate::inference::unifier::TVar("T".to_string()),
+                        crate::inference::unifier::EqlTraits::from_iter(vec![
+                            crate::inference::unifier::EqlTrait::Eq
+                        ])
+                    )],
+                    vec![
+                        crate::inference::unifier::TypeDecl::Var(
+                            crate::inference::unifier::VarDecl {
+                                tvar: crate::inference::unifier::TVar("T".to_string()),
+                                bounds: crate::inference::unifier::EqlTraits::default(),
+                            }
+                        ),
+                        crate::inference::unifier::TypeDecl::Var(
+                            crate::inference::unifier::VarDecl {
+                                tvar: crate::inference::unifier::TVar("T".to_string()),
+                                bounds: crate::inference::unifier::EqlTraits::default(),
+                            }
+                        )
+                    ],
+                    crate::inference::unifier::TypeDecl::Native(
+                        crate::inference::unifier::NativeDecl(None)
+                    ),
+                )
+                .expect("FunctionSignatureDecl creation failed due to a type error"),
+            })
+            .to_string()
+        );
     }
 }

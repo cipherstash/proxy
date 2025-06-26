@@ -213,7 +213,7 @@ pub async fn insert_jsonb() -> Value {
         }
     });
 
-    let sql = format!("INSERT INTO encrypted (id, encrypted_jsonb) VALUES ($1, $2)");
+    let sql = "INSERT INTO encrypted (id, encrypted_jsonb) VALUES ($1, $2)".to_string();
     insert(&sql, &[&id, &encrypted_jsonb]).await;
 
     encrypted_jsonb

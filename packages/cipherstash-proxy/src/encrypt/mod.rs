@@ -141,19 +141,17 @@ impl Encrypt {
             if let Some(column) = opt {
                 if let Some(e) = result.remove(idx) {
                     encrypted = Some(to_eql_encrypted(e, &column.identifier)?);
-                } else {
-                    if let Some(plaintext) = index_term_plaintexts[idx].clone() {
-                        let index = column.config.clone().into_ste_vec_index().unwrap();
-                        let op = QueryOp::SteVecSelector;
+                } else if let Some(plaintext) = index_term_plaintexts[idx].clone() {
+                    let index = column.config.clone().into_ste_vec_index().unwrap();
+                    let op = QueryOp::SteVecSelector;
 
-                        let index_term =
-                            (index, plaintext).build_queryable(self.cipher.clone(), op)?;
+                    let index_term =
+                        (index, plaintext).build_queryable(self.cipher.clone(), op)?;
 
-                        encrypted = Some(to_eql_encrypted_from_index_term(
-                            index_term,
-                            &column.identifier,
-                        )?);
-                    }
+                    encrypted = Some(to_eql_encrypted_from_index_term(
+                        index_term,
+                        &column.identifier,
+                    )?);
                 }
             }
 
