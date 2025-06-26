@@ -1,6 +1,6 @@
 #[cfg(test)]
 mod tests {
-    use crate::common::{insert, query_by, random_id, trace};
+    use crate::common::{execute_query, query_by, random_id, trace};
 
     ///
     /// IN clause subquery should be able to use ORDER BY
@@ -13,7 +13,7 @@ mod tests {
         let encrypted_text = "hello".to_string();
 
         let sql = "INSERT INTO encrypted (id, encrypted_text) VALUES ($1, $2)";
-        insert(sql, &[&id, &encrypted_text]).await;
+        execute_query(sql, &[&id, &encrypted_text]).await;
 
         let sql = "SELECT encrypted_text FROM encrypted WHERE id IN (SELECT id FROM encrypted WHERE id = $1 ORDER BY id DESC LIMIT 10 OFFSET 0) GROUP BY encrypted_text";
 

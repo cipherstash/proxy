@@ -124,12 +124,12 @@ pub async fn connect(port: u16) -> Client {
     client
 }
 
-pub async fn insert(sql: &str, params: &[&(dyn ToSql + Sync)]) {
+pub async fn execute_query(sql: &str, params: &[&(dyn ToSql + Sync)]) {
     let client = connect_with_tls(PROXY).await;
     client.query(sql, params).await.unwrap();
 }
 
-pub async fn insert_simple_query(sql: &str) {
+pub async fn execute_simple_query(sql: &str) {
     let client = connect_with_tls(PROXY).await;
     client.simple_query(sql).await.unwrap();
 }
@@ -138,6 +138,13 @@ pub async fn query<T: for<'a> tokio_postgres::types::FromSql<'a> + Send + Sync>(
     sql: &str,
 ) -> Vec<T> {
     let client = connect_with_tls(PROXY).await;
+    query_with_client(sql, &client).await
+}
+
+pub async fn query_with_client<T: for<'a> tokio_postgres::types::FromSql<'a> + Send + Sync>(
+    sql: &str,
+    client: &Client,
+) -> Vec<T> {
     let rows = client.query(sql, &[]).await.unwrap();
     rows.iter().map(|row| row.get(0)).collect::<Vec<T>>()
 }
@@ -156,6 +163,14 @@ where
     <T as std::str::FromStr>::Err: std::fmt::Debug,
 {
     let client = connect_with_tls(PROXY).await;
+
+    simple_query_with_client(sql, &client).await
+}
+
+pub async fn simple_query_with_client<T: std::str::FromStr>(sql: &str, client: &Client) -> Vec<T>
+where
+    <T as std::str::FromStr>::Err: std::fmt::Debug,
+{
     let rows = client.simple_query(sql).await.unwrap();
     rows.iter()
         .filter_map(|row| {

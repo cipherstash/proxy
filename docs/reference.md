@@ -245,6 +245,64 @@ CS_DATABASE__INSTALL_AWS_RDS_CERT_BUNDLE="true"
 ```
 
 
+## Disabling encrypted mapping
+Transforming SQL statements is core to how CipherStash Proxy works. 
+Internally, Proxy takes the plaintext SQL statements issued by your application, and transforms them into statements on [EQL](https://github.com/cipherstash/encrypt-query-language/) columns. 
+Proxy does this through an internal process called _encrypted mapping_, or just _mapping_ for short. 
+
+In some circumstances it may be necessary to disable encrypted mapping for one or more SQL statements.
+
+For example, you are doing a data transformation with complex logic, and you are doing the transformation directly in the database with `plpgsql`.
+
+A `SET` command can be used to change the `CIPHERSTASH.UNSAFE_DISABLE_MAPPING` configuration parameter.
+
+The parameter is always scoped to the connection `SESSION` - mapping is only ever disabled for the client connection the `SET` command was issued on.
+
+> [!IMPORTANT]
+> Extra care is required when using `CIPHERSTASH.UNSAFE_DISABLE_MAPPING`.
+>
+> **If mapping is disabled, sensitive data may not be encrypted and may appear in logs.**
+
+CipherStash Proxy and EQL do provide some protection against writing plaintext into and reading plaintext from encrypted columns.
+
+Always use `eql_v2.add_encrypted_constraint(table, column)` when defining encrypted columns to ensure plaintext data cannot be written.
+
+Unmapped `SELECT` statements should always return the encrypted payload.
+If the constraint has been applied, unmapped `INSERT`/`UPDATE` statements should return a PostgreSQL type error.
+
+
+### Disable mapping
+```
+SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING = true;
+```
+
+### Enable mapping
+```
+SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING = false;
+```
+
+### Note on prepared statements and mapping
+
+CipherStash Proxy only decrypts data of SQL statements that it has explicitly checked and mapped.
+
+If mapping is disabled, any subsequent `PREPARE` will skip the mapping process.
+
+If mapping is re-enabled for the connection, returned data will not be decrypted.
+
+To enable mapping, encryption, and decryption of prepared statements, either:
+
+- a new connection is required, or
+- the client needs to prepare the statement again
+
+This behaviour is expected and a consequence of the PostgreSQL protocol.
+
+To prepare a statement, the client sends the SQL in a `parse` message.
+Once a statement has been prepared, the client skips the `parse` step, and does not send the SQL again, referring to the statement by a specified name.
+If mapping is disabled, Proxy will not map the statement on `parse`, and data returned from subsequent executions will never be decrypted.
+If mapping is enabled on the connection, when the client executes the statement it will reference it by name, skipping the `parse` step. 
+As the statement was not mapped in the `parse` because mapping was disabled at that point, the returned data will not be decrypted
+
+
 ## Prometheus metrics
 
 To enable a Prometheus exporter on the default port (`9930`) use either:
