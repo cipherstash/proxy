@@ -650,9 +650,9 @@ dependencies = [
 
 [[package]]
 name = "cipherstash-client"
-version = "0.22.2"
+version = "0.23.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0168885dfe967dc3884a51e415ce15c82343b7fd8be36b08d39f25f4fc727064"
+checksum = "3165e25e8e2cd848f80ed24f127e0e4c869860c9840dc1a723951b0bcd24b655"
 dependencies = [
  "aes-gcm-siv",
  "anyhow",
@@ -930,6 +930,19 @@ dependencies = [
  "serde_json",
  "toml",
  "winnow 0.7.4",
+]
+
+[[package]]
+name = "const-hex"
+version = "1.14.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "83e22e0ed40b96a48d3db274f72fd365bd78f67af39b6bbd47e8a15e1c6207ff"
+dependencies = [
+ "cfg-if",
+ "cpufeatures",
+ "hex",
+ "proptest",
+ "serde",
 ]
 
 [[package]]
@@ -1332,6 +1345,7 @@ dependencies = [
 name = "eql-mapper-macros"
 version = "2.0.0"
 dependencies = [
+ "pretty_assertions",
  "proc-macro2",
  "quote",
  "syn 2.0.101",
@@ -2836,6 +2850,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "proptest"
+version = "1.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6fcdab19deb5195a31cf7726a210015ff1496ba1464fd42cb4f537b8b01b471f"
+dependencies = [
+ "bitflags 2.9.0",
+ "lazy_static",
+ "num-traits",
+ "rand 0.9.0",
+ "rand_chacha 0.9.0",
+ "rand_xorshift",
+ "regex-syntax 0.8.5",
+ "unarray",
+]
+
+[[package]]
 name = "psm"
 version = "0.1.26"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2958,6 +2988,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "99d9a13982dcf210057a8a78572b2217b667c3beacbf3a0d8b454f6f82837d38"
 dependencies = [
  "getrandom 0.3.2",
+]
+
+[[package]]
+name = "rand_xorshift"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "513962919efc330f829edb2535844d1b912b0fbe2ca165d613e4e8788bb05a5a"
+dependencies = [
+ "rand_core 0.9.3",
 ]
 
 [[package]]
@@ -4248,6 +4287,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1dccffe3ce07af9386bfd29e80c0ab1a8205a2fc34e4bcd40364df902cfa8f3f"
 
 [[package]]
+name = "unarray"
+version = "0.1.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "eaea85b334db583fe3274d12b4cd1880032beab409c0d774be044d4480ab9a94"
+
+[[package]]
 name = "unicode-bidi"
 version = "0.3.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5094,13 +5139,14 @@ dependencies = [
 
 [[package]]
 name = "zerokms-protocol"
-version = "0.4.0"
+version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "01a9d0d8103cfa862b451f2c35144301df25a233f7fae041666b890a1578c3b1"
+checksum = "af31358bcf35336b9990ce1d6f671f66cca00385fb21f55db155e38b7ec666cd"
 dependencies = [
  "async-trait",
  "base64",
  "cipherstash-config",
+ "const-hex",
  "fake 2.10.0",
  "opaque-debug",
  "rand 0.8.5",
