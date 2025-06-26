@@ -200,6 +200,11 @@ pub async fn simple_query_with_null(sql: &str) -> Vec<Option<String>> {
         .collect()
 }
 
+pub async fn insert(sql: &str, params: &[&(dyn ToSql + Sync)]) {
+    let client = connect_with_tls(PROXY).await;
+    client.query(sql, params).await.unwrap();
+}
+
 pub async fn insert_jsonb() -> Value {
     let id = random_id();
 
@@ -214,6 +219,7 @@ pub async fn insert_jsonb() -> Value {
     });
 
     let sql = "INSERT INTO encrypted (id, encrypted_jsonb) VALUES ($1, $2)".to_string();
+
     insert(&sql, &[&id, &encrypted_jsonb]).await;
 
     encrypted_jsonb
