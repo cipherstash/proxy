@@ -145,8 +145,7 @@ impl Encrypt {
                     let index = column.config.clone().into_ste_vec_index().unwrap();
                     let op = QueryOp::SteVecSelector;
 
-                    let index_term =
-                        (index, plaintext).build_queryable(self.cipher.clone(), op)?;
+                    let index_term = (index, plaintext).build_queryable(self.cipher.clone(), op)?;
 
                     encrypted = Some(to_eql_encrypted_from_index_term(
                         index_term,

@@ -47,8 +47,7 @@ impl<'ast> Importer<'ast> {
 
             self.scope_tracker.borrow_mut().add_relation(Relation {
                 name: table_alias.clone(),
-                projection_type: Type::Value(Value::Projection(projection))
-                    .into(),
+                projection_type: Type::Value(Value::Projection(projection)).into(),
             })?;
 
             Ok(())
@@ -113,8 +112,7 @@ impl<'ast> Importer<'ast> {
 
                     scope_tracker.add_relation(Relation {
                         name: record_as.cloned().ok(),
-                        projection_type: Type::Value(Value::Projection(projection))
-                        .into(),
+                        projection_type: Type::Value(Value::Projection(projection)).into(),
                     })?;
                 }
             }

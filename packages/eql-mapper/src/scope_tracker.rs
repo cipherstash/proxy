@@ -263,9 +263,9 @@ impl<'ast> Scope<'ast> {
 
     fn try_match_projection(&self, ty: Arc<Type>) -> Result<Vec<ProjectionColumn>, TypeError> {
         match &*ty {
-            Type::Value(Value::Projection(projection)) => Ok(Vec::from_iter(
-                projection.columns().iter().cloned(),
-            )),
+            Type::Value(Value::Projection(projection)) => {
+                Ok(Vec::from_iter(projection.columns().iter().cloned()))
+            }
             other => Err(TypeError::Expected(format!(
                 "expected projection but got: {other}"
             ))),

@@ -232,11 +232,7 @@ impl UnifyTypes<Projection, Projection> for Unifier<'_> {
         if lhs.len() == rhs.len() {
             let mut cols: Vec<ProjectionColumn> = Vec::with_capacity(lhs.len());
 
-            for (lhs_col, rhs_col) in lhs
-                .columns()
-                .iter()
-                .zip(rhs.columns())
-            {
+            for (lhs_col, rhs_col) in lhs.columns().iter().zip(rhs.columns()) {
                 let unified_ty = self.unify(lhs_col.ty.clone(), rhs_col.ty.clone())?;
                 cols.push(ProjectionColumn::new(unified_ty, lhs_col.alias.clone()));
             }

@@ -8,7 +8,7 @@ mod parse_type_decl;
 use proc_macro::TokenStream;
 
 use crate::parse_type_decl::{
-    BinaryOpDecls, ConcreteTyArgs, FunctionDecls, ShallowInitTypes, TVar, TypeDecl, TypeEnvDecl
+    BinaryOpDecls, ConcreteTyArgs, FunctionDecls, ShallowInitTypes, TVar, TypeDecl, TypeEnvDecl,
 };
 
 /// Generates `#[tracing::instrument]` attributes for `InferType::infer_enter` & `InferType::infer_enter`
@@ -100,7 +100,8 @@ pub fn concrete_ty(tokens: TokenStream) -> TokenStream {
             );
             use crate::inference::unifier::ResolveType;
             #type_decl.instantiate_concrete().unwrap().resolve_type(&mut unifier).unwrap()
-        }}.into()
+        }}
+        .into()
     }
 }
 

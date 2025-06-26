@@ -2,7 +2,7 @@ use proc_macro2::token_stream::TokenStream;
 use quote::{quote, ToTokens, TokenStreamExt};
 use syn::{
     braced, bracketed, parenthesized,
-    parse::{ Parse, ParseStream},
+    parse::{Parse, ParseStream},
     punctuated::Punctuated,
     token::{self},
     Ident, Token, TypePath,
@@ -747,9 +747,9 @@ impl ToTokens for Binding {
 
 #[cfg(test)]
 mod test {
+    use pretty_assertions::assert_eq;
     use quote::quote;
     use syn::parse2;
-    use pretty_assertions::assert_eq;
 
     use crate::parse_type_decl::{AssociatedTypeDecl, BinaryOpDecl, TVar};
 
@@ -771,7 +771,7 @@ mod test {
             parsed.0.to_string(),
             quote!(crate::inference::unifier::AssociatedTypeDecl {
                 impl_decl: Box::new(crate::inference::unifier::TypeDecl::Var(
-                    crate::inference::unifier::VarDecl{
+                    crate::inference::unifier::VarDecl {
                         tvar: crate::inference::unifier::TVar("T".to_string()),
                         bounds: crate::inference::unifier::EqlTraits::none()
                     }

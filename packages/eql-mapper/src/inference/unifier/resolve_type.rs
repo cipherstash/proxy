@@ -86,10 +86,9 @@ impl ResolveType for Projection {
     type Output = crate::Projection;
 
     fn resolve_type(&self, unifier: &mut Unifier<'_>) -> Result<Self::Output, TypeError> {
-        let resolved_cols = self
-            .columns()
-            .iter()
-            .try_fold(vec![], |mut acc, col| -> Result<Vec<crate::ProjectionColumn>, TypeError> {
+        let resolved_cols = self.columns().iter().try_fold(
+            vec![],
+            |mut acc, col| -> Result<Vec<crate::ProjectionColumn>, TypeError> {
                 let alias = col.alias.clone();
                 if let Type::Value(Value::Projection(projection)) = &*col.ty {
                     let resolved = projection.resolve_type(unifier)?;
@@ -99,7 +98,8 @@ impl ResolveType for Projection {
                     acc.push(crate::ProjectionColumn { ty: value, alias });
                 }
                 Ok(acc)
-            })?;
+            },
+        )?;
 
         Ok(crate::Projection(resolved_cols))
     }
