@@ -5,7 +5,7 @@
 mod tests {
     use std::collections::HashMap;
 
-    use crate::common::{clear, insert, query, query_by, random_id, random_limited, trace};
+    use crate::common::{clear, execute_query, query, query_by, random_id, random_limited, trace};
     use once_cell::sync::Lazy;
     use regex::Regex;
 
@@ -65,7 +65,10 @@ mod tests {
             map
         });
 
-        let assert_int_stat = |stats: &HashMap<String, Stat>, stat_name: &str, expected: i32, test_label: &str| {
+        let assert_int_stat = |stats: &HashMap<String, Stat>,
+                               stat_name: &str,
+                               expected: i32,
+                               test_label: &str| {
             let baseline = &baselines.get(stat_name);
             let expected_with_baseline = baseline
                 .and_then(|stat| stat.as_i32())
@@ -97,7 +100,7 @@ mod tests {
 
         let encrypted_val = crate::value_for_type!(String, random_limited());
         let sql = "INSERT INTO encrypted (id, plaintext) VALUES ($1, $2)";
-        insert(sql, &[&id, &encrypted_val]).await;
+        execute_query(sql, &[&id, &encrypted_val]).await;
 
         let tests = [
             ("cipherstash_proxy_statements_total", 2),
@@ -137,16 +140,11 @@ mod tests {
         // let body = "foo_bar 123\nbaz_qux 234".to_string();
         let lines = body.lines().map(|line| P8S_SAMPLE_RE.captures(line));
 
-        for line in lines {
-            if let Some(ref caps) = line {
-                if let (Some(ref name), Some(ref value)) = (caps.name("name"), caps.name("value")) {
-                    println!("{:?}", value);
-                    let stat = parse_stat(value.as_str());
-                    stats.insert(
-                        name.as_str().into(),
-                        stat
-                    );
-                }
+        for ref caps in lines.flatten() {
+            if let (Some(ref name), Some(ref value)) = (caps.name("name"), caps.name("value")) {
+                println!("{:?}", value);
+                let stat = parse_stat(value.as_str());
+                stats.insert(name.as_str().into(), stat);
             }
         }
         stats
