@@ -406,9 +406,4 @@ impl EqlValue {
 
        ILIKE { expr: Self, pattern: Self::Tokenized, .. } -> Native;
    }
-
-   /// The type used by the EQL Mapper to represent any non-EQL type.
-   #[derive(Eq, Ord, Contain, JsonLike, TokenMatch)]
-   #[lang-item]
-   type Native;
 */

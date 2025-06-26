@@ -97,7 +97,7 @@ impl TypeEnv {
     pub(crate) fn add_decl_with_indirection(&mut self, spec: TypeDecl) -> Result<TVar, TypeError> {
         match spec {
             TypeDecl::Var(VarDecl { tvar, .. }) => {
-                self.get_spec(&tvar)?;
+                self.get_decl(&tvar)?;
                 Ok(tvar.clone())
             }
             _ => {
@@ -107,7 +107,7 @@ impl TypeEnv {
         }
     }
 
-    pub(crate) fn get_spec(&self, tvar: &TVar) -> Result<&TypeDecl, TypeError> {
+    pub(crate) fn get_decl(&self, tvar: &TVar) -> Result<&TypeDecl, TypeError> {
         match self.decls.get(tvar) {
             Some(spec) => Ok(spec),
             None => Err(TypeError::InternalError(format!(

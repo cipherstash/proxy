@@ -20,7 +20,7 @@ impl InstantiatedTypeEnv {
             Ok(())
         } else {
             Err(TypeError::InternalError(format!(
-                "named type {} not found in {}",
+                "named type {} already initialised in {}",
                 tvar, self
             )))
         }

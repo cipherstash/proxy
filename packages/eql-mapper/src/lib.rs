@@ -32,9 +32,10 @@ mod test {
     use super::{test_helpers::*, type_check};
     use crate::{
         projection, schema, test_helpers,
-        unifier::{EqlTerm, EqlTrait, EqlTraits, EqlValue, NativeValue},
+        unifier::{EqlTerm, EqlTrait, EqlTraits, EqlValue, InstantiateType, NativeValue},
         Param, Projection, ProjectionColumn, Schema, TableColumn, TableResolver, Value,
     };
+    use eql_mapper_macros::concrete_ty;
     use pretty_assertions::assert_eq;
     use sqltk::{
         parser::ast::{self as ast, Ident, Statement},
@@ -66,7 +67,7 @@ mod test {
             Ok(typed) => {
                 assert_eq!(
                     typed.projection,
-                    projection![(NATIVE(users.email) as email)]
+                    concrete_ty!({ Native(users.email) as email } as crate::Projection)
                 )
             }
             Err(err) => panic!("type check failed: {err}"),
@@ -92,10 +93,8 @@ mod test {
             Ok(typed) => {
                 assert_eq!(
                     typed.projection,
-                    projection![(EQL(users.email: Eq) as email)]
+                    concrete_ty! {{EQL(users.email: Eq) as email} as crate::Projection}
                 );
-
-                eprintln!("TYPED LITS: {:#?}", typed.literals);
 
                 assert_eq!(
                     typed.literals,

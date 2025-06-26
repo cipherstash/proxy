@@ -1,7 +1,7 @@
 //! # Symbolic type declarations
 //!
 //! [`TypeDecl`] and its variants provide the means to write type declarations symbolically which is much more pleasant
-//! than constructing types by building [`Type`] variants by hand.
+//! than constructing types via manually constructing [`Type`] variants.
 //!
 //! This makes it much simpler (and therefore less of a chore) to write tests for the [`Unifier`] and also for declaring
 //! EQL-compatible functions and operators.

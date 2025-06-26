@@ -357,8 +357,32 @@ impl Type {
                 Err(())
             }
             crate::Type::Value(value) => {
-                if let Some(t) = (value as &dyn std::any::Any).downcast_ref::<T>() {
-                    return Ok(t.clone());
+                match value {
+                    crate::Value::Eql(maybe_t) => {
+                        if let Some(t) = (maybe_t as &dyn std::any::Any).downcast_ref::<T>() {
+                            return Ok(t.clone());
+                        }
+                    }
+                    crate::Value::Native(maybe_t) => {
+                        if let Some(t) = (maybe_t as &dyn std::any::Any).downcast_ref::<T>() {
+                            return Ok(t.clone());
+                        }
+                    }
+                    crate::Value::Array(maybe_t) => {
+                        if let Some(t) = (maybe_t as &dyn std::any::Any).downcast_ref::<T>() {
+                            return Ok(t.clone());
+                        }
+                    }
+                    crate::Value::Projection(maybe_t) => {
+                        if let Some(t) = (maybe_t as &dyn std::any::Any).downcast_ref::<T>() {
+                            return Ok(t.clone());
+                        }
+                    }
+                    crate::Value::SetOf(maybe_t) => {
+                        if let Some(t) = (maybe_t as &dyn std::any::Any).downcast_ref::<T>() {
+                            return Ok(t.clone());
+                        }
+                    }
                 }
 
                 Err(())
