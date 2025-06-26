@@ -2,10 +2,10 @@ use proc_macro2::token_stream::TokenStream;
 use quote::{quote, ToTokens, TokenStreamExt};
 use syn::{
     braced, bracketed, parenthesized,
-    parse::{Parse, ParseStream},
+    parse::{ Parse, ParseStream},
     punctuated::Punctuated,
     token::{self},
-    Ident, Token,
+    Ident, Token, TypePath,
 };
 
 mod kw {
@@ -635,6 +635,7 @@ impl Parse for TypeEnvDecl {
 mod test {
     use quote::quote;
     use syn::parse2;
+    use pretty_assertions::assert_eq;
 
     use crate::parse_type_decl::{AssociatedTypeDecl, BinaryOpDecl, TVar};
 
@@ -655,7 +656,12 @@ mod test {
         assert_eq!(
             parsed.0.to_string(),
             quote!(crate::inference::unifier::AssociatedTypeDecl {
-                parent_tvar: crate::inference::unifier::TVar("T".to_string()),
+                impl_decl: Box::new(crate::inference::unifier::TypeDecl::Var(
+                    crate::inference::unifier::VarDecl{
+                        tvar: crate::inference::unifier::TVar("T".to_string()),
+                        bounds: crate::inference::unifier::EqlTraits::none()
+                    }
+                )),
                 as_eql_trait: crate::inference::unifier::EqlTrait::JsonLike,
                 type_name: "Accessor",
             })
@@ -697,7 +703,7 @@ mod test {
                         crate::inference::unifier::NativeDecl(None)
                     ),
                 )
-                .expect("FunctionSignatureDecl creation failed due to a TypeError"),
+                .expect("FunctionSignatureDecl creation failed due to a type error"),
             })
             .to_string()
         );
@@ -770,6 +776,26 @@ impl ToTokens for ShallowInitTypes {
                 #binding.instantiate_shallow(#unifier).unwrap();
             });
         }
+    }
+}
+
+pub(crate) struct ConcreteTyArgs {
+    pub(crate) ty_decl: TypeDecl,
+    pub(crate) ty_as: Option<TypePath>,
+}
+
+impl Parse for ConcreteTyArgs {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        let ty_decl = input.parse()?;
+        let ty_as = if input.peek(Token![as]) {
+            let _: Token![as] = input.parse()?;
+            let ty: TypePath = input.parse()?;
+            Some(ty)
+        } else {
+            None
+        };
+
+        Ok(Self { ty_decl, ty_as })
     }
 }
 
