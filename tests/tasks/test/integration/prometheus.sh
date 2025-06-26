@@ -33,13 +33,13 @@ if [[ $response != *"cipherstash_proxy_rows_total 1"* ]]; then
     exit 1
 fi
 
-if [[ $response != *"cipherstash_proxy_statements_execution_duration_seconds 0."* ]]; then
-    echo "error: did not see string in output: \"cipherstash_proxy_statements_execution_duration_seconds 0.\""
+if [[ $response != *"cipherstash_proxy_statements_execution_duration_seconds{quantile=\"1\"} 0."* ]]; then
+    echo "error: did not see string in output: \"cipherstash_proxy_statements_execution_duration_seconds{quantile=\"1\"} 0.\""
     exit 1
 fi
 
-if [[ $response != *"cipherstash_proxy_statements_session_duration_seconds 0."* ]]; then
-    echo "error: did not see string in output: \"cipherstash_proxy_statements_session_duration_seconds 0.\""
+if [[ $response != *"cipherstash_proxy_statements_session_duration_seconds{quantile=\"1\"} 0."* ]]; then
+    echo "error: did not see string in output: \"cipherstash_proxy_statements_session_duration_seconds{quantile=\"1\"} 0.\""
     exit 1
 fi
 
