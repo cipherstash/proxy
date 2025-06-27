@@ -217,16 +217,14 @@ impl<'ast> Scope<'ast> {
                     column.alias.as_ref().map(SqlIdent::from).as_ref() == Some(&second_ident)
                 }) {
                     Ok(Some(projection_column)) => Ok(projection_column.ty.clone()),
-                    Ok(None) | Err(_) => Err(ScopeError::NoMatch(format!(
-                        "{first_ident}.{second_ident}"
-                    ))),
+                    Ok(None) | Err(_) => {
+                        Err(ScopeError::NoMatch(format!("{first_ident}.{second_ident}")))
+                    }
                 }
             }
             Ok(None) | Err(_) => match &self.parent {
                 Some(parent) => parent.borrow().resolve_compound_ident(idents),
-                None => Err(ScopeError::NoMatch(format!(
-                    "{first_ident}.{second_ident}"
-                ))),
+                None => Err(ScopeError::NoMatch(format!("{first_ident}.{second_ident}"))),
             },
         }
     }
