@@ -19,6 +19,8 @@ SELECT eql_v2.add_column(
   'email'
 );
 
-SELECT eql_v2.encrypt();
-SELECT eql_v2.activate();
+-- SELECT eql_v2.encrypt();
+-- SELECT eql_v2.activate();
 
+SELECT eql_v2.migrate_config();
+SELECT eql_v2.activate_config();
