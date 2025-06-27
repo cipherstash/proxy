@@ -156,7 +156,7 @@ impl Schema {
         } else {
             Err(SchemaError::ColumnNotFound(
                 format!("{table_name}"),
-                format!("{}", column_name),
+                format!("{column_name}"),
             ))
         }
     }

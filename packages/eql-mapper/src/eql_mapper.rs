@@ -231,8 +231,7 @@ impl<'ast> EqlMapper<'ast> {
                     Type::Value(value) if value.contains_eql() => Ok((p, value)),
                     Type::Value(value) if !value.contains_eql() => Ok((p, value)),
                     other => Err(TypeError::Expected(format!(
-                        "expected param '{}' to resolve to a scalar type but got '{}'",
-                        p, other
+                        "expected param '{p}' to resolve to a scalar type but got '{other}'"
                     )))?,
                 }
             })

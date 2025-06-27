@@ -111,8 +111,7 @@ impl TypeEnv {
         match self.decls.get(tvar) {
             Some(spec) => Ok(spec),
             None => Err(TypeError::InternalError(format!(
-                "unknown typespec {} in type env",
-                tvar
+                "unknown typespec {tvar} in type env"
             ))),
         }
     }
@@ -122,8 +121,7 @@ impl TypeEnv {
             Some(TypeDecl::Var(VarDecl { bounds, .. })) => Ok(*bounds),
             Some(_) => Ok(EqlTraits::none()),
             None => Err(TypeError::InternalError(format!(
-                "tvar {} not found in type env",
-                tvar
+                "tvar {tvar} not found in type env"
             ))),
         }
     }

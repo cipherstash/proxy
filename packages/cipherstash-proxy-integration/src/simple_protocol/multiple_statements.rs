@@ -31,7 +31,7 @@ mod tests {
         // CmmandComplete does not implement PartialEq, so no equality check with ==
         match &insert_result[0] {
             CommandComplete(n) => assert_eq!(1, *n),
-            _unexpected => panic!("unexpected insert result: {:?}", insert_result),
+            _unexpected => panic!("unexpected insert result: {insert_result:?}"),
         }
 
         // Check each Row by ID
@@ -75,7 +75,7 @@ mod tests {
         // CmmandComplete does not implement PartialEq, so no equality check with ==
         match &insert_result[0] {
             CommandComplete(n) => assert_eq!(1, *n),
-            _unexpected => panic!("unexpected insert result: {:?}", insert_result),
+            _unexpected => panic!("unexpected insert result: {insert_result:?}"),
         }
 
         // Build SQL string containing multiple statements;
@@ -92,7 +92,7 @@ mod tests {
         // CmmandComplete does not implement PartialEq, so no equality check with ==
         match &insert_result[0] {
             CommandComplete(n) => assert_eq!(1, *n),
-            _unexpected => panic!("unexpected insert result: {:?}", insert_result),
+            _unexpected => panic!("unexpected insert result: {insert_result:?}"),
         }
 
         // Check each Row by ID

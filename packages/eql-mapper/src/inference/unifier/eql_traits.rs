@@ -72,8 +72,7 @@ impl EqlTrait {
                     | (EqlTrait::JsonLike, "Path")
                     | (EqlTrait::Contain, "Only") => Ok(ty.clone()),
                     (_, unknown_associated_type) => Err(TypeError::InternalError(format!(
-                        "Unknown associated type {}::{}",
-                        self, unknown_associated_type
+                        "Unknown associated type {self}::{unknown_associated_type}"
                     ))),
                 }
             }
@@ -105,8 +104,7 @@ impl EqlTrait {
                         ))))
                     }
                     (_, unknown_associated_type) => Err(TypeError::InternalError(format!(
-                        "Unknown associated type {}::{}",
-                        self, unknown_associated_type
+                        "Unknown associated type {self}::{unknown_associated_type}"
                     ))),
                 }
             }

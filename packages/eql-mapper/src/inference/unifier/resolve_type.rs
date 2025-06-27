@@ -29,8 +29,7 @@ impl ResolveType for Type {
                 }
 
                 Err(TypeError::Incomplete(format!(
-                    "there are no substitutions for type var {}",
-                    type_var
+                    "there are no substitutions for type var {type_var}"
                 )))
             }
 
@@ -39,8 +38,7 @@ impl ResolveType for Type {
                     Ok(constructor.resolve_type(unifier)?)
                 } else {
                     Err(TypeError::InternalError(format!(
-                        "could not resolve associated type {}",
-                        associated
+                        "could not resolve associated type {associated}"
                     )))
                 }
             }

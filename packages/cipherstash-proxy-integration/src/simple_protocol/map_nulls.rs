@@ -25,7 +25,7 @@ mod tests {
         if let Row(r) = &rows[1] {
             assert_eq!(encrypted_text, r.get(1));
         } else {
-            panic!("Unexpected query results: {:?}", rows);
+            panic!("Unexpected query results: {rows:?}");
         }
 
         let encrypted_int4: Option<&str> = None;
@@ -41,7 +41,7 @@ mod tests {
         if let Row(r) = &rows[1] {
             assert_eq!(encrypted_int4, r.get(1));
         } else {
-            panic!("Unexpected query results: {:?}", rows);
+            panic!("Unexpected query results: {rows:?}");
         }
     }
 
@@ -69,7 +69,7 @@ mod tests {
             assert!(r.get(3).is_none());
             assert!(r.get(4).is_none());
         } else {
-            panic!("Unexpected query results: {:?}", rows);
+            panic!("Unexpected query results: {rows:?}");
         }
 
         let sql = format!("UPDATE encrypted SET encrypted_float8 = NULL WHERE id = {id}");
@@ -87,7 +87,7 @@ mod tests {
             assert!(r.get(4).is_none());
             assert!(r.get(5).is_none());
         } else {
-            panic!("Unexpected query results: {:?}", rows);
+            panic!("Unexpected query results: {rows:?}");
         }
     }
 }

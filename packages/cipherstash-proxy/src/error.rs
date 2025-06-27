@@ -385,6 +385,6 @@ mod tests {
         let error = MappingError::Internal("unexpected bug encounterd".to_string());
         let message = error.to_string();
 
-        assert_eq!(format!("Statement encountered an internal error. This may be a bug in the statement mapping module of CipherStash Proxy. Please visit {}#mapping-internal-error for more information.", ERROR_DOC_BASE_URL), message);
+        assert_eq!(format!("Statement encountered an internal error. This may be a bug in the statement mapping module of CipherStash Proxy. Please visit {ERROR_DOC_BASE_URL}#mapping-internal-error for more information."), message);
     }
 }

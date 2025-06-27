@@ -126,9 +126,9 @@ impl<'ast> TypeInferencer<'ast> {
         match self.unify(self.get_node_type(lhs), self.get_node_type(rhs)) {
             Ok(unified) => Ok(unified),
             Err(err) => Err(TypeError::OnNodes(
-                format!("{:?}", lhs),
+                format!("{lhs:?}"),
                 self.get_node_type(lhs),
-                format!("{:?}", rhs),
+                format!("{rhs:?}"),
                 self.get_node_type(rhs),
                 err.to_string(),
             )),

@@ -19,7 +19,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config = match TandemConfig::load(&args) {
         Ok(config) => config,
         Err(err) => {
-            eprintln!("{}", err);
+            eprintln!("{err}");
             std::process::exit(exitcode::CONFIG);
         }
     };

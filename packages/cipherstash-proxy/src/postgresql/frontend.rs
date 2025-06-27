@@ -974,7 +974,7 @@ where
 
         // This *should* be sufficient for escaping error messages as we're only
         // using the string literal, and not identifiers
-        let quoted_error = quote_literal(format!("{}", err).as_str());
+        let quoted_error = quote_literal(format!("{err}").as_str());
         let content = format!("DO $$ BEGIN RAISE EXCEPTION {quoted_error}; END; $$;");
 
         debug!(

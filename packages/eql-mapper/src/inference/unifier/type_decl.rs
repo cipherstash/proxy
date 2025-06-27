@@ -257,7 +257,7 @@ impl Display for ProjectionDecl {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("{")?;
         for (idx, col) in self.0.iter().enumerate() {
-            f.write_fmt(format_args!("{}", col))?;
+            f.write_fmt(format_args!("{col}"))?;
             if idx < self.0.len() - 1 {
                 f.write_str(",")?;
             }
@@ -324,7 +324,7 @@ impl Display for ProjectionColumnDecl {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_fmt(format_args!("{}", self.0))?;
         if let Some(alias) = &self.1 {
-            f.write_fmt(format_args!(" as {}", alias))?;
+            f.write_fmt(format_args!(" as {alias}"))?;
         }
         Ok(())
     }
@@ -569,8 +569,7 @@ impl FunctionSignatureDecl {
                 Ok(())
             } else {
                 Err(TypeError::InternalError(format!(
-                    "use of undeclared type var '{}'",
-                    tvar
+                    "use of undeclared type var '{tvar}'"
                 )))
             }
         };
@@ -602,7 +601,7 @@ pub(crate) struct NativeDecl(pub(crate) Option<TableColumn>);
 impl Display for NativeDecl {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match &self.0 {
-            Some(tc) => f.write_fmt(format_args!("Native({})", tc)),
+            Some(tc) => f.write_fmt(format_args!("Native({tc})")),
             None => f.write_fmt(format_args!("Native")),
         }
     }

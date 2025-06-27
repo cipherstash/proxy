@@ -122,7 +122,7 @@ pub struct ProjectionColumn {
 impl ProjectionColumn {
     fn render_alias(&self) -> String {
         match &self.alias {
-            Some(name) => format!(": {}", name),
+            Some(name) => format!(": {name}"),
             None => String::from(""),
         }
     }

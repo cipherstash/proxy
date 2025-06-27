@@ -35,8 +35,7 @@ impl UnifyTypes<Value, Projection> for Unifier<'_> {
             self.unify_types(lhs, &rhs[0].ty)
         } else {
             Err(TypeError::Conflict(format!(
-                "cannot unify value type {} with projection with > 1 column (it has {} columns) {}",
-                lhs, len, rhs
+                "cannot unify value type {lhs} with projection with > 1 column (it has {len} columns) {rhs}"
             )))
         }
     }
@@ -67,8 +66,7 @@ impl UnifyTypes<Value, Value> for Unifier<'_> {
             }
 
             (lhs, rhs) => Err(TypeError::Conflict(format!(
-                "cannot unify values {} and {}",
-                lhs, rhs
+                "cannot unify values {lhs} and {rhs}"
             ))),
         }
     }
@@ -116,8 +114,7 @@ impl UnifyTypes<EqlTerm, EqlTerm> for Unifier<'_> {
             }
 
             (_, _) => Err(TypeError::Conflict(format!(
-                "cannot unify EQL terms {} and {}",
-                lhs, rhs
+                "cannot unify EQL terms {lhs} and {rhs}"
             ))),
         }
     }
@@ -164,8 +161,7 @@ impl UnifyTypes<AssociatedType, AssociatedType> for Unifier<'_> {
                 lhs.selector.clone()
             } else {
                 Err(TypeError::Conflict(format!(
-                    "Cannot unify associated types {} and {}",
-                    lhs, rhs
+                    "Cannot unify associated types {lhs} and {rhs}"
                 )))?
             },
             resolved_ty: self.unify(lhs.resolved_ty.clone(), rhs.resolved_ty.clone())?,
@@ -240,8 +236,7 @@ impl UnifyTypes<Projection, Projection> for Unifier<'_> {
             Ok(Projection::new(cols).into())
         } else {
             Err(TypeError::Conflict(format!(
-                "cannot unify projections {} and {} because they have different numbers of columns",
-                lhs, rhs
+                "cannot unify projections {lhs} and {rhs} because they have different numbers of columns"
             )))
         }
     }

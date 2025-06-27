@@ -81,7 +81,7 @@ impl Display for Fmt<&[Arc<crate::unifier::Type>]> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("[")?;
         for (idx, ty) in self.0.iter().enumerate() {
-            f.write_fmt(format_args!("{}", ty))?;
+            f.write_fmt(format_args!("{ty}"))?;
             if idx < self.0.len() - 1 {
                 f.write_str(", ")?;
             }
@@ -115,7 +115,7 @@ impl Display for Fmt<&Vec<(Param, crate::Value)>> {
         let formatted = self
             .0
             .iter()
-            .map(|(p, v)| format!("{}: {}", p, v))
+            .map(|(p, v)| format!("{p}: {v}"))
             .collect::<Vec<_>>()
             .join(", ");
         f.write_str(&formatted)
@@ -127,7 +127,7 @@ impl Display for Fmt<&Vec<(EqlTerm, &sqltk::parser::ast::Value)>> {
         let formatted = self
             .0
             .iter()
-            .map(|(e, n)| format!("{}: {}", e, n))
+            .map(|(e, n)| format!("{e}: {n}"))
             .collect::<Vec<_>>()
             .join(", ");
         f.write_str(&formatted)

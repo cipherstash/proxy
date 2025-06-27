@@ -106,7 +106,7 @@ pub async fn connect_with_tls(port: u16) -> Client {
 
     tokio::spawn(async move {
         if let Err(e) = connection.await {
-            eprintln!("connection error: {}", e);
+            eprintln!("connection error: {e}");
         }
     });
     client
@@ -118,7 +118,7 @@ pub async fn connect(port: u16) -> Client {
 
     tokio::spawn(async move {
         if let Err(e) = connection.await {
-            eprintln!("connection error: {}", e);
+            eprintln!("connection error: {e}");
         }
     });
 

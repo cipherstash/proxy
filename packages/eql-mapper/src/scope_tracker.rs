@@ -185,8 +185,7 @@ impl<'ast> Scope<'ast> {
                 Ok(None) => match &self.parent {
                     Some(parent) => parent.borrow().resolve_ident(ident),
                     None => Err(ScopeError::NoMatch(format!(
-                        "identifier {} not found in scope",
-                        ident
+                        "identifier {ident} not found in scope"
                     ))),
                 },
             }
@@ -219,16 +218,14 @@ impl<'ast> Scope<'ast> {
                 }) {
                     Ok(Some(projection_column)) => Ok(projection_column.ty.clone()),
                     Ok(None) | Err(_) => Err(ScopeError::NoMatch(format!(
-                        "{}.{}",
-                        first_ident, second_ident
+                        "{first_ident}.{second_ident}"
                     ))),
                 }
             }
             Ok(None) | Err(_) => match &self.parent {
                 Some(parent) => parent.borrow().resolve_compound_ident(idents),
                 None => Err(ScopeError::NoMatch(format!(
-                    "{}.{}",
-                    first_ident, second_ident
+                    "{first_ident}.{second_ident}"
                 ))),
             },
         }

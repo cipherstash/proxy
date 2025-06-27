@@ -459,7 +459,7 @@ mod test {
 
         let typed = match type_check(schema, &statement) {
             Ok(typed) => typed,
-            Err(err) => panic!("type check failed: {:#?}", err),
+            Err(err) => panic!("type check failed: {err:#?}"),
         };
 
         assert_eq!(
@@ -506,7 +506,7 @@ mod test {
 
         let typed = match type_check(schema, &statement) {
             Ok(typed) => typed,
-            Err(err) => panic!("type check failed: {:#?}", err),
+            Err(err) => panic!("type check failed: {err:#?}"),
         };
 
         assert_eq!(
@@ -645,7 +645,7 @@ mod test {
 
         let typed = match type_check(schema, &statement) {
             Ok(typed) => typed,
-            Err(err) => panic!("type check failed: {:#?}", err),
+            Err(err) => panic!("type check failed: {err:#?}"),
         };
 
         assert_eq!(
@@ -689,7 +689,7 @@ mod test {
 
         let typed = match type_check(schema, &statement) {
             Ok(typed) => typed,
-            Err(err) => panic!("type check failed: {:#?}", err),
+            Err(err) => panic!("type check failed: {err:#?}"),
         };
 
         assert_eq!(
@@ -736,7 +736,7 @@ mod test {
 
         let typed = match type_check(schema, &statement) {
             Ok(typed) => typed,
-            Err(err) => panic!("type check failed: {:#?}", err),
+            Err(err) => panic!("type check failed: {err:#?}"),
         };
 
         assert_eq!(
@@ -787,7 +787,7 @@ mod test {
         let typed = match type_check(schema, &statement) {
             Ok(typed) => typed,
             Err(err) => {
-                panic!("type check failed: {:#?}", err)
+                panic!("type check failed: {err:#?}")
             }
         };
 
@@ -830,7 +830,7 @@ mod test {
 
         let typed = match type_check(schema, &statement) {
             Ok(typed) => typed,
-            Err(err) => panic!("type check failed: {:#?}", err),
+            Err(err) => panic!("type check failed: {err:#?}"),
         };
 
         assert_eq!(
@@ -867,7 +867,7 @@ mod test {
 
         let typed = match type_check(schema, &statement) {
             Ok(typed) => typed,
-            Err(err) => panic!("type check failed: {:#?}", err),
+            Err(err) => panic!("type check failed: {err:#?}"),
         };
 
         assert_eq!(typed.projection, Projection(vec![]));
@@ -899,7 +899,7 @@ mod test {
 
         let typed = match type_check(schema, &statement) {
             Ok(typed) => typed,
-            Err(err) => panic!("type check failed: {:#?}", err),
+            Err(err) => panic!("type check failed: {err:#?}"),
         };
 
         assert_eq!(
@@ -938,7 +938,7 @@ mod test {
 
         let typed = match type_check(schema, &statement) {
             Ok(typed) => typed,
-            Err(err) => panic!("type check failed: {:#?}", err),
+            Err(err) => panic!("type check failed: {err:#?}"),
         };
 
         assert_eq!(typed.projection, Projection(vec![]));
@@ -968,7 +968,7 @@ mod test {
 
         let typed = match type_check(schema, &statement) {
             Ok(typed) => typed,
-            Err(err) => panic!("type check failed: {:#?}", err),
+            Err(err) => panic!("type check failed: {err:#?}"),
         };
 
         assert_eq!(
@@ -1007,7 +1007,7 @@ mod test {
 
         let typed = match type_check(schema, &statement) {
             Ok(typed) => typed,
-            Err(err) => panic!("type check failed: {:#?}", err),
+            Err(err) => panic!("type check failed: {err:#?}"),
         };
 
         assert_eq!(typed.projection, Projection(vec![]));
@@ -1037,7 +1037,7 @@ mod test {
 
         let typed = match type_check(schema, &statement) {
             Ok(typed) => typed,
-            Err(err) => panic!("type check failed: {:#?}", err),
+            Err(err) => panic!("type check failed: {err:#?}"),
         };
 
         assert_eq!(
@@ -1076,7 +1076,7 @@ mod test {
 
         let typed = match type_check(schema.clone(), &statement) {
             Ok(typed) => typed,
-            Err(err) => panic!("type check failed: {:#?}", err),
+            Err(err) => panic!("type check failed: {err:#?}"),
         };
 
         assert_eq!(
@@ -1101,7 +1101,7 @@ mod test {
                 transformed_statement.to_string(),
                 "SELECT * FROM employees WHERE salary > 'ENCRYPTED'::JSONB::eql_v2_encrypted"
             ),
-            Err(err) => panic!("statement transformation failed: {}", err),
+            Err(err) => panic!("statement transformation failed: {err}"),
         };
     }
 
@@ -1126,7 +1126,7 @@ mod test {
 
         let typed = match type_check(schema.clone(), &statement) {
             Ok(typed) => typed,
-            Err(err) => panic!("type check failed: {:#?}", err),
+            Err(err) => panic!("type check failed: {err:#?}"),
         };
 
         assert_eq!(
@@ -1151,7 +1151,7 @@ mod test {
                 transformed_statement.to_string(),
                 "INSERT INTO employees (salary) VALUES ('ENCRYPTED'::JSONB::eql_v2_encrypted)"
             ),
-            Err(err) => panic!("statement transformation failed: {}", err),
+            Err(err) => panic!("statement transformation failed: {err}"),
         };
     }
 
@@ -1197,7 +1197,7 @@ mod test {
 
         let typed = match type_check(schema, &statement) {
             Ok(typed) => typed,
-            Err(err) => panic!("type check failed: {:#?}", err),
+            Err(err) => panic!("type check failed: {err:#?}"),
         };
 
         assert_eq!(
@@ -1614,8 +1614,7 @@ mod test {
             .join(", ");
 
         let statement = parse(&format!(
-            "SELECT id, {}({}) AS meds FROM patients",
-            fn_name, args_in
+            "SELECT id, {fn_name}({args_in}) AS meds FROM patients"
         ));
 
         let args_encrypted = args
@@ -1626,7 +1625,7 @@ mod test {
                     value: ast::Value::SingleQuotedString(s),
                     span: _,
                 }) => {
-                    format!("'<encrypted-selector({})>'::JSONB::eql_v2_encrypted", s)
+                    format!("'<encrypted-selector({s})>'::JSONB::eql_v2_encrypted")
                 }
                 _ => panic!("unsupported expr type in test util"),
             })

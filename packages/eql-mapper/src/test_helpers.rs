@@ -60,7 +60,7 @@ pub(crate) fn dummy_encrypted_json_selector(
         if let Value::SingleQuotedString(s) = &selector {
             dummy_encrypted_values.insert(
                 get_node_key_of_json_selector(statement, &selector),
-                ast::Value::SingleQuotedString(format!("<encrypted-selector({})>", s)),
+                ast::Value::SingleQuotedString(format!("<encrypted-selector({s})>")),
             );
         } else {
             panic!("dummy_encrypted_json_selector only works on Value::SingleQuotedString")
