@@ -43,6 +43,3 @@ SELECT eql_v2.add_search_config(
   'ore',
   'date'
 );
-
-SELECT cs_encrypt_v1();
-SELECT cs_activate_v1();
