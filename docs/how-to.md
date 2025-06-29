@@ -222,16 +222,6 @@ SELECT eql_v2.add_search_config(
 The first SQL statement adds a `match` index, which is used for partial matches with `LIKE`.
 The second SQL statement adds an `ore` index, which is used for ordering with `ORDER BY`.
 
-Now that the indexes has been added, you must activate them:
-
-```sql
-SELECT cs_encrypt_v1();
-SELECT cs_activate_v1();
-```
-
-This loads and activates the encrypted indexes.
-
-You must run the `cs_encrypt_v1()` and `cs_activate_v1()` functions after any modifications to the encrypted indexes.
 
 > ![IMPORTANT]
 > Adding, updating, or deleting encrypted indexes on columns that already contain encrypted data will not re-index that data. To use the new indexes, you must `SELECT` the data out of the column, and `UPDATE` it again.
