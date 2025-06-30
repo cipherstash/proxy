@@ -1,4 +1,4 @@
-use std::{collections::HashMap, marker::PhantomData, sync::Arc};
+use std::{collections::HashMap, fmt::Debug, marker::PhantomData, sync::Arc};
 
 use sqltk::{AsNodeKey, NodeKey};
 use tracing::{span, Level};
@@ -8,7 +8,10 @@ use crate::{
     Param, ParamError,
 };
 
-use super::Sequence;
+use super::{
+    unifier::{EqlTraits, Var},
+    Sequence,
+};
 
 /// `TypeRegistry` maintains an association between `sqltk_parser` AST nodes and the node's inferred [`Type`].
 #[derive(Debug)]
@@ -38,8 +41,9 @@ impl<'ast> TypeRegistry<'ast> {
         }
     }
 
-    pub(crate) fn get_nodes_and_types<N: AsNodeKey>(&self) -> Vec<(&'ast N, Arc<Type>)> {
-        self.node_types
+    pub(crate) fn get_nodes_and_types<N: AsNodeKey + Debug>(&self) -> Vec<(&'ast N, Arc<Type>)> {
+        let result = self
+            .node_types
             .iter()
             .filter_map(|(key, tvar)| {
                 key.get_as::<N>().map(|n| {
@@ -48,11 +52,13 @@ impl<'ast> TypeRegistry<'ast> {
                         self.substitutions
                             .get(tvar)
                             .cloned()
-                            .unwrap_or(Arc::new(Type::Var(*tvar))),
+                            .unwrap_or(Arc::new(Type::Var(Var(*tvar, EqlTraits::default())))),
                     )
                 })
             })
-            .collect()
+            .collect();
+
+        result
     }
 
     pub(crate) fn get_type(&self, tvar: TypeVar) -> Option<Arc<Type>> {
@@ -77,7 +83,7 @@ impl<'ast> TypeRegistry<'ast> {
                     self.substitutions
                         .get(tvar)
                         .cloned()
-                        .unwrap_or(Arc::new(Type::Var(*tvar))),
+                        .unwrap_or(Arc::new(Type::Var(Var(*tvar, EqlTraits::none())))),
                 )
             })
             .collect()
@@ -105,7 +111,7 @@ impl<'ast> TypeRegistry<'ast> {
                     self.substitutions
                         .get(tvar)
                         .cloned()
-                        .unwrap_or(Arc::new(Type::Var(*tvar))),
+                        .unwrap_or(Arc::new(Type::Var(Var(*tvar, EqlTraits::none())))),
                 )
             })
             .collect()
@@ -123,7 +129,7 @@ impl<'ast> TypeRegistry<'ast> {
                 self.substitutions
                     .get(&tvar)
                     .cloned()
-                    .unwrap_or(Arc::new(Type::Var(tvar)))
+                    .unwrap_or(Arc::new(Type::Var(Var(tvar, EqlTraits::none()))))
             })
     }
 
@@ -141,7 +147,7 @@ impl<'ast> TypeRegistry<'ast> {
             None => {
                 let tvar = self.fresh_tvar();
                 self.node_types.insert(node.as_node_key(), tvar);
-                Type::Var(tvar).into()
+                Type::Var(Var(tvar, EqlTraits::none())).into()
             }
         }
     }
@@ -150,11 +156,11 @@ impl<'ast> TypeRegistry<'ast> {
     /// associated `Type` then a fresh [`Type::Var`] will be assigned.
     fn get_or_init_param_type(&mut self, param: &'ast String) -> Arc<Type> {
         match self.param_types.get(&param).cloned() {
-            Some(tvar) => Type::Var(tvar).into(),
+            Some(tvar) => Type::Var(Var(tvar, EqlTraits::none())).into(),
             None => {
                 let tvar = self.fresh_tvar();
                 self.param_types.insert(param, tvar);
-                Type::Var(tvar).into()
+                Type::Var(Var(tvar, EqlTraits::none())).into()
             }
         }
     }

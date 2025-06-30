@@ -218,6 +218,9 @@ pub enum EncryptError {
     #[error("Column configuration for column '{column}' in table '{table}' does not match the encrypted column. For help visit {}#encrypt-column-config-mismatch", ERROR_DOC_BASE_URL)]
     ColumnConfigurationMismatch { table: String, column: String },
 
+    #[error("InvalidIndexTerm")]
+    InvalidIndexTerm,
+
     /// This should in practice be unreachable
     #[error("Missing encrypt configuration for column type `{plaintext_type}`. For help visit {}#encrypt-missing-encrypt-configuration", ERROR_DOC_BASE_URL)]
     MissingEncryptConfiguration { plaintext_type: String },
@@ -382,6 +385,6 @@ mod tests {
         let error = MappingError::Internal("unexpected bug encounterd".to_string());
         let message = error.to_string();
 
-        assert_eq!(format!("Statement encountered an internal error. This may be a bug in the statement mapping module of CipherStash Proxy. Please visit {}#mapping-internal-error for more information.", ERROR_DOC_BASE_URL), message);
+        assert_eq!(format!("Statement encountered an internal error. This may be a bug in the statement mapping module of CipherStash Proxy. Please visit {ERROR_DOC_BASE_URL}#mapping-internal-error for more information."), message);
     }
 }

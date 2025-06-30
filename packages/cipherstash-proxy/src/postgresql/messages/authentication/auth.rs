@@ -298,7 +298,7 @@ impl Display for SaslMechanism {
             SaslMechanism::ScramSha256 => SCRAM_SHA_256.to_owned(),
             SaslMechanism::ScramSha256Plus => SCRAM_SHA_256_PLUS.to_owned(),
         };
-        write!(f, "{}", s)
+        write!(f, "{s}")
     }
 }
 

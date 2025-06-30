@@ -47,7 +47,7 @@ mod tests {
         let config = match TandemConfig::load(&args) {
             Ok(config) => config,
             Err(err) => {
-                eprintln!("Configuration Error: {}", err);
+                eprintln!("Configuration Error: {err}");
                 panic!();
             }
         };

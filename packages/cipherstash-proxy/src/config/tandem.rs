@@ -314,7 +314,7 @@ impl TandemConfig {
             stack_size
                 .parse()
                 .inspect_err(|err| {
-                    println!("Could not parse env var RUST_MIN_STACK: {}", err);
+                    println!("Could not parse env var RUST_MIN_STACK: {err}");
                     println!("Using the default thread stack size");
                 })
                 .unwrap_or(DEFAULT_THREAD_STACK_SIZE);

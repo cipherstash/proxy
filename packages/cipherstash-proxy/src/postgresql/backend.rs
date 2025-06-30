@@ -361,7 +361,12 @@ where
             let param_types = statement
                 .param_columns
                 .iter()
-                .map(|col| col.as_ref().map(|col| col.postgres_type.clone()))
+                .map(|col| {
+                    col.as_ref().map(|col| {
+                        debug!(target: MAPPER, client_id = self.context.client_id, ColumnConfig = ?col);
+                        col.postgres_type.clone()
+                    })
+                })
                 .collect::<Vec<_>>();
 
             debug!(target: MAPPER, client_id = self.context.client_id, param_types = ?param_types);

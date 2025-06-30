@@ -186,7 +186,7 @@ impl BindParam {
 impl Display for BindParam {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         let s = String::from_utf8_lossy(&self.bytes).to_string();
-        write!(f, "{}", s)
+        write!(f, "{s}")
     }
 }
 

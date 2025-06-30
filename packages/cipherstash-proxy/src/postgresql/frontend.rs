@@ -26,9 +26,10 @@ use crate::prometheus::{
 use crate::EqlEncrypted;
 use bytes::BytesMut;
 use cipherstash_client::encryption::Plaintext;
-use eql_mapper::{self, EqlMapperError, EqlValue, TableColumn, TypeCheckedStatement};
+use eql_mapper::{self, EqlMapperError, EqlTerm, TableColumn, TypeCheckedStatement};
 use metrics::{counter, histogram};
 use pg_escape::quote_literal;
+use postgres_types::Type;
 use serde::Serialize;
 use sqltk::parser::ast::{self, Value};
 use sqltk::parser::dialect::PostgreSqlDialect;
@@ -376,7 +377,7 @@ where
             return Ok(vec![]);
         }
 
-        let plaintexts = literals_to_plaintext(&literal_values, literal_columns)?;
+        let plaintexts = literals_to_plaintext(literal_values, literal_columns)?;
 
         let start = Instant::now();
 
@@ -814,25 +815,28 @@ where
         typed_statement: &eql_mapper::TypeCheckedStatement<'_>,
     ) -> Result<Vec<Option<Column>>, Error> {
         let mut projection_columns = vec![];
-        if let eql_mapper::Projection::WithColumns(columns) = &typed_statement.projection {
-            for col in columns {
-                let eql_mapper::ProjectionColumn { ty, .. } = col;
-                let configured_column = match ty {
-                    eql_mapper::Value::Eql(EqlValue(TableColumn { table, column })) => {
-                        let identifier: Identifier = Identifier::from((table, column));
-                        debug!(
-                            target: MAPPER,
-                            client_id = self.context.client_id,
-                            msg = "Configured column",
-                            column = ?identifier
-                        );
-                        self.get_column(identifier)?
-                    }
-                    _ => None,
-                };
-                projection_columns.push(configured_column)
-            }
+
+        for col in typed_statement.projection.columns() {
+            let eql_mapper::ProjectionColumn { ty, .. } = col;
+            let configured_column = match ty {
+                eql_mapper::Value::Eql(eql_term) => {
+                    let TableColumn { table, column } = eql_term.table_column();
+                    let identifier: Identifier = Identifier::from((table, column));
+
+                    debug!(
+                        target: MAPPER,
+                        client_id = self.context.client_id,
+                        msg = "Configured column",
+                        column = ?identifier,
+                        ?eql_term,
+                    );
+                    self.get_column(identifier, eql_term)?
+                }
+                _ => None,
+            };
+            projection_columns.push(configured_column)
         }
+
         Ok(projection_columns)
     }
 
@@ -844,6 +848,7 @@ where
     ///
     /// Preserves the ordering and semantics of the projection to reduce the complexity of positional encryption.
     ///
+    ///
     fn get_param_columns(
         &self,
         typed_statement: &eql_mapper::TypeCheckedStatement<'_>,
@@ -852,17 +857,19 @@ where
 
         for param in typed_statement.params.iter() {
             let configured_column = match param {
-                (_, eql_mapper::Value::Eql(EqlValue(TableColumn { table, column }))) => {
+                (_, eql_mapper::Value::Eql(eql_term)) => {
+                    let TableColumn { table, column } = eql_term.table_column();
                     let identifier = Identifier::from((table, column));
 
                     debug!(
                         target: MAPPER,
                         client_id = self.context.client_id,
                         msg = "Encrypted parameter",
-                        column = ?identifier
+                        column = ?identifier,
+                        ?eql_term,
                     );
 
-                    self.get_column(identifier)?
+                    self.get_column(identifier, eql_term)?
                 }
                 _ => None,
             };
@@ -878,21 +885,20 @@ where
     ) -> Result<Vec<Option<Column>>, Error> {
         let mut literal_columns = vec![];
 
-        for (eql_value, _) in typed_statement.literals.iter() {
-            match eql_value {
-                EqlValue(TableColumn { table, column }) => {
-                    let identifier = Identifier::from((table, column));
-                    debug!(
-                        target: MAPPER,
-                        client_id = self.context.client_id,
-                        msg = "Encrypted literal",
-                        identifier = ?identifier
-                    );
-                    let col = self.get_column(identifier)?;
-                    if col.is_some() {
-                        literal_columns.push(col);
-                    }
-                }
+        for (eql_term, _) in typed_statement.literals.iter() {
+            let TableColumn { table, column } = eql_term.table_column();
+            let identifier = Identifier::from((table, column));
+
+            debug!(
+                target: MAPPER,
+                client_id = self.context.client_id,
+                msg = "Encrypted literal",
+                column = ?identifier,
+                ?eql_term,
+            );
+            let col = self.get_column(identifier, eql_term)?;
+            if col.is_some() {
+                literal_columns.push(col);
             }
         }
 
@@ -903,7 +909,11 @@ where
     /// Get the column configuration for the Identifier
     /// Returns `EncryptError::UnknownColumn` if configuration cannot be found for the Identified column
     /// if mapping enabled, and None if mapping is disabled. It'll log a warning either way.
-    fn get_column(&self, identifier: Identifier) -> Result<Option<Column>, Error> {
+    fn get_column(
+        &self,
+        identifier: Identifier,
+        eql_term: &EqlTerm,
+    ) -> Result<Option<Column>, Error> {
         match self.encrypt.get_column_config(&identifier) {
             Some(config) => {
                 debug!(
@@ -912,7 +922,16 @@ where
                     msg = "Configured column",
                     column = ?identifier
                 );
-                Ok(Some(Column::new(identifier, config)))
+
+                // IndexTerm::SteVecSelector
+
+                let postgres_type = if matches!(eql_term, EqlTerm::JsonPath(_)) {
+                    Some(Type::JSONPATH)
+                } else {
+                    None
+                };
+
+                Ok(Some(Column::new(identifier, config, postgres_type)))
             }
             None => {
                 warn!(
@@ -955,7 +974,7 @@ where
 
         // This *should* be sufficient for escaping error messages as we're only
         // using the string literal, and not identifiers
-        let quoted_error = quote_literal(format!("{}", err).as_str());
+        let quoted_error = quote_literal(format!("{err}").as_str());
         let content = format!("DO $$ BEGIN RAISE EXCEPTION {quoted_error}; END; $$;");
 
         debug!(
@@ -973,13 +992,13 @@ where
 }
 
 fn literals_to_plaintext(
-    literals: &Vec<&ast::Value>,
+    literals: &Vec<(EqlTerm, &ast::Value)>,
     literal_columns: &Vec<Option<Column>>,
 ) -> Result<Vec<Option<Plaintext>>, Error> {
     let plaintexts = literals
         .iter()
         .zip(literal_columns)
-        .map(|(val, col)| match col {
+        .map(|((_, val), col)| match col {
             Some(col) => literal_from_sql(val, col.cast_type()).map_err(|err| {
                 debug!(
                     target: MAPPER,

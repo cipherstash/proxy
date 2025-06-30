@@ -22,7 +22,7 @@ mod tests {
         if let Row(r) = &rows[1] {
             assert_eq!(Some("plain"), r.get(1));
         } else {
-            panic!("Unexpected query results: {:?}", rows);
+            panic!("Unexpected query results: {rows:?}");
         }
     }
 
@@ -43,7 +43,7 @@ mod tests {
         // CmmandComplete does not implement PartialEq, so no equality check with ==
         match &insert_result[0] {
             CommandComplete(n) => assert_eq!(1, *n),
-            _unexpected => panic!("unexpected insert result: {:?}", insert_result),
+            _unexpected => panic!("unexpected insert result: {insert_result:?}"),
         }
 
         let sql = format!("SELECT id, encrypted_text FROM encrypted WHERE id = {id}");
@@ -83,7 +83,7 @@ mod tests {
         // CmmandComplete does not implement PartialEq, so no equality check with ==
         match &insert_result[0] {
             CommandComplete(n) => assert_eq!(1, *n),
-            _unexpected => panic!("unexpected insert result: {:?}", insert_result),
+            _unexpected => panic!("unexpected insert result: {insert_result:?}"),
         }
 
         let sql = format!("SELECT id, encrypted_int2 FROM encrypted WHERE id = {id}");
@@ -124,7 +124,7 @@ mod tests {
         // CmmandComplete does not implement PartialEq, so no equality check with ==
         match &insert_result[0] {
             CommandComplete(n) => assert_eq!(1, *n),
-            _unexpected => panic!("unexpected insert result: {:?}", insert_result),
+            _unexpected => panic!("unexpected insert result: {insert_result:?}"),
         }
 
         let sql = format!("SELECT id, encrypted_date FROM encrypted WHERE id = {id}");
@@ -166,7 +166,7 @@ mod tests {
         // CmmandComplete does not implement PartialEq, so no equality check with ==
         match &insert_result[0] {
             CommandComplete(n) => assert_eq!(1, *n),
-            _unexpected => panic!("unexpected insert result: {:?}", insert_result),
+            _unexpected => panic!("unexpected insert result: {insert_result:?}"),
         }
 
         let sql = format!("SELECT id, encrypted_date FROM encrypted WHERE id = {id}");
@@ -217,7 +217,7 @@ mod tests {
             // CmmandComplete does not implement PartialEq, so no equality check with ==
             match &insert_result[0] {
                 CommandComplete(n) => assert_eq!(1, *n),
-                _unexpected => panic!("unexpected insert result: {:?}", insert_result),
+                _unexpected => panic!("unexpected insert result: {insert_result:?}"),
             }
 
             let sql = format!("SELECT id, encrypted_int4 FROM encrypted WHERE id = {id}");

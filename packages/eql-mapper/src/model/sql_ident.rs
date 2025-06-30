@@ -10,7 +10,7 @@ use sqltk::parser::ast::Ident;
 /// quoted or not.
 ///
 /// For an "official" explanation of how SQL identifiers work (at least with respect to Postgres), see
-/// [https://www.postgresql.org/docs/14/sql-syntax-lexical.html#SQL-SYNTAX-IDENTIFIERS].
+/// [<https://www.postgresql.org/docs/14/sql-syntax-lexical.html#SQL-SYNTAX-IDENTIFIERS>].
 ///
 /// SQL is wild, hey!
 #[derive(Debug, Clone, Display)]

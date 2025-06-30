@@ -1,10 +1,7 @@
 use crate::{
-    inference::{
-        unifier::{Constructor, Type},
-        TypeError, TypeRegistry,
-    },
+    inference::{unifier::Type, TypeError, TypeRegistry},
     model::{SchemaError, TableResolver},
-    unifier::{Projection, ProjectionColumns},
+    unifier::{Projection, Value},
     Relation, ScopeError, ScopeTracker,
 };
 use sqltk::parser::ast::{
@@ -46,14 +43,11 @@ impl<'ast> Importer<'ast> {
         {
             let table = self.table_resolver.resolve_table(table_name)?;
 
-            let cols = ProjectionColumns::new_from_schema_table(table.clone());
+            let projection = Projection::new_from_schema_table(table.clone());
 
             self.scope_tracker.borrow_mut().add_relation(Relation {
                 name: table_alias.clone(),
-                projection_type: Type::Constructor(Constructor::Projection(
-                    Projection::WithColumns(cols),
-                ))
-                .into(),
+                projection_type: Type::Value(Value::Projection(projection)).into(),
             })?;
 
             Ok(())
@@ -114,14 +108,11 @@ impl<'ast> Importer<'ast> {
                 if scope_tracker.resolve_relation(name).is_err() {
                     let table = self.table_resolver.resolve_table(name)?;
 
-                    let cols = ProjectionColumns::new_from_schema_table(table.clone());
+                    let projection = Projection::new_from_schema_table(table.clone());
 
                     scope_tracker.add_relation(Relation {
                         name: record_as.cloned().ok(),
-                        projection_type: Type::Constructor(Constructor::Projection(
-                            Projection::WithColumns(cols),
-                        ))
-                        .into(),
+                        projection_type: Type::Value(Value::Projection(projection)).into(),
                     })?;
                 }
             }

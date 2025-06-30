@@ -10,7 +10,7 @@ mod tests {
         T: ToSql + Sync + Send + 'static,
     {
         let id = random_id();
-        let sql = format!("INSERT INTO encrypted (id, {}) VALUES ($1, $2)", col);
+        let sql = format!("INSERT INTO encrypted (id, {col}) VALUES ($1, $2)");
         execute_query(&sql, &[&id, &val]).await;
     }
 

@@ -55,12 +55,12 @@ mod tests {
         let encrypted_jsonb = serde_json::json!({"key": "value"});
 
         let sql = format!(
-            "INSERT INTO encrypted (id, encrypted_jsonb) VALUES ($1, '{encrypted_jsonb}')",
+            "INSERT INTO encrypted (id, encrypted_jsonb) VALUES ($1, '{encrypted_jsonb}'::jsonb)",
         );
 
         client.query(&sql, &[&id]).await.unwrap();
 
-        let sql = "SELECT id, encrypted_jsonb FROM encrypted WHERE id = $1";
+        let sql = "SELECT id, encrypted_jsonb::jsonb FROM encrypted WHERE id = $1";
         let rows = client.query(sql, &[&id]).await.unwrap();
 
         assert_eq!(rows.len(), 1);

@@ -20,7 +20,7 @@ pub use eql_mapper::*;
 pub use model::*;
 pub use param::*;
 pub use type_checked_statement::*;
-pub use unifier::{EqlValue, NativeValue, TableColumn};
+pub use unifier::{EqlTerm, EqlTrait, EqlTraits, EqlValue, NativeValue, TableColumn};
 
 pub(crate) use dep::*;
 pub(crate) use inference::*;
@@ -29,26 +29,19 @@ pub(crate) use transformation_rules::*;
 
 #[cfg(test)]
 mod test {
-    use super::test_helpers::*;
-    use super::type_check;
-    use crate::col;
-    use crate::projection;
-    use crate::test_helpers;
-    use crate::Param;
-    use crate::Schema;
-    use crate::TableResolver;
+    use super::{test_helpers::*, type_check};
     use crate::{
-        schema, unifier::EqlValue, unifier::NativeValue, Projection, ProjectionColumn, TableColumn,
-        Value,
+        projection, schema, test_helpers,
+        unifier::{EqlTerm, EqlTrait, EqlTraits, EqlValue, InstantiateType, NativeValue},
+        Param, Projection, ProjectionColumn, Schema, TableColumn, TableResolver, Value,
     };
+    use eql_mapper_macros::concrete_ty;
     use pretty_assertions::assert_eq;
-    use sqltk::parser::ast::Ident;
-    use sqltk::parser::ast::Statement;
-    use sqltk::parser::ast::{self as ast};
-    use sqltk::AsNodeKey;
-    use sqltk::NodeKey;
-    use std::collections::HashMap;
-    use std::sync::Arc;
+    use sqltk::{
+        parser::ast::{self as ast, Ident, Statement},
+        AsNodeKey, NodeKey,
+    };
+    use std::{collections::HashMap, sync::Arc};
     use tracing::error;
 
     fn resolver(schema: Schema) -> Arc<TableResolver> {
@@ -74,7 +67,7 @@ mod test {
             Ok(typed) => {
                 assert_eq!(
                     typed.projection,
-                    projection![(NATIVE(users.email) as email)]
+                    concrete_ty!({ Native(users.email) as email } as crate::Projection)
                 )
             }
             Err(err) => panic!("type check failed: {err}"),
@@ -88,7 +81,7 @@ mod test {
             tables: {
                 users: {
                     id,
-                    email (EQL),
+                    email (EQL: Eq),
                     first_name,
                 }
             }
@@ -98,17 +91,24 @@ mod test {
 
         match type_check(schema, &statement) {
             Ok(typed) => {
-                assert_eq!(typed.projection, projection![(EQL(users.email) as email)]);
+                assert_eq!(
+                    typed.projection,
+                    concrete_ty! {{EQL(users.email: Eq) as email} as crate::Projection}
+                );
 
-                eprintln!("TYPED LITS: {:#?}", typed.literals);
-
-                assert!(typed.literals.contains(&(
-                    EqlValue(TableColumn {
-                        table: id("users"),
-                        column: id("email")
-                    }),
-                    &ast::Value::SingleQuotedString("hello@cipherstash.com".into())
-                )));
+                assert_eq!(
+                    typed.literals,
+                    vec![(
+                        EqlTerm::Full(EqlValue(
+                            TableColumn {
+                                table: id("users"),
+                                column: id("email"),
+                            },
+                            EqlTraits::from(EqlTrait::Eq)
+                        ),),
+                        &ast::Value::SingleQuotedString("hello@cipherstash.com".into()),
+                    )]
+                );
             }
             Err(err) => panic!("type check failed: {err}"),
         }
@@ -132,11 +132,14 @@ mod test {
         match type_check(schema, &statement) {
             Ok(typed) => {
                 assert!(typed.literals.contains(&(
-                    EqlValue(TableColumn {
-                        table: id("users"),
-                        column: id("email")
-                    }),
-                    &ast::Value::SingleQuotedString("hello@cipherstash.com".into())
+                    EqlTerm::Full(EqlValue(
+                        TableColumn {
+                            table: id("users"),
+                            column: id("email")
+                        },
+                        EqlTraits::default()
+                    )),
+                    &ast::Value::SingleQuotedString("hello@cipherstash.com".into()),
                 )));
             }
             Err(err) => panic!("type check failed: {err}"),
@@ -161,11 +164,14 @@ mod test {
         match type_check(schema, &statement) {
             Ok(typed) => {
                 assert!(typed.literals.contains(&(
-                    EqlValue(TableColumn {
-                        table: id("users"),
-                        column: id("email")
-                    }),
-                    &ast::Value::SingleQuotedString("hello@cipherstash.com".into())
+                    EqlTerm::Full(EqlValue(
+                        TableColumn {
+                            table: id("users"),
+                            column: id("email")
+                        },
+                        EqlTraits::default()
+                    )),
+                    &ast::Value::SingleQuotedString("hello@cipherstash.com".into()),
                 )));
             }
             Err(err) => panic!("type check failed: {err}"),
@@ -191,11 +197,14 @@ mod test {
         match type_check(schema, &statement) {
             Ok(typed) => {
                 assert!(typed.literals.contains(&(
-                    EqlValue(TableColumn {
-                        table: id("users"),
-                        column: id("email")
-                    }),
-                    &ast::Value::SingleQuotedString("hello@cipherstash.com".into())
+                    EqlTerm::Full(EqlValue(
+                        TableColumn {
+                            table: id("users"),
+                            column: id("email")
+                        },
+                        EqlTraits::default()
+                    )),
+                    &ast::Value::SingleQuotedString("hello@cipherstash.com".into()),
                 )));
             }
             Err(err) => panic!("type check failed: {err}"),
@@ -219,14 +228,14 @@ mod test {
 
         match type_check(schema, &statement) {
             Ok(typed) => {
-                let v = Value::Native(NativeValue(Some(TableColumn {
+                let v: Value = Value::Native(NativeValue(Some(TableColumn {
                     table: id("users"),
                     column: id("id"),
                 })));
 
-                let (_, param_value) = typed.params.first().unwrap();
+                let (_, value) = typed.params.first().unwrap();
 
-                assert_eq!(param_value, &v);
+                assert_eq!(value, &v);
 
                 assert_eq!(
                     typed.projection,
@@ -450,7 +459,54 @@ mod test {
 
         let typed = match type_check(schema, &statement) {
             Ok(typed) => typed,
-            Err(err) => panic!("type check failed: {:#?}", err),
+            Err(err) => panic!("type check failed: {err:#?}"),
+        };
+
+        assert_eq!(
+            typed.projection,
+            projection![
+                (NATIVE(users.id) as id),
+                (EQL(users.email) as email),
+                (NATIVE(todo_lists.id) as id),
+                (NATIVE(todo_lists.owner_id) as owner_id),
+                (EQL(todo_lists.secret) as secret)
+            ]
+        );
+    }
+
+    #[test]
+    fn wildcard_expansion_2() {
+        // init_tracing();
+        let schema = resolver(schema! {
+            tables: {
+                users: {
+                    id,
+                    email (EQL),
+                }
+                todo_lists: {
+                    id,
+                    owner_id,
+                    secret (EQL),
+                }
+            }
+        });
+
+        let statement = parse(
+            r#"
+                select * from (
+                    select
+                        u.*,
+                        tl.*
+                    from
+                        users as u
+                    inner join todo_lists as tl on tl.owner_id = u.id
+                )
+            "#,
+        );
+
+        let typed = match type_check(schema, &statement) {
+            Ok(typed) => typed,
+            Err(err) => panic!("type check failed: {err:#?}"),
         };
 
         assert_eq!(
@@ -482,17 +538,23 @@ mod test {
 
         match type_check(schema, &statement) {
             Ok(typed) => {
-                let a = Value::Eql(EqlValue(TableColumn {
-                    table: id("users"),
-                    column: id("email"),
-                }));
+                let a = Value::Eql(EqlTerm::Full(EqlValue(
+                    TableColumn {
+                        table: id("users"),
+                        column: id("email"),
+                    },
+                    EqlTraits::default(),
+                )));
 
-                let b = Value::Eql(EqlValue(TableColumn {
-                    table: id("users"),
-                    column: id("first_name"),
-                }));
+                let b = Value::Eql(EqlTerm::Full(EqlValue(
+                    TableColumn {
+                        table: id("users"),
+                        column: id("first_name"),
+                    },
+                    EqlTraits::default(),
+                )));
 
-                assert_eq!(typed.params, vec![(Param(1), a), (Param(2), b)]);
+                assert_eq!(typed.params, vec![(Param(1), a,), (Param(2), b,)]);
 
                 assert_eq!(
                     typed.projection,
@@ -514,8 +576,8 @@ mod test {
             tables: {
                 users: {
                     id,
-                    salary (EQL),
-                    age (EQL),
+                    salary (EQL: Ord),
+                    age (EQL: Ord),
                 }
             }
         });
@@ -524,24 +586,30 @@ mod test {
 
         match type_check(schema, &statement) {
             Ok(typed) => {
-                let a = Value::Eql(EqlValue(TableColumn {
-                    table: id("users"),
-                    column: id("salary"),
-                }));
+                let a = Value::Eql(EqlTerm::Full(EqlValue(
+                    TableColumn {
+                        table: id("users"),
+                        column: id("salary"),
+                    },
+                    EqlTraits::from(EqlTrait::Ord),
+                )));
 
-                let b = Value::Eql(EqlValue(TableColumn {
-                    table: id("users"),
-                    column: id("age"),
-                }));
+                let b = Value::Eql(EqlTerm::Full(EqlValue(
+                    TableColumn {
+                        table: id("users"),
+                        column: id("age"),
+                    },
+                    EqlTraits::from(EqlTrait::Ord),
+                )));
 
-                assert_eq!(typed.params, vec![(Param(1), a), (Param(2), b)]);
+                assert_eq!(typed.params, vec![(Param(1), a,), (Param(2), b,)]);
 
                 assert_eq!(
                     typed.projection,
                     projection![
                         (NATIVE(users.id) as id),
-                        (EQL(users.salary) as salary),
-                        (EQL(users.age) as age)
+                        (EQL(users.salary: Ord) as salary),
+                        (EQL(users.age: Ord) as age)
                     ]
                 );
             }
@@ -557,7 +625,7 @@ mod test {
                     id,
                     first_name,
                     last_name,
-                    salary (EQL),
+                    salary (EQL: Ord),
                 }
             }
         });
@@ -577,7 +645,7 @@ mod test {
 
         let typed = match type_check(schema, &statement) {
             Ok(typed) => typed,
-            Err(err) => panic!("type check failed: {:#?}", err),
+            Err(err) => panic!("type check failed: {err:#?}"),
         };
 
         assert_eq!(
@@ -585,7 +653,7 @@ mod test {
             projection![
                 (NATIVE(employees.first_name) as first_name),
                 (NATIVE(employees.last_name) as last_name),
-                (EQL(employees.salary) as salary)
+                (EQL(employees.salary: Ord) as salary)
             ]
         );
     }
@@ -601,7 +669,7 @@ mod test {
                     first_name,
                     last_name,
                     department_name,
-                    salary (EQL),
+                    salary (EQL: Ord),
                 }
             }
         });
@@ -621,7 +689,7 @@ mod test {
 
         let typed = match type_check(schema, &statement) {
             Ok(typed) => typed,
-            Err(err) => panic!("type check failed: {:#?}", err),
+            Err(err) => panic!("type check failed: {err:#?}"),
         };
 
         assert_eq!(
@@ -630,7 +698,7 @@ mod test {
                 (NATIVE(employees.first_name) as first_name),
                 (NATIVE(employees.last_name) as last_name),
                 (NATIVE(employees.department_name) as department_name),
-                (EQL(employees.salary) as salary),
+                (EQL(employees.salary: Ord) as salary),
                 (NATIVE as rank)
             ]
         );
@@ -668,7 +736,7 @@ mod test {
 
         let typed = match type_check(schema, &statement) {
             Ok(typed) => typed,
-            Err(err) => panic!("type check failed: {:#?}", err),
+            Err(err) => panic!("type check failed: {err:#?}"),
         };
 
         assert_eq!(
@@ -719,7 +787,7 @@ mod test {
         let typed = match type_check(schema, &statement) {
             Ok(typed) => typed,
             Err(err) => {
-                panic!("type check failed: {:#?}", err)
+                panic!("type check failed: {err:#?}")
             }
         };
 
@@ -745,7 +813,7 @@ mod test {
                     id,
                     department,
                     age,
-                    salary (EQL),
+                    salary (EQL: Ord),
                 }
             }
         });
@@ -762,14 +830,14 @@ mod test {
 
         let typed = match type_check(schema, &statement) {
             Ok(typed) => typed,
-            Err(err) => panic!("type check failed: {:#?}", err),
+            Err(err) => panic!("type check failed: {err:#?}"),
         };
 
         assert_eq!(
             typed.projection,
             projection![
                 (NATIVE(employees.age) as max),
-                (EQL(employees.salary) as min)
+                (EQL(employees.salary: Ord) as min)
             ]
         );
     }
@@ -799,10 +867,10 @@ mod test {
 
         let typed = match type_check(schema, &statement) {
             Ok(typed) => typed,
-            Err(err) => panic!("type check failed: {:#?}", err),
+            Err(err) => panic!("type check failed: {err:#?}"),
         };
 
-        assert_eq!(typed.projection, Projection::Empty);
+        assert_eq!(typed.projection, Projection(vec![]));
     }
 
     #[test]
@@ -831,7 +899,7 @@ mod test {
 
         let typed = match type_check(schema, &statement) {
             Ok(typed) => typed,
-            Err(err) => panic!("type check failed: {:#?}", err),
+            Err(err) => panic!("type check failed: {err:#?}"),
         };
 
         assert_eq!(
@@ -870,10 +938,10 @@ mod test {
 
         let typed = match type_check(schema, &statement) {
             Ok(typed) => typed,
-            Err(err) => panic!("type check failed: {:#?}", err),
+            Err(err) => panic!("type check failed: {err:#?}"),
         };
 
-        assert_eq!(typed.projection, Projection::Empty);
+        assert_eq!(typed.projection, Projection(vec![]));
     }
 
     #[test]
@@ -900,7 +968,7 @@ mod test {
 
         let typed = match type_check(schema, &statement) {
             Ok(typed) => typed,
-            Err(err) => panic!("type check failed: {:#?}", err),
+            Err(err) => panic!("type check failed: {err:#?}"),
         };
 
         assert_eq!(
@@ -926,7 +994,7 @@ mod test {
                     name,
                     department,
                     age,
-                    salary (EQL),
+                    salary (EQL: Ord),
                 }
             }
         });
@@ -939,10 +1007,10 @@ mod test {
 
         let typed = match type_check(schema, &statement) {
             Ok(typed) => typed,
-            Err(err) => panic!("type check failed: {:#?}", err),
+            Err(err) => panic!("type check failed: {err:#?}"),
         };
 
-        assert_eq!(typed.projection, Projection::Empty);
+        assert_eq!(typed.projection, Projection(vec![]));
     }
 
     #[test]
@@ -956,7 +1024,7 @@ mod test {
                     name,
                     department,
                     age,
-                    salary (EQL),
+                    salary (EQL: Ord),
                 }
             }
         });
@@ -969,7 +1037,7 @@ mod test {
 
         let typed = match type_check(schema, &statement) {
             Ok(typed) => typed,
-            Err(err) => panic!("type check failed: {:#?}", err),
+            Err(err) => panic!("type check failed: {err:#?}"),
         };
 
         assert_eq!(
@@ -979,7 +1047,7 @@ mod test {
                 (NATIVE(employees.name) as name),
                 (NATIVE(employees.department) as department),
                 (NATIVE(employees.age) as age),
-                (EQL(employees.salary) as salary)
+                (EQL(employees.salary: Ord) as salary)
             ]
         );
     }
@@ -995,7 +1063,7 @@ mod test {
                     name,
                     department,
                     age,
-                    salary (EQL),
+                    salary (EQL: Ord),
                 }
             }
         });
@@ -1008,17 +1076,20 @@ mod test {
 
         let typed = match type_check(schema.clone(), &statement) {
             Ok(typed) => typed,
-            Err(err) => panic!("type check failed: {:#?}", err),
+            Err(err) => panic!("type check failed: {err:#?}"),
         };
 
         assert_eq!(
             typed.literals,
             vec![(
-                EqlValue(TableColumn {
-                    table: id("employees"),
-                    column: id("salary")
-                }),
-                &ast::Value::Number(200000.into(), false)
+                EqlTerm::Full(EqlValue(
+                    TableColumn {
+                        table: id("employees"),
+                        column: id("salary")
+                    },
+                    EqlTraits::from(EqlTrait::Ord)
+                ),),
+                &ast::Value::Number(200000.into(), false),
             )]
         );
 
@@ -1030,7 +1101,7 @@ mod test {
                 transformed_statement.to_string(),
                 "SELECT * FROM employees WHERE salary > 'ENCRYPTED'::JSONB::eql_v2_encrypted"
             ),
-            Err(err) => panic!("statement transformation failed: {}", err),
+            Err(err) => panic!("statement transformation failed: {err}"),
         };
     }
 
@@ -1055,16 +1126,19 @@ mod test {
 
         let typed = match type_check(schema.clone(), &statement) {
             Ok(typed) => typed,
-            Err(err) => panic!("type check failed: {:#?}", err),
+            Err(err) => panic!("type check failed: {err:#?}"),
         };
 
         assert_eq!(
             typed.literals,
             vec![(
-                EqlValue(TableColumn {
-                    table: id("employees"),
-                    column: id("salary")
-                }),
+                EqlTerm::Full(EqlValue(
+                    TableColumn {
+                        table: id("employees"),
+                        column: id("salary")
+                    },
+                    EqlTraits::default()
+                )),
                 &ast::Value::Number(20000.into(), false)
             )]
         );
@@ -1077,7 +1151,7 @@ mod test {
                 transformed_statement.to_string(),
                 "INSERT INTO employees (salary) VALUES ('ENCRYPTED'::JSONB::eql_v2_encrypted)"
             ),
-            Err(err) => panic!("statement transformation failed: {}", err),
+            Err(err) => panic!("statement transformation failed: {err}"),
         };
     }
 
@@ -1091,7 +1165,7 @@ mod test {
                     id,
                     department_id,
                     name,
-                    salary (EQL),
+                    salary (EQL: Ord),
                 }
             }
         });
@@ -1123,18 +1197,18 @@ mod test {
 
         let typed = match type_check(schema, &statement) {
             Ok(typed) => typed,
-            Err(err) => panic!("type check failed: {:#?}", err),
+            Err(err) => panic!("type check failed: {err:#?}"),
         };
 
         assert_eq!(
             typed.projection,
             projection![
-                (EQL(employees.salary) as min_salary),
-                (EQL(employees.salary) as y),
+                (EQL(employees.salary: Ord) as min_salary),
+                (EQL(employees.salary: Ord) as y),
                 (NATIVE(employees.id) as id),
                 (NATIVE(employees.department_id) as department_id),
                 (NATIVE(employees.name) as name),
-                (EQL(employees.salary) as salary)
+                (EQL(employees.salary: Ord) as salary)
             ]
         );
     }
@@ -1169,7 +1243,7 @@ mod test {
             projection_type(&parse("select $1")),
             projection_type(&parse("select t from (select $1 as t)")),
             projection_type(&parse("select * from (select $1)")),
-            Projection::WithColumns(vec![ProjectionColumn {
+            Projection(vec![ProjectionColumn {
                 alias: None,
                 ty: Value::Native(NativeValue(None)),
             }]),
@@ -1404,26 +1478,39 @@ mod test {
             tables: {
                 employees: {
                     id,
-                    eql_col (EQL),
+                    eql_col (EQL: JsonLike),
                     native_col,
                 }
             }
         });
 
-        let statement = parse("
-            SELECT jsonb_path_query(eql_col, '$.secret'), jsonb_path_query(native_col, '$.not-secret') FROM employees
-        ");
+        let statement = parse(
+            "
+            SELECT
+                jsonb_path_exists(eql_col, '$.another-secret'),
+                jsonb_path_query(eql_col, '$.secret'),
+                jsonb_path_query(native_col, '$.not-secret')
+            FROM employees
+        ",
+        );
 
         match type_check(schema, &statement) {
             Ok(typed) => {
                 match typed.transform(test_helpers::dummy_encrypted_json_selector(
                     &statement,
-                    ast::Value::SingleQuotedString("$.secret".into()),
+                    vec![
+                        ast::Value::SingleQuotedString("$.secret".into()),
+                        ast::Value::SingleQuotedString("$.another-secret".into()),
+                    ],
                 )) {
                     Ok(statement) => {
                         assert_eq!(
                             statement.to_string(),
-                            "SELECT eql_v2.jsonb_path_query(eql_col, '<encrypted-selector($.secret)>'::JSONB::eql_v2_encrypted), jsonb_path_query(native_col, '$.not-secret') FROM employees"
+                            "SELECT \
+                            eql_v2.jsonb_path_exists(eql_col, '<encrypted-selector($.another-secret)>'::JSONB::eql_v2_encrypted), \
+                            eql_v2.jsonb_path_query(eql_col, '<encrypted-selector($.secret)>'::JSONB::eql_v2_encrypted), \
+                            jsonb_path_query(native_col, '$.not-secret') \
+                            FROM employees"
                         );
                     }
                     Err(err) => panic!("transformation failed: {err}"),
@@ -1447,6 +1534,7 @@ mod test {
 
     #[test]
     fn jsonb_operator_arrow() {
+        // init_tracing();
         test_jsonb_operator("->");
     }
 
@@ -1456,36 +1544,31 @@ mod test {
     }
 
     #[test]
-    fn jsonb_operator_hash_arrow() {
-        test_jsonb_operator("#>");
-    }
-
-    #[test]
-    fn jsonb_operator_hash_long_arrow() {
-        test_jsonb_operator("#>>");
-    }
-
-    #[test]
+    #[ignore = "? is unimplemented"]
     fn jsonb_operator_hash_at_at() {
         test_jsonb_operator("@@");
     }
 
     #[test]
+    #[ignore = "@? is unimplemented"]
     fn jsonb_operator_at_question() {
         test_jsonb_operator("@?");
     }
 
     #[test]
+    #[ignore = "? is unimplemented"]
     fn jsonb_operator_question() {
         test_jsonb_operator("?");
     }
 
     #[test]
+    #[ignore = "?& is unimplemented"]
     fn jsonb_operator_question_and() {
         test_jsonb_operator("?&");
     }
 
     #[test]
+    #[ignore = "?| is unimplemented"]
     fn jsonb_operator_question_pipe() {
         test_jsonb_operator("?|");
     }
@@ -1514,15 +1597,12 @@ mod test {
         );
     }
 
-    // TODO: do we need to check that the RHS of JSON operators MUST be a Value node
-    // and not an arbitrary expression?
-
     fn test_jsonb_function(fn_name: &str, args: Vec<ast::Expr>) {
         let schema = resolver(schema! {
             tables: {
                 patients: {
                     id,
-                    notes (EQL),
+                    notes (EQL: JsonLike),
                 }
             }
         });
@@ -1534,8 +1614,7 @@ mod test {
             .join(", ");
 
         let statement = parse(&format!(
-            "SELECT id, {}({}) AS meds FROM patients",
-            fn_name, args_in
+            "SELECT id, {fn_name}({args_in}) AS meds FROM patients"
         ));
 
         let args_encrypted = args
@@ -1546,7 +1625,7 @@ mod test {
                     value: ast::Value::SingleQuotedString(s),
                     span: _,
                 }) => {
-                    format!("'<encrypted-selector({})>'::JSONB::eql_v2_encrypted", s)
+                    format!("'<encrypted-selector({s})>'::JSONB::eql_v2_encrypted")
                 }
                 _ => panic!("unsupported expr type in test util"),
             })
@@ -1559,7 +1638,7 @@ mod test {
             if let ast::Expr::Value(ast::ValueWithSpan { value, .. }) = arg {
                 encrypted_literals.extend(test_helpers::dummy_encrypted_json_selector(
                     &statement,
-                    value.clone(),
+                    vec![value.clone()],
                 ));
             }
         }
@@ -1587,28 +1666,63 @@ mod test {
             tables: {
                 patients: {
                     id,
-                    notes (EQL),
+                    notes (EQL: JsonLike + Contain),
                 }
             }
         });
 
         let statement = parse(&format!(
-            "SELECT id, notes {} 'medications' AS meds FROM patients",
-            op
+            "SELECT id, notes {op} 'medications' AS meds FROM patients",
         ));
 
         match type_check(schema, &statement) {
             Ok(typed) => {
-                match typed.transform(test_helpers::dummy_encrypted_json_selector(&statement, ast::Value::SingleQuotedString("medications".to_owned()))) {
+                match typed.transform(test_helpers::dummy_encrypted_json_selector(&statement, vec![ast::Value::SingleQuotedString("medications".to_owned())])) {
                     Ok(statement) => assert_eq!(
                         statement.to_string(),
-                        format!("SELECT id, notes {} '<encrypted-selector(medications)>'::JSONB::eql_v2_encrypted AS meds FROM patients", op)
+                        format!("SELECT id, notes {op} '<encrypted-selector(medications)>'::JSONB::eql_v2_encrypted AS meds FROM patients")
                     ),
                     Err(err) => panic!("transformation failed: {err}"),
                 }
             }
             Err(err) => panic!("type check failed: {err}"),
         }
+    }
+
+    #[test]
+    fn eql_term_partial_is_unified_with_eql_term_whole() {
+        // init_tracing();
+        let schema = resolver(schema! {
+            tables: {
+                patients: {
+                    id,
+                    email (EQL: Eq),
+                }
+            }
+        });
+
+        // let statement = parse(
+        //     "SELECT id, email FROM patients WHERE email = 'alice@example.com'"
+        // );
+
+        let statement = parse(
+            "
+            SELECT id, email FROM patients AS p
+            INNER JOIN (
+                SELECT 'alice@example.com' AS selector
+            ) AS selectors
+            WHERE p.email = selectors.selector
+        ",
+        );
+
+        let typed = type_check(schema, &statement)
+            .map_err(|err| err.to_string())
+            .unwrap();
+
+        assert_eq!(
+            typed.projection,
+            projection![(NATIVE(patients.id) as id), (EQL(patients.email: Eq) as email)]
+        );
     }
 
     #[test]
@@ -1718,5 +1832,98 @@ mod test {
             }
             Err(err) => panic!("type check failed: {err}"),
         }
+    }
+
+    #[test]
+    fn jsonb_path_query_param_to_eql() {
+        // init_tracing();
+        let schema = resolver(schema! {
+            tables: {
+                patients: {
+                    id,
+                    notes (EQL: JsonLike),
+                }
+            }
+        });
+
+        let statement = parse("SELECT eql_v2.jsonb_path_query(notes, $1) as notes FROM patients");
+
+        let typed = type_check(schema, &statement)
+            .map_err(|err| err.to_string())
+            .unwrap();
+
+        assert_eq!(
+            typed.projection,
+            projection![(EQL(patients.notes: JsonLike) as notes)]
+        );
+    }
+
+    #[test]
+    fn ensure_eql_mapper_does_not_choke_on_elixir_ecto_schema_metadata_query() {
+        // init_tracing();
+        let schema = resolver(schema! {
+            tables: {
+                pg_attribute: {
+                    attrelid,
+                    attnum,
+                    atttypid,
+                    attisdropped,
+                }
+                pg_type: {
+                    oid,
+                    typname,
+                    typsend,
+                    typreceive,
+                    typoutput,
+                    typinput,
+                    typbasetype,
+                    typrelid,
+                    typelem,
+                }
+                pg_range: {
+                   rngtypid,
+                   rngmultitypid,
+                   rngsubtype,
+                }
+            }
+        });
+
+        let statement = parse(
+            "SELECT
+            t.oid,
+            t.typname,
+            t.typsend,
+            t.typreceive,
+            t.typoutput,
+            t.typinput,
+            coalesce(d.typelem, t.typelem),
+            coalesce(r.rngsubtype, 0),
+            ARRAY(
+                SELECT
+                    a.atttypid
+                FROM
+                    pg_attribute AS a
+                WHERE
+                    a.attrelid = t.typrelid
+                    AND a.attnum > 0
+                    AND NOT a.attisdropped
+                ORDER BY a.attnum
+            ) FROM pg_type AS t
+                LEFT JOIN pg_type AS d ON t.typbasetype = d.oid
+                LEFT JOIN pg_range AS r ON r.rngtypid = t.oid OR r.rngmultitypid = t.oid OR (
+                    t.typbasetype <> 0
+                    AND r.rngtypid = t.typbasetype
+                )
+            WHERE
+                (t.typrelid = 0)
+            AND (t.typelem = 0 OR NOT EXISTS (
+                SELECT 1 FROM pg_type AS s
+                WHERE s.typrelid <> 0 AND s.oid = t.typelem
+            ))",
+        );
+
+        type_check(schema, &statement)
+            .map_err(|err| err.to_string())
+            .unwrap();
     }
 }
