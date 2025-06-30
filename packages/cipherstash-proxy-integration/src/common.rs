@@ -7,10 +7,7 @@ use rustls::{
 };
 use serde_json::Value;
 use std::sync::{Arc, Once};
-use tokio_postgres::{
-    types::{FromSql, ToSql, Type},
-    Client, NoTls,
-};
+use tokio_postgres::{types::ToSql, Client, NoTls};
 use tracing_subscriber::{filter::Directive, EnvFilter, FmtSubscriber};
 
 pub const PROXY: u16 = 6432;
@@ -162,16 +159,19 @@ where
     rows.iter().map(|row| row.get(0)).collect::<Vec<T>>()
 }
 
-pub async fn simple_query<T: for<'a> FromSql<'a> + std::fmt::Debug>(sql: &str) -> Vec<T> {
+pub async fn simple_query<T: std::str::FromStr>(sql: &str) -> Vec<T>
+where
+    <T as std::str::FromStr>::Err: std::fmt::Debug,
+{
     let client = connect_with_tls(PROXY).await;
 
     simple_query_with_client(sql, &client).await
 }
 
-pub async fn simple_query_with_client<T: for<'a> FromSql<'a> + std::fmt::Debug>(
-    sql: &str,
-    client: &Client,
-) -> Vec<T> {
+pub async fn simple_query_with_client<T: std::str::FromStr>(sql: &str, client: &Client) -> Vec<T>
+where
+    <T as std::str::FromStr>::Err: std::fmt::Debug,
+{
     let rows = client.simple_query(sql).await.unwrap();
     rows.iter()
         .filter_map(|row| {
@@ -180,19 +180,13 @@ pub async fn simple_query_with_client<T: for<'a> FromSql<'a> + std::fmt::Debug>(
                     // Convert string value to FromSql compatible type
                     // Try different type conversions based on the value format
                     // PostgreSQL returns booleans as "t" or "f" in simple queries
-                    let bytes = if val == "t" || val == "f" {
-                        // Convert PostgreSQL boolean format to binary representation
-                        if val == "t" {
-                            &[1u8]
-                        } else {
-                            &[0u8]
-                        }
-                    } else {
-                        val.as_bytes()
-                    };
 
-                    // Try as text for other types
-                    T::from_sql(&Type::TEXT, bytes).ok()
+                    // Convert PostgreSQL boolean format to binary representation
+                    match val {
+                        "t" => "true".parse::<T>().ok(),
+                        "f" => "false".parse::<T>().ok(),
+                        _ => val.parse::<T>().ok(),
+                    }
                 })
             } else {
                 None
