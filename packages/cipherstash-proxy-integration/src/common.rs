@@ -11,7 +11,6 @@ use tokio_postgres::{
     types::{FromSql, ToSql, Type},
     Client, NoTls,
 };
-use tracing::info;
 use tracing_subscriber::{filter::Directive, EnvFilter, FmtSubscriber};
 
 pub const PROXY: u16 = 6432;
@@ -193,10 +192,7 @@ pub async fn simple_query_with_client<T: for<'a> FromSql<'a> + std::fmt::Debug>(
                     };
 
                     // Try as text for other types
-                    match T::from_sql(&Type::TEXT, bytes) {
-                        Ok(parsed_val) => Some(parsed_val),
-                        Err(_) => None,
-                    }
+                    T::from_sql(&Type::TEXT, bytes).ok()
                 })
             } else {
                 None

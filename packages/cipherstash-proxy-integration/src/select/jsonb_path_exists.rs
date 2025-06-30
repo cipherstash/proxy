@@ -3,8 +3,6 @@ mod tests {
     use crate::common::{clear, insert_jsonb, query_by, simple_query, trace};
     use crate::support::assert::assert_expected;
     use crate::support::json_path::JsonPath;
-    use serde::de::DeserializeOwned;
-    use serde_json::Value;
 
     async fn select_jsonb(selector: &str, value: bool) {
         let selector = JsonPath::new(selector);
@@ -50,11 +48,6 @@ mod tests {
         clear().await;
 
         insert_jsonb().await;
-
-        let v = serde_json::json!({
-            "number": 1815,
-            "string": "world",
-        });
 
         select_jsonb("$.nested", true).await;
     }
