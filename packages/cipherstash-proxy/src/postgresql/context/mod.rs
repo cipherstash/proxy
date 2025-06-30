@@ -8,7 +8,10 @@ use super::{
     },
     Column,
 };
-use crate::{log::CONTEXT, prometheus::STATEMENTS_EXECUTION_DURATION_SECONDS};
+use crate::{
+    log::CONTEXT,
+    prometheus::{STATEMENTS_EXECUTION_DURATION_SECONDS, STATEMENTS_SESSION_DURATION_SECONDS},
+};
 use eql_mapper::{Schema, TableResolver};
 use metrics::histogram;
 use sqltk::parser::ast::{Expr, Ident, ObjectName, ObjectNamePart, Set, Value, ValueWithSpan};
@@ -21,6 +24,7 @@ use tracing::debug;
 
 type DescribeQueue = Queue<Describe>;
 type ExecuteQueue = Queue<ExecuteContext>;
+type SessionMetricsQueue = Queue<SessionMetricsContext>;
 type PortalQueue = Queue<Arc<Portal>>;
 
 #[derive(Clone, Debug)]
@@ -31,6 +35,7 @@ pub struct Context {
     describe: Arc<RwLock<DescribeQueue>>,
     execute: Arc<RwLock<ExecuteQueue>>,
     schema_changed: Arc<RwLock<bool>>,
+    session_metrics: Arc<RwLock<SessionMetricsQueue>>,
     table_resolver: Arc<TableResolver>,
     unsafe_disable_mapping: bool,
 }
@@ -45,6 +50,23 @@ impl ExecuteContext {
     fn new(name: Name) -> ExecuteContext {
         ExecuteContext {
             name,
+            start: Instant::now(),
+        }
+    }
+
+    fn duration(&self) -> Duration {
+        Instant::now().duration_since(self.start)
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct SessionMetricsContext {
+    start: Instant,
+}
+
+impl SessionMetricsContext {
+    fn new() -> SessionMetricsContext {
+        SessionMetricsContext {
             start: Instant::now(),
         }
     }
@@ -87,6 +109,7 @@ impl Context {
             describe: Arc::new(RwLock::from(Queue::new())),
             execute: Arc::new(RwLock::from(Queue::new())),
             schema_changed: Arc::new(RwLock::from(false)),
+            session_metrics: Arc::new(RwLock::from(Queue::new())),
             table_resolver: Arc::new(TableResolver::new_editable(schema)),
             client_id,
             unsafe_disable_mapping: false,
@@ -104,6 +127,24 @@ impl Context {
     pub fn complete_describe(&mut self) {
         debug!(target: CONTEXT, client_id = self.client_id, msg = "Describe complete");
         let _ = self.describe.write().map(|mut queue| queue.complete());
+    }
+
+    pub fn start_session(&mut self) {
+        let ctx = SessionMetricsContext::new();
+        let _ = self.session_metrics.write().map(|mut queue| queue.add(ctx));
+    }
+
+    pub fn finish_session(&mut self) {
+        debug!(target: CONTEXT, client_id = self.client_id, msg = "Session Metrics finished");
+
+        if let Some(session) = self.get_session_metrics() {
+            histogram!(STATEMENTS_SESSION_DURATION_SECONDS).record(session.duration());
+        }
+
+        let _ = self
+            .session_metrics
+            .write()
+            .map(|mut queue| queue.complete());
     }
 
     pub fn set_execute(&mut self, name: Name) {
@@ -226,6 +267,13 @@ impl Context {
         let execute_context = queue.next()?;
         debug!(target: CONTEXT, client_id = self.client_id, msg = "Get Execute", execute = ?execute_context);
         Some(execute_context.to_owned())
+    }
+
+    pub fn get_session_metrics(&self) -> Option<SessionMetricsContext> {
+        let queue = self.session_metrics.read().ok()?;
+        let session_context = queue.next()?;
+        debug!(target: CONTEXT, client_id = self.client_id, msg = "Get Session Metrics", session_metrics = ?session_context);
+        Some(session_context.to_owned())
     }
 
     pub fn set_schema_changed(&self) {

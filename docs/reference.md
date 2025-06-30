@@ -344,9 +344,12 @@ If the proxy is running on a host other than localhost, access on that host.
 | `cipherstash_proxy_rows_total`                                  | Counter   | Total number of rows returned                                               |
 | `cipherstash_proxy_server_bytes_received_total`                 | Counter   | Number of bytes CipherStash Proxy received from the PostgreSQL server       |
 | `cipherstash_proxy_server_bytes_sent_total`                     | Counter   | Number of bytes CipherStash Proxy sent to the PostgreSQL server             |
-| `cipherstash_proxy_statements_execution_duration_seconds`       | Histogram | Duration of time CipherStash Proxy spent executing SQL statements           |
+| `cipherstash_proxy_statements_execution_duration_seconds`       | Histogram | Duration of time the proxied database spent executing SQL statements        |
 | `cipherstash_proxy_statements_execution_duration_seconds_count` | Count     | Number of observations of CipherStash Proxy statement duration              |
 | `cipherstash_proxy_statements_execution_duration_seconds_sum`   | Count     | Total time CipherStash Proxy spent executing SQL statements                 |
+| `cipherstash_proxy_statements_session_duration_seconds`         | Histogram | Duration of time CipherStash Proxy spent processing the statement including encryption, proxied database execution, and decryption |
+| `cipherstash_proxy_statements_session_duration_seconds_count`   | Count     | Number of observations of CipherStash Proxy statement duration              |
+| `cipherstash_proxy_statements_session_duration_seconds_sum`     | Count     | Total time CipherStash Proxy spent processing SQL statements                |
 | `cipherstash_proxy_statements_encrypted_total`                  | Counter   | Number of SQL statements that required encryption                           |
 | `cipherstash_proxy_statements_passthrough_total`                | Counter   | Number of SQL statements that did not require encryption                    |
 | `cipherstash_proxy_statements_total`                            | Counter   | Total number of SQL statements processed by CipherStash Proxy               |

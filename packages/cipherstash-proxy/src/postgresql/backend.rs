@@ -117,6 +117,7 @@ where
                 debug!(target: PROTOCOL, client_id = self.context.client_id, msg = "CommandComplete | EmptyQueryResponse | PortalSuspended");
                 self.flush().await?;
                 self.context.complete_execution();
+                self.context.finish_session();
             }
             BackendCode::ErrorResponse => {
                 if let Some(b) = self.error_response_handler(&bytes)? {
@@ -124,6 +125,7 @@ where
                 }
                 self.flush().await?;
                 self.context.complete_execution();
+                self.context.finish_session();
             }
             // Describe with Target:Statement
             // Returns a ParameterDescription followed by RowDescription
