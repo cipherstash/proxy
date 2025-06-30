@@ -226,7 +226,9 @@ pub async fn insert_jsonb() -> Value {
         "nested": {
             "number": 1815,
             "string": "world",
-        }
+        },
+        "array_string": ["hello", "world"],
+        "array_number": [42, 84],
     });
 
     let sql = "INSERT INTO encrypted (id, encrypted_jsonb) VALUES ($1, $2)".to_string();

@@ -1,6 +1,7 @@
 mod group_by;
 mod jsonb_path_exists;
 mod jsonb_path_query;
+mod jsonb_path_query_first;
 mod order_by;
 mod order_by_with_null;
 mod pg_catalog;
