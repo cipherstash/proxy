@@ -1857,4 +1857,73 @@ mod test {
             projection![(EQL(patients.notes: JsonLike) as notes)]
         );
     }
+
+    #[test]
+    fn ensure_eql_mapper_does_not_choke_on_elixir_ecto_schema_metadata_query() {
+        // init_tracing();
+        let schema = resolver(schema! {
+            tables: {
+                pg_attribute: {
+                    attrelid,
+                    attnum,
+                    atttypid,
+                    attisdropped,
+                }
+                pg_type: {
+                    oid,
+                    typname,
+                    typsend,
+                    typreceive,
+                    typoutput,
+                    typinput,
+                    typbasetype,
+                    typrelid,
+                    typelem,
+                }
+                pg_range: {
+                   rngtypid,
+                   rngmultitypid,
+                   rngsubtype,
+                }
+            }
+        });
+
+        let statement = parse(
+            "SELECT
+            t.oid,
+            t.typname,
+            t.typsend,
+            t.typreceive,
+            t.typoutput,
+            t.typinput,
+            coalesce(d.typelem, t.typelem),
+            coalesce(r.rngsubtype, 0),
+            ARRAY(
+                SELECT
+                    a.atttypid
+                FROM
+                    pg_attribute AS a
+                WHERE
+                    a.attrelid = t.typrelid
+                    AND a.attnum > 0
+                    AND NOT a.attisdropped
+                ORDER BY a.attnum
+            ) FROM pg_type AS t
+                LEFT JOIN pg_type AS d ON t.typbasetype = d.oid
+                LEFT JOIN pg_range AS r ON r.rngtypid = t.oid OR r.rngmultitypid = t.oid OR (
+                    t.typbasetype <> 0
+                    AND r.rngtypid = t.typbasetype
+                )
+            WHERE
+                (t.typrelid = 0)
+            AND (t.typelem = 0 OR NOT EXISTS (
+                SELECT 1 FROM pg_type AS s
+                WHERE s.typrelid <> 0 AND s.oid = t.typelem
+            ))",
+        );
+
+        type_check(schema, &statement)
+            .map_err(|err| err.to_string())
+            .unwrap();
+    }
 }

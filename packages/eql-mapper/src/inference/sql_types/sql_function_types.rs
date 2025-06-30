@@ -79,13 +79,14 @@ impl SqlFunction {
                         &[],
                         ret_type,
                     )?,
-                    FunctionArguments::Subquery(query) => NativeFunction::new(1)
-                        .apply_constraints(
+                    FunctionArguments::Subquery(query) => {
+                        let query_type = &[inferencer.get_node_type(&**query)];
+                        NativeFunction::new(1).apply_constraints(
                             &mut inferencer.unifier.borrow_mut(),
-                            &[inferencer.get_node_type(&**query)],
+                            query_type,
                             ret_type,
-                        )?,
-
+                        )?
+                    }
                     FunctionArguments::List(list) => {
                         let args: Vec<Arc<Type>> = list
                             .args
