@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1751266424381,
+  "lastUpdate": 1751327454083,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -6928,6 +6928,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 7.064496,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "b748d5e37d4da200036f2634a93cf37ddc0ec04f",
+          "message": "feat: JSON indexing for EQL V2",
+          "timestamp": "2025-06-26T02:07:32Z",
+          "url": "https://github.com/cipherstash/proxy/pull/263/commits/b748d5e37d4da200036f2634a93cf37ddc0ec04f"
+        },
+        "date": 1751327452515,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 6.649847,
             "unit": "Number"
           }
         ]
