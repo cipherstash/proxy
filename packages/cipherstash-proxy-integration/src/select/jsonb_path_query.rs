@@ -66,6 +66,31 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn select_jsonb_path_query_with_unknown() {
+        trace();
+
+        clear().await;
+
+        insert_jsonb().await;
+
+        let selector = JsonPath::new("$.vtha");
+
+        let expected = vec![];
+
+        let sql = "SELECT jsonb_path_query(encrypted_jsonb, $1) as selected FROM encrypted";
+        let actual = query_by::<Value>(sql, &selector).await;
+
+        assert_expected(&expected, &actual);
+
+        let sql = format!(
+            "SELECT jsonb_path_query(encrypted_jsonb, '{selector}') as selected FROM encrypted"
+        );
+        let actual = simple_query::<Value>(&sql).await;
+
+        assert_expected(&expected, &actual);
+    }
+
+    #[tokio::test]
     async fn select_jsonb_path_query_with_alias() {
         trace();
 
