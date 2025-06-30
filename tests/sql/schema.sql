@@ -162,3 +162,149 @@ SELECT eql_v2.add_encrypted_constraint('encrypted', 'encrypted_text');
 
 SELECT eql_v2.migrate_config();
 SELECT eql_v2.activate_config();
+
+-- This is the exact same schema as above but using a database-generated primary key.
+-- It is required to remove flake form the Elixir integration test suite.
+-- TODO: port all the rest of our integration tests to this schema.
+DROP TABLE IF EXISTS encrypted_elixir;
+CREATE TABLE encrypted_elixir (
+    id serial,
+    plaintext text,
+    plaintext_date date,
+    plaintext_domain domain_type_with_check,
+    encrypted_text eql_v2_encrypted,
+    encrypted_bool eql_v2_encrypted,
+    encrypted_int2 eql_v2_encrypted,
+    encrypted_int4 eql_v2_encrypted,
+    encrypted_int8 eql_v2_encrypted,
+    encrypted_float8 eql_v2_encrypted,
+    encrypted_date eql_v2_encrypted,
+    encrypted_jsonb eql_v2_encrypted,
+    PRIMARY KEY(id)
+);
+
+DROP TABLE IF EXISTS unconfigured_elixir;
+CREATE TABLE unconfigured_elixir (
+    id serial,
+    encrypted_unconfigured eql_v2_encrypted,
+    PRIMARY KEY(id)
+);
+
+SELECT eql_v2.add_search_config(
+  'encrypted_elixir',
+  'encrypted_text',
+  'unique',
+  'text'
+);
+
+SELECT eql_v2.add_search_config(
+  'encrypted_elixir',
+  'encrypted_text',
+  'match',
+  'text'
+);
+
+SELECT eql_v2.add_search_config(
+  'encrypted_elixir',
+  'encrypted_text',
+  'ore',
+  'text'
+);
+
+SELECT eql_v2.add_search_config(
+  'encrypted_elixir',
+  'encrypted_bool',
+  'unique',
+  'boolean'
+);
+
+SELECT eql_v2.add_search_config(
+  'encrypted_elixir',
+  'encrypted_bool',
+  'ore',
+  'boolean'
+);
+
+SELECT eql_v2.add_search_config(
+  'encrypted_elixir',
+  'encrypted_int2',
+  'unique',
+  'small_int'
+);
+
+SELECT eql_v2.add_search_config(
+  'encrypted_elixir',
+  'encrypted_int2',
+  'ore',
+  'small_int'
+);
+
+SELECT eql_v2.add_search_config(
+  'encrypted_elixir',
+  'encrypted_int4',
+  'unique',
+  'int'
+);
+
+SELECT eql_v2.add_search_config(
+  'encrypted_elixir',
+  'encrypted_int4',
+  'ore',
+  'int'
+);
+
+SELECT eql_v2.add_search_config(
+  'encrypted_elixir',
+  'encrypted_int8',
+  'unique',
+  'big_int'
+);
+
+SELECT eql_v2.add_search_config(
+  'encrypted_elixir',
+  'encrypted_int8',
+  'ore',
+  'big_int'
+);
+
+
+SELECT eql_v2.add_search_config(
+  'encrypted_elixir',
+  'encrypted_float8',
+  'unique',
+  'double'
+);
+
+SELECT eql_v2.add_search_config(
+  'encrypted_elixir',
+  'encrypted_float8',
+  'ore',
+  'double'
+);
+
+SELECT eql_v2.add_search_config(
+  'encrypted_elixir',
+  'encrypted_date',
+  'unique',
+  'date'
+);
+
+SELECT eql_v2.add_search_config(
+  'encrypted_elixir',
+  'encrypted_date',
+  'ore',
+  'date'
+);
+
+SELECT eql_v2.add_search_config(
+  'encrypted_elixir',
+  'encrypted_jsonb',
+  'ste_vec',
+  'jsonb',
+  '{"prefix": "encrypted/encrypted_jsonb"}'
+);
+
+SELECT eql_v2.add_encrypted_constraint('encrypted_elixir', 'encrypted_text');
+
+SELECT eql_v2.migrate_config();
+SELECT eql_v2.activate_config();
