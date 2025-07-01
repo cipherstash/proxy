@@ -7,7 +7,7 @@ use crate::{
 };
 use bytes::{Buf, BufMut, BytesMut};
 use std::io::Cursor;
-use tracing::{debug, error};
+use tracing::{debug, error, info};
 
 #[derive(Debug, Clone)]
 pub struct DataRow {
@@ -26,6 +26,7 @@ impl DataRow {
     ) -> Vec<Option<eql::EqlEncrypted>> {
         let mut result = vec![];
         for (data_column, column_config) in self.columns.iter_mut().zip(column_configuration) {
+            info!(target: DECRYPT, ?column_config, ?data_column);
             let encrypted = column_config
                 .as_ref()
                 .filter(|_| data_column.is_not_null())
@@ -34,6 +35,7 @@ impl DataRow {
                         .try_into()
                         .inspect_err(|err| match err {
                             Error::Encrypt(EncryptError::ColumnIsNull) => {
+                                debug!(target: DECRYPT, msg ="ColumnIsNull", ?config);
                                 // Not an error, as you were
                                 data_column.set_null();
                             }
@@ -179,6 +181,8 @@ impl TryFrom<&mut DataColumn> for eql::EqlEncrypted {
 
     fn try_from(col: &mut DataColumn) -> Result<Self, Error> {
         if let Some(bytes) = &col.bytes {
+            info!(target: DECRYPT, ?bytes);
+
             if &bytes[0..=1] == b"(\"" {
                 // Text encoding
                 // Encrypted record is in the form ("{}")
@@ -198,6 +202,7 @@ impl TryFrom<&mut DataColumn> for eql::EqlEncrypted {
                     }
                 }
             } else {
+                // BINARY ENCODING
                 // 12 bytes for the binary rowtype header
                 // plus 1 byte for the jsonb header (value of 1)
                 // [Int32] Number of fields (N)
@@ -220,7 +225,10 @@ impl TryFrom<&mut DataColumn> for eql::EqlEncrypted {
                 let sliced = &bytes[start..];
 
                 match serde_json::from_slice(sliced) {
-                    Ok(e) => return Ok(e),
+                    Ok(e) => {
+                        info!(target: DECRYPT, ?e);
+                        return Ok(e);
+                    }
                     Err(err) => {
                         debug!(target: DECRYPT, error = err.to_string());
                         return Err(err.into());
@@ -252,7 +260,7 @@ mod tests {
     fn column_config(column: &str) -> Option<Column> {
         let identifier = Identifier::new("encrypted", column);
         let config = ColumnConfig::build("column".to_string()).casts_as(ColumnType::SmallInt);
-        let column = Column::new(identifier, config);
+        let column = Column::new(identifier, config, None);
         Some(column)
     }
 

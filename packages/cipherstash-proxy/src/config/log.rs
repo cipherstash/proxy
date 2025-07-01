@@ -104,7 +104,7 @@ impl Display for LogLevel {
             LogLevel::Debug => "debug",
             LogLevel::Trace => "trace",
         };
-        write!(f, "{}", s)
+        write!(f, "{s}")
     }
 }
 

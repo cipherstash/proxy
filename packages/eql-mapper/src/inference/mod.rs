@@ -2,8 +2,7 @@ mod infer_type;
 mod infer_type_impls;
 mod registry;
 mod sequence;
-mod sql_fn_macros;
-mod sql_functions;
+mod sql_types;
 mod type_error;
 
 pub mod unifier;
@@ -23,7 +22,7 @@ use crate::{ScopeError, ScopeTracker, TableResolver};
 
 pub(crate) use registry::*;
 pub(crate) use sequence::*;
-pub(crate) use sql_functions::*;
+pub(crate) use sql_types::*;
 pub(crate) use type_error::*;
 
 /// [`Visitor`] implementation that performs type inference on AST nodes.
@@ -127,9 +126,9 @@ impl<'ast> TypeInferencer<'ast> {
         match self.unify(self.get_node_type(lhs), self.get_node_type(rhs)) {
             Ok(unified) => Ok(unified),
             Err(err) => Err(TypeError::OnNodes(
-                format!("{:?}", lhs),
+                format!("{lhs:?}"),
                 self.get_node_type(lhs),
-                format!("{:?}", rhs),
+                format!("{rhs:?}"),
                 self.get_node_type(rhs),
                 err.to_string(),
             )),

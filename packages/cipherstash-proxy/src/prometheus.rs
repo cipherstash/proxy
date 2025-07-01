@@ -35,7 +35,7 @@ pub const SERVER_BYTES_SENT_TOTAL: &str = "cipherstash_proxy_server_bytes_sent_t
 pub const SERVER_BYTES_RECEIVED_TOTAL: &str = "cipherstash_proxy_server_bytes_received_total";
 
 pub fn start(host: String, port: u16) -> Result<(), Error> {
-    let address = format!("{}:{}", host, port);
+    let address = format!("{host}:{port}");
     let socket_address: SocketAddr = address.parse().unwrap();
 
     debug!(target: DEVELOPMENT, msg = "Starting Prometheus exporter", port);

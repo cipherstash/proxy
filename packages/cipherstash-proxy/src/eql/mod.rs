@@ -1,4 +1,4 @@
-use cipherstash_client::zerokms::{encrypted_record, EncryptedRecord};
+use cipherstash_client::zerokms::EncryptedRecord;
 use serde::{Deserialize, Serialize};
 use sqltk::parser::ast::Ident;
 
@@ -75,14 +75,78 @@ pub struct EqlEncrypted {
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct EqlEncryptedBody {
-    #[serde(rename = "c", with = "encrypted_record::formats::mp_base85")]
-    pub(crate) ciphertext: EncryptedRecord,
+    #[serde(
+        rename = "c",
+        // serialize_with = "serialize_option_encrypted_record",
+        default,
+        with = "formats::mp_base85",
+        // with = "encrypted_record::formats::mp_base85",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub(crate) ciphertext: Option<EncryptedRecord>,
 
     #[serde(flatten)]
     pub(crate) indexes: EqlEncryptedIndexes,
 
     #[serde(rename = "a", skip_serializing_if = "Option::is_none")]
     pub(crate) is_array_item: Option<bool>,
+}
+
+// /// Serializes an Option<EncryptedRecord> using the mp_base85 format.
+// pub fn serialize_option_encrypted_record<S>(
+//     value: &Option<EncryptedRecord>,
+//     serializer: S,
+// ) -> Result<S::Ok, S::Error>
+// where
+//     S: Serializer,
+// {
+//     match value {
+//         Some(record) => {
+//             encrypted_record::formats::mp_base85::serialize(record, serializer)
+//             // serialize(record, serializer)
+//             // let encoded = record.to_mp_base85().map_err(serde::ser::Error::custom)?;
+//             // serializer.serialize_some(&encoded)
+//         }
+//         None => serializer.serialize_none(),
+//     }
+// }
+pub mod formats {
+    pub mod mp_base85 {
+        use super::super::*;
+        use serde::Deserialize;
+
+        pub fn serialize<S>(
+            ciphertext: &Option<EncryptedRecord>,
+            serializer: S,
+        ) -> Result<S::Ok, S::Error>
+        where
+            S: serde::Serializer,
+        {
+            // encrypted_record::formats::mp_base85
+            match ciphertext {
+                Some(record) => {
+                    let s = record.to_mp_base85().map_err(serde::ser::Error::custom)?;
+                    serializer.serialize_some(&s)
+                }
+
+                None => serializer.serialize_none(),
+            }
+        }
+
+        pub fn deserialize<'de, D>(deserializer: D) -> Result<Option<EncryptedRecord>, D::Error>
+        where
+            D: serde::Deserializer<'de>,
+        {
+            let s: Option<String> = Option::deserialize(deserializer)?;
+            if let Some(s) = s {
+                Ok(EncryptedRecord::from_mp_base85(&s)
+                    // .map_err(serde::de::Error::custom)
+                    .ok())
+            } else {
+                Ok(None)
+            }
+        }
+    }
 }
 
 ///
@@ -152,17 +216,18 @@ mod tests {
     pub fn ciphertext_json() {
         let expected = Identifier::new("table", "column");
 
+        let ciphertext = Some(EncryptedRecord {
+            iv: Iv::default(),
+            ciphertext: vec![1; 32],
+            tag: vec![1; 16],
+            descriptor: "ciphertext".to_string(),
+            dataset_id: Some(Uuid::new_v4()),
+        });
         let ct = EqlEncrypted {
             identifier: expected.clone(),
             version: 1,
             body: EqlEncryptedBody {
-                ciphertext: EncryptedRecord {
-                    iv: Iv::default(),
-                    ciphertext: vec![1; 32],
-                    tag: vec![1; 16],
-                    descriptor: "ciphertext".to_string(),
-                    dataset_id: Some(Uuid::new_v4()),
-                },
+                ciphertext,
                 indexes: EqlEncryptedIndexes {
                     ore_block_u64_8_256: None,
                     bloom_filter: None,

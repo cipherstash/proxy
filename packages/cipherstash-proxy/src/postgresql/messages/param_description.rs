@@ -1,11 +1,13 @@
 use super::BackendCode;
 use crate::{
     error::{Error, ProtocolError},
+    log::MAPPER,
     SIZE_I16, SIZE_I32,
 };
 use bytes::{Buf, BufMut, BytesMut};
 use postgres_types::Type;
 use std::io::Cursor;
+use tracing::debug;
 
 ///
 /// Describe b't' (Backend) message.
@@ -34,6 +36,8 @@ pub struct ParamDescription {
 
 impl ParamDescription {
     pub fn map_types(&mut self, mapped_types: &[Option<Type>]) {
+        debug!(target: MAPPER, ?mapped_types);
+
         for (idx, t) in mapped_types.iter().enumerate() {
             if let Some(t) = t {
                 self.types[idx] = t.oid() as i32;

@@ -3,7 +3,7 @@
 //! Column type information is unused currently.
 
 use super::sql_ident::*;
-use crate::iterator_ext::IteratorExt;
+use crate::{iterator_ext::IteratorExt, unifier::EqlTraits};
 use core::fmt::Debug;
 use derive_more::Display;
 use sqltk::parser::ast::{Ident, ObjectName, ObjectNamePart};
@@ -41,14 +41,14 @@ pub struct Column {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Display, Hash)]
 pub enum ColumnKind {
     Native,
-    Eql,
+    Eql(EqlTraits),
 }
 
 impl Column {
-    pub fn eql(name: Ident) -> Self {
+    pub fn eql(name: Ident, features: EqlTraits) -> Self {
         Self {
             name,
-            kind: ColumnKind::Eql,
+            kind: ColumnKind::Eql(features),
         }
     }
 
@@ -156,7 +156,7 @@ impl Schema {
         } else {
             Err(SchemaError::ColumnNotFound(
                 format!("{table_name}"),
-                format!("{}", column_name),
+                format!("{column_name}"),
             ))
         }
     }
@@ -190,6 +190,45 @@ impl Table {
             .cloned()
             .map_err(|_| SchemaError::ColumnNotFound(self.name.to_string(), name.to_string()))
     }
+}
+
+#[macro_export]
+macro_rules! to_eql_trait_impls {
+    ($($indexes:ident)*) => {
+        {
+            #[allow(unused_mut)]
+            let mut impls = $crate::unifier::EqlTraits::default();
+            $crate::to_eql_trait_impls!(@flags impls $($indexes)*);
+            impls
+        }
+    };
+
+    (@flags $impls:ident Eq $($indexes:ident)*) => {
+        $impls.add_mut(EqlTrait::Eq);
+        $crate::to_eql_trait_impls!(@flags $impls $($indexes)*);
+    };
+
+    (@flags $impls:ident Ord $($indexes:ident)*) => {
+        $impls.add_mut(EqlTrait::Ord);
+        $crate::to_eql_trait_impls!(@flags $impls $($indexes)*);
+    };
+
+    (@flags $impls:ident TokenMatch $($indexes:ident)*) => {
+        $impls.add_mut(EqlTrait::TokenMatch);
+        $crate::to_eql_trait_impls!(@flags $impls $($indexes)*);
+    };
+
+    (@flags $impls:ident JsonLike $($indexes:ident)*) => {
+        $impls.add_mut(EqlTrait::JsonLike);
+        $crate::to_eql_trait_impls!(@flags $impls $($indexes)*);
+    };
+
+    (@flags $impls:ident Contain $($indexes:ident)*) => {
+        $impls.add_mut(EqlTrait::Contain);
+        $crate::to_eql_trait_impls!(@flags $impls $($indexes)*);
+    };
+
+    (@flags $impls:ident) => {}
 }
 
 /// A DSL to create a [`Schema`] for testing purposes.
@@ -235,10 +274,20 @@ macro_rules! schema {
     (@add_columns $table:ident $( $column_name:ident $(($($options:tt)+))? , )* ) => {
         $( schema!(@add_column $table $column_name $(($($options)*))? ); )*
     };
-    (@add_column $table:ident $column_name:ident (EQL) ) => {
+    (@add_column $table:ident $column_name:ident (EQL $(: $trait_:ident $(+ $trait_rest:ident)*)?) ) => {
         $table.add_column(std::sync::Arc::new($crate::model::Column::eql(
-            ::sqltk::parser::ast::Ident::new(stringify!($column_name))
+            ::sqltk::parser::ast::Ident::new(stringify!($column_name)),
+            $crate::to_eql_trait_impls!($($trait_ $($trait_rest)*)?)
         )));
+    };
+    (@add_column $table:ident $column_name:ident (PK) ) => {
+        $table.add_column(
+            std::sync::Arc::new(
+                $crate::model::Column::native(
+                    ::sqltk::parser::ast::Ident::new(stringify!($column_name))
+                )
+            ),
+        );
     };
     (@add_column $table:ident $column_name:ident () ) => {
         $table.add_column(

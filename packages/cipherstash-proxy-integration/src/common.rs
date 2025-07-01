@@ -5,6 +5,7 @@ use rustls::{
     client::danger::ServerCertVerifier, crypto::aws_lc_rs::default_provider,
     pki_types::CertificateDer, ClientConfig,
 };
+use serde_json::Value;
 use std::sync::{Arc, Once};
 use tokio_postgres::{types::ToSql, Client, NoTls};
 use tracing_subscriber::{filter::Directive, EnvFilter, FmtSubscriber};
@@ -105,7 +106,7 @@ pub async fn connect_with_tls(port: u16) -> Client {
 
     tokio::spawn(async move {
         if let Err(e) = connection.await {
-            eprintln!("connection error: {}", e);
+            eprintln!("connection error: {e}");
         }
     });
     client
@@ -117,7 +118,7 @@ pub async fn connect(port: u16) -> Client {
 
     tokio::spawn(async move {
         if let Err(e) = connection.await {
-            eprintln!("connection error: {}", e);
+            eprintln!("connection error: {e}");
         }
     });
 
@@ -175,7 +176,18 @@ where
     rows.iter()
         .filter_map(|row| {
             if let tokio_postgres::SimpleQueryMessage::Row(r) = row {
-                r.get(0).and_then(|val| val.parse::<T>().ok())
+                r.get(0).and_then(|val| {
+                    // Convert string value to FromSql compatible type
+                    // Try different type conversions based on the value format
+                    // PostgreSQL returns booleans as "t" or "f" in simple queries
+
+                    // Convert PostgreSQL boolean format to binary representation
+                    match val {
+                        "t" => "true".parse::<T>().ok(),
+                        "f" => "false".parse::<T>().ok(),
+                        _ => val.parse::<T>().ok(),
+                    }
+                })
             } else {
                 None
             }
@@ -197,6 +209,33 @@ pub async fn simple_query_with_null(sql: &str) -> Vec<Option<String>> {
             }
         })
         .collect()
+}
+
+pub async fn insert(sql: &str, params: &[&(dyn ToSql + Sync)]) {
+    let client = connect_with_tls(PROXY).await;
+    client.query(sql, params).await.unwrap();
+}
+
+pub async fn insert_jsonb() -> Value {
+    let id = random_id();
+
+    let encrypted_jsonb = serde_json::json!({
+        "id": id,
+        "string": "hello",
+        "number": 42,
+        "nested": {
+            "number": 1815,
+            "string": "world",
+        },
+        "array_string": ["hello", "world"],
+        "array_number": [42, 84],
+    });
+
+    let sql = "INSERT INTO encrypted (id, encrypted_jsonb) VALUES ($1, $2)".to_string();
+
+    insert(&sql, &[&id, &encrypted_jsonb]).await;
+
+    encrypted_jsonb
 }
 
 ///
