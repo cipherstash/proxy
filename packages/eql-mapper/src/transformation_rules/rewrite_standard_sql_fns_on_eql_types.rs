@@ -6,7 +6,8 @@ use sqltk::parser::ast::{
 };
 use sqltk::{AsNodeKey, NodeKey, NodePath, Visitable};
 
-use crate::{get_sql_function, EqlMapperError, Type, Value};
+use crate::unifier::{Type, Value};
+use crate::{get_sql_function, EqlMapperError};
 
 use super::TransformationRule;
 

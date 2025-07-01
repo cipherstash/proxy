@@ -5,6 +5,7 @@ use tracing::{span, Level};
 
 use crate::{
     inference::unifier::{Type, TypeVar},
+    unifier::Unifier,
     Param, ParamError,
 };
 
@@ -90,11 +91,14 @@ impl<'ast> TypeRegistry<'ast> {
     }
 
     // TODO: move this logic to EqlMapper?
-    pub(crate) fn resolved_param_types(&self) -> Result<Vec<(Param, Arc<Type>)>, ParamError> {
+    pub(crate) fn resolved_param_types(
+        &self,
+        unifier: &Unifier<'ast>,
+    ) -> Result<Vec<(Param, Arc<Type>)>, ParamError> {
         let mut params = self
             .get_params()
             .iter()
-            .map(|(p, ty)| Param::try_from(*p).map(|p| (p, ty.clone())))
+            .map(|(p, ty)| Param::try_from(*p).map(|p| (p, ty.clone().follow_tvars(unifier))))
             .collect::<Result<Vec<_>, _>>()?;
 
         params.sort_by(|(a, _), (b, _)| a.cmp(b));

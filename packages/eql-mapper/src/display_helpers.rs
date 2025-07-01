@@ -1,5 +1,4 @@
 use std::{
-    collections::HashMap,
     fmt::{Debug, Display},
     sync::Arc,
 };
@@ -9,7 +8,7 @@ use sqltk::parser::ast::{
 };
 use sqltk::NodeKey;
 
-use crate::{unifier::EqlTerm, Param, Type};
+use crate::unifier::EqlTerm;
 
 #[derive(Debug, Clone, Copy, Hash, Eq, PartialEq)]
 pub struct Fmt<T>(pub(crate) T);
@@ -65,18 +64,6 @@ impl Display for Fmt<NodeKey<'_>> {
     }
 }
 
-impl Display for Fmt<&HashMap<NodeKey<'_>, Type>> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut out: Vec<String> = Vec::new();
-        out.push("{ ".into());
-        for (k, v) in self.0.iter() {
-            out.push(format!("{}: {}", Fmt(*k), v));
-        }
-        out.push(" }".into());
-        f.write_str(&out.join(", "))
-    }
-}
-
 impl Display for Fmt<&[Arc<crate::unifier::Type>]> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("[")?;
@@ -107,18 +94,6 @@ impl<T: Display> Display for FmtAstVec<&Vec<T>> {
 impl<T: Display> Display for FmtAst<&T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         T::fmt(self.0, f)
-    }
-}
-
-impl Display for Fmt<&Vec<(Param, crate::Value)>> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let formatted = self
-            .0
-            .iter()
-            .map(|(p, v)| format!("{p}: {v}"))
-            .collect::<Vec<_>>()
-            .join(", ");
-        f.write_str(&formatted)
     }
 }
 

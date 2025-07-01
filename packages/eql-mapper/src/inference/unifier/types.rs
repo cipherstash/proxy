@@ -5,7 +5,7 @@ use sqltk::parser::ast::Ident;
 
 use crate::{ColumnKind, Table, TypeError};
 
-use super::{resolve_type::ResolveType, EqlTrait, EqlTraits, Unifier};
+use super::{EqlTrait, EqlTraits, Unifier};
 
 /// The [`Type`] enum represents the types used by the [`Unifier`] to represent the SQL & EQL types returned by
 /// expressions, projection-producing statements, built-in database functions & operators, EQL function & operators and
@@ -32,17 +32,15 @@ pub enum Type {
     Associated(AssociatedType),
 }
 
-// Statically assert that `Type` is `Send + Sync`.  If `Type` did not implement `Send` and/or `Sync` this crate would
-// fail to compile anyway but the error message is very obtuse. A failure here makes it obvious.
-const _: () = {
-    fn assert_send<T: Send>() {}
-    fn assert_sync<T: Sync>() {}
-
-    fn assert_all() {
-        assert_send::<Type>();
-        assert_sync::<Type>();
+impl Type {
+    pub fn contains_eql(&self) -> bool {
+        match self {
+            Type::Value(value) => value.contains_eql(),
+            Type::Var(_) => false,
+            Type::Associated(associated_type) => associated_type.contains_eql(),
+        }
     }
-};
+}
 
 /// An associated type.
 ///
@@ -79,6 +77,10 @@ impl AssociatedType {
             Ok(None)
         }
     }
+
+    fn contains_eql(&self) -> bool {
+        self.impl_ty.contains_eql()
+    }
 }
 
 /// A type variable with trait bounds.
@@ -106,6 +108,10 @@ pub struct SetOf(pub Arc<Type>);
 impl SetOf {
     pub(crate) fn inner_ty(&self) -> Arc<Type> {
         self.0.clone()
+    }
+
+    fn contains_eql(&self) -> bool {
+        self.0.contains_eql()
     }
 }
 
@@ -140,9 +146,27 @@ pub enum Value {
     SetOf(SetOf),
 }
 
+impl Value {
+    pub fn contains_eql(&self) -> bool {
+        match self {
+            Value::Eql(_) => true,
+            Value::Native(_) => false,
+            Value::Array(array) => array.contains_eql(),
+            Value::Projection(projection) => projection.contains_eql(),
+            Value::SetOf(set_of) => set_of.contains_eql(),
+        }
+    }
+}
+
 /// An array of some type.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Display, Hash)]
 pub struct Array(pub Arc<Type>);
+
+impl Array {
+    fn contains_eql(&self) -> bool {
+        self.0.contains_eql()
+    }
+}
 
 /// An `EqlTerm` is a type associated with a particular EQL type, i.e. an [`EqlValue`].
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Display, Hash)]
@@ -279,6 +303,8 @@ impl Type {
         Type::Value(Value::Array(Array(element_ty.into()))).into()
     }
 
+    /// Dereferences all type variables in `self` to the final type in chain of `Type::Var`.
+    /// The final type can be a `Type::Var`.
     pub(crate) fn follow_tvars(self: Arc<Self>, unifier: &Unifier<'_>) -> Arc<Type> {
         match &*self.clone() {
             Type::Value(Value::Projection(Projection(cols))) => {
@@ -326,59 +352,54 @@ impl Type {
         }
     }
 
-    /// Resolves `self`, returning it as a [`crate::Type`].
-    ///
-    /// A resolved type is one in which all type variables have been resolved, recursively.
-    ///
-    /// Fails with a [`TypeError`] if the stored `Type` cannot be fully resolved.
-    pub fn resolved(&self, unifier: &mut Unifier<'_>) -> Result<crate::Type, TypeError> {
-        self.resolve_type(unifier)
-    }
-
     pub(crate) fn resolved_as<T: Clone + 'static>(
-        &self,
-        unifier: &mut Unifier<'_>,
+        self: Arc<Type>,
+        unifier: &Unifier<'_>,
     ) -> Result<T, TypeError> {
-        let resolved_ty: crate::Type = self.resolve_type(unifier)?;
+        let resolved_ty = self.follow_tvars(unifier);
 
-        let result = match &resolved_ty {
-            crate::Type::Value(crate::Value::Projection(projection)) => {
+        if !matches!(&*resolved_ty, Type::Value(_)) {
+            return Err(TypeError::Expected("type to be resolved".to_string()));
+        }
+
+        let result = match &*resolved_ty {
+            Type::Value(Value::Projection(projection)) => {
                 if let Some(t) = (projection as &dyn std::any::Any).downcast_ref::<T>() {
                     return Ok(t.clone());
                 }
 
                 Err(())
             }
-            crate::Type::Value(crate::Value::SetOf(ty)) => {
+            Type::Value(Value::SetOf(ty)) => {
                 if let Some(t) = (ty as &dyn std::any::Any).downcast_ref::<T>() {
                     return Ok(t.clone());
                 }
 
                 Err(())
             }
-            crate::Type::Value(value) => {
+            Type::Value(value) => {
                 match value {
-                    crate::Value::Eql(maybe_t) => {
+                    Value::Eql(maybe_t) => {
                         if let Some(t) = (maybe_t as &dyn std::any::Any).downcast_ref::<T>() {
                             return Ok(t.clone());
                         }
                     }
-                    crate::Value::Native(maybe_t) => {
+                    Value::Native(maybe_t) => {
                         if let Some(t) = (maybe_t as &dyn std::any::Any).downcast_ref::<T>() {
                             return Ok(t.clone());
                         }
                     }
-                    crate::Value::Array(maybe_t) => {
+                    Value::Array(maybe_t) => {
                         if let Some(t) = (maybe_t as &dyn std::any::Any).downcast_ref::<T>() {
                             return Ok(t.clone());
                         }
                     }
-                    crate::Value::Projection(maybe_t) => {
+                    Value::Projection(maybe_t) => {
                         if let Some(t) = (maybe_t as &dyn std::any::Any).downcast_ref::<T>() {
                             return Ok(t.clone());
                         }
                     }
-                    crate::Value::SetOf(maybe_t) => {
+                    Value::SetOf(maybe_t) => {
                         if let Some(t) = (maybe_t as &dyn std::any::Any).downcast_ref::<T>() {
                             return Ok(t.clone());
                         }
@@ -387,6 +408,8 @@ impl Type {
 
                 Err(())
             }
+            Type::Associated(_) => Err(()),
+            Type::Var(_) => Err(()),
         };
 
         result.map_err(|_| {
@@ -473,12 +496,41 @@ impl Projection {
         )
     }
 
-    pub(crate) fn len(&self) -> usize {
+    pub fn len(&self) -> usize {
         self.0.len()
     }
 
-    pub(crate) fn columns(&self) -> &[ProjectionColumn] {
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    pub fn columns(&self) -> &[ProjectionColumn] {
         &self.0
+    }
+
+    fn contains_eql(&self) -> bool {
+        self.columns().iter().any(|col| col.ty.contains_eql())
+    }
+
+    pub(crate) fn flatten(&self, unifier: &Unifier<'_>) -> Result<Self, TypeError> {
+        let resolved_cols = self.columns().iter().try_fold(
+            vec![],
+            |mut acc, col| -> Result<Vec<ProjectionColumn>, TypeError> {
+                let alias = col.alias.clone();
+                if let Type::Value(Value::Projection(projection)) =
+                    &*col.ty.clone().follow_tvars(unifier)
+                {
+                    let resolved = projection.flatten(unifier)?;
+                    acc.extend(resolved.0.into_iter());
+                } else {
+                    let ty = col.ty.clone().follow_tvars(unifier);
+                    acc.push(ProjectionColumn { ty, alias });
+                }
+                Ok(acc)
+            },
+        )?;
+
+        Ok(crate::Projection(resolved_cols))
     }
 }
 
@@ -567,3 +619,15 @@ impl From<Array> for Type {
         Type::Value(Value::Array(array))
     }
 }
+
+// Statically assert that `Type` is `Send + Sync`.  If `Type` did not implement `Send` and/or `Sync` this crate would
+// fail to compile anyway but the error message is very obtuse. A failure here makes it obvious.
+const _: () = {
+    fn assert_send<T: Send>() {}
+    fn assert_sync<T: Sync>() {}
+
+    fn assert_all() {
+        assert_send::<Type>();
+        assert_sync::<Type>();
+    }
+};
