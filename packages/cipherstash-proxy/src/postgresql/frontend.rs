@@ -818,8 +818,8 @@ where
 
         for col in typed_statement.projection.columns() {
             let eql_mapper::ProjectionColumn { ty, .. } = col;
-            let configured_column = match ty {
-                eql_mapper::Value::Eql(eql_term) => {
+            let configured_column = match &**ty {
+                eql_mapper::Type::Value(eql_mapper::Value::Eql(eql_term)) => {
                     let TableColumn { table, column } = eql_term.table_column();
                     let identifier: Identifier = Identifier::from((table, column));
 

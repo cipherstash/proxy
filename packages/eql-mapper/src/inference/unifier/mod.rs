@@ -2,7 +2,6 @@ use std::{cell::RefCell, collections::HashMap, rc::Rc, sync::Arc};
 
 mod eql_traits;
 mod instantiated_type_env;
-mod resolve_type;
 mod type_decl;
 mod type_env;
 mod types;
@@ -16,7 +15,7 @@ pub(crate) use type_decl::*;
 use unify_types::UnifyTypes;
 
 use sqltk::AsNodeKey;
-pub(crate) use types::*;
+pub use types::*;
 
 pub(crate) use type_env::*;
 pub use types::{EqlTerm, EqlValue, NativeValue, TableColumn};

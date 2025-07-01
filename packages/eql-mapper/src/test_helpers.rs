@@ -13,7 +13,7 @@ use tracing_subscriber::fmt::format::FmtSpan;
 
 use std::sync::Once;
 
-use crate::{Projection, ProjectionColumn};
+use crate::unifier::{Projection, ProjectionColumn};
 
 #[allow(unused)]
 pub(crate) fn init_tracing() {
@@ -108,14 +108,14 @@ pub(crate) fn find_nodekey_for_value_node(
 macro_rules! col {
     ((NATIVE)) => {
         ProjectionColumn {
-            ty: Value::Native(NativeValue(None)),
+            ty: Arc::new(Type::Value(Value::Native(NativeValue(None)))),
             alias: None,
         }
     };
 
     ((NATIVE as $alias:ident)) => {
         ProjectionColumn {
-            ty: Value::Native(NativeValue(None)),
+            ty: Arc::new(Type::Value(Value::Native(NativeValue(None)))),
             alias: Some(id(stringify!($alias))),
         }
     };
@@ -132,30 +132,30 @@ macro_rules! col {
 
     ((NATIVE($table:ident . $column:ident) as $alias:ident)) => {
         ProjectionColumn {
-            ty: Value::Native(NativeValue(Some(TableColumn {
+            ty: Arc::new(Type::Value(Value::Native(NativeValue(Some(TableColumn {
                 table: id(stringify!($table)),
                 column: id(stringify!($column)),
-            }))),
+            }))))),
             alias: Some(id(stringify!($alias))),
         }
     };
 
     ((EQL($table:ident . $column:ident $(: $($eql_traits:ident)*)?))) => {
         ProjectionColumn {
-            ty: Value::Eql(EqlTerm::Full(EqlValue(TableColumn {
+            ty: Arc::new(Type::Value(Value::Eql(EqlTerm::Full(EqlValue(TableColumn {
                 table: id(stringify!($table)),
                 column: id(stringify!($column)),
-            }, $crate::to_eql_traits!($($($eql_traits)*)?)))),
+            }, $crate::to_eql_traits!($($($eql_traits)*)?)))))),
             alias: None,
         }
     };
 
     ((EQL($table:ident . $column:ident $(: $($eql_traits:ident)*)?) as $alias:ident)) => {
         ProjectionColumn {
-            ty: Value::Eql(EqlTerm::Full(EqlValue(TableColumn {
+            ty: Arc::new(Type::Value(Value::Eql(EqlTerm::Full(EqlValue(TableColumn {
                 table: id(stringify!($table)),
                 column: id(stringify!($column)),
-            }, $crate::to_eql_traits!($($($eql_traits)*)?)))),
+            }, $crate::to_eql_traits!($($($eql_traits)*)?)))))),
             alias: Some(id(stringify!($alias))),
         }
     };

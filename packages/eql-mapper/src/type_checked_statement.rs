@@ -6,9 +6,11 @@ use sqltk::{AsNodeKey, NodeKey, Transformable};
 use crate::unifier::EqlTerm;
 use crate::{
     CastLiteralsAsEncrypted, CastParamsAsEncrypted, DryRunnable, EqlMapperError,
-    FailOnPlaceholderChange, Param, PreserveEffectiveAliases, Projection,
-    RewriteStandardSqlFnsOnEqlTypes, TransformationRule, Type, Value,
+    FailOnPlaceholderChange, Param, PreserveEffectiveAliases, RewriteStandardSqlFnsOnEqlTypes,
+    TransformationRule,
 };
+
+use crate::unifier::{Projection, Type, Value};
 
 /// A `TypeCheckedStatement` is returned from a successful call to [`crate::type_check`].
 #[derive(Debug)]

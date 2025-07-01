@@ -20,7 +20,10 @@ pub use eql_mapper::*;
 pub use model::*;
 pub use param::*;
 pub use type_checked_statement::*;
-pub use unifier::{EqlTerm, EqlTrait, EqlTraits, EqlValue, NativeValue, TableColumn};
+pub use unifier::{
+    Array, AssociatedType, EqlTerm, EqlTrait, EqlTraits, EqlValue, NativeValue, Projection,
+    ProjectionColumn, SetOf, TableColumn, Type, Value,
+};
 
 pub(crate) use dep::*;
 pub(crate) use inference::*;
@@ -32,8 +35,11 @@ mod test {
     use super::{test_helpers::*, type_check};
     use crate::{
         projection, schema, test_helpers,
-        unifier::{EqlTerm, EqlTrait, EqlTraits, EqlValue, InstantiateType, NativeValue},
-        Param, Projection, ProjectionColumn, Schema, TableColumn, TableResolver, Value,
+        unifier::{
+            EqlTerm, EqlTrait, EqlTraits, EqlValue, InstantiateType, NativeValue, Projection,
+            ProjectionColumn, Type, Value,
+        },
+        Param, Schema, TableColumn, TableResolver,
     };
     use eql_mapper_macros::concrete_ty;
     use pretty_assertions::assert_eq;
@@ -67,7 +73,7 @@ mod test {
             Ok(typed) => {
                 assert_eq!(
                     typed.projection,
-                    concrete_ty!({ Native(users.email) as email } as crate::Projection)
+                    concrete_ty!({ Native(users.email) as email } as Projection)
                 )
             }
             Err(err) => panic!("type check failed: {err}"),
@@ -93,7 +99,7 @@ mod test {
             Ok(typed) => {
                 assert_eq!(
                     typed.projection,
-                    concrete_ty! {{EQL(users.email: Eq) as email} as crate::Projection}
+                    concrete_ty! {{EQL(users.email: Eq) as email} as Projection}
                 );
 
                 assert_eq!(
@@ -1245,7 +1251,7 @@ mod test {
             projection_type(&parse("select * from (select $1)")),
             Projection(vec![ProjectionColumn {
                 alias: None,
-                ty: Value::Native(NativeValue(None)),
+                ty: Arc::new(Type::Value(Value::Native(NativeValue(None)))),
             }]),
         ]);
     }
