@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1751327454083,
+  "lastUpdate": 1751329791288,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -6953,6 +6953,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 6.649847,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "james@cipherstash.com",
+            "name": "James Sadler",
+            "username": "freshtonic"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "70bb65972baab91879e545688c7f365abdce52d2",
+          "message": "Merge pull request #263 from cipherstash/feat/json-indexing-eql-v2\n\nfeat: JSON indexing for EQL V2",
+          "timestamp": "2025-07-01T10:25:50+10:00",
+          "tree_id": "8e728735fb8a2bd47de40b609876ed21828403d7",
+          "url": "https://github.com/cipherstash/proxy/commit/70bb65972baab91879e545688c7f365abdce52d2"
+        },
+        "date": 1751329789761,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 6.683255,
             "unit": "Number"
           }
         ]
