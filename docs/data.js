@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1751346045478,
+  "lastUpdate": 1751350685704,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -7057,6 +7057,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 7.048224,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "james@cipherstash.com",
+            "name": "James Sadler",
+            "username": "freshtonic"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "a52414a987e070eeab6544d0965c0d9452a1b279",
+          "message": "Merge pull request #272 from cipherstash/refactor/use-only-one-type-system\n\nref(eql-mapper): remove extra Type implementation",
+          "timestamp": "2025-07-01T16:14:53+10:00",
+          "tree_id": "f20aeef9b042a7212a777209d67fcefd4a72b12c",
+          "url": "https://github.com/cipherstash/proxy/commit/a52414a987e070eeab6544d0965c0d9452a1b279"
+        },
+        "date": 1751350684207,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 6.646181,
             "unit": "Number"
           }
         ]
