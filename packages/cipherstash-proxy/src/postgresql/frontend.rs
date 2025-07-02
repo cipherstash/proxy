@@ -246,6 +246,8 @@ where
     /// And send it on
     ///
     async fn query_handler(&mut self, bytes: &BytesMut) -> Result<Option<BytesMut>, Error> {
+        self.context.start_session();
+
         let mut query = Query::try_from(bytes)?;
 
         // Simple Query may contain many statements
@@ -475,6 +477,8 @@ where
     ///
     ///
     async fn parse_handler(&mut self, bytes: &BytesMut) -> Result<Option<BytesMut>, Error> {
+        self.context.start_session();
+
         let mut message = Parse::try_from(bytes)?;
 
         debug!(
