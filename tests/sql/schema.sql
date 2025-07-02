@@ -157,6 +157,8 @@ SELECT eql_v2.add_search_config(
   '{"prefix": "encrypted/encrypted_jsonb"}'
 );
 
+SELECT eql_v2.add_encrypted_constraint('encrypted', 'encrypted_text');
+
 
 -- This is the exact same schema as above but using a database-generated primary key.
 -- It is required to remove flake form the Elixir integration test suite.
@@ -298,4 +300,6 @@ SELECT eql_v2.add_search_config(
   'jsonb',
   '{"prefix": "encrypted/encrypted_jsonb"}'
 );
+
+SELECT eql_v2.add_encrypted_constraint('encrypted_elixir', 'encrypted_text');
 
