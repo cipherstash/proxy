@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1751422122338,
+  "lastUpdate": 1751427564579,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -7136,6 +7136,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 6.684038,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "toby@cipherstash.com",
+            "name": "Toby Hede",
+            "username": "tobyhede"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "38cd30f38abc8f5bab676980b9b6f50e0bb1e83f",
+          "message": "Merge pull request #271 from cipherstash/update-eql-2.1.0\n\nfeat: update eql-2.1.0",
+          "timestamp": "2025-07-02T13:35:43+10:00",
+          "tree_id": "4c1d03566797c818b69536d6c239b2f25a36730c",
+          "url": "https://github.com/cipherstash/proxy/commit/38cd30f38abc8f5bab676980b9b6f50e0bb1e83f"
+        },
+        "date": 1751427563361,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 7.045081,
             "unit": "Number"
           }
         ]
