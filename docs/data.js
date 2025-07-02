@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1751431451075,
+  "lastUpdate": 1751434570579,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -7190,6 +7190,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 6.625892,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "robin@rhoward.id.au",
+            "name": "Robin Howard",
+            "username": "damncabbage"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "34fd19cb43312b2004e4fc5a75e4eb8703b73f1a",
+          "message": "Merge pull request #270 from cipherstash/rh/p8s-sql-metrics\n\nAdd collection of processing and execution duration metrics for Prometheus reporting",
+          "timestamp": "2025-07-02T15:32:40+10:00",
+          "tree_id": "c5e05450f8c03d1d375f8f76aeb02ec6e345eff1",
+          "url": "https://github.com/cipherstash/proxy/commit/34fd19cb43312b2004e4fc5a75e4eb8703b73f1a"
+        },
+        "date": 1751434568763,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 6.720729,
             "unit": "Number"
           }
         ]
