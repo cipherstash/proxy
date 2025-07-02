@@ -183,14 +183,17 @@ pub enum EqlTerm {
 
     /// A JSON field or array index. The inferred type of the right hand side of the `->` operator when the
     /// left hand side is an [`EqlValue`] that implements the EQL trait `JsonLike`.
+    #[display("EQL:JsonAccessor({})", _0)]
     JsonAccessor(EqlValue),
 
     /// A JSON path. The inferred type of the second argument to functions such `jsonb_path_query` when the first
     /// argument is an [`EqlValue`] that implements the EQL trait `JsonLike`.
+    #[display("EQL:JsonPath({})", _0)]
     JsonPath(EqlValue),
 
     /// A text value that can be used as the right hand side of `LIKE` or `ILIKE` when the left hand side is an
     /// [`EqlValue`] that implements the EQL trait `TokenMatch`.
+    #[display("EQL:Tokenized({})", _0)]
     Tokenized(EqlValue),
 }
 
