@@ -19,6 +19,7 @@ mod schema_change;
 mod select;
 mod simple_protocol;
 mod support;
+mod update;
 
 #[macro_export]
 macro_rules! value_for_type {
