@@ -197,6 +197,20 @@ pub enum EqlTerm {
     Tokenized(EqlValue),
 }
 
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Display, Hash)]
+pub enum EqlTermVariant {
+    #[display("EQL:Full")]
+    Full,
+    #[display("EQL:Partial")]
+    Partial,
+    #[display("EQL:JsonAccessor")]
+    JsonAccessor,
+    #[display("EQL:JsonPath")]
+    JsonPath,
+    #[display("EQL:Tokenized")]
+    Tokenized,
+}
+
 impl EqlTerm {
     pub fn table_column(&self) -> &TableColumn {
         match self {
@@ -205,6 +219,16 @@ impl EqlTerm {
             | EqlTerm::JsonAccessor(eql_value)
             | EqlTerm::JsonPath(eql_value)
             | EqlTerm::Tokenized(eql_value) => eql_value.table_column(),
+        }
+    }
+
+    pub fn variant(&self) -> EqlTermVariant {
+        match self {
+            EqlTerm::Full(_) => EqlTermVariant::Full,
+            EqlTerm::Partial(_, _) => EqlTermVariant::Partial,
+            EqlTerm::JsonAccessor(_) => EqlTermVariant::JsonAccessor,
+            EqlTerm::JsonPath(_) => EqlTermVariant::JsonPath,
+            EqlTerm::Tokenized(_) => EqlTermVariant::Tokenized,
         }
     }
 }

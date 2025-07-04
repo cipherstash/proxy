@@ -998,8 +998,8 @@ fn literals_to_plaintext(
     let plaintexts = literals
         .iter()
         .zip(literal_columns)
-        .map(|((_, val), col)| match col {
-            Some(col) => literal_from_sql(val, col.cast_type()).map_err(|err| {
+        .map(|((eql_term, val), col)| match col {
+            Some(col) => literal_from_sql(val, eql_term.variant(), col.cast_type()).map_err(|err| {
                 debug!(
                     target: MAPPER,
                     msg = "Could not convert literal value",
