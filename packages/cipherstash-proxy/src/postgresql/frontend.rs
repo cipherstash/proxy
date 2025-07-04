@@ -999,16 +999,18 @@ fn literals_to_plaintext(
         .iter()
         .zip(literal_columns)
         .map(|((eql_term, val), col)| match col {
-            Some(col) => literal_from_sql(val, eql_term.variant(), col.cast_type()).map_err(|err| {
-                debug!(
-                    target: MAPPER,
-                    msg = "Could not convert literal value",
-                    value = ?val,
-                    cast_type = ?col.cast_type(),
-                    error = err.to_string()
-                );
-                MappingError::InvalidParameter(col.to_owned())
-            }),
+            Some(col) => {
+                literal_from_sql(val, eql_term.variant(), col.cast_type()).map_err(|err| {
+                    debug!(
+                        target: MAPPER,
+                        msg = "Could not convert literal value",
+                        value = ?val,
+                        cast_type = ?col.cast_type(),
+                        error = err.to_string()
+                    );
+                    MappingError::InvalidParameter(col.to_owned())
+                })
+            }
             None => Ok(None),
         })
         .collect::<Result<Vec<_>, _>>()?;

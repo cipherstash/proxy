@@ -66,8 +66,13 @@ impl Bind {
 
                     // Convert param bytes into a Plaintext wrapping a Value
                     // If the param type is different, will convert the bound type to the correct Plaintext variant identified by the cast_type
-                    let plaintext = bind_param_from_sql(param, &bound_param_type, EqlTermVariant::Full, col.cast_type())
-                        .map_err(|_| MappingError::InvalidParameter(col.to_owned()))?;
+                    let plaintext = bind_param_from_sql(
+                        param,
+                        &bound_param_type,
+                        EqlTermVariant::Full,
+                        col.cast_type(),
+                    )
+                    .map_err(|_| MappingError::InvalidParameter(col.to_owned()))?;
 
                     Ok(plaintext)
                 }

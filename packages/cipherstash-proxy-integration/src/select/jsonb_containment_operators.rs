@@ -10,7 +10,8 @@ mod tests {
 
         insert_jsonb().await;
 
-        let sql = "SELECT encrypted_jsonb @> '{ \"array_number\": [42, 84]}' FROM encrypted LIMIT 1";
+        let sql =
+            "SELECT encrypted_jsonb @> '{ \"array_number\": [42, 84]}' FROM encrypted LIMIT 1";
         let contains: bool = simple_query(&sql).await[0];
 
         assert!(contains);

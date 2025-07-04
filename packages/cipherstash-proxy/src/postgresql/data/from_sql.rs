@@ -11,7 +11,7 @@ use eql_mapper::EqlTermVariant;
 use postgres_types::FromSql;
 use postgres_types::Type;
 use rust_decimal::Decimal;
-use sqltk::parser::{ast::Value};
+use sqltk::parser::ast::Value;
 use std::str::FromStr;
 use tracing::debug;
 
@@ -122,7 +122,9 @@ fn text_from_sql(
     col_type: ColumnType,
 ) -> Result<Plaintext, MappingError> {
     match (eql_term, col_type) {
-        (EqlTermVariant::Full | EqlTermVariant::Partial, ColumnType::Utf8Str) => Ok(Plaintext::new(val)),
+        (EqlTermVariant::Full | EqlTermVariant::Partial, ColumnType::Utf8Str) => {
+            Ok(Plaintext::new(val))
+        }
         (EqlTermVariant::Full | EqlTermVariant::Partial, ColumnType::Float) => {
             parse_str_as_numeric_plaintext::<f64>(val)
         }
@@ -152,9 +154,11 @@ fn text_from_sql(
                 .map_err(|_| MappingError::CouldNotParseParameter)
                 .map(Plaintext::new)
         }
-        (EqlTermVariant::Full | EqlTermVariant::Partial, ColumnType::Decimal) => Decimal::from_str(val)
-            .map_err(|_| MappingError::CouldNotParseParameter)
-            .map(Plaintext::new),
+        (EqlTermVariant::Full | EqlTermVariant::Partial, ColumnType::Decimal) => {
+            Decimal::from_str(val)
+                .map_err(|_| MappingError::CouldNotParseParameter)
+                .map(Plaintext::new)
+        }
         (EqlTermVariant::Full | EqlTermVariant::Partial, ColumnType::Timestamp) => {
             unimplemented!("Timestamp")
         }
@@ -206,7 +210,7 @@ fn binary_from_sql(
         (EqlTermVariant::Full | EqlTermVariant::Partial, ColumnType::Int, &Type::INT4) => {
             parse_bytes_from_sql::<i32>(bytes, pg_type).map(Plaintext::new)
         }
-        (EqlTermVariant::Full | EqlTermVariant::Partial, ColumnType::Int, &Type::INT2)  => {
+        (EqlTermVariant::Full | EqlTermVariant::Partial, ColumnType::Int, &Type::INT2) => {
             parse_bytes_from_sql::<i16>(bytes, pg_type).map(|i| Plaintext::new(i as i32))
         }
 
@@ -245,9 +249,11 @@ fn binary_from_sql(
         (EqlTermVariant::JsonAccessor, ColumnType::JsonB, &Type::TEXT | &Type::VARCHAR) => {
             parse_bytes_from_sql::<String>(bytes, pg_type).map(Plaintext::new)
         }
-        (EqlTermVariant::Full | EqlTermVariant::Partial, ColumnType::JsonB, &Type::JSON | &Type::JSONB) => {
-            parse_bytes_from_sql::<serde_json::Value>(bytes, pg_type).map(Plaintext::new)
-        }
+        (
+            EqlTermVariant::Full | EqlTermVariant::Partial,
+            ColumnType::JsonB,
+            &Type::JSON | &Type::JSONB,
+        ) => parse_bytes_from_sql::<serde_json::Value>(bytes, pg_type).map(Plaintext::new),
 
         // TODO: timestamps
         (_, ColumnType::Timestamp, &Type::TIMESTAMPTZ) => unimplemented!("TIMESTAMPTZ"),
@@ -256,7 +262,6 @@ fn binary_from_sql(
         // // If input type is a string but the target column isn't then parse as string and convert
         // (_, _) => parse_bytes_from_sql::<String>(bytes, pg_type)
         //     .and_then(|val| text_from_sql(&val, pg_type, col_type)),
-
         (eql_term, col_type, _) => Err(MappingError::UnsupportedParameterType {
             eql_term: eql_term.clone(),
             column_type: col_type.clone(),
@@ -393,9 +398,14 @@ mod tests {
         bytes.put_i64(val);
         let param = BindParam::new(FormatCode::Binary, bytes);
 
-        let pt = bind_param_from_sql(&param, &Type::INT8, EqlTermVariant::Full, ColumnType::BigInt)
-            .unwrap()
-            .unwrap();
+        let pt = bind_param_from_sql(
+            &param,
+            &Type::INT8,
+            EqlTermVariant::Full,
+            ColumnType::BigInt,
+        )
+        .unwrap()
+        .unwrap();
         assert_eq!(pt, Plaintext::BigInt(Some(val)));
 
         // Text
@@ -407,9 +417,14 @@ mod tests {
 
         let param = BindParam::new(FormatCode::Text, bytes);
 
-        let pt = bind_param_from_sql(&param, &Type::INT8, EqlTermVariant::Full, ColumnType::BigInt)
-            .unwrap()
-            .unwrap();
+        let pt = bind_param_from_sql(
+            &param,
+            &Type::INT8,
+            EqlTermVariant::Full,
+            ColumnType::BigInt,
+        )
+        .unwrap()
+        .unwrap();
         assert_eq!(pt, Plaintext::BigInt(Some(val)));
     }
 
@@ -423,9 +438,14 @@ mod tests {
         bytes.put_u8(true as u8);
         let param = BindParam::new(FormatCode::Binary, bytes);
 
-        let pt = bind_param_from_sql(&param, &Type::BOOL, EqlTermVariant::Full, ColumnType::Boolean)
-            .unwrap()
-            .unwrap();
+        let pt = bind_param_from_sql(
+            &param,
+            &Type::BOOL,
+            EqlTermVariant::Full,
+            ColumnType::Boolean,
+        )
+        .unwrap()
+        .unwrap();
         assert_eq!(pt, Plaintext::Boolean(Some(val)));
 
         // Text
@@ -437,9 +457,14 @@ mod tests {
 
         let param = BindParam::new(FormatCode::Text, bytes);
 
-        let pt = bind_param_from_sql(&param, &Type::BOOL, EqlTermVariant::Full, ColumnType::Boolean)
-            .unwrap()
-            .unwrap();
+        let pt = bind_param_from_sql(
+            &param,
+            &Type::BOOL,
+            EqlTermVariant::Full,
+            ColumnType::Boolean,
+        )
+        .unwrap()
+        .unwrap();
         assert_eq!(pt, Plaintext::Boolean(Some(val)));
     }
 
