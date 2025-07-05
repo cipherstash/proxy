@@ -174,8 +174,8 @@ fn text_from_sql(
         (EqlTermVariant::Tokenized, ColumnType::Utf8Str) => Ok(Plaintext::new(val)),
 
         (eql_term, col_type) => Err(MappingError::UnsupportedParameterType {
-            eql_term: eql_term.clone(),
-            column_type: col_type.clone(),
+            eql_term,
+            column_type: col_type,
             postgres_type: None,
         }),
     }
@@ -258,13 +258,17 @@ fn binary_from_sql(
         // TODO: timestamps
         (_, ColumnType::Timestamp, &Type::TIMESTAMPTZ) => unimplemented!("TIMESTAMPTZ"),
 
-        // TODO
-        // // If input type is a string but the target column isn't then parse as string and convert
-        // (_, _) => parse_bytes_from_sql::<String>(bytes, pg_type)
+        // If input type is a string but the target column isn't then parse as string and convert
+        // (&Type::TEXT, _) => parse_bytes_from_sql::<String>(bytes, pg_type)
         //     .and_then(|val| text_from_sql(&val, pg_type, col_type)),
+
+        // If input type is a string but the target column isn't then parse as string and convert
+        (_, _, &Type::TEXT | &Type::VARCHAR) => parse_bytes_from_sql::<String>(bytes, pg_type)
+            .and_then(|val| text_from_sql(&val, EqlTermVariant::Full, pg_type, col_type)),
+
         (eql_term, col_type, _) => Err(MappingError::UnsupportedParameterType {
-            eql_term: eql_term.clone(),
-            column_type: col_type.clone(),
+            eql_term,
+            column_type: col_type,
             postgres_type: Some(pg_type.clone()),
         }),
     }
