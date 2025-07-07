@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1751596666395,
+  "lastUpdate": 1751848965678,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -7294,6 +7294,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 6.672871,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "toby@cipherstash.com",
+            "name": "Toby Hede",
+            "username": "tobyhede"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "571fcc2bf9d187998bc90099d1b2ae55fe66843f",
+          "message": "Merge pull request #273 from cipherstash/sql-update-tests\n\nTests for SQL UPDATE",
+          "timestamp": "2025-07-07T10:39:44+10:00",
+          "tree_id": "6fadc81fe61ede5ba235a0701e27ba0a97b09083",
+          "url": "https://github.com/cipherstash/proxy/commit/571fcc2bf9d187998bc90099d1b2ae55fe66843f"
+        },
+        "date": 1751848964136,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 6.656265,
             "unit": "Number"
           }
         ]
