@@ -9,7 +9,6 @@ use crate::postgresql::protocol::BytesMutReadString;
 use crate::{SIZE_I16, SIZE_I32};
 use bytes::{Buf, BufMut, BytesMut};
 use cipherstash_client::encryption::Plaintext;
-use eql_mapper::EqlTermVariant;
 use postgres_types::Type;
 use std::fmt::{self, Display, Formatter};
 use std::io::Cursor;
@@ -64,15 +63,17 @@ impl Bind {
                         col = ?col, bound_param_type = ?bound_param_type
                     );
 
+                    // if matches!(bound_param_type, Type::)
+
                     // Convert param bytes into a Plaintext wrapping a Value
                     // If the param type is different, will convert the bound type to the correct Plaintext variant identified by the cast_type
                     let plaintext = bind_param_from_sql(
                         param,
                         &bound_param_type,
-                        EqlTermVariant::Full,
+                        col.eql_term(),
                         col.cast_type(),
                     )
-                    .map_err(|_| MappingError::InvalidParameter(col.to_owned()))?;
+                    .map_err(|_| MappingError::InvalidParameter(Box::new(col.to_owned())))?;
 
                     Ok(plaintext)
                 }

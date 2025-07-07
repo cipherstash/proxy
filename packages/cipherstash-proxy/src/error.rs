@@ -3,7 +3,6 @@ use bytes::BytesMut;
 use cipherstash_client::{encryption, schema::ColumnType};
 use eql_mapper::{EqlMapperError, EqlTermVariant};
 use metrics_exporter_prometheus::BuildError;
-use postgres_types::Type;
 use std::{io, time::Duration};
 use thiserror::Error;
 
@@ -72,7 +71,7 @@ pub enum ContextError {
 pub enum MappingError {
     #[error("Invalid parameter for column '{}' of type '{}' in table '{}' (OID {}). For help visit {}#mapping-invalid-parameter",
     _0.column_name(), _0.cast_type(), _0.table_name(), _0.oid(), ERROR_DOC_BASE_URL)]
-    InvalidParameter(Column),
+    InvalidParameter(Box<Column>),
 
     #[error(
         "{}. For help visit {}#mapping-invalid-sql-statement",
@@ -85,7 +84,6 @@ pub enum MappingError {
     UnsupportedParameterType {
         eql_term: EqlTermVariant,
         column_type: ColumnType,
-        postgres_type: Option<Type>,
     },
 
     #[error("Statement could not be type checked: {}. For help visit {}#mapping-statement-could-not-be-type-checked", _0, ERROR_DOC_BASE_URL)]

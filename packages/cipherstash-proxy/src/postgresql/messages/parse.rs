@@ -157,7 +157,7 @@ mod tests {
 
         let config = ColumnConfig::build("column".to_string()).casts_as(ColumnType::SmallInt);
 
-        let column = Column::new(identifier, config, None);
+        let column = Column::new(identifier, config, None, eql_mapper::EqlTermVariant::Full);
         let columns = vec![None, Some(column)];
 
         parse.rewrite_param_types(&columns);

@@ -1,4 +1,5 @@
 use cipherstash_client::schema::{ColumnConfig, ColumnType};
+use eql_mapper::EqlTermVariant;
 use postgres_types::Type;
 
 use crate::Identifier;
@@ -8,6 +9,7 @@ pub struct Column {
     pub identifier: Identifier,
     pub config: ColumnConfig,
     pub postgres_type: Type,
+    pub eql_term: EqlTermVariant,
 }
 
 impl Column {
@@ -15,6 +17,7 @@ impl Column {
         identifier: Identifier,
         config: ColumnConfig,
         postgres_type: Option<Type>,
+        eql_term: EqlTermVariant,
     ) -> Column {
         let postgres_type =
             postgres_type.unwrap_or(column_type_to_postgres_type(&config.cast_type));
@@ -23,6 +26,7 @@ impl Column {
             identifier,
             config,
             postgres_type,
+            eql_term,
         }
     }
 
@@ -38,20 +42,20 @@ impl Column {
         self.postgres_type.oid()
     }
 
-    pub fn postgres_type_name(&self) -> &str {
-        self.postgres_type.name()
-    }
-
     pub fn cast_type(&self) -> ColumnType {
         self.config.cast_type
     }
 
-    pub fn is_param_type(&self, param_type: &Type) -> bool {
-        param_type == &self.postgres_type
+    pub fn eql_term(&self) -> EqlTermVariant {
+        self.eql_term
     }
 
     pub fn is_encryptable(&self) -> bool {
-        self.postgres_type != postgres_types::Type::JSONPATH
+        // self.postgres_type != postgres_types::Type::JSONPATH
+        matches!(
+            self.eql_term,
+            EqlTermVariant::Full | EqlTermVariant::Partial
+        )
     }
 }
 

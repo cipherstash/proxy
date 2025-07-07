@@ -13,7 +13,7 @@ use postgres_types::Type;
 use rust_decimal::Decimal;
 use sqltk::parser::ast::Value;
 use std::str::FromStr;
-use tracing::debug;
+use tracing::{debug, error};
 
 pub fn bind_param_from_sql(
     param: &BindParam,
@@ -21,6 +21,8 @@ pub fn bind_param_from_sql(
     eql_term: EqlTermVariant,
     col_type: ColumnType,
 ) -> Result<Option<Plaintext>, Error> {
+    error!(target: ENCODING, ?param, ?postgres_type, ?eql_term, ?col_type);
+
     if param.is_null() {
         return Ok(None);
     }
@@ -121,6 +123,8 @@ fn text_from_sql(
     eql_term: EqlTermVariant,
     col_type: ColumnType,
 ) -> Result<Plaintext, MappingError> {
+    debug!(target: ENCODING, ?val, ?eql_term, ?col_type);
+
     match (eql_term, col_type) {
         (EqlTermVariant::Full | EqlTermVariant::Partial, ColumnType::Utf8Str) => {
             Ok(Plaintext::new(val))
@@ -162,6 +166,9 @@ fn text_from_sql(
         (EqlTermVariant::Full | EqlTermVariant::Partial, ColumnType::Timestamp) => {
             unimplemented!("Timestamp")
         }
+
+        // postgres_type: Jsonpath, eql_term: Full, col_type: JsonB
+
         // If JSONB, JSONPATH values are treated as strings
         (EqlTermVariant::JsonPath | EqlTermVariant::JsonAccessor, ColumnType::JsonB) => {
             Ok(Plaintext::new(val))
@@ -176,7 +183,6 @@ fn text_from_sql(
         (eql_term, col_type) => Err(MappingError::UnsupportedParameterType {
             eql_term,
             column_type: col_type,
-            postgres_type: None,
         }),
     }
 }
@@ -271,7 +277,6 @@ fn binary_from_sql(
         (eql_term, col_type, _) => Err(MappingError::UnsupportedParameterType {
             eql_term,
             column_type: col_type,
-            postgres_type: Some(pg_type.clone()),
         }),
     }
 }
@@ -391,6 +396,7 @@ mod tests {
                 mode: ColumnMode::PlaintextDuplicate,
             },
             postgres_type: ty,
+            eql_term: EqlTermVariant::Full,
         }
     }
 

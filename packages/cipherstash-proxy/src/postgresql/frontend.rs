@@ -924,14 +924,19 @@ where
                 );
 
                 // IndexTerm::SteVecSelector
-
                 let postgres_type = if matches!(eql_term, EqlTerm::JsonPath(_)) {
                     Some(Type::JSONPATH)
                 } else {
                     None
                 };
 
-                Ok(Some(Column::new(identifier, config, postgres_type)))
+                let eql_term = eql_term.variant();
+                Ok(Some(Column::new(
+                    identifier,
+                    config,
+                    postgres_type,
+                    eql_term,
+                )))
             }
             None => {
                 warn!(
@@ -998,19 +1003,17 @@ fn literals_to_plaintext(
     let plaintexts = literals
         .iter()
         .zip(literal_columns)
-        .map(|((eql_term, val), col)| match col {
-            Some(col) => {
-                literal_from_sql(val, eql_term.variant(), col.cast_type()).map_err(|err| {
-                    debug!(
-                        target: MAPPER,
-                        msg = "Could not convert literal value",
-                        value = ?val,
-                        cast_type = ?col.cast_type(),
-                        error = err.to_string()
-                    );
-                    MappingError::InvalidParameter(col.to_owned())
-                })
-            }
+        .map(|((_, val), col)| match col {
+            Some(col) => literal_from_sql(val, col.eql_term(), col.cast_type()).map_err(|err| {
+                debug!(
+                    target: MAPPER,
+                    msg = "Could not convert literal value",
+                    value = ?val,
+                    cast_type = ?col.cast_type(),
+                    error = err.to_string()
+                );
+                MappingError::InvalidParameter(Box::new(col.to_owned()))
+            }),
             None => Ok(None),
         })
         .collect::<Result<Vec<_>, _>>()?;

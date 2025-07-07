@@ -260,7 +260,7 @@ mod tests {
     fn column_config(column: &str) -> Option<Column> {
         let identifier = Identifier::new("encrypted", column);
         let config = ColumnConfig::build("column".to_string()).casts_as(ColumnType::SmallInt);
-        let column = Column::new(identifier, config, None);
+        let column = Column::new(identifier, config, None, eql_mapper::EqlTermVariant::Full);
         Some(column)
     }
 
