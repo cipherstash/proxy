@@ -167,8 +167,6 @@ fn text_from_sql(
             unimplemented!("Timestamp")
         }
 
-        // postgres_type: Jsonpath, eql_term: Full, col_type: JsonB
-
         // If JSONB, JSONPATH values are treated as strings
         (EqlTermVariant::JsonPath | EqlTermVariant::JsonAccessor, ColumnType::JsonB) => {
             Ok(Plaintext::new(val))
@@ -221,7 +219,6 @@ fn binary_from_sql(
         (EqlTermVariant::Full | EqlTermVariant::Partial, ColumnType::Int, &Type::INT2) => {
             parse_bytes_from_sql::<i16>(bytes, pg_type).map(|i| Plaintext::new(i as i32))
         }
-
         // INT8, INT4 and INT2 can be converted to BigInt plaintext
         (EqlTermVariant::Full | EqlTermVariant::Partial, ColumnType::BigInt, &Type::INT8) => {
             parse_bytes_from_sql::<i64>(bytes, pg_type).map(Plaintext::new)
@@ -257,10 +254,11 @@ fn binary_from_sql(
         (EqlTermVariant::JsonAccessor, ColumnType::JsonB, &Type::TEXT | &Type::VARCHAR) => {
             parse_bytes_from_sql::<String>(bytes, pg_type).map(Plaintext::new)
         }
+        // Python psycopg sends JSON/B as BYTEA
         (
             EqlTermVariant::Full | EqlTermVariant::Partial,
             ColumnType::JsonB,
-            &Type::JSON | &Type::JSONB,
+            &Type::JSON | &Type::JSONB | &Type::BYTEA,
         ) => parse_bytes_from_sql::<serde_json::Value>(bytes, pg_type).map(Plaintext::new),
 
         // TODO: timestamps

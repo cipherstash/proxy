@@ -51,7 +51,6 @@ impl Column {
     }
 
     pub fn is_encryptable(&self) -> bool {
-        // self.postgres_type != postgres_types::Type::JSONPATH
         matches!(
             self.eql_term,
             EqlTermVariant::Full | EqlTermVariant::Partial
