@@ -13,7 +13,7 @@ use postgres_types::Type;
 use rust_decimal::Decimal;
 use sqltk::parser::ast::Value;
 use std::str::FromStr;
-use tracing::{debug, error};
+use tracing::debug;
 
 pub fn bind_param_from_sql(
     param: &BindParam,
