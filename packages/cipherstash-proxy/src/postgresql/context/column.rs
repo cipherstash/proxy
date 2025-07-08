@@ -20,7 +20,7 @@ impl Column {
         eql_term: EqlTermVariant,
     ) -> Column {
         let postgres_type =
-            postgres_type.unwrap_or(column_type_to_postgres_type(&config.cast_type));
+            postgres_type.unwrap_or(column_type_to_postgres_type(&config.cast_type, eql_term));
 
         Column {
             identifier,
@@ -58,18 +58,27 @@ impl Column {
     }
 }
 
-fn column_type_to_postgres_type(col_type: &ColumnType) -> postgres_types::Type {
-    match col_type {
-        ColumnType::Boolean => postgres_types::Type::BOOL,
-        ColumnType::BigInt => postgres_types::Type::INT8,
-        ColumnType::BigUInt => postgres_types::Type::INT8,
-        ColumnType::Date => postgres_types::Type::DATE,
-        ColumnType::Decimal => postgres_types::Type::NUMERIC,
-        ColumnType::Float => postgres_types::Type::FLOAT8,
-        ColumnType::Int => postgres_types::Type::INT4,
-        ColumnType::SmallInt => postgres_types::Type::INT2,
-        ColumnType::Timestamp => postgres_types::Type::TIMESTAMPTZ,
-        ColumnType::Utf8Str => postgres_types::Type::TEXT,
-        ColumnType::JsonB => postgres_types::Type::JSONB,
+///
+/// Maps a configured index type to a Postgres Type
+///
+/// JSONAccessors are mapped to a string for the client, but are JSONB for the server
+///
+fn column_type_to_postgres_type(
+    col_type: &ColumnType,
+    eql_term: EqlTermVariant,
+) -> postgres_types::Type {
+    match (col_type, eql_term) {
+        (ColumnType::Boolean, _) => postgres_types::Type::BOOL,
+        (ColumnType::BigInt, _) => postgres_types::Type::INT8,
+        (ColumnType::BigUInt, _) => postgres_types::Type::INT8,
+        (ColumnType::Date, _) => postgres_types::Type::DATE,
+        (ColumnType::Decimal, _) => postgres_types::Type::NUMERIC,
+        (ColumnType::Float, _) => postgres_types::Type::FLOAT8,
+        (ColumnType::Int, _) => postgres_types::Type::INT4,
+        (ColumnType::SmallInt, _) => postgres_types::Type::INT2,
+        (ColumnType::Timestamp, _) => postgres_types::Type::TIMESTAMPTZ,
+        (ColumnType::Utf8Str, _) => postgres_types::Type::TEXT,
+        (ColumnType::JsonB, EqlTermVariant::JsonAccessor) => postgres_types::Type::TEXT,
+        (ColumnType::JsonB, _) => postgres_types::Type::JSONB,
     }
 }

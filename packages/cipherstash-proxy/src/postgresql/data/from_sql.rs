@@ -13,7 +13,7 @@ use postgres_types::Type;
 use rust_decimal::Decimal;
 use sqltk::parser::ast::Value;
 use std::str::FromStr;
-use tracing::{debug, error};
+use tracing::debug;
 
 pub fn bind_param_from_sql(
     param: &BindParam,
@@ -21,7 +21,7 @@ pub fn bind_param_from_sql(
     eql_term: EqlTermVariant,
     col_type: ColumnType,
 ) -> Result<Option<Plaintext>, Error> {
-    error!(target: ENCODING, ?param, ?postgres_type, ?eql_term, ?col_type);
+    debug!(target: ENCODING, ?param, ?postgres_type, ?eql_term, ?col_type);
 
     if param.is_null() {
         return Ok(None);
@@ -169,6 +169,11 @@ fn text_from_sql(
 
         // If JSONB, JSONPATH values are treated as strings
         (EqlTermVariant::JsonPath | EqlTermVariant::JsonAccessor, ColumnType::JsonB) => {
+            let val = if val.starts_with("$.") {
+                val.to_string()
+            } else {
+                format!("$.{}", val)
+            };
             Ok(Plaintext::new(val))
         }
         (EqlTermVariant::Full | EqlTermVariant::Partial, ColumnType::JsonB) => {
@@ -249,10 +254,24 @@ fn binary_from_sql(
 
         // If JSONB, JSONPATH values are treated as strings
         (EqlTermVariant::JsonPath, ColumnType::JsonB, &Type::JSONPATH) => {
-            parse_bytes_from_sql::<String>(bytes, pg_type).map(Plaintext::new)
+            parse_bytes_from_sql::<String>(bytes, pg_type).map(|val| {
+                let val = if val.starts_with("$.") {
+                    val
+                } else {
+                    format!("$.{}", val)
+                };
+                Plaintext::new(val)
+            })
         }
         (EqlTermVariant::JsonAccessor, ColumnType::JsonB, &Type::TEXT | &Type::VARCHAR) => {
-            parse_bytes_from_sql::<String>(bytes, pg_type).map(Plaintext::new)
+            parse_bytes_from_sql::<String>(bytes, pg_type).map(|val| {
+                let val = if val.starts_with("$.") {
+                    val
+                } else {
+                    format!("$.{}", val)
+                };
+                Plaintext::new(val)
+            })
         }
         // Python psycopg sends JSON/B as BYTEA
         (
