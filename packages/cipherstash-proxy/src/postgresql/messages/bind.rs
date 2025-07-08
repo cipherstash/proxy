@@ -63,8 +63,6 @@ impl Bind {
                         col = ?col, bound_param_type = ?bound_param_type
                     );
 
-                    // if matches!(bound_param_type, Type::)
-
                     // Convert param bytes into a Plaintext wrapping a Value
                     // If the param type is different, will convert the bound type to the correct Plaintext variant identified by the cast_type
                     let plaintext = bind_param_from_sql(

@@ -7,7 +7,7 @@ use crate::{
 };
 use bytes::{Buf, BufMut, BytesMut};
 use std::io::Cursor;
-use tracing::{debug, error, info};
+use tracing::{debug, error};
 
 #[derive(Debug, Clone)]
 pub struct DataRow {
@@ -26,7 +26,6 @@ impl DataRow {
     ) -> Vec<Option<eql::EqlEncrypted>> {
         let mut result = vec![];
         for (data_column, column_config) in self.columns.iter_mut().zip(column_configuration) {
-            info!(target: DECRYPT, ?column_config, ?data_column);
             let encrypted = column_config
                 .as_ref()
                 .filter(|_| data_column.is_not_null())
@@ -181,8 +180,6 @@ impl TryFrom<&mut DataColumn> for eql::EqlEncrypted {
 
     fn try_from(col: &mut DataColumn) -> Result<Self, Error> {
         if let Some(bytes) = &col.bytes {
-            info!(target: DECRYPT, ?bytes);
-
             if &bytes[0..=1] == b"(\"" {
                 // Text encoding
                 // Encrypted record is in the form ("{}")
@@ -226,7 +223,6 @@ impl TryFrom<&mut DataColumn> for eql::EqlEncrypted {
 
                 match serde_json::from_slice(sliced) {
                     Ok(e) => {
-                        info!(target: DECRYPT, ?e);
                         return Ok(e);
                     }
                     Err(err) => {
