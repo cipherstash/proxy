@@ -1,4 +1,6 @@
 mod group_by;
+mod jsonb_contained_by;
+mod jsonb_contains;
 mod jsonb_path_exists;
 mod jsonb_path_query;
 mod jsonb_path_query_first;

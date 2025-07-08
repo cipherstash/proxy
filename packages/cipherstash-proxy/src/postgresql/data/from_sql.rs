@@ -7,25 +7,29 @@ use bigdecimal::BigDecimal;
 use bytes::BytesMut;
 use chrono::NaiveDate;
 use cipherstash_client::{encryption::Plaintext, schema::ColumnType};
+use eql_mapper::EqlTermVariant;
 use postgres_types::FromSql;
 use postgres_types::Type;
 use rust_decimal::Decimal;
 use sqltk::parser::ast::Value;
 use std::str::FromStr;
-use tracing::debug;
+use tracing::{debug, error};
 
 pub fn bind_param_from_sql(
     param: &BindParam,
     postgres_type: &Type,
+    eql_term: EqlTermVariant,
     col_type: ColumnType,
 ) -> Result<Option<Plaintext>, Error> {
+    error!(target: ENCODING, ?param, ?postgres_type, ?eql_term, ?col_type);
+
     if param.is_null() {
         return Ok(None);
     }
 
     let pt = match param.format_code {
-        FormatCode::Text => text_from_sql(&param.to_string(), postgres_type, col_type),
-        FormatCode::Binary => binary_from_sql(&param.bytes, postgres_type, col_type),
+        FormatCode::Text => text_from_sql(&param.to_string(), eql_term, col_type),
+        FormatCode::Binary => binary_from_sql(&param.bytes, postgres_type, eql_term, col_type),
     }?;
 
     Ok(Some(pt))
@@ -37,9 +41,10 @@ pub fn bind_param_from_sql(
 /// This function extracts the inner type and converts it to a Plaintext value.
 pub fn literal_from_sql(
     literal: &Value,
+    eql_term: EqlTermVariant,
     col_type: ColumnType,
 ) -> Result<Option<Plaintext>, MappingError> {
-    debug!(target: ENCODING, ?literal, ?col_type);
+    debug!(target: ENCODING, ?literal, ?eql_term, ?col_type);
     let pt = match literal {
         // All string literal variants
         Value::SingleQuotedString(s)
@@ -54,10 +59,10 @@ pub fn literal_from_sql(
         | Value::DoubleQuotedRawStringLiteral(s)
         | Value::TripleSingleQuotedRawStringLiteral(s)
         | Value::TripleDoubleQuotedRawStringLiteral(s)
-        | Value::NationalStringLiteral(s) => Some(text_from_sql(s, &Type::TEXT, col_type)?),
+        | Value::NationalStringLiteral(s) => Some(text_from_sql(s, eql_term, col_type)?),
 
         // Dollar quoted strings are a special case of string literals
-        Value::DollarQuotedString(s) => Some(text_from_sql(&s.value, &Type::TEXT, col_type)?),
+        Value::DollarQuotedString(s) => Some(text_from_sql(&s.value, eql_term, col_type)?),
 
         // If a boolean was parsed directly map it to a Plaintext::Boolean
         Value::Boolean(b) => Some(Plaintext::new(*b)),
@@ -78,8 +83,11 @@ pub fn literal_from_sql(
         // #[cfg(feature = "bigdecimal")]
         Value::Number(d, _) => Some(decimal_from_sql(d, col_type)?),
 
-        // TODO: Not sure what the behaviour should be for these
-        Value::Placeholder(_) => todo!("Placeholder parsed type not implemented"),
+        Value::Placeholder(_) => {
+            return Err(MappingError::Internal(String::from(
+                "placeholder is not a literal",
+            )))
+        }
     };
 
     Ok(pt)
@@ -112,30 +120,31 @@ pub fn literal_from_sql(
 /// | `Type::INT8` | `ColumnType::Int` | `Error`` |
 fn text_from_sql(
     val: &str,
-    pg_type: &Type,
+    eql_term: EqlTermVariant,
     col_type: ColumnType,
 ) -> Result<Plaintext, MappingError> {
-    match (pg_type, col_type) {
-        // String is is String
-        (&Type::TEXT, ColumnType::Utf8Str) => Ok(Plaintext::new(val)),
-        // Primitive numeric types are parsed from the string or from types that will fit
-        (&Type::TEXT, ColumnType::Float) => parse_str_as_numeric_plaintext::<f64>(val),
-        (&Type::TEXT | &Type::INT2, ColumnType::SmallInt) => {
+    debug!(target: ENCODING, ?val, ?eql_term, ?col_type);
+
+    match (eql_term, col_type) {
+        (EqlTermVariant::Full | EqlTermVariant::Partial, ColumnType::Utf8Str) => {
+            Ok(Plaintext::new(val))
+        }
+        (EqlTermVariant::Full | EqlTermVariant::Partial, ColumnType::Float) => {
+            parse_str_as_numeric_plaintext::<f64>(val)
+        }
+        (EqlTermVariant::Full | EqlTermVariant::Partial, ColumnType::SmallInt) => {
             parse_str_as_numeric_plaintext::<i16>(val)
         }
-        (&Type::TEXT | &Type::INT2 | &Type::INT4, ColumnType::Int) => {
+        (EqlTermVariant::Full | EqlTermVariant::Partial, ColumnType::Int) => {
             parse_str_as_numeric_plaintext::<i32>(val)
         }
-        (&Type::TEXT | &Type::INT2 | &Type::INT4 | &Type::INT8, ColumnType::BigInt) => {
+        (EqlTermVariant::Full | EqlTermVariant::Partial, ColumnType::BigInt) => {
             parse_str_as_numeric_plaintext::<i64>(val)
         }
-        (&Type::TEXT | &Type::INT2 | &Type::INT4 | &Type::INT8, ColumnType::BigUInt) => {
+        (EqlTermVariant::Full | EqlTermVariant::Partial, ColumnType::BigUInt) => {
             parse_str_as_numeric_plaintext::<u64>(val)
         }
-        (
-            &Type::TEXT | &Type::BOOL | &Type::INT2 | &Type::INT4 | &Type::INT8,
-            ColumnType::Boolean,
-        ) => {
+        (EqlTermVariant::Full | EqlTermVariant::Partial, ColumnType::Boolean) => {
             let val = match val {
                 "TRUE" | "true" | "t" | "y" | "yes" | "on" | "1" => true,
                 "FALSE" | "f" | "false" | "n" | "no" | "off" | "0" => false,
@@ -144,26 +153,34 @@ fn text_from_sql(
             Ok(Plaintext::new(val))
         }
         // NaiveDate::parse_from_str ignores time and offset so these are all valid
-        (&Type::TEXT | &Type::DATE | &Type::TIMESTAMP | &Type::TIMESTAMPTZ, ColumnType::Date) => {
+        (EqlTermVariant::Full | EqlTermVariant::Partial, ColumnType::Date) => {
             NaiveDate::parse_from_str(val, "%Y-%m-%d")
                 .map_err(|_| MappingError::CouldNotParseParameter)
                 .map(Plaintext::new)
         }
-        (&Type::TEXT | &Type::NUMERIC, ColumnType::Decimal) => Decimal::from_str(val)
-            .map_err(|_| MappingError::CouldNotParseParameter)
-            .map(Plaintext::new),
-
-        (&Type::TIMESTAMPTZ, _) => {
-            unimplemented!("TIMESTAMPTZ")
+        (EqlTermVariant::Full | EqlTermVariant::Partial, ColumnType::Decimal) => {
+            Decimal::from_str(val)
+                .map_err(|_| MappingError::CouldNotParseParameter)
+                .map(Plaintext::new)
         }
+        (EqlTermVariant::Full | EqlTermVariant::Partial, ColumnType::Timestamp) => {
+            unimplemented!("Timestamp")
+        }
+
         // If JSONB, JSONPATH values are treated as strings
-        (&Type::TEXT | &Type::JSONPATH, ColumnType::JsonB) => Ok(Plaintext::new(val)),
-        (&Type::JSONB, ColumnType::JsonB) => serde_json::from_str::<serde_json::Value>(val)
-            .map_err(|_| MappingError::CouldNotParseParameter)
-            .map(Plaintext::new),
-        (ty, _) => Err(MappingError::UnsupportedParameterType {
-            name: ty.name().to_owned(),
-            oid: ty.oid(),
+        (EqlTermVariant::JsonPath | EqlTermVariant::JsonAccessor, ColumnType::JsonB) => {
+            Ok(Plaintext::new(val))
+        }
+        (EqlTermVariant::Full | EqlTermVariant::Partial, ColumnType::JsonB) => {
+            serde_json::from_str::<serde_json::Value>(val)
+                .map_err(|_| MappingError::CouldNotParseParameter)
+                .map(Plaintext::new)
+        }
+        (EqlTermVariant::Tokenized, ColumnType::Utf8Str) => Ok(Plaintext::new(val)),
+
+        (eql_term, col_type) => Err(MappingError::UnsupportedParameterType {
+            eql_term,
+            column_type: col_type,
         }),
     }
 }
@@ -174,79 +191,90 @@ fn text_from_sql(
 fn binary_from_sql(
     bytes: &BytesMut,
     pg_type: &Type,
+    eql_term: EqlTermVariant,
     col_type: ColumnType,
 ) -> Result<Plaintext, MappingError> {
-    match (pg_type, col_type) {
-        (&Type::TEXT, ColumnType::Utf8Str) => {
+    debug!(target: ENCODING, ?pg_type, ?eql_term, ?col_type);
+
+    match (eql_term, col_type, pg_type) {
+        (EqlTermVariant::Full | EqlTermVariant::Partial, ColumnType::Utf8Str, _) => {
             parse_bytes_from_sql::<String>(bytes, pg_type).map(Plaintext::new)
         }
-        (&Type::BOOL, ColumnType::Boolean) => {
+        (EqlTermVariant::Full | EqlTermVariant::Partial, ColumnType::Boolean, _) => {
             parse_bytes_from_sql::<bool>(bytes, pg_type).map(Plaintext::new)
         }
-        (&Type::DATE, ColumnType::Date) => {
+        (EqlTermVariant::Full | EqlTermVariant::Partial, ColumnType::Date, _) => {
             parse_bytes_from_sql::<NaiveDate>(bytes, pg_type).map(Plaintext::new)
         }
-        (&Type::FLOAT8, ColumnType::Float) => {
+        (EqlTermVariant::Full | EqlTermVariant::Partial, ColumnType::Float, _) => {
             parse_bytes_from_sql::<f64>(bytes, pg_type).map(Plaintext::new)
         }
-        (&Type::INT2, ColumnType::SmallInt) => {
+        (EqlTermVariant::Full | EqlTermVariant::Partial, ColumnType::SmallInt, _) => {
             parse_bytes_from_sql::<i16>(bytes, pg_type).map(Plaintext::new)
         }
         // INT4 and INT2 can be converted to Int plaintext
-        (&Type::INT4, ColumnType::Int) => {
+        (EqlTermVariant::Full | EqlTermVariant::Partial, ColumnType::Int, &Type::INT4) => {
             parse_bytes_from_sql::<i32>(bytes, pg_type).map(Plaintext::new)
         }
-        (&Type::INT2, ColumnType::Int) => {
+        (EqlTermVariant::Full | EqlTermVariant::Partial, ColumnType::Int, &Type::INT2) => {
             parse_bytes_from_sql::<i16>(bytes, pg_type).map(|i| Plaintext::new(i as i32))
         }
-
         // INT8, INT4 and INT2 can be converted to BigInt plaintext
-        (&Type::INT8, ColumnType::BigInt) => {
+        (EqlTermVariant::Full | EqlTermVariant::Partial, ColumnType::BigInt, &Type::INT8) => {
             parse_bytes_from_sql::<i64>(bytes, pg_type).map(Plaintext::new)
         }
-        (&Type::INT4, ColumnType::BigInt) => {
+        (EqlTermVariant::Full | EqlTermVariant::Partial, ColumnType::BigInt, &Type::INT4) => {
             parse_bytes_from_sql::<i32>(bytes, pg_type).map(|i| Plaintext::new(i as i64))
         }
-        (&Type::INT2, ColumnType::BigInt) => {
+        (EqlTermVariant::Full | EqlTermVariant::Partial, ColumnType::BigInt, &Type::INT2) => {
             parse_bytes_from_sql::<i16>(bytes, pg_type).map(|i| Plaintext::new(i as i64))
         }
 
         // INT8, INT4 and INT2 can be converted to BigUInt plaintext (note the sign change)
-        (&Type::INT8, ColumnType::BigUInt) => {
+        (EqlTermVariant::Full | EqlTermVariant::Partial, ColumnType::BigUInt, &Type::INT8) => {
             parse_bytes_from_sql::<i64>(bytes, pg_type).map(|b| Plaintext::new(b as u64))
         }
-        (&Type::INT4, ColumnType::BigUInt) => {
+        (EqlTermVariant::Full | EqlTermVariant::Partial, ColumnType::BigUInt, &Type::INT4) => {
             parse_bytes_from_sql::<i32>(bytes, pg_type).map(|b| Plaintext::new(b as u64))
         }
-        (&Type::INT2, ColumnType::BigUInt) => {
+        (EqlTermVariant::Full | EqlTermVariant::Partial, ColumnType::BigUInt, &Type::INT2) => {
             parse_bytes_from_sql::<i16>(bytes, pg_type).map(|b| Plaintext::new(b as u64))
         }
 
         // Even though basically any number can be a decimal, `rust_decimal` only supports converting from NUMERIC
         // Text values will be handled by the text_from_sql function (see below)
-        (&Type::NUMERIC, ColumnType::Decimal) => {
+        (EqlTermVariant::Full | EqlTermVariant::Partial, ColumnType::Decimal, &Type::NUMERIC) => {
             parse_bytes_from_sql::<Decimal>(bytes, pg_type).map(Plaintext::new)
         }
 
         // If JSONB, JSONPATH values are treated as strings
-        (&Type::JSONPATH, ColumnType::JsonB) => {
+        (EqlTermVariant::JsonPath, ColumnType::JsonB, &Type::JSONPATH) => {
             parse_bytes_from_sql::<String>(bytes, pg_type).map(Plaintext::new)
         }
-        (&Type::JSON | &Type::JSONB | &Type::BYTEA, ColumnType::JsonB) => {
-            parse_bytes_from_sql::<serde_json::Value>(bytes, pg_type).map(Plaintext::new)
+        (EqlTermVariant::JsonAccessor, ColumnType::JsonB, &Type::TEXT | &Type::VARCHAR) => {
+            parse_bytes_from_sql::<String>(bytes, pg_type).map(Plaintext::new)
         }
-
-        // If input type is a string but the target column isn't then parse as string and convert
-        (&Type::TEXT, _) => parse_bytes_from_sql::<String>(bytes, pg_type)
-            .and_then(|val| text_from_sql(&val, pg_type, col_type)),
+        // Python psycopg sends JSON/B as BYTEA
+        (
+            EqlTermVariant::Full | EqlTermVariant::Partial,
+            ColumnType::JsonB,
+            &Type::JSON | &Type::JSONB | &Type::BYTEA,
+        ) => parse_bytes_from_sql::<serde_json::Value>(bytes, pg_type).map(Plaintext::new),
 
         // TODO: timestamps
-        (_, ColumnType::Timestamp) => unimplemented!("TIMESTAMPTZ"),
+        (_, ColumnType::Timestamp, &Type::TIMESTAMPTZ) => unimplemented!("TIMESTAMPTZ"),
 
-        // Unsupported
-        (ty, _) => Err(MappingError::UnsupportedParameterType {
-            name: ty.name().to_owned(),
-            oid: ty.oid(),
+        // If input type is a string but the target column isn't then parse as string and convert
+        // (&Type::TEXT, _) => parse_bytes_from_sql::<String>(bytes, pg_type)
+        //     .and_then(|val| text_from_sql(&val, pg_type, col_type)),
+
+        // If input type is a string but the target column isn't then parse as string and convert
+        (_, _, &Type::TEXT | &Type::VARCHAR) => parse_bytes_from_sql::<String>(bytes, pg_type)
+            .and_then(|val| text_from_sql(&val, EqlTermVariant::Full, col_type)),
+
+        (eql_term, col_type, _) => Err(MappingError::UnsupportedParameterType {
+            eql_term,
+            column_type: col_type,
         }),
     }
 }
@@ -348,6 +376,7 @@ mod tests {
         encryption::Plaintext,
         schema::{ColumnConfig, ColumnMode, ColumnType},
     };
+    use eql_mapper::EqlTermVariant;
     use postgres_types::{ToSql, Type};
 
     fn to_message(s: &[u8]) -> BytesMut {
@@ -365,6 +394,7 @@ mod tests {
                 mode: ColumnMode::PlaintextDuplicate,
             },
             postgres_type: ty,
+            eql_term: EqlTermVariant::Full,
         }
     }
 
@@ -378,9 +408,14 @@ mod tests {
         bytes.put_i64(val);
         let param = BindParam::new(FormatCode::Binary, bytes);
 
-        let pt = bind_param_from_sql(&param, &Type::INT8, ColumnType::BigInt)
-            .unwrap()
-            .unwrap();
+        let pt = bind_param_from_sql(
+            &param,
+            &Type::INT8,
+            EqlTermVariant::Full,
+            ColumnType::BigInt,
+        )
+        .unwrap()
+        .unwrap();
         assert_eq!(pt, Plaintext::BigInt(Some(val)));
 
         // Text
@@ -392,9 +427,14 @@ mod tests {
 
         let param = BindParam::new(FormatCode::Text, bytes);
 
-        let pt = bind_param_from_sql(&param, &Type::INT8, ColumnType::BigInt)
-            .unwrap()
-            .unwrap();
+        let pt = bind_param_from_sql(
+            &param,
+            &Type::INT8,
+            EqlTermVariant::Full,
+            ColumnType::BigInt,
+        )
+        .unwrap()
+        .unwrap();
         assert_eq!(pt, Plaintext::BigInt(Some(val)));
     }
 
@@ -408,9 +448,14 @@ mod tests {
         bytes.put_u8(true as u8);
         let param = BindParam::new(FormatCode::Binary, bytes);
 
-        let pt = bind_param_from_sql(&param, &Type::BOOL, ColumnType::Boolean)
-            .unwrap()
-            .unwrap();
+        let pt = bind_param_from_sql(
+            &param,
+            &Type::BOOL,
+            EqlTermVariant::Full,
+            ColumnType::Boolean,
+        )
+        .unwrap()
+        .unwrap();
         assert_eq!(pt, Plaintext::Boolean(Some(val)));
 
         // Text
@@ -422,9 +467,14 @@ mod tests {
 
         let param = BindParam::new(FormatCode::Text, bytes);
 
-        let pt = bind_param_from_sql(&param, &Type::BOOL, ColumnType::Boolean)
-            .unwrap()
-            .unwrap();
+        let pt = bind_param_from_sql(
+            &param,
+            &Type::BOOL,
+            EqlTermVariant::Full,
+            ColumnType::Boolean,
+        )
+        .unwrap()
+        .unwrap();
         assert_eq!(pt, Plaintext::Boolean(Some(val)));
     }
 
@@ -440,7 +490,7 @@ mod tests {
 
         let param = BindParam::new(FormatCode::Binary, bytes);
 
-        let pt = bind_param_from_sql(&param, &Type::DATE, ColumnType::Date)
+        let pt = bind_param_from_sql(&param, &Type::DATE, EqlTermVariant::Full, ColumnType::Date)
             .unwrap()
             .unwrap();
         assert_eq!(pt, Plaintext::NaiveDate(Some(val)));
@@ -451,7 +501,7 @@ mod tests {
 
         let param = BindParam::new(FormatCode::Text, bytes);
 
-        let pt = bind_param_from_sql(&param, &Type::DATE, ColumnType::Date)
+        let pt = bind_param_from_sql(&param, &Type::DATE, EqlTermVariant::Full, ColumnType::Date)
             .unwrap()
             .unwrap();
         assert_eq!(pt, Plaintext::NaiveDate(Some(val)));

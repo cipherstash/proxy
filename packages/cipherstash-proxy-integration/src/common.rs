@@ -181,7 +181,7 @@ where
                     // Try different type conversions based on the value format
                     // PostgreSQL returns booleans as "t" or "f" in simple queries
 
-                    // Convert PostgreSQL boolean format to binary representation
+                    // Convert PostgreSQL boolean format to native rust representation
                     match val {
                         "t" => "true".parse::<T>().ok(),
                         "f" => "false".parse::<T>().ok(),

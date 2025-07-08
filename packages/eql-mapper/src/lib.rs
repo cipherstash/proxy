@@ -21,8 +21,8 @@ pub use model::*;
 pub use param::*;
 pub use type_checked_statement::*;
 pub use unifier::{
-    Array, AssociatedType, EqlTerm, EqlTrait, EqlTraits, EqlValue, NativeValue, Projection,
-    ProjectionColumn, SetOf, TableColumn, Type, Value,
+    Array, AssociatedType, EqlTerm, EqlTermVariant, EqlTrait, EqlTraits, EqlValue, NativeValue,
+    Projection, ProjectionColumn, SetOf, TableColumn, Type, Value,
 };
 
 pub(crate) use dep::*;

@@ -1,7 +1,7 @@
 use crate::{postgresql::Column, Identifier};
 use bytes::BytesMut;
-use cipherstash_client::encryption;
-use eql_mapper::EqlMapperError;
+use cipherstash_client::{encryption, schema::ColumnType};
+use eql_mapper::{EqlMapperError, EqlTermVariant};
 use metrics_exporter_prometheus::BuildError;
 use std::{io, time::Duration};
 use thiserror::Error;
@@ -71,7 +71,7 @@ pub enum ContextError {
 pub enum MappingError {
     #[error("Invalid parameter for column '{}' of type '{}' in table '{}' (OID {}). For help visit {}#mapping-invalid-parameter",
     _0.column_name(), _0.cast_type(), _0.table_name(), _0.oid(), ERROR_DOC_BASE_URL)]
-    InvalidParameter(Column),
+    InvalidParameter(Box<Column>),
 
     #[error(
         "{}. For help visit {}#mapping-invalid-sql-statement",
@@ -80,8 +80,11 @@ pub enum MappingError {
     )]
     InvalidSqlStatement(String),
 
-    #[error("Encryption of PostgreSQL {name} (OID {oid}) types is not currently supported. For help visit {}#mapping-unsupported-parameter-type", ERROR_DOC_BASE_URL)]
-    UnsupportedParameterType { name: String, oid: u32 },
+    #[error("Encryption of EQL column {column_type} using strategy {eql_term} is not supported. For help visit {}#mapping-unsupported-parameter-type", ERROR_DOC_BASE_URL)]
+    UnsupportedParameterType {
+        eql_term: EqlTermVariant,
+        column_type: ColumnType,
+    },
 
     #[error("Statement could not be type checked: {}. For help visit {}#mapping-statement-could-not-be-type-checked", _0, ERROR_DOC_BASE_URL)]
     StatementCouldNotBeTypeChecked(String),
