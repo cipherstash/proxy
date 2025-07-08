@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1751952752600,
+  "lastUpdate": 1751954466889,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -7627,6 +7627,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 6.642393,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "toby@cipherstash.com",
+            "name": "Toby Hede",
+            "username": "tobyhede"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "3d33e92e6b5b0742c850ee1fa542803414607348",
+          "message": "Merge pull request #275 from cipherstash/test/proxy/jsonb-field-access\n\nTests for JSONB field access operator (`->`)",
+          "timestamp": "2025-07-08T15:57:15+10:00",
+          "tree_id": "127b6be8c65d9b7e5150a0e29796fa6fd62f0823",
+          "url": "https://github.com/cipherstash/proxy/commit/3d33e92e6b5b0742c850ee1fa542803414607348"
+        },
+        "date": 1751954465446,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 6.605928,
             "unit": "Number"
           }
         ]
