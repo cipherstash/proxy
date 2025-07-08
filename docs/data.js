@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1751933167407,
+  "lastUpdate": 1751934010445,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -7473,6 +7473,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 7.121441,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "toby@cipherstash.com",
+            "name": "Toby Hede",
+            "username": "tobyhede"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "a6bf3847870001e2d2679379a77eeeff0aeaae9e",
+          "message": "Merge pull request #274 from cipherstash/test/proxy/json-indexing\n\nTests for JSON containment",
+          "timestamp": "2025-07-08T10:17:10+10:00",
+          "tree_id": "549938925b74f3a8c37c95be7dfcbd77b3522ebf",
+          "url": "https://github.com/cipherstash/proxy/commit/a6bf3847870001e2d2679379a77eeeff0aeaae9e"
+        },
+        "date": 1751934008957,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 6.628143,
             "unit": "Number"
           }
         ]
