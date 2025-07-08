@@ -172,7 +172,7 @@ fn text_from_sql(
             let val = if val.starts_with("$.") {
                 val.to_string()
             } else {
-                format!("$.{}", val)
+                format!("$.{val}")
             };
             Ok(Plaintext::new(val))
         }
@@ -258,7 +258,7 @@ fn binary_from_sql(
                 let val = if val.starts_with("$.") {
                     val
                 } else {
-                    format!("$.{}", val)
+                    format!("$.{val}")
                 };
                 Plaintext::new(val)
             })
@@ -268,7 +268,7 @@ fn binary_from_sql(
                 let val = if val.starts_with("$.") {
                     val
                 } else {
-                    format!("$.{}", val)
+                    format!("$.{val}")
                 };
                 Plaintext::new(val)
             })
