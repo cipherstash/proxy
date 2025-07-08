@@ -104,4 +104,31 @@ mod tests {
 
         select_contained_by_jsonb(value, false).await;
     }
+
+    #[tokio::test]
+    async fn jsonb_contained_by_with_nested_object() {
+        trace();
+
+        clear().await;
+        insert_jsonb().await;
+
+        let value = serde_json::json!({
+             "nested": {
+                "number": 1815,
+                "string": "world",
+            },
+        });
+
+        select_contained_by_jsonb(value, true).await;
+
+        // Not contained
+        let value = serde_json::json!({
+            "nested": {
+                "number": 1914,
+                "string": "world",
+            },
+        });
+
+        select_contained_by_jsonb(value, false).await;
+    }
 }
