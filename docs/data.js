@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1751934010445,
+  "lastUpdate": 1751946825440,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -7502,6 +7502,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 6.628143,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "58c1f5f69a06b05a966cbd90e682f44b9d8d41ad",
+          "message": "Tests for JSONB field access operators (`->` and `->>`)",
+          "timestamp": "2025-07-08T00:17:15Z",
+          "url": "https://github.com/cipherstash/proxy/pull/275/commits/58c1f5f69a06b05a966cbd90e682f44b9d8d41ad"
+        },
+        "date": 1751946824352,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 7.071455,
             "unit": "Number"
           }
         ]
