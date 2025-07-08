@@ -27,6 +27,20 @@ mod tests {
         assert_expected(&expected, &actual);
     }
 
+    async fn select_get_jsonb_field_null(selector: &str) {
+        let sql = "SELECT encrypted_jsonb->$1 FROM encrypted LIMIT 1";
+        let actual = query_by::<Option<Value>>(sql, &selector).await;
+
+        let expected = vec![None];
+        assert_expected(&expected, &actual);
+
+        let sql = format!("SELECT encrypted_jsonb  -> '{selector}' FROM encrypted LIMIT 1");
+        let actual = simple_query_with_null(&sql).await;
+
+        let expected = vec![None];
+        assert_expected(&expected, &actual);
+    }
+
     #[tokio::test]
     async fn jsonb_get_string_field() {
         trace();
@@ -107,32 +121,7 @@ mod tests {
         clear().await;
         insert_jsonb().await;
 
-        let selector = "blahvtha";
-
-        let sql = "SELECT encrypted_jsonb->$1 FROM encrypted LIMIT 1";
-        let actual = query_by::<Option<Value>>(sql, &selector).await;
-
-        let expected = vec![None];
-        assert_expected(&expected, &actual);
-
-        let sql = format!("SELECT encrypted_jsonb  -> '{selector}' FROM encrypted LIMIT 1");
-        let actual = simple_query_with_null(&sql).await;
-
-        let expected = vec![None];
-        assert_expected(&expected, &actual);
-
-        let selector = "$.blahvtha";
-
-        let sql = "SELECT encrypted_jsonb->$1 FROM encrypted LIMIT 1";
-        let actual = query_by::<Option<Value>>(sql, &selector).await;
-
-        let expected = vec![None];
-        assert_expected(&expected, &actual);
-
-        let sql = format!("SELECT encrypted_jsonb  -> '{selector}' FROM encrypted LIMIT 1");
-        let actual = simple_query_with_null(&sql).await;
-
-        let expected = vec![None];
-        assert_expected(&expected, &actual);
+        select_get_jsonb_field_null("blahvtha").await;
+        select_get_jsonb_field_null("$.blahvtha").await;
     }
 }
