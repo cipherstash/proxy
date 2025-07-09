@@ -78,7 +78,7 @@ func TestSelectJsonbContainsWithString(t *testing.T) {
 	}
 }
 
-func TestSelectJsonbPathQueryFirstString(t *testing.T) {
+func selectJsonbPathQueryFirst(t *testing.T, selector string, value interface{}) {
 	conn := setupPgxConnection(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -104,8 +104,6 @@ func TestSelectJsonbPathQueryFirstString(t *testing.T) {
 		"array_number": []int{42, 84},
 	}
 
-	selector := "$.array_string[*]"
-
 	for _, mode := range modes {
 		id := rand.Int()
 		t.Run(mode.String(), func(t *testing.T) {
@@ -122,18 +120,22 @@ func TestSelectJsonbPathQueryFirstString(t *testing.T) {
 				err := conn.QueryRow(context.Background(), selectStmt, mode, selector).Scan(&fetchedBytes)
 				require.NoError(err)
 
-				var result string
+				var result interface{}
 				err = json.Unmarshal(fetchedBytes, &result)
 				require.NoError(err)
-				require.Equal("hello", result)
+				require.Equal(value, result)
 
 				err = conn.QueryRow(context.Background(), fmt.Sprintf(selectTemplate, selector), mode).Scan(&fetchedBytes)
 				require.NoError(err)
 
 				err = json.Unmarshal(fetchedBytes, &result)
 				require.NoError(err)
-				require.Equal("hello", result)
+				require.Equal(value, result)
 			})
 		})
 	}
+}
+
+func TestSelectJsonbPathQueryFirstString(t *testing.T) {
+	selectJsonbPathQueryFirst(t, "$.array_string[*]", "hello")
 }
