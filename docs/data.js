@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1752040845762,
+  "lastUpdate": 1752053338567,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -7706,6 +7706,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 6.633737,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "35329e52f88a92616fe6750ae22d395e848ac4b7",
+          "message": "feat: first, simple jsonb test in golang",
+          "timestamp": "2025-07-08T05:57:19Z",
+          "url": "https://github.com/cipherstash/proxy/pull/276/commits/35329e52f88a92616fe6750ae22d395e848ac4b7"
+        },
+        "date": 1752053337356,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 7.040978,
             "unit": "Number"
           }
         ]
