@@ -18,6 +18,18 @@ func TestTrivial(t *testing.T) {
 }
 
 func TestSelectJsonbContainsWithString(t *testing.T) {
+	selector := map[string]interface{}{
+		"string": "hello",
+	}
+	selectJsonbContains(t, selector, true)
+
+	selector = map[string]interface{}{
+		"string": "blah",
+	}
+	selectJsonbContains(t, selector, false)
+}
+
+func selectJsonbContains(t *testing.T, selector map[string]interface{}, expected bool) {
 	conn := setupPgxConnection(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -43,10 +55,6 @@ func TestSelectJsonbContainsWithString(t *testing.T) {
 		"array_number": []int{42, 84},
 	}
 
-	select_jsonb := map[string]interface{}{
-		"string": "hello",
-	}
-
 	for _, mode := range modes {
 		id := rand.Int()
 		t.Run(mode.String(), func(t *testing.T) {
@@ -60,19 +68,19 @@ func TestSelectJsonbContainsWithString(t *testing.T) {
 			})
 
 			t.Run("select", func(t *testing.T) {
-				jsonBytes, err := json.Marshal(select_jsonb)
+				jsonBytes, err := json.Marshal(selector)
 				require.NoError(err)
 				jsonStr := string(jsonBytes)
 
 				var rv bool
 				err = conn.QueryRow(context.Background(), selectStmt, mode, jsonStr).Scan(&rv)
 				require.NoError(err)
-				require.True(rv)
+				require.Equal(expected, rv)
 
 				err = conn.QueryRow(context.Background(), fmt.Sprintf(selectTemplate, jsonStr), mode).Scan(&rv)
 				require.NoError(err)
 
-				require.True(rv)
+				require.Equal(expected, rv)
 			})
 		})
 	}
