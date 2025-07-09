@@ -78,7 +78,9 @@ func TestSelectJsonbContainsWithString(t *testing.T) {
 	}
 }
 
-func selectJsonbPathQueryFirst(t *testing.T, selector string, value interface{}) {
+// expected is a pointer to express that if nil, the returned json should be empty and
+// cannot be unmarshalled
+func selectJsonbPathQueryFirst(t *testing.T, selector string, expected *interface{}) {
 	conn := setupPgxConnection(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -120,22 +122,41 @@ func selectJsonbPathQueryFirst(t *testing.T, selector string, value interface{})
 				err := conn.QueryRow(context.Background(), selectStmt, mode, selector).Scan(&fetchedBytes)
 				require.NoError(err)
 
-				var result interface{}
-				err = json.Unmarshal(fetchedBytes, &result)
-				require.NoError(err)
-				require.Equal(value, result)
+				if expected == nil {
+					require.Equal(0, len(fetchedBytes))
+				} else {
+					var result interface{}
+					err = json.Unmarshal(fetchedBytes, &result)
+					require.NoError(err)
+					require.Equal(*expected, result)
+				}
 
 				err = conn.QueryRow(context.Background(), fmt.Sprintf(selectTemplate, selector), mode).Scan(&fetchedBytes)
 				require.NoError(err)
 
-				err = json.Unmarshal(fetchedBytes, &result)
-				require.NoError(err)
-				require.Equal(value, result)
+				if expected == nil {
+					require.Equal(0, len(fetchedBytes))
+				} else {
+					var result interface{}
+					err = json.Unmarshal(fetchedBytes, &result)
+					require.NoError(err)
+					require.Equal(*expected, result)
+				}
 			})
 		})
 	}
 }
 
 func TestSelectJsonbPathQueryFirstString(t *testing.T) {
-	selectJsonbPathQueryFirst(t, "$.array_string[*]", "hello")
+	var expected interface{} = "hello"
+	selectJsonbPathQueryFirst(t, "$.array_string[*]", &expected)
+}
+
+func TestSelectJsonbPathQueryFirstNumber(t *testing.T) {
+	var expected interface{} = 42.0
+	selectJsonbPathQueryFirst(t, "$.array_number[*]", &expected)
+}
+
+func TestSelectJsonbPathQueryFirstWithUnknown(t *testing.T) {
+	selectJsonbPathQueryFirst(t, "$.vtha", nil)
 }
