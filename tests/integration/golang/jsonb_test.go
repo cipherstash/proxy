@@ -30,6 +30,7 @@ func TestSelectJsonbContainsWithString(t *testing.T) {
 
 	insertStmt := "INSERT INTO encrypted (id, encrypted_jsonb) VALUES ($1, $2)"
 	selectStmt := "SELECT encrypted_jsonb @> $1 FROM encrypted LIMIT 1"
+	selectTemplate := "SELECT encrypted_jsonb @> '%s' FROM encrypted"
 
 	obj := map[string]interface{}{
 		"string": "hello",
@@ -66,6 +67,11 @@ func TestSelectJsonbContainsWithString(t *testing.T) {
 				var rv bool
 				err = conn.QueryRow(context.Background(), selectStmt, mode, jsonStr).Scan(&rv)
 				require.NoError(err)
+				require.True(rv)
+
+				err = conn.QueryRow(context.Background(), fmt.Sprintf(selectTemplate, jsonStr), mode).Scan(&rv)
+				require.NoError(err)
+
 				require.True(rv)
 			})
 		})
