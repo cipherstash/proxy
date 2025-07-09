@@ -41,7 +41,7 @@ The test suite uses subtests heavily, so you can be very specific about what tes
 
 ```bash
 # Tell the tests where to find Proxy
-export DATABASE_URL="postgresql://cipherstash:password@localhost:6432/cipherstash"
+export DATABASE_URL="postgresql://cipherstash:p%40ssword@localhost:6432/cipherstash"
 
 # Run tests for encrypted_int8 columns
 go test -v ./... -run TestPgxEncryptedMapInts/encrypted_int8
