@@ -29,6 +29,18 @@ func TestSelectJsonbContainsWithString(t *testing.T) {
 	selectJsonbContains(t, selector, false)
 }
 
+func TestSelectJsonbContainsWithNumber(t *testing.T) {
+	selector := map[string]interface{}{
+		"number": 42,
+	}
+	selectJsonbContains(t, selector, true)
+
+	selector = map[string]interface{}{
+		"number": 11,
+	}
+	selectJsonbContains(t, selector, false)
+}
+
 func selectJsonbContains(t *testing.T, selector map[string]interface{}, expected bool) {
 	conn := setupPgxConnection(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
