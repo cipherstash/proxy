@@ -22,6 +22,10 @@ func TestSelectJsonbContainsWithString(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
+	tx, err := conn.Begin(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback(ctx)
+
 	require := require.New(t)
 
 	insertStmt := "INSERT INTO encrypted (id, encrypted_jsonb) VALUES ($1, $2)"
@@ -72,6 +76,10 @@ func TestSelectJsonbPathQueryFirstString(t *testing.T) {
 	conn := setupPgxConnection(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
+
+	tx, err := conn.Begin(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback(ctx)
 
 	require := require.New(t)
 
