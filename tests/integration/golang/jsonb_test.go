@@ -12,12 +12,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TODO: trivial test. Delete it later
-func TestTrivial(t *testing.T) {
-	require := require.New(t)
-	require.Equal(0, 0)
-}
-
 func TestSelectJsonbContainsWithString(t *testing.T) {
 	selector := map[string]interface{}{
 		"string": "hello",
@@ -105,47 +99,15 @@ func selectJsonbContains(t *testing.T, selector map[string]interface{}, expected
 }
 
 func selectJsonbContainment(t *testing.T, selector map[string]interface{}, selectStmt string, selectTemplate string, expected bool) {
-	conn := setupPgxConnection(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
-	tx, err := conn.Begin(ctx)
-	require.NoError(t, err)
-	defer tx.Rollback(ctx)
-
-	require := require.New(t)
-
-	insertStmt := "INSERT INTO encrypted (id, encrypted_jsonb) VALUES ($1, $2)"
-
-	for _, mode := range modes {
-		id := rand.Int()
-		t.Run(mode.String(), func(t *testing.T) {
-			t.Run("insert", func(t *testing.T) {
-				jsonBytes, err := json.Marshal(testData())
-				require.NoError(err)
-				jsonStr := string(jsonBytes)
-
-				_, err = conn.Exec(ctx, insertStmt, mode, id, jsonStr)
-				require.NoError(err)
-			})
-
-			t.Run("select", func(t *testing.T) {
-				jsonBytes, err := json.Marshal(selector)
-				require.NoError(err)
-				jsonStr := string(jsonBytes)
-
-				var rv bool
-				err = conn.QueryRow(context.Background(), selectStmt, mode, jsonStr).Scan(&rv)
-				require.NoError(err)
-				require.Equal(expected, rv)
-
-				err = conn.QueryRow(context.Background(), fmt.Sprintf(selectTemplate, jsonStr), mode).Scan(&rv)
-				require.NoError(err)
-
-				require.Equal(expected, rv)
-			})
-		})
+	expectedResult := ExpectedResult{
+		Type:  ExpectedNativeBool,
+		Value: expected,
 	}
+
+	jsonBytes, err := json.Marshal(selector)
+	require.NoError(t, err)
+
+	selectJsonb(t, string(jsonBytes), selectStmt, selectTemplate, expectedResult)
 }
 
 func TestJsonbContainedByWithString(t *testing.T) {
@@ -289,41 +251,60 @@ func selectJsonb(t *testing.T, selector string, selectStmt string, selectTemplat
 			})
 
 			t.Run("select", func(t *testing.T) {
-				var fetchedBytes []byte
-				err := conn.QueryRow(context.Background(), selectStmt, mode, selector).Scan(&fetchedBytes)
-				if expectedResult.Type == ExpectedNoResult {
+				switch expectedResult.Type {
+				case ExpectedNoResult:
+					// test parameterised version
+					err := conn.QueryRow(context.Background(), selectStmt, mode, selector).Scan(nil)
 					require.ErrorIs(err, sql.ErrNoRows)
-				} else if expectedResult.Type == ExpectedNativeBool {
+
+					// test template version
+					err = conn.QueryRow(context.Background(), fmt.Sprintf(selectTemplate, selector), mode).Scan(nil)
+					require.ErrorIs(err, sql.ErrNoRows)
+
+				case ExpectedNativeBool:
 					var result bool
+
+					// test parameterised version
 					err = conn.QueryRow(context.Background(), selectStmt, mode, selector).Scan(&result)
 					require.NoError(err)
 					require.Equal(expectedResult.Value, result)
 
+					// test template version
 					err = conn.QueryRow(context.Background(), fmt.Sprintf(selectTemplate, selector), mode).Scan(&result)
 					require.NoError(err)
 					require.Equal(expectedResult.Value, result)
-				} else {
-					require.NoError(err)
-					if expectedResult.Type == ExpectedEmpty {
-						require.Equal(0, len(fetchedBytes))
-					} else {
-						var result interface{}
-						err = json.Unmarshal(fetchedBytes, &result)
-						require.NoError(err)
-						require.Equal(expectedResult.Value, result)
-					}
 
+				case ExpectedEmpty:
+					var fetchedBytes []byte
+
+					// test parameterised version
+					err := conn.QueryRow(context.Background(), selectStmt, mode, selector).Scan(&fetchedBytes)
+					require.NoError(err)
+					require.Equal(0, len(fetchedBytes))
+
+					// test template version
 					err = conn.QueryRow(context.Background(), fmt.Sprintf(selectTemplate, selector), mode).Scan(&fetchedBytes)
 					require.NoError(err)
+					require.Equal(0, len(fetchedBytes))
 
-					if expectedResult.Type == ExpectedEmpty {
-						require.Equal(0, len(fetchedBytes))
-					} else {
-						var result interface{}
-						err = json.Unmarshal(fetchedBytes, &result)
-						require.NoError(err)
-						require.Equal(expectedResult.Value, result)
-					}
+				case ExpectedJsonValue:
+					var fetchedBytes []byte
+
+					var result interface{}
+
+					// test parameterised version
+					err := conn.QueryRow(context.Background(), selectStmt, mode, selector).Scan(&fetchedBytes)
+					require.NoError(err)
+					err = json.Unmarshal(fetchedBytes, &result)
+					require.NoError(err)
+					require.Equal(expectedResult.Value, result)
+
+					// test template version
+					err = conn.QueryRow(context.Background(), fmt.Sprintf(selectTemplate, selector), mode).Scan(&fetchedBytes)
+					require.NoError(err)
+					err = json.Unmarshal(fetchedBytes, &result)
+					require.NoError(err)
+					require.Equal(expectedResult.Value, result)
 				}
 			})
 		})
