@@ -98,6 +98,13 @@ func testData() map[string]interface{} {
 }
 
 func selectJsonbContains(t *testing.T, selector map[string]interface{}, expected bool) {
+	selectJsonbContainment(t, selector,
+		"SELECT encrypted_jsonb @> $1 FROM encrypted LIMIT 1",
+		"SELECT encrypted_jsonb @> '%s' FROM encrypted LIMIT 1",
+		expected)
+}
+
+func selectJsonbContainment(t *testing.T, selector map[string]interface{}, selectStmt string, selectTemplate string, expected bool) {
 	conn := setupPgxConnection(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -109,8 +116,6 @@ func selectJsonbContains(t *testing.T, selector map[string]interface{}, expected
 	require := require.New(t)
 
 	insertStmt := "INSERT INTO encrypted (id, encrypted_jsonb) VALUES ($1, $2)"
-	selectStmt := "SELECT encrypted_jsonb @> $1 FROM encrypted LIMIT 1"
-	selectTemplate := "SELECT encrypted_jsonb @> '%s' FROM encrypted LIMIT 1"
 
 	for _, mode := range modes {
 		id := rand.Int()
@@ -210,49 +215,10 @@ func TestJsonbContainedByWithNestedObject(t *testing.T) {
 }
 
 func selectContainedByJsonb(t *testing.T, selector map[string]interface{}, expected bool) {
-	conn := setupPgxConnection(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
-	tx, err := conn.Begin(ctx)
-	require.NoError(t, err)
-	defer tx.Rollback(ctx)
-
-	require := require.New(t)
-
-	insertStmt := "INSERT INTO encrypted (id, encrypted_jsonb) VALUES ($1, $2)"
-	selectStmt := "SELECT $1 <@ encrypted_jsonb FROM encrypted LIMIT 1"
-	selectTemplate := "SELECT '%s' <@ encrypted_jsonb FROM encrypted LIMIT 1"
-
-	for _, mode := range modes {
-		id := rand.Int()
-		t.Run(mode.String(), func(t *testing.T) {
-			t.Run("insert", func(t *testing.T) {
-				jsonBytes, err := json.Marshal(testData())
-				require.NoError(err)
-				jsonStr := string(jsonBytes)
-
-				_, err = conn.Exec(ctx, insertStmt, mode, id, jsonStr)
-				require.NoError(err)
-			})
-
-			t.Run("select", func(t *testing.T) {
-				jsonBytes, err := json.Marshal(selector)
-				require.NoError(err)
-				jsonStr := string(jsonBytes)
-
-				var rv bool
-				err = conn.QueryRow(context.Background(), selectStmt, mode, jsonStr).Scan(&rv)
-				require.NoError(err)
-				require.Equal(expected, rv)
-
-				err = conn.QueryRow(context.Background(), fmt.Sprintf(selectTemplate, jsonStr), mode).Scan(&rv)
-				require.NoError(err)
-
-				require.Equal(expected, rv)
-			})
-		})
-	}
+	selectJsonbContainment(t, selector,
+		"SELECT $1 <@ encrypted_jsonb FROM encrypted LIMIT 1",
+		"SELECT '%s' <@ encrypted_jsonb FROM encrypted LIMIT 1",
+		expected)
 }
 
 // expected is a pointer to express that if nil, the returned json should be empty and
