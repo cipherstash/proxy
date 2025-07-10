@@ -362,11 +362,20 @@ func selectJsonb(t *testing.T, selector string, selectStmt string, selectTemplat
 			t.Run("select", func(t *testing.T) {
 				var fetchedBytes []byte
 				err := conn.QueryRow(context.Background(), selectStmt, mode, selector).Scan(&fetchedBytes)
-				if expectedResult.Type == ExpectedResultTypeNoResult {
+				if expectedResult.Type == ExpectedNoResult {
 					require.ErrorIs(err, sql.ErrNoRows)
+				} else if expectedResult.Type == ExpectedNativeBool {
+					var result bool
+					err = conn.QueryRow(context.Background(), selectStmt, mode, selector).Scan(&result)
+					require.NoError(err)
+					require.Equal(expectedResult.Value, result)
+
+					err = conn.QueryRow(context.Background(), fmt.Sprintf(selectTemplate, selector), mode).Scan(&result)
+					require.NoError(err)
+					require.Equal(expectedResult.Value, result)
 				} else {
 					require.NoError(err)
-					if expectedResult.Type == ExpectedResultTypeEmpty {
+					if expectedResult.Type == ExpectedEmpty {
 						require.Equal(0, len(fetchedBytes))
 					} else {
 						var result interface{}
@@ -378,7 +387,7 @@ func selectJsonb(t *testing.T, selector string, selectStmt string, selectTemplat
 					err = conn.QueryRow(context.Background(), fmt.Sprintf(selectTemplate, selector), mode).Scan(&fetchedBytes)
 					require.NoError(err)
 
-					if expectedResult.Type == ExpectedResultTypeEmpty {
+					if expectedResult.Type == ExpectedEmpty {
 						require.Equal(0, len(fetchedBytes))
 					} else {
 						var result interface{}
@@ -394,7 +403,7 @@ func selectJsonb(t *testing.T, selector string, selectStmt string, selectTemplat
 
 func TestSelectJsonbPathQueryNumber(t *testing.T) {
 	expected := ExpectedResult{
-		Type:  ExpectedResultTypeValue,
+		Type:  ExpectedJsonValue,
 		Value: 42.0,
 	}
 	selectJsonb(t, "$.number", selectJsonbPathQueryStmt(), selectJsonbPathQueryTemplate(), expected)
@@ -402,7 +411,7 @@ func TestSelectJsonbPathQueryNumber(t *testing.T) {
 
 func TestSelectJsonbPathQueryString(t *testing.T) {
 	expected := ExpectedResult{
-		Type:  ExpectedResultTypeValue,
+		Type:  ExpectedJsonValue,
 		Value: "world",
 	}
 	selectJsonb(t, "$.nested.string", selectJsonbPathQueryStmt(), selectJsonbPathQueryTemplate(), expected)
@@ -410,7 +419,7 @@ func TestSelectJsonbPathQueryString(t *testing.T) {
 
 func TestSelectJsonbPathQueryValue(t *testing.T) {
 	expected := ExpectedResult{
-		Type: ExpectedResultTypeValue,
+		Type: ExpectedJsonValue,
 		Value: map[string]interface{}{
 			"number": 1815.0,
 			"string": "world",
@@ -421,14 +430,14 @@ func TestSelectJsonbPathQueryValue(t *testing.T) {
 
 func TestSelectJsonbPathQueryWithUnknown(t *testing.T) {
 	expected := ExpectedResult{
-		Type: ExpectedResultTypeNoResult,
+		Type: ExpectedNoResult,
 	}
 	selectJsonb(t, "$.vtha", selectJsonbPathQueryStmt(), selectJsonbPathQueryTemplate(), expected)
 }
 
 func TestSelectJsonbPathQueryWithAlias(t *testing.T) {
 	expected := ExpectedResult{
-		Type: ExpectedResultTypeValue,
+		Type: ExpectedJsonValue,
 		Value: map[string]interface{}{
 			"number": 1815.0,
 			"string": "world",
@@ -437,13 +446,62 @@ func TestSelectJsonbPathQueryWithAlias(t *testing.T) {
 	selectJsonb(t, "$.nested", "SELECT jsonb_path_query(encrypted_jsonb, $1) as selected FROM encrypted", "SELECT jsonb_path_query(encrypted_jsonb, '%s') as selected FROM encrypted", expected)
 }
 
+func selectJsonPathExistsQueryStmt() string {
+	return "SELECT jsonb_path_exists(encrypted_jsonb, $1) FROM encrypted"
+}
+
+func selectJsonPathExistsQueryTemplate() string {
+	return "SELECT jsonb_path_exists(encrypted_jsonb, '%s') FROM encrypted"
+}
+
+func TestSelectJsonbPathExistsNumber(t *testing.T) {
+	expected := ExpectedResult{
+		Type:  ExpectedNativeBool,
+		Value: true,
+	}
+	selectJsonb(t, "$.number", selectJsonPathExistsQueryStmt(), selectJsonPathExistsQueryTemplate(), expected)
+}
+
+func TestSelectJsonbPathExistsString(t *testing.T) {
+	expected := ExpectedResult{
+		Type:  ExpectedNativeBool,
+		Value: true,
+	}
+	selectJsonb(t, "$.nested.string", selectJsonPathExistsQueryStmt(), selectJsonPathExistsQueryTemplate(), expected)
+}
+
+func TestSelectJsonbPathExistsValue(t *testing.T) {
+	expected := ExpectedResult{
+		Type:  ExpectedNativeBool,
+		Value: true,
+	}
+	selectJsonb(t, "$.nested", selectJsonPathExistsQueryStmt(), selectJsonPathExistsQueryTemplate(), expected)
+}
+
+func TestSelectJsonbPathExistsWithUnknownSelector(t *testing.T) {
+	expected := ExpectedResult{
+		Type:  ExpectedNativeBool,
+		Value: false,
+	}
+	selectJsonb(t, "$.vtha", selectJsonPathExistsQueryStmt(), selectJsonPathExistsQueryTemplate(), expected)
+}
+
+func TestSelectJsonbPathExistsWithAlias(t *testing.T) {
+	expected := ExpectedResult{
+		Type:  ExpectedNativeBool,
+		Value: true,
+	}
+	selectJsonb(t, "$.nested", "SELECT jsonb_path_exists(encrypted_jsonb, $1) as selected FROM encrypted", "SELECT jsonb_path_exists(encrypted_jsonb, '%s') as selected FROM encrypted", expected)
+}
+
 // Sum type does not exist natively in golang. This seems like a common pattern to use instead
 type ExpectedResultType int
 
 const (
-	ExpectedResultTypeEmpty ExpectedResultType = iota
-	ExpectedResultTypeValue
-	ExpectedResultTypeNoResult
+	ExpectedEmpty ExpectedResultType = iota
+	ExpectedJsonValue
+	ExpectedNoResult
+	ExpectedNativeBool
 )
 
 type ExpectedResult struct {
