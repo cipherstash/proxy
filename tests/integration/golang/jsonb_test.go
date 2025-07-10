@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"math/rand"
@@ -324,4 +325,128 @@ func TestSelectJsonbPathQueryFirstNumber(t *testing.T) {
 
 func TestSelectJsonbPathQueryFirstWithUnknown(t *testing.T) {
 	selectJsonbPathQueryFirst(t, "$.vtha", nil)
+}
+
+func selectJsonbPathQueryStmt() string {
+	return "SELECT jsonb_path_query(encrypted_jsonb, $1) FROM encrypted"
+}
+
+func selectJsonbPathQueryTemplate() string {
+	return "SELECT jsonb_path_query(encrypted_jsonb, '%s') FROM encrypted"
+}
+
+func selectJsonb(t *testing.T, selector string, selectStmt string, selectTemplate string, expectedResult ExpectedResult) {
+	conn := setupPgxConnection(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	tx, err := conn.Begin(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback(ctx)
+
+	require := require.New(t)
+
+	insertStmt := "INSERT INTO encrypted (id, encrypted_jsonb) VALUES ($1, $2)"
+
+	for _, mode := range modes {
+		id := rand.Int()
+		t.Run(mode.String(), func(t *testing.T) {
+			t.Run("insert", func(t *testing.T) {
+				jsonBytes, err := json.Marshal(testData())
+				require.NoError(err)
+
+				_, err = conn.Exec(ctx, insertStmt, mode, id, string(jsonBytes))
+				require.NoError(err)
+			})
+
+			t.Run("select", func(t *testing.T) {
+				var fetchedBytes []byte
+				err := conn.QueryRow(context.Background(), selectStmt, mode, selector).Scan(&fetchedBytes)
+				if expectedResult.Type == ExpectedResultTypeNoResult {
+					require.ErrorIs(err, sql.ErrNoRows)
+				} else {
+					require.NoError(err)
+					if expectedResult.Type == ExpectedResultTypeEmpty {
+						require.Equal(0, len(fetchedBytes))
+					} else {
+						var result interface{}
+						err = json.Unmarshal(fetchedBytes, &result)
+						require.NoError(err)
+						require.Equal(expectedResult.Value, result)
+					}
+
+					err = conn.QueryRow(context.Background(), fmt.Sprintf(selectTemplate, selector), mode).Scan(&fetchedBytes)
+					require.NoError(err)
+
+					if expectedResult.Type == ExpectedResultTypeEmpty {
+						require.Equal(0, len(fetchedBytes))
+					} else {
+						var result interface{}
+						err = json.Unmarshal(fetchedBytes, &result)
+						require.NoError(err)
+						require.Equal(expectedResult.Value, result)
+					}
+				}
+			})
+		})
+	}
+}
+
+func TestSelectJsonbPathQueryNumber(t *testing.T) {
+	expected := ExpectedResult{
+		Type:  ExpectedResultTypeValue,
+		Value: 42.0,
+	}
+	selectJsonb(t, "$.number", selectJsonbPathQueryStmt(), selectJsonbPathQueryTemplate(), expected)
+}
+
+func TestSelectJsonbPathQueryString(t *testing.T) {
+	expected := ExpectedResult{
+		Type:  ExpectedResultTypeValue,
+		Value: "world",
+	}
+	selectJsonb(t, "$.nested.string", selectJsonbPathQueryStmt(), selectJsonbPathQueryTemplate(), expected)
+}
+
+func TestSelectJsonbPathQueryValue(t *testing.T) {
+	expected := ExpectedResult{
+		Type: ExpectedResultTypeValue,
+		Value: map[string]interface{}{
+			"number": 1815.0,
+			"string": "world",
+		},
+	}
+	selectJsonb(t, "$.nested", selectJsonbPathQueryStmt(), selectJsonbPathQueryTemplate(), expected)
+}
+
+func TestSelectJsonbPathQueryWithUnknown(t *testing.T) {
+	expected := ExpectedResult{
+		Type: ExpectedResultTypeNoResult,
+	}
+	selectJsonb(t, "$.vtha", selectJsonbPathQueryStmt(), selectJsonbPathQueryTemplate(), expected)
+}
+
+func TestSelectJsonbPathQueryWithAlias(t *testing.T) {
+	expected := ExpectedResult{
+		Type: ExpectedResultTypeValue,
+		Value: map[string]interface{}{
+			"number": 1815.0,
+			"string": "world",
+		},
+	}
+	selectJsonb(t, "$.nested", "SELECT jsonb_path_query(encrypted_jsonb, $1) as selected FROM encrypted", "SELECT jsonb_path_query(encrypted_jsonb, '%s') as selected FROM encrypted", expected)
+}
+
+// Sum type does not exist natively in golang. This seems like a common pattern to use instead
+type ExpectedResultType int
+
+const (
+	ExpectedResultTypeEmpty ExpectedResultType = iota
+	ExpectedResultTypeValue
+	ExpectedResultTypeNoResult
+)
+
+type ExpectedResult struct {
+	Type  ExpectedResultType
+	Value any
 }
