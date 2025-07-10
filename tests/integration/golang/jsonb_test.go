@@ -223,74 +223,37 @@ func selectContainedByJsonb(t *testing.T, selector map[string]interface{}, expec
 
 // expected is a pointer to express that if nil, the returned json should be empty and
 // cannot be unmarshalled
-func selectJsonbPathQueryFirst(t *testing.T, selector string, expected *interface{}) {
-	conn := setupPgxConnection(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
-	tx, err := conn.Begin(ctx)
-	require.NoError(t, err)
-	defer tx.Rollback(ctx)
-
-	require := require.New(t)
-
-	insertStmt := "INSERT INTO encrypted (id, encrypted_jsonb) VALUES ($1, $2)"
-	selectStmt := "SELECT jsonb_path_query_first(encrypted_jsonb, $1) FROM encrypted"
-	selectTemplate := "SELECT jsonb_path_query_first(encrypted_jsonb, '%s') FROM encrypted"
-
-	for _, mode := range modes {
-		id := rand.Int()
-		t.Run(mode.String(), func(t *testing.T) {
-			t.Run("insert", func(t *testing.T) {
-				jsonBytes, err := json.Marshal(testData())
-				require.NoError(err)
-
-				_, err = conn.Exec(ctx, insertStmt, mode, id, string(jsonBytes))
-				require.NoError(err)
-			})
-
-			t.Run("select", func(t *testing.T) {
-				var fetchedBytes []byte
-				err := conn.QueryRow(context.Background(), selectStmt, mode, selector).Scan(&fetchedBytes)
-				require.NoError(err)
-
-				if expected == nil {
-					require.Equal(0, len(fetchedBytes))
-				} else {
-					var result interface{}
-					err = json.Unmarshal(fetchedBytes, &result)
-					require.NoError(err)
-					require.Equal(*expected, result)
-				}
-
-				err = conn.QueryRow(context.Background(), fmt.Sprintf(selectTemplate, selector), mode).Scan(&fetchedBytes)
-				require.NoError(err)
-
-				if expected == nil {
-					require.Equal(0, len(fetchedBytes))
-				} else {
-					var result interface{}
-					err = json.Unmarshal(fetchedBytes, &result)
-					require.NoError(err)
-					require.Equal(*expected, result)
-				}
-			})
-		})
-	}
+func selectJsonbPathQueryFirst(t *testing.T, selector string, expected ExpectedResult) {
+	selectJsonb(
+		t,
+		selector,
+		"SELECT jsonb_path_query_first(encrypted_jsonb, $1) FROM encrypted",
+		"SELECT jsonb_path_query_first(encrypted_jsonb, '%s') FROM encrypted",
+		expected,
+	)
 }
 
 func TestSelectJsonbPathQueryFirstString(t *testing.T) {
-	var expected interface{} = "hello"
-	selectJsonbPathQueryFirst(t, "$.array_string[*]", &expected)
+	var expected = ExpectedResult{
+		Type:  ExpectedJsonValue,
+		Value: "hello",
+	}
+	selectJsonbPathQueryFirst(t, "$.array_string[*]", expected)
 }
 
 func TestSelectJsonbPathQueryFirstNumber(t *testing.T) {
-	var expected interface{} = 42.0
-	selectJsonbPathQueryFirst(t, "$.array_number[*]", &expected)
+	var expected = ExpectedResult{
+		Type:  ExpectedJsonValue,
+		Value: 42.0,
+	}
+	selectJsonbPathQueryFirst(t, "$.array_number[*]", expected)
 }
 
 func TestSelectJsonbPathQueryFirstWithUnknown(t *testing.T) {
-	selectJsonbPathQueryFirst(t, "$.vtha", nil)
+	var expected = ExpectedResult{
+		Type: ExpectedEmpty,
+	}
+	selectJsonbPathQueryFirst(t, "$.vtha", expected)
 }
 
 func selectJsonbPathQueryStmt() string {
