@@ -41,6 +41,48 @@ func TestSelectJsonbContainsWithNumber(t *testing.T) {
 	selectJsonbContains(t, selector, false)
 }
 
+func TestSelectJsonbContainsWithNumericArray(t *testing.T) {
+	selector := map[string]interface{}{
+		"array_number": []int{42, 84},
+	}
+	selectJsonbContains(t, selector, true)
+
+	selector = map[string]interface{}{
+		"array_number": []int{1, 2},
+	}
+	selectJsonbContains(t, selector, false)
+}
+
+func TestSelectJsonbContainsWithStringArray(t *testing.T) {
+	selector := map[string]interface{}{
+		"array_string": []string{"hello", "world"},
+	}
+	selectJsonbContains(t, selector, true)
+
+	selector = map[string]interface{}{
+		"array_string": []string{"blah", "vtha"},
+	}
+	selectJsonbContains(t, selector, false)
+}
+
+func TestSelectJsonbContainsWithNestedObject(t *testing.T) {
+	selector := map[string]interface{}{
+		"nested": map[string]interface{}{
+			"number": 1815,
+			"string": "world",
+		},
+	}
+	selectJsonbContains(t, selector, true)
+
+	selector = map[string]interface{}{
+		"nested": map[string]interface{}{
+			"number": 1914,
+			"string": "world",
+		},
+	}
+	selectJsonbContains(t, selector, false)
+}
+
 func selectJsonbContains(t *testing.T, selector map[string]interface{}, expected bool) {
 	conn := setupPgxConnection(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
