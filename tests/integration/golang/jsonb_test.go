@@ -83,6 +83,19 @@ func TestSelectJsonbContainsWithNestedObject(t *testing.T) {
 	selectJsonbContains(t, selector, false)
 }
 
+func testData() map[string]interface{} {
+	return map[string]interface{}{
+		"string": "hello",
+		"number": 42,
+		"nested": map[string]interface{}{
+			"number": 1815,
+			"string": "world",
+		},
+		"array_string": []string{"hello", "world"},
+		"array_number": []int{42, 84},
+	}
+}
+
 func selectJsonbContains(t *testing.T, selector map[string]interface{}, expected bool) {
 	conn := setupPgxConnection(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -96,24 +109,125 @@ func selectJsonbContains(t *testing.T, selector map[string]interface{}, expected
 
 	insertStmt := "INSERT INTO encrypted (id, encrypted_jsonb) VALUES ($1, $2)"
 	selectStmt := "SELECT encrypted_jsonb @> $1 FROM encrypted LIMIT 1"
-	selectTemplate := "SELECT encrypted_jsonb @> '%s' FROM encrypted"
-
-	obj := map[string]interface{}{
-		"string": "hello",
-		"number": 42,
-		"nested": map[string]interface{}{
-			"number": 1815,
-			"string": "world",
-		},
-		"array_string": []string{"hello", "world"},
-		"array_number": []int{42, 84},
-	}
+	selectTemplate := "SELECT encrypted_jsonb @> '%s' FROM encrypted LIMIT 1"
 
 	for _, mode := range modes {
 		id := rand.Int()
 		t.Run(mode.String(), func(t *testing.T) {
 			t.Run("insert", func(t *testing.T) {
-				jsonBytes, err := json.Marshal(obj)
+				jsonBytes, err := json.Marshal(testData())
+				require.NoError(err)
+				jsonStr := string(jsonBytes)
+
+				_, err = conn.Exec(ctx, insertStmt, mode, id, jsonStr)
+				require.NoError(err)
+			})
+
+			t.Run("select", func(t *testing.T) {
+				jsonBytes, err := json.Marshal(selector)
+				require.NoError(err)
+				jsonStr := string(jsonBytes)
+
+				var rv bool
+				err = conn.QueryRow(context.Background(), selectStmt, mode, jsonStr).Scan(&rv)
+				require.NoError(err)
+				require.Equal(expected, rv)
+
+				err = conn.QueryRow(context.Background(), fmt.Sprintf(selectTemplate, jsonStr), mode).Scan(&rv)
+				require.NoError(err)
+
+				require.Equal(expected, rv)
+			})
+		})
+	}
+}
+
+func TestJsonbContainedByWithString(t *testing.T) {
+	selector := map[string]interface{}{
+		"string": "hello",
+	}
+	selectJsonbContains(t, selector, true)
+
+	selector = map[string]interface{}{
+		"string": "blah",
+	}
+	selectContainedByJsonb(t, selector, false)
+}
+
+func TestJsonbContainedByWithNumber(t *testing.T) {
+	selector := map[string]interface{}{
+		"number": 42,
+	}
+	selectJsonbContains(t, selector, true)
+
+	selector = map[string]interface{}{
+		"number": 11,
+	}
+	selectContainedByJsonb(t, selector, false)
+}
+
+func TestJsonbContainedByWithNumericArray(t *testing.T) {
+	selector := map[string]interface{}{
+		"array_number": []int{42, 84},
+	}
+	selectJsonbContains(t, selector, true)
+
+	selector = map[string]interface{}{
+		"array_number": []int{1, 2},
+	}
+	selectJsonbContains(t, selector, false)
+}
+
+func TestJsonbContainedByWithStringArray(t *testing.T) {
+	selector := map[string]interface{}{
+		"array_string": []string{"hello", "world"},
+	}
+	selectJsonbContains(t, selector, true)
+
+	selector = map[string]interface{}{
+		"array_string": []string{"blah", "vtha"},
+	}
+	selectJsonbContains(t, selector, false)
+}
+
+func TestJsonbContainedByWithNestedObject(t *testing.T) {
+	selector := map[string]interface{}{
+		"nested": map[string]interface{}{
+			"number": 1815,
+			"string": "world",
+		},
+	}
+	selectJsonbContains(t, selector, true)
+
+	selector = map[string]interface{}{
+		"nested": map[string]interface{}{
+			"number": 1914,
+			"string": "world",
+		},
+	}
+	selectJsonbContains(t, selector, false)
+}
+
+func selectContainedByJsonb(t *testing.T, selector map[string]interface{}, expected bool) {
+	conn := setupPgxConnection(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	tx, err := conn.Begin(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback(ctx)
+
+	require := require.New(t)
+
+	insertStmt := "INSERT INTO encrypted (id, encrypted_jsonb) VALUES ($1, $2)"
+	selectStmt := "SELECT $1 <@ encrypted_jsonb FROM encrypted LIMIT 1"
+	selectTemplate := "SELECT '%s' <@ encrypted_jsonb FROM encrypted LIMIT 1"
+
+	for _, mode := range modes {
+		id := rand.Int()
+		t.Run(mode.String(), func(t *testing.T) {
+			t.Run("insert", func(t *testing.T) {
+				jsonBytes, err := json.Marshal(testData())
 				require.NoError(err)
 				jsonStr := string(jsonBytes)
 
@@ -157,22 +271,11 @@ func selectJsonbPathQueryFirst(t *testing.T, selector string, expected *interfac
 	selectStmt := "SELECT jsonb_path_query_first(encrypted_jsonb, $1) FROM encrypted"
 	selectTemplate := "SELECT jsonb_path_query_first(encrypted_jsonb, '%s') FROM encrypted"
 
-	obj := map[string]interface{}{
-		"string": "hello",
-		"number": 42,
-		"nested": map[string]interface{}{
-			"number": 1815,
-			"string": "world",
-		},
-		"array_string": []string{"hello", "world"},
-		"array_number": []int{42, 84},
-	}
-
 	for _, mode := range modes {
 		id := rand.Int()
 		t.Run(mode.String(), func(t *testing.T) {
 			t.Run("insert", func(t *testing.T) {
-				jsonBytes, err := json.Marshal(obj)
+				jsonBytes, err := json.Marshal(testData())
 				require.NoError(err)
 
 				_, err = conn.Exec(ctx, insertStmt, mode, id, string(jsonBytes))
