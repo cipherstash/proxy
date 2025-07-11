@@ -7,4 +7,4 @@ RUN go mod download && go mod verify
 
 COPY . .
 
-CMD ["go", "test", "-v", "./..."]
+CMD ["go", "test", "-parallel", "32", "-v", "./..."]
