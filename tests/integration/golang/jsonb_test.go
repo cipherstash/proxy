@@ -17,8 +17,10 @@ func TestSelectJsonbContainsWithString(t *testing.T) {
 		"string": "hello",
 	}
 	selectJsonbContains(t, selector, true)
+}
 
-	selector = map[string]interface{}{
+func TestSelectJsonbContainsWithStringNegative(t *testing.T) {
+	selector := map[string]interface{}{
 		"string": "blah",
 	}
 	selectJsonbContains(t, selector, false)
@@ -29,8 +31,10 @@ func TestSelectJsonbContainsWithNumber(t *testing.T) {
 		"number": 42,
 	}
 	selectJsonbContains(t, selector, true)
+}
 
-	selector = map[string]interface{}{
+func TestSelectJsonbContainsWithNumberNegative(t *testing.T) {
+	selector := map[string]interface{}{
 		"number": 11,
 	}
 	selectJsonbContains(t, selector, false)
@@ -41,8 +45,10 @@ func TestSelectJsonbContainsWithNumericArray(t *testing.T) {
 		"array_number": []int{42, 84},
 	}
 	selectJsonbContains(t, selector, true)
+}
 
-	selector = map[string]interface{}{
+func TestSelectJsonbContainsWithNumericArrayNegative(t *testing.T) {
+	selector := map[string]interface{}{
 		"array_number": []int{1, 2},
 	}
 	selectJsonbContains(t, selector, false)
@@ -53,8 +59,10 @@ func TestSelectJsonbContainsWithStringArray(t *testing.T) {
 		"array_string": []string{"hello", "world"},
 	}
 	selectJsonbContains(t, selector, true)
+}
 
-	selector = map[string]interface{}{
+func TestSelectJsonbContainsWithStringArrayNegative(t *testing.T) {
+	selector := map[string]interface{}{
 		"array_string": []string{"blah", "vtha"},
 	}
 	selectJsonbContains(t, selector, false)
@@ -68,8 +76,10 @@ func TestSelectJsonbContainsWithNestedObject(t *testing.T) {
 		},
 	}
 	selectJsonbContains(t, selector, true)
+}
 
-	selector = map[string]interface{}{
+func TestSelectJsonbContainsWithNestedObjectNegative(t *testing.T) {
+	selector := map[string]interface{}{
 		"nested": map[string]interface{}{
 			"number": 1914,
 			"string": "world",
@@ -115,11 +125,13 @@ func TestJsonbContainedByWithString(t *testing.T) {
 		"string": "hello",
 	}
 	selectJsonbContains(t, selector, true)
+}
 
-	selector = map[string]interface{}{
+func TestJsonbContainedByWithStringNegative(t *testing.T) {
+	selector := map[string]interface{}{
 		"string": "blah",
 	}
-	selectContainedByJsonb(t, selector, false)
+	selectJsonbContains(t, selector, false)
 }
 
 func TestJsonbContainedByWithNumber(t *testing.T) {
@@ -127,8 +139,10 @@ func TestJsonbContainedByWithNumber(t *testing.T) {
 		"number": 42,
 	}
 	selectJsonbContains(t, selector, true)
+}
 
-	selector = map[string]interface{}{
+func TestJsonbContainedByWithNumberNegative(t *testing.T) {
+	selector := map[string]interface{}{
 		"number": 11,
 	}
 	selectContainedByJsonb(t, selector, false)
@@ -139,8 +153,10 @@ func TestJsonbContainedByWithNumericArray(t *testing.T) {
 		"array_number": []int{42, 84},
 	}
 	selectJsonbContains(t, selector, true)
+}
 
-	selector = map[string]interface{}{
+func TestJsonbContainedByWithNumericArrayNegative(t *testing.T) {
+	selector := map[string]interface{}{
 		"array_number": []int{1, 2},
 	}
 	selectJsonbContains(t, selector, false)
@@ -151,8 +167,10 @@ func TestJsonbContainedByWithStringArray(t *testing.T) {
 		"array_string": []string{"hello", "world"},
 	}
 	selectJsonbContains(t, selector, true)
+}
 
-	selector = map[string]interface{}{
+func TestJsonbContainedByWithStringArrayNegative(t *testing.T) {
+	selector := map[string]interface{}{
 		"array_string": []string{"blah", "vtha"},
 	}
 	selectJsonbContains(t, selector, false)
@@ -166,8 +184,10 @@ func TestJsonbContainedByWithNestedObject(t *testing.T) {
 		},
 	}
 	selectJsonbContains(t, selector, true)
+}
 
-	selector = map[string]interface{}{
+func TestJsonbContainedByWithNestedObjectNegative(t *testing.T) {
+	selector := map[string]interface{}{
 		"nested": map[string]interface{}{
 			"number": 1914,
 			"string": "world",
