@@ -6,11 +6,59 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/rand"
+	"os"
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/stretchr/testify/require"
 )
+
+func TestMain(m *testing.M) {
+	dbURL := os.Getenv("DATABASE_URL")
+	if dbURL == "" {
+		fmt.Println("DATABASE_URL environment variable not set")
+		os.Exit(1)
+	}
+
+	conn, err := pgx.Connect(context.Background(), dbURL)
+	if err != nil {
+		fmt.Printf("Unable to connect to database: %v\n", err)
+		os.Exit(1)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	insertStmt := "INSERT INTO encrypted (id, encrypted_jsonb) VALUES ($1, $2)"
+	id := rand.Int()
+	jsonBytes, err := json.Marshal(testData())
+	if err != nil {
+		fmt.Printf("Unable to marshall test data: %v\n", err)
+		os.Exit(1)
+	}
+
+	_, err = conn.Exec(ctx, insertStmt, id, string(jsonBytes))
+	if err != nil {
+		fmt.Printf("Unable to insert test data: %v\n", err)
+		os.Exit(1)
+	}
+
+	exitCode := m.Run()
+
+	deleteStmt := "DELETE FROM encrypted where id=$1"
+
+	cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	_, err = conn.Exec(cleanupCtx, deleteStmt, id)
+	if err != nil {
+		fmt.Printf("Unable to delete test data: %v\n", err)
+		os.Exit(1)
+	}
+
+	os.Exit(exitCode)
+}
 
 func TestSelectJsonbContainsWithString(t *testing.T) {
 	selector := map[string]interface{}{
@@ -251,46 +299,36 @@ func selectJsonb(t *testing.T, selector string, selectStmt string, selectTemplat
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	tx, err := conn.Begin(ctx)
-	require.NoError(t, err)
-	defer tx.Rollback(ctx)
-
 	require := require.New(t)
 
-	insertStmt := "INSERT INTO encrypted (id, encrypted_jsonb) VALUES ($1, $2)"
+	tx, err := conn.Begin(ctx)
+	require.NoError(err)
+	defer tx.Rollback(ctx)
 
 	for _, mode := range modes {
-		id := rand.Int()
 		t.Run(mode.String(), func(t *testing.T) {
-			t.Run("insert", func(t *testing.T) {
-				jsonBytes, err := json.Marshal(testData())
-				require.NoError(err)
-
-				_, err = conn.Exec(ctx, insertStmt, mode, id, string(jsonBytes))
-				require.NoError(err)
-			})
 
 			t.Run("select", func(t *testing.T) {
 				switch expectedResult.Type {
 				case ExpectedNoResult:
 					// test parameterised version
-					err := conn.QueryRow(context.Background(), selectStmt, mode, selector).Scan(nil)
+					err := tx.QueryRow(context.Background(), selectStmt, mode, selector).Scan(nil)
 					require.ErrorIs(err, sql.ErrNoRows)
 
 					// test template version
-					err = conn.QueryRow(context.Background(), fmt.Sprintf(selectTemplate, selector), mode).Scan(nil)
+					err = tx.QueryRow(context.Background(), fmt.Sprintf(selectTemplate, selector), mode).Scan(nil)
 					require.ErrorIs(err, sql.ErrNoRows)
 
 				case ExpectedNativeBool:
 					var result bool
 
 					// test parameterised version
-					err = conn.QueryRow(context.Background(), selectStmt, mode, selector).Scan(&result)
+					err = tx.QueryRow(context.Background(), selectStmt, mode, selector).Scan(&result)
 					require.NoError(err)
 					require.Equal(expectedResult.Value, result)
 
 					// test template version
-					err = conn.QueryRow(context.Background(), fmt.Sprintf(selectTemplate, selector), mode).Scan(&result)
+					err = tx.QueryRow(context.Background(), fmt.Sprintf(selectTemplate, selector), mode).Scan(&result)
 					require.NoError(err)
 					require.Equal(expectedResult.Value, result)
 
@@ -298,12 +336,12 @@ func selectJsonb(t *testing.T, selector string, selectStmt string, selectTemplat
 					var fetchedBytes []byte
 
 					// test parameterised version
-					err := conn.QueryRow(context.Background(), selectStmt, mode, selector).Scan(&fetchedBytes)
+					err := tx.QueryRow(context.Background(), selectStmt, mode, selector).Scan(&fetchedBytes)
 					require.NoError(err)
 					require.Equal(0, len(fetchedBytes))
 
 					// test template version
-					err = conn.QueryRow(context.Background(), fmt.Sprintf(selectTemplate, selector), mode).Scan(&fetchedBytes)
+					err = tx.QueryRow(context.Background(), fmt.Sprintf(selectTemplate, selector), mode).Scan(&fetchedBytes)
 					require.NoError(err)
 					require.Equal(0, len(fetchedBytes))
 
@@ -313,14 +351,14 @@ func selectJsonb(t *testing.T, selector string, selectStmt string, selectTemplat
 					var result interface{}
 
 					// test parameterised version
-					err := conn.QueryRow(context.Background(), selectStmt, mode, selector).Scan(&fetchedBytes)
+					err := tx.QueryRow(context.Background(), selectStmt, mode, selector).Scan(&fetchedBytes)
 					require.NoError(err)
 					err = json.Unmarshal(fetchedBytes, &result)
 					require.NoError(err)
 					require.Equal(expectedResult.Value, result)
 
 					// test template version
-					err = conn.QueryRow(context.Background(), fmt.Sprintf(selectTemplate, selector), mode).Scan(&fetchedBytes)
+					err = tx.QueryRow(context.Background(), fmt.Sprintf(selectTemplate, selector), mode).Scan(&fetchedBytes)
 					require.NoError(err)
 					err = json.Unmarshal(fetchedBytes, &result)
 					require.NoError(err)
