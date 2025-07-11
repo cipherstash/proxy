@@ -319,14 +319,10 @@ func selectJsonbPathQueryTemplate() string {
 
 func selectJsonb(t *testing.T, selector string, selectStmt string, selectTemplate string, expectedResult ExpectedResult) {
 	conn := setupPgxConnection(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	_, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	require := require.New(t)
-
-	tx, err := conn.Begin(ctx)
-	require.NoError(err)
-	defer tx.Rollback(ctx)
 
 	for _, mode := range modes {
 		t.Run(mode.String(), func(t *testing.T) {
@@ -335,23 +331,23 @@ func selectJsonb(t *testing.T, selector string, selectStmt string, selectTemplat
 				switch expectedResult.Type {
 				case ExpectedNoResult:
 					// test parameterised version
-					err := tx.QueryRow(context.Background(), selectStmt, mode, selector).Scan(nil)
+					err := conn.QueryRow(context.Background(), selectStmt, mode, selector).Scan(nil)
 					require.ErrorIs(err, sql.ErrNoRows)
 
 					// test template version
-					err = tx.QueryRow(context.Background(), fmt.Sprintf(selectTemplate, selector), mode).Scan(nil)
+					err = conn.QueryRow(context.Background(), fmt.Sprintf(selectTemplate, selector), mode).Scan(nil)
 					require.ErrorIs(err, sql.ErrNoRows)
 
 				case ExpectedNativeBool:
 					var result bool
 
 					// test parameterised version
-					err = tx.QueryRow(context.Background(), selectStmt, mode, selector).Scan(&result)
+					err := conn.QueryRow(context.Background(), selectStmt, mode, selector).Scan(&result)
 					require.NoError(err)
 					require.Equal(expectedResult.Value, result)
 
 					// test template version
-					err = tx.QueryRow(context.Background(), fmt.Sprintf(selectTemplate, selector), mode).Scan(&result)
+					err = conn.QueryRow(context.Background(), fmt.Sprintf(selectTemplate, selector), mode).Scan(&result)
 					require.NoError(err)
 					require.Equal(expectedResult.Value, result)
 
@@ -359,12 +355,12 @@ func selectJsonb(t *testing.T, selector string, selectStmt string, selectTemplat
 					var fetchedBytes []byte
 
 					// test parameterised version
-					err := tx.QueryRow(context.Background(), selectStmt, mode, selector).Scan(&fetchedBytes)
+					err := conn.QueryRow(context.Background(), selectStmt, mode, selector).Scan(&fetchedBytes)
 					require.NoError(err)
 					require.Equal(0, len(fetchedBytes))
 
 					// test template version
-					err = tx.QueryRow(context.Background(), fmt.Sprintf(selectTemplate, selector), mode).Scan(&fetchedBytes)
+					err = conn.QueryRow(context.Background(), fmt.Sprintf(selectTemplate, selector), mode).Scan(&fetchedBytes)
 					require.NoError(err)
 					require.Equal(0, len(fetchedBytes))
 
@@ -374,14 +370,14 @@ func selectJsonb(t *testing.T, selector string, selectStmt string, selectTemplat
 					var result interface{}
 
 					// test parameterised version
-					err := tx.QueryRow(context.Background(), selectStmt, mode, selector).Scan(&fetchedBytes)
+					err := conn.QueryRow(context.Background(), selectStmt, mode, selector).Scan(&fetchedBytes)
 					require.NoError(err)
 					err = json.Unmarshal(fetchedBytes, &result)
 					require.NoError(err)
 					require.Equal(expectedResult.Value, result)
 
 					// test template version
-					err = tx.QueryRow(context.Background(), fmt.Sprintf(selectTemplate, selector), mode).Scan(&fetchedBytes)
+					err = conn.QueryRow(context.Background(), fmt.Sprintf(selectTemplate, selector), mode).Scan(&fetchedBytes)
 					require.NoError(err)
 					err = json.Unmarshal(fetchedBytes, &result)
 					require.NoError(err)
