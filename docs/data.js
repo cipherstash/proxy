@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1752140688606,
+  "lastUpdate": 1752212746375,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -7756,6 +7756,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 6.712614,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "66d47d62cad79a46388007af03e848533a0f3cc7",
+          "message": "Integration tests in golang with pgx",
+          "timestamp": "2025-07-08T05:57:19Z",
+          "url": "https://github.com/cipherstash/proxy/pull/276/commits/66d47d62cad79a46388007af03e848533a0f3cc7"
+        },
+        "date": 1752212744989,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 6.821765,
             "unit": "Number"
           }
         ]
