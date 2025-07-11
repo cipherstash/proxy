@@ -61,6 +61,7 @@ func TestMain(m *testing.M) {
 }
 
 func TestSelectJsonbContainsWithString(t *testing.T) {
+	t.Parallel()
 	selector := map[string]interface{}{
 		"string": "hello",
 	}
@@ -68,6 +69,7 @@ func TestSelectJsonbContainsWithString(t *testing.T) {
 }
 
 func TestSelectJsonbContainsWithStringNegative(t *testing.T) {
+	t.Parallel()
 	selector := map[string]interface{}{
 		"string": "blah",
 	}
@@ -75,6 +77,7 @@ func TestSelectJsonbContainsWithStringNegative(t *testing.T) {
 }
 
 func TestSelectJsonbContainsWithNumber(t *testing.T) {
+	t.Parallel()
 	selector := map[string]interface{}{
 		"number": 42,
 	}
@@ -82,6 +85,7 @@ func TestSelectJsonbContainsWithNumber(t *testing.T) {
 }
 
 func TestSelectJsonbContainsWithNumberNegative(t *testing.T) {
+	t.Parallel()
 	selector := map[string]interface{}{
 		"number": 11,
 	}
@@ -89,6 +93,7 @@ func TestSelectJsonbContainsWithNumberNegative(t *testing.T) {
 }
 
 func TestSelectJsonbContainsWithNumericArray(t *testing.T) {
+	t.Parallel()
 	selector := map[string]interface{}{
 		"array_number": []int{42, 84},
 	}
@@ -96,6 +101,7 @@ func TestSelectJsonbContainsWithNumericArray(t *testing.T) {
 }
 
 func TestSelectJsonbContainsWithNumericArrayNegative(t *testing.T) {
+	t.Parallel()
 	selector := map[string]interface{}{
 		"array_number": []int{1, 2},
 	}
@@ -103,6 +109,7 @@ func TestSelectJsonbContainsWithNumericArrayNegative(t *testing.T) {
 }
 
 func TestSelectJsonbContainsWithStringArray(t *testing.T) {
+	t.Parallel()
 	selector := map[string]interface{}{
 		"array_string": []string{"hello", "world"},
 	}
@@ -110,6 +117,7 @@ func TestSelectJsonbContainsWithStringArray(t *testing.T) {
 }
 
 func TestSelectJsonbContainsWithStringArrayNegative(t *testing.T) {
+	t.Parallel()
 	selector := map[string]interface{}{
 		"array_string": []string{"blah", "vtha"},
 	}
@@ -117,6 +125,7 @@ func TestSelectJsonbContainsWithStringArrayNegative(t *testing.T) {
 }
 
 func TestSelectJsonbContainsWithNestedObject(t *testing.T) {
+	t.Parallel()
 	selector := map[string]interface{}{
 		"nested": map[string]interface{}{
 			"number": 1815,
@@ -127,6 +136,7 @@ func TestSelectJsonbContainsWithNestedObject(t *testing.T) {
 }
 
 func TestSelectJsonbContainsWithNestedObjectNegative(t *testing.T) {
+	t.Parallel()
 	selector := map[string]interface{}{
 		"nested": map[string]interface{}{
 			"number": 1914,
@@ -169,6 +179,7 @@ func selectJsonbContainment(t *testing.T, selector map[string]interface{}, selec
 }
 
 func TestJsonbContainedByWithString(t *testing.T) {
+	t.Parallel()
 	selector := map[string]interface{}{
 		"string": "hello",
 	}
@@ -176,6 +187,7 @@ func TestJsonbContainedByWithString(t *testing.T) {
 }
 
 func TestJsonbContainedByWithStringNegative(t *testing.T) {
+	t.Parallel()
 	selector := map[string]interface{}{
 		"string": "blah",
 	}
@@ -183,6 +195,7 @@ func TestJsonbContainedByWithStringNegative(t *testing.T) {
 }
 
 func TestJsonbContainedByWithNumber(t *testing.T) {
+	t.Parallel()
 	selector := map[string]interface{}{
 		"number": 42,
 	}
@@ -190,6 +203,7 @@ func TestJsonbContainedByWithNumber(t *testing.T) {
 }
 
 func TestJsonbContainedByWithNumberNegative(t *testing.T) {
+	t.Parallel()
 	selector := map[string]interface{}{
 		"number": 11,
 	}
@@ -197,6 +211,7 @@ func TestJsonbContainedByWithNumberNegative(t *testing.T) {
 }
 
 func TestJsonbContainedByWithNumericArray(t *testing.T) {
+	t.Parallel()
 	selector := map[string]interface{}{
 		"array_number": []int{42, 84},
 	}
@@ -204,6 +219,7 @@ func TestJsonbContainedByWithNumericArray(t *testing.T) {
 }
 
 func TestJsonbContainedByWithNumericArrayNegative(t *testing.T) {
+	t.Parallel()
 	selector := map[string]interface{}{
 		"array_number": []int{1, 2},
 	}
@@ -211,6 +227,7 @@ func TestJsonbContainedByWithNumericArrayNegative(t *testing.T) {
 }
 
 func TestJsonbContainedByWithStringArray(t *testing.T) {
+	t.Parallel()
 	selector := map[string]interface{}{
 		"array_string": []string{"hello", "world"},
 	}
@@ -218,6 +235,7 @@ func TestJsonbContainedByWithStringArray(t *testing.T) {
 }
 
 func TestJsonbContainedByWithStringArrayNegative(t *testing.T) {
+	t.Parallel()
 	selector := map[string]interface{}{
 		"array_string": []string{"blah", "vtha"},
 	}
@@ -225,6 +243,7 @@ func TestJsonbContainedByWithStringArrayNegative(t *testing.T) {
 }
 
 func TestJsonbContainedByWithNestedObject(t *testing.T) {
+	t.Parallel()
 	selector := map[string]interface{}{
 		"nested": map[string]interface{}{
 			"number": 1815,
@@ -235,6 +254,7 @@ func TestJsonbContainedByWithNestedObject(t *testing.T) {
 }
 
 func TestJsonbContainedByWithNestedObjectNegative(t *testing.T) {
+	t.Parallel()
 	selector := map[string]interface{}{
 		"nested": map[string]interface{}{
 			"number": 1914,
@@ -264,6 +284,7 @@ func selectJsonbPathQueryFirst(t *testing.T, selector string, expected ExpectedR
 }
 
 func TestSelectJsonbPathQueryFirstString(t *testing.T) {
+	t.Parallel()
 	var expected = ExpectedResult{
 		Type:  ExpectedJsonValue,
 		Value: "hello",
@@ -272,6 +293,7 @@ func TestSelectJsonbPathQueryFirstString(t *testing.T) {
 }
 
 func TestSelectJsonbPathQueryFirstNumber(t *testing.T) {
+	t.Parallel()
 	var expected = ExpectedResult{
 		Type:  ExpectedJsonValue,
 		Value: 42.0,
@@ -280,6 +302,7 @@ func TestSelectJsonbPathQueryFirstNumber(t *testing.T) {
 }
 
 func TestSelectJsonbPathQueryFirstWithUnknown(t *testing.T) {
+	t.Parallel()
 	var expected = ExpectedResult{
 		Type: ExpectedEmpty,
 	}
@@ -370,6 +393,7 @@ func selectJsonb(t *testing.T, selector string, selectStmt string, selectTemplat
 }
 
 func TestSelectJsonbPathQueryNumber(t *testing.T) {
+	t.Parallel()
 	expected := ExpectedResult{
 		Type:  ExpectedJsonValue,
 		Value: 42.0,
@@ -378,6 +402,7 @@ func TestSelectJsonbPathQueryNumber(t *testing.T) {
 }
 
 func TestSelectJsonbPathQueryString(t *testing.T) {
+	t.Parallel()
 	expected := ExpectedResult{
 		Type:  ExpectedJsonValue,
 		Value: "world",
@@ -386,6 +411,7 @@ func TestSelectJsonbPathQueryString(t *testing.T) {
 }
 
 func TestSelectJsonbPathQueryValue(t *testing.T) {
+	t.Parallel()
 	expected := ExpectedResult{
 		Type: ExpectedJsonValue,
 		Value: map[string]interface{}{
@@ -397,6 +423,7 @@ func TestSelectJsonbPathQueryValue(t *testing.T) {
 }
 
 func TestSelectJsonbPathQueryWithUnknown(t *testing.T) {
+	t.Parallel()
 	expected := ExpectedResult{
 		Type: ExpectedNoResult,
 	}
@@ -404,6 +431,7 @@ func TestSelectJsonbPathQueryWithUnknown(t *testing.T) {
 }
 
 func TestSelectJsonbPathQueryWithAlias(t *testing.T) {
+	t.Parallel()
 	expected := ExpectedResult{
 		Type: ExpectedJsonValue,
 		Value: map[string]interface{}{
@@ -423,6 +451,7 @@ func selectJsonPathExistsQueryTemplate() string {
 }
 
 func TestSelectJsonbPathExistsNumber(t *testing.T) {
+	t.Parallel()
 	expected := ExpectedResult{
 		Type:  ExpectedNativeBool,
 		Value: true,
@@ -431,6 +460,7 @@ func TestSelectJsonbPathExistsNumber(t *testing.T) {
 }
 
 func TestSelectJsonbPathExistsString(t *testing.T) {
+	t.Parallel()
 	expected := ExpectedResult{
 		Type:  ExpectedNativeBool,
 		Value: true,
@@ -439,6 +469,7 @@ func TestSelectJsonbPathExistsString(t *testing.T) {
 }
 
 func TestSelectJsonbPathExistsValue(t *testing.T) {
+	t.Parallel()
 	expected := ExpectedResult{
 		Type:  ExpectedNativeBool,
 		Value: true,
@@ -447,6 +478,7 @@ func TestSelectJsonbPathExistsValue(t *testing.T) {
 }
 
 func TestSelectJsonbPathExistsWithUnknownSelector(t *testing.T) {
+	t.Parallel()
 	expected := ExpectedResult{
 		Type:  ExpectedNativeBool,
 		Value: false,
@@ -455,6 +487,7 @@ func TestSelectJsonbPathExistsWithUnknownSelector(t *testing.T) {
 }
 
 func TestSelectJsonbPathExistsWithAlias(t *testing.T) {
+	t.Parallel()
 	expected := ExpectedResult{
 		Type:  ExpectedNativeBool,
 		Value: true,
