@@ -32,6 +32,7 @@ func setupPgxConnection(t *testing.T) *pgx.Conn {
 }
 
 func TestPgxConnect(t *testing.T) {
+	t.Parallel()
 	conn := setupPgxConnection(t)
 	require := require.New(t)
 
@@ -42,12 +43,17 @@ func TestPgxConnect(t *testing.T) {
 }
 
 func TestPgxUnencryptedInsertAndSelect(t *testing.T) {
+	t.Parallel()
 	conn := setupPgxConnection(t)
 	require := require.New(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	_, err := conn.Exec(ctx, `
+	tx, err := conn.Begin(ctx)
+	require.NoError(err)
+	defer tx.Rollback(ctx)
+
+	_, err = tx.Exec(ctx, `
 CREATE TEMPORARY TABLE t (name text not null unique);
 
 INSERT INTO t (name) VALUES
@@ -58,15 +64,20 @@ INSERT INTO t (name) VALUES
 	require.NoError(err)
 
 	var result string
-	err = conn.QueryRow(context.Background(), "SELECT name FROM t").Scan(&result)
+	err = tx.QueryRow(context.Background(), "SELECT name FROM t").Scan(&result)
 	require.NoError(err)
 	require.Equal("Ada", result)
 }
 
 func TestPgxEncryptedMapText(t *testing.T) {
+	t.Parallel()
 	conn := setupPgxConnection(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
+
+	tx, err := conn.Begin(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback(ctx)
 
 	column := "encrypted_text"
 	value := "hello, world"
@@ -77,14 +88,14 @@ func TestPgxEncryptedMapText(t *testing.T) {
 		id := rand.Int()
 		t.Run(mode.String(), func(t *testing.T) {
 			t.Run("insert", func(t *testing.T) {
-				_, err := conn.Exec(ctx, insertStmt, mode, id, value)
+				_, err := tx.Exec(ctx, insertStmt, mode, id, value)
 				require.NoError(t, err)
 			})
 
 			t.Run("select", func(t *testing.T) {
 				var rid int
 				var rv string
-				err := conn.QueryRow(context.Background(), selectStmt, mode, id).Scan(&rid, &rv)
+				err := tx.QueryRow(context.Background(), selectStmt, mode, id).Scan(&rid, &rv)
 				require.NoError(t, err)
 				require.Equal(t, id, rid)
 				require.Equal(t, value, rv)
@@ -94,9 +105,14 @@ func TestPgxEncryptedMapText(t *testing.T) {
 }
 
 func TestPgxEncryptedMapInts(t *testing.T) {
+	t.Parallel()
 	conn := setupPgxConnection(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
+
+	tx, err := conn.Begin(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback(ctx)
 
 	columns := []string{"encrypted_int2", "encrypted_int4", "encrypted_int8"}
 	value := 99
@@ -109,14 +125,14 @@ func TestPgxEncryptedMapInts(t *testing.T) {
 				id := rand.Int()
 				t.Run(mode.String(), func(t *testing.T) {
 					t.Run("insert", func(t *testing.T) {
-						_, err := conn.Exec(ctx, insertStmt, mode, id, value)
+						_, err := tx.Exec(ctx, insertStmt, mode, id, value)
 						require.NoError(t, err)
 					})
 
 					t.Run("select", func(t *testing.T) {
 						var rid int
 						var rv int
-						err := conn.QueryRow(context.Background(), selectStmt, mode, id).Scan(&rid, &rv)
+						err := tx.QueryRow(context.Background(), selectStmt, mode, id).Scan(&rid, &rv)
 						require.NoError(t, err)
 						require.Equal(t, id, rid)
 						require.Equal(t, value, rv)
@@ -128,9 +144,14 @@ func TestPgxEncryptedMapInts(t *testing.T) {
 }
 
 func TestPgxEncryptedMapFloat(t *testing.T) {
+	t.Parallel()
 	conn := setupPgxConnection(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
+
+	tx, err := conn.Begin(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback(ctx)
 
 	column := "encrypted_float8"
 	value := 1.5
@@ -145,14 +166,14 @@ func TestPgxEncryptedMapFloat(t *testing.T) {
 		}
 		t.Run(mode.String(), func(t *testing.T) {
 			t.Run("insert", func(t *testing.T) {
-				_, err := conn.Exec(ctx, insertStmt, mode, id, value)
+				_, err := tx.Exec(ctx, insertStmt, mode, id, value)
 				require.NoError(t, err)
 			})
 
 			t.Run("select", func(t *testing.T) {
 				var rid int
 				var rv float64
-				err := conn.QueryRow(context.Background(), selectStmt, mode, id).Scan(&rid, &rv)
+				err := tx.QueryRow(context.Background(), selectStmt, mode, id).Scan(&rid, &rv)
 				require.NoError(t, err)
 				require.Equal(t, id, rid)
 				require.Equal(t, value, rv)
@@ -162,16 +183,23 @@ func TestPgxEncryptedMapFloat(t *testing.T) {
 }
 
 func TestPgxInsertEncryptedWithDomainTypeAndReturning(t *testing.T) {
+	t.Parallel()
 	conn := setupPgxConnection(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
 
 	dtypes, err := conn.LoadTypes(context.Background(), []string{"domain_type_with_check"})
 	require.NoError(t, err)
 	conn.TypeMap().RegisterTypes(dtypes)
 
+	tx, err := conn.Begin(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback(ctx)
+
 	encrypted_column_value := "hello, world"
 	plaintext_domain_value := "BV"
 
-	insertStmt := fmt.Sprintf(`INSERT INTO encrypted (id, encrypted_text, plaintext_domain) VALUES ($1, $2, $3) RETURNING id, encrypted_text, plaintext_domain`);
+	insertStmt := fmt.Sprintf(`INSERT INTO encrypted (id, encrypted_text, plaintext_domain) VALUES ($1, $2, $3) RETURNING id, encrypted_text, plaintext_domain`)
 
 	for _, mode := range modes {
 		id := rand.Int()
@@ -191,8 +219,6 @@ func TestPgxInsertEncryptedWithDomainTypeAndReturning(t *testing.T) {
 		})
 	}
 }
-
-
 
 /*
 func TestPgxEncryptedMapDate(t *testing.T) {
