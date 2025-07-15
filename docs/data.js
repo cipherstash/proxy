@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1752213975480,
+  "lastUpdate": 1752547681584,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -7806,6 +7806,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 6.777432,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "yujiyokoo@gmail.com",
+            "name": "Yuji Yokoo",
+            "username": "yujiyokoo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "b174e14559c0f8bca50be0a22a3d4b792918c6e1",
+          "message": "Merge pull request #276 from cipherstash/feat/jsonb-golang-tests\n\nIntegration tests in golang with pgx",
+          "timestamp": "2025-07-15T11:45:19+09:00",
+          "tree_id": "aa8c4945105e914fc2cbd9c7357bb9b6fa022bca",
+          "url": "https://github.com/cipherstash/proxy/commit/b174e14559c0f8bca50be0a22a3d4b792918c6e1"
+        },
+        "date": 1752547680427,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 7.068057,
             "unit": "Number"
           }
         ]
