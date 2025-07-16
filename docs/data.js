@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1752632826173,
+  "lastUpdate": 1752633109571,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -7914,6 +7914,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 6.998479,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "ee5108b27ad11337bd8babab9e80931b2806d1e9",
+          "message": "fix(eql-mapper): resolution of CTE tables",
+          "timestamp": "2025-07-15T15:09:50Z",
+          "url": "https://github.com/cipherstash/proxy/pull/280/commits/ee5108b27ad11337bd8babab9e80931b2806d1e9"
+        },
+        "date": 1752633108125,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 6.770954,
             "unit": "Number"
           }
         ]
