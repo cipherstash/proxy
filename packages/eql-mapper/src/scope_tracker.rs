@@ -297,17 +297,20 @@ impl<'ast> Visitor<'ast> for ScopeTracker<'ast> {
 
     fn enter<N: Visitable>(&mut self, node: &'ast N) -> ControlFlow<Break<Self::Error>> {
         if node.downcast_ref::<Statement>().is_some() {
-            let root = Scope::new_root();
-            self.stack.push(root.clone());
-            return ControlFlow::Continue(());
+            match self.stack.last() {
+                Some(scope) => {
+                    self.stack.push(Scope::new_child(scope));
+                }
+                None => {
+                    self.stack.push(Scope::new_root());
+                }
+            }
         }
 
         if node.downcast_ref::<Query>().is_some() {
             match self.stack.last() {
                 Some(scope) => {
-                    let child = Scope::new_child(scope);
-                    self.stack.push(child.clone());
-                    return ControlFlow::Continue(());
+                    self.stack.push(Scope::new_child(scope));
                 }
                 None => return ControlFlow::Break(Break::Err(ScopeError::NoCurrentScope)),
             }
