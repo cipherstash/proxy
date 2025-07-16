@@ -810,6 +810,31 @@ mod test {
     }
 
     #[test]
+    fn cte_tables_can_be_resolved_in_subqueries() {
+        let schema = resolver(schema! {
+            tables: {
+                source_table: {
+                    id,
+                }
+
+                dest_table: {
+                    id,
+                }
+            }
+        });
+
+        let statement = parse(
+            "
+            WITH fd AS ( SELECT id FROM source_table )
+            INSERT INTO dest_table ( id )
+            SELECT id FROM fd RETURNING id
+        ",
+        );
+
+        type_check(schema, &statement).unwrap();
+    }
+
+    #[test]
     fn aggregates() {
         // init_tracing();
 
