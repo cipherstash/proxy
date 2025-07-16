@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1752633109571,
+  "lastUpdate": 1752634308546,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -7939,6 +7939,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 6.770954,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "lindsay@cipherstash.com",
+            "name": "Lindsay Holmwood",
+            "username": "auxesis"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "9583da9be1d95d640fd03f34c44afe49ff3f9a4b",
+          "message": "Merge pull request #280 from cipherstash/fix/cte-resolution-in-sub-statements\n\nfix(eql-mapper): resolution of CTE tables",
+          "timestamp": "2025-07-16T12:48:48+10:00",
+          "tree_id": "c9e92f13e38691bad833f96f5956328669bd5268",
+          "url": "https://github.com/cipherstash/proxy/commit/9583da9be1d95d640fd03f34c44afe49ff3f9a4b"
+        },
+        "date": 1752634307065,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 6.629315,
             "unit": "Number"
           }
         ]
