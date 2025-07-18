@@ -32,4 +32,4 @@ helm-repos:
 additional-values-files: []
 
 # Debug output
-debug: false 
+debug: false
