@@ -1,0 +1,172 @@
+# Default values for cipherstash-proxy.
+# This is a YAML-formatted file.
+# Declare variables to be passed into your templates.
+
+replicaCount: 1
+
+image:
+  repository: cipherstash/proxy
+  pullPolicy: IfNotPresent
+  # Overrides the image tag whose default is the chart appVersion.
+  tag: "2.1.2"
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+# CipherStash configuration
+cipherstash:
+  workspaceCrn: "replace_with_cipherstash_workspace_crn"
+  clientId: "replace_with_cipherstash_client_id"
+  clientKey: "replace_with_cipherstash_client_key"  # Only used if secrets are disabled
+  clientAccessKey: "replace_with_cipherstash_access_key"  # Only used if secrets are disabled
+
+# Database configuration
+database:
+  host: "replace_with_postgres_host"
+  name: "replace_with_postgres_database"
+  port: "replace_with_postgres_port"
+  username: "replace_with_postgres_username"
+  password: "replace_with_postgres_password"  # Only used if secrets are disabled
+
+# Secrets configuration
+secrets:
+  # Whether to create secrets for sensitive values
+  create: true
+  
+  # If create is true, these values will be stored in a Kubernetes secret
+  # Leave empty to use the values from database.password, cipherstash.clientKey, etc.
+  databasePassword: ""
+  cipherstashClientKey: ""
+  cipherstashClientAccessKey: ""
+  
+  # Use external secrets (when create is false)
+  external:
+    # Name of existing secret containing database password
+    databasePasswordSecret:
+      name: ""
+      key: "password"
+    
+    # Name of existing secret containing CipherStash client key
+    cipherstashClientKeySecret:
+      name: ""
+      key: "client-key"
+    
+    # Name of existing secret containing CipherStash client access key
+    cipherstashClientAccessKeySecret:
+      name: ""
+      key: "client-access-key"
+
+# Prometheus configuration
+prometheus:
+  enabled: true
+
+serviceAccount:
+  # Specifies whether a service account should be created
+  create: true
+  # Annotations to add to the service account
+  annotations: {}
+  # The name of the service account to use.
+  # If not set and create is true, a name is generated using the fullname template
+  name: ""
+
+podAnnotations: {}
+
+podSecurityContext: {}
+  # fsGroup: 2000
+
+securityContext: {}
+  # capabilities:
+  #   drop:
+  #   - ALL
+  # readOnlyRootFilesystem: true
+  # runAsNonRoot: true
+  # runAsUser: 1000
+
+service:
+  type: ClusterIP
+  port: 6432
+  targetPort: 6432
+
+# Metrics service configuration
+metricsService:
+  enabled: true
+  type: ClusterIP
+  port: 9930
+  targetPort: 9930
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "9930"
+    prometheus.io/path: "/metrics"
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+    # kubernetes.io/ingress.class: nginx
+    # kubernetes.io/tls-acme: "true"
+  hosts:
+    - host: chart-example.local
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+  #  - secretName: chart-example-tls
+  #    hosts:
+  #      - chart-example.local
+
+resources:
+  # We usually recommend not to specify default resources and to leave this as a conscious
+  # choice for the user. This also increases chances charts run on environments with little
+  # resources, such as Minikube. If you do want to specify resources, uncomment the following
+  # lines, adjust them as necessary, and remove the curly braces after 'resources:'.
+  limits:
+    cpu: 500m
+    memory: 512Mi
+  requests:
+    cpu: 100m
+    memory: 128Mi
+
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 100
+  targetCPUUtilizationPercentage: 80
+  # targetMemoryUtilizationPercentage: 80
+
+nodeSelector: {}
+
+tolerations: []
+
+affinity: {}
+
+# Strategy for deployment updates
+strategy:
+  type: RollingUpdate
+  rollingUpdate:
+    maxUnavailable: 25%
+    maxSurge: 25%
+
+# Probes configuration
+probes:
+  liveness:
+    enabled: true
+    initialDelaySeconds: 30
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+    tcpSocket:
+      port: 6432
+  readiness:
+    enabled: true
+    initialDelaySeconds: 5
+    periodSeconds: 5
+    timeoutSeconds: 3
+    failureThreshold: 3
+    tcpSocket:
+      port: 6432
+
+# Namespace configuration
+namespace:
+  create: false
+  name: cipherstash 

@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "cipherstash-proxy.fullname" . }}
+  namespace: {{ include "cipherstash-proxy.namespace" . }}
+  labels:
+    {{- include "cipherstash-proxy.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.service.type }}
+  ports:
+    - port: {{ .Values.service.port }}
+      targetPort: {{ .Values.service.targetPort }}
+      protocol: TCP
+      name: proxy
+  selector:
+    {{- include "cipherstash-proxy.selectorLabels" . | nindent 4 }} 
