@@ -33,25 +33,25 @@ database:
 secrets:
   # Whether to create secrets for sensitive values
   create: true
-  
+
   # If create is true, these values will be stored in a Kubernetes secret
   # Leave empty to use the values from database.password, cipherstash.clientKey, etc.
   databasePassword: ""
   cipherstashClientKey: ""
   cipherstashClientAccessKey: ""
-  
+
   # Use external secrets (when create is false)
   external:
     # Name of existing secret containing database password
     databasePasswordSecret:
       name: ""
       key: "password"
-    
+
     # Name of existing secret containing CipherStash client key
     cipherstashClientKeySecret:
       name: ""
       key: "client-key"
-    
+
     # Name of existing secret containing CipherStash client access key
     cipherstashClientAccessKeySecret:
       name: ""
@@ -169,4 +169,4 @@ probes:
 # Namespace configuration
 namespace:
   create: false
-  name: cipherstash 
+  name: cipherstash

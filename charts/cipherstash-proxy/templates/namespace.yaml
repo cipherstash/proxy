@@ -5,4 +5,4 @@ metadata:
   name: {{ .Values.namespace.name }}
   labels:
     {{- include "cipherstash-proxy.labels" . | nindent 4 }}
-{{- end }} 
+{{- end }}

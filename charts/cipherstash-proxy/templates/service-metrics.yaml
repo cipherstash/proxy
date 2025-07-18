@@ -20,4 +20,4 @@ spec:
       name: metrics
   selector:
     {{- include "cipherstash-proxy.selectorLabels" . | nindent 4 }}
-{{- end }} 
+{{- end }}
