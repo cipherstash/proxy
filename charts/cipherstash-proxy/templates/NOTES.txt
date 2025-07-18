@@ -1,0 +1,39 @@
+1. Get the application URL by running these commands:
+{{- if .Values.ingress.enabled }}
+{{- range $host := .Values.ingress.hosts }}
+  {{- range .paths }}
+  http{{ if $.Values.ingress.tls }}s{{ end }}://{{ $host.host }}{{ .path }}
+  {{- end }}
+{{- end }}
+{{- else if contains "NodePort" .Values.service.type }}
+  export NODE_PORT=$(kubectl get --namespace {{ include "cipherstash-proxy.namespace" . }} -o jsonpath="{.spec.ports[0].nodePort}" services {{ include "cipherstash-proxy.fullname" . }})
+  export NODE_IP=$(kubectl get nodes --namespace {{ include "cipherstash-proxy.namespace" . }} -o jsonpath="{.items[0].status.addresses[0].address}")
+  echo http://$NODE_IP:$NODE_PORT
+{{- else if contains "LoadBalancer" .Values.service.type }}
+     NOTE: It may take a few minutes for the LoadBalancer IP to be available.
+           You can watch the status of by running 'kubectl get --namespace {{ include "cipherstash-proxy.namespace" . }} svc -w {{ include "cipherstash-proxy.fullname" . }}'
+  export SERVICE_IP=$(kubectl get svc --namespace {{ include "cipherstash-proxy.namespace" . }} {{ include "cipherstash-proxy.fullname" . }} --template "{{"{{ range (index .status.loadBalancer.ingress 0) }}{{.}}{{ end }}"}}")
+  echo http://$SERVICE_IP:{{ .Values.service.port }}
+{{- else if contains "ClusterIP" .Values.service.type }}
+  export POD_NAME=$(kubectl get pods --namespace {{ include "cipherstash-proxy.namespace" . }} -l "{{ include "cipherstash-proxy.selectorLabels" . | replace ": " "=" | replace "\n" "," }}" -o jsonpath="{.items[0].metadata.name}")
+  export CONTAINER_PORT=$(kubectl get pod --namespace {{ include "cipherstash-proxy.namespace" . }} $POD_NAME -o jsonpath="{.spec.containers[0].ports[0].containerPort}")
+  echo "Visit http://127.0.0.1:{{ .Values.service.port }} to use your application"
+  kubectl --namespace {{ include "cipherstash-proxy.namespace" . }} port-forward $POD_NAME {{ .Values.service.port }}:$CONTAINER_PORT
+{{- end }}
+
+2. CipherStash Proxy Configuration:
+   - Proxy Port: {{ .Values.service.port }}
+   - Target Database: {{ .Values.database.host }}:{{ .Values.database.port }}/{{ .Values.database.name }}
+   {{- if .Values.metricsService.enabled }}
+   - Metrics Port: {{ .Values.metricsService.port }} (Prometheus metrics available at /metrics)
+   {{- end }}
+
+3. To connect your application to the proxy, update your database connection string to point to:
+   Host: {{ include "cipherstash-proxy.fullname" . }}.{{ include "cipherstash-proxy.namespace" . }}.svc.cluster.local
+   Port: {{ .Values.service.port }}
+
+4. Important Notes:
+   - Make sure your database credentials and CipherStash configuration are correctly set in values.yaml
+   - Verify that your PostgreSQL database is accessible from the cluster
+   - Check the proxy logs for any configuration or connection issues:
+     kubectl logs --namespace {{ include "cipherstash-proxy.namespace" . }} -l "{{ include "cipherstash-proxy.selectorLabels" . | replace ": " "=" | replace "\n" "," }}" -f 
