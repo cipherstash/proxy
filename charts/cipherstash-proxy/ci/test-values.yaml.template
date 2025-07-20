@@ -45,4 +45,4 @@ probes:
   readiness:
     enabled: true
     initialDelaySeconds: 5
-    periodSeconds: 10 
+    periodSeconds: 10
