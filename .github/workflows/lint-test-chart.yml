@@ -34,6 +34,20 @@ jobs:
       - name: Set up chart-testing
         uses: helm/chart-testing-action@v2.6.1
 
+      - name: Prepare test values with secrets
+        run: |
+          # Substitute environment variables in test-values.yaml template
+          envsubst < charts/cipherstash-proxy/ci/test-values.yaml.template > charts/cipherstash-proxy/ci/test-values.yaml
+        env:
+          CS_WORKSPACE_CRN: ${{ secrets.CS_WORKSPACE_CRN }}
+          CS_CLIENT_ID: ${{ secrets.CS_CLIENT_ID }}
+          CS_CLIENT_KEY: ${{ secrets.CS_CLIENT_KEY }}
+          CS_CLIENT_ACCESS_KEY: ${{ secrets.CS_CLIENT_ACCESS_KEY }}
+          CS_CI_DATABASE_HOST: ${{ secrets.CS_CI_DATABASE_HOST }}
+          CS_CI_DATABASE_NAME: ${{ secrets.CS_CI_DATABASE_NAME }}
+          CS_CI_DATABASE_USER: ${{ secrets.CS_CI_DATABASE_USER }}
+          CS_CI_DATABASE_PASSWORD: ${{ secrets.CS_CI_DATABASE_PASSWORD }}
+
       - name: Run chart-testing (list-changed)
         id: list-changed
         run: |

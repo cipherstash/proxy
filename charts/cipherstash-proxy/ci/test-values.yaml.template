@@ -1,22 +1,19 @@
 # Test values for chart-testing CI
-# 
-# NOTE: This file will be automatically overwritten during CI runs
-# with values from GitHub secrets. The template is in test-values.yaml.template
-#
 # These values provide minimal configuration for testing chart installation
+# This is a template file - secrets will be substituted by CI
 
 database:
-  host: "postgres.example.com"
-  name: "testdb"
+  host: "${CS_CI_DATABASE_HOST}"
+  name: "${CS_CI_DATABASE_NAME}"
   port: "5432"
-  username: "testuser"
-  password: "testpass"
+  username: "${CS_CI_DATABASE_USER}"
+  password: "${CS_CI_DATABASE_PASSWORD}"
 
 cipherstash:
-  workspaceCrn: "crn:region:id"
-  clientId: "test-client-id"
-  clientKey: "test-client-key"
-  clientAccessKey: "test-client-access-key"
+  workspaceCrn: "${CS_WORKSPACE_CRN}"
+  clientId: "${CS_CLIENT_ID}"
+  clientKey: "${CS_CLIENT_KEY}"
+  clientAccessKey: "${CS_CLIENT_ACCESS_KEY}"
 
 # Disable secrets for testing to use plain text values
 secrets:
@@ -48,4 +45,4 @@ probes:
   readiness:
     enabled: true
     initialDelaySeconds: 5
-    periodSeconds: 10
+    periodSeconds: 10 

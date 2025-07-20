@@ -44,7 +44,7 @@ helm uninstall my-cipherstash-proxy
 The following values must be configured for the proxy to work:
 
 ```bash
-helm install my-cipherstash-proxy ./cipherstash-proxy-chart \
+helm install my-cipherstash-proxy cipherstash/cipherstash-proxy \
   --set database.host=postgres.example.com \
   --set database.name=myapp \
   --set database.username=myuser \
