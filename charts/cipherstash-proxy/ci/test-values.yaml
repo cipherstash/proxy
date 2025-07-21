@@ -26,10 +26,10 @@ secrets:
 resources:
   limits:
     cpu: 200m
-    memory: 256Mi
+    memory: 2Gi
   requests:
     cpu: 100m
-    memory: 128Mi
+    memory: 256Mi
 
 # Disable metrics service for simpler testing
 metricsService:

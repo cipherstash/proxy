@@ -19,14 +19,14 @@ cipherstash:
 secrets:
   create: false
 
-# Minimal resources for testing - Note we were seeing OOM kills at 256Mi
+# Minimal resources for testing - Note we were seeing OOM kills at 256Mi and 512Mi
 resources:
   limits:
     cpu: 200m
-    memory: 512Mi
+    memory: 2Gi
   requests:
     cpu: 100m
-    memory: 128Mi
+    memory: 256Mi
 
 # Disable metrics service for simpler testing
 metricsService:
