@@ -31,7 +31,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn select_jsonb_path_query_first_string() {
+    async fn select_jsonb_path_query_first_array_wildcard_string() {
         trace();
 
         clear().await;
@@ -42,7 +42,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn select_jsonb_path_query_first_number() {
+    async fn select_jsonb_path_query_first_array_wildcard_number() {
         trace();
 
         clear().await;
@@ -79,63 +79,60 @@ mod tests {
         assert_expected(&expected, &actual);
     }
 
-    // #[tokio::test]
-    // async fn select_jsonb_path_query_first_string() {
-    //     trace();
+    #[tokio::test]
+    async fn select_jsonb_path_query_first_string() {
+        trace();
 
-    //     clear().await;
+        clear().await;
 
-    //     insert_jsonb().await;
-    //     insert_jsonb().await;
+        insert_jsonb().await;
 
-    //     select_jsonb("$.nested.string", "world".to_string()).await;
-    // }
+        select_jsonb("$.nested.string", "world".to_string()).await;
+    }
 
-    // #[tokio::test]
-    // async fn select_jsonb_path_query_first_value() {
-    //     trace();
+    #[tokio::test]
+    async fn select_jsonb_path_query_first_value() {
+        trace();
 
-    //     clear().await;
+        clear().await;
 
-    //     insert_jsonb().await;
-    //     insert_jsonb().await;
+        insert_jsonb().await;
 
-    //     let v = serde_json::json!({
-    //         "number": 1815,
-    //         "string": "world",
-    //     });
+        let v = serde_json::json!({
+            "number": 1815,
+            "string": "world",
+        });
 
-    //     select_jsonb("$.nested", v).await;
-    // }
+        select_jsonb("$.nested", v).await;
+    }
 
-    // #[tokio::test]
-    // async fn select_jsonb_path_query_first_with_alias() {
-    //     trace();
+    #[tokio::test]
+    async fn select_jsonb_path_query_first_with_alias() {
+        trace();
 
-    //     clear().await;
+        clear().await;
 
-    //     insert_jsonb().await;
-    //     insert_jsonb().await;
+        insert_jsonb().await;
 
-    //     let value = serde_json::json!({
-    //         "number": 1815,
-    //         "string": "world",
-    //     });
+        let value = serde_json::json!({
+            "number": 1815,
+            "string": "world",
+        });
 
-    //     let selector = JsonPath::new("$.nested");
+        let selector = JsonPath::new("$.nested");
 
-    //     let expected = vec![value];
+        let expected = vec![value];
 
-    //     let sql = "SELECT jsonb_path_query_first(encrypted_jsonb, $1) as selected FROM encrypted";
-    //     let actual = query_by::<Value>(sql, &selector).await;
+        let sql = "SELECT jsonb_path_query_first(encrypted_jsonb, $1) as selected FROM encrypted";
+        let actual = query_by::<Value>(sql, &selector).await;
 
-    //     assert_expected(&expected, &actual);
+        assert_expected(&expected, &actual);
 
-    //     let sql = format!(
-    //         "SELECT jsonb_path_query_first(encrypted_jsonb, '{selector}') as selected FROM encrypted"
-    //     );
-    //     let actual = simple_query::<Value>(&sql).await;
+        let sql = format!(
+            "SELECT jsonb_path_query_first(encrypted_jsonb, '{selector}') as selected FROM encrypted"
+        );
+        let actual = simple_query::<Value>(&sql).await;
 
-    //     assert_expected(&expected, &actual);
-    // }
+        assert_expected(&expected, &actual);
+    }
 }
