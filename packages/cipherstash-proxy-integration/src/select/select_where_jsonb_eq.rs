@@ -10,12 +10,11 @@ mod tests {
         insert_jsonb_for_search().await;
 
         let json_path_selector = JsonPath::new(selector);
-        let value = Value::from(value);
 
         // WHERE -> with extended
         let sql = "SELECT encrypted_jsonb FROM encrypted WHERE encrypted_jsonb -> $1 = $2";
         let actual = query_by_params::<Value>(sql, &[&selector, &value]).await;
-        assert_expected(&expected, &actual);
+        assert_expected(expected, &actual);
 
         // WHERE -> with simple
         let sql =
@@ -23,20 +22,20 @@ mod tests {
                 "SELECT encrypted_jsonb FROM encrypted WHERE encrypted_jsonb -> '{selector}' = '{value}'"
         );
         let actual = simple_query::<Value>(&sql).await;
-        assert_expected(&expected, &actual);
+        assert_expected(expected, &actual);
 
         // WHERE jsonb_path_query_first with extended
         let sql = "SELECT encrypted_jsonb FROM encrypted WHERE jsonb_path_query_first(encrypted_jsonb, $1) = $2";
         let actual = query_by_params::<Value>(sql, &[&json_path_selector, &value]).await;
 
-        assert_expected(&expected, &actual);
+        assert_expected(expected, &actual);
 
         // WHERE jsonb_path_query_first with simple
         let sql = format!(
             "SELECT encrypted_jsonb FROM encrypted WHERE jsonb_path_query_first(encrypted_jsonb, '{selector}') = '{value}'"
         );
         let actual = simple_query::<Value>(&sql).await;
-        assert_expected(&expected, &actual);
+        assert_expected(expected, &actual);
     }
 
     #[tokio::test]
