@@ -1,11 +1,8 @@
 name: Release Charts
 
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - 'charts/**'
+  release:
+    types: [published]
 
 jobs:
   lint-test:
@@ -14,7 +11,9 @@ jobs:
   release:
     needs: lint-test
     permissions:
-      contents: write
+      contents: write      # Create releases and upload chart packages
+      pages: write         # Update GitHub Pages for chart repository
+      id-token: write      # Required for GitHub Pages deployment
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -26,6 +25,23 @@ jobs:
         run: |
           git config user.name "$GITHUB_ACTOR"
           git config user.email "$GITHUB_ACTOR@users.noreply.github.com"
+
+      - name: Update chart version
+        run: |
+          # Extract version from release tag (remove 'v' prefix if present)
+          RELEASE_VERSION="${{ github.event.release.tag_name }}"
+          CHART_VERSION="${RELEASE_VERSION#v}"
+          
+          # Update the chart version in Chart.yaml
+          sed -i "s/^version: .*/version: ${CHART_VERSION}/" charts/cipherstash-proxy/Chart.yaml
+          sed -i "s/^appVersion: .*/appVersion: \"${CHART_VERSION}\"/" charts/cipherstash-proxy/Chart.yaml
+          
+          # Update the image tag in values.yaml to use the new version
+          sed -i "s/^  tag: .*/  tag: \"${CHART_VERSION}\"/" charts/cipherstash-proxy/values.yaml
+          
+          # Commit the version update
+          git add charts/cipherstash-proxy/Chart.yaml charts/cipherstash-proxy/values.yaml
+          git commit -m "Update chart and image version to ${CHART_VERSION}" || true
 
       - name: Run chart-releaser
         uses: helm/chart-releaser-action@v1.6.0
