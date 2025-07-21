@@ -12,10 +12,10 @@ metadata:
 spec:
   restartPolicy: Never
   containers:
-    - name: wget
+    - name: netcat
       image: busybox:1.36
-      command: ['wget']
-      args: ['{{ include "cipherstash-proxy.fullname" . }}:{{ .Values.service.port }}', '--timeout=5', '--tries=1', '--spider']
+      command: ['sh', '-c']
+      args: ['timeout 10 nc -z {{ include "cipherstash-proxy.fullname" . }} {{ .Values.service.port }} && echo "Connection successful"']
       resources:
         limits:
           cpu: 100m
