@@ -154,8 +154,15 @@ pub async fn query_by<T>(sql: &str, param: &(dyn ToSql + Sync)) -> Vec<T>
 where
     T: for<'a> tokio_postgres::types::FromSql<'a> + Send + Sync,
 {
+    query_by_params(sql, &[param]).await
+}
+
+pub async fn query_by_params<T>(sql: &str, params: &[&(dyn ToSql + Sync)]) -> Vec<T>
+where
+    T: for<'a> tokio_postgres::types::FromSql<'a> + Send + Sync,
+{
     let client = connect_with_tls(PROXY).await;
-    let rows = client.query(sql, &[param]).await.unwrap();
+    let rows = client.query(sql, params).await.unwrap();
     rows.iter().map(|row| row.get(0)).collect::<Vec<T>>()
 }
 
