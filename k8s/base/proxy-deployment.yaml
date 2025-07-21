@@ -55,11 +55,11 @@ spec:
           value: "true"
         resources:
           requests:
-            memory: "128Mi"
+            memory: "256Mi"
             cpu: "100m"
           limits:
-            memory: "512Mi"
-            cpu: "500m"
+            memory: "2Gi"
+            cpu: "1"
         livenessProbe:
           tcpSocket:
             port: 6432
