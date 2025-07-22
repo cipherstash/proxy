@@ -10,6 +10,23 @@ on:
     paths:
       - 'charts/**'
   workflow_call:
+    secrets:
+      CS_WORKSPACE_CRN:
+        required: true
+      CS_CLIENT_ID:
+        required: true
+      CS_CLIENT_KEY:
+        required: true
+      CS_CLIENT_ACCESS_KEY:
+        required: true
+      CS_CI_DATABASE_HOST:
+        required: true
+      CS_CI_DATABASE_NAME:
+        required: true
+      CS_CI_DATABASE_USER:
+        required: true
+      CS_CI_DATABASE_PASSWORD:
+        required: true
 
 jobs:
   lint-test:
