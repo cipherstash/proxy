@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1753210598059,
+  "lastUpdate": 1753210619071,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -8738,6 +8738,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 7.109834,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "0d0d8fd090e9c354fcd9037f23ac65aad11191aa",
+          "message": "fix(helm): PR_BYPASS specificlly pass secrets to lint job on release",
+          "timestamp": "2025-07-22T18:42:02Z",
+          "url": "https://github.com/cipherstash/proxy/pull/288/commits/0d0d8fd090e9c354fcd9037f23ac65aad11191aa"
+        },
+        "date": 1753210617663,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 6.877296,
             "unit": "Number"
           }
         ]
