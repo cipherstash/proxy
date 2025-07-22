@@ -31,7 +31,8 @@ CS_PROXY__HOST = "proxy"
 # Misc
 DOCKER_CLI_HINTS = "false" # Please don't show us What's Next.
 
-CS_EQL_VERSION = "eql-2.1.3"
+CS_EQL_VERSION = "eql-2.1.4"
+
 
 [tools]
 "cargo:cargo-binstall" = "latest"
@@ -485,6 +486,7 @@ run = """
 # install script
 if [ -z "$CS_EQL_PATH" ]; then
   echo "Downloading ${CS_EQL_VERSION} install"
+  echo "https://github.com/cipherstash/encrypt-query-language/releases/download/${CS_EQL_VERSION}/cipherstash-encrypt.sql"
   curl -sLo "{{config_root}}/cipherstash-encrypt.sql" https://github.com/cipherstash/encrypt-query-language/releases/download/${CS_EQL_VERSION}/cipherstash-encrypt.sql
 else
   echo "Using EQL: ${CS_EQL_PATH}/cipherstash-encrypt.sql"
