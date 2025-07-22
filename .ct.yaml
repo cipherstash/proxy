@@ -14,8 +14,8 @@ excluded-charts: []
 # Validate maintainers in Chart.yaml
 validate-maintainers: true
 
-# Enable chart version checking
-check-version-increment: true
+# Disable chart version checking (handled by automated release process)
+check-version-increment: false
 
 # Enable linting of Chart.yaml schema
 validate-chart-schema: true
