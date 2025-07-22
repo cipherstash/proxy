@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1753190974668,
+  "lastUpdate": 1753207302142,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -8572,6 +8572,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 6.806307,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "cj@cipherstash.com",
+            "name": "CJ Brewer",
+            "username": "calvinbrewer"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "6e9e3540a1044c511a3b42123c96b62587c22252",
+          "message": "Merge pull request #281 from cipherstash/helm\n\nfeat: cipherstash-proxy helm chart",
+          "timestamp": "2025-07-22T11:58:44-06:00",
+          "tree_id": "1f5e390183073eae3a45cffcde84f655a733f8c5",
+          "url": "https://github.com/cipherstash/proxy/commit/6e9e3540a1044c511a3b42123c96b62587c22252"
+        },
+        "date": 1753207300789,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 6.775711,
             "unit": "Number"
           }
         ]
