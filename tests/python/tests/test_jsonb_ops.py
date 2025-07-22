@@ -52,6 +52,42 @@ def test_jsonb_contained_by():
                 binary=False, prepare=True)
 
 
+def test_jsonb_contains():
+    val = {"key": "value"}
+    column = "encrypted_jsonb"
+    select_fragment = "encrypted_jsonb @> %s"
+    tests = [
+        (val, True),
+        ({"key": "different value"}, False)
+    ]
+
+    for (param, expected) in tests:
+        param = json.dumps(param)
+
+        execute(json.dumps(val), column,
+                select_fragment=select_fragment,
+                select_params=[param],
+                expected=expected)
+
+        execute(json.dumps(val).encode(), column,
+                select_fragment=select_fragment,
+                select_params=[param.encode()],
+                expected=expected,
+                binary=True)
+
+        execute(json.dumps(val).encode(), column,
+                select_fragment=select_fragment,
+                select_params=[param.encode()],
+                expected=expected,
+                binary=True, prepare=True)
+
+        execute(json.dumps(val), column,
+                select_fragment=select_fragment,
+                select_params=[param],
+                expected=expected,
+                binary=False, prepare=True)
+
+
 def make_id():
     return random.randrange(1, 1000000000)
 
