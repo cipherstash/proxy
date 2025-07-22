@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1753208508500,
+  "lastUpdate": 1753209423560,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -8626,6 +8626,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 6.839685,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "cj@cipherstash.com",
+            "name": "CJ Brewer",
+            "username": "calvinbrewer"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "7375195786ec1b4e0719334d00199f913cf26d3e",
+          "message": "Merge pull request #286 from cipherstash/hot-fix-helm\n\nfix(helm): PR_BYPASS release process post merge",
+          "timestamp": "2025-07-22T12:34:18-06:00",
+          "tree_id": "33c030191cb6b1cb9e2fc6478a65cad519724bd3",
+          "url": "https://github.com/cipherstash/proxy/commit/7375195786ec1b4e0719334d00199f913cf26d3e"
+        },
+        "date": 1753209422432,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 6.981023,
             "unit": "Number"
           }
         ]
