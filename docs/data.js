@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1753210125172,
+  "lastUpdate": 1753210598059,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -8709,6 +8709,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 7.124655,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "cj@cipherstash.com",
+            "name": "CJ Brewer",
+            "username": "calvinbrewer"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "71ef3cd8f37ab9587c5166abc23863d25c3f77e7",
+          "message": "Merge pull request #288 from cipherstash/hot-fix-helm\n\nfix(helm): PR_BYPASS specificlly pass secrets to lint job on release",
+          "timestamp": "2025-07-22T12:54:01-06:00",
+          "tree_id": "e781022fbda55d74377c6828a857fff8067b4f5b",
+          "url": "https://github.com/cipherstash/proxy/commit/71ef3cd8f37ab9587c5166abc23863d25c3f77e7"
+        },
+        "date": 1753210596930,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 7.109834,
             "unit": "Number"
           }
         ]
