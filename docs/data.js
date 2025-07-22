@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1753209895698,
+  "lastUpdate": 1753210125172,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -8680,6 +8680,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 7.115958,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "cj@cipherstash.com",
+            "name": "CJ Brewer",
+            "username": "calvinbrewer"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "6e53f8c5918fd815188f640fdd5365c1b4578d5c",
+          "message": "Merge pull request #287 from cipherstash/hot-fix-helm\n\nfix(helm): PR_BYPASS linting misconfiguration",
+          "timestamp": "2025-07-22T12:41:57-06:00",
+          "tree_id": "52cfba7e19aff280a8a3552b460b02cfdc053f0f",
+          "url": "https://github.com/cipherstash/proxy/commit/6e53f8c5918fd815188f640fdd5365c1b4578d5c"
+        },
+        "date": 1753210123984,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 7.124655,
             "unit": "Number"
           }
         ]
