@@ -1,0 +1,25 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: "{{ include "cipherstash-proxy.fullname" . }}-test-connection"
+  namespace: {{ include "cipherstash-proxy.namespace" . }}
+  labels:
+    {{- include "cipherstash-proxy.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": test
+    "helm.sh/hook-weight": "0"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  restartPolicy: Never
+  containers:
+    - name: netcat
+      image: busybox:1.36
+      command: ['sh', '-c']
+      args: ['timeout 10 nc -z {{ include "cipherstash-proxy.fullname" . }} {{ .Values.service.port }} && echo "Connection successful"']
+      resources:
+        limits:
+          cpu: 100m
+          memory: 128Mi
+        requests:
+          cpu: 50m
+          memory: 64Mi

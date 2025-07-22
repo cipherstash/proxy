@@ -1,0 +1,22 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: cipherstash-proxy-metrics
+  namespace: cipherstash
+  labels:
+    app: cipherstash-proxy
+    version: "2.1.2"
+    service-type: metrics
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "9930"
+    prometheus.io/path: "/metrics"
+spec:
+  type: ClusterIP
+  ports:
+  - name: metrics
+    port: 9930
+    targetPort: 9930
+    protocol: TCP
+  selector:
+    app: cipherstash-proxy

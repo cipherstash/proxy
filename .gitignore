@@ -21,3 +21,6 @@ rust-toolchain.toml
 ## benchmark result data
 tests/benchmark/results/*.csv
 tests/benchmark/benchmark-*.png
+
+## Local helm chart testing
+testing-chart.yaml

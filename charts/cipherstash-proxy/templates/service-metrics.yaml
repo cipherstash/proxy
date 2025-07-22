@@ -1,0 +1,23 @@
+{{- if .Values.metricsService.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "cipherstash-proxy.fullname" . }}-metrics
+  namespace: {{ include "cipherstash-proxy.namespace" . }}
+  labels:
+    {{- include "cipherstash-proxy.labels" . | nindent 4 }}
+    service-type: metrics
+  {{- with .Values.metricsService.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ .Values.metricsService.type }}
+  ports:
+    - port: {{ .Values.metricsService.port }}
+      targetPort: {{ .Values.metricsService.targetPort }}
+      protocol: TCP
+      name: metrics
+  selector:
+    {{- include "cipherstash-proxy.selectorLabels" . | nindent 4 }}
+{{- end }}

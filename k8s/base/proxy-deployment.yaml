@@ -1,0 +1,76 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cipherstash-proxy
+  namespace: cipherstash
+  labels:
+    app: cipherstash-proxy
+    version: "2.1.2"
+spec:
+  replicas: 1
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 25%
+      maxSurge: 25%
+  selector:
+    matchLabels:
+      app: cipherstash-proxy
+  template:
+    metadata:
+      labels:
+        app: cipherstash-proxy
+        version: "2.1.2"
+    spec:
+      containers:
+      - name: cipherstash-proxy
+        image: cipherstash/proxy:2.1.2
+        ports:
+        - name: proxy
+          containerPort: 6432
+          protocol: TCP
+        - name: metrics
+          containerPort: 9930
+          protocol: TCP
+        env:
+        - name: CS_DATABASE__HOST
+          value: "replace_with_postgres_host"
+        - name: CS_DATABASE__NAME
+          value: "replace_with_postgres_database"
+        - name: CS_DATABASE__PORT
+          value: "replace_with_postgres_port"
+        - name: CS_DATABASE__USERNAME
+          value: "replace_with_postgres_username"
+        - name: CS_DATABASE__PASSWORD
+          value: "replace_with_postgres_password"
+        - name: CS_WORKSPACE_CRN
+          value: "replace_with_cipherstash_workspace_crn"
+        - name: CS_CLIENT_ID
+          value: "replace_with_cipherstash_client_id"
+        - name: CS_CLIENT_KEY
+          value: "replace_with_cipherstash_client_key"
+        - name: CS_CLIENT_ACCESS_KEY
+          value: "replace_with_cipherstash_access_key"
+        - name: CS_PROMETHEUS__ENABLED
+          value: "true"
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "100m"
+          limits:
+            memory: "2Gi"
+            cpu: "1"
+        livenessProbe:
+          tcpSocket:
+            port: 6432
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          tcpSocket:
+            port: 6432
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3
