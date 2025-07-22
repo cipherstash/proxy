@@ -118,6 +118,59 @@ def test_jsonb_get_extract():
             binary=False, prepare=True)
 
 
+def test_jsonb_extract():
+    val = {
+        "string": "hello",
+        "number": 42,
+        "nested": {
+            "number": 1815,
+            "string": "world",
+        },
+        "array_string": ["hello", "world"],
+        "array_number": [42, 84],
+    }
+    column = "encrypted_jsonb"
+    select_fragment = "encrypted_jsonb->'%s'"
+    tests = [
+        ("string", "hello"),
+        ("number", 42),
+        ("array_string", ["hello", "world"]),
+        ("array_number", [42, 84]),
+        ("nested", {"number": 1815, "string": "world"}),
+        ("nonexistent", None),
+    ]
+
+    for (param, expected) in tests:
+
+        # JSONPath selectors work with EQL fields
+        for accessor in [param, "$." + param]:
+
+            param = json.dumps(param)
+
+            execute(json.dumps(val), column,
+                    select_fragment=select_fragment,
+                    select_params=[param],
+                    expected=expected)
+
+            execute(json.dumps(val).encode(), column,
+                    select_fragment=select_fragment,
+                    select_params=[param.encode()],
+                    expected=expected,
+                    binary=True)
+
+            execute(json.dumps(val).encode(), column,
+                    select_fragment=select_fragment,
+                    select_params=[param.encode()],
+                    expected=expected,
+                    binary=True, prepare=True)
+
+            execute(json.dumps(val), column,
+                    select_fragment=select_fragment,
+                    select_params=[param],
+                    expected=expected,
+                    binary=False, prepare=True)
+
+
 def make_id():
     return random.randrange(1, 1000000000)
 
