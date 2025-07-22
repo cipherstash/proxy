@@ -3,6 +3,12 @@ name: Release Charts
 on:
   release:
     types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Chart version to release (e.g., 0.1.1) and needs to be a valid Proxy release.'
+        required: true
+        type: string
 
 jobs:
   lint-test:
@@ -28,9 +34,16 @@ jobs:
 
       - name: Update chart version
         run: |
-          # Extract version from release tag (remove 'v' prefix if present)
-          RELEASE_VERSION="${{ github.event.release.tag_name }}"
-          CHART_VERSION="${RELEASE_VERSION#v}"
+          # Determine version source: manual input or release tag
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            CHART_VERSION="${{ github.event.inputs.version }}"
+          else
+            # Extract version from release tag (remove 'v' prefix if present)
+            RELEASE_VERSION="${{ github.event.release.tag_name }}"
+            CHART_VERSION="${RELEASE_VERSION#v}"
+          fi
+          
+          echo "Using chart version: ${CHART_VERSION}"
           
           # Update the chart version in Chart.yaml
           sed -i "s/^version: .*/version: ${CHART_VERSION}/" charts/cipherstash-proxy/Chart.yaml
