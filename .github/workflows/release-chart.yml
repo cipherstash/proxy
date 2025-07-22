@@ -13,6 +13,15 @@ on:
 jobs:
   lint-test:
     uses: ./.github/workflows/lint-test-chart.yml
+    secrets:
+      CS_WORKSPACE_CRN: ${{ secrets.CS_WORKSPACE_CRN }}
+      CS_CLIENT_ID: ${{ secrets.CS_CLIENT_ID }}
+      CS_CLIENT_KEY: ${{ secrets.CS_CLIENT_KEY }}
+      CS_CLIENT_ACCESS_KEY: ${{ secrets.CS_CLIENT_ACCESS_KEY }}
+      CS_CI_DATABASE_HOST: ${{ secrets.CS_CI_DATABASE_HOST }}
+      CS_CI_DATABASE_NAME: ${{ secrets.CS_CI_DATABASE_NAME }}
+      CS_CI_DATABASE_USER: ${{ secrets.CS_CI_DATABASE_USER }}
+      CS_CI_DATABASE_PASSWORD: ${{ secrets.CS_CI_DATABASE_PASSWORD }}
 
   release:
     needs: lint-test
