@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1753209423560,
+  "lastUpdate": 1753209895698,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -8655,6 +8655,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 6.981023,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "6887c3456e2205cea8b47da1910f327ab20638bb",
+          "message": "fix(helm): PR_BYPASS linting misconfiguration",
+          "timestamp": "2025-07-22T18:34:22Z",
+          "url": "https://github.com/cipherstash/proxy/pull/287/commits/6887c3456e2205cea8b47da1910f327ab20638bb"
+        },
+        "date": 1753209894453,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 7.115958,
             "unit": "Number"
           }
         ]
