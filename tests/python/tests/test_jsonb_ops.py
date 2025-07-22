@@ -118,7 +118,7 @@ def test_jsonb_extract_simple():
             binary=False, prepare=True)
 
 
-def test_jsonb_extract():
+def test_jsonb_extract_parameterised():
     val = {
         "string": "hello",
         "number": 42,
