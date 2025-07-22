@@ -88,7 +88,7 @@ def test_jsonb_contains():
                 binary=False, prepare=True)
 
 
-def test_jsonb_get_extract():
+def test_jsonb_extract_simple():
     expected = "value"
     val = {"key": expected}
     column = "encrypted_jsonb"
