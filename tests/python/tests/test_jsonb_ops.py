@@ -88,6 +88,36 @@ def test_jsonb_contains():
                 binary=False, prepare=True)
 
 
+def test_jsonb_get_extract():
+    expected = "value"
+    val = {"key": expected}
+    column = "encrypted_jsonb"
+    select_fragment = "encrypted_jsonb->'key'"
+
+    execute(json.dumps(val), column,
+            select_fragment=select_fragment,
+            select_params=[],
+            expected=expected)
+
+    execute(json.dumps(val).encode(), column,
+            select_fragment=select_fragment,
+            select_params=[],
+            expected=expected,
+            binary=True)
+
+    execute(json.dumps(val).encode(), column,
+            select_fragment=select_fragment,
+            select_params=[],
+            expected=expected,
+            binary=True, prepare=True)
+
+    execute(json.dumps(val), column,
+            select_fragment=select_fragment,
+            select_params=[],
+            expected=expected,
+            binary=False, prepare=True)
+
+
 def make_id():
     return random.randrange(1, 1000000000)
 
