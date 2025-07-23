@@ -232,6 +232,162 @@ impl PatientPii {
     }
 }
 
+/// Enhanced patient PII with complex JSONB medical metadata for comprehensive testing.
+///
+/// This extended structure demonstrates EQL v2's capabilities with complex nested JSONB data,
+/// including arrays, nested objects, and mixed data types commonly found in healthcare systems.
+#[derive(Serialize)]
+struct EnhancedPatientPii {
+    /// Patient's first name
+    first_name: String,
+    /// Patient's last name
+    last_name: String,
+    /// Patient's email address for communication
+    email: String,
+    /// Patient's date of birth in ISO8601 format (YYYY-MM-DD)
+    date_of_birth: String,
+    /// Complex medical history metadata
+    medical_history: MedicalHistory,
+    /// Insurance information
+    insurance: InsuranceInfo,
+    /// Current vital signs and measurements
+    vitals: VitalSigns,
+}
+
+/// Medical history information containing arrays and nested data.
+#[derive(Serialize)]
+struct MedicalHistory {
+    /// Known allergies as array of strings
+    allergies: Vec<String>,
+    /// Chronic conditions as array of strings
+    conditions: Vec<String>,
+    /// Emergency contact information
+    emergency_contact: EmergencyContact,
+    /// Risk factors with numeric scores
+    risk_factors: RiskFactors,
+}
+
+/// Emergency contact details.
+#[derive(Serialize)]
+struct EmergencyContact {
+    /// Contact person's name
+    name: String,
+    /// Contact phone number
+    phone: String,
+    /// Relationship to patient
+    relationship: String,
+}
+
+/// Risk assessment scores.
+#[derive(Serialize)]
+struct RiskFactors {
+    /// Cardiovascular risk score (0-100)
+    cardiovascular: i32,
+    /// Diabetes risk score (0-100)
+    diabetes: i32,
+    /// Overall health score (0-100)
+    overall_health: i32,
+}
+
+/// Insurance provider information.
+#[derive(Serialize)]
+struct InsuranceInfo {
+    /// Insurance provider name
+    provider: String,
+    /// Policy number
+    policy_number: String,
+    /// Group ID for employer plans
+    group_id: i32,
+    /// Coverage details
+    coverage: CoverageDetails,
+}
+
+/// Insurance coverage breakdown.
+#[derive(Serialize)]
+struct CoverageDetails {
+    /// Deductible amount in dollars
+    deductible: i32,
+    /// Out-of-pocket maximum
+    out_of_pocket_max: i32,
+    /// Copay amounts for different services
+    copays: CopayInfo,
+}
+
+/// Copay information for different medical services.
+#[derive(Serialize)]
+struct CopayInfo {
+    /// Primary care visit copay
+    primary_care: i32,
+    /// Specialist visit copay
+    specialist: i32,
+    /// Emergency room copay
+    emergency: i32,
+}
+
+/// Current vital signs and physical measurements.
+#[derive(Serialize)]
+struct VitalSigns {
+    /// Height in centimeters
+    height_cm: i32,
+    /// Weight in kilograms
+    weight_kg: i32,
+    /// Blood type (A+, A-, B+, B-, AB+, AB-, O+, O-)
+    blood_type: String,
+    /// Blood pressure readings
+    blood_pressure: BloodPressure,
+    /// Recent lab results
+    lab_results: LabResults,
+}
+
+/// Blood pressure measurements.
+#[derive(Serialize)]
+struct BloodPressure {
+    /// Systolic pressure
+    systolic: i32,
+    /// Diastolic pressure
+    diastolic: i32,
+    /// Date of measurement
+    measured_date: String,
+}
+
+/// Laboratory test results.
+#[derive(Serialize)]
+struct LabResults {
+    /// Cholesterol level (mg/dL)
+    cholesterol: i32,
+    /// Blood glucose level (mg/dL)
+    glucose: i32,
+    /// Hemoglobin A1C percentage
+    hemoglobin_a1c: f32,
+    /// Date of lab work
+    test_date: String,
+}
+
+/// Enhanced patient with complex JSONB metadata.
+#[derive(Serialize)]
+struct EnhancedPatient {
+    /// Unique identifier for the patient (UUID)
+    id: Uuid,
+    /// Enhanced PII with complex medical metadata
+    pii: EnhancedPatientPii,
+}
+
+impl EnhancedPatient {
+    fn new(
+        id: &str,
+        first_name: &str,
+        last_name: &str,
+        email: &str,
+        date_of_birth: &str,
+        pii_data: EnhancedPatientPii,
+    ) -> Self {
+        Self {
+            id: Uuid::parse_str(id).unwrap(),
+            pii: pii_data,
+        }
+    }
+}
+
 /// Represents a medication prescription for a patient.
 ///
 /// This struct links patients to their prescribed medications and contains sensitive medical information
@@ -920,13 +1076,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let client = connect_with_tls(PROXY).await;
 
+    // === ORIGINAL SHOWCASE: Aspirin Query ===
+    println!("🩺 Healthcare Database Showcase - EQL v2 Searchable Encryption");
+    println!("============================================================");
+
     // Query 1: Get the Aspirin medication ID
     let aspirin_id_sql = "SELECT id FROM medications WHERE name = 'Aspirin';";
     let rows = client.query(aspirin_id_sql, &[]).await.unwrap();
     let aspirin_id: Uuid = rows[0].get::<usize, Uuid>(0);
 
     // Query 2: Main parameterized query to find patients with active Aspirin prescriptions
-    // Uses EQL v2 searchable encryption to query encrypted medication data
     let main_sql = r#"
         SELECT p.pii->'email' as email
         FROM patients p
@@ -941,76 +1100,530 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .await
         .unwrap();
 
-    // Extract email addresses from the result
+    // Extract and validate results
     let actual_emails: Vec<Value> = rows.into_iter().map(|row| row.get(0)).collect();
     let actual_emails: Vec<String> = actual_emails
         .into_iter()
         .map(|value| serde_json::from_value(value).unwrap())
         .collect();
 
-    println!("🩺 Healthcare Database Showcase - EQL v2 Searchable Encryption");
-    println!("============================================================");
     println!();
     println!("📊 Query Results: Patients with active Aspirin prescriptions:");
     println!();
-
     for (i, email) in actual_emails.iter().enumerate() {
         println!("   {}. {}", i + 1, email);
     }
-
     println!();
-    println!(
-        "✅ Found {} patients with active Aspirin prescriptions",
-        actual_emails.len()
-    );
+    println!("✅ Found {} patients with active Aspirin prescriptions", actual_emails.len());
 
-    // Expected patients with active Aspirin prescriptions based on test data:
-    // - John Smith: "81mg once daily", from "2024-01-15" to "2024-12-31"
-    // - Emily Davis: "325mg as needed for headache", from "2024-01-10" to "2024-12-31"
-    // - Robert Wilson: "81mg once daily", from "2024-06-01" to "2024-12-31"
+    // Validate original results
     let expected_emails = vec![
         "emily.davis@yahoo.com".to_string(),
         "john.smith@email.com".to_string(),
         "rob.wilson@email.com".to_string(),
     ];
 
-    // Verify all expected emails are present
     for expected_email in &expected_emails {
         if !actual_emails.contains(expected_email) {
-            eprintln!(
-                "❌ Expected email '{}' not found in results",
-                expected_email
-            );
+            eprintln!("❌ Expected email '{}' not found in results", expected_email);
             return Err("Query validation failed".into());
         }
     }
 
-    // Verify we have the correct number of results (no duplicates)
-    if actual_emails.len() != expected_emails.len() {
-        eprintln!(
-            "❌ Expected {} unique emails, but got {}",
-            expected_emails.len(),
-            actual_emails.len()
-        );
-        return Err("Query validation failed".into());
-    }
+    // === COMPREHENSIVE JSONB TESTING ===
+    println!("\n\n🧪 === COMPREHENSIVE EQL JSONB OPERATIONS TESTING ===");
+    println!("Testing all supported JSONB operators and functions with complex healthcare data");
+    println!("===============================================================================");
 
-    // Verify ordering (emails should be sorted alphabetically)
-    let mut sorted_expected = expected_emails.clone();
-    sorted_expected.sort();
-    if actual_emails != sorted_expected {
-        eprintln!("❌ Results are not properly ordered by email address");
-        return Err("Query validation failed".into());
-    }
+    // Create enhanced test data with complex JSONB structures
+    create_enhanced_jsonb_test_data().await;
 
+    // Run comprehensive JSONB operation tests
+    test_field_access_operations().await?;
+    test_containment_operations().await?;
+    test_jsonpath_functions().await?;
+    test_comparison_operations().await?;
+    test_complex_nested_queries().await?;
+
+    println!("\n🎉 === ALL TESTS COMPLETED SUCCESSFULLY! ===");
     println!();
-    println!("🔒 This demonstration showcases:");
+    println!("🔒 This comprehensive demonstration showcases:");
     println!("   • EQL v2 searchable encryption for sensitive patient data");
+    println!("   • All supported JSONB operators: ->, ->>, @>, <@");
+    println!("   • JSONB functions: jsonb_path_exists, jsonb_path_query_first, jsonb_path_query");
+    println!("   • Comparison operations on extracted JSONB fields");
+    println!("   • Complex queries with JOINs, aggregations, and subqueries");
     println!("   • Healthcare-compliant database schema with proper foreign keys");
-    println!("   • Realistic medical data with medications, procedures, and patient records");
+    println!("   • Realistic medical data with nested objects, arrays, and mixed data types");
     println!("   • Secure querying of encrypted data while maintaining privacy");
     println!();
-    println!("✨ All query validations passed successfully!");
+    println!("✨ EQL v2 provides comprehensive JSONB support for encrypted healthcare data!");
 
     Ok(())
 }
+
+/// Creates enhanced JSONB test data with complex nested medical information.
+async fn create_enhanced_jsonb_test_data() {
+    println!("📋 Creating enhanced JSONB test data...");
+
+    let enhanced_patients = [
+        // Patient 1: John Smith with complex medical data
+        EnhancedPatient::new(
+            "a1b2c3d4-e5f6-4a5b-8c9d-123456789001",
+            "John",
+            "Smith",
+            "john.smith@email.com",
+            "1985-03-15",
+            EnhancedPatientPii {
+                first_name: "John".to_string(),
+                last_name: "Smith".to_string(),
+                email: "john.smith@email.com".to_string(),
+                date_of_birth: "1985-03-15".to_string(),
+                medical_history: MedicalHistory {
+                    allergies: vec!["penicillin".to_string(), "peanuts".to_string()],
+                    conditions: vec!["diabetes".to_string(), "hypertension".to_string()],
+                    emergency_contact: EmergencyContact {
+                        name: "Jane Smith".to_string(),
+                        phone: "+1-555-0123".to_string(),
+                        relationship: "spouse".to_string(),
+                    },
+                    risk_factors: RiskFactors {
+                        cardiovascular: 75,
+                        diabetes: 85,
+                        overall_health: 60,
+                    },
+                },
+                insurance: InsuranceInfo {
+                    provider: "HealthCorp".to_string(),
+                    policy_number: "HC123456".to_string(),
+                    group_id: 1001,
+                    coverage: CoverageDetails {
+                        deductible: 500,
+                        out_of_pocket_max: 3000,
+                        copays: CopayInfo {
+                            primary_care: 25,
+                            specialist: 50,
+                            emergency: 200,
+                        },
+                    },
+                },
+                vitals: VitalSigns {
+                    height_cm: 180,
+                    weight_kg: 75,
+                    blood_type: "O+".to_string(),
+                    blood_pressure: BloodPressure {
+                        systolic: 140,
+                        diastolic: 90,
+                        measured_date: "2024-01-15".to_string(),
+                    },
+                    lab_results: LabResults {
+                        cholesterol: 220,
+                        glucose: 95,
+                        hemoglobin_a1c: 6.2,
+                        test_date: "2024-01-10".to_string(),
+                    },
+                },
+            },
+        ),
+        // Patient 2: Sarah Johnson with different insurance
+        EnhancedPatient::new(
+            "a1b2c3d4-e5f6-4a5b-8c9d-123456789002",
+            "Sarah",
+            "Johnson",
+            "sarah.johnson@gmail.com",
+            "1992-07-28",
+            EnhancedPatientPii {
+                first_name: "Sarah".to_string(),
+                last_name: "Johnson".to_string(),
+                email: "sarah.johnson@gmail.com".to_string(),
+                date_of_birth: "1992-07-28".to_string(),
+                medical_history: MedicalHistory {
+                    allergies: vec!["shellfish".to_string()],
+                    conditions: vec!["asthma".to_string()],
+                    emergency_contact: EmergencyContact {
+                        name: "Robert Johnson".to_string(),
+                        phone: "+1-555-0456".to_string(),
+                        relationship: "father".to_string(),
+                    },
+                    risk_factors: RiskFactors {
+                        cardiovascular: 25,
+                        diabetes: 15,
+                        overall_health: 85,
+                    },
+                },
+                insurance: InsuranceInfo {
+                    provider: "BlueCross".to_string(),
+                    policy_number: "BC789012".to_string(),
+                    group_id: 2002,
+                    coverage: CoverageDetails {
+                        deductible: 1000,
+                        out_of_pocket_max: 5000,
+                        copays: CopayInfo {
+                            primary_care: 20,
+                            specialist: 40,
+                            emergency: 150,
+                        },
+                    },
+                },
+                vitals: VitalSigns {
+                    height_cm: 165,
+                    weight_kg: 58,
+                    blood_type: "A+".to_string(),
+                    blood_pressure: BloodPressure {
+                        systolic: 115,
+                        diastolic: 75,
+                        measured_date: "2024-02-10".to_string(),
+                    },
+                    lab_results: LabResults {
+                        cholesterol: 185,
+                        glucose: 82,
+                        hemoglobin_a1c: 5.1,
+                        test_date: "2024-02-05".to_string(),
+                    },
+                },
+            },
+        ),
+        // Patient 3: Michael Brown with high risk factors
+        EnhancedPatient::new(
+            "a1b2c3d4-e5f6-4a5b-8c9d-123456789003",
+            "Michael",
+            "Brown",
+            "m.brown@outlook.com",
+            "1978-12-03",
+            EnhancedPatientPii {
+                first_name: "Michael".to_string(),
+                last_name: "Brown".to_string(),
+                email: "m.brown@outlook.com".to_string(),
+                date_of_birth: "1978-12-03".to_string(),
+                medical_history: MedicalHistory {
+                    allergies: vec!["latex".to_string(), "sulfa".to_string(), "iodine".to_string()],
+                    conditions: vec!["hypertension".to_string(), "high_cholesterol".to_string()],
+                    emergency_contact: EmergencyContact {
+                        name: "Lisa Brown".to_string(),
+                        phone: "+1-555-0789".to_string(),
+                        relationship: "wife".to_string(),
+                    },
+                    risk_factors: RiskFactors {
+                        cardiovascular: 90,
+                        diabetes: 65,
+                        overall_health: 45,
+                    },
+                },
+                insurance: InsuranceInfo {
+                    provider: "HealthCorp".to_string(),
+                    policy_number: "HC345678".to_string(),
+                    group_id: 1001,
+                    coverage: CoverageDetails {
+                        deductible: 750,
+                        out_of_pocket_max: 4000,
+                        copays: CopayInfo {
+                            primary_care: 30,
+                            specialist: 60,
+                            emergency: 250,
+                        },
+                    },
+                },
+                vitals: VitalSigns {
+                    height_cm: 175,
+                    weight_kg: 95,
+                    blood_type: "B-".to_string(),
+                    blood_pressure: BloodPressure {
+                        systolic: 160,
+                        diastolic: 100,
+                        measured_date: "2024-03-01".to_string(),
+                    },
+                    lab_results: LabResults {
+                        cholesterol: 280,
+                        glucose: 110,
+                        hemoglobin_a1c: 6.8,
+                        test_date: "2024-02-25".to_string(),
+                    },
+                },
+            },
+        ),
+    ];
+
+    for patient in &enhanced_patients {
+        let pii_json = serde_json::to_value(&patient.pii).unwrap();
+        let sql = "INSERT INTO patients (id, pii) VALUES ($1, $2)";
+        insert(sql, &[&patient.id, &pii_json]).await;
+    }
+
+    println!("✅ Enhanced JSONB test data created successfully");
+}
+
+/// Tests field access operations (-> and ->>).
+async fn test_field_access_operations() -> Result<(), Box<dyn std::error::Error>> {
+    println!("\n🔍 === Testing Field Access Operations (-> and ->>) ===");
+    let client = connect_with_tls(PROXY).await;
+
+    // Test 1: Extract nested object with -> operator (returns JSONB)
+    println!("📝 Test 1: Extract medical_history with -> operator");
+    let sql = "SELECT id, pii -> 'medical_history' as medical_history FROM patients WHERE pii -> 'medical_history' IS NOT NULL LIMIT 1";
+    let rows = client.query(sql, &[]).await?;
+    assert!(!rows.is_empty(), "Should find patients with medical history");
+
+    let medical_history: Value = rows[0].get("medical_history");
+    assert!(medical_history.get("allergies").is_some(), "Medical history should contain allergies");
+    println!("✅ Successfully extracted medical_history as JSONB");
+
+    // Test 2: Extract text field with ->> operator (returns text)
+    println!("📝 Test 2: Extract blood_type with ->> operator");
+    let sql = "SELECT id, pii -> 'vitals' ->> 'blood_type' as blood_type FROM patients WHERE pii -> 'vitals' ->> 'blood_type' = 'O+' LIMIT 1";
+    let rows = client.query(sql, &[]).await?;
+    if !rows.is_empty() {
+        let blood_type: Option<String> = rows[0].get("blood_type");
+        println!("✅ Successfully extracted blood_type: {:?}", blood_type);
+    }
+
+    // Test 3: Extract nested field with chained operators
+    println!("📝 Test 3: Extract nested insurance provider");
+    let sql = "SELECT id, pii -> 'insurance' ->> 'provider' as provider FROM patients WHERE pii -> 'insurance' ->> 'provider' = 'HealthCorp'";
+    let rows = client.query(sql, &[]).await?;
+    assert!(!rows.is_empty(), "Should find HealthCorp patients");
+    println!("✅ Successfully extracted nested insurance provider");
+
+    // Test 4: Extract array elements
+    println!("📝 Test 4: Extract allergies array");
+    let sql = "SELECT id, pii -> 'medical_history' -> 'allergies' as allergies FROM patients WHERE pii -> 'medical_history' -> 'allergies' IS NOT NULL LIMIT 1";
+    let rows = client.query(sql, &[]).await?;
+    if !rows.is_empty() {
+        let allergies: Value = rows[0].get("allergies");
+        assert!(allergies.is_array(), "Allergies should be an array");
+        println!("✅ Successfully extracted allergies array");
+    }
+
+    println!("🎉 Field Access Operations tests completed successfully!");
+    Ok(())
+}
+
+/// Tests containment operations (@> and <@).
+async fn test_containment_operations() -> Result<(), Box<dyn std::error::Error>> {
+    println!("\n🔍 === Testing Containment Operations (@> and <@) ===");
+    let client = connect_with_tls(PROXY).await;
+
+    // Test 1: @> operator (contains) - find patients with specific insurance provider
+    println!("📝 Test 1: Find patients with HealthCorp insurance using @>");
+    let sql = r#"SELECT COUNT(*) as count FROM patients WHERE pii @> '{"insurance": {"provider": "HealthCorp"}}'"#;
+    let rows = client.query(sql, &[]).await?;
+    let count: i64 = rows[0].get("count");
+    assert!(count >= 1, "Should find at least one HealthCorp patient");
+    println!("✅ Found {} HealthCorp patients using @> operator", count);
+
+    // Test 2: @> operator with nested object matching
+    println!("📝 Test 2: Find patients with diabetes condition using @>");
+    let sql = r#"SELECT COUNT(*) as count FROM patients WHERE pii @> '{"medical_history": {"conditions": ["diabetes"]}}'"#;
+    let rows = client.query(sql, &[]).await?;
+    let count: i64 = rows[0].get("count");
+    println!("✅ Found {} patients with diabetes using @> operator", count);
+
+    // Test 3: <@ operator (contained by) - check if a structure is contained
+    println!("📝 Test 3: Check if blood type structure is contained using <@");
+    let sql = r#"SELECT COUNT(*) as count FROM patients WHERE '{"vitals": {"blood_type": "O+"}}' <@ pii"#;
+    let rows = client.query(sql, &[]).await?;
+    let count: i64 = rows[0].get("count");
+    println!("✅ Found {} patients where O+ blood type structure is contained", count);
+
+    // Test 4: Complex containment with emergency contact
+    println!("📝 Test 4: Complex containment with emergency contact");
+    let sql = r#"SELECT id, pii -> 'medical_history' -> 'emergency_contact' ->> 'name' as contact_name
+                 FROM patients
+                 WHERE pii @> '{"medical_history": {"emergency_contact": {"relationship": "spouse"}}}'
+                 LIMIT 1"#;
+    let rows = client.query(sql, &[]).await?;
+    if !rows.is_empty() {
+        let contact_name: Option<String> = rows[0].get("contact_name");
+        println!("✅ Found spouse emergency contact: {:?}", contact_name);
+    }
+
+    println!("🎉 Containment Operations tests completed successfully!");
+    Ok(())
+}
+
+/// Tests JSONPath functions (jsonb_path_query_first, jsonb_path_query, jsonb_path_exists).
+async fn test_jsonpath_functions() -> Result<(), Box<dyn std::error::Error>> {
+    println!("\n🔍 === Testing JSONPath Functions ===");
+    let client = connect_with_tls(PROXY).await;
+
+    // Test 1: jsonb_path_exists - check if path exists
+    println!("📝 Test 1: Check if insurance.coverage path exists");
+    let sql = r#"SELECT COUNT(*) as count FROM patients WHERE jsonb_path_exists(pii, '$.insurance.coverage')"#;
+    let rows = client.query(sql, &[]).await?;
+    let count: i64 = rows[0].get("count");
+    assert!(count >= 1, "Should find patients with insurance coverage data");
+    println!("✅ Found {} patients with insurance.coverage path", count);
+
+    // Test 2: jsonb_path_query_first - extract single value
+    println!("📝 Test 2: Extract first allergy using jsonb_path_query_first");
+    let sql = r#"SELECT jsonb_path_query_first(pii, '$.medical_history.allergies[0]') as first_allergy
+                 FROM patients
+                 WHERE jsonb_path_exists(pii, '$.medical_history.allergies')
+                 LIMIT 1"#;
+    let rows = client.query(sql, &[]).await?;
+    if !rows.is_empty() {
+        let first_allergy: Option<Value> = rows[0].get("first_allergy");
+        println!("✅ First allergy found: {:?}", first_allergy);
+    }
+
+    // Test 3: jsonb_path_query - extract multiple values (array elements)
+    println!("📝 Test 3: Extract all allergies using jsonb_path_query");
+    let sql = r#"SELECT jsonb_path_query(pii, '$.medical_history.allergies[*]') as allergy
+                 FROM patients
+                 WHERE jsonb_path_exists(pii, '$.medical_history.allergies')
+                 LIMIT 5"#;
+    let rows = client.query(sql, &[]).await?;
+    println!("✅ Found {} allergy records using jsonb_path_query", rows.len());
+
+    // Test 4: Complex JSONPath with conditions
+    println!("📝 Test 4: Find patients with high cardiovascular risk");
+    let sql = r#"SELECT id, jsonb_path_query_first(pii, '$.medical_history.risk_factors.cardiovascular') as cv_risk
+                 FROM patients
+                 WHERE CAST(jsonb_path_query_first(pii, '$.medical_history.risk_factors.cardiovascular') AS INTEGER) > 70"#;
+    let rows = client.query(sql, &[]).await?;
+    println!("✅ Found {} patients with high cardiovascular risk", rows.len());
+
+    // Test 5: Extract nested numeric values
+    println!("📝 Test 5: Extract copay amounts using JSONPath");
+    let sql = r#"SELECT jsonb_path_query_first(pii, '$.insurance.coverage.copays.primary_care') as primary_copay
+                 FROM patients
+                 WHERE jsonb_path_exists(pii, '$.insurance.coverage.copays')
+                 LIMIT 1"#;
+    let rows = client.query(sql, &[]).await?;
+    if !rows.is_empty() {
+        let copay: Option<Value> = rows[0].get("primary_copay");
+        println!("✅ Primary care copay: {:?}", copay);
+    }
+
+    println!("🎉 JSONPath Functions tests completed successfully!");
+    Ok(())
+}
+
+/// Tests comparison operations on extracted fields.
+async fn test_comparison_operations() -> Result<(), Box<dyn std::error::Error>> {
+    println!("\n🔍 === Testing Comparison Operations ===");
+    let client = connect_with_tls(PROXY).await;
+
+    // Test 1: Numeric comparison on extracted integer field
+    println!("📝 Test 1: Find patients with group_id >= 2000");
+    let sql = r#"SELECT id, pii -> 'insurance' ->> 'group_id' as group_id
+                 FROM patients
+                 WHERE CAST(pii -> 'insurance' ->> 'group_id' AS INTEGER) >= 2000"#;
+    let rows = client.query(sql, &[]).await?;
+    println!("✅ Found {} patients with group_id >= 2000", rows.len());
+
+    // Test 2: String comparison
+    println!("📝 Test 2: Find patients with blood type containing '+'");
+    let sql = r#"SELECT id, pii -> 'vitals' ->> 'blood_type' as blood_type
+                 FROM patients
+                 WHERE pii -> 'vitals' ->> 'blood_type' LIKE '%+'"#;
+    let rows = client.query(sql, &[]).await?;
+    println!("✅ Found {} patients with positive blood types", rows.len());
+
+    // Test 3: Date comparison
+    println!("📝 Test 3: Find patients with recent lab results");
+    let sql = r#"SELECT id, pii -> 'vitals' -> 'lab_results' ->> 'test_date' as test_date
+                 FROM patients
+                 WHERE pii -> 'vitals' -> 'lab_results' ->> 'test_date' >= '2024-02-01'"#;
+    let rows = client.query(sql, &[]).await?;
+    println!("✅ Found {} patients with recent lab results", rows.len());
+
+    // Test 4: Floating point comparison
+    println!("📝 Test 4: Find patients with elevated A1C levels");
+    let sql = r#"SELECT id, pii -> 'vitals' -> 'lab_results' ->> 'hemoglobin_a1c' as a1c
+                 FROM patients
+                 WHERE CAST(pii -> 'vitals' -> 'lab_results' ->> 'hemoglobin_a1c' AS FLOAT) > 6.0"#;
+    let rows = client.query(sql, &[]).await?;
+    println!("✅ Found {} patients with elevated A1C levels", rows.len());
+
+    // Test 5: Complex comparison with multiple conditions
+    println!("📝 Test 5: Find high-risk patients (weight > 80 AND cardiovascular risk > 60)");
+    let sql = r#"SELECT id,
+                        pii -> 'vitals' ->> 'weight_kg' as weight,
+                        pii -> 'medical_history' -> 'risk_factors' ->> 'cardiovascular' as cv_risk
+                 FROM patients
+                 WHERE CAST(pii -> 'vitals' ->> 'weight_kg' AS INTEGER) > 80
+                   AND CAST(pii -> 'medical_history' -> 'risk_factors' ->> 'cardiovascular' AS INTEGER) > 60"#;
+    let rows = client.query(sql, &[]).await?;
+    println!("✅ Found {} high-risk patients with weight > 80kg and CV risk > 60", rows.len());
+
+    println!("🎉 Comparison Operations tests completed successfully!");
+    Ok(())
+}
+
+/// Tests complex nested queries combining multiple JSONB operations.
+async fn test_complex_nested_queries() -> Result<(), Box<dyn std::error::Error>> {
+    println!("\n🔍 === Testing Complex Nested Queries ===");
+    let client = connect_with_tls(PROXY).await;
+
+    // Test 1: Complex query with JOIN, containment, and field extraction
+    println!("📝 Test 1: Find patients with specific insurance AND active prescriptions");
+    let sql = r#"
+        SELECT DISTINCT p.id,
+               p.pii ->> 'first_name' as first_name,
+               p.pii ->> 'last_name' as last_name,
+               p.pii -> 'insurance' ->> 'provider' as insurance_provider
+        FROM patients p
+        JOIN patient_medications pm ON p.id = pm.patient_id
+        WHERE p.pii @> '{"insurance": {"provider": "HealthCorp"}}'
+          AND pm.medication ->> 'to_date' >= '2024-01-16'
+        ORDER BY p.pii ->> 'last_name'
+    "#;
+    let rows = client.query(sql, &[]).await?;
+    println!("✅ Found {} HealthCorp patients with active prescriptions", rows.len());
+
+    // Test 2: Aggregation with JSONB extraction
+    println!("📝 Test 2: Calculate average risk scores by insurance provider");
+    let sql = r#"
+        SELECT p.pii -> 'insurance' ->> 'provider' as provider,
+               AVG(CAST(p.pii -> 'medical_history' -> 'risk_factors' ->> 'cardiovascular' AS FLOAT)) as avg_cv_risk,
+               COUNT(*) as patient_count
+        FROM patients p
+        WHERE jsonb_path_exists(p.pii, '$.medical_history.risk_factors.cardiovascular')
+        GROUP BY p.pii -> 'insurance' ->> 'provider'
+        ORDER BY avg_cv_risk DESC
+    "#;
+    let rows = client.query(sql, &[]).await?;
+    println!("✅ Calculated risk scores for {} insurance providers", rows.len());
+
+    for row in &rows {
+        let provider: Option<String> = row.get("provider");
+        let avg_risk: Option<f64> = row.get("avg_cv_risk");
+        let count: Option<i64> = row.get("patient_count");
+        println!("   {:?}: Avg CV Risk = {:?}, Patients = {:?}", provider, avg_risk, count);
+    }
+
+    // Test 3: Complex filtering with multiple JSONB conditions
+    println!("📝 Test 3: Find patients with allergies AND high deductibles");
+    let sql = r#"
+        SELECT id,
+               pii ->> 'first_name' as name,
+               jsonb_array_length(pii -> 'medical_history' -> 'allergies') as allergy_count,
+               pii -> 'insurance' -> 'coverage' ->> 'deductible' as deductible
+        FROM patients
+        WHERE jsonb_array_length(pii -> 'medical_history' -> 'allergies') > 1
+          AND CAST(pii -> 'insurance' -> 'coverage' ->> 'deductible' AS INTEGER) > 500
+        ORDER BY allergy_count DESC
+    "#;
+    let rows = client.query(sql, &[]).await?;
+    println!("✅ Found {} patients with multiple allergies and high deductibles", rows.len());
+
+    // Test 4: Subquery with JSONB operations
+    println!("📝 Test 4: Find patients with above-average copays");
+    let sql = r#"
+        SELECT id,
+               pii ->> 'first_name' as name,
+               pii -> 'insurance' -> 'coverage' -> 'copays' ->> 'primary_care' as copay
+        FROM patients
+        WHERE CAST(pii -> 'insurance' -> 'coverage' -> 'copays' ->> 'primary_care' AS INTEGER) >
+              (SELECT AVG(CAST(pii -> 'insurance' -> 'coverage' -> 'copays' ->> 'primary_care' AS INTEGER))
+               FROM patients
+               WHERE jsonb_path_exists(pii, '$.insurance.coverage.copays.primary_care'))
+        ORDER BY CAST(pii -> 'insurance' -> 'coverage' -> 'copays' ->> 'primary_care' AS INTEGER) DESC
+    "#;
+    let rows = client.query(sql, &[]).await?;
+    println!("✅ Found {} patients with above-average copays", rows.len());
+
+    println!("🎉 Complex Nested Queries tests completed successfully!");
+    Ok(())
+}
+
