@@ -178,6 +178,11 @@ where
                 }
             }
             Code::Sync => {
+                debug!(target: PROTOCOL,
+                    client_id = self.context.client_id,
+                    ?code,
+                );
+
                 if self.context.schema_changed() {
                     self.encrypt.reload_schema().await;
                 }
@@ -190,7 +195,13 @@ where
                     self.in_error = false;
                 }
             }
-            _code => {}
+            code => {
+                debug!(target: PROTOCOL,
+                    client_id = self.context.client_id,
+                    msg = "Passthrough",
+                    ?code,
+                );
+            }
         }
 
         self.write_to_server(bytes).await?;

@@ -164,7 +164,13 @@ where
                 }
             }
 
-            _ => {}
+            code => {
+                debug!(target: PROTOCOL,
+                    client_id = self.context.client_id,
+                    msg = "Passthrough",
+                    ?code,
+                );
+            }
         }
 
         self.write_with_flush(bytes).await?;
