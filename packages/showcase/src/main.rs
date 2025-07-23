@@ -1079,7 +1079,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // === ORIGINAL SHOWCASE: Aspirin Query ===
     println!("🩺 Healthcare Database Showcase - EQL v2 Searchable Encryption");
     println!("============================================================");
-    
+
     // Query 1: Get the Aspirin medication ID
     let aspirin_id_sql = "SELECT id FROM medications WHERE name = 'Aspirin';";
     let rows = client.query(aspirin_id_sql, &[]).await.unwrap();
@@ -1134,17 +1134,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("\n\n🧪 === COMPREHENSIVE EQL JSONB OPERATIONS TESTING ===");
     println!("Testing all supported JSONB operators and functions with complex healthcare data");
     println!("===============================================================================");
-    
+
     // Create enhanced test data with complex JSONB structures
     create_enhanced_jsonb_test_data().await;
-    
+
     // Run comprehensive JSONB operation tests
     test_field_access_operations().await?;
     test_containment_operations().await?;
     test_jsonpath_functions().await?;
     test_comparison_operations().await?;
     test_complex_nested_queries().await?;
-    
+
     println!("\n🎉 === ALL TESTS COMPLETED SUCCESSFULLY! ===");
     println!();
     println!("🔒 This comprehensive demonstration showcases:");
@@ -1165,13 +1165,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// Creates enhanced JSONB test data with complex nested medical information.
 async fn create_enhanced_jsonb_test_data() {
     println!("📋 Creating enhanced JSONB test data...");
-    
+
     let enhanced_patients = [
         // Patient 1: John Smith with complex medical data
         EnhancedPatient::new(
             "a1b2c3d4-e5f6-4a5b-8c9d-123456789001",
             "John",
-            "Smith", 
+            "Smith",
             "john.smith@email.com",
             "1985-03-15",
             EnhancedPatientPii {
@@ -1230,7 +1230,7 @@ async fn create_enhanced_jsonb_test_data() {
             "a1b2c3d4-e5f6-4a5b-8c9d-123456789002",
             "Sarah",
             "Johnson",
-            "sarah.johnson@gmail.com", 
+            "sarah.johnson@gmail.com",
             "1992-07-28",
             EnhancedPatientPii {
                 first_name: "Sarah".to_string(),
@@ -1289,7 +1289,7 @@ async fn create_enhanced_jsonb_test_data() {
             "Michael",
             "Brown",
             "m.brown@outlook.com",
-            "1978-12-03", 
+            "1978-12-03",
             EnhancedPatientPii {
                 first_name: "Michael".to_string(),
                 last_name: "Brown".to_string(),
@@ -1348,7 +1348,7 @@ async fn create_enhanced_jsonb_test_data() {
         let sql = "INSERT INTO patients (id, pii) VALUES ($1, $2)";
         insert(sql, &[&patient.id, &pii_json]).await;
     }
-    
+
     println!("✅ Enhanced JSONB test data created successfully");
 }
 
@@ -1356,17 +1356,17 @@ async fn create_enhanced_jsonb_test_data() {
 async fn test_field_access_operations() -> Result<(), Box<dyn std::error::Error>> {
     println!("\n🔍 === Testing Field Access Operations (-> and ->>) ===");
     let client = connect_with_tls(PROXY).await;
-    
+
     // Test 1: Extract nested object with -> operator (returns JSONB)
     println!("📝 Test 1: Extract medical_history with -> operator");
     let sql = "SELECT id, pii -> 'medical_history' as medical_history FROM patients WHERE pii -> 'medical_history' IS NOT NULL LIMIT 1";
     let rows = client.query(sql, &[]).await?;
     assert!(!rows.is_empty(), "Should find patients with medical history");
-    
+
     let medical_history: Value = rows[0].get("medical_history");
     assert!(medical_history.get("allergies").is_some(), "Medical history should contain allergies");
     println!("✅ Successfully extracted medical_history as JSONB");
-    
+
     // Test 2: Extract text field with ->> operator (returns text)
     println!("📝 Test 2: Extract blood_type with ->> operator");
     let sql = "SELECT id, pii -> 'vitals' ->> 'blood_type' as blood_type FROM patients WHERE pii -> 'vitals' ->> 'blood_type' = 'O+' LIMIT 1";
@@ -1375,14 +1375,14 @@ async fn test_field_access_operations() -> Result<(), Box<dyn std::error::Error>
         let blood_type: Option<String> = rows[0].get("blood_type");
         println!("✅ Successfully extracted blood_type: {:?}", blood_type);
     }
-    
+
     // Test 3: Extract nested field with chained operators
     println!("📝 Test 3: Extract nested insurance provider");
     let sql = "SELECT id, pii -> 'insurance' ->> 'provider' as provider FROM patients WHERE pii -> 'insurance' ->> 'provider' = 'HealthCorp'";
     let rows = client.query(sql, &[]).await?;
     assert!(!rows.is_empty(), "Should find HealthCorp patients");
     println!("✅ Successfully extracted nested insurance provider");
-    
+
     // Test 4: Extract array elements
     println!("📝 Test 4: Extract allergies array");
     let sql = "SELECT id, pii -> 'medical_history' -> 'allergies' as allergies FROM patients WHERE pii -> 'medical_history' -> 'allergies' IS NOT NULL LIMIT 1";
@@ -1392,7 +1392,7 @@ async fn test_field_access_operations() -> Result<(), Box<dyn std::error::Error>
         assert!(allergies.is_array(), "Allergies should be an array");
         println!("✅ Successfully extracted allergies array");
     }
-    
+
     println!("🎉 Field Access Operations tests completed successfully!");
     Ok(())
 }
@@ -1401,7 +1401,7 @@ async fn test_field_access_operations() -> Result<(), Box<dyn std::error::Error>
 async fn test_containment_operations() -> Result<(), Box<dyn std::error::Error>> {
     println!("\n🔍 === Testing Containment Operations (@> and <@) ===");
     let client = connect_with_tls(PROXY).await;
-    
+
     // Test 1: @> operator (contains) - find patients with specific insurance provider
     println!("📝 Test 1: Find patients with HealthCorp insurance using @>");
     let sql = r#"SELECT COUNT(*) as count FROM patients WHERE pii @> '{"insurance": {"provider": "HealthCorp"}}'"#;
@@ -1409,25 +1409,25 @@ async fn test_containment_operations() -> Result<(), Box<dyn std::error::Error>>
     let count: i64 = rows[0].get("count");
     assert!(count >= 1, "Should find at least one HealthCorp patient");
     println!("✅ Found {} HealthCorp patients using @> operator", count);
-    
+
     // Test 2: @> operator with nested object matching
     println!("📝 Test 2: Find patients with diabetes condition using @>");
     let sql = r#"SELECT COUNT(*) as count FROM patients WHERE pii @> '{"medical_history": {"conditions": ["diabetes"]}}'"#;
     let rows = client.query(sql, &[]).await?;
     let count: i64 = rows[0].get("count");
     println!("✅ Found {} patients with diabetes using @> operator", count);
-    
+
     // Test 3: <@ operator (contained by) - check if a structure is contained
     println!("📝 Test 3: Check if blood type structure is contained using <@");
     let sql = r#"SELECT COUNT(*) as count FROM patients WHERE '{"vitals": {"blood_type": "O+"}}' <@ pii"#;
     let rows = client.query(sql, &[]).await?;
     let count: i64 = rows[0].get("count");
     println!("✅ Found {} patients where O+ blood type structure is contained", count);
-    
+
     // Test 4: Complex containment with emergency contact
     println!("📝 Test 4: Complex containment with emergency contact");
-    let sql = r#"SELECT id, pii -> 'medical_history' -> 'emergency_contact' ->> 'name' as contact_name 
-                 FROM patients 
+    let sql = r#"SELECT id, pii -> 'medical_history' -> 'emergency_contact' ->> 'name' as contact_name
+                 FROM patients
                  WHERE pii @> '{"medical_history": {"emergency_contact": {"relationship": "spouse"}}}'
                  LIMIT 1"#;
     let rows = client.query(sql, &[]).await?;
@@ -1435,7 +1435,7 @@ async fn test_containment_operations() -> Result<(), Box<dyn std::error::Error>>
         let contact_name: Option<String> = rows[0].get("contact_name");
         println!("✅ Found spouse emergency contact: {:?}", contact_name);
     }
-    
+
     println!("🎉 Containment Operations tests completed successfully!");
     Ok(())
 }
@@ -1444,7 +1444,7 @@ async fn test_containment_operations() -> Result<(), Box<dyn std::error::Error>>
 async fn test_jsonpath_functions() -> Result<(), Box<dyn std::error::Error>> {
     println!("\n🔍 === Testing JSONPath Functions ===");
     let client = connect_with_tls(PROXY).await;
-    
+
     // Test 1: jsonb_path_exists - check if path exists
     println!("📝 Test 1: Check if insurance.coverage path exists");
     let sql = r#"SELECT COUNT(*) as count FROM patients WHERE jsonb_path_exists(pii, '$.insurance.coverage')"#;
@@ -1452,40 +1452,40 @@ async fn test_jsonpath_functions() -> Result<(), Box<dyn std::error::Error>> {
     let count: i64 = rows[0].get("count");
     assert!(count >= 1, "Should find patients with insurance coverage data");
     println!("✅ Found {} patients with insurance.coverage path", count);
-    
+
     // Test 2: jsonb_path_query_first - extract single value
     println!("📝 Test 2: Extract first allergy using jsonb_path_query_first");
-    let sql = r#"SELECT jsonb_path_query_first(pii, '$.medical_history.allergies[0]') as first_allergy 
-                 FROM patients 
-                 WHERE jsonb_path_exists(pii, '$.medical_history.allergies') 
+    let sql = r#"SELECT jsonb_path_query_first(pii, '$.medical_history.allergies[0]') as first_allergy
+                 FROM patients
+                 WHERE jsonb_path_exists(pii, '$.medical_history.allergies')
                  LIMIT 1"#;
     let rows = client.query(sql, &[]).await?;
     if !rows.is_empty() {
         let first_allergy: Option<Value> = rows[0].get("first_allergy");
         println!("✅ First allergy found: {:?}", first_allergy);
     }
-    
+
     // Test 3: jsonb_path_query - extract multiple values (array elements)
     println!("📝 Test 3: Extract all allergies using jsonb_path_query");
-    let sql = r#"SELECT jsonb_path_query(pii, '$.medical_history.allergies[*]') as allergy 
-                 FROM patients 
+    let sql = r#"SELECT jsonb_path_query(pii, '$.medical_history.allergies[*]') as allergy
+                 FROM patients
                  WHERE jsonb_path_exists(pii, '$.medical_history.allergies')
                  LIMIT 5"#;
     let rows = client.query(sql, &[]).await?;
     println!("✅ Found {} allergy records using jsonb_path_query", rows.len());
-    
+
     // Test 4: Complex JSONPath with conditions
     println!("📝 Test 4: Find patients with high cardiovascular risk");
     let sql = r#"SELECT id, jsonb_path_query_first(pii, '$.medical_history.risk_factors.cardiovascular') as cv_risk
-                 FROM patients 
+                 FROM patients
                  WHERE CAST(jsonb_path_query_first(pii, '$.medical_history.risk_factors.cardiovascular') AS INTEGER) > 70"#;
     let rows = client.query(sql, &[]).await?;
     println!("✅ Found {} patients with high cardiovascular risk", rows.len());
-    
+
     // Test 5: Extract nested numeric values
     println!("📝 Test 5: Extract copay amounts using JSONPath");
     let sql = r#"SELECT jsonb_path_query_first(pii, '$.insurance.coverage.copays.primary_care') as primary_copay
-                 FROM patients 
+                 FROM patients
                  WHERE jsonb_path_exists(pii, '$.insurance.coverage.copays')
                  LIMIT 1"#;
     let rows = client.query(sql, &[]).await?;
@@ -1493,7 +1493,7 @@ async fn test_jsonpath_functions() -> Result<(), Box<dyn std::error::Error>> {
         let copay: Option<Value> = rows[0].get("primary_copay");
         println!("✅ Primary care copay: {:?}", copay);
     }
-    
+
     println!("🎉 JSONPath Functions tests completed successfully!");
     Ok(())
 }
@@ -1502,50 +1502,50 @@ async fn test_jsonpath_functions() -> Result<(), Box<dyn std::error::Error>> {
 async fn test_comparison_operations() -> Result<(), Box<dyn std::error::Error>> {
     println!("\n🔍 === Testing Comparison Operations ===");
     let client = connect_with_tls(PROXY).await;
-    
+
     // Test 1: Numeric comparison on extracted integer field
     println!("📝 Test 1: Find patients with group_id >= 2000");
     let sql = r#"SELECT id, pii -> 'insurance' ->> 'group_id' as group_id
-                 FROM patients 
+                 FROM patients
                  WHERE CAST(pii -> 'insurance' ->> 'group_id' AS INTEGER) >= 2000"#;
     let rows = client.query(sql, &[]).await?;
     println!("✅ Found {} patients with group_id >= 2000", rows.len());
-    
+
     // Test 2: String comparison
     println!("📝 Test 2: Find patients with blood type containing '+'");
     let sql = r#"SELECT id, pii -> 'vitals' ->> 'blood_type' as blood_type
-                 FROM patients 
+                 FROM patients
                  WHERE pii -> 'vitals' ->> 'blood_type' LIKE '%+'"#;
     let rows = client.query(sql, &[]).await?;
     println!("✅ Found {} patients with positive blood types", rows.len());
-    
+
     // Test 3: Date comparison
     println!("📝 Test 3: Find patients with recent lab results");
     let sql = r#"SELECT id, pii -> 'vitals' -> 'lab_results' ->> 'test_date' as test_date
-                 FROM patients 
+                 FROM patients
                  WHERE pii -> 'vitals' -> 'lab_results' ->> 'test_date' >= '2024-02-01'"#;
     let rows = client.query(sql, &[]).await?;
     println!("✅ Found {} patients with recent lab results", rows.len());
-    
+
     // Test 4: Floating point comparison
     println!("📝 Test 4: Find patients with elevated A1C levels");
     let sql = r#"SELECT id, pii -> 'vitals' -> 'lab_results' ->> 'hemoglobin_a1c' as a1c
-                 FROM patients 
+                 FROM patients
                  WHERE CAST(pii -> 'vitals' -> 'lab_results' ->> 'hemoglobin_a1c' AS FLOAT) > 6.0"#;
     let rows = client.query(sql, &[]).await?;
     println!("✅ Found {} patients with elevated A1C levels", rows.len());
-    
+
     // Test 5: Complex comparison with multiple conditions
     println!("📝 Test 5: Find high-risk patients (weight > 80 AND cardiovascular risk > 60)");
-    let sql = r#"SELECT id, 
+    let sql = r#"SELECT id,
                         pii -> 'vitals' ->> 'weight_kg' as weight,
                         pii -> 'medical_history' -> 'risk_factors' ->> 'cardiovascular' as cv_risk
-                 FROM patients 
+                 FROM patients
                  WHERE CAST(pii -> 'vitals' ->> 'weight_kg' AS INTEGER) > 80
                    AND CAST(pii -> 'medical_history' -> 'risk_factors' ->> 'cardiovascular' AS INTEGER) > 60"#;
     let rows = client.query(sql, &[]).await?;
     println!("✅ Found {} high-risk patients with weight > 80kg and CV risk > 60", rows.len());
-    
+
     println!("🎉 Comparison Operations tests completed successfully!");
     Ok(())
 }
@@ -1554,7 +1554,7 @@ async fn test_comparison_operations() -> Result<(), Box<dyn std::error::Error>> 
 async fn test_complex_nested_queries() -> Result<(), Box<dyn std::error::Error>> {
     println!("\n🔍 === Testing Complex Nested Queries ===");
     let client = connect_with_tls(PROXY).await;
-    
+
     // Test 1: Complex query with JOIN, containment, and field extraction
     println!("📝 Test 1: Find patients with specific insurance AND active prescriptions");
     let sql = r#"
@@ -1570,7 +1570,7 @@ async fn test_complex_nested_queries() -> Result<(), Box<dyn std::error::Error>>
     "#;
     let rows = client.query(sql, &[]).await?;
     println!("✅ Found {} HealthCorp patients with active prescriptions", rows.len());
-    
+
     // Test 2: Aggregation with JSONB extraction
     println!("📝 Test 2: Calculate average risk scores by insurance provider");
     let sql = r#"
@@ -1584,14 +1584,14 @@ async fn test_complex_nested_queries() -> Result<(), Box<dyn std::error::Error>>
     "#;
     let rows = client.query(sql, &[]).await?;
     println!("✅ Calculated risk scores for {} insurance providers", rows.len());
-    
+
     for row in &rows {
         let provider: Option<String> = row.get("provider");
         let avg_risk: Option<f64> = row.get("avg_cv_risk");
         let count: Option<i64> = row.get("patient_count");
         println!("   {:?}: Avg CV Risk = {:?}, Patients = {:?}", provider, avg_risk, count);
     }
-    
+
     // Test 3: Complex filtering with multiple JSONB conditions
     println!("📝 Test 3: Find patients with allergies AND high deductibles");
     let sql = r#"
@@ -1606,7 +1606,7 @@ async fn test_complex_nested_queries() -> Result<(), Box<dyn std::error::Error>>
     "#;
     let rows = client.query(sql, &[]).await?;
     println!("✅ Found {} patients with multiple allergies and high deductibles", rows.len());
-    
+
     // Test 4: Subquery with JSONB operations
     println!("📝 Test 4: Find patients with above-average copays");
     let sql = r#"
@@ -1614,7 +1614,7 @@ async fn test_complex_nested_queries() -> Result<(), Box<dyn std::error::Error>>
                pii ->> 'first_name' as name,
                pii -> 'insurance' -> 'coverage' -> 'copays' ->> 'primary_care' as copay
         FROM patients
-        WHERE CAST(pii -> 'insurance' -> 'coverage' -> 'copays' ->> 'primary_care' AS INTEGER) > 
+        WHERE CAST(pii -> 'insurance' -> 'coverage' -> 'copays' ->> 'primary_care' AS INTEGER) >
               (SELECT AVG(CAST(pii -> 'insurance' -> 'coverage' -> 'copays' ->> 'primary_care' AS INTEGER))
                FROM patients
                WHERE jsonb_path_exists(pii, '$.insurance.coverage.copays.primary_care'))
@@ -1622,7 +1622,7 @@ async fn test_complex_nested_queries() -> Result<(), Box<dyn std::error::Error>>
     "#;
     let rows = client.query(sql, &[]).await?;
     println!("✅ Found {} patients with above-average copays", rows.len());
-    
+
     println!("🎉 Complex Nested Queries tests completed successfully!");
     Ok(())
 }
