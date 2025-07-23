@@ -66,6 +66,14 @@ const SCHEMA: &str = r#"
         PRIMARY KEY(id)
     );
 
+    SELECT eql_v2.add_search_config(
+        'patients',
+        'pii',
+        'ste_vec',
+        'jsonb',
+        '{"prefix": "patients/pii"}'
+    );
+
     -- Medications reference table (plaintext)
     DROP TABLE IF EXISTS medications CASCADE;
     CREATE TABLE medications (
@@ -94,12 +102,28 @@ const SCHEMA: &str = r#"
         FOREIGN KEY (patient_id) REFERENCES patients(id) ON DELETE CASCADE
     );
 
+    SELECT eql_v2.add_search_config(
+        'patient_medications',
+        'medication',
+        'ste_vec',
+        'jsonb',
+        '{"prefix": "patient_medications/medication"}'
+    );
+
     -- Patient procedures junction table with encrypted details
     DROP TABLE IF EXISTS patient_procedures CASCADE;
     CREATE TABLE patient_procedures (
         patient_id uuid,
         procedure eql_v2_encrypted,
         FOREIGN KEY (patient_id) REFERENCES patients(id) ON DELETE CASCADE
+    );
+
+    SELECT eql_v2.add_search_config(
+        'patient_procedures',
+        'procedure',
+        'ste_vec',
+        'jsonb',
+        '{"prefix": "patient_procedures/procedure"}'
     );
 "#;
 
