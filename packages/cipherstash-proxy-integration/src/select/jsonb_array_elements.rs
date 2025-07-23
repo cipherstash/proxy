@@ -21,7 +21,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn select_jsonb_string_array_elements() {
+    async fn select_jsonb_array_elements_with_string() {
         trace();
 
         clear().await;
@@ -32,19 +32,19 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn select_jsonb_number_array_elements() {
+    async fn select_jsonb_array_elements_with_numeric() {
         trace();
 
         clear().await;
 
         insert_jsonb().await;
 
-        let expected = vec![Value::from(42), Value::from(84)];
+        let expected = vec![Value::from("42"), Value::from("84")];
         select_jsonb("$.array_number[@]", &expected).await;
     }
 
     #[tokio::test]
-    async fn select_jsonb_unknown_array_elements() {
+    async fn select_jsonb_array_elements_with_unknown_field() {
         trace();
 
         clear().await;

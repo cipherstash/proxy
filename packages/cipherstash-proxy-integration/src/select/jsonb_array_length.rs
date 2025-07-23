@@ -29,7 +29,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn select_jsonb_string_array_length() {
+    async fn select_jsonb_array_length_with_string() {
         trace();
 
         clear().await;
@@ -39,7 +39,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn select_jsonb_array_length_number() {
+    async fn select_jsonb_array_length_with_numeric() {
         trace();
 
         clear().await;
@@ -50,7 +50,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn select_jsonb_array_length_unknown() {
+    async fn select_jsonb_array_length_with_unknown_field() {
         trace();
 
         clear().await;
