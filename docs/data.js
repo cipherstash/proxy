@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1753281827969,
+  "lastUpdate": 1753282545525,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -9063,6 +9063,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 6.672302,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "6cc5cbb92420c9006f36a4bed623a9966b6a8d4f",
+          "message": "chore: clean up docs and helm charts",
+          "timestamp": "2025-07-22T18:54:05Z",
+          "url": "https://github.com/cipherstash/proxy/pull/289/commits/6cc5cbb92420c9006f36a4bed623a9966b6a8d4f"
+        },
+        "date": 1753282543481,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 7.000602,
             "unit": "Number"
           }
         ]
