@@ -1,4 +1,5 @@
 mod group_by;
+mod jsonb_array_elements;
 mod jsonb_array_length;
 mod jsonb_contained_by;
 mod jsonb_contains;
