@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1753280108689,
+  "lastUpdate": 1753281827969,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -9038,6 +9038,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 7.045018,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "d8cd4a7b59db14751a16d4a6ab1c9193be9fd21a",
+          "message": "test(proxy): add comprehensive Proxy/EQL integration test showcasing important features",
+          "timestamp": "2025-07-22T18:54:05Z",
+          "url": "https://github.com/cipherstash/proxy/pull/285/commits/d8cd4a7b59db14751a16d4a6ab1c9193be9fd21a"
+        },
+        "date": 1753281826518,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 6.672302,
             "unit": "Number"
           }
         ]
