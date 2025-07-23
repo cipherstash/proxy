@@ -478,10 +478,6 @@ done
 alias = 'e'
 description = "Download latest EQL release or use local copy"
 dir = "{{config_root}}/tests"
-outputs = [
-  "{{config_root}}/cipherstash-encrypt.sql",
-  "{{config_root}}/cipherstash-encrypt-uninstall.sql",
-]
 run = """
 # install script
 if [ -z "$CS_EQL_PATH" ]; then
