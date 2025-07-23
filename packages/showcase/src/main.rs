@@ -1,52 +1,52 @@
 /*
  * ╔═══════════════════════════════════════════════════════════════════════════════════════════════════════════════╗
- * ║                                    HEALTHCARE DATABASE SCHEMA                                                    ║
- * ║                                                                                                                   ║
- * ║    ┌─────────────────┐       ┌─────────────────────┐       ┌─────────────────────┐                             ║
- * ║    │   medications   │       │     procedures      │       │      patients       │                             ║
- * ║    │                 │       │                     │       │                     │                             ║
- * ║    │ id (uuid) PK    │       │ id (uuid) PK        │       │ id (uuid) PK        │                             ║
- * ║    │ name (text)     │       │ name (text)         │       │ pii (eql_v2_enc)    │                             ║
- * ║    │ description     │       │ description (text)  │       │                     │                             ║
- * ║    │ (text)          │       │ code (text)         │       │ Contains:           │                             ║
- * ║    └─────────────────┘       │ procedure_type      │       │ • first_name        │                             ║
- * ║            │                 │ (text)              │       │ • last_name         │                             ║
- * ║            │                 └─────────────────────┘       │ • email             │                             ║
- * ║            │                         │                     │ • date_of_birth     │                             ║
- * ║            │                         │                     └─────────────────────┘                             ║
- * ║            │                         │                             │                                             ║
- * ║            ▼                         ▼                             ▼                                             ║
- * ║    ┌─────────────────────┐   ┌─────────────────────┐       ┌─────────────────────┐                             ║
- * ║    │ patient_medications │   │ patient_procedures  │       │                     │                             ║
- * ║    │                     │   │                     │       │                     │                             ║
- * ║    │ patient_id (uuid)   │◄──┤ patient_id (uuid)   │◄──────┤                     │                             ║
- * ║    │ FK → patients.id    │   │ FK → patients.id     │       │                     │                             ║
- * ║    │                     │   │                     │       │                     │                             ║
- * ║    │ medication          │   │ procedure           │       │                     │                             ║
- * ║    │ (eql_v2_encrypted)  │   │ (eql_v2_encrypted)  │       │                     │                             ║
- * ║    │                     │   │                     │       │                     │                             ║
- * ║    │ Contains:           │   │ Contains:           │       │                     │                             ║
- * ║    │ • medication_id ────┼───┤ • procedure_id ─────┼───────┤                     │                             ║
- * ║    │ • daily_dosage      │   │ • when              │       │                     │                             ║
- * ║    │ • from_date         │   │ • laterality        │       │                     │                             ║
- * ║    │ • to_date           │   │ • body_site         │       │                     │                             ║
- * ║    └─────────────────────┘   │ • priority          │       │                     │                             ║
- * ║                              │ • status            │       │                     │                             ║
- * ║                              │ • preop_diagnosis   │       │                     │                             ║
- * ║                              │ • postop_diagnosis  │       │                     │                             ║
- * ║                              │ • procedure_outcome │       │                     │                             ║
- * ║                              └─────────────────────┘       │                     │                             ║
- * ║                                                            │                     │                             ║
- * ║  Foreign Key Constraints:                                  │                     │                             ║
- * ║  • patient_medications.patient_id → patients.id           │                     │                             ║
- * ║  • patient_procedures.patient_id → patients.id            │                     │                             ║
- * ║  • All with CASCADE DELETE for referential integrity      │                     │                             ║
- * ║                                                            │                     │                             ║
- * ║  Encryption Details:                                       └─────────────────────┘                             ║
+ * ║                                    HEALTHCARE DATABASE SCHEMA                                                 ║
+ * ║                                                                                                               ║
+ * ║    ┌─────────────────┐       ┌─────────────────────┐       ┌─────────────────────┐                            ║
+ * ║    │   medications   │       │     procedures      │       │      patients       │                            ║
+ * ║    │                 │       │                     │       │                     │                            ║
+ * ║    │ id (uuid) PK    │       │ id (uuid) PK        │       │ id (uuid) PK        │                            ║
+ * ║    │ name (text)     │       │ name (text)         │       │ pii (eql_v2_enc)    │                            ║
+ * ║    │ description     │       │ description (text)  │       │                     │                            ║
+ * ║    │ (text)          │       │ code (text)         │       │ Contains:           │                            ║
+ * ║    └─────────────────┘       │ procedure_type      │       │ • first_name        │                            ║
+ * ║            │                 │ (text)              │       │ • last_name         │                            ║
+ * ║            │                 └─────────────────────┘       │ • email             │                            ║
+ * ║            │                         │                     │ • date_of_birth     │                            ║
+ * ║            │                         │                     └─────────────────────┘                            ║
+ * ║            │                         │                             │                                          ║
+ * ║            ▼                         ▼                             ▼                                          ║
+ * ║    ┌─────────────────────┐   ┌─────────────────────┐       ┌─────────────────────┐                            ║
+ * ║    │ patient_medications │   │ patient_procedures  │       │                     │                            ║
+ * ║    │                     │   │                     │       │                     │                            ║
+ * ║    │ patient_id (uuid)   │◄──┤ patient_id (uuid)   │◄──────┤                     │                            ║
+ * ║    │ FK → patients.id    │   │ FK → patients.id    │       │                     │                            ║
+ * ║    │                     │   │                     │       │                     │                            ║
+ * ║    │ medication          │   │ procedure           │       │                     │                            ║
+ * ║    │ (eql_v2_encrypted)  │   │ (eql_v2_encrypted)  │       │                     │                            ║
+ * ║    │                     │   │                     │       │                     │                            ║
+ * ║    │ Contains:           │   │ Contains:           │       │                     │                            ║
+ * ║    │ • medication_id ────┼───┤ • procedure_id ─────┼───────┤                     │                            ║
+ * ║    │ • daily_dosage      │   │ • when              │       │                     │                            ║
+ * ║    │ • from_date         │   │ • laterality        │       │                     │                            ║
+ * ║    │ • to_date           │   │ • body_site         │       │                     │                            ║
+ * ║    └─────────────────────┘   │ • priority          │       │                     │                            ║
+ * ║                              │ • status            │       │                     │                            ║
+ * ║                              │ • preop_diagnosis   │       │                     │                            ║
+ * ║                              │ • postop_diagnosis  │       │                     │                            ║
+ * ║                              │ • procedure_outcome │       │                     │                            ║
+ * ║                              └─────────────────────┘       │                     │                            ║
+ * ║                                                            │                     │                            ║
+ * ║  Foreign Key Constraints:                                  │                     │                            ║
+ * ║  • patient_medications.patient_id → patients.id            │                     │                            ║
+ * ║  • patient_procedures.patient_id → patients.id             │                     │                            ║
+ * ║  • All with CASCADE DELETE for referential integrity       │                     │                            ║
+ * ║                                                            │                     │                            ║
+ * ║  Encryption Details:                                       └─────────────────────┘                            ║
  * ║  • PII data in patients.pii is encrypted using EQL v2                                                         ║
- * ║  • Junction tables store encrypted procedure/medication details                                                ║
- * ║  • Foreign keys enforce referential integrity with CASCADE DELETE                                              ║
- * ║  • Reference tables contain plaintext lookup data                                                              ║
+ * ║  • Junction tables store encrypted procedure/medication details                                               ║
+ * ║  • Foreign keys enforce referential integrity with CASCADE DELETE                                             ║
+ * ║  • Reference tables contain plaintext lookup data                                                             ║
  * ╚═══════════════════════════════════════════════════════════════════════════════════════════════════════════════╝
  */
 
@@ -213,7 +213,7 @@ impl Patient {
 struct PatientPii {
     /// Patient's first name
     first_name: String,
-    /// Patient's last name  
+    /// Patient's last name
     last_name: String,
     /// Patient's email address for communication
     email: String,
