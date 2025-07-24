@@ -1,5 +1,6 @@
 use super::{configure, connect_with_retry};
 use crate::{error::Error, log::AUTHENTICATION};
+use aws_lc_rs::digest;
 use core::str;
 use oid_registry::{
     Oid, OID_HASH_SHA1, OID_NIST_HASH_SHA256, OID_NIST_HASH_SHA384, OID_NIST_HASH_SHA512,
@@ -7,7 +8,7 @@ use oid_registry::{
     OID_PKCS1_SHA512WITHRSA, OID_SIG_ECDSA_WITH_SHA256, OID_SIG_ECDSA_WITH_SHA384, OID_SIG_ED25519,
 };
 use postgres_protocol::authentication::sasl::ChannelBinding;
-use ring::digest;
+
 use std::{
     pin::Pin,
     task::{Context, Poll},

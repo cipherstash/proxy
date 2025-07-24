@@ -1,4 +1,6 @@
 mod group_by;
+mod jsonb_array_elements;
+mod jsonb_array_length;
 mod jsonb_contained_by;
 mod jsonb_contains;
 mod jsonb_get_field;
@@ -10,6 +12,7 @@ mod order_by;
 mod order_by_with_null;
 mod pg_catalog;
 mod regression;
+mod select_domain_type;
 mod select_where_jsonb_eq;
 mod select_where_jsonb_gt;
 mod select_where_jsonb_gte;

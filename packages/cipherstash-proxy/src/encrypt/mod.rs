@@ -133,7 +133,7 @@ impl Encrypt {
         let mut encrypted_eql = vec![];
         // if !pipeline.is_empty() { }
 
-        let mut result = pipeline.encrypt(None).await?;
+        let mut result = pipeline.encrypt(None, None).await?;
 
         for (idx, opt) in columns.iter().enumerate() {
             let mut encrypted = None;

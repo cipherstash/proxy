@@ -200,6 +200,8 @@ B+qwsnNEiDoJhgYj+cQ=
 
     #[test]
     fn test_configure_server_with_paths() {
+        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+
         let tls_config = TlsConfig::Path {
             private_key_path: "../../tests/tls/server.key".to_string(),
             certificate_path: "../../tests/tls/server.cert".to_string(),
@@ -211,6 +213,8 @@ B+qwsnNEiDoJhgYj+cQ=
 
     #[test]
     fn test_configure_server_with_path_for_pem() {
+        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+
         let tls_config = TlsConfig::Pem {
             private_key_pem: "../../tests/tls/server.key".to_string(),
             certificate_pem: "../../tests/tls/server.cert".to_string(),
@@ -222,6 +226,8 @@ B+qwsnNEiDoJhgYj+cQ=
 
     #[test]
     fn test_configure_server_with_pem_for_path() {
+        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+
         let tls_config = TlsConfig::Path {
             private_key_path: private_key_pem(),
             certificate_path: certificate_pem(),
@@ -233,6 +239,8 @@ B+qwsnNEiDoJhgYj+cQ=
 
     #[test]
     fn test_configure_server_with_pems() {
+        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+
         let tls_config = TlsConfig::Pem {
             private_key_pem: private_key_pem(),
             certificate_pem: certificate_pem(),

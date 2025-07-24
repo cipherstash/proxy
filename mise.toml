@@ -31,7 +31,7 @@ CS_PROXY__HOST = "proxy"
 # Misc
 DOCKER_CLI_HINTS = "false" # Please don't show us What's Next.
 
-CS_EQL_VERSION = "eql-2.1.4"
+CS_EQL_VERSION = "eql-2.1.5"
 
 
 [tools]
@@ -92,7 +92,12 @@ if [ "${CS_DATABASE__HOST}" == "localhost" ]; then
 fi
 
 # run the container
-echo docker compose up {{arg(name="service",default="proxy")}} {{option(name="extra-args",default="")}} | bash
+if ! echo docker compose up {{arg(name="service",default="proxy")}} {{option(name="extra-args",default="")}} | bash; then
+  echo "Error occurred during docker compose up, showing container logs:"
+  docker logs --timestamps --follow proxy
+  exit 1
+fi
+
 """
 
 [tasks."proxy:psql"]
@@ -478,10 +483,6 @@ done
 alias = 'e'
 description = "Download latest EQL release or use local copy"
 dir = "{{config_root}}/tests"
-outputs = [
-  "{{config_root}}/cipherstash-encrypt.sql",
-  "{{config_root}}/cipherstash-encrypt-uninstall.sql",
-]
 run = """
 # install script
 if [ -z "$CS_EQL_PATH" ]; then

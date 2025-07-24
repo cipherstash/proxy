@@ -268,6 +268,8 @@ pub async fn insert_jsonb_for_search() {
 ///
 /// This is because the test database uses a self-signed certificate.
 pub fn configure_test_client() -> ClientConfig {
+    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+
     let verifier = DangerousTestCertVerifier;
     rustls::ClientConfig::builder()
         .dangerous()
