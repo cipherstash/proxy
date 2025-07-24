@@ -35,9 +35,9 @@ This showcase demonstrates EQL v2's comprehensive support for JSONB operations o
 
 **Key Features:**
 - ✅ All JSONB operators work with encrypted data
-- ✅ Complex nested healthcare data structures  
+- ✅ Complex nested healthcare data structures
 - ✅ Real-world medical scenarios (allergies, insurance, vitals)
-- ✅ HIPAA-compliant data modeling with encryption
+- ✅ HIPAA-inspired data modeling with encryption
 - ✅ Comprehensive test coverage of EQL capabilities
 
 ## Database Schema
@@ -69,7 +69,7 @@ The enhanced patient data includes complex nested structures:
 ```json
 {
   "first_name": "John",
-  "last_name": "Smith", 
+  "last_name": "Smith",
   "email": "john.smith@email.com",
   "date_of_birth": "1985-03-15",
   "medical_history": {
@@ -88,7 +88,7 @@ The enhanced patient data includes complex nested structures:
   },
   "insurance": {
     "provider": "HealthCorp",
-    "policy_number": "HC123456", 
+    "policy_number": "HC123456",
     "group_id": 1001,
     "coverage": {
       "deductible": 500,
@@ -129,9 +129,9 @@ Extracts a field and returns it as JSONB, preserving the JSON structure.
 
 **Test 1: Extract nested medical history**
 ```sql
-SELECT id, pii -> 'medical_history' as medical_history 
-FROM patients 
-WHERE pii -> 'medical_history' IS NOT NULL 
+SELECT id, pii -> 'medical_history' as medical_history
+FROM patients
+WHERE pii -> 'medical_history' IS NOT NULL
 LIMIT 1;
 ```
 
@@ -145,8 +145,8 @@ WHERE pii -> 'insurance' ->> 'provider' = 'HealthCorp';
 **Test 3: Extract array field**
 ```sql
 SELECT id, pii -> 'medical_history' -> 'allergies' as allergies
-FROM patients 
-WHERE pii -> 'medical_history' -> 'allergies' IS NOT NULL 
+FROM patients
+WHERE pii -> 'medical_history' -> 'allergies' IS NOT NULL
 LIMIT 1;
 ```
 
@@ -157,15 +157,15 @@ Extracts a field and returns it as text, converting JSON values to strings.
 **Test 1: Extract blood type as text**
 ```sql
 SELECT id, pii -> 'vitals' ->> 'blood_type' as blood_type
-FROM patients 
-WHERE pii -> 'vitals' ->> 'blood_type' = 'O+' 
+FROM patients
+WHERE pii -> 'vitals' ->> 'blood_type' = 'O+'
 LIMIT 1;
 ```
 
 **Test 2: Extract nested insurance provider**
 ```sql
 SELECT id, pii -> 'insurance' ->> 'provider' as provider
-FROM patients 
+FROM patients
 WHERE pii -> 'insurance' ->> 'provider' = 'HealthCorp';
 ```
 
@@ -184,22 +184,22 @@ Tests whether the left JSONB value contains the right JSONB value.
 
 **Test 1: Find patients with specific insurance provider**
 ```sql
-SELECT COUNT(*) as count 
-FROM patients 
+SELECT COUNT(*) as count
+FROM patients
 WHERE pii @> '{"insurance": {"provider": "HealthCorp"}}';
 ```
 
 **Test 2: Find patients with diabetes condition**
 ```sql
-SELECT COUNT(*) as count 
-FROM patients 
+SELECT COUNT(*) as count
+FROM patients
 WHERE pii @> '{"medical_history": {"conditions": ["diabetes"]}}';
 ```
 
 **Test 3: Complex nested object matching**
 ```sql
 SELECT id, pii -> 'medical_history' -> 'emergency_contact' ->> 'name' as contact_name
-FROM patients 
+FROM patients
 WHERE pii @> '{"medical_history": {"emergency_contact": {"relationship": "spouse"}}}'
 LIMIT 1;
 ```
@@ -210,8 +210,8 @@ Tests whether the left JSONB value is contained within the right JSONB value.
 
 **Test 1: Check if blood type structure is contained**
 ```sql
-SELECT COUNT(*) as count 
-FROM patients 
+SELECT COUNT(*) as count
+FROM patients
 WHERE '{"vitals": {"blood_type": "O+"}}' <@ pii;
 ```
 
@@ -230,8 +230,8 @@ Tests whether a JSONPath expression matches any values in the JSONB data.
 
 **Test 1: Check if insurance coverage path exists**
 ```sql
-SELECT COUNT(*) as count 
-FROM patients 
+SELECT COUNT(*) as count
+FROM patients
 WHERE jsonb_path_exists(pii, '$.insurance.coverage');
 ```
 
@@ -256,22 +256,22 @@ Extracts the first JSON value that matches a JSONPath expression.
 **Test 1: Extract first allergy**
 ```sql
 SELECT jsonb_path_query_first(pii, '$.medical_history.allergies[0]') as first_allergy
-FROM patients 
-WHERE jsonb_path_exists(pii, '$.medical_history.allergies') 
+FROM patients
+WHERE jsonb_path_exists(pii, '$.medical_history.allergies')
 LIMIT 1;
 ```
 
 **Test 2: Extract cardiovascular risk score**
 ```sql
 SELECT id, jsonb_path_query_first(pii, '$.medical_history.risk_factors.cardiovascular') as cv_risk
-FROM patients 
+FROM patients
 WHERE CAST(jsonb_path_query_first(pii, '$.medical_history.risk_factors.cardiovascular') AS INTEGER) > 70;
 ```
 
 **Test 3: Extract copay amounts**
 ```sql
 SELECT jsonb_path_query_first(pii, '$.insurance.coverage.copays.primary_care') as primary_copay
-FROM patients 
+FROM patients
 WHERE jsonb_path_exists(pii, '$.insurance.coverage.copays')
 LIMIT 1;
 ```
@@ -283,7 +283,7 @@ Extracts all JSON values that match a JSONPath expression (returns multiple resu
 **Test 1: Extract all allergies**
 ```sql
 SELECT jsonb_path_query(pii, '$.medical_history.allergies[*]') as allergy
-FROM patients 
+FROM patients
 WHERE jsonb_path_exists(pii, '$.medical_history.allergies')
 LIMIT 5;
 ```
@@ -302,7 +302,7 @@ WHERE jsonb_path_exists(pii, '$.medical_history.conditions');
 **Test 1: Integer comparison - Find patients with high group IDs**
 ```sql
 SELECT id, pii -> 'insurance' ->> 'group_id' as group_id
-FROM patients 
+FROM patients
 WHERE CAST(pii -> 'insurance' ->> 'group_id' AS INTEGER) >= 2000;
 ```
 
@@ -318,7 +318,7 @@ WHERE CAST(pii -> 'vitals' ->> 'weight_kg' AS INTEGER) > 80;
 **Test 1: Blood type pattern matching**
 ```sql
 SELECT id, pii -> 'vitals' ->> 'blood_type' as blood_type
-FROM patients 
+FROM patients
 WHERE pii -> 'vitals' ->> 'blood_type' LIKE '%+';
 ```
 
@@ -334,7 +334,7 @@ WHERE pii -> 'insurance' ->> 'provider' = 'HealthCorp';
 **Test 1: Recent lab results**
 ```sql
 SELECT id, pii -> 'vitals' -> 'lab_results' ->> 'test_date' as test_date
-FROM patients 
+FROM patients
 WHERE pii -> 'vitals' -> 'lab_results' ->> 'test_date' >= '2024-02-01';
 ```
 
@@ -350,16 +350,16 @@ WHERE pii -> 'vitals' -> 'blood_pressure' ->> 'measured_date' >= '2024-01-01';
 **Test 1: Elevated A1C levels**
 ```sql
 SELECT id, pii -> 'vitals' -> 'lab_results' ->> 'hemoglobin_a1c' as a1c
-FROM patients 
+FROM patients
 WHERE CAST(pii -> 'vitals' -> 'lab_results' ->> 'hemoglobin_a1c' AS FLOAT) > 6.0;
 ```
 
 **Test 2: Multi-condition risk assessment**
 ```sql
-SELECT id, 
+SELECT id,
        pii -> 'vitals' ->> 'weight_kg' as weight,
        pii -> 'medical_history' -> 'risk_factors' ->> 'cardiovascular' as cv_risk
-FROM patients 
+FROM patients
 WHERE CAST(pii -> 'vitals' ->> 'weight_kg' AS INTEGER) > 80
   AND CAST(pii -> 'medical_history' -> 'risk_factors' ->> 'cardiovascular' AS INTEGER) > 60;
 ```
@@ -414,7 +414,7 @@ SELECT id,
        pii ->> 'first_name' as name,
        pii -> 'insurance' -> 'coverage' -> 'copays' ->> 'primary_care' as copay
 FROM patients
-WHERE CAST(pii -> 'insurance' -> 'coverage' -> 'copays' ->> 'primary_care' AS INTEGER) > 
+WHERE CAST(pii -> 'insurance' -> 'coverage' -> 'copays' ->> 'primary_care' AS INTEGER) >
       (SELECT AVG(CAST(pii -> 'insurance' -> 'coverage' -> 'copays' ->> 'primary_care' AS INTEGER))
        FROM patients
        WHERE jsonb_path_exists(pii, '$.insurance.coverage.copays.primary_care'))
@@ -436,7 +436,7 @@ ORDER BY CAST(pii -> 'insurance' -> 'coverage' -> 'copays' ->> 'primary_care' AS
    CS_WORKSPACE_CRN = "crn:region:workspace-id"
    CS_CLIENT_ACCESS_KEY = "your-access-key"
    CS_DEFAULT_KEYSET_ID = "your-keyset-id"
-   CS_CLIENT_ID = "your-client-id" 
+   CS_CLIENT_ID = "your-client-id"
    CS_CLIENT_KEY = "your-client-key"
    ```
 
@@ -463,7 +463,7 @@ The showcase will execute and display:
 
 1. **Original Healthcare Query**: Aspirin prescription lookup
 2. **Field Access Operations**: Testing `->` and `->>`
-3. **Containment Operations**: Testing `@>` and `<@`  
+3. **Containment Operations**: Testing `@>` and `<@`
 4. **JSONPath Functions**: Testing `jsonb_path_*` functions
 5. **Comparison Operations**: Numeric, string, date, and float comparisons
 6. **Complex Nested Queries**: JOINs, aggregations, and subqueries
