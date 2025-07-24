@@ -87,7 +87,13 @@ Data can only be encrypted or decrypted by CipherStash Proxy. The database (Post
 
 Computations on encypted data in a SQL query is not possible (except for specific operators and functions permitted by encrypted search configuration for a column) because the database cannot decrypt the data.
 
-For example `SELECT LOWER(some_encrypted_column) FROM encrypted_table` cannot work because `some_encrypted_column` is encrypted.
+For example `SELECT LOWER(some_encrypted_column) FROM encrypted_table` cannot work because `some_encrypted_column` is encrypted and the built-in SQL function `LOWER` can only operate on plaintext (not ciphertext).
+
+**IMPORTANT: by default encrypted columns and encrypted literals cannot be passed as arguments to SQL functions**
+
+Encrypted columns can only be passed as arguments to a SQL function if the value has an encrypted search index that supports that specific function.
+
+For example, the SQL `AVG` function cannot be used on encrypted numeric values. But the SQL `MIN` and `MAX` functions can be used on an encrypted value that has an ORE index.
 
 **IMPORTANT: CAST operations cannot work on encrypted data** because casting would require decryption of the encrypted data within the database, which is impossible. When a column has an `ste_vec` configuration, comparison and ordering operations work directly on the encrypted values without requiring CAST operations.
 
@@ -101,10 +107,10 @@ Examples of what DOES NOT WORK:
 - `pii -> 'vitals' -> 'blood_type'` ❌ (chained -> operators)
 - `pii -> 'medical_history' -> 'allergies'` ❌ (chained -> operators)
 
-This is a fundamental limitation in the searchable encryption. This limitation will be lifted in a future release. 
+This is a fundamental limitation in the searchable encryption. This limitation will be lifted in a future release.
 
 **WORKAROUND: Use `jsonb_path_query_first` instead for deep nested access:**
-- `jsonb_path_query_first(pii, '$.vitals.blood_type')` ✅ 
+- `jsonb_path_query_first(pii, '$.vitals.blood_type')` ✅
 - `jsonb_path_query_first(pii, '$.medical_history.allergies[0]')` ✅
 
 **REMEMBER: Always use JSONPath functions for accessing nested JSON data in encrypted columns, never chain `->` operators!**
