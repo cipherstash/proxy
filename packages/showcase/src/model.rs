@@ -77,13 +77,38 @@ impl Patient {
             pii: PatientPii::new(first_name, last_name, email, date_of_birth),
         }
     }
+
+    pub fn new_enhanced(
+        id: &str,
+        first_name: &str,
+        last_name: &str,
+        email: &str,
+        date_of_birth: &str,
+        medical_history: MedicalHistory,
+        insurance: InsuranceInfo,
+        vitals: VitalSigns,
+    ) -> Self {
+        Self {
+            id: Uuid::parse_str(id).unwrap(),
+            pii: PatientPii::new_enhanced(
+                first_name,
+                last_name,
+                email,
+                date_of_birth,
+                medical_history,
+                insurance,
+                vitals,
+            ),
+        }
+    }
 }
 
 /// Contains personally identifiable information for a patient.
 ///
 /// This data is sensitive and must be encrypted when stored in the database. EQL v2 provides
 /// searchable encryption, allowing healthcare providers to query patient data while maintaining
-/// strong privacy protections.
+/// strong privacy protections. Enhanced fields are optional to support both basic and complex
+/// patient records.
 #[derive(Serialize)]
 pub struct PatientPii {
     /// Patient's first name
@@ -94,6 +119,12 @@ pub struct PatientPii {
     pub email: String,
     /// Patient's date of birth in ISO8601 format (YYYY-MM-DD)
     pub date_of_birth: String,
+    /// Complex medical history metadata (optional for enhanced records)
+    pub medical_history: Option<MedicalHistory>,
+    /// Insurance information (optional for enhanced records)
+    pub insurance: Option<InsuranceInfo>,
+    /// Current vital signs and measurements (optional for enhanced records)
+    pub vitals: Option<VitalSigns>,
 }
 
 impl PatientPii {
@@ -103,31 +134,33 @@ impl PatientPii {
             last_name: last_name.to_string(),
             email: email.to_string(),
             date_of_birth: date_of_birth.to_string(),
+            medical_history: None,
+            insurance: None,
+            vitals: None,
+        }
+    }
+
+    pub fn new_enhanced(
+        first_name: &str,
+        last_name: &str,
+        email: &str,
+        date_of_birth: &str,
+        medical_history: MedicalHistory,
+        insurance: InsuranceInfo,
+        vitals: VitalSigns,
+    ) -> Self {
+        Self {
+            first_name: first_name.to_string(),
+            last_name: last_name.to_string(),
+            email: email.to_string(),
+            date_of_birth: date_of_birth.to_string(),
+            medical_history: Some(medical_history),
+            insurance: Some(insurance),
+            vitals: Some(vitals),
         }
     }
 }
 
-/// Enhanced patient PII with complex JSONB medical metadata for comprehensive testing.
-///
-/// This extended structure demonstrates EQL v2's capabilities with complex nested JSONB data,
-/// including arrays, nested objects, and mixed data types commonly found in healthcare systems.
-#[derive(Serialize)]
-pub struct EnhancedPatientPii {
-    /// Patient's first name
-    pub first_name: String,
-    /// Patient's last name
-    pub last_name: String,
-    /// Patient's email address for communication
-    pub email: String,
-    /// Patient's date of birth in ISO8601 format (YYYY-MM-DD)
-    pub date_of_birth: String,
-    /// Complex medical history metadata
-    pub medical_history: MedicalHistory,
-    /// Insurance information
-    pub insurance: InsuranceInfo,
-    /// Current vital signs and measurements
-    pub vitals: VitalSigns,
-}
 
 /// Medical history information containing arrays and nested data.
 #[derive(Serialize)]
@@ -238,26 +271,6 @@ pub struct LabResults {
     pub test_date: String,
 }
 
-/// Enhanced patient with complex JSONB metadata.
-#[derive(Serialize)]
-pub struct EnhancedPatient {
-    /// Unique identifier for the patient (UUID)
-    pub id: Uuid,
-    /// Enhanced PII with complex medical metadata
-    pub pii: EnhancedPatientPii,
-}
-
-impl EnhancedPatient {
-    pub fn new(
-        id: &str,
-        pii_data: EnhancedPatientPii,
-    ) -> Self {
-        Self {
-            id: Uuid::parse_str(id).unwrap(),
-            pii: pii_data,
-        }
-    }
-}
 
 /// Represents a medication prescription for a patient.
 ///
