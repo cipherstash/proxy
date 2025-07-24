@@ -875,25 +875,25 @@ async fn test_field_access_operations() -> Result<(), Box<dyn std::error::Error>
     assert!(medical_history.get("allergies").is_some(), "Medical history should contain allergies");
     println!("✅ Successfully extracted medical_history as JSONB");
 
-    // Test 2: Extract text field with ->> operator (returns text)
-    println!("📝 Test 2: Extract blood_type with ->> operator");
-    let sql = "SELECT id, pii -> 'vitals' ->> 'blood_type' as blood_type FROM patients WHERE pii -> 'vitals' ->> 'blood_type' = 'O+' LIMIT 1";
+    // Test 2: Extract text field with jsonb_path_query_first (returns text)
+    println!("📝 Test 2: Extract blood_type with jsonb_path_query_first");
+    let sql = "SELECT id, jsonb_path_query_first(pii, '$.vitals.blood_type') as blood_type FROM patients WHERE jsonb_path_query_first(pii, '$.vitals.blood_type')::text = '\"O+\"' LIMIT 1";
     let rows = client.query(sql, &[]).await?;
     if !rows.is_empty() {
-        let blood_type: Option<String> = rows[0].get("blood_type");
+        let blood_type: Option<Value> = rows[0].get("blood_type");
         println!("✅ Successfully extracted blood_type: {:?}", blood_type);
     }
 
-    // Test 3: Extract nested field with chained operators
+    // Test 3: Extract nested field with jsonb_path_query_first
     println!("📝 Test 3: Extract nested insurance provider");
-    let sql = "SELECT id, pii -> 'insurance' ->> 'provider' as provider FROM patients WHERE pii -> 'insurance' ->> 'provider' = 'HealthCorp'";
+    let sql = "SELECT id, jsonb_path_query_first(pii, '$.insurance.provider') as provider FROM patients WHERE jsonb_path_query_first(pii, '$.insurance.provider')::text = '\"HealthCorp\"'";
     let rows = client.query(sql, &[]).await?;
     assert!(!rows.is_empty(), "Should find HealthCorp patients");
     println!("✅ Successfully extracted nested insurance provider");
 
     // Test 4: Extract array elements
     println!("📝 Test 4: Extract allergies array");
-    let sql = "SELECT id, pii -> 'medical_history' -> 'allergies' as allergies FROM patients WHERE pii -> 'medical_history' -> 'allergies' IS NOT NULL LIMIT 1";
+    let sql = "SELECT id, jsonb_path_query_first(pii, '$.medical_history.allergies') as allergies FROM patients WHERE jsonb_path_exists(pii, '$.medical_history.allergies') LIMIT 1";
     let rows = client.query(sql, &[]).await?;
     if !rows.is_empty() {
         let allergies: Value = rows[0].get("allergies");
@@ -934,13 +934,13 @@ async fn test_containment_operations() -> Result<(), Box<dyn std::error::Error>>
 
     // Test 4: Complex containment with emergency contact
     println!("📝 Test 4: Complex containment with emergency contact");
-    let sql = r#"SELECT id, pii -> 'medical_history' -> 'emergency_contact' ->> 'name' as contact_name
+    let sql = r#"SELECT id, jsonb_path_query_first(pii, '$.medical_history.emergency_contact.name') as contact_name
                  FROM patients
                  WHERE pii @> '{"medical_history": {"emergency_contact": {"relationship": "spouse"}}}'
                  LIMIT 1"#;
     let rows = client.query(sql, &[]).await?;
     if !rows.is_empty() {
-        let contact_name: Option<String> = rows[0].get("contact_name");
+        let contact_name: Option<Value> = rows[0].get("contact_name");
         println!("✅ Found spouse emergency contact: {:?}", contact_name);
     }
 
@@ -986,7 +986,7 @@ async fn test_jsonpath_functions() -> Result<(), Box<dyn std::error::Error>> {
     println!("📝 Test 4: Find patients with high cardiovascular risk");
     let sql = r#"SELECT id, jsonb_path_query_first(pii, '$.medical_history.risk_factors.cardiovascular') as cv_risk
                  FROM patients
-                 WHERE CAST(jsonb_path_query_first(pii, '$.medical_history.risk_factors.cardiovascular') AS INTEGER) > 70"#;
+                 WHERE jsonb_path_query_first(pii, '$.medical_history.risk_factors.cardiovascular') > 70"#;
     let rows = client.query(sql, &[]).await?;
     println!("✅ Found {} patients with high cardiovascular risk", rows.len());
 
@@ -1013,44 +1013,44 @@ async fn test_comparison_operations() -> Result<(), Box<dyn std::error::Error>> 
 
     // Test 1: Numeric comparison on extracted integer field
     println!("📝 Test 1: Find patients with group_id >= 2000");
-    let sql = r#"SELECT id, pii -> 'insurance' ->> 'group_id' as group_id
+    let sql = r#"SELECT id, jsonb_path_query_first(pii, '$.insurance.group_id') as group_id
                  FROM patients
-                 WHERE CAST(pii -> 'insurance' ->> 'group_id' AS INTEGER) >= 2000"#;
+                 WHERE jsonb_path_query_first(pii, '$.insurance.group_id') >= 2000"#;
     let rows = client.query(sql, &[]).await?;
     println!("✅ Found {} patients with group_id >= 2000", rows.len());
 
     // Test 2: String comparison
     println!("📝 Test 2: Find patients with blood type containing '+'");
-    let sql = r#"SELECT id, pii -> 'vitals' ->> 'blood_type' as blood_type
+    let sql = r#"SELECT id, jsonb_path_query_first(pii, '$.vitals.blood_type') as blood_type
                  FROM patients
-                 WHERE pii -> 'vitals' ->> 'blood_type' LIKE '%+'"#;
+                 WHERE jsonb_path_query_first(pii, '$.vitals.blood_type')::text LIKE '%+%'"#;
     let rows = client.query(sql, &[]).await?;
     println!("✅ Found {} patients with positive blood types", rows.len());
 
     // Test 3: Date comparison
     println!("📝 Test 3: Find patients with recent lab results");
-    let sql = r#"SELECT id, pii -> 'vitals' -> 'lab_results' ->> 'test_date' as test_date
+    let sql = r#"SELECT id, jsonb_path_query_first(pii, '$.vitals.lab_results.test_date') as test_date
                  FROM patients
-                 WHERE pii -> 'vitals' -> 'lab_results' ->> 'test_date' >= '2024-02-01'"#;
+                 WHERE jsonb_path_query_first(pii, '$.vitals.lab_results.test_date')::text >= '"2024-02-01"'"#;
     let rows = client.query(sql, &[]).await?;
     println!("✅ Found {} patients with recent lab results", rows.len());
 
     // Test 4: Floating point comparison
     println!("📝 Test 4: Find patients with elevated A1C levels");
-    let sql = r#"SELECT id, pii -> 'vitals' -> 'lab_results' ->> 'hemoglobin_a1c' as a1c
+    let sql = r#"SELECT id, jsonb_path_query_first(pii, '$.vitals.lab_results.hemoglobin_a1c') as a1c
                  FROM patients
-                 WHERE CAST(pii -> 'vitals' -> 'lab_results' ->> 'hemoglobin_a1c' AS FLOAT) > 6.0"#;
+                 WHERE jsonb_path_query_first(pii, '$.vitals.lab_results.hemoglobin_a1c') > 6.0"#;
     let rows = client.query(sql, &[]).await?;
     println!("✅ Found {} patients with elevated A1C levels", rows.len());
 
     // Test 5: Complex comparison with multiple conditions
     println!("📝 Test 5: Find high-risk patients (weight > 80 AND cardiovascular risk > 60)");
     let sql = r#"SELECT id,
-                        pii -> 'vitals' ->> 'weight_kg' as weight,
-                        pii -> 'medical_history' -> 'risk_factors' ->> 'cardiovascular' as cv_risk
+                        jsonb_path_query_first(pii, '$.vitals.weight_kg') as weight,
+                        jsonb_path_query_first(pii, '$.medical_history.risk_factors.cardiovascular') as cv_risk
                  FROM patients
-                 WHERE CAST(pii -> 'vitals' ->> 'weight_kg' AS INTEGER) > 80
-                   AND CAST(pii -> 'medical_history' -> 'risk_factors' ->> 'cardiovascular' AS INTEGER) > 60"#;
+                 WHERE jsonb_path_query_first(pii, '$.vitals.weight_kg') > 80
+                   AND jsonb_path_query_first(pii, '$.medical_history.risk_factors.cardiovascular') > 60"#;
     let rows = client.query(sql, &[]).await?;
     println!("✅ Found {} high-risk patients with weight > 80kg and CV risk > 60", rows.len());
 
@@ -1069,7 +1069,7 @@ async fn test_complex_nested_queries() -> Result<(), Box<dyn std::error::Error>>
         SELECT DISTINCT p.id,
                p.pii ->> 'first_name' as first_name,
                p.pii ->> 'last_name' as last_name,
-               p.pii -> 'insurance' ->> 'provider' as insurance_provider
+               jsonb_path_query_first(p.pii, '$.insurance.provider') as insurance_provider
         FROM patients p
         JOIN patient_medications pm ON p.id = pm.patient_id
         WHERE p.pii @> '{"insurance": {"provider": "HealthCorp"}}'
@@ -1082,12 +1082,12 @@ async fn test_complex_nested_queries() -> Result<(), Box<dyn std::error::Error>>
     // Test 2: Aggregation with JSONB extraction
     println!("📝 Test 2: Calculate average risk scores by insurance provider");
     let sql = r#"
-        SELECT p.pii -> 'insurance' ->> 'provider' as provider,
-               AVG(CAST(p.pii -> 'medical_history' -> 'risk_factors' ->> 'cardiovascular' AS FLOAT)) as avg_cv_risk,
+        SELECT jsonb_path_query_first(p.pii, '$.insurance.provider') as provider,
+               AVG(jsonb_path_query_first(p.pii, '$.medical_history.risk_factors.cardiovascular')) as avg_cv_risk,
                COUNT(*) as patient_count
         FROM patients p
         WHERE jsonb_path_exists(p.pii, '$.medical_history.risk_factors.cardiovascular')
-        GROUP BY p.pii -> 'insurance' ->> 'provider'
+        GROUP BY jsonb_path_query_first(p.pii, '$.insurance.provider')
         ORDER BY avg_cv_risk DESC
     "#;
     let rows = client.query(sql, &[]).await?;
@@ -1105,11 +1105,11 @@ async fn test_complex_nested_queries() -> Result<(), Box<dyn std::error::Error>>
     let sql = r#"
         SELECT id,
                pii ->> 'first_name' as name,
-               jsonb_array_length(pii -> 'medical_history' -> 'allergies') as allergy_count,
-               pii -> 'insurance' -> 'coverage' ->> 'deductible' as deductible
+               jsonb_array_length(jsonb_path_query_first(pii, '$.medical_history.allergies')) as allergy_count,
+               jsonb_path_query_first(pii, '$.insurance.coverage.deductible') as deductible
         FROM patients
-        WHERE jsonb_array_length(pii -> 'medical_history' -> 'allergies') > 1
-          AND CAST(pii -> 'insurance' -> 'coverage' ->> 'deductible' AS INTEGER) > 500
+        WHERE jsonb_array_length(jsonb_path_query_first(pii, '$.medical_history.allergies')) > 1
+          AND jsonb_path_query_first(pii, '$.insurance.coverage.deductible') > 500
         ORDER BY allergy_count DESC
     "#;
     let rows = client.query(sql, &[]).await?;
@@ -1120,13 +1120,13 @@ async fn test_complex_nested_queries() -> Result<(), Box<dyn std::error::Error>>
     let sql = r#"
         SELECT id,
                pii ->> 'first_name' as name,
-               pii -> 'insurance' -> 'coverage' -> 'copays' ->> 'primary_care' as copay
+               jsonb_path_query_first(pii, '$.insurance.coverage.copays.primary_care') as copay
         FROM patients
-        WHERE CAST(pii -> 'insurance' -> 'coverage' -> 'copays' ->> 'primary_care' AS INTEGER) >
-              (SELECT AVG(CAST(pii -> 'insurance' -> 'coverage' -> 'copays' ->> 'primary_care' AS INTEGER))
+        WHERE jsonb_path_query_first(pii, '$.insurance.coverage.copays.primary_care') >
+              (SELECT AVG(jsonb_path_query_first(pii, '$.insurance.coverage.copays.primary_care'))
                FROM patients
                WHERE jsonb_path_exists(pii, '$.insurance.coverage.copays.primary_care'))
-        ORDER BY CAST(pii -> 'insurance' -> 'coverage' -> 'copays' ->> 'primary_care' AS INTEGER) DESC
+        ORDER BY jsonb_path_query_first(pii, '$.insurance.coverage.copays.primary_care') DESC
     "#;
     let rows = client.query(sql, &[]).await?;
     println!("✅ Found {} patients with above-average copays", rows.len());
