@@ -1,4 +1,11 @@
-use crate::{common::{connect_with_tls, insert, table_exists, PROXY}, model::{BloodPressure, CopayInfo, CoverageDetails, EmergencyContact, InsuranceInfo, LabResults, MedicalHistory, Medication, Patient, PatientProcedure, Prescription, Procedure, RiskFactors, VitalSigns}};
+use crate::{
+    common::{connect_with_tls, insert, table_exists, PROXY},
+    model::{
+        BloodPressure, CopayInfo, CoverageDetails, EmergencyContact, InsuranceInfo, LabResults,
+        MedicalHistory, Medication, Patient, PatientProcedure, Prescription, Procedure,
+        RiskFactors, VitalSigns,
+    },
+};
 
 pub async fn insert_test_data() {
     let medications = [
@@ -641,7 +648,11 @@ pub async fn create_enhanced_jsonb_test_data() {
             "m.brown@outlook.com",
             "1978-12-03",
             MedicalHistory {
-                allergies: vec!["latex".to_string(), "sulfa".to_string(), "iodine".to_string()],
+                allergies: vec![
+                    "latex".to_string(),
+                    "sulfa".to_string(),
+                    "iodine".to_string(),
+                ],
                 conditions: vec!["hypertension".to_string(), "high_cholesterol".to_string()],
                 emergency_contact: EmergencyContact {
                     name: "Lisa Brown".to_string(),
