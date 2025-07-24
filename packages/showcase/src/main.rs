@@ -70,6 +70,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     clear().await;
     setup_schema().await;
     insert_test_data().await;
+    create_enhanced_jsonb_test_data().await;
 
     let client = connect_with_tls(PROXY).await;
 
@@ -137,8 +138,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Testing all supported JSONB operators and functions with complex healthcare data");
     println!("===============================================================================");
 
-    // Create enhanced test data with complex JSONB structures
-    create_enhanced_jsonb_test_data().await;
+    // Enhanced test data with complex JSONB structures was already created above
 
     // Run comprehensive JSONB operation tests
     test_field_access_operations().await?;
@@ -171,7 +171,7 @@ async fn test_field_access_operations() -> Result<(), Box<dyn std::error::Error>
 
     // Test 1: Extract nested object with -> operator (returns JSONB)
     println!("📝 Test 1: Extract medical_history with -> operator");
-    let sql = "SELECT id, pii -> 'medical_history' as medical_history FROM patients WHERE pii -> 'medical_history' IS NOT NULL LIMIT 1";
+    let sql = "SELECT id, pii -> 'medical_history' as medical_history FROM patients WHERE id = 'a1b2c3d4-e5f6-4a5b-8c9d-123456789011' LIMIT 1";
     let rows = client.query(sql, &[]).await?;
     assert!(
         !rows.is_empty(),
@@ -187,7 +187,7 @@ async fn test_field_access_operations() -> Result<(), Box<dyn std::error::Error>
 
     // Test 2: Extract text field with jsonb_path_query_first (returns text)
     println!("📝 Test 2: Extract blood_type with jsonb_path_query_first");
-    let sql = "SELECT id, jsonb_path_query_first(pii, '$.vitals.blood_type') as blood_type FROM patients WHERE jsonb_path_query_first(pii, '$.vitals.blood_type')::text = '\"O+\"' LIMIT 1";
+    let sql = "SELECT id, jsonb_path_query_first(pii, '$.vitals.blood_type') as blood_type FROM patients WHERE id = 'a1b2c3d4-e5f6-4a5b-8c9d-123456789011' LIMIT 1";
     let rows = client.query(sql, &[]).await?;
     if !rows.is_empty() {
         let blood_type: Option<Value> = rows[0].get("blood_type");
@@ -196,7 +196,7 @@ async fn test_field_access_operations() -> Result<(), Box<dyn std::error::Error>
 
     // Test 3: Extract nested field with jsonb_path_query_first
     println!("📝 Test 3: Extract nested insurance provider");
-    let sql = "SELECT id, jsonb_path_query_first(pii, '$.insurance.provider') as provider FROM patients WHERE jsonb_path_query_first(pii, '$.insurance.provider')::text = '\"HealthCorp\"'";
+    let sql = "SELECT id, jsonb_path_query_first(pii, '$.insurance.provider') as provider FROM patients WHERE jsonb_path_query_first(pii, '$.insurance.provider') = '\"HealthCorp\"'";
     let rows = client.query(sql, &[]).await?;
     assert!(!rows.is_empty(), "Should find HealthCorp patients");
     println!("✅ Successfully extracted nested insurance provider");

@@ -95,7 +95,19 @@ When generating tests, it is important that Claude understands the fundamental l
 
 ### JSON operator limitations
 
-The `->` cannot be chained due to a fundamental limitation in the searchable encryption. This limitation will be lifted in a future release. In the meantime `json_path_query` can be used with a JSONPath selector to select arbitrarily deeply nested values.
+**CRITICAL LIMITATION: The `->` operator CANNOT be chained on `ste_vec` encrypted columns!**
+
+Examples of what DOES NOT WORK:
+- `pii -> 'vitals' -> 'blood_type'` ❌ (chained -> operators)
+- `pii -> 'medical_history' -> 'allergies'` ❌ (chained -> operators)
+
+This is a fundamental limitation in the searchable encryption. This limitation will be lifted in a future release. 
+
+**WORKAROUND: Use `jsonb_path_query_first` instead for deep nested access:**
+- `jsonb_path_query_first(pii, '$.vitals.blood_type')` ✅ 
+- `jsonb_path_query_first(pii, '$.medical_history.allergies[0]')` ✅
+
+**REMEMBER: Always use JSONPath functions for accessing nested JSON data in encrypted columns, never chain `->` operators!**
 
 
 ## Test generation
