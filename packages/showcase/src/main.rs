@@ -596,7 +596,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let client = connect_with_tls(PROXY).await;
 
-    // === ORIGINAL SHOWCASE: Aspirin Query ===
     println!("🩺 Healthcare Database Showcase - EQL v2 Searchable Encryption");
     println!("============================================================");
 
@@ -689,7 +688,7 @@ async fn create_enhanced_jsonb_test_data() {
     let enhanced_patients = [
         // Patient 1: John Smith with complex medical data
         EnhancedPatient::new(
-            "a1b2c3d4-e5f6-4a5b-8c9d-123456789001",
+            "a1b2c3d4-e5f6-4a5b-8c9d-123456789011",
             EnhancedPatientPii {
                 first_name: "John".to_string(),
                 last_name: "Smith".to_string(),
@@ -743,7 +742,7 @@ async fn create_enhanced_jsonb_test_data() {
         ),
         // Patient 2: Sarah Johnson with different insurance
         EnhancedPatient::new(
-            "a1b2c3d4-e5f6-4a5b-8c9d-123456789002",
+            "a1b2c3d4-e5f6-4a5b-8c9d-123456789012",
             EnhancedPatientPii {
                 first_name: "Sarah".to_string(),
                 last_name: "Johnson".to_string(),
@@ -797,7 +796,7 @@ async fn create_enhanced_jsonb_test_data() {
         ),
         // Patient 3: Michael Brown with high risk factors
         EnhancedPatient::new(
-            "a1b2c3d4-e5f6-4a5b-8c9d-123456789003",
+            "a1b2c3d4-e5f6-4a5b-8c9d-123456789013",
             EnhancedPatientPii {
                 first_name: "Michael".to_string(),
                 last_name: "Brown".to_string(),
