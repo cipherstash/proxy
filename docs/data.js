@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1753365130428,
+  "lastUpdate": 1753395640267,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -9546,6 +9546,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 7.059845,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "toby@cipherstash.com",
+            "name": "Toby Hede",
+            "username": "tobyhede"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "124db7c6e2c43f5ac010a27f592a7c0b1e83d3ce",
+          "message": "Merge pull request #284 from cipherstash/jsonb-array-functions\n\nIntegration tests for jsonb array functions",
+          "timestamp": "2025-07-25T08:16:50+10:00",
+          "tree_id": "2957cdc1fb2fb0a2f29e596c4e0e217fdbf84cad",
+          "url": "https://github.com/cipherstash/proxy/commit/124db7c6e2c43f5ac010a27f592a7c0b1e83d3ce"
+        },
+        "date": 1753395639050,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 7.114975,
             "unit": "Number"
           }
         ]
