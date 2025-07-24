@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1753317885115,
+  "lastUpdate": 1753321821241,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -9142,6 +9142,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 7.113758,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "d89e7ab3eeb23af79b61418f11bb639d2e1ee75b",
+          "message": "fix: error on invalid workspace_crn",
+          "timestamp": "2025-07-24T00:42:06Z",
+          "url": "https://github.com/cipherstash/proxy/pull/290/commits/d89e7ab3eeb23af79b61418f11bb639d2e1ee75b"
+        },
+        "date": 1753321819841,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 6.703861,
             "unit": "Number"
           }
         ]
