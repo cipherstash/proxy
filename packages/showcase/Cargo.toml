@@ -2,6 +2,7 @@
 name = "showcase"
 version.workspace = true
 edition.workspace = true
+description = "Healthcare data model demonstrating EQL v2 searchable encryption with realistic encrypted application patterns"
 
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
