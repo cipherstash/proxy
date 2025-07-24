@@ -179,6 +179,13 @@ async fn init(mut config: TandemConfig) -> Encrypt {
 
     config.check_obsolete_config();
 
+    let _ = rustls::crypto::aws_lc_rs::default_provider()
+        .install_default()
+        .inspect_err(|err| {
+            error!(msg = "Could not initalise the CryptoProvider", ?err);
+            std::process::exit(exitcode::CONFIG);
+        });
+
     match config.tls {
         Some(ref mut tls) => {
             _ = tls.check_cert().inspect_err(|err| {
