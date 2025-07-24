@@ -1,0 +1,1 @@
+pub const SCHEMA: &'static str = include_str!("./schema.sql");
