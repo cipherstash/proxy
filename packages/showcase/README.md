@@ -121,59 +121,71 @@ The enhanced patient data includes complex nested structures:
 
 ## JSONB Operators
 
+⚠️ **CRITICAL LIMITATION: Chained `->` operators CANNOT be used on encrypted columns!**
+
+Examples that **DO NOT WORK**:
+- `pii -> 'vitals' -> 'blood_type'` ❌ (chained operators)
+- `pii -> 'medical_history' -> 'allergies'` ❌ (chained operators)
+- `pii -> 'insurance' -> 'coverage'` ❌ (chained operators)
+
+**Use JSONPath functions instead for deep nested access:**
+- `jsonb_path_query_first(pii, '$.vitals.blood_type')` ✅
+- `jsonb_path_query_first(pii, '$.medical_history.allergies[0]')` ✅
+- `jsonb_path_query_first(pii, '$.insurance.coverage')` ✅
+
 ### Field Access Operators
 
 #### `->` (Extract Field as JSONB)
 
-Extracts a field and returns it as JSONB, preserving the JSON structure.
+Extracts a field and returns it as JSONB, preserving the JSON structure. **Note: Only single-level access works on encrypted columns.**
 
-**Test 1: Extract nested medical history**
+**Test 1: Extract nested medical history (single level only)**
 ```sql
 SELECT id, pii -> 'medical_history' as medical_history
 FROM patients
-WHERE pii -> 'medical_history' IS NOT NULL
+WHERE id = 'a1b2c3d4-e5f6-4a5b-8c9d-123456789011'
 LIMIT 1;
 ```
 
-**Test 2: Extract nested insurance information**
+**Test 2: Extract nested insurance information (use JSONPath for deep access)**
 ```sql
-SELECT id, pii -> 'insurance' -> 'coverage' as coverage
+SELECT id, jsonb_path_query_first(pii, '$.insurance.coverage') as coverage
 FROM patients
-WHERE pii -> 'insurance' ->> 'provider' = 'HealthCorp';
+WHERE jsonb_path_query_first(pii, '$.insurance.provider') = '"HealthCorp"';
 ```
 
-**Test 3: Extract array field**
+**Test 3: Extract array field (use JSONPath for reliability)**
 ```sql
-SELECT id, pii -> 'medical_history' -> 'allergies' as allergies
+SELECT id, jsonb_path_query_first(pii, '$.medical_history.allergies') as allergies
 FROM patients
-WHERE pii -> 'medical_history' -> 'allergies' IS NOT NULL
+WHERE jsonb_path_exists(pii, '$.medical_history.allergies')
 LIMIT 1;
 ```
 
 #### `->>` (Extract Field as Text)
 
-Extracts a field and returns it as text, converting JSON values to strings.
+Extracts a field and returns it as text, converting JSON values to strings. **Note: Chaining is not supported on encrypted columns.**
 
-**Test 1: Extract blood type as text**
+**Test 1: Extract blood type as text (use JSONPath)**
 ```sql
-SELECT id, pii -> 'vitals' ->> 'blood_type' as blood_type
+SELECT id, jsonb_path_query_first(pii, '$.vitals.blood_type') as blood_type
 FROM patients
-WHERE pii -> 'vitals' ->> 'blood_type' = 'O+'
+WHERE id = 'a1b2c3d4-e5f6-4a5b-8c9d-123456789011'
 LIMIT 1;
 ```
 
 **Test 2: Extract nested insurance provider**
 ```sql
-SELECT id, pii -> 'insurance' ->> 'provider' as provider
+SELECT id, jsonb_path_query_first(pii, '$.insurance.provider') as provider
 FROM patients
-WHERE pii -> 'insurance' ->> 'provider' = 'HealthCorp';
+WHERE jsonb_path_query_first(pii, '$.insurance.provider') = '"HealthCorp"';
 ```
 
-**Test 3: Chain operators for deep field access**
+**Test 3: Deep field access (use JSONPath only)**
 ```sql
-SELECT id, pii -> 'medical_history' -> 'emergency_contact' ->> 'name' as contact_name
+SELECT id, jsonb_path_query_first(pii, '$.medical_history.emergency_contact.name') as contact_name
 FROM patients
-WHERE pii -> 'medical_history' -> 'emergency_contact' ->> 'relationship' = 'spouse';
+WHERE pii @> '{"medical_history": {"emergency_contact": {"relationship": "spouse"}}}';
 ```
 
 ### Containment Operators
@@ -265,7 +277,7 @@ LIMIT 1;
 ```sql
 SELECT id, jsonb_path_query_first(pii, '$.medical_history.risk_factors.cardiovascular') as cv_risk
 FROM patients
-WHERE CAST(jsonb_path_query_first(pii, '$.medical_history.risk_factors.cardiovascular') AS INTEGER) > 70;
+WHERE jsonb_path_query_first(pii, '$.medical_history.risk_factors.cardiovascular') > 70;
 ```
 
 **Test 3: Extract copay amounts**
@@ -301,67 +313,67 @@ WHERE jsonb_path_exists(pii, '$.medical_history.conditions');
 
 **Test 1: Integer comparison - Find patients with high group IDs**
 ```sql
-SELECT id, pii -> 'insurance' ->> 'group_id' as group_id
+SELECT id, jsonb_path_query_first(pii, '$.insurance.group_id') as group_id
 FROM patients
-WHERE CAST(pii -> 'insurance' ->> 'group_id' AS INTEGER) >= 2000;
+WHERE jsonb_path_query_first(pii, '$.insurance.group_id') >= 2000;
 ```
 
 **Test 2: Weight comparison**
 ```sql
-SELECT id, pii -> 'vitals' ->> 'weight_kg' as weight
+SELECT id, jsonb_path_query_first(pii, '$.vitals.weight_kg') as weight
 FROM patients
-WHERE CAST(pii -> 'vitals' ->> 'weight_kg' AS INTEGER) > 80;
+WHERE jsonb_path_query_first(pii, '$.vitals.weight_kg') > 80;
 ```
 
 ### String Comparisons
 
 **Test 1: Blood type pattern matching**
 ```sql
-SELECT id, pii -> 'vitals' ->> 'blood_type' as blood_type
+SELECT id, jsonb_path_query_first(pii, '$.vitals.blood_type') as blood_type
 FROM patients
-WHERE pii -> 'vitals' ->> 'blood_type' LIKE '%+';
+WHERE jsonb_path_query_first(pii, '$.vitals.blood_type')::text LIKE '%+';
 ```
 
 **Test 2: Provider name comparison**
 ```sql
-SELECT id, pii -> 'insurance' ->> 'provider' as provider
+SELECT id, jsonb_path_query_first(pii, '$.insurance.provider') as provider
 FROM patients
-WHERE pii -> 'insurance' ->> 'provider' = 'HealthCorp';
+WHERE jsonb_path_query_first(pii, '$.insurance.provider') = '"HealthCorp"';
 ```
 
 ### Date Comparisons
 
 **Test 1: Recent lab results**
 ```sql
-SELECT id, pii -> 'vitals' -> 'lab_results' ->> 'test_date' as test_date
+SELECT id, jsonb_path_query_first(pii, '$.vitals.lab_results.test_date') as test_date
 FROM patients
-WHERE pii -> 'vitals' -> 'lab_results' ->> 'test_date' >= '2024-02-01';
+WHERE jsonb_path_query_first(pii, '$.vitals.lab_results.test_date')::text >= '"2024-02-01"';
 ```
 
 **Test 2: Blood pressure measurement dates**
 ```sql
-SELECT id, pii -> 'vitals' -> 'blood_pressure' ->> 'measured_date' as bp_date
+SELECT id, jsonb_path_query_first(pii, '$.vitals.blood_pressure.measured_date') as bp_date
 FROM patients
-WHERE pii -> 'vitals' -> 'blood_pressure' ->> 'measured_date' >= '2024-01-01';
+WHERE jsonb_path_query_first(pii, '$.vitals.blood_pressure.measured_date')::text >= '"2024-01-01"';
 ```
 
 ### Float Comparisons
 
 **Test 1: Elevated A1C levels**
 ```sql
-SELECT id, pii -> 'vitals' -> 'lab_results' ->> 'hemoglobin_a1c' as a1c
+SELECT id, jsonb_path_query_first(pii, '$.vitals.lab_results.hemoglobin_a1c') as a1c
 FROM patients
-WHERE CAST(pii -> 'vitals' -> 'lab_results' ->> 'hemoglobin_a1c' AS FLOAT) > 6.0;
+WHERE jsonb_path_query_first(pii, '$.vitals.lab_results.hemoglobin_a1c') > 6.0;
 ```
 
 **Test 2: Multi-condition risk assessment**
 ```sql
 SELECT id,
-       pii -> 'vitals' ->> 'weight_kg' as weight,
-       pii -> 'medical_history' -> 'risk_factors' ->> 'cardiovascular' as cv_risk
+       jsonb_path_query_first(pii, '$.vitals.weight_kg') as weight,
+       jsonb_path_query_first(pii, '$.medical_history.risk_factors.cardiovascular') as cv_risk
 FROM patients
-WHERE CAST(pii -> 'vitals' ->> 'weight_kg' AS INTEGER) > 80
-  AND CAST(pii -> 'medical_history' -> 'risk_factors' ->> 'cardiovascular' AS INTEGER) > 60;
+WHERE jsonb_path_query_first(pii, '$.vitals.weight_kg') > 80
+  AND jsonb_path_query_first(pii, '$.medical_history.risk_factors.cardiovascular') > 60;
 ```
 
 ## Complex Queries
@@ -373,7 +385,7 @@ WHERE CAST(pii -> 'vitals' ->> 'weight_kg' AS INTEGER) > 80
 SELECT DISTINCT p.id,
        p.pii ->> 'first_name' as first_name,
        p.pii ->> 'last_name' as last_name,
-       p.pii -> 'insurance' ->> 'provider' as insurance_provider
+       jsonb_path_query_first(p.pii, '$.insurance.provider') as insurance_provider
 FROM patients p
 JOIN patient_medications pm ON p.id = pm.patient_id
 WHERE p.pii @> '{"insurance": {"provider": "HealthCorp"}}'
@@ -385,12 +397,12 @@ ORDER BY p.pii ->> 'last_name';
 
 **Test 1: Average risk scores by insurance provider**
 ```sql
-SELECT p.pii -> 'insurance' ->> 'provider' as provider,
-       AVG(CAST(p.pii -> 'medical_history' -> 'risk_factors' ->> 'cardiovascular' AS FLOAT)) as avg_cv_risk,
+SELECT jsonb_path_query_first(p.pii, '$.insurance.provider') as provider,
+       AVG(jsonb_path_query_first(p.pii, '$.medical_history.risk_factors.cardiovascular')) as avg_cv_risk,
        COUNT(*) as patient_count
 FROM patients p
 WHERE jsonb_path_exists(p.pii, '$.medical_history.risk_factors.cardiovascular')
-GROUP BY p.pii -> 'insurance' ->> 'provider'
+GROUP BY jsonb_path_query_first(p.pii, '$.insurance.provider')
 ORDER BY avg_cv_risk DESC;
 ```
 
@@ -398,11 +410,11 @@ ORDER BY avg_cv_risk DESC;
 ```sql
 SELECT id,
        pii ->> 'first_name' as name,
-       jsonb_array_length(pii -> 'medical_history' -> 'allergies') as allergy_count,
-       pii -> 'insurance' -> 'coverage' ->> 'deductible' as deductible
+       jsonb_array_length(jsonb_path_query_first(pii, '$.medical_history.allergies')) as allergy_count,
+       jsonb_path_query_first(pii, '$.insurance.coverage.deductible') as deductible
 FROM patients
-WHERE jsonb_array_length(pii -> 'medical_history' -> 'allergies') > 1
-  AND CAST(pii -> 'insurance' -> 'coverage' ->> 'deductible' AS INTEGER) > 500
+WHERE jsonb_array_length(jsonb_path_query_first(pii, '$.medical_history.allergies')) > 1
+  AND jsonb_path_query_first(pii, '$.insurance.coverage.deductible') > 500
 ORDER BY allergy_count DESC;
 ```
 
@@ -412,13 +424,13 @@ ORDER BY allergy_count DESC;
 ```sql
 SELECT id,
        pii ->> 'first_name' as name,
-       pii -> 'insurance' -> 'coverage' -> 'copays' ->> 'primary_care' as copay
+       jsonb_path_query_first(pii, '$.insurance.coverage.copays.primary_care') as copay
 FROM patients
-WHERE CAST(pii -> 'insurance' -> 'coverage' -> 'copays' ->> 'primary_care' AS INTEGER) >
-      (SELECT AVG(CAST(pii -> 'insurance' -> 'coverage' -> 'copays' ->> 'primary_care' AS INTEGER))
+WHERE jsonb_path_query_first(pii, '$.insurance.coverage.copays.primary_care') >
+      (SELECT AVG(jsonb_path_query_first(pii, '$.insurance.coverage.copays.primary_care'))
        FROM patients
        WHERE jsonb_path_exists(pii, '$.insurance.coverage.copays.primary_care'))
-ORDER BY CAST(pii -> 'insurance' -> 'coverage' -> 'copays' ->> 'primary_care' AS INTEGER) DESC;
+ORDER BY jsonb_path_query_first(pii, '$.insurance.coverage.copays.primary_care') DESC;
 ```
 
 ## Running the Showcase
@@ -478,7 +490,13 @@ Each test section provides detailed output showing:
 - **🔒 Searchable Encryption**: All queries work on encrypted data
 - **🏥 Healthcare Compliance**: HIPAA-style data protection with functionality
 - **📈 Performance**: Complex queries execute efficiently with EQL
-- **🔧 Developer Experience**: Standard PostgreSQL JSONB syntax works transparently
+- **🔧 Developer Experience**: Standard PostgreSQL JSONB syntax works with some adaptations
 - **🛡️ Security**: Sensitive medical data remains encrypted at rest and in transit
+
+### Important Limitations
+
+⚠️ **CAST Operations**: CAST operations cannot work on encrypted data because casting would require decryption within the database, which is impossible. EQL's `ste_vec` configuration enables direct comparison and ordering operations on encrypted values without requiring CAST.
+
+⚠️ **Chained Operators**: The `->` operator cannot be chained on `ste_vec` encrypted columns. Use JSONPath functions like `jsonb_path_query_first()` for deep nested access instead.
 
 This showcase proves that EQL v2 provides comprehensive JSONB support for encrypted data, enabling sophisticated healthcare applications while maintaining strong privacy protections.
