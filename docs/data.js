@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1753323028700,
+  "lastUpdate": 1753323049345,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -9217,6 +9217,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 7.153798,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "toby@cipherstash.com",
+            "name": "Toby Hede",
+            "username": "tobyhede"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "034b660044d9a83bfce6e4f6dfa2389af892a508",
+          "message": "Merge pull request #290 from cipherstash/handle-invalid-workspace-crn\n\nfix: error on invalid workspace_crn",
+          "timestamp": "2025-07-24T12:07:50+10:00",
+          "tree_id": "4bc27cc2e2a9c032a38eae33393325668a906627",
+          "url": "https://github.com/cipherstash/proxy/commit/034b660044d9a83bfce6e4f6dfa2389af892a508"
+        },
+        "date": 1753323047978,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 6.745296,
             "unit": "Number"
           }
         ]
