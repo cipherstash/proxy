@@ -331,7 +331,7 @@ WHERE jsonb_path_query_first(pii, '$.vitals.weight_kg') > 80;
 ```sql
 SELECT id, jsonb_path_query_first(pii, '$.vitals.blood_type') as blood_type
 FROM patients
-WHERE jsonb_path_query_first(pii, '$.vitals.blood_type')::text LIKE '%+';
+WHERE jsonb_path_query_first(pii, '$.vitals.blood_type') LIKE '%+';
 ```
 
 **Test 2: Provider name comparison**
