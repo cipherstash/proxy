@@ -493,7 +493,7 @@ Each test section provides detailed output showing:
 
 ### Important Limitations
 
-- `LOWER()` cannot be used on encrypted text (operates only on plaintext) ❌ncrypted literals cannot be passed as arguments to SQL functions. Encrypted columns can only be passed to SQL functions if the value has an encrypted search index that supports that specific function.
+Encrypted literals cannot be passed as arguments to SQL functions. Encrypted columns can only be passed to SQL functions if the value has an encrypted search index that supports that specific function.
 
 Examples:
 - `AVG()` cannot be used on encrypted numeric values ❌
