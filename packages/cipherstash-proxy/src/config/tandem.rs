@@ -138,6 +138,11 @@ pub struct DevelopmentConfig {
 ///
 /// ENV vars must be prefixed with `CS_`.
 ///
+/// IMPORTANT!
+/// Config needs to be loaded *before* logging can be initalized
+/// Tracing macros will not output and you may be confused.
+/// Use `println!`` and `eprintln!`` instead.
+///
 impl TandemConfig {
     pub fn default_path() -> String {
         DEFAULT_CONFIG_FILE_PATH.to_string()
@@ -194,9 +199,13 @@ impl TandemConfig {
                     env.insert("CS_ENCRYPT__DEFAULT_KEYSET_ID".into(), value);
                 }
 
-                if let Ok(Ok(value)) = std::env::var(CS_WORKSPACE_CRN).map(|crn| crn.parse::<Crn>())
-                {
-                    env.insert("CS_AUTH__WORKSPACE_CRN".into(), value.to_string());
+                if let Ok(value) = std::env::var(CS_WORKSPACE_CRN) {
+                    value
+                        .parse::<Crn>()
+                        .map(|crn| {
+                            env.insert("CS_AUTH__WORKSPACE_CRN".into(), crn.to_string());
+                        })
+                        .map_err(|_| ConfigError::InvalidWorkspaceCrn { crn: value })?;
                 }
 
                 if let Ok(value) = std::env::var(CS_WORKSPACE_ID) {
@@ -647,6 +656,25 @@ mod tests {
                     assert!(e
                         .to_string()
                         .contains("Missing workspace_crn from [auth] configuration. For help visit https://github.com/cipherstash/proxy/blob/main/docs/how-to/index.md#configuring-proxy"));
+                }
+            })
+        });
+    }
+
+    #[test]
+    fn invalid_crn_provided() {
+        let env = merge_env_vars(vec![(
+            "CS_WORKSPACE_CRN",
+            Some("crn:ap-southeast-N.aws:ABCDE12345"),
+        )]);
+
+        with_no_cs_vars(|| {
+            temp_env::with_vars(env, || {
+                let config = TandemConfig::build("tests/config/unknown.toml");
+                assert!(config.is_err());
+
+                if let Err(e) = config {
+                    assert!(e.to_string().contains("Invalid Workspace CRN"));
                 }
             })
         });
