@@ -1,6 +1,5 @@
-
-use uuid::Uuid;
 use serde::Serialize;
+use uuid::Uuid;
 
 /// Represents a medication in the healthcare system.
 ///
@@ -71,7 +70,13 @@ pub struct Patient {
 }
 
 impl Patient {
-    pub fn new(id: &str, first_name: &str, last_name: &str, email: &str, date_of_birth: &str) -> Self {
+    pub fn new(
+        id: &str,
+        first_name: &str,
+        last_name: &str,
+        email: &str,
+        date_of_birth: &str,
+    ) -> Self {
         Self {
             id: Uuid::parse_str(id).unwrap(),
             pii: PatientPii::new(first_name, last_name, email, date_of_birth),
@@ -160,7 +165,6 @@ impl PatientPii {
         }
     }
 }
-
 
 /// Medical history information containing arrays and nested data.
 #[derive(Serialize)]
@@ -270,7 +274,6 @@ pub struct LabResults {
     /// Date of lab work
     pub test_date: String,
 }
-
 
 /// Represents a medication prescription for a patient.
 ///
