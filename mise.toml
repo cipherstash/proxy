@@ -92,7 +92,12 @@ if [ "${CS_DATABASE__HOST}" == "localhost" ]; then
 fi
 
 # run the container
-echo docker compose up {{arg(name="service",default="proxy")}} {{option(name="extra-args",default="")}} | bash
+if ! echo docker compose up {{arg(name="service",default="proxy")}} {{option(name="extra-args",default="")}} | bash; then
+  echo "Error occurred during docker compose up, showing container logs:"
+  docker logs --timestamps --follow proxy
+  exit 1
+fi
+
 """
 
 [tasks."proxy:psql"]
