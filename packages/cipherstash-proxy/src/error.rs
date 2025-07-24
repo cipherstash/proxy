@@ -8,7 +8,7 @@ use thiserror::Error;
 
 const ERROR_DOC_BASE_URL: &str = "https://github.com/cipherstash/proxy/blob/main/docs/errors.md";
 const ERROR_DOC_CONFIG_URL: &str =
-    "https://github.com/cipherstash/proxy/blob/main/docs/how-to.md#configuring-proxy";
+    "https://github.com/cipherstash/proxy/blob/main/docs/how-to/index.md#configuring-proxy";
 
 #[derive(Error, Debug)]
 pub enum Error {

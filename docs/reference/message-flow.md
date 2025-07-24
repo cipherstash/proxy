@@ -1,10 +1,10 @@
-## Message Handling Flow Diagrams
+# Message Handling Flow Diagrams
 
-
+Below are the flow diagrams for the message handling in CipherStash Proxy for PostgreSQL requests.
 
 ### Parse
 
-![Parse message](parse.svg "Parse")
+![Parse message](./images/parse.svg "Parse")
 
 
 ```mermaid
@@ -27,7 +27,7 @@ flowchart LR
 
 ### Bind
 
-![Bind message](bind.svg "Bind")
+![Bind message](./images/bind.svg "Bind")
 
 ```mermaid
 ---

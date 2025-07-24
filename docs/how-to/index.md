@@ -68,7 +68,7 @@ docker compose up
 ```
 
 Connect your PostgreSQL client to Proxy on TCP 6432.
-Point [Prometheus to scrape metrics](reference.md#prometheus-metrics) on TCP 9930.
+Point [Prometheus to scrape metrics](../reference/index.md#prometheus-metrics) on TCP 9930.
 
 ## Configuring Proxy
 
@@ -89,7 +89,7 @@ Proxy's configuration loading order of preference is:
 1. If `cipherstash-proxy.toml` is not present, Proxy will look up environment variables to configure itself
 1. If **both** `cipherstash-proxy.toml` and environment variables are present, Proxy will use `cipherstash-proxy.toml` as the base configuration, and override it with any environment variables that are set
 
-See [Proxy config options](reference.md#proxy-config-options) for all the available options.
+See [Proxy config options](../reference/index.md#proxy-config-options) for all the available options.
 
 ### Configuring Proxy with environment variables
 
@@ -106,7 +106,7 @@ CS_CLIENT_ID
 CS_CLIENT_KEY
 ```
 
-Read the full list of environment variables and what they do in the [reference documentation](reference.md#proxy-config-options).
+Read the full list of environment variables and what they do in the [reference documentation](../reference/index.md#proxy-config-options).
 
 ### Configuring Proxy with a TOML file
 
@@ -128,7 +128,7 @@ client_id = "cipherstash-client-id"
 client_key = "cipherstash-client-key"
 ```
 
-Read the full list of configuration options and what they do in the [reference documentation](reference.md#proxy-config-options).
+Read the full list of configuration options and what they do in the [reference documentation](../reference/index.md#proxy-config-options).
 
 ## Running Proxy locally
 
@@ -230,12 +230,12 @@ To learn how to use encrypted indexes for other encrypted data types like `text`
 
 When deploying CipherStash Proxy into production environments with real data, we recommend that you apply these database schema changes with the normal tools and process you use for making changes to your database schema.
 
-To see more examples of how to modify your database schema, check out [the example schema](./getting-started/schema-example.sql) from [Getting started](#getting-started).
+To see more examples of how to modify your database schema, check out [the example schema](./sql/schema-example.sql) from [Getting started](#getting-started).
 
 ## Encrypting data in an existing database
 
 CipherStash Proxy includes an `encrypt` tool – a CLI application to encrypt existing data, or to apply index changes after changes to the encryption configuration of a protected database.
-See the [`encrypt` tool guide](encrypt-tool.md) for info about using the `encrypt` tool.
+See the [`encrypt` tool guide](../reference/encrypt-tool.md) for info about using the `encrypt` tool.
 
 ---
 

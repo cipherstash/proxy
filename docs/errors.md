@@ -1,5 +1,3 @@
-
-
 # Errors
 
 ## Table of contents

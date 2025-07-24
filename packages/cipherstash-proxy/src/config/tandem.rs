@@ -646,7 +646,7 @@ mod tests {
                 if let Err(e) = config {
                     assert!(e
                         .to_string()
-                        .contains("Missing workspace_crn from [auth] configuration. For help visit https://github.com/cipherstash/proxy/blob/main/docs/how-to.md#configuring-proxy"));
+                        .contains("Missing workspace_crn from [auth] configuration. For help visit https://github.com/cipherstash/proxy/blob/main/docs/how-to/index.md#configuring-proxy"));
                 }
             })
         });
