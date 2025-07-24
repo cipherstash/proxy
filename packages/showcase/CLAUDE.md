@@ -89,6 +89,8 @@ Computations on encypted data in a SQL query is not possible (except for specifi
 
 For example `SELECT LOWER(some_encrypted_column) FROM encrypted_table` cannot work because `some_encrypted_column` is encrypted.
 
+**IMPORTANT: CAST operations cannot work on encrypted data** because casting would require decryption of the encrypted data within the database, which is impossible. When a column has an `ste_vec` configuration, comparison and ordering operations work directly on the encrypted values without requiring CAST operations.
+
 When generating tests, it is important that Claude understands the fundamental limitations of EQL so that it does not generate test cases or example code that can never work.
 
 ### JSON operator limitations
