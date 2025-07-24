@@ -52,7 +52,7 @@ This strategy is poorly named because it does NOT imply that there is a unique c
 
 ### ste_vec
 
-Provides support for the following JSON operators and functions:
+Provides support for the following JSON operators and functions on encrypted JSON data:
 
 Operators:
 
@@ -63,11 +63,19 @@ Operators:
 
 Functions:
 
+- `jsonb_path_query`
 - `jsonb_path_query_first`
 - `jsonb_path_exists`
 - `jsonb_array_length`
 - `jsonb_array_elements`
 - `jsonb_array_elements_text`
+
+When an `ste_vec` is created for a JSON document it allows the following operations to be performed:
+
+- Containment operations (`@>` & `<@`)
+- Fields or array elements extracted using `->` or `json_query_path`
+  - support containment operations (`@>` & `<@`)
+  - Strings, numbers and booleans support equality and comparison using `<`, `<=`, `=`, `<>`, `>`, `>=`.
 
 ## Referential integrity
 
@@ -85,7 +93,8 @@ When generating tests, it is important that Claude understands the fundamental l
 
 ### JSON operator limitations
 
-The values returned by the JSON operators and functions cannot have further JSON operators or functions called on it. The returned value can be decrypted BUT the value returned behaves as if there are no searchable encrypted indexes defined for it.
+The `->` cannot be chained due to a fundamental limitation in the searchable encryption. This limitation will be lifted in a future release. In the meantime `json_path_query` can be used with a JSONPath selector to select arbitrarily deeply nested values.
+
 
 ## Test generation
 
