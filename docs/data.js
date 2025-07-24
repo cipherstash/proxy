@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1753282774715,
+  "lastUpdate": 1753317885115,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -9113,6 +9113,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 6.812965,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "cj@cipherstash.com",
+            "name": "CJ Brewer",
+            "username": "calvinbrewer"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "f0e11112455aa5744bf7999aca0a3d9bb46a0189",
+          "message": "Merge pull request #289 from cipherstash/clean-up\n\nchore: clean up docs and helm charts",
+          "timestamp": "2025-07-23T18:42:01-06:00",
+          "tree_id": "55a888c0c5f0295040aed0489e22a3492ff201e1",
+          "url": "https://github.com/cipherstash/proxy/commit/f0e11112455aa5744bf7999aca0a3d9bb46a0189"
+        },
+        "date": 1753317884018,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 7.113758,
             "unit": "Number"
           }
         ]
