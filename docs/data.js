@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1753321915400,
+  "lastUpdate": 1753323028700,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -9192,6 +9192,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 6.831269,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "54a95d9447c81df68b06daa8904d930ae74c94bf",
+          "message": "Integration tests for jsonb array functions",
+          "timestamp": "2025-07-24T00:42:06Z",
+          "url": "https://github.com/cipherstash/proxy/pull/284/commits/54a95d9447c81df68b06daa8904d930ae74c94bf"
+        },
+        "date": 1753323027568,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 7.153798,
             "unit": "Number"
           }
         ]
