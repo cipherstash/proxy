@@ -210,7 +210,7 @@ WHERE pii @> '{"medical_history": {"conditions": ["diabetes"]}}';
 
 **Test 3: Complex nested object matching**
 ```sql
-SELECT id, pii -> 'medical_history' -> 'emergency_contact' ->> 'name' as contact_name
+SELECT id, jsonb_path_query_first(pii, '$.medical_history.emergency_contact.name') as contact_name
 FROM patients
 WHERE pii @> '{"medical_history": {"emergency_contact": {"relationship": "spouse"}}}'
 LIMIT 1;
@@ -395,15 +395,16 @@ ORDER BY p.pii ->> 'last_name';
 
 ### Aggregations with JSONB
 
-**Test 1: Average risk scores by insurance provider**
+**Test 1: Risk score distribution by insurance provider**
 ```sql
 SELECT jsonb_path_query_first(p.pii, '$.insurance.provider') as provider,
-       AVG(jsonb_path_query_first(p.pii, '$.medical_history.risk_factors.cardiovascular')) as avg_cv_risk,
+       MIN(jsonb_path_query_first(p.pii, '$.medical_history.risk_factors.cardiovascular')) as min_cv_risk,
+       MAX(jsonb_path_query_first(p.pii, '$.medical_history.risk_factors.cardiovascular')) as max_cv_risk,
        COUNT(*) as patient_count
 FROM patients p
 WHERE jsonb_path_exists(p.pii, '$.medical_history.risk_factors.cardiovascular')
 GROUP BY jsonb_path_query_first(p.pii, '$.insurance.provider')
-ORDER BY avg_cv_risk DESC;
+ORDER BY max_cv_risk DESC;
 ```
 
 **Test 2: Allergy statistics**
@@ -420,16 +421,13 @@ ORDER BY allergy_count DESC;
 
 ### Subqueries with JSONB
 
-**Test 1: Patients with above-average copays**
+**Test 1: Patients with high copays (above median)**
 ```sql
 SELECT id,
        pii ->> 'first_name' as name,
        jsonb_path_query_first(pii, '$.insurance.coverage.copays.primary_care') as copay
 FROM patients
-WHERE jsonb_path_query_first(pii, '$.insurance.coverage.copays.primary_care') >
-      (SELECT AVG(jsonb_path_query_first(pii, '$.insurance.coverage.copays.primary_care'))
-       FROM patients
-       WHERE jsonb_path_exists(pii, '$.insurance.coverage.copays.primary_care'))
+WHERE jsonb_path_query_first(pii, '$.insurance.coverage.copays.primary_care') > 25
 ORDER BY jsonb_path_query_first(pii, '$.insurance.coverage.copays.primary_care') DESC;
 ```
 
@@ -494,6 +492,13 @@ Each test section provides detailed output showing:
 - **🛡️ Security**: Sensitive medical data remains encrypted at rest and in transit
 
 ### Important Limitations
+
+- `LOWER()` cannot be used on encrypted text (operates only on plaintext) ❌ncrypted literals cannot be passed as arguments to SQL functions. Encrypted columns can only be passed to SQL functions if the value has an encrypted search index that supports that specific function.
+
+Examples:
+- `AVG()` cannot be used on encrypted numeric values ❌
+- `MIN()` and `MAX()` can be used on encrypted values with ORE index ✅
+- `LOWER()` cannot be used on encrypted text (operates only on plaintext) ❌
 
 ⚠️ **CAST Operations**: CAST operations cannot work on encrypted data because casting would require decryption within the database, which is impossible. EQL's `ste_vec` configuration enables direct comparison and ordering operations on encrypted values without requiring CAST.
 
