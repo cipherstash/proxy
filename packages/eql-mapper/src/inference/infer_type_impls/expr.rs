@@ -1,7 +1,7 @@
 use crate::{
     get_sql_binop_rule,
     inference::{unifier::Type, InferType, TypeError},
-    SqlIdent, TypeInferencer,
+    IdentCase, TypeInferencer,
 };
 use eql_mapper_macros::trace_infer;
 use sqltk::parser::ast::{AccessExpr, Array, Expr, Ident, Subscript};
@@ -14,7 +14,7 @@ impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
             // in which case we resolve it to a fresh type variable.
             Expr::Identifier(ident) => {
                 // sqltk_parser treats the `DEFAULT` keyword in expression position as an identifier.
-                if SqlIdent(ident) == SqlIdent(&Ident::new("default")) {
+                if IdentCase(ident) == IdentCase(&Ident::new("default")) {
                     self.unify_node_with_type(return_val, self.fresh_tvar())?;
                 } else {
                     self.unify_node_with_type(return_val, self.resolve_ident(ident)?)?;

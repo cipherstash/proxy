@@ -429,10 +429,10 @@ impl Parse for FunctionDecl {
 
         Ok(Self(quote! {
             crate::inference::unifier::FunctionDecl {
-                name: sqltk::parser::ast::ObjectName(vec![
+                name: crate::IdentCase(sqltk::parser::ast::ObjectName(vec![
                     sqltk::parser::ast::ObjectNamePart::Identifier(sqltk::parser::ast::Ident::new(#schema)),
                     sqltk::parser::ast::ObjectNamePart::Identifier(sqltk::parser::ast::Ident::new(#function_name)),
-                ]),
+                ])),
                 inner: crate::inference::unifier::FunctionSignatureDecl::new(
                     vec![#(#generic_args),*],
                     vec![#(#bounds),*],

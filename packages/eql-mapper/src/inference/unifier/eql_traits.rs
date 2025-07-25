@@ -138,6 +138,7 @@ pub struct EqlTraits {
     pub token_match: bool,
 
     /// The type implements field selection (e.g. `->` & `->>`)
+    /// `json_like` implies `ord` and `eq`.
     pub json_like: bool,
 
     /// The type implements containment checking (e.g. `@>` and `<@`)
@@ -191,6 +192,8 @@ impl EqlTraits {
             }
             EqlTrait::TokenMatch => self.token_match = true,
             EqlTrait::JsonLike => {
+                self.ord = true; // implied
+                self.eq = true; // implied
                 self.json_like = true;
             }
             EqlTrait::Contain => self.contain = true,
