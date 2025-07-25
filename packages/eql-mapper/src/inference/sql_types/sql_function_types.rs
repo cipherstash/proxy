@@ -1,12 +1,10 @@
 use std::sync::{Arc, LazyLock};
 
-use sqltk::parser::ast::{
-    Function, FunctionArg, FunctionArgExpr, FunctionArguments, Ident, ObjectNamePart,
-};
+use sqltk::parser::ast::{Function, FunctionArg, FunctionArgExpr, FunctionArguments, Ident};
 
 use crate::{
     unifier::{FunctionDecl, Type, Unifier},
-    TypeError, TypeInferencer,
+    IdentCase, TypeError, TypeInferencer,
 };
 
 /// Either explicit typing rules for a function that supports EQL, or a fallback where the typing rules force all
@@ -17,13 +15,13 @@ pub(crate) enum SqlFunction {
     Fallback,
 }
 
-static PG_CATALOG: LazyLock<ObjectNamePart> =
-    LazyLock::new(|| ObjectNamePart::Identifier(Ident::new("pg_catalog")));
+static PG_CATALOG: LazyLock<IdentCase<Ident>> =
+    LazyLock::new(|| IdentCase(Ident::new("pg_catalog")));
 
 impl SqlFunction {
     pub(crate) fn should_rewrite(&self) -> bool {
         match self {
-            SqlFunction::Explicit(function_spec) => function_spec.name.0[0] == *PG_CATALOG,
+            SqlFunction::Explicit(function_decl) => function_decl.name.starts_with(&PG_CATALOG),
             SqlFunction::Fallback => false,
         }
     }

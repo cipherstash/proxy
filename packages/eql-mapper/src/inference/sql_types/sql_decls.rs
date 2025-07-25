@@ -3,7 +3,7 @@ use std::{collections::HashMap, sync::LazyLock};
 use eql_mapper_macros::{binary_operators, functions};
 use sqltk::parser::ast::{BinaryOperator, Ident, ObjectName, ObjectNamePart};
 
-use crate::unifier::{BinaryOpDecl, FunctionDecl};
+use crate::{unifier::{BinaryOpDecl, FunctionDecl}, IdentCase};
 
 use super::{SqlBinaryOp, SqlFunction};
 
@@ -39,7 +39,7 @@ pub(crate) fn get_sql_binop_rule(op: &BinaryOperator) -> SqlBinaryOp {
 }
 
 /// SQL functions that are handled with special case type checking rules for EQL.
-static SQL_FUNCTION_TYPES: LazyLock<HashMap<ObjectName, FunctionDecl>> = LazyLock::new(|| {
+static SQL_FUNCTION_TYPES: LazyLock<HashMap<IdentCase<ObjectName>, FunctionDecl>> = LazyLock::new(|| {
     // # SQL function declations.
     //
     // `Native` automatically satisfies *all* trait bounds. This is the trick that keeps the complexity of EQL Mapper's
@@ -81,16 +81,16 @@ static SQL_FUNCTION_TYPES: LazyLock<HashMap<ObjectName, FunctionDecl>> = LazyLoc
 pub(crate) fn get_sql_function(fn_name: &ObjectName) -> SqlFunction {
     // FIXME: this is a hack and we need proper schema resolution logic
     let fully_qualified_fn_name = if fn_name.0.len() == 1 {
-        &ObjectName(vec![
+        IdentCase(ObjectName(vec![
             ObjectNamePart::Identifier(Ident::new("pg_catalog")),
             fn_name.0[0].clone(),
-        ])
+        ]))
     } else {
-        fn_name
+        IdentCase(fn_name.clone())
     };
 
     SQL_FUNCTION_TYPES
-        .get(fully_qualified_fn_name)
+        .get(&fully_qualified_fn_name)
         .map(SqlFunction::Explicit)
         .unwrap_or(SqlFunction::Fallback)
 }
