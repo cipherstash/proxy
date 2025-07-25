@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1753427418934,
+  "lastUpdate": 1753427457816,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -9625,6 +9625,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 7.006414,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "466d471352971fd15dabaee2f2d050bc61937471",
+          "message": "feature(showcase): add comprehensive Proxy/EQL showcase crate",
+          "timestamp": "2025-07-24T22:16:55Z",
+          "url": "https://github.com/cipherstash/proxy/pull/285/commits/466d471352971fd15dabaee2f2d050bc61937471"
+        },
+        "date": 1753427456761,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 7.16471,
             "unit": "Number"
           }
         ]
