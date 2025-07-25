@@ -7,7 +7,7 @@ use rustls::{
 };
 use serde_json::Value;
 use std::sync::{Arc, Once};
-use tokio_postgres::{types::ToSql, Client, NoTls};
+use tokio_postgres::{types::ToSql, Client, NoTls, SimpleQueryMessage};
 use tracing_subscriber::{filter::Directive, EnvFilter, FmtSubscriber};
 
 pub const PROXY: u16 = 6432;
@@ -56,6 +56,43 @@ pub async fn reset_schema() {
 
     let client = connect_with_tls(port).await;
     client.simple_query(TEST_SCHEMA_SQL).await.unwrap();
+}
+
+pub async fn reset_schema_to(schema: &'static str) {
+    let port = std::env::var("CS_DATABASE__PORT")
+        .map(|s| s.parse().unwrap())
+        .unwrap_or(PG_LATEST);
+
+    let client = connect_with_tls(port).await;
+    client.simple_query(schema).await.unwrap();
+}
+
+pub async fn table_exists(table: &str) -> bool {
+    let query = format!(
+        r#"
+        SELECT EXISTS (
+            SELECT 1
+            FROM information_schema.tables
+            WHERE table_schema = 'public'
+            AND table_name = '{table}'
+        );
+    "#
+    );
+
+    let port = std::env::var("CS_DATABASE__PORT")
+        .map(|s| s.parse().unwrap())
+        .unwrap_or(PG_LATEST);
+
+    let client = connect_with_tls(port).await;
+    let messages = client.simple_query(&query).await.unwrap();
+
+    for message in messages {
+        if let SimpleQueryMessage::Row(row) = message {
+            return row.get(0) == Some("t");
+        }
+    }
+
+    false
 }
 
 pub fn trace() {
@@ -182,7 +219,7 @@ where
     let rows = client.simple_query(sql).await.unwrap();
     rows.iter()
         .filter_map(|row| {
-            if let tokio_postgres::SimpleQueryMessage::Row(r) = row {
+            if let SimpleQueryMessage::Row(r) = row {
                 r.get(0).and_then(|val| {
                     // Convert string value to FromSql compatible type
                     // Try different type conversions based on the value format
@@ -209,7 +246,7 @@ pub async fn simple_query_with_null(sql: &str) -> Vec<Option<String>> {
     let rows = client.simple_query(sql).await.unwrap();
     rows.iter()
         .filter_map(|row| {
-            if let tokio_postgres::SimpleQueryMessage::Row(r) = row {
+            if let SimpleQueryMessage::Row(r) = row {
                 Some(r.get(0).map(|val| val.to_string()))
             } else {
                 None

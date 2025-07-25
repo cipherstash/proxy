@@ -2,7 +2,7 @@
 use crate::inference::unifier::{ProjectionColumn, Type};
 use crate::inference::TypeError;
 use crate::iterator_ext::IteratorExt;
-use crate::model::SqlIdent;
+use crate::model::IdentCase;
 use crate::unifier::{Projection, Value};
 use crate::Relation;
 use sqltk::parser::ast::{Ident, ObjectName, ObjectNamePart, Query, Statement};
@@ -139,11 +139,11 @@ impl<'ast> Scope<'ast> {
                 .0
                 .iter()
                 .map(|ObjectNamePart::Identifier(ident)| ident)
-                .map(SqlIdent::from)
+                .map(IdentCase::from)
                 .collect::<Vec<_>>();
 
             match self.relations.iter().find_unique(&|r| {
-                r.name.as_ref().map(SqlIdent::from).as_ref() == Some(&sql_idents[0])
+                r.name.as_ref().map(IdentCase::from).as_ref() == Some(&sql_idents[0])
             }) {
                 Ok(relation) => Ok(relation.projection_type.clone()),
                 Err(_) => Err(ScopeError::NoMatch(sql_idents[0].to_string())),
@@ -158,7 +158,7 @@ impl<'ast> Scope<'ast> {
                 None => Err(ScopeError::NoMatch(String::from("empty scope"))),
             }
         } else {
-            let sql_ident = Some(SqlIdent::from(ident));
+            let sql_ident = Some(IdentCase::from(ident));
 
             let mut all_columns = self
                 .relations
@@ -178,7 +178,7 @@ impl<'ast> Scope<'ast> {
                 .into_iter();
 
             match all_columns
-                .try_find_unique(&|col| col.alias.as_ref().map(SqlIdent::from) == sql_ident)
+                .try_find_unique(&|col| col.alias.as_ref().map(IdentCase::from) == sql_ident)
             {
                 Ok(Some(col)) => Ok(col.ty),
                 Err(_) => Err(ScopeError::AmbiguousMatch(ident.to_string())),
@@ -199,13 +199,13 @@ impl<'ast> Scope<'ast> {
             ));
         }
 
-        let first_ident = SqlIdent::from(&idents[0]);
-        let second_ident = SqlIdent::from(&idents[1]);
+        let first_ident = IdentCase::from(&idents[0]);
+        let second_ident = IdentCase::from(&idents[1]);
 
         let mut relations = self.relations.iter();
 
         match relations.try_find_unique(&|relation| {
-            relation.name.as_ref().map(SqlIdent::from).as_ref() == Some(&first_ident)
+            relation.name.as_ref().map(IdentCase::from).as_ref() == Some(&first_ident)
         }) {
             Ok(Some(named_relation)) => {
                 let columns = self
@@ -214,7 +214,7 @@ impl<'ast> Scope<'ast> {
                 let mut columns = columns.iter();
 
                 match columns.try_find_unique(&|column| {
-                    column.alias.as_ref().map(SqlIdent::from).as_ref() == Some(&second_ident)
+                    column.alias.as_ref().map(IdentCase::from).as_ref() == Some(&second_ident)
                 }) {
                     Ok(Some(projection_column)) => Ok(projection_column.ty.clone()),
                     Ok(None) | Err(_) => {
@@ -242,10 +242,10 @@ impl<'ast> Scope<'ast> {
         }
 
         let ObjectNamePart::Identifier(ident) = name.0.last().unwrap();
-        let ident = SqlIdent(ident);
+        let ident = IdentCase(ident);
 
         match self.relations.iter().try_find_unique(&|relation| {
-            relation.name.as_ref().map(SqlIdent::from).as_ref() == Some(&ident)
+            relation.name.as_ref().map(IdentCase::from).as_ref() == Some(&ident)
         }) {
             Ok(Some(found)) => Ok(found.clone()),
             Ok(None) => match &self.parent {

@@ -29,8 +29,7 @@ use sqltk::parser::ast::{BinaryOperator, ObjectName};
 use tracing::{event, instrument, Level};
 
 use crate::{
-    unifier::{instantiated_type_env::InstantiatedTypeEnv, AssociatedTypeSelector},
-    EqlTrait, Fmt, TypeError,
+    unifier::{instantiated_type_env::InstantiatedTypeEnv, AssociatedTypeSelector}, EqlTrait, Fmt, IdentCase, TypeError
 };
 
 use super::{
@@ -412,7 +411,7 @@ pub(crate) struct BoundsDecl(pub(crate) TVar, pub(crate) EqlTraits);
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct FunctionDecl {
     /// The function name.
-    pub(crate) name: ObjectName,
+    pub(crate) name: IdentCase<ObjectName>,
     /// The declaration of this function.
     pub(crate) inner: FunctionSignatureDecl,
 }
