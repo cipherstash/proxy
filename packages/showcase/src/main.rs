@@ -420,7 +420,7 @@ async fn test_complex_nested_queries() -> Result<(), Box<dyn std::error::Error>>
         FROM patients AS p
         WHERE jsonb_path_exists(p.pii, '$.medical_history.risk_factors.cardiovascular')
         GROUP BY jsonb_path_query_first(p.pii, '$.insurance.provider')
-        ORDER BY max_cv_risk DESC
+        ORDER BY MAX(jsonb_path_query_first(p.pii, '$.medical_history.risk_factors.cardiovascular')) DESC
     "#;
     let rows = client.query(sql, &[]).await?;
     println!(
@@ -429,9 +429,14 @@ async fn test_complex_nested_queries() -> Result<(), Box<dyn std::error::Error>>
     );
 
     for row in &rows {
-        let provider: Option<String> = row.get("provider");
-        let avg_risk: Option<f64> = row.get("max_cv_risk");
+        let provider: Option<Value> = row.get("provider");
+        let provider: Option<&str> = provider.as_ref().and_then(|v| v.as_str());
+
+        let avg_risk: Option<Value> = row.get("max_cv_risk");
+        let avg_risk: Option<i64> = avg_risk.as_ref().and_then(|v| v.as_i64());
+
         let count: Option<i64> = row.get("patient_count");
+
         println!(
             "   {:?}: Avg CV Risk = {:?}, Patients = {:?}",
             provider, avg_risk, count
@@ -443,12 +448,12 @@ async fn test_complex_nested_queries() -> Result<(), Box<dyn std::error::Error>>
     let sql = r#"
         SELECT id,
                pii -> 'first_name' as name,
-               jsonb_array_length(jsonb_path_query_first(pii, '$.medical_history.allergies')) as allergy_count,
+               jsonb_array_length(jsonb_path_query_first(pii, '$.medical_history.allergies[@]')) as allergy_count,
                jsonb_path_query_first(pii, '$.insurance.coverage.deductible') as deductible
         FROM patients
-        WHERE jsonb_array_length(jsonb_path_query_first(pii, '$.medical_history.allergies')) > 1
+        WHERE jsonb_array_length(jsonb_path_query_first(pii, '$.medical_history.allergies[@]')) > 1
           AND jsonb_path_query_first(pii, '$.insurance.coverage.deductible') > 500
-        ORDER BY allergy_count DESC
+        ORDER BY jsonb_array_length(jsonb_path_query_first(pii, '$.medical_history.allergies[@]')) DESC
     "#;
     let rows = client.query(sql, &[]).await?;
     println!(
