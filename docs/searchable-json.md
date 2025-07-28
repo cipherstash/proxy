@@ -7,6 +7,7 @@ This document outlines the supported JSONB functions and operators in CipherStas
 
 - [Setup](#setup)
 - [->](#field_access_operator)
+- [->>](#field_access_as_text_operator)
 - [jsonb_path_query](#jsonb_path_query)
 - [jsonb_path_query_first](#jsonb_path_query_first)
 - [jsonb_path_exists](#jsonb_path_exists)
@@ -106,6 +107,69 @@ SELECT encrypted_jsonb -> 'string_array' FROM cipherstash;
 
 ---------------------------------------------------------------
 
+
+
+<a id='field_access_as_text_operator'></a>
+### `->> text returns eql_v2_encrypted decrypted as jsonb`
+
+Extracts JSON object field with the given key.
+
+
+#### Important Note
+
+The `->>` selector is currently an alias for the `->` selector.
+This is a limitation of the current version of Cipherstash Proxy that will be addressed in an upcoming release.
+
+The data returned by `->>` is decrypted as the literal `json` value, instead of converting to `text` like the vanilla PostgreSQL operator.
+The returned json can be cast to any valid type in the client.
+
+
+
+#### Syntax
+
+```sql
+SELECT encrypted_column ->> 'field' FROM table_name;
+```
+
+#### Examples
+
+```sql
+-- field path returns value
+SELECT encrypted_jsonb ->> 'number' FROM cipherstash;
+
+------------------
+ jsonb_path_query
+------------------
+ 1
+(1 row)
+```
+
+
+```sql
+-- object path returns nested object
+SELECT encrypted_jsonb ->> 'object' FROM cipherstash;
+
+-------------------------------------
+          jsonb_path_query
+-------------------------------------
+ { "string": "world", "number": 99 }
+(1 row)
+```
+
+
+```sql
+-- array field path returns array
+SELECT encrypted_jsonb -> 'string_array' FROM cipherstash;
+
+-------------------
+ jsonb_path_query
+-------------------
+ ["hello","world"]
+(1 row)
+```
+
+
+---------------------------------------------------------------
 
 
 <a id='jsonb_path_query'></a>
