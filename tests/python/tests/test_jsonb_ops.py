@@ -27,6 +27,7 @@ def test_jsonb_contained_by():
 
     for (param, expected) in tests:
         param = json.dumps(param)
+        print("Testing param: {}, expecting: {}".format(param, expected))
 
         execute(json.dumps(val), column,
                 select_fragment=select_fragment,
@@ -63,6 +64,7 @@ def test_jsonb_contains():
 
     for (param, expected) in tests:
         param = json.dumps(param)
+        print("Testing param: {}, expecting: {}".format(param, expected))
 
         execute(json.dumps(val), column,
                 select_fragment=select_fragment,
@@ -146,8 +148,9 @@ def test_jsonb_extract_parameterised():
         #       # JSONPath selectors work with EQL fields
         #       for accessor in [param, "$." + param]:
         for accessor in [param]:
-
             param = json.dumps(param)
+
+            print("Testing param: {}, expecting: {}".format(param, expected))
 
             execute(json.dumps(val), column,
                     select_fragment=select_fragment,
@@ -186,7 +189,7 @@ def execute(val, column, binary=None, prepare=None, expected=None,
             with conn.transaction():
                 id = make_id()
 
-                print("Testing {} Binary: {} Prepare: {}".format(
+                print("... for column {}, with binary: {}, prepare: {}".format(
                     column, binary, prepare))
 
                 sql = "INSERT INTO encrypted (id, {}) VALUES (%s, %s)".format(
