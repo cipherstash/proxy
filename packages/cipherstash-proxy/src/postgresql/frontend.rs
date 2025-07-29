@@ -592,7 +592,7 @@ where
 
         debug!(target: MAPPER,
             client_id = self.context.client_id,
-            statement = ?statement
+            statement = %statement
         );
 
         counter!(STATEMENTS_TOTAL).increment(1);
