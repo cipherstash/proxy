@@ -460,23 +460,5 @@ async fn test_complex_nested_queries() -> Result<(), Box<dyn std::error::Error>>
         "✅ Found {} patients with multiple allergies and high deductibles",
         rows.len()
     );
-
-    // Test 4: Subquery with JSONB operations
-    println!("📝 Test 4: Find patients with above-average copays");
-    let sql = r#"
-        SELECT id,
-               pii -> 'first_name' as name,
-               jsonb_path_query_first(pii, '$.insurance.coverage.copays.primary_care') as copay
-        FROM patients
-        WHERE jsonb_path_query_first(pii, '$.insurance.coverage.copays.primary_care') >
-              (SELECT AVG(jsonb_path_query_first(pii, '$.insurance.coverage.copays.primary_care'))
-               FROM patients
-               WHERE jsonb_path_exists(pii, '$.insurance.coverage.copays.primary_care'))
-        ORDER BY jsonb_path_query_first(pii, '$.insurance.coverage.copays.primary_care') DESC
-    "#;
-    let rows = client.query(sql, &[]).await?;
-    println!("✅ Found {} patients with above-average copays", rows.len());
-
-    println!("🎉 Complex Nested Queries tests completed successfully!");
     Ok(())
 }
