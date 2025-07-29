@@ -451,8 +451,8 @@ async fn test_complex_nested_queries() -> Result<(), Box<dyn std::error::Error>>
                jsonb_array_length(jsonb_path_query_first(pii, '$.medical_history.allergies[@]')) as allergy_count,
                jsonb_path_query_first(pii, '$.insurance.coverage.deductible') as deductible
         FROM patients
-        WHERE jsonb_array_length(jsonb_path_query_first(pii, '$.medical_history.allergies[@]')) > 1
-          AND jsonb_path_query_first(pii, '$.insurance.coverage.deductible') > 500
+        WHERE jsonb_path_query_first(pii, '$.insurance.coverage.deductible') > 500
+        AND jsonb_array_length(jsonb_path_query_first(pii, '$.medical_history.allergies[@]')) > 1
         ORDER BY jsonb_array_length(jsonb_path_query_first(pii, '$.medical_history.allergies[@]')) DESC
     "#;
     let rows = client.query(sql, &[]).await?;
