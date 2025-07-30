@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1753858685639,
+  "lastUpdate": 1753859704915,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -10108,6 +10108,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 6.790215,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "7afd460cedb17381654ff1c5e2dab0948e9aeda4",
+          "message": "WIP: Adds Showcase to CI runs",
+          "timestamp": "2025-07-30T02:48:30Z",
+          "url": "https://github.com/cipherstash/proxy/pull/292/commits/7afd460cedb17381654ff1c5e2dab0948e9aeda4"
+        },
+        "date": 1753859703511,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 6.882347,
             "unit": "Number"
           }
         ]
