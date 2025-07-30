@@ -21,7 +21,6 @@ cts-common = { workspace = true }
 eql-mapper = { path = "../eql-mapper" }
 exitcode = "1.1.2"
 hex = "0.4.3"
-itertools = "0.14.0"
 md-5 = "0.10.6"
 metrics = "0.24.1"
 metrics-exporter-prometheus = "0.17"
