@@ -99,6 +99,10 @@ services:
       - CS_SERVER__REQUIRE_TLS=true
       - CS_PROMETHEUS__ENABLED=${CS_PROMETHEUS__ENABLED:-true}
       - CS_WORKSPACE_CRN=${CS_WORKSPACE_CRN}
+      - CS_LOG__FORMAT=${CS_LOG__FORMAT}
+      - CS_LOG__LEVEL=${CS_LOG__LEVEL}
+      - CS_LOG__PROTOCOL_LEVEL=${CS_LOG__PROTOCOL_LEVEL}
+      - CS_LOG__MAPPER_LEVEL=${CS_LOG__MAPPER_LEVEL}
 
     volumes:
       - ./tls/server.cert:/etc/cipherstash-proxy/server.cert
