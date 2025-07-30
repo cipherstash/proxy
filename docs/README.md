@@ -11,6 +11,7 @@ This directory contains the documentation for the CipherStash Proxy.
 * [CipherStash Proxy reference](reference/index.md)
 * [Message handling flow diagrams](reference/message-flow.md)
 * [Encrypt tool guide](reference/encrypt-tool.md)
+* [Searchable JSON Functions & Operators](reference/searchable-json.md)
 
 ## Proxy errors
 
