@@ -2,7 +2,7 @@ import json
 import os
 import psycopg
 import random
-import pytest
+# import pytest
 
 conn_params = {
     "user": os.environ.get("CS_DATABASE__USERNAME"),
@@ -17,6 +17,7 @@ connection_str = psycopg.conninfo.make_conninfo(**conn_params)
 print("Connection to Proxy with {}".format(connection_str))
 
 
+#@pytest.mark.skip()
 def test_jsonb_eq_simple():
     val = {"key": "value"}
     column = "encrypted_jsonb"
@@ -60,7 +61,7 @@ def test_jsonb_eq_simple():
                     binary=False, prepare=True)
 
 
-@pytest.mark.skip(reason="All parameterised jsonb_col->%s or jsonb_path_query*() calls fail or hang")
+#@pytest.mark.skip(reason="All parameterised jsonb_col->%s or jsonb_path_query*() calls fail or hang")
 def test_jsonb_parameterised():
     val = {"key": "value"}
     column = "encrypted_jsonb"
@@ -69,14 +70,14 @@ def test_jsonb_parameterised():
         "jsonb_path_query_first({}, %s) = %s".format(column),
     ]
     tests = [
-        (["key", "value"], val),
-        (["key", "different value"], None),
+        (["key", json.dumps("value")], val),
+        (["key", json.dumps("different value")], None),
         # TODO: diff_key?
     ]
 
     for where_fragment in where_fragments:
         for (params, expected) in tests:
-            params = list(map(json.dumps, params))
+            #params = list(map(json.dumps, params))
 
             print("Testing fragment: {}, params: {}, expecting: {}".format(
                 where_fragment, params, expected))
@@ -86,15 +87,15 @@ def test_jsonb_parameterised():
                     params=params,
                     expected=expected)
 
-            execute(json.dumps(val).encode(), column,
+            execute(json.dumps(val), column,
                     where_fragment=where_fragment,
-                    params=list(map(lambda p: p.encode(), params)),
+                    params=params,
                     expected=expected,
                     binary=True)
 
-            execute(json.dumps(val).encode(), column,
+            execute(json.dumps(val), column,
                     where_fragment=where_fragment,
-                    params=list(map(lambda p: p.encode(), params)),
+                    params=params,
                     expected=expected,
                     binary=True, prepare=True)
 
@@ -105,6 +106,7 @@ def test_jsonb_parameterised():
                     binary=False, prepare=True)
 
 
+#@pytest.mark.skip()
 def test_jsonb_eq_numeric():
     val = {"string": "C", "number": 3}
     column = "encrypted_jsonb"
@@ -124,15 +126,15 @@ def test_jsonb_eq_numeric():
                 params=[param],
                 expected=expected)
 
-        execute(json.dumps(val).encode(), column,
+        execute(json.dumps(val), column,
                 where_fragment=where_fragment,
-                params=[param.encode()],
+                params=[param],
                 expected=expected,
                 binary=True)
 
-        execute(json.dumps(val).encode(), column,
+        execute(json.dumps(val), column,
                 where_fragment=where_fragment,
-                params=[param.encode()],
+                params=[param],
                 expected=expected,
                 binary=True, prepare=True)
 
@@ -167,7 +169,7 @@ def execute(val, column, binary=None, prepare=None, expected=None,
                 sql = "SELECT id, encrypted_jsonb FROM encrypted WHERE id = %s AND {}".format(
                     where_fragment)
                 cursor.execute(
-                    sql, ([id] + params),
+                    sql, [id] + params,
                     binary=binary, prepare=prepare)
 
                 row = cursor.fetchone()
