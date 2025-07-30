@@ -704,5 +704,53 @@ pub async fn create_enhanced_jsonb_test_data() {
         insert(sql, &[&patient.id, &pii_json]).await;
     }
 
+    // Add prescriptions for enhanced patients so they appear in complex queries
+    let enhanced_prescriptions = [
+        // Patient 1 (John Smith - HealthCorp insurance) - active prescriptions
+        Prescription::new(
+            "a1b2c3d4-e5f6-4a5b-8c9d-123456789011",
+            "550e8400-e29b-41d4-a716-446655440005",
+            "500mg twice daily",
+            "2024-01-20",
+            "2024-12-31",
+        ), // Metformin
+        Prescription::new(
+            "a1b2c3d4-e5f6-4a5b-8c9d-123456789011",
+            "550e8400-e29b-41d4-a716-446655440006",
+            "10mg once daily",
+            "2024-02-01",
+            "2024-12-31",
+        ), // Lisinopril
+        // Patient 2 (Sarah Johnson - BlueCross insurance) - active prescriptions
+        Prescription::new(
+            "a1b2c3d4-e5f6-4a5b-8c9d-123456789012",
+            "550e8400-e29b-41d4-a716-446655440002",
+            "200mg as needed",
+            "2024-01-25",
+            "2024-08-31",
+        ), // Ibuprofen
+        // Patient 3 (Michael Brown - HealthCorp insurance) - active prescriptions
+        Prescription::new(
+            "a1b2c3d4-e5f6-4a5b-8c9d-123456789013",
+            "550e8400-e29b-41d4-a716-446655440007",
+            "40mg once daily",
+            "2024-02-15",
+            "2024-12-31",
+        ), // Atorvastatin
+        Prescription::new(
+            "a1b2c3d4-e5f6-4a5b-8c9d-123456789013",
+            "550e8400-e29b-41d4-a716-446655440009",
+            "50mg once daily",
+            "2024-03-01",
+            "2024-12-31",
+        ), // Losartan
+    ];
+
+    for prescription in &enhanced_prescriptions {
+        let prescription_json = serde_json::to_value(&prescription.prescription).unwrap();
+        let sql = "INSERT INTO patient_medications (patient_id, medication) VALUES ($1, $2)";
+        insert(sql, &[&prescription.patient_id, &prescription_json]).await;
+    }
+
     println!("✅ Enhanced JSONB test data created successfully");
 }
