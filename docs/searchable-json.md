@@ -6,8 +6,13 @@ This document outlines the supported JSONB functions and operators in CipherStas
 ## Table of Contents
 
 - [Setup](#setup)
+- [Operators](#operators)
 - [->](#field_access_operator)
 - [->>](#field_access_as_text_operator)
+- [@>](#contains_operator)
+- [<@](#contained_by_operator)
+- [->>](#field_access_as_text_operator)
+- [Functions](#functions)
 - [jsonb_path_query](#jsonb_path_query)
 - [jsonb_path_query_first](#jsonb_path_query_first)
 - [jsonb_path_exists](#jsonb_path_exists)
@@ -15,9 +20,9 @@ This document outlines the supported JSONB functions and operators in CipherStas
 - [jsonb_array_length](#jsonb_array_length)
 
 
-### Setup
+## Setup
 
-Schema
+### Schema
 
 ```sql
   CREATE TABLE cipherstash (
@@ -26,7 +31,7 @@ Schema
   )
 ```
 
-Encrypted column configuration
+### Encrypted column configuration
 ```
 SELECT eql_v2.add_search_config(
   'cipherstash',
@@ -36,6 +41,8 @@ SELECT eql_v2.add_search_config(
   '{"prefix": "cipherstash/encrypted_jsonb"}'
 );
 ```
+
+### JSON document structure
 
 Examples assume an encrypted JSON document with the following structure:
 ```
@@ -54,6 +61,7 @@ Examples assume an encrypted JSON document with the following structure:
 
 ---------------------------------------------------------------
 
+## Operators
 
 <a id='field_access_operator'></a>
 ### `-> text returns eql_v2_encrypted decrypted as jsonb`
@@ -171,6 +179,118 @@ SELECT encrypted_jsonb -> 'string_array' FROM cipherstash;
 
 ---------------------------------------------------------------
 
+
+### `@>` (Contains Operator)
+
+
+<a id='contains_operator'></a>
+### `eql_v2_encrypted @> eql_v2_encrypted returns boolean`
+
+Does the left `eql_v2_encrypted` value contain the right `eql_v2_encrypted` path/value entries at the top level?
+
+
+#### Syntax
+
+```sql
+SELECT encrypted_column @> '{ .. }' FROM table_name;
+```
+
+#### Examples
+
+```sql
+-- field/value returns true
+SELECT encrypted_jsonb @> '{"number": 1}' FROM cipherstash;
+
+----------
+ ?column?
+----------
+ t
+(1 row)
+```
+
+```sql
+-- field/value returns false if no match
+SELECT encrypted_jsonb @> '{"number": 99}' FROM cipherstash;
+
+----------
+ ?column?
+----------
+ f
+(1 row)
+```
+
+
+```sql
+-- nested object
+SELECT encrypted_jsonb @> '{"object": {"string": "world", "number": 99},' FROM cipherstash;
+
+----------
+ ?column?
+----------
+ t
+(1 row)
+```
+
+
+---------------------------------------------------------------
+
+
+### `<@` (Contained By Operator)
+
+
+<a id='contained_by_operator'></a>
+### `eql_v2_encrypted <@ eql_v2_encrypted returns boolean`
+
+Is the first JSON value contained in the second?
+
+
+#### Syntax
+
+```sql
+SELECT '{ .. }' <@ encrypted_column FROM table_name;
+```
+
+#### Examples
+
+```sql
+-- field/value returns true
+SELECT '{"number": 1}' @> encrypted_jsonb FROM cipherstash;
+
+----------
+ ?column?
+----------
+ t
+(1 row)
+```
+
+```sql
+-- field/value returns false if no match
+SELECT '{"number": 99}' @> encrypted_jsonb FROM cipherstash;
+
+----------
+ ?column?
+----------
+ f
+(1 row)
+```
+
+
+```sql
+-- nested object
+SELECT '{"object": {"string": "world", "number": 99}' @> encrypted_jsonb FROM cipherstash;
+
+----------
+ ?column?
+----------
+ t
+(1 row)
+```
+
+
+---------------------------------------------------------------
+
+
+## Functions
 
 <a id='jsonb_path_query'></a>
 ### `jsonb_path_query(target eql_v2_encrypted, path jsonpath) returns setof eql_v2_encrypted decrypted as jsonb`
@@ -458,78 +578,9 @@ SELECT jsonb_array_length(jsonb_path_query(encrypted_jsonb, '$.unknown')) FROM c
 
 
 
-
-SELECT jsonb_path_query('{
-    "string": "hello",
-    "number": 1,
-    "object": {
-        "string": "world",
-        "number": 99
-    },
-    "string_array": ["hello", "world"],
-    "numeric_array": [1, 2, 3, 4]
-}'::jsonb, '$.number');
-
-
-SELECT jsonb_array_length(jsonb_path_query('{
-    "string": "hello",
-    "number": 1,
-    "object": {
-        "string": "world",
-        "number": 99
-    },
-    "string_array": ["hello", "world"],
-    "numeric_array": [1, 2, 3, 4]
-}'::jsonb, '$.blsgh'));
-
-
-
----------------------------------------------------------------
 ---------------------------------------------------------------
 
 
-
-
----------------------------------------------------------------
-
-
-## Field Access Operators
-
-### `->` (Field Access Operator)
-
-Extracts a JSON field by key name or array element by index.
-
-**Syntax:**
-```sql
-SELECT encrypted_jsonb -> 'field_name' FROM table_name;
-SELECT encrypted_jsonb -> '$.field_name' FROM table_name;
-```
-
-**Examples:**
-```sql
--- Access string field
-SELECT encrypted_jsonb -> 'string' FROM encrypted;
-
--- Access numeric field
-SELECT encrypted_jsonb -> 'number' FROM encrypted;
-
--- Access array field
-SELECT encrypted_jsonb -> 'array_number' FROM encrypted;
-
--- Access nested object
-SELECT encrypted_jsonb -> 'nested' FROM encrypted;
-
--- JSONPath syntax also supported
-SELECT encrypted_jsonb -> '$.string' FROM encrypted;
-```
-
-**Supported Field Types:**
-- Strings
-- Numbers
-- Arrays
-- Nested objects
-
-**Returns:** JSON value or `NULL` if field doesn't exist.
 
 ## Containment Operators
 
