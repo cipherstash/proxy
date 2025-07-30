@@ -370,37 +370,25 @@ SELECT jsonb_path_query_first(encrypted_column, '$.path') FROM table_name;
 #### Examples
 
 ```sql
--- field path returns value
-SELECT jsonb_path_query_first(encrypted_jsonb, '$.number') FROM cipherstash;
+-- Returns first element of array
+SELECT jsonb_path_query_first(encrypted_jsonb, '$.string_array[*]') FROM cipherstash;
+
+------------------------
+ jsonb_path_query_first
+------------------------
+ "hello"
+(1 row)
+```
+
+
+```sql
+-- Returns first element of array
+SELECT jsonb_path_query_first(encrypted_jsonb, '$.numeric_array[*]') FROM cipherstash;
 
 ------------------------
  jsonb_path_query_first
 ------------------------
  1
-(1 row)
-```
-
-
-```sql
--- object path returns nested object
-SELECT jsonb_path_query_first(encrypted_jsonb, '$.object') FROM cipherstash;
-
--------------------------------------
-       jsonb_path_query_first
--------------------------------------
- { "string": "world", "number": 99 }
-(1 row)
-```
-
-
-```sql
--- object field path returns nested value
-SELECT jsonb_path_query_first(encrypted_jsonb, '$.object.string') FROM cipherstash;
-
-------------------------
- jsonb_path_query_first
-------------------------
- "world"
 (1 row)
 ```
 
