@@ -7,19 +7,22 @@ authors = [
   "James Sadler <james@cipherstash.com>",
   "Yuji Yokoo <yuji@cipherstash.com>",
   "Drew Thomas <drew@cipherstash.com>",
-  "Toby Hede <drew@cipherstash.com>"
+  "Toby Hede <toby@cipherstash.com>",
 ]
 
 [dependencies]
 eql-mapper-macros = { path = "../eql-mapper-macros" }
-derive_more = { version = "^1.0", features = ["display", "constructor", "deref", "deref_mut"] }
+derive_more = { version = "^1.0", features = [
+  "display",
+  "constructor",
+  "deref",
+  "deref_mut",
+] }
 impl-trait-for-tuples = "0.2.3"
-itertools = "^0.13"
 sqltk = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
-vec1 = "1.12.1"
 topological-sort = "0.2.2"
 
 [dev-dependencies]
