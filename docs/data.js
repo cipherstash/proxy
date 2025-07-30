@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1753840510669,
+  "lastUpdate": 1753842082168,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -9975,6 +9975,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 6.785946,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "toby@cipherstash.com",
+            "name": "Toby Hede",
+            "username": "tobyhede"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "4952258bd0596535ac930ede2dced33374191ff5",
+          "message": "Merge pull request #293 from cipherstash/deps/cleanup\n\nRemove unused dependencies",
+          "timestamp": "2025-07-30T12:18:33+10:00",
+          "tree_id": "5d65358997d82f429a8f595ec8e31814c37b80de",
+          "url": "https://github.com/cipherstash/proxy/commit/4952258bd0596535ac930ede2dced33374191ff5"
+        },
+        "date": 1753842081033,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 7.156406,
             "unit": "Number"
           }
         ]
