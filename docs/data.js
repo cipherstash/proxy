@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1753842082168,
+  "lastUpdate": 1753844310071,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -10004,6 +10004,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 7.156406,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "toby@cipherstash.com",
+            "name": "Toby Hede",
+            "username": "tobyhede"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "d4a6c6f7c5abd1123d7354318c44bf37c5b60252",
+          "message": "Merge pull request #291 from cipherstash/docs/jsonb-functions-operators\n\ndocs: json functions",
+          "timestamp": "2025-07-30T12:48:26+10:00",
+          "tree_id": "068cdd54a61b67082bc521e991010f080bb601a7",
+          "url": "https://github.com/cipherstash/proxy/commit/d4a6c6f7c5abd1123d7354318c44bf37c5b60252"
+        },
+        "date": 1753844308569,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 6.727657,
             "unit": "Number"
           }
         ]
