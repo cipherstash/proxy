@@ -1957,4 +1957,25 @@ mod test {
             .map_err(|err| err.to_string())
             .unwrap();
     }
+
+    #[test]
+    fn functions_can_be_resolved_case_insensitively() {
+        // init_tracing();
+        let schema = resolver(schema! {
+            tables: {
+                patients: {
+                    id,
+                    age (EQL: Ord),
+                }
+            }
+        });
+
+        let statement = parse(
+            r#"
+            select min(age), MIN(age) from patients;
+        "#,
+        );
+
+        type_check(schema, &statement).unwrap();
+    }
 }

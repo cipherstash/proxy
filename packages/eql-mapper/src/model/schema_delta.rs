@@ -13,7 +13,7 @@ use sqltk::parser::ast::{
 use sqltk::{Break, Visitable, Visitor};
 
 use super::{
-    Column, ColumnKind, Schema, SchemaError, SchemaTableColumn, SqlIdent, Table, TableResolver,
+    Column, ColumnKind, IdentCase, Schema, SchemaError, SchemaTableColumn, Table, TableResolver,
 };
 
 /// The current state of the schema as viewed by the current transaction.
@@ -92,7 +92,7 @@ impl SchemaWithEdits {
         match table
             .columns
             .iter()
-            .find(|col| SqlIdent(&col.name) == SqlIdent(column_name))
+            .find(|col| IdentCase(&col.name) == IdentCase(column_name))
         {
             Some(col) => {
                 let ObjectName(parts) = table_name;

@@ -2,7 +2,7 @@
 //!
 //! Column type information is unused currently.
 
-use super::sql_ident::*;
+use super::ident_case::*;
 use crate::{iterator_ext::IteratorExt, unifier::EqlTraits};
 use core::fmt::Debug;
 use derive_more::Display;
@@ -105,7 +105,7 @@ impl Schema {
             let ObjectNamePart::Identifier(name) = name.0.last().unwrap();
             let mut haystack = self.tables.iter();
             haystack
-                .find_unique(&|table| SqlIdent::from(&table.name) == SqlIdent::from(name))
+                .find_unique(&|table| IdentCase::from(&table.name) == IdentCase::from(name))
                 .cloned()
                 .map_err(|_| SchemaError::TableNotFound(name.to_string()))
         } else {
@@ -138,7 +138,7 @@ impl Schema {
             let ObjectNamePart::Identifier(table_name) = table_name.0.last().unwrap();
             let mut haystack = self.tables.iter();
             match haystack
-                .find_unique(&|table| SqlIdent::from(&table.name) == SqlIdent::from(table_name))
+                .find_unique(&|table| IdentCase::from(&table.name) == IdentCase::from(table_name))
             {
                 Ok(table) => match table.get_column(column_name) {
                     Ok(column) => Ok(SchemaTableColumn {
@@ -186,7 +186,7 @@ impl Table {
     pub fn get_column(&self, name: &Ident) -> Result<Arc<Column>, SchemaError> {
         let mut haystack = self.columns.iter();
         haystack
-            .find_unique(&|column| SqlIdent::from(&column.name) == SqlIdent::from(name))
+            .find_unique(&|column| IdentCase::from(&column.name) == IdentCase::from(name))
             .cloned()
             .map_err(|_| SchemaError::ColumnNotFound(self.name.to_string(), name.to_string()))
     }

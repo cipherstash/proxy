@@ -31,7 +31,7 @@ CS_PROXY__HOST = "proxy"
 # Misc
 DOCKER_CLI_HINTS = "false" # Please don't show us What's Next.
 
-CS_EQL_VERSION = "eql-2.1.5"
+CS_EQL_VERSION = "eql-2.1.6"
 
 
 [tools]
@@ -44,7 +44,7 @@ CS_EQL_VERSION = "eql-2.1.5"
 [tasks.proxy]
 alias = 'p'
 description = "Run the proxy (with `cargo run`)"
-run = 'pwd && env | grep CS_ && echo cargo run {{option(name="extra-args",default="")}} | bash'
+run = 'pwd && env | grep CS_ && echo cargo run --package cipherstash-proxy {{option(name="extra-args",default="")}} | bash'
 
 [tasks."proxy:kill"]
 alias = 'k'

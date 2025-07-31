@@ -274,7 +274,7 @@ pub struct TableColumn {
 pub struct EqlValue(pub TableColumn, pub EqlTraits);
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Display, Hash)]
-#[display("{}", _0.as_ref().map(|tc| format!("({tc})")).unwrap_or(String::from("")))]
+#[display("{}", _0.as_ref().map(|tc| format!("Native({tc})")).unwrap_or(String::from("Native")))]
 pub struct NativeValue(pub Option<TableColumn>);
 
 /// A column from a projection.
