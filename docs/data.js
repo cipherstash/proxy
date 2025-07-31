@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1753926990453,
+  "lastUpdate": 1753936474745,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -10487,6 +10487,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 7.083851,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "efc846d977449f41126c44f230ca13f344225fba",
+          "message": "chore: set CS_LOG__CONTEXT_LEVEL in docker compose (default: debug)",
+          "timestamp": "2025-07-31T01:21:05Z",
+          "url": "https://github.com/cipherstash/proxy/pull/295/commits/efc846d977449f41126c44f230ca13f344225fba"
+        },
+        "date": 1753936473330,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 6.68267,
             "unit": "Number"
           }
         ]
