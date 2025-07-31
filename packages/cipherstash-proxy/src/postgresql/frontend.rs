@@ -110,6 +110,9 @@ where
             }
         }
 
+        self.context.debug_statements();
+        self.context.debug_execute();
+
         match code {
             Code::Query => {
                 match self.query_handler(&bytes).await {

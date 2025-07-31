@@ -327,6 +327,24 @@ impl Context {
     pub fn unsafe_disable_mapping(&mut self) -> bool {
         self.unsafe_disable_mapping
     }
+
+    pub fn debug_execute(&self) {
+        if let Ok(queue) = self.execute.read() {
+            debug!(target: CONTEXT, client_id = self.client_id, "Execute:");
+            for (index, execute_context) in queue.queue.iter().enumerate() {
+                debug!(target: CONTEXT, client_id = self.client_id, index = index, execute_context = ?execute_context);
+            }
+        }
+    }
+
+    pub fn debug_statements(&self) {
+        if let Ok(statements) = self.statements.read() {
+            debug!(target: CONTEXT, client_id = self.client_id, "Statements:");
+            for (name, statement) in statements.iter() {
+                debug!(target: CONTEXT, client_id = self.client_id, name = ?name, statement = ?statement);
+            }
+        }
+    }
 }
 
 impl Statement {
