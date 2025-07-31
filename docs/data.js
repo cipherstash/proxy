@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1753923010486,
+  "lastUpdate": 1753925123293,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -10433,6 +10433,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 6.76051,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "james@cipherstash.com",
+            "name": "James Sadler",
+            "username": "freshtonic"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "f74f8ce28836aeab0e3e43d11f4b3da8103f909a",
+          "message": "Merge pull request #285 from cipherstash/test/walkthrough\n\nfeature(showcase): add comprehensive Proxy/EQL showcase crate",
+          "timestamp": "2025-07-31T11:20:58+10:00",
+          "tree_id": "145d0cbdbcf94f8cea8e7d644b9b73a04c273368",
+          "url": "https://github.com/cipherstash/proxy/commit/f74f8ce28836aeab0e3e43d11f4b3da8103f909a"
+        },
+        "date": 1753925121926,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 6.732169,
             "unit": "Number"
           }
         ]
