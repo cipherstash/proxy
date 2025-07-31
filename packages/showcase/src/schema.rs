@@ -1,7 +1,7 @@
-use crate::common::reset_schema_to;
+use crate::common::{reset_schema_to, PROXY};
 
 const SCHEMA: &'static str = include_str!("./schema.sql");
 
 pub async fn setup_schema() {
-    reset_schema_to(SCHEMA).await
+    reset_schema_to(SCHEMA, PROXY).await
 }
