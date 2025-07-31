@@ -125,10 +125,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     for expected_email in &expected_emails {
         if !actual_emails.contains(expected_email) {
-            eprintln!(
-                "❌ Expected email '{}' not found in results",
-                expected_email
-            );
+            eprintln!("❌ Expected email '{expected_email}' not found in results");
             return Err("Query validation failed".into());
         }
     }
@@ -191,7 +188,7 @@ async fn test_field_access_operations() -> Result<(), Box<dyn std::error::Error>
     let rows = client.query(sql, &[]).await?;
     if !rows.is_empty() {
         let blood_type: Option<Value> = rows[0].get("blood_type");
-        println!("✅ Successfully extracted blood_type: {:?}", blood_type);
+        println!("✅ Successfully extracted blood_type: {blood_type:?}");
     }
 
     // Test 3: Extract nested field with jsonb_path_query_first
@@ -226,17 +223,14 @@ async fn test_containment_operations() -> Result<(), Box<dyn std::error::Error>>
     let rows = client.query(sql, &[]).await?;
     let count: i64 = rows[0].get("count");
     assert!(count >= 1, "Should find at least one HealthCorp patient");
-    println!("✅ Found {} HealthCorp patients using @> operator", count);
+    println!("✅ Found {count} HealthCorp patients using @> operator");
 
     // Test 2: @> operator with nested object matching
     println!("📝 Test 2: Find patients with diabetes condition using @>");
     let sql = r#"SELECT COUNT(*) as count FROM patients WHERE pii @> '{"medical_history": {"conditions": ["diabetes"]}}'"#;
     let rows = client.query(sql, &[]).await?;
     let count: i64 = rows[0].get("count");
-    println!(
-        "✅ Found {} patients with diabetes using @> operator",
-        count
-    );
+    println!("✅ Found {count} patients with diabetes using @> operator");
 
     // Test 3: <@ operator (contained by) - check if a structure is contained
     println!("📝 Test 3: Check if blood type structure is contained using <@");
@@ -244,10 +238,7 @@ async fn test_containment_operations() -> Result<(), Box<dyn std::error::Error>>
         r#"SELECT COUNT(*) as count FROM patients WHERE '{"vitals": {"blood_type": "O+"}}' <@ pii"#;
     let rows = client.query(sql, &[]).await?;
     let count: i64 = rows[0].get("count");
-    println!(
-        "✅ Found {} patients where O+ blood type structure is contained",
-        count
-    );
+    println!("✅ Found {count} patients where O+ blood type structure is contained");
 
     // Test 4: Complex containment with emergency contact
     println!("📝 Test 4: Complex containment with emergency contact");
@@ -258,7 +249,7 @@ async fn test_containment_operations() -> Result<(), Box<dyn std::error::Error>>
     let rows = client.query(sql, &[]).await?;
     if !rows.is_empty() {
         let contact_name: Option<Value> = rows[0].get("contact_name");
-        println!("✅ Found spouse emergency contact: {:?}", contact_name);
+        println!("✅ Found spouse emergency contact: {contact_name:?}");
     }
 
     println!("🎉 Containment Operations tests completed successfully!");
@@ -279,7 +270,7 @@ async fn test_jsonpath_functions() -> Result<(), Box<dyn std::error::Error>> {
         count >= 1,
         "Should find patients with insurance coverage data"
     );
-    println!("✅ Found {} patients with insurance.coverage path", count);
+    println!("✅ Found {count} patients with insurance.coverage path");
 
     // Test 2: jsonb_path_query_first - extract single value
     println!("📝 Test 2: Extract first allergy using jsonb_path_query_first");
@@ -290,7 +281,7 @@ async fn test_jsonpath_functions() -> Result<(), Box<dyn std::error::Error>> {
     let rows = client.query(sql, &[]).await?;
     if !rows.is_empty() {
         let first_allergy: Option<Value> = rows[0].get("first_allergy");
-        println!("✅ First allergy found: {:?}", first_allergy);
+        println!("✅ First allergy found: {first_allergy:?}");
     }
 
     // Test 3: jsonb_path_query - extract multiple values (array elements)
@@ -325,7 +316,7 @@ async fn test_jsonpath_functions() -> Result<(), Box<dyn std::error::Error>> {
     let rows = client.query(sql, &[]).await?;
     if !rows.is_empty() {
         let copay: Option<Value> = rows[0].get("primary_copay");
-        println!("✅ Primary care copay: {:?}", copay);
+        println!("✅ Primary care copay: {copay:?}");
     }
 
     println!("🎉 JSONPath Functions tests completed successfully!");
@@ -437,10 +428,7 @@ async fn test_complex_nested_queries() -> Result<(), Box<dyn std::error::Error>>
 
         let count: Option<i64> = row.get("patient_count");
 
-        println!(
-            "   {:?}: Avg CV Risk = {:?}, Patients = {:?}",
-            provider, avg_risk, count
-        );
+        println!("   {provider:?}: Avg CV Risk = {avg_risk:?}, Patients = {count:?}");
     }
 
     // Test 3: Complex filtering with multiple JSONB conditions

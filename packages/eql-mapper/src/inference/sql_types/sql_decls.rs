@@ -3,7 +3,10 @@ use std::{collections::HashMap, sync::LazyLock};
 use eql_mapper_macros::{binary_operators, functions};
 use sqltk::parser::ast::{BinaryOperator, Ident, ObjectName, ObjectNamePart};
 
-use crate::{unifier::{BinaryOpDecl, FunctionDecl}, IdentCase};
+use crate::{
+    unifier::{BinaryOpDecl, FunctionDecl},
+    IdentCase,
+};
 
 use super::{SqlBinaryOp, SqlFunction};
 
@@ -39,44 +42,45 @@ pub(crate) fn get_sql_binop_rule(op: &BinaryOperator) -> SqlBinaryOp {
 }
 
 /// SQL functions that are handled with special case type checking rules for EQL.
-static SQL_FUNCTION_TYPES: LazyLock<HashMap<IdentCase<ObjectName>, FunctionDecl>> = LazyLock::new(|| {
-    // # SQL function declations.
-    //
-    // `Native` automatically satisfies *all* trait bounds. This is the trick that keeps the complexity of EQL Mapper's
-    // type system simple enough to be tractable for a small team of engineers. It is a *safe* strategy because even
-    // though EQL Mapper will not catch a type error with incorrect use of native database types, Postgres will.
-    //
-    // The Postgres versions of `count`, `min`, `max` etc are defined in the `pg_catalog` namespace. `pg_catalog` is
-    // prepended to the `search_path` by Postgres. When resolving the names of registered unqualified functions in
-    // this list, `pg_catalog`  is assumed to be the schema. Additionally, functions in `pg_catalog` will be
-    // rewritten to their EQL counterpart by the EQL Mapper.
+static SQL_FUNCTION_TYPES: LazyLock<HashMap<IdentCase<ObjectName>, FunctionDecl>> =
+    LazyLock::new(|| {
+        // # SQL function declations.
+        //
+        // `Native` automatically satisfies *all* trait bounds. This is the trick that keeps the complexity of EQL Mapper's
+        // type system simple enough to be tractable for a small team of engineers. It is a *safe* strategy because even
+        // though EQL Mapper will not catch a type error with incorrect use of native database types, Postgres will.
+        //
+        // The Postgres versions of `count`, `min`, `max` etc are defined in the `pg_catalog` namespace. `pg_catalog` is
+        // prepended to the `search_path` by Postgres. When resolving the names of registered unqualified functions in
+        // this list, `pg_catalog`  is assumed to be the schema. Additionally, functions in `pg_catalog` will be
+        // rewritten to their EQL counterpart by the EQL Mapper.
 
-    let items = functions! {
-        pg_catalog.count<T>(T) -> Native;
-        pg_catalog.min<T>(T) -> T where T: Ord;
-        pg_catalog.max<T>(T) -> T where T: Ord;
-        pg_catalog.jsonb_path_query<T>(T, <T as JsonLike>::Path) -> T where T: JsonLike;
-        pg_catalog.jsonb_path_query_first<T>(T, <T as JsonLike>::Path) -> T where T: JsonLike;
-        pg_catalog.jsonb_path_exists<T>(T, <T as JsonLike>::Path) -> Native where T: JsonLike;
-        pg_catalog.jsonb_array_length<T>(T) -> Native where T: JsonLike;
-        pg_catalog.jsonb_array_elements<T>(T) -> SetOf<T> where T: JsonLike;
-        pg_catalog.jsonb_array_elements_text<T>(T) -> SetOf<T> where T: JsonLike;
-        eql_v2.min<T>(T) -> T where T: Ord;
-        eql_v2.max<T>(T) -> T where T: Ord;
-        eql_v2.jsonb_path_query<T>(T, <T as JsonLike>::Path) -> T where T: JsonLike;
-        eql_v2.jsonb_path_query_first<T>(T, <T as JsonLike>::Path) -> T where T: JsonLike;
-        eql_v2.jsonb_path_exists<T>(T, <T as JsonLike>::Path) -> Native where T: JsonLike;
-        eql_v2.jsonb_array_length<T>(T) -> Native where T: JsonLike;
-        eql_v2.jsonb_array_elements<T>(T) -> SetOf<T> where T: JsonLike;
-        eql_v2.jsonb_array_elements_text<T>(T) -> SetOf<T> where T: JsonLike;
-    };
+        let items = functions! {
+            pg_catalog.count<T>(T) -> Native;
+            pg_catalog.min<T>(T) -> T where T: Ord;
+            pg_catalog.max<T>(T) -> T where T: Ord;
+            pg_catalog.jsonb_path_query<T>(T, <T as JsonLike>::Path) -> T where T: JsonLike;
+            pg_catalog.jsonb_path_query_first<T>(T, <T as JsonLike>::Path) -> T where T: JsonLike;
+            pg_catalog.jsonb_path_exists<T>(T, <T as JsonLike>::Path) -> Native where T: JsonLike;
+            pg_catalog.jsonb_array_length<T>(T) -> Native where T: JsonLike;
+            pg_catalog.jsonb_array_elements<T>(T) -> SetOf<T> where T: JsonLike;
+            pg_catalog.jsonb_array_elements_text<T>(T) -> SetOf<T> where T: JsonLike;
+            eql_v2.min<T>(T) -> T where T: Ord;
+            eql_v2.max<T>(T) -> T where T: Ord;
+            eql_v2.jsonb_path_query<T>(T, <T as JsonLike>::Path) -> T where T: JsonLike;
+            eql_v2.jsonb_path_query_first<T>(T, <T as JsonLike>::Path) -> T where T: JsonLike;
+            eql_v2.jsonb_path_exists<T>(T, <T as JsonLike>::Path) -> Native where T: JsonLike;
+            eql_v2.jsonb_array_length<T>(T) -> Native where T: JsonLike;
+            eql_v2.jsonb_array_elements<T>(T) -> SetOf<T> where T: JsonLike;
+            eql_v2.jsonb_array_elements_text<T>(T) -> SetOf<T> where T: JsonLike;
+        };
 
-    HashMap::from_iter(
-        items
-            .into_iter()
-            .map(|rule: FunctionDecl| (rule.name.clone(), rule)),
-    )
-});
+        HashMap::from_iter(
+            items
+                .into_iter()
+                .map(|rule: FunctionDecl| (rule.name.clone(), rule)),
+        )
+    });
 
 pub(crate) fn get_sql_function(fn_name: &ObjectName) -> SqlFunction {
     // FIXME: this is a hack and we need proper schema resolution logic

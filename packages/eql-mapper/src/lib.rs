@@ -1970,9 +1970,11 @@ mod test {
             }
         });
 
-        let statement = parse(r#"
+        let statement = parse(
+            r#"
             select min(age), MIN(age) from patients;
-        "#);
+        "#,
+        );
 
         type_check(schema, &statement).unwrap();
     }

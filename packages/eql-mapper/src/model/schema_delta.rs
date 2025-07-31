@@ -13,7 +13,7 @@ use sqltk::parser::ast::{
 use sqltk::{Break, Visitable, Visitor};
 
 use super::{
-    Column, ColumnKind, Schema, SchemaError, SchemaTableColumn, IdentCase, Table, TableResolver,
+    Column, ColumnKind, IdentCase, Schema, SchemaError, SchemaTableColumn, Table, TableResolver,
 };
 
 /// The current state of the schema as viewed by the current transaction.

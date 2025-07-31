@@ -29,7 +29,8 @@ use sqltk::parser::ast::{BinaryOperator, ObjectName};
 use tracing::{event, instrument, Level};
 
 use crate::{
-    unifier::{instantiated_type_env::InstantiatedTypeEnv, AssociatedTypeSelector}, EqlTrait, Fmt, IdentCase, TypeError
+    unifier::{instantiated_type_env::InstantiatedTypeEnv, AssociatedTypeSelector},
+    EqlTrait, Fmt, IdentCase, TypeError,
 };
 
 use super::{

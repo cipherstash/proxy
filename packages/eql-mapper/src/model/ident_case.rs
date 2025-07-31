@@ -24,9 +24,9 @@ impl<'a> IdentCase<&'a Ident> {
     }
 }
 
-impl<'a> IdentCase<ObjectName> {
+impl IdentCase<ObjectName> {
     pub(crate) fn starts_with(&self, other: &IdentCase<Ident>) -> bool {
-        let ObjectNamePart::Identifier(first) = &self.0.0[0];
+        let ObjectNamePart::Identifier(first) = &self.0 .0[0];
         IdentCase(first) == IdentCase(&other.0)
     }
 }
@@ -133,9 +133,9 @@ impl PartialEq<IdentCase<&ObjectName>> for IdentCase<ObjectName> {
 impl Ord for IdentCase<&'_ Ident> {
     fn cmp(&self, other: &Self) -> Ordering {
         match self.0.value.len().cmp(&other.0.value.len()) {
-            Ordering::Less => return Ordering::Less,
+            Ordering::Less => Ordering::Less,
 
-            Ordering::Greater => return Ordering::Greater,
+            Ordering::Greater => Ordering::Greater,
 
             Ordering::Equal => match (self.0.quote_style, other.0.quote_style) {
                 (None, None) => {
@@ -203,13 +203,11 @@ impl Ord for IdentCase<&'_ Ident> {
     }
 }
 
-
 impl PartialOrd for IdentCase<&'_ Ident> {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
     }
 }
-
 
 impl PartialOrd<IdentCase<Ident>> for IdentCase<&Ident> {
     fn partial_cmp(&self, other: &IdentCase<sqltk::parser::ast::Ident>) -> Option<Ordering> {
@@ -217,18 +215,17 @@ impl PartialOrd<IdentCase<Ident>> for IdentCase<&Ident> {
     }
 }
 
-
 impl PartialOrd<IdentCase<&Ident>> for IdentCase<Ident> {
     fn partial_cmp(&self, other: &IdentCase<&sqltk::parser::ast::Ident>) -> Option<Ordering> {
-        (&IdentCase(&self.0)).partial_cmp(other)
+        IdentCase(&self.0).partial_cmp(other)
     }
 }
 
 impl Ord for IdentCase<&'_ ObjectName> {
     fn cmp(&self, other: &Self) -> Ordering {
         match self.0 .0.len().cmp(&other.0 .0.len()) {
-            Ordering::Less => return Ordering::Less,
-            Ordering::Greater => return Ordering::Greater,
+            Ordering::Less => Ordering::Less,
+            Ordering::Greater => Ordering::Greater,
             Ordering::Equal => {
                 for (ObjectNamePart::Identifier(mine), ObjectNamePart::Identifier(theirs)) in
                     self.0 .0.iter().zip(other.0 .0.iter())
@@ -282,7 +279,7 @@ impl Hash for IdentCase<Ident> {
 // This Hash implementation (and the following) one is required in order to be consistent with PartialEq.
 impl Hash for IdentCase<&ObjectName> {
     fn hash<H: Hasher>(&self, state: &mut H) {
-        for ObjectNamePart::Identifier(ident) in self.0.0.iter() {
+        for ObjectNamePart::Identifier(ident) in self.0 .0.iter() {
             IdentCase(ident).hash(state);
         }
     }
@@ -338,8 +335,8 @@ mod test {
         ($first:ident . $second:ident) => {
             ObjectName(vec![
                 ObjectNamePart::Identifier(Ident::from(stringify!($first))),
-                ObjectNamePart::Identifier(Ident::from(stringify!($second))
-            )])
+                ObjectNamePart::Identifier(Ident::from(stringify!($second))),
+            ])
         };
 
         ($first:literal . $second:literal) => {
@@ -357,10 +354,22 @@ mod test {
         assert_eq!(IdentCase(&id!(email)), IdentCase(&id!(email)));
         assert_eq!(IdentCase(id!(eMaIl)), IdentCase(id!(email)));
 
-        assert_eq!(IdentCase(&objname!(customer.email)), IdentCase(objname!(customer.email)));
-        assert_eq!(IdentCase(objname!(customer.eMaIl)), IdentCase(&objname!(customer.email)));
-        assert_eq!(IdentCase(&objname!(customer.email)), IdentCase(&objname!(customer.email)));
-        assert_eq!(IdentCase(objname!(customer.eMaIl)), IdentCase(objname!(customer.email)));
+        assert_eq!(
+            IdentCase(&objname!(customer.email)),
+            IdentCase(objname!(customer.email))
+        );
+        assert_eq!(
+            IdentCase(objname!(customer.eMaIl)),
+            IdentCase(&objname!(customer.email))
+        );
+        assert_eq!(
+            IdentCase(&objname!(customer.email)),
+            IdentCase(&objname!(customer.email))
+        );
+        assert_eq!(
+            IdentCase(objname!(customer.eMaIl)),
+            IdentCase(objname!(customer.email))
+        );
     }
 
     #[test]
@@ -369,10 +378,22 @@ mod test {
         assert_eq!(IdentCase(id!(eMaIl)), IdentCase(id!(email)));
         assert_ne!(IdentCase(id!(age)), IdentCase(id!(email)));
 
-        assert_eq!(IdentCase(objname!(customer.email)), IdentCase(objname!(customer.email)));
-        assert_eq!(IdentCase(objname!(customer.eMaIl)), IdentCase(objname!(customer.email)));
-        assert_ne!(IdentCase(objname!(customer.age)), IdentCase(objname!(customer.email)));
-        assert_ne!(IdentCase(objname!(person.email)), IdentCase(objname!(customer.email)));
+        assert_eq!(
+            IdentCase(objname!(customer.email)),
+            IdentCase(objname!(customer.email))
+        );
+        assert_eq!(
+            IdentCase(objname!(customer.eMaIl)),
+            IdentCase(objname!(customer.email))
+        );
+        assert_ne!(
+            IdentCase(objname!(customer.age)),
+            IdentCase(objname!(customer.email))
+        );
+        assert_ne!(
+            IdentCase(objname!(person.email)),
+            IdentCase(objname!(customer.email))
+        );
     }
 
     #[test]
@@ -380,8 +401,14 @@ mod test {
         assert_eq!(IdentCase(id!("email")), IdentCase(id!("email")));
         assert_ne!(IdentCase(id!("Email")), IdentCase(id!("email")));
 
-        assert_eq!(IdentCase(objname!("customer"."email")), IdentCase(objname!("customer"."email")));
-        assert_ne!(IdentCase(objname!("customer"."Email")), IdentCase(objname!("customer"."email")));
+        assert_eq!(
+            IdentCase(objname!("customer"."email")),
+            IdentCase(objname!("customer"."email"))
+        );
+        assert_ne!(
+            IdentCase(objname!("customer"."Email")),
+            IdentCase(objname!("customer"."email"))
+        );
     }
 
     #[test]
@@ -390,8 +417,17 @@ mod test {
         assert_ne!(IdentCase(id!("Email")), IdentCase(id!(email)));
         assert_ne!(IdentCase(id!(email)), IdentCase(id!("Email")));
 
-        assert_eq!(IdentCase(objname!("customer"."email")), IdentCase(objname!(customer.email)));
-        assert_ne!(IdentCase(objname!("customer"."Email")), IdentCase(objname!(customer.email)));
-        assert_ne!(IdentCase(objname!(customer.email)), IdentCase(objname!("customer"."Email")));
+        assert_eq!(
+            IdentCase(objname!("customer"."email")),
+            IdentCase(objname!(customer.email))
+        );
+        assert_ne!(
+            IdentCase(objname!("customer"."Email")),
+            IdentCase(objname!(customer.email))
+        );
+        assert_ne!(
+            IdentCase(objname!(customer.email)),
+            IdentCase(objname!("customer"."Email"))
+        );
     }
 }
