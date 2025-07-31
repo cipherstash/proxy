@@ -168,7 +168,8 @@ where
                 debug!(target: PROTOCOL,
                     client_id = self.context.client_id,
                     msg = "Passthrough",
-                    ?code,
+                    byte = ?code,
+                    code = code.to_string(),
                 );
             }
         }
