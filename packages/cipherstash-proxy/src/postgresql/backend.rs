@@ -281,10 +281,16 @@ where
 
         self.check_column_config(projection_columns, &ciphertexts)?;
 
+        let keyset_id = self.context.keyset_id();
+
         // Decrypt CipherText -> Plaintext
-        let plaintexts = self.encrypt.decrypt(ciphertexts).await.inspect_err(|_| {
-            counter!(DECRYPTION_ERROR_TOTAL).increment(1);
-        })?;
+        let plaintexts = self
+            .encrypt
+            .decrypt(keyset_id, ciphertexts)
+            .await
+            .inspect_err(|_| {
+                counter!(DECRYPTION_ERROR_TOTAL).increment(1);
+            })?;
 
         // Avoid the iter calculation if we can
         if self.encrypt.config.prometheus_enabled() {

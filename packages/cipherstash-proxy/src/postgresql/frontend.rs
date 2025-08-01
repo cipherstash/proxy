@@ -291,7 +291,7 @@ where
             }
 
             if let Some(keyset_id) = self.context.maybe_set_keyset_id(&statement)? {
-                warn!(msg = "SET CIPHERSTASH.KEYSET_ID = {keyset_id}", keyset_id);
+                warn!(msg = "SET CIPHERSTASH.KEYSET_ID = {keyset_id}", ?keyset_id);
             }
 
             self.check_for_schema_change(&statement);
@@ -397,13 +397,15 @@ where
             return Ok(vec![]);
         }
 
+        let keyset_id = self.context.keyset_id();
+
         let plaintexts = literals_to_plaintext(literal_values, literal_columns)?;
 
         let start = Instant::now();
 
         let encrypted = self
             .encrypt
-            .encrypt(plaintexts, literal_columns)
+            .encrypt(keyset_id, plaintexts, literal_columns)
             .await
             .inspect_err(|_| {
                 counter!(ENCRYPTION_ERROR_TOTAL).increment(1);
@@ -522,7 +524,7 @@ where
         }
 
         if let Some(keyset_id) = self.context.maybe_set_keyset_id(&statement)? {
-            warn!(msg = "SET CIPHERSTASH.KEYSET_ID = {keyset_id}", keyset_id);
+            warn!(msg = "SET CIPHERSTASH.KEYSET_ID = {keyset_id}", ?keyset_id);
         }
 
         self.check_for_schema_change(&statement);
@@ -771,11 +773,13 @@ where
 
         debug!(target: MAPPER, client_id = self.context.client_id, plaintexts = ?plaintexts);
 
+        let keyset_id = self.context.keyset_id();
+
         let start = Instant::now();
 
         let encrypted = self
             .encrypt
-            .encrypt(plaintexts, &statement.param_columns)
+            .encrypt(keyset_id, plaintexts, &statement.param_columns)
             .await
             .inspect_err(|_| {
                 counter!(ENCRYPTION_ERROR_TOTAL).increment(1);

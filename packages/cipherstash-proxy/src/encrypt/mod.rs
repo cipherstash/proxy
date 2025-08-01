@@ -18,7 +18,8 @@ use cipherstash_client::{
         PlaintextTarget, Queryable, ReferencedPendingPipeline,
     },
     schema::ColumnConfig,
-    ConsoleConfig, CtsConfig, ZeroKMSConfig,
+    zerokms::ClientKey,
+    ConsoleConfig, CtsConfig, ZeroKMS, ZeroKMSConfig,
 };
 use cipherstash_client::{
     config::{ConfigError, ZeroKMSConfigWithClientKey},
@@ -28,6 +29,7 @@ use config::EncryptConfigManager;
 use schema::SchemaManager;
 use std::{sync::Arc, vec};
 use tracing::{debug, info, warn};
+use uuid::Uuid;
 
 /// SQL Statement for loading encrypt configuration from database
 const ENCRYPT_CONFIG_QUERY: &str = include_str!("./sql/select_config.sql");
@@ -40,24 +42,27 @@ const AGGREGATE_QUERY: &str = include_str!("./sql/select_aggregates.sql");
 
 type ScopedCipher = encryption::ScopedCipher<AutoRefresh<ServiceCredentials>>;
 
+type ZerokmsClient = ZeroKMS<AutoRefresh<ServiceCredentials>, ClientKey>;
+
 ///
 /// All of the things required for Encrypt-as-a-Product
 ///
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct Encrypt {
     pub config: TandemConfig,
-    cipher: Arc<ScopedCipher>,
     pub encrypt_config: EncryptConfigManager,
     pub schema: SchemaManager,
     /// The EQL version installed in the database or `None` if it was not present
     pub eql_version: Option<String>,
+    zerokms_client: Arc<ZerokmsClient>,
 }
 
 impl Encrypt {
     pub async fn init(config: TandemConfig) -> Result<Encrypt, Error> {
-        let cipher = Arc::new(init_cipher(&config).await?);
+        let zerokms_client = init_zerokms_client(&config)?;
+
         let encrypt_config = EncryptConfigManager::init(&config.database).await?;
-        // TODO: populate EqlTraitImpls based on config
+        // TODO: populate EqlTraitImpls based in config
         let schema = SchemaManager::init(&config.database).await?;
 
         let eql_version = {
@@ -80,11 +85,26 @@ impl Encrypt {
 
         Ok(Encrypt {
             config,
-            cipher,
+            zerokms_client: Arc::new(zerokms_client),
             encrypt_config,
             schema,
             eql_version,
         })
+    }
+
+    /// Initialize cipher using the stored zerokms_config
+    pub async fn init_cipher(&self, keyset_id: Option<Uuid>) -> Result<ScopedCipher, Error> {
+        let zerokms_client = self.zerokms_client.clone();
+        match ScopedCipher::init(zerokms_client, keyset_id).await {
+            Ok(cipher) => {
+                debug!(target: ENCRYPT, msg = "Initialized ZeroKMS ScopedCipher");
+                Ok(cipher)
+            }
+            Err(err) => {
+                debug!(target: ENCRYPT, msg = "Error initializing ZeroKMS ScopedCipher", error = err.to_string());
+                Err(err.into())
+            }
+        }
     }
 
     ///
@@ -93,10 +113,16 @@ impl Encrypt {
     ///
     pub async fn encrypt(
         &self,
+        keyset_id: Option<Uuid>,
         plaintexts: Vec<Option<Plaintext>>,
         columns: &[Option<Column>],
     ) -> Result<Vec<Option<eql::EqlEncrypted>>, Error> {
-        let mut pipeline = ReferencedPendingPipeline::new(self.cipher.clone());
+        let keyset_id = keyset_id.or(self.config.encrypt.default_keyset_id);
+        debug!(target: ENCRYPT, ?keyset_id);
+
+        let cipher = Arc::new(self.init_cipher(keyset_id).await?);
+
+        let mut pipeline = ReferencedPendingPipeline::new(cipher.clone());
         let mut index_term_plaintexts = vec![None; columns.len()];
 
         for (idx, item) in plaintexts.into_iter().zip(columns.iter()).enumerate() {
@@ -145,7 +171,7 @@ impl Encrypt {
                     let index = column.config.clone().into_ste_vec_index().unwrap();
                     let op = QueryOp::SteVecSelector;
 
-                    let index_term = (index, plaintext).build_queryable(self.cipher.clone(), op)?;
+                    let index_term = (index, plaintext).build_queryable(cipher.clone(), op)?;
 
                     encrypted = Some(to_eql_encrypted_from_index_term(
                         index_term,
@@ -170,8 +196,14 @@ impl Encrypt {
     ///
     pub async fn decrypt(
         &self,
+        keyset_id: Option<Uuid>,
         ciphertexts: Vec<Option<eql::EqlEncrypted>>,
     ) -> Result<Vec<Option<Plaintext>>, Error> {
+        let keyset_id = keyset_id.or(self.config.encrypt.default_keyset_id);
+        debug!(target: ENCRYPT, ?keyset_id);
+
+        let cipher = Arc::new(self.init_cipher(keyset_id).await?);
+
         // Create a mutable vector to hold the decrypted results
         let mut results = vec![None; ciphertexts.len()];
 
@@ -183,7 +215,7 @@ impl Encrypt {
             .collect::<_>();
 
         // Decrypt the ciphertexts
-        let decrypted = self.cipher.decrypt(encrypted).await?;
+        let decrypted = cipher.decrypt(encrypted).await?;
 
         // Merge the decrypted values as plaintext into their original indexed positions
         for (idx, decrypted) in indices.into_iter().zip(decrypted) {
@@ -211,6 +243,15 @@ impl Encrypt {
     pub fn is_empty_config(&self) -> bool {
         self.encrypt_config.is_empty()
     }
+}
+
+fn init_zerokms_client(
+    config: &TandemConfig,
+) -> Result<ZeroKMS<AutoRefresh<ServiceCredentials>, ClientKey>, ConfigError> {
+    let zerokms_config = build_zerokms_config(config)?;
+
+    Ok(zerokms_config
+        .create_client_with_credentials(AutoRefresh::new(zerokms_config.credentials())))
 }
 
 fn build_zerokms_config(config: &TandemConfig) -> Result<ZeroKMSConfigWithClientKey, ConfigError> {
@@ -241,24 +282,6 @@ fn build_zerokms_config(config: &TandemConfig) -> Result<ZeroKMSConfigWithClient
     };
 
     builder.build_with_client_key()
-}
-
-async fn init_cipher(config: &TandemConfig) -> Result<ScopedCipher, Error> {
-    let zerokms_config = build_zerokms_config(config)?;
-
-    let zerokms_client = zerokms_config
-        .create_client_with_credentials(AutoRefresh::new(zerokms_config.credentials()));
-
-    match ScopedCipher::init(Arc::new(zerokms_client), config.encrypt.default_keyset_id).await {
-        Ok(cipher) => {
-            debug!(target: ENCRYPT, msg = "Initialized ZeroKMS ScopedCipher");
-            Ok(cipher)
-        }
-        Err(err) => {
-            debug!(target: ENCRYPT, msg =  "Error initializing ZeroKMS ScopedCipher", error = err.to_string());
-            Err(err.into())
-        }
-    }
 }
 
 fn to_eql_encrypted_from_index_term(
