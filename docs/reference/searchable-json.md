@@ -6,6 +6,7 @@ This document outlines the supported JSONB functions and operators in CipherStas
 ## Table of Contents
 
 - [Setup](#setup)
+- [Important Limtiations](#important-limitations)
 - [Operators](#operators)
 - [->](#field_access_operator)
 - [->>](#field_access_as_text_operator)
@@ -57,6 +58,24 @@ Examples assume an encrypted JSON document with the following structure:
     "numeric_array": [1, 2, 3, 4],
 };
 ```
+
+
+## Important Limitations
+
+Encrypted literals cannot be passed as arguments to SQL functions. Encrypted columns can only be passed to SQL functions if the value has an encrypted search index that supports that specific function.
+
+Examples:
+- `AVG()` cannot be used on encrypted numeric values ❌
+- `MIN()` and `MAX()` can be used on encrypted values with ORE index ✅
+- `LOWER()` cannot be used on encrypted text (operates only on plaintext) ❌
+
+⚠️ **CAST Operations**: CAST operations cannot work on encrypted data because casting would require decryption within the database, which is impossible. EQL's `ste_vec` configuration enables direct comparison and ordering operations on encrypted values without requiring CAST.
+
+⚠️ **Chained Operators**: The `->` operator cannot be chained on `ste_vec` encrypted columns. Use JSONPath functions like `jsonb_path_query_first()` for deep nested access instead.
+
+⚠️ **Array Access**: A selector path to an array field `$.array` will return the decrypted array as a json literal To access an encrypted array as an array of encrypted values (for use with functions like `jsonb_array_length`) requires the special EQL array element selector `[@]`. The selector is an extension of JSONPath and works similar to the standard wildcard `[*]` path. The wildcard selector follows the default PostgreSQL behaviour and will return the array elements as a setof encrypted values.
+
+
 
 
 ---------------------------------------------------------------
