@@ -360,7 +360,7 @@ impl Context {
                 })) = values.first()
                 {
                     let keyset_id =
-                        Uuid::parse_str(&value).map_err(|_| EncryptError::KeysetIdCouldNotBeSet)?;
+                        Uuid::parse_str(value).map_err(|_| EncryptError::KeysetIdCouldNotBeSet)?;
 
                     self.keyset_id = Some(keyset_id.to_owned());
                     return Ok(Some(keyset_id.to_owned()));
