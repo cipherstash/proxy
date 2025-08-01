@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1754020117006,
+  "lastUpdate": 1754023884865,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -10720,6 +10720,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 6.687896,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "james@cipherstash.com",
+            "name": "James Sadler",
+            "username": "freshtonic"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "6b5835655828a54b2ff094ef8c240bb410945b6f",
+          "message": "Merge pull request #292 from cipherstash/rh/cip-1624/showcase-ci\n\nci(showcase): Adds Showcase to CI runs",
+          "timestamp": "2025-08-01T14:47:30+10:00",
+          "tree_id": "579a35c18df6bdc3eba178be730963f5dd98c5eb",
+          "url": "https://github.com/cipherstash/proxy/commit/6b5835655828a54b2ff094ef8c240bb410945b6f"
+        },
+        "date": 1754023883079,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 6.719143,
             "unit": "Number"
           }
         ]
