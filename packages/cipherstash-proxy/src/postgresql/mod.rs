@@ -4,6 +4,7 @@ mod data;
 mod format_code;
 mod frontend;
 mod handler;
+mod mitm;
 mod message_buffer;
 mod messages;
 mod protocol;

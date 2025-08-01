@@ -10,12 +10,30 @@ mod tests {
     async fn select_from_pg_catalog() {
         let client = connect_with_tls(PROXY).await;
 
-        let sql = "SELECT attname, atttypid FROM pg_catalog.pg_attribute WHERE attrelid IS NOT NULL AND NOT attisdropped AND attnum > 0 ORDER BY attnum";
-        let rows = client.query(sql, &[]).await.unwrap();
+        let rows = client
+            .query(
+                "SELECT attname, atttypid FROM pg_catalog.pg_attribute
+                WHERE attrelid IS NOT NULL
+                AND NOT attisdropped AND attnum > 0
+                ORDER BY attnum",
+                &[],
+            )
+            .await
+            .unwrap();
 
         assert!(
             !rows.is_empty(),
             "Expected non-empty result from pg_catalog.pg_attribute",
+        );
+
+        let rows = client
+            .query("SELECT * FROM pg_catalog.pg_type", &[])
+            .await
+            .unwrap();
+
+        assert!(
+            !rows.is_empty(),
+            "Expected non-empty result from pg_catalog.pg_type",
         );
     }
 }
