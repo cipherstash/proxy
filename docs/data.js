@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1754010823056,
+  "lastUpdate": 1754012143349,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -10612,6 +10612,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 6.724802,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "james@cipherstash.com",
+            "name": "James Sadler",
+            "username": "freshtonic"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "23dac3cc712d8c240f724603e5795961eab01abb",
+          "message": "Merge pull request #297 from cipherstash/chore/disabe-elixir-integration-tests\n\nchore: 🔧 disable elixir integration tests",
+          "timestamp": "2025-08-01T11:32:17+10:00",
+          "tree_id": "fc210c660143a4878c9feb92ecc481212b68ec4c",
+          "url": "https://github.com/cipherstash/proxy/commit/23dac3cc712d8c240f724603e5795961eab01abb"
+        },
+        "date": 1754012142186,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 7.119757,
             "unit": "Number"
           }
         ]
