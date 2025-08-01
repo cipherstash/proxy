@@ -15,7 +15,7 @@ CS_CLIENT_KEY = "client-key"
 CS_CLIENT_ID = "client-id"
 
 # The release of EQL that the proxy tests will use and releases will be built with
-CS_EQL_VERSION="eql-2.1.6"
+CS_EQL_VERSION = "eql-2.1.8"
 
 # TLS variables are required for providing TLS to Proxy's clients.
 # CS_TLS__TYPE can be either "Path" or "Pem" (case-sensitive).
