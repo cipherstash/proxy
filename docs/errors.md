@@ -292,6 +292,7 @@ A keyset_id could not be set using `SET CIPHERSTASH.KEYSET_ID`
 ### How to Fix
 
 1. Check the syntax of the `SET CIPHERSTASH.KEYSET_ID` command. The `keyset_id` value should be in single quotes.
+2. Check that the provided `keyset_id` is a valid UUID.
 
 
 ```

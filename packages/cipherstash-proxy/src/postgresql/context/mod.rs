@@ -22,6 +22,7 @@ use std::{
     time::{Duration, Instant},
 };
 use tracing::debug;
+use uuid::Uuid;
 
 type DescribeQueue = Queue<Describe>;
 type ExecuteQueue = Queue<ExecuteContext>;
@@ -39,7 +40,7 @@ pub struct Context {
     session_metrics: Arc<RwLock<SessionMetricsQueue>>,
     table_resolver: Arc<TableResolver>,
     unsafe_disable_mapping: bool,
-    keyset_id: Option<String>,
+    keyset_id: Option<Uuid>,
 }
 
 #[derive(Clone, Debug)]
@@ -338,7 +339,7 @@ impl Context {
     pub fn maybe_set_keyset_id(
         &mut self,
         statement: &sqltk::parser::ast::Statement,
-    ) -> Result<Option<String>, Error> {
+    ) -> Result<Option<Uuid>, Error> {
         // The CIPHERSTASH. namespace prevents errors KEYSET_ID
         // The constants avoid the need to allocate Vecs every time we examine the statement.
         static SQL_SETTING_NAME_KEYSET_ID: LazyLock<ObjectName> = LazyLock::new(|| {
@@ -358,8 +359,11 @@ impl Context {
                     ..
                 })) = values.first()
                 {
-                    self.keyset_id = Some(value.to_owned());
-                    return Ok(Some(value.to_owned()));
+                    let keyset_id =
+                        Uuid::parse_str(&value).map_err(|_| EncryptError::KeysetIdCouldNotBeSet)?;
+
+                    self.keyset_id = Some(keyset_id.to_owned());
+                    return Ok(Some(keyset_id.to_owned()));
                 } else {
                     return Err(EncryptError::KeysetIdCouldNotBeSet.into());
                 }
@@ -368,7 +372,7 @@ impl Context {
         Ok(None)
     }
 
-    pub fn keyset_id(&mut self) -> Option<String> {
+    pub fn keyset_id(&mut self) -> Option<Uuid> {
         self.keyset_id.to_owned()
     }
 }
@@ -492,6 +496,7 @@ mod tests {
     use eql_mapper::Schema;
     use sqltk::parser::{dialect::PostgreSqlDialect, parser::Parser};
     use std::sync::Arc;
+    use uuid::Uuid;
 
     fn statement() -> Statement {
         Statement {
@@ -748,12 +753,12 @@ mod tests {
 
         let schema = Arc::new(Schema::new("public"));
 
-        let keyset_id = Some("keyset_id".to_string());
+        let keyset_id = Some(Uuid::parse_str("7d4cbd7f-ba0d-4985-9ed2-ebe2ffe77590").unwrap());
 
         let sql = vec![
-            "SET CIPHERSTASH.KEYSET_ID = 'keyset_id'",
-            "SET SESSION CIPHERSTASH.KEYSET_ID = 'keyset_id'",
-            "SET CIPHERSTASH.KEYSET_ID TO 'keyset_id'",
+            "SET CIPHERSTASH.KEYSET_ID = '7d4cbd7f-ba0d-4985-9ed2-ebe2ffe77590'",
+            "SET SESSION CIPHERSTASH.KEYSET_ID = '7d4cbd7f-ba0d-4985-9ed2-ebe2ffe77590'",
+            "SET CIPHERSTASH.KEYSET_ID TO '7d4cbd7f-ba0d-4985-9ed2-ebe2ffe77590'",
         ];
 
         for s in sql {
@@ -791,7 +796,15 @@ mod tests {
         assert!(value.is_none());
 
         // Returns ERROR if SET but badly formatted
-        let sql = "SET CIPHERSTASH.KEYSET_ID = keyset_id";
+        let sql = "SET CIPHERSTASH.KEYSET_ID = d74cbd7fba0d49859ed2ebe2ffe77590";
+        let statement = parse_statement(sql);
+
+        let result = context.maybe_set_keyset_id(&statement);
+
+        assert!(result.is_err());
+
+        // Returns ERROR if SET but not UUIOD
+        let sql = "SET CIPHERSTASH.KEYSET_ID = 'keyset_id'";
         let statement = parse_statement(sql);
 
         let result = context.maybe_set_keyset_id(&statement);
