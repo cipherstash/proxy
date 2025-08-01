@@ -110,6 +110,9 @@ where
             }
         }
 
+        self.context.debug_statements();
+        self.context.debug_execute();
+
         match code {
             Code::Query => {
                 match self.query_handler(&bytes).await {
@@ -199,7 +202,8 @@ where
                 debug!(target: PROTOCOL,
                     client_id = self.context.client_id,
                     msg = "Passthrough",
-                    ?code,
+                    byte = ?code,
+                    code = code.to_string(),
                 );
             }
         }

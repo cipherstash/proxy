@@ -1,4 +1,5 @@
 use bytes::BytesMut;
+use std::fmt;
 
 pub mod authentication;
 pub mod bind;
@@ -19,6 +20,7 @@ pub enum FrontendCode {
     Bind,
     Describe,
     Execute,
+    Flush,
     Parse,
     PasswordMessage,
     Query,
@@ -86,6 +88,7 @@ impl From<FrontendCode> for u8 {
             FrontendCode::Bind => b'B',
             FrontendCode::Describe => b'D',
             FrontendCode::Execute => b'E',
+            FrontendCode::Flush => b'H',
             FrontendCode::Parse => b'P',
             FrontendCode::PasswordMessage => b'p',
             FrontendCode::Query => b'Q',
@@ -104,6 +107,7 @@ impl From<FrontendCode> for char {
             FrontendCode::Bind => 'B',
             FrontendCode::Describe => 'D',
             FrontendCode::Execute => 'E',
+            FrontendCode::Flush => 'H',
             FrontendCode::Parse => 'P',
             FrontendCode::PasswordMessage => 'p',
             FrontendCode::Query => 'Q',
@@ -196,6 +200,53 @@ impl From<BackendCode> for char {
             BackendCode::ReadyForQuery => 'Z',
             BackendCode::RowDescription => 'T',
             BackendCode::Unknown(c) => c,
+        }
+    }
+}
+
+impl fmt::Display for BackendCode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            BackendCode::Authentication => write!(f, "BackendCode::Authentication"),
+            BackendCode::BackendKeyData => write!(f, "BackendCode::BackendKeyData"),
+            BackendCode::BindComplete => write!(f, "BackendCode::BindComplete"),
+            BackendCode::CloseComplete => write!(f, "BackendCode::CloseComplete"),
+            BackendCode::CommandComplete => write!(f, "BackendCode::CommandComplete"),
+            BackendCode::CopyBothResponse => write!(f, "BackendCode::CopyBothResponse"),
+            BackendCode::CopyInResponse => write!(f, "BackendCode::CopyInResponse"),
+            BackendCode::CopyOutResponse => write!(f, "BackendCode::CopyOutResponse"),
+            BackendCode::DataRow => write!(f, "BackendCode::DataRow"),
+            BackendCode::EmptyQueryResponse => write!(f, "BackendCode::EmptyQueryResponse"),
+            BackendCode::ErrorResponse => write!(f, "BackendCode::ErrorResponse"),
+            BackendCode::NoData => write!(f, "BackendCode::NoData"),
+            BackendCode::NoticeResponse => write!(f, "BackendCode::NoticeResponse"),
+            BackendCode::NotificationResponse => write!(f, "BackendCode::NotificationResponse"),
+            BackendCode::ParameterDescription => write!(f, "BackendCode::ParameterDescription"),
+            BackendCode::ParameterStatus => write!(f, "BackendCode::ParameterStatus"),
+            BackendCode::ParseComplete => write!(f, "BackendCode::ParseComplete"),
+            BackendCode::PortalSuspended => write!(f, "BackendCode::PortalSuspended"),
+            BackendCode::ReadyForQuery => write!(f, "BackendCode::ReadyForQuery"),
+            BackendCode::RowDescription => write!(f, "BackendCode::RowDescription"),
+            BackendCode::Unknown(c) => write!(f, "BackendCode::Unknown('{}')", c),
+        }
+    }
+}
+
+impl fmt::Display for FrontendCode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            FrontendCode::Bind => write!(f, "FrontendCode::Bind"),
+            FrontendCode::Describe => write!(f, "FrontendCode::Describe"),
+            FrontendCode::Execute => write!(f, "FrontendCode::Execute"),
+            FrontendCode::Flush => write!(f, "FrontendCode::Flush"),
+            FrontendCode::Parse => write!(f, "FrontendCode::Parse"),
+            FrontendCode::PasswordMessage => write!(f, "FrontendCode::PasswordMessage"),
+            FrontendCode::Query => write!(f, "FrontendCode::Query"),
+            FrontendCode::SASLInitialResponse => write!(f, "FrontendCode::SASLInitialResponse"),
+            FrontendCode::SASLResponse => write!(f, "FrontendCode::SASLResponse"),
+            FrontendCode::Sync => write!(f, "FrontendCode::Sync"),
+            FrontendCode::Terminate => write!(f, "FrontendCode::Terminate"),
+            FrontendCode::Unknown(c) => write!(f, "FrontendCode::Unknown('{}')", c),
         }
     }
 }
