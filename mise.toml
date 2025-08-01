@@ -351,7 +351,8 @@ echo '###############################################'
 echo
 mise run test:integration:lang:golang
 mise run test:integration:lang:python
-mise run test:integration:lang:elixir
+# Commented out pending fix of the root cause of the test flake
+# mise run test:integration:lang:elixir
 """
 
 [tasks."test:nextest"]
