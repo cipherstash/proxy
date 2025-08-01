@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1754012433586,
+  "lastUpdate": 1754013412339,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -10666,6 +10666,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 7.120459,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "toby@cipherstash.com",
+            "name": "Toby Hede",
+            "username": "tobyhede"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "eb5edd4ce52748610ca1e8874bd207ca85e81a8b",
+          "message": "Merge pull request #298 from cipherstash/docs/add-limitations\n\nAdd more notes on json limitations",
+          "timestamp": "2025-08-01T11:53:46+10:00",
+          "tree_id": "7802c947855c28c91ff2475e96f4f521f2fce3fb",
+          "url": "https://github.com/cipherstash/proxy/commit/eb5edd4ce52748610ca1e8874bd207ca85e81a8b"
+        },
+        "date": 1754013410827,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 6.878123,
             "unit": "Number"
           }
         ]
