@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1754076591684,
+  "lastUpdate": 1754077494305,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -10903,6 +10903,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 12.866646,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "cj@cipherstash.com",
+            "name": "CJ Brewer",
+            "username": "calvinbrewer"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "462d123d83749a5db3fc8c038da72f3378a77012",
+          "message": "Merge pull request #301 from cipherstash/blacksmith-migration-6bfbfec\n\n.github/workflows: Migrate workflows to Blacksmith runners",
+          "timestamp": "2025-08-01T13:40:20-06:00",
+          "tree_id": "2e8bb436bf3de0d514c0b7ed27d0cf08b88c55c9",
+          "url": "https://github.com/cipherstash/proxy/commit/462d123d83749a5db3fc8c038da72f3378a77012"
+        },
+        "date": 1754077492949,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 12.778832,
             "unit": "Number"
           }
         ]
