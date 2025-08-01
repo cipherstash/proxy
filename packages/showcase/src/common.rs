@@ -14,11 +14,7 @@ pub const PG_V17_TLS: u16 = 5617;
 
 static INIT: Once = Once::new();
 
-pub async fn reset_schema_to(schema: &'static str) {
-    let port = std::env::var("CS_DATABASE__PORT")
-        .map(|s| s.parse().unwrap())
-        .unwrap_or(PG_LATEST);
-
+pub async fn reset_schema_to(schema: &'static str, port: u16) {
     let client = connect_with_tls(port).await;
     client.simple_query(schema).await.unwrap();
 }
