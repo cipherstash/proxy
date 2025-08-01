@@ -15,6 +15,8 @@
 
 - Encrypt errors:
   - [Column could not be encrypted](#encrypt-column-could-not-be-encrypted)
+  - [KeysetId could not be set](#encrypt-keyset-id-could-not-be-set)
+  - [Column could not be encrypted](#encrypt-column-could-not-be-encrypted)
   - [Plaintext could not be encoded](#encrypt-plaintext-could-not-be-encoded)
   - [Unknown column](#encrypt-unknown-column)
   - [Unknown table](#encrypt-unknown-table)
@@ -269,6 +271,35 @@ The most likely cause is network access to the ZeroKMS service.
 <!-- TODO: Link to ZeroKMS Doc -->
 3. Check that the encrypted configuration `cast` matches the expected type.
 <!-- TODO: Link to config -->
+
+
+
+<!-- ---------------------------------------------------------------------------------------------------- -->
+
+
+## KeysetId could not be set <a id='encrypt-keyset-id-could-not-be-set'></a>
+
+A keyset_id could not be set using the `SET CIPHERSTASH.KEYSET_ID` command.
+
+
+### Error message
+
+```
+A keyset_id could not be set using `SET CIPHERSTASH.KEYSET_ID`
+```
+
+
+### How to Fix
+
+1. Check the syntax of the `SET CIPHERSTASH.KEYSET_ID` command. The `keyset_id` value should be in single quotes.
+
+
+```
+   SET [ SESSION ] CIPHERSTASH.KEYSET_ID { TO | = } '{keyset_id}'
+```
+
+
+
 
 
 

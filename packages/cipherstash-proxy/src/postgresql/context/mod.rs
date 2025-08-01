@@ -9,6 +9,7 @@ use super::{
     Column,
 };
 use crate::{
+    error::{EncryptError, Error},
     log::CONTEXT,
     prometheus::{STATEMENTS_EXECUTION_DURATION_SECONDS, STATEMENTS_SESSION_DURATION_SECONDS},
 };
@@ -38,6 +39,7 @@ pub struct Context {
     session_metrics: Arc<RwLock<SessionMetricsQueue>>,
     table_resolver: Arc<TableResolver>,
     unsafe_disable_mapping: bool,
+    keyset_id: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -113,6 +115,7 @@ impl Context {
             table_resolver: Arc::new(TableResolver::new_editable(schema)),
             client_id,
             unsafe_disable_mapping: false,
+            keyset_id: None,
         }
     }
 
@@ -326,6 +329,47 @@ impl Context {
 
     pub fn unsafe_disable_mapping(&mut self) -> bool {
         self.unsafe_disable_mapping
+    }
+
+    /// Examines a [`sqltk::parser::ast::Statement`] and if it is precisely equal to `SET CIPHERSTASH.KEYSET_ID = {keyset_id};`
+    /// then it sets the [`Context::keyset_id`] to the provided `{keyset_id}`` value.
+    ///
+    ///
+    pub fn maybe_set_keyset_id(
+        &mut self,
+        statement: &sqltk::parser::ast::Statement,
+    ) -> Result<Option<String>, Error> {
+        // The CIPHERSTASH. namespace prevents errors KEYSET_ID
+        // The constants avoid the need to allocate Vecs every time we examine the statement.
+        static SQL_SETTING_NAME_KEYSET_ID: LazyLock<ObjectName> = LazyLock::new(|| {
+            ObjectName(vec![
+                ObjectNamePart::Identifier(Ident::new("CIPHERSTASH")),
+                ObjectNamePart::Identifier(Ident::new("KEYSET_ID")),
+            ])
+        });
+
+        if let sqltk::parser::ast::Statement::Set(Set::SingleAssignment {
+            variable, values, ..
+        }) = statement
+        {
+            if variable == &*SQL_SETTING_NAME_KEYSET_ID {
+                if let Some(Expr::Value(ValueWithSpan {
+                    value: Value::SingleQuotedString(value),
+                    ..
+                })) = values.first()
+                {
+                    self.keyset_id = Some(value.to_owned());
+                    return Ok(Some(value.to_owned()));
+                } else {
+                    return Err(EncryptError::KeysetIdCouldNotBeSet.into());
+                }
+            }
+        }
+        Ok(None)
+    }
+
+    pub fn keyset_id(&mut self) -> Option<String> {
+        self.keyset_id.to_owned()
     }
 }
 
@@ -696,5 +740,62 @@ mod tests {
 
         context.maybe_set_unsafe_disable_mapping(&statement);
         assert!(!context.unsafe_disable_mapping());
+    }
+
+    #[test]
+    pub fn set_keyset_id() {
+        log::init(LogConfig::default());
+
+        let schema = Arc::new(Schema::new("public"));
+
+        let keyset_id = Some("keyset_id".to_string());
+
+        let sql = vec![
+            "SET CIPHERSTASH.KEYSET_ID = 'keyset_id'",
+            "SET SESSION CIPHERSTASH.KEYSET_ID = 'keyset_id'",
+            "SET CIPHERSTASH.KEYSET_ID TO 'keyset_id'",
+        ];
+
+        for s in sql {
+            let mut context = Context::new(1, schema.clone());
+            assert!(context.keyset_id().is_none());
+
+            let statement = parse_statement(s);
+            let result = context.maybe_set_keyset_id(&statement);
+
+            // OK and has a value
+            assert!(result.is_ok());
+            assert!(result.unwrap().is_some());
+
+            // keyset id set
+            assert_eq!(keyset_id, context.keyset_id());
+        }
+    }
+
+    #[test]
+    pub fn set_keyset_id_error_handling() {
+        log::init(LogConfig::default());
+
+        let schema = Arc::new(Schema::new("public"));
+        let mut context = Context::new(1, schema);
+
+        // Returns OK if unknown command
+        let sql = "SET CIPHERSTASH.BLAH = 'keyset_id'";
+        let statement = parse_statement(sql);
+
+        let result = context.maybe_set_keyset_id(&statement);
+        assert!(result.is_ok());
+
+        // Value is NONE as nothing was set
+        let value = result.unwrap();
+        assert!(value.is_none());
+
+        // Returns ERROR if SET but badly formatted
+        let sql = "SET CIPHERSTASH.KEYSET_ID = keyset_id";
+        let statement = parse_statement(sql);
+
+        let result = context.maybe_set_keyset_id(&statement);
+
+        assert!(result.is_err());
     }
 }

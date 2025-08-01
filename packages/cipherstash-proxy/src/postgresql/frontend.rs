@@ -277,7 +277,10 @@ where
             if let Some(mapping_disabled) =
                 self.context.maybe_set_unsafe_disable_mapping(&statement)
             {
-                warn!("SET CIPHERSTASH.DISABLE_MAPPING" = mapping_disabled);
+                warn!(
+                    msg = "SET CIPHERSTASH.DISABLE_MAPPING = {mapping_disabled}",
+                    mapping_disabled
+                );
             }
 
             if self.context.unsafe_disable_mapping() {
@@ -285,6 +288,10 @@ where
                 counter!(STATEMENTS_PASSTHROUGH_MAPPING_DISABLED_TOTAL).increment(1);
                 counter!(STATEMENTS_PASSTHROUGH_TOTAL).increment(1);
                 continue;
+            }
+
+            if let Some(keyset_id) = self.context.maybe_set_keyset_id(&statement)? {
+                warn!(msg = "SET CIPHERSTASH.KEYSET_ID = {keyset_id}", keyset_id);
             }
 
             self.check_for_schema_change(&statement);
@@ -501,7 +508,10 @@ where
         let statement = self.parse_statement(&message.statement)?;
 
         if let Some(mapping_disabled) = self.context.maybe_set_unsafe_disable_mapping(&statement) {
-            warn!("SET CIPHERSTASH.DISABLE_MAPPING" = mapping_disabled);
+            warn!(
+                msg = "SET CIPHERSTASH.DISABLE_MAPPING = {mapping_disabled}",
+                mapping_disabled
+            );
         }
 
         if self.context.unsafe_disable_mapping() {
@@ -509,6 +519,10 @@ where
             counter!(STATEMENTS_PASSTHROUGH_MAPPING_DISABLED_TOTAL).increment(1);
             counter!(STATEMENTS_PASSTHROUGH_TOTAL).increment(1);
             return Ok(None);
+        }
+
+        if let Some(keyset_id) = self.context.maybe_set_keyset_id(&statement)? {
+            warn!(msg = "SET CIPHERSTASH.KEYSET_ID = {keyset_id}", keyset_id);
         }
 
         self.check_for_schema_change(&statement);

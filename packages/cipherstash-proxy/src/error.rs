@@ -230,6 +230,12 @@ pub enum EncryptError {
     #[error("InvalidIndexTerm")]
     InvalidIndexTerm,
 
+    #[error(
+        "A keyset_id could not be set using `SET CIPHERSTASH.KEYSET_ID`. For help visit {}#encrypt-keyset-id-could-not-be-set",
+        ERROR_DOC_BASE_URL
+    )]
+    KeysetIdCouldNotBeSet,
+
     /// This should in practice be unreachable
     #[error("Missing encrypt configuration for column type `{plaintext_type}`. For help visit {}#encrypt-missing-encrypt-configuration", ERROR_DOC_BASE_URL)]
     MissingEncryptConfiguration { plaintext_type: String },
