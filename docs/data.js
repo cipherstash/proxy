@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1754075695457,
+  "lastUpdate": 1754076241291,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -10849,6 +10849,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 7.158148,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "cj@cipherstash.com",
+            "name": "CJ Brewer",
+            "username": "calvinbrewer"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "6bfbfecf87a11db4b7d931dd683bd54f606b76c8",
+          "message": "Merge pull request #300 from cipherstash/eql-2.1.8\n\nchore: PR_BYPASS upgrade eql to 2.1.8",
+          "timestamp": "2025-08-01T13:19:42-06:00",
+          "tree_id": "d4f40af41c7cda0c4d838f8513bddba9d8e06998",
+          "url": "https://github.com/cipherstash/proxy/commit/6bfbfecf87a11db4b7d931dd683bd54f606b76c8"
+        },
+        "date": 1754076239708,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 6.775653,
             "unit": "Number"
           }
         ]
