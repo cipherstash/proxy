@@ -67,7 +67,7 @@ impl TryFrom<&BytesMut> for SASLInitialResponse {
 
         // Note: all password messages use the 'p' code
         if code != b'p' {
-            return Err(ProtocolError::UnexpectedMessageCode {
+            return Err(ProtocolError::UnexpectedMessageCode1 {
                 expected: FrontendCode::SASLInitialResponse.into(),
                 received: code as char,
             }

@@ -60,7 +60,7 @@ impl TryFrom<&BytesMut> for ParamDescription {
         let code = cursor.get_u8();
 
         if BackendCode::from(code) != BackendCode::ParameterDescription {
-            return Err(ProtocolError::UnexpectedMessageCode {
+            return Err(ProtocolError::UnexpectedMessageCode1 {
                 expected: BackendCode::ParameterDescription.into(),
                 received: code as char,
             }

@@ -19,7 +19,7 @@ impl TryFrom<&BytesMut> for Execute {
         let code = cursor.get_u8();
 
         if FrontendCode::from(code) != FrontendCode::Execute {
-            return Err(ProtocolError::UnexpectedMessageCode {
+            return Err(ProtocolError::UnexpectedMessageCode1 {
                 expected: FrontendCode::Execute.into(),
                 received: code as char,
             }

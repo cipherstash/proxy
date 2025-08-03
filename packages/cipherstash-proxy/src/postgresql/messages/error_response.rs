@@ -314,7 +314,7 @@ impl TryFrom<&BytesMut> for ErrorResponse {
         let code = cursor.get_u8();
 
         if BackendCode::from(code) != BackendCode::ErrorResponse {
-            return Err(ProtocolError::UnexpectedMessageCode {
+            return Err(ProtocolError::UnexpectedMessageCode1 {
                 expected: BackendCode::ErrorResponse.into(),
                 received: code as char,
             }

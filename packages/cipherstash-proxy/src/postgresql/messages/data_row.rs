@@ -103,7 +103,7 @@ impl TryFrom<&BytesMut> for DataRow {
         let code = cursor.get_u8();
 
         if BackendCode::from(code) != BackendCode::DataRow {
-            return Err(ProtocolError::UnexpectedMessageCode {
+            return Err(ProtocolError::UnexpectedMessageCode1 {
                 expected: BackendCode::DataRow.into(),
                 received: code as char,
             }

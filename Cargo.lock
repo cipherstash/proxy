@@ -804,6 +804,7 @@ dependencies = [
  "metrics",
  "metrics-exporter-prometheus",
  "oid-registry",
+ "paste",
  "pg_escape",
  "postgres-protocol",
  "postgres-types",

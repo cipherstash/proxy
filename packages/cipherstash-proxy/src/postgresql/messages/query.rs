@@ -42,7 +42,7 @@ impl TryFrom<&BytesMut> for Query {
         let code = cursor.get_u8();
 
         if FrontendCode::from(code) != FrontendCode::Query {
-            return Err(ProtocolError::UnexpectedMessageCode {
+            return Err(ProtocolError::UnexpectedMessageCode1 {
                 expected: FrontendCode::Query.into(),
                 received: code as char,
             }

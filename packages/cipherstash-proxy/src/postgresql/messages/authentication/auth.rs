@@ -139,7 +139,7 @@ impl TryFrom<&BytesMut> for Authentication {
         let code = cursor.get_u8();
 
         if BackendCode::from(code) != BackendCode::Authentication {
-            return Err(ProtocolError::UnexpectedMessageCode {
+            return Err(ProtocolError::UnexpectedMessageCode1 {
                 expected: BackendCode::Authentication.into(),
                 received: code as char,
             }
@@ -247,7 +247,7 @@ impl TryFrom<&BytesMut> for PasswordMessage {
         let code = cursor.get_u8();
 
         if FrontendCode::from(code) != FrontendCode::PasswordMessage {
-            return Err(ProtocolError::UnexpectedMessageCode {
+            return Err(ProtocolError::UnexpectedMessageCode1 {
                 expected: FrontendCode::PasswordMessage.into(),
                 received: code as char,
             }

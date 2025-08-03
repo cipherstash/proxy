@@ -63,7 +63,7 @@ impl TryFrom<&BytesMut> for Describe {
         let code = cursor.get_u8();
 
         if FrontendCode::from(code) != FrontendCode::Describe {
-            return Err(ProtocolError::UnexpectedMessageCode {
+            return Err(ProtocolError::UnexpectedMessageCode1 {
                 expected: FrontendCode::Describe.into(),
                 received: code as char,
             }

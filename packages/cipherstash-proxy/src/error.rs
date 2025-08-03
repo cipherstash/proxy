@@ -277,7 +277,10 @@ pub enum ProtocolError {
     UnexpectedAuthenticationResponse { expected: String, received: i32 },
 
     #[error("Expected {expected} message code, received {received}")]
-    UnexpectedMessageCode { expected: char, received: char },
+    UnexpectedMessageCode1 { expected: char, received: char },
+
+    #[error("Expected {} message code, received {received}", expected.iter().map(ToString::to_string).collect::<Vec<_>>().join(" or "))]
+    UnexpectedMessageCode { expected: Vec<char>, received: char },
 
     #[error("Unexpected message length {len} for code {code}")]
     UnexpectedMessageLength { code: u8, len: usize },

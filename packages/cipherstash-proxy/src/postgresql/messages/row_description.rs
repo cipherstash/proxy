@@ -65,7 +65,7 @@ impl TryFrom<&BytesMut> for RowDescription {
         let code = cursor.get_u8();
 
         if BackendCode::from(code) != BackendCode::RowDescription {
-            return Err(ProtocolError::UnexpectedMessageCode {
+            return Err(ProtocolError::UnexpectedMessageCode1 {
                 expected: BackendCode::RowDescription.into(),
                 received: code as char,
             }

@@ -53,7 +53,7 @@ impl TryFrom<&BytesMut> for Parse {
         let code = cursor.get_u8() as char;
 
         if FrontendCode::from(code) != FrontendCode::Parse {
-            return Err(ProtocolError::UnexpectedMessageCode {
+            return Err(ProtocolError::UnexpectedMessageCode1 {
                 expected: FrontendCode::Parse.into(),
                 received: code,
             }
