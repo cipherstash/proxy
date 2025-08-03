@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1754077553858,
+  "lastUpdate": 1754262561514,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -10986,6 +10986,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 6.897704,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "21381b457c4ce995b39df655642a2cbe97f20e21",
+          "message": "chore: PR_BYPASS upgrade eql to 2.1.8",
+          "timestamp": "2025-08-01T04:47:35Z",
+          "url": "https://github.com/cipherstash/proxy/pull/300/commits/21381b457c4ce995b39df655642a2cbe97f20e21"
+        },
+        "date": 1754262560165,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 6.720538,
             "unit": "Number"
           }
         ]
