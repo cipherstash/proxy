@@ -1,5 +1,6 @@
 use super::context::Context;
 use super::data::to_sql;
+use super::error_handler::PostgreSqlErrorHandler;
 use super::message_buffer::MessageBuffer;
 use super::messages::error_response::ErrorResponse;
 use super::messages::row_description::RowDescription;
@@ -193,7 +194,15 @@ where
             | BackendCode::EmptyQueryResponse
             | BackendCode::PortalSuspended => {
                 debug!(target: PROTOCOL, client_id = self.context.client_id, msg = "CommandComplete | EmptyQueryResponse | PortalSuspended");
-                self.flush().await?;
+
+                match self.flush().await {
+                    Ok(_) => (),
+                    Err(err) => {
+                        warn!(client_id = self.client_id(), error = err.to_string());
+                        self.handle_error(err)?;
+                    }
+                }
+
                 self.context.complete_execution();
                 self.context.finish_session();
             }
@@ -201,7 +210,15 @@ where
                 if let Some(b) = self.error_response_handler(&bytes)? {
                     bytes = b
                 }
-                self.flush().await?;
+
+                match self.flush().await {
+                    Ok(_) => (),
+                    Err(err) => {
+                        warn!(client_id = self.client_id(), error = err.to_string());
+                        self.handle_error(err)?;
+                    }
+                }
+
                 self.context.complete_execution();
                 self.context.finish_session();
             }
@@ -295,7 +312,7 @@ where
     fn error_response_handler(&mut self, bytes: &BytesMut) -> Result<Option<BytesMut>, Error> {
         let error_response = ErrorResponse::try_from(bytes)?;
         error!(msg = "PostgreSQL Error", error = ?error_response);
-        info!(msg = "PostgreSQL Errors are returned from the database");
+        info!(msg = "PostgreSQL Errors originate in the database");
         Ok(Some(bytes.to_owned()))
     }
 
@@ -321,7 +338,14 @@ where
     ///
     pub async fn write_with_flush(&mut self, bytes: BytesMut) -> Result<(), Error> {
         debug!(target: DEVELOPMENT, client_id = self.context.client_id, msg = "Write");
-        self.flush().await?;
+
+        match self.flush().await {
+            Ok(_) => (),
+            Err(err) => {
+                warn!(client_id = self.client_id(), error = err.to_string());
+                self.handle_error(err)?;
+            }
+        }
 
         self.write(bytes).await?;
         Ok(())
@@ -628,5 +652,46 @@ where
                 Ok(false)
             }
         }
+    }
+}
+
+/// Implementation of PostgreSQL error handling for the Backend component.
+impl<R> PostgreSqlErrorHandler for Backend<R>
+where
+    R: AsyncRead + Unpin,
+{
+    fn client_sender(&mut self) -> &mut Sender {
+        &mut self.client_sender
+    }
+
+    fn client_id(&self) -> i32 {
+        self.context.client_id
+    }
+
+    /// Backend-specific error response handling.
+    ///
+    /// Unlike the frontend, the backend doesn't need to set an error state
+    /// since errors during result processing should immediately terminate
+    /// the current query execution.
+    fn send_error_response(&mut self, error_response: ErrorResponse) -> Result<(), Error> {
+        // Ensure any buffered data is cleared before sending error
+        self.buffer.clear();
+
+        let message = BytesMut::try_from(error_response)?;
+
+        debug!(
+            target: "PROTOCOL",
+            client_id = self.context.client_id,
+            msg = "backend_send_error_response",
+            ?message,
+        );
+
+        self.client_sender.send(message)?;
+
+        // Mark execution as complete to clean up state
+        self.context.complete_execution();
+        self.context.finish_session();
+
+        Ok(())
     }
 }

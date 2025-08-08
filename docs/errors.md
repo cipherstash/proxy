@@ -15,8 +15,9 @@
 
 - Encrypt errors:
   - [Column could not be encrypted](#encrypt-column-could-not-be-encrypted)
-  - [KeysetId could not be set](#encrypt-keyset-id-could-not-be-set)
   - [Column could not be encrypted](#encrypt-column-could-not-be-encrypted)
+  - [Could not decrypt data for keyset](#encrypt-encrypt-could-not-decrypt-data-for-keyset)
+  - [KeysetId could not be set](#encrypt-keyset-id-could-not-be-set)
   - [Plaintext could not be encoded](#encrypt-plaintext-could-not-be-encoded)
   - [Unknown column](#encrypt-unknown-column)
   - [Unknown table](#encrypt-unknown-table)
@@ -274,6 +275,7 @@ The most likely cause is network access to the ZeroKMS service.
 
 
 
+
 <!-- ---------------------------------------------------------------------------------------------------- -->
 
 
@@ -288,24 +290,52 @@ A keyset_id could not be set using the `SET CIPHERSTASH.KEYSET_ID` command.
 A keyset_id could not be set using `SET CIPHERSTASH.KEYSET_ID`
 ```
 
-
 ### How to Fix
 
 1. Check the syntax of the `SET CIPHERSTASH.KEYSET_ID` command. The `keyset_id` value should be in single quotes.
 2. Check that the provided `keyset_id` is a valid UUID.
+2. Check that the value is being set as a literal. The PostgreSQL `SET` statement does not support parameterised querying.
 
 
 ```
    SET [ SESSION ] CIPHERSTASH.KEYSET_ID { TO | = } '{keyset_id}'
 ```
 
+<!-- ---------------------------------------------------------------------------------------------------- -->
 
 
+## Could not decrypt data for keyset <a id='encrypt-could-not-decrypt-data-for-keyset'></a>
 
+The data belonging to the active `keyset_id` could not be decrypted.
+
+
+### Error message
+
+```
+Could not decrypt data for keyset '{keyset_id}'
+```
+
+### Notes
+
+This error is caused because the active `keyset_id` does not match the `keyset_id` of the data being decrypted.
+
+Each encrypted record belong to a `keyset` with a unique identifier (the `keyset_id`).
+
+The proxy encrypts data in the currently active `keyset`.
+
+A single default keyset can be defined in the proxy configuration or the `SET CIPHERSTASH.KEYSET_ID` statement can be used to dynamically set the active `keyset` at runtime.
+
+If the `keyset_id` of the record does not match the current `keyset_id` the data cannot be decrypted.
+
+### How to Fix
+
+1. Check that the `keyset_id` in the configuration matches the encrypted records.
+2. If using the `SET CIPHERSTASH.KEYSET_ID` statement, check that this `keyset_id`matches the encrypted records.
+is a valid UUID.
+3. Check that the configured `client` has been granted access to to the `keyset_id`.
 
 
 <!-- ---------------------------------------------------------------------------------------------------- -->
-
 
 
 ## Plaintext could not be encoded <a id='encrypt-plaintext-could-not-be-encoded'></a>
@@ -344,7 +374,9 @@ For example:
 2. Check that the configuration has not changed.
 3. Check [EQL](https://github.com/cipherstash/encrypt-query-language).
 
+
 <!-- ---------------------------------------------------------------------------------------------------- -->
+
 
 ## Unknown Column <a id='encrypt-unknown-column'></a>
 

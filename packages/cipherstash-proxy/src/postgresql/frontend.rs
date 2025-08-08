@@ -1,4 +1,5 @@
 use super::context::{Context, Statement};
+use super::error_handler::PostgreSqlErrorHandler;
 use super::messages::bind::Bind;
 use super::messages::describe::Describe;
 use super::messages::execute::Execute;
@@ -302,16 +303,7 @@ where
     ///
     /// * `err` - The error to be converted and sent to the client
     pub async fn error_handler(&mut self, err: Error) -> Result<(), Error> {
-        let error_response = match err {
-            Error::Mapping(err) => ErrorResponse::invalid_sql_statement(err.to_string()),
-            Error::Encrypt(EncryptError::UnknownColumn {
-                ref table,
-                ref column,
-            }) => ErrorResponse::unknown_column(err.to_string(), table, column),
-            _ => ErrorResponse::system_error(err.to_string()),
-        };
-        self.send_error_response(error_response)?;
-        Ok(())
+        self.handle_error(err)
     }
 
     pub async fn write_to_server(&mut self, bytes: BytesMut) -> Result<(), Error> {
@@ -1192,23 +1184,23 @@ where
         }
     }
 
-    ///
-    /// Send an ErrorResponse to the client and set the Frontend in error state
-    ///
-    fn send_error_response(&mut self, error_response: ErrorResponse) -> Result<(), Error> {
-        let message = BytesMut::try_from(error_response)?;
+    // ///
+    // /// Send an ErrorResponse to the client and set the Frontend in error state
+    // ///
+    // fn send_error_response(&mut self, error_response: ErrorResponse) -> Result<(), Error> {
+    //     let message = BytesMut::try_from(error_response)?;
 
-        debug!(target: PROTOCOL,
-            client_id = self.context.client_id,
-            msg = "send_error_response",
-            ?message,
-        );
+    //     debug!(target: PROTOCOL,
+    //         client_id = self.context.client_id,
+    //         msg = "send_error_response",
+    //         ?message,
+    //     );
 
-        self.client_sender.send(message)?;
-        self.in_error = true;
+    //     self.client_sender.send(message)?;
+    //     self.in_error = true;
 
-        Ok(())
-    }
+    //     Ok(())
+    // }
 
     /// TODO output err as structured data.
     ///      err can carry any additional context from caller
@@ -1263,4 +1255,34 @@ where
     T: ?Sized + Serialize,
 {
     Ok(serde_json::to_string(literal).map(Value::SingleQuotedString)?)
+}
+
+/// Implementation of PostgreSQL error handling for the Frontend component.
+impl<R, W> PostgreSqlErrorHandler for Frontend<R, W>
+where
+    R: AsyncRead + Unpin,
+    W: AsyncWrite + Unpin,
+{
+    fn client_sender(&mut self) -> &mut Sender {
+        &mut self.client_sender
+    }
+
+    fn client_id(&self) -> i32 {
+        self.context.client_id
+    }
+
+    fn send_error_response(&mut self, error_response: ErrorResponse) -> Result<(), Error> {
+        let message = BytesMut::try_from(error_response)?;
+
+        debug!(target: PROTOCOL,
+            client_id = self.context.client_id,
+            msg = "send_error_response",
+            ?message,
+        );
+
+        self.client_sender.send(message)?;
+        self.in_error = true; // Frontend-specific: set error state for extended query protocol
+
+        Ok(())
+    }
 }
