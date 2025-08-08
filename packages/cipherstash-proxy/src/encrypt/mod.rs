@@ -214,8 +214,24 @@ impl Encrypt {
             .filter_map(|(idx, eql)| Some((idx, eql?.body.ciphertext.unwrap())))
             .collect::<_>();
 
-        // Decrypt the ciphertexts
-        let decrypted = cipher.decrypt(encrypted).await?;
+        let decrypted = cipher.decrypt(encrypted).await.map_err(|e| -> Error {
+            match &e {
+                cipherstash_client::zerokms::Error::Decrypt(_) => {
+                    let error_msg = e.to_string();
+                    if error_msg.contains("Failed to retrieve key") {
+                        EncryptError::CouldNotDecryptDataForKeyset {
+                            keyset_id: keyset_id
+                                .map(|id| id.to_string())
+                                .unwrap_or("default_keyset".to_string()),
+                        }
+                        .into()
+                    } else {
+                        e.into()
+                    }
+                }
+                _ => e.into(),
+            }
+        })?;
 
         // Merge the decrypted values as plaintext into their original indexed positions
         for (idx, decrypted) in indices.into_iter().zip(decrypted) {
