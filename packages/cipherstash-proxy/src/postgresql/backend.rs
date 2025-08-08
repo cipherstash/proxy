@@ -23,16 +23,65 @@ use bytes::BytesMut;
 use metrics::{counter, histogram};
 use std::time::Instant;
 use tokio::io::AsyncRead;
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 
+/// The PostgreSQL proxy backend that handles server-to-client message processing.
+///
+/// The Backend intercepts messages from PostgreSQL servers, identifies encrypted data
+/// in query results, performs batch decryption, and forwards decrypted results back to
+/// PostgreSQL clients. It implements efficient batching strategies to minimize decryption
+/// overhead and maintains proper PostgreSQL wire protocol semantics.
+///
+/// # Message Flow
+///
+/// ```text
+/// Server -> Backend -> Client
+///    |         |         |
+///    |   [Intercept]     |
+///    |   [Buffer Rows]   |
+///    |   [Batch Decrypt] |
+///    |   [Format Data]   |
+///    |         |         |
+///    +----> [Forward] ---+
+/// ```
+///
+/// # Key Responsibilities
+///
+/// - **Result Decryption**: Decrypt encrypted column values in query results
+/// - **Batch Processing**: Buffer DataRow messages for efficient batch decryption
+/// - **Format Conversion**: Convert decrypted data to appropriate PostgreSQL wire formats
+/// - **Protocol Compliance**: Maintain PostgreSQL message ordering and semantics
+/// - **Error Handling**: Process and log PostgreSQL error responses
+/// - **Metadata Management**: Handle ParameterDescription and RowDescription messages
+///
+/// # Buffering Strategy
+///
+/// DataRow messages containing encrypted data are buffered to enable batch decryption:
+/// - Buffer fills up to a configurable capacity
+/// - Flush occurs on buffer full, session end, or non-DataRow message
+/// - Batching reduces encryption API round-trips and improves performance
+///
+/// # Message Types Handled
+///
+/// - `DataRow`: Query result rows (buffered for batch decryption)
+/// - `CommandComplete`: Indicates end of query execution (triggers flush)
+/// - `ErrorResponse`: PostgreSQL error messages (logged and forwarded)
+/// - `RowDescription`: Result column metadata (modified for encrypted columns)
+/// - `ParameterDescription`: Parameter metadata (modified for encrypted parameters)
+/// - `ReadyForQuery`: Session ready state (triggers schema reload if needed)
 pub struct Backend<R>
 where
     R: AsyncRead + Unpin,
 {
+    /// Sender for outgoing messages to client
     client_sender: Sender,
+    /// Reader for incoming messages from server
     server_reader: R,
+    /// Encryption service for column decryption
     encrypt: Encrypt,
+    /// Session context with portal and statement metadata
     context: Context,
+    /// Buffer for batching DataRow messages before decryption
     buffer: MessageBuffer,
 }
 
@@ -40,6 +89,14 @@ impl<R> Backend<R>
 where
     R: AsyncRead + Unpin,
 {
+    /// Creates a new Backend instance.
+    ///
+    /// # Arguments
+    ///
+    /// * `client_sender` - Channel sender for sending messages to the client
+    /// * `server_reader` - Stream for reading messages from the PostgreSQL server
+    /// * `encrypt` - Encryption service for handling column decryption
+    /// * `context` - Session context shared with the frontend
     pub fn new(
         client_sender: Sender,
         server_reader: R,
@@ -56,28 +113,46 @@ where
         }
     }
 
+    /// Main message processing loop for handling server messages.
     ///
-    /// An Execute phase is always terminated by the appearance of exactly one of these messages:
-    ///     CommandComplete
-    ///     EmptyQueryResponse
-    ///     ErrorResponse
-    ///     PortalSuspended
+    /// Reads messages from the PostgreSQL server, processes them based on message type,
+    /// performs decryption for encrypted result data, and forwards messages to the client.
     ///
-    /// Describe Flow
-    ///     Describe => [D1, D2]
-    ///         Get -> D1
-    ///         Handle ParameterDescription and/or RowDescription
-    ///         Complete
-    ///     Describe => [D2]
+    /// # PostgreSQL Protocol Phases
     ///
-    /// Execute Flow
-    ///     Execute [E1, E2]
-    ///        Get -> E1
-    ///        Handle DataRow
-    ///               DataRow
+    /// ## Execute Phase
+    /// Execute operations produce a stream of DataRow messages followed by exactly one of:
+    /// - `CommandComplete` - Successful completion
+    /// - `EmptyQueryResponse` - Empty query completed
+    /// - `ErrorResponse` - Error occurred
+    /// - `PortalSuspended` - Portal execution suspended (LIMIT reached)
     ///
+    /// ## Describe Phase
+    /// Describe operations return metadata about statements or portals:
+    /// - `ParameterDescription` - Parameter metadata (for statements)
+    /// - `RowDescription` - Result column metadata
+    /// - `NoData` - No result columns
     ///
+    /// # Message Processing Flow
     ///
+    /// 1. **Read Message**: Read and parse PostgreSQL wire protocol message
+    /// 2. **Check Passthrough**: Skip processing if encryption is disabled
+    /// 3. **Handle by Type**: Route to appropriate handler based on message code
+    /// 4. **Buffer Management**: Buffer DataRows, flush on completion/errors
+    /// 5. **Forward**: Send processed message to PostgreSQL client
+    ///
+    /// # Buffering Behavior
+    ///
+    /// DataRow messages are buffered for batch decryption to improve performance.
+    /// The buffer is automatically flushed when:
+    /// - Buffer reaches capacity
+    /// - Execute phase completes (CommandComplete, ErrorResponse, etc.)
+    /// - Non-DataRow message is encountered
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(())` on successful message processing, or an `Error` if a fatal
+    /// error occurs that should terminate the connection.
     pub async fn rewrite(&mut self) -> Result<(), Error> {
         let connection_timeout = self.encrypt.config.database.connection_timeout();
 
@@ -99,6 +174,9 @@ where
             self.write_with_flush(bytes).await?;
             return Ok(());
         }
+
+        let keyset_id = self.context.keyset_id();
+        warn!(?self.context.client_id, ?keyset_id);
 
         match code.into() {
             BackendCode::DataRow => {
@@ -178,12 +256,42 @@ where
         Ok(())
     }
 
+    /// Handles PostgreSQL ErrorResponse messages from the server.
     ///
-    /// Handle error response messages
-    /// The Frontend triggers an exception in the database for some errors
-    /// These errors are filtered here
-    /// Other Error Responses are logged and passed through
+    /// ErrorResponse messages indicate that an error occurred during SQL execution.
+    /// This handler logs the errors for debugging and monitoring purposes, then
+    /// forwards them to the client unchanged to maintain PostgreSQL compatibility.
     ///
+    /// # Error Types
+    ///
+    /// PostgreSQL can return various types of errors:
+    /// - **Syntax Errors**: Malformed SQL statements
+    /// - **Permission Errors**: Access denied to tables/columns
+    /// - **Constraint Violations**: Primary key, foreign key, etc.
+    /// - **Data Errors**: Type mismatches, invalid values
+    /// - **System Errors**: Connection issues, resource exhaustion
+    ///
+    /// # Proxy Error Integration
+    ///
+    /// Some errors may originate from proxy operations:
+    /// - Encryption/decryption failures propagated as database exceptions
+    /// - Schema validation errors from EQL mapping
+    /// - Key retrieval errors from the encryption service
+    ///
+    /// These proxy-generated errors are formatted as PostgreSQL-compatible
+    /// error responses by the frontend, so they appear as normal database
+    /// errors to maintain client compatibility.
+    ///
+    /// # Logging and Monitoring
+    ///
+    /// All errors are logged at ERROR level for debugging and recorded in
+    /// monitoring systems. This helps track both application-level issues
+    /// and proxy-specific problems.
+    ///
+    /// # Returns
+    ///
+    /// Always returns `Some(bytes)` containing the original error response
+    /// to forward to the client unchanged.
     fn error_response_handler(&mut self, bytes: &BytesMut) -> Result<Option<BytesMut>, Error> {
         let error_response = ErrorResponse::try_from(bytes)?;
         error!(msg = "PostgreSQL Error", error = ?error_response);
@@ -230,11 +338,45 @@ where
         Ok(())
     }
 
+    /// Flushes all buffered DataRow messages by performing batch decryption.
     ///
-    /// Flush all buffered DataRow messages
+    /// This is the core decryption logic that processes buffered DataRow messages,
+    /// extracts encrypted column values, performs batch decryption, and sends the
+    /// decrypted results back to the client in the proper PostgreSQL wire format.
     ///
-    /// Decrypts any configured column values and writes the decrypted values to the client
+    /// # Process Overview
     ///
+    /// 1. **Portal Validation**: Check if current portal requires decryption
+    /// 2. **Data Extraction**: Extract encrypted values from buffered DataRows
+    /// 3. **Batch Decryption**: Send all encrypted values to decryption service
+    /// 4. **Format Conversion**: Convert decrypted plaintext to PostgreSQL wire format
+    /// 5. **Result Assembly**: Reconstruct DataRows with decrypted values
+    /// 6. **Client Delivery**: Send decrypted DataRows to client
+    ///
+    /// # Portal-Based Processing
+    ///
+    /// Decryption behavior is determined by the portal associated with the current execution:
+    /// - **Encrypted Portal**: Contains column metadata for decryption
+    /// - **Passthrough Portal**: No decryption needed, should not have buffered data
+    ///
+    /// # Batch Decryption Benefits
+    ///
+    /// - **Performance**: Single API call for multiple encrypted values
+    /// - **Efficiency**: Reduces network round-trips to encryption service
+    /// - **Consistency**: All values decrypted with same keyset ID
+    ///
+    /// # Format Code Handling
+    ///
+    /// Result columns can be formatted as text or binary based on format codes
+    /// specified in the original Bind message. Decrypted values are properly
+    /// encoded according to these format specifications.
+    ///
+    /// # Error Handling
+    ///
+    /// Decryption errors (including key retrieval failures) are converted to
+    /// appropriate error responses and recorded in metrics. The error mapping
+    /// implemented in the encryption service ensures proper keyset ID context
+    /// is preserved in error messages.
     async fn flush(&mut self) -> Result<(), Error> {
         if self.buffer.is_empty() {
             debug!(target: MAPPER, client_id = self.context.client_id, msg = "Empty buffer");
@@ -282,6 +424,7 @@ where
         self.check_column_config(projection_columns, &ciphertexts)?;
 
         let keyset_id = self.context.keyset_id();
+        warn!(?keyset_id);
 
         // Decrypt CipherText -> Plaintext
         let plaintexts = self
@@ -433,10 +576,40 @@ where
         }
     }
 
+    /// Handles PostgreSQL DataRow messages containing query result data.
     ///
-    /// Handle DataRow messages
-    /// If there is no associated Portal, the row does not require decryption and can be passed through
+    /// DataRow messages contain the actual row data returned by SELECT queries.
+    /// This handler determines whether rows contain encrypted data that needs
+    /// decryption, and either buffers them for batch processing or passes them
+    /// through unchanged.
     ///
+    /// # Processing Decision
+    ///
+    /// The handler examines the portal associated with the current execution:
+    /// - **Encrypted Portal**: Rows may contain encrypted data, buffer for decryption
+    /// - **Passthrough Portal**: Rows contain no encrypted data, forward immediately
+    /// - **No Portal**: No execution context, forward immediately
+    ///
+    /// # Buffering Strategy
+    ///
+    /// Encrypted rows are added to an internal buffer rather than being processed
+    /// immediately. This enables:
+    /// - Batch decryption of multiple encrypted values
+    /// - Improved performance through reduced API calls
+    /// - Better error handling for decryption operations
+    ///
+    /// The buffer is automatically flushed when it reaches capacity or when
+    /// the query execution completes.
+    ///
+    /// # Return Value
+    ///
+    /// Returns `Ok(true)` if the row was buffered (caller should not forward),
+    /// or `Ok(false)` if the row should be forwarded unchanged by the caller.
+    ///
+    /// # Metrics
+    ///
+    /// Records metrics for both encrypted and passthrough row processing to
+    /// track proxy performance and encryption usage patterns.
     async fn data_row_handler(&mut self, bytes: &BytesMut) -> Result<bool, Error> {
         counter!(ROWS_TOTAL).increment(1);
         match self.context.get_portal_from_execute().as_deref() {
