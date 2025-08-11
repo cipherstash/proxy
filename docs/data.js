@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1754875713859,
+  "lastUpdate": 1754878671931,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -11344,6 +11344,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 6.790346,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "toby@cipherstash.com",
+            "name": "Toby Hede",
+            "username": "tobyhede"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "7215bdd4ca03c58503865151043e7f45f6693484",
+          "message": "Merge pull request #303 from cipherstash/multitudes-deployment-integration\n\nSend deployment notification to multitudes",
+          "timestamp": "2025-08-11T12:14:38+10:00",
+          "tree_id": "6af91079e105e215086cd0f848acf7b5b032bc17",
+          "url": "https://github.com/cipherstash/proxy/commit/7215bdd4ca03c58503865151043e7f45f6693484"
+        },
+        "date": 1754878670604,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 6.758372,
             "unit": "Number"
           }
         ]
