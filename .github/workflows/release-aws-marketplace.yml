@@ -105,4 +105,12 @@ jobs:
         run: |
           mise run release:aws-marketplace
 
+      - name: Notify Multitudes
+        run: |
+          curl --request POST \
+            --fail-with-body \
+            --url "https://api.developer.multitudes.co/deployments" \
+            --header "Content-Type: application/json" \
+            --header "Authorization: ${{ secrets.MULTITUDES_ACCESS_TOKEN }}" \
+            --data '{"commitSha": "${{ github.sha }}", "environmentName":"marketplace"}'
 

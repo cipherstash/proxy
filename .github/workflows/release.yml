@@ -128,3 +128,12 @@ jobs:
       - name: Inspect image
         run: |
           docker buildx imagetools inspect ${{ env.REGISTRY_IMAGE }}:${{ steps.meta.outputs.version }}
+
+      - name: Notify Multitudes
+        run: |
+          curl --request POST \
+            --fail-with-body \
+            --url "https://api.developer.multitudes.co/deployments" \
+            --header "Content-Type: application/json" \
+            --header "Authorization: ${{ secrets.MULTITUDES_ACCESS_TOKEN }}" \
+            --data '{"commitSha": "${{ github.sha }}", "environmentName":"dockerhub"}'

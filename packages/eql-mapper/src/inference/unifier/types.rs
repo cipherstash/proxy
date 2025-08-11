@@ -646,15 +646,3 @@ impl From<Array> for Type {
         Type::Value(Value::Array(array))
     }
 }
-
-// Statically assert that `Type` is `Send + Sync`.  If `Type` did not implement `Send` and/or `Sync` this crate would
-// fail to compile anyway but the error message is very obtuse. A failure here makes it obvious.
-const _: () = {
-    fn assert_send<T: Send>() {}
-    fn assert_sync<T: Sync>() {}
-
-    fn assert_all() {
-        assert_send::<Type>();
-        assert_sync::<Type>();
-    }
-};

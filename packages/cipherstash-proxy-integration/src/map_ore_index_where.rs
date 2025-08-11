@@ -73,7 +73,14 @@ mod tests {
 
         // GT: given [1, 3], `> 1` returns [3]
         let sql = format!("SELECT {col_name} FROM encrypted WHERE {col_name} > $1");
-        test_ore_op(&client, col_name, &sql, &[&low], &[high.clone()]).await;
+        test_ore_op(
+            &client,
+            col_name,
+            &sql,
+            &[&low],
+            std::slice::from_ref(&high),
+        )
+        .await;
 
         // GT 2nd case: given [1, 3], `> 3` returns []
         let sql = format!("SELECT {col_name} FROM encrypted WHERE {col_name} > $1");
@@ -81,7 +88,14 @@ mod tests {
 
         // LT: given [1, 3], `< 3` returns [1]
         let sql = format!("SELECT {col_name} FROM encrypted WHERE {col_name} < $1");
-        test_ore_op(&client, col_name, &sql, &[&high], &[low.clone()]).await;
+        test_ore_op(
+            &client,
+            col_name,
+            &sql,
+            &[&high],
+            std::slice::from_ref(&low),
+        )
+        .await;
 
         // LT 2nd case: given [1, 3], `< 3` returns []
         let sql = format!("SELECT {col_name} FROM encrypted WHERE {col_name} < $1");
@@ -116,11 +130,18 @@ mod tests {
 
         // EQ: given [1, 3], `= 1` returns [1]
         let sql = format!("SELECT {col_name} FROM encrypted WHERE {col_name} = $1");
-        test_ore_op(&client, col_name, &sql, &[&low], &[low.clone()]).await;
+        test_ore_op(&client, col_name, &sql, &[&low], std::slice::from_ref(&low)).await;
 
         // NEQ: given [1, 3], `<> 3` returns [1]
         let sql = format!("SELECT {col_name} FROM encrypted WHERE {col_name} <> $1");
-        test_ore_op(&client, col_name, &sql, &[&high], &[low.clone()]).await;
+        test_ore_op(
+            &client,
+            col_name,
+            &sql,
+            &[&high],
+            std::slice::from_ref(&low),
+        )
+        .await;
     }
 
     /// Runs the query and checks the returned results match the expected results.
