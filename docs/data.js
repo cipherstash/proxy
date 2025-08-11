@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1754878671931,
+  "lastUpdate": 1754883277851,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -11373,6 +11373,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 6.758372,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "1fb222014a22d59fcff90fcc31ad0ec257cebea3",
+          "message": "Adds JSONB operator tests for the Python integration suite",
+          "timestamp": "2025-08-11T02:14:42Z",
+          "url": "https://github.com/cipherstash/proxy/pull/277/commits/1fb222014a22d59fcff90fcc31ad0ec257cebea3"
+        },
+        "date": 1754883276579,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 7.032772,
             "unit": "Number"
           }
         ]
