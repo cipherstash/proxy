@@ -149,7 +149,7 @@ impl<'ast> TypeCheckedStatement<'ast> {
     fn make_transformer(
         &self,
         encrypted_literals: HashMap<NodeKey<'ast>, sqltk::parser::ast::Value>,
-    ) -> DryRunnable<impl TransformationRule<'_>> {
+    ) -> DryRunnable<'_, impl TransformationRule<'_>> {
         DryRunnable::new((
             RewriteStandardSqlFnsOnEqlTypes::new(Arc::clone(&self.node_types)),
             PreserveEffectiveAliases,

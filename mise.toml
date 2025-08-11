@@ -31,7 +31,7 @@ CS_PROXY__HOST = "proxy"
 # Misc
 DOCKER_CLI_HINTS = "false" # Please don't show us What's Next.
 
-CS_EQL_VERSION = "eql-2.1.6"
+CS_EQL_VERSION = "eql-2.1.8"
 
 
 [tools]
@@ -342,6 +342,16 @@ echo
 mise --env tls run proxy:up proxy-tls --extra-args "--detach --wait"
 mise --env tls run test:wait_for_postgres_to_quack --port 6432 --max-retries 20 --tls
 cargo nextest run --no-fail-fast --nocapture -E 'package(cipherstash-proxy-integration)'
+mise --env tls run proxy:down
+
+echo
+echo '###############################################'
+echo '# Test: Showcase'
+echo '###############################################'
+echo
+mise --env tls run proxy:up proxy-tls --extra-args "--detach --wait"
+mise --env tls run test:wait_for_postgres_to_quack --port 6432 --max-retries 20 --tls
+RUST_BACKTRACE=full cargo run -p showcase
 mise --env tls run proxy:down
 
 echo
