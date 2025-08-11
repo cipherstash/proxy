@@ -21,7 +21,7 @@ use std::{
     sync::{Arc, LazyLock, RwLock},
     time::{Duration, Instant},
 };
-use tracing::{debug, error};
+use tracing::debug;
 use uuid::Uuid;
 
 type DescribeQueue = Queue<Describe>;

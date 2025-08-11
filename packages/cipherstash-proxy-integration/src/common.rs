@@ -188,7 +188,7 @@ pub async fn query_with_client<T: for<'a> tokio_postgres::types::FromSql<'a> + S
 }
 
 pub fn rows_to_vec<T: for<'a> tokio_postgres::types::FromSql<'a> + Send + Sync>(
-    rows: &Vec<Row>,
+    rows: &[Row],
 ) -> Vec<T> {
     rows.iter().map(|row| row.get(0)).collect::<Vec<T>>()
 }

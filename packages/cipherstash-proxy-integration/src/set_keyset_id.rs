@@ -1,11 +1,9 @@
 #[cfg(test)]
 mod tests {
     use crate::common::{
-        clear, connect_with_tls, execute_query, query_by, query_with_client, random_id,
-        rows_to_vec, trace, PROXY,
+        clear, connect_with_tls, execute_query, query_with_client, random_id, rows_to_vec, trace,
+        PROXY,
     };
-    use serde_json::Value;
-    use tracing::{error, info};
     use uuid::Uuid;
 
     ///
@@ -25,7 +23,7 @@ mod tests {
             .map(|s| Uuid::parse_str(&s).unwrap())
             .unwrap();
 
-        let tenant_keyset_id_2 = std::env::var("CS_TENANT_KEYSET_ID_2")
+        let _tenant_keyset_id_2 = std::env::var("CS_TENANT_KEYSET_ID_2")
             .map(|s| Uuid::parse_str(&s).unwrap())
             .unwrap();
 
@@ -35,7 +33,7 @@ mod tests {
         // // INSERT with DEFAULT keyset
         let default_id = random_id();
         let default_encrypted_val = 1;
-        execute_query(&insert_sql, &[&default_id, &encrypted_val]).await;
+        execute_query(insert_sql, &[&default_id, &default_encrypted_val]).await;
 
         // KEYSET_ID IS SCOPRED TO A CONNECTION
         // The same client/connection is used for tests
@@ -45,6 +43,7 @@ mod tests {
         let rows = client.query(select_sql, &[&default_id]).await.unwrap();
         let actual = rows_to_vec::<i32>(&rows);
         let expected = vec![default_encrypted_val];
+        assert_eq!(expected, actual);
 
         // Test setting keyset_id with single quotes
         let sql = format!("SET CIPHERSTASH.KEYSET_ID = '{tenant_keyset_id_1}'");
@@ -73,7 +72,7 @@ mod tests {
         assert!(result.is_err());
 
         // Use the DEFAULT keyset
-        let sql = format!("SET CIPHERSTASH.KEYSET_ID = '{default_keyset_Id}'");
+        let sql = format!("SET CIPHERSTASH.KEYSET_ID = '{default_keyset_id}'");
         let result = client.query(&sql, &[]).await;
         assert!(result.is_ok(), "Setting keyset_id should succeed");
 
@@ -81,6 +80,7 @@ mod tests {
         let rows = client.query(select_sql, &[&default_id]).await.unwrap();
         let actual = rows_to_vec::<i32>(&rows);
         let expected = vec![default_encrypted_val];
+        assert_eq!(expected, actual);
     }
 
     ///
