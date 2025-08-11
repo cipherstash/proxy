@@ -68,6 +68,7 @@ services:
       - CS_LOG__LEVEL=${CS_LOG__LEVEL:-debug}
       - CS_LOG__PROTOCOL_LEVEL=${CS_LOG__PROTOCOL_LEVEL:-debug}
       - CS_LOG__MAPPER_LEVEL=${CS_LOG__MAPPER_LEVEL:-debug}
+      - CS_LOG__CONTEXT_LEVEL=${CS_LOG__CONTEXT_LEVEL:-debug}
     networks:
       - postgres
     deploy:
@@ -103,7 +104,11 @@ services:
       - CS_SERVER__REQUIRE_TLS=true
       - CS_PROMETHEUS__ENABLED=${CS_PROMETHEUS__ENABLED:-true}
       - CS_WORKSPACE_CRN=${CS_WORKSPACE_CRN}
-
+      - CS_LOG__FORMAT=${CS_LOG__FORMAT:-pretty}
+      - CS_LOG__LEVEL=${CS_LOG__LEVEL:-debug}
+      - CS_LOG__PROTOCOL_LEVEL=${CS_LOG__PROTOCOL_LEVEL:-debug}
+      - CS_LOG__MAPPER_LEVEL=${CS_LOG__MAPPER_LEVEL:-debug}
+      - CS_LOG__CONTEXT_LEVEL=${CS_LOG__CONTEXT_LEVEL:-debug}
     volumes:
       - ./tls/server.cert:/etc/cipherstash-proxy/server.cert
       - ./tls/server.key:/etc/cipherstash-proxy/server.key

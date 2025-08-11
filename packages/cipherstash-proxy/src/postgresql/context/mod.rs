@@ -21,7 +21,7 @@ use std::{
     sync::{Arc, LazyLock, RwLock},
     time::{Duration, Instant},
 };
-use tracing::debug;
+use tracing::{debug, error};
 use uuid::Uuid;
 
 type DescribeQueue = Queue<Describe>;
@@ -40,7 +40,7 @@ pub struct Context {
     session_metrics: Arc<RwLock<SessionMetricsQueue>>,
     table_resolver: Arc<TableResolver>,
     unsafe_disable_mapping: bool,
-    keyset_id: Option<Uuid>,
+    keyset_id: Arc<RwLock<Option<Uuid>>>,
 }
 
 #[derive(Clone, Debug)]
@@ -116,7 +116,7 @@ impl Context {
             table_resolver: Arc::new(TableResolver::new_editable(schema)),
             client_id,
             unsafe_disable_mapping: false,
-            keyset_id: None,
+            keyset_id: Arc::new(RwLock::new(None)),
         }
     }
 
@@ -362,9 +362,16 @@ impl Context {
                     let keyset_id =
                         Uuid::parse_str(value).map_err(|_| EncryptError::KeysetIdCouldNotBeSet)?;
 
-                    self.keyset_id = Some(keyset_id.to_owned());
-                    return Ok(Some(keyset_id.to_owned()));
+                    debug!(target: CONTEXT, client_id = self.client_id, msg = "Setting KeysetId", ?keyset_id);
+
+                    let _ = self
+                        .keyset_id
+                        .write()
+                        .map(|mut guard| *guard = Some(keyset_id));
+
+                    return Ok(Some(keyset_id));
                 } else {
+                    debug!(target: CONTEXT, client_id = self.client_id, msg = "KeysetId could not be set", ?statement);
                     return Err(EncryptError::KeysetIdCouldNotBeSet.into());
                 }
             }
@@ -372,8 +379,8 @@ impl Context {
         Ok(None)
     }
 
-    pub fn keyset_id(&mut self) -> Option<Uuid> {
-        self.keyset_id.to_owned()
+    pub fn keyset_id(&self) -> Option<Uuid> {
+        self.keyset_id.read().ok().and_then(|k| *k)
     }
 }
 

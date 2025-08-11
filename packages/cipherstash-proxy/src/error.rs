@@ -228,7 +228,7 @@ pub enum EncryptError {
     ColumnConfigurationMismatch { table: String, column: String },
 
     #[error(
-        "Could not decrypt data for keyset '{keyset_id}'. For help visit {}#encrypt-could-not-decrypt-data-for-keyset",
+        "Could not decrypt data using keyset '{keyset_id}'. For help visit {}#encrypt-could-not-decrypt-data-for-keyset",
         ERROR_DOC_BASE_URL
     )]
     CouldNotDecryptDataForKeyset { keyset_id: String },

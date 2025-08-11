@@ -329,10 +329,9 @@ If the `keyset_id` of the record does not match the current `keyset_id` the data
 
 ### How to Fix
 
-1. Check that the `keyset_id` in the configuration matches the encrypted records.
-2. If using the `SET CIPHERSTASH.KEYSET_ID` statement, check that this `keyset_id`matches the encrypted records.
-is a valid UUID.
-3. Check that the configured `client` has been granted access to to the `keyset_id`.
+1. Check that the `keyset_id` in the configuration matches the `keyset_id` of the encrypted records.
+2. If using the `SET CIPHERSTASH.KEYSET_ID` statement, check that this `keyset_id` matches the `keyset_id` of the encrypted records.
+3. Check that the configured `client` has been granted access to the `keyset_id`.
 
 
 <!-- ---------------------------------------------------------------------------------------------------- -->

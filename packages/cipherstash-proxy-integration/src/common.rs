@@ -7,7 +7,7 @@ use rustls::{
 };
 use serde_json::Value;
 use std::sync::{Arc, Once};
-use tokio_postgres::{types::ToSql, Client, NoTls, SimpleQueryMessage};
+use tokio_postgres::{types::ToSql, Client, NoTls, Row, SimpleQueryMessage};
 use tracing_subscriber::{filter::Directive, EnvFilter, FmtSubscriber};
 
 pub const PROXY: u16 = 6432;
@@ -184,6 +184,12 @@ pub async fn query_with_client<T: for<'a> tokio_postgres::types::FromSql<'a> + S
     client: &Client,
 ) -> Vec<T> {
     let rows = client.query(sql, &[]).await.unwrap();
+    rows.iter().map(|row| row.get(0)).collect::<Vec<T>>()
+}
+
+pub fn rows_to_vec<T: for<'a> tokio_postgres::types::FromSql<'a> + Send + Sync>(
+    rows: &Vec<Row>,
+) -> Vec<T> {
     rows.iter().map(|row| row.get(0)).collect::<Vec<T>>()
 }
 

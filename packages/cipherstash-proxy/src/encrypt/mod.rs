@@ -95,13 +95,16 @@ impl Encrypt {
     /// Initialize cipher using the stored zerokms_config
     pub async fn init_cipher(&self, keyset_id: Option<Uuid>) -> Result<ScopedCipher, Error> {
         let zerokms_client = self.zerokms_client.clone();
+
+        debug!(target: ENCRYPT, msg="init_cipher", ?keyset_id);
+
         match ScopedCipher::init(zerokms_client, keyset_id).await {
             Ok(cipher) => {
-                debug!(target: ENCRYPT, msg = "Initialized ZeroKMS ScopedCipher");
+                debug!(target: ENCRYPT, msg = "Initialized ZeroKMS ScopedCipher", ?keyset_id);
                 Ok(cipher)
             }
             Err(err) => {
-                debug!(target: ENCRYPT, msg = "Error initializing ZeroKMS ScopedCipher", error = err.to_string());
+                debug!(target: ENCRYPT, msg = "Error initializing ZeroKMS ScopedCipher", ?keyset_id, error = err.to_string());
                 Err(err.into())
             }
         }
@@ -118,7 +121,8 @@ impl Encrypt {
         columns: &[Option<Column>],
     ) -> Result<Vec<Option<eql::EqlEncrypted>>, Error> {
         let keyset_id = keyset_id.or(self.config.encrypt.default_keyset_id);
-        debug!(target: ENCRYPT, ?keyset_id);
+
+        debug!(target: ENCRYPT, msg="Encrypt", ?keyset_id);
 
         let cipher = Arc::new(self.init_cipher(keyset_id).await?);
 
@@ -200,7 +204,7 @@ impl Encrypt {
         ciphertexts: Vec<Option<eql::EqlEncrypted>>,
     ) -> Result<Vec<Option<Plaintext>>, Error> {
         let keyset_id = keyset_id.or(self.config.encrypt.default_keyset_id);
-        debug!(target: ENCRYPT, ?keyset_id);
+        debug!(target: ENCRYPT, msg="Decrypt", ?keyset_id);
 
         let cipher = Arc::new(self.init_cipher(keyset_id).await?);
 
@@ -213,6 +217,8 @@ impl Encrypt {
             .enumerate()
             .filter_map(|(idx, eql)| Some((idx, eql?.body.ciphertext.unwrap())))
             .collect::<_>();
+
+        debug!(target: ENCRYPT, ?encrypted);
 
         let decrypted = cipher.decrypt(encrypted).await.map_err(|e| -> Error {
             match &e {
@@ -336,6 +342,7 @@ fn to_eql_encrypted(
     identifier: &Identifier,
 ) -> Result<eql::EqlEncrypted, Error> {
     debug!(target: ENCRYPT, msg = "Encrypted to EQL", ?identifier);
+
     match encrypted {
         Encrypted::Record(ciphertext, terms) => {
             let mut match_index: Option<Vec<u16>> = None;
@@ -345,6 +352,9 @@ fn to_eql_encrypted(
             let mut ore_cclw_fixed_index: Option<String> = None;
             let mut ore_cclw_var_index: Option<String> = None;
             let mut selector: Option<String> = None;
+
+            warn!("===================================");
+            warn!(target: ENCRYPT, dataset_id = ?ciphertext.dataset_id);
 
             for index_term in terms {
                 match index_term {
