@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1754954582580,
+  "lastUpdate": 1754954711716,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -11673,6 +11673,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 2.496206,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "82e63eebcfe5f3b37f39225bd47600db785b90e4",
+          "message": "Add SET command for run-time configuration of keyset_id",
+          "timestamp": "2025-08-11T02:14:42Z",
+          "url": "https://github.com/cipherstash/proxy/pull/299/commits/82e63eebcfe5f3b37f39225bd47600db785b90e4"
+        },
+        "date": 1754954710187,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 2.717767,
             "unit": "Number"
           }
         ]
