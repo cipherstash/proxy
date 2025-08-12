@@ -242,6 +242,12 @@ pub enum EncryptError {
     )]
     KeysetIdCouldNotBeSet,
 
+    #[error(
+        "A keyset_name could not be set using `SET CIPHERSTASH.KEYSET_NAME`. For help visit {}#encrypt-keyset-id-could-not-be-set",
+        ERROR_DOC_BASE_URL
+    )]
+    KeysetNameCouldNotBeSet,
+
     /// This should in practice be unreachable
     #[error("Missing encrypt configuration for column type `{plaintext_type}`. For help visit {}#encrypt-missing-encrypt-configuration", ERROR_DOC_BASE_URL)]
     MissingEncryptConfiguration { plaintext_type: String },
@@ -254,6 +260,9 @@ pub enum EncryptError {
 
     #[error(transparent)]
     PlaintextCouldNotBeDecoded(#[from] cipherstash_client::encryption::TypeParseError),
+
+    #[error("A keyset cannot be set if a keyset has been configured.")]
+    UnexpectedKeyset,
 
     #[error(
         "Column '{column}' in table '{table}' has no Encrypt configuration. For help visit {}#encrypt-unknown-column",

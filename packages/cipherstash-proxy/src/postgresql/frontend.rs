@@ -400,10 +400,7 @@ where
                 continue;
             }
 
-            if let Some(keyset_id) = self.context.maybe_set_keyset_id(&statement)? {
-                let msg = format!("SET CIPHERSTASH.KEYSET_ID = '{keyset_id}'");
-                warn!(msg, ?keyset_id);
-            }
+            self.handle_keyset_setting(&statement)?;
 
             self.check_for_schema_change(&statement);
 
@@ -670,10 +667,7 @@ where
             return Ok(None);
         }
 
-        if let Some(keyset_id) = self.context.maybe_set_keyset_id(&statement)? {
-            let msg = format!("SET CIPHERSTASH.KEYSET_ID = '{keyset_id}'");
-            warn!(msg, ?keyset_id);
-        }
+        self.handle_keyset_setting(&statement)?;
 
         let keyset_id = self.context.keyset_id();
         // let keyset_id = self.context.keyset_id;
@@ -805,6 +799,22 @@ where
             );
             self.context.set_schema_changed();
         }
+    }
+
+    ///
+    /// Handles keyset setting for statements, with optional validation for unexpected keysets.
+    /// Returns Ok(true) if a keyset was set, Ok(false) if no keyset command was found.
+    ///
+    fn handle_keyset_setting(&mut self, statement: &ast::Statement) -> Result<(), Error> {
+        if let Some(keyset_identifier) = self.context.maybe_set_keyset(statement)? {
+            if self.encrypt.config.encrypt.default_keyset_id.is_some() {
+                return Err(EncryptError::UnexpectedKeyset.into());
+            }
+
+            let msg = format!("SET CIPHERSTASH KEYSET = '{keyset_identifier}'");
+            warn!(msg, ?keyset_identifier);
+        }
+        Ok(())
     }
 
     ///
