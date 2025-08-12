@@ -18,6 +18,7 @@ mod pipeline;
 mod schema_change;
 mod select;
 mod set_keyset_id;
+mod set_keyset_name;
 mod simple_protocol;
 mod support;
 mod update;

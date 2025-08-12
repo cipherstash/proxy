@@ -29,6 +29,21 @@ type ExecuteQueue = Queue<ExecuteContext>;
 type SessionMetricsQueue = Queue<SessionMetricsContext>;
 type PortalQueue = Queue<Arc<Portal>>;
 
+#[derive(Clone, Debug, PartialEq)]
+pub enum KeysetIdentifier {
+    Id(Uuid),
+    Name(String),
+}
+
+impl std::fmt::Display for KeysetIdentifier {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            KeysetIdentifier::Id(uuid) => write!(f, "{}", uuid),
+            KeysetIdentifier::Name(name) => write!(f, "{}", name),
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct Context {
     pub client_id: i32,
@@ -40,7 +55,7 @@ pub struct Context {
     session_metrics: Arc<RwLock<SessionMetricsQueue>>,
     table_resolver: Arc<TableResolver>,
     unsafe_disable_mapping: bool,
-    keyset_id: Arc<RwLock<Option<Uuid>>>,
+    keyset_id: Arc<RwLock<Option<KeysetIdentifier>>>,
 }
 
 #[derive(Clone, Debug)]
@@ -339,7 +354,7 @@ impl Context {
     pub fn maybe_set_keyset_id(
         &mut self,
         statement: &sqltk::parser::ast::Statement,
-    ) -> Result<Option<Uuid>, Error> {
+    ) -> Result<Option<KeysetIdentifier>, Error> {
         // The CIPHERSTASH. namespace prevents errors KEYSET_ID
         // The constants avoid the need to allocate Vecs every time we examine the statement.
         static SQL_SETTING_NAME_KEYSET_ID: LazyLock<ObjectName> = LazyLock::new(|| {
@@ -364,12 +379,13 @@ impl Context {
 
                     debug!(target: CONTEXT, client_id = self.client_id, msg = "Setting KeysetId", ?keyset_id);
 
+                    let identifier = KeysetIdentifier::Id(keyset_id);
                     let _ = self
                         .keyset_id
                         .write()
-                        .map(|mut guard| *guard = Some(keyset_id));
+                        .map(|mut guard| *guard = Some(identifier.clone()));
 
-                    return Ok(Some(keyset_id));
+                    return Ok(Some(identifier));
                 } else {
                     debug!(target: CONTEXT, client_id = self.client_id, msg = "KeysetId could not be set", ?statement);
                     return Err(EncryptError::KeysetIdCouldNotBeSet.into());
@@ -379,8 +395,77 @@ impl Context {
         Ok(None)
     }
 
+    /// Examines a [`sqltk::parser::ast::Statement`] and if it is precisely equal to `SET CIPHERSTASH.KEYSET_NAME = {keyset_name};`
+    /// then it sets the [`Context::keyset_id`] to the provided `{keyset_name}`` value.
+    ///
+    ///
+    pub fn maybe_set_keyset_name(
+        &mut self,
+        statement: &sqltk::parser::ast::Statement,
+    ) -> Result<Option<KeysetIdentifier>, Error> {
+        // The CIPHERSTASH. namespace prevents errors KEYSET_NAME
+        // The constants avoid the need to allocate Vecs every time we examine the statement.
+        static SQL_SETTING_NAME_KEYSET_NAME: LazyLock<ObjectName> = LazyLock::new(|| {
+            ObjectName(vec![
+                ObjectNamePart::Identifier(Ident::new("CIPHERSTASH")),
+                ObjectNamePart::Identifier(Ident::new("KEYSET_NAME")),
+            ])
+        });
+
+        if let sqltk::parser::ast::Statement::Set(Set::SingleAssignment {
+            variable, values, ..
+        }) = statement
+        {
+            if variable == &*SQL_SETTING_NAME_KEYSET_NAME {
+                if let Some(Expr::Value(ValueWithSpan {
+                    value: Value::SingleQuotedString(value),
+                    ..
+                })) = values.first()
+                {
+                    let keyset_name = value.clone();
+
+                    debug!(target: CONTEXT, client_id = self.client_id, msg = "Setting KeysetName", ?keyset_name);
+
+                    let identifier = KeysetIdentifier::Name(keyset_name);
+                    let _ = self
+                        .keyset_id
+                        .write()
+                        .map(|mut guard| *guard = Some(identifier.clone()));
+
+                    return Ok(Some(identifier));
+                } else {
+                    debug!(target: CONTEXT, client_id = self.client_id, msg = "KeysetName could not be set", ?statement);
+                    return Err(EncryptError::KeysetIdCouldNotBeSet.into());
+                }
+            }
+        }
+        Ok(None)
+    }
+
+    /// Single entry point for setting keyset identifiers by either ID or name.
+    /// Tries to set keyset_id first, then keyset_name if that doesn't match.
+    ///
+    pub fn maybe_set_keyset(
+        &mut self,
+        statement: &sqltk::parser::ast::Statement,
+    ) -> Result<Option<KeysetIdentifier>, Error> {
+        match self.maybe_set_keyset_id(statement)? {
+            Some(identifier) => Ok(Some(identifier)),
+            None => self.maybe_set_keyset_name(statement),
+        }
+    }
+
     pub fn keyset_id(&self) -> Option<Uuid> {
-        self.keyset_id.read().ok().and_then(|k| *k)
+        self.keyset_id.read().ok().and_then(|k| {
+            k.as_ref().and_then(|identifier| match identifier {
+                KeysetIdentifier::Id(uuid) => Some(*uuid),
+                KeysetIdentifier::Name(_) => None,
+            })
+        })
+    }
+
+    pub fn keyset_identifier(&self) -> Option<KeysetIdentifier> {
+        self.keyset_id.read().ok().and_then(|k| k.clone())
     }
 }
 
@@ -494,7 +579,7 @@ impl Portal {
 
 #[cfg(test)]
 mod tests {
-    use super::{Context, Describe, Portal, Statement};
+    use super::{Context, Describe, KeysetIdentifier, Portal, Statement};
     use crate::{
         config::LogConfig,
         log,
@@ -777,10 +862,15 @@ mod tests {
 
             // OK and has a value
             assert!(result.is_ok());
-            assert!(result.unwrap().is_some());
+            let identifier = result.unwrap();
+            assert!(identifier.is_some());
 
             // keyset id set
             assert_eq!(keyset_id, context.keyset_id());
+            assert_eq!(
+                Some(KeysetIdentifier::Id(keyset_id.unwrap())),
+                context.keyset_identifier()
+            );
         }
     }
 
@@ -817,5 +907,125 @@ mod tests {
         let result = context.maybe_set_keyset_id(&statement);
 
         assert!(result.is_err());
+    }
+
+    #[test]
+    pub fn set_keyset_name() {
+        log::init(LogConfig::default());
+
+        let schema = Arc::new(Schema::new("public"));
+
+        let sql = vec![
+            "SET CIPHERSTASH.KEYSET_NAME = 'test-keyset'",
+            "SET SESSION CIPHERSTASH.KEYSET_NAME = 'test-keyset'",
+            "SET CIPHERSTASH.KEYSET_NAME TO 'test-keyset'",
+        ];
+
+        for s in sql {
+            let mut context = Context::new(1, schema.clone());
+            assert!(context.keyset_identifier().is_none());
+
+            let statement = parse_statement(s);
+            let result = context.maybe_set_keyset_name(&statement);
+
+            // OK and has a value
+            assert!(result.is_ok());
+            let identifier = result.unwrap();
+            assert!(identifier.is_some());
+
+            // keyset name set
+            assert_eq!(
+                Some(KeysetIdentifier::Name("test-keyset".to_string())),
+                context.keyset_identifier()
+            );
+            assert_eq!(
+                Some(KeysetIdentifier::Name("test-keyset".to_string())),
+                identifier
+            );
+            // keyset_id should return None when set by name
+            assert!(context.keyset_id().is_none());
+        }
+    }
+
+    #[test]
+    pub fn set_keyset_name_error_handling() {
+        log::init(LogConfig::default());
+
+        let schema = Arc::new(Schema::new("public"));
+        let mut context = Context::new(1, schema);
+
+        // Returns OK if unknown command
+        let sql = "SET CIPHERSTASH.BLAH = 'keyset_name'";
+        let statement = parse_statement(sql);
+
+        let result = context.maybe_set_keyset_name(&statement);
+        assert!(result.is_ok());
+
+        // Value is NONE as nothing was set
+        let value = result.unwrap();
+        assert!(value.is_none());
+
+        // Returns ERROR if SET but badly formatted (unquoted)
+        let sql = "SET CIPHERSTASH.KEYSET_NAME = test-keyset";
+        let statement = parse_statement(sql);
+
+        let result = context.maybe_set_keyset_name(&statement);
+        assert!(result.is_err());
+
+        // Returns ERROR if SET with wrong value type (number)
+        let sql = "SET CIPHERSTASH.KEYSET_NAME = 123";
+        let statement = parse_statement(sql);
+
+        let result = context.maybe_set_keyset_name(&statement);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    pub fn maybe_set_keyset_unified_function() {
+        log::init(LogConfig::default());
+
+        let schema = Arc::new(Schema::new("public"));
+
+        // Test that maybe_set_keyset handles both ID and name
+        let mut context = Context::new(1, schema.clone());
+
+        // Test with keyset ID
+        let keyset_id_sql = "SET CIPHERSTASH.KEYSET_ID = '7d4cbd7f-ba0d-4985-9ed2-ebe2ffe77590'";
+        let statement = parse_statement(keyset_id_sql);
+        let result = context.maybe_set_keyset(&statement);
+
+        assert!(result.is_ok());
+        let identifier = result.unwrap();
+        assert!(identifier.is_some());
+        assert_eq!(
+            Some(KeysetIdentifier::Id(
+                Uuid::parse_str("7d4cbd7f-ba0d-4985-9ed2-ebe2ffe77590").unwrap()
+            )),
+            identifier
+        );
+
+        // Test with keyset name
+        let mut context = Context::new(2, schema.clone());
+        let keyset_name_sql = "SET CIPHERSTASH.KEYSET_NAME = 'test-keyset'";
+        let statement = parse_statement(keyset_name_sql);
+        let result = context.maybe_set_keyset(&statement);
+
+        assert!(result.is_ok());
+        let identifier = result.unwrap();
+        assert!(identifier.is_some());
+        assert_eq!(
+            Some(KeysetIdentifier::Name("test-keyset".to_string())),
+            identifier
+        );
+
+        // Test with unknown command
+        let mut context = Context::new(3, schema);
+        let unknown_sql = "SET CIPHERSTASH.UNKNOWN = 'value'";
+        let statement = parse_statement(unknown_sql);
+        let result = context.maybe_set_keyset(&statement);
+
+        assert!(result.is_ok());
+        let identifier = result.unwrap();
+        assert!(identifier.is_none());
     }
 }

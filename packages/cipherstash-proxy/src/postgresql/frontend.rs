@@ -400,9 +400,9 @@ where
                 continue;
             }
 
-            if let Some(keyset_id) = self.context.maybe_set_keyset_id(&statement)? {
-                let msg = format!("SET CIPHERSTASH.KEYSET_ID = '{keyset_id}'");
-                warn!(msg, ?keyset_id);
+            if let Some(keyset_identifier) = self.context.maybe_set_keyset(&statement)? {
+                let msg = format!("SET CIPHERSTASH keyset = '{keyset_identifier}'");
+                warn!(msg, ?keyset_identifier);
             }
 
             self.check_for_schema_change(&statement);
@@ -670,9 +670,9 @@ where
             return Ok(None);
         }
 
-        if let Some(keyset_id) = self.context.maybe_set_keyset_id(&statement)? {
-            let msg = format!("SET CIPHERSTASH.KEYSET_ID = '{keyset_id}'");
-            warn!(msg, ?keyset_id);
+        if let Some(keyset_identifier) = self.context.maybe_set_keyset(&statement)? {
+            let msg = format!("SET CIPHERSTASH keyset = '{keyset_identifier}'");
+            warn!(msg, ?keyset_identifier);
         }
 
         let keyset_id = self.context.keyset_id();
