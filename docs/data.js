@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1754970897682,
+  "lastUpdate": 1754972266181,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -11898,6 +11898,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 2.89968,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "robin@cipherstash.com",
+            "name": "Robin Howard",
+            "username": "damncabbage"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "2715867a293f3ba8a46b591a32c1c10e8ea2e923",
+          "message": "Merge pull request #277 from cipherstash/rh/test/python/jsonb-operators\n\nAdds JSONB tests to the Python integration suite",
+          "timestamp": "2025-08-12T14:14:49+10:00",
+          "tree_id": "76d06edbbc48a0b7bbebd8af2c2c93eb42bed95f",
+          "url": "https://github.com/cipherstash/proxy/commit/2715867a293f3ba8a46b591a32c1c10e8ea2e923"
+        },
+        "date": 1754972264780,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 6.762798,
             "unit": "Number"
           }
         ]
