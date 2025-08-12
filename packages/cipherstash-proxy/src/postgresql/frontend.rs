@@ -1,4 +1,5 @@
 use super::context::{Context, Statement};
+use super::error_handler::PostgreSqlErrorHandler;
 use super::messages::bind::Bind;
 use super::messages::describe::Describe;
 use super::messages::execute::Execute;
@@ -10,7 +11,7 @@ use crate::connect::Sender;
 use crate::encrypt::Encrypt;
 use crate::eql::Identifier;
 use crate::error::{EncryptError, Error, MappingError};
-use crate::log::{MAPPER, PROTOCOL};
+use crate::log::{CONTEXT, MAPPER, PROTOCOL};
 use crate::postgresql::context::column::Column;
 use crate::postgresql::context::Portal;
 use crate::postgresql::data::literal_from_sql;
@@ -43,16 +44,65 @@ use tracing::{debug, error, warn};
 
 const DIALECT: PostgreSqlDialect = PostgreSqlDialect {};
 
+/// The PostgreSQL proxy frontend that handles client-to-server message processing.
+///
+/// The Frontend intercepts messages from PostgreSQL clients, analyzes SQL statements for
+/// encrypted columns, performs encryption transformations, and forwards modified messages
+/// to the PostgreSQL server. It implements the PostgreSQL wire protocol and supports both
+/// simple queries and extended query protocol (prepared statements).
+///
+/// # Message Flow
+///
+/// ```text
+/// Client -> Frontend -> Server
+///    |         |          |
+///    |    [Intercept]     |
+///    |    [Parse SQL]     |
+///    |    [Encrypt]       |
+///    |    [Transform]     |
+///    |         |          |
+///    +-----> [Forward] ---+
+/// ```
+///
+/// # Key Responsibilities
+///
+/// - **SQL Analysis**: Parse and type-check SQL statements against schema
+/// - **Encryption**: Encrypt literal values and bind parameters for configured columns
+/// - **Query Transformation**: Rewrite SQL to use EQL functions for encrypted operations
+/// - **Protocol Handling**: Manage PostgreSQL extended query protocol (Parse/Bind/Execute)
+/// - **Error Management**: Convert encryption errors to PostgreSQL-compatible error responses
+/// - **Context Management**: Track statements, portals, and session state
+///
+/// # Supported PostgreSQL Messages
+///
+/// - `Query`: Simple query protocol with SQL string
+/// - `Parse`: Prepare statement with parameter placeholders
+/// - `Bind`: Bind parameters to prepared statement
+/// - `Execute`: Execute bound statement
+/// - `Describe`: Describe statement or portal metadata
+/// - `Sync`: Synchronization point for extended query protocol
+///
+/// # Error Handling
+///
+/// Encryption and mapping errors are converted to appropriate PostgreSQL error responses
+/// and sent back to the client. The frontend maintains error state to properly handle
+/// the PostgreSQL extended query error recovery protocol.
 pub struct Frontend<R, W>
 where
     R: AsyncRead + Unpin,
     W: AsyncWrite + Unpin,
 {
+    /// Reader for incoming client messages
     client_reader: R,
+    /// Sender for outgoing messages to client
     client_sender: Sender,
+    /// Writer for forwarding messages to server
     server_writer: W,
+    /// Encryption service for column encryption/decryption
     encrypt: Encrypt,
+    /// Session context tracking statements, portals, and keyset IDs
     context: Context,
+    /// Error state flag for extended query protocol error handling
     in_error: bool,
 }
 
@@ -61,6 +111,15 @@ where
     R: AsyncRead + Unpin,
     W: AsyncWrite + Unpin,
 {
+    /// Creates a new Frontend instance.
+    ///
+    /// # Arguments
+    ///
+    /// * `client_reader` - Stream for reading messages from the PostgreSQL client
+    /// * `client_sender` - Channel sender for sending messages back to client
+    /// * `server_writer` - Stream for writing messages to the PostgreSQL server
+    /// * `encrypt` - Encryption service for handling column encryption/decryption
+    /// * `context` - Session context for tracking statements and portals
     pub fn new(
         client_reader: R,
         client_sender: Sender,
@@ -78,6 +137,29 @@ where
         }
     }
 
+    /// Main message processing loop for handling client messages.
+    ///
+    /// Reads a message from the client, processes it based on the PostgreSQL message type,
+    /// performs any necessary encryption/transformation, and forwards it to the server.
+    ///
+    /// # Message Processing Flow
+    ///
+    /// 1. **Read Message**: Read and parse the PostgreSQL wire protocol message
+    /// 2. **Check Mapping**: Skip processing if mapping is disabled
+    /// 3. **Handle by Type**: Route to appropriate handler based on message type
+    /// 4. **Error Recovery**: Handle extended query protocol error states
+    /// 5. **Forward**: Send processed message to PostgreSQL server
+    ///
+    /// # Error States
+    ///
+    /// When an error occurs during extended query processing, the frontend enters
+    /// error state and discards messages until a Sync message is received, following
+    /// the PostgreSQL protocol specification.
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(())` on successful message processing, or an `Error` if a fatal
+    /// error occurs that should terminate the connection.
     pub async fn rewrite(&mut self) -> Result<(), Error> {
         let connection_timeout = self.encrypt.config.database.connection_timeout();
         let (code, mut bytes) = protocol::read_message(
@@ -208,17 +290,20 @@ where
         Ok(())
     }
 
+    /// Handles errors that occur during message processing.
+    ///
+    /// Converts various error types into appropriate PostgreSQL ErrorResponse messages
+    /// and sends them back to the client. This maintains compatibility with PostgreSQL
+    /// clients by providing familiar error formats.
+    ///
+    /// Uses the shared `PostgreSqlErrorHandler` trait implementation for consistent
+    /// error handling across frontend and backend components.
+    ///
+    /// # Arguments
+    ///
+    /// * `err` - The error to be converted and sent to the client
     pub async fn error_handler(&mut self, err: Error) -> Result<(), Error> {
-        let error_response = match err {
-            Error::Mapping(err) => ErrorResponse::invalid_sql_statement(err.to_string()),
-            Error::Encrypt(EncryptError::UnknownColumn {
-                ref table,
-                ref column,
-            }) => ErrorResponse::unknown_column(err.to_string(), table, column),
-            _ => ErrorResponse::system_error(err.to_string()),
-        };
-        self.send_error_response(error_response)?;
-        Ok(())
+        self.handle_error(err)
     }
 
     pub async fn write_to_server(&mut self, bytes: BytesMut) -> Result<(), Error> {
@@ -249,13 +334,38 @@ where
         Ok(())
     }
 
+    /// Handles PostgreSQL Query messages (simple query protocol).
     ///
-    /// Take the SQL Statement from the Query message
-    /// If it contains literal values that map to encrypted configured columns
-    /// Encrypt the values
-    /// Rewrite the statement
-    /// And send it on
+    /// Processes SQL statements that may contain literal values, encrypting any literals
+    /// that correspond to configured encrypted columns and transforming the SQL to use
+    /// appropriate EQL functions for encrypted operations.
     ///
+    /// # Simple Query Protocol
+    ///
+    /// The simple query protocol allows sending SQL statements as strings directly,
+    /// unlike the extended query protocol which separates parsing, binding, and execution.
+    /// This handler supports multiple statements separated by semicolons.
+    ///
+    /// # Processing Steps
+    ///
+    /// 1. **Parse Statements**: Split and parse multiple SQL statements
+    /// 2. **Check Configuration**: Handle CipherStash-specific SET commands
+    /// 3. **Type Check**: Validate statements against database schema
+    /// 4. **Encrypt Literals**: Encrypt any literal values in configured columns
+    /// 5. **Transform**: Apply EQL transformations to encrypted operations
+    /// 6. **Rewrite**: Combine transformed statements back into single query
+    ///
+    /// # Configuration Commands
+    ///
+    /// Supports these CipherStash configuration commands:
+    /// - `SET CIPHERSTASH.DISABLE_MAPPING = {true|false}` - Enable/disable encryption
+    /// - `SET CIPHERSTASH.KEYSET_ID = 'uuid'` - Set encryption keyset ID
+    ///
+    /// # Returns
+    ///
+    /// - `Ok(Some(bytes))` - Transformed query that should replace the original
+    /// - `Ok(None)` - No transformation needed, forward original query
+    /// - `Err(error)` - Processing failed, error should be sent to client
     async fn query_handler(&mut self, bytes: &BytesMut) -> Result<Option<BytesMut>, Error> {
         self.context.start_session();
 
@@ -277,7 +387,10 @@ where
             if let Some(mapping_disabled) =
                 self.context.maybe_set_unsafe_disable_mapping(&statement)
             {
-                warn!("SET CIPHERSTASH.DISABLE_MAPPING" = mapping_disabled);
+                warn!(
+                    msg = "SET CIPHERSTASH.DISABLE_MAPPING = {mapping_disabled}",
+                    mapping_disabled
+                );
             }
 
             if self.context.unsafe_disable_mapping() {
@@ -285,6 +398,11 @@ where
                 counter!(STATEMENTS_PASSTHROUGH_MAPPING_DISABLED_TOTAL).increment(1);
                 counter!(STATEMENTS_PASSTHROUGH_TOTAL).increment(1);
                 continue;
+            }
+
+            if let Some(keyset_id) = self.context.maybe_set_keyset_id(&statement)? {
+                let msg = format!("SET CIPHERSTASH.KEYSET_ID = '{keyset_id}'");
+                warn!(msg, ?keyset_id);
             }
 
             self.check_for_schema_change(&statement);
@@ -371,11 +489,28 @@ where
         }
     }
 
+    /// Encrypts literal values found in SQL statements.
     ///
-    /// Encrypt the literals in the statement using the Column configuration
-    /// Returns the transformed statement as an ast::Statement
+    /// Takes literal values extracted from SQL statements and encrypts those that
+    /// correspond to configured encrypted columns using the current keyset ID.
+    /// This is used for simple queries where values are embedded directly in SQL.
     ///
+    /// # Arguments
     ///
+    /// * `typed_statement` - Type-checked statement containing literal value metadata
+    /// * `literal_columns` - Column configurations for each literal (Some if encrypted, None if not)
+    ///
+    /// # Process
+    ///
+    /// 1. Extract literal values from the typed statement
+    /// 2. Convert values to appropriate plaintext types based on column config
+    /// 3. Batch encrypt all values using the current keyset ID
+    /// 4. Record encryption metrics and timing
+    ///
+    /// # Returns
+    ///
+    /// Vector of encrypted values corresponding to each literal, with `None` for
+    /// literals that don't require encryption and `Some(EqlEncrypted)` for encrypted values.
     async fn encrypt_literals(
         &mut self,
         typed_statement: &TypeCheckedStatement<'_>,
@@ -390,13 +525,21 @@ where
             return Ok(vec![]);
         }
 
+        let keyset_id = self.context.keyset_id();
+        // let keyset_id = self.context.keyset_id;
+
+        error!(target: CONTEXT,
+            client_id = self.context.client_id,
+            ?keyset_id,
+        );
+
         let plaintexts = literals_to_plaintext(literal_values, literal_columns)?;
 
         let start = Instant::now();
 
         let encrypted = self
             .encrypt
-            .encrypt(plaintexts, literal_columns)
+            .encrypt(keyset_id, plaintexts, literal_columns)
             .await
             .inspect_err(|_| {
                 counter!(ENCRYPTION_ERROR_TOTAL).increment(1);
@@ -462,31 +605,44 @@ where
         Ok(Some(transformed_statement))
     }
 
+    /// Handles PostgreSQL Parse messages for the extended query protocol.
     ///
-    /// Parse message handler
-    /// THIS ONE IS VERY IMPORTANT
+    /// Parse messages contain SQL statements with parameter placeholders ($1, $2, etc.)
+    /// that will be bound with actual values in subsequent Bind messages. This handler
+    /// analyzes the SQL, performs any necessary transformations for encrypted columns,
+    /// and stores the statement metadata for later use.
     ///
-    /// Parse messages contain the actual SQL Statement
-    /// Handler handles
-    ///  - parse sql into Statement AST
-    ///  - type check the statement against the schema
-    ///  - collect parameter and projection metadata
-    ///  - add meta data to the Context
+    /// # Extended Query Protocol
     ///
-    /// Context is keyed by message.name and message.name may be empty (Unnamed)
+    /// The extended query protocol consists of:
+    /// 1. **Parse** - Prepare SQL statement with parameters (this handler)
+    /// 2. **Bind** - Bind parameter values to prepared statement
+    /// 3. **Execute** - Execute the bound statement
     ///
-    /// A named statement is essentially a stored procedure.
-    /// Once a named statement has been successfully parsed, the client may refer to the statement
-    /// by name in the Bind step.
+    /// # Statement Naming
     ///
-    /// There is in effect only one Unnamed Statement.
-    /// Subsequent parse messages with an empty name overide the Unnamed Statement.
+    /// - **Named statements**: Can be reused across multiple Bind/Execute cycles
+    /// - **Unnamed statement**: Temporary statement that gets replaced by subsequent Parse messages
     ///
-    /// This is how keys work, if you send the same key with a different statement then you have a different statement?
+    /// # Processing Steps
     ///
-    /// The name is used as key when the Statement is stored in the Context.
+    /// 1. **Parse SQL**: Convert SQL string to AST representation
+    /// 2. **Configuration**: Handle CipherStash SET commands (keyset ID, mapping toggle)
+    /// 3. **Type Checking**: Validate statement against database schema
+    /// 4. **Metadata Collection**: Extract parameter and projection column information
+    /// 5. **Transformation**: Apply EQL transformations for encrypted operations
+    /// 6. **Storage**: Store statement metadata in context for later Bind operations
     ///
+    /// # Parameter Type Handling
     ///
+    /// Parameter types can be specified in the Parse message, overriding schema-derived types.
+    /// This is important for proper parameter encoding/decoding during Bind operations.
+    ///
+    /// # Returns
+    ///
+    /// - `Ok(Some(bytes))` - Modified Parse message with transformed SQL/parameters
+    /// - `Ok(None)` - No transformation needed, forward original message
+    /// - `Err(error)` - Processing failed, error should be sent to client
     async fn parse_handler(&mut self, bytes: &BytesMut) -> Result<Option<BytesMut>, Error> {
         self.context.start_session();
 
@@ -501,7 +657,10 @@ where
         let statement = self.parse_statement(&message.statement)?;
 
         if let Some(mapping_disabled) = self.context.maybe_set_unsafe_disable_mapping(&statement) {
-            warn!("SET CIPHERSTASH.DISABLE_MAPPING" = mapping_disabled);
+            warn!(
+                msg = "SET CIPHERSTASH.DISABLE_MAPPING = {mapping_disabled}",
+                mapping_disabled
+            );
         }
 
         if self.context.unsafe_disable_mapping() {
@@ -510,6 +669,19 @@ where
             counter!(STATEMENTS_PASSTHROUGH_TOTAL).increment(1);
             return Ok(None);
         }
+
+        if let Some(keyset_id) = self.context.maybe_set_keyset_id(&statement)? {
+            let msg = format!("SET CIPHERSTASH.KEYSET_ID = '{keyset_id}'");
+            warn!(msg, ?keyset_id);
+        }
+
+        let keyset_id = self.context.keyset_id();
+        // let keyset_id = self.context.keyset_id;
+
+        error!(target: CONTEXT,
+            client_id = self.context.client_id,
+            ?keyset_id,
+        );
 
         self.check_for_schema_change(&statement);
 
@@ -677,22 +849,49 @@ where
         Ok(Some(statement))
     }
 
+    /// Handles PostgreSQL Bind messages for the extended query protocol.
     ///
-    /// Handle Bind messages
+    /// Bind messages contain parameter values that are bound to prepared statements
+    /// created by previous Parse messages. This handler encrypts parameter values
+    /// that correspond to configured encrypted columns and creates a portal for
+    /// later execution.
     ///
-    /// Flow
+    /// # Extended Query Protocol Flow
     ///
-    ///     Fetch the statement from the context
-    ///     Fetch the statement param types
-    ///         Only configured params have Some(param_type)
+    /// ```text
+    /// Parse    -> Bind         -> Execute
+    /// SQL+$1   -> $1='value'   -> Run query
+    /// ```
     ///
-    ///     For each bind param
-    ///         If Some(param_type) exists
-    ///             Decode the parameter into the correct native type
-    ///             Encrypt the param
-    ///             Update the bind param with the encrypted value
+    /// # Processing Steps
     ///
+    /// 1. **Statement Lookup**: Retrieve prepared statement metadata from context
+    /// 2. **Parameter Processing**: For each parameter that maps to an encrypted column:
+    ///    - Decode parameter value from PostgreSQL wire format
+    ///    - Convert to appropriate plaintext type based on column configuration
+    ///    - Encrypt using current keyset ID
+    ///    - Re-encode in PostgreSQL wire format
+    /// 3. **Portal Creation**: Create portal with encryption metadata for Execute phase
+    /// 4. **Result Format**: Handle result column format codes for decryption
     ///
+    /// # Portal Management
+    ///
+    /// Portals link Bind operations to Execute operations and carry:
+    /// - Statement metadata (parameter/projection column configurations)
+    /// - Result format codes (text vs binary encoding)
+    /// - Encryption state (whether decryption will be needed)
+    ///
+    /// # Parameter Encryption
+    ///
+    /// Only parameters that correspond to configured encrypted columns are processed.
+    /// Other parameters are forwarded unchanged to maintain compatibility with
+    /// standard PostgreSQL operations.
+    ///
+    /// # Returns
+    ///
+    /// - `Ok(Some(bytes))` - Modified Bind message with encrypted parameter values
+    /// - `Ok(None)` - No parameter encryption needed, forward original message
+    /// - `Err(error)` - Processing failed, error should be sent to client
     async fn bind_handler(&mut self, bytes: &BytesMut) -> Result<Option<BytesMut>, Error> {
         if self.context.unsafe_disable_mapping() {
             warn!(msg = "Encrypted statement mapping is not enabled");
@@ -757,11 +956,27 @@ where
 
         debug!(target: MAPPER, client_id = self.context.client_id, plaintexts = ?plaintexts);
 
+        let keyset_id = self.context.keyset_id();
+        // let keyset_id = self.context.keyset_id;
+
+        error!(target: CONTEXT,
+            client_id = self.context.client_id,
+            ?keyset_id,
+        );
+
+        let keyset_id = self.context.keyset_id();
+        // let keyset_id = self.context.keyset_id;
+
+        error!(target: CONTEXT,
+            client_id = self.context.client_id,
+            ?keyset_id,
+        );
+
         let start = Instant::now();
 
         let encrypted = self
             .encrypt
-            .encrypt(plaintexts, &statement.param_columns)
+            .encrypt(keyset_id, plaintexts, &statement.param_columns)
             .await
             .inspect_err(|_| {
                 counter!(ENCRYPTION_ERROR_TOTAL).increment(1);
@@ -969,23 +1184,23 @@ where
         }
     }
 
-    ///
-    /// Send an ErrorResponse to the client and set the Frontend in error state
-    ///
-    fn send_error_response(&mut self, error_response: ErrorResponse) -> Result<(), Error> {
-        let message = BytesMut::try_from(error_response)?;
+    // ///
+    // /// Send an ErrorResponse to the client and set the Frontend in error state
+    // ///
+    // fn send_error_response(&mut self, error_response: ErrorResponse) -> Result<(), Error> {
+    //     let message = BytesMut::try_from(error_response)?;
 
-        debug!(target: PROTOCOL,
-            client_id = self.context.client_id,
-            msg = "send_error_response",
-            ?message,
-        );
+    //     debug!(target: PROTOCOL,
+    //         client_id = self.context.client_id,
+    //         msg = "send_error_response",
+    //         ?message,
+    //     );
 
-        self.client_sender.send(message)?;
-        self.in_error = true;
+    //     self.client_sender.send(message)?;
+    //     self.in_error = true;
 
-        Ok(())
-    }
+    //     Ok(())
+    // }
 
     /// TODO output err as structured data.
     ///      err can carry any additional context from caller
@@ -1040,4 +1255,34 @@ where
     T: ?Sized + Serialize,
 {
     Ok(serde_json::to_string(literal).map(Value::SingleQuotedString)?)
+}
+
+/// Implementation of PostgreSQL error handling for the Frontend component.
+impl<R, W> PostgreSqlErrorHandler for Frontend<R, W>
+where
+    R: AsyncRead + Unpin,
+    W: AsyncWrite + Unpin,
+{
+    fn client_sender(&mut self) -> &mut Sender {
+        &mut self.client_sender
+    }
+
+    fn client_id(&self) -> i32 {
+        self.context.client_id
+    }
+
+    fn send_error_response(&mut self, error_response: ErrorResponse) -> Result<(), Error> {
+        let message = BytesMut::try_from(error_response)?;
+
+        debug!(target: PROTOCOL,
+            client_id = self.context.client_id,
+            msg = "send_error_response",
+            ?message,
+        );
+
+        self.client_sender.send(message)?;
+        self.in_error = true; // Frontend-specific: set error state for extended query protocol
+
+        Ok(())
+    }
 }

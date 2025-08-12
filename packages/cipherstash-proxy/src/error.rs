@@ -227,8 +227,20 @@ pub enum EncryptError {
     #[error("Column configuration for column '{column}' in table '{table}' does not match the encrypted column. For help visit {}#encrypt-column-config-mismatch", ERROR_DOC_BASE_URL)]
     ColumnConfigurationMismatch { table: String, column: String },
 
+    #[error(
+        "Could not decrypt data using keyset '{keyset_id}'. For help visit {}#encrypt-could-not-decrypt-data-for-keyset",
+        ERROR_DOC_BASE_URL
+    )]
+    CouldNotDecryptDataForKeyset { keyset_id: String },
+
     #[error("InvalidIndexTerm")]
     InvalidIndexTerm,
+
+    #[error(
+        "A keyset_id could not be set using `SET CIPHERSTASH.KEYSET_ID`. For help visit {}#encrypt-keyset-id-could-not-be-set",
+        ERROR_DOC_BASE_URL
+    )]
+    KeysetIdCouldNotBeSet,
 
     /// This should in practice be unreachable
     #[error("Missing encrypt configuration for column type `{plaintext_type}`. For help visit {}#encrypt-missing-encrypt-configuration", ERROR_DOC_BASE_URL)]

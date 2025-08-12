@@ -9,6 +9,7 @@ use super::{
     Column,
 };
 use crate::{
+    error::{EncryptError, Error},
     log::CONTEXT,
     prometheus::{STATEMENTS_EXECUTION_DURATION_SECONDS, STATEMENTS_SESSION_DURATION_SECONDS},
 };
@@ -21,6 +22,7 @@ use std::{
     time::{Duration, Instant},
 };
 use tracing::debug;
+use uuid::Uuid;
 
 type DescribeQueue = Queue<Describe>;
 type ExecuteQueue = Queue<ExecuteContext>;
@@ -38,6 +40,7 @@ pub struct Context {
     session_metrics: Arc<RwLock<SessionMetricsQueue>>,
     table_resolver: Arc<TableResolver>,
     unsafe_disable_mapping: bool,
+    keyset_id: Arc<RwLock<Option<Uuid>>>,
 }
 
 #[derive(Clone, Debug)]
@@ -113,6 +116,7 @@ impl Context {
             table_resolver: Arc::new(TableResolver::new_editable(schema)),
             client_id,
             unsafe_disable_mapping: false,
+            keyset_id: Arc::new(RwLock::new(None)),
         }
     }
 
@@ -327,6 +331,57 @@ impl Context {
     pub fn unsafe_disable_mapping(&mut self) -> bool {
         self.unsafe_disable_mapping
     }
+
+    /// Examines a [`sqltk::parser::ast::Statement`] and if it is precisely equal to `SET CIPHERSTASH.KEYSET_ID = {keyset_id};`
+    /// then it sets the [`Context::keyset_id`] to the provided `{keyset_id}`` value.
+    ///
+    ///
+    pub fn maybe_set_keyset_id(
+        &mut self,
+        statement: &sqltk::parser::ast::Statement,
+    ) -> Result<Option<Uuid>, Error> {
+        // The CIPHERSTASH. namespace prevents errors KEYSET_ID
+        // The constants avoid the need to allocate Vecs every time we examine the statement.
+        static SQL_SETTING_NAME_KEYSET_ID: LazyLock<ObjectName> = LazyLock::new(|| {
+            ObjectName(vec![
+                ObjectNamePart::Identifier(Ident::new("CIPHERSTASH")),
+                ObjectNamePart::Identifier(Ident::new("KEYSET_ID")),
+            ])
+        });
+
+        if let sqltk::parser::ast::Statement::Set(Set::SingleAssignment {
+            variable, values, ..
+        }) = statement
+        {
+            if variable == &*SQL_SETTING_NAME_KEYSET_ID {
+                if let Some(Expr::Value(ValueWithSpan {
+                    value: Value::SingleQuotedString(value),
+                    ..
+                })) = values.first()
+                {
+                    let keyset_id =
+                        Uuid::parse_str(value).map_err(|_| EncryptError::KeysetIdCouldNotBeSet)?;
+
+                    debug!(target: CONTEXT, client_id = self.client_id, msg = "Setting KeysetId", ?keyset_id);
+
+                    let _ = self
+                        .keyset_id
+                        .write()
+                        .map(|mut guard| *guard = Some(keyset_id));
+
+                    return Ok(Some(keyset_id));
+                } else {
+                    debug!(target: CONTEXT, client_id = self.client_id, msg = "KeysetId could not be set", ?statement);
+                    return Err(EncryptError::KeysetIdCouldNotBeSet.into());
+                }
+            }
+        }
+        Ok(None)
+    }
+
+    pub fn keyset_id(&self) -> Option<Uuid> {
+        self.keyset_id.read().ok().and_then(|k| *k)
+    }
 }
 
 impl Statement {
@@ -448,6 +503,7 @@ mod tests {
     use eql_mapper::Schema;
     use sqltk::parser::{dialect::PostgreSqlDialect, parser::Parser};
     use std::sync::Arc;
+    use uuid::Uuid;
 
     fn statement() -> Statement {
         Statement {
@@ -696,5 +752,70 @@ mod tests {
 
         context.maybe_set_unsafe_disable_mapping(&statement);
         assert!(!context.unsafe_disable_mapping());
+    }
+
+    #[test]
+    pub fn set_keyset_id() {
+        log::init(LogConfig::default());
+
+        let schema = Arc::new(Schema::new("public"));
+
+        let keyset_id = Some(Uuid::parse_str("7d4cbd7f-ba0d-4985-9ed2-ebe2ffe77590").unwrap());
+
+        let sql = vec![
+            "SET CIPHERSTASH.KEYSET_ID = '7d4cbd7f-ba0d-4985-9ed2-ebe2ffe77590'",
+            "SET SESSION CIPHERSTASH.KEYSET_ID = '7d4cbd7f-ba0d-4985-9ed2-ebe2ffe77590'",
+            "SET CIPHERSTASH.KEYSET_ID TO '7d4cbd7f-ba0d-4985-9ed2-ebe2ffe77590'",
+        ];
+
+        for s in sql {
+            let mut context = Context::new(1, schema.clone());
+            assert!(context.keyset_id().is_none());
+
+            let statement = parse_statement(s);
+            let result = context.maybe_set_keyset_id(&statement);
+
+            // OK and has a value
+            assert!(result.is_ok());
+            assert!(result.unwrap().is_some());
+
+            // keyset id set
+            assert_eq!(keyset_id, context.keyset_id());
+        }
+    }
+
+    #[test]
+    pub fn set_keyset_id_error_handling() {
+        log::init(LogConfig::default());
+
+        let schema = Arc::new(Schema::new("public"));
+        let mut context = Context::new(1, schema);
+
+        // Returns OK if unknown command
+        let sql = "SET CIPHERSTASH.BLAH = 'keyset_id'";
+        let statement = parse_statement(sql);
+
+        let result = context.maybe_set_keyset_id(&statement);
+        assert!(result.is_ok());
+
+        // Value is NONE as nothing was set
+        let value = result.unwrap();
+        assert!(value.is_none());
+
+        // Returns ERROR if SET but badly formatted
+        let sql = "SET CIPHERSTASH.KEYSET_ID = d74cbd7fba0d49859ed2ebe2ffe77590";
+        let statement = parse_statement(sql);
+
+        let result = context.maybe_set_keyset_id(&statement);
+
+        assert!(result.is_err());
+
+        // Returns ERROR if SET but not UUIOD
+        let sql = "SET CIPHERSTASH.KEYSET_ID = 'keyset_id'";
+        let statement = parse_statement(sql);
+
+        let result = context.maybe_set_keyset_id(&statement);
+
+        assert!(result.is_err());
     }
 }

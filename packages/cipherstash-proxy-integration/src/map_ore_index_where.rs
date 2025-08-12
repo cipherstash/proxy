@@ -73,6 +73,7 @@ mod tests {
 
         // GT: given [1, 3], `> 1` returns [3]
         let sql = format!("SELECT {col_name} FROM encrypted WHERE {col_name} > $1");
+
         test_ore_op(
             &client,
             col_name,
