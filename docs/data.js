@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1754972266181,
+  "lastUpdate": 1754973248086,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -11927,6 +11927,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 6.762798,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "toby@cipherstash.com",
+            "name": "Toby Hede",
+            "username": "tobyhede"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "59eb3f2de3067b272da2ef6c6165039575d41b5e",
+          "message": "Merge pull request #299 from cipherstash/set-keyset\n\nAdd SET command for run-time configuration of keyset_id",
+          "timestamp": "2025-08-12T14:31:24+10:00",
+          "tree_id": "c8f1c640e08191cce60f024c4b0151be5e787540",
+          "url": "https://github.com/cipherstash/proxy/commit/59eb3f2de3067b272da2ef6c6165039575d41b5e"
+        },
+        "date": 1754973246957,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 2.863696,
             "unit": "Number"
           }
         ]
