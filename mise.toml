@@ -139,6 +139,15 @@ mise run test:unit
 mise run test:integration
 """
 
+[tasks.check]
+alias = ['c']
+description = "Runs checks"
+run = """
+mise run test:check
+mise run test:format
+mise run test:clippy
+"""
+
 [tasks."reset"]
 alias = 'r'
 description = "Reset database"

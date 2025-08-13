@@ -76,6 +76,9 @@ mise run reset
 # Full test suite (hygiene + unit + integration)
 mise run test
 
+# Hygiene checks only
+mise run check
+
 # Unit tests only
 mise run test:unit [test_name]
 
@@ -111,7 +114,7 @@ Proxy requires CipherStash credentials configured in `mise.local.toml`:
 CS_WORKSPACE_CRN = "crn:region:workspace-id"
 CS_CLIENT_ACCESS_KEY = "your-access-key"
 CS_DEFAULT_KEYSET_ID = "your-keyset-id"
-CS_CLIENT_ID = "your-client-id" 
+CS_CLIENT_ID = "your-client-id"
 CS_CLIENT_KEY = "your-client-key"
 ```
 
@@ -136,7 +139,7 @@ Available targets: `DEVELOPMENT`, `AUTHENTICATION`, `CONTEXT`, `ENCRYPT`, `KEYSE
 
 ### Error Handling
 - All errors defined in `packages/cipherstash-proxy/src/error.rs`
-- Errors grouped by problem domain (not module structure)  
+- Errors grouped by problem domain (not module structure)
 - Customer-facing errors include friendly messages and documentation links
 - Use descriptive variant names without "Error" suffix
 

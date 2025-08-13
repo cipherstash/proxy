@@ -17,9 +17,7 @@ Or with options:
 ## What This Command Does
 
 1. Unless specified with `--no-verify`, automatically runs pre-commit checks:
-   - `cargo clippy` to ensure code quality
-   - `cargo check` to verify the build succeeds
-   - `cargo fmt --check` to ensure consistent code formatting
+   - `mise run check`
 2. Checks which files are staged with `git status`
 3. If 0 files are staged, automatically adds all modified and new files with `git add`
 4. Performs a `git diff` to understand what changes are being committed
