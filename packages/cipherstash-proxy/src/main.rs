@@ -178,8 +178,6 @@ async fn init(mut config: TandemConfig) -> Encrypt {
         info!(msg = "Encrypted statement mapping errors are enabled");
     }
 
-    config.check_obsolete_config();
-
     let _ = rustls::crypto::aws_lc_rs::default_provider()
         .install_default()
         .inspect_err(|err| {

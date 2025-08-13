@@ -7,8 +7,7 @@ use crate::config::LogFormat;
 use crate::error::{ConfigError, Error};
 use crate::Args;
 use cipherstash_client::config::vars::{
-    CS_CLIENT_ACCESS_KEY, CS_CLIENT_ID, CS_CLIENT_KEY, CS_DEFAULT_KEYSET_ID, CS_REGION,
-    CS_WORKSPACE_CRN, CS_WORKSPACE_ID,
+    CS_CLIENT_ACCESS_KEY, CS_CLIENT_ID, CS_CLIENT_KEY, CS_DEFAULT_KEYSET_ID, CS_WORKSPACE_CRN,
 };
 use config::{Config, Environment};
 use cts_common::Crn;
@@ -18,7 +17,6 @@ use std::collections::HashMap;
 use std::env;
 use std::path::PathBuf;
 use std::sync::LazyLock;
-use tracing::warn;
 use uuid::Uuid;
 
 #[derive(Clone, Debug, Deserialize)]
@@ -26,7 +24,6 @@ pub struct TandemConfig {
     #[serde(default)]
     pub server: ServerConfig,
     pub database: DatabaseConfig,
-    #[serde(deserialize_with = "deserialise_auth_config")]
     pub auth: AuthConfig,
     pub encrypt: EncryptConfig,
     pub tls: Option<TlsConfig>,
@@ -37,63 +34,10 @@ pub struct TandemConfig {
     pub development: Option<DevelopmentConfig>,
 }
 
-impl TandemConfig {
-    pub fn check_obsolete_config(&self) {
-        if let Some(workspace_id) = &self.auth.obsolete.workspace_id {
-            warn!(
-                msg = "'workspace_id' is superseded by 'workspace_crn' and will be ignored.",
-                workspace_id = workspace_id
-            );
-        }
-
-        if let Some(region) = &self.auth.obsolete.region {
-            warn!(
-                msg = "'region' is superseded by 'workspace_crn' and will be ignored.",
-                region = region
-            );
-        }
-    }
-}
-
 #[derive(Clone, Debug, Deserialize)]
 pub struct AuthConfig {
     pub workspace_crn: Crn,
     pub client_access_key: String,
-    pub obsolete: ObsoleteAuthConfig,
-}
-
-/// The old auth config values. Used for issuing warnings but never actually used for configuration
-#[derive(Clone, Debug, Deserialize, PartialEq)]
-pub struct ObsoleteAuthConfig {
-    pub workspace_id: Option<String>,
-    pub region: Option<String>,
-}
-
-fn deserialise_auth_config<'de, D>(deserializer: D) -> Result<AuthConfig, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    #[derive(Deserialize)]
-    struct AuthConfigRaw {
-        workspace_crn: Crn,
-        client_access_key: String,
-        // obsolete methods of configuration
-        workspace_id: Option<String>,
-        region: Option<String>,
-    }
-
-    let auth_config_raw = AuthConfigRaw::deserialize(deserializer)?;
-
-    let obsolete_config = ObsoleteAuthConfig {
-        workspace_id: auth_config_raw.workspace_id.clone(),
-        region: auth_config_raw.region.clone(),
-    };
-
-    Ok(AuthConfig {
-        workspace_crn: auth_config_raw.workspace_crn,
-        client_access_key: auth_config_raw.client_access_key,
-        obsolete: obsolete_config,
-    })
 }
 
 #[derive(Debug, Deserialize, Clone, PartialEq)]
@@ -208,14 +152,6 @@ impl TandemConfig {
                             env.insert("CS_AUTH__WORKSPACE_CRN".into(), crn.to_string());
                         })
                         .map_err(|_| ConfigError::InvalidWorkspaceCrn { crn: value })?;
-                }
-
-                if let Ok(value) = std::env::var(CS_WORKSPACE_ID) {
-                    env.insert("CS_AUTH__WORKSPACE_ID".into(), value);
-                }
-
-                if let Ok(value) = std::env::var(CS_REGION) {
-                    env.insert("CS_AUTH__REGION".into(), value);
                 }
 
                 if let Ok(value) = std::env::var(CS_CLIENT_ACCESS_KEY) {
@@ -404,9 +340,7 @@ fn extract_invalid_field(input: &str) -> (String, String) {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::log::{set_format, subscriber};
-    use crate::test_helpers::{with_no_cs_vars, MockMakeWriter};
+    use crate::test_helpers::with_no_cs_vars;
     use crate::{
         config::{tandem::extract_missing_field_and_key, TandemConfig},
         error::Error,
@@ -415,8 +349,6 @@ mod tests {
         CS_CLIENT_ACCESS_KEY, CS_CLIENT_ID, CS_CLIENT_KEY, CS_DEFAULT_KEYSET_ID,
     };
     use std::collections::HashMap;
-    use tracing::dispatcher::set_default;
-    use tracing_subscriber::fmt::writer::BoxMakeWriter;
     use uuid::Uuid;
 
     const CS_PREFIX: &str = "CS_TEST";
@@ -865,93 +797,5 @@ mod tests {
                 );
             })
         })
-    }
-
-    #[test]
-    fn crn_from_toml_with_workspace_id_and_region_env_vars() {
-        let env = merge_env_vars(vec![
-            ("CS_WORKSPACE_ID", Some("DCMBTGHEX5R2RMR4")),
-            ("CS_REGION", Some("us-west-1")),
-        ]);
-
-        with_no_cs_vars(|| {
-            temp_env::with_vars(env, || {
-                // CRN in toml is used
-                let config =
-                    TandemConfig::build("tests/config/cipherstash-proxy-with-crn.toml").unwrap();
-
-                assert_eq!(
-                    "E4UMRN47WJNSMAKR",
-                    config.auth.workspace_crn.workspace_id.to_string()
-                );
-                assert_eq!(
-                    "us-west-1.aws",
-                    config.auth.workspace_crn.region.to_string()
-                );
-
-                // workspace_id and region in env vars are obsolete
-                assert_eq!(
-                    config.auth.obsolete,
-                    ObsoleteAuthConfig {
-                        workspace_id: Some("DCMBTGHEX5R2RMR4".to_string()),
-                        region: Some("us-west-1".to_string()),
-                    }
-                );
-            })
-        });
-    }
-
-    #[test]
-    fn crn_with_workspace_id_or_region_in_toml() {
-        with_no_cs_vars(|| {
-            // CRN in toml is used
-            let config = TandemConfig::build(
-                "tests/config/cipherstash-proxy-with-crn-region-workspace-id.toml",
-            )
-            .unwrap();
-            assert_eq!(
-                "E4UMRN47WJNSMAKR",
-                config.auth.workspace_crn.workspace_id.to_string()
-            );
-            assert_eq!(
-                "us-west-1.aws",
-                config.auth.workspace_crn.region.to_string()
-            );
-
-            // workspace_id and region in toml are obsolete
-            assert_eq!(
-                config.auth.obsolete,
-                ObsoleteAuthConfig {
-                    workspace_id: Some("DCMBTGHEX5R2RMR4".to_string()),
-                    region: Some("ap-southeast-2.aws".to_string()),
-                }
-            );
-        });
-    }
-
-    #[test]
-    fn print_warnings_about_obsolete_config() {
-        let make_writer = MockMakeWriter::default();
-        let config = LogConfig::with_level(LogLevel::Warn);
-        let subscriber =
-            subscriber::builder(&config).with_writer(BoxMakeWriter::new(make_writer.clone()));
-        let subscriber = set_format(&config, subscriber);
-        let _default = set_default(&subscriber.into());
-
-        with_no_cs_vars(|| {
-            let tandem_config = TandemConfig::build(
-                "tests/config/cipherstash-proxy-with-crn-region-workspace-id.toml",
-            )
-            .unwrap();
-
-            tandem_config.check_obsolete_config();
-        });
-
-        let log_contents = make_writer.get_string();
-        assert!(log_contents
-            .contains("'workspace_id' is superseded by 'workspace_crn' and will be ignored."));
-        assert!(
-            log_contents.contains("'region' is superseded by 'workspace_crn' and will be ignored.")
-        );
     }
 }
