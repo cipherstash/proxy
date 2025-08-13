@@ -5,11 +5,9 @@
 /// ErrorResponse messages and sent to clients in a protocol-compliant manner.
 use crate::{
     connect::Sender,
-    error::{EncryptError, Error},
+    error::{EncryptError, Error, MappingError},
     postgresql::messages::error_response::ErrorResponse,
 };
-use bytes::BytesMut;
-use tracing::debug;
 
 /// Trait for components that can send PostgreSQL error responses to clients.
 ///
@@ -37,6 +35,13 @@ pub trait PostgreSqlErrorHandler {
     /// * `err` - The error to be converted to a PostgreSQL ErrorResponse
     fn error_to_response(&self, err: Error) -> ErrorResponse {
         match err {
+            Error::Mapping(MappingError::InvalidParameter(ref column)) => {
+                ErrorResponse::invalid_parameter(
+                    err.to_string(),
+                    &column.table_name(),
+                    &column.column_name(),
+                )
+            }
             Error::Mapping(err) => ErrorResponse::invalid_sql_statement(err.to_string()),
             Error::Encrypt(EncryptError::UnknownColumn {
                 ref table,
@@ -51,36 +56,26 @@ pub trait PostgreSqlErrorHandler {
 
     /// Send an ErrorResponse message to the client.
     ///
-    /// Converts the ErrorResponse to PostgreSQL wire format and sends it
+    /// Converts the error to a PostgreSQL ErrorResponse and sends it
     /// to the client via the component's sender channel.
     ///
     /// # Arguments
     ///
     /// * `error_response` - The ErrorResponse to send to the client
-    fn send_error_response(&mut self, error_response: ErrorResponse) -> Result<(), Error> {
-        let message = BytesMut::try_from(error_response)?;
+    fn send_error_response(&mut self, err: Error) -> Result<(), Error>;
+    // fn send_error_response(&mut self, err: Error) -> Result<(), Error> {
+    //     let error_response = self.error_to_response(err);
 
-        debug!(
-            target: "PROTOCOL",
-            client_id = self.client_id(),
-            msg = "send_error_response",
-            ?message,
-        );
+    //     let message = BytesMut::try_from(error_response)?;
 
-        self.client_sender().send(message)?;
-        Ok(())
-    }
+    //     debug!(
+    //         target: "PROTOCOL",
+    //         client_id = self.client_id(),
+    //         msg = "send_error_response",
+    //         ?message,
+    //     );
 
-    /// Handle an error by converting it to a PostgreSQL ErrorResponse and sending to client.
-    ///
-    /// This is the main error handling entry point that combines error conversion
-    /// and client communication.
-    ///
-    /// # Arguments
-    ///
-    /// * `err` - The error to handle
-    fn handle_error(&mut self, err: Error) -> Result<(), Error> {
-        let error_response = self.error_to_response(err);
-        self.send_error_response(error_response)
-    }
+    //     self.client_sender().send(message)?;
+    //     Ok(())
+    // }
 }

@@ -15,7 +15,7 @@ use crate::log::{CONTEXT, MAPPER, PROTOCOL};
 use crate::postgresql::context::column::Column;
 use crate::postgresql::context::Portal;
 use crate::postgresql::data::literal_from_sql;
-use crate::postgresql::messages::error_response::ErrorResponse;
+use crate::postgresql::messages::ready_for_query::ReadyForQuery;
 use crate::postgresql::messages::terminate::Terminate;
 use crate::postgresql::messages::Name;
 use crate::prometheus::{
@@ -40,7 +40,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
-use tracing::{debug, error, warn};
+use tracing::{debug, error, info, warn};
 
 const DIALECT: PostgreSqlDialect = PostgreSqlDialect {};
 
@@ -204,7 +204,9 @@ where
                                 msg = "Query Error",
                                 error = ?err.to_string(),
                         );
-                        self.error_handler(err).await?;
+                        self.send_error_response(err)?;
+                        self.send_ready_for_query()?;
+                        return Ok(());
                     }
                 }
             }
@@ -225,7 +227,8 @@ where
                                 msg = "Parse Error",
                                 error = ?err.to_string(),
                         );
-                        self.error_handler(err).await?;
+                        self.send_error_response(err)?;
+                        return Ok(());
                     }
                 }
             }
@@ -235,19 +238,14 @@ where
                     // No mapping needed, don't change the bytes
                     Ok(None) => (),
                     Err(err) => match err {
-                        Error::Mapping(MappingError::InvalidParameter(ref column)) => {
+                        Error::Mapping(MappingError::InvalidParameter(_)) => {
                             warn!(target: PROTOCOL,
                                 client_id = self.context.client_id,
                                 msg = "EncryptError::InvalidParameter",
                             );
 
-                            let error_response = ErrorResponse::invalid_parameter(
-                                err.to_string(),
-                                &column.table_name(),
-                                &column.column_name(),
-                            );
-
-                            self.send_error_response(error_response)?;
+                            self.send_error_response(err)?;
+                            return Ok(());
                         }
                         _ => {
                             warn!(target: PROTOCOL,
@@ -274,7 +272,7 @@ where
                         client_id = self.context.client_id,
                         msg = "Clear error state",
                     );
-                    self.in_error = false;
+                    self.send_ready_for_query()?;
                 }
             }
             code => {
@@ -290,23 +288,8 @@ where
         Ok(())
     }
 
-    /// Handles errors that occur during message processing.
-    ///
-    /// Converts various error types into appropriate PostgreSQL ErrorResponse messages
-    /// and sends them back to the client. This maintains compatibility with PostgreSQL
-    /// clients by providing familiar error formats.
-    ///
-    /// Uses the shared `PostgreSqlErrorHandler` trait implementation for consistent
-    /// error handling across frontend and backend components.
-    ///
-    /// # Arguments
-    ///
-    /// * `err` - The error to be converted and sent to the client
-    pub async fn error_handler(&mut self, err: Error) -> Result<(), Error> {
-        self.handle_error(err)
-    }
-
     pub async fn write_to_server(&mut self, bytes: BytesMut) -> Result<(), Error> {
+        debug!(target: PROTOCOL, msg = "Write to server", ?bytes);
         let sent: u64 = bytes.len() as u64;
         counter!(SERVER_BYTES_SENT_TOTAL).increment(sent);
         self.server_writer.write_all(&bytes).await?;
@@ -400,7 +383,7 @@ where
                 continue;
             }
 
-            self.handle_keyset_setting(&statement)?;
+            self.handle_set_keyset(&statement)?;
 
             self.check_for_schema_change(&statement);
 
@@ -422,6 +405,11 @@ where
 
             match self.to_encryptable_statement(&typed_statement, vec![])? {
                 Some(statement) => {
+                    debug!(target: MAPPER,
+                        client_id = self.context.client_id,
+                        msg = "Encryptable Statement",
+                    );
+
                     if typed_statement.requires_transform() {
                         let encrypted_literals = self
                             .encrypt_literals(&typed_statement, &statement.literal_columns)
@@ -440,10 +428,7 @@ where
                             encrypted = true;
                         }
                     }
-                    debug!(target: MAPPER,
-                        client_id = self.context.client_id,
-                        msg = "Encrypted Statement"
-                    );
+
                     counter!(STATEMENTS_ENCRYPTED_TOTAL).increment(1);
 
                     // Set Encrypted portal
@@ -523,7 +508,6 @@ where
         }
 
         let keyset_id = self.context.keyset_id();
-        // let keyset_id = self.context.keyset_id;
 
         error!(target: CONTEXT,
             client_id = self.context.client_id,
@@ -667,7 +651,7 @@ where
             return Ok(None);
         }
 
-        self.handle_keyset_setting(&statement)?;
+        self.handle_set_keyset(&statement)?;
 
         let keyset_id = self.context.keyset_id();
         // let keyset_id = self.context.keyset_id;
@@ -802,17 +786,22 @@ where
     }
 
     ///
-    /// Handles keyset setting for statements, with optional validation for unexpected keysets.
-    /// Returns Ok(true) if a keyset was set, Ok(false) if no keyset command was found.
+    /// Handles `SET CIPHERSTASH KEYSET_*` statements
+    /// If Proxy is configured with a `default_keyset_id` and `SET` is called, returns an error
     ///
-    fn handle_keyset_setting(&mut self, statement: &ast::Statement) -> Result<(), Error> {
+    ///
+    fn handle_set_keyset(&mut self, statement: &ast::Statement) -> Result<(), Error> {
         if let Some(keyset_identifier) = self.context.maybe_set_keyset(statement)? {
             if self.encrypt.config.encrypt.default_keyset_id.is_some() {
+                debug!(target: MAPPER,
+                    client_id = self.context.client_id,
+                    msg = "Unexpected SET CIPHERSTASH.KEYSET",
+                    default_keyset_id = ?self.encrypt.config.encrypt.default_keyset_id,
+                    ?keyset_identifier
+                );
                 return Err(EncryptError::UnexpectedKeyset.into());
             }
-
-            let msg = format!("SET CIPHERSTASH KEYSET = '{keyset_identifier}'");
-            warn!(msg, ?keyset_identifier);
+            info!(msg = "SET CIPHERSTASH.KEYSET", ?keyset_identifier);
         }
         Ok(())
     }
@@ -1194,23 +1183,23 @@ where
         }
     }
 
-    // ///
-    // /// Send an ErrorResponse to the client and set the Frontend in error state
-    // ///
-    // fn send_error_response(&mut self, error_response: ErrorResponse) -> Result<(), Error> {
-    //     let message = BytesMut::try_from(error_response)?;
+    ///
+    /// Send an ReadyForQuery to the client and remove error state.
+    ///
+    fn send_ready_for_query(&mut self) -> Result<(), Error> {
+        let message = BytesMut::from(ReadyForQuery);
 
-    //     debug!(target: PROTOCOL,
-    //         client_id = self.context.client_id,
-    //         msg = "send_error_response",
-    //         ?message,
-    //     );
+        debug!(target: PROTOCOL,
+            client_id = self.context.client_id,
+            msg = "send_ready_for_query",
+            ?message,
+        );
 
-    //     self.client_sender.send(message)?;
-    //     self.in_error = true;
+        self.client_sender.send(message)?;
+        self.in_error = false;
 
-    //     Ok(())
-    // }
+        Ok(())
+    }
 
     /// TODO output err as structured data.
     ///      err can carry any additional context from caller
@@ -1281,7 +1270,8 @@ where
         self.context.client_id
     }
 
-    fn send_error_response(&mut self, error_response: ErrorResponse) -> Result<(), Error> {
+    fn send_error_response(&mut self, err: Error) -> Result<(), Error> {
+        let error_response = self.error_to_response(err);
         let message = BytesMut::try_from(error_response)?;
 
         debug!(target: PROTOCOL,

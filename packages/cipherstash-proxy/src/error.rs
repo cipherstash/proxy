@@ -261,6 +261,9 @@ pub enum EncryptError {
     #[error(transparent)]
     PlaintextCouldNotBeDecoded(#[from] cipherstash_client::encryption::TypeParseError),
 
+    #[error("Missing keyset identifer.")]
+    MissingKeysetIdentifier,
+
     #[error("A keyset cannot be set if a keyset has been configured.")]
     UnexpectedKeyset,
 
