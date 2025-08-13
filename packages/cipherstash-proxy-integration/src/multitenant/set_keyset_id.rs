@@ -1,10 +1,8 @@
 #[cfg(test)]
 mod tests {
     use crate::common::{
-        clear, connect_with_tls, execute_query, query_with_client, random_id, rows_to_vec, trace,
-        PROXY,
+        clear, connect_with_tls, random_id, rows_to_vec, simple_query_with_client, trace, PROXY,
     };
-    use tracing::error;
     use uuid::Uuid;
 
     ///
@@ -103,7 +101,7 @@ mod tests {
         // DEFAULT_KEYSET_ID SHOULD BE DISABLED FOR THIS TEST
         // SET KEYSET IS REQUIRED
         let sql = "INSERT INTO encrypted (id, encrypted_text) VALUES (1, 'hello')";
-        let result = client.simple_query(&sql).await;
+        let result = client.simple_query(sql).await;
         assert!(result.is_err());
 
         // // THIS IS COUNTER INTUITIVE
@@ -123,6 +121,7 @@ mod tests {
         // // INSERT
         let tenant_1_id = random_id();
         let encrypted_text = "hello";
+        let expected = vec![encrypted_text];
 
         let sql = format!(
             "INSERT INTO encrypted (id, encrypted_text) VALUES ({}, '{}')",
@@ -133,11 +132,9 @@ mod tests {
         assert!(result.is_ok());
 
         // SELECT
-        let sql = format!("SELECT id, encrypted_text FROM encrypted WHERE id = {tenant_1_id}");
-        let rows = client.simple_query(&sql).await.unwrap();
-        let actual = rows_to_vec::<i32>(&rows);
+        let sql = format!("SELECT encrypted_text FROM encrypted WHERE id = {tenant_1_id}");
+        let actual = simple_query_with_client::<String>(&sql, &client).await;
 
-        let expected = vec![encrypted_text];
         assert_eq!(expected, actual);
 
         //  --------
@@ -180,60 +177,73 @@ mod tests {
             .map(|s| Uuid::parse_str(&s).unwrap())
             .unwrap();
 
-        // Client 1 sets a keyset_id
-        let client1 = connect_with_tls(PROXY).await;
-        let sql = format!("SET CIPHERSTASH.KEYSET_ID = '{tenant_keyset_id_1}'");
-        let result = client1.query(&sql, &[]).await;
-        assert!(result.is_ok(), "Client 1 should be able to set keyset_id");
-
-        // Client 2 should not be affected by client 1's keyset_id setting
-        let client2 = connect_with_tls(PROXY).await;
-
         // Both clients should be able to perform operations independently
-        let id1 = random_id();
-        let id2 = random_id();
-        let text1 = "client1 data".to_string();
-        let text2 = "client2 data".to_string();
+        let tenant_1_id = random_id();
+        let tenant_2_id = random_id();
+        let tenant_1_text = "TENANT_1".to_string();
+        let tenant_2_text = "TENANT_2".to_string();
+
+        let tenant_1_client = connect_with_tls(PROXY).await;
+        let tenant_2_client = connect_with_tls(PROXY).await;
+
+        // DEFAULT_KEYSET_ID SHOULD BE DISABLED FOR THIS TEST
+        // SET KEYSET IS REQUIRED
+        let sql = "INSERT INTO encrypted (id, encrypted_text) VALUES (1, 'hello')";
+        let result = tenant_1_client.simple_query(sql).await;
+        assert!(result.is_err());
+
+        let sql = format!("SET CIPHERSTASH.KEYSET_ID = '{tenant_keyset_id_1}'");
+        let result = tenant_1_client.query(&sql, &[]).await;
+        assert!(result.is_ok());
+
+        // TENANT_2 has no keyset, INSERT should fail
+        let sql = "INSERT INTO encrypted (id, encrypted_text) VALUES (1, 'hello')";
+        let result = tenant_2_client.simple_query(sql).await;
+        assert!(result.is_err());
+
+        let sql = format!("SET CIPHERSTASH.KEYSET_ID = '{tenant_keyset_id_2}'");
+        let result = tenant_2_client.query(&sql, &[]).await;
+        assert!(result.is_ok());
+
+        // ------------------
 
         let insert_sql = "INSERT INTO encrypted (id, encrypted_text) VALUES ($1, $2)";
 
-        // Client 1 insert (has keyset_id set)
-        let result1 = client1.query(insert_sql, &[&id1, &text1]).await;
-        assert!(result1.is_ok(), "Client 1 insert should succeed");
+        // TENANT_1 INSERT
+        let result = tenant_1_client
+            .query(insert_sql, &[&tenant_1_id, &tenant_1_text])
+            .await;
+        assert!(result.is_ok());
 
-        // Client 2 insert (no keyset_id set)
-        let result2 = client2.query(insert_sql, &[&id2, &text2]).await;
-        assert!(result2.is_ok(), "Client 2 insert should succeed");
+        // TENANT_2 INSERT
+        let result = tenant_2_client
+            .query(insert_sql, &[&tenant_2_id, &tenant_2_text])
+            .await;
+        assert!(result.is_ok());
 
-        //  --------
-        // Client 2 can now set its own keyset_id
-        let sql = format!("SET CIPHERSTASH.KEYSET_ID = '{tenant_keyset_id_2}'");
-        let result = client2.query(&sql, &[]).await;
-        assert!(result.is_ok(),);
+        // ------------------
 
-        //  --------
-        // SELECT with Client 1
-        let sql = format!("SELECT encrypted_text FROM encrypted WHERE id = {id1}");
-        let rows = query_with_client::<String>(&sql, &client1).await;
-        assert_eq!(rows.len(), 1);
-        assert_eq!(rows[0], text1);
+        // SELECT TENANT_1 record with TENANT_2 should fail
+        let sql = format!("SELECT id, encrypted_text FROM encrypted WHERE id = {tenant_1_id}");
+        let result = tenant_1_client.simple_query(&sql).await;
+        assert!(result.is_ok());
 
-        // // SELECT with Client 2 (which is now TENANT 2) is an error
-        let sql = format!("SELECT encrypted_text FROM encrypted WHERE id = {id2}");
-        let result = client2.query(&sql, &[]).await;
-        assert!(result.is_err(),);
+        // SELECT TENANT_2 record with TENANT_1 should fail
+        let sql = format!("SELECT id, encrypted_text FROM encrypted WHERE id = {tenant_2_id}");
+        let result = tenant_1_client.simple_query(&sql).await;
+        assert!(result.is_err());
 
-        //  --------
-        // Client 2 sets DEFAULT
-        // let sql = format!("SET CIPHERSTASH.KEYSET_ID = '{default_keyset_id}'");
-        // let result = client2.query(&sql, &[]).await;
-        // assert!(result.is_ok(),);
+        // ------------------
 
-        // // SELECT with Client 2 (which is now TENANT 2) is an error
-        // let sql = format!("SELECT encrypted_text FROM encrypted WHERE id = {id2}");
-        // let rows = query_with_client::<String>(&sql, &client2).await;
-        // assert_eq!(rows.len(), 1);
-        // assert_eq!(rows[0], text2);
+        // SELECT TENANT_2 record with TENANT_1 should fail
+        let sql = format!("SELECT id, encrypted_text FROM encrypted WHERE id = {tenant_2_id}");
+        let result = tenant_2_client.simple_query(&sql).await;
+        assert!(result.is_ok());
+
+        // SELECT TENANT_1 record with TENANT_2 should fail
+        let sql = format!("SELECT id, encrypted_text FROM encrypted WHERE id = {tenant_1_id}");
+        let result = tenant_2_client.simple_query(&sql).await;
+        assert!(result.is_err());
     }
 
     ///

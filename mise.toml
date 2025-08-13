@@ -351,7 +351,26 @@ echo
 mise --env tls run proxy:up proxy-tls --extra-args "--detach --wait"
 mise --env tls run test:wait_for_postgres_to_quack --port 6432 --max-retries 20 --tls
 cargo nextest run --no-fail-fast --nocapture -E 'package(cipherstash-proxy-integration)'
+cargo nextest run --no-fail-fast --nocapture -E 'package(cipherstash-proxy-integration) and not test(multitenant)'
 mise --env tls run proxy:down
+
+echo
+echo '###############################################'
+echo '# Test: Multitenant Integration'
+echo '###############################################'
+echo
+
+mise --env tls run proxy:up proxy-tls --extra-args "--detach --wait"
+mise --env tls run test:wait_for_postgres_to_quack --port 6432 --max-retries 20 --tls
+
+{% set default_keyset_id = env.CS_DEFAULT_KEYSET_ID %}
+echo "unset CS_DEFAULT_KEYSET_ID"
+unset CS_DEFAULT_KEYSET_ID
+cargo nextest run --no-fail-fast --nocapture -E 'package(cipherstash-proxy-integration) and test(multitenant)'
+mise --env tls run proxy:down
+echo "set CS_DEFAULT_KEYSET_ID = {{default_keyset_id}}"
+export CS_DEFAULT_KEYSET_ID = {{default_keyset_id}}
+
 
 echo
 echo '###############################################'

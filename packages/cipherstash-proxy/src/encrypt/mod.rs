@@ -123,10 +123,8 @@ impl Encrypt {
         debug!(target: ENCRYPT, msg="Encrypt", ?keyset_id, default_keyset_id = ?self.config.encrypt.default_keyset_id);
 
         // A keyset is required if no default keyset has been configured
-        if self.config.encrypt.default_keyset_id.is_none() {
-            if keyset_id.is_none() {
-                return Err(EncryptError::MissingKeysetIdentifier.into());
-            }
+        if self.config.encrypt.default_keyset_id.is_none() && keyset_id.is_none() {
+            return Err(EncryptError::MissingKeysetIdentifier.into());
         }
 
         let cipher = Arc::new(self.init_cipher(keyset_id).await?);
@@ -209,10 +207,8 @@ impl Encrypt {
         ciphertexts: Vec<Option<eql::EqlEncrypted>>,
     ) -> Result<Vec<Option<Plaintext>>, Error> {
         // A keyset is required if no default keyset has been configured
-        if self.config.encrypt.default_keyset_id.is_none() {
-            if keyset_id.is_none() {
-                return Err(EncryptError::MissingKeysetIdentifier.into());
-            }
+        if self.config.encrypt.default_keyset_id.is_none() && keyset_id.is_none() {
+            return Err(EncryptError::MissingKeysetIdentifier.into());
         }
         debug!(target: ENCRYPT, msg="Decrypt", ?keyset_id);
 
