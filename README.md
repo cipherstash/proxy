@@ -1,10 +1,12 @@
-<h1 align="center">
-  <img alt="CipherStash Logo" loading="lazy" width="128" height="128" decoding="async" data-nimg="1"   style="color:transparent" src="https://cipherstash.com/assets/cs-github.png">
-  </br>
-  Proxy
-</h1>
 <p align="center">
-  Implement robust data security without sacrificing performance or usability
+<img src="docs/images/index-dark.png#gh-dark-mode-only">
+<img src="docs/images/index-dark.png#gh-light-mode-only">
+</p>
+
+<p align="center">
+  Encrypt your sensitive data in Postgres instantly - no app changes needed.
+
+  Designed for security. Built for growth.
   <br/>
   <div align="center" style="display: flex; justify-content: center; gap: 1rem;">
     <a href="https://cipherstash.com">
