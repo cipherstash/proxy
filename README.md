@@ -1,12 +1,9 @@
-<p align="center">
-<img src="docs/images/index-dark.png#gh-dark-mode-only">
-<img src="docs/images/index-dark.png#gh-light-mode-only">
-</p>
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="./docs/images/index-dark.png">
+  <img alt="CipherStash Proxy: searchable encryption for Postgres'" src="./docs/images/index-light.png">
+</picture>
 
 <p align="center">
-  Encrypt your sensitive data in Postgres instantly - no app changes needed.
-
-  Designed for security. Built for growth.
   <br/>
   <div align="center" style="display: flex; justify-content: center; gap: 1rem;">
     <a href="https://cipherstash.com">
@@ -23,7 +20,6 @@
     </a>
   </div>
 </p>
-<br/>
 
 <!-- start -->
 
