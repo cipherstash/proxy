@@ -103,8 +103,11 @@ where
     /// Session context tracking statements, portals, and keyset IDs
     context: Context,
     /// Error state flag for extended query protocol error handling
-    in_error: bool,
+    error_state: Option<ErrorState>,
 }
+
+#[derive(Debug)]
+struct ErrorState;
 
 impl<R, W> Frontend<R, W>
 where
@@ -133,7 +136,7 @@ where
             server_writer,
             encrypt,
             context,
-            in_error: false,
+            error_state: None,
         }
     }
 
@@ -181,10 +184,10 @@ where
 
         // When an error is detected while processing any extended-query message, the backend issues ErrorResponse, then reads and discards messages until a Sync is reached,
         // https://www.postgresql.org/docs/current/protocol-flow.html#PROTOCOL-FLOW-EXT-QUERY
-        if self.in_error {
+        if self.error_state.is_some() {
             warn!(target: PROTOCOL,
                 client_id = self.context.client_id,
-                in_error = self.in_error,
+                error_state = ?self.error_state,
                 ?code,
             );
             if code != Code::Sync {
@@ -200,9 +203,9 @@ where
                     Ok(None) => (),
                     Err(err) => {
                         warn!(
-                                client_id = self.context.client_id,
-                                msg = "Query Error",
-                                error = ?err.to_string(),
+                            client_id = self.context.client_id,
+                            msg = "Query Handler Error",
+                            error = ?err.to_string(),
                         );
                         self.send_error_response(err)?;
                         self.send_ready_for_query()?;
@@ -223,9 +226,9 @@ where
                     Ok(None) => (),
                     Err(err) => {
                         warn!(
-                                client_id = self.context.client_id,
-                                msg = "Parse Error",
-                                error = ?err.to_string(),
+                            client_id = self.context.client_id,
+                            msg = "Parse Handler Error",
+                            error = ?err.to_string(),
                         );
                         self.send_error_response(err)?;
                         return Ok(());
@@ -266,13 +269,14 @@ where
                 if self.context.schema_changed() {
                     self.encrypt.reload_schema().await;
                 }
-                // Clear the error state
-                if self.in_error {
-                    warn!(target: PROTOCOL,
+
+                if self.error_state.is_some() {
+                    debug!(target: PROTOCOL,
                         client_id = self.context.client_id,
-                        msg = "Clear error state",
+                        msg = "Ready for Query",
                     );
                     self.send_ready_for_query()?;
+                    return Ok(());
                 }
             }
             code => {
@@ -787,22 +791,28 @@ where
 
     ///
     /// Handles `SET CIPHERSTASH KEYSET_*` statements
-    /// If Proxy is configured with a `default_keyset_id` and `SET` is called, returns an error
     ///
+    /// Returns an error if `SET CIPHERSTASH KEYSET_*` is called and proxy is configured with a `default_keyset_id`
+    /// Returns an error if `SET CIPHERSTASH KEYSET_ID` cannot parse the value as a valid UUID
     ///
     fn handle_set_keyset(&mut self, statement: &ast::Statement) -> Result<(), Error> {
         if let Some(keyset_identifier) = self.context.maybe_set_keyset(statement)? {
+            error!(client_id = self.context.client_id, ?keyset_identifier);
+
             if self.encrypt.config.encrypt.default_keyset_id.is_some() {
                 debug!(target: MAPPER,
                     client_id = self.context.client_id,
-                    msg = "Unexpected SET CIPHERSTASH.KEYSET",
                     default_keyset_id = ?self.encrypt.config.encrypt.default_keyset_id,
                     ?keyset_identifier
                 );
-                return Err(EncryptError::UnexpectedKeyset.into());
+                return Err(EncryptError::UnexpectedSetKeyset.into());
             }
-            info!(msg = "SET CIPHERSTASH.KEYSET", ?keyset_identifier);
+            info!(
+                msg = "SET CIPHERSTASH.KEYSET",
+                keyset_identifier = keyset_identifier.to_string()
+            );
         }
+
         Ok(())
     }
 
@@ -1196,7 +1206,7 @@ where
         );
 
         self.client_sender.send(message)?;
-        self.in_error = false;
+        self.error_state = None;
 
         Ok(())
     }
@@ -1281,7 +1291,7 @@ where
         );
 
         self.client_sender.send(message)?;
-        self.in_error = true; // Frontend-specific: set error state for extended query protocol
+        self.error_state = Some(ErrorState); // Frontend-specific: set error state for extended query protocol
 
         Ok(())
     }

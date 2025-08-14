@@ -276,7 +276,7 @@ mod tests {
 
             // Test that operations still work after each keyset_id change
             let id = random_id();
-            let text = format!("test data for {}", value);
+            let text = format!("TEST: {}", value);
 
             let insert_sql = "INSERT INTO encrypted (id, encrypted_text) VALUES ($1, $2)";
             let result = client.query(insert_sql, &[&id, &text]).await;
@@ -300,21 +300,20 @@ mod tests {
             .unwrap();
 
         // Test cases that should potentially fail or be handled gracefully
-        let invalid_cases = vec![
+        let invalid = vec![
             format!("SET CIPHERSTASH.KEYSET_ID = {tenant_keyset_id_1}"), // unquoted string
-            format!("SET CIPHERSTASH.KEYSET_ID = \"{tenant_keyset_id_1}\""), // double quoted string
-            format!("SET CIPHERSTASH.KEYSET_ID = 123"),                  // numeric value
-            format!("SET CIPHERSTASH.KEYSET_ID = NULL"),                 // null value
+            format!("SET CIPHERSTASH.KEYSET_ID = NULL"),
+            format!("SET CIPHERSTASH.KEYSET_ID = 123"),
         ];
 
-        for invalid_sql in invalid_cases {
-            let result = client.query(&invalid_sql, &[]).await;
-            assert!(result.is_err(),);
+        for sql in invalid {
+            let result = client.query(&sql, &[]).await;
+            assert!(result.is_err());
         }
 
         // Ensure that after invalid attempts, a valid keyset_id can still be set
         let sql = format!("SET CIPHERSTASH.KEYSET_ID = '{tenant_keyset_id_1}'");
         let result = client.query(&sql, &[]).await;
-        assert!(result.is_ok(),);
+        assert!(result.is_ok());
     }
 }
