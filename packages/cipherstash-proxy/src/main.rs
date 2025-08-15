@@ -149,7 +149,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 ///
 async fn init(mut config: TandemConfig) -> Encrypt {
     if config.encrypt.default_keyset_id.is_none() {
-        info!(msg = "Encrypt using default dataset");
+        warn!(msg = "Default Keyset Id has not been configured");
+        warn!(msg = "A Keyset Identifier must be set using the `SET CIPHERSTASH.KEYSET_ID` or `SET CIPHERSTASH.KEYSET_NAME` commands");
     }
 
     match config.server.server_name() {

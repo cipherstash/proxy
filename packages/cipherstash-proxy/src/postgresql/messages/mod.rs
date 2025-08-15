@@ -9,6 +9,7 @@ pub mod execute;
 pub mod param_description;
 pub mod parse;
 pub mod query;
+pub mod ready_for_query;
 pub mod row_description;
 pub mod terminate;
 

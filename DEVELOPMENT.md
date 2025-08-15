@@ -50,7 +50,7 @@ stash access-keys create proxy
 # add to CS_CLIENT_ACCESS_KEY
 
 # Create a dataset
-stash datasets create proxy
+stash keysets create proxy
 # add to CS_DEFAULT_KEYSET_ID
 
 # Create a client

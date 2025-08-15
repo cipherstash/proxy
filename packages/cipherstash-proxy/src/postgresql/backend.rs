@@ -199,7 +199,7 @@ where
                     Ok(_) => (),
                     Err(err) => {
                         warn!(client_id = self.client_id(), error = err.to_string());
-                        self.handle_error(err)?;
+                        self.send_error_response(err)?;
                     }
                 }
 
@@ -215,7 +215,7 @@ where
                     Ok(_) => (),
                     Err(err) => {
                         warn!(client_id = self.client_id(), error = err.to_string());
-                        self.handle_error(err)?;
+                        self.send_error_response(err)?;
                     }
                 }
 
@@ -343,7 +343,7 @@ where
             Ok(_) => (),
             Err(err) => {
                 warn!(client_id = self.client_id(), error = err.to_string());
-                self.handle_error(err)?;
+                self.send_error_response(err)?;
             }
         }
 
@@ -673,7 +673,8 @@ where
     /// Unlike the frontend, the backend doesn't need to set an error state
     /// since errors during result processing should immediately terminate
     /// the current query execution.
-    fn send_error_response(&mut self, error_response: ErrorResponse) -> Result<(), Error> {
+    fn send_error_response(&mut self, err: Error) -> Result<(), Error> {
+        let error_response = self.error_to_response(err);
         // Ensure any buffered data is cleared before sending error
         self.buffer.clear();
 
@@ -687,10 +688,6 @@ where
         );
 
         self.client_sender.send(message)?;
-
-        // Mark execution as complete to clean up state
-        self.context.complete_execution();
-        self.context.finish_session();
 
         Ok(())
     }
