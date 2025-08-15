@@ -176,12 +176,14 @@ impl TandemConfig {
         // For parsing top-level values such as CS_HOST, CS_PORT
         // and for parsing nested env values such as CS_DATABASE__HOST, CS_DATABASE__PORT
         let cs_env_source = Environment::with_prefix(CS_PREFIX)
+            .ignore_empty(true)
             .try_parsing(true)
             .separator("__")
             .prefix_separator("_");
 
         // Env vars from `stash setup --proxy`
         let stash_setup_source = Environment::with_prefix(CS_PREFIX)
+            .ignore_empty(true)
             .separator("__")
             .prefix_separator("_")
             .source(Some({
