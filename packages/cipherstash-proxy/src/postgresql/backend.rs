@@ -10,7 +10,7 @@ use crate::connect::Sender;
 use crate::encrypt::Encrypt;
 use crate::eql::EqlEncrypted;
 use crate::error::{EncryptError, Error};
-use crate::log::{DEVELOPMENT, MAPPER, PROTOCOL};
+use crate::log::{CONTEXT, DEVELOPMENT, MAPPER, PROTOCOL};
 use crate::postgresql::context::Portal;
 use crate::postgresql::messages::data_row::DataRow;
 use crate::postgresql::messages::param_description::ParamDescription;
@@ -176,8 +176,8 @@ where
             return Ok(());
         }
 
-        let keyset_id = self.context.keyset_id();
-        warn!(?self.context.client_id, ?keyset_id);
+        let keyset_id = self.context.keyset_identifier();
+        debug!(target: CONTEXT, client_id = ?self.context.client_id, ?keyset_id);
 
         match code.into() {
             BackendCode::DataRow => {
@@ -447,8 +447,12 @@ where
 
         self.check_column_config(projection_columns, &ciphertexts)?;
 
-        let keyset_id = self.context.keyset_id();
-        warn!(?keyset_id);
+        let keyset_id = self.context.keyset_identifier();
+
+        debug!(target: CONTEXT,
+            client_id = self.context.client_id,
+            ?keyset_id,
+        );
 
         // Decrypt CipherText -> Plaintext
         let plaintexts = self

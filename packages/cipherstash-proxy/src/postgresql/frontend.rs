@@ -511,7 +511,7 @@ where
             return Ok(vec![]);
         }
 
-        let keyset_id = self.context.keyset_id();
+        let keyset_id = self.context.keyset_identifier();
 
         error!(target: CONTEXT,
             client_id = self.context.client_id,
@@ -657,8 +657,7 @@ where
 
         self.handle_set_keyset(&statement)?;
 
-        let keyset_id = self.context.keyset_id();
-        // let keyset_id = self.context.keyset_id;
+        let keyset_id = self.context.keyset_identifier();
 
         error!(target: CONTEXT,
             client_id = self.context.client_id,
@@ -960,23 +959,12 @@ where
         bind: &Bind,
         statement: &Statement,
     ) -> Result<Vec<Option<crate::EqlEncrypted>>, Error> {
+        let keyset_id = self.context.keyset_identifier();
         let plaintexts =
             bind.to_plaintext(&statement.param_columns, &statement.postgres_param_types)?;
 
         debug!(target: MAPPER, client_id = self.context.client_id, plaintexts = ?plaintexts);
-
-        let keyset_id = self.context.keyset_id();
-        // let keyset_id = self.context.keyset_id;
-
-        error!(target: CONTEXT,
-            client_id = self.context.client_id,
-            ?keyset_id,
-        );
-
-        let keyset_id = self.context.keyset_id();
-        // let keyset_id = self.context.keyset_id;
-
-        error!(target: CONTEXT,
+        debug!(target: CONTEXT,
             client_id = self.context.client_id,
             ?keyset_id,
         );

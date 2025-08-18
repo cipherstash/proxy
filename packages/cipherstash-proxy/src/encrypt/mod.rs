@@ -7,7 +7,7 @@ use crate::{
     eql::{self, EqlEncryptedBody, EqlEncryptedIndexes},
     error::{EncryptError, Error},
     log::ENCRYPT,
-    postgresql::Column,
+    postgresql::{Column, KeysetIdentifier},
     Identifier, EQL_SCHEMA_VERSION,
 };
 use cipherstash_client::{
@@ -29,7 +29,6 @@ use config::EncryptConfigManager;
 use schema::SchemaManager;
 use std::{sync::Arc, vec};
 use tracing::{debug, info, warn};
-use uuid::Uuid;
 
 /// SQL Statement for loading encrypt configuration from database
 const ENCRYPT_CONFIG_QUERY: &str = include_str!("./sql/select_config.sql");
@@ -93,18 +92,20 @@ impl Encrypt {
     }
 
     /// Initialize cipher using the stored zerokms_config
-    pub async fn init_cipher(&self, keyset_id: Option<Uuid>) -> Result<ScopedCipher, Error> {
+    pub async fn init_cipher(
+        &self,
+        keyset_id: Option<KeysetIdentifier>,
+    ) -> Result<ScopedCipher, Error> {
         let zerokms_client = self.zerokms_client.clone();
 
-        debug!(target: ENCRYPT, msg="init_cipher", ?keyset_id);
+        debug!(target: ENCRYPT, msg = "Initializing ZeroKMS ScopedCipher", ?keyset_id);
 
-        match ScopedCipher::init(zerokms_client, keyset_id).await {
-            Ok(cipher) => {
-                debug!(target: ENCRYPT, msg = "Initialized ZeroKMS ScopedCipher", ?keyset_id);
-                Ok(cipher)
-            }
+        let identified_by = keyset_id.map(|id| id.0);
+
+        match ScopedCipher::init(zerokms_client, identified_by).await {
+            Ok(cipher) => Ok(cipher),
             Err(err) => {
-                debug!(target: ENCRYPT, msg = "Error initializing ZeroKMS ScopedCipher", ?keyset_id, error = err.to_string());
+                debug!(target: ENCRYPT, msg = "Error initializing ZeroKMS ScopedCipher", error = err.to_string());
                 Err(err.into())
             }
         }
@@ -116,7 +117,7 @@ impl Encrypt {
     ///
     pub async fn encrypt(
         &self,
-        keyset_id: Option<Uuid>,
+        keyset_id: Option<KeysetIdentifier>,
         plaintexts: Vec<Option<Plaintext>>,
         columns: &[Option<Column>],
     ) -> Result<Vec<Option<eql::EqlEncrypted>>, Error> {
@@ -203,7 +204,7 @@ impl Encrypt {
     ///
     pub async fn decrypt(
         &self,
-        keyset_id: Option<Uuid>,
+        keyset_id: Option<KeysetIdentifier>,
         ciphertexts: Vec<Option<eql::EqlEncrypted>>,
     ) -> Result<Vec<Option<Plaintext>>, Error> {
         // A keyset is required if no default keyset has been configured
@@ -212,7 +213,7 @@ impl Encrypt {
         }
         debug!(target: ENCRYPT, msg="Decrypt", ?keyset_id);
 
-        let cipher = Arc::new(self.init_cipher(keyset_id).await?);
+        let cipher = Arc::new(self.init_cipher(keyset_id.clone()).await?);
 
         // Create a mutable vector to hold the decrypted results
         let mut results = vec![None; ciphertexts.len()];
@@ -358,9 +359,6 @@ fn to_eql_encrypted(
             let mut ore_cclw_fixed_index: Option<String> = None;
             let mut ore_cclw_var_index: Option<String> = None;
             let mut selector: Option<String> = None;
-
-            warn!("===================================");
-            warn!(target: ENCRYPT, dataset_id = ?ciphertext.dataset_id);
 
             for index_term in terms {
                 match index_term {

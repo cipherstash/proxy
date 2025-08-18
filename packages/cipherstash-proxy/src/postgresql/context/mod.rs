@@ -13,6 +13,7 @@ use crate::{
     log::CONTEXT,
     prometheus::{STATEMENTS_EXECUTION_DURATION_SECONDS, STATEMENTS_SESSION_DURATION_SECONDS},
 };
+use cipherstash_client::IdentifiedBy;
 use eql_mapper::{Schema, TableResolver};
 use metrics::histogram;
 use sqltk::parser::ast::{Expr, Ident, ObjectName, ObjectNamePart, Set, Value, ValueWithSpan};
@@ -21,7 +22,7 @@ use std::{
     sync::{Arc, LazyLock, RwLock},
     time::{Duration, Instant},
 };
-use tracing::debug;
+use tracing::{debug, warn};
 use uuid::Uuid;
 
 type DescribeQueue = Queue<Describe>;
@@ -30,17 +31,11 @@ type SessionMetricsQueue = Queue<SessionMetricsContext>;
 type PortalQueue = Queue<Arc<Portal>>;
 
 #[derive(Clone, Debug, PartialEq)]
-pub enum KeysetIdentifier {
-    Id(Uuid),
-    Name(String),
-}
+pub struct KeysetIdentifier(pub IdentifiedBy);
 
 impl std::fmt::Display for KeysetIdentifier {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            KeysetIdentifier::Id(uuid) => write!(f, "{}", uuid),
-            KeysetIdentifier::Name(name) => write!(f, "{}", name),
-        }
+        self.0.fmt(f)
     }
 }
 
@@ -369,17 +364,25 @@ impl Context {
         }) = statement
         {
             if variable == &*SQL_SETTING_NAME_KEYSET_ID {
-                if let Some(Expr::Value(ValueWithSpan {
-                    value: Value::SingleQuotedString(value),
-                    ..
-                })) = values.first()
-                {
-                    let keyset_id =
-                        Uuid::parse_str(value).map_err(|_| EncryptError::KeysetIdCouldNotBeSet)?;
+                if let Some(Expr::Value(ValueWithSpan { value, .. })) = values.first() {
+                    let value_str = match value {
+                        Value::SingleQuotedString(s) | Value::DoubleQuotedString(s) => s.clone(),
+                        Value::Number(n, _) => n.to_string(),
+                        _ => {
+                            let err = EncryptError::KeysetIdCouldNotBeSet;
+                            warn!(target: CONTEXT, client_id = self.client_id, msg = err.to_string());
+                            return Ok(None);
+                        }
+                    };
+                    let keyset_id = Uuid::parse_str(&value_str).map_err(|_| {
+                        EncryptError::KeysetIdCouldNotBeParsed {
+                            id: value_str.to_owned(),
+                        }
+                    })?;
 
-                    debug!(target: CONTEXT, client_id = self.client_id, msg = "Setting KeysetId", ?keyset_id);
+                    debug!(target: CONTEXT, client_id = self.client_id, msg = "Set KeysetId", ?keyset_id);
 
-                    let identifier = KeysetIdentifier::Id(keyset_id);
+                    let identifier = KeysetIdentifier(IdentifiedBy::Uuid(keyset_id));
                     let _ = self
                         .keyset_id
                         .write()
@@ -387,8 +390,9 @@ impl Context {
 
                     return Ok(Some(identifier));
                 } else {
-                    debug!(target: CONTEXT, client_id = self.client_id, msg = "KeysetId could not be set", ?statement);
-                    return Err(EncryptError::KeysetIdCouldNotBeSet.into());
+                    let err = EncryptError::KeysetIdCouldNotBeSet;
+                    warn!(target: CONTEXT, client_id = self.client_id, msg = err.to_string());
+                    // We let the database handle any syntax errors to avoid complexifying the fronted flow (more)
                 }
             }
         }
@@ -417,16 +421,20 @@ impl Context {
         }) = statement
         {
             if variable == &*SQL_SETTING_NAME_KEYSET_NAME {
-                if let Some(Expr::Value(ValueWithSpan {
-                    value: Value::SingleQuotedString(value),
-                    ..
-                })) = values.first()
-                {
-                    let keyset_name = value.clone();
+                if let Some(Expr::Value(ValueWithSpan { value, .. })) = values.first() {
+                    let keyset_name = match value {
+                        Value::SingleQuotedString(s) | Value::DoubleQuotedString(s) => s.clone(),
+                        Value::Number(n, _) => n.to_string(),
+                        _ => {
+                            let err = EncryptError::KeysetNameCouldNotBeSet;
+                            warn!(target: CONTEXT, client_id = self.client_id, msg = err.to_string());
+                            return Ok(None);
+                        }
+                    };
 
-                    debug!(target: CONTEXT, client_id = self.client_id, msg = "Setting KeysetName", ?keyset_name);
+                    debug!(target: CONTEXT, client_id = self.client_id, msg = "Set KeysetName", ?keyset_name);
 
-                    let identifier = KeysetIdentifier::Name(keyset_name);
+                    let identifier = KeysetIdentifier(IdentifiedBy::Name(keyset_name.into()));
                     let _ = self
                         .keyset_id
                         .write()
@@ -434,8 +442,9 @@ impl Context {
 
                     return Ok(Some(identifier));
                 } else {
-                    debug!(target: CONTEXT, client_id = self.client_id, msg = "KeysetName could not be set", ?statement);
-                    return Err(EncryptError::KeysetIdCouldNotBeSet.into());
+                    let err = EncryptError::KeysetNameCouldNotBeSet;
+                    warn!(target: CONTEXT, client_id = self.client_id, msg = err.to_string());
+                    // We let the database handle any syntax errors to avoid complexifying the fronted flow (more)
                 }
             }
         }
@@ -453,15 +462,6 @@ impl Context {
             Some(identifier) => Ok(Some(identifier)),
             None => self.maybe_set_keyset_name(statement),
         }
-    }
-
-    pub fn keyset_id(&self) -> Option<Uuid> {
-        self.keyset_id.read().ok().and_then(|k| {
-            k.as_ref().and_then(|identifier| match identifier {
-                KeysetIdentifier::Id(uuid) => Some(*uuid),
-                KeysetIdentifier::Name(_) => None,
-            })
-        })
     }
 
     pub fn keyset_identifier(&self) -> Option<KeysetIdentifier> {
@@ -845,9 +845,9 @@ mod tests {
 
         let schema = Arc::new(Schema::new("public"));
 
-        let keyset_id = Uuid::parse_str("7d4cbd7f-ba0d-4985-9ed2-ebe2ffe77590").unwrap();
-
-        let expected = Some(KeysetIdentifier::Id(keyset_id));
+        let uuid = Uuid::parse_str("7d4cbd7f-ba0d-4985-9ed2-ebe2ffe77590").unwrap();
+        let keyset_id = Some(uuid);
+        let identifier = KeysetIdentifier::Id(uuid);
 
         let sql = vec![
             "SET CIPHERSTASH.KEYSET_ID = '7d4cbd7f-ba0d-4985-9ed2-ebe2ffe77590'",
@@ -864,13 +864,11 @@ mod tests {
 
             // OK and has a value
             assert!(result.is_ok());
-            let identifier = result.unwrap();
-            assert!(identifier.is_some());
-            assert_eq!(expected, identifier);
+            assert!(result.unwrap().is_some());
 
             // keyset id set
-            assert_eq!(Some(keyset_id), context.keyset_id());
-            assert_eq!(expected, context.keyset_identifier());
+            assert_eq!(keyset_id, context.keyset_id());
+            assert_eq!(Some(identifier.clone()), context.keyset_identifier());
         }
     }
 
@@ -892,13 +890,14 @@ mod tests {
         let value = result.unwrap();
         assert!(value.is_none());
 
-        // Returns ERROR if SET but badly formatted
+        // Returns OK(None) if SET but badly formatted (no quotes)
         let sql = "SET CIPHERSTASH.KEYSET_ID = d74cbd7fba0d49859ed2ebe2ffe77590";
         let statement = parse_statement(sql);
 
         let result = context.maybe_set_keyset_id(&statement);
 
-        assert!(result.is_err());
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_none());
 
         // Returns ERROR if SET but not UUIOD
         let sql = "SET CIPHERSTASH.KEYSET_ID = 'keyset_id'";
@@ -965,18 +964,56 @@ mod tests {
         let value = result.unwrap();
         assert!(value.is_none());
 
-        // Returns ERROR if SET but badly formatted (unquoted)
+        // Returns OK(None) if SET but badly formatted (unquoted)
         let sql = "SET CIPHERSTASH.KEYSET_NAME = test-keyset";
         let statement = parse_statement(sql);
 
         let result = context.maybe_set_keyset_name(&statement);
-        assert!(result.is_err());
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_none());
 
-        // Returns ERROR if SET with wrong value type (number)
+        // Returns OK(Some) if SET with number value (now supported)
         let sql = "SET CIPHERSTASH.KEYSET_NAME = 123";
         let statement = parse_statement(sql);
 
         let result = context.maybe_set_keyset_name(&statement);
+        assert!(result.is_ok());
+        let identifier = result.unwrap();
+        assert!(identifier.is_some());
+        assert_eq!(
+            KeysetIdentifier::Name("123".to_string()),
+            identifier.unwrap()
+        );
+    }
+
+    #[test]
+    pub fn set_keyset_supports_numbers() {
+        log::init(LogConfig::default());
+
+        let schema = Arc::new(Schema::new("public"));
+
+        // Test keyset name with number
+        let mut context = Context::new(1, schema.clone());
+        let sql = "SET CIPHERSTASH.KEYSET_NAME = 12345";
+        let statement = parse_statement(sql);
+        let result = context.maybe_set_keyset_name(&statement);
+
+        assert!(result.is_ok());
+        let identifier = result.unwrap();
+        assert!(identifier.is_some());
+        assert_eq!(
+            KeysetIdentifier::Name("12345".to_string()),
+            identifier.unwrap()
+        );
+
+        // Test keyset id with numeric UUID (should work if it's a valid UUID)
+        let mut context = Context::new(2, schema);
+        // This will fail because 123 is not a valid UUID, but it shows the number is processed
+        let sql = "SET CIPHERSTASH.KEYSET_ID = 123";
+        let statement = parse_statement(sql);
+        let result = context.maybe_set_keyset_id(&statement);
+
+        // Should return error because 123 is not a valid UUID
         assert!(result.is_err());
     }
 
