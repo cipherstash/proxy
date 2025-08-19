@@ -585,6 +585,7 @@ mod tests {
         log,
         postgresql::messages::{describe::Target, Name},
     };
+    use cipherstash_client::IdentifiedBy;
     use eql_mapper::Schema;
     use sqltk::parser::{dialect::PostgreSqlDialect, parser::Parser};
     use std::sync::Arc;
@@ -846,8 +847,8 @@ mod tests {
         let schema = Arc::new(Schema::new("public"));
 
         let uuid = Uuid::parse_str("7d4cbd7f-ba0d-4985-9ed2-ebe2ffe77590").unwrap();
-        let keyset_id = Some(uuid);
-        let identifier = KeysetIdentifier::Id(uuid);
+
+        let identifier = KeysetIdentifier(IdentifiedBy::Uuid(uuid));
 
         let sql = vec![
             "SET CIPHERSTASH.KEYSET_ID = '7d4cbd7f-ba0d-4985-9ed2-ebe2ffe77590'",
@@ -857,7 +858,7 @@ mod tests {
 
         for s in sql {
             let mut context = Context::new(1, schema.clone());
-            assert!(context.keyset_id().is_none());
+            assert!(context.keyset_identifier().is_none());
 
             let statement = parse_statement(s);
             let result = context.maybe_set_keyset_id(&statement);
@@ -867,7 +868,6 @@ mod tests {
             assert!(result.unwrap().is_some());
 
             // keyset id set
-            assert_eq!(keyset_id, context.keyset_id());
             assert_eq!(Some(identifier.clone()), context.keyset_identifier());
         }
     }
@@ -927,22 +927,13 @@ mod tests {
             let statement = parse_statement(s);
             let result = context.maybe_set_keyset_name(&statement);
 
+            let identifier = KeysetIdentifier(IdentifiedBy::Name("test-keyset".to_string().into()));
+
             // OK and has a value
             assert!(result.is_ok());
-            let identifier = result.unwrap();
-            assert!(identifier.is_some());
+            assert!(result.unwrap().is_some());
 
-            // keyset name set
-            assert_eq!(
-                Some(KeysetIdentifier::Name("test-keyset".to_string())),
-                context.keyset_identifier()
-            );
-            assert_eq!(
-                Some(KeysetIdentifier::Name("test-keyset".to_string())),
-                identifier
-            );
-            // keyset_id should return None when set by name
-            assert!(context.keyset_id().is_none());
+            assert_eq!(Some(identifier.clone()), context.keyset_identifier());
         }
     }
 
@@ -976,14 +967,11 @@ mod tests {
         let sql = "SET CIPHERSTASH.KEYSET_NAME = 123";
         let statement = parse_statement(sql);
 
+        let identifier = KeysetIdentifier(IdentifiedBy::Name("123".to_string().into()));
         let result = context.maybe_set_keyset_name(&statement);
         assert!(result.is_ok());
-        let identifier = result.unwrap();
-        assert!(identifier.is_some());
-        assert_eq!(
-            KeysetIdentifier::Name("123".to_string()),
-            identifier.unwrap()
-        );
+        assert!(result.unwrap().is_some());
+        assert_eq!(Some(identifier.clone()), context.keyset_identifier());
     }
 
     #[test]
@@ -996,15 +984,12 @@ mod tests {
         let mut context = Context::new(1, schema.clone());
         let sql = "SET CIPHERSTASH.KEYSET_NAME = 12345";
         let statement = parse_statement(sql);
-        let result = context.maybe_set_keyset_name(&statement);
 
+        let identifier = KeysetIdentifier(IdentifiedBy::Name("12345".to_string().into()));
+        let result = context.maybe_set_keyset_name(&statement);
         assert!(result.is_ok());
-        let identifier = result.unwrap();
-        assert!(identifier.is_some());
-        assert_eq!(
-            KeysetIdentifier::Name("12345".to_string()),
-            identifier.unwrap()
-        );
+        assert!(result.unwrap().is_some());
+        assert_eq!(Some(identifier.clone()), context.keyset_identifier());
 
         // Test keyset id with numeric UUID (should work if it's a valid UUID)
         let mut context = Context::new(2, schema);
@@ -1029,31 +1014,27 @@ mod tests {
         // Test with keyset ID
         let keyset_id_sql = "SET CIPHERSTASH.KEYSET_ID = '7d4cbd7f-ba0d-4985-9ed2-ebe2ffe77590'";
         let statement = parse_statement(keyset_id_sql);
+
+        let uuid = Uuid::parse_str("7d4cbd7f-ba0d-4985-9ed2-ebe2ffe77590").unwrap();
+
+        let identifier = KeysetIdentifier(IdentifiedBy::Uuid(uuid));
         let result = context.maybe_set_keyset(&statement);
 
         assert!(result.is_ok());
-        let identifier = result.unwrap();
-        assert!(identifier.is_some());
-        assert_eq!(
-            Some(KeysetIdentifier::Id(
-                Uuid::parse_str("7d4cbd7f-ba0d-4985-9ed2-ebe2ffe77590").unwrap()
-            )),
-            identifier
-        );
+        assert!(result.unwrap().is_some());
+        assert_eq!(Some(identifier.clone()), context.keyset_identifier());
 
         // Test with keyset name
         let mut context = Context::new(2, schema.clone());
         let keyset_name_sql = "SET CIPHERSTASH.KEYSET_NAME = 'test-keyset'";
         let statement = parse_statement(keyset_name_sql);
+
+        let identifier = KeysetIdentifier(IdentifiedBy::Name("test-keyset".to_string().into()));
         let result = context.maybe_set_keyset(&statement);
 
         assert!(result.is_ok());
-        let identifier = result.unwrap();
-        assert!(identifier.is_some());
-        assert_eq!(
-            Some(KeysetIdentifier::Name("test-keyset".to_string())),
-            identifier
-        );
+        assert!(result.unwrap().is_some());
+        assert_eq!(Some(identifier.clone()), context.keyset_identifier());
 
         // Test with unknown command
         let mut context = Context::new(3, schema);

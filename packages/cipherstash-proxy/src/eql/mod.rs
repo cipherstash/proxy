@@ -221,7 +221,7 @@ mod tests {
             ciphertext: vec![1; 32],
             tag: vec![1; 16],
             descriptor: "ciphertext".to_string(),
-            dataset_id: Some(Uuid::new_v4()),
+            keyset_id: Some(Uuid::new_v4()),
         });
         let ct = EqlEncrypted {
             identifier: expected.clone(),
