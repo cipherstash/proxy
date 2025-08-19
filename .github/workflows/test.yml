@@ -35,9 +35,3 @@ jobs:
           RUST_BACKTRACE: "1"
         run: |
           mise run --output prefix test
-
-      # Always show the Proxy logs, for debugging
-      - name: Show Proxy logs
-        if: always()
-        run: |
-          docker logs --timestamps proxy-tls
