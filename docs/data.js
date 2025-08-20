@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1755732067450,
+  "lastUpdate": 1755732972525,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -12739,6 +12739,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 5.205961,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "f44a2d35dc51690a9205412a68f8a6c980f27da3",
+          "message": "feat: cache initialised scoped_cipher/s",
+          "timestamp": "2025-08-20T18:46:29Z",
+          "url": "https://github.com/cipherstash/proxy/pull/308/commits/f44a2d35dc51690a9205412a68f8a6c980f27da3"
+        },
+        "date": 1755732971070,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 12.816267,
             "unit": "Number"
           }
         ]
