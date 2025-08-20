@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1755656559227,
+  "lastUpdate": 1755658976911,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -12456,6 +12456,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 2.719759,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "toby@cipherstash.com",
+            "name": "Toby Hede",
+            "username": "tobyhede"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "88839240ab63384abd4bee8501920828b3c413dc",
+          "message": "Merge pull request #304 from cipherstash/set-keyset-name\n\nHandle SET KEYSET errors with grace and aplomb",
+          "timestamp": "2025-08-20T12:59:04+10:00",
+          "tree_id": "d0d44ed62467357365eb7a11e3ddd219d523248c",
+          "url": "https://github.com/cipherstash/proxy/commit/88839240ab63384abd4bee8501920828b3c413dc"
+        },
+        "date": 1755658975528,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 2.754742,
             "unit": "Number"
           }
         ]
