@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1755706316557,
+  "lastUpdate": 1755713469150,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -12660,6 +12660,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 5.258817,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "dfd635471d45381d5822121319a89f14013e50bd",
+          "message": ".github/workflows: Migrate workflows to Blacksmith runners",
+          "timestamp": "2025-08-20T02:59:08Z",
+          "url": "https://github.com/cipherstash/proxy/pull/307/commits/dfd635471d45381d5822121319a89f14013e50bd"
+        },
+        "date": 1755713467751,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 5.076788,
             "unit": "Number"
           }
         ]
