@@ -188,8 +188,6 @@ impl Encrypt {
                 }
             }
 
-            info!(target: ENCRYPT, msg = "encrypted_eql", idx, ?opt, ?encrypted);
-
             encrypted_eql.push(encrypted);
         }
 
