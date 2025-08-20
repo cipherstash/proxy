@@ -136,7 +136,7 @@ mise run rust:version
 mise run test:check
 mise run test:format
 mise run test:clippy
-# mise run test:unit
+mise run test:unit
 mise run test:integration
 """
 

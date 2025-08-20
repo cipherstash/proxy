@@ -246,7 +246,14 @@ where
                                 client_id = self.context.client_id,
                                 msg = "EncryptError::InvalidParameter",
                             );
-
+                            self.send_error_response(err)?;
+                            return Ok(());
+                        }
+                        Error::Encrypt(EncryptError::UnknownKeysetIdentifier { .. }) => {
+                            warn!(target: PROTOCOL,
+                                client_id = self.context.client_id,
+                                msg = "EncryptError::UnknownKeysetIdentifier",
+                            );
                             self.send_error_response(err)?;
                             return Ok(());
                         }
@@ -254,6 +261,7 @@ where
                             warn!(target: PROTOCOL,
                                 client_id = self.context.client_id,
                                 msg = "Bind Error",
+                                err = err.to_string()
                             );
                             return Err(err);
                         }
@@ -513,11 +521,6 @@ where
 
         let keyset_id = self.context.keyset_identifier();
 
-        error!(target: CONTEXT,
-            client_id = self.context.client_id,
-            ?keyset_id,
-        );
-
         let plaintexts = literals_to_plaintext(literal_values, literal_columns)?;
 
         let start = Instant::now();
@@ -657,13 +660,6 @@ where
 
         self.handle_set_keyset(&statement)?;
 
-        let keyset_id = self.context.keyset_identifier();
-
-        error!(target: CONTEXT,
-            client_id = self.context.client_id,
-            ?keyset_id,
-        );
-
         self.check_for_schema_change(&statement);
 
         if !eql_mapper::requires_type_check(&statement) {
@@ -796,7 +792,7 @@ where
     ///
     fn handle_set_keyset(&mut self, statement: &ast::Statement) -> Result<(), Error> {
         if let Some(keyset_identifier) = self.context.maybe_set_keyset(statement)? {
-            error!(client_id = self.context.client_id, ?keyset_identifier);
+            debug!(client_id = self.context.client_id, ?keyset_identifier);
 
             if self.encrypt.config.encrypt.default_keyset_id.is_some() {
                 debug!(target: MAPPER,

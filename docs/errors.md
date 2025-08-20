@@ -311,13 +311,13 @@ A KeysetId could not be set using the `SET CIPHERSTASH.KEYSET_ID` command.
 ### Error message
 
 ```
-A KeysetId could not be set using `SET CIPHERSTASH.KEYSET_ID`
+Keyset Id could not be set using `SET CIPHERSTASH.KEYSET_ID`
 ```
 
 ### How to Fix
 
-1. Check the syntax of the `SET CIPHERSTASH.KEYSET_ID` command. The `KeysetId` value should be in single quotes.
-2. Check that the `KeysetId` is a valid UUID.
+1. Check the syntax of the `SET CIPHERSTASH.KEYSET_ID` command. The `keyset_id` value should be in single quotes.
+2. Check that the `keyset_id` is a valid UUID.
 3. Check that the value is being set as a literal. The PostgreSQL `SET` statement does not support parameterised querying.
 
 
@@ -337,20 +337,39 @@ KeysetName could not be set using the `SET CIPHERSTASH.KEYSET_NAME` command.
 ### Error message
 
 ```
-A KeysetName could not be set using `SET CIPHERSTASH.KEYSET_NAME`
+Keyset Name could not be set using `SET CIPHERSTASH.KEYSET_NAME`
 ```
 
 ### How to Fix
 
-1. Check the syntax of the `SET CIPHERSTASH.KEYSET_ID` command. The `KeysetName` value should be in single quotes.
-2. Check that the provided `KeysetName` is a valid UUID.
+1. Check the syntax of the `SET CIPHERSTASH.KEYSET_ID` command. The `keyset_name` value should be in single quotes.
 2. Check that the value is being set as a literal. The PostgreSQL `SET` statement does not support parameterised querying.
 
 
 ```
-   SET [ SESSION ] CIPHERSTASH.KEYSET_NAME { TO | = } '{KeysetName}'
+   SET [ SESSION ] CIPHERSTASH.KEYSET_NAME { TO | = } '{keyset_name}'
 ```
 
+
+<!-- ---------------------------------------------------------------------------------------------------- -->
+
+
+## Unknown Keyset Identifier <a id='encrypt-unknown-keyset'></a>
+
+The specified keyset could not be loaded.
+
+
+### Error message
+
+```
+Unknown keyset name or id '{keyset}'
+```
+
+### How to Fix
+
+1. Check that the active `keyset_name` or `keyset_id` is associated with a keyset in the configured workspace.
+2. Check that the configured client credentials have access to the keyset and workspace.
+3. Keyset names are case sensitive. If setting the active keyset by name, check that the `keyset_name` is an exact match.
 
 
 <!-- ---------------------------------------------------------------------------------------------------- -->
@@ -567,7 +586,7 @@ If the error persists, please contact CipherStash [support](https://cipherstash.
 
 ### How to Fix
 
-1. Check that the data in the encrypted column is in correct format [EQL](https://github.com/cipherstash/encrypt-query-language).
+1. Check that the data in the encrypted column is in the correct format [EQL](https://github.com/cipherstash/encrypt-query-language).
 
 <!-- TODO: Link to EQL Doc on storage format-->
 

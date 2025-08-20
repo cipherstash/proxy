@@ -50,6 +50,9 @@ pub trait PostgreSqlErrorHandler {
             Error::Encrypt(EncryptError::CouldNotDecryptDataForKeyset { .. }) => {
                 ErrorResponse::system_error(err.to_string())
             }
+            Error::Encrypt(EncryptError::UnknownKeysetIdentifier { .. }) => {
+                ErrorResponse::system_error(err.to_string())
+            }
             _ => ErrorResponse::system_error(err.to_string()),
         }
     }
@@ -63,19 +66,4 @@ pub trait PostgreSqlErrorHandler {
     ///
     /// * `error_response` - The ErrorResponse to send to the client
     fn send_error_response(&mut self, err: Error) -> Result<(), Error>;
-    // fn send_error_response(&mut self, err: Error) -> Result<(), Error> {
-    //     let error_response = self.error_to_response(err);
-
-    //     let message = BytesMut::try_from(error_response)?;
-
-    //     debug!(
-    //         target: "PROTOCOL",
-    //         client_id = self.client_id(),
-    //         msg = "send_error_response",
-    //         ?message,
-    //     );
-
-    //     self.client_sender().send(message)?;
-    //     Ok(())
-    // }
 }

@@ -243,13 +243,13 @@ pub enum EncryptError {
     KeysetIdCouldNotBeParsed { id: String },
 
     #[error(
-        "KeysetId could not be set using `SET CIPHERSTASH.KEYSET_ID`. For help visit {}#encrypt-keyset-id-could-not-be-set",
+        "Keyset Id could not be set using `SET CIPHERSTASH.KEYSET_ID`. For help visit {}#encrypt-keyset-id-could-not-be-set",
         ERROR_DOC_BASE_URL
     )]
     KeysetIdCouldNotBeSet,
 
     #[error(
-        "A KeysetName could not be set using `SET CIPHERSTASH.KEYSET_NAME`. For help visit {}#encrypt-keyset-name-could-not-be-set",
+        "Keyset Name could not be set using `SET CIPHERSTASH.KEYSET_NAME`. For help visit {}#encrypt-keyset-name-could-not-be-set",
         ERROR_DOC_BASE_URL
     )]
     KeysetNameCouldNotBeSet,
@@ -281,6 +281,12 @@ pub enum EncryptError {
         ERROR_DOC_BASE_URL
     )]
     UnknownColumn { table: String, column: String },
+
+    #[error(
+        "Unknown keyset name or id '{keyset}'. For help visit {}#encrypt-unknown-keyset",
+        ERROR_DOC_BASE_URL
+    )]
+    UnknownKeysetIdentifier { keyset: String },
 
     #[error(
         "Table '{table}' has no Encrypt configuration. For help visit {}#encrypt-unknown-table",

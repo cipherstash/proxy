@@ -100,13 +100,22 @@ impl Encrypt {
 
         debug!(target: ENCRYPT, msg = "Initializing ZeroKMS ScopedCipher", ?keyset_id);
 
-        let identified_by = keyset_id.map(|id| id.0);
+        let identified_by = keyset_id.clone().map(|id| id.0);
 
         match ScopedCipher::init(zerokms_client, identified_by).await {
             Ok(cipher) => Ok(cipher),
             Err(err) => {
                 debug!(target: ENCRYPT, msg = "Error initializing ZeroKMS ScopedCipher", error = err.to_string());
-                Err(err.into())
+
+                match err {
+                    cipherstash_client::zerokms::Error::LoadKeyset(_) => {
+                        Err(EncryptError::UnknownKeysetIdentifier {
+                            keyset: keyset_id.map_or("default".to_string(), |id| id.to_string()),
+                        }
+                        .into())
+                    }
+                    _ => Err(err.into()),
+                }
             }
         }
     }
