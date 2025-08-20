@@ -31,6 +31,8 @@ jobs:
           CS_CLIENT_ID: ${{ secrets.CS_CLIENT_ID }}
           CS_CLIENT_KEY: ${{ secrets.CS_CLIENT_KEY }}
           CS_WORKSPACE_CRN: "crn:ap-southeast-2.aws:${{ secrets.CS_WORKSPACE_ID }}"
+          CS_LOG__FORMAT: "structured"
+          CS_LOG__LEVEL: "info"
 
           RUST_BACKTRACE: "1"
         run: |
