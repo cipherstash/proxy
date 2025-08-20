@@ -50,7 +50,7 @@ stash access-keys create proxy
 # add to CS_CLIENT_ACCESS_KEY
 
 # Create a dataset
-stash datasets create proxy
+stash keysets create proxy
 # add to CS_DEFAULT_KEYSET_ID
 
 # Create a client
@@ -408,6 +408,9 @@ The integration tests have several runtime dependencies:
 
 - Running PostgreSQL instances (that can be started with `mise run postgres:up`)
 - Credentials for CipherStash ZeroKMS (which can be found in the [quickstart](#developing) section)
+
+The `Multitenant` Integration tests require different configuration from the baseline.
+The `CS_DEFAULT_KEYSET_ID` value must not be set for the multitenant `SET KEYSET_*` commands to work.
 
 ##### Language-specific integration tests
 

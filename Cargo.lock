@@ -701,9 +701,9 @@ dependencies = [
 
 [[package]]
 name = "cipherstash-client"
-version = "0.26.0"
+version = "0.27.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d83afae8d39f37d0d309589bda0570cfbd7d0488919465dbaeeb5df87fd6dadc"
+checksum = "229db71d51fb3dc5431cc20f5b543bb9d48f1177d9128573289f5dba723878d7"
 dependencies = [
  "aes-gcm-siv",
  "anyhow",
@@ -5138,9 +5138,9 @@ dependencies = [
 
 [[package]]
 name = "zerokms-protocol"
-version = "0.6.0"
+version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e8f49316e3bee7e2244f5ea9f1463479615a7f8c36a86c34ea59a314830e64c0"
+checksum = "d03a43cb707f0722fdb9b2ff145e93427f8510540315be02ad015c2da061f2eb"
 dependencies = [
  "async-trait",
  "base64",

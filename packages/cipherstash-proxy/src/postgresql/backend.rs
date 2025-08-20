@@ -10,7 +10,7 @@ use crate::connect::Sender;
 use crate::encrypt::Encrypt;
 use crate::eql::EqlEncrypted;
 use crate::error::{EncryptError, Error};
-use crate::log::{DEVELOPMENT, MAPPER, PROTOCOL};
+use crate::log::{CONTEXT, DEVELOPMENT, MAPPER, PROTOCOL};
 use crate::postgresql::context::Portal;
 use crate::postgresql::messages::data_row::DataRow;
 use crate::postgresql::messages::param_description::ParamDescription;
@@ -176,8 +176,8 @@ where
             return Ok(());
         }
 
-        let keyset_id = self.context.keyset_id();
-        warn!(?self.context.client_id, ?keyset_id);
+        let keyset_id = self.context.keyset_identifier();
+        debug!(target: CONTEXT, client_id = ?self.context.client_id, ?keyset_id);
 
         match code.into() {
             BackendCode::DataRow => {
@@ -199,7 +199,7 @@ where
                     Ok(_) => (),
                     Err(err) => {
                         warn!(client_id = self.client_id(), error = err.to_string());
-                        self.handle_error(err)?;
+                        self.send_error_response(err)?;
                     }
                 }
 
@@ -215,7 +215,7 @@ where
                     Ok(_) => (),
                     Err(err) => {
                         warn!(client_id = self.client_id(), error = err.to_string());
-                        self.handle_error(err)?;
+                        self.send_error_response(err)?;
                     }
                 }
 
@@ -343,7 +343,7 @@ where
             Ok(_) => (),
             Err(err) => {
                 warn!(client_id = self.client_id(), error = err.to_string());
-                self.handle_error(err)?;
+                self.send_error_response(err)?;
             }
         }
 
@@ -447,8 +447,12 @@ where
 
         self.check_column_config(projection_columns, &ciphertexts)?;
 
-        let keyset_id = self.context.keyset_id();
-        warn!(?keyset_id);
+        let keyset_id = self.context.keyset_identifier();
+
+        debug!(target: CONTEXT,
+            client_id = self.context.client_id,
+            ?keyset_id,
+        );
 
         // Decrypt CipherText -> Plaintext
         let plaintexts = self
@@ -673,7 +677,8 @@ where
     /// Unlike the frontend, the backend doesn't need to set an error state
     /// since errors during result processing should immediately terminate
     /// the current query execution.
-    fn send_error_response(&mut self, error_response: ErrorResponse) -> Result<(), Error> {
+    fn send_error_response(&mut self, err: Error) -> Result<(), Error> {
+        let error_response = self.error_to_response(err);
         // Ensure any buffered data is cleared before sending error
         self.buffer.clear();
 
@@ -687,10 +692,6 @@ where
         );
 
         self.client_sender.send(message)?;
-
-        // Mark execution as complete to clean up state
-        self.context.complete_execution();
-        self.context.finish_session();
 
         Ok(())
     }

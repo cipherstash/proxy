@@ -237,10 +237,22 @@ pub enum EncryptError {
     InvalidIndexTerm,
 
     #[error(
-        "A keyset_id could not be set using `SET CIPHERSTASH.KEYSET_ID`. For help visit {}#encrypt-keyset-id-could-not-be-set",
+        "KeysetId `{id}` could not be parsed using `SET CIPHERSTASH.KEYSET_ID`. KeysetId should be a valid UUID. For help visit {}#encrypt-keyset-id-could-not-be-parsed",
+        ERROR_DOC_BASE_URL
+    )]
+    KeysetIdCouldNotBeParsed { id: String },
+
+    #[error(
+        "KeysetId could not be set using `SET CIPHERSTASH.KEYSET_ID`. For help visit {}#encrypt-keyset-id-could-not-be-set",
         ERROR_DOC_BASE_URL
     )]
     KeysetIdCouldNotBeSet,
+
+    #[error(
+        "A KeysetName could not be set using `SET CIPHERSTASH.KEYSET_NAME`. For help visit {}#encrypt-keyset-name-could-not-be-set",
+        ERROR_DOC_BASE_URL
+    )]
+    KeysetNameCouldNotBeSet,
 
     /// This should in practice be unreachable
     #[error("Missing encrypt configuration for column type `{plaintext_type}`. For help visit {}#encrypt-missing-encrypt-configuration", ERROR_DOC_BASE_URL)]
@@ -254,6 +266,15 @@ pub enum EncryptError {
 
     #[error(transparent)]
     PlaintextCouldNotBeDecoded(#[from] cipherstash_client::encryption::TypeParseError),
+
+    #[error("Missing keyset identifer.")]
+    MissingKeysetIdentifier,
+
+    #[error(
+        "Cannot SET CIPHERSTASH.KEYSET if a default keyset has been configured. For help visit {}#encrypt-unexpected-set-keyset",
+        ERROR_DOC_BASE_URL
+    )]
+    UnexpectedSetKeyset,
 
     #[error(
         "Column '{column}' in table '{table}' has no Encrypt configuration. For help visit {}#encrypt-unknown-column",

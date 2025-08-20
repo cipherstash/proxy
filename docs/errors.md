@@ -17,7 +17,9 @@
   - [Column could not be encrypted](#encrypt-column-could-not-be-encrypted)
   - [Column could not be encrypted](#encrypt-column-could-not-be-encrypted)
   - [Could not decrypt data for keyset](#encrypt-encrypt-could-not-decrypt-data-for-keyset)
+  - [KeysetId could not be parsed](#encrypt-keyset-id-could-not-be-parsed)
   - [KeysetId could not be set](#encrypt-keyset-id-could-not-be-set)
+  - [KeysetName could not be set](#encrypt-keyset-name-could-not-be-set)
   - [Plaintext could not be encoded](#encrypt-plaintext-could-not-be-encoded)
   - [Unknown column](#encrypt-unknown-column)
   - [Unknown table](#encrypt-unknown-table)
@@ -279,27 +281,77 @@ The most likely cause is network access to the ZeroKMS service.
 <!-- ---------------------------------------------------------------------------------------------------- -->
 
 
+## KeysetId could not be parsed <a id='encrypt-keyset-id-could-not-be-parsed'></a>
+
+A keyset_id could not be parsed using the `SET CIPHERSTASH.KEYSET_ID` command.
+
+### Error message
+
+```
+KeysetId `{id}` could not be parsed using `SET CIPHERSTASH.KEYSET_ID`. KeysetId should be a valid UUID.
+```
+
+### How to Fix
+
+1. Check that the `KeysetId` is a valid UUID.
+
+
+```
+   SET [ SESSION ] CIPHERSTASH.KEYSET_ID { TO | = } '{KeysetId}'
+```
+
+<!-- ---------------------------------------------------------------------------------------------------- -->
+
+
 ## KeysetId could not be set <a id='encrypt-keyset-id-could-not-be-set'></a>
 
-A keyset_id could not be set using the `SET CIPHERSTASH.KEYSET_ID` command.
+A KeysetId could not be set using the `SET CIPHERSTASH.KEYSET_ID` command.
 
 
 ### Error message
 
 ```
-A keyset_id could not be set using `SET CIPHERSTASH.KEYSET_ID`
+A KeysetId could not be set using `SET CIPHERSTASH.KEYSET_ID`
 ```
 
 ### How to Fix
 
-1. Check the syntax of the `SET CIPHERSTASH.KEYSET_ID` command. The `keyset_id` value should be in single quotes.
-2. Check that the provided `keyset_id` is a valid UUID.
-2. Check that the value is being set as a literal. The PostgreSQL `SET` statement does not support parameterised querying.
+1. Check the syntax of the `SET CIPHERSTASH.KEYSET_ID` command. The `KeysetId` value should be in single quotes.
+2. Check that the `KeysetId` is a valid UUID.
+3. Check that the value is being set as a literal. The PostgreSQL `SET` statement does not support parameterised querying.
 
 
 ```
    SET [ SESSION ] CIPHERSTASH.KEYSET_ID { TO | = } '{keyset_id}'
 ```
+
+
+<!-- ---------------------------------------------------------------------------------------------------- -->
+
+
+## KeysetName could not be set <a id='encrypt-keyset-name-could-not-be-set'></a>
+
+KeysetName could not be set using the `SET CIPHERSTASH.KEYSET_NAME` command.
+
+
+### Error message
+
+```
+A KeysetName could not be set using `SET CIPHERSTASH.KEYSET_NAME`
+```
+
+### How to Fix
+
+1. Check the syntax of the `SET CIPHERSTASH.KEYSET_ID` command. The `KeysetName` value should be in single quotes.
+2. Check that the provided `KeysetName` is a valid UUID.
+2. Check that the value is being set as a literal. The PostgreSQL `SET` statement does not support parameterised querying.
+
+
+```
+   SET [ SESSION ] CIPHERSTASH.KEYSET_NAME { TO | = } '{KeysetName}'
+```
+
+
 
 <!-- ---------------------------------------------------------------------------------------------------- -->
 
