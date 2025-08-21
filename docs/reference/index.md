@@ -258,6 +258,55 @@ As a convenience for production deployments, with the below environment variable
 CS_DATABASE__INSTALL_AWS_RDS_CERT_BUNDLE="true"
 ```
 
+## Multitenant
+
+CipherStash Proxy supports multitenant applications by allowing clients to switch between different keysets at runtime. This enables a single Proxy instance to handle encrypted data for multiple tenants, with each tenant's data protected by separate encryption keys.
+
+### Keyset Commands
+
+#### SET CIPHERSTASH.KEYSET_ID
+
+Sets the active keyset for the current connection using a keyset UUID.
+
+**Syntax:**
+```sql
+SET CIPHERSTASH.KEYSET_ID = '<keyset-uuid>';
+```
+
+**Parameters:**
+- `keyset-uuid`: The UUID of the keyset to activate for this connection
+
+**Example:**
+```sql
+SET CIPHERSTASH.KEYSET_ID = '2cace9db-3a2a-4b46-a184-ba412b3e0730';
+```
+
+#### SET CIPHERSTASH.KEYSET_NAME
+
+Sets the active keyset for the current connection using a keyset name.
+
+**Syntax:**
+```sql
+SET CIPHERSTASH.KEYSET_NAME = '<keyset-name>';
+```
+
+**Parameters:**
+- `keyset-name`: The name of the keyset to activate for this connection
+
+**Example:**
+```sql
+SET CIPHERSTASH.KEYSET_NAME = 'tenant-1';
+```
+
+### Usage Notes
+
+- These commands must be executed before performing any encrypted operations
+- The keyset remains active for the duration of the connection
+- If a default keyset is configured in the Proxy, these commands cannot be used and will return an error
+- Each tenant should use a separate database connection with their own keyset
+- Keyset switching is connection-scoped and does not affect other connections
+
+
 
 ## Disabling encrypted mapping
 Transforming SQL statements is core to how CipherStash Proxy works.
