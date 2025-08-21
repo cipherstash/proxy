@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1755732972525,
+  "lastUpdate": 1755738661441,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -12764,6 +12764,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 12.816267,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "toby@cipherstash.com",
+            "name": "Toby Hede",
+            "username": "tobyhede"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "a869981f92e9db389b3bd426f7028b618ccf115b",
+          "message": "Merge pull request #306 from cipherstash/set-key-name-integration-test\n\nSet key name integration test",
+          "timestamp": "2025-08-21T11:06:49+10:00",
+          "tree_id": "66b0520c7d56da98ad7fb55fcd694e84d08179ef",
+          "url": "https://github.com/cipherstash/proxy/commit/a869981f92e9db389b3bd426f7028b618ccf115b"
+        },
+        "date": 1755738659766,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 5.107581,
             "unit": "Number"
           }
         ]
