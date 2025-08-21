@@ -136,7 +136,7 @@ mise run rust:version
 mise run test:check
 mise run test:format
 mise run test:clippy
-# mise run test:unit
+mise run test:unit
 mise run test:integration
 """
 
@@ -278,20 +278,20 @@ description = "Runs integration test/s"
 run = """
 set -e
 
-# echo
-# echo '###############################################'
-# echo '# Preflight'
-# echo '###############################################'
-# echo
+echo
+echo '###############################################'
+echo '# Preflight'
+echo '###############################################'
+echo
 
 # Ensure Postgres instances are running
 mise run test:integration:preflight
 
-# echo
-# echo '###############################################'
-# echo '# Test: unconfigured proxy'
-# echo '###############################################'
-# echo
+echo
+echo '###############################################'
+echo '# Test: unconfigured proxy'
+echo '###############################################'
+echo
 
 mise --env tcp run postgres:eql:teardown
 mise --env tcp run proxy:up proxy --extra-args "--detach --wait"
@@ -299,55 +299,54 @@ mise --env tcp run test:wait_for_postgres_to_quack --port 6432 --max-retries 20
 mise --env tcp run test:integration:psql-passthrough
 mise --env tcp run proxy:down
 
-# echo
-# echo '###############################################'
-# echo '# Setup'
-# echo '###############################################'
-# echo
+echo
+echo '###############################################'
+echo '# Setup'
+echo '###############################################'
+echo
 
-# # Ensure EQL is set up before we try and start Proxy
+# Ensure EQL is set up before we try and start Proxy
 mise --env tcp run postgres:setup
 mise --env tls run postgres:setup
 
-# echo
-# echo '###############################################'
-# echo '# Test: Prometheus'
-# echo '###############################################'
-# echo
+echo
+echo '###############################################'
+echo '# Test: Prometheus'
+echo '###############################################'
+echo
 
 mise --env tcp run proxy:up proxy --extra-args "--detach --wait"
 mise --env tcp run test:wait_for_postgres_to_quack --port 6432 --max-retries 20
 mise --env tcp run test:integration:prometheus
 mise --env tcp run proxy:down
 
-# echo
-# echo '###############################################'
-# echo '# Test: non-TLS'
-# echo '###############################################'
-# echo
+echo
+echo '###############################################'
+echo '# Test: non-TLS'
+echo '###############################################'
+echo
 
 mise --env tcp run proxy:up proxy --extra-args "--detach --wait"
 mise --env tcp run test:wait_for_postgres_to_quack --port 6432 --max-retries 20
 mise --env tcp run test:integration:psql-tcp
 mise --env tcp run proxy:down
 
-# echo
-# echo '###############################################'
-# echo '# Test: TLS'
-# echo '###############################################'
-# echo
+echo
+echo '###############################################'
+echo '# Test: TLS'
+echo '###############################################'
+echo
 
 mise --env tls run proxy:up proxy-tls --extra-args "--detach --wait"
 mise --env tls run test:wait_for_postgres_to_quack --port 6432 --max-retries 20 --tls
 mise --env tls run test:integration:psql-tls
 mise --env tls run proxy:down
 
-
-# echo
-# echo '###############################################'
-# echo '# Test: Integration'
-# echo '###############################################'
-# echo
+echo
+echo '###############################################'
+echo '# Test: Integration'
+echo '###############################################'
+echo
 
 mise --env tls run proxy:up proxy-tls --extra-args "--detach --wait"
 mise --env tls run test:wait_for_postgres_to_quack --port 6432 --max-retries 20 --tls
@@ -373,23 +372,24 @@ export CS_DEFAULT_KEYSET_ID="{{default_keyset_id}}"
 
 mise --env tls run proxy:down
 
-# echo
-# echo '###############################################'
-# echo '# Test: Showcase'
-# echo '###############################################'
-# echo
+echo
+echo '###############################################'
+echo '# Test: Showcase'
+echo '###############################################'
+echo
 mise --env tls run proxy:up proxy-tls --extra-args "--detach --wait"
 mise --env tls run test:wait_for_postgres_to_quack --port 6432 --max-retries 20 --tls
 RUST_BACKTRACE=full cargo run -p showcase
 mise --env tls run proxy:down
 
-# echo
-# echo '###############################################'
-# echo '# Test: Language-specific integration'
-# echo '###############################################'
-# echo
+echo
+echo '###############################################'
+echo '# Test: Language-specific integration'
+echo '###############################################'
+echo
 mise run test:integration:lang:golang
 mise run test:integration:lang:python
+
 # Commented out pending fix of the root cause of the test flake
 # mise run test:integration:lang:elixir
 """

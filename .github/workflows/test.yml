@@ -28,10 +28,18 @@ jobs:
           CS_TENANT_KEYSET_ID_1: ${{ secrets.CS_TENANT_KEYSET_ID_1 }}
           CS_TENANT_KEYSET_ID_2: ${{ secrets.CS_TENANT_KEYSET_ID_2 }}
           CS_TENANT_KEYSET_ID_3: ${{ secrets.CS_TENANT_KEYSET_ID_3 }}
+          CS_TENANT_KEYSET_NAME_1: ${{ secrets.CS_TENANT_KEYSET_NAME_1 }}
+          CS_TENANT_KEYSET_NAME_2: ${{ secrets.CS_TENANT_KEYSET_NAME_2 }}
+          CS_TENANT_KEYSET_NAME_3: ${{ secrets.CS_TENANT_KEYSET_NAME_3 }}
           CS_CLIENT_ID: ${{ secrets.CS_CLIENT_ID }}
           CS_CLIENT_KEY: ${{ secrets.CS_CLIENT_KEY }}
           CS_WORKSPACE_CRN: "crn:ap-southeast-2.aws:${{ secrets.CS_WORKSPACE_ID }}"
-
           RUST_BACKTRACE: "1"
         run: |
           mise run --output prefix test
+
+      # Always show the Proxy logs, for debugging
+      - name: Show Proxy logs
+        if: always()
+        run: |
+          docker logs --timestamps proxy-tls
