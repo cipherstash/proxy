@@ -47,7 +47,7 @@ jobs:
         uses: benchmark-action/github-action-benchmark@v1
         with:
           # What benchmark tool the output.txt came from
-          tool: 'customSmallerIsBetter'
+          tool: 'customBiggerIsBetter'
           # Where the output from the benchmark tool is stored
           output-file-path: tests/benchmark/results/output.json
 
