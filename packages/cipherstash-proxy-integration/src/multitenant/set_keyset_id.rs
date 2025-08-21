@@ -1,3 +1,10 @@
+/// IMPORTANT
+/// IMPORTANT
+///
+/// These test assumes that `CS_DEFAULT_KEYSET_ID` has not been set
+///
+/// The mise integration task splits the `multitenant` tests so that the config can be changed
+///
 #[cfg(test)]
 mod tests {
     use crate::common::{
