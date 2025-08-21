@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1755744279407,
+  "lastUpdate": 1755753727319,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -12868,6 +12868,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 12.446184,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "50e3d9cc749a90d1d15baca3c7382c09838ca809",
+          "message": "feat: ✨ add configurable cipher caching with async Moka",
+          "timestamp": "2025-08-21T01:06:53Z",
+          "url": "https://github.com/cipherstash/proxy/pull/308/commits/50e3d9cc749a90d1d15baca3c7382c09838ca809"
+        },
+        "date": 1755753725882,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 25.277508,
             "unit": "Number"
           }
         ]
