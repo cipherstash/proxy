@@ -8,6 +8,7 @@ use crate::{
     error::{EncryptError, Error},
     log::ENCRYPT,
     postgresql::{Column, KeysetIdentifier},
+    prometheus::{KEYSET_CIPHER_CACHE_HITS_TOTAL, KEYSET_CIPHER_INIT_TOTAL},
     Identifier, EQL_SCHEMA_VERSION,
 };
 use cipherstash_client::{
@@ -26,8 +27,10 @@ use cipherstash_client::{
     encryption::QueryOp,
 };
 use config::EncryptConfigManager;
+use metrics::counter;
+use moka::future::Cache;
 use schema::SchemaManager;
-use std::{sync::Arc, vec};
+use std::{sync::Arc, time::Duration, vec};
 use tracing::{debug, info, warn};
 
 /// SQL Statement for loading encrypt configuration from database
@@ -54,6 +57,7 @@ pub struct Encrypt {
     /// The EQL version installed in the database or `None` if it was not present
     pub eql_version: Option<String>,
     zerokms_client: Arc<ZerokmsClient>,
+    cipher_cache: Cache<String, Arc<ScopedCipher>>,
 }
 
 impl Encrypt {
@@ -82,28 +86,81 @@ impl Encrypt {
             }
         };
 
+        let cipher_cache = Cache::builder()
+            // Use weigher to estimate memory usage of ScopedCipher instances
+            .weigher(|_key: &String, _value: &Arc<ScopedCipher>| -> u32 {
+                // Estimate memory usage of a ScopedCipher:
+                // - Base Arc overhead: ~24 bytes
+                // - ScopedCipher internal state: estimated ~1KB for crypto state
+                // - Key material and connection state: estimated ~2KB
+                // Total conservative estimate: ~3KB per cipher
+                3 * 1024 // 3KB estimated per cipher
+            })
+            // Set capacity in bytes (convert from entry count to memory estimate)
+            .max_capacity((config.server.cipher_cache_size as u64) * 3 * 1024)
+            .time_to_live(Duration::from_secs(config.server.cipher_cache_ttl_seconds))
+            .build();
+
         Ok(Encrypt {
             config,
             zerokms_client: Arc::new(zerokms_client),
             encrypt_config,
             schema,
             eql_version,
+            cipher_cache,
         })
     }
 
-    /// Initialize cipher using the stored zerokms_config
+    /// Generate a cache key for the keyset identifier
+    fn cache_key_for_keyset(keyset_id: &Option<KeysetIdentifier>) -> String {
+        match keyset_id {
+            Some(id) => format!("{}", id.0),
+            None => "default".to_string(),
+        }
+    }
+
+    /// Initialize cipher using the stored zerokms_config, with async Moka caching and memory tracking
     pub async fn init_cipher(
         &self,
         keyset_id: Option<KeysetIdentifier>,
-    ) -> Result<ScopedCipher, Error> {
+    ) -> Result<Arc<ScopedCipher>, Error> {
+        let cache_key = Self::cache_key_for_keyset(&keyset_id);
+
+        // Check cache first
+        if let Some(cached_cipher) = self.cipher_cache.get(&cache_key).await {
+            debug!(target: ENCRYPT, msg = "Use cached ScopedCipher", ?keyset_id);
+            counter!(KEYSET_CIPHER_CACHE_HITS_TOTAL).increment(1);
+            return Ok(cached_cipher);
+        }
+
         let zerokms_client = self.zerokms_client.clone();
 
         debug!(target: ENCRYPT, msg = "Initializing ZeroKMS ScopedCipher", ?keyset_id);
 
-        let identified_by = keyset_id.clone().map(|id| id.0);
+        // let identified_by = keyset_id.clone().map(|id| id.0);
+        let identified_by = keyset_id.as_ref().map(|id| id.0.clone());
 
         match ScopedCipher::init(zerokms_client, identified_by).await {
-            Ok(cipher) => Ok(cipher),
+            Ok(cipher) => {
+                let arc_cipher = Arc::new(cipher);
+
+                counter!(KEYSET_CIPHER_INIT_TOTAL).increment(1);
+
+                // Store in cache
+                self.cipher_cache
+                    .insert(cache_key, arc_cipher.clone())
+                    .await;
+
+                // Update pending tasks to get accurate cache statistics
+                self.cipher_cache.run_pending_tasks().await;
+
+                let entry_count = self.cipher_cache.entry_count();
+                let memory_usage_bytes = self.cipher_cache.weighted_size();
+
+                debug!(target: ENCRYPT, msg = "ScopedCipher cache", ?keyset_id, entry_count, memory_usage_bytes);
+
+                Ok(arc_cipher)
+            }
             Err(err) => {
                 debug!(target: ENCRYPT, msg = "Error initializing ZeroKMS ScopedCipher", error = err.to_string());
 
@@ -137,7 +194,7 @@ impl Encrypt {
             return Err(EncryptError::MissingKeysetIdentifier.into());
         }
 
-        let cipher = Arc::new(self.init_cipher(keyset_id).await?);
+        let cipher = self.init_cipher(keyset_id).await?;
 
         let mut pipeline = ReferencedPendingPipeline::new(cipher.clone());
         let mut index_term_plaintexts = vec![None; columns.len()];
@@ -220,7 +277,7 @@ impl Encrypt {
         }
         debug!(target: ENCRYPT, msg="Decrypt", ?keyset_id);
 
-        let cipher = Arc::new(self.init_cipher(keyset_id.clone()).await?);
+        let cipher = self.init_cipher(keyset_id.clone()).await?;
 
         // Create a mutable vector to hold the decrypted results
         let mut results = vec![None; ciphertexts.len()];

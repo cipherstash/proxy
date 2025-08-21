@@ -18,6 +18,7 @@ mod passthrough;
 mod pipeline;
 mod schema_change;
 mod select;
+mod set_keyset_error;
 mod simple_protocol;
 mod support;
 mod update;

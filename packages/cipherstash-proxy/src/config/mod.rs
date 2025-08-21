@@ -26,6 +26,9 @@ pub const DEFAULT_PORT: u16 = 6432;
 pub const DEFAULT_SHUTDOWN_TIMEOUT: u64 = 2000;
 pub const DEFAULT_WORKER_THREADS: usize = 4;
 
+pub const DEFAULT_CIPHER_CACHE_SIZE: usize = 64;
+pub const DEFAULT_CIPHER_CACHE_TTL_SECONDS: u64 = 3600; // 1 hour
+
 fn protected_string_deserializer<'de, D>(deserializer: D) -> Result<Protected<String>, D::Error>
 where
     D: serde::Deserializer<'de>,

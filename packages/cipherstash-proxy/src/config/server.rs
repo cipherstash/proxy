@@ -1,4 +1,7 @@
-use super::{DEFAULT_PORT, DEFAULT_SHUTDOWN_TIMEOUT, DEFAULT_WORKER_THREADS};
+use super::{
+    DEFAULT_CIPHER_CACHE_SIZE, DEFAULT_CIPHER_CACHE_TTL_SECONDS, DEFAULT_PORT,
+    DEFAULT_SHUTDOWN_TIMEOUT, DEFAULT_WORKER_THREADS,
+};
 use crate::error::{ConfigError, Error};
 use rustls_pki_types::ServerName;
 use serde::Deserialize;
@@ -23,6 +26,12 @@ pub struct ServerConfig {
     pub worker_threads: usize,
 
     pub thread_stack_size: Option<usize>,
+
+    #[serde(default = "ServerConfig::default_cipher_cache_size")]
+    pub cipher_cache_size: usize,
+
+    #[serde(default = "ServerConfig::default_cipher_cache_ttl_seconds")]
+    pub cipher_cache_ttl_seconds: u64,
 }
 
 impl Default for ServerConfig {
@@ -34,6 +43,8 @@ impl Default for ServerConfig {
             shutdown_timeout: ServerConfig::default_shutdown_timeout(),
             worker_threads: ServerConfig::default_worker_threads(),
             thread_stack_size: None,
+            cipher_cache_size: ServerConfig::default_cipher_cache_size(),
+            cipher_cache_ttl_seconds: ServerConfig::default_cipher_cache_ttl_seconds(),
         }
     }
 }
@@ -63,6 +74,14 @@ impl ServerConfig {
             }
             Err(_) => DEFAULT_WORKER_THREADS,
         }
+    }
+
+    pub const fn default_cipher_cache_size() -> usize {
+        DEFAULT_CIPHER_CACHE_SIZE
+    }
+
+    pub const fn default_cipher_cache_ttl_seconds() -> u64 {
+        DEFAULT_CIPHER_CACHE_TTL_SECONDS
     }
 
     pub fn server_name(&self) -> Result<ServerName<'_>, Error> {

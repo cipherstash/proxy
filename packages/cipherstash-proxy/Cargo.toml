@@ -24,6 +24,7 @@ hex = "0.4.3"
 md-5 = "0.10.6"
 metrics = "0.24.1"
 metrics-exporter-prometheus = "0.17"
+moka = { version = "0.12", features = ["future"] }
 oid-registry = "0.8"
 pg_escape = "0.1.1"
 postgres-protocol = "0.6.7"

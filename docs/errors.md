@@ -368,7 +368,7 @@ Unknown keyset name or id '{keyset}'
 ### How to Fix
 
 1. Check that the active `keyset_name` or `keyset_id` is associated with a keyset in the configured workspace.
-2. Check that the configured client credentials have access to the keyset and workspace.
+2. Check that the configured `client` has been granted access to the keyset via the dashboard.
 3. Keyset names are case sensitive. If setting the active keyset by name, check that the `keyset_name` is an exact match.
 
 
