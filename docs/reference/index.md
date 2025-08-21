@@ -58,6 +58,20 @@ worker_threads = "4"
 # Env: CS_SERVER__THREAD_STACK_SIZE
 thread_stack_size = "2097152"
 
+# Cipher cache size (number of entries)
+# Sets the maximum number of encryption/decryption operations to cache
+# Optional
+# Default: `64`
+# Env: CS_SERVER__CIPHER_CACHE_SIZE
+cipher_cache_size = "64"
+
+# Cipher cache TTL in seconds
+# Sets how long cached encryption/decryption operations are valid
+# Optional
+# Default: `3600` (1 hour)
+# Env: CS_SERVER__CIPHER_CACHE_TTL_SECONDS
+cipher_cache_ttl_seconds = "3600"
+
 ### Proxy -> Backing database connection settings
 [database]
 # Database host address
@@ -246,9 +260,9 @@ CS_DATABASE__INSTALL_AWS_RDS_CERT_BUNDLE="true"
 
 
 ## Disabling encrypted mapping
-Transforming SQL statements is core to how CipherStash Proxy works. 
-Internally, Proxy takes the plaintext SQL statements issued by your application, and transforms them into statements on [EQL](https://github.com/cipherstash/encrypt-query-language/) columns. 
-Proxy does this through an internal process called _encrypted mapping_, or just _mapping_ for short. 
+Transforming SQL statements is core to how CipherStash Proxy works.
+Internally, Proxy takes the plaintext SQL statements issued by your application, and transforms them into statements on [EQL](https://github.com/cipherstash/encrypt-query-language/) columns.
+Proxy does this through an internal process called _encrypted mapping_, or just _mapping_ for short.
 
 In some circumstances it may be necessary to disable encrypted mapping for one or more SQL statements.
 
@@ -299,7 +313,7 @@ This behaviour is expected and a consequence of the PostgreSQL protocol.
 To prepare a statement, the client sends the SQL in a `parse` message.
 Once a statement has been prepared, the client skips the `parse` step, and does not send the SQL again, referring to the statement by a specified name.
 If mapping is disabled, Proxy will not map the statement on `parse`, and data returned from subsequent executions will never be decrypted.
-If mapping is enabled on the connection, when the client executes the statement it will reference it by name, skipping the `parse` step. 
+If mapping is enabled on the connection, when the client executes the statement it will reference it by name, skipping the `parse` step.
 As the statement was not mapped in the `parse` because mapping was disabled at that point, the returned data will not be decrypted
 
 
@@ -324,6 +338,8 @@ If the proxy is running on a host other than localhost, access on that host.
 
 | Name                                                            | Target    | Description                                                                 |
 |-----------------------------------------------------------------|-----------|-----------------------------------------------------------------------------|
+| `cipherstash_proxy_keyset_cipher_cache_hits_total`                     | Counter   | Number of times a keyset-scoped cipher was found in the cache                       |
+| `cipherstash_proxy_keyset_cipher_init_total`                           | Counter   | Number of times a new keyset-scoped cipher  has been initialized                     |
 | `cipherstash_proxy_clients_active_connections`                  | Gauge     | Current number of connections to CipherStash Proxy from clients             |
 | `cipherstash_proxy_clients_bytes_received_total`                | Counter   | Number of bytes received by CipherStash Proxy from clients                  |
 | `cipherstash_proxy_clients_bytes_sent_total`                    | Counter   | Number of bytes sent from CipherStash Proxy to clients                      |

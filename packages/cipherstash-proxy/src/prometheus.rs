@@ -37,6 +37,9 @@ pub const CLIENTS_BYTES_RECEIVED_TOTAL: &str = "cipherstash_proxy_clients_bytes_
 pub const SERVER_BYTES_SENT_TOTAL: &str = "cipherstash_proxy_server_bytes_sent_total";
 pub const SERVER_BYTES_RECEIVED_TOTAL: &str = "cipherstash_proxy_server_bytes_received_total";
 
+pub const KEYSET_CIPHER_INIT_TOTAL: &str = "cipherstash_proxy_keyset_cipher_init_total";
+pub const KEYSET_CIPHER_CACHE_HITS_TOTAL: &str = "cipherstash_proxy_keyset_cipher_cache_hits_total";
+
 pub fn start(host: String, port: u16) -> Result<(), Error> {
     let address = format!("{host}:{port}");
     let socket_address: SocketAddr = address.parse().unwrap();
@@ -143,6 +146,15 @@ pub fn start(host: String, port: u16) -> Result<(), Error> {
     describe_counter!(
         SERVER_BYTES_RECEIVED_TOTAL,
         "Number of bytes CipherStash Proxy received from the PostgreSQL server"
+    );
+
+    describe_counter!(
+        KEYSET_CIPHER_INIT_TOTAL,
+        "Number of times a new keyset-scoped cipher has been initialized"
+    );
+    describe_counter!(
+        KEYSET_CIPHER_CACHE_HITS_TOTAL,
+        "Number of times a keyset-scoped cipher was found in the cache"
     );
 
     // Prometheus endpoint is empty on startup and looks like an error
