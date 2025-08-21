@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1755753727319,
+  "lastUpdate": 1755754881675,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -12893,6 +12893,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 25.277508,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "toby@cipherstash.com",
+            "name": "Toby Hede",
+            "username": "tobyhede"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "df1dab71ea692ee84f7067c4626f705da93f2a24",
+          "message": "Merge pull request #308 from cipherstash/scoped-cipher-lru\n\nfeat: ✨ add configurable cipher caching with async Moka",
+          "timestamp": "2025-08-21T15:37:23+10:00",
+          "tree_id": "1eba0adcabdf8566bfb5bfa63d6da5451cee1505",
+          "url": "https://github.com/cipherstash/proxy/commit/df1dab71ea692ee84f7067c4626f705da93f2a24"
+        },
+        "date": 1755754880256,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 24.55119,
             "unit": "Number"
           }
         ]
