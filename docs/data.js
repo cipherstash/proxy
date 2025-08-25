@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1756081168543,
+  "lastUpdate": 1756081851558,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -12997,6 +12997,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 23.774776,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "toby@cipherstash.com",
+            "name": "Toby Hede",
+            "username": "tobyhede"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "c52d65b7b28d80ed3f67c669d62653006c6d707e",
+          "message": "Merge pull request #309 from cipherstash/calculate-cache-size\n\nrefactor: ♻️ use std::mem::size_of for accurate cipher cache sizing",
+          "timestamp": "2025-08-25T10:27:15+10:00",
+          "tree_id": "abdc1e8971ae20573c3cb61942720c3304c52b87",
+          "url": "https://github.com/cipherstash/proxy/commit/c52d65b7b28d80ed3f67c669d62653006c6d707e"
+        },
+        "date": 1756081850071,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 23.958757,
             "unit": "Number"
           }
         ]
