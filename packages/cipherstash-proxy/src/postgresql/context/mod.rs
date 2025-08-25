@@ -2,10 +2,7 @@ pub mod column;
 
 use super::{
     format_code::FormatCode,
-    messages::{
-        describe::{Describe, Target},
-        Name,
-    },
+    messages::{describe::Describe, Name, Target},
     Column,
 };
 use crate::{
@@ -29,6 +26,7 @@ type DescribeQueue = Queue<Describe>;
 type ExecuteQueue = Queue<ExecuteContext>;
 type SessionMetricsQueue = Queue<SessionMetricsContext>;
 type PortalQueue = Queue<Arc<Portal>>;
+type StatementQueue = Queue<Arc<Statement>>;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct KeysetIdentifier(pub IdentifiedBy);
@@ -42,7 +40,7 @@ impl std::fmt::Display for KeysetIdentifier {
 #[derive(Clone, Debug)]
 pub struct Context {
     pub client_id: i32,
-    statements: Arc<RwLock<HashMap<Name, Arc<Statement>>>>,
+    statements: Arc<RwLock<HashMap<Name, StatementQueue>>>,
     portals: Arc<RwLock<HashMap<Name, PortalQueue>>>,
     describe: Arc<RwLock<DescribeQueue>>,
     execute: Arc<RwLock<ExecuteQueue>>,
@@ -187,6 +185,9 @@ impl Context {
             histogram!(STATEMENTS_EXECUTION_DURATION_SECONDS).record(execute.duration());
             if execute.name.is_unnamed() {
                 self.close_portal(&execute.name);
+                // Also close unnamed statements after execution completes
+                // This ensures cleanup for any orphaned unnamed statements
+                self.close_statement(&execute.name);
             }
         }
 
@@ -195,10 +196,12 @@ impl Context {
 
     pub fn add_statement(&mut self, name: Name, statement: Statement) {
         debug!(target: CONTEXT, client_id = self.client_id, statement = ?name);
-        let _ = self
-            .statements
-            .write()
-            .map(|mut guarded| guarded.insert(name, Arc::new(statement)));
+        let _ = self.statements.write().map(|mut statements| {
+            statements
+                .entry(name)
+                .or_insert_with(Queue::new)
+                .add(Arc::new(statement));
+        });
     }
 
     pub fn add_portal(&mut self, name: Name, portal: Portal) {
@@ -214,7 +217,21 @@ impl Context {
     pub fn get_statement(&self, name: &Name) -> Option<Arc<Statement>> {
         debug!(target: CONTEXT, client_id = self.client_id, statement = ?name);
         let statements = self.statements.read().ok()?;
-        statements.get(name).cloned()
+        let queue = statements.get(name)?;
+        queue.next().cloned()
+    }
+
+    ///
+    /// Close the statement identified by `name`
+    /// Statement is removed from queue
+    ///
+    pub fn close_statement(&mut self, name: &Name) {
+        debug!(target: CONTEXT, client_id = self.client_id, msg = "Close Statement", name = ?name);
+        let _ = self.statements.write().map(|mut statements| {
+            statements
+                .entry(name.clone())
+                .and_modify(|queue| queue.complete());
+        });
     }
 
     ///
