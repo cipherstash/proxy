@@ -264,7 +264,7 @@ impl Context {
             } => self.get_portal_statement(name),
             Describe {
                 ref name,
-                target: Target::PreparedStatement,
+                target: Target::Statement,
             } => self.get_statement(name),
         }
     }
@@ -583,7 +583,7 @@ mod tests {
     use crate::{
         config::LogConfig,
         log,
-        postgresql::messages::{describe::Target, Name},
+        postgresql::messages::{Name, Target},
     };
     use cipherstash_client::IdentifiedBy;
     use eql_mapper::Schema;
@@ -629,7 +629,7 @@ mod tests {
 
         let describe = Describe {
             name,
-            target: Target::PreparedStatement,
+            target: Target::Statement,
         };
         context.set_describe(describe);
 
