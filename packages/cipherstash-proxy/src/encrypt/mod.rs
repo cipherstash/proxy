@@ -46,6 +46,9 @@ type ScopedCipher = encryption::ScopedCipher<AutoRefresh<ServiceCredentials>>;
 
 type ZerokmsClient = ZeroKMS<AutoRefresh<ServiceCredentials>, ClientKey>;
 
+/// Memory size of a single ScopedCipher instance for cache weighing
+const SCOPED_CIPHER_SIZE: usize = std::mem::size_of::<ScopedCipher>();
+
 ///
 /// All of the things required for Encrypt-as-a-Product
 ///
@@ -87,17 +90,12 @@ impl Encrypt {
         };
 
         let cipher_cache = Cache::builder()
-            // Use weigher to estimate memory usage of ScopedCipher instances
+            // Use weigher to calculate actual memory usage of ScopedCipher instances
             .weigher(|_key: &String, _value: &Arc<ScopedCipher>| -> u32 {
-                // Estimate memory usage of a ScopedCipher:
-                // - Base Arc overhead: ~24 bytes
-                // - ScopedCipher internal state: estimated ~1KB for crypto state
-                // - Key material and connection state: estimated ~2KB
-                // Total conservative estimate: ~3KB per cipher
-                3 * 1024 // 3KB estimated per cipher
+                SCOPED_CIPHER_SIZE as u32
             })
-            // Set capacity in bytes (convert from entry count to memory estimate)
-            .max_capacity((config.server.cipher_cache_size as u64) * 3 * 1024)
+            // Set capacity in bytes (entry count * actual struct size)
+            .max_capacity((config.server.cipher_cache_size as u64) * SCOPED_CIPHER_SIZE as u64)
             .time_to_live(Duration::from_secs(config.server.cipher_cache_ttl_seconds))
             .build();
 

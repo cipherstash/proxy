@@ -258,6 +258,64 @@ As a convenience for production deployments, with the below environment variable
 CS_DATABASE__INSTALL_AWS_RDS_CERT_BUNDLE="true"
 ```
 
+## Multitenant operation
+
+CipherStash Proxy supports multitenant applications using ZeroKMS keysets to provide strong cryptographic separation between tenants.
+
+In multitenant operation, tenants are associated with a keyset, and data is protected by separate encryption keys. Data access through the proxy can be scoped to a specific keyset at runtime using the `SET CIPHERSTASH.KEYSET` SQL commands:
+  - `SET CIPHERSTASH.KEYSET_ID`
+  - `SET CIPHERSTASH.KEYSET_NAME`
+
+The `SET CIPHERSTASH.KEYSET` commands enable a proxy connection to be scoped to a keyset by `id` or `name`. Once a keyset has been set for a connection, subsequent operations are scoped to that keyset. Data can only be decrypted by the same keyset that performed the encryption.
+
+ A keyset `name` is unique to a workspace, and functions like an alias. Using a keyset `name` enables the keyset to be associated with an arbitrary identifier such as an internal `TenantId`. Use of a `name` is optional, and the actual `id`
+
+The proxy must be configured *without* a `DEFAULT_KEYSET_ID` to enable multitenant operation and the use of the `SET KEYSET` commands.
+
+
+### Keyset commands
+
+#### SET CIPHERSTASH.KEYSET_ID
+
+Sets the active keyset for the current connection using a keyset UUID.
+
+**Syntax:**
+```sql
+SET CIPHERSTASH.KEYSET_ID = '<keyset-uuid>';
+```
+
+**Parameters:**
+- `keyset-uuid`: The UUID of the keyset to activate for this connection
+
+**Example:**
+```sql
+SET CIPHERSTASH.KEYSET_ID = '2cace9db-3a2a-4b46-a184-ba412b3e0730';
+```
+
+#### SET CIPHERSTASH.KEYSET_NAME
+
+Sets the active keyset for the current connection using a keyset name.
+
+**Syntax:**
+```sql
+SET CIPHERSTASH.KEYSET_NAME = '<keyset-name>';
+```
+
+**Parameters:**
+- `keyset-name`: The name of the keyset to activate for this connection
+
+**Example:**
+```sql
+SET CIPHERSTASH.KEYSET_NAME = 'tenant-1';
+```
+
+### Usage notes
+
+- The `SET CIPHERSTASH.KEYSET` commands must be executed before performing any encryption operations
+- The keyset remains active for the duration of the connection, or until a subsequent `SET CIPHERSTASH.KEYSET`
+- If a default keyset is configured in the Proxy, these commands cannot be used, and will return an error
+- The active keyset is connection-scoped and does not affect other connections
+
 
 ## Disabling encrypted mapping
 Transforming SQL statements is core to how CipherStash Proxy works.
