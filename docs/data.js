@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1755762966452,
+  "lastUpdate": 1756081168543,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -12972,6 +12972,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 26.06805,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "410f8ba9dcdacc481c19af3e194ede48b2968982",
+          "message": "refactor: ♻️ use std::mem::size_of for accurate cipher cache sizing",
+          "timestamp": "2025-08-24T11:38:30Z",
+          "url": "https://github.com/cipherstash/proxy/pull/309/commits/410f8ba9dcdacc481c19af3e194ede48b2968982"
+        },
+        "date": 1756081167134,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 23.774776,
             "unit": "Number"
           }
         ]
