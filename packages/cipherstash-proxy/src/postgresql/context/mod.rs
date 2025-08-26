@@ -714,7 +714,7 @@ mod tests {
 
         let mut context = Context::new(1, schema);
 
-        let name = Name("name".to_string());
+        let name = Name::from("name");
 
         context.add_statement(&name, statement());
 
@@ -739,8 +739,8 @@ mod tests {
 
         let mut context = Context::new(1, schema);
 
-        let statement_name = Name("statement".to_string());
-        let portal_name = Name("portal".to_string());
+        let statement_name = Name::from("statement");
+        let portal_name = Name::from("portal");
 
         // Add statement to context
         context.add_statement(&statement_name, statement());
@@ -781,8 +781,8 @@ mod tests {
         let mut context = Context::new(1, schema);
 
         // Create multiple statements
-        let statement_name_1 = Name("statement_1".to_string());
-        let statement_name_2 = Name("statement_2".to_string());
+        let statement_name_1 = Name::from("statement_1");
+        let statement_name_2 = Name::from("statement_2");
 
         // Add statements to context
         context.add_statement(&statement_name_1, statement());
@@ -791,7 +791,7 @@ mod tests {
         // Replicate pipelined execution
         // Add multiple portals with the same name
         // Pointing to different statements
-        let portal_name = Name("portal".to_string());
+        let portal_name = Name::from("portal");
 
         let statement_1 = context.get_statement(&statement_name_1).unwrap();
         context.add_portal(portal_name.clone(), portal(&statement_1));
@@ -830,14 +830,14 @@ mod tests {
 
         let mut context = Context::new(1, schema);
 
-        let statement_name_1 = Name("statement_1".to_string());
+        let statement_name_1 = Name::from("statement_1");
         let portal_name_1 = Name::unnamed();
 
-        let statement_name_2 = Name("statement_2".to_string());
+        let statement_name_2 = Name::from("statement_2");
         let portal_name_2 = Name::unnamed();
 
-        let statement_name_3 = Name("statement_3".to_string());
-        let portal_name_3 = Name("portal_3".to_string());
+        let statement_name_3 = Name::from("statement_3");
+        let portal_name_3 = Name::from("portal_3");
 
         // Add statement to context
         context.add_statement(&statement_name_1, statement());
@@ -1178,8 +1178,8 @@ mod tests {
         assert!(retrieved5.is_none());
 
         // Test named statements (go to prepared_statements)
-        let named_name1 = Name("stmt1".to_string());
-        let named_name2 = Name("stmt2".to_string());
+        let named_name1 = Name::from("stmt1");
+        let named_name2 = Name::from("stmt2");
         let named_statement1 = statement();
         let named_statement2 = statement();
 

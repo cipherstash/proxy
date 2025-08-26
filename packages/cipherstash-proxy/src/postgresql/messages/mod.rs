@@ -9,6 +9,7 @@ pub mod data_row;
 pub mod describe;
 pub mod error_response;
 pub mod execute;
+pub mod name;
 pub mod param_description;
 pub mod parse;
 pub mod query;
@@ -18,6 +19,7 @@ pub mod target;
 pub mod terminate;
 
 // Re-export commonly used types
+pub use name::Name;
 pub use target::Target;
 
 pub const NULL: i32 = -1;
@@ -261,27 +263,6 @@ impl fmt::Display for FrontendCode {
             FrontendCode::Terminate => write!(f, "FrontendCode::Terminate"),
             FrontendCode::Unknown(c) => write!(f, "FrontendCode::Unknown('{}')", c),
         }
-    }
-}
-
-#[derive(Debug, Clone, Hash, Eq, PartialEq)]
-pub struct Name(pub String);
-
-impl Name {
-    pub fn unnamed() -> Name {
-        Name("".to_string())
-    }
-
-    pub fn is_unnamed(&self) -> bool {
-        self.0.is_empty()
-    }
-}
-
-impl std::ops::Deref for Name {
-    type Target = str;
-
-    fn deref(&self) -> &str {
-        self.0.as_str()
     }
 }
 
