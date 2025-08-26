@@ -52,7 +52,7 @@ impl TryFrom<&BytesMut> for Close {
         let target = cursor.get_u8();
         let target = Target::try_from(target)?;
         let name = cursor.read_string()?;
-        let name = Name(name);
+        let name = Name::from(name);
 
         Ok(Close { target, name })
     }
@@ -64,7 +64,7 @@ impl TryFrom<Close> for BytesMut {
     fn try_from(close: Close) -> Result<BytesMut, Error> {
         let mut bytes = BytesMut::new();
 
-        let name = CString::new(close.name.0.as_str())?;
+        let name = CString::new(close.name.as_str())?;
         let name = name.as_bytes_with_nul();
 
         let len = SIZE_I32 + SIZE_U8 + name.len();
@@ -122,7 +122,7 @@ mod tests {
         let close = Close::try_from(&bytes).unwrap();
 
         assert!(matches!(close.target, Target::Statement));
-        assert_eq!(close.name.0, "stmt1");
+        assert_eq!(close.name.as_str(), "stmt1");
         assert!(!close.name.is_unnamed());
     }
 
@@ -132,13 +132,13 @@ mod tests {
 
         let close = Close {
             target: Target::Portal,
-            name: Name("portal1".to_string()),
+            name: Name::from("portal1"),
         };
 
         let bytes = BytesMut::try_from(close).unwrap();
         let parsed = Close::try_from(&bytes).unwrap();
 
         assert!(matches!(parsed.target, Target::Portal));
-        assert_eq!(parsed.name.0, "portal1");
+        assert_eq!(parsed.name.as_str(), "portal1");
     }
 }

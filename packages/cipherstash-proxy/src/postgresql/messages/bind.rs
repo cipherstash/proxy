@@ -227,10 +227,10 @@ impl TryFrom<&BytesMut> for Bind {
         let _len = cursor.get_i32();
 
         let portal = cursor.read_string()?;
-        let portal = Name(portal);
+        let portal = Name::from(portal);
 
         let prepared_statement = cursor.read_string()?;
-        let prepared_statement = Name(prepared_statement);
+        let prepared_statement = Name::from(prepared_statement);
 
         let num_param_format_codes = cursor.get_i16();
         let mut param_format_codes = Vec::new();

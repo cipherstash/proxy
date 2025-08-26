@@ -29,7 +29,7 @@ impl TryFrom<&BytesMut> for Execute {
         let _len = cursor.get_i32(); // read and progress cursor
 
         let portal = cursor.read_string()?;
-        let portal = Name(portal);
+        let portal = Name::from(portal);
         let max_rows = cursor.get_i32();
 
         Ok(Execute { portal, max_rows })

@@ -333,7 +333,7 @@ where
             Target::Portal => self.context.close_portal(&close.name),
             Target::Statement => {
                 self.context.close_portal(&close.name);
-                self.context.close_statement(&close.name);
+                // self.context.close_statement(&close.name);
             }
         }
         Ok(())
