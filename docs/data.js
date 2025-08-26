@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1756191827948,
+  "lastUpdate": 1756198021618,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -13251,6 +13251,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 27.022603,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "toby@cipherstash.com",
+            "name": "Toby Hede",
+            "username": "tobyhede"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "1cf7ebf2affcd16d61b81fc139ff53adf384e406",
+          "message": "Merge pull request #311 from cipherstash/remove-obsolete-config\n\nchore: remove obsolete config",
+          "timestamp": "2025-08-26T18:43:15+10:00",
+          "tree_id": "9ed56d787dcc61a227021105cac1854cd1be6c79",
+          "url": "https://github.com/cipherstash/proxy/commit/1cf7ebf2affcd16d61b81fc139ff53adf384e406"
+        },
+        "date": 1756198020002,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 23.99462,
             "unit": "Number"
           }
         ]
