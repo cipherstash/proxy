@@ -32,29 +32,6 @@ pub(crate) struct Describe {
     pub name: Name,
 }
 
-///
-/// The target of the describe message.
-///
-/// Valid values are PreparedStatment or Portal
-///
-/// A Portal is a parsed statement PLUS any bound parameters
-/// Describe with `Target::Portal` returns the RowDescription describing the result set.
-/// The assuumption is that the parameters are already bound to the portal, so the Describe message is not required to include any parameter information.
-///
-/// Calls to Execute are made on a Portal (not a prepared statement) as execute requires any bound parameters
-///
-/// A PreparedStatement is the parsed statement
-/// Describe with `Target::PreparedStatement` returns a ParameterDescription followed by the RowDescription.
-///
-///
-/// See https://www.postgresql.org/docs/current/protocol-flow.html#PROTOCOL-FLOW-EXT-QUERY
-///
-#[derive(Debug, Clone)]
-pub enum Target {
-    Portal,
-    PreparedStatement,
-}
-
 impl TryFrom<&BytesMut> for Describe {
     type Error = Error;
 
@@ -74,7 +51,7 @@ impl TryFrom<&BytesMut> for Describe {
         let target = cursor.get_u8();
         let target = Target::try_from(target)?;
         let name = cursor.read_string()?;
-        let name = Name(name);
+        let name = Name::from(name);
 
         Ok(Describe { target, name })
     }
@@ -86,7 +63,7 @@ impl TryFrom<Describe> for BytesMut {
     fn try_from(describe: Describe) -> Result<BytesMut, Error> {
         let mut bytes = BytesMut::new();
 
-        let name = CString::new(describe.name.0.as_str())?;
+        let name = CString::new(describe.name.as_str())?;
         let name = name.as_bytes_with_nul();
 
         let len = SIZE_I32 + SIZE_U8 + name.len();
@@ -97,17 +74,5 @@ impl TryFrom<Describe> for BytesMut {
         bytes.put_slice(name);
 
         Ok(bytes)
-    }
-}
-
-impl TryFrom<u8> for Target {
-    type Error = Error;
-
-    fn try_from(t: u8) -> Result<Target, Error> {
-        match t as char {
-            'S' => Ok(Target::PreparedStatement),
-            'P' => Ok(Target::Portal),
-            t => Err(ProtocolError::UnexpectedDescribeTarget(t).into()),
-        }
     }
 }

@@ -621,7 +621,7 @@ mod tests {
 
         let mut context = Context::new(1, schema);
 
-        let name = Name("name".to_string());
+        let name = Name::from("name");
 
         context.add_statement(name.clone(), statement());
 
@@ -646,8 +646,8 @@ mod tests {
 
         let mut context = Context::new(1, schema);
 
-        let statement_name = Name("statement".to_string());
-        let portal_name = Name("portal".to_string());
+        let statement_name = Name::from("statement");
+        let portal_name = Name::from("portal");
 
         // Add statement to context
         context.add_statement(statement_name.clone(), statement());
@@ -688,8 +688,8 @@ mod tests {
         let mut context = Context::new(1, schema);
 
         // Create multiple statements
-        let statement_name_1 = Name("statement_1".to_string());
-        let statement_name_2 = Name("statement_2".to_string());
+        let statement_name_1 = Name::from("statement_1");
+        let statement_name_2 = Name::from("statement_2");
 
         // Add statements to context
         context.add_statement(statement_name_1.clone(), statement());
@@ -698,7 +698,7 @@ mod tests {
         // Replicate pipelined execution
         // Add multiple portals with the same name
         // Pointing to different statements
-        let portal_name = Name("portal".to_string());
+        let portal_name = Name::from("portal");
 
         let statement_1 = context.get_statement(&statement_name_1).unwrap();
         context.add_portal(portal_name.clone(), portal(&statement_1));
@@ -737,14 +737,14 @@ mod tests {
 
         let mut context = Context::new(1, schema);
 
-        let statement_name_1 = Name("statement_1".to_string());
+        let statement_name_1 = Name::from("statement_1");
         let portal_name_1 = Name::unnamed();
 
-        let statement_name_2 = Name("statement_2".to_string());
+        let statement_name_2 = Name::from("statement_2");
         let portal_name_2 = Name::unnamed();
 
-        let statement_name_3 = Name("statement_3".to_string());
-        let portal_name_3 = Name("portal_3".to_string());
+        let statement_name_3 = Name::from("statement_3");
+        let portal_name_3 = Name::from("portal_3");
 
         // Add statement to context
         context.add_statement(statement_name_1.clone(), statement());
@@ -1045,5 +1045,69 @@ mod tests {
         assert!(result.is_ok());
         let identifier = result.unwrap();
         assert!(identifier.is_none());
+    }
+
+    #[test]
+    pub fn test_unnamed_vs_named_statements() {
+        log::init(LogConfig::default());
+
+        let schema = Arc::new(Schema::new("public"));
+        let mut context = Context::new(1, schema);
+
+        // Test unnamed statements (go to queue)
+        let unnamed_name = Name::unnamed();
+        let statement1 = statement();
+        let statement2 = statement();
+
+        context.add_statement(&unnamed_name, statement1);
+        context.add_statement(&unnamed_name, statement2);
+
+        // Should get the same statement (front of queue) until consumed
+        let _retrieved1 = context.get_statement(&unnamed_name).unwrap();
+        let _retrieved2 = context.get_statement(&unnamed_name).unwrap();
+
+        // Should still return the first statement (not consumed yet)
+        let retrieved3 = context.get_statement(&unnamed_name);
+        assert!(retrieved3.is_some());
+
+        // Now consume the first statement
+        context.close_statement(&unnamed_name);
+
+        // Should now return the second statement
+        let retrieved4 = context.get_statement(&unnamed_name);
+        assert!(retrieved4.is_some());
+
+        // Consume the second statement
+        context.close_statement(&unnamed_name);
+
+        // Should now return None (queue exhausted)
+        let retrieved5 = context.get_statement(&unnamed_name);
+        assert!(retrieved5.is_none());
+
+        // Test named statements (go to prepared_statements)
+        let named_name1 = Name::from("stmt1");
+        let named_name2 = Name::from("stmt2");
+        let named_statement1 = statement();
+        let named_statement2 = statement();
+
+        context.add_statement(&named_name1, named_statement1);
+        context.add_statement(&named_name2, named_statement2);
+
+        // Should be able to get named statements multiple times
+        let named_retrieved1 = context.get_statement(&named_name1).unwrap();
+        let named_retrieved1_again = context.get_statement(&named_name1).unwrap();
+        let named_retrieved2 = context.get_statement(&named_name2).unwrap();
+
+        // Should be able to get same statement multiple times
+        assert!(named_retrieved1.param_columns == named_retrieved1_again.param_columns);
+
+        // Close a named statement
+        context.close_prepared_statement(&named_name1);
+        let should_be_none = context.get_statement(&named_name1);
+        assert!(should_be_none.is_none());
+
+        // Other named statement should still be available
+        let named_retrieved2_again = context.get_statement(&named_name2).unwrap();
+        assert!(named_retrieved2.param_columns == named_retrieved2_again.param_columns);
     }
 }

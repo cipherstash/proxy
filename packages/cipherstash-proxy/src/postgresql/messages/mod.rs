@@ -6,12 +6,17 @@ pub mod data_row;
 pub mod describe;
 pub mod error_response;
 pub mod execute;
+pub mod name;
 pub mod param_description;
 pub mod parse;
 pub mod query;
 pub mod ready_for_query;
 pub mod row_description;
 pub mod terminate;
+
+// Re-export commonly used types
+pub use name::Name;
+pub use target::Target;
 
 pub const NULL: i32 = -1;
 

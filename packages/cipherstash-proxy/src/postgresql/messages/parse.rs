@@ -62,7 +62,7 @@ impl TryFrom<&BytesMut> for Parse {
 
         let _len = cursor.get_i32();
         let name = cursor.read_string()?;
-        let name = Name(name);
+        let name = Name::from(name);
 
         let statement = cursor.read_string()?;
         let num_params = cursor.get_i16();
@@ -89,7 +89,7 @@ impl TryFrom<Parse> for BytesMut {
     fn try_from(parse: Parse) -> Result<BytesMut, Error> {
         let mut bytes = BytesMut::new();
 
-        let name = CString::new(parse.name.0.as_str())?;
+        let name = CString::new(parse.name.as_str())?;
         let name = name.as_bytes_with_nul();
 
         let statement = CString::new(parse.statement)?;
