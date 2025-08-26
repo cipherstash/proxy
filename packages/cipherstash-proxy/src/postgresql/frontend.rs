@@ -722,8 +722,7 @@ where
                 counter!(STATEMENTS_ENCRYPTED_TOTAL).increment(1);
 
                 message.rewrite_param_types(&statement.param_columns);
-                self.context
-                    .add_statement(message.name.to_owned(), statement);
+                self.context.add_statement(&message.name, statement);
             }
             _ => {
                 debug!(target: MAPPER,
