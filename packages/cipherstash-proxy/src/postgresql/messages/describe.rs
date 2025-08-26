@@ -33,7 +33,6 @@ pub(crate) struct Describe {
     pub name: Name,
 }
 
-
 impl TryFrom<&BytesMut> for Describe {
     type Error = Error;
 
@@ -53,7 +52,7 @@ impl TryFrom<&BytesMut> for Describe {
         let target = cursor.get_u8();
         let target = Target::try_from(target)?;
         let name = cursor.read_string()?;
-        let name = Name(name);
+        let name = Name::from(name);
 
         Ok(Describe { target, name })
     }
@@ -65,7 +64,7 @@ impl TryFrom<Describe> for BytesMut {
     fn try_from(describe: Describe) -> Result<BytesMut, Error> {
         let mut bytes = BytesMut::new();
 
-        let name = CString::new(describe.name.0.as_str())?;
+        let name = CString::new(describe.name.as_str())?;
         let name = name.as_bytes_with_nul();
 
         let len = SIZE_I32 + SIZE_U8 + name.len();
@@ -78,4 +77,3 @@ impl TryFrom<Describe> for BytesMut {
         Ok(bytes)
     }
 }
-
