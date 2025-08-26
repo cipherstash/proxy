@@ -40,7 +40,8 @@ impl std::fmt::Display for KeysetIdentifier {
 #[derive(Clone, Debug)]
 pub struct Context {
     pub client_id: i32,
-    statements: Arc<RwLock<HashMap<Name, StatementQueue>>>,
+    statements: Arc<RwLock<StatementQueue>>,
+    prepared_statements: Arc<RwLock<HashMap<Name, Statement>>>,
     portals: Arc<RwLock<HashMap<Name, PortalQueue>>>,
     describe: Arc<RwLock<DescribeQueue>>,
     execute: Arc<RwLock<ExecuteQueue>>,
@@ -115,7 +116,8 @@ pub enum Portal {
 impl Context {
     pub fn new(client_id: i32, schema: Arc<Schema>) -> Context {
         Context {
-            statements: Arc::new(RwLock::new(HashMap::new())),
+            statements: Arc::new(RwLock::new(Queue::new())),
+            prepared_statements: Arc::new(RwLock::new(HashMap::new())),
             portals: Arc::new(RwLock::new(HashMap::new())),
             describe: Arc::new(RwLock::from(Queue::new())),
             execute: Arc::new(RwLock::from(Queue::new())),
@@ -194,14 +196,19 @@ impl Context {
         let _ = self.execute.write().map(|mut queue| queue.complete());
     }
 
-    pub fn add_statement(&mut self, name: Name, statement: Statement) {
+    ///
+    /// Add a statement identified by `name` to the appropriate storage
+    /// Unnamed statements go to the queue, named statements to prepared_statements HashMap
+    ///
+    pub fn add_statement(&mut self, name: &Name, statement: Statement) {
         debug!(target: CONTEXT, client_id = self.client_id, statement = ?name);
-        let _ = self.statements.write().map(|mut statements| {
-            statements
-                .entry(name)
-                .or_insert_with(Queue::new)
-                .add(Arc::new(statement));
-        });
+        if name.is_unnamed() {
+            // Unnamed statements go to the queue
+            self.add_unnamed_statement(statement);
+        } else {
+            // Named statements go to prepared_statements
+            self.add_prepared_statement(name.to_owned(), statement);
+        }
     }
 
     pub fn add_portal(&mut self, name: Name, portal: Portal) {
@@ -214,23 +221,92 @@ impl Context {
         });
     }
 
+    ///
+    /// Get a statement identified by `name` from the appropriate storage
+    /// Routes to either unnamed queue or prepared statements HashMap
+    ///
     pub fn get_statement(&self, name: &Name) -> Option<Arc<Statement>> {
         debug!(target: CONTEXT, client_id = self.client_id, statement = ?name);
-        let statements = self.statements.read().ok()?;
-        let queue = statements.get(name)?;
-        queue.next().cloned()
+        if name.is_unnamed() {
+            // Get from unnamed statement queue
+            self.get_unnamed_statement()
+        } else {
+            // Get from prepared statements
+            self.get_prepared_statement(name)
+        }
     }
 
     ///
     /// Close the statement identified by `name`
-    /// Statement is removed from queue
+    /// Routes to either unnamed queue or prepared statements HashMap
     ///
     pub fn close_statement(&mut self, name: &Name) {
         debug!(target: CONTEXT, client_id = self.client_id, msg = "Close Statement", name = ?name);
+        if name.is_unnamed() {
+            // Close unnamed statement from queue
+            self.close_unnamed_statement();
+        } else {
+            // Close named prepared statement
+            self.close_prepared_statement(name);
+        }
+    }
+
+    ///
+    /// Internal implementation: add an unnamed statement to the queue
+    ///
+    fn add_unnamed_statement(&mut self, statement: Statement) {
+        debug!(target: CONTEXT, client_id = self.client_id, msg = "Add Unnamed Statement");
         let _ = self.statements.write().map(|mut statements| {
-            statements
-                .entry(name.clone())
-                .and_modify(|queue| queue.complete());
+            statements.add(Arc::new(statement));
+        });
+    }
+
+    ///
+    /// Internal implementation: get an unnamed statement from the queue
+    ///
+    fn get_unnamed_statement(&self) -> Option<Arc<Statement>> {
+        debug!(target: CONTEXT, client_id = self.client_id, msg = "Get Unnamed Statement");
+        let statements = self.statements.read().ok()?;
+        statements.next().cloned()
+    }
+
+    ///
+    /// Internal implementation: close (remove) an unnamed statement from the queue
+    ///
+    fn close_unnamed_statement(&mut self) {
+        debug!(target: CONTEXT, client_id = self.client_id, msg = "Close Unnamed Statement");
+        let _ = self.statements.write().map(|mut statements| {
+            statements.complete();
+        });
+    }
+
+    ///
+    /// Add a named prepared statement
+    ///
+    pub fn add_prepared_statement(&mut self, name: Name, statement: Statement) {
+        debug!(target: CONTEXT, client_id = self.client_id, msg = "Add Prepared Statement", name = ?name);
+        let _ = self.prepared_statements.write().map(|mut statements| {
+            statements.insert(name, statement);
+        });
+    }
+
+    ///
+    /// Get a named prepared statement
+    ///
+    pub fn get_prepared_statement(&self, name: &Name) -> Option<Arc<Statement>> {
+        debug!(target: CONTEXT, client_id = self.client_id, msg = "Get Prepared Statement", name = ?name);
+        let statements = self.prepared_statements.read().ok()?;
+        statements.get(name).map(|s| Arc::new(s.clone()))
+    }
+
+    ///
+    /// Close the prepared statement identified by `name`
+    /// Statement is removed from the HashMap
+    ///
+    pub fn close_prepared_statement(&mut self, name: &Name) {
+        debug!(target: CONTEXT, client_id = self.client_id, msg = "Close Prepared Statement", name = ?name);
+        let _ = self.prepared_statements.write().map(|mut statements| {
+            statements.remove(name);
         });
     }
 
@@ -640,7 +716,7 @@ mod tests {
 
         let name = Name("name".to_string());
 
-        context.add_statement(name.clone(), statement());
+        context.add_statement(&name, statement());
 
         let statement = context.get_statement(&name).unwrap();
 
@@ -667,7 +743,7 @@ mod tests {
         let portal_name = Name("portal".to_string());
 
         // Add statement to context
-        context.add_statement(statement_name.clone(), statement());
+        context.add_statement(&statement_name, statement());
 
         // Get statement from context
         let statement = context.get_statement(&statement_name).unwrap();
@@ -709,8 +785,8 @@ mod tests {
         let statement_name_2 = Name("statement_2".to_string());
 
         // Add statements to context
-        context.add_statement(statement_name_1.clone(), statement());
-        context.add_statement(statement_name_2.clone(), statement());
+        context.add_statement(&statement_name_1, statement());
+        context.add_statement(&statement_name_2, statement());
 
         // Replicate pipelined execution
         // Add multiple portals with the same name
@@ -764,9 +840,9 @@ mod tests {
         let portal_name_3 = Name("portal_3".to_string());
 
         // Add statement to context
-        context.add_statement(statement_name_1.clone(), statement());
-        context.add_statement(statement_name_2.clone(), statement());
-        context.add_statement(statement_name_3.clone(), statement());
+        context.add_statement(&statement_name_1, statement());
+        context.add_statement(&statement_name_2, statement());
+        context.add_statement(&statement_name_3, statement());
 
         // Create portals for each statement
         let statement_1 = context.get_statement(&statement_name_1).unwrap();
@@ -1062,5 +1138,69 @@ mod tests {
         assert!(result.is_ok());
         let identifier = result.unwrap();
         assert!(identifier.is_none());
+    }
+
+    #[test]
+    pub fn test_unnamed_vs_named_statements() {
+        log::init(LogConfig::default());
+
+        let schema = Arc::new(Schema::new("public"));
+        let mut context = Context::new(1, schema);
+
+        // Test unnamed statements (go to queue)
+        let unnamed_name = Name::unnamed();
+        let statement1 = statement();
+        let statement2 = statement();
+
+        context.add_statement(&unnamed_name, statement1);
+        context.add_statement(&unnamed_name, statement2);
+
+        // Should get the same statement (front of queue) until consumed
+        let _retrieved1 = context.get_statement(&unnamed_name).unwrap();
+        let _retrieved2 = context.get_statement(&unnamed_name).unwrap();
+
+        // Should still return the first statement (not consumed yet)
+        let retrieved3 = context.get_statement(&unnamed_name);
+        assert!(retrieved3.is_some());
+
+        // Now consume the first statement
+        context.close_statement(&unnamed_name);
+
+        // Should now return the second statement
+        let retrieved4 = context.get_statement(&unnamed_name);
+        assert!(retrieved4.is_some());
+
+        // Consume the second statement
+        context.close_statement(&unnamed_name);
+
+        // Should now return None (queue exhausted)
+        let retrieved5 = context.get_statement(&unnamed_name);
+        assert!(retrieved5.is_none());
+
+        // Test named statements (go to prepared_statements)
+        let named_name1 = Name("stmt1".to_string());
+        let named_name2 = Name("stmt2".to_string());
+        let named_statement1 = statement();
+        let named_statement2 = statement();
+
+        context.add_statement(&named_name1, named_statement1);
+        context.add_statement(&named_name2, named_statement2);
+
+        // Should be able to get named statements multiple times
+        let named_retrieved1 = context.get_statement(&named_name1).unwrap();
+        let named_retrieved1_again = context.get_statement(&named_name1).unwrap();
+        let named_retrieved2 = context.get_statement(&named_name2).unwrap();
+
+        // Should be able to get same statement multiple times
+        assert!(named_retrieved1.param_columns == named_retrieved1_again.param_columns);
+
+        // Close a named statement
+        context.close_prepared_statement(&named_name1);
+        let should_be_none = context.get_statement(&named_name1);
+        assert!(should_be_none.is_none());
+
+        // Other named statement should still be available
+        let named_retrieved2_again = context.get_statement(&named_name2).unwrap();
+        assert!(named_retrieved2.param_columns == named_retrieved2_again.param_columns);
     }
 }
