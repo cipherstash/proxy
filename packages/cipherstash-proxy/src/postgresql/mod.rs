@@ -1,6 +1,7 @@
 mod backend;
 mod context;
 mod data;
+mod encryption;
 mod error_handler;
 mod format_code;
 mod frontend;

@@ -1,6 +1,7 @@
 use super::context::{Context, Statement};
+use super::encryption::EncryptionService;
 use super::error_handler::PostgreSqlErrorHandler;
-use super::mapping::{ColumnMapper, TypeChecker};
+use super::mapping::TypeChecker;
 use super::messages::bind::Bind;
 use super::messages::describe::Describe;
 use super::messages::execute::Execute;
@@ -13,8 +14,7 @@ use crate::connect::Sender;
 use crate::encrypt::Encrypt;
 use crate::error::{EncryptError, Error, MappingError};
 use crate::log::{CONTEXT, MAPPER, PROTOCOL};
-use crate::postgresql::context::{column::Column, Portal};
-use crate::postgresql::data::literal_from_sql;
+use crate::postgresql::context::Portal;
 use crate::postgresql::messages::close::Close;
 use crate::postgresql::messages::ready_for_query::ReadyForQuery;
 use crate::postgresql::messages::terminate::Terminate;
@@ -27,8 +27,7 @@ use crate::prometheus::{
 };
 use crate::EqlEncrypted;
 use bytes::BytesMut;
-use cipherstash_client::encryption::Plaintext;
-use eql_mapper::{EqlTerm, TypeCheckedStatement};
+use eql_mapper::TypeCheckedStatement;
 use metrics::{counter, histogram};
 use pg_escape::quote_literal;
 use serde::Serialize;
@@ -440,7 +439,8 @@ where
                 }
             };
 
-            match self.to_encryptable_statement(&typed_statement, vec![])? {
+            let encryption_service = EncryptionService::new(&self.encrypt, self.context.keyset_identifier());
+            match encryption_service.to_encryptable_statement(&typed_statement, vec![])? {
                 Some(statement) => {
                     debug!(target: MAPPER,
                         client_id = self.context.client_id,
@@ -448,7 +448,7 @@ where
                     );
 
                     if typed_statement.requires_transform() {
-                        let encrypted_literals = self
+                        let encrypted_literals = encryption_service
                             .encrypt_literals(&typed_statement, &statement.literal_columns)
                             .await?;
 
@@ -508,70 +508,6 @@ where
         }
     }
 
-    /// Encrypts literal values found in SQL statements.
-    ///
-    /// Takes literal values extracted from SQL statements and encrypts those that
-    /// correspond to configured encrypted columns using the current keyset ID.
-    /// This is used for simple queries where values are embedded directly in SQL.
-    ///
-    /// # Arguments
-    ///
-    /// * `typed_statement` - Type-checked statement containing literal value metadata
-    /// * `literal_columns` - Column configurations for each literal (Some if encrypted, None if not)
-    ///
-    /// # Process
-    ///
-    /// 1. Extract literal values from the typed statement
-    /// 2. Convert values to appropriate plaintext types based on column config
-    /// 3. Batch encrypt all values using the current keyset ID
-    /// 4. Record encryption metrics and timing
-    ///
-    /// # Returns
-    ///
-    /// Vector of encrypted values corresponding to each literal, with `None` for
-    /// literals that don't require encryption and `Some(EqlEncrypted)` for encrypted values.
-    async fn encrypt_literals(
-        &mut self,
-        typed_statement: &TypeCheckedStatement<'_>,
-        literal_columns: &Vec<Option<Column>>,
-    ) -> Result<Vec<Option<EqlEncrypted>>, Error> {
-        let literal_values = typed_statement.literal_values();
-        if literal_values.is_empty() {
-            debug!(target: MAPPER,
-                client_id = self.context.client_id,
-                msg = "No literals to encrypt"
-            );
-            return Ok(vec![]);
-        }
-
-        let keyset_id = self.context.keyset_identifier();
-
-        let plaintexts = literals_to_plaintext(literal_values, literal_columns)?;
-
-        let start = Instant::now();
-
-        let encrypted = self
-            .encrypt
-            .encrypt(keyset_id, plaintexts, literal_columns)
-            .await
-            .inspect_err(|_| {
-                counter!(ENCRYPTION_ERROR_TOTAL).increment(1);
-            })?;
-
-        debug!(target: MAPPER,
-            client_id = self.context.client_id,
-            ?literal_columns,
-            ?encrypted
-        );
-
-        counter!(ENCRYPTION_REQUESTS_TOTAL).increment(1);
-        counter!(ENCRYPTED_VALUES_TOTAL).increment(encrypted.len() as u64);
-
-        let duration = Instant::now().duration_since(start);
-        histogram!(ENCRYPTION_DURATION_SECONDS).record(duration);
-
-        Ok(encrypted)
-    }
 
     ///
     /// Transforms a typed statement
@@ -716,10 +652,11 @@ where
         // These override the underlying column type
         let param_types = message.param_types.clone();
 
-        match self.to_encryptable_statement(&typed_statement, param_types)? {
+        let encryption_service = EncryptionService::new(&self.encrypt, self.context.keyset_identifier());
+        match encryption_service.to_encryptable_statement(&typed_statement, param_types)? {
             Some(statement) => {
                 if typed_statement.requires_transform() {
-                    let encrypted_literals = self
+                    let encrypted_literals = encryption_service
                         .encrypt_literals(&typed_statement, &statement.literal_columns)
                         .await?;
 
@@ -767,48 +704,6 @@ where
 
 
 
-    ///
-    /// Creates a Statement from an EQL Mapper Typed Statement
-    /// Returned Statement contains the Column configuration for any encrypted columns in params, literals and projection.
-    /// Returns `None` if the Statement is not Encryptable
-    ///
-    fn to_encryptable_statement(
-        &self,
-        typed_statement: &TypeCheckedStatement<'_>,
-        param_types: Vec<i32>,
-    ) -> Result<Option<Statement>, Error> {
-        let column_mapper = ColumnMapper::new(&self.encrypt);
-        let param_columns = column_mapper.get_param_columns(typed_statement)?;
-        let projection_columns = column_mapper.get_projection_columns(typed_statement)?;
-        let literal_columns = column_mapper.get_literal_columns(typed_statement)?;
-
-        let no_encrypted_param_columns = param_columns.iter().all(|c| c.is_none());
-        let no_encrypted_projection_columns = projection_columns.iter().all(|c| c.is_none());
-
-        if (param_columns.is_empty() || no_encrypted_param_columns)
-            && (projection_columns.is_empty() || no_encrypted_projection_columns)
-            && !typed_statement.requires_transform()
-        {
-            return Ok(None);
-        }
-
-        debug!(target: MAPPER,
-            client_id = self.context.client_id,
-            msg = "Encryptable Statement",
-            param_columns = ?param_columns,
-            projection_columns = ?projection_columns,
-            literal_columns = ?literal_columns,
-        );
-
-        let statement = Statement::new(
-            param_columns.to_owned(),
-            projection_columns.to_owned(),
-            literal_columns.to_owned(),
-            param_types,
-        );
-
-        Ok(Some(statement))
-    }
 
     /// Handles PostgreSQL Bind messages for the extended query protocol.
     ///
@@ -871,7 +766,8 @@ where
             debug!(target:MAPPER, client_id = self.context.client_id, ?statement);
 
             if statement.has_params() {
-                let encrypted = self.encrypt_params(&bind, &statement).await?;
+                let encryption_service = EncryptionService::new(&self.encrypt, self.context.keyset_identifier());
+                let encrypted = encryption_service.encrypt_params(&bind, &statement).await?;
                 bind.rewrite(encrypted)?;
             }
             if statement.has_projection() {
@@ -990,29 +886,6 @@ where
     }
 }
 
-fn literals_to_plaintext(
-    literals: &Vec<(EqlTerm, &ast::Value)>,
-    literal_columns: &Vec<Option<Column>>,
-) -> Result<Vec<Option<Plaintext>>, Error> {
-    let plaintexts = literals
-        .iter()
-        .zip(literal_columns)
-        .map(|((_, val), col)| match col {
-            Some(col) => literal_from_sql(val, col.eql_term(), col.cast_type()).map_err(|err| {
-                debug!(
-                    target: MAPPER,
-                    msg = "Could not convert literal value",
-                    value = ?val,
-                    cast_type = ?col.cast_type(),
-                    error = err.to_string()
-                );
-                MappingError::InvalidParameter(Box::new(col.to_owned()))
-            }),
-            None => Ok(None),
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-    Ok(plaintexts)
-}
 
 fn to_json_literal_value<T>(literal: &T) -> Result<Value, Error>
 where
