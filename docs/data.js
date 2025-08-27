@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1756276734911,
+  "lastUpdate": 1756276760530,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -13613,6 +13613,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 24.562618,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "922f165c53a82dd0be00d52e28d2cc1eefa3cc74",
+          "message": "refactor: centralize log target definitions using declarative macro",
+          "timestamp": "2025-08-27T06:35:20Z",
+          "url": "https://github.com/cipherstash/proxy/pull/316/commits/922f165c53a82dd0be00d52e28d2cc1eefa3cc74"
+        },
+        "date": 1756276759004,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 26.190008,
             "unit": "Number"
           }
         ]
