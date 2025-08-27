@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1756264950345,
+  "lastUpdate": 1756265039811,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -13480,6 +13480,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 24.217353,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "099bc1e28744ce9fa26291fa469bb6617194ae43",
+          "message": "♻️ refactor: convert Name struct to enum and extract to own module",
+          "timestamp": "2025-08-26T08:43:20Z",
+          "url": "https://github.com/cipherstash/proxy/pull/314/commits/099bc1e28744ce9fa26291fa469bb6617194ae43"
+        },
+        "date": 1756265038335,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 25.16519,
             "unit": "Number"
           }
         ]
