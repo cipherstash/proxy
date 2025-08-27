@@ -289,7 +289,11 @@ where
                 }
             }
             Code::Close => {
-                self.close_handler(&bytes).await?;
+                debug!(target: PROTOCOL,
+                    client_id = self.context.client_id,
+                    msg = "Close",
+                    ?code,
+                );
             }
             code => {
                 debug!(target: PROTOCOL,
