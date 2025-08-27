@@ -8,6 +8,7 @@ mod handler;
 mod message_buffer;
 mod messages;
 mod protocol;
+mod sql;
 mod startup;
 
 pub use context::column::Column;

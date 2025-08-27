@@ -7,6 +7,7 @@ use super::messages::parse::Parse;
 use super::messages::query::Query;
 use super::messages::FrontendCode as Code;
 use super::protocol::{self};
+use super::sql::SqlProcessor;
 use crate::connect::Sender;
 use crate::encrypt::Encrypt;
 use crate::eql::Identifier;
@@ -23,7 +24,7 @@ use crate::prometheus::{
     CLIENTS_BYTES_RECEIVED_TOTAL, ENCRYPTED_VALUES_TOTAL, ENCRYPTION_DURATION_SECONDS,
     ENCRYPTION_ERROR_TOTAL, ENCRYPTION_REQUESTS_TOTAL, SERVER_BYTES_SENT_TOTAL,
     STATEMENTS_ENCRYPTED_TOTAL, STATEMENTS_PASSTHROUGH_MAPPING_DISABLED_TOTAL,
-    STATEMENTS_PASSTHROUGH_TOTAL, STATEMENTS_TOTAL, STATEMENTS_UNMAPPABLE_TOTAL,
+    STATEMENTS_PASSTHROUGH_TOTAL, STATEMENTS_UNMAPPABLE_TOTAL,
 };
 use crate::EqlEncrypted;
 use bytes::BytesMut;
@@ -34,16 +35,12 @@ use pg_escape::quote_literal;
 use postgres_types::Type;
 use serde::Serialize;
 use sqltk::parser::ast::{self, Value};
-use sqltk::parser::dialect::PostgreSqlDialect;
-use sqltk::parser::parser::Parser;
 use sqltk::NodeKey;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
-use tracing::{debug, error, info, warn};
-
-const DIALECT: PostgreSqlDialect = PostgreSqlDialect {};
+use tracing::{debug, error, warn};
 
 /// The PostgreSQL proxy frontend that handles client-to-server message processing.
 ///
@@ -388,7 +385,7 @@ where
         let mut query = Query::try_from(bytes)?;
 
         // Simple Query may contain many statements
-        let parsed_statements = self.parse_statements(&query.statement)?;
+        let parsed_statements = SqlProcessor::parse_statements(&query.statement)?;
         let mut transformed_statements = vec![];
 
         debug!(target: MAPPER,
@@ -416,9 +413,17 @@ where
                 continue;
             }
 
-            self.handle_set_keyset(&statement)?;
+            if let Some(_keyset_identifier) = SqlProcessor::handle_set_keyset(
+                &statement, 
+                &mut self.context, 
+                self.encrypt.config.encrypt.default_keyset_id.is_some()
+            )? {
+                // Keyset was set successfully
+            }
 
-            self.check_for_schema_change(&statement);
+            if SqlProcessor::check_for_schema_change(self.context.get_table_resolver(), &statement) {
+                self.context.set_schema_changed();
+            }
 
             if !eql_mapper::requires_type_check(&statement) {
                 counter!(STATEMENTS_PASSTHROUGH_TOTAL).increment(1);
@@ -663,7 +668,7 @@ where
             parse = ?message
         );
 
-        let statement = self.parse_statement(&message.statement)?;
+        let statement = SqlProcessor::parse_statement(&message.statement)?;
 
         if let Some(mapping_disabled) = self.context.maybe_set_unsafe_disable_mapping(&statement) {
             warn!(
@@ -679,9 +684,17 @@ where
             return Ok(None);
         }
 
-        self.handle_set_keyset(&statement)?;
+        if let Some(_keyset_identifier) = SqlProcessor::handle_set_keyset(
+            &statement, 
+            &mut self.context, 
+            self.encrypt.config.encrypt.default_keyset_id.is_some()
+        )? {
+            // Keyset was set successfully
+        }
 
-        self.check_for_schema_change(&statement);
+        if SqlProcessor::check_for_schema_change(self.context.get_table_resolver(), &statement) {
+            self.context.set_schema_changed();
+        }
 
         if !eql_mapper::requires_type_check(&statement) {
             counter!(STATEMENTS_PASSTHROUGH_TOTAL).increment(1);
@@ -751,85 +764,8 @@ where
         }
     }
 
-    ///
-    /// Parse a SQL statement string into an SqlParser AST
-    ///
-    fn parse_statement(&mut self, statement: &str) -> Result<ast::Statement, Error> {
-        let statement = Parser::new(&DIALECT)
-            .try_with_sql(statement)?
-            .parse_statement()?;
 
-        debug!(target: MAPPER,
-            client_id = self.context.client_id,
-            statement = %statement
-        );
 
-        counter!(STATEMENTS_TOTAL).increment(1);
-
-        Ok(statement)
-    }
-
-    ///
-    /// Parse a SQL String potentially containing multiple statements into parsed SqlParser AST
-    ///
-    fn parse_statements(&mut self, statement: &str) -> Result<Vec<ast::Statement>, Error> {
-        let statement = Parser::new(&DIALECT)
-            .try_with_sql(statement)?
-            .parse_statements()?;
-
-        debug!(target: MAPPER,
-            client_id = self.context.client_id,
-            statement = ?statement
-        );
-
-        counter!(STATEMENTS_TOTAL).increment(statement.len() as u64);
-
-        Ok(statement)
-    }
-
-    ///
-    /// Check the Statement AST for DDL
-    /// Sets a schema changed flag in the Context
-    ///
-    ///
-    fn check_for_schema_change(&self, statement: &ast::Statement) {
-        let schema_changed = eql_mapper::collect_ddl(self.context.get_table_resolver(), statement);
-
-        if schema_changed {
-            debug!(target: MAPPER,
-                client_id = self.context.client_id,
-                msg = "schema changed"
-            );
-            self.context.set_schema_changed();
-        }
-    }
-
-    ///
-    /// Handles `SET CIPHERSTASH KEYSET_*` statements
-    ///
-    /// Returns an error if `SET CIPHERSTASH KEYSET_*` is called and proxy is configured with a `default_keyset_id`
-    /// Returns an error if `SET CIPHERSTASH KEYSET_ID` cannot parse the value as a valid UUID
-    ///
-    fn handle_set_keyset(&mut self, statement: &ast::Statement) -> Result<(), Error> {
-        if let Some(keyset_identifier) = self.context.maybe_set_keyset(statement)? {
-            debug!(client_id = self.context.client_id, ?keyset_identifier);
-
-            if self.encrypt.config.encrypt.default_keyset_id.is_some() {
-                debug!(target: MAPPER,
-                    client_id = self.context.client_id,
-                    default_keyset_id = ?self.encrypt.config.encrypt.default_keyset_id,
-                    ?keyset_identifier
-                );
-                return Err(EncryptError::UnexpectedSetKeyset.into());
-            }
-            info!(
-                msg = "SET CIPHERSTASH.KEYSET",
-                keyset_identifier = keyset_identifier.to_string()
-            );
-        }
-
-        Ok(())
-    }
 
     ///
     /// Creates a Statement from an EQL Mapper Typed Statement
