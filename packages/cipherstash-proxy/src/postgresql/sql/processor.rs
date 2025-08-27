@@ -7,7 +7,7 @@ use sqltk::parser::ast;
 use sqltk::parser::dialect::PostgreSqlDialect;
 use sqltk::parser::parser::Parser;
 use std::sync::Arc;
-use tracing::{debug, info};
+use tracing::info;
 
 const DIALECT: PostgreSqlDialect = PostgreSqlDialect {};
 
@@ -29,12 +29,6 @@ impl SqlProcessor {
             .try_with_sql(statement)?
             .parse_statement()?;
 
-        debug!(
-            target: "mapper",
-            statement = %statement,
-            "Parsed SQL statement"
-        );
-
         counter!(STATEMENTS_TOTAL).increment(1);
 
         Ok(statement)
@@ -53,13 +47,6 @@ impl SqlProcessor {
         let statements = Parser::new(&DIALECT)
             .try_with_sql(statements)?
             .parse_statements()?;
-
-        debug!(
-            target: "mapper",
-            statements = ?statements,
-            count = statements.len(),
-            "Parsed multiple SQL statements"
-        );
 
         counter!(STATEMENTS_TOTAL).increment(statements.len() as u64);
 
@@ -80,16 +67,7 @@ impl SqlProcessor {
         table_resolver: Arc<TableResolver>,
         statement: &ast::Statement,
     ) -> bool {
-        let schema_changed = eql_mapper::collect_ddl(table_resolver, statement);
-
-        if schema_changed {
-            debug!(
-                target: "mapper",
-                msg = "Schema change detected in statement"
-            );
-        }
-
-        schema_changed
+        eql_mapper::collect_ddl(table_resolver, statement)
     }
 
     /// Handle `SET CIPHERSTASH KEYSET_*` statements.
@@ -115,17 +93,7 @@ impl SqlProcessor {
         default_keyset_configured: bool,
     ) -> Result<Option<KeysetIdentifier>, Error> {
         if let Some(keyset_identifier) = context.maybe_set_keyset(statement)? {
-            debug!(
-                keyset_identifier = ?keyset_identifier,
-                "Processing SET CIPHERSTASH.KEYSET command"
-            );
-
             if default_keyset_configured {
-                debug!(
-                    target: "mapper",
-                    keyset_identifier = ?keyset_identifier,
-                    msg = "SET KEYSET command conflicts with configured default keyset"
-                );
                 return Err(EncryptError::UnexpectedSetKeyset.into());
             }
 
