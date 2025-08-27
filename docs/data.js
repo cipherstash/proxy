@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1756265039811,
+  "lastUpdate": 1756271397522,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -13505,6 +13505,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 25.16519,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "toby@cipherstash.com",
+            "name": "Toby Hede",
+            "username": "tobyhede"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "94addf4dc41266853e63a84c4635903d52aa3e0d",
+          "message": "Merge pull request #314 from cipherstash/refactor-name\n\n♻️ refactor: convert Name struct to enum and extract to own module",
+          "timestamp": "2025-08-27T15:06:24+10:00",
+          "tree_id": "7daec23ccb0113900d62ddae7f1d211dd06dd02d",
+          "url": "https://github.com/cipherstash/proxy/commit/94addf4dc41266853e63a84c4635903d52aa3e0d"
+        },
+        "date": 1756271395941,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 25.084806,
             "unit": "Number"
           }
         ]
