@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1756272433261,
+  "lastUpdate": 1756274540966,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -13559,6 +13559,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 24.819485,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "a908238e772b15c92871edd918fa8903764cfb01",
+          "message": "refactor: rename Encrypt module to Proxy for better clarity",
+          "timestamp": "2025-08-27T05:06:28Z",
+          "url": "https://github.com/cipherstash/proxy/pull/315/commits/a908238e772b15c92871edd918fa8903764cfb01"
+        },
+        "date": 1756274539481,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 24.005007,
             "unit": "Number"
           }
         ]
