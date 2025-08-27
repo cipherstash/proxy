@@ -5,6 +5,7 @@ mod error_handler;
 mod format_code;
 mod frontend;
 mod handler;
+mod mapping;
 mod message_buffer;
 mod messages;
 mod protocol;
