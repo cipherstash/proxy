@@ -26,6 +26,36 @@ macro_rules! define_log_targets {
                 _ => config.level,
             }
         }
+
+        // Compile-time validation that LogConfig has all required fields
+        // This will fail to compile if any field is missing from LogConfig
+        pub const fn validate_log_config_fields() {
+            use crate::config::LogConfig;
+
+            // Create a dummy LogConfig to ensure all fields exist
+            let _config = LogConfig {
+                ansi_enabled: true,
+                format: crate::config::LogFormat::Pretty,
+                output: crate::config::LogOutput::Stdout,
+                level: LogLevel::Info,
+                $(
+                    $field_name: LogLevel::Info,
+                )*
+            };
+        }
+
+        // NOTE: Due to Rust macro system limitations, LogConfig fields in config/log.rs
+        // must be manually synchronized with the targets defined here.
+        //
+        // When adding a new target (NEWTARGET, new_target_level, "new_target"):
+        // 1. Add the target to the define_log_targets! macro invocation below
+        // 2. Add this field to LogConfig struct in config/log.rs:
+        //    #[serde(default = "LogConfig::default_log_level")]
+        //    pub new_target_level: LogLevel,
+        // 3. Add this assignment to with_level() method in config/log.rs:
+        //    new_target_level: level,
+        //
+        // The validate_log_config_fields() function will fail to compile if fields are missing.
     };
 }
 
@@ -45,3 +75,6 @@ define_log_targets!(
     (MAPPER, mapper_level, "mapper"),
     (SCHEMA, schema_level, "schema"),
 );
+
+// Trigger compile-time validation
+const _: () = validate_log_config_fields();
