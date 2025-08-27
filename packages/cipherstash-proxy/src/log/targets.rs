@@ -3,10 +3,10 @@ use serde::Deserialize;
 
 // Define all log targets in one place
 macro_rules! define_log_targets {
-    ($(($const_name:ident, $field_name:ident, $target_str:literal)),* $(,)?) => {
-        // Generate target constants
+    ($(($const_name:ident, $field_name:ident)),* $(,)?) => {
+        // Generate target constants with automatic string generation
         $(
-            pub const $const_name: &str = $target_str;
+            pub const $const_name: &str = stringify!($const_name);
         )*
 
         // Generate LogTargetLevels struct with all target level fields
@@ -64,18 +64,18 @@ macro_rules! define_log_targets {
 }
 
 define_log_targets!(
-    (DEVELOPMENT, development_level, "development"),
-    (AUTHENTICATION, authentication_level, "authentication"),
-    (CONFIG, config_level, "config"),
-    (CONTEXT, context_level, "context"),
-    (ENCODING, encoding_level, "encoding"),
-    (ENCRYPT, encrypt_level, "encrypt"),
-    (DECRYPT, decrypt_level, "decrypt"),
-    (ENCRYPT_CONFIG, encrypt_config_level, "encrypt_config"),
-    (KEYSET, keyset_level, "keyset"),
-    (MIGRATE, migrate_level, "migrate"),
-    (PROTOCOL, protocol_level, "protocol"),
-    (PROXY, proxy_level, "proxy"),
-    (MAPPER, mapper_level, "mapper"),
-    (SCHEMA, schema_level, "schema"),
+    (DEVELOPMENT, development_level),
+    (AUTHENTICATION, authentication_level),
+    (CONFIG, config_level),
+    (CONTEXT, context_level),
+    (ENCODING, encoding_level),
+    (ENCRYPT, encrypt_level),
+    (DECRYPT, decrypt_level),
+    (ENCRYPT_CONFIG, encrypt_config_level),
+    (KEYSET, keyset_level),
+    (MIGRATE, migrate_level),
+    (PROTOCOL, protocol_level),
+    (PROXY, proxy_level),
+    (MAPPER, mapper_level),
+    (SCHEMA, schema_level),
 );

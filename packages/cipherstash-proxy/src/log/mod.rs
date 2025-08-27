@@ -49,7 +49,9 @@ mod tests {
     use crate::config::LogLevel;
 
     use super::*;
-    use crate::log::targets::LogTargetLevels;
+    use crate::log::targets::{
+        LogTargetLevels, AUTHENTICATION, CONTEXT, DEVELOPMENT, KEYSET, MAPPER, PROTOCOL, SCHEMA,
+    };
     use crate::test_helpers::MockMakeWriter;
     use tracing::dispatcher::set_default;
     use tracing::{debug, error, info, trace, warn};
@@ -136,48 +138,48 @@ mod tests {
         let _default = set_default(&subscriber.into());
 
         // with development level 'info', info should be logged but not debug
-        debug!(target: "development", "debug/development");
-        info!(target: "development", "info/development");
+        debug!(target: DEVELOPMENT, "debug/development");
+        info!(target: DEVELOPMENT, "info/development");
         let log_contents = make_writer.get_string();
         assert!(!log_contents.contains("debug/development"));
         assert!(log_contents.contains("info/development"));
 
         // with authentication level 'debug', debug should be logged but not trace
-        trace!(target: "authentication", "trace/authentication");
-        debug!(target: "authentication", "debug/authentication");
+        trace!(target: AUTHENTICATION, "trace/authentication");
+        debug!(target: AUTHENTICATION, "debug/authentication");
         let log_contents = make_writer.get_string();
         assert!(!log_contents.contains("trace/authentication"));
         assert!(log_contents.contains("debug/authentication"));
 
         // with context level 'error', error should be logged but not warn
-        warn!(target: "context", "warn/context");
-        error!(target: "context", "error/context");
+        warn!(target: CONTEXT, "warn/context");
+        error!(target: CONTEXT, "error/context");
         let log_contents = make_writer.get_string();
         assert!(!log_contents.contains("warn/context"));
         assert!(log_contents.contains("error/context"));
 
         // with keyset level 'trace', trace should be logged
-        trace!(target: "keyset", "trace/keyset");
+        trace!(target: KEYSET, "trace/keyset");
         let log_contents = make_writer.get_string();
         assert!(log_contents.contains("trace/keyset"));
 
         // with protocol level 'info', info should be logged but not debug
-        debug!(target: "protocol", "debug/protocol");
-        info!(target: "protocol", "info/protocol");
+        debug!(target: PROTOCOL, "debug/protocol");
+        info!(target: PROTOCOL, "info/protocol");
         let log_contents = make_writer.get_string();
         assert!(!log_contents.contains("debug/protocol"));
         assert!(log_contents.contains("info/protocol"));
 
         // with mapper level 'info', info should be logged but not debug
-        debug!(target: "mapper", "debug/mapper");
-        info!(target: "mapper", "info/mapper");
+        debug!(target: MAPPER, "debug/mapper");
+        info!(target: MAPPER, "info/mapper");
         let log_contents = make_writer.get_string();
         assert!(!log_contents.contains("debug/mapper"));
         assert!(log_contents.contains("info/mapper"));
 
         // with schema level 'info', info should be logged but not debug
-        debug!(target: "schema", "debug/schema");
-        info!(target: "schema", "info/schema");
+        debug!(target: SCHEMA, "debug/schema");
+        info!(target: SCHEMA, "info/schema");
         let log_contents = make_writer.get_string();
         assert!(!log_contents.contains("debug/schema"));
         assert!(log_contents.contains("info/schema"));

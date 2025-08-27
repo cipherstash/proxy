@@ -572,12 +572,14 @@ To add a new log target, you only need to add **one line** to the macro in `pack
 
 ```rust
 define_log_targets!(
-    (DEVELOPMENT, development_level, "development"),
-    (AUTHENTICATION, authentication_level, "authentication"),
+    (DEVELOPMENT, development_level),
+    (AUTHENTICATION, authentication_level),
     // ... existing targets ...
-    (NEW_TARGET, new_target_level, "new_target"), // <- Add this line
+    (NEW_TARGET, new_target_level), // <- Add this line
 );
 ```
+
+The constant name (e.g., `NEW_TARGET`) is automatically converted to a string value using `stringify!()`, so `NEW_TARGET` becomes `"NEW_TARGET"` for use in logging calls.
 
 This automatically:
 - Creates the `NEW_TARGET` constant for use in logging calls
