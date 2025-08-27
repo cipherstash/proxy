@@ -1,10 +1,9 @@
 use crate::{
     config::DatabaseConfig,
-    connect,
-    encrypt::ENCRYPT_CONFIG_QUERY,
-    eql,
+    connect, eql,
     error::{ConfigError, Error},
     log::ENCRYPT_CONFIG,
+    proxy::ENCRYPT_CONFIG_QUERY,
 };
 use arc_swap::ArcSwap;
 use cipherstash_client::schema::ColumnConfig;

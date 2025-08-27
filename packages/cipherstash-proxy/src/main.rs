@@ -1,8 +1,8 @@
 use cipherstash_proxy::config::TandemConfig;
 use cipherstash_proxy::connect::{self, AsyncStream};
-use cipherstash_proxy::encrypt::Encrypt;
 use cipherstash_proxy::error::Error;
 use cipherstash_proxy::prometheus::CLIENTS_ACTIVE_CONNECTIONS;
+use cipherstash_proxy::proxy::Proxy;
 use cipherstash_proxy::{cli, log, postgresql as pg, prometheus, tls, Args};
 use clap::Parser;
 use metrics::gauge;
@@ -53,16 +53,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     runtime.block_on(async move {
         let shutdown_timeout = &config.server.shutdown_timeout();
 
-        let mut encrypt = init(config).await;
+        let mut proxy = init(config).await;
 
-        let mut listener = connect::bind_with_retry(&encrypt.config.server).await;
+        let mut listener = connect::bind_with_retry(&proxy.config.server).await;
         let tracker = TaskTracker::new();
 
         let mut client_id = 0;
 
-        if encrypt.config.prometheus_enabled() {
-            let host = encrypt.config.server.host.to_owned();
-            match prometheus::start(host, encrypt.config.prometheus.port) {
+        if proxy.config.prometheus_enabled() {
+            let host = proxy.config.server.host.to_owned();
+            match prometheus::start(host, proxy.config.prometheus.port) {
                 Ok(_) => {}
                 Err(err) => {
                     error!(
@@ -82,7 +82,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             },
             _ = sighup() => {
                 info!(msg = "Received SIGHUP. Reloading configuration");
-                (listener, encrypt) = reload_config(listener, &args, encrypt).await;
+                (listener, proxy) = reload_config(listener, &args, proxy).await;
                 info!(msg = "Reloaded configuration");
             },
             _ = sigterm() => {
@@ -91,16 +91,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             },
             Ok(client_stream) = AsyncStream::accept(&listener) => {
 
-                    let encrypt = encrypt.clone();
+                    let proxy = proxy.clone();
 
                     client_id += 1;
 
                     tracker.spawn(async move {
-                        let encrypt = encrypt.clone();
+                        let proxy = proxy.clone();
 
                         gauge!(CLIENTS_ACTIVE_CONNECTIONS).increment(1);
 
-                        match pg::handler(client_stream, encrypt, client_id).await {
+                        match pg::handler(client_stream, proxy, client_id).await {
                             Ok(_) => (),
                             Err(err) => {
 
@@ -145,9 +145,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ///
 /// Validate various configuration options and
-/// Init the Encrypt service
+/// Init the Proxy service
 ///
-async fn init(mut config: TandemConfig) -> Encrypt {
+async fn init(mut config: TandemConfig) -> Proxy {
     if config.encrypt.default_keyset_id.is_none() {
         warn!(msg = "Default Keyset Id has not been configured");
         warn!(msg = "A Keyset Identifier must be set using the `SET CIPHERSTASH.KEYSET_ID` or `SET CIPHERSTASH.KEYSET_NAME` commands");
@@ -216,25 +216,25 @@ async fn init(mut config: TandemConfig) -> Encrypt {
         }
     }
 
-    match Encrypt::init(config).await {
-        Ok(encrypt) => {
-            info!(msg = "Connected to CipherStash Encrypt");
+    match Proxy::init(config).await {
+        Ok(proxy) => {
+            info!(msg = "Connected to CipherStash Proxy");
             info!(
                 msg = "Connected to Database",
-                database = encrypt.config.database.name,
-                host = encrypt.config.database.host,
-                port = encrypt.config.database.port,
-                username = encrypt.config.database.username,
-                eql_version = encrypt.eql_version,
+                database = proxy.config.database.name,
+                host = proxy.config.database.host,
+                port = proxy.config.database.port,
+                username = proxy.config.database.username,
+                eql_version = proxy.eql_version,
             );
-            if encrypt.eql_version.as_deref() != EQL_VERSION_AT_BUILD_TIME {
+            if proxy.eql_version.as_deref() != EQL_VERSION_AT_BUILD_TIME {
                 warn!(
                     msg = "installed version of EQL is different to the version that Proxy was built with",
                     eql_build_version = EQL_VERSION_AT_BUILD_TIME,
-                    eql_installed_version = encrypt.eql_version,
+                    eql_installed_version = proxy.eql_version,
                 );
             }
-            encrypt
+            proxy
         }
         Err(err) => {
             error!(
@@ -261,11 +261,7 @@ async fn sighup() -> std::io::Result<()> {
     Ok(())
 }
 
-async fn reload_config(
-    listener: TcpListener,
-    args: &Args,
-    encrypt: Encrypt,
-) -> (TcpListener, Encrypt) {
+async fn reload_config(listener: TcpListener, args: &Args, proxy: Proxy) -> (TcpListener, Proxy) {
     let new_config = match TandemConfig::load(args) {
         Ok(config) => config,
         Err(err) => {
@@ -273,17 +269,17 @@ async fn reload_config(
                 msg = "Configuration could not be reloaded: {}",
                 error = err.to_string()
             );
-            return (listener, encrypt);
+            return (listener, proxy);
         }
     };
 
-    let new_encrypt = init(new_config).await;
+    let new_proxy = init(new_config).await;
 
     // Explicit drop needed here to free the network resources before binding if using the same address & port
     std::mem::drop(listener);
 
     (
-        connect::bind_with_retry(&new_encrypt.config.server).await,
-        new_encrypt,
+        connect::bind_with_retry(&new_proxy.config.server).await,
+        new_proxy,
     )
 }

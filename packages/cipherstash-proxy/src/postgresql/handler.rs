@@ -14,8 +14,8 @@ use crate::postgresql::messages::error_response::ErrorResponse;
 use crate::postgresql::{protocol, startup};
 use crate::{
     connect::AsyncStream,
-    encrypt::Encrypt,
     error::{Error, ProtocolError},
+    proxy::Proxy,
     tls,
 };
 use bytes::BytesMut;
@@ -54,31 +54,31 @@ use tracing::{debug, error, info, warn};
 ///
 pub async fn handler(
     client_stream: AsyncStream,
-    encrypt: Encrypt,
+    proxy: Proxy,
     client_id: i32,
 ) -> Result<(), Error> {
     let mut client_stream = client_stream;
 
     // Connect to the database server, using TLS if configured
-    let stream = AsyncStream::connect(&encrypt.config.database.to_socket_address()).await?;
-    let mut database_stream = startup::with_tls(stream, &encrypt.config).await?;
+    let stream = AsyncStream::connect(&proxy.config.database.to_socket_address()).await?;
+    let mut database_stream = startup::with_tls(stream, &proxy.config).await?;
     info!(
         msg = "Client connected",
-        database = encrypt.config.database.to_socket_address(),
+        database = proxy.config.database.to_socket_address(),
         client_id = client_id,
     );
 
     loop {
         let startup_message = startup::read_message(
             &mut client_stream,
-            encrypt.config.database.connection_timeout(),
+            proxy.config.database.connection_timeout(),
         )
         .await?;
 
         match &startup_message.code {
             StartupCode::SSLRequest => {
-                startup::send_ssl_response(&encrypt, &mut client_stream).await?;
-                if let Some(ref tls) = encrypt.config.tls {
+                startup::send_ssl_response(&proxy, &mut client_stream).await?;
+                if let Some(ref tls) = proxy.config.tls {
                     match client_stream {
                         AsyncStream::Tcp(stream) => {
                             // The Client is connecting to our Server
@@ -112,8 +112,8 @@ pub async fn handler(
     {
         let salt = generate_md5_password_salt();
 
-        let username = encrypt.config.database.username.as_bytes();
-        let password = encrypt.config.database.password();
+        let username = proxy.config.database.username.as_bytes();
+        let password = proxy.config.database.password();
 
         let password = password.as_bytes();
 
@@ -123,7 +123,7 @@ pub async fn handler(
         let bytes = BytesMut::try_from(message)?;
         client_stream.write_all(&bytes).await?;
 
-        let connection_timeout = encrypt.config.database.connection_timeout();
+        let connection_timeout = proxy.config.database.connection_timeout();
         let (_code, bytes) =
             protocol::read_message(&mut client_stream, client_id, connection_timeout).await?;
 
@@ -161,15 +161,15 @@ pub async fn handler(
         }
         AuthenticationMethod::AuthenticationCleartextPassword => {
             debug!(target: AUTHENTICATION, msg = "AuthenticationCleartextPassword");
-            let password = encrypt.config.database.password();
+            let password = proxy.config.database.password();
             let message = PasswordMessage::new(password);
             let bytes = BytesMut::try_from(message)?;
             database_stream.write_all(&bytes).await?;
         }
         AuthenticationMethod::Md5Password { salt } => {
             debug!(target: AUTHENTICATION, msg = "Md5Password");
-            let username = encrypt.config.database.username.as_bytes();
-            let password = encrypt.config.database.password();
+            let username = proxy.config.database.username.as_bytes();
+            let password = proxy.config.database.password();
             let password = password.as_bytes();
 
             let hash = md5_hash(username, password, salt);
@@ -186,7 +186,7 @@ pub async fn handler(
             // If we are connected via TLS, we can support SCRAM-SHA-256-PLUS
             // If we are not connected via TLS, the database won't ask for SCRAM-SHA-256-PLUS
             let channel_binding = database_stream.channel_binding();
-            let password = encrypt.config.database.password();
+            let password = proxy.config.database.password();
             let password = password.as_bytes();
             scram_sha_256_plus_handler(&mut database_stream, mechanism, password, channel_binding)
                 .await?;
@@ -204,7 +204,7 @@ pub async fn handler(
         }
     }
 
-    if encrypt.config.server.require_tls && !client_stream.is_tls() {
+    if proxy.config.server.require_tls && !client_stream.is_tls() {
         let message = ErrorResponse::tls_required();
         let bytes = BytesMut::try_from(message)?;
         client_stream.write_all(&bytes).await?;
@@ -218,25 +218,25 @@ pub async fn handler(
 
     let channel_writer = ChannelWriter::new(client_writer, client_id);
 
-    let schema = encrypt.schema.load();
+    let schema = proxy.schema.load();
     let context = Context::new(client_id, schema);
 
     let mut frontend = Frontend::new(
         client_reader,
         channel_writer.sender(),
         server_writer,
-        encrypt.clone(),
+        proxy.clone(),
         context.clone(),
     );
     let mut backend = Backend::new(
         channel_writer.sender(),
         server_reader,
-        encrypt.clone(),
+        proxy.clone(),
         context.clone(),
     );
 
-    if encrypt.is_passthrough() {
-        if encrypt.config.use_structured_logging() {
+    if proxy.is_passthrough() {
+        if proxy.config.use_structured_logging() {
             warn!(msg = "RUNNING IN PASSTHROUGH MODE");
             warn!(msg = "DATA IS NOT PROTECTED WITH ENCRYPTION");
         } else {

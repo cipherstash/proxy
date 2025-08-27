@@ -18,6 +18,7 @@ pub const AUTHENTICATION: &str = "authentication";
 pub const CONFIG: &str = "config";
 pub const CONTEXT: &str = "context";
 pub const ENCRYPT: &str = "encrypt";
+pub const PROXY: &str = "proxy";
 pub const DECRYPT: &str = "decrypt";
 pub const ENCODING: &str = "encoding";
 pub const ENCRYPT_CONFIG: &str = "encrypt_config";

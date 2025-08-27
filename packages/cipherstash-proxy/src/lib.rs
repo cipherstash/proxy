@@ -3,20 +3,20 @@
 pub mod cli;
 pub mod config;
 pub mod connect;
-pub mod encrypt;
 pub mod eql;
 pub mod error;
 pub mod log;
 pub mod postgresql;
 pub mod prometheus;
+pub mod proxy;
 pub mod tls;
 
 pub use crate::cli::Args;
 pub use crate::cli::Migrate;
 pub use crate::config::{DatabaseConfig, ServerConfig, TandemConfig, TlsConfig};
-pub use crate::encrypt::Encrypt;
 pub use crate::eql::{EqlEncrypted, ForQuery, Identifier, Plaintext};
 pub use crate::log::init;
+pub use crate::proxy::Proxy;
 
 use std::mem;
 

@@ -6,7 +6,7 @@ use crate::{
     connect,
     eql::{self, EqlEncryptedBody, EqlEncryptedIndexes},
     error::{EncryptError, Error},
-    log::ENCRYPT,
+    log::{ENCRYPT, PROXY},
     postgresql::{Column, KeysetIdentifier},
     prometheus::{KEYSET_CIPHER_CACHE_HITS_TOTAL, KEYSET_CIPHER_INIT_TOTAL},
     Identifier, EQL_SCHEMA_VERSION,
@@ -31,7 +31,7 @@ use metrics::counter;
 use moka::future::Cache;
 use schema::SchemaManager;
 use std::{sync::Arc, time::Duration, vec};
-use tracing::{debug, info, warn};
+use tracing::{debug, warn};
 
 /// SQL Statement for loading encrypt configuration from database
 const ENCRYPT_CONFIG_QUERY: &str = include_str!("./sql/select_config.sql");
@@ -50,10 +50,10 @@ type ZerokmsClient = ZeroKMS<AutoRefresh<ServiceCredentials>, ClientKey>;
 const SCOPED_CIPHER_SIZE: usize = std::mem::size_of::<ScopedCipher>();
 
 ///
-/// All of the things required for Encrypt-as-a-Product
+/// Core proxy service providing encryption, configuration, and schema management.
 ///
 #[derive(Clone)]
-pub struct Encrypt {
+pub struct Proxy {
     pub config: TandemConfig,
     pub encrypt_config: EncryptConfigManager,
     pub schema: SchemaManager,
@@ -63,8 +63,8 @@ pub struct Encrypt {
     cipher_cache: Cache<String, Arc<ScopedCipher>>,
 }
 
-impl Encrypt {
-    pub async fn init(config: TandemConfig) -> Result<Encrypt, Error> {
+impl Proxy {
+    pub async fn init(config: TandemConfig) -> Result<Proxy, Error> {
         let zerokms_client = init_zerokms_client(&config)?;
 
         let encrypt_config = EncryptConfigManager::init(&config.database).await?;
@@ -99,7 +99,7 @@ impl Encrypt {
             .time_to_live(Duration::from_secs(config.server.cipher_cache_ttl_seconds))
             .build();
 
-        Ok(Encrypt {
+        Ok(Proxy {
             config,
             zerokms_client: Arc::new(zerokms_client),
             encrypt_config,
@@ -126,14 +126,14 @@ impl Encrypt {
 
         // Check cache first
         if let Some(cached_cipher) = self.cipher_cache.get(&cache_key).await {
-            debug!(target: ENCRYPT, msg = "Use cached ScopedCipher", ?keyset_id);
+            debug!(target: PROXY, msg = "Use cached ScopedCipher", ?keyset_id);
             counter!(KEYSET_CIPHER_CACHE_HITS_TOTAL).increment(1);
             return Ok(cached_cipher);
         }
 
         let zerokms_client = self.zerokms_client.clone();
 
-        debug!(target: ENCRYPT, msg = "Initializing ZeroKMS ScopedCipher", ?keyset_id);
+        debug!(target: PROXY, msg = "Initializing ZeroKMS ScopedCipher", ?keyset_id);
 
         // let identified_by = keyset_id.clone().map(|id| id.0);
         let identified_by = keyset_id.as_ref().map(|id| id.0.clone());
@@ -155,12 +155,12 @@ impl Encrypt {
                 let entry_count = self.cipher_cache.entry_count();
                 let memory_usage_bytes = self.cipher_cache.weighted_size();
 
-                debug!(target: ENCRYPT, msg = "ScopedCipher cache", ?keyset_id, entry_count, memory_usage_bytes);
+                debug!(target: PROXY, msg = "ScopedCipher cached", ?keyset_id, entry_count, memory_usage_bytes);
 
                 Ok(arc_cipher)
             }
             Err(err) => {
-                debug!(target: ENCRYPT, msg = "Error initializing ZeroKMS ScopedCipher", error = err.to_string());
+                debug!(target: PROXY, msg = "Error initializing ZeroKMS ScopedCipher", error = err.to_string());
 
                 match err {
                     cipherstash_client::zerokms::Error::LoadKeyset(_) => {
@@ -200,13 +200,10 @@ impl Encrypt {
         for (idx, item) in plaintexts.into_iter().zip(columns.iter()).enumerate() {
             match item {
                 (Some(plaintext), Some(column)) => {
-                    info!(target: ENCRYPT, msg = "ENCRYPT", idx, ?column, ?plaintext);
-
                     if column.is_encryptable() {
                         let encryptable = PlaintextTarget::new(plaintext, column.config.clone());
                         pipeline.add_with_ref::<PlaintextTarget>(encryptable, idx)?;
                     } else {
-                        info!(target: ENCRYPT, msg = "Add to index_term_plaintexts", idx, ?column);
                         index_term_plaintexts[idx] = Some(plaintext);
                     }
                 }
@@ -273,7 +270,7 @@ impl Encrypt {
         if self.config.encrypt.default_keyset_id.is_none() && keyset_id.is_none() {
             return Err(EncryptError::MissingKeysetIdentifier.into());
         }
-        debug!(target: ENCRYPT, msg="Decrypt", ?keyset_id);
+        debug!(target: ENCRYPT, msg="Decrypt", ?keyset_id, default_keyset_id = ?self.config.encrypt.default_keyset_id);
 
         let cipher = self.init_cipher(keyset_id.clone()).await?;
 
@@ -286,8 +283,6 @@ impl Encrypt {
             .enumerate()
             .filter_map(|(idx, eql)| Some((idx, eql?.body.ciphertext.unwrap())))
             .collect::<_>();
-
-        debug!(target: ENCRYPT, ?encrypted);
 
         let decrypted = cipher.decrypt(encrypted).await.map_err(|e| -> Error {
             match &e {
@@ -379,8 +374,6 @@ fn to_eql_encrypted_from_index_term(
     index_term: IndexTerm,
     identifier: &Identifier,
 ) -> Result<eql::EqlEncrypted, Error> {
-    debug!(target: ENCRYPT, msg = "Encrypted to EQL", ?identifier);
-
     let selector = match index_term {
         IndexTerm::SteVecSelector(s) => Some(hex::encode(s.as_bytes())),
         _ => return Err(EncryptError::InvalidIndexTerm.into()),
@@ -410,8 +403,6 @@ fn to_eql_encrypted(
     encrypted: Encrypted,
     identifier: &Identifier,
 ) -> Result<eql::EqlEncrypted, Error> {
-    debug!(target: ENCRYPT, msg = "Encrypted to EQL", ?identifier);
-
     match encrypted {
         Encrypted::Record(ciphertext, terms) => {
             let mut match_index: Option<Vec<u16>> = None;
