@@ -1,41 +1,10 @@
 use crate::config::{LogConfig, LogLevel, LogOutput};
-use crate::log::{AUTHENTICATION, CONTEXT, DEVELOPMENT, ENCRYPT, KEYSET, MAPPER, PROTOCOL, SCHEMA};
+use crate::log::targets::{log_level_for, log_targets};
 use tracing_subscriber::filter::EnvFilter;
 use tracing_subscriber::fmt::format::{DefaultFields, Format};
 use tracing_subscriber::fmt::writer::BoxMakeWriter;
 use tracing_subscriber::fmt::SubscriberBuilder;
 use tracing_subscriber::FmtSubscriber;
-
-use super::DECRYPT;
-
-fn log_targets() -> Vec<&'static str> {
-    vec![
-        DEVELOPMENT,
-        AUTHENTICATION,
-        CONTEXT,
-        DECRYPT,
-        ENCRYPT,
-        KEYSET,
-        PROTOCOL,
-        MAPPER,
-        SCHEMA,
-    ]
-}
-
-fn log_level_for(config: &LogConfig, target: &str) -> LogLevel {
-    match target {
-        DEVELOPMENT => config.development_level,
-        AUTHENTICATION => config.authentication_level,
-        CONTEXT => config.context_level,
-        DECRYPT => config.decrypt_level,
-        ENCRYPT => config.encrypt_level,
-        KEYSET => config.keyset_level,
-        PROTOCOL => config.protocol_level,
-        MAPPER => config.mapper_level,
-        SCHEMA => config.schema_level,
-        _ => config.level,
-    }
-}
 
 pub fn builder(
     config: &LogConfig,

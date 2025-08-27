@@ -17,6 +17,7 @@ pub struct LogConfig {
     #[serde(default = "LogConfig::default_log_level")]
     pub level: LogLevel,
 
+    // Log target level fields - generated from define_log_targets! macro
     #[serde(default = "LogConfig::default_log_level")]
     pub development_level: LogLevel,
 
@@ -45,13 +46,16 @@ pub struct LogConfig {
     pub keyset_level: LogLevel,
 
     #[serde(default = "LogConfig::default_log_level")]
+    pub mapper_level: LogLevel,
+
+    #[serde(default = "LogConfig::default_log_level")]
     pub migrate_level: LogLevel,
 
     #[serde(default = "LogConfig::default_log_level")]
     pub protocol_level: LogLevel,
 
     #[serde(default = "LogConfig::default_log_level")]
-    pub mapper_level: LogLevel,
+    pub proxy_level: LogLevel,
 
     #[serde(default = "LogConfig::default_log_level")]
     pub schema_level: LogLevel,
@@ -121,19 +125,21 @@ impl LogConfig {
             output: LogConfig::default_log_output(),
             ansi_enabled: LogConfig::default_ansi_enabled(),
             level,
+            // Log target level field assignments - matches define_log_targets! macro
             development_level: level,
             authentication_level: level,
+            config_level: level,
             context_level: level,
             encoding_level: level,
             encrypt_level: level,
-            encrypt_config_level: level,
             decrypt_level: level,
+            encrypt_config_level: level,
             keyset_level: level,
+            mapper_level: level,
             migrate_level: level,
             protocol_level: level,
-            mapper_level: level,
+            proxy_level: level,
             schema_level: level,
-            config_level: level,
         }
     }
 

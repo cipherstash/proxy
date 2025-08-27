@@ -1,4 +1,5 @@
 pub mod subscriber;
+pub mod targets;
 
 use crate::config::{LogConfig, LogFormat};
 use std::sync::Once;
@@ -12,22 +13,11 @@ use tracing_subscriber::{
 };
 
 // Log targets used in logs like `debug!(target: DEVELOPMENT, "Flush message buffer");`
-// If you add one, make sure `log_targets()` and `log_level_for()` functions are updated.
-pub const DEVELOPMENT: &str = "development"; // one for various hidden "development mode" messages
-pub const AUTHENTICATION: &str = "authentication";
-pub const CONFIG: &str = "config";
-pub const CONTEXT: &str = "context";
-pub const ENCRYPT: &str = "encrypt";
-pub const PROXY: &str = "proxy";
-pub const DECRYPT: &str = "decrypt";
-pub const ENCODING: &str = "encoding";
-pub const ENCRYPT_CONFIG: &str = "encrypt_config";
-pub const KEYSET: &str = "keyset";
-pub const MIGRATE: &str = "migrate";
-pub const PARSER: &str = "parser";
-pub const PROTOCOL: &str = "protocol";
-pub const MAPPER: &str = "mapper";
-pub const SCHEMA: &str = "schema";
+// All targets are now defined in the targets module using the define_log_targets! macro.
+pub use targets::{
+    AUTHENTICATION, CONFIG, CONTEXT, DECRYPT, DEVELOPMENT, ENCODING, ENCRYPT, ENCRYPT_CONFIG,
+    KEYSET, MAPPER, MIGRATE, PROTOCOL, PROXY, SCHEMA,
+};
 
 static INIT: Once = Once::new();
 
@@ -129,6 +119,7 @@ mod tests {
             keyset_level: LogLevel::Trace,
             migrate_level: LogLevel::Trace,
             protocol_level: LogLevel::Info,
+            proxy_level: LogLevel::Info,
             mapper_level: LogLevel::Info,
             schema_level: LogLevel::Info,
             config_level: LogLevel::Info,
