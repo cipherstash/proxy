@@ -1,6 +1,6 @@
 use super::context::{Context, Statement};
 use super::error_handler::PostgreSqlErrorHandler;
-use super::mapping::ColumnMapper;
+use super::mapping::{ColumnMapper, TypeChecker};
 use super::messages::bind::Bind;
 use super::messages::describe::Describe;
 use super::messages::execute::Execute;
@@ -23,12 +23,12 @@ use crate::prometheus::{
     CLIENTS_BYTES_RECEIVED_TOTAL, ENCRYPTED_VALUES_TOTAL, ENCRYPTION_DURATION_SECONDS,
     ENCRYPTION_ERROR_TOTAL, ENCRYPTION_REQUESTS_TOTAL, SERVER_BYTES_SENT_TOTAL,
     STATEMENTS_ENCRYPTED_TOTAL, STATEMENTS_PASSTHROUGH_MAPPING_DISABLED_TOTAL,
-    STATEMENTS_PASSTHROUGH_TOTAL, STATEMENTS_UNMAPPABLE_TOTAL,
+    STATEMENTS_PASSTHROUGH_TOTAL,
 };
 use crate::EqlEncrypted;
 use bytes::BytesMut;
 use cipherstash_client::encryption::Plaintext;
-use eql_mapper::{self, EqlMapperError, EqlTerm, TypeCheckedStatement};
+use eql_mapper::{EqlTerm, TypeCheckedStatement};
 use metrics::{counter, histogram};
 use pg_escape::quote_literal;
 use serde::Serialize;
@@ -423,12 +423,13 @@ where
                 self.context.set_schema_changed();
             }
 
-            if !eql_mapper::requires_type_check(&statement) {
+            let type_checker = TypeChecker::new(self.context.get_table_resolver());
+            if !type_checker.requires_type_check(&statement) {
                 counter!(STATEMENTS_PASSTHROUGH_TOTAL).increment(1);
                 continue;
             }
 
-            let typed_statement = match self.type_check(&statement) {
+            let typed_statement = match type_checker.type_check(&statement) {
                 Ok(ts) => ts,
                 Err(err) => {
                     if self.encrypt.config.mapping_errors_enabled() {
@@ -694,12 +695,13 @@ where
             self.context.set_schema_changed();
         }
 
-        if !eql_mapper::requires_type_check(&statement) {
+        let type_checker = TypeChecker::new(self.context.get_table_resolver());
+        if !type_checker.requires_type_check(&statement) {
             counter!(STATEMENTS_PASSTHROUGH_TOTAL).increment(1);
             return Ok(None);
         }
 
-        let typed_statement = match self.type_check(&statement) {
+        let typed_statement = match type_checker.type_check(&statement) {
             Ok(ts) => ts,
             Err(err) => {
                 if self.encrypt.config.mapping_errors_enabled() {
@@ -944,41 +946,6 @@ where
         Ok(encrypted)
     }
 
-    fn type_check<'a>(
-        &self,
-        statement: &'a ast::Statement,
-    ) -> Result<TypeCheckedStatement<'a>, Error> {
-        match eql_mapper::type_check(self.context.get_table_resolver(), statement) {
-            Ok(typed_statement) => {
-                debug!(target: MAPPER,
-                    client_id = self.context.client_id,
-                    typed_statement = ?typed_statement
-                );
-
-                Ok(typed_statement)
-            }
-            Err(EqlMapperError::InternalError(str)) => {
-                warn!(
-                    client_id = self.context.client_id,
-                    msg = "Internal Error in EQL Mapper",
-                    mapping_errors_enabled = self.encrypt.config.mapping_errors_enabled(),
-                    error = str,
-                );
-                counter!(STATEMENTS_UNMAPPABLE_TOTAL).increment(1);
-                Err(MappingError::Internal(str).into())
-            }
-            Err(err) => {
-                warn!(
-                    client_id = self.context.client_id,
-                    msg = "Unmappable statement",
-                    mapping_errors_enabled = self.encrypt.config.mapping_errors_enabled(),
-                    error = err.to_string(),
-                );
-                counter!(STATEMENTS_UNMAPPABLE_TOTAL).increment(1);
-                Err(MappingError::StatementCouldNotBeTypeChecked(err.to_string()).into())
-            }
-        }
-    }
 
 
     ///
