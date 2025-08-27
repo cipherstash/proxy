@@ -8,7 +8,6 @@ use super::messages::query::Query;
 use super::messages::FrontendCode as Code;
 use super::protocol::{self};
 use crate::connect::Sender;
-use crate::encrypt::Encrypt;
 use crate::eql::Identifier;
 use crate::error::{EncryptError, Error, MappingError};
 use crate::log::{CONTEXT, MAPPER, PROTOCOL};
@@ -25,6 +24,7 @@ use crate::prometheus::{
     STATEMENTS_ENCRYPTED_TOTAL, STATEMENTS_PASSTHROUGH_MAPPING_DISABLED_TOTAL,
     STATEMENTS_PASSTHROUGH_TOTAL, STATEMENTS_TOTAL, STATEMENTS_UNMAPPABLE_TOTAL,
 };
+use crate::proxy::Proxy;
 use crate::EqlEncrypted;
 use bytes::BytesMut;
 use cipherstash_client::encryption::Plaintext;
@@ -99,8 +99,8 @@ where
     client_sender: Sender,
     /// Writer for forwarding messages to server
     server_writer: W,
-    /// Encryption service for column encryption/decryption
-    encrypt: Encrypt,
+    /// Proxy service for column encryption/decryption and configuration
+    proxy: Proxy,
     /// Session context tracking statements, portals, and keyset IDs
     context: Context,
     /// Error state flag for extended query protocol error handling
@@ -128,14 +128,14 @@ where
         client_reader: R,
         client_sender: Sender,
         server_writer: W,
-        encrypt: Encrypt,
+        proxy: Proxy,
         context: Context,
     ) -> Self {
         Frontend {
             client_reader,
             client_sender,
             server_writer,
-            encrypt,
+            proxy,
             context,
             error_state: None,
         }
@@ -165,7 +165,7 @@ where
     /// Returns `Ok(())` on successful message processing, or an `Error` if a fatal
     /// error occurs that should terminate the connection.
     pub async fn rewrite(&mut self) -> Result<(), Error> {
-        let connection_timeout = self.encrypt.config.database.connection_timeout();
+        let connection_timeout = self.proxy.config.database.connection_timeout();
         let (code, mut bytes) = protocol::read_message(
             &mut self.client_reader,
             self.context.client_id,
@@ -176,7 +176,7 @@ where
         let sent: u64 = bytes.len() as u64;
         counter!(CLIENTS_BYTES_RECEIVED_TOTAL).increment(sent);
 
-        if self.encrypt.config.mapping_disabled() {
+        if self.proxy.config.mapping_disabled() {
             self.write_to_server(bytes).await?;
             return Ok(());
         }
@@ -276,7 +276,7 @@ where
                 );
 
                 if self.context.schema_changed() {
-                    self.encrypt.reload_schema().await;
+                    self.proxy.reload_schema().await;
                 }
 
                 if self.error_state.is_some() {
@@ -424,7 +424,7 @@ where
             let typed_statement = match self.type_check(&statement) {
                 Ok(ts) => ts,
                 Err(err) => {
-                    if self.encrypt.config.mapping_errors_enabled() {
+                    if self.proxy.config.mapping_errors_enabled() {
                         return Err(err);
                     } else {
                         return Ok(None);
@@ -543,7 +543,7 @@ where
         let start = Instant::now();
 
         let encrypted = self
-            .encrypt
+            .proxy
             .encrypt(keyset_id, plaintexts, literal_columns)
             .await
             .inspect_err(|_| {
@@ -687,7 +687,7 @@ where
         let typed_statement = match self.type_check(&statement) {
             Ok(ts) => ts,
             Err(err) => {
-                if self.encrypt.config.mapping_errors_enabled() {
+                if self.proxy.config.mapping_errors_enabled() {
                     return Err(err);
                 } else {
                     return Ok(None);
@@ -811,10 +811,10 @@ where
         if let Some(keyset_identifier) = self.context.maybe_set_keyset(statement)? {
             debug!(client_id = self.context.client_id, ?keyset_identifier);
 
-            if self.encrypt.config.encrypt.default_keyset_id.is_some() {
+            if self.proxy.config.encrypt.default_keyset_id.is_some() {
                 debug!(target: MAPPER,
                     client_id = self.context.client_id,
-                    default_keyset_id = ?self.encrypt.config.encrypt.default_keyset_id,
+                    default_keyset_id = ?self.proxy.config.encrypt.default_keyset_id,
                     ?keyset_identifier
                 );
                 return Err(EncryptError::UnexpectedSetKeyset.into());
@@ -985,7 +985,7 @@ where
         let start = Instant::now();
 
         let encrypted = self
-            .encrypt
+            .proxy
             .encrypt(keyset_id, plaintexts, &statement.param_columns)
             .await
             .inspect_err(|_| {
@@ -993,7 +993,7 @@ where
             })?;
 
         // Avoid the iter calculation if we can
-        if self.encrypt.config.prometheus_enabled() {
+        if self.proxy.config.prometheus_enabled() {
             let encrypted_count = encrypted.iter().filter(|e| e.is_some()).count() as u64;
 
             counter!(ENCRYPTION_REQUESTS_TOTAL).increment(1);
@@ -1023,7 +1023,7 @@ where
                 warn!(
                     client_id = self.context.client_id,
                     msg = "Internal Error in EQL Mapper",
-                    mapping_errors_enabled = self.encrypt.config.mapping_errors_enabled(),
+                    mapping_errors_enabled = self.proxy.config.mapping_errors_enabled(),
                     error = str,
                 );
                 counter!(STATEMENTS_UNMAPPABLE_TOTAL).increment(1);
@@ -1033,7 +1033,7 @@ where
                 warn!(
                     client_id = self.context.client_id,
                     msg = "Unmappable statement",
-                    mapping_errors_enabled = self.encrypt.config.mapping_errors_enabled(),
+                    mapping_errors_enabled = self.proxy.config.mapping_errors_enabled(),
                     error = err.to_string(),
                 );
                 counter!(STATEMENTS_UNMAPPABLE_TOTAL).increment(1);
@@ -1154,7 +1154,7 @@ where
         identifier: Identifier,
         eql_term: &EqlTerm,
     ) -> Result<Option<Column>, Error> {
-        match self.encrypt.get_column_config(&identifier) {
+        match self.proxy.get_column_config(&identifier) {
             Some(config) => {
                 debug!(
                     target: MAPPER,

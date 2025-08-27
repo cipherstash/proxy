@@ -7,7 +7,6 @@ use super::messages::row_description::RowDescription;
 use super::messages::BackendCode;
 use super::Column;
 use crate::connect::Sender;
-use crate::encrypt::Encrypt;
 use crate::eql::EqlEncrypted;
 use crate::error::{EncryptError, Error};
 use crate::log::{CONTEXT, DEVELOPMENT, MAPPER, PROTOCOL};
@@ -20,6 +19,7 @@ use crate::prometheus::{
     DECRYPTION_ERROR_TOTAL, DECRYPTION_REQUESTS_TOTAL, ROWS_ENCRYPTED_TOTAL,
     ROWS_PASSTHROUGH_TOTAL, ROWS_TOTAL, SERVER_BYTES_RECEIVED_TOTAL,
 };
+use crate::proxy::Proxy;
 use bytes::BytesMut;
 use metrics::{counter, histogram};
 use std::time::Instant;
@@ -79,7 +79,7 @@ where
     /// Reader for incoming messages from server
     server_reader: R,
     /// Encryption service for column decryption
-    encrypt: Encrypt,
+    proxy: Proxy,
     /// Session context with portal and statement metadata
     context: Context,
     /// Buffer for batching DataRow messages before decryption
@@ -98,17 +98,12 @@ where
     /// * `server_reader` - Stream for reading messages from the PostgreSQL server
     /// * `encrypt` - Encryption service for handling column decryption
     /// * `context` - Session context shared with the frontend
-    pub fn new(
-        client_sender: Sender,
-        server_reader: R,
-        encrypt: Encrypt,
-        context: Context,
-    ) -> Self {
+    pub fn new(client_sender: Sender, server_reader: R, proxy: Proxy, context: Context) -> Self {
         let buffer = MessageBuffer::new();
         Backend {
             client_sender,
             server_reader,
-            encrypt,
+            proxy,
             context,
             buffer,
         }
@@ -155,7 +150,7 @@ where
     /// Returns `Ok(())` on successful message processing, or an `Error` if a fatal
     /// error occurs that should terminate the connection.
     pub async fn rewrite(&mut self) -> Result<(), Error> {
-        let connection_timeout = self.encrypt.config.database.connection_timeout();
+        let connection_timeout = self.proxy.config.database.connection_timeout();
 
         let (code, mut bytes) = protocol::read_message(
             &mut self.server_reader,
@@ -167,7 +162,7 @@ where
         let sent: u64 = bytes.len() as u64;
         counter!(SERVER_BYTES_RECEIVED_TOTAL).increment(sent);
 
-        if self.encrypt.is_passthrough() {
+        if self.proxy.is_passthrough() {
             debug!(target: DEVELOPMENT,
                 client_id = self.context.client_id,
                 msg = "Passthrough enabled"
@@ -255,7 +250,7 @@ where
                     msg = "ReadyForQuery"
                 );
                 if self.context.schema_changed() {
-                    self.encrypt.reload_schema().await;
+                    self.proxy.reload_schema().await;
                 }
             }
 
@@ -456,7 +451,7 @@ where
 
         // Decrypt CipherText -> Plaintext
         let plaintexts = self
-            .encrypt
+            .proxy
             .decrypt(keyset_id, ciphertexts)
             .await
             .inspect_err(|_| {
@@ -464,7 +459,7 @@ where
             })?;
 
         // Avoid the iter calculation if we can
-        if self.encrypt.config.prometheus_enabled() {
+        if self.proxy.config.prometheus_enabled() {
             let decrypted_count =
                 plaintexts
                     .iter()
