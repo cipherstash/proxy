@@ -244,17 +244,23 @@ Default level is `Info`.
 
 Proxy has multiple "log targets" corresponding to the internal domains.
 
-Set log levels for a specific log target to turn on or turn of more verbose logging:
+Set log levels for a specific log target to turn on or turn off more verbose logging:
 
 ```
 Target          | ENV
 --------------- | -------------------------------------
 DEVELOPMENT     | CS_LOG__DEVELOPMENT_LEVEL
 AUTHENTICATION  | CS_LOG__AUTHENTICATION_LEVEL
+CONFIG          | CS_LOG__CONFIG_LEVEL
 CONTEXT         | CS_LOG__CONTEXT_LEVEL
+ENCODING        | CS_LOG__ENCODING_LEVEL
 ENCRYPT         | CS_LOG__ENCRYPT_LEVEL
+DECRYPT         | CS_LOG__DECRYPT_LEVEL
+ENCRYPT_CONFIG  | CS_LOG__ENCRYPT_CONFIG_LEVEL
 KEYSET          | CS_LOG__KEYSET_LEVEL
+MIGRATE         | CS_LOG__MIGRATE_LEVEL
 PROTOCOL        | CS_LOG__PROTOCOL_LEVEL
+PROXY           | CS_LOG__PROXY_LEVEL
 MAPPER          | CS_LOG__MAPPER_LEVEL
 SCHEMA          | CS_LOG__SCHEMA_LEVEL
 ```
@@ -547,12 +553,37 @@ Debug logging is very verbose, and targets allow configuration of granular log l
 A `target` is a string value that is added to the standard tracing macro calls (`debug!, error!, etc`).
 Log levels can be configured for each `target` individually.
 
-A number of targets are already defined in `log.rs`.
+### Logging Architecture
 
-The targets are aligned with the different components and contexts (`PROTOCOL, AUTHENTICATION, MAPPER, etc`)
+The logging system uses a declarative macro approach for managing log targets:
+
+- **Single source of truth**: All log targets are defined in `packages/cipherstash-proxy/src/log/targets.rs` using the `define_log_targets!` macro
+- **Automatic generation**: The macro generates target constants, configuration struct fields, and accessor functions
+- **Type safety**: Uses a generated `LogTargetLevels` struct with serde flattening for config integration
+- **Self-documenting**: Clear separation between core config and target-specific levels
+
+The targets are aligned with the different components and contexts (`PROTOCOL`, `AUTHENTICATION`, `MAPPER`, etc.).
 
 There is a general `DEVELOPMENT` target for logs that don't quite fit into a specific category.
 
+### Adding a New Log Target
+
+To add a new log target, you only need to add **one line** to the macro in `packages/cipherstash-proxy/src/log/targets.rs`:
+
+```rust
+define_log_targets!(
+    (DEVELOPMENT, development_level, "development"),
+    (AUTHENTICATION, authentication_level, "authentication"),
+    // ... existing targets ...
+    (NEW_TARGET, new_target_level, "new_target"), // <- Add this line
+);
+```
+
+This automatically:
+- Creates the `NEW_TARGET` constant for use in logging calls
+- Generates the `new_target_level` field in `LogTargetLevels` struct
+- Creates the environment variable `CS_LOG__NEW_TARGET_LEVEL`
+- Adds the target to all logging functions and validation
 
 ### Available targets
 
@@ -561,14 +592,19 @@ Target          | ENV
 --------------- | -------------------------------------
 DEVELOPMENT     | CS_LOG__DEVELOPMENT_LEVEL
 AUTHENTICATION  | CS_LOG__AUTHENTICATION_LEVEL
+CONFIG          | CS_LOG__CONFIG_LEVEL
 CONTEXT         | CS_LOG__CONTEXT_LEVEL
+ENCODING        | CS_LOG__ENCODING_LEVEL
 ENCRYPT         | CS_LOG__ENCRYPT_LEVEL
+DECRYPT         | CS_LOG__DECRYPT_LEVEL
+ENCRYPT_CONFIG  | CS_LOG__ENCRYPT_CONFIG_LEVEL
 KEYSET          | CS_LOG__KEYSET_LEVEL
+MIGRATE         | CS_LOG__MIGRATE_LEVEL
 PROTOCOL        | CS_LOG__PROTOCOL_LEVEL
+PROXY           | CS_LOG__PROXY_LEVEL
 MAPPER          | CS_LOG__MAPPER_LEVEL
 SCHEMA          | CS_LOG__SCHEMA_LEVEL
 ```
-
 
 ### Example
 
@@ -585,12 +621,22 @@ CS_LOG__MAPPER_LEVEL = "debug"
 Log `debug` output for the `MAPPER` target:
 
 ```rust
-    debug!(
-        target: MAPPER,
-        client_id = self.context.client_id,
-        identifier = ?identifier
-    );
+debug!(
+    target: MAPPER,
+    client_id = self.context.client_id,
+    identifier = ?identifier
+);
 ```
+
+### Implementation Details
+
+The logging system uses these key components:
+
+- **`define_log_targets!` macro** in `log/targets.rs`: Generates all logging infrastructure
+- **`LogTargetLevels` struct**: Auto-generated struct containing all target level fields
+- **`LogConfig` struct**: Main configuration with `#[serde(flatten)]` integration
+- **Target constants**: Exported for use in logging calls (e.g., `MAPPER`, `PROTOCOL`)
+- **Environment variables**: Auto-generated from target names (e.g., `CS_LOG__MAPPER_LEVEL`)
 
 ## Benchmarks
 
