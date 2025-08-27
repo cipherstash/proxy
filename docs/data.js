@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1756274540966,
+  "lastUpdate": 1756276734911,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -13584,6 +13584,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 24.005007,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "toby@cipherstash.com",
+            "name": "Toby Hede",
+            "username": "tobyhede"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "8972c411aa59de342cdde905e876d157219e098d",
+          "message": "Merge pull request #315 from cipherstash/refactor-rename-encrypt-to-proxy\n\nrefactor: rename Encrypt module to Proxy for better clarity",
+          "timestamp": "2025-08-27T16:35:16+10:00",
+          "tree_id": "c2512ae3a80752859301882375909f72fa6e8f77",
+          "url": "https://github.com/cipherstash/proxy/commit/8972c411aa59de342cdde905e876d157219e098d"
+        },
+        "date": 1756276733492,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 24.562618,
             "unit": "Number"
           }
         ]
