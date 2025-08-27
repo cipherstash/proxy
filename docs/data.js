@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1756262448723,
+  "lastUpdate": 1756263024095,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -13430,6 +13430,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 24.684789,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "4afacf0f9eabb4980b28140daacea8b95d5cb14b",
+          "message": "refactor: split statement handling in connection Context #310",
+          "timestamp": "2025-08-26T08:43:20Z",
+          "url": "https://github.com/cipherstash/proxy/pull/313/commits/4afacf0f9eabb4980b28140daacea8b95d5cb14b"
+        },
+        "date": 1756263021848,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 24.299281,
             "unit": "Number"
           }
         ]
