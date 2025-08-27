@@ -49,6 +49,7 @@ mod tests {
     use crate::config::LogLevel;
 
     use super::*;
+    use crate::log::targets::LogTargetLevels;
     use crate::test_helpers::MockMakeWriter;
     use tracing::dispatcher::set_default;
     use tracing::{debug, error, info, trace, warn};
@@ -109,20 +110,22 @@ mod tests {
             output: LogConfig::default_log_output(),
             ansi_enabled: LogConfig::default_ansi_enabled(),
             level: LogLevel::Info,
-            development_level: LogLevel::Info,
-            authentication_level: LogLevel::Debug,
-            context_level: LogLevel::Error,
-            encoding_level: LogLevel::Error,
-            encrypt_level: LogLevel::Error,
-            encrypt_config_level: LogLevel::Error,
-            decrypt_level: LogLevel::Error,
-            keyset_level: LogLevel::Trace,
-            migrate_level: LogLevel::Trace,
-            protocol_level: LogLevel::Info,
-            proxy_level: LogLevel::Info,
-            mapper_level: LogLevel::Info,
-            schema_level: LogLevel::Info,
-            config_level: LogLevel::Info,
+            targets: LogTargetLevels {
+                development_level: LogLevel::Info,
+                authentication_level: LogLevel::Debug,
+                context_level: LogLevel::Error,
+                encoding_level: LogLevel::Error,
+                encrypt_level: LogLevel::Error,
+                encrypt_config_level: LogLevel::Error,
+                decrypt_level: LogLevel::Error,
+                keyset_level: LogLevel::Trace,
+                migrate_level: LogLevel::Trace,
+                protocol_level: LogLevel::Info,
+                proxy_level: LogLevel::Info,
+                mapper_level: LogLevel::Info,
+                schema_level: LogLevel::Info,
+                config_level: LogLevel::Info,
+            },
         };
 
         let subscriber =

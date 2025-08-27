@@ -1,4 +1,5 @@
 use crate::config::LogLevel;
+use serde::Deserialize;
 
 // Define all log targets in one place
 macro_rules! define_log_targets {
@@ -7,6 +8,44 @@ macro_rules! define_log_targets {
         $(
             pub const $const_name: &str = $target_str;
         )*
+
+        // Generate LogTargetLevels struct with all target level fields
+        #[derive(Clone, Debug, Deserialize)]
+        pub struct LogTargetLevels {
+            $(
+                #[serde(default = "LogTargetLevels::default_target_level")]
+                pub $field_name: LogLevel,
+            )*
+        }
+
+        impl Default for LogTargetLevels {
+            fn default() -> Self {
+                Self::with_level(LogLevel::Info)
+            }
+        }
+
+        impl LogTargetLevels {
+            pub fn with_level(level: LogLevel) -> Self {
+                LogTargetLevels {
+                    $(
+                        $field_name: level,
+                    )*
+                }
+            }
+
+            pub const fn default_target_level() -> LogLevel {
+                LogLevel::Info
+            }
+
+            pub fn get_level_for_target(&self, target: &str) -> LogLevel {
+                match target {
+                    $(
+                        $const_name => self.$field_name,
+                    )*
+                    _ => LogLevel::Info, // fallback level
+                }
+            }
+        }
 
         // Generate function to get all target names
         pub fn log_targets() -> Vec<&'static str> {
@@ -17,45 +56,10 @@ macro_rules! define_log_targets {
             ]
         }
 
-        // Generate function to map target to log level
+        // Generate function to map target to log level using the flattened config
         pub fn log_level_for(config: &crate::config::LogConfig, target: &str) -> LogLevel {
-            match target {
-                $(
-                    $const_name => config.$field_name,
-                )*
-                _ => config.level,
-            }
+            config.targets.get_level_for_target(target)
         }
-
-        // Compile-time validation that LogConfig has all required fields
-        // This will fail to compile if any field is missing from LogConfig
-        pub const fn validate_log_config_fields() {
-            use crate::config::LogConfig;
-
-            // Create a dummy LogConfig to ensure all fields exist
-            let _config = LogConfig {
-                ansi_enabled: true,
-                format: crate::config::LogFormat::Pretty,
-                output: crate::config::LogOutput::Stdout,
-                level: LogLevel::Info,
-                $(
-                    $field_name: LogLevel::Info,
-                )*
-            };
-        }
-
-        // NOTE: Due to Rust macro system limitations, LogConfig fields in config/log.rs
-        // must be manually synchronized with the targets defined here.
-        //
-        // When adding a new target (NEWTARGET, new_target_level, "new_target"):
-        // 1. Add the target to the define_log_targets! macro invocation below
-        // 2. Add this field to LogConfig struct in config/log.rs:
-        //    #[serde(default = "LogConfig::default_log_level")]
-        //    pub new_target_level: LogLevel,
-        // 3. Add this assignment to with_level() method in config/log.rs:
-        //    new_target_level: level,
-        //
-        // The validate_log_config_fields() function will fail to compile if fields are missing.
     };
 }
 
@@ -75,6 +79,3 @@ define_log_targets!(
     (MAPPER, mapper_level, "mapper"),
     (SCHEMA, schema_level, "schema"),
 );
-
-// Trigger compile-time validation
-const _: () = validate_log_config_fields();
