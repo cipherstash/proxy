@@ -2,10 +2,7 @@ pub mod column;
 
 use super::{
     format_code::FormatCode,
-    messages::{
-        describe::{Describe, Target},
-        Name,
-    },
+    messages::{describe::Describe, Name, Target},
     Column,
 };
 use crate::{
@@ -264,7 +261,7 @@ impl Context {
             } => self.get_portal_statement(name),
             Describe {
                 ref name,
-                target: Target::PreparedStatement,
+                target: Target::Statement,
             } => self.get_statement(name),
         }
     }
@@ -583,7 +580,7 @@ mod tests {
     use crate::{
         config::LogConfig,
         log,
-        postgresql::messages::{describe::Target, Name},
+        postgresql::messages::{Name, Target},
     };
     use cipherstash_client::IdentifiedBy;
     use eql_mapper::Schema;
@@ -621,7 +618,7 @@ mod tests {
 
         let mut context = Context::new(1, schema);
 
-        let name = Name("name".to_string());
+        let name = Name::from("name");
 
         context.add_statement(name.clone(), statement());
 
@@ -629,7 +626,7 @@ mod tests {
 
         let describe = Describe {
             name,
-            target: Target::PreparedStatement,
+            target: Target::Statement,
         };
         context.set_describe(describe);
 
@@ -646,8 +643,8 @@ mod tests {
 
         let mut context = Context::new(1, schema);
 
-        let statement_name = Name("statement".to_string());
-        let portal_name = Name("portal".to_string());
+        let statement_name = Name::from("statement");
+        let portal_name = Name::from("portal");
 
         // Add statement to context
         context.add_statement(statement_name.clone(), statement());
@@ -688,8 +685,8 @@ mod tests {
         let mut context = Context::new(1, schema);
 
         // Create multiple statements
-        let statement_name_1 = Name("statement_1".to_string());
-        let statement_name_2 = Name("statement_2".to_string());
+        let statement_name_1 = Name::from("statement_1");
+        let statement_name_2 = Name::from("statement_2");
 
         // Add statements to context
         context.add_statement(statement_name_1.clone(), statement());
@@ -698,7 +695,7 @@ mod tests {
         // Replicate pipelined execution
         // Add multiple portals with the same name
         // Pointing to different statements
-        let portal_name = Name("portal".to_string());
+        let portal_name = Name::from("portal");
 
         let statement_1 = context.get_statement(&statement_name_1).unwrap();
         context.add_portal(portal_name.clone(), portal(&statement_1));
@@ -737,14 +734,14 @@ mod tests {
 
         let mut context = Context::new(1, schema);
 
-        let statement_name_1 = Name("statement_1".to_string());
+        let statement_name_1 = Name::from("statement_1");
         let portal_name_1 = Name::unnamed();
 
-        let statement_name_2 = Name("statement_2".to_string());
+        let statement_name_2 = Name::from("statement_2");
         let portal_name_2 = Name::unnamed();
 
-        let statement_name_3 = Name("statement_3".to_string());
-        let portal_name_3 = Name("portal_3".to_string());
+        let statement_name_3 = Name::from("statement_3");
+        let portal_name_3 = Name::from("portal_3");
 
         // Add statement to context
         context.add_statement(statement_name_1.clone(), statement());

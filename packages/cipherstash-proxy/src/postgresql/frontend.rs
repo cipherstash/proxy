@@ -15,9 +15,10 @@ use crate::log::{CONTEXT, MAPPER, PROTOCOL};
 use crate::postgresql::context::column::Column;
 use crate::postgresql::context::Portal;
 use crate::postgresql::data::literal_from_sql;
+use crate::postgresql::messages::close::Close;
 use crate::postgresql::messages::ready_for_query::ReadyForQuery;
 use crate::postgresql::messages::terminate::Terminate;
-use crate::postgresql::messages::Name;
+use crate::postgresql::messages::{Name, Target};
 use crate::prometheus::{
     CLIENTS_BYTES_RECEIVED_TOTAL, ENCRYPTED_VALUES_TOTAL, ENCRYPTION_DURATION_SECONDS,
     ENCRYPTION_ERROR_TOTAL, ENCRYPTION_REQUESTS_TOTAL, SERVER_BYTES_SENT_TOTAL,
@@ -287,6 +288,9 @@ where
                     return Ok(());
                 }
             }
+            Code::Close => {
+                self.close_handler(&bytes).await?;
+            }
             code => {
                 debug!(target: PROTOCOL,
                     client_id = self.context.client_id,
@@ -319,6 +323,19 @@ where
         let describe = Describe::try_from(bytes)?;
         debug!(target: PROTOCOL, client_id = self.context.client_id, ?describe);
         self.context.set_describe(describe);
+        Ok(())
+    }
+
+    async fn close_handler(&mut self, bytes: &BytesMut) -> Result<(), Error> {
+        let close = Close::try_from(bytes)?;
+        debug!(target: PROTOCOL, client_id = self.context.client_id, ?close);
+        match close.target {
+            Target::Portal => self.context.close_portal(&close.name),
+            Target::Statement => {
+                self.context.close_portal(&close.name);
+                // self.context.close_statement(&close.name);
+            }
+        }
         Ok(())
     }
 

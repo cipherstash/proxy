@@ -1,25 +1,36 @@
+use std::fmt;
+
 use bytes::BytesMut;
 
 pub mod authentication;
 pub mod bind;
+pub mod close;
 pub mod data_row;
 pub mod describe;
 pub mod error_response;
 pub mod execute;
+pub mod name;
 pub mod param_description;
 pub mod parse;
 pub mod query;
 pub mod ready_for_query;
 pub mod row_description;
+pub mod target;
 pub mod terminate;
+
+// Re-export commonly used types
+pub use name::Name;
+pub use target::Target;
 
 pub const NULL: i32 = -1;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum FrontendCode {
     Bind,
+    Close,
     Describe,
     Execute,
+    Flush,
     Parse,
     PasswordMessage,
     Query,
@@ -65,8 +76,10 @@ impl From<char> for FrontendCode {
     fn from(code: char) -> Self {
         match code {
             'B' => FrontendCode::Bind,
+            'C' => FrontendCode::Close,
             'D' => FrontendCode::Describe,
             'E' => FrontendCode::Execute,
+            'H' => FrontendCode::Flush,
             'p' => FrontendCode::PasswordMessage,
             'P' => FrontendCode::Parse,
             'Q' => FrontendCode::Query,
@@ -85,8 +98,10 @@ impl From<FrontendCode> for u8 {
     fn from(code: FrontendCode) -> Self {
         match code {
             FrontendCode::Bind => b'B',
+            FrontendCode::Close => b'C',
             FrontendCode::Describe => b'D',
             FrontendCode::Execute => b'E',
+            FrontendCode::Flush => b'F',
             FrontendCode::Parse => b'P',
             FrontendCode::PasswordMessage => b'p',
             FrontendCode::Query => b'Q',
@@ -103,8 +118,10 @@ impl From<FrontendCode> for char {
     fn from(code: FrontendCode) -> Self {
         match code {
             FrontendCode::Bind => 'B',
+            FrontendCode::Close => 'C',
             FrontendCode::Describe => 'D',
             FrontendCode::Execute => 'E',
+            FrontendCode::Flush => 'F',
             FrontendCode::Parse => 'P',
             FrontendCode::PasswordMessage => 'p',
             FrontendCode::Query => 'Q',
@@ -201,24 +218,51 @@ impl From<BackendCode> for char {
     }
 }
 
-#[derive(Debug, Clone, Hash, Eq, PartialEq)]
-pub struct Name(pub String);
-
-impl Name {
-    pub fn unnamed() -> Name {
-        Name("".to_string())
-    }
-
-    pub fn is_unnamed(&self) -> bool {
-        self.0.is_empty()
+impl fmt::Display for BackendCode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            BackendCode::Authentication => write!(f, "BackendCode::Authentication"),
+            BackendCode::BackendKeyData => write!(f, "BackendCode::BackendKeyData"),
+            BackendCode::BindComplete => write!(f, "BackendCode::BindComplete"),
+            BackendCode::CloseComplete => write!(f, "BackendCode::CloseComplete"),
+            BackendCode::CommandComplete => write!(f, "BackendCode::CommandComplete"),
+            BackendCode::CopyBothResponse => write!(f, "BackendCode::CopyBothResponse"),
+            BackendCode::CopyInResponse => write!(f, "BackendCode::CopyInResponse"),
+            BackendCode::CopyOutResponse => write!(f, "BackendCode::CopyOutResponse"),
+            BackendCode::DataRow => write!(f, "BackendCode::DataRow"),
+            BackendCode::EmptyQueryResponse => write!(f, "BackendCode::EmptyQueryResponse"),
+            BackendCode::ErrorResponse => write!(f, "BackendCode::ErrorResponse"),
+            BackendCode::NoData => write!(f, "BackendCode::NoData"),
+            BackendCode::NoticeResponse => write!(f, "BackendCode::NoticeResponse"),
+            BackendCode::NotificationResponse => write!(f, "BackendCode::NotificationResponse"),
+            BackendCode::ParameterDescription => write!(f, "BackendCode::ParameterDescription"),
+            BackendCode::ParameterStatus => write!(f, "BackendCode::ParameterStatus"),
+            BackendCode::ParseComplete => write!(f, "BackendCode::ParseComplete"),
+            BackendCode::PortalSuspended => write!(f, "BackendCode::PortalSuspended"),
+            BackendCode::ReadyForQuery => write!(f, "BackendCode::ReadyForQuery"),
+            BackendCode::RowDescription => write!(f, "BackendCode::RowDescription"),
+            BackendCode::Unknown(c) => write!(f, "BackendCode::Unknown('{}')", c),
+        }
     }
 }
 
-impl std::ops::Deref for Name {
-    type Target = str;
-
-    fn deref(&self) -> &str {
-        self.0.as_str()
+impl fmt::Display for FrontendCode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            FrontendCode::Bind => write!(f, "FrontendCode::Bind"),
+            FrontendCode::Close => write!(f, "FrontendCode::Close"),
+            FrontendCode::Describe => write!(f, "FrontendCode::Describe"),
+            FrontendCode::Execute => write!(f, "FrontendCode::Execute"),
+            FrontendCode::Flush => write!(f, "FrontendCode::Flush"),
+            FrontendCode::Parse => write!(f, "FrontendCode::Parse"),
+            FrontendCode::PasswordMessage => write!(f, "FrontendCode::PasswordMessage"),
+            FrontendCode::Query => write!(f, "FrontendCode::Query"),
+            FrontendCode::SASLInitialResponse => write!(f, "FrontendCode::SASLInitialResponse"),
+            FrontendCode::SASLResponse => write!(f, "FrontendCode::SASLResponse"),
+            FrontendCode::Sync => write!(f, "FrontendCode::Sync"),
+            FrontendCode::Terminate => write!(f, "FrontendCode::Terminate"),
+            FrontendCode::Unknown(c) => write!(f, "FrontendCode::Unknown('{}')", c),
+        }
     }
 }
 
