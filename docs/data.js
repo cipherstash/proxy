@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1756277536456,
+  "lastUpdate": 1756347812858,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -13688,6 +13688,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 22.12624,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "toby@cipherstash.com",
+            "name": "Toby Hede",
+            "username": "tobyhede"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "f1b66a27ed12315a0cb4ac782030d706c98913dc",
+          "message": "Merge pull request #316 from cipherstash/refactor-logging-targets\n\nrefactor: centralize log target definitions using declarative macro",
+          "timestamp": "2025-08-28T12:19:40+10:00",
+          "tree_id": "178ea721bdc688e64a5c995101937441e867e535",
+          "url": "https://github.com/cipherstash/proxy/commit/f1b66a27ed12315a0cb4ac782030d706c98913dc"
+        },
+        "date": 1756347811360,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 23.305308,
             "unit": "Number"
           }
         ]
