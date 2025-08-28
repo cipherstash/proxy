@@ -3,6 +3,9 @@ use std::{fmt::Display, io::IsTerminal};
 use clap::ValueEnum;
 use serde::Deserialize;
 
+// Import the generated LogTargetLevels struct
+use crate::log::targets::LogTargetLevels;
+
 #[derive(Clone, Debug, Deserialize)]
 pub struct LogConfig {
     #[serde(default = "LogConfig::default_ansi_enabled")]
@@ -17,44 +20,10 @@ pub struct LogConfig {
     #[serde(default = "LogConfig::default_log_level")]
     pub level: LogLevel,
 
-    #[serde(default = "LogConfig::default_log_level")]
-    pub development_level: LogLevel,
-
-    #[serde(default = "LogConfig::default_log_level")]
-    pub authentication_level: LogLevel,
-
-    #[serde(default = "LogConfig::default_log_level")]
-    pub config_level: LogLevel,
-
-    #[serde(default = "LogConfig::default_log_level")]
-    pub context_level: LogLevel,
-
-    #[serde(default = "LogConfig::default_log_level")]
-    pub encoding_level: LogLevel,
-
-    #[serde(default = "LogConfig::default_log_level")]
-    pub encrypt_level: LogLevel,
-
-    #[serde(default = "LogConfig::default_log_level")]
-    pub decrypt_level: LogLevel,
-
-    #[serde(default = "LogConfig::default_log_level")]
-    pub encrypt_config_level: LogLevel,
-
-    #[serde(default = "LogConfig::default_log_level")]
-    pub keyset_level: LogLevel,
-
-    #[serde(default = "LogConfig::default_log_level")]
-    pub migrate_level: LogLevel,
-
-    #[serde(default = "LogConfig::default_log_level")]
-    pub protocol_level: LogLevel,
-
-    #[serde(default = "LogConfig::default_log_level")]
-    pub mapper_level: LogLevel,
-
-    #[serde(default = "LogConfig::default_log_level")]
-    pub schema_level: LogLevel,
+    // All log target levels - automatically generated and flattened from LogTargetLevels
+    // To add a new target: just add it to the define_log_targets! macro in log/targets.rs
+    #[serde(flatten)]
+    pub targets: LogTargetLevels,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, ValueEnum)]
@@ -121,19 +90,8 @@ impl LogConfig {
             output: LogConfig::default_log_output(),
             ansi_enabled: LogConfig::default_ansi_enabled(),
             level,
-            development_level: level,
-            authentication_level: level,
-            context_level: level,
-            encoding_level: level,
-            encrypt_level: level,
-            encrypt_config_level: level,
-            decrypt_level: level,
-            keyset_level: level,
-            migrate_level: level,
-            protocol_level: level,
-            mapper_level: level,
-            schema_level: level,
-            config_level: level,
+            // All target levels automatically set using generated LogTargetLevels
+            targets: LogTargetLevels::with_level(level),
         }
     }
 
