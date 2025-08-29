@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1756347812858,
+  "lastUpdate": 1756446335931,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -13717,6 +13717,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 23.305308,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "efb30a971d43160d4a7fee6c58a9c82bc155e6a1",
+          "message": "♻️ refactor: extract SQL parsing logic into dedicated Parser module",
+          "timestamp": "2025-08-28T02:19:44Z",
+          "url": "https://github.com/cipherstash/proxy/pull/317/commits/efb30a971d43160d4a7fee6c58a9c82bc155e6a1"
+        },
+        "date": 1756446334320,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 21.109157,
             "unit": "Number"
           }
         ]
