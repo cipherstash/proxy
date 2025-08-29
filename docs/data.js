@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1756446335931,
+  "lastUpdate": 1756447371355,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -13742,6 +13742,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 21.109157,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "toby@cipherstash.com",
+            "name": "Toby Hede",
+            "username": "tobyhede"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "5705317c2e96ca3474832603e2ccd5cb5acba9a2",
+          "message": "Merge pull request #317 from cipherstash/refactor-frontend-parser\n\n♻️ refactor: extract SQL parsing logic into dedicated Parser module",
+          "timestamp": "2025-08-29T15:59:03+10:00",
+          "tree_id": "8a124961df8a6b65e6b6d64663b7cd40ee08e083",
+          "url": "https://github.com/cipherstash/proxy/commit/5705317c2e96ca3474832603e2ccd5cb5acba9a2"
+        },
+        "date": 1756447369810,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 22.263597,
             "unit": "Number"
           }
         ]
