@@ -6,6 +6,7 @@ use super::messages::execute::Execute;
 use super::messages::parse::Parse;
 use super::messages::query::Query;
 use super::messages::FrontendCode as Code;
+use super::parser::SqlParser;
 use super::protocol::{self};
 use crate::connect::Sender;
 use crate::eql::Identifier;
@@ -22,7 +23,7 @@ use crate::prometheus::{
     CLIENTS_BYTES_RECEIVED_TOTAL, ENCRYPTED_VALUES_TOTAL, ENCRYPTION_DURATION_SECONDS,
     ENCRYPTION_ERROR_TOTAL, ENCRYPTION_REQUESTS_TOTAL, SERVER_BYTES_SENT_TOTAL,
     STATEMENTS_ENCRYPTED_TOTAL, STATEMENTS_PASSTHROUGH_MAPPING_DISABLED_TOTAL,
-    STATEMENTS_PASSTHROUGH_TOTAL, STATEMENTS_TOTAL, STATEMENTS_UNMAPPABLE_TOTAL,
+    STATEMENTS_PASSTHROUGH_TOTAL, STATEMENTS_UNMAPPABLE_TOTAL,
 };
 use crate::proxy::Proxy;
 use crate::EqlEncrypted;
@@ -34,16 +35,12 @@ use pg_escape::quote_literal;
 use postgres_types::Type;
 use serde::Serialize;
 use sqltk::parser::ast::{self, Value};
-use sqltk::parser::dialect::PostgreSqlDialect;
-use sqltk::parser::parser::Parser;
 use sqltk::NodeKey;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use tracing::{debug, error, info, warn};
-
-const DIALECT: PostgreSqlDialect = PostgreSqlDialect {};
 
 /// The PostgreSQL proxy frontend that handles client-to-server message processing.
 ///
@@ -384,7 +381,7 @@ where
         let mut query = Query::try_from(bytes)?;
 
         // Simple Query may contain many statements
-        let parsed_statements = self.parse_statements(&query.statement)?;
+        let parsed_statements = SqlParser::parse_statements(&query.statement)?;
         let mut transformed_statements = vec![];
 
         debug!(target: MAPPER,
@@ -659,7 +656,7 @@ where
             parse = ?message
         );
 
-        let statement = self.parse_statement(&message.statement)?;
+        let statement = SqlParser::parse_statement(&message.statement)?;
 
         if let Some(mapping_disabled) = self.context.maybe_set_unsafe_disable_mapping(&statement) {
             warn!(
@@ -746,42 +743,6 @@ where
         } else {
             Ok(None)
         }
-    }
-
-    ///
-    /// Parse a SQL statement string into an SqlParser AST
-    ///
-    fn parse_statement(&mut self, statement: &str) -> Result<ast::Statement, Error> {
-        let statement = Parser::new(&DIALECT)
-            .try_with_sql(statement)?
-            .parse_statement()?;
-
-        debug!(target: MAPPER,
-            client_id = self.context.client_id,
-            statement = %statement
-        );
-
-        counter!(STATEMENTS_TOTAL).increment(1);
-
-        Ok(statement)
-    }
-
-    ///
-    /// Parse a SQL String potentially containing multiple statements into parsed SqlParser AST
-    ///
-    fn parse_statements(&mut self, statement: &str) -> Result<Vec<ast::Statement>, Error> {
-        let statement = Parser::new(&DIALECT)
-            .try_with_sql(statement)?
-            .parse_statements()?;
-
-        debug!(target: MAPPER,
-            client_id = self.context.client_id,
-            statement = ?statement
-        );
-
-        counter!(STATEMENTS_TOTAL).increment(statement.len() as u64);
-
-        Ok(statement)
     }
 
     ///

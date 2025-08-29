@@ -7,6 +7,7 @@ mod frontend;
 mod handler;
 mod message_buffer;
 mod messages;
+mod parser;
 mod protocol;
 mod startup;
 
