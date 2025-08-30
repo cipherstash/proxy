@@ -10,6 +10,7 @@ mod messages;
 mod parser;
 mod protocol;
 mod startup;
+mod statement_analyzer;
 
 pub use context::column::Column;
 pub use context::KeysetIdentifier;
