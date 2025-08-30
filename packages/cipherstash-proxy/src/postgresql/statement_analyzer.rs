@@ -1,15 +1,88 @@
 use crate::eql::Identifier;
-use crate::error::{EncryptError, Error};
+use crate::error::{EncryptError, Error, MappingError};
 use crate::log::MAPPER;
 use crate::postgresql::context::column::Column;
+use crate::prometheus::STATEMENTS_UNMAPPABLE_TOTAL;
 use cipherstash_client::schema::ColumnConfig;
-use eql_mapper::{EqlTerm, TableColumn, TypeCheckedStatement};
+use eql_mapper::{EqlMapperError, EqlTerm, TableColumn, TypeCheckedStatement};
+use eql_mapper::TableResolver;
+use metrics::counter;
 use postgres_types::Type;
+use sqltk::parser::ast;
+use std::sync::Arc;
 use tracing::{debug, warn};
 
-pub struct ColumnMapper;
+pub struct StatementAnalyzer<'a> {
+    typed_statement: TypeCheckedStatement<'a>,
+}
 
-impl ColumnMapper {
+impl<'a> StatementAnalyzer<'a> {
+    /// Creates a new StatementAnalyzer by type-checking the provided statement
+    ///
+    /// Performs type checking against the database schema and creates an analyzer
+    /// that holds the typed statement for subsequent column analysis operations.
+    ///
+    /// # Arguments
+    ///
+    /// * `statement` - The parsed AST statement to analyze
+    /// * `table_resolver` - Database schema resolver for type checking
+    /// * `mapping_errors_enabled` - Whether to include mapping error details in logs
+    ///
+    /// # Returns
+    ///
+    /// Returns a StatementAnalyzer instance on successful type checking, or an Error
+    /// if the statement cannot be type-checked against the schema.
+    pub fn new(
+        statement: &'a ast::Statement,
+        table_resolver: Arc<TableResolver>,
+        mapping_errors_enabled: bool,
+    ) -> Result<Self, Error> {
+        match eql_mapper::type_check(table_resolver, statement) {
+            Ok(typed_statement) => {
+                debug!(target: MAPPER,
+                    typed_statement = ?typed_statement
+                );
+
+                Ok(Self { typed_statement })
+            }
+            Err(EqlMapperError::InternalError(str)) => {
+                warn!(
+                    msg = "Internal Error in EQL Mapper",
+                    mapping_errors_enabled,
+                    error = str,
+                );
+                counter!(STATEMENTS_UNMAPPABLE_TOTAL).increment(1);
+                Err(MappingError::Internal(str).into())
+            }
+            Err(err) => {
+                warn!(
+                    msg = "Unmappable statement",
+                    mapping_errors_enabled,
+                    error = err.to_string(),
+                );
+                counter!(STATEMENTS_UNMAPPABLE_TOTAL).increment(1);
+                Err(MappingError::StatementCouldNotBeTypeChecked(err.to_string()).into())
+            }
+        }
+    }
+
+    /// Proxy methods for TypeCheckedStatement functionality
+    pub fn requires_transform(&self) -> bool {
+        self.typed_statement.requires_transform()
+    }
+
+    pub fn literal_values(&self) -> &Vec<(EqlTerm, &ast::Value)> {
+        self.typed_statement.literal_values()
+    }
+
+    pub fn transform(&self, encrypted_nodes: std::collections::HashMap<sqltk::NodeKey, sqltk::parser::ast::Value>) -> Result<sqltk::parser::ast::Statement, eql_mapper::EqlMapperError> {
+        self.typed_statement.transform(encrypted_nodes)
+    }
+
+    pub fn literals(&self) -> &Vec<(EqlTerm, &ast::Value)> {
+        &self.typed_statement.literals
+    }
+
     /// Maps typed statement projection columns to an Encrypt column configuration
     ///
     /// The returned `Vec` is of `Option<Column>` because the Projection columns are a mix of native and EQL types.
@@ -17,12 +90,12 @@ impl ColumnMapper {
     ///
     /// Preserves the ordering and semantics of the projection to reduce the complexity of positional encryption.
     pub fn get_projection_columns(
-        typed_statement: &TypeCheckedStatement<'_>,
+        &self,
         get_column_config: impl Fn(&Identifier) -> Option<ColumnConfig>,
     ) -> Result<Vec<Option<Column>>, Error> {
         let mut projection_columns = vec![];
 
-        for col in typed_statement.projection.columns() {
+        for col in self.typed_statement.projection.columns() {
             let eql_mapper::ProjectionColumn { ty, .. } = col;
             let configured_column = match &**ty {
                 eql_mapper::Type::Value(eql_mapper::Value::Eql(eql_term)) => {
@@ -52,12 +125,12 @@ impl ColumnMapper {
     ///
     /// Preserves the ordering and semantics of the projection to reduce the complexity of positional encryption.
     pub fn get_param_columns(
-        typed_statement: &TypeCheckedStatement<'_>,
+        &self,
         get_column_config: impl Fn(&Identifier) -> Option<ColumnConfig>,
     ) -> Result<Vec<Option<Column>>, Error> {
         let mut param_columns = vec![];
 
-        for param in typed_statement.params.iter() {
+        for param in self.typed_statement.params.iter() {
             let configured_column = match param {
                 (_, eql_mapper::Value::Eql(eql_term)) => {
                     let TableColumn { table, column } = eql_term.table_column();
@@ -81,12 +154,12 @@ impl ColumnMapper {
     }
 
     pub fn get_literal_columns(
-        typed_statement: &TypeCheckedStatement<'_>,
+        &self,
         get_column_config: impl Fn(&Identifier) -> Option<ColumnConfig>,
     ) -> Result<Vec<Option<Column>>, Error> {
         let mut literal_columns = vec![];
 
-        for (eql_term, _) in typed_statement.literals.iter() {
+        for (eql_term, _) in self.typed_statement.literals.iter() {
             let TableColumn { table, column } = eql_term.table_column();
             let identifier = Identifier::from((table, column));
 

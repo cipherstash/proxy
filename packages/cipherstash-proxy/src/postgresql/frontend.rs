@@ -1,6 +1,6 @@
 use super::context::{Context, Statement};
 use super::error_handler::PostgreSqlErrorHandler;
-use super::mapping::ColumnMapper;
+use super::statement_analyzer::StatementAnalyzer;
 use super::messages::bind::Bind;
 use super::messages::describe::Describe;
 use super::messages::execute::Execute;
@@ -23,13 +23,13 @@ use crate::prometheus::{
     CLIENTS_BYTES_RECEIVED_TOTAL, ENCRYPTED_VALUES_TOTAL, ENCRYPTION_DURATION_SECONDS,
     ENCRYPTION_ERROR_TOTAL, ENCRYPTION_REQUESTS_TOTAL, SERVER_BYTES_SENT_TOTAL,
     STATEMENTS_ENCRYPTED_TOTAL, STATEMENTS_PASSTHROUGH_MAPPING_DISABLED_TOTAL,
-    STATEMENTS_PASSTHROUGH_TOTAL, STATEMENTS_UNMAPPABLE_TOTAL,
+    STATEMENTS_PASSTHROUGH_TOTAL,
 };
 use crate::proxy::Proxy;
 use crate::EqlEncrypted;
 use bytes::BytesMut;
 use cipherstash_client::encryption::Plaintext;
-use eql_mapper::{self, EqlMapperError, EqlTerm, TypeCheckedStatement};
+use eql_mapper::{self, EqlTerm};
 use metrics::{counter, histogram};
 use pg_escape::quote_literal;
 use serde::Serialize;
@@ -417,8 +417,12 @@ where
                 continue;
             }
 
-            let typed_statement = match self.type_check(&statement) {
-                Ok(ts) => ts,
+            let analyzer = match StatementAnalyzer::new(
+                &statement,
+                self.context.get_table_resolver(),
+                self.proxy.config.mapping_errors_enabled(),
+            ) {
+                Ok(analyzer) => analyzer,
                 Err(err) => {
                     if self.proxy.config.mapping_errors_enabled() {
                         return Err(err);
@@ -428,20 +432,20 @@ where
                 }
             };
 
-            match self.to_encryptable_statement(&typed_statement, vec![])? {
+            match self.to_encryptable_statement(&analyzer, vec![])? {
                 Some(statement) => {
                     debug!(target: MAPPER,
                         client_id = self.context.client_id,
                         msg = "Encryptable Statement",
                     );
 
-                    if typed_statement.requires_transform() {
+                    if analyzer.requires_transform() {
                         let encrypted_literals = self
-                            .encrypt_literals(&typed_statement, &statement.literal_columns)
+                            .encrypt_literals(&analyzer, &statement.literal_columns)
                             .await?;
 
                         if let Some(transformed_statement) = self
-                            .transform_statement(&typed_statement, &encrypted_literals)
+                            .transform_statement(&analyzer, &encrypted_literals)
                             .await?
                         {
                             debug!(target: MAPPER,
@@ -520,10 +524,10 @@ where
     /// literals that don't require encryption and `Some(EqlEncrypted)` for encrypted values.
     async fn encrypt_literals(
         &mut self,
-        typed_statement: &TypeCheckedStatement<'_>,
+        analyzer: &StatementAnalyzer<'_>,
         literal_columns: &Vec<Option<Column>>,
     ) -> Result<Vec<Option<EqlEncrypted>>, Error> {
-        let literal_values = typed_statement.literal_values();
+        let literal_values = analyzer.literal_values();
         if literal_values.is_empty() {
             debug!(target: MAPPER,
                 client_id = self.context.client_id,
@@ -568,7 +572,7 @@ where
     ///
     async fn transform_statement(
         &mut self,
-        typed_statement: &TypeCheckedStatement<'_>,
+        analyzer: &StatementAnalyzer<'_>,
         encrypted_literals: &Vec<Option<EqlEncrypted>>,
     ) -> Result<Option<ast::Statement>, Error> {
         // Convert literals to ast Expr
@@ -583,23 +587,17 @@ where
 
         // Map encrypted literal values back to the Expression nodes.
         // Filter out the Null/None values to only include literals that have been encrypted
-        let encrypted_nodes = typed_statement
-            .literals
+        let encrypted_nodes = analyzer.literals()
             .iter()
             .zip(encrypted_expressions.into_iter())
             .filter_map(|((_, original_node), en)| en.map(|en| (NodeKey::new(*original_node), en)))
             .collect::<HashMap<_, _>>();
 
-        debug!(target: MAPPER,
-            client_id = self.context.client_id,
-            literals = encrypted_nodes.len(),
-        );
-
-        if !typed_statement.requires_transform() {
+        if !analyzer.requires_transform() {
             return Ok(None);
         }
 
-        let transformed_statement = typed_statement
+        let transformed_statement = analyzer
             .transform(encrypted_nodes)
             .map_err(|e| MappingError::StatementCouldNotBeTransformed(e.to_string()))?;
 
@@ -680,8 +678,12 @@ where
             return Ok(None);
         }
 
-        let typed_statement = match self.type_check(&statement) {
-            Ok(ts) => ts,
+        let analyzer = match StatementAnalyzer::new(
+            &statement,
+            self.context.get_table_resolver(),
+            self.proxy.config.mapping_errors_enabled(),
+        ) {
+            Ok(analyzer) => analyzer,
             Err(err) => {
                 if self.proxy.config.mapping_errors_enabled() {
                     return Err(err);
@@ -695,15 +697,15 @@ where
         // These override the underlying column type
         let param_types = message.param_types.clone();
 
-        match self.to_encryptable_statement(&typed_statement, param_types)? {
+        match self.to_encryptable_statement(&analyzer, param_types)? {
             Some(statement) => {
-                if typed_statement.requires_transform() {
+                if analyzer.requires_transform() {
                     let encrypted_literals = self
-                        .encrypt_literals(&typed_statement, &statement.literal_columns)
+                        .encrypt_literals(&analyzer, &statement.literal_columns)
                         .await?;
 
                     if let Some(transformed_statement) = self
-                        .transform_statement(&typed_statement, &encrypted_literals)
+                        .transform_statement(&analyzer, &encrypted_literals)
                         .await?
                     {
                         debug!(target: MAPPER,
@@ -795,16 +797,16 @@ where
     ///
     fn to_encryptable_statement(
         &self,
-        typed_statement: &TypeCheckedStatement<'_>,
+        analyzer: &StatementAnalyzer<'_>,
         param_types: Vec<i32>,
     ) -> Result<Option<Statement>, Error> {
-        let param_columns = ColumnMapper::get_param_columns(typed_statement, |id| {
+        let param_columns = analyzer.get_param_columns(|id| {
             self.proxy.get_column_config(id)
         })?;
-        let projection_columns = ColumnMapper::get_projection_columns(typed_statement, |id| {
+        let projection_columns = analyzer.get_projection_columns(|id| {
             self.proxy.get_column_config(id)
         })?;
-        let literal_columns = ColumnMapper::get_literal_columns(typed_statement, |id| {
+        let literal_columns = analyzer.get_literal_columns(|id| {
             self.proxy.get_column_config(id)
         })?;
 
@@ -813,13 +815,12 @@ where
 
         if (param_columns.is_empty() || no_encrypted_param_columns)
             && (projection_columns.is_empty() || no_encrypted_projection_columns)
-            && !typed_statement.requires_transform()
+            && !analyzer.requires_transform()
         {
             return Ok(None);
         }
 
         debug!(target: MAPPER,
-            client_id = self.context.client_id,
             msg = "Encryptable Statement",
             param_columns = ?param_columns,
             projection_columns = ?projection_columns,
@@ -972,41 +973,6 @@ where
         Ok(encrypted)
     }
 
-    fn type_check<'a>(
-        &self,
-        statement: &'a ast::Statement,
-    ) -> Result<TypeCheckedStatement<'a>, Error> {
-        match eql_mapper::type_check(self.context.get_table_resolver(), statement) {
-            Ok(typed_statement) => {
-                debug!(target: MAPPER,
-                    client_id = self.context.client_id,
-                    typed_statement = ?typed_statement
-                );
-
-                Ok(typed_statement)
-            }
-            Err(EqlMapperError::InternalError(str)) => {
-                warn!(
-                    client_id = self.context.client_id,
-                    msg = "Internal Error in EQL Mapper",
-                    mapping_errors_enabled = self.proxy.config.mapping_errors_enabled(),
-                    error = str,
-                );
-                counter!(STATEMENTS_UNMAPPABLE_TOTAL).increment(1);
-                Err(MappingError::Internal(str).into())
-            }
-            Err(err) => {
-                warn!(
-                    client_id = self.context.client_id,
-                    msg = "Unmappable statement",
-                    mapping_errors_enabled = self.proxy.config.mapping_errors_enabled(),
-                    error = err.to_string(),
-                );
-                counter!(STATEMENTS_UNMAPPABLE_TOTAL).increment(1);
-                Err(MappingError::StatementCouldNotBeTypeChecked(err.to_string()).into())
-            }
-        }
-    }
 
     ///
     /// Send an ReadyForQuery to the client and remove error state.
