@@ -1,6 +1,5 @@
 use super::context::{Context, Statement};
 use super::error_handler::PostgreSqlErrorHandler;
-use super::statement_analyzer::StatementAnalyzer;
 use super::messages::bind::Bind;
 use super::messages::describe::Describe;
 use super::messages::execute::Execute;
@@ -9,6 +8,7 @@ use super::messages::query::Query;
 use super::messages::FrontendCode as Code;
 use super::parser::SqlParser;
 use super::protocol::{self};
+use super::statement_analyzer::StatementAnalyzer;
 use crate::connect::Sender;
 use crate::error::{EncryptError, Error, MappingError};
 use crate::log::{CONTEXT, MAPPER, PROTOCOL};
@@ -587,7 +587,8 @@ where
 
         // Map encrypted literal values back to the Expression nodes.
         // Filter out the Null/None values to only include literals that have been encrypted
-        let encrypted_nodes = analyzer.literals()
+        let encrypted_nodes = analyzer
+            .literals()
             .iter()
             .zip(encrypted_expressions.into_iter())
             .filter_map(|((_, original_node), en)| en.map(|en| (NodeKey::new(*original_node), en)))
@@ -800,15 +801,11 @@ where
         analyzer: &StatementAnalyzer<'_>,
         param_types: Vec<i32>,
     ) -> Result<Option<Statement>, Error> {
-        let param_columns = analyzer.get_param_columns(|id| {
-            self.proxy.get_column_config(id)
-        })?;
-        let projection_columns = analyzer.get_projection_columns(|id| {
-            self.proxy.get_column_config(id)
-        })?;
-        let literal_columns = analyzer.get_literal_columns(|id| {
-            self.proxy.get_column_config(id)
-        })?;
+        let param_columns = analyzer.get_param_columns(|id| self.proxy.get_column_config(id))?;
+        let projection_columns =
+            analyzer.get_projection_columns(|id| self.proxy.get_column_config(id))?;
+        let literal_columns =
+            analyzer.get_literal_columns(|id| self.proxy.get_column_config(id))?;
 
         let no_encrypted_param_columns = param_columns.iter().all(|c| c.is_none());
         let no_encrypted_projection_columns = projection_columns.iter().all(|c| c.is_none());
@@ -972,7 +969,6 @@ where
 
         Ok(encrypted)
     }
-
 
     ///
     /// Send an ReadyForQuery to the client and remove error state.

@@ -4,8 +4,8 @@ use crate::log::MAPPER;
 use crate::postgresql::context::column::Column;
 use crate::prometheus::STATEMENTS_UNMAPPABLE_TOTAL;
 use cipherstash_client::schema::ColumnConfig;
-use eql_mapper::{EqlMapperError, EqlTerm, TableColumn, TypeCheckedStatement};
 use eql_mapper::TableResolver;
+use eql_mapper::{EqlMapperError, EqlTerm, TableColumn, TypeCheckedStatement};
 use metrics::counter;
 use postgres_types::Type;
 use sqltk::parser::ast;
@@ -75,7 +75,10 @@ impl<'a> StatementAnalyzer<'a> {
         self.typed_statement.literal_values()
     }
 
-    pub fn transform(&self, encrypted_nodes: std::collections::HashMap<sqltk::NodeKey, sqltk::parser::ast::Value>) -> Result<sqltk::parser::ast::Statement, eql_mapper::EqlMapperError> {
+    pub fn transform(
+        &self,
+        encrypted_nodes: std::collections::HashMap<sqltk::NodeKey, sqltk::parser::ast::Value>,
+    ) -> Result<sqltk::parser::ast::Statement, eql_mapper::EqlMapperError> {
         self.typed_statement.transform(encrypted_nodes)
     }
 

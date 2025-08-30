@@ -5,12 +5,12 @@ mod error_handler;
 mod format_code;
 mod frontend;
 mod handler;
-mod statement_analyzer;
 mod message_buffer;
 mod messages;
 mod parser;
 mod protocol;
 mod startup;
+mod statement_analyzer;
 
 pub use context::column::Column;
 pub use context::KeysetIdentifier;
