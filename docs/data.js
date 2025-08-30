@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1756526033527,
+  "lastUpdate": 1756529839871,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -13821,6 +13821,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 24.059217,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "55906e219788308c905b2d07d764616dcb2833a0",
+          "message": "♻️ refactor: extract column mapping logic into ColumnMapper module",
+          "timestamp": "2025-08-29T05:59:07Z",
+          "url": "https://github.com/cipherstash/proxy/pull/318/commits/55906e219788308c905b2d07d764616dcb2833a0"
+        },
+        "date": 1756529838374,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 23.993051,
             "unit": "Number"
           }
         ]
