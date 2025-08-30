@@ -798,21 +798,15 @@ where
         typed_statement: &TypeCheckedStatement<'_>,
         param_types: Vec<i32>,
     ) -> Result<Option<Statement>, Error> {
-        let param_columns = ColumnMapper::get_param_columns(
-            typed_statement,
-            |id| self.proxy.get_column_config(id),
-            self.context.client_id,
-        )?;
-        let projection_columns = ColumnMapper::get_projection_columns(
-            typed_statement,
-            |id| self.proxy.get_column_config(id),
-            self.context.client_id,
-        )?;
-        let literal_columns = ColumnMapper::get_literal_columns(
-            typed_statement,
-            |id| self.proxy.get_column_config(id),
-            self.context.client_id,
-        )?;
+        let param_columns = ColumnMapper::get_param_columns(typed_statement, |id| {
+            self.proxy.get_column_config(id)
+        })?;
+        let projection_columns = ColumnMapper::get_projection_columns(typed_statement, |id| {
+            self.proxy.get_column_config(id)
+        })?;
+        let literal_columns = ColumnMapper::get_literal_columns(typed_statement, |id| {
+            self.proxy.get_column_config(id)
+        })?;
 
         let no_encrypted_param_columns = param_columns.iter().all(|c| c.is_none());
         let no_encrypted_projection_columns = projection_columns.iter().all(|c| c.is_none());

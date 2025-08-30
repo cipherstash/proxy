@@ -19,7 +19,6 @@ impl ColumnMapper {
     pub fn get_projection_columns(
         typed_statement: &TypeCheckedStatement<'_>,
         get_column_config: impl Fn(&Identifier) -> Option<ColumnConfig>,
-        client_id: i32,
     ) -> Result<Vec<Option<Column>>, Error> {
         let mut projection_columns = vec![];
 
@@ -36,7 +35,7 @@ impl ColumnMapper {
                         column = ?identifier,
                         ?eql_term,
                     );
-                    Self::get_column(identifier, eql_term, &get_column_config, client_id)?
+                    Self::get_column(identifier, eql_term, &get_column_config)?
                 }
                 _ => None,
             };
@@ -55,7 +54,6 @@ impl ColumnMapper {
     pub fn get_param_columns(
         typed_statement: &TypeCheckedStatement<'_>,
         get_column_config: impl Fn(&Identifier) -> Option<ColumnConfig>,
-        client_id: i32,
     ) -> Result<Vec<Option<Column>>, Error> {
         let mut param_columns = vec![];
 
@@ -72,7 +70,7 @@ impl ColumnMapper {
                         ?eql_term,
                     );
 
-                    Self::get_column(identifier, eql_term, &get_column_config, client_id)?
+                    Self::get_column(identifier, eql_term, &get_column_config)?
                 }
                 _ => None,
             };
@@ -85,7 +83,6 @@ impl ColumnMapper {
     pub fn get_literal_columns(
         typed_statement: &TypeCheckedStatement<'_>,
         get_column_config: impl Fn(&Identifier) -> Option<ColumnConfig>,
-        client_id: i32,
     ) -> Result<Vec<Option<Column>>, Error> {
         let mut literal_columns = vec![];
 
@@ -99,7 +96,7 @@ impl ColumnMapper {
                 column = ?identifier,
                 ?eql_term,
             );
-            let col = Self::get_column(identifier, eql_term, &get_column_config, client_id)?;
+            let col = Self::get_column(identifier, eql_term, &get_column_config)?;
             if col.is_some() {
                 literal_columns.push(col);
             }
@@ -115,13 +112,11 @@ impl ColumnMapper {
         identifier: Identifier,
         eql_term: &EqlTerm,
         get_column_config: impl Fn(&Identifier) -> Option<ColumnConfig>,
-        client_id: i32,
     ) -> Result<Option<Column>, Error> {
         match get_column_config(&identifier) {
             Some(config) => {
                 debug!(
                     target: MAPPER,
-                    client_id,
                     msg = "Configured column",
                     column = ?identifier
                 );
@@ -144,7 +139,6 @@ impl ColumnMapper {
             None => {
                 warn!(
                     target: MAPPER,
-                    client_id,
                     msg = "Configured column not found. Encryption configuration may have been deleted.",
                     ?identifier,
                 );
