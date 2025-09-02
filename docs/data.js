@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1756769537713,
+  "lastUpdate": 1756778463725,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -13871,6 +13871,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 24.042285,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "toby@cipherstash.com",
+            "name": "Toby Hede",
+            "username": "tobyhede"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "51e1d0712a702bfbb82967e89673f7ea1d6e693f",
+          "message": "Merge pull request #320 from cipherstash/tracing-subscriber-0.3.20\n\ndeps: tracing-subscriber from 0.3.19 to 0.3.20",
+          "timestamp": "2025-09-02T11:57:17+10:00",
+          "tree_id": "a0af48f295aa42c1d1bf5c3508c8bfd3d1b7c34e",
+          "url": "https://github.com/cipherstash/proxy/commit/51e1d0712a702bfbb82967e89673f7ea1d6e693f"
+        },
+        "date": 1756778462194,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 23.995644,
             "unit": "Number"
           }
         ]
