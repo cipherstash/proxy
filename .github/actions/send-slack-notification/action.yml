@@ -1,0 +1,26 @@
+name: Send Slack Notification
+
+inputs:
+  channel:
+    description: 'Destination Slack channel'
+    required: true
+
+  webhook_url:
+    description: 'Slack notification webhook url'
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: "Notify slack on failure"
+      if: failure() && github.ref == 'refs/heads/main'
+      uses: slackapi/slack-github-action@v1
+      with:
+        payload: |
+          {
+            "text": ":alert::alert::alert:\n\nBuild failed on `proxy/main`!\n\n<https://github.com/cipherstash/cipherstash-suite/actions/runs/${{ github.run_id }}|View run>",
+            "channel": "#${{ inputs.channel }}"
+          }
+      env:
+        SLACK_WEBHOOK_URL: ${{ inputs.webhook_url }}
+
