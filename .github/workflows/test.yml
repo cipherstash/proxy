@@ -38,8 +38,8 @@ jobs:
         run: |
           mise run --output prefix test
 
-      # Always show the Proxy logs, for debugging
-      - name: Show Proxy logs
-        if: always()
-        run: |
-          docker logs --timestamps proxy-tls
+      - uses: ./.github/actions/send-slack-notification
+        with:
+          channel: engineering
+          webhook_url: ${{ secrets.SLACK_NOTIFICATION_WEBHOOK_URL }}
+
