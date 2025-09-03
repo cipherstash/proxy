@@ -1,10 +1,9 @@
-<h1 align="center">
-  <img alt="CipherStash Logo" loading="lazy" width="128" height="128" decoding="async" data-nimg="1"   style="color:transparent" src="https://cipherstash.com/assets/cs-github.png">
-  </br>
-  Proxy
-</h1>
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="./docs/images/index-dark.png">
+  <img alt="CipherStash Proxy: searchable encryption for Postgres'" src="./docs/images/index-light.png">
+</picture>
+
 <p align="center">
-  Implement robust data security without sacrificing performance or usability
   <br/>
   <div align="center" style="display: flex; justify-content: center; gap: 1rem;">
     <a href="https://cipherstash.com">
@@ -21,7 +20,6 @@
     </a>
   </div>
 </p>
-<br/>
 
 <!-- start -->
 
