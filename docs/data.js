@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1756872760658,
+  "lastUpdate": 1756873827954,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -14000,6 +14000,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 25.369586,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "toby@cipherstash.com",
+            "name": "Toby Hede",
+            "username": "tobyhede"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "86b0ca4a95e79158f2e4d69ac9c3b310d8cc7872",
+          "message": "Merge pull request #321 from cipherstash/post-to-slack-on-build-fail\n\n🚀 ci: add Slack notifications for build failures on main",
+          "timestamp": "2025-09-03T14:26:47+10:00",
+          "tree_id": "610160011ca046cd7f28ac8b560c4f82eb086c1c",
+          "url": "https://github.com/cipherstash/proxy/commit/86b0ca4a95e79158f2e4d69ac9c3b310d8cc7872"
+        },
+        "date": 1756873826401,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 24.623533,
             "unit": "Number"
           }
         ]
