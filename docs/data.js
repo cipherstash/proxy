@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1756871232268,
+  "lastUpdate": 1756871784775,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -13925,6 +13925,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 24.379462,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "9be8489c8dcaa5bb8fe4cfffd0574a57d1d49f8f",
+          "message": "🚀 ci: add Slack notifications for build failures on main",
+          "timestamp": "2025-09-02T01:57:21Z",
+          "url": "https://github.com/cipherstash/proxy/pull/321/commits/9be8489c8dcaa5bb8fe4cfffd0574a57d1d49f8f"
+        },
+        "date": 1756871783312,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 25.741607,
             "unit": "Number"
           }
         ]
