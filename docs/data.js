@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1756971211910,
+  "lastUpdate": 1756973086747,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -14079,6 +14079,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 25.843989,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "47744c1b34f30103c46ed35cb854e587510dbcf1",
+          "message": "✅ test: add Go integration tests for encrypted struct scanning",
+          "timestamp": "2025-09-03T04:26:51Z",
+          "url": "https://github.com/cipherstash/proxy/pull/323/commits/47744c1b34f30103c46ed35cb854e587510dbcf1"
+        },
+        "date": 1756973085170,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 25.7808,
             "unit": "Number"
           }
         ]
