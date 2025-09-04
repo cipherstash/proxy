@@ -1,37 +1,17 @@
-mod config;
-mod schema;
-
 use crate::{
     config::TandemConfig,
-    connect,
-    eql::{self, EqlEncryptedBody, EqlEncryptedIndexes},
-    error::{EncryptError, Error},
-    log::{ENCRYPT, PROXY},
+    connect, eql,
+    error::Error,
+    log::PROXY,
     postgresql::{Column, KeysetIdentifier},
-    prometheus::{KEYSET_CIPHER_CACHE_HITS_TOTAL, KEYSET_CIPHER_INIT_TOTAL},
-    Identifier, EQL_SCHEMA_VERSION,
+    proxy::{config::EncryptConfigManager, schema::SchemaManager, zerokms::ZeroKms},
 };
-use cipherstash_client::{
-    config::EnvSource,
-    credentials::{auto_refresh::AutoRefresh, ServiceCredentials},
-    encryption::{
-        self, Encrypted, EncryptedEntry, EncryptedSteVecTerm, IndexTerm, Plaintext,
-        PlaintextTarget, Queryable, ReferencedPendingPipeline,
-    },
-    schema::ColumnConfig,
-    zerokms::ClientKey,
-    ConsoleConfig, CtsConfig, ZeroKMS, ZeroKMSConfig,
-};
-use cipherstash_client::{
-    config::{ConfigError, ZeroKMSConfigWithClientKey},
-    encryption::QueryOp,
-};
-use config::EncryptConfigManager;
-use metrics::counter;
-use moka::future::Cache;
-use schema::SchemaManager;
-use std::{sync::Arc, time::Duration, vec};
+use cipherstash_client::{encryption::Plaintext, schema::ColumnConfig};
 use tracing::{debug, warn};
+
+mod config;
+mod schema;
+mod zerokms;
 
 /// SQL Statement for loading encrypt configuration from database
 const ENCRYPT_CONFIG_QUERY: &str = include_str!("./sql/select_config.sql");
@@ -41,13 +21,6 @@ const SCHEMA_QUERY: &str = include_str!("./sql/select_table_schemas.sql");
 
 /// SQL Statement for loading aggregates as part of database schema
 const AGGREGATE_QUERY: &str = include_str!("./sql/select_aggregates.sql");
-
-type ScopedCipher = encryption::ScopedCipher<AutoRefresh<ServiceCredentials>>;
-
-type ZerokmsClient = ZeroKMS<AutoRefresh<ServiceCredentials>, ClientKey>;
-
-/// Memory size of a single ScopedCipher instance for cache weighing
-const SCOPED_CIPHER_SIZE: usize = std::mem::size_of::<ScopedCipher>();
 
 ///
 /// Core proxy service providing encryption, configuration, and schema management.
@@ -59,13 +32,12 @@ pub struct Proxy {
     pub schema: SchemaManager,
     /// The EQL version installed in the database or `None` if it was not present
     pub eql_version: Option<String>,
-    zerokms_client: Arc<ZerokmsClient>,
-    cipher_cache: Cache<String, Arc<ScopedCipher>>,
+    zerokms: ZeroKms,
 }
 
 impl Proxy {
     pub async fn init(config: TandemConfig) -> Result<Proxy, Error> {
-        let zerokms_client = init_zerokms_client(&config)?;
+        let zerokms = ZeroKms::new(&config)?;
 
         let encrypt_config = EncryptConfigManager::init(&config.database).await?;
         // TODO: populate EqlTraitImpls based in config
@@ -89,95 +61,17 @@ impl Proxy {
             }
         };
 
-        let cipher_cache = Cache::builder()
-            // Use weigher to calculate actual memory usage of ScopedCipher instances
-            .weigher(|_key: &String, _value: &Arc<ScopedCipher>| -> u32 {
-                SCOPED_CIPHER_SIZE as u32
-            })
-            // Set capacity in bytes (entry count * actual struct size)
-            .max_capacity((config.server.cipher_cache_size as u64) * SCOPED_CIPHER_SIZE as u64)
-            .time_to_live(Duration::from_secs(config.server.cipher_cache_ttl_seconds))
-            .build();
-
         Ok(Proxy {
             config,
-            zerokms_client: Arc::new(zerokms_client),
+            zerokms,
             encrypt_config,
             schema,
             eql_version,
-            cipher_cache,
         })
-    }
-
-    /// Generate a cache key for the keyset identifier
-    fn cache_key_for_keyset(keyset_id: &Option<KeysetIdentifier>) -> String {
-        match keyset_id {
-            Some(id) => format!("{}", id.0),
-            None => "default".to_string(),
-        }
-    }
-
-    /// Initialize cipher using the stored zerokms_config, with async Moka caching and memory tracking
-    pub async fn init_cipher(
-        &self,
-        keyset_id: Option<KeysetIdentifier>,
-    ) -> Result<Arc<ScopedCipher>, Error> {
-        let cache_key = Self::cache_key_for_keyset(&keyset_id);
-
-        // Check cache first
-        if let Some(cached_cipher) = self.cipher_cache.get(&cache_key).await {
-            debug!(target: PROXY, msg = "Use cached ScopedCipher", ?keyset_id);
-            counter!(KEYSET_CIPHER_CACHE_HITS_TOTAL).increment(1);
-            return Ok(cached_cipher);
-        }
-
-        let zerokms_client = self.zerokms_client.clone();
-
-        debug!(target: PROXY, msg = "Initializing ZeroKMS ScopedCipher", ?keyset_id);
-
-        // let identified_by = keyset_id.clone().map(|id| id.0);
-        let identified_by = keyset_id.as_ref().map(|id| id.0.clone());
-
-        match ScopedCipher::init(zerokms_client, identified_by).await {
-            Ok(cipher) => {
-                let arc_cipher = Arc::new(cipher);
-
-                counter!(KEYSET_CIPHER_INIT_TOTAL).increment(1);
-
-                // Store in cache
-                self.cipher_cache
-                    .insert(cache_key, arc_cipher.clone())
-                    .await;
-
-                // Update pending tasks to get accurate cache statistics
-                self.cipher_cache.run_pending_tasks().await;
-
-                let entry_count = self.cipher_cache.entry_count();
-                let memory_usage_bytes = self.cipher_cache.weighted_size();
-
-                debug!(target: PROXY, msg = "ScopedCipher cached", ?keyset_id, entry_count, memory_usage_bytes);
-
-                Ok(arc_cipher)
-            }
-            Err(err) => {
-                debug!(target: PROXY, msg = "Error initializing ZeroKMS ScopedCipher", error = err.to_string());
-
-                match err {
-                    cipherstash_client::zerokms::Error::LoadKeyset(_) => {
-                        Err(EncryptError::UnknownKeysetIdentifier {
-                            keyset: keyset_id.map_or("default".to_string(), |id| id.to_string()),
-                        }
-                        .into())
-                    }
-                    _ => Err(err.into()),
-                }
-            }
-        }
     }
 
     ///
     /// Encrypt `Plaintexts` using the `Column` configuration
-    ///
     ///
     pub async fn encrypt(
         &self,
@@ -185,74 +79,16 @@ impl Proxy {
         plaintexts: Vec<Option<Plaintext>>,
         columns: &[Option<Column>],
     ) -> Result<Vec<Option<eql::EqlEncrypted>>, Error> {
-        debug!(target: ENCRYPT, msg="Encrypt", ?keyset_id, default_keyset_id = ?self.config.encrypt.default_keyset_id);
+        debug!(target: PROXY, msg="Encrypt", ?keyset_id, default_keyset_id = ?self.config.encrypt.default_keyset_id);
 
-        // A keyset is required if no default keyset has been configured
-        if self.config.encrypt.default_keyset_id.is_none() && keyset_id.is_none() {
-            return Err(EncryptError::MissingKeysetIdentifier.into());
-        }
-
-        let cipher = self.init_cipher(keyset_id).await?;
-
-        let mut pipeline = ReferencedPendingPipeline::new(cipher.clone());
-        let mut index_term_plaintexts = vec![None; columns.len()];
-
-        for (idx, item) in plaintexts.into_iter().zip(columns.iter()).enumerate() {
-            match item {
-                (Some(plaintext), Some(column)) => {
-                    if column.is_encryptable() {
-                        let encryptable = PlaintextTarget::new(plaintext, column.config.clone());
-                        pipeline.add_with_ref::<PlaintextTarget>(encryptable, idx)?;
-                    } else {
-                        index_term_plaintexts[idx] = Some(plaintext);
-                    }
-                }
-                (None, Some(column)) => {
-                    // Parameter is NULL
-                    // Do nothing
-                    debug!(target: ENCRYPT, msg = "Null parameter", ?column);
-                }
-                (Some(plaintext), None) => {
-                    // Should be unreachable
-                    // Bind doesn't know what type of Plaintext to create in the first place if the column is None
-                    let plaintext_type = plaintext_type_name(plaintext);
-                    return Err(EncryptError::MissingEncryptConfiguration { plaintext_type }.into());
-                }
-                (None, None) => {
-                    // Parameter is not encryptable
-                    // Do nothing
-                }
-            }
-        }
-
-        let mut encrypted_eql = vec![];
-        // if !pipeline.is_empty() { }
-
-        let mut result = pipeline.encrypt(None, None).await?;
-
-        for (idx, opt) in columns.iter().enumerate() {
-            let mut encrypted = None;
-
-            if let Some(column) = opt {
-                if let Some(e) = result.remove(idx) {
-                    encrypted = Some(to_eql_encrypted(e, &column.identifier)?);
-                } else if let Some(plaintext) = index_term_plaintexts[idx].clone() {
-                    let index = column.config.clone().into_ste_vec_index().unwrap();
-                    let op = QueryOp::SteVecSelector;
-
-                    let index_term = (index, plaintext).build_queryable(cipher.clone(), op)?;
-
-                    encrypted = Some(to_eql_encrypted_from_index_term(
-                        index_term,
-                        &column.identifier,
-                    )?);
-                }
-            }
-
-            encrypted_eql.push(encrypted);
-        }
-
-        Ok(encrypted_eql)
+        self.zerokms
+            .encrypt(
+                keyset_id,
+                plaintexts,
+                columns,
+                self.config.encrypt.default_keyset_id,
+            )
+            .await
     }
 
     ///
@@ -260,56 +96,20 @@ impl Proxy {
     ///
     /// Database values are stored as `eql::Ciphertext`
     ///
-    ///
     pub async fn decrypt(
         &self,
         keyset_id: Option<KeysetIdentifier>,
         ciphertexts: Vec<Option<eql::EqlEncrypted>>,
     ) -> Result<Vec<Option<Plaintext>>, Error> {
-        // A keyset is required if no default keyset has been configured
-        if self.config.encrypt.default_keyset_id.is_none() && keyset_id.is_none() {
-            return Err(EncryptError::MissingKeysetIdentifier.into());
-        }
-        debug!(target: ENCRYPT, msg="Decrypt", ?keyset_id, default_keyset_id = ?self.config.encrypt.default_keyset_id);
+        debug!(target: PROXY, msg="Decrypt", ?keyset_id, default_keyset_id = ?self.config.encrypt.default_keyset_id);
 
-        let cipher = self.init_cipher(keyset_id.clone()).await?;
-
-        // Create a mutable vector to hold the decrypted results
-        let mut results = vec![None; ciphertexts.len()];
-
-        // Collect the index and ciphertext details for every Some(ciphertext)
-        let (indices, encrypted): (Vec<_>, Vec<_>) = ciphertexts
-            .into_iter()
-            .enumerate()
-            .filter_map(|(idx, eql)| Some((idx, eql?.body.ciphertext.unwrap())))
-            .collect::<_>();
-
-        let decrypted = cipher.decrypt(encrypted).await.map_err(|e| -> Error {
-            match &e {
-                cipherstash_client::zerokms::Error::Decrypt(_) => {
-                    let error_msg = e.to_string();
-                    if error_msg.contains("Failed to retrieve key") {
-                        EncryptError::CouldNotDecryptDataForKeyset {
-                            keyset_id: keyset_id
-                                .map(|id| id.to_string())
-                                .unwrap_or("default_keyset".to_string()),
-                        }
-                        .into()
-                    } else {
-                        e.into()
-                    }
-                }
-                _ => e.into(),
-            }
-        })?;
-
-        // Merge the decrypted values as plaintext into their original indexed positions
-        for (idx, decrypted) in indices.into_iter().zip(decrypted) {
-            let plaintext = Plaintext::from_slice(&decrypted)?;
-            results[idx] = Some(plaintext);
-        }
-
-        Ok(results)
+        self.zerokms
+            .decrypt(
+                keyset_id,
+                ciphertexts,
+                self.config.encrypt.default_keyset_id,
+            )
+            .await
     }
 
     pub fn get_column_config(&self, identifier: &eql::Identifier) -> Option<ColumnConfig> {
@@ -331,247 +131,10 @@ impl Proxy {
     }
 }
 
-fn init_zerokms_client(
-    config: &TandemConfig,
-) -> Result<ZeroKMS<AutoRefresh<ServiceCredentials>, ClientKey>, ConfigError> {
-    let zerokms_config = build_zerokms_config(config)?;
-
-    Ok(zerokms_config
-        .create_client_with_credentials(AutoRefresh::new(zerokms_config.credentials())))
-}
-
-fn build_zerokms_config(config: &TandemConfig) -> Result<ZeroKMSConfigWithClientKey, ConfigError> {
-    let console_config = ConsoleConfig::builder().with_env().build()?;
-
-    let builder = CtsConfig::builder().with_env();
-    let builder = if let Some(cts_host) = config.cts_host() {
-        builder.base_url(&cts_host)
-    } else {
-        builder
-    };
-    let cts_config = builder.build()?;
-
-    // Not using with_env because the proxy config should take precedence
-    let builder = ZeroKMSConfig::builder()
-        .add_source(EnvSource::default())
-        .workspace_crn(config.auth.workspace_crn.clone())
-        .access_key(&config.auth.client_access_key)
-        .try_with_client_id(&config.encrypt.client_id)?
-        .try_with_client_key(&config.encrypt.client_key)?
-        .console_config(&console_config)
-        .cts_config(&cts_config);
-
-    let builder = if let Some(zerokms_host) = config.zerokms_host() {
-        builder.base_url(zerokms_host)
-    } else {
-        builder
-    };
-
-    builder.build_with_client_key()
-}
-
-fn to_eql_encrypted_from_index_term(
-    index_term: IndexTerm,
-    identifier: &Identifier,
-) -> Result<eql::EqlEncrypted, Error> {
-    let selector = match index_term {
-        IndexTerm::SteVecSelector(s) => Some(hex::encode(s.as_bytes())),
-        _ => return Err(EncryptError::InvalidIndexTerm.into()),
-    };
-
-    Ok(eql::EqlEncrypted {
-        identifier: identifier.to_owned(),
-        version: EQL_SCHEMA_VERSION,
-        body: EqlEncryptedBody {
-            ciphertext: None,
-            indexes: EqlEncryptedIndexes {
-                bloom_filter: None,
-                ore_block_u64_8_256: None,
-                hmac_256: None,
-                blake3: None,
-                ore_cllw_u64_8: None,
-                ore_cllw_var_8: None,
-                selector,
-                ste_vec_index: None,
-            },
-            is_array_item: None,
-        },
-    })
-}
-
-fn to_eql_encrypted(
-    encrypted: Encrypted,
-    identifier: &Identifier,
-) -> Result<eql::EqlEncrypted, Error> {
-    match encrypted {
-        Encrypted::Record(ciphertext, terms) => {
-            let mut match_index: Option<Vec<u16>> = None;
-            let mut ore_index: Option<Vec<String>> = None;
-            let mut unique_index: Option<String> = None;
-            let mut blake3_index: Option<String> = None;
-            let mut ore_cclw_fixed_index: Option<String> = None;
-            let mut ore_cclw_var_index: Option<String> = None;
-            let mut selector: Option<String> = None;
-
-            for index_term in terms {
-                match index_term {
-                    IndexTerm::Binary(bytes) => {
-                        unique_index = Some(format_index_term_binary(&bytes))
-                    }
-                    IndexTerm::BitMap(inner) => match_index = Some(inner),
-                    IndexTerm::OreArray(bytes) => {
-                        ore_index = Some(format_index_term_ore_array(&bytes));
-                    }
-                    IndexTerm::OreFull(bytes) => {
-                        ore_index = Some(format_index_term_ore(&bytes));
-                    }
-                    IndexTerm::OreLeft(bytes) => {
-                        ore_index = Some(format_index_term_ore(&bytes));
-                    }
-                    IndexTerm::BinaryVec(_) => todo!(),
-                    IndexTerm::SteVecSelector(s) => {
-                        selector = Some(hex::encode(s.as_bytes()));
-                    }
-                    IndexTerm::SteVecTerm(ste_vec_term) => match ste_vec_term {
-                        EncryptedSteVecTerm::Mac(bytes) => blake3_index = Some(hex::encode(bytes)),
-                        EncryptedSteVecTerm::OreFixed(ore) => {
-                            ore_cclw_fixed_index = Some(hex::encode(&ore))
-                        }
-                        EncryptedSteVecTerm::OreVariable(ore) => {
-                            ore_cclw_var_index = Some(hex::encode(&ore))
-                        }
-                    },
-                    IndexTerm::SteQueryVec(_query) => {} // TODO: what do we do here?
-                    IndexTerm::Null => {}
-                };
-            }
-
-            Ok(eql::EqlEncrypted {
-                identifier: identifier.to_owned(),
-                version: EQL_SCHEMA_VERSION,
-                body: EqlEncryptedBody {
-                    ciphertext: Some(ciphertext),
-                    indexes: EqlEncryptedIndexes {
-                        bloom_filter: match_index,
-                        ore_block_u64_8_256: ore_index,
-                        hmac_256: unique_index,
-                        blake3: blake3_index,
-                        ore_cllw_u64_8: ore_cclw_fixed_index,
-                        ore_cllw_var_8: ore_cclw_var_index,
-                        selector,
-                        ste_vec_index: None,
-                    },
-                    is_array_item: None,
-                },
-            })
-        }
-        Encrypted::SteVec(ste_vec) => {
-            let ciphertext = ste_vec.root_ciphertext()?.clone();
-
-            let ste_vec_index: Vec<EqlEncryptedBody> = ste_vec
-                .into_iter()
-                .map(
-                    |EncryptedEntry {
-                         tokenized_selector,
-                         term,
-                         record,
-                         parent_is_array,
-                     }| {
-                        let indexes = match term {
-                            EncryptedSteVecTerm::Mac(bytes) => EqlEncryptedIndexes {
-                                selector: Some(hex::encode(tokenized_selector.as_bytes())),
-                                blake3: Some(hex::encode(bytes)),
-                                ..Default::default()
-                            },
-                            EncryptedSteVecTerm::OreFixed(ore) => EqlEncryptedIndexes {
-                                selector: Some(hex::encode(tokenized_selector.as_bytes())),
-                                ore_cllw_u64_8: Some(hex::encode(&ore)),
-                                ..Default::default()
-                            },
-                            EncryptedSteVecTerm::OreVariable(ore) => EqlEncryptedIndexes {
-                                selector: Some(hex::encode(tokenized_selector.as_bytes())),
-                                ore_cllw_var_8: Some(hex::encode(&ore)),
-                                ..Default::default()
-                            },
-                        };
-
-                        eql::EqlEncryptedBody {
-                            ciphertext: Some(record),
-                            indexes,
-                            is_array_item: Some(parent_is_array),
-                        }
-                    },
-                )
-                .collect();
-
-            // FIXME: I'm unsure if I've handled the root ciphertext correctly
-            // The way it's implemented right now is that it will be repeated one in the ste_vec_index.
-            Ok(eql::EqlEncrypted {
-                identifier: identifier.to_owned(),
-                version: EQL_SCHEMA_VERSION,
-                body: EqlEncryptedBody {
-                    ciphertext: Some(ciphertext.clone()),
-                    indexes: EqlEncryptedIndexes {
-                        bloom_filter: None,
-                        ore_block_u64_8_256: None,
-                        hmac_256: None,
-                        blake3: None,
-                        ore_cllw_u64_8: None,
-                        ore_cllw_var_8: None,
-                        selector: None,
-                        ste_vec_index: Some(ste_vec_index),
-                    },
-                    is_array_item: None,
-                },
-            })
-        }
-    }
-}
-
-fn format_index_term_binary(bytes: &Vec<u8>) -> String {
-    hex::encode(bytes)
-}
-
-fn format_index_term_ore_bytea(bytes: &Vec<u8>) -> String {
-    hex::encode(bytes)
-}
-
-///
-/// Formats a Vec<Vec<u8>> into a Vec<String>
-///
-fn format_index_term_ore_array(vec_of_bytes: &[Vec<u8>]) -> Vec<String> {
-    vec_of_bytes
-        .iter()
-        .map(format_index_term_ore_bytea)
-        .collect()
-}
-
-///
-/// Formats a Vec<Vec<u8>> into a single elenent Vec<String>
-///
-fn format_index_term_ore(bytes: &Vec<u8>) -> Vec<String> {
-    vec![format_index_term_ore_bytea(bytes)]
-}
-
-fn plaintext_type_name(pt: Plaintext) -> String {
-    match pt {
-        Plaintext::BigInt(_) => "BigInt".to_string(),
-        Plaintext::BigUInt(_) => "BigUInt".to_string(),
-        Plaintext::Boolean(_) => "Boolean".to_string(),
-        Plaintext::Decimal(_) => "Decimal".to_string(),
-        Plaintext::Float(_) => "Float".to_string(),
-        Plaintext::Int(_) => "Int".to_string(),
-        Plaintext::NaiveDate(_) => "NaiveDate".to_string(),
-        Plaintext::SmallInt(_) => "SmallInt".to_string(),
-        Plaintext::Timestamp(_) => "Timestamp".to_string(),
-        Plaintext::Utf8Str(_) => "Utf8Str".to_string(),
-        Plaintext::JsonB(_) => "JsonB".to_string(),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::TandemConfig;
     use crate::test_helpers::with_no_cs_vars;
     use cts_common::WorkspaceId;
 
@@ -608,7 +171,7 @@ mod tests {
 
             let tandem_config = build_tandem_config(env);
 
-            let zerokms_config = build_zerokms_config(&tandem_config).unwrap();
+            let zerokms_config = zerokms::build_zerokms_config(&tandem_config).unwrap();
 
             assert_eq!(
                 WorkspaceId::try_from("3KISDURL3ZCWYZ2O").unwrap(),
