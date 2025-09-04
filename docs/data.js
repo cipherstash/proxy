@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1756873827954,
+  "lastUpdate": 1756970493044,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -14029,6 +14029,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 24.623533,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "37a6111c2ee80eeeac5e70168a412c2502ec6962",
+          "message": "♻️ refactor: extract ZeroKMS functionality into dedicated module",
+          "timestamp": "2025-09-03T04:26:51Z",
+          "url": "https://github.com/cipherstash/proxy/pull/322/commits/37a6111c2ee80eeeac5e70168a412c2502ec6962"
+        },
+        "date": 1756970491542,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 25.362824,
             "unit": "Number"
           }
         ]
