@@ -578,7 +578,7 @@ where
 
         debug!(target: PROTOCOL, client_id = self.context.client_id, RowDescription = ?description);
 
-        if let Some(statement) = self.context.get_statement_from_describe() {
+        if let Some(statement) = self.context.get_statement_for_row_decription() {
             let projection_types = statement
                 .projection_columns
                 .iter()
