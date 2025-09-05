@@ -220,3 +220,88 @@ func TestPgxInsertEncryptedWithDomainTypeAndReturning(t *testing.T) {
 	}
 }
 
+// EncryptedRow represents a row with id and encrypted_text fields
+type EncryptedRow struct {
+	ID            int    `db:"id"`
+	EncryptedText string `db:"encrypted_text"`
+}
+
+// Scan implements the sql.Scanner interface for EncryptedRow
+func (er *EncryptedRow) Scan(src interface{}) error {
+	return fmt.Errorf("Scan method not implemented for single value")
+}
+
+func TestPgxInsertEncryptedWithStructScan(t *testing.T) {
+	t.Parallel()
+	conn := setupPgxConnection(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	tx, err := conn.Begin(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback(ctx)
+
+	encryptedTextValue := "test encrypted content"
+	insertStmt := `INSERT INTO encrypted (id, encrypted_text) VALUES ($1, $2) RETURNING id, encrypted_text`
+
+	for _, mode := range modes {
+		id := rand.Int()
+
+		t.Run(mode.String(), func(t *testing.T) {
+			t.Run("insert_with_struct_scan", func(t *testing.T) {
+				var row EncryptedRow
+				err := conn.QueryRow(context.Background(), insertStmt, mode, id, encryptedTextValue).Scan(&row.ID, &row.EncryptedText)
+				require.NoError(t, err)
+				require.Equal(t, id, row.ID)
+				require.Equal(t, encryptedTextValue, row.EncryptedText)
+			})
+		})
+	}
+}
+
+// EncryptedRowWithJsonb represents a row with id, encrypted_text and encrypted_jsonb fields
+type EncryptedRowWithJsonb struct {
+	ID              int                    `db:"id"`
+	EncryptedText   string                 `db:"encrypted_text"`
+	EncryptedJsonb  map[string]interface{} `db:"encrypted_jsonb"`
+}
+
+// Scan implements the sql.Scanner interface for EncryptedRowWithJsonb
+func (er *EncryptedRowWithJsonb) Scan(src interface{}) error {
+	return fmt.Errorf("Scan method not implemented for single value")
+}
+
+func TestPgxInsertEncryptedWithJsonbStructScan(t *testing.T) {
+	t.Parallel()
+	conn := setupPgxConnection(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	tx, err := conn.Begin(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback(ctx)
+
+	encryptedTextValue := "test encrypted content"
+	encryptedJsonbValue := `{"key":"value","number":42}`
+	expectedJsonbValue := map[string]interface{}{
+		"key":    "value",
+		"number": float64(42),
+	}
+	insertStmt := `INSERT INTO encrypted (id, encrypted_text, encrypted_jsonb) VALUES ($1, $2, $3) RETURNING id, encrypted_text, encrypted_jsonb`
+
+	for _, mode := range modes {
+		id := rand.Int()
+
+		t.Run(mode.String(), func(t *testing.T) {
+			t.Run("insert_with_jsonb_struct_scan", func(t *testing.T) {
+				var row EncryptedRowWithJsonb
+				err := conn.QueryRow(context.Background(), insertStmt, mode, id, encryptedTextValue, encryptedJsonbValue).Scan(&row.ID, &row.EncryptedText, &row.EncryptedJsonb)
+				require.NoError(t, err)
+				require.Equal(t, id, row.ID)
+				require.Equal(t, encryptedTextValue, row.EncryptedText)
+				require.Equal(t, expectedJsonbValue, row.EncryptedJsonb)
+			})
+		})
+	}
+}
+
