@@ -248,6 +248,19 @@ impl Context {
         }
     }
 
+    pub fn get_statement_for_row_decription(&self) -> Option<Arc<Statement>> {
+        if let Some(statement) = self.get_statement_from_describe() {
+            return Some(statement.clone());
+        }
+
+        if let Some(Portal::Encrypted { statement, .. }) = self.get_portal_from_execute().as_deref()
+        {
+            return Some(statement.clone());
+        };
+
+        None
+    }
+
     pub fn get_statement_from_describe(&self) -> Option<Arc<Statement>> {
         let queue = self.describe.read().ok()?;
         let describe = queue.next()?;
