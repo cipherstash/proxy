@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1757091801627,
+  "lastUpdate": 1757092465965,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -14179,6 +14179,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 25.285222,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "cj@cipherstash.com",
+            "name": "CJ Brewer",
+            "username": "calvinbrewer"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "99d0190eb2594972860c1b1b484ad931a6dbeb58",
+          "message": "Merge pull request #323 from cipherstash/go-json-struct-tests\n\nfix: simple protocol type error for JSONB encrypted types",
+          "timestamp": "2025-09-05T11:10:34-06:00",
+          "tree_id": "ac42e9651c8aa4b1379e4f0660a517940f3ea049",
+          "url": "https://github.com/cipherstash/proxy/commit/99d0190eb2594972860c1b1b484ad931a6dbeb58"
+        },
+        "date": 1757092464548,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 25.701688,
             "unit": "Number"
           }
         ]
