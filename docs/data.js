@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1757059154093,
+  "lastUpdate": 1757091801627,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -14154,6 +14154,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 25.418379,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "1faea84b3272a42f09314924a5ce9004233b3601",
+          "message": "fix: simple protocol type error for JSONB encrypted types",
+          "timestamp": "2025-09-03T04:26:51Z",
+          "url": "https://github.com/cipherstash/proxy/pull/323/commits/1faea84b3272a42f09314924a5ce9004233b3601"
+        },
+        "date": 1757091800227,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 25.285222,
             "unit": "Number"
           }
         ]
