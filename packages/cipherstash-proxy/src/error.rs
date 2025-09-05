@@ -52,7 +52,7 @@ pub enum Error {
     Tls(#[from] rustls::Error),
 
     #[error(transparent)]
-    ZeroKMS(#[from] cipherstash_client::zerokms::Error),
+    ZeroKMS(#[from] ZeroKMSError),
 
     #[error("Unknown error")]
     Unknown,
@@ -65,6 +65,15 @@ pub enum Error {
 pub enum ContextError {
     #[error("Portal could not be found in context")]
     UnknownPortal,
+}
+
+#[derive(Error, Debug)]
+pub enum ZeroKMSError {
+    #[error("ZeroKMS authentication failed. Check the configured credentials. For help visit {}#zerokms-authentication-failed", ERROR_DOC_BASE_URL)]
+    AuthenticationFailed,
+
+    #[error(transparent)]
+    System(#[from] cipherstash_client::zerokms::Error),
 }
 
 #[derive(Error, Debug)]
@@ -283,7 +292,7 @@ pub enum EncryptError {
     UnknownColumn { table: String, column: String },
 
     #[error(
-        "Unknown keyset name or id '{keyset}'. For help visit {}#encrypt-unknown-keyset",
+        "Unknown keyset name or id '{keyset}'. Check the configured credentials. For help visit {}#encrypt-unknown-keyset",
         ERROR_DOC_BASE_URL
     )]
     UnknownKeysetIdentifier { keyset: String },
@@ -300,10 +309,10 @@ pub enum EncryptError {
 
 #[derive(Error, Debug)]
 pub enum ProtocolError {
-    #[error("Database authentication failed: check username and password. For help visit {}#authentication-failed-database", ERROR_DOC_BASE_URL)]
+    #[error("Database authentication failed. Check username and password. For help visit {}#authentication-failed-database", ERROR_DOC_BASE_URL)]
     AuthenticationFailed,
 
-    #[error("Client authentication failed: check username and password. For help visit {}#authentication-failed-client", ERROR_DOC_BASE_URL)]
+    #[error("Client authentication failed. Check username and password. For help visit {}#authentication-failed-client", ERROR_DOC_BASE_URL)]
     ClientAuthenticationFailed,
 
     #[error("Expected {expected} parameter format codes, received {received}")]

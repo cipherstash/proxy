@@ -22,6 +22,7 @@
   - [KeysetName could not be set](#encrypt-keyset-name-could-not-be-set)
   - [Plaintext could not be encoded](#encrypt-plaintext-could-not-be-encoded)
   - [Unknown column](#encrypt-unknown-column)
+  - [Unknown Keyset Identifier](#encrypt-unknown-keyset)
   - [Unknown table](#encrypt-unknown-table)
   - [Unknown index term](#encrypt-unknown-index-term)
   - [Column configuration mismatch](#encrypt-column-config-mismatch)
@@ -46,14 +47,14 @@ Authentication failed when connecting to the database.
 ### Error message
 
 ```
-Database authentication failed: check username and password
+Database authentication failed. Check username and password
 ```
 
 ### How to fix
 
-Check the configured username and password are correct and can connect to the database.
+1. Check the configured username and password are correct and can connect to the database.
 
-Check the database is using a supported authentication method.
+2. Check the database is using a supported authentication method.
 
 CipherStash Proxy supports several PostgreSQL password authentication methods:
 
@@ -76,20 +77,37 @@ Authentication failed when connecting a client to the proxy.
 ### Error message
 
 ```
-Client authentication failed: check username and password
+Client authentication failed. Check username and password.
 ```
 
 ### How to fix
 
-Check the configured username and password are correct.
+1. Check the configured username and password are correct.
 
 
 
 <!-- ---------------------------------------------------------------------------------------------------- -->
 
 
+## ZeroKMS  <a id='authentication-failed-zerokms'></a>
+
+Authentication failed when connecting to ZeroKMS.
+
+
+### Error message
+
+```
+ZeroKMS authentication failed. Check the configured credentials.
+```
+
+### How to Fix
+
+1. Check that the configured `client` credentials are correct.
+2. Check that the active `keyset_name` or `keyset_id` is associated with a keyset in the configured workspace.
+
 
 <!-- ---------------------------------------------------------------------------------------------------- -->
+
 
 # Mapping errors
 
@@ -354,7 +372,7 @@ Keyset Name could not be set using `SET CIPHERSTASH.KEYSET_NAME`
 <!-- ---------------------------------------------------------------------------------------------------- -->
 
 
-## Unknown Keyset Identifier <a id='encrypt-unknown-keyset'></a>
+## Unknown keyset identifier <a id='encrypt-unknown-keyset'></a>
 
 The specified keyset could not be loaded.
 
@@ -370,9 +388,11 @@ Unknown keyset name or id '{keyset}'
 1. Check that the active `keyset_name` or `keyset_id` is associated with a keyset in the configured workspace.
 2. Check that the configured `client` has been granted access to the keyset via the dashboard.
 3. Keyset names are case sensitive. If setting the active keyset by name, check that the `keyset_name` is an exact match.
+4. Check that the configured `client` credentials are correct.
 
 
 <!-- ---------------------------------------------------------------------------------------------------- -->
+
 
 
 ## Could not decrypt data for keyset <a id='encrypt-could-not-decrypt-data-for-keyset'></a>

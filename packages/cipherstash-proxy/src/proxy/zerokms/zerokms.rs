@@ -1,8 +1,8 @@
 use crate::{
     config::TandemConfig,
     eql,
-    error::{EncryptError, Error},
-    log::ENCRYPT,
+    error::{EncryptError, Error, ZeroKMSError},
+    log::{ENCRYPT, PROXY},
     postgresql::{Column, KeysetIdentifier},
     prometheus::{KEYSET_CIPHER_CACHE_HITS_TOTAL, KEYSET_CIPHER_INIT_TOTAL},
 };
@@ -13,7 +13,7 @@ use cipherstash_client::{
 use metrics::counter;
 use moka::future::Cache;
 use std::{sync::Arc, time::Duration};
-use tracing::debug;
+use tracing::{debug, info, warn};
 
 use super::{
     init_zerokms_client, plaintext_type_name, to_eql_encrypted, to_eql_encrypted_from_index_term,
@@ -30,7 +30,7 @@ pub struct ZeroKms {
 }
 
 impl ZeroKms {
-    pub fn new(config: &TandemConfig) -> Result<Self, Error> {
+    pub fn init(config: &TandemConfig) -> Result<Self, Error> {
         let zerokms_client = init_zerokms_client(config)?;
 
         let cipher_cache = Cache::builder()
@@ -66,14 +66,14 @@ impl ZeroKms {
 
         // Check cache first
         if let Some(cached_cipher) = self.cipher_cache.get(&cache_key).await {
-            debug!(target: "proxy", msg = "Use cached ScopedCipher", ?keyset_id);
+            debug!(target: PROXY, msg = "Use cached ScopedCipher", ?keyset_id);
             counter!(KEYSET_CIPHER_CACHE_HITS_TOTAL).increment(1);
             return Ok(cached_cipher);
         }
 
         let zerokms_client = self.zerokms_client.clone();
 
-        debug!(target: "proxy", msg = "Initializing ZeroKMS ScopedCipher", ?keyset_id);
+        debug!(target: PROXY, msg = "Initializing ZeroKMS ScopedCipher", ?keyset_id);
 
         let identified_by = keyset_id.as_ref().map(|id| id.0.clone());
 
@@ -94,12 +94,14 @@ impl ZeroKms {
                 let entry_count = self.cipher_cache.entry_count();
                 let memory_usage_bytes = self.cipher_cache.weighted_size();
 
-                debug!(target: "proxy", msg = "ScopedCipher cached", ?keyset_id, entry_count, memory_usage_bytes);
+                info!(msg = "Connected to ZeroKMS");
+                debug!(target: PROXY, msg = "ScopedCipher cached", ?keyset_id, entry_count, memory_usage_bytes);
 
                 Ok(arc_cipher)
             }
             Err(err) => {
-                debug!(target: "proxy", msg = "Error initializing ZeroKMS ScopedCipher", error = err.to_string());
+                debug!(target: PROXY, msg = "Error initializing ZeroKMS ScopedCipher", error = err.to_string());
+                warn!(msg = "Error initializing ZeroKMS", error = err.to_string());
 
                 match err {
                     cipherstash_client::zerokms::Error::LoadKeyset(_) => {
@@ -108,7 +110,10 @@ impl ZeroKms {
                         }
                         .into())
                     }
-                    _ => Err(err.into()),
+                    cipherstash_client::zerokms::Error::Credentials(_) => {
+                        Err(ZeroKMSError::AuthenticationFailed.into())
+                    }
+                    _ => Err(Error::ZeroKMS(err.into())),
                 }
             }
         }
@@ -219,10 +224,10 @@ impl ZeroKms {
             .filter_map(|(idx, eql)| Some((idx, eql?.body.ciphertext.unwrap())))
             .collect::<_>();
 
-        let decrypted = cipher.decrypt(encrypted).await.map_err(|e| -> Error {
-            match &e {
+        let decrypted = cipher.decrypt(encrypted).await.map_err(|err| -> Error {
+            match &err {
                 cipherstash_client::zerokms::Error::Decrypt(_) => {
-                    let error_msg = e.to_string();
+                    let error_msg = err.to_string();
                     if error_msg.contains("Failed to retrieve key") {
                         EncryptError::CouldNotDecryptDataForKeyset {
                             keyset_id: keyset_id
@@ -231,10 +236,10 @@ impl ZeroKms {
                         }
                         .into()
                     } else {
-                        e.into()
+                        Error::ZeroKMS(err.into())
                     }
                 }
-                _ => e.into(),
+                _ => Error::ZeroKMS(err.into()),
             }
         })?;
 

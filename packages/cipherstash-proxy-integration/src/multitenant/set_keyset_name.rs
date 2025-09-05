@@ -341,7 +341,7 @@ mod tests {
         if let Err(err) = result {
             let msg = err.to_string();
 
-            assert_eq!(msg, "db error: FATAL: Unknown keyset name or id 'BLAHVTHA'. For help visit https://github.com/cipherstash/proxy/blob/main/docs/errors.md#encrypt-unknown-keyset");
+            assert_eq!(msg, "db error: FATAL: Unknown keyset name or id 'BLAHVTHA'. Check the configured credentials. For help visit https://github.com/cipherstash/proxy/blob/main/docs/errors.md#encrypt-unknown-keyset");
         } else {
             unreachable!();
         }
