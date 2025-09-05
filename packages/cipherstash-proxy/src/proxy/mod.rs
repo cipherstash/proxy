@@ -37,7 +37,11 @@ pub struct Proxy {
 
 impl Proxy {
     pub async fn init(config: TandemConfig) -> Result<Proxy, Error> {
-        let zerokms = ZeroKms::new(&config)?;
+        let zerokms = ZeroKms::init(&config)?;
+
+        // Attempt to connect to default keyset
+        // Ensures error on start if credential or network issue
+        zerokms.init_cipher(None).await?;
 
         let encrypt_config = EncryptConfigManager::init(&config.database).await?;
         // TODO: populate EqlTraitImpls based in config
