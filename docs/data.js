@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1757284779058,
+  "lastUpdate": 1757285999504,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -14233,6 +14233,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 25.374517,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "b9ec83777122804e1506d45248e388393f1048c2",
+          "message": "fix: improve ZeroKMS error handling and startup validation",
+          "timestamp": "2025-09-05T17:10:38Z",
+          "url": "https://github.com/cipherstash/proxy/pull/322/commits/b9ec83777122804e1506d45248e388393f1048c2"
+        },
+        "date": 1757285998077,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 25.431015,
             "unit": "Number"
           }
         ]
