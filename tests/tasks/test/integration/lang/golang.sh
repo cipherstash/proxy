@@ -5,16 +5,13 @@
 
 set -e
 
-mise --env tls run postgres:up --extra-args "--detach --wait"
-mise --env tls run postgres:setup
-mise --env tls run proxy:down proxy-tls
-mise --env tls run proxy:up --extra-args "--detach --wait"
 
 source "$(dirname "${BASH_SOURCE[0]}")/../url_encode.sh"
 
 encoded_password=$(urlencode "${CS_DATABASE__PASSWORD}")
 
 connection_url=postgresql://${CS_DATABASE__USERNAME}:${encoded_password}@proxy:6432/${CS_DATABASE__NAME}
+
 network_id=$(docker network ls --filter name=tests_postgres --quiet)
 platform="linux/$(uname -m | sed 's/x86_64/amd64/')"
 

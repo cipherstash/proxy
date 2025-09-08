@@ -71,6 +71,8 @@ services:
       - CS_LOG__CONTEXT_LEVEL=${CS_LOG__CONTEXT_LEVEL:-debug}
     networks:
       - postgres
+    extra_hosts:
+      - host.docker.internal:host-gateway
     deploy:
       resources:
         limits:
@@ -114,6 +116,8 @@ services:
       - ./tls/server.key:/etc/cipherstash-proxy/server.key
     networks:
       - postgres
+    extra_hosts:
+      - host.docker.internal:host-gateway
 
   python:
     image: test/python
