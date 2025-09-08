@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1757309334341,
+  "lastUpdate": 1757309425500,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -14462,6 +14462,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 25.093107,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "c2f4219e4cc15c9a541c6b07c19989eb72ae2bdd",
+          "message": "docs: simplify commit command documentation",
+          "timestamp": "2025-09-08T00:21:48Z",
+          "url": "https://github.com/cipherstash/proxy/pull/324/commits/c2f4219e4cc15c9a541c6b07c19989eb72ae2bdd"
+        },
+        "date": 1757309424049,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 25.074007,
             "unit": "Number"
           }
         ]
