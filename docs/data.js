@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1757305990032,
+  "lastUpdate": 1757307881101,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -14412,6 +14412,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 24.585213,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "41419eda9a13ca43a7ec090fa628e931394542fb",
+          "message": "refactor(tests): remove orchestration from go integration tests",
+          "timestamp": "2025-09-08T00:21:48Z",
+          "url": "https://github.com/cipherstash/proxy/pull/325/commits/41419eda9a13ca43a7ec090fa628e931394542fb"
+        },
+        "date": 1757307879594,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 25.10665,
             "unit": "Number"
           }
         ]
