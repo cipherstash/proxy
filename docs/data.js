@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1757309806210,
+  "lastUpdate": 1757312771682,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -14512,6 +14512,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 25.8339,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "toby@cipherstash.com",
+            "name": "Toby Hede",
+            "username": "tobyhede"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "e9cd36c1ca5280ca09669f45c7dfb686713ba209",
+          "message": "Merge pull request #324 from cipherstash/remove-commit-emojis\n\ndocs: simplify commit command documentation",
+          "timestamp": "2025-09-08T16:20:26+10:00",
+          "tree_id": "ec2e1f7efae7c15f3b95bbb7df462f3db0ae9ae1",
+          "url": "https://github.com/cipherstash/proxy/commit/e9cd36c1ca5280ca09669f45c7dfb686713ba209"
+        },
+        "date": 1757312770163,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 25.216012,
             "unit": "Number"
           }
         ]
