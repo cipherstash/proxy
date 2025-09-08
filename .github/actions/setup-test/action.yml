@@ -14,9 +14,11 @@ runs:
     - name: Setup Rust cache
       uses: Swatinem/rust-cache@v2
       with:
-        cache-provider: ${{ inputs.provider }}
-        shared-key: ${{ inputs.key }}
         cache-all-crates: true
+    - name: Set up Docker Compose
+      uses: docker/setup-compose-action@v1
+      with:
+        version: latest
     - uses: jdx/mise-action@v2
       with:
         version: 2025.1.0 # [default: latest] mise version to install

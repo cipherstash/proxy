@@ -28,7 +28,9 @@ CS_DATABASE__PORT = "5532"
 # CS_DATABASE__PORT = "5617"
 
 # Default configuration for dev cipherstash-proxy run using 'mise run proxy:up'
-CS_PROXY__HOST = "proxy"
+# CS_PROXY__HOST = "proxy"
+CS_PROXY__HOST = "host.docker.internal"
+
 # Misc
 DOCKER_CLI_HINTS = "false" # Please don't show us What's Next.
 
@@ -387,7 +389,14 @@ echo '###############################################'
 echo '# Test: Language-specific integration'
 echo '###############################################'
 echo
+
+mise --env tls run postgres:up --extra-args "--detach --wait"
+mise --env tls run postgres:setup
+mise --env tls run proxy:down proxy-tls
+mise --env tls run proxy:up --extra-args "--detach --wait"
+
 mise run test:integration:lang:golang
+
 mise run test:integration:lang:python
 
 # Commented out pending fix of the root cause of the test flake
