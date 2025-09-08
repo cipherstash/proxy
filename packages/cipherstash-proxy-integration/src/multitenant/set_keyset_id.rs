@@ -283,7 +283,7 @@ mod tests {
         if let Err(err) = result {
             let msg = err.to_string();
 
-            assert_eq!(msg, "db error: FATAL: Unknown keyset name or id '2cace9db-3a2a-4b46-a184-ba412b3e0730'. For help visit https://github.com/cipherstash/proxy/blob/main/docs/errors.md#encrypt-unknown-keyset");
+            assert_eq!(msg, "db error: FATAL: Unknown keyset name or id '2cace9db-3a2a-4b46-a184-ba412b3e0730'. Check the configured credentials. For help visit https://github.com/cipherstash/proxy/blob/main/docs/errors.md#encrypt-unknown-keyset");
         } else {
             unreachable!();
         }
