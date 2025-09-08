@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1757289487478,
+  "lastUpdate": 1757291143340,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -14308,6 +14308,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 24.637021,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "toby@cipherstash.com",
+            "name": "Toby Hede",
+            "username": "tobyhede"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "73c35df8042690fad15c2e226a61c26d753279d7",
+          "message": "Merge pull request #322 from cipherstash/handle-zkms-error-on-startup\n\nfix: improve ZeroKMS error handling and startup validation",
+          "timestamp": "2025-09-08T10:21:44+10:00",
+          "tree_id": "6066e819c91d17481739ea577e0c263d317c505f",
+          "url": "https://github.com/cipherstash/proxy/commit/73c35df8042690fad15c2e226a61c26d753279d7"
+        },
+        "date": 1757291141770,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 24.535157,
             "unit": "Number"
           }
         ]
