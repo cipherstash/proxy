@@ -1,8 +1,10 @@
 pub mod column;
+pub mod portal;
+pub mod statement;
 
+pub use self::{portal::Portal, statement::Statement};
 use super::{
     column_mapper::ColumnMapper,
-    format_code::FormatCode,
     messages::{describe::Describe, Name, Target},
     Column,
 };
@@ -96,26 +98,6 @@ impl SessionMetricsContext {
 #[derive(Clone, Debug)]
 pub struct Queue<T> {
     pub queue: VecDeque<T>,
-}
-
-///
-/// Type Analysed parameters and projection
-///
-#[derive(Debug, Clone, PartialEq)]
-pub struct Statement {
-    pub param_columns: Vec<Option<Column>>,
-    pub projection_columns: Vec<Option<Column>>,
-    pub literal_columns: Vec<Option<Column>>,
-    pub postgres_param_types: Vec<i32>,
-}
-
-#[derive(Clone, Debug)]
-pub enum Portal {
-    Encrypted {
-        format_codes: Vec<FormatCode>,
-        statement: Arc<Statement>,
-    },
-    Passthrough,
 }
 
 impl Context {
@@ -684,38 +666,6 @@ impl Context {
     }
 }
 
-impl Statement {
-    pub fn new(
-        param_columns: Vec<Option<Column>>,
-        projection_columns: Vec<Option<Column>>,
-        literal_columns: Vec<Option<Column>>,
-        postgres_param_types: Vec<i32>,
-    ) -> Statement {
-        Statement {
-            param_columns,
-            projection_columns,
-            literal_columns,
-            postgres_param_types,
-        }
-    }
-
-    pub fn unencryped() -> Statement {
-        Statement::new(vec![], vec![], vec![], vec![])
-    }
-
-    pub fn has_literals(&self) -> bool {
-        !self.literal_columns.is_empty()
-    }
-
-    pub fn has_params(&self) -> bool {
-        !self.param_columns.is_empty()
-    }
-
-    pub fn has_projection(&self) -> bool {
-        !self.projection_columns.is_empty()
-    }
-}
-
 impl<T> Queue<T> {
     pub fn new() -> Self {
         Queue {
@@ -733,62 +683,6 @@ impl<T> Queue<T> {
 
     pub fn add(&mut self, item: T) {
         self.queue.push_back(item);
-    }
-}
-
-impl Portal {
-    pub fn encrypted_with_format_codes(
-        statement: Arc<Statement>,
-        format_codes: Vec<FormatCode>,
-    ) -> Portal {
-        Portal::Encrypted {
-            statement,
-            format_codes,
-        }
-    }
-
-    pub fn encrypted(statement: Arc<Statement>) -> Portal {
-        let format_codes = vec![];
-        Portal::Encrypted {
-            statement,
-            format_codes,
-        }
-    }
-
-    pub fn passthrough() -> Portal {
-        Portal::Passthrough
-    }
-
-    pub fn projection_columns(&self) -> &Vec<Option<Column>> {
-        static EMPTY: Vec<Option<Column>> = vec![];
-        match self {
-            Portal::Encrypted { statement, .. } => &statement.projection_columns,
-            _ => &EMPTY,
-        }
-    }
-
-    // FormatCodes should not be None at this point
-    // FormatCodes will be:
-    //  - empty, in which case assume Text
-    //  - single value, in which case use this for all columns
-    //  - multiple values, in which case use the value for each column
-    pub fn format_codes(&self, row_len: usize) -> Vec<FormatCode> {
-        match self {
-            Portal::Encrypted { format_codes, .. } => match format_codes.len() {
-                0 => vec![FormatCode::Text; row_len],
-                1 => {
-                    let format_code = match format_codes.first() {
-                        Some(code) => *code,
-                        None => FormatCode::Text,
-                    };
-                    vec![format_code; row_len]
-                }
-                _ => format_codes.clone(),
-            },
-            Portal::Passthrough => {
-                unreachable!()
-            }
-        }
     }
 }
 
