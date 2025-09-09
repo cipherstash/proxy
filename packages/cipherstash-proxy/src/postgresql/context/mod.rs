@@ -1,6 +1,7 @@
 pub mod column;
 
 use super::{
+    column_mapper::ColumnMapper,
     format_code::FormatCode,
     messages::{describe::Describe, Name, Target},
     Column,
@@ -44,6 +45,7 @@ pub struct Context {
     config: Arc<TandemConfig>,
     encryption: Arc<dyn EncryptionService>,
     schema: Arc<dyn SchemaService>,
+    column_processor: ColumnMapper,
     statements: Arc<RwLock<HashMap<Name, Arc<Statement>>>>,
     portals: Arc<RwLock<HashMap<Name, PortalQueue>>>,
     describe: Arc<RwLock<DescribeQueue>>,
@@ -124,6 +126,8 @@ impl Context {
         encryption: Arc<dyn EncryptionService>,
         schema_service: Arc<dyn SchemaService>,
     ) -> Context {
+        let column_processor = ColumnMapper::new(schema_service.clone());
+
         Context {
             statements: Arc::new(RwLock::new(HashMap::new())),
             portals: Arc::new(RwLock::new(HashMap::new())),
@@ -136,6 +140,7 @@ impl Context {
             config,
             encryption,
             schema: schema_service,
+            column_processor,
             unsafe_disable_mapping: false,
             keyset_id: Arc::new(RwLock::new(None)),
         }
@@ -532,6 +537,29 @@ impl Context {
         self.schema.is_empty_config()
     }
 
+    // Column processing delegation methods
+    pub fn get_projection_columns(
+        &self,
+        typed_statement: &eql_mapper::TypeCheckedStatement<'_>,
+    ) -> Result<Vec<Option<Column>>, Error> {
+        self.column_processor
+            .get_projection_columns(typed_statement)
+    }
+
+    pub fn get_param_columns(
+        &self,
+        typed_statement: &eql_mapper::TypeCheckedStatement<'_>,
+    ) -> Result<Vec<Option<Column>>, Error> {
+        self.column_processor.get_param_columns(typed_statement)
+    }
+
+    pub fn get_literal_columns(
+        &self,
+        typed_statement: &eql_mapper::TypeCheckedStatement<'_>,
+    ) -> Result<Vec<Option<Column>>, Error> {
+        self.column_processor.get_literal_columns(typed_statement)
+    }
+
     // Direct config access methods
     pub fn connection_timeout(&self) -> std::time::Duration {
         self.config
@@ -629,10 +657,20 @@ impl Context {
         std::env::set_var("CS_DATABASE__NAME", "test");
         std::env::set_var("CS_DATABASE__HOST", "localhost");
         std::env::set_var("CS_DATABASE__PORT", "5432");
-        std::env::set_var("CS_AUTH__WORKSPACE_CRN", "crn:ap-southeast-2.aws:test");
+        std::env::set_var(
+            "CS_AUTH__WORKSPACE_CRN",
+            "crn:ap-southeast-2.aws:3KISDURL3ZCWYZ2O",
+        );
         std::env::set_var("CS_AUTH__CLIENT_ACCESS_KEY", "test");
-        std::env::set_var("CS_ENCRYPT__CLIENT_ID", "test");
-        std::env::set_var("CS_ENCRYPT__CLIENT_KEY", "test");
+        std::env::set_var(
+            "CS_ENCRYPT__CLIENT_ID",
+            "e40f1692-6bb7-4bbd-a552-4c0f155be073",
+        );
+        std::env::set_var("CS_ENCRYPT__CLIENT_KEY", "a4627031a16b7065726d75746174696f6e90090e0805000b0d0c0106040f0a0302076770325f66726f6da16b7065726d75746174696f6e9007060a0b02090d080c00040f0305010e6570325f746fa16b7065726d75746174696f6e900a0206090b04050c070f0e010d030800627033a16b7065726d75746174696f6e98210514181d0818200a18190b1112181809130f15181a0717181e000e0103181f0d181c1602040c181b1006");
+        std::env::set_var(
+            "CS_ENCRYPT__KEYSET_ID",
+            "c50d8463-60e9-41a5-86cd-5782e03a503c",
+        );
 
         let config = Arc::new(
             crate::config::TandemConfig::build("tests/config/unknown.toml")

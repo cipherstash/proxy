@@ -1,4 +1,5 @@
 mod backend;
+mod column_mapper;
 mod context;
 mod data;
 mod error_handler;
