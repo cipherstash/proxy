@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1757375164681,
+  "lastUpdate": 1757376009120,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -14641,6 +14641,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 24.446153,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "toby@cipherstash.com",
+            "name": "Toby Hede",
+            "username": "tobyhede"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "6cbc7a9d0c867f3f24f963e9820b25b16b22defa",
+          "message": "Merge pull request #325 from cipherstash/go-integration-remove-orchestration\n\nrefactor(tests): remove orchestration from go integration tests",
+          "timestamp": "2025-09-09T09:55:49+10:00",
+          "tree_id": "e15c05298b9581fc5fe6e11b5b5badc825b103fa",
+          "url": "https://github.com/cipherstash/proxy/commit/6cbc7a9d0c867f3f24f963e9820b25b16b22defa"
+        },
+        "date": 1757376007706,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 23.129015,
             "unit": "Number"
           }
         ]
