@@ -135,6 +135,53 @@ impl Proxy {
     }
 }
 
+// Implement service traits for backward compatibility
+#[async_trait::async_trait]
+impl crate::services::EncryptionService for Proxy {
+    async fn encrypt(
+        &self,
+        keyset_id: Option<KeysetIdentifier>,
+        plaintexts: Vec<Option<cipherstash_client::encryption::Plaintext>>,
+        columns: &[Option<Column>],
+    ) -> Result<Vec<Option<crate::EqlEncrypted>>, Error> {
+        self.encrypt(keyset_id, plaintexts, columns).await
+    }
+
+    async fn decrypt(
+        &self,
+        keyset_id: Option<KeysetIdentifier>,
+        ciphertexts: Vec<Option<crate::EqlEncrypted>>,
+    ) -> Result<Vec<Option<cipherstash_client::encryption::Plaintext>>, Error> {
+        self.decrypt(keyset_id, ciphertexts).await
+    }
+}
+
+#[async_trait::async_trait]
+impl crate::services::SchemaService for Proxy {
+    async fn reload_schema(&self) {
+        self.reload_schema().await;
+    }
+
+    fn get_column_config(
+        &self,
+        identifier: &crate::eql::Identifier,
+    ) -> Option<cipherstash_client::schema::ColumnConfig> {
+        self.get_column_config(identifier)
+    }
+
+    fn get_table_resolver(&self) -> std::sync::Arc<eql_mapper::TableResolver> {
+        self.schema.get_table_resolver()
+    }
+
+    fn is_passthrough(&self) -> bool {
+        self.is_passthrough()
+    }
+
+    fn is_empty_config(&self) -> bool {
+        self.is_empty_config()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

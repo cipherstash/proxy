@@ -4,7 +4,7 @@ use crate::proxy::{AGGREGATE_QUERY, SCHEMA_QUERY};
 use crate::{connect, log::SCHEMA};
 use arc_swap::ArcSwap;
 use eql_mapper::{self, EqlTraits};
-use eql_mapper::{Column, Schema, Table};
+use eql_mapper::{Column, Schema, Table, TableResolver};
 use sqltk::parser::ast::Ident;
 use std::sync::Arc;
 use std::time::Duration;
@@ -41,6 +41,10 @@ impl SchemaManager {
                 );
             }
         };
+    }
+
+    pub fn get_table_resolver(&self) -> Arc<TableResolver> {
+        Arc::new(TableResolver::new_editable(self.load()))
     }
 }
 

@@ -9,6 +9,7 @@ pub mod log;
 pub mod postgresql;
 pub mod prometheus;
 pub mod proxy;
+pub mod services;
 pub mod tls;
 
 pub use crate::cli::Args;
