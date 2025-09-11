@@ -30,8 +30,8 @@ const AGGREGATE_QUERY: &str = include_str!("./sql/select_aggregates.sql");
 #[derive(Clone)]
 pub struct Proxy {
     pub config: TandemConfig,
-    pub encrypt_config: EncryptConfigManager,
-    pub schema: SchemaManager,
+    pub encrypt_config_manager: EncryptConfigManager,
+    pub schema_manager: SchemaManager,
     /// The EQL version installed in the database or `None` if it was not present
     pub eql_version: Option<String>,
     zerokms: ZeroKms,
@@ -70,8 +70,8 @@ impl Proxy {
         Ok(Proxy {
             config,
             zerokms,
-            encrypt_config,
-            schema,
+            encrypt_config_manager: encrypt_config,
+            schema_manager: schema,
             eql_version,
         })
     }
@@ -119,21 +119,21 @@ impl Proxy {
     }
 
     pub fn get_column_config(&self, identifier: &eql::Identifier) -> Option<ColumnConfig> {
-        let encrypt_config = self.encrypt_config.load();
+        let encrypt_config = self.encrypt_config_manager.load();
         encrypt_config.get_column_config(identifier)
     }
 
     pub async fn reload_schema(&self) {
-        self.schema.reload().await;
-        self.encrypt_config.reload().await;
+        self.schema_manager.reload().await;
+        self.encrypt_config_manager.reload().await;
     }
 
     pub fn is_passthrough(&self) -> bool {
-        self.encrypt_config.is_empty() || self.config.mapping_disabled()
+        self.encrypt_config_manager.is_empty() || self.config.mapping_disabled()
     }
 
     pub fn is_empty_config(&self) -> bool {
-        self.encrypt_config.is_empty()
+        self.encrypt_config_manager.is_empty()
     }
 }
 
@@ -172,7 +172,7 @@ impl crate::services::SchemaService for Proxy {
     }
 
     fn get_table_resolver(&self) -> std::sync::Arc<eql_mapper::TableResolver> {
-        self.schema.get_table_resolver()
+        self.schema_manager.get_table_resolver()
     }
 
     fn is_passthrough(&self) -> bool {

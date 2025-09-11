@@ -218,8 +218,7 @@ pub async fn handler(
 
     let channel_writer = ChannelWriter::new(client_writer, client_id);
 
-    let schema = proxy.schema.load();
-    let context = Context::new_with_proxy(client_id, schema, proxy.clone());
+    let context = Context::new_with_proxy(client_id, proxy.clone());
 
     let mut frontend = Frontend::new(
         client_reader,

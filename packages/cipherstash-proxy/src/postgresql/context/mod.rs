@@ -13,6 +13,7 @@ use crate::{
     error::{EncryptError, Error},
     log::CONTEXT,
     prometheus::{STATEMENTS_EXECUTION_DURATION_SECONDS, STATEMENTS_SESSION_DURATION_SECONDS},
+    proxy::EncryptConfig,
     services::{EncryptionService, SchemaService},
 };
 use cipherstash_client::IdentifiedBy;
@@ -105,6 +106,7 @@ impl Context {
         client_id: i32,
         schema: Arc<Schema>,
         config: Arc<TandemConfig>,
+        _encrypt_config: Arc<EncryptConfig>,
         encryption: Arc<dyn EncryptionService>,
         schema_service: Arc<dyn SchemaService>,
     ) -> Context {
@@ -570,17 +572,18 @@ impl Context {
     }
 
     /// Helper function for gradual migration - creates Context with Proxy implementing services
-    pub fn new_with_proxy(
-        client_id: i32,
-        schema: Arc<Schema>,
-        proxy: crate::proxy::Proxy,
-    ) -> Context {
+    pub fn new_with_proxy(client_id: i32, proxy: crate::proxy::Proxy) -> Context {
         let config = Arc::new(proxy.config.clone());
+        let encrypt_config = proxy.encrypt_config_manager.load();
+        let schema = proxy.schema_manager.load();
+
         let proxy = Arc::new(proxy);
+
         Self::new(
             client_id,
             schema,
             config,
+            encrypt_config,
             proxy.clone(), // as EncryptionService
             proxy,         // as SchemaService
         )
@@ -633,36 +636,20 @@ impl Context {
             }
         }
 
-        // Set up minimal environment variables for testing
-        std::env::set_var("CS_DATABASE__USERNAME", "test");
-        std::env::set_var("CS_DATABASE__PASSWORD", "test");
-        std::env::set_var("CS_DATABASE__NAME", "test");
-        std::env::set_var("CS_DATABASE__HOST", "localhost");
-        std::env::set_var("CS_DATABASE__PORT", "5432");
-        std::env::set_var(
-            "CS_AUTH__WORKSPACE_CRN",
-            "crn:ap-southeast-2.aws:3KISDURL3ZCWYZ2O",
-        );
-        std::env::set_var("CS_AUTH__CLIENT_ACCESS_KEY", "test");
-        std::env::set_var(
-            "CS_ENCRYPT__CLIENT_ID",
-            "e40f1692-6bb7-4bbd-a552-4c0f155be073",
-        );
-        std::env::set_var("CS_ENCRYPT__CLIENT_KEY", "a4627031a16b7065726d75746174696f6e90090e0805000b0d0c0106040f0a0302076770325f66726f6da16b7065726d75746174696f6e9007060a0b02090d080c00040f0305010e6570325f746fa16b7065726d75746174696f6e900a0206090b04050c070f0e010d030800627033a16b7065726d75746174696f6e98210514181d0818200a18190b1112181809130f15181a0717181e000e0103181f0d181c1602040c181b1006");
-        std::env::set_var(
-            "CS_ENCRYPT__KEYSET_ID",
-            "c50d8463-60e9-41a5-86cd-5782e03a503c",
-        );
-
-        let config = Arc::new(
-            crate::config::TandemConfig::build("tests/config/unknown.toml")
-                .expect("Failed to create test config"),
-        );
+        let config = Arc::new(TandemConfig::for_testing());
+        let encrypt_config = Arc::new(EncryptConfig::default());
 
         let encryption = Arc::new(MockEncryptionService) as Arc<dyn EncryptionService>;
         let schema_service = Arc::new(MockSchemaService) as Arc<dyn SchemaService>;
 
-        Self::new(client_id, schema, config, encryption, schema_service)
+        Self::new(
+            client_id,
+            schema,
+            config,
+            encrypt_config,
+            encryption,
+            schema_service,
+        )
     }
 }
 
