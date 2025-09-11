@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1757376009120,
+  "lastUpdate": 1757561891891,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -14670,6 +14670,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 23.129015,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "c47fe1524bb91934ca7ced8dcbd2bed6c85dda44",
+          "message": "docs: env vars for CTS & ZeroKMS endpoints",
+          "timestamp": "2025-09-08T23:55:53Z",
+          "url": "https://github.com/cipherstash/proxy/pull/326/commits/c47fe1524bb91934ca7ced8dcbd2bed6c85dda44"
+        },
+        "date": 1757561890381,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 23.683522,
             "unit": "Number"
           }
         ]
