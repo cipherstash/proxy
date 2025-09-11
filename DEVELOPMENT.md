@@ -664,6 +664,19 @@ CS_CLIENT_ID
 CS_CLIENT_KEY
 ```
 
+
+### Connecting to another environment
+
+Proxy connects to the CipherStash production environment by default.
+
+To connect to an alternative environment, provide the CTS and ZeroKMS host endpoints:
+
+```
+CS_CTS_HOST
+CS_ZEROKMS_HOST
+```
+
+
 ### Running the benchmark
 
 ```bash
