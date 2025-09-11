@@ -1,7 +1,6 @@
 use crate::{
     eql,
     error::{ConfigError, Error},
-    log::KEYSET,
 };
 use cipherstash_client::schema::{
     column::{Index, IndexType, TokenFilter, Tokenizer},
@@ -9,7 +8,13 @@ use cipherstash_client::schema::{
 };
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, str::FromStr};
-use tracing::debug;
+
+#[derive(Debug, Deserialize, Serialize, Clone, Default)]
+pub struct ColumnEncryptionConfig {
+    #[serde(rename = "v")]
+    pub version: u32,
+    pub tables: Tables,
+}
 
 #[derive(Debug, Deserialize, Serialize, Clone, Default)]
 pub struct Tables(HashMap<String, Table>);
@@ -33,13 +38,6 @@ impl IntoIterator for Table {
     fn into_iter(self) -> Self::IntoIter {
         self.0.into_iter()
     }
-}
-
-#[derive(Debug, Deserialize, Serialize, Clone, Default)]
-pub struct EncryptConfig {
-    #[serde(rename = "v")]
-    pub version: u32,
-    pub tables: Tables,
 }
 
 #[derive(Debug, Default, Deserialize, Serialize, Clone, PartialEq)]
@@ -133,7 +131,7 @@ impl From<CastAs> for ColumnType {
     }
 }
 
-impl FromStr for EncryptConfig {
+impl FromStr for ColumnEncryptionConfig {
     type Err = Error;
 
     fn from_str(data: &str) -> Result<Self, Self::Err> {
@@ -142,7 +140,7 @@ impl FromStr for EncryptConfig {
     }
 }
 
-impl EncryptConfig {
+impl ColumnEncryptionConfig {
     pub fn is_empty(&self) -> bool {
         self.tables.0.is_empty()
     }
@@ -151,7 +149,6 @@ impl EncryptConfig {
         let mut map = HashMap::new();
         for (table_name, columns) in self.tables.into_iter() {
             for (column_name, column) in columns.into_iter() {
-                debug!(target: KEYSET, msg = "Configured column", table = table_name, column = column_name);
                 let column_config = column.into_column_config(&column_name);
                 let key = eql::Identifier::new(&table_name, &column_name);
                 map.insert(key, column_config);
@@ -201,7 +198,7 @@ mod tests {
     use super::*;
 
     fn parse(json: serde_json::Value) -> HashMap<eql::Identifier, ColumnConfig> {
-        serde_json::from_value::<EncryptConfig>(json)
+        serde_json::from_value::<ColumnEncryptionConfig>(json)
             .map(|config| config.into_config_map())
             .expect("Error ok")
     }

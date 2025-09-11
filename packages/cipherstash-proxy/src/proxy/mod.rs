@@ -4,14 +4,16 @@ use crate::{
     error::Error,
     log::PROXY,
     postgresql::{Column, KeysetIdentifier},
-    proxy::{config::EncryptConfigManager, schema::SchemaManager, zerokms::ZeroKms},
+    proxy::{encrypt_config::EncryptConfigManager, schema::SchemaManager, zerokms::ZeroKms},
 };
 use cipherstash_client::{encryption::Plaintext, schema::ColumnConfig};
 use tracing::{debug, warn};
 
-mod config;
+mod encrypt_config;
 mod schema;
 mod zerokms;
+
+pub use encrypt_config::EncryptConfig;
 
 /// SQL Statement for loading encrypt configuration from database
 const ENCRYPT_CONFIG_QUERY: &str = include_str!("./sql/select_config.sql");
@@ -118,7 +120,7 @@ impl Proxy {
 
     pub fn get_column_config(&self, identifier: &eql::Identifier) -> Option<ColumnConfig> {
         let encrypt_config = self.encrypt_config.load();
-        encrypt_config.get(identifier).cloned()
+        encrypt_config.get_column_config(identifier)
     }
 
     pub async fn reload_schema(&self) {
