@@ -3,7 +3,7 @@ use crate::{
     error::{EncryptError, Error},
     log::MAPPER,
     postgresql::Column,
-    services::SchemaService,
+    proxy::EncryptConfig,
 };
 use eql_mapper::{EqlTerm, TableColumn, TypeCheckedStatement};
 use postgres_types::Type;
@@ -14,13 +14,13 @@ use tracing::{debug, warn};
 /// and mapping them to encryption configurations.
 #[derive(Clone)]
 pub struct ColumnMapper {
-    schema_service: Arc<dyn SchemaService>,
+    encrypt_config: Arc<EncryptConfig>,
 }
 
 impl ColumnMapper {
     /// Create a new ColumnProcessor with the given schema service and client ID
-    pub fn new(schema_service: Arc<dyn SchemaService>) -> Self {
-        Self { schema_service }
+    pub fn new(encrypt_config: Arc<EncryptConfig>) -> Self {
+        Self { encrypt_config }
     }
 
     /// Maps typed statement projection columns to an Encrypt column configuration
@@ -127,7 +127,7 @@ impl ColumnMapper {
         identifier: Identifier,
         eql_term: &EqlTerm,
     ) -> Result<Option<Column>, Error> {
-        match self.schema_service.get_column_config(&identifier) {
+        match self.encrypt_config.get_column_config(&identifier) {
             Some(config) => {
                 debug!(
                     target: MAPPER,

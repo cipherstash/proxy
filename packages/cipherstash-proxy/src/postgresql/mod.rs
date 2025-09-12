@@ -13,6 +13,7 @@ mod protocol;
 mod startup;
 
 pub use context::column::Column;
+pub use context::Context;
 pub use context::KeysetIdentifier;
 pub use handler::handler;
 

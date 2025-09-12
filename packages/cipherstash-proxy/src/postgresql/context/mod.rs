@@ -13,8 +13,7 @@ use crate::{
     error::{EncryptError, Error},
     log::CONTEXT,
     prometheus::{STATEMENTS_EXECUTION_DURATION_SECONDS, STATEMENTS_SESSION_DURATION_SECONDS},
-    proxy::EncryptConfig,
-    services::{EncryptionService, SchemaService},
+    proxy::{EncryptConfig, EncryptionService, ReloadCommand, ReloadSender},
 };
 use cipherstash_client::IdentifiedBy;
 use eql_mapper::{Schema, TableResolver};
@@ -25,7 +24,7 @@ use std::{
     sync::{Arc, LazyLock, RwLock},
     time::{Duration, Instant},
 };
-use tracing::{debug, warn};
+use tracing::{debug, error, warn};
 use uuid::Uuid;
 
 type DescribeQueue = Queue<Describe>;
@@ -43,12 +42,16 @@ impl std::fmt::Display for KeysetIdentifier {
 }
 
 #[derive(Clone)]
-pub struct Context {
+pub struct Context<T>
+where
+    T: EncryptionService,
+{
     pub client_id: i32,
     config: Arc<TandemConfig>,
-    encryption: Arc<dyn EncryptionService>,
-    schema: Arc<dyn SchemaService>,
-    column_processor: ColumnMapper,
+    encrypt_config: Arc<EncryptConfig>,
+    encryption: T,
+    reload_sender: ReloadSender,
+    column_mapper: ColumnMapper,
     statements: Arc<RwLock<HashMap<Name, Arc<Statement>>>>,
     portals: Arc<RwLock<HashMap<Name, PortalQueue>>>,
     describe: Arc<RwLock<DescribeQueue>>,
@@ -101,16 +104,19 @@ pub struct Queue<T> {
     pub queue: VecDeque<T>,
 }
 
-impl Context {
+impl<T> Context<T>
+where
+    T: EncryptionService,
+{
     pub fn new(
         client_id: i32,
-        schema: Arc<Schema>,
         config: Arc<TandemConfig>,
-        _encrypt_config: Arc<EncryptConfig>,
-        encryption: Arc<dyn EncryptionService>,
-        schema_service: Arc<dyn SchemaService>,
-    ) -> Context {
-        let column_processor = ColumnMapper::new(schema_service.clone());
+        encrypt_config: Arc<EncryptConfig>,
+        schema: Arc<Schema>,
+        encryption: T,
+        reload_sender: ReloadSender,
+    ) -> Context<T> {
+        let column_mapper = ColumnMapper::new(encrypt_config.clone());
 
         Context {
             statements: Arc::new(RwLock::new(HashMap::new())),
@@ -122,9 +128,10 @@ impl Context {
             table_resolver: Arc::new(TableResolver::new_editable(schema)),
             client_id,
             config,
+            encrypt_config,
+            column_mapper,
             encryption,
-            schema: schema_service,
-            column_processor,
+            reload_sender,
             unsafe_disable_mapping: false,
             keyset_id: Arc::new(RwLock::new(None)),
         }
@@ -484,10 +491,11 @@ impl Context {
     // Service delegation methods
     pub async fn encrypt(
         &self,
-        keyset_id: Option<KeysetIdentifier>,
         plaintexts: Vec<Option<cipherstash_client::encryption::Plaintext>>,
         columns: &[Option<Column>],
     ) -> Result<Vec<Option<crate::EqlEncrypted>>, Error> {
+        let keyset_id = self.keyset_identifier();
+
         self.encryption
             .encrypt(keyset_id, plaintexts, columns)
             .await
@@ -495,30 +503,26 @@ impl Context {
 
     pub async fn decrypt(
         &self,
-        keyset_id: Option<KeysetIdentifier>,
         ciphertexts: Vec<Option<crate::EqlEncrypted>>,
     ) -> Result<Vec<Option<cipherstash_client::encryption::Plaintext>>, Error> {
+        let keyset_id = self.keyset_identifier();
         self.encryption.decrypt(keyset_id, ciphertexts).await
     }
 
     pub async fn reload_schema(&self) {
-        self.schema.reload_schema().await;
-        self.set_schema_changed();
-    }
-
-    pub fn get_column_config(
-        &self,
-        identifier: &crate::eql::Identifier,
-    ) -> Option<cipherstash_client::schema::ColumnConfig> {
-        self.schema.get_column_config(identifier)
+        match self.reload_sender.send(ReloadCommand::DatabaseSchema) {
+            Ok(_) => self.set_schema_changed(),
+            Err(err) => {
+                error!(
+                    msg = "Database schema could not be reloaded",
+                    error = err.to_string()
+                );
+            }
+        }
     }
 
     pub fn is_passthrough(&self) -> bool {
-        self.schema.is_passthrough()
-    }
-
-    pub fn is_empty_config(&self) -> bool {
-        self.schema.is_empty_config()
+        self.encrypt_config.is_empty() || self.config.mapping_disabled()
     }
 
     // Column processing delegation methods
@@ -526,30 +530,26 @@ impl Context {
         &self,
         typed_statement: &eql_mapper::TypeCheckedStatement<'_>,
     ) -> Result<Vec<Option<Column>>, Error> {
-        self.column_processor
-            .get_projection_columns(typed_statement)
+        self.column_mapper.get_projection_columns(typed_statement)
     }
 
     pub fn get_param_columns(
         &self,
         typed_statement: &eql_mapper::TypeCheckedStatement<'_>,
     ) -> Result<Vec<Option<Column>>, Error> {
-        self.column_processor.get_param_columns(typed_statement)
+        self.column_mapper.get_param_columns(typed_statement)
     }
 
     pub fn get_literal_columns(
         &self,
         typed_statement: &eql_mapper::TypeCheckedStatement<'_>,
     ) -> Result<Vec<Option<Column>>, Error> {
-        self.column_processor.get_literal_columns(typed_statement)
+        self.column_mapper.get_literal_columns(typed_statement)
     }
 
     // Direct config access methods
-    pub fn connection_timeout(&self) -> std::time::Duration {
-        self.config
-            .database
-            .connection_timeout()
-            .unwrap_or_else(|| std::time::Duration::from_secs(10))
+    pub fn connection_timeout(&self) -> Option<std::time::Duration> {
+        self.config.database.connection_timeout()
     }
 
     pub fn mapping_disabled(&self) -> bool {
@@ -571,85 +571,41 @@ impl Context {
             .map(|uuid| KeysetIdentifier(IdentifiedBy::Uuid(uuid)))
     }
 
-    /// Helper function for gradual migration - creates Context with Proxy implementing services
-    pub fn new_with_proxy(client_id: i32, proxy: crate::proxy::Proxy) -> Context {
-        let config = Arc::new(proxy.config.clone());
-        let encrypt_config = proxy.encrypt_config_manager.load();
-        let schema = proxy.schema_manager.load();
-
-        let proxy = Arc::new(proxy);
-
-        Self::new(
-            client_id,
-            schema,
-            config,
-            encrypt_config,
-            proxy.clone(), // as EncryptionService
-            proxy,         // as SchemaService
-        )
+    // Additional config access methods for handler
+    pub fn database_socket_address(&self) -> String {
+        self.config.database.to_socket_address()
     }
 
-    /// Helper function for tests - creates Context with minimal mock services
-    #[cfg(test)]
-    pub fn new_for_test(client_id: i32, schema: Arc<Schema>) -> Context {
-        // Create minimal mock services for testing
-        struct MockEncryptionService;
-        struct MockSchemaService;
+    pub fn database_username(&self) -> &str {
+        &self.config.database.username
+    }
 
-        #[async_trait::async_trait]
-        impl EncryptionService for MockEncryptionService {
-            async fn encrypt(
-                &self,
-                _keyset_id: Option<KeysetIdentifier>,
-                plaintexts: Vec<Option<cipherstash_client::encryption::Plaintext>>,
-                _columns: &[Option<Column>],
-            ) -> Result<Vec<Option<crate::EqlEncrypted>>, Error> {
-                Ok(plaintexts.into_iter().map(|_| None).collect())
-            }
+    pub fn database_password(&self) -> String {
+        self.config.database.password()
+    }
 
-            async fn decrypt(
-                &self,
-                _keyset_id: Option<KeysetIdentifier>,
-                ciphertexts: Vec<Option<crate::EqlEncrypted>>,
-            ) -> Result<Vec<Option<cipherstash_client::encryption::Plaintext>>, Error> {
-                Ok(ciphertexts.into_iter().map(|_| None).collect())
-            }
-        }
+    pub fn tls_config(&self) -> &Option<crate::config::TlsConfig> {
+        &self.config.tls
+    }
 
-        #[async_trait::async_trait]
-        impl SchemaService for MockSchemaService {
-            async fn reload_schema(&self) {}
-            fn get_column_config(
-                &self,
-                _identifier: &crate::eql::Identifier,
-            ) -> Option<cipherstash_client::schema::ColumnConfig> {
-                None
-            }
-            fn get_table_resolver(&self) -> Arc<TableResolver> {
-                Arc::new(TableResolver::new_editable(Arc::new(Schema::new("public"))))
-            }
-            fn is_passthrough(&self) -> bool {
-                true
-            }
-            fn is_empty_config(&self) -> bool {
-                true
-            }
-        }
+    pub fn use_tls(&self) -> bool {
+        self.config.tls.is_some()
+    }
 
-        let config = Arc::new(TandemConfig::for_testing());
-        let encrypt_config = Arc::new(EncryptConfig::default());
+    pub fn require_tls(&self) -> bool {
+        self.config.server.require_tls
+    }
 
-        let encryption = Arc::new(MockEncryptionService) as Arc<dyn EncryptionService>;
-        let schema_service = Arc::new(MockSchemaService) as Arc<dyn SchemaService>;
+    pub fn use_structured_logging(&self) -> bool {
+        self.config.use_structured_logging()
+    }
 
-        Self::new(
-            client_id,
-            schema,
-            config,
-            encrypt_config,
-            encryption,
-            schema_service,
-        )
+    pub fn database_tls_disabled(&self) -> bool {
+        self.config.database_tls_disabled()
+    }
+
+    pub fn config(&self) -> &crate::config::TandemConfig {
+        &self.config
     }
 }
 
@@ -678,14 +634,63 @@ mod tests {
     use super::{Context, Describe, KeysetIdentifier, Portal, Statement};
     use crate::{
         config::LogConfig,
+        error::Error,
         log,
-        postgresql::messages::{Name, Target},
+        postgresql::{
+            messages::{Name, Target},
+            Column,
+        },
+        proxy::{EncryptConfig, EncryptionService},
+        TandemConfig,
     };
     use cipherstash_client::IdentifiedBy;
     use eql_mapper::Schema;
     use sqltk::parser::{dialect::PostgreSqlDialect, parser::Parser};
     use std::sync::Arc;
+    use tokio::sync::mpsc;
     use uuid::Uuid;
+
+    struct TestService {}
+
+    #[async_trait::async_trait]
+    impl EncryptionService for TestService {
+        async fn encrypt(
+            &self,
+            _keyset_id: Option<KeysetIdentifier>,
+            _plaintexts: Vec<Option<cipherstash_client::encryption::Plaintext>>,
+            _columns: &[Option<Column>],
+        ) -> Result<Vec<Option<crate::EqlEncrypted>>, Error> {
+            Ok(vec![])
+        }
+
+        async fn decrypt(
+            &self,
+            _keyset_id: Option<KeysetIdentifier>,
+            _ciphertexts: Vec<Option<crate::EqlEncrypted>>,
+        ) -> Result<Vec<Option<cipherstash_client::encryption::Plaintext>>, Error> {
+            Ok(vec![])
+        }
+    }
+
+    fn create_context() -> Context<TestService> {
+        let client_id = 1;
+        let config = Arc::new(TandemConfig::for_testing());
+        let encrypt_config = Arc::new(EncryptConfig::default());
+        let schema = Arc::new(Schema::new("public"));
+
+        let (reload_sender, _reload_receiver) = mpsc::unbounded_channel();
+
+        let service = TestService {};
+
+        Context::new(
+            client_id,
+            config,
+            encrypt_config,
+            schema,
+            service,
+            reload_sender,
+        )
+    }
 
     fn statement() -> Statement {
         Statement {
@@ -713,9 +718,7 @@ mod tests {
     pub fn get_statement_from_describe() {
         log::init(LogConfig::default());
 
-        let schema = Arc::new(Schema::new("public"));
-
-        let mut context = Context::new_for_test(1, schema);
+        let mut context = create_context();
 
         let name = Name::from("name");
 
@@ -738,9 +741,7 @@ mod tests {
     pub fn execution_flow() {
         log::init(LogConfig::default());
 
-        let schema = Arc::new(Schema::new("public"));
-
-        let mut context = Context::new_for_test(1, schema);
+        let mut context = create_context();
 
         let statement_name = Name::from("statement");
         let portal_name = Name::from("portal");
@@ -779,9 +780,7 @@ mod tests {
     pub fn add_and_close_portals() {
         log::init(LogConfig::default());
 
-        let schema = Arc::new(Schema::new("public"));
-
-        let mut context = Context::new_for_test(1, schema);
+        let mut context = create_context();
 
         // Create multiple statements
         let statement_name_1 = Name::from("statement_1");
@@ -829,9 +828,7 @@ mod tests {
     pub fn pipeline_execution() {
         log::init(LogConfig::default());
 
-        let schema = Arc::new(Schema::new("public"));
-
-        let mut context = Context::new_for_test(1, schema);
+        let mut context = create_context();
 
         let statement_name_1 = Name::from("statement_1");
         let portal_name_1 = Name::unnamed();
@@ -902,8 +899,7 @@ mod tests {
     pub fn disable_mapping() {
         log::init(LogConfig::default());
 
-        let schema = Arc::new(Schema::new("public"));
-        let mut context = Context::new_for_test(1, schema);
+        let mut context = create_context();
 
         let sql = "SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING = true";
         let statement = parse_statement(sql);
@@ -940,8 +936,6 @@ mod tests {
     pub fn set_keyset_id() {
         log::init(LogConfig::default());
 
-        let schema = Arc::new(Schema::new("public"));
-
         let uuid = Uuid::parse_str("7d4cbd7f-ba0d-4985-9ed2-ebe2ffe77590").unwrap();
 
         let identifier = KeysetIdentifier(IdentifiedBy::Uuid(uuid));
@@ -953,7 +947,7 @@ mod tests {
         ];
 
         for s in sql {
-            let mut context = Context::new_for_test(1, schema.clone());
+            let mut context = create_context();
             assert!(context.keyset_identifier().is_none());
 
             let statement = parse_statement(s);
@@ -972,8 +966,7 @@ mod tests {
     pub fn set_keyset_id_error_handling() {
         log::init(LogConfig::default());
 
-        let schema = Arc::new(Schema::new("public"));
-        let mut context = Context::new_for_test(1, schema);
+        let mut context = create_context();
 
         // Returns OK if unknown command
         let sql = "SET CIPHERSTASH.BLAH = 'keyset_id'";
@@ -1008,8 +1001,6 @@ mod tests {
     pub fn set_keyset_name() {
         log::init(LogConfig::default());
 
-        let schema = Arc::new(Schema::new("public"));
-
         let sql = vec![
             "SET CIPHERSTASH.KEYSET_NAME = 'test-keyset'",
             "SET SESSION CIPHERSTASH.KEYSET_NAME = 'test-keyset'",
@@ -1017,7 +1008,7 @@ mod tests {
         ];
 
         for s in sql {
-            let mut context = Context::new_for_test(1, schema.clone());
+            let mut context = create_context();
             assert!(context.keyset_identifier().is_none());
 
             let statement = parse_statement(s);
@@ -1037,8 +1028,7 @@ mod tests {
     pub fn set_keyset_name_error_handling() {
         log::init(LogConfig::default());
 
-        let schema = Arc::new(Schema::new("public"));
-        let mut context = Context::new_for_test(1, schema);
+        let mut context = create_context();
 
         // Returns OK if unknown command
         let sql = "SET CIPHERSTASH.BLAH = 'keyset_name'";
@@ -1074,10 +1064,8 @@ mod tests {
     pub fn set_keyset_supports_numbers() {
         log::init(LogConfig::default());
 
-        let schema = Arc::new(Schema::new("public"));
-
         // Test keyset name with number
-        let mut context = Context::new_for_test(1, schema.clone());
+        let mut context = create_context();
         let sql = "SET CIPHERSTASH.KEYSET_NAME = 12345";
         let statement = parse_statement(sql);
 
@@ -1088,7 +1076,7 @@ mod tests {
         assert_eq!(Some(identifier.clone()), context.keyset_identifier());
 
         // Test keyset id with numeric UUID (should work if it's a valid UUID)
-        let mut context = Context::new_for_test(2, schema);
+        let mut context = create_context();
         // This will fail because 123 is not a valid UUID, but it shows the number is processed
         let sql = "SET CIPHERSTASH.KEYSET_ID = 123";
         let statement = parse_statement(sql);
@@ -1102,10 +1090,8 @@ mod tests {
     pub fn maybe_set_keyset_unified_function() {
         log::init(LogConfig::default());
 
-        let schema = Arc::new(Schema::new("public"));
-
         // Test that maybe_set_keyset handles both ID and name
-        let mut context = Context::new_for_test(1, schema.clone());
+        let mut context = create_context();
 
         // Test with keyset ID
         let keyset_id_sql = "SET CIPHERSTASH.KEYSET_ID = '7d4cbd7f-ba0d-4985-9ed2-ebe2ffe77590'";
@@ -1121,7 +1107,7 @@ mod tests {
         assert_eq!(Some(identifier.clone()), context.keyset_identifier());
 
         // Test with keyset name
-        let mut context = Context::new_for_test(2, schema.clone());
+        let mut context = create_context();
         let keyset_name_sql = "SET CIPHERSTASH.KEYSET_NAME = 'test-keyset'";
         let statement = parse_statement(keyset_name_sql);
 
@@ -1133,7 +1119,7 @@ mod tests {
         assert_eq!(Some(identifier.clone()), context.keyset_identifier());
 
         // Test with unknown command
-        let mut context = Context::new_for_test(3, schema);
+        let mut context = create_context();
         let unknown_sql = "SET CIPHERSTASH.UNKNOWN = 'value'";
         let statement = parse_statement(unknown_sql);
         let result = context.maybe_set_keyset(&statement);

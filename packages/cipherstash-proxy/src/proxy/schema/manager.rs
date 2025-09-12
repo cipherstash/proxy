@@ -4,7 +4,7 @@ use crate::proxy::{AGGREGATE_QUERY, SCHEMA_QUERY};
 use crate::{connect, log::SCHEMA};
 use arc_swap::ArcSwap;
 use eql_mapper::{self, EqlTraits};
-use eql_mapper::{Column, Schema, Table, TableResolver};
+use eql_mapper::{Column, Schema, Table};
 use sqltk::parser::ast::Ident;
 use std::sync::Arc;
 use std::time::Duration;
@@ -42,10 +42,6 @@ impl SchemaManager {
             }
         };
     }
-
-    pub fn get_table_resolver(&self) -> Arc<TableResolver> {
-        Arc::new(TableResolver::new_editable(self.load()))
-    }
 }
 
 async fn init_reloader(config: DatabaseConfig) -> Result<SchemaManager, Error> {
@@ -75,7 +71,7 @@ async fn init_reloader(config: DatabaseConfig) -> Result<SchemaManager, Error> {
                 }
                 Err(err) => {
                     warn!(
-                        msg = "Error loading Encrypt configuration",
+                        msg = "Error loading database schema",
                         error = err.to_string()
                     );
                 }
@@ -147,7 +143,6 @@ pub async fn load_schema(config: &DatabaseConfig) -> Result<Schema, Error> {
                 Some("eql_v2_encrypted") => {
                     debug!(target: SCHEMA, msg = "eql_v2_encrypted column", table = table_name, column = col);
 
-                    // TODO - map config to the set of implemented traits
                     let eql_traits =  EqlTraits::all();
                     Column::eql(ident, eql_traits)
                 }

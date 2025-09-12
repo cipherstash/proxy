@@ -10,7 +10,7 @@ use super::parser::SqlParser;
 use super::protocol::{self};
 use crate::connect::Sender;
 use crate::error::{EncryptError, Error, MappingError};
-use crate::log::{CONTEXT, MAPPER, PROTOCOL};
+use crate::log::{MAPPER, PROTOCOL};
 use crate::postgresql::context::column::Column;
 use crate::postgresql::context::Portal;
 use crate::postgresql::data::literal_from_sql;
@@ -24,6 +24,7 @@ use crate::prometheus::{
     STATEMENTS_ENCRYPTED_TOTAL, STATEMENTS_PASSTHROUGH_MAPPING_DISABLED_TOTAL,
     STATEMENTS_PASSTHROUGH_TOTAL, STATEMENTS_UNMAPPABLE_TOTAL,
 };
+use crate::proxy::EncryptionService;
 use crate::EqlEncrypted;
 use bytes::BytesMut;
 use cipherstash_client::encryption::Plaintext;
@@ -82,10 +83,11 @@ use tracing::{debug, error, info, warn};
 /// Encryption and mapping errors are converted to appropriate PostgreSQL error responses
 /// and sent back to the client. The frontend maintains error state to properly handle
 /// the PostgreSQL extended query error recovery protocol.
-pub struct Frontend<R, W>
+pub struct Frontend<R, W, S>
 where
     R: AsyncRead + Unpin,
     W: AsyncWrite + Unpin,
+    S: EncryptionService,
 {
     /// Reader for incoming client messages
     client_reader: R,
@@ -94,7 +96,7 @@ where
     /// Writer for forwarding messages to server
     server_writer: W,
     /// Session context tracking statements, portals, and keyset IDs
-    context: Context,
+    context: Context<S>,
     /// Error state flag for extended query protocol error handling
     error_state: Option<ErrorState>,
 }
@@ -102,10 +104,11 @@ where
 #[derive(Debug)]
 struct ErrorState;
 
-impl<R, W> Frontend<R, W>
+impl<R, W, S> Frontend<R, W, S>
 where
     R: AsyncRead + Unpin,
     W: AsyncWrite + Unpin,
+    S: EncryptionService,
 {
     /// Creates a new Frontend instance.
     ///
@@ -119,7 +122,7 @@ where
         client_reader: R,
         client_sender: Sender,
         server_writer: W,
-        context: Context,
+        context: Context<S>,
     ) -> Self {
         Frontend {
             client_reader,
@@ -154,11 +157,10 @@ where
     /// Returns `Ok(())` on successful message processing, or an `Error` if a fatal
     /// error occurs that should terminate the connection.
     pub async fn rewrite(&mut self) -> Result<(), Error> {
-        let connection_timeout = Some(self.context.connection_timeout());
         let (code, mut bytes) = protocol::read_message(
             &mut self.client_reader,
             self.context.client_id,
-            connection_timeout,
+            self.context.connection_timeout(),
         )
         .await?;
 
@@ -525,15 +527,13 @@ where
             return Ok(vec![]);
         }
 
-        let keyset_id = self.context.keyset_identifier();
-
         let plaintexts = literals_to_plaintext(literal_values, literal_columns)?;
 
         let start = Instant::now();
 
         let encrypted = self
             .context
-            .encrypt(keyset_id, plaintexts, literal_columns)
+            .encrypt(plaintexts, literal_columns)
             .await
             .inspect_err(|_| {
                 counter!(ENCRYPTION_ERROR_TOTAL).increment(1);
@@ -925,21 +925,16 @@ where
         bind: &Bind,
         statement: &Statement,
     ) -> Result<Vec<Option<crate::EqlEncrypted>>, Error> {
-        let keyset_id = self.context.keyset_identifier();
         let plaintexts =
             bind.to_plaintext(&statement.param_columns, &statement.postgres_param_types)?;
 
         debug!(target: MAPPER, client_id = self.context.client_id, plaintexts = ?plaintexts);
-        debug!(target: CONTEXT,
-            client_id = self.context.client_id,
-            ?keyset_id,
-        );
 
         let start = Instant::now();
 
         let encrypted = self
             .context
-            .encrypt(keyset_id, plaintexts, &statement.param_columns)
+            .encrypt(plaintexts, &statement.param_columns)
             .await
             .inspect_err(|_| {
                 counter!(ENCRYPTION_ERROR_TOTAL).increment(1);
@@ -1069,10 +1064,11 @@ where
 }
 
 /// Implementation of PostgreSQL error handling for the Frontend component.
-impl<R, W> PostgreSqlErrorHandler for Frontend<R, W>
+impl<R, W, S> PostgreSqlErrorHandler for Frontend<R, W, S>
 where
     R: AsyncRead + Unpin,
     W: AsyncWrite + Unpin,
+    S: EncryptionService,
 {
     fn client_sender(&mut self) -> &mut Sender {
         &mut self.client_sender

@@ -28,7 +28,7 @@ use super::{FrontendCode, Name};
 ///     The name of the prepared statement or portal to describe (an empty string selects the unnamed prepared statement or portal).
 
 #[derive(Debug, Clone)]
-pub(crate) struct Describe {
+pub struct Describe {
     pub target: Target,
     pub name: Name,
 }
