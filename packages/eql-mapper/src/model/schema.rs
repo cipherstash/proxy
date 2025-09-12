@@ -84,7 +84,6 @@ impl Schema {
         S: Into<String>,
     {
         let name = Ident::new(name);
-        // name.quote_style = Some('"');
 
         Self {
             name,

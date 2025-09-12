@@ -81,6 +81,21 @@ impl DatabaseConfig {
         })?;
         Ok(name)
     }
+
+    #[cfg(test)]
+    pub fn for_testing() -> Self {
+        Self {
+            host: Self::default_host(),
+            port: Self::default_port(),
+            name: "test".to_string(),
+            username: "test".to_string(),
+            password: Protected::new("test".to_string()),
+            connection_timeout: None,
+            with_tls_verification: false,
+            config_reload_interval: Self::default_config_reload_interval(),
+            schema_reload_interval: Self::default_schema_reload_interval(),
+        }
+    }
 }
 
 ///

@@ -4,7 +4,6 @@ use super::protocol::StartupCode;
 use crate::connect::ChannelWriter;
 use crate::error::ConfigError;
 use crate::log::{AUTHENTICATION, PROTOCOL};
-use crate::postgresql::context::Context;
 use crate::postgresql::messages::authentication::auth::{AuthenticationMethod, SaslMechanism};
 use crate::postgresql::messages::authentication::sasl::SASLResponse;
 use crate::postgresql::messages::authentication::{
@@ -12,10 +11,11 @@ use crate::postgresql::messages::authentication::{
 };
 use crate::postgresql::messages::error_response::ErrorResponse;
 use crate::postgresql::{protocol, startup};
+use crate::proxy::ZeroKms;
 use crate::{
     connect::AsyncStream,
     error::{Error, ProtocolError},
-    proxy::Proxy,
+    postgresql::context::Context,
     tls,
 };
 use bytes::BytesMut;
@@ -52,33 +52,27 @@ use tracing::{debug, error, info, warn};
 ///         Propagate and continue
 ///
 ///
-pub async fn handler(
-    client_stream: AsyncStream,
-    proxy: Proxy,
-    client_id: i32,
-) -> Result<(), Error> {
+pub async fn handler(client_stream: AsyncStream, context: Context<ZeroKms>) -> Result<(), Error> {
     let mut client_stream = client_stream;
+    let client_id = context.client_id;
 
     // Connect to the database server, using TLS if configured
-    let stream = AsyncStream::connect(&proxy.config.database.to_socket_address()).await?;
-    let mut database_stream = startup::with_tls(stream, &proxy.config).await?;
+    let stream = AsyncStream::connect(&context.database_socket_address()).await?;
+    let mut database_stream = startup::with_tls(stream, context.config()).await?;
     info!(
         msg = "Client connected",
-        database = proxy.config.database.to_socket_address(),
+        database = context.database_socket_address(),
         client_id = client_id,
     );
 
     loop {
-        let startup_message = startup::read_message(
-            &mut client_stream,
-            proxy.config.database.connection_timeout(),
-        )
-        .await?;
+        let startup_message =
+            startup::read_message(&mut client_stream, context.connection_timeout()).await?;
 
         match &startup_message.code {
             StartupCode::SSLRequest => {
-                startup::send_ssl_response(&proxy, &mut client_stream).await?;
-                if let Some(ref tls) = proxy.config.tls {
+                startup::send_ssl_response(&mut client_stream, context.use_tls()).await?;
+                if let Some(ref tls) = context.tls_config() {
                     match client_stream {
                         AsyncStream::Tcp(stream) => {
                             // The Client is connecting to our Server
@@ -112,8 +106,8 @@ pub async fn handler(
     {
         let salt = generate_md5_password_salt();
 
-        let username = proxy.config.database.username.as_bytes();
-        let password = proxy.config.database.password();
+        let username = context.database_username().as_bytes();
+        let password = context.database_password();
 
         let password = password.as_bytes();
 
@@ -123,7 +117,7 @@ pub async fn handler(
         let bytes = BytesMut::try_from(message)?;
         client_stream.write_all(&bytes).await?;
 
-        let connection_timeout = proxy.config.database.connection_timeout();
+        let connection_timeout = context.connection_timeout();
         let (_code, bytes) =
             protocol::read_message(&mut client_stream, client_id, connection_timeout).await?;
 
@@ -161,15 +155,15 @@ pub async fn handler(
         }
         AuthenticationMethod::AuthenticationCleartextPassword => {
             debug!(target: AUTHENTICATION, msg = "AuthenticationCleartextPassword");
-            let password = proxy.config.database.password();
+            let password = context.database_password();
             let message = PasswordMessage::new(password);
             let bytes = BytesMut::try_from(message)?;
             database_stream.write_all(&bytes).await?;
         }
         AuthenticationMethod::Md5Password { salt } => {
             debug!(target: AUTHENTICATION, msg = "Md5Password");
-            let username = proxy.config.database.username.as_bytes();
-            let password = proxy.config.database.password();
+            let username = context.database_username().as_bytes();
+            let password = context.database_password();
             let password = password.as_bytes();
 
             let hash = md5_hash(username, password, salt);
@@ -186,7 +180,7 @@ pub async fn handler(
             // If we are connected via TLS, we can support SCRAM-SHA-256-PLUS
             // If we are not connected via TLS, the database won't ask for SCRAM-SHA-256-PLUS
             let channel_binding = database_stream.channel_binding();
-            let password = proxy.config.database.password();
+            let password = context.database_password();
             let password = password.as_bytes();
             scram_sha_256_plus_handler(&mut database_stream, mechanism, password, channel_binding)
                 .await?;
@@ -204,7 +198,7 @@ pub async fn handler(
         }
     }
 
-    if proxy.config.server.require_tls && !client_stream.is_tls() {
+    if context.require_tls() && !client_stream.is_tls() {
         let message = ErrorResponse::tls_required();
         let bytes = BytesMut::try_from(message)?;
         client_stream.write_all(&bytes).await?;
@@ -218,25 +212,16 @@ pub async fn handler(
 
     let channel_writer = ChannelWriter::new(client_writer, client_id);
 
-    let schema = proxy.schema.load();
-    let context = Context::new(client_id, schema);
-
     let mut frontend = Frontend::new(
         client_reader,
         channel_writer.sender(),
         server_writer,
-        proxy.clone(),
         context.clone(),
     );
-    let mut backend = Backend::new(
-        channel_writer.sender(),
-        server_reader,
-        proxy.clone(),
-        context.clone(),
-    );
+    let mut backend = Backend::new(channel_writer.sender(), server_reader, context.clone());
 
-    if proxy.is_passthrough() {
-        if proxy.config.use_structured_logging() {
+    if context.is_passthrough() {
+        if context.use_structured_logging() {
             warn!(msg = "RUNNING IN PASSTHROUGH MODE");
             warn!(msg = "DATA IS NOT PROTECTED WITH ENCRYPTION");
         } else {

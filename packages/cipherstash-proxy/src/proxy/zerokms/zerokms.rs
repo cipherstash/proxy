@@ -5,6 +5,7 @@ use crate::{
     log::{ENCRYPT, PROXY},
     postgresql::{Column, KeysetIdentifier},
     prometheus::{KEYSET_CIPHER_CACHE_HITS_TOTAL, KEYSET_CIPHER_INIT_TOTAL},
+    proxy::EncryptionService,
 };
 use cipherstash_client::{
     encryption::QueryOp,
@@ -14,6 +15,7 @@ use metrics::counter;
 use moka::future::Cache;
 use std::{sync::Arc, time::Duration};
 use tracing::{debug, info, warn};
+use uuid::Uuid;
 
 use super::{
     init_zerokms_client, plaintext_type_name, to_eql_encrypted, to_eql_encrypted_from_index_term,
@@ -25,6 +27,7 @@ const SCOPED_CIPHER_SIZE: usize = std::mem::size_of::<ScopedCipher>();
 
 #[derive(Clone)]
 pub struct ZeroKms {
+    default_keyset_id: Option<Uuid>,
     zerokms_client: Arc<ZerokmsClient>,
     cipher_cache: Cache<String, Arc<ScopedCipher>>,
 }
@@ -43,7 +46,10 @@ impl ZeroKms {
             .time_to_live(Duration::from_secs(config.server.cipher_cache_ttl_seconds))
             .build();
 
+        let default_keyset_id = config.encrypt.default_keyset_id;
+
         Ok(ZeroKms {
+            default_keyset_id,
             zerokms_client: Arc::new(zerokms_client),
             cipher_cache,
         })
@@ -118,21 +124,23 @@ impl ZeroKms {
             }
         }
     }
+}
 
+#[async_trait::async_trait]
+impl EncryptionService for ZeroKms {
     ///
     /// Encrypt `Plaintexts` using the `Column` configuration
     ///
-    pub async fn encrypt(
+    async fn encrypt(
         &self,
         keyset_id: Option<KeysetIdentifier>,
         plaintexts: Vec<Option<Plaintext>>,
         columns: &[Option<Column>],
-        default_keyset_id: Option<uuid::Uuid>,
     ) -> Result<Vec<Option<eql::EqlEncrypted>>, Error> {
-        debug!(target: ENCRYPT, msg="Encrypt", ?keyset_id, ?default_keyset_id);
+        debug!(target: ENCRYPT, msg="Encrypt", ?keyset_id, default_keyset_id = ?self.default_keyset_id);
 
         // A keyset is required if no default keyset has been configured
-        if default_keyset_id.is_none() && keyset_id.is_none() {
+        if self.default_keyset_id.is_none() && keyset_id.is_none() {
             return Err(EncryptError::MissingKeysetIdentifier.into());
         }
 
@@ -200,17 +208,17 @@ impl ZeroKms {
     ///
     /// Database values are stored as `eql::Ciphertext`
     ///
-    pub async fn decrypt(
+    async fn decrypt(
         &self,
         keyset_id: Option<KeysetIdentifier>,
         ciphertexts: Vec<Option<eql::EqlEncrypted>>,
-        default_keyset_id: Option<uuid::Uuid>,
     ) -> Result<Vec<Option<Plaintext>>, Error> {
+        debug!(target: ENCRYPT, msg="Decrypt", ?keyset_id, default_keyset_id = ?self.default_keyset_id);
+
         // A keyset is required if no default keyset has been configured
-        if default_keyset_id.is_none() && keyset_id.is_none() {
+        if self.default_keyset_id.is_none() && keyset_id.is_none() {
             return Err(EncryptError::MissingKeysetIdentifier.into());
         }
-        debug!(target: ENCRYPT, msg="Decrypt", ?keyset_id, ?default_keyset_id);
 
         let cipher = self.init_cipher(keyset_id.clone()).await?;
 

@@ -82,7 +82,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             },
             _ = sighup() => {
                 info!(msg = "Received SIGHUP. Reloading configuration");
-                (listener, proxy) = reload_config(listener, &args, proxy).await;
+                (listener, proxy) = match reload_config(listener, &args).await {
+                    Ok((listener, proxy)) => (listener, proxy),
+                    Err(_) => todo!(),
+                };
+
                 info!(msg = "Reloaded configuration");
             },
             _ = sigterm() => {
@@ -91,16 +95,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             },
             Ok(client_stream) = AsyncStream::accept(&listener) => {
 
-                    let proxy = proxy.clone();
-
                     client_id += 1;
 
+                    let context = proxy.context(client_id);
+
                     tracker.spawn(async move {
-                        let proxy = proxy.clone();
 
                         gauge!(CLIENTS_ACTIVE_CONNECTIONS).increment(1);
 
-                        match pg::handler(client_stream, proxy, client_id).await {
+                        match pg::handler(client_stream,context).await {
                             Ok(_) => (),
                             Err(err) => {
 
@@ -261,7 +264,7 @@ async fn sighup() -> std::io::Result<()> {
     Ok(())
 }
 
-async fn reload_config(listener: TcpListener, args: &Args, proxy: Proxy) -> (TcpListener, Proxy) {
+async fn reload_config(listener: TcpListener, args: &Args) -> Result<(TcpListener, Proxy), Error> {
     let new_config = match TandemConfig::load(args) {
         Ok(config) => config,
         Err(err) => {
@@ -269,7 +272,7 @@ async fn reload_config(listener: TcpListener, args: &Args, proxy: Proxy) -> (Tcp
                 msg = "Configuration could not be reloaded: {}",
                 error = err.to_string()
             );
-            return (listener, proxy);
+            return Err(err);
         }
     };
 
@@ -278,8 +281,8 @@ async fn reload_config(listener: TcpListener, args: &Args, proxy: Proxy) -> (Tcp
     // Explicit drop needed here to free the network resources before binding if using the same address & port
     std::mem::drop(listener);
 
-    (
+    Ok((
         connect::bind_with_retry(&new_proxy.config.server).await,
         new_proxy,
-    )
+    ))
 }
