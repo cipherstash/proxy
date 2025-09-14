@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1757656402918,
+  "lastUpdate": 1757892191980,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -14795,6 +14795,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 27.09142,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "toby@cipherstash.com",
+            "name": "Toby Hede",
+            "username": "tobyhede"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "f5d53294914f652f3d7943f108b8de39f3fae24e",
+          "message": "Merge pull request #326 from cipherstash/proxy-env-update\n\ndocs: connecting proxy to non-production environment",
+          "timestamp": "2025-09-15T09:19:53+10:00",
+          "tree_id": "5a6ec775db4b3c0448e64a2cc8b51bf7b29efc87",
+          "url": "https://github.com/cipherstash/proxy/commit/f5d53294914f652f3d7943f108b8de39f3fae24e"
+        },
+        "date": 1757892190495,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 24.925134,
             "unit": "Number"
           }
         ]
