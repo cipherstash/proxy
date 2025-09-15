@@ -9,7 +9,8 @@ use crate::{
 };
 use cipherstash_client::encryption::Plaintext;
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
-use tracing::warn;
+use tokio::sync::oneshot::Sender;
+use tracing::{debug, warn};
 
 mod encrypt_config;
 mod schema;
@@ -22,6 +23,8 @@ pub type ReloadSender = UnboundedSender<ReloadCommand>;
 
 type ReloadReceiver = UnboundedReceiver<ReloadCommand>;
 
+pub type ReloadResponder = Sender<()>;
+
 /// SQL Statement for loading encrypt configuration from database
 const ENCRYPT_CONFIG_QUERY: &str = include_str!("./sql/select_config.sql");
 
@@ -31,10 +34,10 @@ const SCHEMA_QUERY: &str = include_str!("./sql/select_table_schemas.sql");
 /// SQL Statement for loading aggregates as part of database schema
 const AGGREGATE_QUERY: &str = include_str!("./sql/select_aggregates.sql");
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug)]
 pub enum ReloadCommand {
-    DatabaseSchema,
-    EncryptSchema,
+    DatabaseSchema(ReloadResponder),
+    EncryptSchema(ReloadResponder),
 }
 
 ///
@@ -48,7 +51,6 @@ pub struct Proxy {
     pub eql_version: Option<String>,
     zerokms: ZeroKms,
     reload_sender: ReloadSender,
-    reload_receiver: ReloadReceiver,
 }
 
 impl Proxy {
@@ -59,22 +61,27 @@ impl Proxy {
         // Ensures error on start if credential or network issue
         zerokms.init_cipher(None).await?;
 
-        let encrypt_config = EncryptConfigManager::init(&config.database).await?;
+        let encrypt_config_manager = EncryptConfigManager::init(&config.database).await?;
 
-        let schema = SchemaManager::init(&config.database).await?;
+        let schema_manager = SchemaManager::init(&config.database).await?;
 
         let eql_version = Proxy::eql_version(&config).await?;
 
         let (reload_sender, reload_receiver) = mpsc::unbounded_channel();
 
+        Proxy::receive(
+            reload_receiver,
+            schema_manager.clone(),
+            encrypt_config_manager.clone(),
+        );
+
         Ok(Proxy {
             config: Arc::new(config),
             zerokms,
-            encrypt_config_manager: encrypt_config,
-            schema_manager: schema,
+            encrypt_config_manager,
+            schema_manager,
             eql_version,
             reload_sender,
-            reload_receiver,
         })
     }
 
@@ -97,13 +104,27 @@ impl Proxy {
         Ok(version)
     }
 
-    pub async fn receive(&mut self) {
-        while let Some(command) = self.reload_receiver.recv().await {
-            match command {
-                ReloadCommand::DatabaseSchema => self.schema_manager.reload().await,
-                ReloadCommand::EncryptSchema => self.encrypt_config_manager.reload().await,
+    pub fn receive(
+        mut reload_receiver: ReloadReceiver,
+        schema_manager: SchemaManager,
+        encrypt_config_manager: EncryptConfigManager,
+    ) {
+        tokio::task::spawn(async move {
+            while let Some(command) = reload_receiver.recv().await {
+                debug!(msg = "ReloadCommand received", ?command);
+                match command {
+                    ReloadCommand::DatabaseSchema(responder) => {
+                        schema_manager.reload().await;
+                        encrypt_config_manager.reload().await;
+                        let _ = responder.send(());
+                    }
+                    ReloadCommand::EncryptSchema(responder) => {
+                        encrypt_config_manager.reload().await;
+                        let _ = responder.send(());
+                    }
+                }
             }
-        }
+        });
     }
 
     ///

@@ -746,10 +746,6 @@ where
         let schema_changed = eql_mapper::collect_ddl(self.context.get_table_resolver(), statement);
 
         if schema_changed {
-            debug!(target: MAPPER,
-                client_id = self.context.client_id,
-                msg = "schema changed"
-            );
             self.context.set_schema_changed();
         }
     }

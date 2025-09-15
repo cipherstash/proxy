@@ -24,6 +24,7 @@ use std::{
     sync::{Arc, LazyLock, RwLock},
     time::{Duration, Instant},
 };
+use tokio::sync::oneshot;
 use tracing::{debug, error, warn};
 use uuid::Uuid;
 
@@ -311,6 +312,10 @@ where
     }
 
     pub fn set_schema_changed(&self) {
+        debug!(target: CONTEXT,
+            client_id = self.client_id,
+            msg = "Schema changed"
+        );
         let _ = self.schema_changed.write().map(|mut guard| *guard = true);
     }
 
@@ -510,8 +515,27 @@ where
     }
 
     pub async fn reload_schema(&self) {
-        match self.reload_sender.send(ReloadCommand::DatabaseSchema) {
-            Ok(_) => self.set_schema_changed(),
+        let (responder, receiver) = oneshot::channel();
+
+        // let _ = self
+        //     .reload_sender
+        //     .send(ReloadCommand::DatabaseSchema(responder))
+        //     .inspect_err(|err| {
+        //         // Error means a fatal internal error in send.
+        //         // No recovery really possible
+        //         // Log because may break subsequent statements and lead to confusion
+        //         error!(
+        //             target: CONTEXT,
+        //             msg = "Database schema could not be reloaded",
+        //             error = err.to_string()
+        //         )
+        //     });
+
+        match self
+            .reload_sender
+            .send(ReloadCommand::DatabaseSchema(responder))
+        {
+            Ok(_) => (),
             Err(err) => {
                 error!(
                     msg = "Database schema could not be reloaded",
@@ -519,6 +543,10 @@ where
                 );
             }
         }
+
+        debug!(target: CONTEXT, msg = "Waiting for schema reload");
+        let response = receiver.await;
+        debug!(target: CONTEXT, msg = "Database schema reloaded", ?response);
     }
 
     pub fn is_passthrough(&self) -> bool {
