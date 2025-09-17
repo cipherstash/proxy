@@ -12,7 +12,6 @@ use crate::{
     error::{Error, ProtocolError},
     log::PROTOCOL,
     postgresql::{SSL_REQUEST, SSL_RESPONSE_NO, SSL_RESPONSE_YES},
-    proxy::Proxy,
     tls, TandemConfig, SIZE_I32,
 };
 
@@ -151,13 +150,10 @@ pub async fn send_ssl_request<T: AsyncRead + AsyncWrite + Unpin>(
 /// The SSLResponse MUST come before the TLS handshake
 ///
 pub async fn send_ssl_response<T: AsyncWrite + Unpin>(
-    proxy: &Proxy,
     stream: &mut T,
+    tls: bool,
 ) -> Result<(), Error> {
-    let response = match proxy.config.tls {
-        Some(_) => b'S',
-        None => b'N',
-    };
+    let response = if tls { b'S' } else { b'N' };
 
     debug!(target: PROTOCOL, msg = "SSLResponse to Client", SSLResponse = ?response);
 

@@ -71,7 +71,7 @@ async fn init_reloader(config: DatabaseConfig) -> Result<SchemaManager, Error> {
                 }
                 Err(err) => {
                     warn!(
-                        msg = "Error loading Encrypt configuration",
+                        msg = "Error loading database schema",
                         error = err.to_string()
                     );
                 }
@@ -143,7 +143,6 @@ pub async fn load_schema(config: &DatabaseConfig) -> Result<Schema, Error> {
                 Some("eql_v2_encrypted") => {
                     debug!(target: SCHEMA, msg = "eql_v2_encrypted column", table = table_name, column = col);
 
-                    // TODO - map config to the set of implemented traits
                     let eql_traits =  EqlTraits::all();
                     Column::eql(ident, eql_traits)
                 }

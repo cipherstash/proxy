@@ -10,7 +10,7 @@ use crate::{error::TlsConfigError, log::CONFIG};
 /// Server TLS Configuration
 /// This is listener/inbound connection config
 ///
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq)]
 #[serde(untagged)]
 pub enum TlsConfig {
     Pem {

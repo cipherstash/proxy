@@ -1,14 +1,19 @@
 pub mod column;
+pub mod portal;
+pub mod statement;
 
+pub use self::{portal::Portal, statement::Statement};
 use super::{
-    format_code::FormatCode,
+    column_mapper::ColumnMapper,
     messages::{describe::Describe, Name, Target},
     Column,
 };
 use crate::{
+    config::TandemConfig,
     error::{EncryptError, Error},
     log::CONTEXT,
     prometheus::{STATEMENTS_EXECUTION_DURATION_SECONDS, STATEMENTS_SESSION_DURATION_SECONDS},
+    proxy::{EncryptConfig, EncryptionService, ReloadCommand, ReloadSender},
 };
 use cipherstash_client::IdentifiedBy;
 use eql_mapper::{Schema, TableResolver};
@@ -19,7 +24,8 @@ use std::{
     sync::{Arc, LazyLock, RwLock},
     time::{Duration, Instant},
 };
-use tracing::{debug, warn};
+use tokio::sync::oneshot;
+use tracing::{debug, error, warn};
 use uuid::Uuid;
 
 type DescribeQueue = Queue<Describe>;
@@ -36,9 +42,17 @@ impl std::fmt::Display for KeysetIdentifier {
     }
 }
 
-#[derive(Clone, Debug)]
-pub struct Context {
+#[derive(Clone)]
+pub struct Context<T>
+where
+    T: EncryptionService,
+{
     pub client_id: i32,
+    config: Arc<TandemConfig>,
+    encrypt_config: Arc<EncryptConfig>,
+    encryption: T,
+    reload_sender: ReloadSender,
+    column_mapper: ColumnMapper,
     statements: Arc<RwLock<HashMap<Name, Arc<Statement>>>>,
     portals: Arc<RwLock<HashMap<Name, PortalQueue>>>,
     describe: Arc<RwLock<DescribeQueue>>,
@@ -91,28 +105,20 @@ pub struct Queue<T> {
     pub queue: VecDeque<T>,
 }
 
-///
-/// Type Analysed parameters and projection
-///
-#[derive(Debug, Clone, PartialEq)]
-pub struct Statement {
-    pub param_columns: Vec<Option<Column>>,
-    pub projection_columns: Vec<Option<Column>>,
-    pub literal_columns: Vec<Option<Column>>,
-    pub postgres_param_types: Vec<i32>,
-}
+impl<T> Context<T>
+where
+    T: EncryptionService,
+{
+    pub fn new(
+        client_id: i32,
+        config: Arc<TandemConfig>,
+        encrypt_config: Arc<EncryptConfig>,
+        schema: Arc<Schema>,
+        encryption: T,
+        reload_sender: ReloadSender,
+    ) -> Context<T> {
+        let column_mapper = ColumnMapper::new(encrypt_config.clone());
 
-#[derive(Clone, Debug)]
-pub enum Portal {
-    Encrypted {
-        format_codes: Vec<FormatCode>,
-        statement: Arc<Statement>,
-    },
-    Passthrough,
-}
-
-impl Context {
-    pub fn new(client_id: i32, schema: Arc<Schema>) -> Context {
         Context {
             statements: Arc::new(RwLock::new(HashMap::new())),
             portals: Arc::new(RwLock::new(HashMap::new())),
@@ -122,6 +128,11 @@ impl Context {
             session_metrics: Arc::new(RwLock::from(Queue::new())),
             table_resolver: Arc::new(TableResolver::new_editable(schema)),
             client_id,
+            config,
+            encrypt_config,
+            column_mapper,
+            encryption,
+            reload_sender,
             unsafe_disable_mapping: false,
             keyset_id: Arc::new(RwLock::new(None)),
         }
@@ -301,6 +312,10 @@ impl Context {
     }
 
     pub fn set_schema_changed(&self) {
+        debug!(target: CONTEXT,
+            client_id = self.client_id,
+            msg = "Schema changed"
+        );
         let _ = self.schema_changed.write().map(|mut guard| *guard = true);
     }
 
@@ -477,37 +492,133 @@ impl Context {
     pub fn keyset_identifier(&self) -> Option<KeysetIdentifier> {
         self.keyset_id.read().ok().and_then(|k| k.clone())
     }
-}
 
-impl Statement {
-    pub fn new(
-        param_columns: Vec<Option<Column>>,
-        projection_columns: Vec<Option<Column>>,
-        literal_columns: Vec<Option<Column>>,
-        postgres_param_types: Vec<i32>,
-    ) -> Statement {
-        Statement {
-            param_columns,
-            projection_columns,
-            literal_columns,
-            postgres_param_types,
+    // Service delegation methods
+    pub async fn encrypt(
+        &self,
+        plaintexts: Vec<Option<cipherstash_client::encryption::Plaintext>>,
+        columns: &[Option<Column>],
+    ) -> Result<Vec<Option<crate::EqlEncrypted>>, Error> {
+        let keyset_id = self.keyset_identifier();
+
+        self.encryption
+            .encrypt(keyset_id, plaintexts, columns)
+            .await
+    }
+
+    pub async fn decrypt(
+        &self,
+        ciphertexts: Vec<Option<crate::EqlEncrypted>>,
+    ) -> Result<Vec<Option<cipherstash_client::encryption::Plaintext>>, Error> {
+        let keyset_id = self.keyset_identifier();
+        self.encryption.decrypt(keyset_id, ciphertexts).await
+    }
+
+    pub async fn reload_schema(&self) {
+        let (responder, receiver) = oneshot::channel();
+        match self
+            .reload_sender
+            .send(ReloadCommand::DatabaseSchema(responder))
+        {
+            Ok(_) => (),
+            Err(err) => {
+                error!(
+                    msg = "Database schema could not be reloaded",
+                    error = err.to_string()
+                );
+            }
         }
+
+        debug!(target: CONTEXT, msg = "Waiting for schema reload");
+        let response = receiver.await;
+        debug!(target: CONTEXT, msg = "Database schema reloaded", ?response);
     }
 
-    pub fn unencryped() -> Statement {
-        Statement::new(vec![], vec![], vec![], vec![])
+    pub fn is_passthrough(&self) -> bool {
+        self.encrypt_config.is_empty() || self.config.mapping_disabled()
     }
 
-    pub fn has_literals(&self) -> bool {
-        !self.literal_columns.is_empty()
+    // Column processing delegation methods
+    pub fn get_projection_columns(
+        &self,
+        typed_statement: &eql_mapper::TypeCheckedStatement<'_>,
+    ) -> Result<Vec<Option<Column>>, Error> {
+        self.column_mapper.get_projection_columns(typed_statement)
     }
 
-    pub fn has_params(&self) -> bool {
-        !self.param_columns.is_empty()
+    pub fn get_param_columns(
+        &self,
+        typed_statement: &eql_mapper::TypeCheckedStatement<'_>,
+    ) -> Result<Vec<Option<Column>>, Error> {
+        self.column_mapper.get_param_columns(typed_statement)
     }
 
-    pub fn has_projection(&self) -> bool {
-        !self.projection_columns.is_empty()
+    pub fn get_literal_columns(
+        &self,
+        typed_statement: &eql_mapper::TypeCheckedStatement<'_>,
+    ) -> Result<Vec<Option<Column>>, Error> {
+        self.column_mapper.get_literal_columns(typed_statement)
+    }
+
+    // Direct config access methods
+    pub fn connection_timeout(&self) -> Option<std::time::Duration> {
+        self.config.database.connection_timeout()
+    }
+
+    pub fn mapping_disabled(&self) -> bool {
+        self.config.mapping_disabled()
+    }
+
+    pub fn mapping_errors_enabled(&self) -> bool {
+        self.config.mapping_errors_enabled()
+    }
+
+    pub fn prometheus_enabled(&self) -> bool {
+        self.config.prometheus_enabled()
+    }
+
+    pub fn default_keyset_id(&self) -> Option<KeysetIdentifier> {
+        self.config
+            .encrypt
+            .default_keyset_id
+            .map(|uuid| KeysetIdentifier(IdentifiedBy::Uuid(uuid)))
+    }
+
+    // Additional config access methods for handler
+    pub fn database_socket_address(&self) -> String {
+        self.config.database.to_socket_address()
+    }
+
+    pub fn database_username(&self) -> &str {
+        &self.config.database.username
+    }
+
+    pub fn database_password(&self) -> String {
+        self.config.database.password()
+    }
+
+    pub fn tls_config(&self) -> &Option<crate::config::TlsConfig> {
+        &self.config.tls
+    }
+
+    pub fn use_tls(&self) -> bool {
+        self.config.tls.is_some()
+    }
+
+    pub fn require_tls(&self) -> bool {
+        self.config.server.require_tls
+    }
+
+    pub fn use_structured_logging(&self) -> bool {
+        self.config.use_structured_logging()
+    }
+
+    pub fn database_tls_disabled(&self) -> bool {
+        self.config.database_tls_disabled()
+    }
+
+    pub fn config(&self) -> &crate::config::TandemConfig {
+        &self.config
     }
 }
 
@@ -531,75 +642,68 @@ impl<T> Queue<T> {
     }
 }
 
-impl Portal {
-    pub fn encrypted_with_format_codes(
-        statement: Arc<Statement>,
-        format_codes: Vec<FormatCode>,
-    ) -> Portal {
-        Portal::Encrypted {
-            statement,
-            format_codes,
-        }
-    }
-
-    pub fn encrypted(statement: Arc<Statement>) -> Portal {
-        let format_codes = vec![];
-        Portal::Encrypted {
-            statement,
-            format_codes,
-        }
-    }
-
-    pub fn passthrough() -> Portal {
-        Portal::Passthrough
-    }
-
-    pub fn projection_columns(&self) -> &Vec<Option<Column>> {
-        static EMPTY: Vec<Option<Column>> = vec![];
-        match self {
-            Portal::Encrypted { statement, .. } => &statement.projection_columns,
-            _ => &EMPTY,
-        }
-    }
-
-    // FormatCodes should not be None at this point
-    // FormatCodes will be:
-    //  - empty, in which case assume Text
-    //  - single value, in which case use this for all columns
-    //  - multiple values, in which case use the value for each column
-    pub fn format_codes(&self, row_len: usize) -> Vec<FormatCode> {
-        match self {
-            Portal::Encrypted { format_codes, .. } => match format_codes.len() {
-                0 => vec![FormatCode::Text; row_len],
-                1 => {
-                    let format_code = match format_codes.first() {
-                        Some(code) => *code,
-                        None => FormatCode::Text,
-                    };
-                    vec![format_code; row_len]
-                }
-                _ => format_codes.clone(),
-            },
-            Portal::Passthrough => {
-                unreachable!()
-            }
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::{Context, Describe, KeysetIdentifier, Portal, Statement};
     use crate::{
         config::LogConfig,
+        error::Error,
         log,
-        postgresql::messages::{Name, Target},
+        postgresql::{
+            messages::{Name, Target},
+            Column,
+        },
+        proxy::{EncryptConfig, EncryptionService},
+        TandemConfig,
     };
     use cipherstash_client::IdentifiedBy;
     use eql_mapper::Schema;
     use sqltk::parser::{dialect::PostgreSqlDialect, parser::Parser};
     use std::sync::Arc;
+    use tokio::sync::mpsc;
     use uuid::Uuid;
+
+    struct TestService {}
+
+    #[async_trait::async_trait]
+    impl EncryptionService for TestService {
+        async fn encrypt(
+            &self,
+            _keyset_id: Option<KeysetIdentifier>,
+            _plaintexts: Vec<Option<cipherstash_client::encryption::Plaintext>>,
+            _columns: &[Option<Column>],
+        ) -> Result<Vec<Option<crate::EqlEncrypted>>, Error> {
+            Ok(vec![])
+        }
+
+        async fn decrypt(
+            &self,
+            _keyset_id: Option<KeysetIdentifier>,
+            _ciphertexts: Vec<Option<crate::EqlEncrypted>>,
+        ) -> Result<Vec<Option<cipherstash_client::encryption::Plaintext>>, Error> {
+            Ok(vec![])
+        }
+    }
+
+    fn create_context() -> Context<TestService> {
+        let client_id = 1;
+        let config = Arc::new(TandemConfig::for_testing());
+        let encrypt_config = Arc::new(EncryptConfig::default());
+        let schema = Arc::new(Schema::new("public"));
+
+        let (reload_sender, _reload_receiver) = mpsc::unbounded_channel();
+
+        let service = TestService {};
+
+        Context::new(
+            client_id,
+            config,
+            encrypt_config,
+            schema,
+            service,
+            reload_sender,
+        )
+    }
 
     fn statement() -> Statement {
         Statement {
@@ -627,9 +731,7 @@ mod tests {
     pub fn get_statement_from_describe() {
         log::init(LogConfig::default());
 
-        let schema = Arc::new(Schema::new("public"));
-
-        let mut context = Context::new(1, schema);
+        let mut context = create_context();
 
         let name = Name::from("name");
 
@@ -652,9 +754,7 @@ mod tests {
     pub fn execution_flow() {
         log::init(LogConfig::default());
 
-        let schema = Arc::new(Schema::new("public"));
-
-        let mut context = Context::new(1, schema);
+        let mut context = create_context();
 
         let statement_name = Name::from("statement");
         let portal_name = Name::from("portal");
@@ -693,9 +793,7 @@ mod tests {
     pub fn add_and_close_portals() {
         log::init(LogConfig::default());
 
-        let schema = Arc::new(Schema::new("public"));
-
-        let mut context = Context::new(1, schema);
+        let mut context = create_context();
 
         // Create multiple statements
         let statement_name_1 = Name::from("statement_1");
@@ -743,9 +841,7 @@ mod tests {
     pub fn pipeline_execution() {
         log::init(LogConfig::default());
 
-        let schema = Arc::new(Schema::new("public"));
-
-        let mut context = Context::new(1, schema);
+        let mut context = create_context();
 
         let statement_name_1 = Name::from("statement_1");
         let portal_name_1 = Name::unnamed();
@@ -816,8 +912,7 @@ mod tests {
     pub fn disable_mapping() {
         log::init(LogConfig::default());
 
-        let schema = Arc::new(Schema::new("public"));
-        let mut context = Context::new(1, schema);
+        let mut context = create_context();
 
         let sql = "SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING = true";
         let statement = parse_statement(sql);
@@ -854,8 +949,6 @@ mod tests {
     pub fn set_keyset_id() {
         log::init(LogConfig::default());
 
-        let schema = Arc::new(Schema::new("public"));
-
         let uuid = Uuid::parse_str("7d4cbd7f-ba0d-4985-9ed2-ebe2ffe77590").unwrap();
 
         let identifier = KeysetIdentifier(IdentifiedBy::Uuid(uuid));
@@ -867,7 +960,7 @@ mod tests {
         ];
 
         for s in sql {
-            let mut context = Context::new(1, schema.clone());
+            let mut context = create_context();
             assert!(context.keyset_identifier().is_none());
 
             let statement = parse_statement(s);
@@ -886,8 +979,7 @@ mod tests {
     pub fn set_keyset_id_error_handling() {
         log::init(LogConfig::default());
 
-        let schema = Arc::new(Schema::new("public"));
-        let mut context = Context::new(1, schema);
+        let mut context = create_context();
 
         // Returns OK if unknown command
         let sql = "SET CIPHERSTASH.BLAH = 'keyset_id'";
@@ -922,8 +1014,6 @@ mod tests {
     pub fn set_keyset_name() {
         log::init(LogConfig::default());
 
-        let schema = Arc::new(Schema::new("public"));
-
         let sql = vec![
             "SET CIPHERSTASH.KEYSET_NAME = 'test-keyset'",
             "SET SESSION CIPHERSTASH.KEYSET_NAME = 'test-keyset'",
@@ -931,7 +1021,7 @@ mod tests {
         ];
 
         for s in sql {
-            let mut context = Context::new(1, schema.clone());
+            let mut context = create_context();
             assert!(context.keyset_identifier().is_none());
 
             let statement = parse_statement(s);
@@ -951,8 +1041,7 @@ mod tests {
     pub fn set_keyset_name_error_handling() {
         log::init(LogConfig::default());
 
-        let schema = Arc::new(Schema::new("public"));
-        let mut context = Context::new(1, schema);
+        let mut context = create_context();
 
         // Returns OK if unknown command
         let sql = "SET CIPHERSTASH.BLAH = 'keyset_name'";
@@ -988,10 +1077,8 @@ mod tests {
     pub fn set_keyset_supports_numbers() {
         log::init(LogConfig::default());
 
-        let schema = Arc::new(Schema::new("public"));
-
         // Test keyset name with number
-        let mut context = Context::new(1, schema.clone());
+        let mut context = create_context();
         let sql = "SET CIPHERSTASH.KEYSET_NAME = 12345";
         let statement = parse_statement(sql);
 
@@ -1002,7 +1089,7 @@ mod tests {
         assert_eq!(Some(identifier.clone()), context.keyset_identifier());
 
         // Test keyset id with numeric UUID (should work if it's a valid UUID)
-        let mut context = Context::new(2, schema);
+        let mut context = create_context();
         // This will fail because 123 is not a valid UUID, but it shows the number is processed
         let sql = "SET CIPHERSTASH.KEYSET_ID = 123";
         let statement = parse_statement(sql);
@@ -1016,10 +1103,8 @@ mod tests {
     pub fn maybe_set_keyset_unified_function() {
         log::init(LogConfig::default());
 
-        let schema = Arc::new(Schema::new("public"));
-
         // Test that maybe_set_keyset handles both ID and name
-        let mut context = Context::new(1, schema.clone());
+        let mut context = create_context();
 
         // Test with keyset ID
         let keyset_id_sql = "SET CIPHERSTASH.KEYSET_ID = '7d4cbd7f-ba0d-4985-9ed2-ebe2ffe77590'";
@@ -1035,7 +1120,7 @@ mod tests {
         assert_eq!(Some(identifier.clone()), context.keyset_identifier());
 
         // Test with keyset name
-        let mut context = Context::new(2, schema.clone());
+        let mut context = create_context();
         let keyset_name_sql = "SET CIPHERSTASH.KEYSET_NAME = 'test-keyset'";
         let statement = parse_statement(keyset_name_sql);
 
@@ -1047,7 +1132,7 @@ mod tests {
         assert_eq!(Some(identifier.clone()), context.keyset_identifier());
 
         // Test with unknown command
-        let mut context = Context::new(3, schema);
+        let mut context = create_context();
         let unknown_sql = "SET CIPHERSTASH.UNKNOWN = 'value'";
         let statement = parse_statement(unknown_sql);
         let result = context.maybe_set_keyset(&statement);

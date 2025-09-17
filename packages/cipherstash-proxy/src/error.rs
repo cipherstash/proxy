@@ -176,6 +176,9 @@ pub enum ConfigError {
     #[error("Expected an Encrypt configuration table")]
     MissingEncryptConfigTable,
 
+    #[error("Network configuration change requires restart For help visit {}#config-network-change-requires-restart", ERROR_DOC_BASE_URL)]
+    NetworkConfigurationChangeRequiresRestart,
+
     #[error(transparent)]
     Parse(#[from] serde_json::Error),
 

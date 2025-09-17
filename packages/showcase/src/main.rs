@@ -66,16 +66,17 @@ use crate::{
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    println!("🩺 Healthcare Database Showcase - EQL v2 Searchable Encryption");
+    println!("============================================================");
+
     trace();
     clear().await;
+
     setup_schema().await;
     insert_test_data().await;
     create_enhanced_jsonb_test_data().await;
 
     let client = connect_with_tls(PROXY).await;
-
-    println!("🩺 Healthcare Database Showcase - EQL v2 Searchable Encryption");
-    println!("============================================================");
 
     // Query 1: Get the Aspirin medication ID
     let aspirin_id_sql = "SELECT id FROM medications WHERE name = 'Aspirin';";
