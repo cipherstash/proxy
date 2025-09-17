@@ -26,10 +26,6 @@ impl Statement {
         }
     }
 
-    pub fn unencryped() -> Statement {
-        Statement::new(vec![], vec![], vec![], vec![])
-    }
-
     pub fn has_literals(&self) -> bool {
         !self.literal_columns.is_empty()
     }

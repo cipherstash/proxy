@@ -516,21 +516,6 @@ where
 
     pub async fn reload_schema(&self) {
         let (responder, receiver) = oneshot::channel();
-
-        // let _ = self
-        //     .reload_sender
-        //     .send(ReloadCommand::DatabaseSchema(responder))
-        //     .inspect_err(|err| {
-        //         // Error means a fatal internal error in send.
-        //         // No recovery really possible
-        //         // Log because may break subsequent statements and lead to confusion
-        //         error!(
-        //             target: CONTEXT,
-        //             msg = "Database schema could not be reloaded",
-        //             error = err.to_string()
-        //         )
-        //     });
-
         match self
             .reload_sender
             .send(ReloadCommand::DatabaseSchema(responder))

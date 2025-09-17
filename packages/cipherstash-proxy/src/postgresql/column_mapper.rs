@@ -26,7 +26,7 @@ impl ColumnMapper {
     /// Maps typed statement projection columns to an Encrypt column configuration
     ///
     /// The returned `Vec` is of `Option<Column>` because the Projection columns are a mix of native and EQL types.
-    /// Only EQL colunms will have a configuration. Native types are always None.
+    /// Only EQL columns will have a configuration. Native types are always None.
     ///
     /// Preserves the ordering and semantics of the projection to reduce the complexity of positional encryption.
     pub fn get_projection_columns(
