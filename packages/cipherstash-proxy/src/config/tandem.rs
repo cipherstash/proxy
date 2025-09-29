@@ -101,7 +101,7 @@ impl TandemConfig {
             );
             println!("Loading config values from environment variables.");
         }
-        let mut config = TandemConfig::build(&args.config_file_path)?;
+        let mut config = TandemConfig::build(args)?;
 
         // If log level is default, it has not been set by the user in config
         if config.log.level == LogConfig::default_log_level() {
@@ -116,7 +116,20 @@ impl TandemConfig {
         Ok(config)
     }
 
-    pub fn build(path: &str) -> Result<Self, Error> {
+    pub fn build_path(path: &str) -> Result<Self, Error> {
+        let args = Args {
+            config_file_path: path.to_string(),
+            db_host: None,
+            db_name: None,
+            db_user: None,
+            log_level: LogConfig::default_log_level(),
+            log_format: LogConfig::default_log_format(),
+            command: None,
+        };
+        Self::build(&args)
+    }
+
+    pub fn build(args: &Args) -> Result<Self, Error> {
         // For parsing top-level values such as CS_HOST, CS_PORT
         // and for parsing nested env values such as CS_DATABASE__HOST, CS_DATABASE__PORT
         let cs_env_source = Environment::with_prefix(CS_PREFIX)
@@ -161,9 +174,20 @@ impl TandemConfig {
                 env
             }));
 
+        // Command line arguments override env vars
+        if let Some(db_host) = &args.db_host {
+            println!("Overriding database host from command line argument");
+            env::set_var("CS_DATABASE__HOST", db_host);
+        }
+
+        if let Some(dbname) = &args.db_name {
+            println!("Overriding database name from command line argument");
+            env::set_var("CS_DATABASE__NAME", dbname);
+        }
+
         // Source order is important!
         let config = Config::builder()
-            .add_source(config::File::with_name(path).required(false))
+            .add_source(config::File::with_name(&args.config_file_path).required(false))
             .add_source(cs_env_source)
             .add_source(stash_setup_source)
             .build()?
@@ -372,7 +396,7 @@ mod tests {
                 ],
                 || {
                     let config =
-                        TandemConfig::build("tests/config/cipherstash-proxy-test.toml").unwrap();
+                        TandemConfig::build_path("tests/config/cipherstash-proxy-test.toml").unwrap();
 
                     assert_eq!(config.encrypt.client_id, "CS_CLIENT_ID".to_string());
 
@@ -404,7 +428,7 @@ mod tests {
                 ],
                 || {
                     let config =
-                        TandemConfig::build("tests/config/cipherstash-proxy-test.toml").unwrap();
+                        TandemConfig::build_path("tests/config/cipherstash-proxy-test.toml").unwrap();
 
                     assert_eq!(
                         &config.encrypt.client_id,
@@ -418,7 +442,7 @@ mod tests {
     #[test]
     fn database_as_url() {
         let config = with_no_cs_vars(|| {
-            TandemConfig::build("tests/config/cipherstash-proxy-test.toml").unwrap()
+            TandemConfig::build_path("tests/config/cipherstash-proxy-test.toml").unwrap()
         });
         assert_eq!(
             config.database.to_socket_address(),
@@ -430,14 +454,14 @@ mod tests {
     fn dataset_as_uuid() {
         temp_env::with_vars_unset(["CS_ENCRYPT__DATASET_ID", "CS_DEFAULT_KEYSET_ID"], || {
             let config = with_no_cs_vars(|| {
-                TandemConfig::build("tests/config/cipherstash-proxy-test.toml").unwrap()
+                TandemConfig::build_path("tests/config/cipherstash-proxy-test.toml").unwrap()
             });
             assert_eq!(
                 config.encrypt.default_keyset_id,
                 Some(Uuid::parse_str("484cd205-99e8-41ca-acfe-55a7e25a8ec2").unwrap())
             );
 
-            let config = TandemConfig::build("tests/config/cipherstash-proxy-bad-dataset.toml");
+            let config = TandemConfig::build_path("tests/config/cipherstash-proxy-bad-dataset.toml");
 
             assert!(config.is_err());
             assert!(matches!(config.unwrap_err(), Error::Config(_)));
@@ -447,12 +471,12 @@ mod tests {
     #[test]
     fn prometheus_config() {
         with_no_cs_vars(|| {
-            let config = TandemConfig::build("tests/config/cipherstash-proxy-test.toml").unwrap();
+            let config = TandemConfig::build_path("tests/config/cipherstash-proxy-test.toml").unwrap();
             assert!(!config.prometheus_enabled());
 
             temp_env::with_vars([("CS_PROMETHEUS__ENABLED", Some("true"))], || {
                 let config =
-                    TandemConfig::build("tests/config/cipherstash-proxy-test.toml").unwrap();
+                    TandemConfig::build_path("tests/config/cipherstash-proxy-test.toml").unwrap();
                 assert!(config.prometheus_enabled());
                 assert!(config.prometheus.enabled);
                 assert_eq!(config.prometheus.port, 9930);
@@ -460,7 +484,7 @@ mod tests {
 
             temp_env::with_vars([("CS_PROMETHEUS__PORT", Some("7777"))], || {
                 let config =
-                    TandemConfig::build("tests/config/cipherstash-proxy-test.toml").unwrap();
+                    TandemConfig::build_path("tests/config/cipherstash-proxy-test.toml").unwrap();
                 assert!(!config.prometheus_enabled());
                 assert!(!config.prometheus.enabled);
                 assert_eq!(config.prometheus.port, 7777);
@@ -473,7 +497,7 @@ mod tests {
                 ],
                 || {
                     let config =
-                        TandemConfig::build("tests/config/cipherstash-proxy-test.toml").unwrap();
+                        TandemConfig::build_path("tests/config/cipherstash-proxy-test.toml").unwrap();
                     assert!(config.prometheus_enabled());
                     assert!(config.prometheus.enabled);
                     assert_eq!(config.prometheus.port, 7777);
@@ -549,7 +573,7 @@ mod tests {
 
         with_no_cs_vars(|| {
             temp_env::with_vars(env, || {
-                let config = TandemConfig::build("tests/config/unknown.toml").unwrap();
+                let config = TandemConfig::build_path("tests/config/unknown.toml").unwrap();
                 assert_eq!(
                     "E4UMRN47WJNSMAKR",
                     config.auth.workspace_crn.workspace_id.to_string()
@@ -567,7 +591,7 @@ mod tests {
 
         with_no_cs_vars(|| {
             temp_env::with_vars(env, || {
-                let config = TandemConfig::build("tests/config/unknown.toml");
+                let config = TandemConfig::build_path("tests/config/unknown.toml");
 
                 assert_eq!(
                     "E4UMRN47WJNSMAKR",
@@ -583,7 +607,7 @@ mod tests {
 
         with_no_cs_vars(|| {
             temp_env::with_vars(env, || {
-                let config = TandemConfig::build("tests/config/unknown.toml");
+                let config = TandemConfig::build_path("tests/config/unknown.toml");
                 assert!(config.is_err());
 
                 if let Err(e) = config {
@@ -604,7 +628,7 @@ mod tests {
 
         with_no_cs_vars(|| {
             temp_env::with_vars(env, || {
-                let config = TandemConfig::build("tests/config/unknown.toml");
+                let config = TandemConfig::build_path("tests/config/unknown.toml");
                 assert!(config.is_err());
 
                 if let Err(e) = config {
@@ -620,7 +644,7 @@ mod tests {
 
         with_no_cs_vars(|| {
             temp_env::with_vars(env, || {
-                let result = TandemConfig::build("tests/config/unknown.toml");
+                let result = TandemConfig::build_path("tests/config/unknown.toml");
                 assert!(result.is_err());
 
                 if let Err(err) = result {
@@ -642,7 +666,7 @@ mod tests {
 
         with_no_cs_vars(|| {
             temp_env::with_vars(env, || {
-                let result = TandemConfig::build("tests/config/unknown.toml");
+                let result = TandemConfig::build_path("tests/config/unknown.toml");
                 assert!(result.is_err());
 
                 if let Err(err) = result {
@@ -671,7 +695,7 @@ mod tests {
 
         with_no_cs_vars(|| {
             temp_env::with_vars(env, || {
-                let result = TandemConfig::build("tests/config/unknown.toml");
+                let result = TandemConfig::build_path("tests/config/unknown.toml");
                 assert!(result.is_err());
 
                 if let Err(err) = result {
@@ -693,7 +717,7 @@ mod tests {
 
         with_no_cs_vars(|| {
             temp_env::with_vars(env, || {
-                let result = TandemConfig::build("tests/config/unknown.toml");
+                let result = TandemConfig::build_path("tests/config/unknown.toml");
                 assert!(result.is_err());
 
                 if let Err(err) = result {
@@ -725,7 +749,7 @@ mod tests {
 
         with_no_cs_vars(|| {
             temp_env::with_vars(env, || {
-                let result = TandemConfig::build("tests/config/unknown.toml");
+                let result = TandemConfig::build_path("tests/config/unknown.toml");
                 assert!(result.is_err());
 
                 if let Err(err) = result {
@@ -747,7 +771,7 @@ mod tests {
 
         with_no_cs_vars(|| {
             temp_env::with_vars(env, || {
-                let result = TandemConfig::build("tests/config/unknown.toml");
+                let result = TandemConfig::build_path("tests/config/unknown.toml");
                 assert!(result.is_err());
 
                 if let Err(err) = result {
@@ -765,7 +789,7 @@ mod tests {
     fn crn_can_load_from_toml() {
         with_no_cs_vars(|| {
             let config =
-                TandemConfig::build("tests/config/cipherstash-proxy-with-crn.toml").unwrap();
+                TandemConfig::build_path("tests/config/cipherstash-proxy-with-crn.toml").unwrap();
             assert_eq!(
                 "E4UMRN47WJNSMAKR",
                 config.auth.workspace_crn.workspace_id.to_string()
@@ -786,7 +810,7 @@ mod tests {
 
         with_no_cs_vars(|| {
             temp_env::with_vars(env, || {
-                let config = TandemConfig::build("tests/config/unknown.toml").unwrap();
+                let config = TandemConfig::build_path("tests/config/unknown.toml").unwrap();
                 assert_eq!(
                     "E4UMRN47WJNSMAKR",
                     config.auth.workspace_crn.workspace_id.to_string()

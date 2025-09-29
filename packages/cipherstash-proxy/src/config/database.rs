@@ -14,6 +14,8 @@ pub struct DatabaseConfig {
     pub port: u16,
 
     pub name: String,
+
+    #[serde(default = "DatabaseConfig::default_username")]
     pub username: String,
 
     #[serde(deserialize_with = "protected_string_deserializer")]
@@ -38,6 +40,10 @@ impl DatabaseConfig {
 
     pub const fn default_port() -> u16 {
         5432
+    }
+
+    pub fn default_username() -> String {
+        "postgres".to_string()
     }
 
     pub const fn default_config_reload_interval() -> u64 {

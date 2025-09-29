@@ -145,7 +145,7 @@ mod tests {
     fn build_tandem_config(env: Vec<(&str, Option<&str>)>) -> TandemConfig {
         with_no_cs_vars(|| {
             temp_env::with_vars(env, || {
-                TandemConfig::build("tests/config/unknown.toml").unwrap()
+                TandemConfig::build_path("tests/config/unknown.toml").unwrap()
             })
         })
     }
