@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1759205914628,
+  "lastUpdate": 1759206766078,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -14924,6 +14924,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 24.437477,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "lindsay@cipherstash.com",
+            "name": "Lindsay Holmwood",
+            "username": "auxesis"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "aea5786420d5d80c5a4275f2d38426cc0b9b2ac7",
+          "message": "Merge pull request #329 from cipherstash/fix/pin-to-postgres-17\n\nfix: pin tests to Postgres 17",
+          "timestamp": "2025-09-30T14:28:45+10:00",
+          "tree_id": "710a8d3798367addf90f8b0c05957791c9116a0a",
+          "url": "https://github.com/cipherstash/proxy/commit/aea5786420d5d80c5a4275f2d38426cc0b9b2ac7"
+        },
+        "date": 1759206764627,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 25.264519,
             "unit": "Number"
           }
         ]
