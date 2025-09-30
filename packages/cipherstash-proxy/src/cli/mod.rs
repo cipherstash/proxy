@@ -21,6 +21,21 @@ const DEFAULT_CONFIG_FILE: &str = "cipherstash-proxy.toml";
 /// CipherStash Proxy keeps your sensitive data in PostgreSQL encrypted and searchable, with no changes to SQL.
 ///
 pub struct Args {
+    /// Optional database host to connect to.
+    /// Uses env or config file if not specified.
+    #[arg(short = 'H', long)]
+    pub db_host: Option<String>,
+
+    /// Optional database name to connect to.
+    /// Uses env or config file if not specified.
+    #[arg(value_name = "DBNAME")]
+    pub db_name: Option<String>,
+
+    /// Optional database user to connect as.
+    /// Uses env or config file if not specified.
+    #[arg(short = 'u', long)]
+    pub db_user: Option<String>,
+
     /// Optional path to a CipherStash Proxy configuration file.
     ///
     /// Default is "cipherstash-proxy.toml".

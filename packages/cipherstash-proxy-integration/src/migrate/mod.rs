@@ -42,6 +42,9 @@ mod tests {
             log_level: LogLevel::Debug,
             log_format: LogFormat::Pretty,
             command: None,
+            db_host: None,
+            db_name: None,
+            db_user: None,
         };
 
         let config = match TandemConfig::load(&args) {

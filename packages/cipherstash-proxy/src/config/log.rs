@@ -130,30 +130,30 @@ mod tests {
         with_no_cs_vars(|| {
             temp_env::with_vars([("CS_LOG__LEVEL", Some("error"))], || {
                 let config =
-                    TandemConfig::build("tests/config/cipherstash-proxy-test.toml").unwrap();
+                    TandemConfig::build_path("tests/config/cipherstash-proxy-test.toml").unwrap();
                 assert_eq!(config.log.level, LogLevel::Error);
             });
 
             temp_env::with_vars([("CS_LOG__LEVEL", Some("WARN"))], || {
                 let config =
-                    TandemConfig::build("tests/config/cipherstash-proxy-test.toml").unwrap();
+                    TandemConfig::build_path("tests/config/cipherstash-proxy-test.toml").unwrap();
                 assert_eq!(config.log.level, LogLevel::Warn);
             });
 
             temp_env::with_vars([("CS_LOG__OUTPUT", Some("stderr"))], || {
                 let config =
-                    TandemConfig::build("tests/config/cipherstash-proxy-test.toml").unwrap();
+                    TandemConfig::build_path("tests/config/cipherstash-proxy-test.toml").unwrap();
                 assert_eq!(config.log.output, LogOutput::Stderr);
             });
 
             temp_env::with_vars([("CS_LOG__FORMAT", Some("Pretty"))], || {
                 let config =
-                    TandemConfig::build("tests/config/cipherstash-proxy-test.toml").unwrap();
+                    TandemConfig::build_path("tests/config/cipherstash-proxy-test.toml").unwrap();
                 assert_eq!(config.log.format, LogFormat::Pretty);
             });
 
             temp_env::with_vars([("CS_LOG__FORMAT", Some("dEbUG"))], || {
-                let config = TandemConfig::build("tests/config/cipherstash-proxy-test.toml");
+                let config = TandemConfig::build_path("tests/config/cipherstash-proxy-test.toml");
 
                 assert!(config.is_err());
                 assert!(matches!(config.unwrap_err(), Error::Config(_)));
