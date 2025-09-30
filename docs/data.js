@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1759217187038,
+  "lastUpdate": 1759231443045,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -15028,6 +15028,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 24.722415,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "dan@cipherstash.com",
+            "name": "Dan Draper",
+            "username": "coderdan"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "5279c1b4260e0c25591f2e9ed4108ce3c4c16e67",
+          "message": "Merge pull request #328 from cipherstash/feat/cli-args\n\nfeat(config): add optional database connection CLI args",
+          "timestamp": "2025-09-30T21:20:48+10:00",
+          "tree_id": "967c5c8be6c31a123fca675213b5383e80639181",
+          "url": "https://github.com/cipherstash/proxy/commit/5279c1b4260e0c25591f2e9ed4108ce3c4c16e67"
+        },
+        "date": 1759231441614,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 25.998873,
             "unit": "Number"
           }
         ]
