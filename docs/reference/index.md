@@ -258,6 +258,87 @@ As a convenience for production deployments, with the below environment variable
 CS_DATABASE__INSTALL_AWS_RDS_CERT_BUNDLE="true"
 ```
 
+## Command line options
+
+
+
+## Command line interface
+
+The CipherStash Proxy accepts command line arguments.
+For example, the upstream database can be specified via command line arguments.
+Useful for local dev and testing.
+
+### Usage
+
+```bash
+cipherstash-proxy [OPTIONS] [DBNAME] [COMMAND]
+```
+
+### Commands
+
+- **encrypt**  
+  Encrypt one or more columns in a table. This command requires a running and properly configured CipherStash Proxy instance.
+
+- **help**  
+  Print the help message or detailed information for the specified subcommand(s).
+
+### Arguments
+
+- **DBNAME**  
+
+  Optional name of the database to connect to. If not specified, the tool will use the environment variables or configuration file settings.
+
+  Default value: none
+
+- **-H, --db-host <DB_HOST>**
+
+  Optional database host. This value will default to the one defined in your environment or configuration file if not provided.
+
+  Default value: `127.0.0.1`
+
+- **-u, --db-user <DB_USER>**
+
+  Optional database user. This value will default to the one defined in your environment or configuration file if not provided.
+
+  Default value: `postgres`
+
+- **-p, --config-file-path <CONFIG_FILE_PATH>**
+
+  Specifies an optional path to a CipherStash Proxy configuration file.
+  If provided, the application attempts to load configuration settings from this file.
+  However, environment variables can be used instead of the file or to override any values defined within it.
+
+  Default Value: `cipherstash-proxy.toml`
+    
+  Note:
+  The application will look for "cipherstash-proxy.toml" by default if no other file path is specified.
+  
+- **-l, --log-level <LOG_LEVEL>**
+  
+  Sets an optional log level for the application, which controls the verbosity of the logging output.
+  This can be particularly useful for adjusting the level of detail in application logs
+  to suit different environments or debugging needs.
+    
+  Default Value: `info`
+    
+  Environment Variable: `CS_LOG__LEVEL`
+    
+  Possible Values: `error`, `warn`, `info`, `debug`, `trace`
+  
+- **-f, --log-format <LOG_FORMAT>**
+    
+  Specifies an optional log format for the output logs.
+  The default log format is "pretty" when the application detects that it is running in a terminal session,
+  otherwise it defaults to "structured" for non-interactive environments.
+  The setting can be overridden by the corresponding environment variable.
+    
+  Default Value: `pretty` (if running in a terminal session), otherwise `structured`
+    
+  Environment Variable: `CS_LOG__FORMAT`
+    
+  Possible Values: `pretty`, `structured`, `text`
+  
+
 ## Multitenant operation
 
 CipherStash Proxy supports multitenant applications using ZeroKMS keysets to provide strong cryptographic separation between tenants.
