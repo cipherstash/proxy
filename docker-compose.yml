@@ -1,6 +1,7 @@
 services:
   postgres: &postgres
-    image: postgres:latest
+    image: postgres:17
+    pull_policy: always
     container_name: postgres
     environment:
       PGPORT: 5432
