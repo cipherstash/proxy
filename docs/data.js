@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1758083602193,
+  "lastUpdate": 1759205914628,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -14899,6 +14899,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 25.622439,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "04470143eb936284ba8999e6408f264123d23c50",
+          "message": "fix: pin to Postgres 17",
+          "timestamp": "2025-09-26T21:38:56Z",
+          "url": "https://github.com/cipherstash/proxy/pull/329/commits/04470143eb936284ba8999e6408f264123d23c50"
+        },
+        "date": 1759205911965,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 24.437477,
             "unit": "Number"
           }
         ]
