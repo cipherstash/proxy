@@ -1,6 +1,6 @@
 services:
   postgres: &postgres
-    image: postgres:latest
+    image: postgres:17
     container_name: postgres
     command: -c 'config_file=/etc/postgresql/postgresql.conf'
     restart: always
