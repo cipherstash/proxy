@@ -185,6 +185,11 @@ impl TandemConfig {
             env::set_var("CS_DATABASE__NAME", dbname);
         }
 
+        if let Some(db_user) = &args.db_user {
+            println!("Overriding database user from command line argument");
+            env::set_var("CS_DATABASE__USER", db_user);
+        }
+
         // Source order is important!
         let config = Config::builder()
             .add_source(config::File::with_name(&args.config_file_path).required(false))
@@ -396,7 +401,8 @@ mod tests {
                 ],
                 || {
                     let config =
-                        TandemConfig::build_path("tests/config/cipherstash-proxy-test.toml").unwrap();
+                        TandemConfig::build_path("tests/config/cipherstash-proxy-test.toml")
+                            .unwrap();
 
                     assert_eq!(config.encrypt.client_id, "CS_CLIENT_ID".to_string());
 
@@ -428,7 +434,8 @@ mod tests {
                 ],
                 || {
                     let config =
-                        TandemConfig::build_path("tests/config/cipherstash-proxy-test.toml").unwrap();
+                        TandemConfig::build_path("tests/config/cipherstash-proxy-test.toml")
+                            .unwrap();
 
                     assert_eq!(
                         &config.encrypt.client_id,
@@ -461,7 +468,8 @@ mod tests {
                 Some(Uuid::parse_str("484cd205-99e8-41ca-acfe-55a7e25a8ec2").unwrap())
             );
 
-            let config = TandemConfig::build_path("tests/config/cipherstash-proxy-bad-dataset.toml");
+            let config =
+                TandemConfig::build_path("tests/config/cipherstash-proxy-bad-dataset.toml");
 
             assert!(config.is_err());
             assert!(matches!(config.unwrap_err(), Error::Config(_)));
@@ -471,7 +479,8 @@ mod tests {
     #[test]
     fn prometheus_config() {
         with_no_cs_vars(|| {
-            let config = TandemConfig::build_path("tests/config/cipherstash-proxy-test.toml").unwrap();
+            let config =
+                TandemConfig::build_path("tests/config/cipherstash-proxy-test.toml").unwrap();
             assert!(!config.prometheus_enabled());
 
             temp_env::with_vars([("CS_PROMETHEUS__ENABLED", Some("true"))], || {
@@ -497,7 +506,8 @@ mod tests {
                 ],
                 || {
                     let config =
-                        TandemConfig::build_path("tests/config/cipherstash-proxy-test.toml").unwrap();
+                        TandemConfig::build_path("tests/config/cipherstash-proxy-test.toml")
+                            .unwrap();
                     assert!(config.prometheus_enabled());
                     assert!(config.prometheus.enabled);
                     assert_eq!(config.prometheus.port, 7777);
