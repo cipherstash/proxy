@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1759231443045,
+  "lastUpdate": 1761002054390,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -15057,6 +15057,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 25.998873,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "toby@cipherstash.com",
+            "name": "Toby Hede",
+            "username": "tobyhede"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "83fe6357aa6ad2427568527da1cd9f79bdc0004e",
+          "message": "Merge pull request #327 from cipherstash/refactor-frontend-context\n\nRefactor frontend context",
+          "timestamp": "2025-10-21T10:09:50+11:00",
+          "tree_id": "d5fe6c0086489f1d841c3c5f2daa61a7ea21ddc2",
+          "url": "https://github.com/cipherstash/proxy/commit/83fe6357aa6ad2427568527da1cd9f79bdc0004e"
+        },
+        "date": 1761002052786,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 24.560178,
             "unit": "Number"
           }
         ]
