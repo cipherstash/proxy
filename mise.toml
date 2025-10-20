@@ -311,6 +311,8 @@ echo
 mise --env tcp run postgres:setup
 mise --env tls run postgres:setup
 
+mise run test:integration:showcase
+
 echo
 echo '###############################################'
 echo '# Test: Prometheus'
@@ -379,10 +381,8 @@ echo '###############################################'
 echo '# Test: Showcase'
 echo '###############################################'
 echo
-mise --env tls run proxy:up proxy-tls --extra-args "--detach --wait"
-mise --env tls run test:wait_for_postgres_to_quack --port 6432 --max-retries 20 --tls
-RUST_BACKTRACE=full cargo run -p showcase
-mise --env tls run proxy:down
+
+mise run test:integration:showcase
 
 echo
 echo '###############################################'
@@ -644,6 +644,15 @@ if [ ! -e "cipherstash-eql.sql" ]; then
 else
   echo "Prefetched: cipherstash-eql.sql"
 fi
+"""
+
+[tasks."test:integration:showcase"]
+description = "Run Showcase integration test"
+run = """
+mise --env tls run proxy:up proxy-tls --extra-args "--detach --wait"
+mise --env tls run test:wait_for_postgres_to_quack --port 6432 --max-retries 20 --tls
+RUST_BACKTRACE=full cargo run -p showcase
+mise --env tls run proxy:down
 """
 
 [tasks.release]

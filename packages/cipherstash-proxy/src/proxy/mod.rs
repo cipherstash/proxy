@@ -1,17 +1,29 @@
+use std::sync::Arc;
+
 use crate::{
     config::TandemConfig,
-    connect, eql,
+    connect,
     error::Error,
-    log::PROXY,
-    postgresql::{Column, KeysetIdentifier},
-    proxy::{config::EncryptConfigManager, schema::SchemaManager, zerokms::ZeroKms},
+    postgresql::{Column, Context, KeysetIdentifier},
+    proxy::{encrypt_config::EncryptConfigManager, schema::SchemaManager},
 };
-use cipherstash_client::{encryption::Plaintext, schema::ColumnConfig};
+use cipherstash_client::encryption::Plaintext;
+use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
+use tokio::sync::oneshot::Sender;
 use tracing::{debug, warn};
 
-mod config;
+mod encrypt_config;
 mod schema;
 mod zerokms;
+
+pub use encrypt_config::EncryptConfig;
+pub use zerokms::ZeroKms;
+
+pub type ReloadSender = UnboundedSender<ReloadCommand>;
+
+type ReloadReceiver = UnboundedReceiver<ReloadCommand>;
+
+pub type ReloadResponder = Sender<()>;
 
 /// SQL Statement for loading encrypt configuration from database
 const ENCRYPT_CONFIG_QUERY: &str = include_str!("./sql/select_config.sql");
@@ -22,17 +34,23 @@ const SCHEMA_QUERY: &str = include_str!("./sql/select_table_schemas.sql");
 /// SQL Statement for loading aggregates as part of database schema
 const AGGREGATE_QUERY: &str = include_str!("./sql/select_aggregates.sql");
 
+#[derive(Debug)]
+pub enum ReloadCommand {
+    DatabaseSchema(ReloadResponder),
+    EncryptSchema(ReloadResponder),
+}
+
 ///
 /// Core proxy service providing encryption, configuration, and schema management.
 ///
-#[derive(Clone)]
 pub struct Proxy {
-    pub config: TandemConfig,
-    pub encrypt_config: EncryptConfigManager,
-    pub schema: SchemaManager,
+    pub config: Arc<TandemConfig>,
+    pub encrypt_config_manager: EncryptConfigManager,
+    pub schema_manager: SchemaManager,
     /// The EQL version installed in the database or `None` if it was not present
     pub eql_version: Option<String>,
     zerokms: ZeroKms,
+    reload_sender: ReloadSender,
 }
 
 impl Proxy {
@@ -43,96 +61,109 @@ impl Proxy {
         // Ensures error on start if credential or network issue
         zerokms.init_cipher(None).await?;
 
-        let encrypt_config = EncryptConfigManager::init(&config.database).await?;
-        // TODO: populate EqlTraitImpls based in config
-        let schema = SchemaManager::init(&config.database).await?;
+        let encrypt_config_manager = EncryptConfigManager::init(&config.database).await?;
 
-        let eql_version = {
-            let client = connect::database(&config.database).await?;
-            let rows = client
-                .query("SELECT eql_v2.version() AS version;", &[])
-                .await;
+        let schema_manager = SchemaManager::init(&config.database).await?;
 
-            match rows {
-                Ok(rows) => rows.first().map(|row| row.get("version")),
-                Err(err) => {
-                    warn!(
-                        msg = "Could not query EQL version from database",
-                        error = err.to_string()
-                    );
-                    None
-                }
-            }
-        };
+        let eql_version = Proxy::eql_version(&config).await?;
+
+        let (reload_sender, reload_receiver) = mpsc::unbounded_channel();
+
+        Proxy::receive(
+            reload_receiver,
+            schema_manager.clone(),
+            encrypt_config_manager.clone(),
+        );
 
         Ok(Proxy {
-            config,
+            config: Arc::new(config),
             zerokms,
-            encrypt_config,
-            schema,
+            encrypt_config_manager,
+            schema_manager,
             eql_version,
+            reload_sender,
         })
     }
 
+    pub async fn eql_version(config: &TandemConfig) -> Result<Option<String>, Error> {
+        let client = connect::database(&config.database).await?;
+        let rows = client
+            .query("SELECT eql_v2.version() AS version;", &[])
+            .await;
+
+        let version = match rows {
+            Ok(rows) => rows.first().map(|row| row.get("version")),
+            Err(err) => {
+                warn!(
+                    msg = "Could not query EQL version from database",
+                    error = err.to_string()
+                );
+                None
+            }
+        };
+        Ok(version)
+    }
+
+    pub fn receive(
+        mut reload_receiver: ReloadReceiver,
+        schema_manager: SchemaManager,
+        encrypt_config_manager: EncryptConfigManager,
+    ) {
+        tokio::task::spawn(async move {
+            while let Some(command) = reload_receiver.recv().await {
+                debug!(msg = "ReloadCommand received", ?command);
+                match command {
+                    ReloadCommand::DatabaseSchema(responder) => {
+                        schema_manager.reload().await;
+                        encrypt_config_manager.reload().await;
+                        let _ = responder.send(());
+                    }
+                    ReloadCommand::EncryptSchema(responder) => {
+                        encrypt_config_manager.reload().await;
+                        let _ = responder.send(());
+                    }
+                }
+            }
+        });
+    }
+
     ///
-    /// Encrypt `Plaintexts` using the `Column` configuration
+    /// Create a new context from the Proxy settings
     ///
-    pub async fn encrypt(
+    pub fn context(&self, client_id: i32) -> Context<ZeroKms> {
+        let config = self.config.clone();
+        let encrypt_config = self.encrypt_config_manager.load();
+        let schema = self.schema_manager.load();
+        let reload_sender = self.reload_sender.clone();
+        let encryption = self.zerokms.clone();
+
+        Context::new(
+            client_id,
+            config,
+            encrypt_config,
+            schema,
+            encryption,
+            reload_sender,
+        )
+    }
+}
+
+#[async_trait::async_trait]
+pub trait EncryptionService: Send + Sync {
+    /// Encrypt plaintexts for storage in the database
+    async fn encrypt(
         &self,
         keyset_id: Option<KeysetIdentifier>,
         plaintexts: Vec<Option<Plaintext>>,
         columns: &[Option<Column>],
-    ) -> Result<Vec<Option<eql::EqlEncrypted>>, Error> {
-        debug!(target: PROXY, msg="Encrypt", ?keyset_id, default_keyset_id = ?self.config.encrypt.default_keyset_id);
+    ) -> Result<Vec<Option<crate::EqlEncrypted>>, Error>;
 
-        self.zerokms
-            .encrypt(
-                keyset_id,
-                plaintexts,
-                columns,
-                self.config.encrypt.default_keyset_id,
-            )
-            .await
-    }
-
-    ///
-    /// Decrypt eql::Ciphertext into Plaintext
-    ///
-    /// Database values are stored as `eql::Ciphertext`
-    ///
-    pub async fn decrypt(
+    /// Decrypt values retrieved from the database
+    async fn decrypt(
         &self,
         keyset_id: Option<KeysetIdentifier>,
-        ciphertexts: Vec<Option<eql::EqlEncrypted>>,
-    ) -> Result<Vec<Option<Plaintext>>, Error> {
-        debug!(target: PROXY, msg="Decrypt", ?keyset_id, default_keyset_id = ?self.config.encrypt.default_keyset_id);
-
-        self.zerokms
-            .decrypt(
-                keyset_id,
-                ciphertexts,
-                self.config.encrypt.default_keyset_id,
-            )
-            .await
-    }
-
-    pub fn get_column_config(&self, identifier: &eql::Identifier) -> Option<ColumnConfig> {
-        let encrypt_config = self.encrypt_config.load();
-        encrypt_config.get(identifier).cloned()
-    }
-
-    pub async fn reload_schema(&self) {
-        self.schema.reload().await;
-        self.encrypt_config.reload().await;
-    }
-
-    pub fn is_passthrough(&self) -> bool {
-        self.encrypt_config.is_empty() || self.config.mapping_disabled()
-    }
-
-    pub fn is_empty_config(&self) -> bool {
-        self.encrypt_config.is_empty()
-    }
+        ciphertexts: Vec<Option<crate::EqlEncrypted>>,
+    ) -> Result<Vec<Option<Plaintext>>, Error>;
 }
 
 #[cfg(test)]

@@ -19,7 +19,7 @@ use crate::prometheus::{
     DECRYPTION_ERROR_TOTAL, DECRYPTION_REQUESTS_TOTAL, ROWS_ENCRYPTED_TOTAL,
     ROWS_PASSTHROUGH_TOTAL, ROWS_TOTAL, SERVER_BYTES_RECEIVED_TOTAL,
 };
-use crate::proxy::Proxy;
+use crate::proxy::EncryptionService;
 use bytes::BytesMut;
 use metrics::{counter, histogram};
 use std::time::Instant;
@@ -70,25 +70,25 @@ use tracing::{debug, error, info, warn};
 /// - `RowDescription`: Result column metadata (modified for encrypted columns)
 /// - `ParameterDescription`: Parameter metadata (modified for encrypted parameters)
 /// - `ReadyForQuery`: Session ready state (triggers schema reload if needed)
-pub struct Backend<R>
+pub struct Backend<R, S>
 where
     R: AsyncRead + Unpin,
+    S: EncryptionService,
 {
     /// Sender for outgoing messages to client
     client_sender: Sender,
     /// Reader for incoming messages from server
     server_reader: R,
-    /// Encryption service for column decryption
-    proxy: Proxy,
     /// Session context with portal and statement metadata
-    context: Context,
+    context: Context<S>,
     /// Buffer for batching DataRow messages before decryption
     buffer: MessageBuffer,
 }
 
-impl<R> Backend<R>
+impl<R, S> Backend<R, S>
 where
     R: AsyncRead + Unpin,
+    S: EncryptionService,
 {
     /// Creates a new Backend instance.
     ///
@@ -98,12 +98,11 @@ where
     /// * `server_reader` - Stream for reading messages from the PostgreSQL server
     /// * `encrypt` - Encryption service for handling column decryption
     /// * `context` - Session context shared with the frontend
-    pub fn new(client_sender: Sender, server_reader: R, proxy: Proxy, context: Context) -> Self {
+    pub fn new(client_sender: Sender, server_reader: R, context: Context<S>) -> Self {
         let buffer = MessageBuffer::new();
         Backend {
             client_sender,
             server_reader,
-            proxy,
             context,
             buffer,
         }
@@ -150,19 +149,17 @@ where
     /// Returns `Ok(())` on successful message processing, or an `Error` if a fatal
     /// error occurs that should terminate the connection.
     pub async fn rewrite(&mut self) -> Result<(), Error> {
-        let connection_timeout = self.proxy.config.database.connection_timeout();
-
         let (code, mut bytes) = protocol::read_message(
             &mut self.server_reader,
             self.context.client_id,
-            connection_timeout,
+            self.context.connection_timeout(),
         )
         .await?;
 
         let sent: u64 = bytes.len() as u64;
         counter!(SERVER_BYTES_RECEIVED_TOTAL).increment(sent);
 
-        if self.proxy.is_passthrough() {
+        if self.context.is_passthrough() {
             debug!(target: DEVELOPMENT,
                 client_id = self.context.client_id,
                 msg = "Passthrough enabled"
@@ -250,7 +247,7 @@ where
                     msg = "ReadyForQuery"
                 );
                 if self.context.schema_changed() {
-                    self.proxy.reload_schema().await;
+                    self.context.reload_schema().await;
                 }
             }
 
@@ -450,16 +447,12 @@ where
         );
 
         // Decrypt CipherText -> Plaintext
-        let plaintexts = self
-            .proxy
-            .decrypt(keyset_id, ciphertexts)
-            .await
-            .inspect_err(|_| {
-                counter!(DECRYPTION_ERROR_TOTAL).increment(1);
-            })?;
+        let plaintexts = self.context.decrypt(ciphertexts).await.inspect_err(|_| {
+            counter!(DECRYPTION_ERROR_TOTAL).increment(1);
+        })?;
 
         // Avoid the iter calculation if we can
-        if self.proxy.config.prometheus_enabled() {
+        if self.context.prometheus_enabled() {
             let decrypted_count =
                 plaintexts
                     .iter()
@@ -655,9 +648,10 @@ where
 }
 
 /// Implementation of PostgreSQL error handling for the Backend component.
-impl<R> PostgreSqlErrorHandler for Backend<R>
+impl<R, S> PostgreSqlErrorHandler for Backend<R, S>
 where
     R: AsyncRead + Unpin,
+    S: EncryptionService,
 {
     fn client_sender(&mut self) -> &mut Sender {
         &mut self.client_sender

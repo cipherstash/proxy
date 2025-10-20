@@ -9,9 +9,8 @@ use super::messages::FrontendCode as Code;
 use super::parser::SqlParser;
 use super::protocol::{self};
 use crate::connect::Sender;
-use crate::eql::Identifier;
 use crate::error::{EncryptError, Error, MappingError};
-use crate::log::{CONTEXT, MAPPER, PROTOCOL};
+use crate::log::{MAPPER, PROTOCOL};
 use crate::postgresql::context::column::Column;
 use crate::postgresql::context::Portal;
 use crate::postgresql::data::literal_from_sql;
@@ -25,14 +24,13 @@ use crate::prometheus::{
     STATEMENTS_ENCRYPTED_TOTAL, STATEMENTS_PASSTHROUGH_MAPPING_DISABLED_TOTAL,
     STATEMENTS_PASSTHROUGH_TOTAL, STATEMENTS_UNMAPPABLE_TOTAL,
 };
-use crate::proxy::Proxy;
+use crate::proxy::EncryptionService;
 use crate::EqlEncrypted;
 use bytes::BytesMut;
 use cipherstash_client::encryption::Plaintext;
-use eql_mapper::{self, EqlMapperError, EqlTerm, TableColumn, TypeCheckedStatement};
+use eql_mapper::{self, EqlMapperError, EqlTerm, TypeCheckedStatement};
 use metrics::{counter, histogram};
 use pg_escape::quote_literal;
-use postgres_types::Type;
 use serde::Serialize;
 use sqltk::parser::ast::{self, Value};
 use sqltk::NodeKey;
@@ -85,10 +83,11 @@ use tracing::{debug, error, info, warn};
 /// Encryption and mapping errors are converted to appropriate PostgreSQL error responses
 /// and sent back to the client. The frontend maintains error state to properly handle
 /// the PostgreSQL extended query error recovery protocol.
-pub struct Frontend<R, W>
+pub struct Frontend<R, W, S>
 where
     R: AsyncRead + Unpin,
     W: AsyncWrite + Unpin,
+    S: EncryptionService,
 {
     /// Reader for incoming client messages
     client_reader: R,
@@ -96,10 +95,8 @@ where
     client_sender: Sender,
     /// Writer for forwarding messages to server
     server_writer: W,
-    /// Proxy service for column encryption/decryption and configuration
-    proxy: Proxy,
     /// Session context tracking statements, portals, and keyset IDs
-    context: Context,
+    context: Context<S>,
     /// Error state flag for extended query protocol error handling
     error_state: Option<ErrorState>,
 }
@@ -107,10 +104,11 @@ where
 #[derive(Debug)]
 struct ErrorState;
 
-impl<R, W> Frontend<R, W>
+impl<R, W, S> Frontend<R, W, S>
 where
     R: AsyncRead + Unpin,
     W: AsyncWrite + Unpin,
+    S: EncryptionService,
 {
     /// Creates a new Frontend instance.
     ///
@@ -119,20 +117,17 @@ where
     /// * `client_reader` - Stream for reading messages from the PostgreSQL client
     /// * `client_sender` - Channel sender for sending messages back to client
     /// * `server_writer` - Stream for writing messages to the PostgreSQL server
-    /// * `encrypt` - Encryption service for handling column encryption/decryption
-    /// * `context` - Session context for tracking statements and portals
+    /// * `context` - Session context for tracking statements and portals with service access
     pub fn new(
         client_reader: R,
         client_sender: Sender,
         server_writer: W,
-        proxy: Proxy,
-        context: Context,
+        context: Context<S>,
     ) -> Self {
         Frontend {
             client_reader,
             client_sender,
             server_writer,
-            proxy,
             context,
             error_state: None,
         }
@@ -162,18 +157,17 @@ where
     /// Returns `Ok(())` on successful message processing, or an `Error` if a fatal
     /// error occurs that should terminate the connection.
     pub async fn rewrite(&mut self) -> Result<(), Error> {
-        let connection_timeout = self.proxy.config.database.connection_timeout();
         let (code, mut bytes) = protocol::read_message(
             &mut self.client_reader,
             self.context.client_id,
-            connection_timeout,
+            self.context.connection_timeout(),
         )
         .await?;
 
         let sent: u64 = bytes.len() as u64;
         counter!(CLIENTS_BYTES_RECEIVED_TOTAL).increment(sent);
 
-        if self.proxy.config.mapping_disabled() {
+        if self.context.mapping_disabled() {
             self.write_to_server(bytes).await?;
             return Ok(());
         }
@@ -273,7 +267,7 @@ where
                 );
 
                 if self.context.schema_changed() {
-                    self.proxy.reload_schema().await;
+                    self.context.reload_schema().await;
                 }
 
                 if self.error_state.is_some() {
@@ -421,7 +415,7 @@ where
             let typed_statement = match self.type_check(&statement) {
                 Ok(ts) => ts,
                 Err(err) => {
-                    if self.proxy.config.mapping_errors_enabled() {
+                    if self.context.mapping_errors_enabled() {
                         return Err(err);
                     } else {
                         return Ok(None);
@@ -533,15 +527,13 @@ where
             return Ok(vec![]);
         }
 
-        let keyset_id = self.context.keyset_identifier();
-
         let plaintexts = literals_to_plaintext(literal_values, literal_columns)?;
 
         let start = Instant::now();
 
         let encrypted = self
-            .proxy
-            .encrypt(keyset_id, plaintexts, literal_columns)
+            .context
+            .encrypt(plaintexts, literal_columns)
             .await
             .inspect_err(|_| {
                 counter!(ENCRYPTION_ERROR_TOTAL).increment(1);
@@ -684,7 +676,7 @@ where
         let typed_statement = match self.type_check(&statement) {
             Ok(ts) => ts,
             Err(err) => {
-                if self.proxy.config.mapping_errors_enabled() {
+                if self.context.mapping_errors_enabled() {
                     return Err(err);
                 } else {
                     return Ok(None);
@@ -754,10 +746,6 @@ where
         let schema_changed = eql_mapper::collect_ddl(self.context.get_table_resolver(), statement);
 
         if schema_changed {
-            debug!(target: MAPPER,
-                client_id = self.context.client_id,
-                msg = "schema changed"
-            );
             self.context.set_schema_changed();
         }
     }
@@ -772,10 +760,10 @@ where
         if let Some(keyset_identifier) = self.context.maybe_set_keyset(statement)? {
             debug!(client_id = self.context.client_id, ?keyset_identifier);
 
-            if self.proxy.config.encrypt.default_keyset_id.is_some() {
+            if self.context.default_keyset_id().is_some() {
                 debug!(target: MAPPER,
                     client_id = self.context.client_id,
-                    default_keyset_id = ?self.proxy.config.encrypt.default_keyset_id,
+                    default_keyset_id = ?self.context.default_keyset_id(),
                     ?keyset_identifier
                 );
                 return Err(EncryptError::UnexpectedSetKeyset.into());
@@ -799,9 +787,9 @@ where
         typed_statement: &TypeCheckedStatement<'_>,
         param_types: Vec<i32>,
     ) -> Result<Option<Statement>, Error> {
-        let param_columns = self.get_param_columns(typed_statement)?;
-        let projection_columns = self.get_projection_columns(typed_statement)?;
-        let literal_columns = self.get_literal_columns(typed_statement)?;
+        let param_columns = self.context.get_param_columns(typed_statement)?;
+        let projection_columns = self.context.get_projection_columns(typed_statement)?;
+        let literal_columns = self.context.get_literal_columns(typed_statement)?;
 
         let no_encrypted_param_columns = param_columns.iter().all(|c| c.is_none());
         let no_encrypted_projection_columns = projection_columns.iter().all(|c| c.is_none());
@@ -933,28 +921,23 @@ where
         bind: &Bind,
         statement: &Statement,
     ) -> Result<Vec<Option<crate::EqlEncrypted>>, Error> {
-        let keyset_id = self.context.keyset_identifier();
         let plaintexts =
             bind.to_plaintext(&statement.param_columns, &statement.postgres_param_types)?;
 
         debug!(target: MAPPER, client_id = self.context.client_id, plaintexts = ?plaintexts);
-        debug!(target: CONTEXT,
-            client_id = self.context.client_id,
-            ?keyset_id,
-        );
 
         let start = Instant::now();
 
         let encrypted = self
-            .proxy
-            .encrypt(keyset_id, plaintexts, &statement.param_columns)
+            .context
+            .encrypt(plaintexts, &statement.param_columns)
             .await
             .inspect_err(|_| {
                 counter!(ENCRYPTION_ERROR_TOTAL).increment(1);
             })?;
 
         // Avoid the iter calculation if we can
-        if self.proxy.config.prometheus_enabled() {
+        if self.context.prometheus_enabled() {
             let encrypted_count = encrypted.iter().filter(|e| e.is_some()).count() as u64;
 
             counter!(ENCRYPTION_REQUESTS_TOTAL).increment(1);
@@ -984,7 +967,7 @@ where
                 warn!(
                     client_id = self.context.client_id,
                     msg = "Internal Error in EQL Mapper",
-                    mapping_errors_enabled = self.proxy.config.mapping_errors_enabled(),
+                    mapping_errors_enabled = self.context.mapping_errors_enabled(),
                     error = str,
                 );
                 counter!(STATEMENTS_UNMAPPABLE_TOTAL).increment(1);
@@ -994,163 +977,11 @@ where
                 warn!(
                     client_id = self.context.client_id,
                     msg = "Unmappable statement",
-                    mapping_errors_enabled = self.proxy.config.mapping_errors_enabled(),
+                    mapping_errors_enabled = self.context.mapping_errors_enabled(),
                     error = err.to_string(),
                 );
                 counter!(STATEMENTS_UNMAPPABLE_TOTAL).increment(1);
                 Err(MappingError::StatementCouldNotBeTypeChecked(err.to_string()).into())
-            }
-        }
-    }
-
-    ///
-    /// Maps typed statement projection columns to an Encrypt column configuration
-    ///
-    /// The returned `Vec` is of `Option<Column>` because the Projection columns are a mix of native and EQL types.
-    /// Only EQL colunms will have a configuration. Native types are always None.
-    ///
-    /// Preserves the ordering and semantics of the projection to reduce the complexity of positional encryption.
-    ///
-    fn get_projection_columns(
-        &self,
-        typed_statement: &eql_mapper::TypeCheckedStatement<'_>,
-    ) -> Result<Vec<Option<Column>>, Error> {
-        let mut projection_columns = vec![];
-
-        for col in typed_statement.projection.columns() {
-            let eql_mapper::ProjectionColumn { ty, .. } = col;
-            let configured_column = match &**ty {
-                eql_mapper::Type::Value(eql_mapper::Value::Eql(eql_term)) => {
-                    let TableColumn { table, column } = eql_term.table_column();
-                    let identifier: Identifier = Identifier::from((table, column));
-
-                    debug!(
-                        target: MAPPER,
-                        client_id = self.context.client_id,
-                        msg = "Configured column",
-                        column = ?identifier,
-                        ?eql_term,
-                    );
-                    self.get_column(identifier, eql_term)?
-                }
-                _ => None,
-            };
-            projection_columns.push(configured_column)
-        }
-
-        Ok(projection_columns)
-    }
-
-    ///
-    /// Maps typed statement param columns to an Encrypt column configuration
-    ///
-    /// The returned `Vec` is of `Option<Column>` because the Param columns are a mix of native and EQL types.
-    /// Only EQL colunms will have a configuration. Native types are always None.
-    ///
-    /// Preserves the ordering and semantics of the projection to reduce the complexity of positional encryption.
-    ///
-    ///
-    fn get_param_columns(
-        &self,
-        typed_statement: &eql_mapper::TypeCheckedStatement<'_>,
-    ) -> Result<Vec<Option<Column>>, Error> {
-        let mut param_columns = vec![];
-
-        for param in typed_statement.params.iter() {
-            let configured_column = match param {
-                (_, eql_mapper::Value::Eql(eql_term)) => {
-                    let TableColumn { table, column } = eql_term.table_column();
-                    let identifier = Identifier::from((table, column));
-
-                    debug!(
-                        target: MAPPER,
-                        client_id = self.context.client_id,
-                        msg = "Encrypted parameter",
-                        column = ?identifier,
-                        ?eql_term,
-                    );
-
-                    self.get_column(identifier, eql_term)?
-                }
-                _ => None,
-            };
-            param_columns.push(configured_column);
-        }
-
-        Ok(param_columns)
-    }
-
-    fn get_literal_columns(
-        &self,
-        typed_statement: &eql_mapper::TypeCheckedStatement<'_>,
-    ) -> Result<Vec<Option<Column>>, Error> {
-        let mut literal_columns = vec![];
-
-        for (eql_term, _) in typed_statement.literals.iter() {
-            let TableColumn { table, column } = eql_term.table_column();
-            let identifier = Identifier::from((table, column));
-
-            debug!(
-                target: MAPPER,
-                client_id = self.context.client_id,
-                msg = "Encrypted literal",
-                column = ?identifier,
-                ?eql_term,
-            );
-            let col = self.get_column(identifier, eql_term)?;
-            if col.is_some() {
-                literal_columns.push(col);
-            }
-        }
-
-        Ok(literal_columns)
-    }
-
-    ///
-    /// Get the column configuration for the Identifier
-    /// Returns `EncryptError::UnknownColumn` if configuration cannot be found for the Identified column
-    /// if mapping enabled, and None if mapping is disabled. It'll log a warning either way.
-    fn get_column(
-        &self,
-        identifier: Identifier,
-        eql_term: &EqlTerm,
-    ) -> Result<Option<Column>, Error> {
-        match self.proxy.get_column_config(&identifier) {
-            Some(config) => {
-                debug!(
-                    target: MAPPER,
-                    client_id = self.context.client_id,
-                    msg = "Configured column",
-                    column = ?identifier
-                );
-
-                // IndexTerm::SteVecSelector
-                let postgres_type = if matches!(eql_term, EqlTerm::JsonPath(_)) {
-                    Some(Type::JSONPATH)
-                } else {
-                    None
-                };
-
-                let eql_term = eql_term.variant();
-                Ok(Some(Column::new(
-                    identifier,
-                    config,
-                    postgres_type,
-                    eql_term,
-                )))
-            }
-            None => {
-                warn!(
-                    target: MAPPER,
-                    client_id = self.context.client_id,
-                    msg = "Configured column not found. Encryption configuration may have been deleted.",
-                    ?identifier,
-                );
-                Err(EncryptError::UnknownColumn {
-                    table: identifier.table.to_owned(),
-                    column: identifier.column.to_owned(),
-                }
-                .into())
             }
         }
     }
@@ -1229,10 +1060,11 @@ where
 }
 
 /// Implementation of PostgreSQL error handling for the Frontend component.
-impl<R, W> PostgreSqlErrorHandler for Frontend<R, W>
+impl<R, W, S> PostgreSqlErrorHandler for Frontend<R, W, S>
 where
     R: AsyncRead + Unpin,
     W: AsyncWrite + Unpin,
+    S: EncryptionService,
 {
     fn client_sender(&mut self) -> &mut Sender {
         &mut self.client_sender

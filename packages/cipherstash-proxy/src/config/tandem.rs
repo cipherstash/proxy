@@ -302,6 +302,29 @@ impl TandemConfig {
 
         DEFAULT_THREAD_STACK_SIZE
     }
+
+    #[cfg(test)]
+    pub fn for_testing() -> Self {
+        Self {
+            server: ServerConfig::default(),
+            database: DatabaseConfig::for_testing(),
+            auth: AuthConfig {
+                workspace_crn: "crn:ap-southeast-2.aws:IJGECSCWKREECNBS".parse().unwrap(),
+                client_access_key: "test".to_string(),
+            },
+            encrypt: EncryptConfig {
+                client_id: "test".to_string(),
+                client_key: "test".to_string(),
+                default_keyset_id: Some(
+                    Uuid::parse_str("00000000-0000-0000-0000-000000000000").unwrap(),
+                ),
+            },
+            tls: None,
+            log: LogConfig::default(),
+            prometheus: PrometheusConfig::default(),
+            development: None,
+        }
+    }
 }
 
 impl PrometheusConfig {

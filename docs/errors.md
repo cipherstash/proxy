@@ -32,6 +32,8 @@
 
 - Configuration errors:
   - [Missing or invalid TLS configuration](#config-missing-or-invalid-tls)
+  - [Network configuration change requires restart](#config-network-change-requires-restart)
+
 <!-- ---------------------------------------------------------------------------------------------------- -->
 
 <!-- ---------------------------------------------------------------------------------------------------- -->
@@ -649,5 +651,37 @@ Check that the certificate and private key are valid.
 If using PEM-based configuration:
 Check that the certificate and private key are valid.
 
+
+<!-- ---------------------------------------------------------------------------------------------------- -->
+
+
+## Network configuration change requires restart <a id='config-network-change-requires-restart'></a>
+
+A configuration reload was attempted with network-level changes that require a full restart.
+
+### Error message
+
+```
+Network configuration change requires restart
+```
+
+### Notes
+
+When receiving a SIGHUP signal, CipherStash Proxy attempts to reload application-level configuration without disrupting active connections. However, certain network-related configuration changes require stopping and restarting the proxy service to take effect.
+
+The following settings require a restart when changed:
+- `server.host` - The host address the proxy listens on
+- `server.port` - The port the proxy listens on
+- `server.require_tls` - TLS requirement setting
+- `server.worker_threads` - Number of worker threads
+- `tls` - Any TLS certificate or key configuration
+
+### How to fix
+
+1. Stop the CipherStash Proxy service
+2. Update the configuration as needed
+3. Restart the CipherStash Proxy service
+
+Application-level configuration changes (database, auth, encrypt, log, prometheus, development) can be reloaded without restart using SIGHUP.
 
 <!-- ---------------------------------------------------------------------------------------------------- -->

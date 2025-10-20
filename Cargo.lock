@@ -800,6 +800,7 @@ name = "cipherstash-proxy"
 version = "2.0.0"
 dependencies = [
  "arc-swap",
+ "async-trait",
  "aws-lc-rs",
  "bigdecimal",
  "bytes",

@@ -1,4 +1,5 @@
 mod backend;
+mod column_mapper;
 mod context;
 mod data;
 mod error_handler;
@@ -12,6 +13,7 @@ mod protocol;
 mod startup;
 
 pub use context::column::Column;
+pub use context::Context;
 pub use context::KeysetIdentifier;
 pub use handler::handler;
 

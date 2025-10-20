@@ -496,8 +496,6 @@ pub async fn clear() {
     //
     // Deleting rows from the eql_v2_configuration table is not officially supported due to the risk of data loss.
     //
-    // TODO: EQL should support safe removal of config rows - at least in some kind of "test" or non-production
-    // mode.
     let sql = r#"
         DELETE
           FROM public.eql_v2_configuration
