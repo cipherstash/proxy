@@ -1,6 +1,5 @@
 use crate::{
     config::TandemConfig,
-    eql,
     error::{EncryptError, Error, ZeroKMSError},
     log::{ENCRYPT, PROXY},
     postgresql::{Column, KeysetIdentifier},
@@ -10,6 +9,7 @@ use crate::{
 use cipherstash_client::{
     encryption::QueryOp,
     encryption::{Plaintext, PlaintextTarget, Queryable, ReferencedPendingPipeline},
+    eql,
 };
 use metrics::counter;
 use moka::future::Cache;

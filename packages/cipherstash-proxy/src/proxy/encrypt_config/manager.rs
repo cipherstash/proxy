@@ -1,11 +1,12 @@
 use crate::{
     config::DatabaseConfig,
-    connect, eql,
+    connect,
     error::{ConfigError, Error},
     log::ENCRYPT_CONFIG,
     proxy::ENCRYPT_CONFIG_QUERY,
 };
 use arc_swap::ArcSwap;
+use cipherstash_client::eql;
 use cipherstash_client::schema::ColumnConfig;
 use serde_json::Value;
 use std::{collections::HashMap, sync::Arc, time::Duration};

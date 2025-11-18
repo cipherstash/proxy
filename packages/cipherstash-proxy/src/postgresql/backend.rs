@@ -7,7 +7,6 @@ use super::messages::row_description::RowDescription;
 use super::messages::BackendCode;
 use super::Column;
 use crate::connect::Sender;
-use crate::eql::EqlEncrypted;
 use crate::error::{EncryptError, Error};
 use crate::log::{CONTEXT, DEVELOPMENT, MAPPER, PROTOCOL};
 use crate::postgresql::context::Portal;
@@ -21,6 +20,7 @@ use crate::prometheus::{
 };
 use crate::proxy::EncryptionService;
 use bytes::BytesMut;
+use cipherstash_client::eql::EqlEncrypted;
 use metrics::{counter, histogram};
 use std::time::Instant;
 use tokio::io::AsyncRead;

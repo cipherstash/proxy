@@ -1,10 +1,10 @@
-use crate::{
-    eql,
-    error::{ConfigError, Error},
-};
-use cipherstash_client::schema::{
-    column::{Index, IndexType, TokenFilter, Tokenizer},
-    ColumnConfig, ColumnType,
+use crate::error::{ConfigError, Error};
+use cipherstash_client::{
+    eql::Identifier,
+    schema::{
+        column::{Index, IndexType, TokenFilter, Tokenizer},
+        ColumnConfig, ColumnType,
+    },
 };
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, str::FromStr};
@@ -145,12 +145,12 @@ impl ColumnEncryptionConfig {
         self.tables.0.is_empty()
     }
 
-    pub fn into_config_map(self) -> HashMap<eql::Identifier, ColumnConfig> {
+    pub fn into_config_map(self) -> HashMap<Identifier, ColumnConfig> {
         let mut map = HashMap::new();
         for (table_name, columns) in self.tables.into_iter() {
             for (column_name, column) in columns.into_iter() {
                 let column_config = column.into_column_config(&column_name);
-                let key = eql::Identifier::new(&table_name, &column_name);
+                let key = Identifier::new(&table_name, &column_name);
                 map.insert(key, column_config);
             }
         }
@@ -192,12 +192,12 @@ impl Column {
 
 #[cfg(test)]
 mod tests {
-    use eql::Identifier;
+    use cipherstash_client::eql::Identifier;
     use serde_json::json;
 
     use super::*;
 
-    fn parse(json: serde_json::Value) -> HashMap<eql::Identifier, ColumnConfig> {
+    fn parse(json: serde_json::Value) -> HashMap<Identifier, ColumnConfig> {
         serde_json::from_value::<ColumnEncryptionConfig>(json)
             .map(|config| config.into_config_map())
             .expect("Error ok")
