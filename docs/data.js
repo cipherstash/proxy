@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1761002054390,
+  "lastUpdate": 1763631763554,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -15086,6 +15086,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 24.560178,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "e4456258f0c88084c942a9e2852663873f5a5604",
+          "message": "fix: show error from mise task when postgres is not running",
+          "timestamp": "2025-10-21T08:41:41Z",
+          "url": "https://github.com/cipherstash/proxy/pull/332/commits/e4456258f0c88084c942a9e2852663873f5a5604"
+        },
+        "date": 1763631762121,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 25.266007,
             "unit": "Number"
           }
         ]
