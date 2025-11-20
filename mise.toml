@@ -76,21 +76,20 @@ mise run build:binary --target {{target}}
 # build a new container
 mise run build:docker --platform {{docker_platform}}
 
-
 # Make the default invocation with `mise run proxy:up` work.
 # The default mise environment configuration works for Proxy running as a process, connecting via a port forward.
 # Try detecting a running postgres, and use it
 if [ "${CS_DATABASE__HOST}" == "localhost" ]; then
   {% raw %}
-  running_postgres="$(docker ps --filter "name=postgres" --filter "health=healthy" --format "{{.Names}};{{.Ports}}" | grep ${CS_DATABASE__PORT})"
+  running_postgres="$(docker ps --filter "name=postgres" --filter "health=healthy" --format "{{.Names}};{{.Ports}}")"
   {% endraw %}
-  if [ -z "${running_postgres}" ]; then
+  if [ -z "${running_postgres}" ] || [ -z $(echo ${running_postgres} | grep ${CS_DATABASE__PORT}) ] ; then
     echo "error: Could not detect a running, healthy postgres container with port ${CS_DATABASE__PORT}"
     echo "error: Try running 'mise run postgres:up' to start a container"
     exit 68
   fi
   echo $running_postgres
-  export CS_DATABASE__HOST=$(echo $running_postgres | cut -d ';' -f 1)
+  export CS_DATABASE__HOST=$(echo $running_postgres | grep ${CS_DATABASE__PORT} | cut -d ';' -f 1)
   echo "Using postgres running in container: ${CS_DATABASE__HOST}"
 fi
 
