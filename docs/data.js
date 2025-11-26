@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1764135679550,
+  "lastUpdate": 1764198936117,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -15161,6 +15161,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 22.724045,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "lindsay@cipherstash.com",
+            "name": "Lindsay Holmwood",
+            "username": "auxesis"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "14a8fb2619029cf10158e7dc5dbb508debb263de",
+          "message": "Merge pull request #333 from cipherstash/docs/add-security-dot-md",
+          "timestamp": "2025-11-27T10:11:27+11:00",
+          "tree_id": "0df46e315d6d1935cece6afa9aa2d64f4fd576fd",
+          "url": "https://github.com/cipherstash/proxy/commit/14a8fb2619029cf10158e7dc5dbb508debb263de"
+        },
+        "date": 1764198934754,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 22.17934,
             "unit": "Number"
           }
         ]
