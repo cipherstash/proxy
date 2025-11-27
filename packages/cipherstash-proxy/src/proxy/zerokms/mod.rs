@@ -5,7 +5,6 @@ pub use zerokms::ZeroKms;
 
 use crate::{
     config::TandemConfig,
-    eql::{self, EqlEncryptedBody, EqlEncryptedIndexes},
     error::{EncryptError, Error},
     Identifier, EQL_SCHEMA_VERSION,
 };
@@ -14,6 +13,7 @@ use cipherstash_client::{
     config::EnvSource,
     credentials::{auto_refresh::AutoRefresh, ServiceCredentials},
     encryption::{Encrypted, EncryptedEntry, EncryptedSteVecTerm, IndexTerm, Plaintext},
+    eql::{self, EqlEncryptedBody, EqlEncryptedIndexes},
     zerokms::ClientKey,
     ConsoleConfig, CtsConfig, ZeroKMS, ZeroKMSConfig,
 };
@@ -134,6 +134,7 @@ pub(crate) fn to_eql_encrypted(
                         EncryptedSteVecTerm::OreVariable(ore) => {
                             ore_cclw_var_index = Some(hex::encode(&ore))
                         }
+                        _ => ore_cclw_var_index = None,
                     },
                     IndexTerm::SteQueryVec(_query) => {} // TODO: what do we do here?
                     IndexTerm::Null => {}
@@ -187,6 +188,7 @@ pub(crate) fn to_eql_encrypted(
                                 ore_cllw_var_8: Some(hex::encode(&ore)),
                                 ..Default::default()
                             },
+                            _ => EqlEncryptedIndexes::default(),
                         };
 
                         eql::EqlEncryptedBody {

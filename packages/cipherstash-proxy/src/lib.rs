@@ -3,7 +3,6 @@
 pub mod cli;
 pub mod config;
 pub mod connect;
-pub mod eql;
 pub mod error;
 pub mod log;
 pub mod postgresql;
@@ -14,9 +13,9 @@ pub mod tls;
 pub use crate::cli::Args;
 pub use crate::cli::Migrate;
 pub use crate::config::{DatabaseConfig, ServerConfig, TandemConfig, TlsConfig};
-pub use crate::eql::{EqlEncrypted, ForQuery, Identifier, Plaintext};
 pub use crate::log::init;
 pub use crate::proxy::Proxy;
+pub use cipherstash_client::eql::{EqlEncrypted, ForQuery, Identifier, Plaintext};
 
 use std::mem;
 

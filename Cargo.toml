@@ -43,8 +43,9 @@ debug = true
 
 [workspace.dependencies]
 sqltk = { version = "0.10.0" }
-cipherstash-client = "0.27.0"
-cts-common = { version = "0.3.0" }
+cipherstash-client = "0.30.0"
+cts-common = { version = "0.4.0" }
+
 thiserror = "2.0.9"
 tokio = { version = "1.44.2", features = ["full"] }
 tracing = "0.1"

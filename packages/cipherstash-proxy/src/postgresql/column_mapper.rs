@@ -1,10 +1,10 @@
 use crate::{
-    eql::Identifier,
     error::{EncryptError, Error},
     log::MAPPER,
     postgresql::Column,
     proxy::EncryptConfig,
 };
+use cipherstash_client::eql::Identifier;
 use eql_mapper::{EqlTerm, TableColumn, TypeCheckedStatement};
 use postgres_types::Type;
 use std::sync::Arc;
@@ -40,7 +40,8 @@ impl ColumnMapper {
             let configured_column = match &**ty {
                 eql_mapper::Type::Value(eql_mapper::Value::Eql(eql_term)) => {
                     let TableColumn { table, column } = eql_term.table_column();
-                    let identifier: Identifier = Identifier::from((table, column));
+                    let identifier: Identifier =
+                        Identifier::new(table.value.to_string(), column.value.to_string());
 
                     debug!(
                         target: MAPPER,
@@ -74,7 +75,8 @@ impl ColumnMapper {
             let configured_column = match param {
                 (_, eql_mapper::Value::Eql(eql_term)) => {
                     let TableColumn { table, column } = eql_term.table_column();
-                    let identifier = Identifier::from((table, column));
+                    let identifier =
+                        Identifier::new(table.value.to_string(), column.value.to_string());
 
                     debug!(
                         target: MAPPER,
@@ -102,7 +104,7 @@ impl ColumnMapper {
 
         for (eql_term, _) in typed_statement.literals.iter() {
             let TableColumn { table, column } = eql_term.table_column();
-            let identifier = Identifier::from((table, column));
+            let identifier = Identifier::new(table.value.to_string(), column.value.to_string());
 
             debug!(
                 target: MAPPER,
