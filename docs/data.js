@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1764213748075,
+  "lastUpdate": 1764215133701,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -15244,6 +15244,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 23.578323,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "6ca1c953eebe064222b289f776dee3048d3b8e6c",
+          "message": "chore(deps): bump golang.org/x/crypto in /tests/integration/golang",
+          "timestamp": "2025-11-27T00:21:37Z",
+          "url": "https://github.com/cipherstash/proxy/pull/334/commits/6ca1c953eebe064222b289f776dee3048d3b8e6c"
+        },
+        "date": 1764215132348,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 24.030174,
             "unit": "Number"
           }
         ]
