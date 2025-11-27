@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1764198936117,
+  "lastUpdate": 1764203109292,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -15190,6 +15190,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 22.17934,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "james@cipherstash.com",
+            "name": "James Sadler",
+            "username": "freshtonic"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "96aaf408c69f90be8ad0c8a22dd40d7efed09b46",
+          "message": "Merge pull request #330 from cipherstash/chore/remove-eql-module\n\nchore(eql): remove eql module",
+          "timestamp": "2025-11-27T11:21:32+11:00",
+          "tree_id": "8488da84fc650b4dd4208ad6b54167aa8723788b",
+          "url": "https://github.com/cipherstash/proxy/commit/96aaf408c69f90be8ad0c8a22dd40d7efed09b46"
+        },
+        "date": 1764203107900,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 21.490022,
             "unit": "Number"
           }
         ]
