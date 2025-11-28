@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1764215133701,
+  "lastUpdate": 1764293958051,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -15269,6 +15269,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 24.030174,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "toby@cipherstash.com",
+            "name": "Toby Hede",
+            "username": "tobyhede"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "edf6c3dbd63768da8e476326f376e9a6015caadb",
+          "message": "Merge pull request #334 from cipherstash/golang.org/crypto-0.45.0\n\nchore(deps): bump golang.org/x/crypto in /tests/integration/golang",
+          "timestamp": "2025-11-28T12:33:58+11:00",
+          "tree_id": "1a08a268fceb093cff8daff2d7d5dc4141e0a88b",
+          "url": "https://github.com/cipherstash/proxy/commit/edf6c3dbd63768da8e476326f376e9a6015caadb"
+        },
+        "date": 1764293956709,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 25.371945,
             "unit": "Number"
           }
         ]
