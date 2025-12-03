@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1764762415302,
+  "lastUpdate": 1764763680910,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -15377,6 +15377,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 24.458564,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "179645ca76229afa88c0e6690a03bb25371e78a2",
+          "message": "docs(getting-started): use Dashboard not Stash CLI",
+          "timestamp": "2025-12-03T05:22:37Z",
+          "url": "https://github.com/cipherstash/proxy/pull/336/commits/179645ca76229afa88c0e6690a03bb25371e78a2"
+        },
+        "date": 1764763679478,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 25.329138,
             "unit": "Number"
           }
         ]
