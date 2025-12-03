@@ -66,10 +66,11 @@ git clone https://github.com/cipherstash/proxy
 cd proxy
 
 # Sign up, create a workspace, and generate credentials
-open https://dashboard.cipherstash.com/sign-up
+# Visit: https://dashboard.cipherstash.com/sign-up
 
 # Put credentials in .env.proxy.docker
-pbpaste > .env.proxy.docker
+# Copy the credentials from the dashboard and paste them into .env.proxy.docker using your preferred text editor.
+nano .env.proxy.docker
 
 # Start the containers
 docker compose up
