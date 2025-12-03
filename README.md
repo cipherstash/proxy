@@ -65,15 +65,12 @@ Get up and running in local dev in < 5 minutes:
 git clone https://github.com/cipherstash/proxy
 cd proxy
 
-# Install the CipherStash CLI
-## macOS
-brew install cipherstash/tap/stash
-## Linux
-## Download from https://github.com/cipherstash/cli-releases/releases/latest
+# Sign up, create a workspace, and generate credentials
+# Visit: https://dashboard.cipherstash.com/sign-up
 
-# Setup your CipherStash configuration
-stash setup --proxy
-# ⬆️ this outputs creds to .env.proxy.docker
+# Put credentials in .env.proxy.docker
+# Copy the credentials from the dashboard and paste them into .env.proxy.docker using your preferred text editor.
+nano .env.proxy.docker
 
 # Start the containers
 docker compose up
