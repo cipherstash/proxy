@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1764293958051,
+  "lastUpdate": 1764738293860,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -15298,6 +15298,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 25.371945,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "9f5c6f8e5f098717f691e2ea75d9eaee864ac839",
+          "message": "refactor: move EQL encryption logic to cipherstash-client",
+          "timestamp": "2025-11-28T01:34:03Z",
+          "url": "https://github.com/cipherstash/proxy/pull/335/commits/9f5c6f8e5f098717f691e2ea75d9eaee864ac839"
+        },
+        "date": 1764738292443,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 22.266467,
             "unit": "Number"
           }
         ]
