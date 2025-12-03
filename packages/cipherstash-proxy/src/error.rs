@@ -268,7 +268,7 @@ pub enum EncryptError {
 
     /// This should in practice be unreachable
     #[error("Missing encrypt configuration for column type `{plaintext_type}`. For help visit {}#encrypt-missing-encrypt-configuration", ERROR_DOC_BASE_URL)]
-    MissingEncryptConfiguration { plaintext_type: String },
+    MissingEncryptConfiguration { plaintext_type: &'static str },
 
     #[error("Decrypted column could not be encoded as the expected type. For help visit {}#encrypt-plaintext-could-not-be-encoded", ERROR_DOC_BASE_URL)]
     PlaintextCouldNotBeEncoded,
@@ -308,6 +308,78 @@ pub enum EncryptError {
 
     #[error("Unknown Index Term for column '{}' in table '{}'. For help visit {}#encrypt-unknown-index-term", _0.column(), _0.table(), ERROR_DOC_BASE_URL)]
     UnknownIndexTerm(Identifier),
+
+    #[error("ZeroKMS error: `{}`", _0)]
+    ZeroKMS(String),
+}
+
+// This impl is very boilerplatey but we can't simply re-export the `cipherstash-client` version of the error
+// because Proxy currently manages the documentation links.
+impl From<cipherstash_client::eql::EncryptError> for EncryptError {
+    fn from(value: cipherstash_client::eql::EncryptError) -> Self {
+        match value {
+            cipherstash_client::eql::EncryptError::CiphertextCouldNotBeSerialised(error) => {
+                Self::CiphertextCouldNotBeSerialised(error)
+            }
+            cipherstash_client::eql::EncryptError::ColumnCouldNotBeParsed => {
+                Self::ColumnCouldNotBeParsed
+            }
+            cipherstash_client::eql::EncryptError::ColumnIsNull => Self::ColumnIsNull,
+            cipherstash_client::eql::EncryptError::ColumnCouldNotBeDeserialised {
+                table,
+                column,
+            } => Self::ColumnCouldNotBeDeserialised { table, column },
+            cipherstash_client::eql::EncryptError::ColumnCouldNotBeEncrypted { table, column } => {
+                Self::ColumnCouldNotBeEncrypted { table, column }
+            }
+            cipherstash_client::eql::EncryptError::ColumnConfigurationMismatch {
+                table,
+                column,
+            } => Self::ColumnConfigurationMismatch { table, column },
+            cipherstash_client::eql::EncryptError::CouldNotDecryptDataForKeyset { keyset_id } => {
+                Self::CouldNotDecryptDataForKeyset { keyset_id }
+            }
+            cipherstash_client::eql::EncryptError::InvalidIndexTerm => Self::InvalidIndexTerm,
+            cipherstash_client::eql::EncryptError::KeysetIdCouldNotBeParsed { id } => {
+                Self::KeysetIdCouldNotBeParsed { id }
+            }
+            cipherstash_client::eql::EncryptError::KeysetIdCouldNotBeSet => {
+                Self::KeysetIdCouldNotBeSet
+            }
+            cipherstash_client::eql::EncryptError::KeysetNameCouldNotBeSet => {
+                Self::KeysetNameCouldNotBeSet
+            }
+            cipherstash_client::eql::EncryptError::MissingEncryptConfiguration {
+                plaintext_type,
+            } => Self::MissingEncryptConfiguration { plaintext_type },
+            cipherstash_client::eql::EncryptError::PlaintextCouldNotBeEncoded => {
+                Self::PlaintextCouldNotBeEncoded
+            }
+            cipherstash_client::eql::EncryptError::Pipeline(encryption_error) => {
+                Self::Pipeline(encryption_error)
+            }
+            cipherstash_client::eql::EncryptError::PlaintextCouldNotBeDecoded(type_parse_error) => {
+                Self::PlaintextCouldNotBeDecoded(type_parse_error)
+            }
+            cipherstash_client::eql::EncryptError::MissingKeysetIdentifier => {
+                Self::MissingKeysetIdentifier
+            }
+            cipherstash_client::eql::EncryptError::UnexpectedSetKeyset => Self::UnexpectedSetKeyset,
+            cipherstash_client::eql::EncryptError::UnknownColumn { table, column } => {
+                Self::UnknownColumn { table, column }
+            }
+            cipherstash_client::eql::EncryptError::UnknownKeysetIdentifier { keyset } => {
+                Self::UnknownKeysetIdentifier { keyset }
+            }
+            cipherstash_client::eql::EncryptError::UnknownTable { table } => {
+                Self::UnknownTable { table }
+            }
+            cipherstash_client::eql::EncryptError::UnknownIndexTerm(identifier) => {
+                Self::UnknownIndexTerm(identifier)
+            }
+            cipherstash_client::eql::EncryptError::ZeroKMS(message) => Self::ZeroKMS(message),
+        }
+    }
 }
 
 #[derive(Error, Debug)]
