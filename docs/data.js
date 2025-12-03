@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1764763823506,
+  "lastUpdate": 1764773299437,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -15452,6 +15452,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 24.664509,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "cj@cipherstash.com",
+            "name": "CJ Brewer",
+            "username": "calvinbrewer"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "2d436e1016fe958dde0ae5a1a3ff3dac27a0515f",
+          "message": "Merge pull request #336 from cipherstash/docs/update-getting-started\n\ndocs(getting-started): use Dashboard not Stash CLI",
+          "timestamp": "2025-12-03T07:45:14-07:00",
+          "tree_id": "32c86e3bacd0f59a415a09de65fc91be279a5e0a",
+          "url": "https://github.com/cipherstash/proxy/commit/2d436e1016fe958dde0ae5a1a3ff3dac27a0515f"
+        },
+        "date": 1764773298027,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 24.161837,
             "unit": "Number"
           }
         ]
