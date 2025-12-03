@@ -7,9 +7,8 @@ use crate::{
     proxy::EncryptionService,
 };
 use cipherstash_client::{
-    encryption::QueryOp,
-    encryption::{Plaintext, PlaintextTarget, Queryable, ReferencedPendingPipeline},
-    eql,
+    encryption::{Plaintext, ReferencedPendingPipeline},
+    eql::{self, decrypt_eql, encrypt_eql, EqlEncryptionSpec},
 };
 use metrics::counter;
 use moka::future::Cache;
@@ -17,10 +16,7 @@ use std::{sync::Arc, time::Duration};
 use tracing::{debug, info, warn};
 use uuid::Uuid;
 
-use super::{
-    init_zerokms_client, plaintext_type_name, to_eql_encrypted, to_eql_encrypted_from_index_term,
-    ScopedCipher, ZerokmsClient,
-};
+use super::{init_zerokms_client, ScopedCipher, ZerokmsClient};
 
 /// Memory size of a single ScopedCipher instance for cache weighing
 const SCOPED_CIPHER_SIZE: usize = std::mem::size_of::<ScopedCipher>();
@@ -145,62 +141,24 @@ impl EncryptionService for ZeroKms {
         }
 
         let cipher = self.init_cipher(keyset_id).await?;
+        let pipeline = ReferencedPendingPipeline::new(cipher.clone());
 
-        let mut pipeline = ReferencedPendingPipeline::new(cipher.clone());
-        let mut index_term_plaintexts = vec![None; columns.len()];
-
-        for (idx, item) in plaintexts.into_iter().zip(columns.iter()).enumerate() {
-            match item {
-                (Some(plaintext), Some(column)) => {
-                    if column.is_encryptable() {
-                        let encryptable = PlaintextTarget::new(plaintext, column.config.clone());
-                        pipeline.add_with_ref::<PlaintextTarget>(encryptable, idx)?;
+        let encryption_specs: Vec<Option<EqlEncryptionSpec>> = columns
+            .iter()
+            .map(|col| {
+                col.as_ref().map(|col| {
+                    if col.is_encryptable() {
+                        EqlEncryptionSpec::Full(col.identifier.clone(), col.config.clone())
                     } else {
-                        index_term_plaintexts[idx] = Some(plaintext);
+                        EqlEncryptionSpec::SearchOnly(col.identifier.clone(), col.config.clone())
                     }
-                }
-                (None, Some(column)) => {
-                    // Parameter is NULL
-                    debug!(target: ENCRYPT, msg = "Null parameter", ?column);
-                }
-                (Some(plaintext), None) => {
-                    // Should be unreachable
-                    let plaintext_type = plaintext_type_name(plaintext);
-                    return Err(EncryptError::MissingEncryptConfiguration { plaintext_type }.into());
-                }
-                (None, None) => {
-                    // Parameter is not encryptable
-                }
-            }
-        }
+                })
+            })
+            .collect();
 
-        let mut encrypted_eql = vec![];
-
-        let mut result = pipeline.encrypt(None, None).await?;
-
-        for (idx, opt) in columns.iter().enumerate() {
-            let mut encrypted = None;
-
-            if let Some(column) = opt {
-                if let Some(e) = result.remove(idx) {
-                    encrypted = Some(to_eql_encrypted(e, &column.identifier)?);
-                } else if let Some(plaintext) = index_term_plaintexts[idx].clone() {
-                    let index = column.config.clone().into_ste_vec_index().unwrap();
-                    let op = QueryOp::SteVecSelector;
-
-                    let index_term = (index, plaintext).build_queryable(cipher.clone(), op)?;
-
-                    encrypted = Some(to_eql_encrypted_from_index_term(
-                        index_term,
-                        &column.identifier,
-                    )?);
-                }
-            }
-
-            encrypted_eql.push(encrypted);
-        }
-
-        Ok(encrypted_eql)
+        Ok(encrypt_eql(cipher, pipeline, plaintexts, &encryption_specs)
+            .await
+            .map_err(EncryptError::from)?)
     }
 
     ///
@@ -222,41 +180,10 @@ impl EncryptionService for ZeroKms {
 
         let cipher = self.init_cipher(keyset_id.clone()).await?;
 
-        // Create a mutable vector to hold the decrypted results
-        let mut results = vec![None; ciphertexts.len()];
-
-        // Collect the index and ciphertext details for every Some(ciphertext)
-        let (indices, encrypted): (Vec<_>, Vec<_>) = ciphertexts
-            .into_iter()
-            .enumerate()
-            .filter_map(|(idx, eql)| Some((idx, eql?.body.ciphertext.unwrap())))
-            .collect::<_>();
-
-        let decrypted = cipher.decrypt(encrypted).await.map_err(|err| -> Error {
-            match &err {
-                cipherstash_client::zerokms::Error::Decrypt(_) => {
-                    let error_msg = err.to_string();
-                    if error_msg.contains("Failed to retrieve key") {
-                        EncryptError::CouldNotDecryptDataForKeyset {
-                            keyset_id: keyset_id
-                                .map(|id| id.to_string())
-                                .unwrap_or("default_keyset".to_string()),
-                        }
-                        .into()
-                    } else {
-                        Error::ZeroKMS(err.into())
-                    }
-                }
-                _ => Error::ZeroKMS(err.into()),
-            }
-        })?;
-
-        // Merge the decrypted values as plaintext into their original indexed positions
-        for (idx, decrypted) in indices.into_iter().zip(decrypted) {
-            let plaintext = Plaintext::from_slice(&decrypted)?;
-            results[idx] = Some(plaintext);
-        }
-
-        Ok(results)
+        Ok(
+            decrypt_eql(keyset_id.map(|keyset_id| keyset_id.0), cipher, ciphertexts)
+                .await
+                .map_err(EncryptError::from)?,
+        )
     }
 }

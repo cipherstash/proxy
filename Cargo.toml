@@ -43,7 +43,7 @@ debug = true
 
 [workspace.dependencies]
 sqltk = { version = "0.10.0" }
-cipherstash-client = "0.30.0"
+cipherstash-client = { version = "0.31.0" }
 cts-common = { version = "0.4.0" }
 
 thiserror = "2.0.9"
