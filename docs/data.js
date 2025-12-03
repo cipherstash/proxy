@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1764738293860,
+  "lastUpdate": 1764739553700,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -15323,6 +15323,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 22.266467,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "james@cipherstash.com",
+            "name": "James Sadler",
+            "username": "freshtonic"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "b4bb9c3eb951fc8f5221da72cd262a2379b34966",
+          "message": "Merge pull request #335 from cipherstash/refactor/move-remaining-eql-bits-to-cipherstash-client\n\nrefactor: move EQL encryption logic to cipherstash-client",
+          "timestamp": "2025-12-03T16:22:32+11:00",
+          "tree_id": "d17cd553081ca887c8fe30869051627f4935d455",
+          "url": "https://github.com/cipherstash/proxy/commit/b4bb9c3eb951fc8f5221da72cd262a2379b34966"
+        },
+        "date": 1764739552268,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 24.92554,
             "unit": "Number"
           }
         ]
