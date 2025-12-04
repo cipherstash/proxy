@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1764848435988,
+  "lastUpdate": 1764882026069,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -15506,6 +15506,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 22.908692,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "ebea36c22fd1b9f776e519b9e83c3b9de62bca9e",
+          "message": "Support postgres 18",
+          "timestamp": "2025-12-03T14:45:19Z",
+          "url": "https://github.com/cipherstash/proxy/pull/337/commits/ebea36c22fd1b9f776e519b9e83c3b9de62bca9e"
+        },
+        "date": 1764882024803,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 23.842118,
             "unit": "Number"
           }
         ]
