@@ -12,7 +12,7 @@ services:
     volumes:
       - ./pg/postgresql.conf:/etc/postgresql/postgresql.conf
       - ./benchmark/sql/:/etc/postgresql/benchmark/sql
-      - ./pg/data-latest:/var/lib/postgresql/data
+      - ./pg/data-latest:/var/lib/postgresql
     env_file:
       - ./pg/common.env
     networks:
@@ -44,7 +44,7 @@ services:
       - ./pg/pg_hba-tls.conf:/etc/postgresql/pg_hba.conf
       - ./tls/localhost-key.pem:/etc/postgresql/localhost-key.pem
       - ./tls/localhost.pem:/etc/postgresql/localhost.pem
-      - ./pg/data-17:/var/lib/postgresql/data
+      - ./pg/data-17:/var/lib/postgresql
 
   proxy:
     image: cipherstash/proxy:latest
