@@ -1,6 +1,6 @@
 services:
   postgres: &postgres
-    image: postgres:17
+    image: postgres:${PG_VERSION:-17}
     pull_policy: always
     container_name: postgres
     command: -c 'config_file=/etc/postgresql/postgresql.conf'
@@ -32,7 +32,7 @@ services:
 
   postgres-17-tls:
     <<: *postgres
-    image: postgres:17
+    image: postgres:${PG_VERSION:-17}
     container_name: postgres-17-tls
     environment:
       PGPORT: 5617
