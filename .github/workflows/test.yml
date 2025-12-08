@@ -18,7 +18,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        pg_version: [14, 15, 16, 17, 18]
+        pg_version: [14, 15, 16, 17] # PG 18 not currently supported
     env:
       PG_VERSION: ${{ matrix.pg_version }}
     steps:
