@@ -30,10 +30,10 @@ services:
       timeout: 5s
       retries: 10
 
-  postgres-17-tls:
+  postgres-tls:
     <<: *postgres
     image: postgres:${PG_VERSION:-17}
-    container_name: postgres-17-tls
+    container_name: postgres-tls
     environment:
       PGPORT: 5617
     ports:
