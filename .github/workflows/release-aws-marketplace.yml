@@ -82,6 +82,14 @@ jobs:
 
       - uses: actions/checkout@v4
 
+      - name: Load secrets
+        uses: 1password/load-secrets-action@v3
+        with:
+          export-env: true
+        env:
+          OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
+          OP_ENV_FILE: .github/secrets.env.tpl
+
       - uses: jdx/mise-action@v2
         with:
           version: 2025.1.6 # [default: latest] mise version to install
@@ -111,6 +119,6 @@ jobs:
             --fail-with-body \
             --url "https://api.developer.multitudes.co/deployments" \
             --header "Content-Type: application/json" \
-            --header "Authorization: ${{ secrets.MULTITUDES_ACCESS_TOKEN }}" \
+            --header "Authorization: ${{ env.MULTITUDES_ACCESS_TOKEN }}" \
             --data '{"commitSha": "${{ github.sha }}", "environmentName":"marketplace"}'
 

@@ -24,24 +24,31 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-test
+
+      - name: Load secrets
+        uses: 1password/load-secrets-action@v3
+        with:
+          export-env: true
+        env:
+          OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
+          OP_ENV_FILE: .github/secrets.env.tpl
+
       - run: |
           mise run postgres:up --extra-args "--detach --wait"
+
       - name: Run benchmark
         working-directory: tests/benchmark
         env:
-          CS_CLIENT_ACCESS_KEY: ${{ secrets.CS_CLIENT_ACCESS_KEY }}
-          CS_DEFAULT_KEYSET_ID: ${{ secrets.CS_DEFAULT_KEYSET_ID }}
-          CS_CLIENT_ID: ${{ secrets.CS_CLIENT_ID }}
-          CS_CLIENT_KEY: ${{ secrets.CS_CLIENT_KEY }}
-          CS_WORKSPACE_CRN: ${{ secrets.CS_WORKSPACE_CRN }}
           RUST_BACKTRACE: "1"
         run: mise run benchmark:continuous
+
       # Download previous benchmark result from cache (if exists)
       - name: Download previous benchmark data
         uses: actions/cache@v4
         with:
           path: ./cache
           key: ${{ runner.os }}-benchmark
+
       # Run `github-action-benchmark` action
       - name: Store benchmark result
         uses: benchmark-action/github-action-benchmark@v1
@@ -61,5 +68,5 @@ jobs:
       - uses: ./.github/actions/send-slack-notification
         with:
           channel: engineering
-          webhook_url: ${{ secrets.SLACK_NOTIFICATION_WEBHOOK_URL }}
+          webhook_url: ${{ env.SLACK_NOTIFICATION_WEBHOOK_URL }}
 

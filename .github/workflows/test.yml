@@ -18,22 +18,22 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-test
+
+      - name: Load secrets
+        uses: 1password/load-secrets-action@v3
+        with:
+          export-env: true
+        env:
+          OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
+          OP_ENV_FILE: .github/secrets.env.tpl
+
       - run: |
           mise run postgres:up --extra-args "--detach --wait"
-      - env:
+
+      - name: Run tests
+        env:
           # REMEMBER TO ADD ENVIRONMENT VARIABLES TO tests/docker-compose.yml
           # The tests/docker-compose.yml config passes the ENV vars into the container
-          CS_CLIENT_ACCESS_KEY: ${{ secrets.CS_CLIENT_ACCESS_KEY }}
-          CS_DEFAULT_KEYSET_ID: ${{ secrets.CS_DEFAULT_KEYSET_ID }}
-          CS_TENANT_KEYSET_ID_1: ${{ secrets.CS_TENANT_KEYSET_ID_1 }}
-          CS_TENANT_KEYSET_ID_2: ${{ secrets.CS_TENANT_KEYSET_ID_2 }}
-          CS_TENANT_KEYSET_ID_3: ${{ secrets.CS_TENANT_KEYSET_ID_3 }}
-          CS_TENANT_KEYSET_NAME_1: ${{ secrets.CS_TENANT_KEYSET_NAME_1 }}
-          CS_TENANT_KEYSET_NAME_2: ${{ secrets.CS_TENANT_KEYSET_NAME_2 }}
-          CS_TENANT_KEYSET_NAME_3: ${{ secrets.CS_TENANT_KEYSET_NAME_3 }}
-          CS_CLIENT_ID: ${{ secrets.CS_CLIENT_ID }}
-          CS_CLIENT_KEY: ${{ secrets.CS_CLIENT_KEY }}
-          CS_WORKSPACE_CRN: ${{ secrets.CS_WORKSPACE_CRN }}
           RUST_BACKTRACE: "1"
         run: |
           mise run --output prefix test
@@ -41,5 +41,5 @@ jobs:
       - uses: ./.github/actions/send-slack-notification
         with:
           channel: engineering
-          webhook_url: ${{ secrets.SLACK_NOTIFICATION_WEBHOOK_URL }}
+          webhook_url: ${{ env.SLACK_NOTIFICATION_WEBHOOK_URL }}
 
