@@ -73,6 +73,9 @@ static SQL_FUNCTION_TYPES: LazyLock<HashMap<IdentCase<ObjectName>, FunctionDecl>
             eql_v2.jsonb_array_length<T>(T) -> Native where T: JsonLike;
             eql_v2.jsonb_array_elements<T>(T) -> SetOf<T> where T: JsonLike;
             eql_v2.jsonb_array_elements_text<T>(T) -> SetOf<T> where T: JsonLike;
+            eql_v2.jsonb_array<T>(T) -> Native where T: Contain;
+            eql_v2.jsonb_contains<T>(T, T) -> Native where T: Contain;
+            eql_v2.jsonb_contained_by<T>(T, T) -> Native where T: Contain;
         };
 
         HashMap::from_iter(
