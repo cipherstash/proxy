@@ -5,9 +5,9 @@ use sqltk::parser::ast::{
     BinaryOperator, Expr, Function, FunctionArg, FunctionArgExpr, FunctionArgumentList,
     FunctionArguments, Ident, ObjectName, ObjectNamePart,
 };
-use sqltk::{AsNodeKey, NodeKey, NodePath, Visitable};
+use sqltk::{NodeKey, NodePath, Visitable};
 
-use crate::unifier::{Type, Value};
+use crate::unifier::Type;
 use crate::EqlMapperError;
 
 use super::TransformationRule;
@@ -21,23 +21,13 @@ use super::TransformationRule;
 /// `eql_v2.jsonb_array(encrypted_col)`.
 #[derive(Debug)]
 pub struct RewriteContainmentOps<'ast> {
+    #[allow(dead_code)]
     node_types: Arc<HashMap<NodeKey<'ast>, Type>>,
 }
 
 impl<'ast> RewriteContainmentOps<'ast> {
     pub fn new(node_types: Arc<HashMap<NodeKey<'ast>, Type>>) -> Self {
         Self { node_types }
-    }
-
-    /// Returns true if either operand is an EQL type.
-    fn uses_eql_type(&self, left: &Expr, right: &Expr) -> bool {
-        matches!(
-            self.node_types.get(&left.as_node_key()),
-            Some(Type::Value(Value::Eql(_)))
-        ) || matches!(
-            self.node_types.get(&right.as_node_key()),
-            Some(Type::Value(Value::Eql(_)))
-        )
     }
 
     fn make_function_call(fn_name: &str, left: Expr, right: Expr) -> Expr {
@@ -92,9 +82,11 @@ impl<'ast> TransformationRule<'ast> for RewriteContainmentOps<'ast> {
 
     fn would_edit<N: Visitable>(&mut self, _node_path: &NodePath<'ast>, target_node: &N) -> bool {
         if let Some(expr) = target_node.downcast_ref::<Expr>() {
-            if let Expr::BinaryOp { left, op, right } = expr {
+            if let Expr::BinaryOp { left: _, op, right: _ } = expr {
                 if matches!(op, BinaryOperator::AtArrow | BinaryOperator::ArrowAt) {
-                    return self.uses_eql_type(left, right);
+                    // Always rewrite containment operators - if they're used in the query,
+                    // at least one operand must be EQL-typed based on schema
+                    return true;
                 }
             }
         }

@@ -1709,10 +1709,18 @@ mod test {
         match type_check(schema, &statement) {
             Ok(typed) => {
                 match typed.transform(test_helpers::dummy_encrypted_json_selector(&statement, vec![ast::Value::SingleQuotedString("medications".to_owned())])) {
-                    Ok(statement) => assert_eq!(
-                        statement.to_string(),
-                        format!("SELECT id, notes {op} '<encrypted-selector(medications)>'::JSONB::eql_v2_encrypted AS meds FROM patients")
-                    ),
+                    Ok(statement) => {
+                        let expected = match op {
+                            "@>" => format!("SELECT id, eql_v2.jsonb_contains(notes, '<encrypted-selector(medications)>'::JSONB::eql_v2_encrypted) AS meds FROM patients"),
+                            "<@" => format!("SELECT id, eql_v2.jsonb_contained_by(notes, '<encrypted-selector(medications)>'::JSONB::eql_v2_encrypted) AS meds FROM patients"),
+                            // Other operators are not transformed
+                            _ => format!("SELECT id, notes {op} '<encrypted-selector(medications)>'::JSONB::eql_v2_encrypted AS meds FROM patients"),
+                        };
+                        assert_eq!(
+                            statement.to_string(),
+                            expected
+                        )
+                    },
                     Err(err) => panic!("transformation failed: {err}"),
                 }
             }
@@ -1781,6 +1789,103 @@ mod test {
             Ok(_) => (),
             Err(err) => panic!("type check failed for eql_v2.jsonb_contained_by: {err}"),
         }
+    }
+
+    #[test]
+    fn eql_v2_jsonb_contains_with_param() {
+        let schema = resolver(schema! {
+            tables: {
+                patients: {
+                    id,
+                    notes (EQL: JsonLike + Contain),
+                }
+            }
+        });
+
+        let statement = parse(
+            "SELECT id FROM patients WHERE eql_v2.jsonb_contains(notes, $1)",
+        );
+
+        let typed = type_check(schema, &statement)
+            .map_err(|err| err.to_string())
+            .unwrap();
+
+        // Verify param was inferred as EQL type
+        assert!(typed.params_contain_eql(), "param $1 should be EQL type");
+
+        // Verify transformation output - function passes through, param gets cast
+        match typed.transform(HashMap::new()) {
+            Ok(statement) => assert_eq!(
+                statement.to_string(),
+                "SELECT id FROM patients WHERE eql_v2.jsonb_contains(notes, $1::JSONB::eql_v2_encrypted)"
+            ),
+            Err(err) => panic!("transformation failed: {err}"),
+        }
+    }
+
+    #[test]
+    fn containment_operator_transforms_to_function() {
+        let schema = resolver(schema! {
+            tables: {
+                patients: {
+                    id,
+                    notes (EQL: JsonLike + Contain),
+                }
+            }
+        });
+
+        let statement = parse("SELECT id FROM patients WHERE notes @> $1");
+
+        let typed = type_check(schema, &statement)
+            .expect("type check failed for containment operator");
+        let transformed = typed.transform(HashMap::new())
+            .expect("transformation failed");
+        let sql = transformed.to_string();
+
+        // Verify function call exists
+        assert!(
+            sql.contains("eql_v2.jsonb_contains"),
+            "Expected @> to be transformed to eql_v2.jsonb_contains, got: {sql}"
+        );
+
+        // CRITICAL: Verify the parameter is cast to enable GIN index usage
+        // The cast ::JSONB::eql_v2_encrypted is required for GIN indexes to work
+        assert!(
+            sql.contains("::JSONB::eql_v2_encrypted") || sql.contains("::jsonb::eql_v2_encrypted"),
+            "Expected parameter to be cast as ::JSONB::eql_v2_encrypted for GIN index support, got: {sql}"
+        );
+    }
+
+    #[test]
+    fn contained_by_operator_transforms_to_function() {
+        let schema = resolver(schema! {
+            tables: {
+                patients: {
+                    id,
+                    notes (EQL: JsonLike + Contain),
+                }
+            }
+        });
+
+        let statement = parse("SELECT id FROM patients WHERE $1 <@ notes");
+
+        let typed = type_check(schema, &statement)
+            .expect("type check failed for contained_by operator");
+        let transformed = typed.transform(HashMap::new())
+            .expect("transformation failed");
+        let sql = transformed.to_string();
+
+        // Verify function call exists
+        assert!(
+            sql.contains("eql_v2.jsonb_contained_by"),
+            "Expected <@ to be transformed to eql_v2.jsonb_contained_by, got: {sql}"
+        );
+
+        // CRITICAL: Verify the parameter is cast to enable GIN index usage
+        assert!(
+            sql.contains("::JSONB::eql_v2_encrypted") || sql.contains("::jsonb::eql_v2_encrypted"),
+            "Expected parameter to be cast as ::JSONB::eql_v2_encrypted for GIN index support, got: {sql}"
+        );
     }
 
     #[test]
