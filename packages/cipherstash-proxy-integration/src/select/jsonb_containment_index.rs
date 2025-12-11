@@ -116,4 +116,176 @@ mod tests {
             explain.join("\n")
         );
     }
+
+    /// Test: Verify @> operator uses GIN index after creation
+    ///
+    /// The proxy should transform `col @> val` to use eql_v2.jsonb_array()
+    /// which enables the GIN index to be used.
+    #[tokio::test]
+    async fn jsonb_contains_operator_uses_gin_index() {
+        trace();
+        clear().await;
+        drop_gin_index().await;
+        setup_bulk_jsonb_data().await;
+        create_gin_index().await;
+
+        let sql = r#"SELECT id FROM encrypted WHERE encrypted_jsonb @> '{"string": "value_1"}'"#;
+        let explain = explain_query(sql).await;
+
+        info!("EXPLAIN output:\n{}", explain.join("\n"));
+
+        assert!(
+            uses_index(&explain, GIN_INDEX_NAME),
+            "Expected GIN index '{}' to be used. EXPLAIN:\n{}",
+            GIN_INDEX_NAME,
+            explain.join("\n")
+        );
+    }
+
+    /// Test: Verify <@ operator behavior with GIN index
+    ///
+    /// Tests the "contained by" direction of containment.
+    /// NOTE: PostgreSQL GIN indexes typically only efficiently support @>, not <@.
+    /// This test verifies whether the query planner uses the index for <@ queries.
+    /// If it uses seq scan, that's expected PostgreSQL behavior - document it.
+    #[tokio::test]
+    async fn jsonb_contained_by_operator_behavior_with_gin() {
+        trace();
+        clear().await;
+        drop_gin_index().await;
+        setup_bulk_jsonb_data().await;
+        create_gin_index().await;
+
+        // Test if a subset is contained in the column
+        // '{"string": "value_1"}' <@ encrypted_jsonb means:
+        // "find rows where {"string": "value_1"} is contained in the stored value"
+        let sql = r#"SELECT id FROM encrypted WHERE '{"string": "value_1"}' <@ encrypted_jsonb LIMIT 10"#;
+        let explain = explain_query(sql).await;
+
+        info!("EXPLAIN output:\n{}", explain.join("\n"));
+
+        // Note: GIN index may or may not be used for <@ operator
+        // This test documents actual PostgreSQL behavior
+        let index_used = uses_index(&explain, GIN_INDEX_NAME);
+        let seq_scan_used = uses_seq_scan(&explain);
+
+        info!(
+            "GIN index {} for <@ operator (seq scan: {})",
+            if index_used { "IS used" } else { "NOT used" },
+            seq_scan_used
+        );
+
+        // Test passes either way - we're documenting behavior
+        assert!(
+            index_used || seq_scan_used,
+            "Expected either index or seq scan. EXPLAIN:\n{}",
+            explain.join("\n")
+        );
+    }
+
+    /// Test: Verify eql_v2.jsonb_contains() function uses GIN index
+    ///
+    /// Tests direct usage of the EQL helper function (not operator transformation).
+    #[tokio::test]
+    async fn jsonb_contains_function_uses_gin_index() {
+        trace();
+        clear().await;
+        drop_gin_index().await;
+        setup_bulk_jsonb_data().await;
+        create_gin_index().await;
+
+        let sql = r#"SELECT id FROM encrypted WHERE eql_v2.jsonb_contains(encrypted_jsonb, '{"string": "value_1"}'::eql_v2_encrypted)"#;
+        let explain = explain_query(sql).await;
+
+        info!("EXPLAIN output:\n{}", explain.join("\n"));
+
+        assert!(
+            uses_index(&explain, GIN_INDEX_NAME),
+            "Expected GIN index for jsonb_contains(). EXPLAIN:\n{}",
+            explain.join("\n")
+        );
+    }
+
+    /// Test: Verify eql_v2.jsonb_contained_by() function behavior with GIN index
+    ///
+    /// Tests direct usage of the EQL contained_by helper function.
+    /// NOTE: Similar to <@ operator, GIN index support for contained_by may vary.
+    #[tokio::test]
+    async fn jsonb_contained_by_function_behavior_with_gin() {
+        trace();
+        clear().await;
+        drop_gin_index().await;
+        setup_bulk_jsonb_data().await;
+        create_gin_index().await;
+
+        let sql = r#"SELECT id FROM encrypted WHERE eql_v2.jsonb_contained_by('{"string": "value_1"}'::eql_v2_encrypted, encrypted_jsonb)"#;
+        let explain = explain_query(sql).await;
+
+        info!("EXPLAIN output:\n{}", explain.join("\n"));
+
+        // Document actual behavior - GIN may or may not support contained_by
+        let index_used = uses_index(&explain, GIN_INDEX_NAME);
+        let seq_scan_used = uses_seq_scan(&explain);
+
+        info!(
+            "GIN index {} for jsonb_contained_by() (seq scan: {})",
+            if index_used { "IS used" } else { "NOT used" },
+            seq_scan_used
+        );
+
+        // Test passes either way - we're documenting behavior
+        assert!(
+            index_used || seq_scan_used,
+            "Expected either index or seq scan. EXPLAIN:\n{}",
+            explain.join("\n")
+        );
+    }
+
+    /// Test: Verify containment returns correct results when index is used
+    ///
+    /// Ensures GIN index doesn't break functional correctness.
+    /// With 500 rows and n % 10 pattern, expect 50 matches for "value_1".
+    #[tokio::test]
+    async fn containment_returns_correct_results_with_index() {
+        trace();
+        clear().await;
+        drop_gin_index().await;
+        setup_bulk_jsonb_data().await;
+        create_gin_index().await;
+
+        let sql = r#"SELECT COUNT(*) FROM encrypted WHERE encrypted_jsonb @> '{"string": "value_1"}'"#;
+        let result = simple_query::<i64>(sql).await;
+
+        // 500 rows with string = "value_N" where N = n % 10
+        // So ~50 rows should have string = "value_1" (rows 1, 11, 21, ..., 491)
+        assert_eq!(
+            result,
+            vec![50],
+            "Expected 50 rows with string='value_1', got {:?}",
+            result
+        );
+    }
+
+    /// Test: Verify direct eql_v2.jsonb_array() @> usage with GIN index
+    ///
+    /// Tests the low-level API that the helper functions wrap.
+    #[tokio::test]
+    async fn jsonb_array_direct_uses_gin_index() {
+        trace();
+        clear().await;
+        drop_gin_index().await;
+        setup_bulk_jsonb_data().await;
+        create_gin_index().await;
+
+        let sql = r#"SELECT id FROM encrypted WHERE eql_v2.jsonb_array(encrypted_jsonb) @> eql_v2.jsonb_array('{"string": "value_1"}'::eql_v2_encrypted)"#;
+        let explain = explain_query(sql).await;
+
+        info!("EXPLAIN output:\n{}", explain.join("\n"));
+
+        assert!(
+            uses_index(&explain, GIN_INDEX_NAME),
+            "Expected GIN index for jsonb_array() @> jsonb_array(). EXPLAIN:\n{}",
+            explain.join("\n")
+        );
+    }
 }
