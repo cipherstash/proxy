@@ -94,4 +94,26 @@ mod tests {
     fn uses_seq_scan(explain: &[String]) -> bool {
         explain.iter().any(|line| line.contains("Seq Scan"))
     }
+
+    /// Test: Verify sequential scan is used without GIN index (baseline)
+    ///
+    /// This establishes that the GIN index actually matters for query optimization.
+    #[tokio::test]
+    async fn containment_uses_seq_scan_without_index() {
+        trace();
+        clear().await;
+        drop_gin_index().await;
+        setup_bulk_jsonb_data().await;
+
+        let sql = r#"SELECT id FROM encrypted WHERE encrypted_jsonb @> '{"string": "value_1"}'"#;
+        let explain = explain_query(sql).await;
+
+        info!("EXPLAIN output:\n{}", explain.join("\n"));
+
+        assert!(
+            uses_seq_scan(&explain),
+            "Expected Seq Scan without index. EXPLAIN:\n{}",
+            explain.join("\n")
+        );
+    }
 }
