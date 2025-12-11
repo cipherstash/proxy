@@ -1721,6 +1721,69 @@ mod test {
     }
 
     #[test]
+    fn jsonb_array_function() {
+        let schema = resolver(schema! {
+            tables: {
+                patients: {
+                    id,
+                    notes (EQL: JsonLike + Contain),
+                }
+            }
+        });
+
+        let statement = parse(
+            "SELECT id FROM patients WHERE eql_v2.jsonb_array(notes) @> eql_v2.jsonb_array(notes)",
+        );
+
+        match type_check(schema, &statement) {
+            Ok(_) => (),
+            Err(err) => panic!("type check failed for eql_v2.jsonb_array: {err}"),
+        }
+    }
+
+    #[test]
+    fn jsonb_contains_function() {
+        let schema = resolver(schema! {
+            tables: {
+                patients: {
+                    id,
+                    notes (EQL: JsonLike + Contain),
+                }
+            }
+        });
+
+        let statement = parse(
+            "SELECT id FROM patients WHERE eql_v2.jsonb_contains(notes, notes)",
+        );
+
+        match type_check(schema, &statement) {
+            Ok(_) => (),
+            Err(err) => panic!("type check failed for eql_v2.jsonb_contains: {err}"),
+        }
+    }
+
+    #[test]
+    fn jsonb_contained_by_function() {
+        let schema = resolver(schema! {
+            tables: {
+                patients: {
+                    id,
+                    notes (EQL: JsonLike + Contain),
+                }
+            }
+        });
+
+        let statement = parse(
+            "SELECT id FROM patients WHERE eql_v2.jsonb_contained_by(notes, notes)",
+        );
+
+        match type_check(schema, &statement) {
+            Ok(_) => (),
+            Err(err) => panic!("type check failed for eql_v2.jsonb_contained_by: {err}"),
+        }
+    }
+
+    #[test]
     fn eql_term_partial_is_unified_with_eql_term_whole() {
         // init_tracing();
         let schema = resolver(schema! {
