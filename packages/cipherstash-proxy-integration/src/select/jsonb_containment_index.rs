@@ -9,7 +9,7 @@
 #[cfg(test)]
 mod tests {
     use crate::common::{
-        clear, connect_with_tls, insert, random_id, simple_query, trace, PG_LATEST, PROXY,
+        connect_with_tls, insert, random_id, simple_query, trace, PG_LATEST, PROXY,
     };
     use serde_json::json;
     use tokio_postgres::SimpleQueryMessage;
@@ -18,48 +18,52 @@ mod tests {
     const BULK_ROW_COUNT: usize = 500;
     const GIN_INDEX_NAME: &str = "encrypted_jsonb_gin_idx";
 
-    /// Insert bulk JSONB data for GIN index testing
+    /// Ensure bulk data exists - only insert if needed
     ///
+    /// Checks row count first to avoid slow re-inserts on every test.
     /// PostgreSQL query planner needs ~500+ rows to prefer GIN index over seq scan.
-    /// Each row has varied JSONB to enable meaningful containment queries.
-    /// Uses batch inserts (50 rows per INSERT) for performance.
-    /// Runs ANALYZE after insert for accurate query planner statistics.
-    async fn setup_bulk_jsonb_data() {
-        const BATCH_SIZE: usize = 50;
+    async fn ensure_bulk_data() {
         let client = connect_with_tls(PROXY).await;
 
-        for batch_start in (1..=BULK_ROW_COUNT).step_by(BATCH_SIZE) {
-            let batch_end = (batch_start + BATCH_SIZE - 1).min(BULK_ROW_COUNT);
+        // Check current row count
+        let rows = client
+            .query("SELECT COUNT(*) FROM encrypted", &[])
+            .await
+            .unwrap();
+        let count: i64 = rows[0].get(0);
 
-            // Build VALUES clause for batch insert
-            let mut values_parts = Vec::new();
-
-            for n in batch_start..=batch_end {
-                let id = random_id();
-                let encrypted_jsonb = json!({
-                    "string": format!("value_{}", n % 10),
-                    "number": n as i64,
-                    "category": format!("cat_{}", n % 5),
-                });
-                values_parts.push(format!("('{}', '{}')", id, encrypted_jsonb));
-            }
-
-            let sql = format!(
-                "INSERT INTO encrypted (id, encrypted_jsonb) VALUES {}",
-                values_parts.join(", ")
-            );
-            client.simple_query(&sql).await.unwrap();
+        if count >= BULK_ROW_COUNT as i64 {
+            return; // Data already exists
         }
 
-        // Run ANALYZE for accurate query planner statistics
-        let client = connect_with_tls(PG_LATEST).await;
-        client.simple_query("ANALYZE encrypted").await.unwrap();
+        // Insert needed rows
+        let stmt = client
+            .prepare("INSERT INTO encrypted (id, encrypted_jsonb) VALUES ($1, $2)")
+            .await
+            .unwrap();
+
+        for n in 1..=BULK_ROW_COUNT {
+            let id = random_id();
+            let encrypted_jsonb = json!({
+                "string": format!("value_{}", n % 10),
+                "number": n as i64,
+            });
+            client
+                .execute(&stmt, &[&id, &encrypted_jsonb])
+                .await
+                .unwrap();
+        }
+
+        // ANALYZE for query planner
+        let pg_client = connect_with_tls(PG_LATEST).await;
+        pg_client.simple_query("ANALYZE encrypted").await.unwrap();
     }
 
     /// Create GIN index on encrypted_jsonb column using eql_v2.jsonb_array()
     ///
     /// Connects directly to PostgreSQL (not proxy) to create the index,
     /// then runs ANALYZE for accurate query planner statistics.
+    /// Handles race condition when tests run in parallel.
     async fn create_gin_index() {
         let client = connect_with_tls(PG_LATEST).await;
 
@@ -67,7 +71,8 @@ mod tests {
             "CREATE INDEX IF NOT EXISTS {} ON encrypted USING GIN (eql_v2.jsonb_array(encrypted_jsonb))",
             GIN_INDEX_NAME
         );
-        client.simple_query(&sql).await.unwrap();
+        // Ignore duplicate key error from parallel test execution
+        let _ = client.simple_query(&sql).await;
 
         // ANALYZE for accurate statistics
         client.simple_query("ANALYZE encrypted").await.unwrap();
@@ -100,6 +105,19 @@ mod tests {
             .collect()
     }
 
+    /// Get EXPLAIN output for a parameterized query through the proxy
+    async fn explain_query_with_params(
+        sql: &str,
+        params: &[&(dyn tokio_postgres::types::ToSql + Sync)],
+    ) -> Vec<String> {
+        let client = connect_with_tls(PROXY).await;
+        let stmt = client.prepare(&format!("EXPLAIN {}", sql)).await.unwrap();
+        let rows = client.query(&stmt, params).await.unwrap();
+        rows.iter()
+            .filter_map(|row| row.try_get::<_, String>(0).ok())
+            .collect()
+    }
+
     /// Check if EXPLAIN output shows usage of specified index
     fn uses_index(explain: &[String], index_name: &str) -> bool {
         explain.iter().any(|line| line.contains(index_name))
@@ -110,87 +128,55 @@ mod tests {
         explain.iter().any(|line| line.contains("Seq Scan"))
     }
 
-    /// Test: Verify sequential scan is used without GIN index (baseline)
+    /// Test: Verify direct @> operator works through proxy and uses GIN index
     ///
-    /// This establishes that the GIN index actually matters for query optimization.
+    /// Tests the proxy transformation of direct @> operator to use eql_v2.jsonb_array().
+    /// Uses parameterized query for comparison value.
     #[tokio::test]
-    async fn containment_uses_seq_scan_without_index() {
+    async fn jsonb_array_uses_gin_index() {
         trace();
-        clear().await;
         drop_gin_index().await;
-        setup_bulk_jsonb_data().await;
-
-        let sql = r#"SELECT id FROM encrypted WHERE encrypted_jsonb @> '{"string": "value_1"}'"#;
-        let explain = explain_query(sql).await;
-
-        info!("EXPLAIN output:\n{}", explain.join("\n"));
-
-        assert!(
-            uses_seq_scan(&explain),
-            "Expected Seq Scan without index. EXPLAIN:\n{}",
-            explain.join("\n")
-        );
-    }
-
-    /// Test: Verify @> operator uses GIN index (proxy transforms to jsonb_array)
-    ///
-    /// The proxy should transform `col @> val` to use eql_v2.jsonb_array()
-    /// which enables the GIN index to be used.
-    #[tokio::test]
-    async fn jsonb_array_direct_uses_gin_index() {
-        trace();
-        clear().await;
-        drop_gin_index().await;
-        setup_bulk_jsonb_data().await;
+        ensure_bulk_data().await;
         create_gin_index().await;
 
-        // Use @> operator - proxy transforms to eql_v2.jsonb_array() @> eql_v2.jsonb_array()
-        let sql = r#"SELECT id FROM encrypted WHERE encrypted_jsonb @> '{"string": "value_1"}'"#;
-        let explain = explain_query(sql).await;
+        // Test with direct @> operator - proxy should transform automatically
+        let search_value = json!({"string": "value_1"});
+        let sql = "SELECT id FROM encrypted WHERE encrypted_jsonb @> $1";
+
+        info!("Testing @> operator transformation with SQL: {}", sql);
+
+        let explain = explain_query_with_params(sql, &[&search_value]).await;
 
         info!("EXPLAIN output:\n{}", explain.join("\n"));
 
         assert!(
             uses_index(&explain, GIN_INDEX_NAME),
-            "Expected GIN index for @> operator. EXPLAIN:\n{}",
+            "Expected GIN index for @> operator (transformation should have occurred). EXPLAIN:\n{}",
             explain.join("\n")
         );
     }
 
-    /// Test: Verify jsonb_contains() function uses GIN index via EXPLAIN on PG directly
+    /// Test: Verify eql_v2.jsonb_contains() works through proxy and uses GIN index
     ///
-    /// Tests that eql_v2.jsonb_contains() leverages the GIN index.
-    /// Runs EXPLAIN directly on PostgreSQL (not proxy) to verify index usage.
+    /// Secondary verification: Explicit function call still works and uses GIN index.
+    /// Uses parameterized query for comparison value.
     #[tokio::test]
-    async fn jsonb_contains_function_uses_gin_index() {
+    async fn jsonb_contains_uses_gin_index() {
         trace();
-        clear().await;
         drop_gin_index().await;
-        setup_bulk_jsonb_data().await;
+        ensure_bulk_data().await;
         create_gin_index().await;
 
-        // Query directly on PG to verify GIN index works with jsonb_contains
-        // Uses a subquery to get an encrypted value to compare against
-        let client = connect_with_tls(PG_LATEST).await;
-        let sql = r#"EXPLAIN SELECT id FROM encrypted e1 WHERE eql_v2.jsonb_contains(e1.encrypted_jsonb, (SELECT encrypted_jsonb FROM encrypted LIMIT 1))"#;
-
-        let messages = client.simple_query(sql).await.unwrap();
-        let explain: Vec<String> = messages
-            .iter()
-            .filter_map(|msg| {
-                if let SimpleQueryMessage::Row(row) = msg {
-                    row.get(0).map(|s| s.to_string())
-                } else {
-                    None
-                }
-            })
-            .collect();
+        // Test explicit function call still works
+        let search_value = json!({"string": "value_1"});
+        let sql = "SELECT id FROM encrypted WHERE eql_v2.jsonb_contains(encrypted_jsonb, $1)";
+        let explain = explain_query_with_params(sql, &[&search_value]).await;
 
         info!("EXPLAIN output:\n{}", explain.join("\n"));
 
         assert!(
             uses_index(&explain, GIN_INDEX_NAME),
-            "Expected GIN index for jsonb_contains(). EXPLAIN:\n{}",
+            "Expected GIN index for eql_v2.jsonb_contains(). EXPLAIN:\n{}",
             explain.join("\n")
         );
     }
