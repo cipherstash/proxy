@@ -7,9 +7,29 @@
 
 #[cfg(test)]
 mod tests {
-    use crate::common::{connect_with_tls, random_id, trace, PROXY};
+    use crate::common::{clear, connect_with_tls, random_id, trace, PROXY};
     use serde_json::json;
-    use tracing::info;
+    use tracing::{info, warn};
+
+    /// Operand type for containment operator tests
+    #[derive(Debug, Clone, Copy)]
+    enum OperandType {
+        /// Table column reference: `encrypted_jsonb`
+        EncryptedColumn,
+        /// Parameterized value: `$1`
+        Parameter,
+        /// JSON literal in SQL: `'{"key":"value"}'`
+        Literal,
+    }
+
+    /// Query protocol - determines how the query is executed
+    #[derive(Debug, Clone, Copy)]
+    enum QueryProtocol {
+        /// Extended query protocol with parameters (client.query with params)
+        Extended,
+        /// Simple query protocol with SQL string only
+        Simple,
+    }
 
     const BULK_ROW_COUNT: usize = 500;
 
@@ -19,6 +39,7 @@ mod tests {
     /// Inserts 500 rows with `"string": format!("value_{}", n % 10)` pattern.
     async fn ensure_bulk_data() {
         let client = connect_with_tls(PROXY).await;
+        clear().await;
 
         // Check current row count
         let rows = client
@@ -26,6 +47,8 @@ mod tests {
             .await
             .unwrap();
         let count: i64 = rows[0].get(0);
+
+        info!("Records: {count}");
 
         if count >= BULK_ROW_COUNT as i64 {
             return; // Data already exists
