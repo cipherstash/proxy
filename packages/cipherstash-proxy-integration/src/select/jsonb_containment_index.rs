@@ -31,6 +31,37 @@ mod tests {
         Simple,
     }
 
+    /// Configuration for a single containment operator test
+    struct ContainmentTestCase {
+        /// Left-hand side operand type
+        lhs: OperandType,
+        /// Right-hand side operand type
+        rhs: OperandType,
+        /// Expected row count (approximately)
+        expected_count: i64,
+        /// Allowed variance for count assertion
+        variance: i64,
+    }
+
+    impl ContainmentTestCase {
+        fn new(lhs: OperandType, rhs: OperandType) -> Self {
+            Self {
+                lhs,
+                rhs,
+                expected_count: 50,
+                variance: 10,
+            }
+        }
+
+        /// Determine query protocol based on operand types
+        fn protocol(&self) -> QueryProtocol {
+            match (&self.lhs, &self.rhs) {
+                (OperandType::Parameter, _) | (_, OperandType::Parameter) => QueryProtocol::Extended,
+                _ => QueryProtocol::Simple,
+            }
+        }
+    }
+
     const BULK_ROW_COUNT: usize = 500;
 
     /// Ensure bulk data exists - only insert if needed
