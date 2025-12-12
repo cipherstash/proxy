@@ -45,11 +45,31 @@ mod tests {
 
     impl ContainmentTestCase {
         fn new(lhs: OperandType, rhs: OperandType) -> Self {
+            // Adjust expected count based on operand types and containment semantics
+            let (expected_count, variance) = match (&lhs, &rhs) {
+                // LHS is encrypted column: column @> RHS (column contains RHS)
+                (OperandType::EncryptedColumn, OperandType::Parameter) => (50, 10),
+                (OperandType::EncryptedColumn, OperandType::Literal) => (50, 10),
+                (OperandType::EncryptedColumn, OperandType::EncryptedColumn) => (50, 10),
+
+                // LHS is parameter: parameter @> RHS
+                (OperandType::Parameter, OperandType::Parameter) => (50, 10),
+                (OperandType::Parameter, OperandType::Literal) => (50, 10),
+                // Parameter contains individual encrypted column values is generally false
+                (OperandType::Parameter, OperandType::EncryptedColumn) => (0, 1),
+
+                // LHS is literal: literal @> RHS
+                (OperandType::Literal, OperandType::Parameter) => (50, 10),
+                (OperandType::Literal, OperandType::Literal) => (50, 10),
+                // Literal contains individual encrypted column values is generally false
+                (OperandType::Literal, OperandType::EncryptedColumn) => (0, 1),
+            };
+
             Self {
                 lhs,
                 rhs,
-                expected_count: 50,
-                variance: 10,
+                expected_count,
+                variance,
             }
         }
 
