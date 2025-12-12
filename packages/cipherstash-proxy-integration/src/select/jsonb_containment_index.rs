@@ -58,6 +58,7 @@ mod tests {
             // Adjust expected count based on operand types and containment semantics
             let (expected_count, variance) = match (&lhs, &rhs) {
                 // LHS is encrypted column: column @> RHS (column contains RHS)
+                // Uses subset search {"string": "value_1"} - matches ~50 rows
                 (OperandType::EncryptedColumn, OperandType::Parameter) => (50, 10),
                 (OperandType::EncryptedColumn, OperandType::Literal) => (50, 10),
                 (OperandType::EncryptedColumn, OperandType::EncryptedColumn) => (50, 10),
@@ -65,14 +66,14 @@ mod tests {
                 // LHS is parameter: parameter @> RHS
                 (OperandType::Parameter, OperandType::Parameter) => (50, 10),
                 (OperandType::Parameter, OperandType::Literal) => (50, 10),
-                // Parameter contains individual encrypted column values is generally false
-                (OperandType::Parameter, OperandType::EncryptedColumn) => (0, 1),
+                // Parameter @> encrypted column: uses exact match search - matches 1 row
+                (OperandType::Parameter, OperandType::EncryptedColumn) => (1, 0),
 
                 // LHS is literal: literal @> RHS
                 (OperandType::Literal, OperandType::Parameter) => (50, 10),
                 (OperandType::Literal, OperandType::Literal) => (50, 10),
-                // Literal contains individual encrypted column values is generally false
-                (OperandType::Literal, OperandType::EncryptedColumn) => (0, 1),
+                // Literal @> encrypted column: uses exact match search - matches 1 row
+                (OperandType::Literal, OperandType::EncryptedColumn) => (1, 0),
             };
 
             Self {
@@ -80,6 +81,22 @@ mod tests {
                 rhs,
                 expected_count,
                 variance,
+            }
+        }
+
+        /// Get the appropriate search value based on operand types
+        ///
+        /// For `column @> search`: use subset `{"string": "value_1"}` - matches ~50 rows
+        /// For `search @> column`: use exact match `{"string": "value_1", "number": 1}` - matches 1 row
+        fn search_value(&self) -> serde_json::Value {
+            match (&self.lhs, &self.rhs) {
+                // When searching if param/literal contains column, use exact match
+                (OperandType::Parameter, OperandType::EncryptedColumn)
+                | (OperandType::Literal, OperandType::EncryptedColumn) => {
+                    json!({"string": "value_1", "number": 1})
+                }
+                // Otherwise use subset search
+                _ => json!({"string": "value_1"}),
             }
         }
 
@@ -166,6 +183,10 @@ mod tests {
     ///
     /// Tests use fixture data in ID range FIXTURE_ID_START to FIXTURE_ID_END.
     /// Data is inserted once per test run if not already present.
+    ///
+    /// Search value varies by test type:
+    /// - `column @> search`: subset `{"string": "value_1"}` matches ~50 rows
+    /// - `search @> column`: exact `{"string": "value_1", "number": 1}` matches 1 row
     macro_rules! containment_test {
         ($name:ident, lhs = $lhs:ident, rhs = $rhs:ident) => {
             #[tokio::test]
@@ -174,12 +195,11 @@ mod tests {
                 ensure_fixture_data().await;
 
                 let client = connect_with_tls(PROXY).await;
-                let search_value = json!({"string": "value_1"});
-
                 let test_case = ContainmentTestCase::new(
                     OperandType::$lhs,
                     OperandType::$rhs,
                 );
+                let search_value = test_case.search_value();
                 test_case.run(&client, &search_value).await;
             }
         };
