@@ -57,7 +57,12 @@ mod tests {
 
     impl ContainmentTestCase {
         fn new(lhs: OperandType, rhs: OperandType) -> Self {
-            // Adjust expected count based on operand types and containment semantics
+            // Adjust expected count based on operand types and containment semantics.
+            //
+            // Expected counts and variance tolerances:
+            // - Subset searches (column @> search): expect ~50 rows (FIXTURE_COUNT / 10 values)
+            //   Variance ±10 accounts for modulo distribution not being perfectly uniform
+            // - Exact match searches (search @> column): expect 1 row, variance 0 (deterministic)
             let (expected_count, variance) = match (&lhs, &rhs) {
                 // LHS is encrypted column: column @> RHS (column contains RHS)
                 // Uses subset search {"string": "value_1"} - matches ~50 rows
@@ -227,7 +232,7 @@ mod tests {
             FIXTURE_ID_START, FIXTURE_ID_END, count
         );
 
-        if count >= 500 {
+        if count >= FIXTURE_COUNT {
             return; // Fixture data already exists
         }
 
@@ -239,7 +244,7 @@ mod tests {
             .await
             .unwrap();
 
-        for n in 1..=500i64 {
+        for n in 1..=FIXTURE_COUNT {
             let id = FIXTURE_ID_START + n - 1;
             let encrypted_jsonb = json!({
                 "string": format!("value_{}", n % 10),
@@ -251,7 +256,7 @@ mod tests {
                 .unwrap();
         }
 
-        info!("Inserted 500 fixture rows");
+        info!("Inserted {} fixture rows", FIXTURE_COUNT);
     }
 
     // ============================================================================
