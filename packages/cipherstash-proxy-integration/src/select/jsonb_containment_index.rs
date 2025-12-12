@@ -84,6 +84,43 @@ mod tests {
 
             format!("SELECT COUNT(*) FROM encrypted WHERE {} @> {}", lhs, rhs)
         }
+
+        /// Execute the test case
+        async fn run(&self, client: &tokio_postgres::Client, search_json: &serde_json::Value) {
+            let sql = self.build_sql(search_json);
+            info!("Testing @> with LHS={:?}, RHS={:?}", self.lhs, self.rhs);
+            info!("SQL: {}", sql);
+
+            let count: i64 = match self.protocol() {
+                QueryProtocol::Extended => {
+                    let rows = client.query(&sql, &[search_json]).await.unwrap();
+                    rows[0].get(0)
+                }
+                QueryProtocol::Simple => {
+                    let rows = client.simple_query(&sql).await.unwrap();
+                    match &rows[0] {
+                        tokio_postgres::SimpleQueryMessage::Row(row) => {
+                            row.get(0).unwrap().parse().unwrap()
+                        }
+                        _ => panic!("Expected row result"),
+                    }
+                }
+            };
+
+            info!("Result count: {}", count);
+
+            let min = self.expected_count - self.variance;
+            let max = self.expected_count + self.variance;
+            assert!(
+                count >= min && count <= max,
+                "@> with LHS={:?}, RHS={:?}: expected {}-{} rows, got {}",
+                self.lhs,
+                self.rhs,
+                min,
+                max,
+                count
+            );
+        }
     }
 
     const BULK_ROW_COUNT: usize = 500;
