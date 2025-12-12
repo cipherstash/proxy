@@ -2,11 +2,11 @@ use std::collections::HashMap;
 use std::mem;
 use std::sync::Arc;
 
+use sqltk::parser::ast::Value as SqltkValue;
 use sqltk::parser::ast::{
     BinaryOperator, Expr, Function, FunctionArg, FunctionArgExpr, FunctionArgumentList,
     FunctionArguments, Ident, ObjectName, ObjectNamePart, ValueWithSpan,
 };
-use sqltk::parser::ast::Value as SqltkValue;
 use sqltk::parser::tokenizer::Span;
 use sqltk::{NodeKey, NodePath, Visitable};
 
@@ -36,6 +36,7 @@ impl<'ast> RewriteContainmentOps<'ast> {
     ///
     /// Note: We check the operands (left/right), not the BinaryOp result type,
     /// because containment operators return Native (boolean), not EQL.
+    #[inline]
     fn uses_eql_type(&self, left: &'ast Expr, right: &'ast Expr) -> bool {
         self.is_eql_typed(left) || self.is_eql_typed(right)
     }
