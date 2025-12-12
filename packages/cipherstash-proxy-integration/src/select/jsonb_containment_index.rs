@@ -323,7 +323,7 @@ mod tests {
         // With 500 fixture rows and "string": "value_N" where N = n % 10,
         // we expect ~50 rows to have "string": "value_1"
         assert!(
-            count >= 40 && count <= 60, // Allow some variance
+            (40..=60).contains(&count), // Allow some variance
             "Expected approximately 50 rows with jsonb_contains(), got {}",
             count
         );
