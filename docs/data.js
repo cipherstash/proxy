@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1765541263892,
+  "lastUpdate": 1765541544714,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -15656,6 +15656,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 15.274213,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "8aace30604e14a576ff4561a914f88c4130c9986",
+          "message": "WIP proxy converts jsonb containment to eql function call",
+          "timestamp": "2025-12-05T04:51:48Z",
+          "url": "https://github.com/cipherstash/proxy/pull/339/commits/8aace30604e14a576ff4561a914f88c4130c9986"
+        },
+        "date": 1765541543617,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 15.755309,
             "unit": "Number"
           }
         ]
