@@ -1708,7 +1708,10 @@ mod test {
 
         match type_check(schema, &statement) {
             Ok(typed) => {
-                match typed.transform(test_helpers::dummy_encrypted_json_selector(&statement, vec![ast::Value::SingleQuotedString("medications".to_owned())])) {
+                match typed.transform(test_helpers::dummy_encrypted_json_selector(
+                    &statement,
+                    vec![ast::Value::SingleQuotedString("medications".to_owned())],
+                )) {
                     Ok(statement) => {
                         let expected = match op {
                             "@>" => format!("SELECT id, eql_v2.jsonb_contains(notes, '<encrypted-selector(medications)>'::JSONB::eql_v2_encrypted) AS meds FROM patients"),
@@ -1716,11 +1719,8 @@ mod test {
                             // Other operators are not transformed
                             _ => format!("SELECT id, notes {op} '<encrypted-selector(medications)>'::JSONB::eql_v2_encrypted AS meds FROM patients"),
                         };
-                        assert_eq!(
-                            statement.to_string(),
-                            expected
-                        )
-                    },
+                        assert_eq!(statement.to_string(), expected)
+                    }
                     Err(err) => panic!("transformation failed: {err}"),
                 }
             }
@@ -1760,9 +1760,7 @@ mod test {
             }
         });
 
-        let statement = parse(
-            "SELECT id FROM patients WHERE eql_v2.jsonb_contains(notes, notes)",
-        );
+        let statement = parse("SELECT id FROM patients WHERE eql_v2.jsonb_contains(notes, notes)");
 
         match type_check(schema, &statement) {
             Ok(_) => (),
@@ -1781,9 +1779,8 @@ mod test {
             }
         });
 
-        let statement = parse(
-            "SELECT id FROM patients WHERE eql_v2.jsonb_contained_by(notes, notes)",
-        );
+        let statement =
+            parse("SELECT id FROM patients WHERE eql_v2.jsonb_contained_by(notes, notes)");
 
         match type_check(schema, &statement) {
             Ok(_) => (),
@@ -1802,9 +1799,7 @@ mod test {
             }
         });
 
-        let statement = parse(
-            "SELECT id FROM patients WHERE eql_v2.jsonb_contains(notes, $1)",
-        );
+        let statement = parse("SELECT id FROM patients WHERE eql_v2.jsonb_contains(notes, $1)");
 
         let typed = type_check(schema, &statement)
             .map_err(|err| err.to_string())
@@ -1836,9 +1831,10 @@ mod test {
 
         let statement = parse("SELECT id FROM patients WHERE notes @> $1");
 
-        let typed = type_check(schema, &statement)
-            .expect("type check failed for containment operator");
-        let transformed = typed.transform(HashMap::new())
+        let typed =
+            type_check(schema, &statement).expect("type check failed for containment operator");
+        let transformed = typed
+            .transform(HashMap::new())
             .expect("transformation failed");
         let sql = transformed.to_string();
 
@@ -1869,9 +1865,10 @@ mod test {
 
         let statement = parse("SELECT id FROM patients WHERE $1 <@ notes");
 
-        let typed = type_check(schema, &statement)
-            .expect("type check failed for contained_by operator");
-        let transformed = typed.transform(HashMap::new())
+        let typed =
+            type_check(schema, &statement).expect("type check failed for contained_by operator");
+        let transformed = typed
+            .transform(HashMap::new())
             .expect("transformation failed");
         let sql = transformed.to_string();
 
@@ -1904,7 +1901,8 @@ mod test {
 
         let typed = type_check(schema, &statement)
             .expect("type check failed for EXPLAIN with containment operator");
-        let transformed = typed.transform(HashMap::new())
+        let transformed = typed
+            .transform(HashMap::new())
             .expect("transformation failed");
         let sql = transformed.to_string();
 

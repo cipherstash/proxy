@@ -20,6 +20,8 @@ mod tests {
     /// ID range for fixture data (loaded via mise run proxy:fixtures)
     const FIXTURE_ID_START: i64 = 1000000;
     const FIXTURE_ID_END: i64 = 1000499;
+    /// Total number of fixture rows for containment tests
+    const FIXTURE_COUNT: i64 = 500;
 
     /// Operand type for containment operator tests
     #[derive(Debug, Clone, Copy)]
@@ -103,7 +105,9 @@ mod tests {
         /// Determine query protocol based on operand types
         fn protocol(&self) -> QueryProtocol {
             match (&self.lhs, &self.rhs) {
-                (OperandType::Parameter, _) | (_, OperandType::Parameter) => QueryProtocol::Extended,
+                (OperandType::Parameter, _) | (_, OperandType::Parameter) => {
+                    QueryProtocol::Extended
+                }
                 _ => QueryProtocol::Simple,
             }
         }
@@ -195,10 +199,7 @@ mod tests {
                 ensure_fixture_data().await;
 
                 let client = connect_with_tls(PROXY).await;
-                let test_case = ContainmentTestCase::new(
-                    OperandType::$lhs,
-                    OperandType::$rhs,
-                );
+                let test_case = ContainmentTestCase::new(OperandType::$lhs, OperandType::$rhs);
                 let search_value = test_case.search_value();
                 test_case.run(&client, &search_value).await;
             }
@@ -221,7 +222,10 @@ mod tests {
         let rows = client.query(&sql, &[]).await.unwrap();
         let count: i64 = rows[0].get(0);
 
-        info!("Fixture records in range {}-{}: {}", FIXTURE_ID_START, FIXTURE_ID_END, count);
+        info!(
+            "Fixture records in range {}-{}: {}",
+            FIXTURE_ID_START, FIXTURE_ID_END, count
+        );
 
         if count >= 500 {
             return; // Fixture data already exists

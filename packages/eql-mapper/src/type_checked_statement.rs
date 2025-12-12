@@ -6,9 +6,8 @@ use sqltk::{AsNodeKey, NodeKey, Transformable};
 use crate::unifier::EqlTerm;
 use crate::{
     CastLiteralsAsEncrypted, CastParamsAsEncrypted, DryRunnable, EqlMapperError,
-    FailOnPlaceholderChange, Param, PreserveEffectiveAliases, RewriteStandardSqlFnsOnEqlTypes,
-    RewriteContainmentOps,
-    TransformationRule,
+    FailOnPlaceholderChange, Param, PreserveEffectiveAliases, RewriteContainmentOps,
+    RewriteStandardSqlFnsOnEqlTypes, TransformationRule,
 };
 
 use crate::unifier::{Projection, Type, Value};
