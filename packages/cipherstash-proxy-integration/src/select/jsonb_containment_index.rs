@@ -4,12 +4,22 @@
 //! - @> operator is transformed to eql_v2.jsonb_contains()
 //! - eql_v2.jsonb_contains() function works with encrypted data
 //! - Both return correct results matching the expected data pattern
+//!
+//! ## Test Data
+//!
+//! Uses fixture data loaded via `mise run proxy:fixtures` (500 rows with IDs 1000000-1000499).
+//! Pattern: `{"string": "value_N", "number": N}` where N = n % 10
+//! This gives ~50 rows per value (value_0 through value_9).
 
 #[cfg(test)]
 mod tests {
-    use crate::common::{clear, connect_with_tls, random_id, trace, PROXY};
+    use crate::common::{connect_with_tls, trace, PROXY};
     use serde_json::json;
-    use tracing::{info, warn};
+    use tracing::info;
+
+    /// ID range for fixture data (loaded via mise run proxy:fixtures)
+    const FIXTURE_ID_START: i64 = 1000000;
+    const FIXTURE_ID_END: i64 = 1000499;
 
     /// Operand type for containment operator tests
     #[derive(Debug, Clone, Copy)]
@@ -82,6 +92,7 @@ mod tests {
         }
 
         /// Build SQL query string based on operand types
+        /// Filters by fixture ID range to isolate from other test data
         fn build_sql(&self, search_json: &serde_json::Value) -> String {
             let lhs = match self.lhs {
                 OperandType::EncryptedColumn => "encrypted_jsonb".to_string(),
@@ -102,7 +113,11 @@ mod tests {
                 OperandType::Literal => format!("'{}'", search_json),
             };
 
-            format!("SELECT COUNT(*) FROM encrypted WHERE {} @> {}", lhs, rhs)
+            // Filter by fixture ID range to isolate from other test data
+            format!(
+                "SELECT COUNT(*) FROM encrypted WHERE {} @> {} AND id BETWEEN {} AND {}",
+                lhs, rhs, FIXTURE_ID_START, FIXTURE_ID_END
+            )
         }
 
         /// Execute the test case
@@ -148,12 +163,15 @@ mod tests {
     }
 
     /// Generate a containment operator test from operand types
+    ///
+    /// Tests use fixture data in ID range FIXTURE_ID_START to FIXTURE_ID_END.
+    /// Data is inserted once per test run if not already present.
     macro_rules! containment_test {
         ($name:ident, lhs = $lhs:ident, rhs = $rhs:ident) => {
             #[tokio::test]
             async fn $name() {
                 trace();
-                ensure_bulk_data().await;
+                ensure_fixture_data().await;
 
                 let client = connect_with_tls(PROXY).await;
                 let search_value = json!({"string": "value_1"});
@@ -167,40 +185,41 @@ mod tests {
         };
     }
 
-    const BULK_ROW_COUNT: usize = 500;
-
-    /// Ensure bulk data exists - only insert if needed
+    /// Ensure fixture data exists in the specific ID range.
     ///
-    /// Checks row count first to avoid slow re-inserts on every test.
-    /// Inserts 500 rows with `"string": format!("value_{}", n % 10)` pattern.
-    async fn ensure_bulk_data() {
+    /// Uses IDs FIXTURE_ID_START to FIXTURE_ID_END to isolate from other tests.
+    /// Does NOT call clear() - preserves data from other tests.
+    /// Only inserts if the fixture data is missing.
+    async fn ensure_fixture_data() {
         let client = connect_with_tls(PROXY).await;
-        clear().await;
 
-        // Check current row count
-        let rows = client
-            .query("SELECT COUNT(*) FROM encrypted", &[])
-            .await
-            .unwrap();
+        // Check if fixture data already exists
+        let sql = format!(
+            "SELECT COUNT(*) FROM encrypted WHERE id BETWEEN {} AND {}",
+            FIXTURE_ID_START, FIXTURE_ID_END
+        );
+        let rows = client.query(&sql, &[]).await.unwrap();
         let count: i64 = rows[0].get(0);
 
-        info!("Records: {count}");
+        info!("Fixture records in range {}-{}: {}", FIXTURE_ID_START, FIXTURE_ID_END, count);
 
-        if count >= BULK_ROW_COUNT as i64 {
-            return; // Data already exists
+        if count >= 500 {
+            return; // Fixture data already exists
         }
 
-        // Insert needed rows
+        info!("Inserting fixture data...");
+
+        // Insert fixture rows with specific IDs
         let stmt = client
-            .prepare("INSERT INTO encrypted (id, encrypted_jsonb) VALUES ($1, $2)")
+            .prepare("INSERT INTO encrypted (id, encrypted_jsonb) VALUES ($1, $2) ON CONFLICT (id) DO NOTHING")
             .await
             .unwrap();
 
-        for n in 1..=BULK_ROW_COUNT {
-            let id = random_id();
+        for n in 1..=500i64 {
+            let id = FIXTURE_ID_START + n - 1;
             let encrypted_jsonb = json!({
                 "string": format!("value_{}", n % 10),
-                "number": n as i64,
+                "number": n,
             });
             client
                 .execute(&stmt, &[&id, &encrypted_jsonb])
@@ -208,7 +227,7 @@ mod tests {
                 .unwrap();
         }
 
-        info!("Inserted {} rows for testing", BULK_ROW_COUNT);
+        info!("Inserted 500 fixture rows");
     }
 
     // ============================================================================
@@ -246,28 +265,33 @@ mod tests {
     /// Test: Verify eql_v2.jsonb_contains() function works through proxy
     ///
     /// Tests explicit eql_v2.jsonb_contains() function call works correctly.
+    /// Uses fixture data in ID range FIXTURE_ID_START to FIXTURE_ID_END.
     ///
     /// With 500 rows and "string": "value_N" where N = n % 10,
-    /// we expect ~50 rows to have "string": "value_1" (rows 1, 11, 21, ..., 491).
+    /// we expect ~50 rows to have "string": "value_1".
     #[tokio::test]
     async fn jsonb_contains_function_works() {
         trace();
-        ensure_bulk_data().await;
+        ensure_fixture_data().await;
 
         let client = connect_with_tls(PROXY).await;
 
         // Use extended query protocol with parameterized query
+        // Filter by fixture ID range to isolate from other test data
         let search_value = json!({"string": "value_1"});
-        let sql = "SELECT COUNT(*) FROM encrypted WHERE eql_v2.jsonb_contains(encrypted_jsonb, $1)";
+        let sql = format!(
+            "SELECT COUNT(*) FROM encrypted WHERE eql_v2.jsonb_contains(encrypted_jsonb, $1) AND id BETWEEN {} AND {}",
+            FIXTURE_ID_START, FIXTURE_ID_END
+        );
 
         info!("Testing eql_v2.jsonb_contains() function with SQL: {}", sql);
 
-        let rows = client.query(sql, &[&search_value]).await.unwrap();
+        let rows = client.query(&sql, &[&search_value]).await.unwrap();
         let count: i64 = rows[0].get(0);
 
         info!("jsonb_contains() query returned {} matching rows", count);
 
-        // With 500 rows and "string": "value_N" where N = n % 10,
+        // With 500 fixture rows and "string": "value_N" where N = n % 10,
         // we expect ~50 rows to have "string": "value_1"
         assert!(
             count >= 40 && count <= 60, // Allow some variance
