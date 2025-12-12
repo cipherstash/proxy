@@ -123,7 +123,7 @@ CS_CLIENT_KEY = "your-client-key"
 - `5617` - PostgreSQL 17 (TLS)
 - `6432` - CipherStash Proxy
 
-Container names: `postgres`, `postgres-17-tls`, `proxy`, `proxy-tls`
+Container names: `postgres`, `postgres-tls`, `proxy`, `proxy-tls`
 
 ### Logging Configuration
 Set granular log levels by target:

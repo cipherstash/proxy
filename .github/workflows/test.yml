@@ -13,8 +13,14 @@ env:
 
 jobs:
   test:
-    name: Test
+    name: Test (PostgreSQL ${{ matrix.pg_version }})
     runs-on: blacksmith-16vcpu-ubuntu-2204
+    strategy:
+      fail-fast: false
+      matrix:
+        pg_version: [14, 15, 16, 17] # PG 18 not currently supported
+    env:
+      PG_VERSION: ${{ matrix.pg_version }}
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-test

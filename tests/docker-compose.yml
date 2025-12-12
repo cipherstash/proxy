@@ -1,6 +1,6 @@
 services:
   postgres: &postgres
-    image: postgres:17
+    image: postgres:${PG_VERSION:-17}
     pull_policy: always
     container_name: postgres
     command: -c 'config_file=/etc/postgresql/postgresql.conf'
@@ -12,7 +12,7 @@ services:
     volumes:
       - ./pg/postgresql.conf:/etc/postgresql/postgresql.conf
       - ./benchmark/sql/:/etc/postgresql/benchmark/sql
-      - ./pg/data-latest:/var/lib/postgresql/data
+      - ./pg/data-latest:/var/lib/postgresql
     env_file:
       - ./pg/common.env
     networks:
@@ -30,10 +30,10 @@ services:
       timeout: 5s
       retries: 10
 
-  postgres-17-tls:
+  postgres-tls:
     <<: *postgres
-    image: postgres:17
-    container_name: postgres-17-tls
+    image: postgres:${PG_VERSION:-17}
+    container_name: postgres-tls
     environment:
       PGPORT: 5617
     ports:
@@ -44,7 +44,7 @@ services:
       - ./pg/pg_hba-tls.conf:/etc/postgresql/pg_hba.conf
       - ./tls/localhost-key.pem:/etc/postgresql/localhost-key.pem
       - ./tls/localhost.pem:/etc/postgresql/localhost.pem
-      - ./pg/data-17:/var/lib/postgresql/data
+      - ./pg/data-17:/var/lib/postgresql
 
   proxy:
     image: cipherstash/proxy:latest

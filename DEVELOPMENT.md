@@ -175,7 +175,7 @@ mise run postgres:up
 
 # Start postgres instances individually in the foreground
 mise run postgres:up postgres
-mise run postgres:up postgres-17-tls
+mise run postgres:up postgres-tls
 
 # Start a postgres instance in the background
 mise run postgres:up postgres --extra-args "--detach --wait"
@@ -463,7 +463,7 @@ These are the Postgres instances and names currently provided:
 
 | Name              | Description                    |
 |-------------------|--------------------------------|
-| `postgres-17-tls` | TLS, PostgreSQL version 17     |
+| `postgres-tls`    | TLS, (PostgreSQL version 17)   |
 | `postgres`        | non-TLS, Postgres latest       |
 
 
