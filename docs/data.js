@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1765578054188,
+  "lastUpdate": 1765578274956,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -15781,6 +15781,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 24.164718,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "toby@cipherstash.com",
+            "name": "Toby Hede",
+            "username": "tobyhede"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "e9402601287d7f75fda448c7018145865fd43b99",
+          "message": "Merge pull request #337 from cipherstash/support-postgres-18\n\nTest multiple versions of postgres",
+          "timestamp": "2025-12-13T09:19:21+11:00",
+          "tree_id": "5d953af597a0ba946c3eab10b76747f86094d285",
+          "url": "https://github.com/cipherstash/proxy/commit/e9402601287d7f75fda448c7018145865fd43b99"
+        },
+        "date": 1765578273738,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 25.312848,
             "unit": "Number"
           }
         ]
