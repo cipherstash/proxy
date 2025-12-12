@@ -98,12 +98,16 @@ mod tests {
                 }
                 QueryProtocol::Simple => {
                     let rows = client.simple_query(&sql).await.unwrap();
-                    match &rows[0] {
-                        tokio_postgres::SimpleQueryMessage::Row(row) => {
-                            row.get(0).unwrap().parse().unwrap()
-                        }
-                        _ => panic!("Expected row result"),
-                    }
+                    // Find the first Row message (there may be RowDescription and CommandComplete messages)
+                    rows.iter()
+                        .find_map(|msg| {
+                            if let tokio_postgres::SimpleQueryMessage::Row(row) = msg {
+                                row.get(0).map(|v| v.parse::<i64>().unwrap())
+                            } else {
+                                None
+                            }
+                        })
+                        .expect("No Row message found in simple_query response")
                 }
             };
 
@@ -196,6 +200,27 @@ mod tests {
         encrypted_contains_param,
         lhs = EncryptedColumn,
         rhs = Parameter
+    );
+
+    // Encrypted column @> literal (simple protocol)
+    containment_test!(
+        encrypted_contains_literal,
+        lhs = EncryptedColumn,
+        rhs = Literal
+    );
+
+    // Parameter @> encrypted column (extended protocol)
+    containment_test!(
+        param_contains_encrypted,
+        lhs = Parameter,
+        rhs = EncryptedColumn
+    );
+
+    // Literal @> encrypted column (simple protocol)
+    containment_test!(
+        literal_contains_encrypted,
+        lhs = Literal,
+        rhs = EncryptedColumn
     );
 
     /// Test: Verify eql_v2.jsonb_contains() function works through proxy
