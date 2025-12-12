@@ -1714,8 +1714,8 @@ mod test {
                 )) {
                     Ok(statement) => {
                         let expected = match op {
-                            "@>" => format!("SELECT id, eql_v2.jsonb_contains(notes, '<encrypted-selector(medications)>'::JSONB::eql_v2_encrypted) AS meds FROM patients"),
-                            "<@" => format!("SELECT id, eql_v2.jsonb_contained_by(notes, '<encrypted-selector(medications)>'::JSONB::eql_v2_encrypted) AS meds FROM patients"),
+                            "@>" => "SELECT id, eql_v2.jsonb_contains(notes, '<encrypted-selector(medications)>'::JSONB::eql_v2_encrypted) AS meds FROM patients".to_string(),
+                            "<@" => "SELECT id, eql_v2.jsonb_contained_by(notes, '<encrypted-selector(medications)>'::JSONB::eql_v2_encrypted) AS meds FROM patients".to_string(),
                             // Other operators are not transformed
                             _ => format!("SELECT id, notes {op} '<encrypted-selector(medications)>'::JSONB::eql_v2_encrypted AS meds FROM patients"),
                         };

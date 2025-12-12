@@ -58,16 +58,16 @@ pub fn type_check<'ast>(
 ///
 /// In any case, support for those statements is coming soon!
 pub fn requires_type_check(statement: &Statement) -> bool {
-    match statement {
+    matches!(
+        statement,
         Statement::Query(_)
-        | Statement::Insert(_)
-        | Statement::Update { .. }
-        | Statement::Delete(_)
-        | Statement::Merge { .. }
-        | Statement::Prepare { .. }
-        | Statement::Explain { .. } => true,
-        _ => false,
-    }
+            | Statement::Insert(_)
+            | Statement::Update { .. }
+            | Statement::Delete(_)
+            | Statement::Merge { .. }
+            | Statement::Prepare { .. }
+            | Statement::Explain { .. }
+    )
 }
 
 /// The error type returned by various functions in the `eql_mapper` crate.
