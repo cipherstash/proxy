@@ -1889,6 +1889,39 @@ mod test {
     }
 
     #[test]
+    fn explain_statement_transforms_containment_operator() {
+        let schema = resolver(schema! {
+            tables: {
+                patients: {
+                    id,
+                    notes (EQL: JsonLike + Contain),
+                }
+            }
+        });
+
+        // EXPLAIN wraps the inner SELECT - transformation should still apply
+        let statement = parse("EXPLAIN SELECT id FROM patients WHERE notes @> $1");
+
+        let typed = type_check(schema, &statement)
+            .expect("type check failed for EXPLAIN with containment operator");
+        let transformed = typed.transform(HashMap::new())
+            .expect("transformation failed");
+        let sql = transformed.to_string();
+
+        // Verify EXPLAIN is preserved
+        assert!(
+            sql.starts_with("EXPLAIN"),
+            "Expected EXPLAIN prefix preserved, got: {sql}"
+        );
+
+        // Verify function call exists inside the EXPLAIN
+        assert!(
+            sql.contains("eql_v2.jsonb_contains"),
+            "Expected @> inside EXPLAIN to be transformed to eql_v2.jsonb_contains, got: {sql}"
+        );
+    }
+
+    #[test]
     fn eql_term_partial_is_unified_with_eql_term_whole() {
         // init_tracing();
         let schema = resolver(schema! {
