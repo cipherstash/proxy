@@ -187,40 +187,16 @@ mod tests {
         info!("Inserted {} rows for testing", BULK_ROW_COUNT);
     }
 
-    /// Test: Verify direct @> operator transformation works through proxy
-    ///
-    /// Tests that the proxy transforms direct @> operator to eql_v2.jsonb_contains().
-    /// Runs the actual query (not EXPLAIN) to verify transformation works end-to-end.
-    ///
-    /// With 500 rows and "string": "value_N" where N = n % 10,
-    /// we expect ~50 rows to have "string": "value_1" (rows 1, 11, 21, ..., 491).
-    #[tokio::test]
-    async fn jsonb_containment_operator_transformation() {
-        trace();
-        ensure_bulk_data().await;
+    // ============================================================================
+    // @> Containment Operator Tests via Macro
+    // ============================================================================
 
-        let client = connect_with_tls(PROXY).await;
-
-        // Use extended query protocol with parameterized query
-        // The @> operator should be transformed to eql_v2.jsonb_contains()
-        let search_value = json!({"string": "value_1"});
-        let sql = "SELECT COUNT(*) FROM encrypted WHERE encrypted_jsonb @> $1";
-
-        info!("Testing @> operator transformation with SQL: {}", sql);
-
-        let rows = client.query(sql, &[&search_value]).await.unwrap();
-        let count: i64 = rows[0].get(0);
-
-        info!("Containment query returned {} matching rows", count);
-
-        // With 500 rows and "string": "value_N" where N = n % 10,
-        // we expect ~50 rows to have "string": "value_1"
-        assert!(
-            count >= 40 && count <= 60, // Allow some variance
-            "Expected approximately 50 rows with @> containment, got {}",
-            count
-        );
-    }
+    // Encrypted column @> parameter (extended protocol)
+    containment_test!(
+        encrypted_contains_param,
+        lhs = EncryptedColumn,
+        rhs = Parameter
+    );
 
     /// Test: Verify eql_v2.jsonb_contains() function works through proxy
     ///
