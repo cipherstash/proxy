@@ -60,6 +60,30 @@ mod tests {
                 _ => QueryProtocol::Simple,
             }
         }
+
+        /// Build SQL query string based on operand types
+        fn build_sql(&self, search_json: &serde_json::Value) -> String {
+            let lhs = match self.lhs {
+                OperandType::EncryptedColumn => "encrypted_jsonb".to_string(),
+                OperandType::Parameter => "$1".to_string(),
+                OperandType::Literal => format!("'{}'", search_json),
+            };
+
+            let rhs = match self.rhs {
+                OperandType::EncryptedColumn => "encrypted_jsonb".to_string(),
+                OperandType::Parameter => {
+                    // If LHS is also a parameter, this is $2
+                    if matches!(self.lhs, OperandType::Parameter) {
+                        "$2".to_string()
+                    } else {
+                        "$1".to_string()
+                    }
+                }
+                OperandType::Literal => format!("'{}'", search_json),
+            };
+
+            format!("SELECT COUNT(*) FROM encrypted WHERE {} @> {}", lhs, rhs)
+        }
     }
 
     const BULK_ROW_COUNT: usize = 500;
