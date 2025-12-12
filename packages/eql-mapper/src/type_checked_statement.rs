@@ -153,11 +153,11 @@ impl<'ast> TypeCheckedStatement<'ast> {
     ) -> DryRunnable<'_, impl TransformationRule<'_>> {
         DryRunnable::new((
             RewriteStandardSqlFnsOnEqlTypes::new(Arc::clone(&self.node_types)),
+            RewriteContainmentOps::new(Arc::clone(&self.node_types)),
             PreserveEffectiveAliases,
             CastLiteralsAsEncrypted::new(encrypted_literals),
             FailOnPlaceholderChange::new(),
             CastParamsAsEncrypted::new(Arc::clone(&self.node_types)),
-            RewriteContainmentOps::new(Arc::clone(&self.node_types)),
         ))
     }
 }

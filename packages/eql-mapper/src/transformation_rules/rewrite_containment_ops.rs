@@ -1,10 +1,12 @@
 use std::collections::HashMap;
+use std::mem;
 use std::sync::Arc;
 
 use sqltk::parser::ast::{
     BinaryOperator, Expr, Function, FunctionArg, FunctionArgExpr, FunctionArgumentList,
-    FunctionArguments, Ident, ObjectName, ObjectNamePart,
+    FunctionArguments, Ident, ObjectName, ObjectNamePart, Value, ValueWithSpan,
 };
+use sqltk::parser::tokenizer::Span;
 use sqltk::{NodeKey, NodePath, Visitable};
 
 use crate::unifier::Type;
@@ -69,10 +71,14 @@ impl<'ast> TransformationRule<'ast> for RewriteContainmentOps<'ast> {
                     _ => return Ok(false),
                 };
 
-                // Clone the boxed expressions (Expr doesn't implement Default,
-                // so we can't use mem::take on Box<Expr>)
-                let left_expr = left.as_ref().clone();
-                let right_expr = right.as_ref().clone();
+                // Use mem::replace to move (not copy) the original nodes,
+                // preserving their NodeKey identity for downstream casting rules
+                let dummy = Expr::Value(ValueWithSpan {
+                    value: Value::Null,
+                    span: Span::empty(),
+                });
+                let left_expr = mem::replace(&mut **left, dummy.clone());
+                let right_expr = mem::replace(&mut **right, dummy);
                 *expr = Self::make_function_call(fn_name, left_expr, right_expr);
                 return Ok(true);
             }
