@@ -123,6 +123,26 @@ mod tests {
         }
     }
 
+    /// Generate a containment operator test from operand types
+    macro_rules! containment_test {
+        ($name:ident, lhs = $lhs:ident, rhs = $rhs:ident) => {
+            #[tokio::test]
+            async fn $name() {
+                trace();
+                ensure_bulk_data().await;
+
+                let client = connect_with_tls(PROXY).await;
+                let search_value = json!({"string": "value_1"});
+
+                let test_case = ContainmentTestCase::new(
+                    OperandType::$lhs,
+                    OperandType::$rhs,
+                );
+                test_case.run(&client, &search_value).await;
+            }
+        };
+    }
+
     const BULK_ROW_COUNT: usize = 500;
 
     /// Ensure bulk data exists - only insert if needed
