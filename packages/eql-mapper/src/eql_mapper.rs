@@ -64,7 +64,8 @@ pub fn requires_type_check(statement: &Statement) -> bool {
         | Statement::Update { .. }
         | Statement::Delete(_)
         | Statement::Merge { .. }
-        | Statement::Prepare { .. } => true, // not
+        | Statement::Prepare { .. }
+        | Statement::Explain { .. } => true,
         _ => false,
     }
 }
