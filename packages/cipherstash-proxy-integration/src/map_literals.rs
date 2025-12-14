@@ -45,6 +45,11 @@ mod tests {
         println!("encrypted: {:?}", rows[0])
     }
 
+    /// Verify JSONB literal insertion and retrieval without explicit type casts.
+    ///
+    /// JSONB literals in INSERT and SELECT statements work directly with the proxy
+    /// without requiring `::jsonb` type annotations. The proxy infers the JSONB type
+    /// from the target column and handles encryption/decryption transparently.
     #[tokio::test]
     async fn map_jsonb() {
         trace();
