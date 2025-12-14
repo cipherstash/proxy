@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1765692072974,
+  "lastUpdate": 1765692788101,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -15910,6 +15910,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 24.476362,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "toby@cipherstash.com",
+            "name": "Toby Hede",
+            "username": "tobyhede"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "b6a7fb5b5465b54dc93f8fe5d64eb4e5d8277366",
+          "message": "Merge pull request #340 from cipherstash/rust-1.92\n\nPR_BYPASS - minor formatting fix due to rust update",
+          "timestamp": "2025-12-14T17:10:41+11:00",
+          "tree_id": "806a8046516e57737732b6eb3c1b971a83182ae2",
+          "url": "https://github.com/cipherstash/proxy/commit/b6a7fb5b5465b54dc93f8fe5d64eb4e5d8277366"
+        },
+        "date": 1765692786851,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 25.256755,
             "unit": "Number"
           }
         ]
