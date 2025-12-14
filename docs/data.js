@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1765753809187,
+  "lastUpdate": 1765754168959,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -15964,6 +15964,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 25.678385,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "950eca883f92e1d619a70ba230eafa2b36f217d1",
+          "message": "feat(eql-mapper): JSONB containment operator transformation (@> and <@)",
+          "timestamp": "2025-12-14T06:10:45Z",
+          "url": "https://github.com/cipherstash/proxy/pull/339/commits/950eca883f92e1d619a70ba230eafa2b36f217d1"
+        },
+        "date": 1765754167714,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 24.442235,
             "unit": "Number"
           }
         ]
