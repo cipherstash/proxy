@@ -104,7 +104,7 @@ fn get_param_type(idx: usize, param_types: &[i32], col: &Column) -> Type {
     param_types
         .get(idx)
         .and_then(|oid| Type::from_oid(*oid as u32))
-        .map_or_else(|| col.postgres_type.clone(), |t| t)
+        .unwrap_or_else(|| col.postgres_type.clone())
 }
 
 impl BindParam {
