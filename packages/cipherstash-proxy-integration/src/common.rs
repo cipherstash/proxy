@@ -209,6 +209,26 @@ where
     rows.iter().map(|row| row.get(0)).collect::<Vec<T>>()
 }
 
+/// Query directly from PostgreSQL, bypassing the proxy.
+/// Used for sanity check tests to verify data is actually encrypted.
+pub async fn query_direct<T>(sql: &str) -> Vec<T>
+where
+    T: for<'a> tokio_postgres::types::FromSql<'a>,
+{
+    let client = connect_with_tls(PG_LATEST).await;
+    let rows = client.query(sql, &[]).await.unwrap();
+    rows.iter().map(|row| row.get(0)).collect()
+}
+
+pub async fn query_direct_by<T>(sql: &str, param: &(dyn ToSql + Sync)) -> Vec<T>
+where
+    T: for<'a> tokio_postgres::types::FromSql<'a>,
+{
+    let client = connect_with_tls(PG_LATEST).await;
+    let rows = client.query(sql, &[param]).await.unwrap();
+    rows.iter().map(|row| row.get(0)).collect()
+}
+
 pub async fn simple_query<T: std::str::FromStr>(sql: &str) -> Vec<T>
 where
     <T as std::str::FromStr>::Err: std::fmt::Debug,
