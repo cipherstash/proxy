@@ -50,11 +50,7 @@ mod tests {
     test_update_with_null_literal!(update_with_null_literal_jsonb, Value, jsonb);
 
     macro_rules! test_update_simple_query_with_null_literal {
-
         ($name: ident, $type: ident, $pg_type: ident) => {
-            test_update_simple_query_with_null_literal!($name, $type, $pg_type, false);
-        };
-        ($name: ident, $type: ident, $pg_type: ident, $cast: expr) => {
             #[tokio::test]
             pub async fn $name() {
                 trace();
@@ -67,15 +63,8 @@ mod tests {
                 let initial_val = crate::value_for_type!($type, random_limited());
                 let encrypted_val: Option<String> = None;
 
-                let cast_to_type: &str = if $cast {
-                    &format!("::{}", stringify!($pg_type))
-                } else {
-                    ""
-                };
-
-
                 let insert_sql =
-                    format!("INSERT INTO encrypted (id, {encrypted_col}) VALUES ({id}, '{initial_val}'{cast_to_type})");
+                    format!("INSERT INTO encrypted (id, {encrypted_col}) VALUES ({id}, '{initial_val}')");
                 let update_sql = format!("UPDATE encrypted SET {encrypted_col} = NULL WHERE id = {id}");
                 let select_sql = format!("SELECT {encrypted_col} FROM encrypted WHERE id = {id}");
 
@@ -128,8 +117,7 @@ mod tests {
     test_update_simple_query_with_null_literal!(
         update_simple_query_with_null_literal_jsonb,
         Value,
-        jsonb,
-        true
+        jsonb
     );
 
     // -----------------------------------------------------------------

@@ -9,10 +9,6 @@ mod tests {
 
     macro_rules! test_update_with_literal {
         ($name: ident, $type: ident, $pg_type: ident) => {
-            test_update_with_literal!($name, $type, $pg_type, false);
-        };
-
-        ($name: ident, $type: ident, $pg_type: ident, $cast: expr) => {
             #[tokio::test]
             pub async fn $name() {
                 trace();
@@ -27,35 +23,27 @@ mod tests {
 
                 let expected = vec![encrypted_val.clone()];
 
-                let cast_to_type: &str = if $cast {
-                    &format!("::{}", stringify!($pg_type))
-                } else {
-                    ""
-                };
-
                 // First insert a record
-                let insert_sql = format!("INSERT INTO encrypted (id, {encrypted_col}) VALUES ($1, $2)");
+                let insert_sql =
+                    format!("INSERT INTO encrypted (id, {encrypted_col}) VALUES ($1, $2)");
                 execute_query(&insert_sql, &[&id, &initial_val]).await;
 
                 // Then update it with literal value
-                let update_sql = format!("UPDATE encrypted SET {encrypted_col} = '{encrypted_val}'{cast_to_type} WHERE id = $1");
-                let select_sql = format!("SELECT {encrypted_col}{cast_to_type} FROM encrypted WHERE id = $1");
+                let update_sql = format!(
+                    "UPDATE encrypted SET {encrypted_col} = '{encrypted_val}' WHERE id = $1"
+                );
+                let select_sql = format!("SELECT {encrypted_col} FROM encrypted WHERE id = $1");
 
                 execute_query(&update_sql, &[&id]).await;
                 let actual = query_by::<$type>(&select_sql, &id).await;
 
                 assert_eq!(expected, actual);
-
             }
         };
     }
 
     macro_rules! test_update_simple_query_with_literal {
         ($name: ident, $type: ident, $pg_type: ident) => {
-            test_update_simple_query_with_literal!($name, $type, $pg_type, false);
-        };
-
-        ($name: ident, $type: ident, $pg_type: ident, $cast: expr) => {
             #[tokio::test]
             pub async fn $name() {
                 trace();
@@ -69,20 +57,13 @@ mod tests {
                 let initial_val = crate::value_for_type!($type, 1);
                 let encrypted_val = crate::value_for_type!($type, random_limited());
 
-                let cast_to_type: &str = if $cast {
-                    &format!("::{}", stringify!($pg_type))
-                } else {
-                    ""
-                };
-
                 // First insert a record
-                let insert_sql = format!("INSERT INTO encrypted (id, {encrypted_col}) VALUES ({id}, '{initial_val}'{cast_to_type})");
+                let insert_sql = format!("INSERT INTO encrypted (id, {encrypted_col}) VALUES ({id}, '{initial_val}')");
                 execute_simple_query(&insert_sql).await;
 
                 // Then update it with literal value
-                let update_sql = format!("UPDATE encrypted SET {encrypted_col} = '{encrypted_val}'{cast_to_type} WHERE id = {id}");
-                let select_sql = format!("SELECT {encrypted_col}{cast_to_type} FROM encrypted WHERE id = {id}");
-
+                let update_sql = format!("UPDATE encrypted SET {encrypted_col} = '{encrypted_val}' WHERE id = {id}");
+                let select_sql = format!("SELECT {encrypted_col} FROM encrypted WHERE id = {id}");
 
                 let expected = vec![encrypted_val];
 
@@ -101,7 +82,7 @@ mod tests {
     test_update_with_literal!(update_with_literal_bool, bool, bool);
     test_update_with_literal!(update_with_literal_text, String, text);
     test_update_with_literal!(update_with_literal_date, NaiveDate, date);
-    test_update_with_literal!(update_with_literal_jsonb, Value, jsonb, true);
+    test_update_with_literal!(update_with_literal_jsonb, Value, jsonb);
 
     test_update_simple_query_with_literal!(update_simple_query_with_literal_int2, i16, int2);
     test_update_simple_query_with_literal!(update_simple_query_with_literal_int4, i32, int4);
@@ -110,12 +91,7 @@ mod tests {
     test_update_simple_query_with_literal!(update_simple_query_with_literal_bool, bool, bool);
     test_update_simple_query_with_literal!(update_simple_query_with_literal_text, String, text);
     test_update_simple_query_with_literal!(update_simple_query_with_literal_date, NaiveDate, date);
-    test_update_simple_query_with_literal!(
-        update_simple_query_with_literal_jsonb,
-        Value,
-        jsonb,
-        true
-    );
+    test_update_simple_query_with_literal!(update_simple_query_with_literal_jsonb, Value, jsonb);
 
     // -----------------------------------------------------------------
 

@@ -1,6 +1,6 @@
 #[cfg(test)]
 mod tests {
-    use crate::common::{clear, connect_with_tls, random_id, PROXY};
+    use crate::common::{clear, connect_with_tls, random_id, trace, PROXY};
 
     #[tokio::test]
     async fn map_literal() {
@@ -47,6 +47,7 @@ mod tests {
 
     #[tokio::test]
     async fn map_jsonb() {
+        trace();
         clear().await;
 
         let client = connect_with_tls(PROXY).await;
@@ -55,12 +56,12 @@ mod tests {
         let encrypted_jsonb = serde_json::json!({"key": "value"});
 
         let sql = format!(
-            "INSERT INTO encrypted (id, encrypted_jsonb) VALUES ($1, '{encrypted_jsonb}'::jsonb)",
+            "INSERT INTO encrypted (id, encrypted_jsonb) VALUES ($1, '{encrypted_jsonb}')",
         );
 
         client.query(&sql, &[&id]).await.unwrap();
 
-        let sql = "SELECT id, encrypted_jsonb::jsonb FROM encrypted WHERE id = $1";
+        let sql = "SELECT id, encrypted_jsonb FROM encrypted WHERE id = $1";
         let rows = client.query(sql, &[&id]).await.unwrap();
 
         assert_eq!(rows.len(), 1);
