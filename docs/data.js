@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1765675983763,
+  "lastUpdate": 1765692072974,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -15885,6 +15885,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 24.417358,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "cfffb771e112981e6678f834b1f520cab8cd8452",
+          "message": "fix(clippy): replace map_or_else with unwrap_or_else ",
+          "timestamp": "2025-12-12T22:19:25Z",
+          "url": "https://github.com/cipherstash/proxy/pull/340/commits/cfffb771e112981e6678f834b1f520cab8cd8452"
+        },
+        "date": 1765692071685,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 24.476362,
             "unit": "Number"
           }
         ]
