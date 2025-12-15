@@ -324,6 +324,22 @@ pub async fn insert_jsonb_for_search() {
     }
 }
 
+/// Verifies that a text value was actually encrypted in the database.
+/// Queries directly (bypassing proxy) and asserts stored value differs from plaintext.
+pub async fn assert_encrypted_text(id: i64, column: &str, plaintext: &str) {
+    let sql = format!("SELECT {}::text FROM encrypted WHERE id = $1", column);
+    let stored: Vec<String> = query_direct_by(&sql, &id).await;
+
+    assert_eq!(stored.len(), 1, "Expected exactly one row");
+    let stored_text = &stored[0];
+
+    assert_ne!(
+        stored_text, plaintext,
+        "ENCRYPTION FAILED for {}: Stored value matches plaintext! Data was not encrypted.",
+        column
+    );
+}
+
 ///
 /// Configure the client TLS settings.
 /// These are the settings for connecting to the database with TLS.
