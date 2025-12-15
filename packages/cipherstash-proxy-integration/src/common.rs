@@ -217,20 +217,6 @@ fn get_database_port() -> u16 {
         .unwrap_or(PG_PORT)
 }
 
-/// Query directly from PostgreSQL, bypassing the proxy.
-/// Uses CS_DATABASE__HOST and CS_DATABASE__PORT to ensure same DB as proxy.
-pub async fn query_direct<T>(sql: &str) -> Vec<T>
-where
-    T: for<'a> tokio_postgres::types::FromSql<'a>,
-{
-    let port = get_database_port();
-    let client = connect_with_tls(port).await;
-    let rows = client.query(sql, &[]).await.unwrap();
-    rows.iter().map(|row| row.get(0)).collect()
-}
-
-/// Query directly from PostgreSQL with a parameter, bypassing the proxy.
-/// Uses CS_DATABASE__HOST and CS_DATABASE__PORT to ensure same DB as proxy.
 pub async fn query_direct_by<T>(sql: &str, param: &(dyn ToSql + Sync)) -> Vec<T>
 where
     T: for<'a> tokio_postgres::types::FromSql<'a>,

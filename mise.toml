@@ -174,6 +174,18 @@ run = """
 cargo nextest run --no-fail-fast --nocapture -p cipherstash-proxy-integration
 """
 
+[tasks."test:integration:without_multitenant"]
+description = "Runs integration tests excluding multitenant"
+run = """
+cargo nextest run --no-fail-fast --nocapture -E 'package(cipherstash-proxy-integration) and not test(multitenant)'
+"""
+
+[tasks."test:integration:multitenant"]
+description = "Runs multitenant integration tests only"
+run = """
+cargo nextest run --no-fail-fast --nocapture -E 'package(cipherstash-proxy-integration) and test(multitenant)'
+"""
+
 [tasks."test:local:mapper"]
 alias = 'lm'
 description = "Runs test/s"
@@ -354,7 +366,7 @@ echo
 
 mise --env tls run proxy:up proxy-tls --extra-args "--detach --wait"
 mise --env tls run test:wait_for_postgres_to_quack --port 6432 --max-retries 20 --tls
-cargo nextest run --no-fail-fast --nocapture -E 'package(cipherstash-proxy-integration) and not test(multitenant)'
+mise run test:integration:without_multitenant
 mise --env tls run proxy:down
 
 echo
@@ -369,7 +381,7 @@ unset CS_DEFAULT_KEYSET_ID
 
 mise --env tls run proxy:up proxy-tls --extra-args "--detach --wait"
 mise --env tls run test:wait_for_postgres_to_quack --port 6432 --max-retries 20 --tls
-cargo nextest run --no-fail-fast --nocapture -E 'package(cipherstash-proxy-integration) and test(multitenant)'
+mise run test:integration:multitenant
 
 echo "'set CS_DEFAULT_KEYSET_ID = {{default_keyset_id}}'"
 export CS_DEFAULT_KEYSET_ID="{{default_keyset_id}}"
