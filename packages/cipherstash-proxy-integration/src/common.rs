@@ -365,7 +365,7 @@ pub async fn assert_encrypted_jsonb(id: i64, plaintext: &Value) {
 }
 
 /// Verifies that a numeric value was actually encrypted in the database.
-/// Queries directly (bypassing proxy) and asserts stored value cannot be parsed as the original type.
+/// Queries directly (bypassing proxy) and asserts stored value differs from plaintext.
 pub async fn assert_encrypted_numeric<T>(id: i64, column: &str, plaintext: T)
 where
     T: std::fmt::Display + std::str::FromStr + PartialEq,
