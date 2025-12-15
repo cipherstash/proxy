@@ -9,8 +9,8 @@ use tokio_postgres::{types::ToSql, Client, SimpleQueryMessage};
 use tracing_subscriber::{filter::Directive, EnvFilter, FmtSubscriber};
 
 pub const PROXY: u16 = 6432;
-pub const PG_LATEST: u16 = 5532;
-pub const PG_V17_TLS: u16 = 5617;
+pub const PG_PORT: u16 = 5532;
+pub const PG_TLS_PORT: u16 = 5617;
 
 static INIT: Once = Once::new();
 
@@ -33,7 +33,7 @@ pub async fn table_exists(table: &str) -> bool {
 
     let port = std::env::var("CS_DATABASE__PORT")
         .map(|s| s.parse().unwrap())
-        .unwrap_or(PG_LATEST);
+        .unwrap_or(PG_PORT);
 
     let client = connect_with_tls(port).await;
     let messages = client.simple_query(&query).await.unwrap();

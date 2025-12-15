@@ -11,8 +11,8 @@ use tokio_postgres::{types::ToSql, Client, NoTls, Row, SimpleQueryMessage};
 use tracing_subscriber::{filter::Directive, EnvFilter, FmtSubscriber};
 
 pub const PROXY: u16 = 6432;
-pub const PG_LATEST: u16 = 5532;
-pub const PG_V17_TLS: u16 = 5617;
+pub const PG_PORT: u16 = 5532;
+pub const PG_TLS_PORT: u16 = 5617;
 
 pub const TEST_SCHEMA_SQL: &str = include_str!(concat!("../../../tests/sql/schema.sql"));
 
@@ -52,7 +52,7 @@ pub async fn clear() {
 pub async fn reset_schema() {
     let port = std::env::var("CS_DATABASE__PORT")
         .map(|s| s.parse().unwrap())
-        .unwrap_or(PG_LATEST);
+        .unwrap_or(PG_PORT);
 
     let client = connect_with_tls(port).await;
     client.simple_query(TEST_SCHEMA_SQL).await.unwrap();
@@ -61,7 +61,7 @@ pub async fn reset_schema() {
 pub async fn reset_schema_to(schema: &'static str) {
     let port = std::env::var("CS_DATABASE__PORT")
         .map(|s| s.parse().unwrap())
-        .unwrap_or(PG_LATEST);
+        .unwrap_or(PG_PORT);
 
     let client = connect_with_tls(port).await;
     client.simple_query(schema).await.unwrap();
@@ -81,7 +81,7 @@ pub async fn table_exists(table: &str) -> bool {
 
     let port = std::env::var("CS_DATABASE__PORT")
         .map(|s| s.parse().unwrap())
-        .unwrap_or(PG_LATEST);
+        .unwrap_or(PG_PORT);
 
     let client = connect_with_tls(port).await;
     let messages = client.simple_query(&query).await.unwrap();
@@ -116,7 +116,7 @@ pub fn trace() {
 pub fn connection_config(port: u16) -> tokio_postgres::Config {
     let mut db_config = tokio_postgres::Config::new();
 
-    let host = "localhost".to_string();
+    let host = std::env::var("CS_DATABASE__HOST").unwrap_or_else(|_| "localhost".to_string());
     let name = "cipherstash".to_string();
     let username = "cipherstash".to_string();
     let password = "p@ssword".to_string();
@@ -209,22 +209,34 @@ where
     rows.iter().map(|row| row.get(0)).collect::<Vec<T>>()
 }
 
+/// Get database port from environment or use default.
+fn get_database_port() -> u16 {
+    std::env::var("CS_DATABASE__PORT")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(PG_PORT)
+}
+
 /// Query directly from PostgreSQL, bypassing the proxy.
-/// Used for sanity check tests to verify data is actually encrypted.
+/// Uses CS_DATABASE__HOST and CS_DATABASE__PORT to ensure same DB as proxy.
 pub async fn query_direct<T>(sql: &str) -> Vec<T>
 where
     T: for<'a> tokio_postgres::types::FromSql<'a>,
 {
-    let client = connect_with_tls(PG_LATEST).await;
+    let port = get_database_port();
+    let client = connect_with_tls(port).await;
     let rows = client.query(sql, &[]).await.unwrap();
     rows.iter().map(|row| row.get(0)).collect()
 }
 
+/// Query directly from PostgreSQL with a parameter, bypassing the proxy.
+/// Uses CS_DATABASE__HOST and CS_DATABASE__PORT to ensure same DB as proxy.
 pub async fn query_direct_by<T>(sql: &str, param: &(dyn ToSql + Sync)) -> Vec<T>
 where
     T: for<'a> tokio_postgres::types::FromSql<'a>,
 {
-    let client = connect_with_tls(PG_LATEST).await;
+    let port = get_database_port();
+    let client = connect_with_tls(port).await;
     let rows = client.query(sql, &[param]).await.unwrap();
     rows.iter().map(|row| row.get(0)).collect()
 }
