@@ -9,10 +9,9 @@
 mod tests {
     use crate::common::{
         assert_encrypted_jsonb, assert_encrypted_numeric, assert_encrypted_text, clear,
-        connect_with_tls, random_id, random_limited, trace, PROXY,
+        connect_with_tls, random_id, trace, PROXY,
     };
     use chrono::NaiveDate;
-    use serde_json;
 
     #[tokio::test]
     async fn text_encryption_sanity_check() {
@@ -74,7 +73,7 @@ mod tests {
         clear().await;
 
         let id = random_id();
-        let plaintext: f64 = 3.14159;
+        let plaintext: f64 = 123.456;
 
         // Insert through proxy (should encrypt)
         let client = connect_with_tls(PROXY).await;
