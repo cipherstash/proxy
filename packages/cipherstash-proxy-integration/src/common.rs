@@ -8,6 +8,7 @@ use rustls::{
 use serde_json::Value;
 use std::sync::{Arc, Once};
 use tokio_postgres::{types::ToSql, Client, NoTls, Row, SimpleQueryMessage};
+use tracing::info;
 use tracing_subscriber::{filter::Directive, EnvFilter, FmtSubscriber};
 
 pub const PROXY: u16 = 6432;
@@ -116,7 +117,7 @@ pub fn trace() {
 pub fn connection_config(port: u16) -> tokio_postgres::Config {
     let mut db_config = tokio_postgres::Config::new();
 
-    let host = std::env::var("CS_DATABASE__HOST").unwrap_or_else(|_| "localhost".to_string());
+    let host = "localhost".to_string();
     let name = "cipherstash".to_string();
     let username = "cipherstash".to_string();
     let password = "p@ssword".to_string();
@@ -222,6 +223,8 @@ where
     T: for<'a> tokio_postgres::types::FromSql<'a>,
 {
     let port = get_database_port();
+    info!(port);
+
     let client = connect_with_tls(port).await;
     let rows = client.query(sql, &[param]).await.unwrap();
     rows.iter().map(|row| row.get(0)).collect()

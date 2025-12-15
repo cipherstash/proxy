@@ -323,8 +323,6 @@ echo
 mise --env tcp run postgres:setup
 mise --env tls run postgres:setup
 
-mise run test:integration:showcase
-
 echo
 echo '###############################################'
 echo '# Test: Prometheus'
@@ -366,7 +364,7 @@ echo
 
 mise --env tls run proxy:up proxy-tls --extra-args "--detach --wait"
 mise --env tls run test:wait_for_postgres_to_quack --port 6432 --max-retries 20 --tls
-mise run test:integration:without_multitenant
+mise --env tls run test:integration:without_multitenant
 mise --env tls run proxy:down
 
 echo
@@ -381,7 +379,7 @@ unset CS_DEFAULT_KEYSET_ID
 
 mise --env tls run proxy:up proxy-tls --extra-args "--detach --wait"
 mise --env tls run test:wait_for_postgres_to_quack --port 6432 --max-retries 20 --tls
-mise run test:integration:multitenant
+mise --env tls run test:integration:multitenant
 
 echo "'set CS_DEFAULT_KEYSET_ID = {{default_keyset_id}}'"
 export CS_DEFAULT_KEYSET_ID="{{default_keyset_id}}"
