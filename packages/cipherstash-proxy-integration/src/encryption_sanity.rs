@@ -13,5 +13,30 @@ mod tests {
     };
     use chrono::NaiveDate;
 
-    // Tests will be added in subsequent tasks
+    #[tokio::test]
+    async fn text_encryption_sanity_check() {
+        trace();
+        clear().await;
+
+        let id = random_id();
+        let plaintext = "hello world";
+
+        // Insert through proxy (should encrypt)
+        let client = connect_with_tls(PROXY).await;
+        let sql = "INSERT INTO encrypted (id, encrypted_text) VALUES ($1, $2)";
+        client.query(sql, &[&id, &plaintext]).await.unwrap();
+
+        // Verify encryption occurred
+        assert_encrypted_text(id, "encrypted_text", plaintext).await;
+
+        // Round-trip: query through proxy should decrypt back to original
+        let sql = "SELECT encrypted_text FROM encrypted WHERE id = $1";
+        let rows = client.query(sql, &[&id]).await.unwrap();
+        assert_eq!(rows.len(), 1, "Expected exactly one row for round-trip");
+        let decrypted: String = rows[0].get(0);
+        assert_eq!(
+            decrypted, plaintext,
+            "DECRYPTION FAILED: Round-trip value doesn't match original!"
+        );
+    }
 }
