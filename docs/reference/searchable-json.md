@@ -43,6 +43,8 @@ SELECT eql_v2.add_search_config(
 );
 ```
 
+> **Note:** JSONB literals in INSERT and UPDATE statements work directly without explicit `::jsonb` type casts. The proxy infers the JSONB type from the target column and handles encryption transparently.
+
 ### JSON document structure
 
 Examples assume an encrypted JSON document with the following structure:
@@ -590,6 +592,8 @@ SELECT jsonb_array_length(jsonb_path_query(encrypted_jsonb, '$.unknown')) FROM c
 
 
 ## Containment Operators
+
+> **Note:** Containment operators work directly with JSONB literals without requiring explicit `::jsonb` type casts. The examples below use the simplified syntax intentionally.
 
 ### `@>` (Contains Operator)
 

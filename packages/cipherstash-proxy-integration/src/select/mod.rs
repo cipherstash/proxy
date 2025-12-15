@@ -2,6 +2,7 @@ mod group_by;
 mod jsonb_array_elements;
 mod jsonb_array_length;
 mod jsonb_contained_by;
+mod jsonb_containment_index;
 mod jsonb_contains;
 mod jsonb_get_field;
 mod jsonb_get_field_as_ciphertext;

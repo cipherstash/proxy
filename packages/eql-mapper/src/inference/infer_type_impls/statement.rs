@@ -79,6 +79,15 @@ impl<'ast> InferType<'ast, Statement> for TypeInferencer<'ast> {
                 ))
             }
 
+            Statement::Explain {
+                // Note: inner statement's type inference happens through normal AST traversal
+                statement: _inner_statement,
+                ..
+            } => {
+                // Recursively type-check the inner statement so transformations apply
+                // EXPLAIN itself returns metadata, not the query results - give it empty projection
+                self.unify_node_with_type(statement, Type::empty_projection())?;
+            }
             _ => {}
         };
 
