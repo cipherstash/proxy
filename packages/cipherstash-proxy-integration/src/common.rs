@@ -306,6 +306,9 @@ pub async fn insert_jsonb() -> Value {
 
     insert(&sql, &[&id, &encrypted_jsonb]).await;
 
+    // Verify encryption actually occurred
+    assert_encrypted_jsonb(id, &encrypted_jsonb).await;
+
     encrypted_jsonb
 }
 
@@ -321,6 +324,9 @@ pub async fn insert_jsonb_for_search() {
 
         let sql = "INSERT INTO encrypted (id, encrypted_jsonb) VALUES ($1, $2)";
         insert(sql, &[&id, &encrypted_jsonb]).await;
+
+        // Verify encryption actually occurred for each row
+        assert_encrypted_jsonb(id, &encrypted_jsonb).await;
     }
 }
 
