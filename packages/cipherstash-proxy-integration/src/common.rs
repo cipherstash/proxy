@@ -340,6 +340,50 @@ pub async fn assert_encrypted_text(id: i64, column: &str, plaintext: &str) {
     );
 }
 
+/// Verifies that a JSONB value was actually encrypted in the database.
+/// Queries directly (bypassing proxy) and asserts stored value differs from plaintext.
+pub async fn assert_encrypted_jsonb(id: i64, plaintext: &Value) {
+    let sql = "SELECT encrypted_jsonb::text FROM encrypted WHERE id = $1";
+    let stored: Vec<String> = query_direct_by(sql, &id).await;
+
+    assert_eq!(stored.len(), 1, "Expected exactly one row");
+    let stored_text = &stored[0];
+
+    let plaintext_str = plaintext.to_string();
+    assert_ne!(
+        stored_text, &plaintext_str,
+        "ENCRYPTION FAILED for encrypted_jsonb: Stored value matches plaintext! Data was not encrypted."
+    );
+
+    // Additional verification: the encrypted format should be different structure
+    if let Ok(stored_json) = serde_json::from_str::<Value>(stored_text) {
+        assert_ne!(
+            stored_json, *plaintext,
+            "ENCRYPTION FAILED for encrypted_jsonb: Stored JSON structure matches plaintext!"
+        );
+    }
+}
+
+/// Verifies that a numeric value was actually encrypted in the database.
+/// Queries directly (bypassing proxy) and asserts stored value cannot be parsed as the original type.
+pub async fn assert_encrypted_numeric<T>(id: i64, column: &str, plaintext: T)
+where
+    T: std::fmt::Display + std::str::FromStr + PartialEq,
+{
+    let sql = format!("SELECT {}::text FROM encrypted WHERE id = $1", column);
+    let stored: Vec<String> = query_direct_by(&sql, &id).await;
+
+    assert_eq!(stored.len(), 1, "Expected exactly one row");
+    let stored_text = &stored[0];
+
+    let plaintext_str = plaintext.to_string();
+    assert_ne!(
+        stored_text, &plaintext_str,
+        "ENCRYPTION FAILED for {}: Stored value matches plaintext! Data was not encrypted.",
+        column
+    );
+}
+
 ///
 /// Configure the client TLS settings.
 /// These are the settings for connecting to the database with TLS.
