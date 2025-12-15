@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1765765853417,
+  "lastUpdate": 1765768571840,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -16364,6 +16364,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 25.746943,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "toby@cipherstash.com",
+            "name": "Toby Hede",
+            "username": "tobyhede"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "88c5450cbe1efea05df20c385145c3c828b98f6d",
+          "message": "Merge pull request #339 from cipherstash/feature/gin-jsonb-containment-tests\n\nfeat(eql-mapper): JSONB containment operator transformation (@> and <@)",
+          "timestamp": "2025-12-15T14:13:09+11:00",
+          "tree_id": "005b7ab949643dfd2b09ebacd6022bdc3bfb82a1",
+          "url": "https://github.com/cipherstash/proxy/commit/88c5450cbe1efea05df20c385145c3c828b98f6d"
+        },
+        "date": 1765768570625,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 25.469933,
             "unit": "Number"
           }
         ]
