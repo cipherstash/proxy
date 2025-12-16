@@ -115,6 +115,12 @@ mod tests {
         let result = client.simple_query(&sql).await;
         assert!(result.is_ok());
 
+        // SET TENANT_1 WITHOUT QUOTES
+        // VALID AS LONG AS NAME IS A VALID PG IDENTIFIER
+        let sql = format!("SET CIPHERSTASH.KEYSET_NAME = {tenant_keyset_name_1}");
+        let result = client.simple_query(&sql).await;
+        assert!(result.is_ok());
+
         // INSERT
         let tenant_1_id = random_id();
         let encrypted_text = "hello";
@@ -372,8 +378,8 @@ mod tests {
 
         // Test cases that should potentially fail or be handled gracefully
         let invalid_cases = vec![
-            format!("SET CIPHERSTASH.KEYSET_NAME = {tenant_keyset_name_1}"), // unquoted string
-            format!("SET CIPHERSTASH.KEYSET_NAME = NULL"),                   // null value
+            format!("SET CIPHERSTASH.KEYSET_NAME = test-1"), // unquoted string that is NOT a valid pg Identifier
+            format!("SET CIPHERSTASH.KEYSET_NAME = NULL"),   // null value
         ];
 
         for invalid_sql in invalid_cases {

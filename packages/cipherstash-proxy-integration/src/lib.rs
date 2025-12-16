@@ -2,6 +2,7 @@ mod common;
 mod decrypt;
 mod disable_mapping;
 mod empty_result;
+mod encryption_sanity;
 mod extended_protocol_error_messages;
 mod insert;
 mod map_concat;

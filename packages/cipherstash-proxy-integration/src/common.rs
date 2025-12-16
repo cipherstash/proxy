@@ -306,6 +306,9 @@ pub async fn insert_jsonb() -> Value {
 
     insert(&sql, &[&id, &encrypted_jsonb]).await;
 
+    // Verify encryption actually occurred
+    assert_encrypted_jsonb(id, &encrypted_jsonb).await;
+
     encrypted_jsonb
 }
 
@@ -321,7 +324,70 @@ pub async fn insert_jsonb_for_search() {
 
         let sql = "INSERT INTO encrypted (id, encrypted_jsonb) VALUES ($1, $2)";
         insert(sql, &[&id, &encrypted_jsonb]).await;
+
+        // Verify encryption actually occurred for each row
+        assert_encrypted_jsonb(id, &encrypted_jsonb).await;
     }
+}
+
+/// Verifies that a text value was actually encrypted in the database.
+/// Queries directly (bypassing proxy) and asserts stored value differs from plaintext.
+pub async fn assert_encrypted_text(id: i64, column: &str, plaintext: &str) {
+    let sql = format!("SELECT {}::text FROM encrypted WHERE id = $1", column);
+    let stored: Vec<String> = query_direct_by(&sql, &id).await;
+
+    assert_eq!(stored.len(), 1, "Expected exactly one row");
+    let stored_text = &stored[0];
+
+    assert_ne!(
+        stored_text, plaintext,
+        "ENCRYPTION FAILED for {}: Stored value matches plaintext! Data was not encrypted.",
+        column
+    );
+}
+
+/// Verifies that a JSONB value was actually encrypted in the database.
+/// Queries directly (bypassing proxy) and asserts stored value differs from plaintext.
+pub async fn assert_encrypted_jsonb(id: i64, plaintext: &Value) {
+    let sql = "SELECT encrypted_jsonb::text FROM encrypted WHERE id = $1";
+    let stored: Vec<String> = query_direct_by(sql, &id).await;
+
+    assert_eq!(stored.len(), 1, "Expected exactly one row");
+    let stored_text = &stored[0];
+
+    let plaintext_str = plaintext.to_string();
+    assert_ne!(
+        stored_text, &plaintext_str,
+        "ENCRYPTION FAILED for encrypted_jsonb: Stored value matches plaintext! Data was not encrypted."
+    );
+
+    // Additional verification: the encrypted format should be different structure
+    if let Ok(stored_json) = serde_json::from_str::<Value>(stored_text) {
+        assert_ne!(
+            stored_json, *plaintext,
+            "ENCRYPTION FAILED for encrypted_jsonb: Stored JSON structure matches plaintext!"
+        );
+    }
+}
+
+/// Verifies that a numeric value was actually encrypted in the database.
+/// Queries directly (bypassing proxy) and asserts stored value differs from plaintext.
+pub async fn assert_encrypted_numeric<T>(id: i64, column: &str, plaintext: T)
+where
+    T: std::fmt::Display + std::str::FromStr + PartialEq,
+{
+    let sql = format!("SELECT {}::text FROM encrypted WHERE id = $1", column);
+    let stored: Vec<String> = query_direct_by(&sql, &id).await;
+
+    assert_eq!(stored.len(), 1, "Expected exactly one row");
+    let stored_text = &stored[0];
+
+    let plaintext_str = plaintext.to_string();
+    assert_ne!(
+        stored_text, &plaintext_str,
+        "ENCRYPTION FAILED for {}: Stored value matches plaintext! Data was not encrypted.",
+        column
+    );
 }
 
 ///
