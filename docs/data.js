@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1765893342151,
+  "lastUpdate": 1765921966322,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -16618,6 +16618,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 21.914941,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "toby@cipherstash.com",
+            "name": "Toby Hede",
+            "username": "tobyhede"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "f843f1f2b2ffe3c70525e835c53f6903f56a2eb2",
+          "message": "Merge pull request #341 from cipherstash/encryption-sanity-checks\n\nEncryption sanity checks",
+          "timestamp": "2025-12-17T08:49:57+11:00",
+          "tree_id": "107a79a6679bea7886590afd7f848b8e08ddcee8",
+          "url": "https://github.com/cipherstash/proxy/commit/f843f1f2b2ffe3c70525e835c53f6903f56a2eb2"
+        },
+        "date": 1765921964695,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 22.007873,
             "unit": "Number"
           }
         ]
