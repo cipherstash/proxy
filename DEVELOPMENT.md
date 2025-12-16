@@ -37,7 +37,7 @@ CS_DEFAULT_KEYSET_ID = ""
 EOF
 
 # In your browser:
-#  - Sign in to dashboard.cipherstash.com
+#  - Sign in to https://dashboard.cipherstash.com
 #  - Create or select a workspace
 #  - Generate and copy the credentials to your clipboard
 
