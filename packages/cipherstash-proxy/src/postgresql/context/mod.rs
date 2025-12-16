@@ -446,17 +446,20 @@ where
         }) = statement
         {
             if variable == &*SQL_SETTING_NAME_KEYSET_NAME {
-                if let Some(Expr::Value(ValueWithSpan { value, .. })) = values.first() {
-                    let keyset_name = match value {
-                        Value::SingleQuotedString(s) | Value::DoubleQuotedString(s) => s.clone(),
-                        Value::Number(n, _) => n.to_string(),
-                        _ => {
-                            let err = EncryptError::KeysetNameCouldNotBeSet;
-                            warn!(target: CONTEXT, client_id = self.client_id, msg = err.to_string());
-                            return Ok(None);
+                // Try to extract keyset name from Value (quoted string/number) or Identifier (unquoted)
+                let keyset_name = match values.first() {
+                    Some(Expr::Value(ValueWithSpan { value, .. })) => match value {
+                        Value::SingleQuotedString(s) | Value::DoubleQuotedString(s) => {
+                            Some(s.clone())
                         }
-                    };
+                        Value::Number(n, _) => Some(n.to_string()),
+                        _ => None,
+                    },
+                    Some(Expr::Identifier(ident)) => Some(ident.value.clone()),
+                    _ => None,
+                };
 
+                if let Some(keyset_name) = keyset_name {
                     debug!(target: CONTEXT, client_id = self.client_id, msg = "Set KeysetName", ?keyset_name);
 
                     let identifier = KeysetIdentifier(IdentifiedBy::Name(keyset_name.into()));
@@ -469,7 +472,7 @@ where
                 } else {
                     let err = EncryptError::KeysetNameCouldNotBeSet;
                     warn!(target: CONTEXT, client_id = self.client_id, msg = err.to_string());
-                    // We let the database handle any syntax errors to avoid complexifying the fronted flow (more)
+                    // We let the database handle any syntax errors to avoid complexifying the frontend flow
                 }
             }
         }
