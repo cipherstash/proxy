@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1765927836330,
+  "lastUpdate": 1766012167517,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -16697,6 +16697,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 22.08025,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "lindsay@cipherstash.com",
+            "name": "Lindsay Holmwood",
+            "username": "auxesis"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "702c0367ef32a1c70ccdf1fe1a346a9c625ca156",
+          "message": "Merge pull request #342 from cipherstash/docs/dev-docs-use-dashboard\n\ndocs(dev): update dev docs to use dashboard",
+          "timestamp": "2025-12-18T09:53:05+11:00",
+          "tree_id": "016aa610f3d632c555bc241f9021ce8e486e14d3",
+          "url": "https://github.com/cipherstash/proxy/commit/702c0367ef32a1c70ccdf1fe1a346a9c625ca156"
+        },
+        "date": 1766012161145,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 22.372541,
             "unit": "Number"
           }
         ]
