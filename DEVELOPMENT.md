@@ -26,37 +26,24 @@ mise run postgres:up --extra-args "--detach --wait"
 # Install latest eql into database
 mise run postgres:setup
 
-# If this is your first time using CipherStash:
-#  - install stash CLI
-#  - `stash signup`
+# Create a stub mise.local.toml
+cat > mise.local.toml << 'EOF'
+[env]
+CS_WORKSPACE_CRN = ""
+CS_CLIENT_KEY = ""
+CS_CLIENT_ID = ""
+CS_CLIENT_ACCESS_KEY = ""
+CS_DEFAULT_KEYSET_ID = ""
+EOF
 
-# If you have used CipherStash before:
-#  - `stash login`
+# In your browser:
+#  - Sign in to https://dashboard.cipherstash.com
+#  - Create or select a workspace
+#  - Generate and copy the credentials to your clipboard
 
-# Create minimal mise.local.toml
-# CS_WORKSPACE_CRN
-# CS_CLIENT_ACCESS_KEY
-# CS_DEFAULT_KEYSET_ID
-# CS_CLIENT_KEY
-# CS_CLIENT_ID
-
-# Get the workspace ID
-stash workspaces
-# add to CS_WORKSPACE_CRN in the format: "crn:region:workspace-id" - eg. "crn:ap-southeast-2.aws:7WXWMKXKQU42PDB4"
-# NOTE: this is going to change so `stash workspaces` will return CRNs instead of IDs
-
-# Create an access key
-stash access-keys create proxy
-# add to CS_CLIENT_ACCESS_KEY
-
-# Create a dataset
-stash keysets create proxy
-# add to CS_DEFAULT_KEYSET_ID
-
-# Create a client
-stash clients create --keyset-id $DEFAULT_KEYSET_ID proxy
-# add to CS_CLIENT_ID
-# add to CS_CLIENT_KEY
+# In your terminal:
+#  - Paste the credentials into mise.local.toml using your preferred text editor
+nano mise.local.toml
 
 # Build and run Proxy
 mise run proxy
