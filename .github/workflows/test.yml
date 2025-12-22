@@ -33,6 +33,8 @@ jobs:
         env:
           CS_CLIENT_KEY: ${{ secrets.CS_VAULT_CLIENT_KEY }}
           CS_CLIENT_ACCESS_KEY: ${{ secrets.CS_VAULT_CLIENT_ACCESS_KEY }}
+          CS_WORKSPACE_CRN: ${{ secrets.CS_VAULT_WORKSPACE_CRN }}
+          CS_CLIENT_ID: ${{ secrets.CS_VAULT_CLIENT_ID }}
         run: cd scripts && npm run decrypt
 
       - run: |
