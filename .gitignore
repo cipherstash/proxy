@@ -18,6 +18,12 @@ rust-toolchain.toml
 # credentials for local dev
 .env.proxy.docker
 
+# CI secrets plaintext (never commit actual values)
+.github/secrets.env.plaintext
+
+# Node modules (scripts directory)
+scripts/node_modules/
+
 ## benchmark result data
 tests/benchmark/results/*.csv
 tests/benchmark/benchmark-*.png

@@ -18,28 +18,31 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-test
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: scripts/package-lock.json
+
+      - name: Install decrypt dependencies
+        working-directory: scripts
+        run: npm ci
+
+      - name: Decrypt secrets
+        env:
+          CS_CLIENT_KEY: ${{ secrets.CS_VAULT_CLIENT_KEY }}
+          CS_CLIENT_ACCESS_KEY: ${{ secrets.CS_VAULT_CLIENT_ACCESS_KEY }}
+        run: cd scripts && npm run decrypt
+
       - run: |
           mise run postgres:up --extra-args "--detach --wait"
-      - env:
+
+      - name: Run tests
+        env:
           # REMEMBER TO ADD ENVIRONMENT VARIABLES TO tests/docker-compose.yml
           # The tests/docker-compose.yml config passes the ENV vars into the container
-          CS_CLIENT_ACCESS_KEY: ${{ secrets.CS_CLIENT_ACCESS_KEY }}
-          CS_DEFAULT_KEYSET_ID: ${{ secrets.CS_DEFAULT_KEYSET_ID }}
-          CS_TENANT_KEYSET_ID_1: ${{ secrets.CS_TENANT_KEYSET_ID_1 }}
-          CS_TENANT_KEYSET_ID_2: ${{ secrets.CS_TENANT_KEYSET_ID_2 }}
-          CS_TENANT_KEYSET_ID_3: ${{ secrets.CS_TENANT_KEYSET_ID_3 }}
-          CS_TENANT_KEYSET_NAME_1: ${{ secrets.CS_TENANT_KEYSET_NAME_1 }}
-          CS_TENANT_KEYSET_NAME_2: ${{ secrets.CS_TENANT_KEYSET_NAME_2 }}
-          CS_TENANT_KEYSET_NAME_3: ${{ secrets.CS_TENANT_KEYSET_NAME_3 }}
-          CS_CLIENT_ID: ${{ secrets.CS_CLIENT_ID }}
-          CS_CLIENT_KEY: ${{ secrets.CS_CLIENT_KEY }}
-          CS_WORKSPACE_CRN: ${{ secrets.CS_WORKSPACE_CRN }}
           RUST_BACKTRACE: "1"
         run: |
           mise run --output prefix test
-
-      - uses: ./.github/actions/send-slack-notification
-        with:
-          channel: engineering
-          webhook_url: ${{ secrets.SLACK_NOTIFICATION_WEBHOOK_URL }}
 

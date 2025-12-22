@@ -82,6 +82,22 @@ jobs:
 
       - uses: actions/checkout@v4
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: scripts/package-lock.json
+
+      - name: Install decrypt dependencies
+        working-directory: scripts
+        run: npm ci
+
+      - name: Decrypt secrets
+        env:
+          CS_CLIENT_KEY: ${{ secrets.CS_VAULT_CLIENT_KEY }}
+          CS_CLIENT_ACCESS_KEY: ${{ secrets.CS_VAULT_CLIENT_ACCESS_KEY }}
+        run: cd scripts && npm run decrypt
+
       - uses: jdx/mise-action@v2
         with:
           version: 2025.1.6 # [default: latest] mise version to install
@@ -111,6 +127,6 @@ jobs:
             --fail-with-body \
             --url "https://api.developer.multitudes.co/deployments" \
             --header "Content-Type: application/json" \
-            --header "Authorization: ${{ secrets.MULTITUDES_ACCESS_TOKEN }}" \
+            --header "Authorization: ${{ env.MULTITUDES_ACCESS_TOKEN }}" \
             --data '{"commitSha": "${{ github.sha }}", "environmentName":"marketplace"}'
 

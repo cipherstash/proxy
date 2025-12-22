@@ -22,6 +22,23 @@ jobs:
     runs-on: ${{matrix.build.os}}
     steps:
       - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: scripts/package-lock.json
+
+      - name: Install decrypt dependencies
+        working-directory: scripts
+        run: npm ci
+
+      - name: Decrypt secrets
+        env:
+          CS_CLIENT_KEY: ${{ secrets.CS_VAULT_CLIENT_KEY }}
+          CS_CLIENT_ACCESS_KEY: ${{ secrets.CS_VAULT_CLIENT_ACCESS_KEY }}
+        run: cd scripts && npm run decrypt
+
       - name: Setup Rust cache
         uses: Swatinem/rust-cache@v2
         if: github.event_name == 'pull_request' # only cache in pull requests
@@ -55,8 +72,8 @@ jobs:
       - name: Login to Docker Hub
         uses: docker/login-action@v3
         with:
-          username: ${{ secrets.DOCKER_HUB_USERNAME }}
-          password: ${{ secrets.DOCKER_HUB_PERSONAL_ACCESS_TOKEN }}
+          username: ${{ env.DOCKER_HUB_USERNAME }}
+          password: ${{ env.DOCKER_HUB_PASSWORD }}
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -92,6 +109,24 @@ jobs:
     needs:
       - build
     steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: scripts/package-lock.json
+
+      - name: Install decrypt dependencies
+        working-directory: scripts
+        run: npm ci
+
+      - name: Decrypt secrets
+        env:
+          CS_CLIENT_KEY: ${{ secrets.CS_VAULT_CLIENT_KEY }}
+          CS_CLIENT_ACCESS_KEY: ${{ secrets.CS_VAULT_CLIENT_ACCESS_KEY }}
+        run: cd scripts && npm run decrypt
+
       - name: Download digests
         uses: actions/download-artifact@v4
         with:
@@ -102,8 +137,8 @@ jobs:
       - name: Login to Docker Hub
         uses: docker/login-action@v3
         with:
-          username: ${{ secrets.DOCKER_HUB_USERNAME }}
-          password: ${{ secrets.DOCKER_HUB_PERSONAL_ACCESS_TOKEN }}
+          username: ${{ env.DOCKER_HUB_USERNAME }}
+          password: ${{ env.DOCKER_HUB_PASSWORD }}
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -135,5 +170,5 @@ jobs:
             --fail-with-body \
             --url "https://api.developer.multitudes.co/deployments" \
             --header "Content-Type: application/json" \
-            --header "Authorization: ${{ secrets.MULTITUDES_ACCESS_TOKEN }}" \
+            --header "Authorization: ${{ env.MULTITUDES_ACCESS_TOKEN }}" \
             --data '{"commitSha": "${{ github.sha }}", "environmentName":"dockerhub"}'
