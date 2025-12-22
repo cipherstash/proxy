@@ -31,17 +31,37 @@ async function main(): Promise<void> {
   const githubEnvPath = process.env.GITHUB_ENV;
   const isCI = !!githubEnvPath;
 
-  for (const [key, value] of Object.entries(env)) {
+  // Bootstrap secrets (passed in as env vars, need to forward to $GITHUB_ENV)
+  const bootstrapSecrets = [
+    "CS_CLIENT_ID",
+    "CS_CLIENT_KEY",
+    "CS_CLIENT_ACCESS_KEY",
+    "CS_WORKSPACE_CRN",
+  ];
+
+  // Combine bootstrap secrets with decrypted secrets
+  const allSecrets: Record<string, string> = { ...env };
+  for (const key of bootstrapSecrets) {
+    const value = process.env[key];
+    if (value) {
+      allSecrets[key] = value;
+    }
+  }
+
+  for (const [key, value] of Object.entries(allSecrets)) {
     if (isCI) {
       const delimiter = `EOF_${key}_${Date.now()}`;
       fs.appendFileSync(githubEnvPath, `${key}<<${delimiter}\n${value}\n${delimiter}\n`);
     } else {
-      console.log(`${key}=${value}`);
+      // Only output non-bootstrap secrets locally (bootstrap are already in env)
+      if (!bootstrapSecrets.includes(key)) {
+        console.log(`${key}=${value}`);
+      }
     }
   }
 
   if (isCI) {
-    console.error(`Decrypted ${Object.keys(env).length} secrets to $GITHUB_ENV`);
+    console.error(`Wrote ${Object.keys(allSecrets).length} secrets to $GITHUB_ENV`);
   }
 }
 
