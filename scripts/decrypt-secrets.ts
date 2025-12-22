@@ -7,6 +7,10 @@ const schema = csTable("ci_secrets", {
   value: csColumn("value"),
 });
 
+function isFileMode(data: unknown): data is Encrypted {
+  return data !== null && typeof data === "object" && "k" in data && "c" in data;
+}
+
 async function main(): Promise<void> {
   const repoRoot = path.resolve(import.meta.dirname, "..");
   const encryptedPath = path.join(repoRoot, ".github", "secrets.env.encrypted");
@@ -17,17 +21,35 @@ async function main(): Promise<void> {
   }
 
   const client = await protect({ schemas: [schema] });
-  const encrypted: Encrypted = JSON.parse(
+  const encrypted: unknown = JSON.parse(
     fs.readFileSync(encryptedPath, "utf-8")
   );
 
-  const result = await client.decrypt(encrypted);
-  if (result.failure) {
-    console.error(`Failed to decrypt: ${result.failure.message}`);
-    process.exit(1);
-  }
+  let env: Record<string, string>;
 
-  const env = dotenv.parse(String(result.data));
+  if (isFileMode(encrypted)) {
+    // File mode: decrypt single blob, parse as .env
+    const result = await client.decrypt(encrypted);
+    if (result.failure) {
+      console.error(`Failed to decrypt: ${result.failure.message}`);
+      process.exit(1);
+    }
+    env = dotenv.parse(String(result.data));
+    console.error("Detected file mode encryption");
+  } else {
+    // Vars mode: decrypt each variable individually
+    env = {};
+    const encryptedVars = encrypted as Record<string, Encrypted>;
+    for (const [key, payload] of Object.entries(encryptedVars)) {
+      const result = await client.decrypt(payload);
+      if (result.failure) {
+        console.error(`Failed to decrypt ${key}: ${result.failure.message}`);
+        process.exit(1);
+      }
+      env[key] = String(result.data);
+    }
+    console.error(`Detected vars mode encryption (${Object.keys(env).length} variables)`);
+  }
   const githubEnvPath = process.env.GITHUB_ENV;
   const isCI = !!githubEnvPath;
 
