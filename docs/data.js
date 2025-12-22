@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1766377145997,
+  "lastUpdate": 1766446545120,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -16776,6 +16776,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 22.69149,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "46c3f4bbc289bd22ef779e2cd402ddd32b816647",
+          "message": "Use ProtectJS for secrets management",
+          "timestamp": "2025-12-17T22:53:09Z",
+          "url": "https://github.com/cipherstash/proxy/pull/343/commits/46c3f4bbc289bd22ef779e2cd402ddd32b816647"
+        },
+        "date": 1766446543253,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 22.488094,
             "unit": "Number"
           }
         ]
