@@ -1,7 +1,6 @@
 import { protect, csTable, csColumn } from "@cipherstash/protect";
 import * as fs from "fs";
 import * as path from "path";
-import * as dotenv from "dotenv";
 
 const schema = csTable("ci_secrets", {
   value: csColumn("value"),
@@ -14,30 +13,24 @@ async function main(): Promise<void> {
 
   if (!fs.existsSync(plaintextPath)) {
     console.error(`Error: ${plaintextPath} not found`);
-    console.error("Create this file with your plaintext secrets (KEY=value format)");
     process.exit(1);
   }
 
-  const env = dotenv.parse(fs.readFileSync(plaintextPath));
+  const fileContent = fs.readFileSync(plaintextPath, "utf-8");
   const client = await protect({ schemas: [schema] });
 
-  const encrypted: Record<string, unknown> = {};
+  const result = await client.encrypt(fileContent, {
+    table: schema,
+    column: schema.value,
+  });
 
-  for (const [key, value] of Object.entries(env)) {
-    const result = await client.encrypt(value, {
-      table: schema,
-      column: schema.value,
-    });
-    if (result.failure) {
-      console.error(`Failed to encrypt ${key}: ${result.failure.message}`);
-      process.exit(1);
-    }
-    encrypted[key] = result.data;
-    console.error(`Encrypted: ${key}`);
+  if (result.failure) {
+    console.error(`Failed to encrypt: ${result.failure.message}`);
+    process.exit(1);
   }
 
-  fs.writeFileSync(encryptedPath, JSON.stringify(encrypted, null, 2) + "\n");
-  console.error(`\nWrote ${Object.keys(encrypted).length} secrets to ${encryptedPath}`);
+  fs.writeFileSync(encryptedPath, JSON.stringify(result.data, null, 2) + "\n");
+  console.error(`Encrypted secrets file to ${encryptedPath}`);
 }
 
 main().catch((err) => {
