@@ -18,6 +18,9 @@ rust-toolchain.toml
 # credentials for local dev
 .env.proxy.docker
 
+# decrypted CI secrets (encrypted file is .github/secrets.env.encrypted)
+.github/secrets.env
+
 ## benchmark result data
 tests/benchmark/results/*.csv
 tests/benchmark/benchmark-*.png
