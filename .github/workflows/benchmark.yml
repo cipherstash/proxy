@@ -24,24 +24,33 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-test
+
+      - name: Decrypt secrets
+        uses: cipherstash/protectgh@main
+        with:
+          secrets-file: .github/secrets.env.encrypted
+        env:
+          CS_CLIENT_ID: ${{ secrets.CS_VAULT_CLIENT_ID }}
+          CS_CLIENT_KEY: ${{ secrets.CS_VAULT_CLIENT_KEY }}
+          CS_CLIENT_ACCESS_KEY: ${{ secrets.CS_VAULT_CLIENT_ACCESS_KEY }}
+          CS_WORKSPACE_CRN: ${{ secrets.CS_VAULT_WORKSPACE_CRN }}
+
       - run: |
           mise run postgres:up --extra-args "--detach --wait"
+
       - name: Run benchmark
         working-directory: tests/benchmark
         env:
-          CS_CLIENT_ACCESS_KEY: ${{ secrets.CS_CLIENT_ACCESS_KEY }}
-          CS_DEFAULT_KEYSET_ID: ${{ secrets.CS_DEFAULT_KEYSET_ID }}
-          CS_CLIENT_ID: ${{ secrets.CS_CLIENT_ID }}
-          CS_CLIENT_KEY: ${{ secrets.CS_CLIENT_KEY }}
-          CS_WORKSPACE_CRN: ${{ secrets.CS_WORKSPACE_CRN }}
           RUST_BACKTRACE: "1"
         run: mise run benchmark:continuous
+
       # Download previous benchmark result from cache (if exists)
       - name: Download previous benchmark data
         uses: actions/cache@v4
         with:
           path: ./cache
           key: ${{ runner.os }}-benchmark
+
       # Run `github-action-benchmark` action
       - name: Store benchmark result
         uses: benchmark-action/github-action-benchmark@v1
@@ -62,4 +71,3 @@ jobs:
         with:
           channel: engineering
           webhook_url: ${{ secrets.SLACK_NOTIFICATION_WEBHOOK_URL }}
-
