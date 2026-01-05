@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1767571569923,
+  "lastUpdate": 1767588812249,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -16851,6 +16851,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 22.220275,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "toby@cipherstash.com",
+            "name": "Toby Hede",
+            "username": "tobyhede"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "cead6d4d7ac42a67cd87647030d51cb2235ce17d",
+          "message": "Merge pull request #344 from cipherstash/feat/protectgh-ci\n\nci: use protectgh action for encrypted secrets",
+          "timestamp": "2026-01-05T15:49:56+11:00",
+          "tree_id": "64cbd656299f597623e62ad49e13dd93f5d60b39",
+          "url": "https://github.com/cipherstash/proxy/commit/cead6d4d7ac42a67cd87647030d51cb2235ce17d"
+        },
+        "date": 1767588810577,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 22.86261,
             "unit": "Number"
           }
         ]
