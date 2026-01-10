@@ -96,5 +96,59 @@ mod tests {
         })
     }
 
+    /// Schema for credit_data_order_v2 table (customer's table structure)
+    /// Note: Removed DEFAULT gen_random_uuid() to avoid pgcrypto dependency
+    /// (tests provide explicit UUIDs anyway)
+    const MEMORY_LEAK_SCHEMA: &str = r#"
+        DROP TABLE IF EXISTS credit_data_order_v2;
+        CREATE TABLE credit_data_order_v2 (
+            id uuid PRIMARY KEY,
+            created_at timestamp with time zone DEFAULT now(),
+            updated_at timestamp with time zone DEFAULT now(),
+            order_id uuid NOT NULL,
+            account_review boolean NOT NULL DEFAULT false,
+            full_report eql_v2_encrypted,
+            raw_report eql_v2_encrypted,
+            organization_id uuid NOT NULL
+        );
+
+        SELECT eql_v2.add_search_config(
+            'credit_data_order_v2',
+            'full_report',
+            'ste_vec',
+            'jsonb',
+            '{"prefix": "credit_data_order_v2/full_report"}'
+        );
+
+        SELECT eql_v2.add_search_config(
+            'credit_data_order_v2',
+            'raw_report',
+            'ste_vec',
+            'jsonb',
+            '{"prefix": "credit_data_order_v2/raw_report"}'
+        );
+    "#;
+
+    /// Set up the memory leak test schema directly on the database
+    async fn setup_memory_leak_schema() {
+        use crate::common::{connect_with_tls, PG_PORT};
+
+        let port = std::env::var("CS_DATABASE__PORT")
+            .map(|s| s.parse().unwrap())
+            .unwrap_or(PG_PORT);
+
+        let client = connect_with_tls(port).await;
+        client.simple_query(MEMORY_LEAK_SCHEMA).await.unwrap();
+    }
+
+    /// Clean up the memory leak test table
+    async fn cleanup_memory_leak_table() {
+        let client = connect_with_tls(PROXY).await;
+        client
+            .simple_query("TRUNCATE credit_data_order_v2")
+            .await
+            .unwrap();
+    }
+
     // Tests will be added in subsequent tasks
 }
