@@ -209,6 +209,15 @@ where
             .map(|mut guarded| guarded.insert(name, Arc::new(statement)));
     }
 
+    pub fn close_statement(&mut self, name: &Name) {
+        debug!(target: CONTEXT, client_id = self.client_id, statement = ?name);
+
+        let _ = self
+            .statements
+            .write()
+            .map(|mut guarded| guarded.remove(name));
+    }
+
     pub fn add_portal(&mut self, name: Name, portal: Portal) {
         debug!(target: CONTEXT, client_id = self.client_id, name = ?name, portal = ?portal);
         let _ = self.portals.write().map(|mut portals| {
