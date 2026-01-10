@@ -415,4 +415,143 @@ mod tests {
         assert_eq!(db_count as usize, final_count);
         assert_eq!(final_count, TOTAL_INSERTS);
     }
+
+    /// Large-scale stress test for manual memory observation
+    ///
+    /// Run with: cargo test --package cipherstash-proxy-integration memory_leak_stress -- --ignored --nocapture
+    ///
+    /// While this runs, monitor proxy memory with:
+    ///   docker stats proxy
+    /// or
+    ///   watch -n 1 'ps -o rss,vsz,pid,command -p $(pgrep cipherstash-proxy)'
+    ///
+    /// Expected behavior BEFORE fix:
+    /// - Memory grows continuously
+    /// - Does not drop after completion
+    ///
+    /// Expected behavior AFTER fix:
+    /// - Memory stabilizes
+    /// - May drop after completion as connections close
+    #[tokio::test]
+    #[serial]
+    #[ignore = "Long-running stress test - run manually for memory observation"]
+    async fn memory_leak_stress_10k_inserts() {
+        trace();
+        setup_memory_leak_schema().await;
+        cleanup_memory_leak_table().await;
+
+        const WORKER_COUNT: usize = 10;
+        const INSERTS_PER_WORKER: usize = 1000;
+        const TOTAL_INSERTS: usize = WORKER_COUNT * INSERTS_PER_WORKER;
+
+        tracing::info!("Starting stress test: {} workers x {} inserts = {} total",
+            WORKER_COUNT, INSERTS_PER_WORKER, TOTAL_INSERTS);
+        tracing::info!("Monitor memory with: docker stats proxy");
+
+        let completed = Arc::new(AtomicUsize::new(0));
+        let errors = Arc::new(AtomicUsize::new(0));
+        let org_id = Uuid::parse_str("539008ae-e1ff-42ed-8a58-e3588befea9d").unwrap();
+
+        let start = std::time::Instant::now();
+        let mut handles = Vec::with_capacity(WORKER_COUNT);
+
+        for worker_id in 0..WORKER_COUNT {
+            let completed = Arc::clone(&completed);
+            let errors = Arc::clone(&errors);
+
+            let handle = tokio::spawn(async move {
+                let client = connect_with_tls(PROXY).await;
+
+                for i in 0..INSERTS_PER_WORKER {
+                    let id = Uuid::new_v4();
+                    let order_id = Uuid::new_v4();
+                    let json_payload = test_json_payload();
+                    let now = Utc::now();
+
+                    let sql = r#"
+                        INSERT INTO credit_data_order_v2
+                        (id, organization_id, order_id, account_review, full_report, raw_report, created_at, updated_at)
+                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                    "#;
+
+                    match client
+                        .query(
+                            sql,
+                            &[
+                                &id,
+                                &org_id,
+                                &order_id,
+                                &false,
+                                &json_payload,
+                                &json_payload,
+                                &now,
+                                &now,
+                            ],
+                        )
+                        .await
+                    {
+                        Ok(_) => {
+                            let count = completed.fetch_add(1, Ordering::SeqCst) + 1;
+                            if count % 500 == 0 {
+                                tracing::info!(
+                                    "Progress: {}/{} ({:.1}%)",
+                                    count,
+                                    TOTAL_INSERTS,
+                                    (count as f64 / TOTAL_INSERTS as f64) * 100.0
+                                );
+                            }
+                        }
+                        Err(e) => {
+                            errors.fetch_add(1, Ordering::SeqCst);
+                            if errors.load(Ordering::SeqCst) <= 10 {
+                                tracing::error!(
+                                    "Worker {} insert {} failed: {}",
+                                    worker_id,
+                                    i,
+                                    e
+                                );
+                            }
+                        }
+                    }
+                }
+            });
+
+            handles.push(handle);
+        }
+
+        for handle in handles {
+            handle.await.expect("Worker should not panic");
+        }
+
+        let elapsed = start.elapsed();
+        let final_count = completed.load(Ordering::SeqCst);
+        let error_count = errors.load(Ordering::SeqCst);
+
+        tracing::info!("Stress test complete:");
+        tracing::info!("  - Completed: {} inserts", final_count);
+        tracing::info!("  - Errors: {}", error_count);
+        tracing::info!("  - Duration: {:.2}s", elapsed.as_secs_f64());
+        tracing::info!("  - Rate: {:.0} inserts/sec", final_count as f64 / elapsed.as_secs_f64());
+        tracing::info!("");
+        tracing::info!("Check proxy memory now - it should not have grown significantly");
+        tracing::info!("Wait 10s and check again - memory should drop as connections close");
+
+        // Sleep to allow memory observation
+        tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+
+        // Verify
+        let client = connect_with_tls(PROXY).await;
+        let rows = client
+            .query("SELECT COUNT(*) FROM credit_data_order_v2", &[])
+            .await
+            .unwrap();
+        let db_count: i64 = rows[0].get(0);
+
+        assert!(
+            (db_count as usize) >= final_count - error_count,
+            "Database should have at least {} rows, found {}",
+            final_count - error_count,
+            db_count
+        );
+    }
 }
