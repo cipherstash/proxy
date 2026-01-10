@@ -65,7 +65,7 @@ mise has tasks for:
 - Running unit tests (`test:unit`)
 - Running integration tests (`test:integration`, `test:integration:*`)
 - Building binaries (`build:binary`) and Docker images (`build:docker`)
-- Publishing release artifacts (`release`)
+- Creating GitHub releases (`release`) — see [Releasing](#releasing)
 
 These are the important files in the repo:
 
@@ -740,4 +740,49 @@ Struct definitions make error message strings slightly clearer.
 `UnsupportedParameterType { name: String, oid: u32 }` over `UnsupportedParameterType(String, u32)`
 
 Note: not all errors do this at the moment, and we will change over time.
+
+## Releasing
+
+Releases are published via GitHub Actions when a GitHub release is created.
+
+### Using mise (recommended)
+
+```bash
+mise run release v2.1.9
+```
+
+This will:
+1. Create a git tag for the version
+2. Push the tag to origin
+3. Create a GitHub release with auto-generated notes
+4. Trigger the release workflow which builds and publishes Docker images
+
+### Manual release
+
+If you need more control over the release process:
+
+```bash
+# Create and push the tag
+git tag v2.1.9
+git push origin v2.1.9
+
+# Create the GitHub release
+gh release create v2.1.9 --generate-notes
+```
+
+### Re-releasing a version
+
+If a release fails and you need to re-release the same version:
+
+```bash
+# Delete the GitHub release
+gh release delete v2.1.9 --yes
+
+# Delete the tag (local and remote)
+git tag -d v2.1.9
+git push origin :refs/tags/v2.1.9
+
+# Create the release again
+mise run release v2.1.9
+```
 
