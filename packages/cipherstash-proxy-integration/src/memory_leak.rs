@@ -196,4 +196,118 @@ mod tests {
         let count: i64 = rows[0].get(0);
         assert_eq!(count, 1, "Should have exactly one row");
     }
+
+    /// Bulk insert test replicating customer's memory leak scenario
+    ///
+    /// Customer observed:
+    /// - 10,000 inserts: 2.554GB memory
+    /// - 1,000 more: +233MB → 2.787GB
+    /// - Memory never drops
+    ///
+    /// This test uses:
+    /// - 10 concurrent workers (matching customer's config)
+    /// - 1,000 total inserts (scaled down for test speed)
+    /// - Large JSON payloads (~4KB each)
+    /// - Prepared statements via extended query protocol
+    #[tokio::test]
+    #[serial]
+    async fn memory_leak_bulk_insert_concurrent() {
+        trace();
+        setup_memory_leak_schema().await;
+        cleanup_memory_leak_table().await;
+
+        const WORKER_COUNT: usize = 10;
+        const INSERTS_PER_WORKER: usize = 100;
+        const TOTAL_INSERTS: usize = WORKER_COUNT * INSERTS_PER_WORKER;
+
+        let completed = Arc::new(AtomicUsize::new(0));
+        let org_id = Uuid::parse_str("539008ae-e1ff-42ed-8a58-e3588befea9d").unwrap();
+
+        let mut handles = Vec::with_capacity(WORKER_COUNT);
+
+        for worker_id in 0..WORKER_COUNT {
+            let completed = Arc::clone(&completed);
+
+            let handle = tokio::spawn(async move {
+                // Each worker gets its own connection (mimics connection pool)
+                let client = connect_with_tls(PROXY).await;
+
+                for i in 0..INSERTS_PER_WORKER {
+                    let id = Uuid::new_v4();
+                    let order_id = Uuid::new_v4();
+                    let json_payload = test_json_payload();
+                    let now = Utc::now();
+
+                    // Use prepared statement (extended query protocol)
+                    // This is what triggers statement accumulation in Context.statements
+                    let sql = r#"
+                        INSERT INTO credit_data_order_v2
+                        (id, organization_id, order_id, account_review, full_report, raw_report, created_at, updated_at)
+                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                    "#;
+
+                    match client
+                        .query(
+                            sql,
+                            &[
+                                &id,
+                                &org_id,
+                                &order_id,
+                                &false,
+                                &json_payload,
+                                &json_payload,
+                                &now,
+                                &now,
+                            ],
+                        )
+                        .await
+                    {
+                        Ok(_) => {
+                            let count = completed.fetch_add(1, Ordering::SeqCst) + 1;
+                            if count % 100 == 0 {
+                                tracing::info!(
+                                    "Progress: {}/{} inserts completed",
+                                    count,
+                                    TOTAL_INSERTS
+                                );
+                            }
+                        }
+                        Err(e) => {
+                            tracing::error!(
+                                "Worker {} insert {} failed: {}",
+                                worker_id,
+                                i,
+                                e
+                            );
+                        }
+                    }
+                }
+            });
+
+            handles.push(handle);
+        }
+
+        // Wait for all workers to complete
+        for handle in handles {
+            handle.await.expect("Worker task should not panic");
+        }
+
+        let final_count = completed.load(Ordering::SeqCst);
+        tracing::info!("Completed {} inserts", final_count);
+
+        // Verify all rows were inserted
+        let client = connect_with_tls(PROXY).await;
+        let count_sql = "SELECT COUNT(*) FROM credit_data_order_v2";
+        let rows = client.query(count_sql, &[]).await.unwrap();
+        let db_count: i64 = rows[0].get(0);
+
+        assert_eq!(
+            db_count as usize, final_count,
+            "Database count should match completed inserts"
+        );
+        assert_eq!(
+            final_count, TOTAL_INSERTS,
+            "All inserts should complete successfully"
+        );
+    }
 }
