@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1768036803393,
+  "lastUpdate": 1768037950466,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -17009,6 +17009,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 22.87373,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "toby@cipherstash.com",
+            "name": "Toby Hede",
+            "username": "tobyhede"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "467859dccd5227e52b8b3793cf639dc07715f2a6",
+          "message": "Merge pull request #348 from cipherstash/fix/release-arm-build\n\n2. PR_BYPASS: Fixing the release ci action for customer patch release. Low risk. High priority.",
+          "timestamp": "2026-01-10T20:36:03+11:00",
+          "tree_id": "dee167780be4aa395a1fca0fe0e902bd2f465b41",
+          "url": "https://github.com/cipherstash/proxy/commit/467859dccd5227e52b8b3793cf639dc07715f2a6"
+        },
+        "date": 1768037949266,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 22.215375,
             "unit": "Number"
           }
         ]
