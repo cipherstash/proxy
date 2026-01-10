@@ -683,28 +683,6 @@ docker tag cipherstash/proxy:latest cipherstash/proxy:latest
 docker push cipherstash/proxy:latest
 """
 
-[tasks."release:aws-marketplace"]
-description = "Release a Docker image to AWS Marketplace for cipherstash-proxy"
-run = """
-if [ -z "$AWS_MARKETPLACE_ECR_REPOSITORY" ]; then
-  echo "error: no AWS ECR repository provided"
-  echo "error: please set AWS_MARKETPLACE_ECR_REPOSITORY"
-  exit 2
-fi
-
-# If release tag is empty, generate a build timestamp
-# Release tag is set when tagging as an actual version github release.
-if [ -z "$RELEASE_TAG" ]; then
-  RELEASE_TAG=build-$(date +%s)
-fi
-
-echo $AWS_MARKETPLACE_ECR_REPOSITORY:proxy-$BUILD_TAG-$RELEASE_TAG
-
-docker tag cipherstash/proxy:latest $AWS_MARKETPLACE_ECR_REPOSITORY:proxy-$BUILD_TAG-$RELEASE_TAG
-
-docker push $AWS_MARKETPLACE_ECR_REPOSITORY:proxy-$BUILD_TAG-$RELEASE_TAG
-"""
-
 # ====================================================================================================
 
 
