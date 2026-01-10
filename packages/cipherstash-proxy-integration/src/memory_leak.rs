@@ -101,6 +101,10 @@ mod tests {
     /// Note: Removed DEFAULT gen_random_uuid() to avoid pgcrypto dependency
     /// (tests provide explicit UUIDs anyway)
     const MEMORY_LEAK_SCHEMA: &str = r#"
+        -- Clear any existing EQL search configs for this table
+        DELETE FROM public.eql_v2_configuration
+        WHERE (data -> 'tables') ?| array['credit_data_order_v2'];
+
         DROP TABLE IF EXISTS credit_data_order_v2;
         CREATE TABLE credit_data_order_v2 (
             id uuid PRIMARY KEY,
@@ -130,15 +134,10 @@ mod tests {
         );
     "#;
 
-    /// Set up the memory leak test schema directly on the database
+    /// Set up the memory leak test schema through the proxy
+    /// Running through proxy ensures schema cache is updated
     async fn setup_memory_leak_schema() {
-        use crate::common::{connect_with_tls, PG_PORT};
-
-        let port = std::env::var("CS_DATABASE__PORT")
-            .map(|s| s.parse().unwrap())
-            .unwrap_or(PG_PORT);
-
-        let client = connect_with_tls(port).await;
+        let client = connect_with_tls(PROXY).await;
         client.simple_query(MEMORY_LEAK_SCHEMA).await.unwrap();
     }
 
