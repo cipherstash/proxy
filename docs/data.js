@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1768032847183,
+  "lastUpdate": 1768033866958,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -16930,6 +16930,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 22.959044,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "toby@cipherstash.com",
+            "name": "Toby Hede",
+            "username": "tobyhede"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "36831468bbe86f4a78a1c4a53d07cfc0e7c032e0",
+          "message": "Merge pull request #347 from cipherstash/cipherstash-client-0.31.1\n\nCipherstash client 0.31.1",
+          "timestamp": "2026-01-10T19:28:35+11:00",
+          "tree_id": "a70e7283ef4f65e43f7c5be97c24561c16a96fdf",
+          "url": "https://github.com/cipherstash/proxy/commit/36831468bbe86f4a78a1c4a53d07cfc0e7c032e0"
+        },
+        "date": 1768033865749,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 22.668718,
             "unit": "Number"
           }
         ]
