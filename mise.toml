@@ -666,8 +666,21 @@ mise --env tls run proxy:down
 """
 
 [tasks.release]
-description = "Publish release artifacts"
-depends = ["release:docker"]
+description = "Create a GitHub release"
+run = """
+#!/usr/bin/env bash
+set -euo pipefail
+
+VERSION="${1:?Version required, e.g., mise run release v2.1.9}"
+
+echo "Creating release $VERSION..."
+
+git tag "$VERSION"
+git push origin "$VERSION"
+gh release create "$VERSION" --generate-notes
+
+echo "Done! Release workflow will run automatically."
+"""
 
 [tasks."release:docker"]
 description = "Release a Docker image for cipherstash-proxy"
