@@ -15,6 +15,7 @@ mod map_params;
 mod map_unique_index;
 mod migrate;
 mod multitenant;
+mod memory_leak;
 mod passthrough;
 mod pipeline;
 mod schema_change;

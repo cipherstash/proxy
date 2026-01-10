@@ -1,0 +1,100 @@
+//! Memory leak reproduction tests
+//!
+//! These tests replicate customer scenarios that exhibited memory leaks.
+//! The primary scenario involves bulk INSERT operations through prepared statements.
+
+#[cfg(test)]
+mod tests {
+    use crate::common::{connect_with_tls, trace, PROXY};
+    use serde_json::Value;
+    use serial_test::serial;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+    use uuid::Uuid;
+
+    /// Test JSON payload matching customer's credit report structure (~4KB)
+    fn test_json_payload() -> Value {
+        serde_json::json!({
+            "reportId": "RPT-2024-001234567890",
+            "generatedAt": "2024-01-15T14:30:00Z",
+            "consumer": {
+                "firstName": "John",
+                "lastName": "Doe",
+                "dateOfBirth": "1985-06-15",
+                "ssn": "XXX-XX-1234",
+                "addresses": [
+                    {
+                        "type": "current",
+                        "street": "123 Main Street",
+                        "city": "Springfield",
+                        "state": "IL",
+                        "zipCode": "62701",
+                        "since": "2020-03-01"
+                    },
+                    {
+                        "type": "previous",
+                        "street": "456 Oak Avenue",
+                        "city": "Chicago",
+                        "state": "IL",
+                        "zipCode": "60601",
+                        "since": "2015-08-15"
+                    }
+                ],
+                "employment": {
+                    "employer": "Acme Corporation",
+                    "position": "Software Engineer",
+                    "income": 95000,
+                    "since": "2019-01-15"
+                }
+            },
+            "creditScore": {
+                "value": 742,
+                "model": "FICO8",
+                "range": { "min": 300, "max": 850 },
+                "factors": [
+                    { "code": "01", "description": "Length of time accounts have been established" },
+                    { "code": "14", "description": "Number of accounts with delinquency" },
+                    { "code": "07", "description": "Too many inquiries last 12 months" }
+                ]
+            },
+            "accounts": [
+                {
+                    "accountNumber": "XXXX-XXXX-XXXX-4567",
+                    "creditor": "First National Bank",
+                    "type": "creditCard",
+                    "status": "open",
+                    "openDate": "2018-05-20",
+                    "creditLimit": 15000,
+                    "balance": 3250,
+                    "monthlyPayment": 150,
+                    "paymentHistory": ["OK", "OK", "OK", "OK", "OK", "OK", "OK", "OK", "OK", "OK", "OK", "OK"]
+                },
+                {
+                    "accountNumber": "LOAN-789012",
+                    "creditor": "Auto Finance LLC",
+                    "type": "autoLoan",
+                    "status": "open",
+                    "openDate": "2022-02-10",
+                    "originalAmount": 28000,
+                    "balance": 18500,
+                    "monthlyPayment": 485,
+                    "paymentHistory": ["OK", "OK", "OK", "OK", "OK", "OK", "OK", "OK", "OK", "OK", "OK", "OK"]
+                }
+            ],
+            "inquiries": [
+                { "date": "2024-01-10", "creditor": "Capital One", "type": "hard" },
+                { "date": "2023-11-05", "creditor": "Chase Bank", "type": "hard" }
+            ],
+            "publicRecords": [],
+            "collections": [],
+            "metadata": {
+                "version": "2.1.0",
+                "provider": "TestProvider",
+                "requestId": "REQ-2024-ABCDEF123456",
+                "processingTimeMs": 245
+            }
+        })
+    }
+
+    // Tests will be added in subsequent tasks
+}
