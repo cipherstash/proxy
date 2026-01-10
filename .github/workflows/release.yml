@@ -24,7 +24,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Decrypt secrets
-        uses: cipherstash/protectgh@main
+        uses: cipherstash/secrets-action@main
         with:
           secrets-file: .github/secrets.env.encrypted
         env:
@@ -106,7 +106,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Decrypt secrets
-        uses: cipherstash/protectgh@main
+        uses: cipherstash/secrets-action@main
         with:
           secrets-file: .github/secrets.env.encrypted
         env:

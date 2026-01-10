@@ -26,7 +26,7 @@ jobs:
       - uses: ./.github/actions/setup-test
 
       - name: Decrypt secrets
-        uses: cipherstash/protectgh@main
+        uses: cipherstash/secrets-action@main
         with:
           secrets-file: .github/secrets.env.encrypted
         env:
