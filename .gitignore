@@ -24,3 +24,4 @@ tests/benchmark/benchmark-*.png
 
 ## Local helm chart testing
 testing-chart.yaml
+.work
