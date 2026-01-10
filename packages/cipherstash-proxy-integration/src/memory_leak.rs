@@ -6,6 +6,7 @@
 #[cfg(test)]
 mod tests {
     use crate::common::{connect_with_tls, trace, PROXY};
+    use chrono::Utc;
     use serde_json::Value;
     use serial_test::serial;
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -150,5 +151,49 @@ mod tests {
             .unwrap();
     }
 
-    // Tests will be added in subsequent tasks
+    /// Baseline test: single insert to verify schema and encryption work
+    #[tokio::test]
+    #[serial]
+    async fn memory_leak_baseline_single_insert() {
+        trace();
+        setup_memory_leak_schema().await;
+        cleanup_memory_leak_table().await;
+
+        let client = connect_with_tls(PROXY).await;
+
+        let id = Uuid::new_v4();
+        let org_id = Uuid::parse_str("539008ae-e1ff-42ed-8a58-e3588befea9d").unwrap();
+        let order_id = Uuid::new_v4();
+        let json_payload = test_json_payload();
+        let now = chrono::Utc::now();
+
+        let sql = r#"
+            INSERT INTO credit_data_order_v2
+            (id, organization_id, order_id, account_review, full_report, raw_report, created_at, updated_at)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        "#;
+
+        client
+            .query(
+                sql,
+                &[
+                    &id,
+                    &org_id,
+                    &order_id,
+                    &false,
+                    &json_payload,
+                    &json_payload,
+                    &now,
+                    &now,
+                ],
+            )
+            .await
+            .expect("Insert should succeed");
+
+        // Verify row was inserted
+        let count_sql = "SELECT COUNT(*) FROM credit_data_order_v2";
+        let rows = client.query(count_sql, &[]).await.unwrap();
+        let count: i64 = rows[0].get(0);
+        assert_eq!(count, 1, "Should have exactly one row");
+    }
 }
