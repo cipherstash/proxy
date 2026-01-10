@@ -273,12 +273,7 @@ mod tests {
                             }
                         }
                         Err(e) => {
-                            tracing::error!(
-                                "Worker {} insert {} failed: {}",
-                                worker_id,
-                                i,
-                                e
-                            );
+                            tracing::error!("Worker {} insert {} failed: {}", worker_id, i, e);
                         }
                     }
                 }
@@ -309,5 +304,115 @@ mod tests {
             final_count, TOTAL_INSERTS,
             "All inserts should complete successfully"
         );
+    }
+
+    /// Bulk insert with explicit transactions (exact customer pattern)
+    ///
+    /// Customer's code does:
+    /// 1. Get client from pool
+    /// 2. BEGIN
+    /// 3. INSERT
+    /// 4. COMMIT
+    /// 5. Release client
+    ///
+    /// This may create more prepared statements than the non-transaction version.
+    #[tokio::test]
+    #[serial]
+    async fn memory_leak_bulk_insert_with_transactions() {
+        trace();
+        setup_memory_leak_schema().await;
+        cleanup_memory_leak_table().await;
+
+        const WORKER_COUNT: usize = 10;
+        const INSERTS_PER_WORKER: usize = 100;
+        const TOTAL_INSERTS: usize = WORKER_COUNT * INSERTS_PER_WORKER;
+
+        let completed = Arc::new(AtomicUsize::new(0));
+        let org_id = Uuid::parse_str("539008ae-e1ff-42ed-8a58-e3588befea9d").unwrap();
+
+        let mut handles = Vec::with_capacity(WORKER_COUNT);
+
+        for worker_id in 0..WORKER_COUNT {
+            let completed = Arc::clone(&completed);
+
+            let handle = tokio::spawn(async move {
+                for i in 0..INSERTS_PER_WORKER {
+                    // Get a fresh connection for each insert (mimics pool.connect/release)
+                    let client = connect_with_tls(PROXY).await;
+
+                    let id = Uuid::new_v4();
+                    let order_id = Uuid::new_v4();
+                    let json_payload = test_json_payload();
+                    let now = Utc::now();
+
+                    // BEGIN transaction
+                    client.simple_query("BEGIN").await.unwrap();
+
+                    let sql = r#"
+                        INSERT INTO credit_data_order_v2
+                        (id, organization_id, order_id, account_review, full_report, raw_report, created_at, updated_at)
+                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                    "#;
+
+                    match client
+                        .query(
+                            sql,
+                            &[
+                                &id,
+                                &org_id,
+                                &order_id,
+                                &false,
+                                &json_payload,
+                                &json_payload,
+                                &now,
+                                &now,
+                            ],
+                        )
+                        .await
+                    {
+                        Ok(_) => {
+                            // COMMIT transaction
+                            client.simple_query("COMMIT").await.unwrap();
+
+                            let count = completed.fetch_add(1, Ordering::SeqCst) + 1;
+                            if count % 100 == 0 {
+                                tracing::info!(
+                                    "Progress: {}/{} inserts completed",
+                                    count,
+                                    TOTAL_INSERTS
+                                );
+                            }
+                        }
+                        Err(e) => {
+                            // ROLLBACK on error
+                            let _ = client.simple_query("ROLLBACK").await;
+                            tracing::error!("Worker {} insert {} failed: {}", worker_id, i, e);
+                        }
+                    }
+                    // Connection drops here (mimics client.release())
+                }
+            });
+
+            handles.push(handle);
+        }
+
+        // Wait for all workers
+        for handle in handles {
+            handle.await.expect("Worker task should not panic");
+        }
+
+        let final_count = completed.load(Ordering::SeqCst);
+        tracing::info!("Completed {} inserts with transactions", final_count);
+
+        // Verify
+        let client = connect_with_tls(PROXY).await;
+        let rows = client
+            .query("SELECT COUNT(*) FROM credit_data_order_v2", &[])
+            .await
+            .unwrap();
+        let db_count: i64 = rows[0].get(0);
+
+        assert_eq!(db_count as usize, final_count);
+        assert_eq!(final_count, TOTAL_INSERTS);
     }
 }
