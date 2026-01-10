@@ -139,6 +139,42 @@ mod tests {
     async fn setup_memory_leak_schema() {
         let client = connect_with_tls(PROXY).await;
         client.simple_query(MEMORY_LEAK_SCHEMA).await.unwrap();
+
+        // Warm-up: do a test insert to ensure encryption config is fully loaded
+        // This forces the proxy to complete schema reload before tests start
+        let warmup_id = Uuid::new_v4();
+        let warmup_org = Uuid::new_v4();
+        let warmup_order = Uuid::new_v4();
+        let warmup_json = serde_json::json!({"warmup": true});
+        let warmup_now = Utc::now();
+
+        client
+            .execute(
+                r#"INSERT INTO credit_data_order_v2
+                   (id, organization_id, order_id, account_review, full_report, raw_report, created_at, updated_at)
+                   VALUES ($1, $2, $3, $4, $5, $6, $7, $8)"#,
+                &[
+                    &warmup_id,
+                    &warmup_org,
+                    &warmup_order,
+                    &false,
+                    &warmup_json,
+                    &warmup_json,
+                    &warmup_now,
+                    &warmup_now,
+                ],
+            )
+            .await
+            .expect("Warm-up insert should succeed - encryption config loaded");
+
+        // Clean up warmup row
+        client
+            .execute(
+                "DELETE FROM credit_data_order_v2 WHERE id = $1",
+                &[&warmup_id],
+            )
+            .await
+            .unwrap();
     }
 
     /// Clean up the memory leak test table
