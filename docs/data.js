@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1768037950466,
+  "lastUpdate": 1768039076897,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -17038,6 +17038,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 22.215375,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "3db27959216988ade19511943d86cbdbe939eca0",
+          "message": "feat: add mise release task for GitHub releases",
+          "timestamp": "2026-01-10T09:36:08Z",
+          "url": "https://github.com/cipherstash/proxy/pull/349/commits/3db27959216988ade19511943d86cbdbe939eca0"
+        },
+        "date": 1768039075674,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 23.103619,
             "unit": "Number"
           }
         ]
