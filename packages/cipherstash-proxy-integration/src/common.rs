@@ -370,6 +370,82 @@ pub async fn assert_encrypted_jsonb(id: i64, plaintext: &Value) {
     }
 }
 
+/// Insert a JSON value into the encrypted_jsonb_filtered column (with downcase term filter).
+pub async fn insert_jsonb_filtered() -> (i64, Value) {
+    let id = random_id();
+
+    let encrypted_jsonb = serde_json::json!({
+        "id": id,
+        "name": "John",
+        "city": "Melbourne",
+        "nested": {
+            "title": "Engineer",
+            "department": "Technology",
+        },
+        "tags": ["Hello", "World"],
+    });
+
+    let sql = "INSERT INTO encrypted (id, encrypted_jsonb_filtered) VALUES ($1, $2)".to_string();
+
+    insert(&sql, &[&id, &encrypted_jsonb]).await;
+
+    // Verify encryption actually occurred
+    assert_encrypted_jsonb_filtered(id, &encrypted_jsonb).await;
+
+    (id, encrypted_jsonb)
+}
+
+/// Insert multiple JSON values for term filter search testing.
+/// Creates rows with mixed case strings that should match when queried with lowercase.
+pub async fn insert_jsonb_filtered_for_search() -> Vec<(i64, Value)> {
+    let test_data = vec![
+        serde_json::json!({"name": "Alice", "number": 1}),
+        serde_json::json!({"name": "BOB", "number": 2}),
+        serde_json::json!({"name": "Charlie", "number": 3}),
+        serde_json::json!({"name": "DIANA", "number": 4}),
+        serde_json::json!({"name": "Eve", "number": 5}),
+    ];
+
+    let mut results = Vec::new();
+
+    for encrypted_jsonb in test_data {
+        let id = random_id();
+
+        let sql = "INSERT INTO encrypted (id, encrypted_jsonb_filtered) VALUES ($1, $2)";
+        insert(sql, &[&id, &encrypted_jsonb]).await;
+
+        // Verify encryption actually occurred
+        assert_encrypted_jsonb_filtered(id, &encrypted_jsonb).await;
+
+        results.push((id, encrypted_jsonb));
+    }
+
+    results
+}
+
+/// Verifies that a JSON value in encrypted_jsonb_filtered was actually encrypted.
+pub async fn assert_encrypted_jsonb_filtered(id: i64, plaintext: &Value) {
+    let sql = "SELECT encrypted_jsonb_filtered::text FROM encrypted WHERE id = $1";
+    let stored: Vec<String> = query_direct_by(sql, &id).await;
+
+    assert_eq!(stored.len(), 1, "Expected exactly one row");
+    let stored_text = &stored[0];
+
+    let plaintext_str = plaintext.to_string();
+    assert_ne!(
+        stored_text, &plaintext_str,
+        "ENCRYPTION FAILED for encrypted_jsonb_filtered: Stored value matches plaintext! Data was not encrypted."
+    );
+
+    // Additional verification: the encrypted format should be different structure
+    if let Ok(stored_json) = serde_json::from_str::<Value>(stored_text) {
+        assert_ne!(
+            stored_json, *plaintext,
+            "ENCRYPTION FAILED for encrypted_jsonb_filtered: Stored JSON structure matches plaintext!"
+        );
+    }
+}
+
 /// Verifies that a numeric value was actually encrypted in the database.
 /// Queries directly (bypassing proxy) and asserts stored value differs from plaintext.
 pub async fn assert_encrypted_numeric<T>(id: i64, column: &str, plaintext: T)
