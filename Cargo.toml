@@ -43,8 +43,8 @@ debug = true
 
 [workspace.dependencies]
 sqltk = { version = "0.10.0" }
-cipherstash-client = { version = "0.31.1" }
-cts-common = { version = "0.4.0" }
+cipherstash-client = { path = "../cipherstash-suite/packages/cipherstash-client" }
+cts-common = { path = "../cipherstash-suite/packages/cts-common" }
 
 thiserror = "2.0.9"
 tokio = { version = "1.44.2", features = ["full"] }
