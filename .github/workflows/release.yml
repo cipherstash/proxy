@@ -19,6 +19,10 @@ jobs:
         build:
           - { os: blacksmith-16vcpu-ubuntu-2204, docker_platform: linux/amd64, rust_target: "x86_64-unknown-linux-gnu",  cache-provider: buildjet }
           - { os: linux-arm64-public,          docker_platform: linux/arm64, rust_target: "aarch64-unknown-linux-gnu", cache-provider: github }
+    env:
+      CS_ZEROKMS_HOST: https://us-east-1.aws.zerokms.cipherstashmanaged.net
+      CS_CTS_HOST: https://ap-southeast-2.aws.cts.cipherstashmanaged.net
+
     runs-on: ${{matrix.build.os}}
     steps:
       - uses: actions/checkout@v4
@@ -114,6 +118,8 @@ jobs:
           CS_CLIENT_KEY: ${{ secrets.CS_VAULT_CLIENT_KEY }}
           CS_CLIENT_ACCESS_KEY: ${{ secrets.CS_VAULT_CLIENT_ACCESS_KEY }}
           CS_WORKSPACE_CRN: ${{ secrets.CS_VAULT_WORKSPACE_CRN }}
+          CS_ZEROKMS_HOST: https://us-east-1.aws.zerokms.cipherstashmanaged.net
+          CS_CTS_HOST: https://us-east-1.aws.cts.cipherstashmanaged.net
 
       - name: Download digests
         uses: actions/download-artifact@v4
