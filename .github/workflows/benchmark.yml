@@ -21,6 +21,10 @@ jobs:
   benchmark:
     name: Performance regression check
     runs-on: blacksmith-16vcpu-ubuntu-2204
+    env:
+      CS_ZEROKMS_HOST: https://us-east-1.aws.zerokms.cipherstashmanaged.net
+      CS_CTS_HOST: https://ap-southeast-2.aws.cts.cipherstashmanaged.net
+
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-test

@@ -21,6 +21,9 @@ jobs:
         pg_version: [14, 15, 16, 17] # PG 18 not currently supported
     env:
       PG_VERSION: ${{ matrix.pg_version }}
+      CS_ZEROKMS_HOST: https://us-east-1.aws.zerokms.cipherstashmanaged.net
+      CS_CTS_HOST: https://ap-southeast-2.aws.cts.cipherstashmanaged.net
+
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-test
