@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1768877872197,
+  "lastUpdate": 1768879419798,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -17088,6 +17088,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 22.346397,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "toby@cipherstash.com",
+            "name": "Toby Hede",
+            "username": "tobyhede"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "127f803793b8689bbbb146fa47f9e36b9a8dce32",
+          "message": "Merge pull request #351 from cipherstash/use-ecs-platform\n\nchore: use-ecs-platform",
+          "timestamp": "2026-01-20T14:20:44+11:00",
+          "tree_id": "ad5544c9b66ab5eea41fb6b0827c8ae07692b199",
+          "url": "https://github.com/cipherstash/proxy/commit/127f803793b8689bbbb146fa47f9e36b9a8dce32"
+        },
+        "date": 1768879418471,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 21.840337,
             "unit": "Number"
           }
         ]
