@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1768971950487,
+  "lastUpdate": 1768972128451,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "k6 Latency": [
@@ -39,6 +39,46 @@ window.BENCHMARK_DATA = {
           {
             "name": "jsonb-ste-vec-insert_p99",
             "value": 140.72,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "72128361181f911a8f1e27b3108a32277be1dc69",
+          "message": "feat(benchmark): add k6 benchmarks for JSONB/encrypted query performance",
+          "timestamp": "2026-01-20T03:20:49Z",
+          "url": "https://github.com/cipherstash/proxy/pull/352/commits/72128361181f911a8f1e27b3108a32277be1dc69"
+        },
+        "date": 1768972127779,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "jsonb-large-payload_p95",
+            "value": 135.45,
+            "unit": "ms"
+          },
+          {
+            "name": "jsonb-large-payload_p99",
+            "value": 158.39,
+            "unit": "ms"
+          },
+          {
+            "name": "jsonb-ste-vec-insert_p95",
+            "value": 129.18,
+            "unit": "ms"
+          },
+          {
+            "name": "jsonb-ste-vec-insert_p99",
+            "value": 139.85,
             "unit": "ms"
           }
         ]
