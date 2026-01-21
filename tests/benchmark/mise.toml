@@ -201,17 +201,17 @@ mise run k6:build
 # Ensure benchmark schema exists (creates benchmark_encrypted table for text-equality)
 mise run benchmark:setup
 
-# JSONB INSERT (primary)
-echo "Running jsonb-insert..."
-mise run k6_run --script=jsonb-insert --target=proxy --duration=30s
+# JSONB STE-VEC INSERT (primary)
+echo "Running jsonb-ste-vec-insert..."
+mise run k6_run --script=jsonb-ste-vec-insert --target=proxy --duration=30s
 
 # Text equality (baseline)
 echo "Running text-equality..."
 mise run k6_run --script=text-equality --target=proxy --duration=30s
 
-# JSONB containment
-echo "Running jsonb-containment..."
-mise run k6_run --script=jsonb-containment --target=proxy --duration=30s
+# JSONB large payload
+echo "Running jsonb-large-payload..."
+mise run k6_run --script=jsonb-large-payload --target=proxy --duration=30s
 
 echo
 echo "Results written to results/k6/"
