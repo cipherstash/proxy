@@ -1,18 +1,21 @@
 // Connection configuration for k6 benchmarks
 // Ports: postgres=5532, proxy=6432
 //
-// xk6-pgxpool API:
-//   import pgxpool from 'k6/x/pgxpool'
-//   const pool = pgxpool.open(connString, minConns, maxConns)
-//   pgxpool.query(pool, sql, ...args)
-//   pgxpool.exec(pool, sql, ...args)
+// xk6-sql API:
+//   import sql from 'k6/x/sql';
+//   import driver from 'k6/x/sql/driver/postgres';
+//   const db = sql.open(driver, connString);
+//   db.exec(sql, ...args);
+//   const rows = db.query(sql, ...args);
+//   db.close();
 
 export const POSTGRES_PORT = 5532;
 export const PROXY_PORT = 6432;
 
 export function getConnectionString(target) {
-  // Default to 127.0.0.1 (works on Linux CI and macOS with --network=host)
-  const host = __ENV.K6_DB_HOST || '127.0.0.1';
+  // Default to host.docker.internal (works on macOS and Windows Docker)
+  // For Linux CI with --network=host, set K6_DB_HOST=127.0.0.1
+  const host = __ENV.K6_DB_HOST || 'host.docker.internal';
   const port = target === 'proxy' ? PROXY_PORT : POSTGRES_PORT;
   const user = __ENV.K6_DB_USER || 'cipherstash';
   const password = __ENV.K6_DB_PASSWORD || 'p@ssword';
@@ -21,13 +24,6 @@ export function getConnectionString(target) {
   const sslmode = __ENV.K6_DB_SSLMODE || 'disable';
 
   return `postgres://${user}:${password}@${host}:${port}/${database}?sslmode=${sslmode}`;
-}
-
-export function getPoolConfig() {
-  return {
-    minConns: parseInt(__ENV.K6_POOL_MIN || '2'),
-    maxConns: parseInt(__ENV.K6_POOL_MAX || '10'),
-  };
 }
 
 export function getDefaultOptions(thresholds = {}) {

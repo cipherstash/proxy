@@ -180,29 +180,10 @@ echo docker compose up --build {{arg(name="service",default="pgcat")}} {{option(
 [tasks."k6:build"]
 description = "Build k6 Docker image with xk6-pgxpool"
 run = """
-docker build -t k6-pgxpool tests/benchmark/k6/
+docker build -t k6-pgxpool {{config_root}}/k6/
 """
 
-[tasks."k6:run"]
-description = "Run a single k6 benchmark script"
-run = """
-#USAGE flag "--script <script>" help="Script name (without .js)" {
-#USAGE   choices "jsonb-insert" "jsonb-containment" "text-equality" "large-payload"
-#USAGE }
-#USAGE flag "--target <target>" default="proxy" help="Target service" {
-#USAGE   choices "postgres" "proxy"
-#USAGE }
-#USAGE flag "--vus <vus>" default="10" help="Number of virtual users"
-#USAGE flag "--duration <duration>" default="30s" help="Test duration"
-
-docker run --rm --network=host \
-  -v {{config_root}}/k6/scripts:/scripts \
-  -v {{config_root}}/results/k6:/scripts/results/k6 \
-  -e K6_TARGET=${usage_target} \
-  -e K6_VUS=${usage_vus} \
-  -e K6_DURATION=${usage_duration} \
-  k6-pgxpool run /scripts/${usage_script}.js
-"""
+# k6:run task is defined in tasks/k6_run.sh
 
 [tasks."k6:benchmark"]
 description = "Run full k6 benchmark suite"
@@ -222,15 +203,15 @@ mise run benchmark:setup
 
 # JSONB INSERT (primary)
 echo "Running jsonb-insert..."
-mise run k6:run --script=jsonb-insert --target=proxy --duration=30s
+mise run k6_run --script=jsonb-insert --target=proxy --duration=30s
 
 # Text equality (baseline)
 echo "Running text-equality..."
-mise run k6:run --script=text-equality --target=proxy --duration=30s
+mise run k6_run --script=text-equality --target=proxy --duration=30s
 
 # JSONB containment
 echo "Running jsonb-containment..."
-mise run k6:run --script=jsonb-containment --target=proxy --duration=30s
+mise run k6_run --script=jsonb-containment --target=proxy --duration=30s
 
 echo
 echo "Results written to results/k6/"
@@ -249,7 +230,7 @@ echo '# k6 CI Benchmark: jsonb-insert via proxy'
 echo '###############################################'
 echo
 
-mise run k6:run --script=jsonb-insert --target=proxy --vus=10 --duration=30s
+mise run k6_run --script=jsonb-insert --target=proxy --vus=10 --duration=30s
 
 # Copy output for benchmark-action
 cp results/k6/jsonb-insert-output.json results/k6-output.json

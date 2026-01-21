@@ -1,30 +1,29 @@
 // JSONB INSERT benchmark - primary CI benchmark for encrypted JSONB performance
 //
-// Uses xk6-pgxpool API:
-//   pgxpool.open(connString, minConns, maxConns)
-//   pgxpool.exec(pool, sql, ...args)
+// Uses xk6-sql API:
+//   sql.open(driver, connString)
+//   db.exec(sql, ...args)
 
-import pgxpool from 'k6/x/pgxpool';
-import { getConnectionString, getPoolConfig, getDefaultOptions } from './lib/config.js';
+import sql from 'k6/x/sql';
+import driver from 'k6/x/sql/driver/postgres';
+import { getConnectionString, getDefaultOptions } from './lib/config.js';
 import { randomId, generateStandardJsonb } from './lib/data.js';
 import { createSummaryHandler } from './lib/summary.js';
 
 const target = __ENV.K6_TARGET || 'proxy';
 const connectionString = getConnectionString(target);
-const poolConfig = getPoolConfig();
 
 export const options = getDefaultOptions({
   'iteration_duration': ['p(95)<500'],
 });
 
-const pool = pgxpool.open(connectionString, poolConfig.minConns, poolConfig.maxConns);
+const db = sql.open(driver, connectionString);
 
 export default function() {
   const id = randomId();
   const jsonb = generateStandardJsonb(id);
 
-  pgxpool.exec(
-    pool,
+  db.exec(
     `INSERT INTO encrypted (id, encrypted_jsonb) VALUES ($1, $2)`,
     id,
     JSON.stringify(jsonb)
@@ -32,7 +31,7 @@ export default function() {
 }
 
 export function teardown() {
-  pgxpool.close(pool);
+  db.close();
 }
 
 export const handleSummary = createSummaryHandler('jsonb-insert');
