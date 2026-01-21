@@ -56,7 +56,6 @@ jobs:
         working-directory: tests/benchmark
         env:
           RUST_BACKTRACE: "1"
-          K6_DB_HOST: "127.0.0.1"
         run: mise run k6:benchmark:continuous
 
       # Store k6 benchmark result

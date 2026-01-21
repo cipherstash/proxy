@@ -15,8 +15,10 @@ set -e
 # On macOS, host.docker.internal is used instead
 if [ "$(uname)" = "Linux" ]; then
   NETWORK_FLAG="--network=host"
+  DEFAULT_DB_HOST="127.0.0.1"
 else
   NETWORK_FLAG=""
+  DEFAULT_DB_HOST="host.docker.internal"
 fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -27,5 +29,5 @@ docker run --rm $NETWORK_FLAG \
   -e K6_TARGET=${usage_target} \
   -e K6_VUS=${usage_vus} \
   -e K6_DURATION=${usage_duration} \
-  -e K6_DB_HOST=${K6_DB_HOST:-host.docker.internal} \
+  -e K6_DB_HOST=${K6_DB_HOST:-$DEFAULT_DB_HOST} \
   k6-pgxpool run /scripts/${usage_script}.js
