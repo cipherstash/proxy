@@ -268,6 +268,8 @@ echo
 mise run k6_run --script=jsonb-large-payload --target=proxy --vus=10 --duration=60s
 
 # Merge outputs for benchmark-action (separate files for throughput vs latency)
+# Ensure results directory is writable (may have been created by Docker)
+mkdir -p results
 jq -s 'add' results/k6/*-throughput.json > results/k6-throughput.json
 jq -s 'add' results/k6/*-latency.json > results/k6-latency.json
 """

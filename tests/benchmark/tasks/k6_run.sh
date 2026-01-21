@@ -23,7 +23,11 @@ fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
+# Pre-create results directory to avoid Docker creating it as root
+mkdir -p "$SCRIPT_DIR/results/k6"
+
 docker run --rm $NETWORK_FLAG \
+  --user "$(id -u):$(id -g)" \
   -v "$SCRIPT_DIR/k6/scripts:/scripts" \
   -v "$SCRIPT_DIR/results/k6:/scripts/results/k6" \
   -e K6_TARGET=${usage_target} \
