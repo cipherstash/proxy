@@ -218,7 +218,7 @@ echo "Results written to results/k6/"
 """
 
 [tasks."k6:benchmark:continuous"]
-description = "Run k6 benchmark for CI (proxy + jsonb-ste-vec-insert only)"
+description = "Run k6 benchmarks for CI (jsonb-ste-vec-insert + jsonb-large-payload)"
 run = """
 set -e
 
@@ -232,6 +232,14 @@ echo
 
 mise run k6_run --script=jsonb-ste-vec-insert --target=proxy --vus=10 --duration=30s
 
-# Copy output for benchmark-action
-cp results/k6/jsonb-ste-vec-insert-output.json results/k6-output.json
+echo
+echo '###############################################'
+echo '# k6 CI Benchmark: jsonb-large-payload via proxy'
+echo '###############################################'
+echo
+
+mise run k6_run --script=jsonb-large-payload --target=proxy --vus=10 --duration=30s
+
+# Merge outputs for benchmark-action
+jq -s 'add' results/k6/jsonb-ste-vec-insert-output.json results/k6/jsonb-large-payload-output.json > results/k6-output.json
 """
