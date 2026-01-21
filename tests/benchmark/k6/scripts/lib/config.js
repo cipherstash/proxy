@@ -35,6 +35,7 @@ export function getDefaultOptions(thresholds = {}) {
         duration: __ENV.K6_DURATION || '30s',
       },
     },
+    summaryTrendStats: ['min', 'avg', 'med', 'p(90)', 'p(95)', 'p(99)', 'max'],
     thresholds: {
       'iteration_duration': ['p(95)<500'],
       ...thresholds,

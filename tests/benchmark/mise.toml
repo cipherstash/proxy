@@ -230,7 +230,7 @@ echo '# k6 CI Benchmark: jsonb-ste-vec-insert via proxy'
 echo '###############################################'
 echo
 
-mise run k6_run --script=jsonb-ste-vec-insert --target=proxy --vus=10 --duration=30s
+mise run k6_run --script=jsonb-ste-vec-insert --target=proxy --vus=10 --duration=60s
 
 echo
 echo '###############################################'
@@ -238,8 +238,9 @@ echo '# k6 CI Benchmark: jsonb-large-payload via proxy'
 echo '###############################################'
 echo
 
-mise run k6_run --script=jsonb-large-payload --target=proxy --vus=10 --duration=30s
+mise run k6_run --script=jsonb-large-payload --target=proxy --vus=10 --duration=60s
 
-# Merge outputs for benchmark-action
-jq -s 'add' results/k6/jsonb-ste-vec-insert-output.json results/k6/jsonb-large-payload-output.json > results/k6-output.json
+# Merge outputs for benchmark-action (separate files for throughput vs latency)
+jq -s 'add' results/k6/*-throughput.json > results/k6-throughput.json
+jq -s 'add' results/k6/*-latency.json > results/k6-latency.json
 """

@@ -1,5 +1,5 @@
 // benchmark-action compatible output formatter
-// Outputs JSON array for github-action-benchmark
+// Outputs separate JSON files for throughput (bigger is better) and latency (smaller is better)
 //
 // Usage in scripts:
 //   import { createSummaryHandler } from './lib/summary.js';
@@ -15,22 +15,37 @@ export function createSummaryHandler(scriptName) {
       ? data.metrics.iteration_duration.values['p(95)']
       : 0;
 
-    const output = [
+    const p99Duration = data.metrics.iteration_duration
+      ? data.metrics.iteration_duration.values['p(99)']
+      : 0;
+
+    // Throughput metrics (customBiggerIsBetter)
+    const throughputOutput = [
       {
-        name: `${scriptName}_iterations_per_second`,
-        unit: 'Number',
+        name: `${scriptName}_rate`,
+        unit: 'iter/s',
         value: Math.round(iterationsPerSecond * 100) / 100,
       },
+    ];
+
+    // Latency metrics (customSmallerIsBetter)
+    const latencyOutput = [
       {
-        name: `${scriptName}_p95_ms`,
+        name: `${scriptName}_p95`,
         unit: 'ms',
         value: Math.round(p95Duration * 100) / 100,
+      },
+      {
+        name: `${scriptName}_p99`,
+        unit: 'ms',
+        value: Math.round(p99Duration * 100) / 100,
       },
     ];
 
     return {
       'stdout': textSummary(data),
-      [`results/k6/${scriptName}-output.json`]: JSON.stringify(output, null, 2),
+      [`results/k6/${scriptName}-throughput.json`]: JSON.stringify(throughputOutput, null, 2),
+      [`results/k6/${scriptName}-latency.json`]: JSON.stringify(latencyOutput, null, 2),
     };
   };
 }
@@ -48,8 +63,11 @@ function textSummary(data) {
 
   if (data.metrics.iteration_duration) {
     const dur = data.metrics.iteration_duration.values;
-    lines.push(`duration p95: ${dur['p(95)'].toFixed(2)}ms`);
+    lines.push(`duration min: ${dur.min.toFixed(2)}ms`);
     lines.push(`duration avg: ${dur.avg.toFixed(2)}ms`);
+    lines.push(`duration p95: ${dur['p(95)'].toFixed(2)}ms`);
+    lines.push(`duration p99: ${dur['p(99)'].toFixed(2)}ms`);
+    lines.push(`duration max: ${dur.max.toFixed(2)}ms`);
   }
 
   lines.push('');
