@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1768977341125,
+  "lastUpdate": 1768977677860,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "k6 Throughput": [
@@ -174,6 +174,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "jsonb-large-payload_rate",
             "value": 37.29,
+            "unit": "iter/s"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "04e9acffdb5dd3ea1f8bb54be7696c12313f6620",
+          "message": "feat(benchmark): add k6 benchmarks for JSONB/encrypted query performance",
+          "timestamp": "2026-01-20T03:20:49Z",
+          "url": "https://github.com/cipherstash/proxy/pull/352/commits/04e9acffdb5dd3ea1f8bb54be7696c12313f6620"
+        },
+        "date": 1768977676144,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "jsonb-large-payload_rate",
+            "value": 40.26,
             "unit": "iter/s"
           }
         ]
