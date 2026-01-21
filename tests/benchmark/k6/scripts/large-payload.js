@@ -24,7 +24,7 @@ export default function() {
   const jsonb = generateLargeJsonb(id);
 
   db.exec(
-    `INSERT INTO encrypted (id, encrypted_jsonb) VALUES ($1, $2)`,
+    `INSERT INTO benchmark_encrypted (id, encrypted_jsonb) VALUES ($1, $2)`,
     id,
     JSON.stringify(jsonb)
   );

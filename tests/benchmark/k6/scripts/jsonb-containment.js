@@ -1,8 +1,7 @@
 // JSONB containment (@>) benchmark
 //
 // The @> operator on eql_v2_encrypted is confirmed working via integration tests:
-//   packages/cipherstash-proxy-integration/src/select/jsonb_contains.rs:13-14
-//   "SELECT encrypted_jsonb @> $1 FROM encrypted LIMIT 1"
+//   packages/cipherstash-proxy-integration/src/select/jsonb_contains.rs
 //
 // Uses xk6-sql API:
 //   sql.open(driver, connString)
@@ -28,7 +27,7 @@ const db = sql.open(driver, connectionString);
 
 export function setup() {
   // Clean up any leftover data from crashed runs before inserting
-  db.exec(`DELETE FROM encrypted WHERE id BETWEEN $1 AND $2`, ID_START, ID_START + ID_COUNT - 1);
+  db.exec(`DELETE FROM benchmark_encrypted WHERE id BETWEEN $1 AND $2`, ID_START, ID_START + ID_COUNT - 1);
 
   // Insert seed data with known values for containment queries
   for (let i = 0; i < ID_COUNT; i++) {
@@ -40,7 +39,7 @@ export function setup() {
       nested: { string: 'world', number: i },
     };
     db.exec(
-      `INSERT INTO encrypted (id, encrypted_jsonb) VALUES ($1, $2)`,
+      `INSERT INTO benchmark_encrypted (id, encrypted_jsonb) VALUES ($1, $2)`,
       id,
       JSON.stringify(jsonb)
     );
@@ -54,7 +53,7 @@ export default function() {
   // Use exec instead of query - we only need to verify the query runs, not inspect results
   // Query uses @> containment operator on encrypted JSONB
   db.exec(
-    `SELECT id FROM encrypted WHERE encrypted_jsonb @> $1 AND id BETWEEN $2 AND $3`,
+    `SELECT id FROM benchmark_encrypted WHERE encrypted_jsonb @> $1 AND id BETWEEN $2 AND $3`,
     pattern,
     ID_START,
     ID_START + ID_COUNT - 1
@@ -63,7 +62,7 @@ export default function() {
 
 export function teardown() {
   // Clean up seed data
-  db.exec(`DELETE FROM encrypted WHERE id BETWEEN $1 AND $2`, ID_START, ID_START + ID_COUNT - 1);
+  db.exec(`DELETE FROM benchmark_encrypted WHERE id BETWEEN $1 AND $2`, ID_START, ID_START + ID_COUNT - 1);
   db.close();
 }
 

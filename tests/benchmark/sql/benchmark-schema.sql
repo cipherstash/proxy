@@ -11,11 +11,20 @@ DROP TABLE IF EXISTS benchmark_encrypted;
 CREATE TABLE benchmark_encrypted (
     id serial primary key,
     username text,
-    email eql_v2_encrypted
+    email eql_v2_encrypted,
+    encrypted_jsonb eql_v2_encrypted
 );
 
 SELECT eql_v2.add_column(
   'benchmark_encrypted',
   'email'
+);
+
+SELECT eql_v2.add_search_config(
+  'benchmark_encrypted',
+  'encrypted_jsonb',
+  'ste_vec',
+  'jsonb',
+  '{"prefix": "benchmark_encrypted/encrypted_jsonb"}'
 );
 
