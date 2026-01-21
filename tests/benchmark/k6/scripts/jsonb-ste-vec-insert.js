@@ -24,7 +24,7 @@ export default function() {
   const jsonb = generateStandardJsonb(id);
 
   db.exec(
-    `INSERT INTO benchmark_encrypted (id, encrypted_jsonb) VALUES ($1, $2)`,
+    `INSERT INTO benchmark_encrypted (id, encrypted_jsonb_with_ste_vec) VALUES ($1, $2)`,
     id,
     JSON.stringify(jsonb)
   );
@@ -34,4 +34,4 @@ export function teardown() {
   db.close();
 }
 
-export const handleSummary = createSummaryHandler('jsonb-insert');
+export const handleSummary = createSummaryHandler('jsonb-ste-vec-insert');

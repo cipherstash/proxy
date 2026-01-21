@@ -1,4 +1,5 @@
 // Large payload (500KB+) INSERT benchmark for memory/performance investigation
+// Uses encrypted_jsonb column (basic jsonb encryption, no ste_vec)
 //
 // Uses xk6-sql API:
 //   sql.open(driver, connString)
@@ -24,7 +25,7 @@ export default function() {
   const jsonb = generateLargeJsonb(id);
 
   db.exec(
-    `INSERT INTO benchmark_encrypted (id, encrypted_jsonb_with_ste_vec) VALUES ($1, $2)`,
+    `INSERT INTO benchmark_encrypted (id, encrypted_jsonb) VALUES ($1, $2)`,
     id,
     JSON.stringify(jsonb)
   );
@@ -34,4 +35,4 @@ export function teardown() {
   db.close();
 }
 
-export const handleSummary = createSummaryHandler('jsonb-ste-vec-large-payload');
+export const handleSummary = createSummaryHandler('jsonb-large-payload');

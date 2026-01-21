@@ -39,7 +39,7 @@ export function setup() {
       nested: { string: 'world', number: i },
     };
     db.exec(
-      `INSERT INTO benchmark_encrypted (id, encrypted_jsonb) VALUES ($1, $2)`,
+      `INSERT INTO benchmark_encrypted (id, encrypted_jsonb_with_ste_vec) VALUES ($1, $2)`,
       id,
       JSON.stringify(jsonb)
     );
@@ -53,7 +53,7 @@ export default function() {
   // Use exec instead of query - we only need to verify the query runs, not inspect results
   // Query uses @> containment operator on encrypted JSONB
   db.exec(
-    `SELECT id FROM benchmark_encrypted WHERE encrypted_jsonb @> $1 AND id BETWEEN $2 AND $3`,
+    `SELECT id FROM benchmark_encrypted WHERE encrypted_jsonb_with_ste_vec @> $1 AND id BETWEEN $2 AND $3`,
     pattern,
     ID_START,
     ID_START + ID_COUNT - 1
@@ -66,4 +66,4 @@ export function teardown() {
   db.close();
 }
 
-export const handleSummary = createSummaryHandler('jsonb-containment');
+export const handleSummary = createSummaryHandler('jsonb-ste-vec-containment');

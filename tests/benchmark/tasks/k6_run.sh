@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #MISE description="Run a single k6 benchmark script"
 #USAGE flag "--script <script>" help="Script name (without .js)" {
-#USAGE   choices "jsonb-insert" "jsonb-containment" "text-equality" "large-payload"
+#USAGE   choices "jsonb-ste-vec-insert" "jsonb-ste-vec-containment" "jsonb-ste-vec-large-payload" "jsonb-large-payload" "text-equality"
 #USAGE }
 #USAGE flag "--target <target>" default="proxy" help="Target service" {
 #USAGE   choices "postgres" "proxy"
