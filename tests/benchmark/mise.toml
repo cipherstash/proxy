@@ -218,7 +218,7 @@ echo "Results written to results/k6/"
 """
 
 [tasks."k6:benchmark:continuous"]
-description = "Run k6 benchmarks for CI (jsonb-ste-vec-insert + jsonb-large-payload)"
+description = "Run k6 benchmarks for CI (jsonb-large-payload)"
 run = """
 set -e
 
@@ -256,20 +256,13 @@ echo
 mise run k6:build
 
 echo
-echo '# jsonb-ste-vec-insert via proxy'
-echo
-
-mise run k6_run --script=jsonb-ste-vec-insert --target=proxy --vus=10 --duration=60s
-
-echo
 echo '# jsonb-large-payload via proxy'
 echo
 
 mise run k6_run --script=jsonb-large-payload --target=proxy --vus=10 --duration=60s
 
-# Merge outputs for benchmark-action (separate files for throughput vs latency)
-# Ensure results directory is writable (may have been created by Docker)
+# Copy outputs for benchmark-action (separate files for throughput vs latency)
 mkdir -p results
-jq -s 'add' results/k6/*-throughput.json > results/k6-throughput.json
-jq -s 'add' results/k6/*-latency.json > results/k6-latency.json
+cp results/k6/jsonb-large-payload-throughput.json results/k6-throughput.json
+cp results/k6/jsonb-large-payload-latency.json results/k6-latency.json
 """
