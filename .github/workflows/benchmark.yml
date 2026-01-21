@@ -42,6 +42,17 @@ jobs:
       - run: |
           mise run postgres:up --extra-args "--detach --wait"
 
+      - name: Setup EQL and benchmark schema
+        working-directory: tests/benchmark
+        run: |
+          mise --env tcp run postgres:setup
+          mise run benchmark:setup
+
+      - name: Start proxy
+        run: |
+          mise --env tcp run proxy:up proxy --extra-args "--detach --wait"
+          mise --env tcp run test:wait_for_postgres_to_quack --port 6432 --max-retries 20
+
       - name: Build k6 with xk6-pgxpool
         working-directory: tests/benchmark
         run: mise run k6:build
@@ -80,6 +91,12 @@ jobs:
           auto-push: true
           benchmark-data-dir-path: docs/k6/latency
 
+      - name: Run pgbench benchmark
+        working-directory: tests/benchmark
+        env:
+          RUST_BACKTRACE: "1"
+        run: mise run benchmark_service --target=proxy --transaction=encrypted --protocol=extended --port=6432 --time=30 --clients=10
+
       # Download previous benchmark result from cache (if exists)
       - name: Download previous benchmark data
         uses: actions/cache@v4
@@ -88,20 +105,18 @@ jobs:
           key: ${{ runner.os }}-benchmark
 
       # Run `github-action-benchmark` action
-      - name: Store benchmark result
+      - name: Store pgbench benchmark result
         uses: benchmark-action/github-action-benchmark@v1
         with:
-          # What benchmark tool the output.txt came from
+          name: 'pgbench'
           tool: 'customBiggerIsBetter'
-          # Where the output from the benchmark tool is stored
           output-file-path: tests/benchmark/results/output.json
-
           github-token: ${{ secrets.GITHUB_TOKEN }}
           fail-on-alert: true
           comment-on-alert: true
           summary-always: true
           auto-push: true
-          benchmark-data-dir-path: docs
+          benchmark-data-dir-path: docs/pgbench
 
       - uses: ./.github/actions/send-slack-notification
         with:
