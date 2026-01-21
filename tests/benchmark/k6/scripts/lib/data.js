@@ -1,8 +1,11 @@
 // JSONB payload generators for k6 benchmarks
 // Matches integration test fixtures in common.rs
 
+// PostgreSQL int4 (serial) max value - prevents "out of range for type integer" errors
+const MAX_INT4 = 2147483647;
+
 export function randomId() {
-  return Math.floor(Math.random() * Number.MAX_SAFE_INTEGER);
+  return Math.floor(Math.random() * MAX_INT4);
 }
 
 export function generateStandardJsonb(id) {
