@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1768969523898,
+  "lastUpdate": 1768969800906,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -17167,6 +17167,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 22.059858,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "f1d8b97af4fdff29e594bbe3e3864e7de7d2ec11",
+          "message": "feat(benchmark): add k6 benchmarks for JSONB/encrypted query performance",
+          "timestamp": "2026-01-20T03:20:49Z",
+          "url": "https://github.com/cipherstash/proxy/pull/352/commits/f1d8b97af4fdff29e594bbe3e3864e7de7d2ec11"
+        },
+        "date": 1768969800313,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 22.855907,
             "unit": "Number"
           }
         ]
