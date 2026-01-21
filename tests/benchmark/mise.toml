@@ -222,20 +222,47 @@ description = "Run k6 benchmarks for CI (jsonb-ste-vec-insert + jsonb-large-payl
 run = """
 set -e
 
-mise run k6:build
+echo
+echo '###############################################'
+echo '# Preflight'
+echo '###############################################'
+echo
+
+mise run benchmark:clean
+
+# Ensure Postgres instances are running
+mise run test:integration:preflight
 
 echo
 echo '###############################################'
-echo '# k6 CI Benchmark: jsonb-ste-vec-insert via proxy'
+echo '# Setup'
 echo '###############################################'
+echo
+
+# Ensure EQL is set up before we try and start Proxy
+mise --env tcp run postgres:setup
+
+mise run benchmark:setup
+
+mise --env tcp run proxy:up proxy --extra-args "--detach --wait"
+mise --env tcp run test:wait_for_postgres_to_quack --port 6432 --max-retries 20
+
+echo
+echo '###############################################'
+echo '# k6 Benchmarks'
+echo '###############################################'
+echo
+
+mise run k6:build
+
+echo
+echo '# jsonb-ste-vec-insert via proxy'
 echo
 
 mise run k6_run --script=jsonb-ste-vec-insert --target=proxy --vus=10 --duration=60s
 
 echo
-echo '###############################################'
-echo '# k6 CI Benchmark: jsonb-large-payload via proxy'
-echo '###############################################'
+echo '# jsonb-large-payload via proxy'
 echo
 
 mise run k6_run --script=jsonb-large-payload --target=proxy --vus=10 --duration=60s
