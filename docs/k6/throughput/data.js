@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1768979679283,
+  "lastUpdate": 1768980008729,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "k6 Throughput": [
@@ -334,6 +334,33 @@ window.BENCHMARK_DATA = {
           {
             "name": "jsonb-large-payload_rate",
             "value": 38.53,
+            "unit": "iter/s"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "Toby Hede",
+            "username": "tobyhede",
+            "email": "toby@cipherstash.com"
+          },
+          "committer": {
+            "name": "Toby Hede",
+            "username": "tobyhede",
+            "email": "toby@cipherstash.com"
+          },
+          "id": "04e9acffdb5dd3ea1f8bb54be7696c12313f6620",
+          "message": "fix(ci): add pull-requests write permission for benchmark alerts\n\nThe benchmark-action needs pull-requests:write to comment on PRs\nwhen performance regressions are detected.",
+          "timestamp": "2026-01-21T06:28:58Z",
+          "url": "https://github.com/cipherstash/proxy/commit/04e9acffdb5dd3ea1f8bb54be7696c12313f6620"
+        },
+        "date": 1768980007369,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "jsonb-large-payload_rate",
+            "value": 34.57,
             "unit": "iter/s"
           }
         ]
