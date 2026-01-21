@@ -48,6 +48,29 @@ jobs:
           RUST_BACKTRACE: "1"
         run: mise run benchmark:continuous
 
+      - name: Build k6 with xk6-pgxpool
+        working-directory: tests/benchmark
+        run: mise run k6:build
+
+      - name: Run k6 benchmark
+        working-directory: tests/benchmark
+        env:
+          RUST_BACKTRACE: "1"
+        run: mise run k6:benchmark:continuous
+
+      # Store k6 benchmark result
+      - name: Store k6 benchmark result
+        uses: benchmark-action/github-action-benchmark@v1
+        with:
+          tool: 'customBiggerIsBetter'
+          output-file-path: tests/benchmark/results/k6-output.json
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          fail-on-alert: true
+          comment-on-alert: true
+          summary-always: true
+          auto-push: true
+          benchmark-data-dir-path: docs/k6
+
       # Download previous benchmark result from cache (if exists)
       - name: Download previous benchmark data
         uses: actions/cache@v4
