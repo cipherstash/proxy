@@ -1,8 +1,9 @@
 pub mod column;
+pub mod phase_timing;
 pub mod portal;
 pub mod statement;
 
-pub use self::{portal::Portal, statement::Statement};
+pub use self::{phase_timing::{PhaseTiming, PhaseTimer}, portal::Portal, statement::Statement};
 use super::{
     column_mapper::ColumnMapper,
     messages::{describe::Describe, Name, Target},
