@@ -78,12 +78,22 @@ where
     session_id_counter: Arc<AtomicU64>,
 }
 
+/// Context for tracking an in-flight Execute operation.
+///
+/// Timing data is accumulated here during backend message processing because
+/// the backend operates on the execute queue rather than having direct access
+/// to the session metrics queue. On completion via `complete_execution()`,
+/// timing is transferred to the associated SessionMetricsContext.
 #[derive(Clone, Debug)]
 pub struct ExecuteContext {
     name: Name,
     start: Instant,
     session_id: Option<SessionId>,
+    /// Server wait duration (time to first response byte).
+    /// Accumulated here during execution, transferred to SessionMetricsContext on completion.
     server_wait_duration: Option<Duration>,
+    /// Server response duration (time spent receiving response data after first byte).
+    /// Accumulated here during execution, transferred to SessionMetricsContext on completion.
     server_response_duration: Duration,
 }
 
@@ -292,17 +302,23 @@ where
         let _ = self.execute.write().map(|mut queue| queue.add(ctx));
     }
 
+    /// Marks the current Execution as Complete.
     ///
-    /// Marks the current Execution as Complete
+    /// Transfers accumulated timing data from ExecuteContext to SessionMetricsContext.phase_timing:
+    /// - `server_wait_duration` (time to first response byte) is recorded to the session
+    /// - `server_response_duration` (time receiving response data) is added to the session
     ///
-    /// If the associated portal is Unnamed, it is closed
+    /// This two-phase timing pattern exists because the backend operates on the execute queue
+    /// rather than having direct access to the session. Timing is accumulated in ExecuteContext
+    /// during message processing, then transferred to the correct SessionMetricsContext here.
+    ///
+    /// If the associated portal is Unnamed, it is closed.
     ///
     /// From the PostgreSQL Extended Query docs:
     ///     If successfully created, a named portal object lasts till the end of the current transaction, unless explicitly destroyed.
     ///     An unnamed portal is destroyed at the end of the transaction, or as soon as the next Bind statement specifying the unnamed portal as destination is issued
     ///
     /// https://www.postgresql.org/docs/current/protocol-flow.html#PROTOCOL-FLOW-EXT-QUERY
-    ///
     pub fn complete_execution(&mut self) {
         debug!(target: CONTEXT, client_id = self.client_id, msg = "Execute complete");
 
