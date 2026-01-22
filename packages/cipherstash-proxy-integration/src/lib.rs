@@ -1,5 +1,6 @@
 mod common;
 mod decrypt;
+mod diagnostics;
 mod disable_mapping;
 mod empty_result;
 mod encryption_sanity;
