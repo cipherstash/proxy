@@ -12,6 +12,7 @@ use crate::connect::Sender;
 use crate::error::{EncryptError, Error, MappingError};
 use crate::log::{MAPPER, PROTOCOL};
 use crate::postgresql::context::column::Column;
+use crate::postgresql::context::statement_metadata::{ProtocolType, StatementType};
 use crate::postgresql::context::Portal;
 use crate::postgresql::data::literal_from_sql;
 use crate::postgresql::messages::close::Close;
