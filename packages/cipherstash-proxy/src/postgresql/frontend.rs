@@ -1,5 +1,5 @@
-use super::context::{Context, Statement};
 use super::context::phase_timing::PhaseTimer;
+use super::context::{Context, Statement};
 use super::error_handler::PostgreSqlErrorHandler;
 use super::messages::bind::Bind;
 use super::messages::describe::Describe;
@@ -401,10 +401,10 @@ where
 
         let mut portal = Portal::passthrough();
         let mut encrypted = false;
+        let mut parse_duration_recorded = false;
 
         for statement in &parsed_statements {
-            if let Some(mapping_disabled) =
-                self.context.maybe_set_unsafe_disable_mapping(&statement)
+            if let Some(mapping_disabled) = self.context.maybe_set_unsafe_disable_mapping(statement)
             {
                 warn!(
                     msg = "SET CIPHERSTASH.DISABLE_MAPPING = {mapping_disabled}",
@@ -419,16 +419,16 @@ where
                 continue;
             }
 
-            self.handle_set_keyset(&statement)?;
+            self.handle_set_keyset(statement)?;
 
-            self.check_for_schema_change(&statement);
+            self.check_for_schema_change(statement);
 
-            if !eql_mapper::requires_type_check(&statement) {
+            if !eql_mapper::requires_type_check(statement) {
                 counter!(STATEMENTS_PASSTHROUGH_TOTAL).increment(1);
                 continue;
             }
 
-            let typed_statement = match self.type_check(&statement) {
+            let typed_statement = match self.type_check(statement) {
                 Ok(ts) => ts,
                 Err(err) => {
                     if self.context.mapping_errors_enabled() {
@@ -447,6 +447,12 @@ where
                     );
 
                     if typed_statement.requires_transform() {
+                        // Record parse duration before encryption work starts
+                        if !parse_duration_recorded {
+                            self.context.record_parse_duration(parse_timer.elapsed());
+                            parse_duration_recorded = true;
+                        }
+
                         let encrypted_literals = self
                             .encrypt_literals(&typed_statement, &statement.literal_columns)
                             .await?;
@@ -481,8 +487,10 @@ where
             };
         }
 
-        // Record parse/typecheck duration
-        self.context.record_parse_duration(parse_timer.elapsed());
+        // Record parse/typecheck duration (if not already recorded before encryption)
+        if !parse_duration_recorded {
+            self.context.record_parse_duration(parse_timer.elapsed());
+        }
 
         // Set statement type based on parsed statements
         let statement_type = if parsed_statements.len() == 1 {
@@ -760,9 +768,15 @@ where
         // These override the underlying column type
         let param_types = message.param_types.clone();
 
+        let mut parse_duration_recorded = false;
+
         match self.to_encryptable_statement(&typed_statement, param_types)? {
             Some(statement) => {
                 if typed_statement.requires_transform() {
+                    // Record parse duration before encryption work starts
+                    self.context.record_parse_duration(parse_timer.elapsed());
+                    parse_duration_recorded = true;
+
                     let encrypted_literals = self
                         .encrypt_literals(&typed_statement, &statement.literal_columns)
                         .await?;
@@ -795,8 +809,10 @@ where
             }
         }
 
-        // Record parse duration
-        self.context.record_parse_duration(parse_timer.elapsed());
+        // Record parse duration (if not already recorded before encryption)
+        if !parse_duration_recorded {
+            self.context.record_parse_duration(parse_timer.elapsed());
+        }
 
         // Set statement type and fingerprint
         self.context.update_statement_metadata(|m| {
@@ -1028,16 +1044,15 @@ where
         // Add to phase timing diagnostics (accumulate)
         self.context.add_encrypt_duration(duration);
 
-        // Avoid the iter calculation if we can
+        // Always update metadata for slow-statement logging
+        let encrypted_count = encrypted.iter().filter(|e| e.is_some()).count();
+        self.context.update_statement_metadata(|m| {
+            m.encrypted = true;
+            m.set_encrypted_values_count(encrypted_count);
+        });
+
+        // Prometheus metrics remain gated
         if self.context.prometheus_enabled() {
-            let encrypted_count = encrypted.iter().filter(|e| e.is_some()).count();
-
-            // Update metadata
-            self.context.update_statement_metadata(|m| {
-                m.encrypted = true;
-                m.set_encrypted_values_count(encrypted_count);
-            });
-
             counter!(ENCRYPTION_REQUESTS_TOTAL).increment(1);
             counter!(ENCRYPTED_VALUES_TOTAL).increment(encrypted_count as u64);
             histogram!(ENCRYPTION_DURATION_SECONDS).record(duration);

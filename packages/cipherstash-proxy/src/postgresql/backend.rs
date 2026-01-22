@@ -468,7 +468,12 @@ where
             counter!(DECRYPTION_ERROR_TOTAL).increment(1);
         })?;
 
-        // Avoid the iter calculation if we can
+        let duration = Instant::now().duration_since(start);
+
+        // Always record for slow-statement diagnostics
+        self.context.add_decrypt_duration(duration);
+
+        // Prometheus metrics remain gated
         if self.context.prometheus_enabled() {
             let decrypted_count =
                 plaintexts
@@ -477,8 +482,6 @@ where
 
             counter!(DECRYPTION_REQUESTS_TOTAL).increment(1);
             counter!(DECRYPTED_VALUES_TOTAL).increment(decrypted_count);
-
-            let duration = Instant::now().duration_since(start);
             histogram!(DECRYPTION_DURATION_SECONDS).record(duration);
         }
 

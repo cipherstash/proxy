@@ -3,8 +3,7 @@ pub mod phase_timing;
 pub mod portal;
 pub mod statement;
 pub mod statement_metadata;
-pub use self::{phase_timing::{PhaseTiming, PhaseTimer}, portal::Portal, statement::Statement};
-pub use statement_metadata::{StatementMetadata, StatementType, ProtocolType};
+pub use self::{phase_timing::PhaseTiming, portal::Portal, statement::Statement};
 use super::{
     column_mapper::ColumnMapper,
     messages::{describe::Describe, Name, Target},
@@ -14,7 +13,10 @@ use crate::{
     config::TandemConfig,
     error::{EncryptError, Error},
     log::{CONTEXT, SLOW_STATEMENTS},
-    prometheus::{STATEMENTS_EXECUTION_DURATION_SECONDS, STATEMENTS_SESSION_DURATION_SECONDS, SLOW_STATEMENTS_TOTAL},
+    prometheus::{
+        SLOW_STATEMENTS_TOTAL, STATEMENTS_EXECUTION_DURATION_SECONDS,
+        STATEMENTS_SESSION_DURATION_SECONDS,
+    },
     proxy::{EncryptConfig, EncryptionService, ReloadCommand, ReloadSender},
 };
 use cipherstash_client::IdentifiedBy;
@@ -22,6 +24,7 @@ use eql_mapper::{Schema, TableResolver};
 use metrics::{counter, histogram};
 use serde_json::json;
 use sqltk::parser::ast::{Expr, Ident, ObjectName, ObjectNamePart, Set, Value, ValueWithSpan};
+pub use statement_metadata::StatementMetadata;
 use std::{
     collections::{HashMap, VecDeque},
     sync::{Arc, LazyLock, RwLock},
@@ -171,14 +174,17 @@ where
             let metadata = &session.metadata;
 
             // Get labels for metrics
-            let statement_type = metadata.statement_type
+            let statement_type = metadata
+                .statement_type
                 .map(|t| t.as_label())
                 .unwrap_or("unknown");
-            let protocol = metadata.protocol
-                .map(|p| p.as_label())
-                .unwrap_or("unknown");
+            let protocol = metadata.protocol.map(|p| p.as_label()).unwrap_or("unknown");
             let mapped = if metadata.encrypted { "true" } else { "false" };
-            let multi_statement = if metadata.multi_statement { "true" } else { "false" };
+            let multi_statement = if metadata.multi_statement {
+                "true"
+            } else {
+                "false"
+            };
 
             // Record with labels
             histogram!(
@@ -187,10 +193,13 @@ where
                 "protocol" => protocol,
                 "mapped" => mapped,
                 "multi_statement" => multi_statement
-            ).record(duration);
+            )
+            .record(duration);
 
             // Log slow statements when enabled
-            if self.config.slow_statements_enabled() && duration > self.config.slow_statement_min_duration() {
+            if self.config.slow_statements_enabled()
+                && duration > self.config.slow_statement_min_duration()
+            {
                 let timing = &session.phase_timing;
 
                 // Increment slow statements counter
@@ -255,17 +264,25 @@ where
 
         if let Some(execute) = self.get_execute() {
             // Get labels from current session metadata
-            let (statement_type, protocol, mapped, multi_statement) = if let Some(session) = self.get_session_metrics() {
-                let metadata = &session.metadata;
-                (
-                    metadata.statement_type.map(|t| t.as_label()).unwrap_or("unknown"),
-                    metadata.protocol.map(|p| p.as_label()).unwrap_or("unknown"),
-                    if metadata.encrypted { "true" } else { "false" },
-                    if metadata.multi_statement { "true" } else { "false" },
-                )
-            } else {
-                ("unknown", "unknown", "false", "false")
-            };
+            let (statement_type, protocol, mapped, multi_statement) =
+                if let Some(session) = self.get_session_metrics() {
+                    let metadata = &session.metadata;
+                    (
+                        metadata
+                            .statement_type
+                            .map(|t| t.as_label())
+                            .unwrap_or("unknown"),
+                        metadata.protocol.map(|p| p.as_label()).unwrap_or("unknown"),
+                        if metadata.encrypted { "true" } else { "false" },
+                        if metadata.multi_statement {
+                            "true"
+                        } else {
+                            "false"
+                        },
+                    )
+                } else {
+                    ("unknown", "unknown", "false", "false")
+                };
 
             histogram!(
                 STATEMENTS_EXECUTION_DURATION_SECONDS,
@@ -273,7 +290,8 @@ where
                 "protocol" => protocol,
                 "mapped" => mapped,
                 "multi_statement" => multi_statement
-            ).record(execute.duration());
+            )
+            .record(execute.duration());
 
             if execute.name.is_unnamed() {
                 self.close_portal(&execute.name);
