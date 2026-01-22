@@ -300,7 +300,12 @@ where
         debug!(target: PROTOCOL, msg = "Write to server", ?bytes);
         let sent: u64 = bytes.len() as u64;
         counter!(SERVER_BYTES_SENT_TOTAL).increment(sent);
+
+        let start = Instant::now();
         self.server_writer.write_all(&bytes).await?;
+        let duration = start.elapsed();
+        self.context.add_server_write_duration(duration);
+
         Ok(())
     }
 
