@@ -525,8 +525,7 @@ where
         });
 
         self.context.add_portal(Name::unnamed(), portal);
-        self.context
-            .set_execute(Name::unnamed(), Some(session_id));
+        self.context.set_execute(Name::unnamed(), Some(session_id));
 
         if encrypted {
             let transformed_statement = transformed_statements
@@ -795,13 +794,9 @@ where
                         .record_parse_duration(session_id, parse_timer.elapsed());
                     parse_duration_recorded = true;
 
-                        let encrypted_literals = self
-                            .encrypt_literals(
-                                session_id,
-                                &typed_statement,
-                                &statement.literal_columns,
-                            )
-                            .await?;
+                    let encrypted_literals = self
+                        .encrypt_literals(session_id, &typed_statement, &statement.literal_columns)
+                        .await?;
 
                     if let Some(transformed_statement) = self
                         .transform_statement(&typed_statement, &encrypted_literals)
@@ -842,7 +837,6 @@ where
             m.statement_type = Some(StatementType::from_statement(&statement));
             m.set_query_fingerprint(&message.statement);
         });
-
 
         if message.requires_rewrite() {
             let bytes = BytesMut::try_from(message)?;
