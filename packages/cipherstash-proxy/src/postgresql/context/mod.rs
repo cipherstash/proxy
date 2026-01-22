@@ -27,7 +27,10 @@ use sqltk::parser::ast::{Expr, Ident, ObjectName, ObjectNamePart, Set, Value, Va
 pub use statement_metadata::StatementMetadata;
 use std::{
     collections::{HashMap, VecDeque},
-    sync::{Arc, LazyLock, RwLock},
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc, LazyLock, RwLock,
+    },
     time::{Duration, Instant},
 };
 use tokio::sync::oneshot;
@@ -38,6 +41,9 @@ type DescribeQueue = Queue<Describe>;
 type ExecuteQueue = Queue<ExecuteContext>;
 type SessionMetricsQueue = Queue<SessionMetricsContext>;
 type PortalQueue = Queue<Arc<Portal>>;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct SessionId(u64);
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct KeysetIdentifier(pub IdentifiedBy);
@@ -60,6 +66,7 @@ where
     reload_sender: ReloadSender,
     column_mapper: ColumnMapper,
     statements: Arc<RwLock<HashMap<Name, Arc<Statement>>>>,
+    statement_sessions: Arc<RwLock<HashMap<Name, SessionId>>>,
     portals: Arc<RwLock<HashMap<Name, PortalQueue>>>,
     describe: Arc<RwLock<DescribeQueue>>,
     execute: Arc<RwLock<ExecuteQueue>>,
@@ -68,37 +75,66 @@ where
     table_resolver: Arc<TableResolver>,
     unsafe_disable_mapping: bool,
     keyset_id: Arc<RwLock<Option<KeysetIdentifier>>>,
+    session_id_counter: Arc<AtomicU64>,
 }
 
 #[derive(Clone, Debug)]
 pub struct ExecuteContext {
     name: Name,
     start: Instant,
+    session_id: Option<SessionId>,
+    server_wait_duration: Option<Duration>,
+    server_response_duration: Duration,
 }
 
 impl ExecuteContext {
-    fn new(name: Name) -> ExecuteContext {
+    fn new(name: Name, session_id: Option<SessionId>) -> ExecuteContext {
         ExecuteContext {
             name,
             start: Instant::now(),
+            session_id,
+            server_wait_duration: None,
+            server_response_duration: Duration::from_secs(0),
         }
     }
 
     fn duration(&self) -> Duration {
         Instant::now().duration_since(self.start)
     }
+
+    fn record_server_wait_or_add_response(&mut self, duration: Duration) {
+        if self.server_wait_duration.is_none() {
+            self.server_wait_duration = Some(duration);
+        } else {
+            self.server_response_duration += duration;
+        }
+    }
+
+    fn server_wait_duration(&self) -> Option<Duration> {
+        self.server_wait_duration
+    }
+
+    fn server_response_duration(&self) -> Duration {
+        self.server_response_duration
+    }
+
+    fn session_id(&self) -> Option<SessionId> {
+        self.session_id
+    }
 }
 
 #[derive(Clone, Debug)]
 pub struct SessionMetricsContext {
+    id: SessionId,
     start: Instant,
     pub phase_timing: PhaseTiming,
     pub metadata: StatementMetadata,
 }
 
 impl SessionMetricsContext {
-    fn new() -> SessionMetricsContext {
+    fn new(id: SessionId) -> SessionMetricsContext {
         SessionMetricsContext {
+            id,
             start: Instant::now(),
             phase_timing: PhaseTiming::new(),
             metadata: StatementMetadata::new(),
@@ -107,6 +143,10 @@ impl SessionMetricsContext {
 
     fn duration(&self) -> Duration {
         Instant::now().duration_since(self.start)
+    }
+
+    fn id(&self) -> SessionId {
+        self.id
     }
 }
 
@@ -131,6 +171,7 @@ where
 
         Context {
             statements: Arc::new(RwLock::new(HashMap::new())),
+            statement_sessions: Arc::new(RwLock::new(HashMap::new())),
             portals: Arc::new(RwLock::new(HashMap::new())),
             describe: Arc::new(RwLock::from(Queue::new())),
             execute: Arc::new(RwLock::from(Queue::new())),
@@ -145,6 +186,7 @@ where
             reload_sender,
             unsafe_disable_mapping: false,
             keyset_id: Arc::new(RwLock::new(None)),
+            session_id_counter: Arc::new(AtomicU64::new(1)),
         }
     }
 
@@ -161,9 +203,11 @@ where
         let _ = self.describe.write().map(|mut queue| queue.complete());
     }
 
-    pub fn start_session(&mut self) {
-        let ctx = SessionMetricsContext::new();
+    pub fn start_session(&mut self) -> SessionId {
+        let id = SessionId(self.session_id_counter.fetch_add(1, Ordering::Relaxed));
+        let ctx = SessionMetricsContext::new(id);
         let _ = self.session_metrics.write().map(|mut queue| queue.add(ctx));
+        id
     }
 
     pub fn finish_session(&mut self) {
@@ -240,10 +284,10 @@ where
             .map(|mut queue| queue.complete());
     }
 
-    pub fn set_execute(&mut self, name: Name) {
+    pub fn set_execute(&mut self, name: Name, session_id: Option<SessionId>) {
         debug!(target: CONTEXT, client_id = self.client_id, execute = ?name);
 
-        let ctx = ExecuteContext::new(name);
+        let ctx = ExecuteContext::new(name, session_id);
 
         let _ = self.execute.write().map(|mut queue| queue.add(ctx));
     }
@@ -263,6 +307,16 @@ where
         debug!(target: CONTEXT, client_id = self.client_id, msg = "Execute complete");
 
         if let Some(execute) = self.get_execute() {
+            if let Some(session_id) = execute.session_id() {
+                if let Some(wait) = execute.server_wait_duration() {
+                    self.record_server_wait_duration(session_id, wait);
+                }
+                let response = execute.server_response_duration();
+                if !response.is_zero() {
+                    self.add_server_response_duration(session_id, response);
+                }
+            }
+
             // Get labels from current session metadata
             let (statement_type, protocol, mapped, multi_statement) =
                 if let Some(session) = self.get_session_metrics() {
@@ -316,6 +370,11 @@ where
             .statements
             .write()
             .map(|mut guarded| guarded.remove(name));
+
+        let _ = self
+            .statement_sessions
+            .write()
+            .map(|mut guarded| guarded.remove(name));
     }
 
     pub fn add_portal(&mut self, name: Name, portal: Portal) {
@@ -332,6 +391,18 @@ where
         debug!(target: CONTEXT, client_id = self.client_id, statement = ?name);
         let statements = self.statements.read().ok()?;
         statements.get(name).cloned()
+    }
+
+    pub fn set_statement_session(&mut self, name: Name, session_id: SessionId) {
+        let _ = self
+            .statement_sessions
+            .write()
+            .map(|mut sessions| sessions.insert(name, session_id));
+    }
+
+    pub fn get_statement_session(&self, name: &Name) -> Option<SessionId> {
+        let sessions = self.statement_sessions.read().ok()?;
+        sessions.get(name).copied()
     }
 
     ///
@@ -364,8 +435,15 @@ where
 
         match portal.as_ref() {
             Portal::Encrypted { statement, .. } => Some(statement.clone()),
-            Portal::Passthrough => None,
+            Portal::Passthrough { .. } => None,
         }
+    }
+
+    pub fn get_portal_session_id(&self, name: &Name) -> Option<SessionId> {
+        let portals = self.portals.read().ok()?;
+        let queue = portals.get(name)?;
+        let portal = queue.next()?;
+        portal.session_id()
     }
 
     pub fn get_statement_for_row_decription(&self) -> Option<Arc<Statement>> {
@@ -733,118 +811,128 @@ where
         &self.config
     }
 
-    /// Record parse phase duration for the current session (first write wins)
-    pub fn record_parse_duration(&mut self, duration: Duration) {
+    fn with_session_metrics_mut<F>(&mut self, session_id: SessionId, f: F)
+    where
+        F: FnOnce(&mut SessionMetricsContext),
+    {
         if let Ok(mut queue) = self.session_metrics.write() {
-            if let Some(session) = queue.current_mut() {
-                session.phase_timing.record_parse(duration);
+            if let Some(session) = queue
+                .queue
+                .iter_mut()
+                .find(|session| session.id() == session_id)
+            {
+                f(session);
             }
         }
     }
 
-    /// Add encrypt phase duration for the current session (accumulate)
-    pub fn add_encrypt_duration(&mut self, duration: Duration) {
-        if let Ok(mut queue) = self.session_metrics.write() {
-            if let Some(session) = queue.current_mut() {
-                session.phase_timing.add_encrypt(duration);
-            }
-        }
+    pub fn latest_session_id(&self) -> Option<SessionId> {
+        let queue = self.session_metrics.read().ok()?;
+        queue.queue.back().map(|session| session.id())
+    }
+
+    /// Record parse phase duration for the session (first write wins)
+    pub fn record_parse_duration(&mut self, session_id: SessionId, duration: Duration) {
+        self.with_session_metrics_mut(session_id, |session| {
+            session.phase_timing.record_parse(duration);
+        });
+    }
+
+    /// Add encrypt phase duration for the session (accumulate)
+    pub fn add_encrypt_duration(&mut self, session_id: SessionId, duration: Duration) {
+        self.with_session_metrics_mut(session_id, |session| {
+            session.phase_timing.add_encrypt(duration);
+        });
     }
 
     /// Record server write phase duration
-    pub fn record_server_write_duration(&mut self, duration: Duration) {
-        if let Ok(mut queue) = self.session_metrics.write() {
-            if let Some(session) = queue.current_mut() {
-                session.phase_timing.record_server_write(duration);
-            }
-        }
+    pub fn record_server_write_duration(&mut self, session_id: SessionId, duration: Duration) {
+        self.with_session_metrics_mut(session_id, |session| {
+            session.phase_timing.record_server_write(duration);
+        });
     }
 
     /// Add server write phase duration (accumulate)
-    pub fn add_server_write_duration(&mut self, duration: Duration) {
-        if let Ok(mut queue) = self.session_metrics.write() {
-            if let Some(session) = queue.current_mut() {
-                session.phase_timing.add_server_write(duration);
-            }
-        }
+    pub fn add_server_write_duration(&mut self, session_id: SessionId, duration: Duration) {
+        self.with_session_metrics_mut(session_id, |session| {
+            session.phase_timing.add_server_write(duration);
+        });
     }
 
     /// Record server wait phase duration (time to first response byte)
-    pub fn record_server_wait_duration(&mut self, duration: Duration) {
-        if let Ok(mut queue) = self.session_metrics.write() {
-            if let Some(session) = queue.current_mut() {
-                session.phase_timing.record_server_wait(duration);
-            }
-        }
+    pub fn record_server_wait_duration(&mut self, session_id: SessionId, duration: Duration) {
+        self.with_session_metrics_mut(session_id, |session| {
+            session.phase_timing.record_server_wait(duration);
+        });
     }
 
     /// Record server response phase duration
-    pub fn record_server_response_duration(&mut self, duration: Duration) {
-        if let Ok(mut queue) = self.session_metrics.write() {
-            if let Some(session) = queue.current_mut() {
-                session.phase_timing.record_server_response(duration);
-            }
-        }
+    pub fn record_server_response_duration(&mut self, session_id: SessionId, duration: Duration) {
+        self.with_session_metrics_mut(session_id, |session| {
+            session.phase_timing.record_server_response(duration);
+        });
     }
 
     /// Add server response phase duration (accumulate)
-    pub fn add_server_response_duration(&mut self, duration: Duration) {
-        if let Ok(mut queue) = self.session_metrics.write() {
-            if let Some(session) = queue.current_mut() {
-                session.phase_timing.add_server_response(duration);
-            }
-        }
+    pub fn add_server_response_duration(&mut self, session_id: SessionId, duration: Duration) {
+        self.with_session_metrics_mut(session_id, |session| {
+            session.phase_timing.add_server_response(duration);
+        });
     }
 
     /// Record client write phase duration
-    pub fn record_client_write_duration(&mut self, duration: Duration) {
-        if let Ok(mut queue) = self.session_metrics.write() {
-            if let Some(session) = queue.current_mut() {
-                session.phase_timing.record_client_write(duration);
-            }
-        }
+    pub fn record_client_write_duration(&mut self, session_id: SessionId, duration: Duration) {
+        self.with_session_metrics_mut(session_id, |session| {
+            session.phase_timing.record_client_write(duration);
+        });
     }
 
     /// Add client write phase duration (accumulate)
-    pub fn add_client_write_duration(&mut self, duration: Duration) {
-        if let Ok(mut queue) = self.session_metrics.write() {
-            if let Some(session) = queue.current_mut() {
-                session.phase_timing.add_client_write(duration);
-            }
-        }
+    pub fn add_client_write_duration(&mut self, session_id: SessionId, duration: Duration) {
+        self.with_session_metrics_mut(session_id, |session| {
+            session.phase_timing.add_client_write(duration);
+        });
     }
 
     /// Add decrypt phase duration (accumulate)
-    pub fn add_decrypt_duration(&mut self, duration: Duration) {
-        if let Ok(mut queue) = self.session_metrics.write() {
-            if let Some(session) = queue.current_mut() {
-                session.phase_timing.add_decrypt(duration);
-            }
-        }
+    pub fn add_decrypt_duration(&mut self, session_id: SessionId, duration: Duration) {
+        self.with_session_metrics_mut(session_id, |session| {
+            session.phase_timing.add_decrypt(duration);
+        });
     }
 
-    /// Update statement metadata for the current session
-    pub fn update_statement_metadata<F>(&mut self, f: F)
+    /// Update statement metadata for a session
+    pub fn update_statement_metadata<F>(&mut self, session_id: SessionId, f: F)
     where
         F: FnOnce(&mut StatementMetadata),
     {
-        if let Ok(mut queue) = self.session_metrics.write() {
-            if let Some(session) = queue.current_mut() {
-                f(&mut session.metadata);
+        self.with_session_metrics_mut(session_id, |session| {
+            f(&mut session.metadata);
+        });
+    }
+
+    /// Record server wait for first response; otherwise accumulate response time for the current execute
+    pub fn record_execute_server_timing(&mut self, duration: Duration) {
+        if let Ok(mut queue) = self.execute.write() {
+            if let Some(execute) = queue.current_mut() {
+                execute.record_server_wait_or_add_response(duration);
             }
         }
     }
 
-    /// Record server wait for first response; otherwise accumulate response time
-    pub fn record_server_wait_or_add_response(&mut self, duration: Duration) {
-        if let Ok(mut queue) = self.session_metrics.write() {
-            if let Some(session) = queue.current_mut() {
-                if session.phase_timing.server_wait_duration.is_none() {
-                    session.phase_timing.record_server_wait(duration);
-                } else {
-                    session.phase_timing.add_server_response(duration);
-                }
-            }
+    /// Add decrypt phase duration for the current execute session (if any)
+    pub fn add_decrypt_duration_for_execute(&mut self, duration: Duration) {
+        let session_id = self.get_execute().and_then(|execute| execute.session_id());
+        if let Some(session_id) = session_id {
+            self.add_decrypt_duration(session_id, duration);
+        }
+    }
+
+    /// Add client write duration for the current execute session (if any)
+    pub fn add_client_write_duration_for_execute(&mut self, duration: Duration) {
+        let session_id = self.get_execute().and_then(|execute| execute.session_id());
+        if let Some(session_id) = session_id {
+            self.add_client_write_duration(session_id, duration);
         }
     }
 }
@@ -947,7 +1035,7 @@ mod tests {
     }
 
     fn portal(statement: &Arc<Statement>) -> Portal {
-        Portal::encrypted_with_format_codes(statement.clone(), vec![])
+        Portal::encrypted_with_format_codes(statement.clone(), vec![], None)
     }
 
     fn get_statement(portal: Arc<Portal>) -> Arc<Statement> {
@@ -1001,7 +1089,7 @@ mod tests {
         context.add_portal(portal_name.clone(), portal(&statement));
 
         // Add statement name to execute context
-        context.set_execute(portal_name.clone());
+        context.set_execute(portal_name.clone(), None);
 
         // Portal statement should be the right statement
         let portal = context.get_portal_from_execute().unwrap();
@@ -1047,8 +1135,8 @@ mod tests {
         context.add_portal(portal_name.clone(), portal(&statement_2));
 
         // Execute both portals
-        context.set_execute(portal_name.clone());
-        context.set_execute(portal_name.clone());
+        context.set_execute(portal_name.clone(), None);
+        context.set_execute(portal_name.clone(), None);
 
         // Portal should point to first statement
         let portal = context.get_portal_from_execute().unwrap();
@@ -1100,9 +1188,9 @@ mod tests {
         context.add_portal(portal_name_3.clone(), portal(&statement_3));
 
         // Add portals to execute context
-        context.set_execute(portal_name_1.clone());
-        context.set_execute(portal_name_2.clone());
-        context.set_execute(portal_name_3.clone());
+        context.set_execute(portal_name_1.clone(), None);
+        context.set_execute(portal_name_2.clone(), None);
+        context.set_execute(portal_name_3.clone(), None);
 
         // Multiple calls return the portal for the first Execution context
         let portal = context.get_portal_from_execute().unwrap();

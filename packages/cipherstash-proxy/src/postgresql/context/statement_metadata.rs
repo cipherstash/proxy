@@ -1,4 +1,5 @@
 use serde::Serialize;
+use sqltk::parser::ast;
 
 /// Statement type classification for metrics labels
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -25,6 +26,17 @@ impl StatementType {
             StatementType::Select
         } else {
             StatementType::Other
+        }
+    }
+
+    /// Create from parsed AST statement
+    pub fn from_statement(stmt: &ast::Statement) -> Self {
+        match stmt {
+            ast::Statement::Insert { .. } => StatementType::Insert,
+            ast::Statement::Update { .. } => StatementType::Update,
+            ast::Statement::Delete { .. } => StatementType::Delete,
+            ast::Statement::Query(_) => StatementType::Select,
+            _ => StatementType::Other,
         }
     }
 
