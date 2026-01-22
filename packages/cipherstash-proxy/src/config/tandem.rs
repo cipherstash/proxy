@@ -855,4 +855,22 @@ mod tests {
             })
         })
     }
+
+    #[test]
+    fn slow_statements_config() {
+        with_no_cs_vars(|| {
+            temp_env::with_vars(
+                [
+                    ("CS_LOG__SLOW_STATEMENTS", Some("true")),
+                    ("CS_LOG__SLOW_STATEMENT_MIN_DURATION_MS", Some("500")),
+                ],
+                || {
+                    let config = TandemConfig::build_path("tests/config/cipherstash-proxy-test.toml").unwrap();
+
+                    assert!(config.log.slow_statements);
+                    assert_eq!(config.log.slow_statement_min_duration_ms, 500);
+                },
+            );
+        });
+    }
 }

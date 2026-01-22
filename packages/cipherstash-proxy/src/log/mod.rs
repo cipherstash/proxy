@@ -112,6 +112,8 @@ mod tests {
             output: LogConfig::default_log_output(),
             ansi_enabled: LogConfig::default_ansi_enabled(),
             level: LogLevel::Info,
+            slow_statements: false,
+            slow_statement_min_duration_ms: LogConfig::default_slow_statement_min_duration_ms(),
             targets: LogTargetLevels {
                 development_level: LogLevel::Info,
                 authentication_level: LogLevel::Debug,

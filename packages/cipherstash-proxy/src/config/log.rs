@@ -20,6 +20,14 @@ pub struct LogConfig {
     #[serde(default = "LogConfig::default_log_level")]
     pub level: LogLevel,
 
+    /// Enable slow statement logging
+    #[serde(default)]
+    pub slow_statements: bool,
+
+    /// Threshold in milliseconds for slow statement logging (default: 2000ms)
+    #[serde(default = "LogConfig::default_slow_statement_min_duration_ms")]
+    pub slow_statement_min_duration_ms: u64,
+
     // All log target levels - automatically generated and flattened from LogTargetLevels
     // To add a new target: just add it to the define_log_targets! macro in log/targets.rs
     #[serde(flatten)]
@@ -90,6 +98,8 @@ impl LogConfig {
             output: LogConfig::default_log_output(),
             ansi_enabled: LogConfig::default_ansi_enabled(),
             level,
+            slow_statements: false,
+            slow_statement_min_duration_ms: Self::default_slow_statement_min_duration_ms(),
             // All target levels automatically set using generated LogTargetLevels
             targets: LogTargetLevels::with_level(level),
         }
@@ -113,6 +123,10 @@ impl LogConfig {
 
     pub const fn default_log_level() -> LogLevel {
         LogLevel::Info
+    }
+
+    pub const fn default_slow_statement_min_duration_ms() -> u64 {
+        2000 // 2 seconds
     }
 }
 
