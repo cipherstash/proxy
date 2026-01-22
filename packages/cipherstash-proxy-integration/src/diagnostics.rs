@@ -2,6 +2,16 @@
 mod tests {
     use crate::common::{clear, connect_with_tls, PROXY, PROXY_METRICS_PORT};
 
+    /// Maximum number of retry attempts for fetching metrics.
+    /// 5 retries with 200ms delay gives ~1 second total wait time,
+    /// sufficient for Prometheus scrape interval in CI environments.
+    const METRICS_FETCH_MAX_RETRIES: u32 = 5;
+
+    /// Delay between retry attempts in milliseconds.
+    /// 200ms provides a reasonable balance between responsiveness and allowing
+    /// sufficient time for metrics to be published by the Prometheus client.
+    const METRICS_FETCH_RETRY_DELAY_MS: u64 = 200;
+
     /// Fetch metrics with retry logic to handle CI timing variability.
     async fn fetch_metrics_with_retry(max_retries: u32, delay_ms: u64) -> String {
         let url = format!("http://localhost:{}/metrics", PROXY_METRICS_PORT);
@@ -50,7 +60,8 @@ mod tests {
             .unwrap();
 
         // Fetch metrics with retry logic for CI robustness
-        let body = fetch_metrics_with_retry(5, 200).await;
+        let body =
+            fetch_metrics_with_retry(METRICS_FETCH_MAX_RETRIES, METRICS_FETCH_RETRY_DELAY_MS).await;
 
         // Assert that the metrics include the expected labels
         assert!(
