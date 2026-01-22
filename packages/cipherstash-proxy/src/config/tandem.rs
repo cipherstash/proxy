@@ -865,7 +865,6 @@ mod tests {
     }
 
     #[test]
-    #[test]
     fn slow_statement_accessors() {
         with_no_cs_vars(|| {
             temp_env::with_vars(
@@ -882,6 +881,8 @@ mod tests {
             );
         });
     }
+
+    #[test]
     fn slow_statements_config() {
         with_no_cs_vars(|| {
             temp_env::with_vars(
