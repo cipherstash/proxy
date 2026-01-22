@@ -170,7 +170,7 @@ where
         counter!(CLIENTS_BYTES_RECEIVED_TOTAL).increment(sent);
 
         if self.context.mapping_disabled() {
-            self.write_to_server(bytes, None).await?;
+            self.write_to_server(bytes).await?;
             return Ok(());
         }
 
@@ -294,15 +294,11 @@ where
             }
         }
 
-        self.write_to_server(bytes, None).await?;
+        self.write_to_server(bytes).await?;
         Ok(())
     }
 
-    pub async fn write_to_server(
-        &mut self,
-        bytes: BytesMut,
-        session_id: Option<SessionId>,
-    ) -> Result<(), Error> {
+    pub async fn write_to_server(&mut self, bytes: BytesMut) -> Result<(), Error> {
         debug!(target: PROTOCOL, msg = "Write to server", ?bytes);
         let sent: u64 = bytes.len() as u64;
         counter!(SERVER_BYTES_SENT_TOTAL).increment(sent);
@@ -310,8 +306,7 @@ where
         let start = Instant::now();
         self.server_writer.write_all(&bytes).await?;
         let duration = start.elapsed();
-        let session_to_record = session_id.or_else(|| self.context.latest_session_id());
-        if let Some(session_id) = session_to_record {
+        if let Some(session_id) = self.context.latest_session_id() {
             self.context.add_server_write_duration(session_id, duration);
         }
 
@@ -321,7 +316,7 @@ where
     pub async fn terminate(&mut self) -> Result<(), Error> {
         debug!(target: PROTOCOL, msg = "Terminate server connection");
         let bytes = Terminate::message();
-        self.write_to_server(bytes, None).await?;
+        self.write_to_server(bytes).await?;
         Ok(())
     }
 
