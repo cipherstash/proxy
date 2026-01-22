@@ -92,6 +92,7 @@ services:
     container_name: proxy-tls
     ports:
       - 6432:6432
+      - 9930:9930
     environment:
       - CS_DATABASE__NAME=${CS_DATABASE__NAME}
       - CS_DATABASE__USERNAME=${CS_DATABASE__USERNAME}
