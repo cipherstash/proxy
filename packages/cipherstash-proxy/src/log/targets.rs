@@ -78,4 +78,5 @@ define_log_targets!(
     (PROXY, proxy_level),
     (MAPPER, mapper_level),
     (SCHEMA, schema_level),
+    (SLOW_STATEMENTS, slow_statements_level),
 );

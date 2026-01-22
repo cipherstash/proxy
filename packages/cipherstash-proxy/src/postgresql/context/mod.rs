@@ -2,8 +2,9 @@ pub mod column;
 pub mod phase_timing;
 pub mod portal;
 pub mod statement;
-
+pub mod statement_metadata;
 pub use self::{phase_timing::{PhaseTiming, PhaseTimer}, portal::Portal, statement::Statement};
+pub use statement_metadata::{StatementMetadata, StatementType, ProtocolType};
 use super::{
     column_mapper::ColumnMapper,
     messages::{describe::Describe, Name, Target},

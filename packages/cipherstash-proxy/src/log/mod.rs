@@ -127,6 +127,7 @@ mod tests {
                 mapper_level: LogLevel::Info,
                 schema_level: LogLevel::Info,
                 config_level: LogLevel::Info,
+                slow_statements_level: LogLevel::Info,
             },
         };
 
