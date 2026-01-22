@@ -302,6 +302,12 @@ where
         let _ = self.execute.write().map(|mut queue| queue.add(ctx));
     }
 
+    /// Set execute state for portal, looking up session ID internally.
+    pub fn set_execute_for_portal(&mut self, name: Name) {
+        let session_id = self.get_portal_session_id(&name);
+        self.set_execute(name, session_id);
+    }
+
     /// Marks the current Execution as Complete.
     ///
     /// Transfers accumulated timing data from ExecuteContext to SessionMetricsContext.phase_timing:
@@ -393,6 +399,12 @@ where
             .map(|mut guarded| guarded.remove(name));
     }
 
+    /// Close both statement and its associated portal.
+    pub fn close_statement_and_portal(&mut self, name: &Name) {
+        self.close_portal(name);
+        self.close_statement(name);
+    }
+
     pub fn add_portal(&mut self, name: Name, portal: Portal) {
         debug!(target: CONTEXT, client_id = self.client_id, name = ?name, portal = ?portal);
         let _ = self.portals.write().map(|mut portals| {
@@ -419,6 +431,24 @@ where
     pub fn get_statement_session(&self, name: &Name) -> Option<SessionId> {
         let sessions = self.statement_sessions.read().ok()?;
         sessions.get(name).copied()
+    }
+
+    /// Get session for statement, falling back to latest session with warning log.
+    pub fn get_statement_session_or_latest(&self, name: &Name) -> Option<SessionId> {
+        if let Some(id) = self.get_statement_session(name) {
+            return Some(id);
+        }
+
+        let fallback = self.latest_session_id();
+        if fallback.is_some() {
+            warn!(
+                target: CONTEXT,
+                client_id = self.client_id,
+                prepared_statement = ?name,
+                msg = "Session lookup failed for prepared statement, using latest session"
+            );
+        }
+        fallback
     }
 
     ///
@@ -740,6 +770,13 @@ where
         debug!(target: CONTEXT, msg = "Database schema reloaded", ?response);
     }
 
+    /// Reload schema if it has changed since last check.
+    pub async fn reload_schema_if_changed(&self) {
+        if self.schema_changed() {
+            self.reload_schema().await;
+        }
+    }
+
     pub fn is_passthrough(&self) -> bool {
         self.encrypt_config.is_empty() || self.config.mapping_disabled()
     }
@@ -925,6 +962,16 @@ where
         self.with_session_metrics_mut(session_id, |session| {
             f(&mut session.metadata);
         });
+    }
+
+    /// Update statement metadata if session ID is present, no-op otherwise.
+    pub fn with_session<F>(&mut self, session_id: Option<SessionId>, f: F)
+    where
+        F: FnOnce(&mut SessionMetricsContext),
+    {
+        if let Some(sid) = session_id {
+            self.with_session_metrics_mut(sid, f);
+        }
     }
 
     /// Record server wait for first response; otherwise accumulate response time for the current execute

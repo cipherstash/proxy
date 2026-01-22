@@ -11,7 +11,7 @@ use super::parser::SqlParser;
 use super::protocol::{self};
 use crate::connect::Sender;
 use crate::error::{EncryptError, Error, MappingError};
-use crate::log::{CONTEXT, MAPPER, PROTOCOL};
+use crate::log::{MAPPER, PROTOCOL};
 use crate::postgresql::context::column::Column;
 use crate::postgresql::context::statement_metadata::{ProtocolType, StatementType};
 use crate::postgresql::context::Portal;
@@ -269,9 +269,7 @@ where
                     ?code,
                 );
 
-                if self.context.schema_changed() {
-                    self.context.reload_schema().await;
-                }
+                self.context.reload_schema_if_changed().await;
 
                 if self.error_state.is_some() {
                     debug!(target: PROTOCOL,
@@ -332,10 +330,7 @@ where
         debug!(target: PROTOCOL, client_id = self.context.client_id, ?close);
         match close.target {
             Target::Portal => self.context.close_portal(&close.name),
-            Target::Statement => {
-                self.context.close_portal(&close.name);
-                self.context.close_statement(&close.name);
-            }
+            Target::Statement => self.context.close_statement_and_portal(&close.name),
         }
         Ok(())
     }
@@ -343,9 +338,8 @@ where
     async fn execute_handler(&mut self, bytes: &BytesMut) -> Result<(), Error> {
         let execute = Execute::try_from(bytes)?;
         debug!(target: PROTOCOL, client_id = self.context.client_id, ?execute);
-        let session_id = self.context.get_portal_session_id(&execute.portal);
         self.context
-            .set_execute(execute.portal.to_owned(), session_id);
+            .set_execute_for_portal(execute.portal.to_owned());
         Ok(())
     }
 
@@ -987,28 +981,14 @@ where
 
         let mut bind = Bind::try_from(bytes)?;
 
-        let session_id = match self.context.get_statement_session(&bind.prepared_statement) {
-            Some(id) => Some(id),
-            None => {
-                let fallback = self.context.latest_session_id();
-                if fallback.is_some() {
-                    warn!(
-                        target: CONTEXT,
-                        client_id = self.context.client_id,
-                        prepared_statement = ?bind.prepared_statement,
-                        msg = "Session lookup failed for prepared statement, using latest session"
-                    );
-                }
-                fallback
-            }
-        };
+        let session_id = self
+            .context
+            .get_statement_session_or_latest(&bind.prepared_statement);
 
         // Track param bytes for diagnostics
         let param_bytes: usize = bind.param_values.iter().map(|p| p.bytes.len()).sum();
-        if let Some(session_id) = session_id {
-            self.context
-                .update_statement_metadata(session_id, |m| m.set_param_bytes(param_bytes));
-        }
+        self.context
+            .with_session(session_id, |m| m.metadata.set_param_bytes(param_bytes));
 
         debug!(target: PROTOCOL, client_id = self.context.client_id, bind = ?bind);
 
@@ -1027,10 +1007,8 @@ where
                     bind.result_columns_format_codes.to_owned(),
                     session_id,
                 );
-                if let Some(session_id) = session_id {
-                    self.context
-                        .update_statement_metadata(session_id, |m| m.encrypted = true);
-                }
+                self.context
+                    .with_session(session_id, |m| m.metadata.encrypted = true);
             }
         };
 
@@ -1084,16 +1062,13 @@ where
 
         // Record timing and metadata for this encryption operation
         let encrypted_count = encrypted.iter().filter(|e| e.is_some()).count();
-        if let Some(sid) = session_id {
+        self.context.with_session(session_id, |m| {
             // Add to phase timing diagnostics (accumulate)
-            self.context.add_encrypt_duration(sid, duration);
-
+            m.phase_timing.add_encrypt(duration);
             // Always update metadata for slow-statement logging
-            self.context.update_statement_metadata(sid, |m| {
-                m.encrypted = true;
-                m.set_encrypted_values_count(encrypted_count);
-            });
-        }
+            m.metadata.encrypted = true;
+            m.metadata.set_encrypted_values_count(encrypted_count);
+        });
 
         // Prometheus metrics remain gated
         if self.context.prometheus_enabled() {
