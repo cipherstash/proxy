@@ -302,7 +302,15 @@ impl TandemConfig {
 
         DEFAULT_THREAD_STACK_SIZE
     }
+    /// Returns true if slow statement logging is enabled
+    pub fn slow_statements_enabled(&self) -> bool {
+        self.log.slow_statements
+    }
 
+    /// Returns the slow statement minimum duration as a Duration
+    pub fn slow_statement_min_duration(&self) -> std::time::Duration {
+        std::time::Duration::from_millis(self.log.slow_statement_min_duration_ms)
+    }
     #[cfg(test)]
     pub fn for_testing() -> Self {
         Self {
@@ -857,6 +865,23 @@ mod tests {
     }
 
     #[test]
+    #[test]
+    fn slow_statement_accessors() {
+        with_no_cs_vars(|| {
+            temp_env::with_vars(
+                [
+                    ("CS_LOG__SLOW_STATEMENTS", Some("true")),
+                    ("CS_LOG__SLOW_STATEMENT_MIN_DURATION_MS", Some("1000")),
+                ],
+                || {
+                    let config = TandemConfig::build_path("tests/config/cipherstash-proxy-test.toml").unwrap();
+
+                    assert!(config.slow_statements_enabled());
+                    assert_eq!(config.slow_statement_min_duration(), std::time::Duration::from_millis(1000));
+                },
+            );
+        });
+    }
     fn slow_statements_config() {
         with_no_cs_vars(|| {
             temp_env::with_vars(
