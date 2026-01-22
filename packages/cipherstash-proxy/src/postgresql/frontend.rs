@@ -11,7 +11,7 @@ use super::parser::SqlParser;
 use super::protocol::{self};
 use crate::connect::Sender;
 use crate::error::{EncryptError, Error, MappingError};
-use crate::log::{MAPPER, PROTOCOL};
+use crate::log::{CONTEXT, MAPPER, PROTOCOL};
 use crate::postgresql::context::column::Column;
 use crate::postgresql::context::statement_metadata::{ProtocolType, StatementType};
 use crate::postgresql::context::Portal;
@@ -170,7 +170,7 @@ where
         counter!(CLIENTS_BYTES_RECEIVED_TOTAL).increment(sent);
 
         if self.context.mapping_disabled() {
-            self.write_to_server(bytes).await?;
+            self.write_to_server(bytes, None).await?;
             return Ok(());
         }
 
@@ -294,11 +294,15 @@ where
             }
         }
 
-        self.write_to_server(bytes).await?;
+        self.write_to_server(bytes, None).await?;
         Ok(())
     }
 
-    pub async fn write_to_server(&mut self, bytes: BytesMut) -> Result<(), Error> {
+    pub async fn write_to_server(
+        &mut self,
+        bytes: BytesMut,
+        session_id: Option<SessionId>,
+    ) -> Result<(), Error> {
         debug!(target: PROTOCOL, msg = "Write to server", ?bytes);
         let sent: u64 = bytes.len() as u64;
         counter!(SERVER_BYTES_SENT_TOTAL).increment(sent);
@@ -306,7 +310,8 @@ where
         let start = Instant::now();
         self.server_writer.write_all(&bytes).await?;
         let duration = start.elapsed();
-        if let Some(session_id) = self.context.latest_session_id() {
+        let session_to_record = session_id.or_else(|| self.context.latest_session_id());
+        if let Some(session_id) = session_to_record {
             self.context.add_server_write_duration(session_id, duration);
         }
 
@@ -316,7 +321,7 @@ where
     pub async fn terminate(&mut self) -> Result<(), Error> {
         debug!(target: PROTOCOL, msg = "Terminate server connection");
         let bytes = Terminate::message();
-        self.write_to_server(bytes).await?;
+        self.write_to_server(bytes, None).await?;
         Ok(())
     }
 
@@ -987,10 +992,21 @@ where
 
         let mut bind = Bind::try_from(bytes)?;
 
-        let session_id = self
-            .context
-            .get_statement_session(&bind.prepared_statement)
-            .or_else(|| self.context.latest_session_id());
+        let session_id = match self.context.get_statement_session(&bind.prepared_statement) {
+            Some(id) => Some(id),
+            None => {
+                let fallback = self.context.latest_session_id();
+                if fallback.is_some() {
+                    warn!(
+                        target: CONTEXT,
+                        client_id = self.context.client_id,
+                        prepared_statement = ?bind.prepared_statement,
+                        msg = "Session lookup failed for prepared statement, using latest session"
+                    );
+                }
+                fallback
+            }
+        };
 
         // Track param bytes for diagnostics
         let param_bytes: usize = bind.param_values.iter().map(|p| p.bytes.len()).sum();
@@ -1071,15 +1087,14 @@ where
 
         let duration = Instant::now().duration_since(start);
 
-        // Add to phase timing diagnostics (accumulate)
-        if let Some(session_id) = session_id {
-            self.context.add_encrypt_duration(session_id, duration);
-        }
-
-        // Always update metadata for slow-statement logging
+        // Record timing and metadata for this encryption operation
         let encrypted_count = encrypted.iter().filter(|e| e.is_some()).count();
-        if let Some(session_id) = session_id {
-            self.context.update_statement_metadata(session_id, |m| {
+        if let Some(sid) = session_id {
+            // Add to phase timing diagnostics (accumulate)
+            self.context.add_encrypt_duration(sid, duration);
+
+            // Always update metadata for slow-statement logging
+            self.context.update_statement_metadata(sid, |m| {
                 m.encrypted = true;
                 m.set_encrypted_values_count(encrypted_count);
             });
