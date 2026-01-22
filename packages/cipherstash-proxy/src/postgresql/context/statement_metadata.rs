@@ -1,5 +1,5 @@
 use serde::Serialize;
-use sqltk::parser::ast;
+use sqltk::parser::ast::Statement;
 
 /// Statement type classification for metrics labels
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -13,29 +13,13 @@ pub enum StatementType {
 }
 
 impl StatementType {
-    /// Create from SQL statement string
-    pub fn from_sql(sql: &str) -> Self {
-        let trimmed = sql.trim_start().to_uppercase();
-        if trimmed.starts_with("INSERT") {
-            StatementType::Insert
-        } else if trimmed.starts_with("UPDATE") {
-            StatementType::Update
-        } else if trimmed.starts_with("DELETE") {
-            StatementType::Delete
-        } else if trimmed.starts_with("SELECT") {
-            StatementType::Select
-        } else {
-            StatementType::Other
-        }
-    }
-
     /// Create from parsed AST statement
-    pub fn from_statement(stmt: &ast::Statement) -> Self {
+    pub fn from_statement(stmt: &Statement) -> Self {
         match stmt {
-            ast::Statement::Insert { .. } => StatementType::Insert,
-            ast::Statement::Update { .. } => StatementType::Update,
-            ast::Statement::Delete { .. } => StatementType::Delete,
-            ast::Statement::Query(_) => StatementType::Select,
+            Statement::Insert(_) => StatementType::Insert,
+            Statement::Update { .. } => StatementType::Update,
+            Statement::Delete(_) => StatementType::Delete,
+            Statement::Query(_) => StatementType::Select,
             _ => StatementType::Other,
         }
     }
@@ -116,6 +100,11 @@ impl StatementMetadata {
         self.param_bytes = bytes;
     }
 
+    /// Set query fingerprint from SQL statement.
+    ///
+    /// Fingerprints are session-local identifiers for correlating log entries within a single
+    /// proxy instance. They are NOT stable across Rust versions or deployments and should not
+    /// be used for cross-session correlation or persistent storage.
     pub fn set_query_fingerprint(&mut self, sql: &str) {
         use std::collections::hash_map::DefaultHasher;
         use std::hash::{Hash, Hasher};
@@ -134,31 +123,37 @@ impl StatementMetadata {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sqltk::parser::dialect::PostgreSqlDialect;
+    use sqltk::parser::parser::Parser;
+
+    fn parse(sql: &str) -> Statement {
+        Parser::new(&PostgreSqlDialect {})
+            .try_with_sql(sql)
+            .unwrap()
+            .parse_statement()
+            .unwrap()
+    }
 
     #[test]
-    fn statement_type_from_sql() {
+    fn statement_type_from_statement() {
         assert_eq!(
-            StatementType::from_sql("INSERT INTO foo VALUES (1)"),
+            StatementType::from_statement(&parse("INSERT INTO foo VALUES (1)")),
             StatementType::Insert
         );
         assert_eq!(
-            StatementType::from_sql("  insert into foo"),
-            StatementType::Insert
-        );
-        assert_eq!(
-            StatementType::from_sql("UPDATE foo SET bar = 1"),
+            StatementType::from_statement(&parse("UPDATE foo SET bar = 1")),
             StatementType::Update
         );
         assert_eq!(
-            StatementType::from_sql("DELETE FROM foo"),
+            StatementType::from_statement(&parse("DELETE FROM foo")),
             StatementType::Delete
         );
         assert_eq!(
-            StatementType::from_sql("SELECT * FROM foo"),
+            StatementType::from_statement(&parse("SELECT * FROM foo")),
             StatementType::Select
         );
         assert_eq!(
-            StatementType::from_sql("CREATE TABLE foo"),
+            StatementType::from_statement(&parse("CREATE TABLE foo (id INT)")),
             StatementType::Other
         );
     }

@@ -12,6 +12,7 @@ use tracing::info;
 use tracing_subscriber::{filter::Directive, EnvFilter, FmtSubscriber};
 
 pub const PROXY: u16 = 6432;
+pub const PROXY_METRICS_PORT: u16 = 9930;
 pub const PG_PORT: u16 = 5532;
 pub const PG_TLS_PORT: u16 = 5617;
 

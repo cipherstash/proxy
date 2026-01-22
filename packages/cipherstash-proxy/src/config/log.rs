@@ -125,8 +125,13 @@ impl LogConfig {
         LogLevel::Info
     }
 
+    /// Default threshold for slow statement logging (2 seconds).
+    ///
+    /// This value represents a reasonable baseline for identifying slow queries in most
+    /// PostgreSQL workloads. Queries exceeding this duration are likely candidates for
+    /// optimization. Operators can adjust via CS_LOG__SLOW_STATEMENT_MIN_DURATION_MS.
     pub const fn default_slow_statement_min_duration_ms() -> u64 {
-        2000 // 2 seconds
+        2000
     }
 }
 
