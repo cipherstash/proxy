@@ -171,7 +171,10 @@ mod tests {
         timing.add_server_write(Duration::from_millis(3));
         timing.add_server_write(Duration::from_millis(7));
 
-        assert_eq!(timing.server_write_duration, Some(Duration::from_millis(10)));
+        assert_eq!(
+            timing.server_write_duration,
+            Some(Duration::from_millis(10))
+        );
     }
 
     #[test]

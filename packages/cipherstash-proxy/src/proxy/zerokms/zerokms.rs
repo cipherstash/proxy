@@ -3,7 +3,10 @@ use crate::{
     error::{EncryptError, Error, ZeroKMSError},
     log::{ENCRYPT, PROXY},
     postgresql::{Column, KeysetIdentifier},
-    prometheus::{KEYSET_CIPHER_CACHE_HITS_TOTAL, KEYSET_CIPHER_INIT_DURATION_SECONDS, KEYSET_CIPHER_INIT_TOTAL},
+    prometheus::{
+        KEYSET_CIPHER_CACHE_HITS_TOTAL, KEYSET_CIPHER_INIT_DURATION_SECONDS,
+        KEYSET_CIPHER_INIT_TOTAL,
+    },
     proxy::EncryptionService,
 };
 use cipherstash_client::{
@@ -17,8 +20,11 @@ use cipherstash_client::{
 use eql_mapper::EqlTermVariant;
 use metrics::{counter, histogram};
 use moka::future::Cache;
-use std::borrow::Cow;
-use std::{sync::Arc, time::{Duration, Instant}};
+use std::{
+    borrow::Cow,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 use tracing::{debug, info, warn};
 use uuid::Uuid;
 

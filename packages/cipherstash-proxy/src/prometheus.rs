@@ -40,7 +40,8 @@ pub const SERVER_BYTES_RECEIVED_TOTAL: &str = "cipherstash_proxy_server_bytes_re
 
 pub const KEYSET_CIPHER_INIT_TOTAL: &str = "cipherstash_proxy_keyset_cipher_init_total";
 pub const KEYSET_CIPHER_CACHE_HITS_TOTAL: &str = "cipherstash_proxy_keyset_cipher_cache_hits_total";
-pub const KEYSET_CIPHER_INIT_DURATION_SECONDS: &str = "cipherstash_proxy_keyset_cipher_init_duration_seconds";
+pub const KEYSET_CIPHER_INIT_DURATION_SECONDS: &str =
+    "cipherstash_proxy_keyset_cipher_init_duration_seconds";
 
 pub fn start(host: String, port: u16) -> Result<(), Error> {
     let address = format!("{host}:{port}");

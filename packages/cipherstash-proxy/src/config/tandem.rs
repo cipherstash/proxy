@@ -873,10 +873,15 @@ mod tests {
                     ("CS_LOG__SLOW_STATEMENT_MIN_DURATION_MS", Some("1000")),
                 ],
                 || {
-                    let config = TandemConfig::build_path("tests/config/cipherstash-proxy-test.toml").unwrap();
+                    let config =
+                        TandemConfig::build_path("tests/config/cipherstash-proxy-test.toml")
+                            .unwrap();
 
                     assert!(config.slow_statements_enabled());
-                    assert_eq!(config.slow_statement_min_duration(), std::time::Duration::from_millis(1000));
+                    assert_eq!(
+                        config.slow_statement_min_duration(),
+                        std::time::Duration::from_millis(1000)
+                    );
                 },
             );
         });
@@ -891,7 +896,9 @@ mod tests {
                     ("CS_LOG__SLOW_STATEMENT_MIN_DURATION_MS", Some("500")),
                 ],
                 || {
-                    let config = TandemConfig::build_path("tests/config/cipherstash-proxy-test.toml").unwrap();
+                    let config =
+                        TandemConfig::build_path("tests/config/cipherstash-proxy-test.toml")
+                            .unwrap();
 
                     assert!(config.log.slow_statements);
                     assert_eq!(config.log.slow_statement_min_duration_ms, 500);

@@ -125,12 +125,30 @@ mod tests {
 
     #[test]
     fn statement_type_from_sql() {
-        assert_eq!(StatementType::from_sql("INSERT INTO foo VALUES (1)"), StatementType::Insert);
-        assert_eq!(StatementType::from_sql("  insert into foo"), StatementType::Insert);
-        assert_eq!(StatementType::from_sql("UPDATE foo SET bar = 1"), StatementType::Update);
-        assert_eq!(StatementType::from_sql("DELETE FROM foo"), StatementType::Delete);
-        assert_eq!(StatementType::from_sql("SELECT * FROM foo"), StatementType::Select);
-        assert_eq!(StatementType::from_sql("CREATE TABLE foo"), StatementType::Other);
+        assert_eq!(
+            StatementType::from_sql("INSERT INTO foo VALUES (1)"),
+            StatementType::Insert
+        );
+        assert_eq!(
+            StatementType::from_sql("  insert into foo"),
+            StatementType::Insert
+        );
+        assert_eq!(
+            StatementType::from_sql("UPDATE foo SET bar = 1"),
+            StatementType::Update
+        );
+        assert_eq!(
+            StatementType::from_sql("DELETE FROM foo"),
+            StatementType::Delete
+        );
+        assert_eq!(
+            StatementType::from_sql("SELECT * FROM foo"),
+            StatementType::Select
+        );
+        assert_eq!(
+            StatementType::from_sql("CREATE TABLE foo"),
+            StatementType::Other
+        );
     }
 
     #[test]
