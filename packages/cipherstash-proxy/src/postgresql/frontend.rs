@@ -1,4 +1,4 @@
-use super::context::{Context, Statement, PhaseTiming};
+use super::context::{Context, Statement};
 use super::context::phase_timing::PhaseTimer;
 use super::error_handler::PostgreSqlErrorHandler;
 use super::messages::bind::Bind;
@@ -302,7 +302,12 @@ where
         debug!(target: PROTOCOL, msg = "Write to server", ?bytes);
         let sent: u64 = bytes.len() as u64;
         counter!(SERVER_BYTES_SENT_TOTAL).increment(sent);
+
+        let start = Instant::now();
         self.server_writer.write_all(&bytes).await?;
+        let duration = start.elapsed();
+        self.context.add_server_write_duration(duration);
+
         Ok(())
     }
 
@@ -595,10 +600,20 @@ where
             ?encrypted
         );
 
-        counter!(ENCRYPTION_REQUESTS_TOTAL).increment(1);
-        counter!(ENCRYPTED_VALUES_TOTAL).increment(encrypted.len() as u64);
-
         let duration = Instant::now().duration_since(start);
+
+        // Add to phase timing diagnostics (accumulate)
+        self.context.add_encrypt_duration(duration);
+
+        // Update metadata with encrypted values count
+        let encrypted_count = encrypted.iter().filter(|e| e.is_some()).count();
+        self.context.update_statement_metadata(|m| {
+            m.encrypted = true;
+            m.set_encrypted_values_count(encrypted_count);
+        });
+
+        counter!(ENCRYPTION_REQUESTS_TOTAL).increment(1);
+        counter!(ENCRYPTED_VALUES_TOTAL).increment(encrypted_count as u64);
         histogram!(ENCRYPTION_DURATION_SECONDS).record(duration);
 
         Ok(encrypted)
@@ -690,6 +705,13 @@ where
     async fn parse_handler(&mut self, bytes: &BytesMut) -> Result<Option<BytesMut>, Error> {
         self.context.start_session();
 
+        // Set protocol type
+        self.context.update_statement_metadata(|m| {
+            m.protocol = Some(ProtocolType::Extended);
+        });
+
+        let parse_timer = PhaseTimer::start();
+
         let mut message = Parse::try_from(bytes)?;
 
         debug!(
@@ -772,6 +794,15 @@ where
                 counter!(STATEMENTS_PASSTHROUGH_TOTAL).increment(1);
             }
         }
+
+        // Record parse duration
+        self.context.record_parse_duration(parse_timer.elapsed());
+
+        // Set statement type and fingerprint
+        self.context.update_statement_metadata(|m| {
+            m.statement_type = Some(StatementType::from_sql(&message.statement));
+            m.set_query_fingerprint(&message.statement);
+        });
 
         if message.requires_rewrite() {
             let bytes = BytesMut::try_from(message)?;
@@ -922,6 +953,12 @@ where
 
         let mut bind = Bind::try_from(bytes)?;
 
+        // Track param bytes for diagnostics
+        let param_bytes: usize = bind.param_values.iter().map(|p| p.bytes.len()).sum();
+        self.context.update_statement_metadata(|m| {
+            m.set_param_bytes(param_bytes);
+        });
+
         debug!(target: PROTOCOL, client_id = self.context.client_id, bind = ?bind);
 
         let mut portal = Portal::passthrough();
@@ -986,14 +1023,23 @@ where
                 counter!(ENCRYPTION_ERROR_TOTAL).increment(1);
             })?;
 
+        let duration = Instant::now().duration_since(start);
+
+        // Add to phase timing diagnostics (accumulate)
+        self.context.add_encrypt_duration(duration);
+
         // Avoid the iter calculation if we can
         if self.context.prometheus_enabled() {
-            let encrypted_count = encrypted.iter().filter(|e| e.is_some()).count() as u64;
+            let encrypted_count = encrypted.iter().filter(|e| e.is_some()).count();
+
+            // Update metadata
+            self.context.update_statement_metadata(|m| {
+                m.encrypted = true;
+                m.set_encrypted_values_count(encrypted_count);
+            });
 
             counter!(ENCRYPTION_REQUESTS_TOTAL).increment(1);
-            counter!(ENCRYPTED_VALUES_TOTAL).increment(encrypted_count);
-
-            let duration = Instant::now().duration_since(start);
+            counter!(ENCRYPTED_VALUES_TOTAL).increment(encrypted_count as u64);
             histogram!(ENCRYPTION_DURATION_SECONDS).record(duration);
         }
 
