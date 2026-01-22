@@ -157,6 +157,7 @@ where
         )
         .await?;
         let read_duration = read_start.elapsed();
+        self.context.record_server_wait_or_add_response(read_duration);
 
         let sent: u64 = bytes.len() as u64;
         counter!(SERVER_BYTES_RECEIVED_TOTAL).increment(sent);
@@ -362,7 +363,11 @@ where
         let sent: u64 = bytes.len() as u64;
         counter!(CLIENTS_BYTES_SENT_TOTAL).increment(sent);
 
+        let start = Instant::now();
         self.client_sender.send(bytes)?;
+        let duration = start.elapsed();
+        self.context.add_client_write_duration(duration);
+
         Ok(())
     }
 
