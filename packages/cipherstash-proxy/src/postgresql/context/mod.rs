@@ -638,6 +638,121 @@ where
     pub fn config(&self) -> &crate::config::TandemConfig {
         &self.config
     }
+
+    /// Record parse phase duration for the current session (first write wins)
+    pub fn record_parse_duration(&mut self, duration: Duration) {
+        if let Ok(mut queue) = self.session_metrics.write() {
+            if let Some(session) = queue.current_mut() {
+                session.phase_timing.record_parse(duration);
+            }
+        }
+    }
+
+    /// Add encrypt phase duration for the current session (accumulate)
+    pub fn add_encrypt_duration(&mut self, duration: Duration) {
+        if let Ok(mut queue) = self.session_metrics.write() {
+            if let Some(session) = queue.current_mut() {
+                session.phase_timing.add_encrypt(duration);
+            }
+        }
+    }
+
+    /// Record server write phase duration
+    pub fn record_server_write_duration(&mut self, duration: Duration) {
+        if let Ok(mut queue) = self.session_metrics.write() {
+            if let Some(session) = queue.current_mut() {
+                session.phase_timing.record_server_write(duration);
+            }
+        }
+    }
+
+    /// Add server write phase duration (accumulate)
+    pub fn add_server_write_duration(&mut self, duration: Duration) {
+        if let Ok(mut queue) = self.session_metrics.write() {
+            if let Some(session) = queue.current_mut() {
+                session.phase_timing.add_server_write(duration);
+            }
+        }
+    }
+
+    /// Record server wait phase duration (time to first response byte)
+    pub fn record_server_wait_duration(&mut self, duration: Duration) {
+        if let Ok(mut queue) = self.session_metrics.write() {
+            if let Some(session) = queue.current_mut() {
+                session.phase_timing.record_server_wait(duration);
+            }
+        }
+    }
+
+    /// Record server response phase duration
+    pub fn record_server_response_duration(&mut self, duration: Duration) {
+        if let Ok(mut queue) = self.session_metrics.write() {
+            if let Some(session) = queue.current_mut() {
+                session.phase_timing.record_server_response(duration);
+            }
+        }
+    }
+
+    /// Add server response phase duration (accumulate)
+    pub fn add_server_response_duration(&mut self, duration: Duration) {
+        if let Ok(mut queue) = self.session_metrics.write() {
+            if let Some(session) = queue.current_mut() {
+                session.phase_timing.add_server_response(duration);
+            }
+        }
+    }
+
+    /// Record client write phase duration
+    pub fn record_client_write_duration(&mut self, duration: Duration) {
+        if let Ok(mut queue) = self.session_metrics.write() {
+            if let Some(session) = queue.current_mut() {
+                session.phase_timing.record_client_write(duration);
+            }
+        }
+    }
+
+    /// Add client write phase duration (accumulate)
+    pub fn add_client_write_duration(&mut self, duration: Duration) {
+        if let Ok(mut queue) = self.session_metrics.write() {
+            if let Some(session) = queue.current_mut() {
+                session.phase_timing.add_client_write(duration);
+            }
+        }
+    }
+
+    /// Add decrypt phase duration (accumulate)
+    pub fn add_decrypt_duration(&mut self, duration: Duration) {
+        if let Ok(mut queue) = self.session_metrics.write() {
+            if let Some(session) = queue.current_mut() {
+                session.phase_timing.add_decrypt(duration);
+            }
+        }
+    }
+
+    /// Update statement metadata for the current session
+    pub fn update_statement_metadata<F>(&mut self, f: F)
+    where
+        F: FnOnce(&mut StatementMetadata),
+    {
+        if let Ok(mut queue) = self.session_metrics.write() {
+            if let Some(session) = queue.current_mut() {
+                f(&mut session.metadata);
+            }
+        }
+    }
+
+    /// Record server wait for first response; otherwise accumulate response time
+    pub fn record_server_wait_or_add_response(&mut self, duration: Duration) {
+        if let Ok(mut queue) = self.session_metrics.write() {
+            if let Some(session) = queue.current_mut() {
+                if session.phase_timing.server_wait_duration.is_none() {
+                    session.phase_timing.record_server_wait(duration);
+                } else {
+                    session.phase_timing.add_server_response(duration);
+                }
+            }
+        }
+    }
 }
 
 impl<T> Queue<T> {
@@ -657,6 +772,11 @@ impl<T> Queue<T> {
 
     pub fn add(&mut self, item: T) {
         self.queue.push_back(item);
+    }
+
+    /// Get mutable reference to the current (first) item in the queue
+    pub fn current_mut(&mut self) -> Option<&mut T> {
+        self.queue.front_mut()
     }
 }
 
