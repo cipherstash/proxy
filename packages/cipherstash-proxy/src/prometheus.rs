@@ -26,6 +26,7 @@ pub const STATEMENTS_SESSION_DURATION_SECONDS: &str =
     "cipherstash_proxy_statements_session_duration_seconds";
 pub const STATEMENTS_EXECUTION_DURATION_SECONDS: &str =
     "cipherstash_proxy_statements_execution_duration_seconds";
+pub const SLOW_STATEMENTS_TOTAL: &str = "cipherstash_proxy_slow_statements_total";
 
 pub const ROWS_TOTAL: &str = "cipherstash_proxy_rows_total";
 pub const ROWS_ENCRYPTED_TOTAL: &str = "cipherstash_proxy_rows_encrypted_total";
@@ -115,6 +116,10 @@ pub fn start(host: String, port: u16) -> Result<(), Error> {
         STATEMENTS_EXECUTION_DURATION_SECONDS,
         Unit::Seconds,
         "Duration of time the proxied database spent executing SQL statements"
+    );
+    describe_counter!(
+        SLOW_STATEMENTS_TOTAL,
+        "Total number of statements exceeding slow statement threshold"
     );
 
     describe_counter!(ROWS_TOTAL, "Total number of rows returned to clients");

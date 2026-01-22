@@ -13,13 +13,14 @@ use super::{
 use crate::{
     config::TandemConfig,
     error::{EncryptError, Error},
-    log::CONTEXT,
-    prometheus::{STATEMENTS_EXECUTION_DURATION_SECONDS, STATEMENTS_SESSION_DURATION_SECONDS},
+    log::{CONTEXT, SLOW_STATEMENTS},
+    prometheus::{STATEMENTS_EXECUTION_DURATION_SECONDS, STATEMENTS_SESSION_DURATION_SECONDS, SLOW_STATEMENTS_TOTAL},
     proxy::{EncryptConfig, EncryptionService, ReloadCommand, ReloadSender},
 };
 use cipherstash_client::IdentifiedBy;
 use eql_mapper::{Schema, TableResolver};
-use metrics::histogram;
+use metrics::{counter, histogram};
+use serde_json::json;
 use sqltk::parser::ast::{Expr, Ident, ObjectName, ObjectNamePart, Set, Value, ValueWithSpan};
 use std::{
     collections::{HashMap, VecDeque},
@@ -166,7 +167,62 @@ where
         debug!(target: CONTEXT, client_id = self.client_id, msg = "Session Metrics finished");
 
         if let Some(session) = self.get_session_metrics() {
-            histogram!(STATEMENTS_SESSION_DURATION_SECONDS).record(session.duration());
+            let duration = session.duration();
+            let metadata = &session.metadata;
+
+            // Get labels for metrics
+            let statement_type = metadata.statement_type
+                .map(|t| t.as_label())
+                .unwrap_or("unknown");
+            let protocol = metadata.protocol
+                .map(|p| p.as_label())
+                .unwrap_or("unknown");
+            let mapped = if metadata.encrypted { "true" } else { "false" };
+            let multi_statement = if metadata.multi_statement { "true" } else { "false" };
+
+            // Record with labels
+            histogram!(
+                STATEMENTS_SESSION_DURATION_SECONDS,
+                "statement_type" => statement_type,
+                "protocol" => protocol,
+                "mapped" => mapped,
+                "multi_statement" => multi_statement
+            ).record(duration);
+
+            // Log slow statements when enabled
+            if self.config.slow_statements_enabled() && duration > self.config.slow_statement_min_duration() {
+                let timing = &session.phase_timing;
+
+                // Increment slow statements counter
+                counter!(SLOW_STATEMENTS_TOTAL).increment(1);
+
+                let breakdown = json!({
+                    "parse_ms": timing.parse_duration.map(|d| d.as_millis()),
+                    "encrypt_ms": timing.encrypt_duration.map(|d| d.as_millis()),
+                    "server_write_ms": timing.server_write_duration.map(|d| d.as_millis()),
+                    "server_wait_ms": timing.server_wait_duration.map(|d| d.as_millis()),
+                    "server_response_ms": timing.server_response_duration.map(|d| d.as_millis()),
+                    "client_write_ms": timing.client_write_duration.map(|d| d.as_millis()),
+                    "decrypt_ms": timing.decrypt_duration.map(|d| d.as_millis()),
+                });
+
+                warn!(
+                    target: SLOW_STATEMENTS,
+                    client_id = self.client_id,
+                    duration_ms = duration.as_millis() as u64,
+                    statement_type = statement_type,
+                    protocol = protocol,
+                    encrypted = metadata.encrypted,
+                    multi_statement = metadata.multi_statement,
+                    encrypted_values_count = metadata.encrypted_values_count,
+                    param_bytes = metadata.param_bytes,
+                    query_fingerprint = ?metadata.query_fingerprint,
+                    keyset_id = ?self.keyset_identifier(),
+                    mapping_disabled = self.mapping_disabled(),
+                    breakdown = %breakdown,
+                    msg = "Slow statement detected"
+                );
+            }
         }
 
         let _ = self
@@ -198,7 +254,27 @@ where
         debug!(target: CONTEXT, client_id = self.client_id, msg = "Execute complete");
 
         if let Some(execute) = self.get_execute() {
-            histogram!(STATEMENTS_EXECUTION_DURATION_SECONDS).record(execute.duration());
+            // Get labels from current session metadata
+            let (statement_type, protocol, mapped, multi_statement) = if let Some(session) = self.get_session_metrics() {
+                let metadata = &session.metadata;
+                (
+                    metadata.statement_type.map(|t| t.as_label()).unwrap_or("unknown"),
+                    metadata.protocol.map(|p| p.as_label()).unwrap_or("unknown"),
+                    if metadata.encrypted { "true" } else { "false" },
+                    if metadata.multi_statement { "true" } else { "false" },
+                )
+            } else {
+                ("unknown", "unknown", "false", "false")
+            };
+
+            histogram!(
+                STATEMENTS_EXECUTION_DURATION_SECONDS,
+                "statement_type" => statement_type,
+                "protocol" => protocol,
+                "mapped" => mapped,
+                "multi_statement" => multi_statement
+            ).record(execute.duration());
+
             if execute.name.is_unnamed() {
                 self.close_portal(&execute.name);
             }
