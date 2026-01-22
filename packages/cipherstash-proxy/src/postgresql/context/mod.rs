@@ -88,12 +88,16 @@ impl ExecuteContext {
 #[derive(Clone, Debug)]
 pub struct SessionMetricsContext {
     start: Instant,
+    pub phase_timing: PhaseTiming,
+    pub metadata: StatementMetadata,
 }
 
 impl SessionMetricsContext {
     fn new() -> SessionMetricsContext {
         SessionMetricsContext {
             start: Instant::now(),
+            phase_timing: PhaseTiming::new(),
+            metadata: StatementMetadata::new(),
         }
     }
 
