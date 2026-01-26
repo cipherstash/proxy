@@ -105,9 +105,7 @@ mod tests {
         let db_client = connect_with_tls(db_port).await;
 
         // Insert the raw ciphertext directly, casting from text to eql_v2_encrypted
-        let sql = format!(
-            "INSERT INTO encrypted (id, {column}) VALUES ($1, $2::eql_v2_encrypted)"
-        );
+        let sql = format!("INSERT INTO encrypted (id, {column}) VALUES ($1, $2::eql_v2_encrypted)");
         db_client
             .execute(&sql, &[&id, &ciphertext])
             .await
@@ -147,8 +145,7 @@ mod tests {
         let path = fixtures_path();
         fs::create_dir_all(&path).expect("Failed to create fixtures directory");
 
-        let content =
-            serde_json::to_string_pretty(fixtures).expect("Failed to serialize fixtures");
+        let content = serde_json::to_string_pretty(fixtures).expect("Failed to serialize fixtures");
         fs::write(path.join("fixtures.json"), content).expect("Failed to write fixtures file");
     }
 
@@ -497,8 +494,7 @@ mod tests {
             let rows = proxy_client.query(sql, &[&id]).await.unwrap();
             let decrypted: Value = rows[0].get(0);
             assert_eq!(
-                decrypted,
-                fixture.plaintext["string"],
+                decrypted, fixture.plaintext["string"],
                 "Failed to access 'string' field on legacy jsonb"
             );
 
@@ -507,8 +503,7 @@ mod tests {
             let rows = proxy_client.query(sql, &[&id]).await.unwrap();
             let decrypted: Value = rows[0].get(0);
             assert_eq!(
-                decrypted,
-                fixture.plaintext["number"],
+                decrypted, fixture.plaintext["number"],
                 "Failed to access 'number' field on legacy jsonb"
             );
 
@@ -517,8 +512,7 @@ mod tests {
             let rows = proxy_client.query(sql, &[&id]).await.unwrap();
             let decrypted: Value = rows[0].get(0);
             assert_eq!(
-                decrypted,
-                fixture.plaintext["nested"],
+                decrypted, fixture.plaintext["nested"],
                 "Failed to access 'nested' field on legacy jsonb"
             );
         }
@@ -550,8 +544,7 @@ mod tests {
             let rows = proxy_client.query(sql, &[&id]).await.unwrap();
             let decrypted: Value = rows[0].get(0);
             assert_eq!(
-                decrypted,
-                fixture.plaintext["array_number"],
+                decrypted, fixture.plaintext["array_number"],
                 "Failed to access 'array_number' field on legacy jsonb"
             );
         }
