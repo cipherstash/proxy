@@ -156,13 +156,13 @@ pub trait EncryptionService: Send + Sync {
         keyset_id: Option<KeysetIdentifier>,
         plaintexts: Vec<Option<Plaintext>>,
         columns: &[Option<Column>],
-    ) -> Result<Vec<Option<crate::EqlEncrypted>>, Error>;
+    ) -> Result<Vec<Option<crate::EqlCiphertext>>, Error>;
 
     /// Decrypt values retrieved from the database
     async fn decrypt(
         &self,
         keyset_id: Option<KeysetIdentifier>,
-        ciphertexts: Vec<Option<crate::EqlEncrypted>>,
+        ciphertexts: Vec<Option<crate::EqlCiphertext>>,
     ) -> Result<Vec<Option<Plaintext>>, Error>;
 }
 

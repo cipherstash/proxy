@@ -25,7 +25,7 @@ use crate::prometheus::{
     STATEMENTS_PASSTHROUGH_TOTAL, STATEMENTS_UNMAPPABLE_TOTAL,
 };
 use crate::proxy::EncryptionService;
-use crate::EqlEncrypted;
+use crate::EqlCiphertext;
 use bytes::BytesMut;
 use cipherstash_client::encryption::Plaintext;
 use eql_mapper::{self, EqlMapperError, EqlTerm, TypeCheckedStatement};
@@ -370,6 +370,7 @@ where
     /// - `Ok(None)` - No transformation needed, forward original query
     /// - `Err(error)` - Processing failed, error should be sent to client
     async fn query_handler(&mut self, bytes: &BytesMut) -> Result<Option<BytesMut>, Error> {
+        let handler_start = Instant::now();
         self.context.start_session();
 
         let mut query = Query::try_from(bytes)?;
@@ -478,15 +479,32 @@ where
             query.rewrite(transformed_statement.to_string());
 
             let bytes = BytesMut::try_from(query)?;
+            let handler_duration = handler_start.elapsed();
             debug!(
                 target: MAPPER,
                 client_id = self.context.client_id,
                 msg = "Rewrite Query",
                 transformed_statement = transformed_statement.to_string(),
+                duration_ms = handler_duration.as_millis(),
                 bytes = ?bytes,
             );
+            if handler_duration.as_millis() > 100 {
+                warn!(
+                    client_id = self.context.client_id,
+                    msg = "Slow query handler processing",
+                    duration_ms = handler_duration.as_millis(),
+                );
+            }
             Ok(Some(bytes))
         } else {
+            let handler_duration = handler_start.elapsed();
+            if handler_duration.as_millis() > 50 {
+                debug!(
+                    client_id = self.context.client_id,
+                    msg = "Query handler processing time",
+                    duration_ms = handler_duration.as_millis(),
+                );
+            }
             Ok(None)
         }
     }
@@ -512,12 +530,12 @@ where
     /// # Returns
     ///
     /// Vector of encrypted values corresponding to each literal, with `None` for
-    /// literals that don't require encryption and `Some(EqlEncrypted)` for encrypted values.
+    /// literals that don't require encryption and `Some(EqlCiphertext)` for encrypted values.
     async fn encrypt_literals(
         &mut self,
         typed_statement: &TypeCheckedStatement<'_>,
         literal_columns: &Vec<Option<Column>>,
-    ) -> Result<Vec<Option<EqlEncrypted>>, Error> {
+    ) -> Result<Vec<Option<EqlCiphertext>>, Error> {
         let literal_values = typed_statement.literal_values();
         if literal_values.is_empty() {
             debug!(target: MAPPER,
@@ -562,7 +580,7 @@ where
     async fn transform_statement(
         &mut self,
         typed_statement: &TypeCheckedStatement<'_>,
-        encrypted_literals: &Vec<Option<EqlEncrypted>>,
+        encrypted_literals: &Vec<Option<EqlCiphertext>>,
     ) -> Result<Option<ast::Statement>, Error> {
         // Convert literals to ast Expr
         let mut encrypted_expressions = vec![];
@@ -920,7 +938,7 @@ where
         &mut self,
         bind: &Bind,
         statement: &Statement,
-    ) -> Result<Vec<Option<crate::EqlEncrypted>>, Error> {
+    ) -> Result<Vec<Option<crate::EqlCiphertext>>, Error> {
         let plaintexts =
             bind.to_plaintext(&statement.param_columns, &statement.postgres_param_types)?;
 

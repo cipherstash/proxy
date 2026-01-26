@@ -510,7 +510,7 @@ where
         &self,
         plaintexts: Vec<Option<cipherstash_client::encryption::Plaintext>>,
         columns: &[Option<Column>],
-    ) -> Result<Vec<Option<crate::EqlEncrypted>>, Error> {
+    ) -> Result<Vec<Option<crate::EqlCiphertext>>, Error> {
         let keyset_id = self.keyset_identifier();
 
         self.encryption
@@ -520,7 +520,7 @@ where
 
     pub async fn decrypt(
         &self,
-        ciphertexts: Vec<Option<crate::EqlEncrypted>>,
+        ciphertexts: Vec<Option<crate::EqlCiphertext>>,
     ) -> Result<Vec<Option<cipherstash_client::encryption::Plaintext>>, Error> {
         let keyset_id = self.keyset_identifier();
         self.encryption.decrypt(keyset_id, ciphertexts).await
@@ -684,14 +684,14 @@ mod tests {
             _keyset_id: Option<KeysetIdentifier>,
             _plaintexts: Vec<Option<cipherstash_client::encryption::Plaintext>>,
             _columns: &[Option<Column>],
-        ) -> Result<Vec<Option<crate::EqlEncrypted>>, Error> {
+        ) -> Result<Vec<Option<crate::EqlCiphertext>>, Error> {
             Ok(vec![])
         }
 
         async fn decrypt(
             &self,
             _keyset_id: Option<KeysetIdentifier>,
-            _ciphertexts: Vec<Option<crate::EqlEncrypted>>,
+            _ciphertexts: Vec<Option<crate::EqlCiphertext>>,
         ) -> Result<Vec<Option<cipherstash_client::encryption::Plaintext>>, Error> {
             Ok(vec![])
         }

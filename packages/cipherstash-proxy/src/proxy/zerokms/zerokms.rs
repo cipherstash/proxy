@@ -7,11 +7,15 @@ use crate::{
     proxy::EncryptionService,
 };
 use cipherstash_client::{
-    encryption::{Plaintext, ReferencedPendingPipeline},
-    eql::{self, decrypt_eql, encrypt_eql, EqlEncryptionSpec},
+    encryption::Plaintext,
+    eql::{
+        decrypt_eql, encrypt_eql, EqlCiphertext, EqlDecryptOpts, EqlEncryptOpts, EqlOperation,
+        PreparedPlaintext,
+    },
 };
 use metrics::counter;
 use moka::future::Cache;
+use std::borrow::Cow;
 use std::{sync::Arc, time::Duration};
 use tracing::{debug, info, warn};
 use uuid::Uuid;
@@ -132,7 +136,7 @@ impl EncryptionService for ZeroKms {
         keyset_id: Option<KeysetIdentifier>,
         plaintexts: Vec<Option<Plaintext>>,
         columns: &[Option<Column>],
-    ) -> Result<Vec<Option<eql::EqlEncrypted>>, Error> {
+    ) -> Result<Vec<Option<EqlCiphertext>>, Error> {
         debug!(target: ENCRYPT, msg="Encrypt", ?keyset_id, default_keyset_id = ?self.default_keyset_id);
 
         // A keyset is required if no default keyset has been configured
@@ -140,25 +144,59 @@ impl EncryptionService for ZeroKms {
             return Err(EncryptError::MissingKeysetIdentifier.into());
         }
 
-        let cipher = self.init_cipher(keyset_id).await?;
-        let pipeline = ReferencedPendingPipeline::new(cipher.clone());
+        let cipher = self.init_cipher(keyset_id.clone()).await?;
 
-        let encryption_specs: Vec<Option<EqlEncryptionSpec>> = columns
-            .iter()
-            .map(|col| {
-                col.as_ref().map(|col| {
-                    if col.is_encryptable() {
-                        EqlEncryptionSpec::Full(col.identifier.clone(), col.config.clone())
+        // Collect indices and prepared plaintexts for non-None values
+        let mut indices: Vec<usize> = Vec::new();
+        let mut prepared_plaintexts: Vec<PreparedPlaintext> = Vec::new();
+
+        for (idx, (plaintext_opt, col_opt)) in plaintexts.iter().zip(columns.iter()).enumerate() {
+            if let (Some(plaintext), Some(col)) = (plaintext_opt, col_opt) {
+                let eql_op = if col.is_encryptable() {
+                    EqlOperation::Store
+                } else {
+                    // For search-only, we need to get the index type from the column config
+                    // and use Query operation
+                    if let Some(index) = col.config.indexes.first() {
+                        EqlOperation::Query(
+                            &index.index_type,
+                            cipherstash_client::encryption::QueryOp::Default,
+                        )
                     } else {
-                        EqlEncryptionSpec::SearchOnly(col.identifier.clone(), col.config.clone())
+                        EqlOperation::Store
                     }
-                })
-            })
-            .collect();
+                };
 
-        Ok(encrypt_eql(cipher, pipeline, plaintexts, &encryption_specs)
+                let prepared = PreparedPlaintext::new(
+                    Cow::Owned(col.config.clone()),
+                    col.identifier.clone(),
+                    plaintext.clone(),
+                    eql_op,
+                );
+                indices.push(idx);
+                prepared_plaintexts.push(prepared);
+            }
+        }
+
+        // If no plaintexts to encrypt, return all None
+        if prepared_plaintexts.is_empty() {
+            return Ok(vec![None; plaintexts.len()]);
+        }
+
+        // Use default opts since cipher is already initialized with the correct keyset
+        let opts = EqlEncryptOpts::default();
+
+        let encrypted = encrypt_eql(cipher, prepared_plaintexts, &opts)
             .await
-            .map_err(EncryptError::from)?)
+            .map_err(EncryptError::from)?;
+
+        // Reconstruct the result vector with None values in the right places
+        let mut result: Vec<Option<EqlCiphertext>> = vec![None; plaintexts.len()];
+        for (idx, ciphertext) in indices.into_iter().zip(encrypted.into_iter()) {
+            result[idx] = Some(ciphertext);
+        }
+
+        Ok(result)
     }
 
     ///
@@ -169,7 +207,7 @@ impl EncryptionService for ZeroKms {
     async fn decrypt(
         &self,
         keyset_id: Option<KeysetIdentifier>,
-        ciphertexts: Vec<Option<eql::EqlEncrypted>>,
+        ciphertexts: Vec<Option<EqlCiphertext>>,
     ) -> Result<Vec<Option<Plaintext>>, Error> {
         debug!(target: ENCRYPT, msg="Decrypt", ?keyset_id, default_keyset_id = ?self.default_keyset_id);
 
@@ -180,10 +218,35 @@ impl EncryptionService for ZeroKms {
 
         let cipher = self.init_cipher(keyset_id.clone()).await?;
 
-        Ok(
-            decrypt_eql(keyset_id.map(|keyset_id| keyset_id.0), cipher, ciphertexts)
-                .await
-                .map_err(EncryptError::from)?,
-        )
+        // Collect indices and ciphertexts for non-None values
+        let mut indices: Vec<usize> = Vec::new();
+        let mut ciphertexts_to_decrypt: Vec<EqlCiphertext> = Vec::new();
+
+        for (idx, ct_opt) in ciphertexts.iter().enumerate() {
+            if let Some(ct) = ct_opt {
+                indices.push(idx);
+                ciphertexts_to_decrypt.push(ct.clone());
+            }
+        }
+
+        // If no ciphertexts to decrypt, return all None
+        if ciphertexts_to_decrypt.is_empty() {
+            return Ok(vec![None; ciphertexts.len()]);
+        }
+
+        // Use default opts since cipher is already initialized with the correct keyset
+        let opts = EqlDecryptOpts::default();
+
+        let decrypted = decrypt_eql(cipher, ciphertexts_to_decrypt, &opts)
+            .await
+            .map_err(EncryptError::from)?;
+
+        // Reconstruct the result vector with None values in the right places
+        let mut result: Vec<Option<Plaintext>> = vec![None; ciphertexts.len()];
+        for (idx, plaintext) in indices.into_iter().zip(decrypted.into_iter()) {
+            result[idx] = Some(plaintext);
+        }
+
+        Ok(result)
     }
 }
