@@ -7,12 +7,13 @@ use crate::{
     proxy::EncryptionService,
 };
 use cipherstash_client::{
-    encryption::Plaintext,
+    encryption::{Plaintext, QueryOp},
     eql::{
         decrypt_eql, encrypt_eql, EqlCiphertext, EqlDecryptOpts, EqlEncryptOpts, EqlOperation,
         PreparedPlaintext,
     },
 };
+use eql_mapper::EqlTermVariant;
 use metrics::counter;
 use moka::future::Cache;
 use std::borrow::Cow;
@@ -152,18 +153,36 @@ impl EncryptionService for ZeroKms {
 
         for (idx, (plaintext_opt, col_opt)) in plaintexts.iter().zip(columns.iter()).enumerate() {
             if let (Some(plaintext), Some(col)) = (plaintext_opt, col_opt) {
-                let eql_op = if col.is_encryptable() {
-                    EqlOperation::Store
-                } else {
-                    // For search-only, we need to get the index type from the column config
-                    // and use Query operation
-                    if let Some(index) = col.config.indexes.first() {
-                        EqlOperation::Query(
-                            &index.index_type,
-                            cipherstash_client::encryption::QueryOp::Default,
-                        )
-                    } else {
-                        EqlOperation::Store
+                // Determine the EQL operation based on the term variant
+                let eql_op = match col.eql_term {
+                    // Full and Partial terms store encrypted data with all indexes
+                    EqlTermVariant::Full | EqlTermVariant::Partial => EqlOperation::Store,
+
+                    // JsonPath generates a selector term for SteVec queries
+                    EqlTermVariant::JsonPath => {
+                        if let Some(index) = col.config.indexes.first() {
+                            EqlOperation::Query(&index.index_type, QueryOp::SteVecSelector)
+                        } else {
+                            EqlOperation::Store
+                        }
+                    }
+
+                    // JsonAccessor generates a selector term for SteVec field access (-> operator)
+                    EqlTermVariant::JsonAccessor => {
+                        if let Some(index) = col.config.indexes.first() {
+                            EqlOperation::Query(&index.index_type, QueryOp::SteVecSelector)
+                        } else {
+                            EqlOperation::Store
+                        }
+                    }
+
+                    // Tokenized generates match index terms for LIKE/ILIKE
+                    EqlTermVariant::Tokenized => {
+                        if let Some(index) = col.config.indexes.first() {
+                            EqlOperation::Query(&index.index_type, QueryOp::Default)
+                        } else {
+                            EqlOperation::Store
+                        }
                     }
                 };
 
@@ -186,9 +205,11 @@ impl EncryptionService for ZeroKms {
         // Use default opts since cipher is already initialized with the correct keyset
         let opts = EqlEncryptOpts::default();
 
+        debug!(target: ENCRYPT, msg="Calling encrypt_eql", count = prepared_plaintexts.len());
         let encrypted = encrypt_eql(cipher, prepared_plaintexts, &opts)
             .await
             .map_err(EncryptError::from)?;
+        debug!(target: ENCRYPT, msg="encrypt_eql completed", count = encrypted.len());
 
         // Reconstruct the result vector with None values in the right places
         let mut result: Vec<Option<EqlCiphertext>> = vec![None; plaintexts.len()];
@@ -237,9 +258,11 @@ impl EncryptionService for ZeroKms {
         // Use default opts since cipher is already initialized with the correct keyset
         let opts = EqlDecryptOpts::default();
 
+        debug!(target: ENCRYPT, msg="Calling decrypt_eql", count = ciphertexts_to_decrypt.len());
         let decrypted = decrypt_eql(cipher, ciphertexts_to_decrypt, &opts)
             .await
             .map_err(EncryptError::from)?;
+        debug!(target: ENCRYPT, msg="decrypt_eql completed", count = decrypted.len());
 
         // Reconstruct the result vector with None values in the right places
         let mut result: Vec<Option<Plaintext>> = vec![None; ciphertexts.len()];

@@ -255,7 +255,8 @@ where
                                 msg = "Bind Error",
                                 err = err.to_string()
                             );
-                            return Err(err);
+                            self.send_error_response(err)?;
+                            return Ok(());
                         }
                     },
                 }
