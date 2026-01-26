@@ -208,7 +208,7 @@ mod tests {
         );
 
         // Float
-        let float_value: f64 = 3.14159;
+        let float_value: f64 = std::f64::consts::PI;
         fixtures.push(
             capture_encrypted_ciphertext(
                 "encrypted_float8",
