@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1769423133144,
+  "lastUpdate": 1769470293918,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -17567,6 +17567,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 22.887827,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "toby@cipherstash.com",
+            "name": "Toby Hede",
+            "username": "tobyhede"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "e12a527f7a49d052455c08a729d1516c6e323b5c",
+          "message": "Merge pull request #349 from cipherstash/feat/release-task\n\nfeat: add mise release task for GitHub releases",
+          "timestamp": "2026-01-27T10:27:14+11:00",
+          "tree_id": "e09fc1f69100caa6ab7aafeefd56403f14d45c23",
+          "url": "https://github.com/cipherstash/proxy/commit/e12a527f7a49d052455c08a729d1516c6e323b5c"
+        },
+        "date": 1769470292565,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 22.014224,
             "unit": "Number"
           }
         ]
