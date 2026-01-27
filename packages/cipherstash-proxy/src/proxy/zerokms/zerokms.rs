@@ -178,7 +178,9 @@ impl EncryptionService for ZeroKms {
                         .indexes
                         .iter()
                         .find(|i| matches!(i.index_type, IndexType::SteVec { .. }))
-                        .map(|index| EqlOperation::Query(&index.index_type, QueryOp::SteVecSelector))
+                        .map(|index| {
+                            EqlOperation::Query(&index.index_type, QueryOp::SteVecSelector)
+                        })
                         .unwrap_or(EqlOperation::Store),
                 };
 
