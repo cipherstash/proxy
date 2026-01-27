@@ -172,13 +172,13 @@ impl EncryptionService for ZeroKms {
                         })
                         .unwrap_or(EqlOperation::Store),
 
-                    // JsonAccessor generates a term for SteVec field access (-> operator)
+                    // JsonAccessor generates a selector for SteVec field access (-> operator)
                     EqlTermVariant::JsonAccessor => col
                         .config
                         .indexes
                         .iter()
                         .find(|i| matches!(i.index_type, IndexType::SteVec { .. }))
-                        .map(|index| EqlOperation::Query(&index.index_type, QueryOp::SteVecTerm))
+                        .map(|index| EqlOperation::Query(&index.index_type, QueryOp::SteVecSelector))
                         .unwrap_or(EqlOperation::Store),
                 };
 
