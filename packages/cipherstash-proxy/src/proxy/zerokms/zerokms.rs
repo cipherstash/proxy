@@ -12,6 +12,7 @@ use cipherstash_client::{
         decrypt_eql, encrypt_eql, EqlCiphertext, EqlDecryptOpts, EqlEncryptOpts, EqlOperation,
         PreparedPlaintext,
     },
+    schema::column::IndexType,
 };
 use eql_mapper::EqlTermVariant;
 use metrics::counter;
@@ -155,35 +156,30 @@ impl EncryptionService for ZeroKms {
             if let (Some(plaintext), Some(col)) = (plaintext_opt, col_opt) {
                 // Determine the EQL operation based on the term variant
                 let eql_op = match col.eql_term {
-                    // Full and Partial terms store encrypted data with all indexes
-                    EqlTermVariant::Full | EqlTermVariant::Partial => EqlOperation::Store,
+                    // Full, Partial, and Tokenized terms store encrypted data with all indexes
+                    EqlTermVariant::Full | EqlTermVariant::Partial | EqlTermVariant::Tokenized => {
+                        EqlOperation::Store
+                    }
 
-                    // JsonPath generates a selector term for SteVec queries
-                    EqlTermVariant::JsonPath => {
-                        if let Some(index) = col.config.indexes.first() {
+                    // JsonPath generates a selector term for SteVec queries (e.g., jsonb_path_query)
+                    EqlTermVariant::JsonPath => col
+                        .config
+                        .indexes
+                        .iter()
+                        .find(|i| matches!(i.index_type, IndexType::SteVec { .. }))
+                        .map(|index| {
                             EqlOperation::Query(&index.index_type, QueryOp::SteVecSelector)
-                        } else {
-                            EqlOperation::Store
-                        }
-                    }
+                        })
+                        .unwrap_or(EqlOperation::Store),
 
-                    // JsonAccessor generates a selector term for SteVec field access (-> operator)
-                    EqlTermVariant::JsonAccessor => {
-                        if let Some(index) = col.config.indexes.first() {
-                            EqlOperation::Query(&index.index_type, QueryOp::SteVecSelector)
-                        } else {
-                            EqlOperation::Store
-                        }
-                    }
-
-                    // Tokenized generates match index terms for LIKE/ILIKE
-                    EqlTermVariant::Tokenized => {
-                        if let Some(index) = col.config.indexes.first() {
-                            EqlOperation::Query(&index.index_type, QueryOp::Default)
-                        } else {
-                            EqlOperation::Store
-                        }
-                    }
+                    // JsonAccessor generates a term for SteVec field access (-> operator)
+                    EqlTermVariant::JsonAccessor => col
+                        .config
+                        .indexes
+                        .iter()
+                        .find(|i| matches!(i.index_type, IndexType::SteVec { .. }))
+                        .map(|index| EqlOperation::Query(&index.index_type, QueryOp::SteVecTerm))
+                        .unwrap_or(EqlOperation::Store),
                 };
 
                 let prepared = PreparedPlaintext::new(
