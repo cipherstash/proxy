@@ -5,7 +5,7 @@ use crate::{
     postgresql::Column,
 };
 use bytes::{Buf, BufMut, BytesMut};
-use cipherstash_client::eql::EqlEncrypted;
+use cipherstash_client::eql::EqlCiphertext;
 use std::io::Cursor;
 use tracing::{debug, error};
 
@@ -23,7 +23,7 @@ impl DataRow {
     pub fn as_ciphertext(
         &mut self,
         column_configuration: &Vec<Option<Column>>,
-    ) -> Vec<Option<EqlEncrypted>> {
+    ) -> Vec<Option<EqlCiphertext>> {
         let mut result = vec![];
         for (data_column, column_config) in self.columns.iter_mut().zip(column_configuration) {
             let encrypted = column_config
@@ -175,7 +175,7 @@ impl TryFrom<DataColumn> for BytesMut {
     }
 }
 
-impl TryFrom<&mut DataColumn> for EqlEncrypted {
+impl TryFrom<&mut DataColumn> for EqlCiphertext {
     type Error = Error;
 
     fn try_from(col: &mut DataColumn) -> Result<Self, Error> {

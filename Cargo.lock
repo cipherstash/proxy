@@ -779,9 +779,9 @@ dependencies = [
 
 [[package]]
 name = "cipherstash-client"
-version = "0.31.1"
+version = "0.32.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9f3b35ded7920c83e600ee0044102183af5cd307aff4d7070061e6a2d403e956"
+checksum = "bd8ee3770269505a5673c268ed54421e46091374c9ad1a9163d558f704d98cf1"
 dependencies = [
  "aes-gcm-siv",
  "anyhow",
@@ -839,9 +839,9 @@ dependencies = [
 
 [[package]]
 name = "cipherstash-config"
-version = "0.2.4"
+version = "0.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d277d6f9749f5bf7ae43d317c4860c73893ce4ae2ffbba5b2d5d02d078ebf4cc"
+checksum = "9bd94f7826557fa825161118a5b06d1ed60a66185e4f4d5766b9e5ae39669177"
 dependencies = [
  "serde",
  "thiserror 1.0.69",
@@ -1181,9 +1181,9 @@ dependencies = [
 
 [[package]]
 name = "cts-common"
-version = "0.4.0"
+version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6ab8098fcbe24a615b214857f9a06c48932438c060ecc32ea9e41481adea9faf"
+checksum = "b1b0b629ef1939040e09625a0c70045650149f5b6be7bd0935fc0c4a50129b54"
 dependencies = [
  "arrayvec",
  "axum",
@@ -5612,9 +5612,9 @@ dependencies = [
 
 [[package]]
 name = "zerokms-protocol"
-version = "0.8.0"
+version = "0.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d250d0934f3b3071c9d7a91dd26b389c45d5b1f8653aa6660e4efee09bf3063a"
+checksum = "f7fe46b7fa449d5d14d9941ca83e3e92faa44e5f15ffb4b8fcc71158571279b7"
 dependencies = [
  "async-trait",
  "base64",

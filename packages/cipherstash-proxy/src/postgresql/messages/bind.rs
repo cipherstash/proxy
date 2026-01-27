@@ -8,7 +8,7 @@ use crate::postgresql::protocol::BytesMutReadString;
 use crate::{SIZE_I16, SIZE_I32};
 use bytes::{Buf, BufMut, BytesMut};
 use cipherstash_client::encryption::Plaintext;
-use cipherstash_client::eql::{self, EqlEncrypted};
+use cipherstash_client::eql::EqlCiphertext;
 use postgres_types::Type;
 use std::fmt::{self, Display, Formatter};
 use std::io::Cursor;
@@ -81,7 +81,7 @@ impl Bind {
         Ok(plaintexts)
     }
 
-    pub fn rewrite(&mut self, encrypted: Vec<Option<EqlEncrypted>>) -> Result<(), Error> {
+    pub fn rewrite(&mut self, encrypted: Vec<Option<EqlCiphertext>>) -> Result<(), Error> {
         for (idx, ct) in encrypted.iter().enumerate() {
             if let Some(ct) = ct {
                 let json = serde_json::to_value(ct)?;
@@ -192,29 +192,6 @@ impl Display for BindParam {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         let s = String::from_utf8_lossy(&self.bytes).to_string();
         write!(f, "{s}")
-    }
-}
-
-impl From<&BindParam> for Option<eql::Plaintext> {
-    fn from(bind_param: &BindParam) -> Self {
-        if !bind_param.maybe_plaintext() {
-            return None;
-        }
-
-        let bytes = bind_param.json_bytes();
-        let s = std::str::from_utf8(bytes).unwrap_or("");
-
-        match serde_json::from_str(s) {
-            Ok(pt) => Some(pt),
-            Err(e) => {
-                debug!(
-                    param = s,
-                    error = e.to_string(),
-                    "Failed to parse parameter"
-                );
-                None
-            }
-        }
     }
 }
 

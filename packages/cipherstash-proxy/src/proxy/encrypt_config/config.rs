@@ -183,7 +183,10 @@ impl Column {
         }
 
         if let Some(SteVecIndexOpts { prefix }) = self.indexes.ste_vec_index {
-            config = config.add_index(Index::new(IndexType::SteVec { prefix }))
+            config = config.add_index(Index::new(IndexType::SteVec {
+                prefix,
+                term_filters: vec![],
+            }))
         }
 
         config
@@ -463,7 +466,8 @@ mod tests {
         assert_eq!(
             column.indexes[0].index_type,
             IndexType::SteVec {
-                prefix: "event-data".into()
+                prefix: "event-data".into(),
+                term_filters: vec![],
             },
         );
     }

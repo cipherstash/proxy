@@ -174,8 +174,39 @@ run = """
 cargo nextest run --no-fail-fast --nocapture -p cipherstash-proxy-integration
 """
 
+[tasks."test:integration:setup:tls"]
+description = "Setup for TLS integration tests: preflight, postgres, proxy"
+run = """
+set -e
+
+echo
+echo '###############################################'
+echo '# Preflight'
+echo '###############################################'
+echo
+
+mise run test:integration:preflight
+
+echo
+echo '###############################################'
+echo '# Setup'
+echo '###############################################'
+echo
+
+mise --env tls run postgres:setup
+
+echo
+echo '###############################################'
+echo '# Start Proxy'
+echo '###############################################'
+echo
+
+mise --env tls run proxy:up proxy-tls --extra-args "--detach --wait"
+mise --env tls run test:wait_for_postgres_to_quack --port 6432 --max-retries 20 --tls
+"""
+
 [tasks."test:integration:without_multitenant"]
-description = "Runs integration tests excluding multitenant"
+description = "Runs integration tests excluding multitenant (run test:integration:setup:tls first for standalone use)"
 run = """
 cargo nextest run --no-fail-fast --nocapture -E 'package(cipherstash-proxy-integration) and not test(multitenant)'
 """

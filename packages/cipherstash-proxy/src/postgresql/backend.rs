@@ -20,7 +20,7 @@ use crate::prometheus::{
 };
 use crate::proxy::EncryptionService;
 use bytes::BytesMut;
-use cipherstash_client::eql::EqlEncrypted;
+use cipherstash_client::eql::EqlCiphertext;
 use metrics::{counter, histogram};
 use std::time::Instant;
 use tokio::io::AsyncRead;
@@ -149,15 +149,27 @@ where
     /// Returns `Ok(())` on successful message processing, or an `Error` if a fatal
     /// error occurs that should terminate the connection.
     pub async fn rewrite(&mut self) -> Result<(), Error> {
+        let read_start = Instant::now();
         let (code, mut bytes) = protocol::read_message(
             &mut self.server_reader,
             self.context.client_id,
             self.context.connection_timeout(),
         )
         .await?;
+        let read_duration = read_start.elapsed();
 
         let sent: u64 = bytes.len() as u64;
         counter!(SERVER_BYTES_RECEIVED_TOTAL).increment(sent);
+
+        // Log slow database responses (>100ms is concerning)
+        if read_duration.as_millis() > 100 {
+            warn!(
+                client_id = self.context.client_id,
+                msg = "Slow database response",
+                duration_ms = read_duration.as_millis(),
+                message_code = ?code,
+            );
+        }
 
         if self.context.is_passthrough() {
             debug!(target: DEVELOPMENT,
@@ -430,7 +442,7 @@ where
         let projection_columns = portal.projection_columns();
 
         // Each row is converted into Vec<Option<CipherText>>
-        let ciphertexts: Vec<Option<EqlEncrypted>> = rows
+        let ciphertexts: Vec<Option<EqlCiphertext>> = rows
             .iter_mut()
             .flat_map(|row| row.as_ciphertext(projection_columns))
             .collect::<Vec<_>>();
@@ -492,7 +504,7 @@ where
     fn check_column_config(
         &mut self,
         projection_columns: &[Option<Column>],
-        ciphertexts: &[Option<EqlEncrypted>],
+        ciphertexts: &[Option<EqlCiphertext>],
     ) -> Result<(), Error> {
         for (col, ct) in projection_columns.iter().zip(ciphertexts) {
             match (col, ct) {
