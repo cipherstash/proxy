@@ -7,6 +7,7 @@ edition = "2021"
 async-trait = "0.1"
 aws-lc-rs = "1.13.3"
 bigdecimal = { version = "0.4.6", features = ["serde-json"] }
+blake3 = "1"
 arc-swap = "1.7.1"
 bytes = { version = "1.9", default-features = false }
 chrono = { version = "0.4.39", features = ["clock"] }

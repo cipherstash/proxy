@@ -3,7 +3,7 @@ use sqltk::parser::ast::Statement;
 
 /// Statement type classification for metrics labels
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "UPPERCASE")]
+#[serde(rename_all = "lowercase")]
 pub enum StatementType {
     Insert,
     Update,
@@ -102,17 +102,21 @@ impl StatementMetadata {
 
     /// Set query fingerprint from SQL statement.
     ///
-    /// Fingerprints are session-local identifiers for correlating log entries within a single
-    /// proxy instance. They are NOT stable across Rust versions or deployments and should not
-    /// be used for cross-session correlation or persistent storage.
+    /// Uses Blake3 keyed hashing with a per-instance random key to prevent dictionary attacks
+    /// that could reveal SQL statements from fingerprints in logs/metrics.
+    ///
+    /// Fingerprints are instance-local identifiers for correlating log entries within a single
+    /// proxy instance. They are NOT stable across restarts or deployments and should not
+    /// be used for cross-instance correlation or persistent storage.
     pub fn set_query_fingerprint(&mut self, sql: &str) {
-        use std::collections::hash_map::DefaultHasher;
-        use std::hash::{Hash, Hasher};
+        use std::sync::LazyLock;
 
-        let mut hasher = DefaultHasher::new();
-        sql.hash(&mut hasher);
-        let hash = hasher.finish();
-        self.query_fingerprint = Some(format!("{:08x}", hash & 0xFFFFFFFF));
+        // Random key generated once per proxy instance - makes fingerprints
+        // resistant to dictionary attacks while remaining consistent within instance
+        static FINGERPRINT_KEY: LazyLock<[u8; 32]> = LazyLock::new(rand::random);
+
+        let hash = blake3::keyed_hash(&FINGERPRINT_KEY, sql.as_bytes());
+        self.query_fingerprint = Some(hex::encode(&hash.as_bytes()[..4]));
     }
 
     pub fn set_multi_statement(&mut self, value: bool) {

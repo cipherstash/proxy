@@ -27,4 +27,4 @@ tokio-postgres-rustls = "0.13.0"
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 uuid = { version = "1.11.0", features = ["serde", "v4"] }
-reqwest = { version = "0.12", features = ["rustls-tls"] }
+reqwest = { version = "0.13", features = ["rustls"] }
