@@ -3,9 +3,15 @@ on:
   pull_request:
     branches:
       - main
+    paths-ignore:
+      - '.github/workflows/release.yml' # ignore unrelated workflow
+      - '.github/workflows/test.yml' # ignore unrelated workflow
   push:
     branches:
       - main
+    paths-ignore:
+      - '.github/workflows/release.yml' # ignore unrelated workflow
+      - '.github/workflows/test.yml' # ignore unrelated workflow
   workflow_dispatch:
 
 env:
