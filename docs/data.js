@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1769661961291,
+  "lastUpdate": 1769664107827,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -17929,6 +17929,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 22.55041,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "lindsay@cipherstash.com",
+            "name": "Lindsay Holmwood",
+            "username": "auxesis"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "a000bff329f6207d9a4dabc4a976bdad579f66a6",
+          "message": "Merge pull request #356 from cipherstash/fix/set-timeout-on-gh-actions-jobs\n\nfix(ci): error if GitHub Actions jobs run > 30m",
+          "timestamp": "2026-01-29T16:19:05+11:00",
+          "tree_id": "3d79b833b7b69d19c83ec2e160db1455bb00b28f",
+          "url": "https://github.com/cipherstash/proxy/commit/a000bff329f6207d9a4dabc4a976bdad579f66a6"
+        },
+        "date": 1769664106502,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 22.597794,
             "unit": "Number"
           }
         ]
