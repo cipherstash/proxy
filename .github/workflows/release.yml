@@ -17,8 +17,8 @@ jobs:
       fail-fast: false
       matrix:
         build:
-          - { os: blacksmith-16vcpu-ubuntu-2204, docker_platform: linux/amd64, rust_target: "x86_64-unknown-linux-gnu" }
-          - { os: blacksmith-16vcpu-ubuntu-2404-arm, docker_platform: linux/arm64, rust_target: "aarch64-unknown-linux-gnu" }
+          - { os: blacksmith-16vcpu-ubuntu-2404, docker_platform: linux/amd64, rust_target: "x86_64-unknown-linux-gnu" }
+          - { os: linux-arm64-public,            docker_platform: linux/arm64, rust_target: "aarch64-unknown-linux-gnu" }
     env:
       CS_ZEROKMS_HOST: https://us-east-1.aws.zerokms.cipherstashmanaged.net
       CS_CTS_HOST: https://ap-southeast-2.aws.cts.cipherstashmanaged.net
