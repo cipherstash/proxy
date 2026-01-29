@@ -100,7 +100,8 @@ mod tests {
         );
 
         // Extract the value to ensure it's at least 1
-        let slow_statements_line = body.lines()
+        let slow_statements_line = body
+            .lines()
             .find(|l| l.starts_with("cipherstash_proxy_slow_statements_total"))
             .expect("Slow statements counter line should exist");
         let slow_statements_count: u64 = slow_statements_line
@@ -109,8 +110,12 @@ mod tests {
             .expect("Should have a value")
             .parse()
             .expect("Should be a valid number");
-        
-        assert!(slow_statements_count >= 1, "Slow statements count should be at least 1, found {}", slow_statements_count);
+
+        assert!(
+            slow_statements_count >= 1,
+            "Slow statements count should be at least 1, found {}",
+            slow_statements_count
+        );
 
         // Verify that duration histograms also reflect the slow query
         // We check for _count as it works for both histograms and summaries
