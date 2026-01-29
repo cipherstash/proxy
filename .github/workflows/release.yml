@@ -3,6 +3,11 @@ on:
   push: # publish to `main` tag on Docker Hub on merge to main: https://hub.docker.com/layers/cipherstash/proxy/main
     branches:
       - main
+  pull_request: # run the release workflow when changes are made to it in PRs
+    branches:
+      - main
+    paths:
+      - '.github/workflows/release.yml'
   release: # for cutting a numbered release (e.g. v2.1.9)
     types: [published]
   workflow_dispatch: # for running the workflow on an arbitrary branch or commit
@@ -107,6 +112,8 @@ jobs:
     timeout-minutes: 30
     needs:
       - build
+    env:
+      publish: ${{contains(fromJSON('["push", "release"]'), github.event_name)}}
     steps:
       - uses: actions/checkout@v4
 
@@ -151,15 +158,19 @@ jobs:
 
       - name: Create manifest list and push
         working-directory: ${{ runner.temp }}/digests
+        env:
+          DRY_RUN: ${{case(fromJSON(env.publish),' ','--dry-run')}} # run the `docker buildx` command with --dry-run if we're not publishing a release
         run: |
-          docker buildx imagetools create $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
+          docker buildx imagetools create ${{ env.DRY_RUN }} $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
             $(printf '${{ env.REGISTRY_IMAGE }}@sha256:%s ' *)
 
       - name: Inspect image
+        if: ${{ fromJSON(env.publish) }}
         run: |
           docker buildx imagetools inspect ${{ env.REGISTRY_IMAGE }}:${{ steps.meta.outputs.version }}
 
       - name: Notify Multitudes
+        if: ${{ fromJSON(env.publish) }}
         run: |
           curl --request POST \
             --fail-with-body \
