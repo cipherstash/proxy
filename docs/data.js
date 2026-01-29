@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1769667810088,
+  "lastUpdate": 1769671414429,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -18145,6 +18145,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 22.527756,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "lindsay@cipherstash.com",
+            "name": "Lindsay Holmwood",
+            "username": "auxesis"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "5321358d32def7996f5cd82e83f8f36598370ed9",
+          "message": "Merge pull request #358 from cipherstash/ci/ignore-unrelated-workflows\n\nci: ignore unrelated workflows, so we don't run extraneous builds",
+          "timestamp": "2026-01-29T18:20:41+11:00",
+          "tree_id": "a79c31f50be7d1bc82678b8b6744ab157e270a47",
+          "url": "https://github.com/cipherstash/proxy/commit/5321358d32def7996f5cd82e83f8f36598370ed9"
+        },
+        "date": 1769671413020,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 22.445528,
             "unit": "Number"
           }
         ]
