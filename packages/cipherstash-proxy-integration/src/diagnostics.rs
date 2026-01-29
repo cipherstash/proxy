@@ -77,4 +77,32 @@ mod tests {
             "Metrics should include multi_statement=false label"
         );
     }
+
+    #[tokio::test]
+    async fn slow_statement_metrics_and_logs() {
+        let client = connect_with_tls(PROXY).await;
+
+        clear().await;
+
+        // Execute a query that takes longer than the default 2s threshold
+        // We use pg_sleep(2.1) to ensure it's considered slow
+        client.query("SELECT pg_sleep(2.1)", &[]).await.unwrap();
+
+        // Fetch metrics with retry logic
+        let body =
+            fetch_metrics_with_retry(METRICS_FETCH_MAX_RETRIES, METRICS_FETCH_RETRY_DELAY_MS).await;
+
+        // Assert that the slow statements counter incremented
+        assert!(
+            body.contains("cipherstash_proxy_slow_statements_total 1"),
+            "Metrics should include slow statement counter incremented to 1. Found: {}",
+            body
+        );
+
+        // Verify that duration histograms also reflect the slow query
+        assert!(
+            body.contains("cipherstash_proxy_statements_session_duration_seconds_bucket"),
+            "Metrics should include session duration histogram"
+        );
+    }
 }

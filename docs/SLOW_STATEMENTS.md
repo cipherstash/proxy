@@ -10,7 +10,8 @@ Enable slow statement logging via environment variables:
 # Enable slow statement logging (required)
 CS_LOG__SLOW_STATEMENTS=true
 
-# Optional: Set minimum duration threshold (default: 2000ms)
+# Optional: Set minimum duration threshold
+# Default is 2000ms (2 seconds) - only set this if you want a different threshold
 CS_LOG__SLOW_STATEMENT_MIN_DURATION_MS=500
 
 # Optional: Set log level (default: warn when enabled)
@@ -45,6 +46,10 @@ When a statement exceeds the threshold, the proxy logs a detailed breakdown:
   }
 }
 ```
+
+### Query Fingerprints
+
+**Note:** Query fingerprints are ephemeral and instance-local. Each proxy instance generates a unique random key at startup used to compute `query_fingerprint` values. This means fingerprints will change when the proxy restarts and cannot be correlated across different proxy instances. This is intentional for security (prevents dictionary attacks on query patterns). Use fingerprints for correlation within a single proxy instance's runtime only.
 
 ## Prometheus Metrics
 

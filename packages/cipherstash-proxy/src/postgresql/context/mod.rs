@@ -444,7 +444,7 @@ where
             warn!(
                 target: CONTEXT,
                 client_id = self.client_id,
-                prepared_statement = ?name,
+                prepared_statement = %name.as_str(),
                 msg = "Session lookup failed for prepared statement, using latest session"
             );
         }
