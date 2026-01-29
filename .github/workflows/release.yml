@@ -120,7 +120,7 @@ jobs:
           CS_CLIENT_ACCESS_KEY: ${{ secrets.CS_VAULT_CLIENT_ACCESS_KEY }}
           CS_WORKSPACE_CRN: ${{ secrets.CS_VAULT_WORKSPACE_CRN }}
           CS_ZEROKMS_HOST: https://us-east-1.aws.zerokms.cipherstashmanaged.net
-          CS_CTS_HOST: https://us-east-1.aws.cts.cipherstashmanaged.net
+          CS_CTS_HOST: https://ap-southeast-2.aws.cts.cipherstashmanaged.net
 
       - name: Download digests
         uses: actions/download-artifact@v4
