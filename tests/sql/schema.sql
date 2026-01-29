@@ -33,6 +33,7 @@ CREATE TABLE encrypted (
     encrypted_float8 eql_v2_encrypted,
     encrypted_date eql_v2_encrypted,
     encrypted_jsonb eql_v2_encrypted,
+    encrypted_jsonb_filtered eql_v2_encrypted,
     PRIMARY KEY(id)
 );
 
@@ -157,6 +158,14 @@ SELECT eql_v2.add_search_config(
   '{"prefix": "encrypted/encrypted_jsonb"}'
 );
 
+SELECT eql_v2.add_search_config(
+  'encrypted',
+  'encrypted_jsonb_filtered',
+  'ste_vec',
+  'jsonb',
+  '{"prefix": "encrypted/encrypted_jsonb_filtered", "term_filters": [{"kind": "downcase"}]}'
+);
+
 SELECT eql_v2.add_encrypted_constraint('encrypted', 'encrypted_text');
 
 
@@ -177,6 +186,7 @@ CREATE TABLE encrypted_elixir (
     encrypted_float8 eql_v2_encrypted,
     encrypted_date eql_v2_encrypted,
     encrypted_jsonb eql_v2_encrypted,
+    encrypted_jsonb_filtered eql_v2_encrypted,
     PRIMARY KEY(id)
 );
 
@@ -299,6 +309,14 @@ SELECT eql_v2.add_search_config(
   'ste_vec',
   'jsonb',
   '{"prefix": "encrypted/encrypted_jsonb"}'
+);
+
+SELECT eql_v2.add_search_config(
+  'encrypted_elixir',
+  'encrypted_jsonb_filtered',
+  'ste_vec',
+  'jsonb',
+  '{"prefix": "encrypted/encrypted_jsonb_filtered", "term_filters": [{"kind": "downcase"}]}'
 );
 
 SELECT eql_v2.add_encrypted_constraint('encrypted_elixir', 'encrypted_text');
