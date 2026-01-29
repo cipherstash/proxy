@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1769664107827,
+  "lastUpdate": 1769665012621,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -17958,6 +17958,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 22.597794,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "6cd3dabe8baea1329075ef5c3fe04fa0008deb14",
+          "message": "ci: Run release jobs on Blacksmith",
+          "timestamp": "2026-01-29T05:19:09Z",
+          "url": "https://github.com/cipherstash/proxy/pull/357/commits/6cd3dabe8baea1329075ef5c3fe04fa0008deb14"
+        },
+        "date": 1769665011316,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 22.881571,
             "unit": "Number"
           }
         ]
