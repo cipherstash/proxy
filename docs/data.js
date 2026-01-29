@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1769665352411,
+  "lastUpdate": 1769666208960,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -18008,6 +18008,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 22.902199,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "lindsay@cipherstash.com",
+            "name": "Lindsay Holmwood",
+            "username": "auxesis"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "c9c810cb9299df971e50f02c43c87419d74ee4d5",
+          "message": "Merge pull request #357 from cipherstash/ci/run-all-jobs-on-blacksmith\n\nci: Run release jobs on Blacksmith",
+          "timestamp": "2026-01-29T16:54:04+11:00",
+          "tree_id": "e803294b1c1bd6bfe6620b19f1d327cf4dbc50bd",
+          "url": "https://github.com/cipherstash/proxy/commit/c9c810cb9299df971e50f02c43c87419d74ee4d5"
+        },
+        "date": 1769666204543,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 22.504536,
             "unit": "Number"
           }
         ]
