@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1769667283461,
+  "lastUpdate": 1769667810088,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -18116,6 +18116,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 22.572817,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "lindsay@cipherstash.com",
+            "name": "Lindsay Holmwood",
+            "username": "auxesis"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "997600f90a564a24859c7cfe94c809842b3c1d17",
+          "message": "Merge pull request #359 from cipherstash/fix/use-correct-cts-url\n\nfix(ci): use the correct URL for CTS",
+          "timestamp": "2026-01-29T17:20:49+11:00",
+          "tree_id": "329575582fbf693a1cf826fd10133927765ea112",
+          "url": "https://github.com/cipherstash/proxy/commit/997600f90a564a24859c7cfe94c809842b3c1d17"
+        },
+        "date": 1769667808767,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 22.527756,
             "unit": "Number"
           }
         ]
