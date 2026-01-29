@@ -1,11 +1,11 @@
 name: Release
 on:
-  push:
+  push: # publish to `main` tag on Docker Hub on merge to main: https://hub.docker.com/layers/cipherstash/proxy/main
     branches:
       - main
-  release:
+  release: # for cutting a numbered release (e.g. v2.1.9)
     types: [published]
-  workflow_dispatch:
+  workflow_dispatch: # for running the workflow on an arbitrary branch or commit
 
 env:
   REGISTRY_IMAGE: cipherstash/proxy
