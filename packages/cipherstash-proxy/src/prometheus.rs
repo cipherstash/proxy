@@ -26,6 +26,7 @@ pub const STATEMENTS_SESSION_DURATION_SECONDS: &str =
     "cipherstash_proxy_statements_session_duration_seconds";
 pub const STATEMENTS_EXECUTION_DURATION_SECONDS: &str =
     "cipherstash_proxy_statements_execution_duration_seconds";
+pub const SLOW_STATEMENTS_TOTAL: &str = "cipherstash_proxy_slow_statements_total";
 
 pub const ROWS_TOTAL: &str = "cipherstash_proxy_rows_total";
 pub const ROWS_ENCRYPTED_TOTAL: &str = "cipherstash_proxy_rows_encrypted_total";
@@ -39,6 +40,8 @@ pub const SERVER_BYTES_RECEIVED_TOTAL: &str = "cipherstash_proxy_server_bytes_re
 
 pub const KEYSET_CIPHER_INIT_TOTAL: &str = "cipherstash_proxy_keyset_cipher_init_total";
 pub const KEYSET_CIPHER_CACHE_HITS_TOTAL: &str = "cipherstash_proxy_keyset_cipher_cache_hits_total";
+pub const KEYSET_CIPHER_INIT_DURATION_SECONDS: &str =
+    "cipherstash_proxy_keyset_cipher_init_duration_seconds";
 
 pub fn start(host: String, port: u16) -> Result<(), Error> {
     let address = format!("{host}:{port}");
@@ -115,6 +118,10 @@ pub fn start(host: String, port: u16) -> Result<(), Error> {
         Unit::Seconds,
         "Duration of time the proxied database spent executing SQL statements"
     );
+    describe_counter!(
+        SLOW_STATEMENTS_TOTAL,
+        "Total number of statements exceeding slow statement threshold"
+    );
 
     describe_counter!(ROWS_TOTAL, "Total number of rows returned to clients");
     describe_counter!(
@@ -155,6 +162,11 @@ pub fn start(host: String, port: u16) -> Result<(), Error> {
     describe_counter!(
         KEYSET_CIPHER_CACHE_HITS_TOTAL,
         "Number of times a keyset-scoped cipher was found in the cache"
+    );
+    describe_histogram!(
+        KEYSET_CIPHER_INIT_DURATION_SECONDS,
+        Unit::Seconds,
+        "Duration of keyset-scoped cipher initialization (includes ZeroKMS network call)"
     );
 
     // Prometheus endpoint is empty on startup and looks like an error

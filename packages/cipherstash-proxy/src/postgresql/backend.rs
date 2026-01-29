@@ -157,6 +157,7 @@ where
         )
         .await?;
         let read_duration = read_start.elapsed();
+        self.context.record_execute_server_timing(read_duration);
 
         let sent: u64 = bytes.len() as u64;
         counter!(SERVER_BYTES_RECEIVED_TOTAL).increment(sent);
@@ -362,7 +363,11 @@ where
         let sent: u64 = bytes.len() as u64;
         counter!(CLIENTS_BYTES_SENT_TOTAL).increment(sent);
 
+        let start = Instant::now();
         self.client_sender.send(bytes)?;
+        let duration = start.elapsed();
+        self.context.add_client_write_duration_for_execute(duration);
+
         Ok(())
     }
 
@@ -463,7 +468,12 @@ where
             counter!(DECRYPTION_ERROR_TOTAL).increment(1);
         })?;
 
-        // Avoid the iter calculation if we can
+        let duration = Instant::now().duration_since(start);
+
+        // Always record for slow-statement diagnostics
+        self.context.add_decrypt_duration_for_execute(duration);
+
+        // Prometheus metrics remain gated
         if self.context.prometheus_enabled() {
             let decrypted_count =
                 plaintexts
@@ -472,8 +482,6 @@ where
 
             counter!(DECRYPTION_REQUESTS_TOTAL).increment(1);
             counter!(DECRYPTED_VALUES_TOTAL).increment(decrypted_count);
-
-            let duration = Instant::now().duration_since(start);
             histogram!(DECRYPTION_DURATION_SECONDS).record(duration);
         }
 

@@ -3,7 +3,10 @@ use crate::{
     error::{EncryptError, Error, ZeroKMSError},
     log::{ENCRYPT, PROXY},
     postgresql::{Column, KeysetIdentifier},
-    prometheus::{KEYSET_CIPHER_CACHE_HITS_TOTAL, KEYSET_CIPHER_INIT_TOTAL},
+    prometheus::{
+        KEYSET_CIPHER_CACHE_HITS_TOTAL, KEYSET_CIPHER_INIT_DURATION_SECONDS,
+        KEYSET_CIPHER_INIT_TOTAL,
+    },
     proxy::EncryptionService,
 };
 use cipherstash_client::{
@@ -15,10 +18,13 @@ use cipherstash_client::{
     schema::column::IndexType,
 };
 use eql_mapper::EqlTermVariant;
-use metrics::counter;
+use metrics::{counter, histogram};
 use moka::future::Cache;
-use std::borrow::Cow;
-use std::{sync::Arc, time::Duration};
+use std::{
+    borrow::Cow,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 use tracing::{debug, info, warn};
 use uuid::Uuid;
 
@@ -85,11 +91,17 @@ impl ZeroKms {
 
         let identified_by = keyset_id.as_ref().map(|id| id.0.clone());
 
+        // Time the cipher initialization (includes network call to ZeroKMS)
+        let start = Instant::now();
+
         match ScopedCipher::init(zerokms_client, identified_by).await {
             Ok(cipher) => {
+                let init_duration = start.elapsed();
+
                 let arc_cipher = Arc::new(cipher);
 
                 counter!(KEYSET_CIPHER_INIT_TOTAL).increment(1);
+                histogram!(KEYSET_CIPHER_INIT_DURATION_SECONDS).record(init_duration);
 
                 // Store in cache
                 self.cipher_cache
@@ -103,12 +115,23 @@ impl ZeroKms {
                 let memory_usage_bytes = self.cipher_cache.weighted_size();
 
                 info!(msg = "Connected to ZeroKMS");
-                debug!(target: PROXY, msg = "ScopedCipher cached", ?keyset_id, entry_count, memory_usage_bytes);
+                debug!(target: PROXY,
+                    msg = "ScopedCipher cached",
+                    ?keyset_id,
+                    entry_count,
+                    memory_usage_bytes,
+                    init_duration_ms = init_duration.as_millis()
+                );
 
                 Ok(arc_cipher)
             }
             Err(err) => {
-                debug!(target: PROXY, msg = "Error initializing ZeroKMS ScopedCipher", error = err.to_string());
+                let init_duration = start.elapsed();
+                debug!(target: PROXY,
+                    msg = "Error initializing ZeroKMS ScopedCipher",
+                    error = err.to_string(),
+                    init_duration_ms = init_duration.as_millis()
+                );
                 warn!(msg = "Error initializing ZeroKMS", error = err.to_string());
 
                 match err {

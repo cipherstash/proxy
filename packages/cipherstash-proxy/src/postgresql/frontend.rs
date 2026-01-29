@@ -1,4 +1,5 @@
-use super::context::{Context, Statement};
+use super::context::phase_timing::PhaseTimer;
+use super::context::{Context, SessionId, Statement};
 use super::error_handler::PostgreSqlErrorHandler;
 use super::messages::bind::Bind;
 use super::messages::describe::Describe;
@@ -12,6 +13,7 @@ use crate::connect::Sender;
 use crate::error::{EncryptError, Error, MappingError};
 use crate::log::{MAPPER, PROTOCOL};
 use crate::postgresql::context::column::Column;
+use crate::postgresql::context::statement_metadata::{ProtocolType, StatementType};
 use crate::postgresql::context::Portal;
 use crate::postgresql::data::literal_from_sql;
 use crate::postgresql::messages::close::Close;
@@ -267,9 +269,7 @@ where
                     ?code,
                 );
 
-                if self.context.schema_changed() {
-                    self.context.reload_schema().await;
-                }
+                self.context.reload_schema_if_changed().await;
 
                 if self.error_state.is_some() {
                     debug!(target: PROTOCOL,
@@ -300,7 +300,14 @@ where
         debug!(target: PROTOCOL, msg = "Write to server", ?bytes);
         let sent: u64 = bytes.len() as u64;
         counter!(SERVER_BYTES_SENT_TOTAL).increment(sent);
+
+        let start = Instant::now();
         self.server_writer.write_all(&bytes).await?;
+        let duration = start.elapsed();
+        if let Some(session_id) = self.context.latest_session_id() {
+            self.context.add_server_write_duration(session_id, duration);
+        }
+
         Ok(())
     }
 
@@ -323,10 +330,7 @@ where
         debug!(target: PROTOCOL, client_id = self.context.client_id, ?close);
         match close.target {
             Target::Portal => self.context.close_portal(&close.name),
-            Target::Statement => {
-                self.context.close_portal(&close.name);
-                self.context.close_statement(&close.name);
-            }
+            Target::Statement => self.context.close_statement_and_portal(&close.name),
         }
         Ok(())
     }
@@ -334,7 +338,8 @@ where
     async fn execute_handler(&mut self, bytes: &BytesMut) -> Result<(), Error> {
         let execute = Execute::try_from(bytes)?;
         debug!(target: PROTOCOL, client_id = self.context.client_id, ?execute);
-        self.context.set_execute(execute.portal.to_owned());
+        self.context
+            .set_execute_for_portal(execute.portal.to_owned());
         Ok(())
     }
 
@@ -372,7 +377,14 @@ where
     /// - `Err(error)` - Processing failed, error should be sent to client
     async fn query_handler(&mut self, bytes: &BytesMut) -> Result<Option<BytesMut>, Error> {
         let handler_start = Instant::now();
-        self.context.start_session();
+        let session_id = self.context.start_session();
+
+        // Set protocol type for diagnostics
+        self.context.update_statement_metadata(session_id, |m| {
+            m.protocol = Some(ProtocolType::Simple);
+        });
+
+        let parse_timer = PhaseTimer::start();
 
         let mut query = Query::try_from(bytes)?;
 
@@ -385,12 +397,12 @@ where
             statements = parsed_statements.len(),
         );
 
-        let mut portal = Portal::passthrough();
+        let mut portal = Portal::passthrough(Some(session_id));
         let mut encrypted = false;
+        let mut parse_duration_recorded = false;
 
-        for statement in parsed_statements {
-            if let Some(mapping_disabled) =
-                self.context.maybe_set_unsafe_disable_mapping(&statement)
+        for statement in &parsed_statements {
+            if let Some(mapping_disabled) = self.context.maybe_set_unsafe_disable_mapping(statement)
             {
                 warn!(
                     msg = "SET CIPHERSTASH.DISABLE_MAPPING = {mapping_disabled}",
@@ -405,16 +417,16 @@ where
                 continue;
             }
 
-            self.handle_set_keyset(&statement)?;
+            self.handle_set_keyset(statement)?;
 
-            self.check_for_schema_change(&statement);
+            self.check_for_schema_change(statement);
 
-            if !eql_mapper::requires_type_check(&statement) {
+            if !eql_mapper::requires_type_check(statement) {
                 counter!(STATEMENTS_PASSTHROUGH_TOTAL).increment(1);
                 continue;
             }
 
-            let typed_statement = match self.type_check(&statement) {
+            let typed_statement = match self.type_check(statement) {
                 Ok(ts) => ts,
                 Err(err) => {
                     if self.context.mapping_errors_enabled() {
@@ -433,8 +445,19 @@ where
                     );
 
                     if typed_statement.requires_transform() {
+                        // Record parse duration before encryption work starts
+                        if !parse_duration_recorded {
+                            self.context
+                                .record_parse_duration(session_id, parse_timer.elapsed());
+                            parse_duration_recorded = true;
+                        }
+
                         let encrypted_literals = self
-                            .encrypt_literals(&typed_statement, &statement.literal_columns)
+                            .encrypt_literals(
+                                session_id,
+                                &typed_statement,
+                                &statement.literal_columns,
+                            )
                             .await?;
 
                         if let Some(transformed_statement) = self
@@ -453,8 +476,11 @@ where
 
                     counter!(STATEMENTS_ENCRYPTED_TOTAL).increment(1);
 
-                    // Set Encrypted portal
-                    portal = Portal::encrypted(Arc::new(statement));
+                    // Set Encrypted portal and mark as mapped
+                    portal = Portal::encrypted(Arc::new(statement), Some(session_id));
+                    self.context.update_statement_metadata(session_id, |m| {
+                        m.encrypted = true;
+                    });
                 }
                 None => {
                     debug!(target: MAPPER,
@@ -462,13 +488,38 @@ where
                         msg = "Passthrough Statement"
                     );
                     counter!(STATEMENTS_PASSTHROUGH_TOTAL).increment(1);
-                    transformed_statements.push(statement);
+                    transformed_statements.push(statement.clone());
                 }
             };
         }
 
+        // Record parse/typecheck duration (if not already recorded before encryption)
+        if !parse_duration_recorded {
+            self.context
+                .record_parse_duration(session_id, parse_timer.elapsed());
+        }
+
+        // Set statement type based on parsed statements
+        let statement_type = if parsed_statements.len() == 1 {
+            parsed_statements
+                .first()
+                .map(StatementType::from_statement)
+                .unwrap_or(StatementType::Other)
+        } else {
+            StatementType::Other
+        };
+        self.context.update_statement_metadata(session_id, |m| {
+            m.statement_type = Some(statement_type);
+            m.set_multi_statement(parsed_statements.len() > 1);
+        });
+
+        // Set query fingerprint
+        self.context.update_statement_metadata(session_id, |m| {
+            m.set_query_fingerprint(&query.statement);
+        });
+
         self.context.add_portal(Name::unnamed(), portal);
-        self.context.set_execute(Name::unnamed());
+        self.context.set_execute(Name::unnamed(), Some(session_id));
 
         if encrypted {
             let transformed_statement = transformed_statements
@@ -534,6 +585,7 @@ where
     /// literals that don't require encryption and `Some(EqlCiphertext)` for encrypted values.
     async fn encrypt_literals(
         &mut self,
+        session_id: SessionId,
         typed_statement: &TypeCheckedStatement<'_>,
         literal_columns: &Vec<Option<Column>>,
     ) -> Result<Vec<Option<EqlCiphertext>>, Error> {
@@ -564,10 +616,20 @@ where
             ?encrypted
         );
 
-        counter!(ENCRYPTION_REQUESTS_TOTAL).increment(1);
-        counter!(ENCRYPTED_VALUES_TOTAL).increment(encrypted.len() as u64);
-
         let duration = Instant::now().duration_since(start);
+
+        // Add to phase timing diagnostics (accumulate)
+        self.context.add_encrypt_duration(session_id, duration);
+
+        // Update metadata with encrypted values count
+        let encrypted_count = encrypted.iter().filter(|e| e.is_some()).count();
+        self.context.update_statement_metadata(session_id, |m| {
+            m.encrypted = true;
+            m.set_encrypted_values_count(encrypted_count);
+        });
+
+        counter!(ENCRYPTION_REQUESTS_TOTAL).increment(1);
+        counter!(ENCRYPTED_VALUES_TOTAL).increment(encrypted_count as u64);
         histogram!(ENCRYPTION_DURATION_SECONDS).record(duration);
 
         Ok(encrypted)
@@ -657,9 +719,18 @@ where
     /// - `Ok(None)` - No transformation needed, forward original message
     /// - `Err(error)` - Processing failed, error should be sent to client
     async fn parse_handler(&mut self, bytes: &BytesMut) -> Result<Option<BytesMut>, Error> {
-        self.context.start_session();
+        let session_id = self.context.start_session();
+
+        // Set protocol type
+        self.context.update_statement_metadata(session_id, |m| {
+            m.protocol = Some(ProtocolType::Extended);
+        });
+
+        let parse_timer = PhaseTimer::start();
 
         let mut message = Parse::try_from(bytes)?;
+        self.context
+            .set_statement_session(message.name.to_owned(), session_id);
 
         debug!(
             target: PROTOCOL,
@@ -707,11 +778,18 @@ where
         // These override the underlying column type
         let param_types = message.param_types.clone();
 
+        let mut parse_duration_recorded = false;
+
         match self.to_encryptable_statement(&typed_statement, param_types)? {
             Some(statement) => {
                 if typed_statement.requires_transform() {
+                    // Record parse duration before encryption work starts
+                    self.context
+                        .record_parse_duration(session_id, parse_timer.elapsed());
+                    parse_duration_recorded = true;
+
                     let encrypted_literals = self
-                        .encrypt_literals(&typed_statement, &statement.literal_columns)
+                        .encrypt_literals(session_id, &typed_statement, &statement.literal_columns)
                         .await?;
 
                     if let Some(transformed_statement) = self
@@ -741,6 +819,18 @@ where
                 counter!(STATEMENTS_PASSTHROUGH_TOTAL).increment(1);
             }
         }
+
+        // Record parse duration (if not already recorded before encryption)
+        if !parse_duration_recorded {
+            self.context
+                .record_parse_duration(session_id, parse_timer.elapsed());
+        }
+
+        // Set statement type and fingerprint
+        self.context.update_statement_metadata(session_id, |m| {
+            m.statement_type = Some(StatementType::from_statement(&statement));
+            m.set_query_fingerprint(&message.statement);
+        });
 
         if message.requires_rewrite() {
             let bytes = BytesMut::try_from(message)?;
@@ -891,22 +981,34 @@ where
 
         let mut bind = Bind::try_from(bytes)?;
 
+        let session_id = self
+            .context
+            .get_statement_session_or_latest(&bind.prepared_statement);
+
+        // Track param bytes for diagnostics
+        let param_bytes: usize = bind.param_values.iter().map(|p| p.bytes.len()).sum();
+        self.context
+            .with_session(session_id, |m| m.metadata.set_param_bytes(param_bytes));
+
         debug!(target: PROTOCOL, client_id = self.context.client_id, bind = ?bind);
 
-        let mut portal = Portal::passthrough();
+        let mut portal = Portal::passthrough(session_id);
 
         if let Some(statement) = self.context.get_statement(&bind.prepared_statement) {
             debug!(target:MAPPER, client_id = self.context.client_id, ?statement);
 
             if statement.has_params() {
-                let encrypted = self.encrypt_params(&bind, &statement).await?;
+                let encrypted = self.encrypt_params(session_id, &bind, &statement).await?;
                 bind.rewrite(encrypted)?;
             }
             if statement.has_projection() {
                 portal = Portal::encrypted_with_format_codes(
                     statement,
                     bind.result_columns_format_codes.to_owned(),
+                    session_id,
                 );
+                self.context
+                    .with_session(session_id, |m| m.metadata.encrypted = true);
             }
         };
 
@@ -937,6 +1039,7 @@ where
     ///
     async fn encrypt_params(
         &mut self,
+        session_id: Option<SessionId>,
         bind: &Bind,
         statement: &Statement,
     ) -> Result<Vec<Option<crate::EqlCiphertext>>, Error> {
@@ -955,14 +1058,22 @@ where
                 counter!(ENCRYPTION_ERROR_TOTAL).increment(1);
             })?;
 
-        // Avoid the iter calculation if we can
+        let duration = Instant::now().duration_since(start);
+
+        // Record timing and metadata for this encryption operation
+        let encrypted_count = encrypted.iter().filter(|e| e.is_some()).count();
+        self.context.with_session(session_id, |m| {
+            // Add to phase timing diagnostics (accumulate)
+            m.phase_timing.add_encrypt(duration);
+            // Always update metadata for slow-statement logging
+            m.metadata.encrypted = true;
+            m.metadata.set_encrypted_values_count(encrypted_count);
+        });
+
+        // Prometheus metrics remain gated
         if self.context.prometheus_enabled() {
-            let encrypted_count = encrypted.iter().filter(|e| e.is_some()).count() as u64;
-
             counter!(ENCRYPTION_REQUESTS_TOTAL).increment(1);
-            counter!(ENCRYPTED_VALUES_TOTAL).increment(encrypted_count);
-
-            let duration = Instant::now().duration_since(start);
+            counter!(ENCRYPTED_VALUES_TOTAL).increment(encrypted_count as u64);
             histogram!(ENCRYPTION_DURATION_SECONDS).record(duration);
         }
 

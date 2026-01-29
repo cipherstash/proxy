@@ -70,6 +70,7 @@ services:
       - CS_LOG__PROTOCOL_LEVEL=${CS_LOG__PROTOCOL_LEVEL:-debug}
       - CS_LOG__MAPPER_LEVEL=${CS_LOG__MAPPER_LEVEL:-debug}
       - CS_LOG__CONTEXT_LEVEL=${CS_LOG__CONTEXT_LEVEL:-debug}
+      - CS_LOG__SLOW_STATEMENTS=${CS_LOG__SLOW_STATEMENTS:-true}
     networks:
       - postgres
     extra_hosts:
@@ -92,6 +93,7 @@ services:
     container_name: proxy-tls
     ports:
       - 6432:6432
+      - 9930:9930
     environment:
       - CS_DATABASE__NAME=${CS_DATABASE__NAME}
       - CS_DATABASE__USERNAME=${CS_DATABASE__USERNAME}
@@ -112,6 +114,7 @@ services:
       - CS_LOG__PROTOCOL_LEVEL=${CS_LOG__PROTOCOL_LEVEL:-debug}
       - CS_LOG__MAPPER_LEVEL=${CS_LOG__MAPPER_LEVEL:-debug}
       - CS_LOG__CONTEXT_LEVEL=${CS_LOG__CONTEXT_LEVEL:-debug}
+      - CS_LOG__SLOW_STATEMENTS=${CS_LOG__SLOW_STATEMENTS:-true}
     volumes:
       - ./tls/server.cert:/etc/cipherstash-proxy/server.cert
       - ./tls/server.key:/etc/cipherstash-proxy/server.key

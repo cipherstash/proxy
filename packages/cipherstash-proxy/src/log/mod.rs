@@ -16,7 +16,7 @@ use tracing_subscriber::{
 // All targets are now defined in the targets module using the define_log_targets! macro.
 pub use targets::{
     AUTHENTICATION, CONFIG, CONTEXT, DECRYPT, DEVELOPMENT, ENCODING, ENCRYPT, ENCRYPT_CONFIG,
-    KEYSET, MAPPER, MIGRATE, PROTOCOL, PROXY, SCHEMA,
+    KEYSET, MAPPER, MIGRATE, PROTOCOL, PROXY, SCHEMA, SLOW_STATEMENTS,
 };
 
 static INIT: Once = Once::new();
@@ -112,6 +112,8 @@ mod tests {
             output: LogConfig::default_log_output(),
             ansi_enabled: LogConfig::default_ansi_enabled(),
             level: LogLevel::Info,
+            slow_statements: false,
+            slow_statement_min_duration_ms: LogConfig::default_slow_statement_min_duration_ms(),
             targets: LogTargetLevels {
                 development_level: LogLevel::Info,
                 authentication_level: LogLevel::Debug,
@@ -127,6 +129,7 @@ mod tests {
                 mapper_level: LogLevel::Info,
                 schema_level: LogLevel::Info,
                 config_level: LogLevel::Info,
+                slow_statements_level: LogLevel::Info,
             },
         };
 
