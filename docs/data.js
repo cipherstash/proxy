@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1769657947810,
+  "lastUpdate": 1769661961291,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -17904,6 +17904,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 22.770432,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "5d2c04e7bf3a868098c04cdab312f1d5554545c6",
+          "message": "fix(ci): error if GitHub Actions jobs run > 30m",
+          "timestamp": "2026-01-29T03:17:53Z",
+          "url": "https://github.com/cipherstash/proxy/pull/356/commits/5d2c04e7bf3a868098c04cdab312f1d5554545c6"
+        },
+        "date": 1769661959912,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 22.55041,
             "unit": "Number"
           }
         ]
