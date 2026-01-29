@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1769666208960,
+  "lastUpdate": 1769666785898,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -18037,6 +18037,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 22.504536,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "toby@cipherstash.com",
+            "name": "Toby Hede",
+            "username": "tobyhede"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "32df58eda1152cfe03d37dc4ce536e1ccbb3e03b",
+          "message": "Merge pull request #355 from cipherstash/jsonb-term-filters\n\nfeat(ste-vec): add term_filters support with integration tests",
+          "timestamp": "2026-01-29T17:03:32+11:00",
+          "tree_id": "4a4549a456510fbdb2309ce759fcc1ad35ebe835",
+          "url": "https://github.com/cipherstash/proxy/commit/32df58eda1152cfe03d37dc4ce536e1ccbb3e03b"
+        },
+        "date": 1769666784564,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 22.574542,
             "unit": "Number"
           }
         ]
