@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1769657689018,
+  "lastUpdate": 1769657947810,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -17879,6 +17879,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 22.411197,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "42a81ea46c2f14e8f5374a0b914a850b571d8ffa",
+          "message": "feat(ste-vec): add term_filters support with integration tests",
+          "timestamp": "2026-01-29T03:17:53Z",
+          "url": "https://github.com/cipherstash/proxy/pull/355/commits/42a81ea46c2f14e8f5374a0b914a850b571d8ffa"
+        },
+        "date": 1769657946492,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 22.770432,
             "unit": "Number"
           }
         ]
