@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1769666858019,
+  "lastUpdate": 1769667283461,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -18091,6 +18091,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 22.542484,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "19f1a5e8901490642aa8b17eae271f2aebaab8a8",
+          "message": "fix(ci): use the correct URL for CTS",
+          "timestamp": "2026-01-29T06:03:36Z",
+          "url": "https://github.com/cipherstash/proxy/pull/359/commits/19f1a5e8901490642aa8b17eae271f2aebaab8a8"
+        },
+        "date": 1769667282105,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 22.572817,
             "unit": "Number"
           }
         ]
