@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1769648994316,
+  "lastUpdate": 1769656835629,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -17825,6 +17825,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 22.163118,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "toby@cipherstash.com",
+            "name": "Toby Hede",
+            "username": "tobyhede"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "4edb6ac014f0b71a36f9b6a8e741700720b5d805",
+          "message": "Merge pull request #353 from cipherstash/performance-diagnostics\n\nPerformance diagnostics",
+          "timestamp": "2026-01-29T14:17:47+11:00",
+          "tree_id": "218d891450e03ff76b3d3baf2505d0f4d221ebfe",
+          "url": "https://github.com/cipherstash/proxy/commit/4edb6ac014f0b71a36f9b6a8e741700720b5d805"
+        },
+        "date": 1769656834323,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 22.250998,
             "unit": "Number"
           }
         ]
