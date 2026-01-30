@@ -1,11 +1,16 @@
 name: Release
 on:
-  push:
+  push: # publish to `main` tag on Docker Hub on merge to main: https://hub.docker.com/layers/cipherstash/proxy/main
     branches:
       - main
-  release:
+  pull_request: # run the release workflow when changes are made to it in PRs
+    branches:
+      - main
+    paths:
+      - '.github/workflows/release.yml'
+  release: # for cutting a numbered release (e.g. v2.1.9)
     types: [published]
-  workflow_dispatch:
+  workflow_dispatch: # for running the workflow on an arbitrary branch or commit
 
 env:
   REGISTRY_IMAGE: cipherstash/proxy
@@ -17,8 +22,8 @@ jobs:
       fail-fast: false
       matrix:
         build:
-          - { os: blacksmith-16vcpu-ubuntu-2204, docker_platform: linux/amd64, rust_target: "x86_64-unknown-linux-gnu" }
-          - { os: blacksmith-16vcpu-ubuntu-2404-arm, docker_platform: linux/arm64, rust_target: "aarch64-unknown-linux-gnu" }
+          - { os: blacksmith-16vcpu-ubuntu-2404, docker_platform: linux/amd64, rust_target: "x86_64-unknown-linux-gnu" }
+          - { os: linux-arm64-public,            docker_platform: linux/arm64, rust_target: "aarch64-unknown-linux-gnu" }
     env:
       CS_ZEROKMS_HOST: https://us-east-1.aws.zerokms.cipherstashmanaged.net
       CS_CTS_HOST: https://ap-southeast-2.aws.cts.cipherstashmanaged.net
@@ -45,8 +50,8 @@ jobs:
           cache-all-crates: true
       - uses: jdx/mise-action@v2
         with:
-          version: 2025.1.6 # [default: latest] mise version to install
-          install: true # [default: true] run `mise install`
+          version: 2026.1.6 # [default: latest] mise version to install
+          install: false # [default: true] run `mise install`
           cache: ${{ github.event_name != 'pull_request' }} # cache mise using GitHub's cache if running in a PR
       - run: |
           mise run build --platform ${{matrix.build.docker_platform}} --target ${{matrix.build.rust_target}}
@@ -107,6 +112,8 @@ jobs:
     timeout-minutes: 30
     needs:
       - build
+    env:
+      publish: ${{contains(fromJSON('["push", "release"]'), github.event_name)}}
     steps:
       - uses: actions/checkout@v4
 
@@ -151,15 +158,19 @@ jobs:
 
       - name: Create manifest list and push
         working-directory: ${{ runner.temp }}/digests
+        env:
+          DRY_RUN: ${{case(fromJSON(env.publish),' ','--dry-run')}} # run the `docker buildx` command with --dry-run if we're not publishing a release
         run: |
-          docker buildx imagetools create $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
+          docker buildx imagetools create ${{ env.DRY_RUN }} $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
             $(printf '${{ env.REGISTRY_IMAGE }}@sha256:%s ' *)
 
       - name: Inspect image
+        if: ${{ fromJSON(env.publish) }}
         run: |
           docker buildx imagetools inspect ${{ env.REGISTRY_IMAGE }}:${{ steps.meta.outputs.version }}
 
       - name: Notify Multitudes
+        if: ${{ fromJSON(env.publish) }}
         run: |
           curl --request POST \
             --fail-with-body \

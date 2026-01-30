@@ -38,7 +38,7 @@ CS_EQL_VERSION = "eql-2.2.1"
 
 
 [tools]
-"cargo:cargo-binstall" = "latest"
+"cargo:cargo-binstall" = "1.17.3"
 "cargo:cargo-nextest" = "latest"
 "cargo:cargo-sort" = "latest"
 
