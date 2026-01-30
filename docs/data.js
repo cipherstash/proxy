@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1769691450677,
+  "lastUpdate": 1769740887237,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -18349,6 +18349,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 22.28581,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "lindsay@cipherstash.com",
+            "name": "Lindsay Holmwood",
+            "username": "auxesis"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "e9d037c9aa20b31f2a349fd15b1e2256b97356cd",
+          "message": "Merge pull request #360 from cipherstash/ci/run-minimal-release-workflow-on-change\n\nci: run as much of release workflow as possible in PRs",
+          "timestamp": "2026-01-30T13:36:17+11:00",
+          "tree_id": "4a448a721036dba06ae597b105bdf82f98b48081",
+          "url": "https://github.com/cipherstash/proxy/commit/e9d037c9aa20b31f2a349fd15b1e2256b97356cd"
+        },
+        "date": 1769740885900,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 21.750837,
             "unit": "Number"
           }
         ]
