@@ -179,3 +179,52 @@ mise run build:docker --platform linux/arm64
 ```
 
 The build system supports cross-compilation from macOS to Linux using MaterializeInc/crosstools.
+
+## Release Documentation
+
+### Changelog
+
+The project maintains a `CHANGELOG.md` following [Keep a Changelog](https://keepachangelog.com/) format. When making changes that are user-facing or notable, update the changelog:
+
+1. Add entries under an `## [Unreleased]` section at the top
+2. Use appropriate subsections: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Security`
+3. Write entries from the user's perspective, not implementation details
+4. When a release is cut, rename `[Unreleased]` to the version number and date
+
+Example entry:
+```markdown
+## [Unreleased]
+
+### Added
+
+- **Feature name**: Brief description of what users can now do.
+
+### Fixed
+
+- Description of bug that was fixed.
+```
+
+### Release Announcements
+
+For significant releases, write an `ANNOUNCEMENT.md` for the GitHub Discussions page:
+
+1. **Title**: `CipherStash Proxy X.Y.Z Released - Brief Feature Summary`
+2. **Structure**:
+   - Opening paragraph summarizing the release
+   - H2 sections for each major feature with examples
+   - Configuration tables where applicable
+   - Code examples (SQL, JSON, PromQL as relevant)
+   - "Other Changes" section for minor updates
+   - "Upgrade" section linking to the releases page
+3. **Callouts**: Use GitHub callout syntax for important notes:
+   ```markdown
+   > [!NOTE]
+   > Helpful context or clarification.
+
+   > [!TIP]
+   > Recommended best practices.
+
+   > [!IMPORTANT]
+   > Critical information users must know.
+   ```
+4. After copying content to GitHub Discussions, delete `ANNOUNCEMENT.md` from the repo
