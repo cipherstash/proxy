@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1770160828870,
+  "lastUpdate": 1770161939760,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -18457,6 +18457,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 22.677554,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "dan@cipherstash.com",
+            "name": "Dan Draper",
+            "username": "coderdan"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "367c30f4640c0cd09600834c5aa595d76ccde24d",
+          "message": "Merge pull request #364 from cipherstash/chore/update-cs-client\n\nChore/update cs client",
+          "timestamp": "2026-02-04T10:36:12+11:00",
+          "tree_id": "b674ad9aba256fe91c5d642d592bcb69f8b3e6a2",
+          "url": "https://github.com/cipherstash/proxy/commit/367c30f4640c0cd09600834c5aa595d76ccde24d"
+        },
+        "date": 1770161938384,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 21.575838,
             "unit": "Number"
           }
         ]
