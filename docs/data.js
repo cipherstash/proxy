@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1769740887237,
+  "lastUpdate": 1770159278865,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -18378,6 +18378,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 21.750837,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "dan@cipherstash.com",
+            "name": "Dan Draper",
+            "username": "coderdan"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "0efa2c46c3068ced95c6d0e2d0f29aa89dc656bb",
+          "message": "Merge pull request #362 from cipherstash/docs/add-changelog\n\ndocs: add CHANGELOG.md and release documentation guidelines",
+          "timestamp": "2026-02-04T09:51:41+11:00",
+          "tree_id": "67007d63321c53fc2dc08981b6c45399b72e846a",
+          "url": "https://github.com/cipherstash/proxy/commit/0efa2c46c3068ced95c6d0e2d0f29aa89dc656bb"
+        },
+        "date": 1770159277377,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 21.773674,
             "unit": "Number"
           }
         ]
