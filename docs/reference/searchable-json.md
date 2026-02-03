@@ -33,7 +33,7 @@ This document outlines the supported JSONB functions and operators in CipherStas
 ```
 
 ### Encrypted column configuration
-```
+```sql
 SELECT eql_v2.add_search_config(
   'cipherstash',
   'encrypted_jsonb',
@@ -44,6 +44,65 @@ SELECT eql_v2.add_search_config(
 ```
 
 > **Note:** JSONB literals in INSERT and UPDATE statements work directly without explicit `::jsonb` type casts. The proxy infers the JSONB type from the target column and handles encryption transparently.
+
+#### Configuration options
+
+The `ste_vec` index configuration accepts the following options:
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `prefix` | string | (required) | Unique prefix for the index, typically `table/column` |
+| `term_filters` | array | `[]` | Filters applied to indexed terms (e.g., `[{"kind": "downcase"}]`) |
+| `array_index_mode` | string or object | `"all"` | Controls which array selectors are generated during indexing |
+
+#### Array index mode
+
+The `array_index_mode` option controls how arrays within JSONB documents are indexed. This affects which JSONPath selectors can be used to query array data.
+
+**Preset values:**
+
+- `"all"` (default) - Generates all selector types. This is backwards compatible with existing configurations.
+- `"none"` - Disables array indexing entirely.
+
+**Object form for fine-grained control:**
+
+```json
+{
+  "item": true,
+  "wildcard": true,
+  "position": false
+}
+```
+
+| Selector | JSONPath | Description |
+|----------|----------|-------------|
+| `item` | `[@]` | EQL array element selector for functions like `jsonb_array_length` |
+| `wildcard` | `[*]` | Standard JSONPath wildcard for iterating array elements |
+| `position` | `[0]`, `[1]`, etc. | Positional access to specific array indices |
+
+**Example with array_index_mode:**
+
+```sql
+SELECT eql_v2.add_search_config(
+  'cipherstash',
+  'encrypted_jsonb',
+  'ste_vec',
+  'jsonb',
+  '{"prefix": "cipherstash/encrypted_jsonb", "array_index_mode": "all"}'
+);
+```
+
+**Example disabling positional indexing:**
+
+```sql
+SELECT eql_v2.add_search_config(
+  'events',
+  'payload',
+  'ste_vec',
+  'jsonb',
+  '{"prefix": "events/payload", "array_index_mode": {"item": true, "wildcard": true, "position": false}}'
+);
+```
 
 ### JSON document structure
 
