@@ -2,7 +2,7 @@ use crate::error::{ConfigError, Error};
 use cipherstash_client::{
     eql::Identifier,
     schema::{
-        column::{Index, IndexType, TokenFilter, Tokenizer},
+        column::{ArrayIndexMode, Index, IndexType, TokenFilter, Tokenizer},
         ColumnConfig, ColumnType,
     },
 };
@@ -98,6 +98,12 @@ pub struct SteVecIndexOpts {
     prefix: String,
     #[serde(default)]
     term_filters: Vec<TokenFilter>,
+    #[serde(default = "default_array_index_mode")]
+    array_index_mode: ArrayIndexMode,
+}
+
+fn default_array_index_mode() -> ArrayIndexMode {
+    ArrayIndexMode::ALL
 }
 
 fn default_tokenizer() -> Tokenizer {
@@ -187,11 +193,13 @@ impl Column {
         if let Some(SteVecIndexOpts {
             prefix,
             term_filters,
+            array_index_mode,
         }) = self.indexes.ste_vec_index
         {
             config = config.add_index(Index::new(IndexType::SteVec {
                 prefix,
                 term_filters,
+                array_index_mode,
             }))
         }
 
@@ -474,6 +482,7 @@ mod tests {
             IndexType::SteVec {
                 prefix: "event-data".into(),
                 term_filters: vec![],
+                array_index_mode: ArrayIndexMode::ALL,
             },
         );
     }
