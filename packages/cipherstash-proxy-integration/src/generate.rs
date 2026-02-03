@@ -9,7 +9,7 @@ mod tests {
     };
     use cipherstash_client::{encryption::ScopedCipher, zerokms::EncryptedRecord};
     use cipherstash_client::{ConsoleConfig, CtsConfig, ZeroKMSConfig};
-    use cipherstash_config::column::{Index, IndexType};
+    use cipherstash_config::column::{ArrayIndexMode, Index, IndexType};
     use cipherstash_config::{ColumnConfig, ColumnType};
     use cipherstash_proxy::Identifier;
     use serde::{Deserialize, Serialize};
@@ -154,6 +154,8 @@ mod tests {
             .casts_as(ColumnType::JsonB)
             .add_index(Index::new(IndexType::SteVec {
                 prefix: prefix.to_owned(),
+                term_filters: vec![],
+                array_index_mode: ArrayIndexMode::ALL,
             }));
 
         // let mut value =
