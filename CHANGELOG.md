@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+
+- Updated `cipherstash-client` to v0.33.0. Adds `array_index_mode` configuration for STE-VEC indexes, which controls how arrays are indexed in JSONB data. Defaults to `all` (generating item, wildcard, and positional selectors), preserving backwards compatibility with existing configurations.
+
 ## [2.1.20] - 2026-01-29
 
 ### Added
