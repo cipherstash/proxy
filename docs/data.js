@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1770167948854,
+  "lastUpdate": 1770228460145,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -18540,6 +18540,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 21.602992,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "061146a585ca05ce2785a020d9ddb1ca519f9c27",
+          "message": "feat: add configurable logging thresholds for slow db response logging ",
+          "timestamp": "2026-02-04T01:16:35Z",
+          "url": "https://github.com/cipherstash/proxy/pull/367/commits/061146a585ca05ce2785a020d9ddb1ca519f9c27"
+        },
+        "date": 1770228458727,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 22.18983,
             "unit": "Number"
           }
         ]
