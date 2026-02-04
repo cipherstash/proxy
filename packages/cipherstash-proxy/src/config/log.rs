@@ -28,6 +28,10 @@ pub struct LogConfig {
     #[serde(default = "LogConfig::default_slow_statement_min_duration_ms")]
     pub slow_statement_min_duration_ms: u64,
 
+    /// Threshold in milliseconds for slow database response logging (default: 100ms)
+    #[serde(default = "LogConfig::default_slow_db_response_min_duration_ms")]
+    pub slow_db_response_min_duration_ms: u64,
+
     // All log target levels - automatically generated and flattened from LogTargetLevels
     // To add a new target: just add it to the define_log_targets! macro in log/targets.rs
     #[serde(flatten)]
@@ -100,6 +104,7 @@ impl LogConfig {
             level,
             slow_statements: false,
             slow_statement_min_duration_ms: Self::default_slow_statement_min_duration_ms(),
+            slow_db_response_min_duration_ms: Self::default_slow_db_response_min_duration_ms(),
             // All target levels automatically set using generated LogTargetLevels
             targets: LogTargetLevels::with_level(level),
         }
@@ -132,6 +137,16 @@ impl LogConfig {
     /// optimization. Operators can adjust via CS_LOG__SLOW_STATEMENT_MIN_DURATION_MS.
     pub const fn default_slow_statement_min_duration_ms() -> u64 {
         2000
+    }
+
+    /// Default threshold for slow database response logging (100 milliseconds).
+    ///
+    /// This value represents the threshold for logging individual slow messages from
+    /// the PostgreSQL server. Unlike slow statement logging which tracks total query
+    /// time, this tracks per-message read latency from the server connection.
+    /// Operators can adjust via CS_LOG__SLOW_DB_RESPONSE_MIN_DURATION_MS.
+    pub const fn default_slow_db_response_min_duration_ms() -> u64 {
+        100
     }
 }
 

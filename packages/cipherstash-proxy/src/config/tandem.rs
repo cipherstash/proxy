@@ -311,6 +311,11 @@ impl TandemConfig {
     pub fn slow_statement_min_duration(&self) -> std::time::Duration {
         std::time::Duration::from_millis(self.log.slow_statement_min_duration_ms)
     }
+
+    /// Returns the slow database response minimum duration as a Duration
+    pub fn slow_db_response_min_duration(&self) -> std::time::Duration {
+        std::time::Duration::from_millis(self.log.slow_db_response_min_duration_ms)
+    }
     #[cfg(test)]
     pub fn for_testing() -> Self {
         Self {

@@ -162,8 +162,8 @@ where
         let sent: u64 = bytes.len() as u64;
         counter!(SERVER_BYTES_RECEIVED_TOTAL).increment(sent);
 
-        // Log slow database responses (>100ms is concerning)
-        if read_duration.as_millis() > 100 {
+        // Log slow database responses (configurable threshold, default 100ms)
+        if read_duration > self.context.slow_db_response_min_duration() {
             warn!(
                 client_id = self.context.client_id,
                 msg = "Slow database response",
