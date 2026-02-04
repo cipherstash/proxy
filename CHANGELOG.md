@@ -4,7 +4,7 @@ All notable changes to CipherStash Proxy will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased]
+## [2.1.21] - 2026-02-04
 
 ### Changed
 
