@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1770163429321,
+  "lastUpdate": 1770167948854,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -18511,6 +18511,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 21.735936,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "dan@cipherstash.com",
+            "name": "Dan Draper",
+            "username": "coderdan"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "92623ce69cd14652ed2f9e43496d7ad0285d7ab5",
+          "message": "Merge pull request #365 from cipherstash/release/v2.1.21\n\nchore: bump version to 2.1.21",
+          "timestamp": "2026-02-04T12:16:31+11:00",
+          "tree_id": "52d0adcbdd1890be8c1d5d195360573e8bdbe2b2",
+          "url": "https://github.com/cipherstash/proxy/commit/92623ce69cd14652ed2f9e43496d7ad0285d7ab5"
+        },
+        "date": 1770167947481,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 21.602992,
             "unit": "Number"
           }
         ]
