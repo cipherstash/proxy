@@ -114,6 +114,7 @@ mod tests {
             level: LogLevel::Info,
             slow_statements: false,
             slow_statement_min_duration_ms: LogConfig::default_slow_statement_min_duration_ms(),
+            slow_db_response_min_duration_ms: LogConfig::default_slow_db_response_min_duration_ms(),
             targets: LogTargetLevels {
                 development_level: LogLevel::Info,
                 authentication_level: LogLevel::Debug,

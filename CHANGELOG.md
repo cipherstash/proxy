@@ -4,6 +4,12 @@ All notable changes to CipherStash Proxy will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [2.1.22] - 2026-02-05
+
+### Added
+
+- **Configurable slow database response threshold**: The "Slow database response" log threshold is now configurable via `CS_LOG__SLOW_DB_RESPONSE_MIN_DURATION_MS` (default: 100ms). This controls per-message logging for individual slow reads from the PostgreSQL server.
+
 ## [2.1.21] - 2026-02-04
 
 ### Changed
