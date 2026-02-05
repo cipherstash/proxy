@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1770228460145,
+  "lastUpdate": 1770324169009,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -18565,6 +18565,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 22.18983,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "cj@cipherstash.com",
+            "name": "CJ Brewer",
+            "username": "calvinbrewer"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "b293cf8b3ed9279da18ec4915551f96e90f2bd53",
+          "message": "Merge pull request #367 from cipherstash/slow-db-config\n\nfeat: add configurable logging thresholds for slow db response logging",
+          "timestamp": "2026-02-05T13:39:58-07:00",
+          "tree_id": "774a636dd25eedc7afd4eb07ac9ea42f0c07fa54",
+          "url": "https://github.com/cipherstash/proxy/commit/b293cf8b3ed9279da18ec4915551f96e90f2bd53"
+        },
+        "date": 1770324167575,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 22.353257,
             "unit": "Number"
           }
         ]
