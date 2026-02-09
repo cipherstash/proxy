@@ -22,6 +22,8 @@ permissions:
   deployments: write
   # contents permission to update benchmark contents in gh-pages branch
   contents: write
+  # pull-requests permission to comment on PRs with benchmark alerts
+  pull-requests: write
 
 jobs:
   benchmark:
@@ -49,11 +51,45 @@ jobs:
       - run: |
           mise run postgres:up --extra-args "--detach --wait"
 
-      - name: Run benchmark
+      - name: Run k6 benchmark
         working-directory: tests/benchmark
         env:
           RUST_BACKTRACE: "1"
-        run: mise run benchmark:continuous
+        run: mise run k6:benchmark:continuous
+
+      # Store k6 throughput benchmark (higher is better)
+      - name: Store k6 throughput benchmark
+        uses: benchmark-action/github-action-benchmark@v1
+        with:
+          name: 'k6 Throughput'
+          tool: 'customBiggerIsBetter'
+          output-file-path: tests/benchmark/results/k6-throughput.json
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          fail-on-alert: true
+          comment-on-alert: true
+          summary-always: true
+          auto-push: true
+          benchmark-data-dir-path: docs/k6/throughput
+
+      # Store k6 latency benchmark (lower is better)
+      - name: Store k6 latency benchmark
+        uses: benchmark-action/github-action-benchmark@v1
+        with:
+          name: 'k6 Latency'
+          tool: 'customSmallerIsBetter'
+          output-file-path: tests/benchmark/results/k6-latency.json
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          fail-on-alert: true
+          comment-on-alert: true
+          summary-always: true
+          auto-push: true
+          benchmark-data-dir-path: docs/k6/latency
+
+      - name: Run pgbench benchmark
+        working-directory: tests/benchmark
+        env:
+          RUST_BACKTRACE: "1"
+        run: mise run benchmark_service --target=proxy --transaction=encrypted --protocol=extended --port=6432 --time=30 --clients=10
 
       # Download previous benchmark result from cache (if exists)
       - name: Download previous benchmark data
@@ -63,20 +99,18 @@ jobs:
           key: ${{ runner.os }}-benchmark
 
       # Run `github-action-benchmark` action
-      - name: Store benchmark result
+      - name: Store pgbench benchmark result
         uses: benchmark-action/github-action-benchmark@v1
         with:
-          # What benchmark tool the output.txt came from
+          name: 'pgbench'
           tool: 'customBiggerIsBetter'
-          # Where the output from the benchmark tool is stored
           output-file-path: tests/benchmark/results/output.json
-
           github-token: ${{ secrets.GITHUB_TOKEN }}
           fail-on-alert: true
           comment-on-alert: true
           summary-always: true
           auto-push: true
-          benchmark-data-dir-path: docs
+          benchmark-data-dir-path: docs/pgbench
 
       - uses: ./.github/actions/send-slack-notification
         with:

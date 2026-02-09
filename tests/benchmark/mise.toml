@@ -172,3 +172,97 @@ run = """
 set -e
 echo docker compose up --build {{arg(name="service",default="pgcat")}} {{option(name="extra-args",default="")}} | bash
 """
+
+# ====================================================================================================
+# k6 Benchmarks
+# ====================================================================================================
+
+[tasks."k6:build"]
+description = "Build k6 Docker image with xk6-pgxpool"
+run = """
+docker build -t k6-pgxpool {{config_root}}/k6/
+"""
+
+# k6:run task is defined in tasks/k6_run.sh
+
+[tasks."k6:benchmark"]
+description = "Run full k6 benchmark suite"
+run = """
+set -e
+
+echo
+echo '###############################################'
+echo '# k6 Benchmark Suite'
+echo '###############################################'
+echo
+
+mise run k6:build
+
+# Ensure benchmark schema exists (creates benchmark_encrypted table for text-equality)
+mise run benchmark:setup
+
+# JSONB STE-VEC INSERT (primary)
+echo "Running jsonb-ste-vec-insert..."
+mise run k6_run --script=jsonb-ste-vec-insert --target=proxy --duration=30s
+
+# Text equality (baseline)
+echo "Running text-equality..."
+mise run k6_run --script=text-equality --target=proxy --duration=30s
+
+# JSONB large payload
+echo "Running jsonb-large-payload..."
+mise run k6_run --script=jsonb-large-payload --target=proxy --duration=30s
+
+echo
+echo "Results written to results/k6/"
+"""
+
+[tasks."k6:benchmark:continuous"]
+description = "Run k6 benchmarks for CI (jsonb-large-payload)"
+run = """
+set -e
+
+echo
+echo '###############################################'
+echo '# Preflight'
+echo '###############################################'
+echo
+
+mise run benchmark:clean
+
+# Ensure Postgres instances are running
+mise run test:integration:preflight
+
+echo
+echo '###############################################'
+echo '# Setup'
+echo '###############################################'
+echo
+
+# Ensure EQL is set up before we try and start Proxy
+mise --env tcp run postgres:setup
+
+mise run benchmark:setup
+
+mise --env tcp run proxy:up proxy --extra-args "--detach --wait"
+mise --env tcp run test:wait_for_postgres_to_quack --port 6432 --max-retries 20
+
+echo
+echo '###############################################'
+echo '# k6 Benchmarks'
+echo '###############################################'
+echo
+
+mise run k6:build
+
+echo
+echo '# jsonb-large-payload via proxy'
+echo
+
+mise run k6_run --script=jsonb-large-payload --target=proxy --vus=10 --duration=60s
+
+# Copy outputs for benchmark-action (separate files for throughput vs latency)
+mkdir -p results
+cp results/k6/jsonb-large-payload-throughput.json results/k6-throughput.json
+cp results/k6/jsonb-large-payload-latency.json results/k6-latency.json
+"""
