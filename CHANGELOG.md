@@ -4,6 +4,24 @@ All notable changes to CipherStash Proxy will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Changed
+
+- **Log target renamed**: `KEYSET` log target renamed to `ZERO_KMS`. The environment variable `CS_LOG__KEYSET_LEVEL` is now `CS_LOG__ZERO_KMS_LEVEL`.
+
+### Removed
+
+- **Log target removed**: `PROXY` log target and `CS_LOG__PROXY_LEVEL` environment variable have been removed.
+
+### Added
+
+- **Cipher cache miss metric**: New Prometheus counter `cipherstash_proxy_keyset_cipher_cache_miss_total` tracks cache misses requiring cipher initialization.
+- **Cipher init duration metric**: New Prometheus histogram `cipherstash_proxy_keyset_cipher_init_duration_seconds` tracks cipher initialization time including ZeroKMS network calls.
+- **Encrypt/decrypt timing**: Debug logs for `encrypt_eql` and `decrypt_eql` now include `duration_ms`.
+- **Cache eviction logging**: ScopedCipher cache eviction events are now logged under the `ZERO_KMS` target.
+- **Slow cipher init warning**: Cipher initialization taking longer than 1 second triggers a warning log.
+
 ## [2.1.22] - 2026-02-05
 
 ### Added
