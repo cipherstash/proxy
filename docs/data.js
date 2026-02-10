@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1770324169009,
+  "lastUpdate": 1770711634759,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -18594,6 +18594,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 22.353257,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "yujiyokoo@gmail.com",
+            "name": "Yuji Yokoo",
+            "username": "yujiyokoo"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "6367aac143978538844b59287190511be46eb46a",
+          "message": "Merge pull request #332 from cipherstash/fix/print-error-on-pstgres-not-running\n\nfix: show error from mise task when postgres is not running",
+          "timestamp": "2026-02-10T17:17:17+09:00",
+          "tree_id": "8dad1d10b204bcb9ac688c1de3e3038e9f0baa39",
+          "url": "https://github.com/cipherstash/proxy/commit/6367aac143978538844b59287190511be46eb46a"
+        },
+        "date": 1770711633388,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 22.366966,
             "unit": "Number"
           }
         ]
