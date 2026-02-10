@@ -16,8 +16,7 @@ use tracing_subscriber::{
 // All targets are now defined in the targets module using the define_log_targets! macro.
 pub use targets::{
     AUTHENTICATION, CONFIG, CONTEXT, DECRYPT, DEVELOPMENT, ENCODING, ENCRYPT, ENCRYPT_CONFIG,
-    KEYSET, MAPPER, MAPPER, MIGRATE, MIGRATE, PROTOCOL, PROTOCOL, PROXY, SCHEMA, SCHEMA,
-    SLOW_STATEMENTS, ZERO_KMS,
+    MAPPER, MIGRATE, PROTOCOL, SCHEMA, SLOW_STATEMENTS, ZERO_KMS,
 };
 
 static INIT: Once = Once::new();

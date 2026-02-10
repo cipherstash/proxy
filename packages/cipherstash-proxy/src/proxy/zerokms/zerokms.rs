@@ -4,9 +4,8 @@ use crate::{
     log::{ENCRYPT, ZERO_KMS},
     postgresql::{Column, KeysetIdentifier},
     prometheus::{
-        KEYSET_CIPHER_CACHE_HITS_TOTAL, KEYSET_CIPHER_CACHE_HITS_TOTAL,
-        KEYSET_CIPHER_CACHE_MISS_TOTAL, KEYSET_CIPHER_INIT_DURATION_SECONDS,
-        KEYSET_CIPHER_INIT_DURATION_SECONDS, KEYSET_CIPHER_INIT_TOTAL, KEYSET_CIPHER_INIT_TOTAL,
+        KEYSET_CIPHER_CACHE_HITS_TOTAL, KEYSET_CIPHER_CACHE_MISS_TOTAL,
+        KEYSET_CIPHER_INIT_DURATION_SECONDS, KEYSET_CIPHER_INIT_TOTAL,
     },
     proxy::EncryptionService,
 };
@@ -97,17 +96,18 @@ impl ZeroKms {
         let identified_by = keyset_id.as_ref().map(|id| id.0.clone());
 
         let start = Instant::now();
-        match ScopedCipher::init(zerokms_client, identified_by).await {
+        let result = ScopedCipher::init(zerokms_client, identified_by).await;
+        let init_duration = start.elapsed();
+        let init_duration_ms = init_duration.as_millis();
+
+        histogram!(KEYSET_CIPHER_INIT_DURATION_SECONDS).record(init_duration.as_secs_f64());
+
+        if init_duration > Duration::from_secs(1) {
+            warn!(target: ZERO_KMS, msg = "Slow ScopedCipher initialization", ?keyset_id, init_duration_ms);
+        }
+
+        match result {
             Ok(cipher) => {
-                let init_duration = start.elapsed();
-                let init_duration_ms = init_duration.as_millis();
-
-                histogram!(KEYSET_CIPHER_INIT_DURATION_SECONDS).record(init_duration.as_secs_f64());
-
-                if init_duration > Duration::from_secs(1) {
-                    warn!(target: ZERO_KMS, msg = "Slow ScopedCipher initialization", ?keyset_id, init_duration_ms);
-                }
-
                 let arc_cipher = Arc::new(cipher);
 
                 counter!(KEYSET_CIPHER_INIT_TOTAL).increment(1);
@@ -130,11 +130,6 @@ impl ZeroKms {
                 Ok(arc_cipher)
             }
             Err(err) => {
-                let init_duration = start.elapsed();
-                let init_duration_ms = init_duration.as_millis();
-
-                histogram!(KEYSET_CIPHER_INIT_DURATION_SECONDS).record(init_duration.as_secs_f64());
-
                 debug!(target: ZERO_KMS, msg = "Error initializing ZeroKMS ScopedCipher", error = err.to_string(), init_duration_ms);
                 warn!(
                     msg = "Error initializing ZeroKMS",
