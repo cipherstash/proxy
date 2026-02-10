@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1770711634759,
+  "lastUpdate": 1770712572389,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -18623,6 +18623,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 22.366966,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "54dbc42dc05681175fe066f16710312802365c65",
+          "message": "Revert \"Merge pull request #332 from cipherstash/fix/print-error-on-p…",
+          "timestamp": "2026-02-10T08:17:23Z",
+          "url": "https://github.com/cipherstash/proxy/pull/369/commits/54dbc42dc05681175fe066f16710312802365c65"
+        },
+        "date": 1770712570962,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 22.359814,
             "unit": "Number"
           }
         ]
