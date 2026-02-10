@@ -100,8 +100,6 @@ impl ZeroKms {
         let init_duration = start.elapsed();
         let init_duration_ms = init_duration.as_millis();
 
-        histogram!(KEYSET_CIPHER_INIT_DURATION_SECONDS).record(init_duration.as_secs_f64());
-
         if init_duration > Duration::from_secs(1) {
             warn!(target: ZERO_KMS, msg = "Slow ScopedCipher initialization", ?keyset_id, init_duration_ms);
         }
