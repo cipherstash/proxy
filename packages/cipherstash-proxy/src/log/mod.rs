@@ -16,7 +16,8 @@ use tracing_subscriber::{
 // All targets are now defined in the targets module using the define_log_targets! macro.
 pub use targets::{
     AUTHENTICATION, CONFIG, CONTEXT, DECRYPT, DEVELOPMENT, ENCODING, ENCRYPT, ENCRYPT_CONFIG,
-    KEYSET, MAPPER, MIGRATE, PROTOCOL, PROXY, SCHEMA, SLOW_STATEMENTS,
+    KEYSET, MAPPER, MAPPER, MIGRATE, MIGRATE, PROTOCOL, PROTOCOL, PROXY, SCHEMA, SCHEMA,
+    SLOW_STATEMENTS, ZERO_KMS,
 };
 
 static INIT: Once = Once::new();
@@ -50,7 +51,7 @@ mod tests {
 
     use super::*;
     use crate::log::targets::{
-        LogTargetLevels, AUTHENTICATION, CONTEXT, DEVELOPMENT, KEYSET, MAPPER, PROTOCOL, SCHEMA,
+        LogTargetLevels, AUTHENTICATION, CONTEXT, DEVELOPMENT, MAPPER, PROTOCOL, SCHEMA, ZERO_KMS,
     };
     use crate::test_helpers::MockMakeWriter;
     use tracing::dispatcher::set_default;
@@ -123,10 +124,9 @@ mod tests {
                 encrypt_level: LogLevel::Error,
                 encrypt_config_level: LogLevel::Error,
                 decrypt_level: LogLevel::Error,
-                keyset_level: LogLevel::Trace,
+                zero_kms_level: LogLevel::Trace,
                 migrate_level: LogLevel::Trace,
                 protocol_level: LogLevel::Info,
-                proxy_level: LogLevel::Info,
                 mapper_level: LogLevel::Info,
                 schema_level: LogLevel::Info,
                 config_level: LogLevel::Info,
@@ -162,10 +162,10 @@ mod tests {
         assert!(!log_contents.contains("warn/context"));
         assert!(log_contents.contains("error/context"));
 
-        // with keyset level 'trace', trace should be logged
-        trace!(target: KEYSET, "trace/keyset");
+        // with zero_kms level 'trace', trace should be logged
+        trace!(target: ZERO_KMS, "trace/zero_kms");
         let log_contents = make_writer.get_string();
-        assert!(log_contents.contains("trace/keyset"));
+        assert!(log_contents.contains("trace/zero_kms"));
 
         // with protocol level 'info', info should be logged but not debug
         debug!(target: PROTOCOL, "debug/protocol");

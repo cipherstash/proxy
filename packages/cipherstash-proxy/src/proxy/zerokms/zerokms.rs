@@ -1,11 +1,12 @@
 use crate::{
     config::TandemConfig,
     error::{EncryptError, Error, ZeroKMSError},
-    log::{ENCRYPT, PROXY},
+    log::{ENCRYPT, ZERO_KMS},
     postgresql::{Column, KeysetIdentifier},
     prometheus::{
-        KEYSET_CIPHER_CACHE_HITS_TOTAL, KEYSET_CIPHER_INIT_DURATION_SECONDS,
-        KEYSET_CIPHER_INIT_TOTAL,
+        KEYSET_CIPHER_CACHE_HITS_TOTAL, KEYSET_CIPHER_CACHE_HITS_TOTAL,
+        KEYSET_CIPHER_CACHE_MISS_TOTAL, KEYSET_CIPHER_INIT_DURATION_SECONDS,
+        KEYSET_CIPHER_INIT_DURATION_SECONDS, KEYSET_CIPHER_INIT_TOTAL, KEYSET_CIPHER_INIT_TOTAL,
     },
     proxy::EncryptionService,
 };
@@ -52,6 +53,9 @@ impl ZeroKms {
             // Set capacity in bytes (entry count * actual struct size)
             .max_capacity((config.server.cipher_cache_size as u64) * SCOPED_CIPHER_SIZE as u64)
             .time_to_live(Duration::from_secs(config.server.cipher_cache_ttl_seconds))
+            .eviction_listener(|key, _value, cause| {
+                info!(target: ZERO_KMS, msg = "ScopedCipher evicted from cache", cache_key = %key, cause = ?cause);
+            })
             .build();
 
         let default_keyset_id = config.encrypt.default_keyset_id;
@@ -80,23 +84,29 @@ impl ZeroKms {
 
         // Check cache first
         if let Some(cached_cipher) = self.cipher_cache.get(&cache_key).await {
-            debug!(target: PROXY, msg = "Use cached ScopedCipher", ?keyset_id);
+            debug!(target: ZERO_KMS, msg = "Use cached ScopedCipher", ?keyset_id);
             counter!(KEYSET_CIPHER_CACHE_HITS_TOTAL).increment(1);
             return Ok(cached_cipher);
         }
 
         let zerokms_client = self.zerokms_client.clone();
 
-        debug!(target: PROXY, msg = "Initializing ZeroKMS ScopedCipher", ?keyset_id);
+        info!(target: ZERO_KMS, msg = "Initializing ZeroKMS ScopedCipher (cache miss)", ?keyset_id);
+        counter!(KEYSET_CIPHER_CACHE_MISS_TOTAL).increment(1);
 
         let identified_by = keyset_id.as_ref().map(|id| id.0.clone());
 
-        // Time the cipher initialization (includes network call to ZeroKMS)
         let start = Instant::now();
-
         match ScopedCipher::init(zerokms_client, identified_by).await {
             Ok(cipher) => {
                 let init_duration = start.elapsed();
+                let init_duration_ms = init_duration.as_millis();
+
+                histogram!(KEYSET_CIPHER_INIT_DURATION_SECONDS).record(init_duration.as_secs_f64());
+
+                if init_duration > Duration::from_secs(1) {
+                    warn!(target: ZERO_KMS, msg = "Slow ScopedCipher initialization", ?keyset_id, init_duration_ms);
+                }
 
                 let arc_cipher = Arc::new(cipher);
 
@@ -114,25 +124,23 @@ impl ZeroKms {
                 let entry_count = self.cipher_cache.entry_count();
                 let memory_usage_bytes = self.cipher_cache.weighted_size();
 
-                info!(msg = "Connected to ZeroKMS");
-                debug!(target: PROXY,
-                    msg = "ScopedCipher cached",
-                    ?keyset_id,
-                    entry_count,
-                    memory_usage_bytes,
-                    init_duration_ms = init_duration.as_millis()
-                );
+                info!(target: ZERO_KMS, msg = "Connected to ZeroKMS", init_duration_ms);
+                debug!(target: ZERO_KMS, msg = "ScopedCipher cached", ?keyset_id, entry_count, memory_usage_bytes, init_duration_ms);
 
                 Ok(arc_cipher)
             }
             Err(err) => {
                 let init_duration = start.elapsed();
-                debug!(target: PROXY,
-                    msg = "Error initializing ZeroKMS ScopedCipher",
+                let init_duration_ms = init_duration.as_millis();
+
+                histogram!(KEYSET_CIPHER_INIT_DURATION_SECONDS).record(init_duration.as_secs_f64());
+
+                debug!(target: ZERO_KMS, msg = "Error initializing ZeroKMS ScopedCipher", error = err.to_string(), init_duration_ms);
+                warn!(
+                    msg = "Error initializing ZeroKMS",
                     error = err.to_string(),
-                    init_duration_ms = init_duration.as_millis()
+                    init_duration_ms
                 );
-                warn!(msg = "Error initializing ZeroKMS", error = err.to_string());
 
                 match err {
                     cipherstash_client::zerokms::Error::LoadKeyset(_) => {
@@ -227,10 +235,12 @@ impl EncryptionService for ZeroKms {
         let opts = EqlEncryptOpts::default();
 
         debug!(target: ENCRYPT, msg="Calling encrypt_eql", count = prepared_plaintexts.len());
+        let encrypt_start = Instant::now();
         let encrypted = encrypt_eql(cipher, prepared_plaintexts, &opts)
             .await
             .map_err(EncryptError::from)?;
-        debug!(target: ENCRYPT, msg="encrypt_eql completed", count = encrypted.len());
+        let encrypt_duration = encrypt_start.elapsed();
+        debug!(target: ENCRYPT, msg="encrypt_eql completed", count = encrypted.len(), duration_ms = encrypt_duration.as_millis());
 
         // Reconstruct the result vector with None values in the right places
         let mut result: Vec<Option<EqlCiphertext>> = vec![None; plaintexts.len()];
@@ -280,10 +290,12 @@ impl EncryptionService for ZeroKms {
         let opts = EqlDecryptOpts::default();
 
         debug!(target: ENCRYPT, msg="Calling decrypt_eql", count = ciphertexts_to_decrypt.len());
+        let decrypt_start = Instant::now();
         let decrypted = decrypt_eql(cipher, ciphertexts_to_decrypt, &opts)
             .await
             .map_err(EncryptError::from)?;
-        debug!(target: ENCRYPT, msg="decrypt_eql completed", count = decrypted.len());
+        let decrypt_duration = decrypt_start.elapsed();
+        debug!(target: ENCRYPT, msg="decrypt_eql completed", count = decrypted.len(), duration_ms = decrypt_duration.as_millis());
 
         // Reconstruct the result vector with None values in the right places
         let mut result: Vec<Option<Plaintext>> = vec![None; ciphertexts.len()];
