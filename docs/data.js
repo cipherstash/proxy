@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1770762241997,
+  "lastUpdate": 1770764317875,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -18673,6 +18673,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 21.948393,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "2dd341faea9071cb1e6f7c5d2e62ba4d4052203a",
+          "message": "Additional logging for ZeroKMS integration",
+          "timestamp": "2026-02-10T19:16:06Z",
+          "url": "https://github.com/cipherstash/proxy/pull/370/commits/2dd341faea9071cb1e6f7c5d2e62ba4d4052203a"
+        },
+        "date": 1770764316427,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 21.79507,
             "unit": "Number"
           }
         ]
