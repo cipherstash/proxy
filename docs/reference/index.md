@@ -6,9 +6,11 @@ This page contains reference documentation for configuring CipherStash Proxy and
 
 - [Proxy config options](#proxy-config-options)
   - [Recommended settings for development](#recommended-settings-for-development)
+  - [Per-target log levels](#per-target-log-levels)
   - [Docker-specific configuration](#docker-specific-configuration)
 - [Prometheus metrics](#prometheus-metrics)
   - [Available metrics](#available-metrics)
+- [Troubleshooting ZeroKMS connections](#troubleshooting-zerokms-connections)
 - [Supported architectures](#supported-architectures)
 
 
@@ -207,6 +209,27 @@ output = "stdout"
 # Env: CS_LOG__ANSI_ENABLED
 ansi_enabled = "true"
 
+# Enable slow statement logging
+# When enabled, logs detailed timing breakdowns for queries exceeding the threshold
+# Optional
+# Default: `false`
+# Env: CS_LOG__SLOW_STATEMENTS
+slow_statements = "false"
+
+# Minimum duration in milliseconds for a statement to be considered slow
+# Statements exceeding this threshold are logged with phase-by-phase timing
+# Optional
+# Default: `2000`
+# Env: CS_LOG__SLOW_STATEMENT_MIN_DURATION_MS
+slow_statement_min_duration_ms = "2000"
+
+# Minimum duration in milliseconds for a database response to be considered slow
+# Tracks per-message read latency from the PostgreSQL server connection
+# Optional
+# Default: `100`
+# Env: CS_LOG__SLOW_DB_RESPONSE_MIN_DURATION_MS
+slow_db_response_min_duration_ms = "100"
+
 
 [prometheus]
 # Enable prometheus stats
@@ -239,6 +262,36 @@ If you are frequently changing the database schema or making updates to the colu
 ```bash
 CS_DATABASE__CONFIG_RELOAD_INTERVAL="10"
 CS_DATABASE__SCHEMA_RELOAD_INTERVAL="10"
+```
+
+### Per-target log levels
+
+Proxy supports per-target log level overrides using the pattern `CS_LOG__{TARGET}_LEVEL`. Each target corresponds to an internal component, and can be set independently of the global `CS_LOG__LEVEL`.
+
+Valid values: `error`, `warn`, `info`, `debug`, `trace`. Default for all targets: `info`.
+
+| Environment variable | Target | Description |
+|---|---|---|
+| `CS_LOG__DEVELOPMENT_LEVEL` | `DEVELOPMENT` | General development logging |
+| `CS_LOG__AUTHENTICATION_LEVEL` | `AUTHENTICATION` | Client authentication and SASL |
+| `CS_LOG__CONFIG_LEVEL` | `CONFIG` | Configuration loading |
+| `CS_LOG__CONTEXT_LEVEL` | `CONTEXT` | Connection context |
+| `CS_LOG__ENCODING_LEVEL` | `ENCODING` | Data encoding and decoding |
+| `CS_LOG__ENCRYPT_LEVEL` | `ENCRYPT` | Encryption and decryption operations |
+| `CS_LOG__DECRYPT_LEVEL` | `DECRYPT` | Decryption operations |
+| `CS_LOG__ENCRYPT_CONFIG_LEVEL` | `ENCRYPT_CONFIG` | Encryption configuration loading |
+| `CS_LOG__ZEROKMS_LEVEL` | `ZEROKMS` | ZeroKMS cipher init, cache, and connectivity |
+| `CS_LOG__MIGRATE_LEVEL` | `MIGRATE` | Schema migration |
+| `CS_LOG__PROTOCOL_LEVEL` | `PROTOCOL` | PostgreSQL wire protocol |
+| `CS_LOG__MAPPER_LEVEL` | `MAPPER` | SQL statement mapping and transformation |
+| `CS_LOG__SCHEMA_LEVEL` | `SCHEMA` | Database schema analysis |
+| `CS_LOG__SLOW_STATEMENTS_LEVEL` | `SLOW_STATEMENTS` | Slow statement detection |
+
+Example — enable debug logging for encryption and ZeroKMS:
+
+```bash
+CS_LOG__ENCRYPT_LEVEL="debug"
+CS_LOG__ZEROKMS_LEVEL="debug"
 ```
 
 ### Docker-specific configuration
@@ -478,7 +531,9 @@ If the proxy is running on a host other than localhost, access on that host.
 | Name                                                            | Target    | Description                                                                 |
 |-----------------------------------------------------------------|-----------|-----------------------------------------------------------------------------|
 | `cipherstash_proxy_keyset_cipher_cache_hits_total`                     | Counter   | Number of times a keyset-scoped cipher was found in the cache                       |
+| `cipherstash_proxy_keyset_cipher_cache_miss_total`                     | Counter   | Number of cipher cache misses requiring initialization                               |
 | `cipherstash_proxy_keyset_cipher_init_total`                           | Counter   | Number of times a new keyset-scoped cipher  has been initialized                     |
+| `cipherstash_proxy_keyset_cipher_init_duration_seconds`                | Histogram | Duration of cipher initialization including ZeroKMS network call                     |
 | `cipherstash_proxy_clients_active_connections`                  | Gauge     | Current number of connections to CipherStash Proxy from clients             |
 | `cipherstash_proxy_clients_bytes_received_total`                | Counter   | Number of bytes received by CipherStash Proxy from clients                  |
 | `cipherstash_proxy_clients_bytes_sent_total`                    | Counter   | Number of bytes sent from CipherStash Proxy to clients                      |
@@ -509,6 +564,68 @@ If the proxy is running on a host other than localhost, access on that host.
 | `cipherstash_proxy_statements_passthrough_total`                | Counter   | Number of SQL statements that did not require encryption                    |
 | `cipherstash_proxy_statements_total`                            | Counter   | Total number of SQL statements processed by CipherStash Proxy               |
 | `cipherstash_proxy_statements_unmappable_total`                 | Counter   | Total number of unmappable SQL statements processed by CipherStash Proxy    |
+
+## Troubleshooting ZeroKMS connections
+
+### Recommended log settings
+
+For a quick check on ZeroKMS latency and connection issues:
+
+```bash
+CS_LOG__ZEROKMS_LEVEL=debug
+CS_LOG__ENCRYPT_LEVEL=debug
+```
+
+For a deeper investigation, also enable slow statement detection:
+
+```bash
+CS_LOG__ZEROKMS_LEVEL=trace
+CS_LOG__SLOW_STATEMENTS=true
+CS_LOG__SLOW_STATEMENT_MIN_DURATION_MS=500
+CS_LOG__SLOW_DB_RESPONSE_MIN_DURATION_MS=50
+```
+
+### What to look for in logs
+
+| Signal | Meaning |
+|--------|---------|
+| `Initializing ZeroKMS ScopedCipher (cache miss)` | Network call to ZeroKMS is about to happen. Frequent occurrences indicate cache churn. |
+| `Connected to ZeroKMS` with high `init_duration_ms` | Slow cipher init. Healthy values are <200ms; >1s triggers a warning. |
+| `Use cached ScopedCipher` | Cache hit (fast path, no network call). |
+| `ScopedCipher evicted from cache` with `cause: Size` | Cache too small for workload. Increase `cipher_cache_size`. |
+| `Error initializing ZeroKMS` with high `init_duration_ms` | Network timeout to ZeroKMS. |
+| `Error initializing ZeroKMS` with low `init_duration_ms` | Credential or configuration error. |
+
+### Key metrics
+
+Enable Prometheus (`CS_PROMETHEUS__ENABLED=true`) and watch these metrics:
+
+| Metric | Why |
+|--------|-----|
+| `cipherstash_proxy_keyset_cipher_init_duration_seconds` | Distribution of ZeroKMS init times including network latency. |
+| `cipherstash_proxy_keyset_cipher_cache_hits_total` / `cache_miss_total` | Cache hit ratio — should be >95% in steady state. |
+| `cipherstash_proxy_statements_session_duration_seconds` minus `execution_duration_seconds` | Encryption overhead per statement (large gap = encryption, not database). |
+| `cipherstash_proxy_encryption_error_total` / `decryption_error_total` | Spikes indicate ZeroKMS connectivity issues. |
+
+### Useful PromQL queries
+
+```promql
+# P99 cipher init latency
+histogram_quantile(0.99, rate(cipherstash_proxy_keyset_cipher_init_duration_seconds_bucket[5m]))
+
+# Cache hit ratio
+rate(cipherstash_proxy_keyset_cipher_cache_hits_total[5m])
+/ (rate(cipherstash_proxy_keyset_cipher_cache_hits_total[5m])
+   + rate(cipherstash_proxy_keyset_cipher_cache_miss_total[5m]))
+```
+
+### Quick checklist
+
+1. **Cache hit ratio low?** Tune `CS_SERVER__CIPHER_CACHE_SIZE` (default: 64) and `CS_SERVER__CIPHER_CACHE_TTL_SECONDS` (default: 3600).
+2. **`init_duration_ms` >1s?** Network latency to ZeroKMS. Check DNS, firewall rules, and regional proximity.
+3. **Large session vs execution duration gap?** Overhead is in encrypt/decrypt, not the database.
+4. **Frequent evictions?** Increase `cipher_cache_size` to match your workload's keyset count.
+
 
 ## Supported architectures
 
