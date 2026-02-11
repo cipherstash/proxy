@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1770775212812,
+  "lastUpdate": 1770776710377,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -18877,6 +18877,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 21.950427,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "toby@cipherstash.com",
+            "name": "Toby Hede",
+            "username": "tobyhede"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "60c3a395595028c8cdbe8ea4ec9851eef0b44304",
+          "message": "Merge pull request #370 from cipherstash/cts-logging\n\nAdditional logging for ZeroKMS integration",
+          "timestamp": "2026-02-11T13:21:59+11:00",
+          "tree_id": "ee59c745ce5bba319bdd60c22647b4d63551cb78",
+          "url": "https://github.com/cipherstash/proxy/commit/60c3a395595028c8cdbe8ea4ec9851eef0b44304"
+        },
+        "date": 1770776709032,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 21.455075,
             "unit": "Number"
           }
         ]
