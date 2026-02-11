@@ -6,6 +6,7 @@ This page contains reference documentation for configuring CipherStash Proxy and
 
 - [Proxy config options](#proxy-config-options)
   - [Recommended settings for development](#recommended-settings-for-development)
+  - [Per-target log levels](#per-target-log-levels)
   - [Docker-specific configuration](#docker-specific-configuration)
 - [Prometheus metrics](#prometheus-metrics)
   - [Available metrics](#available-metrics)
@@ -208,6 +209,27 @@ output = "stdout"
 # Env: CS_LOG__ANSI_ENABLED
 ansi_enabled = "true"
 
+# Enable slow statement logging
+# When enabled, logs detailed timing breakdowns for queries exceeding the threshold
+# Optional
+# Default: `false`
+# Env: CS_LOG__SLOW_STATEMENTS
+slow_statements = "false"
+
+# Minimum duration in milliseconds for a statement to be considered slow
+# Statements exceeding this threshold are logged with phase-by-phase timing
+# Optional
+# Default: `2000`
+# Env: CS_LOG__SLOW_STATEMENT_MIN_DURATION_MS
+slow_statement_min_duration_ms = "2000"
+
+# Minimum duration in milliseconds for a database response to be considered slow
+# Tracks per-message read latency from the PostgreSQL server connection
+# Optional
+# Default: `100`
+# Env: CS_LOG__SLOW_DB_RESPONSE_MIN_DURATION_MS
+slow_db_response_min_duration_ms = "100"
+
 
 [prometheus]
 # Enable prometheus stats
@@ -240,6 +262,36 @@ If you are frequently changing the database schema or making updates to the colu
 ```bash
 CS_DATABASE__CONFIG_RELOAD_INTERVAL="10"
 CS_DATABASE__SCHEMA_RELOAD_INTERVAL="10"
+```
+
+### Per-target log levels
+
+Proxy supports per-target log level overrides using the pattern `CS_LOG__{TARGET}_LEVEL`. Each target corresponds to an internal component, and can be set independently of the global `CS_LOG__LEVEL`.
+
+Valid values: `error`, `warn`, `info`, `debug`, `trace`. Default for all targets: `info`.
+
+| Environment variable | Target | Description |
+|---|---|---|
+| `CS_LOG__DEVELOPMENT_LEVEL` | `DEVELOPMENT` | General development logging |
+| `CS_LOG__AUTHENTICATION_LEVEL` | `AUTHENTICATION` | Client authentication and SASL |
+| `CS_LOG__CONFIG_LEVEL` | `CONFIG` | Configuration loading |
+| `CS_LOG__CONTEXT_LEVEL` | `CONTEXT` | Connection context |
+| `CS_LOG__ENCODING_LEVEL` | `ENCODING` | Data encoding and decoding |
+| `CS_LOG__ENCRYPT_LEVEL` | `ENCRYPT` | Encryption and decryption operations |
+| `CS_LOG__DECRYPT_LEVEL` | `DECRYPT` | Decryption operations |
+| `CS_LOG__ENCRYPT_CONFIG_LEVEL` | `ENCRYPT_CONFIG` | Encryption configuration loading |
+| `CS_LOG__ZEROKMS_LEVEL` | `ZEROKMS` | ZeroKMS cipher init, cache, and connectivity |
+| `CS_LOG__MIGRATE_LEVEL` | `MIGRATE` | Schema migration |
+| `CS_LOG__PROTOCOL_LEVEL` | `PROTOCOL` | PostgreSQL wire protocol |
+| `CS_LOG__MAPPER_LEVEL` | `MAPPER` | SQL statement mapping and transformation |
+| `CS_LOG__SCHEMA_LEVEL` | `SCHEMA` | Database schema analysis |
+| `CS_LOG__SLOW_STATEMENTS_LEVEL` | `SLOW_STATEMENTS` | Slow statement detection |
+
+Example — enable debug logging for encryption and ZeroKMS:
+
+```bash
+CS_LOG__ENCRYPT_LEVEL="debug"
+CS_LOG__ZEROKMS_LEVEL="debug"
 ```
 
 ### Docker-specific configuration
