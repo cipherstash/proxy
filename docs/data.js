@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1770781985073,
+  "lastUpdate": 1770786184708,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -18931,6 +18931,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 21.931332,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "toby@cipherstash.com",
+            "name": "Toby Hede",
+            "username": "tobyhede"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "7cdc85158cf73dc67737ab2531bbd74bc5387d1c",
+          "message": "Merge pull request #372 from cipherstash/fix-intermittent-tests\n\nfix(ci): resolve PG 17 showcase test failure",
+          "timestamp": "2026-02-11T15:59:53+11:00",
+          "tree_id": "a273487ad536c7e74de9e0b0f6d9400a4f7d6bdb",
+          "url": "https://github.com/cipherstash/proxy/commit/7cdc85158cf73dc67737ab2531bbd74bc5387d1c"
+        },
+        "date": 1770786183406,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 22.018581,
             "unit": "Number"
           }
         ]
