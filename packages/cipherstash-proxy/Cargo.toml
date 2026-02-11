@@ -9,7 +9,7 @@ aws-lc-rs = "1.13.3"
 bigdecimal = { version = "0.4.6", features = ["serde-json"] }
 blake3 = "1"
 arc-swap = "1.7.1"
-bytes = { version = "1.9", default-features = false }
+bytes = { version = "1.11", default-features = false }
 chrono = { version = "0.4.39", features = ["clock"] }
 cipherstash-client = { workspace = true, features = ["tokio"] }
 clap = { version = "4.5.31", features = ["derive", "env"] }
