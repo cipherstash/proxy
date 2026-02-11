@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1770773007915,
+  "lastUpdate": 1770775212812,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -18848,6 +18848,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 21.95377,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "james@cipherstash.com",
+            "name": "James Sadler",
+            "username": "freshtonic"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "a7e2a829bc2c10dc4d445ab8889a6b60ef614d1b",
+          "message": "Merge pull request #371 from cipherstash/chore/bump-cipherstash-client-to-0.33.1\n\ndeps: upgrade cipherstash-client to 0.33.1",
+          "timestamp": "2026-02-11T12:57:06+11:00",
+          "tree_id": "647213f2e8b56d4d51c3ed33a66b5bc7bdf814ac",
+          "url": "https://github.com/cipherstash/proxy/commit/a7e2a829bc2c10dc4d445ab8889a6b60ef614d1b"
+        },
+        "date": 1770775211495,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 21.950427,
             "unit": "Number"
           }
         ]
