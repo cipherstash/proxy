@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1770776710377,
+  "lastUpdate": 1770781985073,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -18906,6 +18906,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 21.455075,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "e9c995d4e26cf96b1c60acf72ee8128262e87441",
+          "message": "fix(ci): resolve PG 17 showcase test failure",
+          "timestamp": "2026-02-11T02:22:03Z",
+          "url": "https://github.com/cipherstash/proxy/pull/372/commits/e9c995d4e26cf96b1c60acf72ee8128262e87441"
+        },
+        "date": 1770781983787,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 21.931332,
             "unit": "Number"
           }
         ]
