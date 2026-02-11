@@ -9,6 +9,7 @@ This page contains reference documentation for configuring CipherStash Proxy and
   - [Docker-specific configuration](#docker-specific-configuration)
 - [Prometheus metrics](#prometheus-metrics)
   - [Available metrics](#available-metrics)
+- [Troubleshooting ZeroKMS connections](#troubleshooting-zerokms-connections)
 - [Supported architectures](#supported-architectures)
 
 
@@ -511,6 +512,68 @@ If the proxy is running on a host other than localhost, access on that host.
 | `cipherstash_proxy_statements_passthrough_total`                | Counter   | Number of SQL statements that did not require encryption                    |
 | `cipherstash_proxy_statements_total`                            | Counter   | Total number of SQL statements processed by CipherStash Proxy               |
 | `cipherstash_proxy_statements_unmappable_total`                 | Counter   | Total number of unmappable SQL statements processed by CipherStash Proxy    |
+
+## Troubleshooting ZeroKMS connections
+
+### Recommended log settings
+
+For a quick check on ZeroKMS latency and connection issues:
+
+```bash
+CS_LOG__ZERO_KMS_LEVEL=debug
+CS_LOG__ENCRYPT_LEVEL=debug
+```
+
+For a deeper investigation, also enable slow statement detection:
+
+```bash
+CS_LOG__ZERO_KMS_LEVEL=trace
+CS_LOG__SLOW_STATEMENTS=true
+CS_LOG__SLOW_STATEMENT_MIN_DURATION_MS=500
+CS_LOG__SLOW_DB_RESPONSE_MIN_DURATION_MS=50
+```
+
+### What to look for in logs
+
+| Signal | Meaning |
+|--------|---------|
+| `Initializing ZeroKMS ScopedCipher (cache miss)` | Network call to ZeroKMS is about to happen. Frequent occurrences indicate cache churn. |
+| `Connected to ZeroKMS` with high `init_duration_ms` | Slow cipher init. Healthy values are <200ms; >1s triggers a warning. |
+| `Use cached ScopedCipher` | Cache hit (fast path, no network call). |
+| `ScopedCipher evicted from cache` with `cause: Size` | Cache too small for workload. Increase `cipher_cache_size`. |
+| `Error initializing ZeroKMS` with high `init_duration_ms` | Network timeout to ZeroKMS. |
+| `Error initializing ZeroKMS` with low `init_duration_ms` | Credential or configuration error. |
+
+### Key metrics
+
+Enable Prometheus (`CS_PROMETHEUS__ENABLED=true`) and watch these metrics:
+
+| Metric | Why |
+|--------|-----|
+| `cipherstash_proxy_keyset_cipher_init_duration_seconds` | Distribution of ZeroKMS init times including network latency. |
+| `cipherstash_proxy_keyset_cipher_cache_hits_total` / `cache_miss_total` | Cache hit ratio — should be >95% in steady state. |
+| `cipherstash_proxy_statements_session_duration_seconds` minus `execution_duration_seconds` | Encryption overhead per statement (large gap = encryption, not database). |
+| `cipherstash_proxy_encryption_error_total` / `decryption_error_total` | Spikes indicate ZeroKMS connectivity issues. |
+
+### Useful PromQL queries
+
+```promql
+# P99 cipher init latency
+histogram_quantile(0.99, rate(cipherstash_proxy_keyset_cipher_init_duration_seconds_bucket[5m]))
+
+# Cache hit ratio
+rate(cipherstash_proxy_keyset_cipher_cache_hits_total[5m])
+/ (rate(cipherstash_proxy_keyset_cipher_cache_hits_total[5m])
+   + rate(cipherstash_proxy_keyset_cipher_cache_miss_total[5m]))
+```
+
+### Quick checklist
+
+1. **Cache hit ratio low?** Tune `CS_SERVER__CIPHER_CACHE_SIZE` (default: 64) and `CS_SERVER__CIPHER_CACHE_TTL_SECONDS` (default: 3600).
+2. **`init_duration_ms` >1s?** Network latency to ZeroKMS. Check DNS, firewall rules, and regional proximity.
+3. **Large session vs execution duration gap?** Overhead is in encrypt/decrypt, not the database.
+4. **Frequent evictions?** Increase `cipher_cache_size` to match your workload's keyset count.
+
 
 ## Supported architectures
 
