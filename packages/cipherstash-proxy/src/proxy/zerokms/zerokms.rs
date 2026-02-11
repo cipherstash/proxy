@@ -128,12 +128,7 @@ impl ZeroKms {
                 Ok(arc_cipher)
             }
             Err(err) => {
-                debug!(target: ZERO_KMS, msg = "Error initializing ZeroKMS ScopedCipher", error = err.to_string(), init_duration_ms);
-                warn!(
-                    msg = "Error initializing ZeroKMS",
-                    error = err.to_string(),
-                    init_duration_ms
-                );
+                warn!(target: ZERO_KMS, msg = "Error initializing ZeroKMS", error = err.to_string(), init_duration_ms);
 
                 match err {
                     cipherstash_client::zerokms::Error::LoadKeyset(_) => {
