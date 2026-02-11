@@ -520,14 +520,14 @@ If the proxy is running on a host other than localhost, access on that host.
 For a quick check on ZeroKMS latency and connection issues:
 
 ```bash
-CS_LOG__ZERO_KMS_LEVEL=debug
+CS_LOG__ZEROKMS_LEVEL=debug
 CS_LOG__ENCRYPT_LEVEL=debug
 ```
 
 For a deeper investigation, also enable slow statement detection:
 
 ```bash
-CS_LOG__ZERO_KMS_LEVEL=trace
+CS_LOG__ZEROKMS_LEVEL=trace
 CS_LOG__SLOW_STATEMENTS=true
 CS_LOG__SLOW_STATEMENT_MIN_DURATION_MS=500
 CS_LOG__SLOW_DB_RESPONSE_MIN_DURATION_MS=50

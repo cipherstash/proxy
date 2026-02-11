@@ -1,7 +1,7 @@
 use crate::{
     config::TandemConfig,
     error::{EncryptError, Error, ZeroKMSError},
-    log::{ENCRYPT, ZERO_KMS},
+    log::{ENCRYPT, ZEROKMS},
     postgresql::{Column, KeysetIdentifier},
     prometheus::{
         KEYSET_CIPHER_CACHE_HITS_TOTAL, KEYSET_CIPHER_CACHE_MISS_TOTAL,
@@ -53,7 +53,7 @@ impl ZeroKms {
             .max_capacity((config.server.cipher_cache_size as u64) * SCOPED_CIPHER_SIZE as u64)
             .time_to_live(Duration::from_secs(config.server.cipher_cache_ttl_seconds))
             .eviction_listener(|key, _value, cause| {
-                info!(target: ZERO_KMS, msg = "ScopedCipher evicted from cache", cache_key = %key, cause = ?cause);
+                info!(target: ZEROKMS, msg = "ScopedCipher evicted from cache", cache_key = %key, cause = ?cause);
             })
             .build();
 
@@ -83,14 +83,14 @@ impl ZeroKms {
 
         // Check cache first
         if let Some(cached_cipher) = self.cipher_cache.get(&cache_key).await {
-            debug!(target: ZERO_KMS, msg = "Use cached ScopedCipher", ?keyset_id);
+            debug!(target: ZEROKMS, msg = "Use cached ScopedCipher", ?keyset_id);
             counter!(KEYSET_CIPHER_CACHE_HITS_TOTAL).increment(1);
             return Ok(cached_cipher);
         }
 
         let zerokms_client = self.zerokms_client.clone();
 
-        info!(target: ZERO_KMS, msg = "Initializing ZeroKMS ScopedCipher (cache miss)", ?keyset_id);
+        info!(target: ZEROKMS, msg = "Initializing ZeroKMS ScopedCipher (cache miss)", ?keyset_id);
         counter!(KEYSET_CIPHER_CACHE_MISS_TOTAL).increment(1);
 
         let identified_by = keyset_id.as_ref().map(|id| id.0.clone());
@@ -101,7 +101,7 @@ impl ZeroKms {
         let init_duration_ms = init_duration.as_millis();
 
         if init_duration > Duration::from_secs(1) {
-            warn!(target: ZERO_KMS, msg = "Slow ScopedCipher initialization", ?keyset_id, init_duration_ms);
+            warn!(target: ZEROKMS, msg = "Slow ScopedCipher initialization", ?keyset_id, init_duration_ms);
         }
 
         match result {
@@ -122,13 +122,13 @@ impl ZeroKms {
                 let entry_count = self.cipher_cache.entry_count();
                 let memory_usage_bytes = self.cipher_cache.weighted_size();
 
-                info!(target: ZERO_KMS, msg = "Connected to ZeroKMS", init_duration_ms);
-                debug!(target: ZERO_KMS, msg = "ScopedCipher cached", ?keyset_id, entry_count, memory_usage_bytes, init_duration_ms);
+                info!(target: ZEROKMS, msg = "Connected to ZeroKMS", init_duration_ms);
+                debug!(target: ZEROKMS, msg = "ScopedCipher cached", ?keyset_id, entry_count, memory_usage_bytes, init_duration_ms);
 
                 Ok(arc_cipher)
             }
             Err(err) => {
-                warn!(target: ZERO_KMS, msg = "Error initializing ZeroKMS", error = err.to_string(), init_duration_ms);
+                warn!(target: ZEROKMS, msg = "Error initializing ZeroKMS", error = err.to_string(), init_duration_ms);
 
                 match err {
                     cipherstash_client::zerokms::Error::LoadKeyset(_) => {

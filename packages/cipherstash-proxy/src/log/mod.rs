@@ -16,7 +16,7 @@ use tracing_subscriber::{
 // All targets are now defined in the targets module using the define_log_targets! macro.
 pub use targets::{
     AUTHENTICATION, CONFIG, CONTEXT, DECRYPT, DEVELOPMENT, ENCODING, ENCRYPT, ENCRYPT_CONFIG,
-    MAPPER, MIGRATE, PROTOCOL, SCHEMA, SLOW_STATEMENTS, ZERO_KMS,
+    MAPPER, MIGRATE, PROTOCOL, SCHEMA, SLOW_STATEMENTS, ZEROKMS,
 };
 
 static INIT: Once = Once::new();
@@ -50,7 +50,7 @@ mod tests {
 
     use super::*;
     use crate::log::targets::{
-        LogTargetLevels, AUTHENTICATION, CONTEXT, DEVELOPMENT, MAPPER, PROTOCOL, SCHEMA, ZERO_KMS,
+        LogTargetLevels, AUTHENTICATION, CONTEXT, DEVELOPMENT, MAPPER, PROTOCOL, SCHEMA, ZEROKMS,
     };
     use crate::test_helpers::MockMakeWriter;
     use tracing::dispatcher::set_default;
@@ -123,7 +123,7 @@ mod tests {
                 encrypt_level: LogLevel::Error,
                 encrypt_config_level: LogLevel::Error,
                 decrypt_level: LogLevel::Error,
-                zero_kms_level: LogLevel::Trace,
+                zerokms_level: LogLevel::Trace,
                 migrate_level: LogLevel::Trace,
                 protocol_level: LogLevel::Info,
                 mapper_level: LogLevel::Info,
@@ -161,10 +161,10 @@ mod tests {
         assert!(!log_contents.contains("warn/context"));
         assert!(log_contents.contains("error/context"));
 
-        // with zero_kms level 'trace', trace should be logged
-        trace!(target: ZERO_KMS, "trace/zero_kms");
+        // with zerokms level 'trace', trace should be logged
+        trace!(target: ZEROKMS, "trace/zerokms");
         let log_contents = make_writer.get_string();
-        assert!(log_contents.contains("trace/zero_kms"));
+        assert!(log_contents.contains("trace/zerokms"));
 
         // with protocol level 'info', info should be logged but not debug
         debug!(target: PROTOCOL, "debug/protocol");

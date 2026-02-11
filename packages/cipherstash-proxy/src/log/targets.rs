@@ -72,7 +72,7 @@ define_log_targets!(
     (ENCRYPT, encrypt_level),
     (DECRYPT, decrypt_level),
     (ENCRYPT_CONFIG, encrypt_config_level),
-    (ZERO_KMS, zero_kms_level),
+    (ZEROKMS, zerokms_level),
     (MIGRATE, migrate_level),
     (PROTOCOL, protocol_level),
     (MAPPER, mapper_level),
