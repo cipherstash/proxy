@@ -479,8 +479,8 @@ If the proxy is running on a host other than localhost, access on that host.
 | Name                                                            | Target    | Description                                                                 |
 |-----------------------------------------------------------------|-----------|-----------------------------------------------------------------------------|
 | `cipherstash_proxy_keyset_cipher_cache_hits_total`                     | Counter   | Number of times a keyset-scoped cipher was found in the cache                       |
-| `cipherstash_proxy_keyset_cipher_init_total`                           | Counter   | Number of times a new keyset-scoped cipher  has been initialized                     |
 | `cipherstash_proxy_keyset_cipher_cache_miss_total`                     | Counter   | Number of cipher cache misses requiring initialization                               |
+| `cipherstash_proxy_keyset_cipher_init_total`                           | Counter   | Number of times a new keyset-scoped cipher  has been initialized                     |
 | `cipherstash_proxy_keyset_cipher_init_duration_seconds`                | Histogram | Duration of cipher initialization including ZeroKMS network call                     |
 | `cipherstash_proxy_clients_active_connections`                  | Gauge     | Current number of connections to CipherStash Proxy from clients             |
 | `cipherstash_proxy_clients_bytes_received_total`                | Counter   | Number of bytes received by CipherStash Proxy from clients                  |
