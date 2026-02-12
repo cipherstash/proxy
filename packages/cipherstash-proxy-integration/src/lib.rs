@@ -1,4 +1,5 @@
 mod common;
+mod contention;
 mod decrypt;
 mod diagnostics;
 mod disable_mapping;
