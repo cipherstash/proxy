@@ -13,7 +13,9 @@
 #[cfg(test)]
 mod tests {
     use crate::common::{clear, connect_with_tls, random_id, random_string, trace, PROXY};
+    use std::sync::Arc;
     use std::time::Instant;
+    use tokio::sync::Notify;
     use tokio::task::JoinSet;
 
     /// Number of tenant connections per test phase.
@@ -212,10 +214,11 @@ mod tests {
 
     /// Verifies that a slow tenant connection does not block other tenants.
     ///
-    /// Tenant A: encrypted insert then pg_sleep(0.5).
-    /// Tenant B (different keyset, spawned 50ms later): 10 encrypted inserts, timed.
+    /// Tenant A: encrypted insert, signals readiness, then pg_sleep(0.5).
+    /// Tenant B (different keyset): waits for A's signal, then does 10 encrypted inserts, timed.
     ///
-    /// Connection setup is excluded from timing.
+    /// Connection setup is excluded from timing. A `Notify` ensures B starts only after
+    /// A has completed its encrypted insert and entered pg_sleep, avoiding timing fragility.
     ///
     /// With shared mutex contention, B may be blocked while A holds a lock.
     /// After per-connection cipher fix, B should complete independently of A's sleep.
@@ -230,7 +233,11 @@ mod tests {
         let client_a = connect_as_tenant(&keyset_ids[0]).await;
         let client_b = connect_as_tenant(&keyset_ids[1]).await;
 
-        // Tenant A: encrypted insert then sleep
+        // A signals after its encrypted insert completes, just before entering pg_sleep.
+        let a_ready = Arc::new(Notify::new());
+        let a_ready_tx = a_ready.clone();
+
+        // Tenant A: encrypted insert, signal, then sleep
         let a_handle = tokio::spawn(async move {
             let id = random_id();
             let val = random_string();
@@ -242,12 +249,15 @@ mod tests {
                 .await
                 .unwrap();
 
+            // Signal that the encrypted insert is done; A is now entering pg_sleep
+            a_ready_tx.notify_one();
+
             // Hold this connection busy with a sleep
             client_a.simple_query("SELECT pg_sleep(0.5)").await.unwrap();
         });
 
-        // Small delay so A is likely in-flight before B starts
-        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        // Wait for A to complete its encrypted insert before starting B
+        a_ready.notified().await;
 
         // Tenant B: encrypted inserts, timed
         let b_handle = tokio::spawn(async move {
