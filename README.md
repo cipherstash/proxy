@@ -210,6 +210,7 @@ This demonstrates the power of CipherStash Proxy:
 
 Check out our [how-to guide](docs/how-to/index.md) for Proxy, or jump straight into the [reference guide](docs/reference/index.md).
 For information on developing for Proxy, see the [Proxy development guide](./DEVELOPMENT.md).
+For a deep dive into how the proxy works internally, see the [Architecture guide](./ARCHITECTURE.md).
 
 ---
 
