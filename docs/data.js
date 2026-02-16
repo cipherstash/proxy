@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1771218238026,
+  "lastUpdate": 1771221323095,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -19185,6 +19185,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 20.393348,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "c05da9b8fb3a8a524b9e672dbef335df376208ae",
+          "message": "test(integration): add contention validation tests for scoped cipher",
+          "timestamp": "2026-02-15T08:18:47Z",
+          "url": "https://github.com/cipherstash/proxy/pull/373/commits/c05da9b8fb3a8a524b9e672dbef335df376208ae"
+        },
+        "date": 1771221321790,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 22.902069,
             "unit": "Number"
           }
         ]
