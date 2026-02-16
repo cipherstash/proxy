@@ -212,16 +212,22 @@ mod tests {
         );
     }
 
+    /// Number of encrypted inserts for the slow-connection test.
+    const SLOW_CONN_INSERTS: usize = 10;
+
     /// Verifies that a slow tenant connection does not block other tenants.
     ///
-    /// Tenant A: encrypted insert, signals readiness, then pg_sleep(0.5).
-    /// Tenant B (different keyset): waits for A's signal, then does 10 encrypted inserts, timed.
+    /// First measures a solo baseline: one tenant doing N encrypted inserts alone.
+    /// Then runs the contention scenario:
+    ///   Tenant A: encrypted insert, signals readiness, then pg_sleep(2).
+    ///   Tenant B (different keyset): waits for A's signal, then does N encrypted inserts, timed.
+    ///
+    /// Asserts that B's time under contention is within 2x of the solo baseline,
+    /// proving B is not blocked by A's sleep. Uses a relative comparison instead
+    /// of an absolute threshold to avoid CI environment speed sensitivity.
     ///
     /// Connection setup is excluded from timing. A `Notify` ensures B starts only after
     /// A has completed its encrypted insert and entered pg_sleep, avoiding timing fragility.
-    ///
-    /// With shared mutex contention, B may be blocked while A holds a lock.
-    /// After per-connection cipher fix, B should complete independently of A's sleep.
     #[tokio::test]
     async fn multitenant_slow_connection_does_not_block_other_tenants() {
         trace();
@@ -229,6 +235,14 @@ mod tests {
 
         let keyset_ids = tenant_keyset_ids(2);
 
+        // --- Solo baseline: measure how long N inserts take with no contention ---
+        let baseline_client = connect_as_tenant(&keyset_ids[1]).await;
+        let baseline_duration = do_encrypted_inserts(&baseline_client, SLOW_CONN_INSERTS).await;
+        drop(baseline_client);
+
+        clear().await;
+
+        // --- Contention scenario ---
         // Establish both connections before timing
         let client_a = connect_as_tenant(&keyset_ids[0]).await;
         let client_b = connect_as_tenant(&keyset_ids[1]).await;
@@ -237,7 +251,7 @@ mod tests {
         let a_ready = Arc::new(Notify::new());
         let a_ready_tx = a_ready.clone();
 
-        // Tenant A: encrypted insert, signal, then sleep
+        // Tenant A: encrypted insert, signal, then sleep (2s to be clearly longer than inserts)
         let a_handle = tokio::spawn(async move {
             let id = random_id();
             let val = random_string();
@@ -252,47 +266,43 @@ mod tests {
             // Signal that the encrypted insert is done; A is now entering pg_sleep
             a_ready_tx.notify_one();
 
-            // Hold this connection busy with a sleep
-            client_a.simple_query("SELECT pg_sleep(0.5)").await.unwrap();
+            // Hold this connection busy with a long sleep
+            client_a.simple_query("SELECT pg_sleep(2)").await.unwrap();
         });
 
         // Wait for A to complete its encrypted insert before starting B
         a_ready.notified().await;
 
         // Tenant B: encrypted inserts, timed
-        let b_handle = tokio::spawn(async move {
-            let start = Instant::now();
-            for _ in 0..10 {
-                let id = random_id();
-                let val = random_string();
-                client_b
-                    .query(
-                        "INSERT INTO encrypted (id, encrypted_text) VALUES ($1, $2)",
-                        &[&id, &val],
-                    )
-                    .await
-                    .unwrap();
-            }
-            start.elapsed()
-        });
+        let b_handle =
+            tokio::spawn(async move { do_encrypted_inserts(&client_b, SLOW_CONN_INSERTS).await });
 
         // Wait for both
         let b_duration = b_handle.await.unwrap();
         a_handle.await.unwrap();
 
         // --- Diagnostics ---
+        let contention_ratio = b_duration.as_secs_f64() / baseline_duration.as_secs_f64();
+
         eprintln!("=== multitenant_slow_connection_does_not_block_other_tenants ===");
         eprintln!(
-            "  Tenant B (10 encrypted inserts while Tenant A sleeps): {:.3}s",
+            "  Solo baseline ({SLOW_CONN_INSERTS} encrypted inserts): {:.3}s",
+            baseline_duration.as_secs_f64()
+        );
+        eprintln!(
+            "  Tenant B ({SLOW_CONN_INSERTS} encrypted inserts while A sleeps): {:.3}s",
             b_duration.as_secs_f64()
         );
-        eprintln!("  (After fix: expect B completes well under 0.5s, independent of A's sleep)");
+        eprintln!("  Contention ratio (B / baseline): {contention_ratio:.3}");
+        eprintln!("  (After fix: expect ratio < 2.0, B completes independently of A's sleep)");
         eprintln!("=================================================================");
 
         assert!(
-            b_duration.as_secs_f64() < 0.5,
-            "Tenant B should not be blocked by Tenant A's sleep, took {:.3}s",
-            b_duration.as_secs_f64()
+            contention_ratio < 2.0,
+            "Tenant B should not be blocked by Tenant A's sleep, \
+             contention ratio={contention_ratio:.3} (B={:.3}s, baseline={:.3}s)",
+            b_duration.as_secs_f64(),
+            baseline_duration.as_secs_f64()
         );
     }
 }
