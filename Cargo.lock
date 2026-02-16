@@ -767,9 +767,9 @@ dependencies = [
 
 [[package]]
 name = "cipherstash-client"
-version = "0.33.1"
+version = "0.33.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c00ee532ebcbd69ca06116c2e8300253e2fc0bbc569807ef75951262f04e9577"
+checksum = "178b3176d30da0e10794e82675f3b8462a36d4c5f5e317874fc0b6d31c23e3b8"
 dependencies = [
  "aes-gcm-siv",
  "anyhow",
@@ -799,7 +799,6 @@ dependencies = [
  "ore-rs",
  "percent-encoding",
  "rand 0.8.5",
- "rand_chacha 0.3.1",
  "recipher",
  "reqwest 0.12.15",
  "reqwest-middleware",
