@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1771298756921,
+  "lastUpdate": 1771301447246,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -19289,6 +19289,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 19.114975,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "toby@cipherstash.com",
+            "name": "Toby Hede",
+            "username": "tobyhede"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "e1ff080fdf2a5c44bacfe5187942c4e2dc83ada4",
+          "message": "Merge pull request #375 from cipherstash/fix/cip-2743-medium-vulns\n\nfix(deps): remediate medium vulnerabilities (CIP-2743)",
+          "timestamp": "2026-02-17T15:07:53+11:00",
+          "tree_id": "8a4294d1dbdf10173858a58e5082ee7fc4d60ffc",
+          "url": "https://github.com/cipherstash/proxy/commit/e1ff080fdf2a5c44bacfe5187942c4e2dc83ada4"
+        },
+        "date": 1771301445937,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 22.252771,
             "unit": "Number"
           }
         ]
