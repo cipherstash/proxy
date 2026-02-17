@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1771221422042,
+  "lastUpdate": 1771292503841,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -19235,6 +19235,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 23.458977,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "toby@cipherstash.com",
+            "name": "Toby Hede",
+            "username": "tobyhede"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "494bf6f48fdfc1a8f1e04b47b93455417376cf56",
+          "message": "Merge pull request #373 from cipherstash/connection-scoped-cipher\n\nUpdate cipherstash-client and add contention validation tests for scoped cipher",
+          "timestamp": "2026-02-17T12:38:29+11:00",
+          "tree_id": "39f7bbb8a5f80416549ab7c7469d6553938943ce",
+          "url": "https://github.com/cipherstash/proxy/commit/494bf6f48fdfc1a8f1e04b47b93455417376cf56"
+        },
+        "date": 1771292502488,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 22.071419,
             "unit": "Number"
           }
         ]
