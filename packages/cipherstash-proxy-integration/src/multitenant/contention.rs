@@ -1,0 +1,313 @@
+/// Tests that validate mutex contention across concurrent multitenant connections.
+///
+/// All proxy connections share a single `Arc<ZerokmsClient>` which internally holds two mutexes:
+/// - `Mutex<ChaChaRng>` in `ViturClient` — serializes IV generation during every encrypt call
+/// - `Arc<Mutex<ServiceCredentials>>` in `AutoRefresh` — serializes token retrieval
+///
+/// In multitenant deployments, different tenants (keysets) encrypting concurrently all contend
+/// on these same mutexes. These tests prove that contention exists and will validate the
+/// per-connection cipher fix.
+///
+/// IMPORTANT: These tests require `CS_DEFAULT_KEYSET_ID` to be unset and tenant keyset
+/// env vars to be set. They run in the multitenant integration test phase.
+#[cfg(test)]
+mod tests {
+    use crate::common::{clear, connect_with_tls, random_id, random_string, trace, PROXY};
+    use std::sync::Arc;
+    use std::time::Instant;
+    use tokio::sync::Notify;
+    use tokio::task::JoinSet;
+
+    /// Number of tenant connections per test phase.
+    const TENANTS_PER_BATCH: usize = 10;
+
+    /// Number of encrypted inserts each tenant performs.
+    const INSERTS_PER_TENANT: usize = 50;
+
+    /// Read tenant keyset IDs from environment, cycling through the 3 available keysets.
+    fn tenant_keyset_ids(count: usize) -> Vec<String> {
+        let keysets = [
+            std::env::var("CS_TENANT_KEYSET_ID_1").unwrap(),
+            std::env::var("CS_TENANT_KEYSET_ID_2").unwrap(),
+            std::env::var("CS_TENANT_KEYSET_ID_3").unwrap(),
+        ];
+        (0..count)
+            .map(|i| keysets[i % keysets.len()].clone())
+            .collect()
+    }
+
+    /// Establish a connection and set the keyset for a tenant.
+    /// Returns the ready-to-use client (connection setup is excluded from timing).
+    async fn connect_as_tenant(keyset_id: &str) -> tokio_postgres::Client {
+        let client = connect_with_tls(PROXY).await;
+        // SET doesn't support parameterized values; keyset_id is from trusted env vars
+        let sql = format!("SET CIPHERSTASH.KEYSET_ID = '{keyset_id}'");
+        client.execute(&sql, &[]).await.unwrap();
+        client
+    }
+
+    /// Perform N encrypted inserts on an already-connected client.
+    /// Returns the wall-clock duration of the insert phase only.
+    async fn do_encrypted_inserts(
+        client: &tokio_postgres::Client,
+        n: usize,
+    ) -> std::time::Duration {
+        let start = Instant::now();
+        for _ in 0..n {
+            let id = random_id();
+            let val = random_string();
+            client
+                .execute(
+                    "INSERT INTO encrypted (id, encrypted_text) VALUES ($1, $2)",
+                    &[&id, &val],
+                )
+                .await
+                .unwrap();
+        }
+        start.elapsed()
+    }
+
+    /// Measures whether concurrent multitenant encrypted inserts scale better than sequential.
+    ///
+    /// Sequential: 10 tenants in series, each doing 50 encrypted inserts.
+    /// Concurrent: 10 tenants in parallel, each doing 50 encrypted inserts.
+    ///
+    /// Connection setup and keyset configuration happen before timing starts.
+    /// Only the encrypt+insert phase is measured.
+    ///
+    /// With shared mutex contention, concurrent wall-clock will be ~same as sequential.
+    /// After per-connection cipher fix, concurrent should be significantly faster.
+    #[tokio::test]
+    async fn multitenant_concurrent_encrypted_inserts_measure_scaling() {
+        trace();
+        clear().await;
+
+        let keyset_ids = tenant_keyset_ids(TENANTS_PER_BATCH);
+
+        // --- Sequential phase: establish all connections first, then measure inserts ---
+        let mut seq_clients = Vec::with_capacity(TENANTS_PER_BATCH);
+        for keyset_id in &keyset_ids {
+            seq_clients.push(connect_as_tenant(keyset_id).await);
+        }
+
+        let seq_start = Instant::now();
+        for client in &seq_clients {
+            do_encrypted_inserts(client, INSERTS_PER_TENANT).await;
+        }
+        let sequential_duration = seq_start.elapsed();
+        drop(seq_clients);
+
+        clear().await;
+
+        // --- Concurrent phase: establish all connections first, then measure inserts ---
+        let mut conc_clients = Vec::with_capacity(TENANTS_PER_BATCH);
+        for keyset_id in &keyset_ids {
+            conc_clients.push(connect_as_tenant(keyset_id).await);
+        }
+
+        let conc_start = Instant::now();
+        let mut join_set = JoinSet::new();
+
+        for client in conc_clients {
+            join_set.spawn(async move {
+                do_encrypted_inserts(&client, INSERTS_PER_TENANT).await;
+            });
+        }
+
+        while let Some(result) = join_set.join_next().await {
+            result.unwrap();
+        }
+        let concurrent_duration = conc_start.elapsed();
+
+        // --- Diagnostics ---
+        let scaling_factor = concurrent_duration.as_secs_f64() / sequential_duration.as_secs_f64();
+
+        eprintln!("=== multitenant_concurrent_encrypted_inserts_measure_scaling ===");
+        eprintln!(
+            "  Sequential ({TENANTS_PER_BATCH} tenants x {INSERTS_PER_TENANT} inserts): {:.3}s",
+            sequential_duration.as_secs_f64()
+        );
+        eprintln!(
+            "  Concurrent ({TENANTS_PER_BATCH} tenants x {INSERTS_PER_TENANT} inserts): {:.3}s",
+            concurrent_duration.as_secs_f64()
+        );
+        eprintln!("  Scaling factor (concurrent / sequential): {scaling_factor:.3}");
+        eprintln!("  (After fix: expect scaling_factor < 0.5)");
+        eprintln!("================================================================");
+
+        // Diagnostic only: scaling_factor < 0.5 indicates the per-connection cipher fix is effective.
+        // Not asserted because CI runners exhibit variable performance under load.
+        if scaling_factor >= 0.5 {
+            eprintln!(
+                "  WARNING: scaling_factor >= 0.5 — concurrent inserts not scaling as expected"
+            );
+        }
+    }
+
+    /// Measures whether per-tenant latency increases under concurrent multitenant load.
+    ///
+    /// Solo: 1 tenant doing 50 encrypted inserts alone.
+    /// Concurrent: 10 tenants each doing 50 encrypted inserts, measuring per-tenant duration.
+    ///
+    /// Connection setup is excluded from timing.
+    ///
+    /// With shared mutex contention, per-tenant latency will increase significantly.
+    /// After per-connection cipher fix, latency should remain stable.
+    #[tokio::test]
+    async fn multitenant_per_connection_latency_increases_with_concurrency() {
+        trace();
+        clear().await;
+
+        let keyset_ids = tenant_keyset_ids(TENANTS_PER_BATCH);
+
+        // --- Solo phase ---
+        let solo_client = connect_as_tenant(&keyset_ids[0]).await;
+        let solo_duration = do_encrypted_inserts(&solo_client, INSERTS_PER_TENANT).await;
+        drop(solo_client);
+
+        clear().await;
+
+        // --- Concurrent phase: establish all connections, then measure ---
+        let mut clients = Vec::with_capacity(TENANTS_PER_BATCH);
+        for keyset_id in &keyset_ids {
+            clients.push(connect_as_tenant(keyset_id).await);
+        }
+
+        let mut join_set = JoinSet::new();
+        for client in clients {
+            join_set.spawn(async move { do_encrypted_inserts(&client, INSERTS_PER_TENANT).await });
+        }
+
+        let mut concurrent_durations = Vec::with_capacity(TENANTS_PER_BATCH);
+        while let Some(result) = join_set.join_next().await {
+            concurrent_durations.push(result.unwrap());
+        }
+
+        let avg_concurrent = concurrent_durations
+            .iter()
+            .map(|d| d.as_secs_f64())
+            .sum::<f64>()
+            / concurrent_durations.len() as f64;
+
+        let max_concurrent = concurrent_durations
+            .iter()
+            .map(|d| d.as_secs_f64())
+            .fold(0.0_f64, f64::max);
+
+        // --- Diagnostics ---
+        let latency_multiplier = avg_concurrent / solo_duration.as_secs_f64();
+
+        eprintln!("=== multitenant_per_connection_latency_increases_with_concurrency ===");
+        eprintln!(
+            "  Solo (1 tenant x {INSERTS_PER_TENANT} inserts): {:.3}s",
+            solo_duration.as_secs_f64()
+        );
+        eprintln!(
+            "  Concurrent avg ({TENANTS_PER_BATCH} tenants x {INSERTS_PER_TENANT} inserts): {avg_concurrent:.3}s",
+        );
+        eprintln!("  Concurrent max: {max_concurrent:.3}s");
+        eprintln!("  Latency multiplier (avg_concurrent / solo): {latency_multiplier:.3}");
+        eprintln!("  (After fix: expect latency_multiplier < 2.0)");
+        eprintln!("=====================================================================");
+
+        // Diagnostic only: latency_multiplier < 2.0 indicates stable per-tenant latency.
+        // Not asserted because CI runners exhibit variable performance under load.
+        if latency_multiplier >= 2.0 {
+            eprintln!("  WARNING: latency_multiplier >= 2.0 — per-tenant latency degraded under concurrency");
+        }
+    }
+
+    /// Number of encrypted inserts for the slow-connection test.
+    const SLOW_CONN_INSERTS: usize = 10;
+
+    /// Verifies that a slow tenant connection does not block other tenants.
+    ///
+    /// First measures a solo baseline: one tenant doing N encrypted inserts alone.
+    /// Then runs the contention scenario:
+    ///   Tenant A: encrypted insert, signals readiness, then pg_sleep(2).
+    ///   Tenant B (different keyset): waits for A's signal, then does N encrypted inserts, timed.
+    ///
+    /// Asserts that B's time under contention is within 2x of the solo baseline,
+    /// proving B is not blocked by A's sleep. Uses a relative comparison instead
+    /// of an absolute threshold to avoid CI environment speed sensitivity.
+    ///
+    /// Connection setup is excluded from timing. A `Notify` ensures B starts only after
+    /// A has completed its encrypted insert and entered pg_sleep, avoiding timing fragility.
+    #[tokio::test]
+    async fn multitenant_slow_connection_does_not_block_other_tenants() {
+        trace();
+        clear().await;
+
+        let keyset_ids = tenant_keyset_ids(2);
+
+        // --- Solo baseline: measure how long N inserts take with no contention ---
+        let baseline_client = connect_as_tenant(&keyset_ids[1]).await;
+        let baseline_duration = do_encrypted_inserts(&baseline_client, SLOW_CONN_INSERTS).await;
+        drop(baseline_client);
+
+        clear().await;
+
+        // --- Contention scenario ---
+        // Establish both connections before timing
+        let client_a = connect_as_tenant(&keyset_ids[0]).await;
+        let client_b = connect_as_tenant(&keyset_ids[1]).await;
+
+        // A signals after its encrypted insert completes, just before entering pg_sleep.
+        let a_ready = Arc::new(Notify::new());
+        let a_ready_tx = a_ready.clone();
+
+        // Tenant A: encrypted insert, signal, then sleep (2s to be clearly longer than inserts)
+        let a_handle = tokio::spawn(async move {
+            let id = random_id();
+            let val = random_string();
+            client_a
+                .execute(
+                    "INSERT INTO encrypted (id, encrypted_text) VALUES ($1, $2)",
+                    &[&id, &val],
+                )
+                .await
+                .unwrap();
+
+            // Signal that the encrypted insert is done; A is now entering pg_sleep
+            a_ready_tx.notify_one();
+
+            // Hold this connection busy with a long sleep
+            client_a.simple_query("SELECT pg_sleep(2)").await.unwrap();
+        });
+
+        // Wait for A to complete its encrypted insert before starting B
+        a_ready.notified().await;
+
+        // Tenant B: encrypted inserts, timed
+        let b_handle =
+            tokio::spawn(async move { do_encrypted_inserts(&client_b, SLOW_CONN_INSERTS).await });
+
+        // Wait for both
+        let b_duration = b_handle.await.unwrap();
+        a_handle.await.unwrap();
+
+        // --- Diagnostics ---
+        let contention_ratio = b_duration.as_secs_f64() / baseline_duration.as_secs_f64();
+
+        eprintln!("=== multitenant_slow_connection_does_not_block_other_tenants ===");
+        eprintln!(
+            "  Solo baseline ({SLOW_CONN_INSERTS} encrypted inserts): {:.3}s",
+            baseline_duration.as_secs_f64()
+        );
+        eprintln!(
+            "  Tenant B ({SLOW_CONN_INSERTS} encrypted inserts while A sleeps): {:.3}s",
+            b_duration.as_secs_f64()
+        );
+        eprintln!("  Contention ratio (B / baseline): {contention_ratio:.3}");
+        eprintln!("  (After fix: expect ratio < 2.0, B completes independently of A's sleep)");
+        eprintln!("=================================================================");
+
+        assert!(
+            contention_ratio < 2.0,
+            "Tenant B should not be blocked by Tenant A's sleep, \
+             contention ratio={contention_ratio:.3} (B={:.3}s, baseline={:.3}s)",
+            b_duration.as_secs_f64(),
+            baseline_duration.as_secs_f64()
+        );
+    }
+}
