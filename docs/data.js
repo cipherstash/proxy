@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1771292503841,
+  "lastUpdate": 1771298756921,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -19264,6 +19264,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 22.071419,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "dbb48de47d9588f32254f9fa24423834bf93c358",
+          "message": "fix(deps): remediate medium vulnerabilities (CIP-2743)",
+          "timestamp": "2026-02-17T01:38:34Z",
+          "url": "https://github.com/cipherstash/proxy/pull/375/commits/dbb48de47d9588f32254f9fa24423834bf93c358"
+        },
+        "date": 1771298755386,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 19.114975,
             "unit": "Number"
           }
         ]
