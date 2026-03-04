@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1772604354649,
+  "lastUpdate": 1772664446514,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -19493,6 +19493,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 40.094961,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "toby@cipherstash.com",
+            "name": "Toby Hede",
+            "username": "tobyhede"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "4dff16e5cec14454714bced0e32f21184a11b3b8",
+          "message": "Merge pull request #378 from cipherstash/fix/cip-2860-aws-lc-sys-patch\n\nfix(deps): patch aws-lc-sys to 0.38.0",
+          "timestamp": "2026-03-05T09:41:46+11:00",
+          "tree_id": "7091019e23f7d12978bec6e9af3b5e2aba296080",
+          "url": "https://github.com/cipherstash/proxy/commit/4dff16e5cec14454714bced0e32f21184a11b3b8"
+        },
+        "date": 1772664445147,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 39.033048,
             "unit": "Number"
           }
         ]
