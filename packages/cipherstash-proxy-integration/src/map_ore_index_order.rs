@@ -431,37 +431,49 @@ mod tests {
 
     #[tokio::test]
     async fn map_ore_order_int4() {
-        let values: Vec<i32> = vec![-50_000, -1_000, -1, 0, 1, 42, 1_000, 10_000, 50_000, 100_000];
+        let values: Vec<i32> = vec![
+            -50_000, -1_000, -1, 0, 1, 42, 1_000, 10_000, 50_000, 100_000,
+        ];
         map_ore_order_generic("encrypted_int4", values, "ASC").await;
     }
 
     #[tokio::test]
     async fn map_ore_order_int4_desc() {
-        let values: Vec<i32> = vec![-50_000, -1_000, -1, 0, 1, 42, 1_000, 10_000, 50_000, 100_000];
+        let values: Vec<i32> = vec![
+            -50_000, -1_000, -1, 0, 1, 42, 1_000, 10_000, 50_000, 100_000,
+        ];
         map_ore_order_generic("encrypted_int4", values, "DESC").await;
     }
 
     #[tokio::test]
     async fn map_ore_order_int8() {
-        let values: Vec<i64> = vec![-1_000_000, -10_000, -1, 0, 1, 42, 10_000, 100_000, 1_000_000, 9_999_999];
+        let values: Vec<i64> = vec![
+            -1_000_000, -10_000, -1, 0, 1, 42, 10_000, 100_000, 1_000_000, 9_999_999,
+        ];
         map_ore_order_generic("encrypted_int8", values, "ASC").await;
     }
 
     #[tokio::test]
     async fn map_ore_order_int8_desc() {
-        let values: Vec<i64> = vec![-1_000_000, -10_000, -1, 0, 1, 42, 10_000, 100_000, 1_000_000, 9_999_999];
+        let values: Vec<i64> = vec![
+            -1_000_000, -10_000, -1, 0, 1, 42, 10_000, 100_000, 1_000_000, 9_999_999,
+        ];
         map_ore_order_generic("encrypted_int8", values, "DESC").await;
     }
 
     #[tokio::test]
     async fn map_ore_order_float8() {
-        let values: Vec<f64> = vec![-99.9, -1.5, -0.001, 0.0, 0.001, 1.5, 3.14, 42.0, 99.9, 1000.5];
+        let values: Vec<f64> = vec![
+            -99.9, -1.5, -0.001, 0.0, 0.001, 1.5, 3.14, 42.0, 99.9, 1000.5,
+        ];
         map_ore_order_generic("encrypted_float8", values, "ASC").await;
     }
 
     #[tokio::test]
     async fn map_ore_order_float8_desc() {
-        let values: Vec<f64> = vec![-99.9, -1.5, -0.001, 0.0, 0.001, 1.5, 3.14, 42.0, 99.9, 1000.5];
+        let values: Vec<f64> = vec![
+            -99.9, -1.5, -0.001, 0.0, 0.001, 1.5, 3.14, 42.0, 99.9, 1000.5,
+        ];
         map_ore_order_generic("encrypted_float8", values, "DESC").await;
     }
 
@@ -510,9 +522,8 @@ mod tests {
                 .unwrap();
         }
 
-        let select_sql = format!(
-            "SELECT {col_name} FROM encrypted ORDER BY {col_name} {direction}"
-        );
+        let select_sql =
+            format!("SELECT {col_name} FROM encrypted ORDER BY {col_name} {direction}");
         let rows = client.query(&select_sql, &[]).await.unwrap();
 
         let actual: Vec<T> = rows.iter().map(|row| row.get(0)).collect();
