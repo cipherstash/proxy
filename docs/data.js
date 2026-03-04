@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1772664446514,
+  "lastUpdate": 1772666449832,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -19522,6 +19522,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 39.033048,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "f207300148700b2da273b96fa594ebc320639d77",
+          "message": "test(integration): expand numeric ORE ordering tests with edge cases",
+          "timestamp": "2026-03-04T22:41:51Z",
+          "url": "https://github.com/cipherstash/proxy/pull/377/commits/f207300148700b2da273b96fa594ebc320639d77"
+        },
+        "date": 1772666448487,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 38.754963,
             "unit": "Number"
           }
         ]
