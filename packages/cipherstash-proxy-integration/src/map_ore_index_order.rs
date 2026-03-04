@@ -336,7 +336,7 @@ mod tests {
         let s_plaintext_two = "a";
         let s_plaintext_three = "b";
 
-        let s_enctrypted_one = "a";
+        let s_encrypted_one = "a";
         let s_encrypted_two = "b";
         let s_encrypted_three = "c";
 
@@ -354,7 +354,7 @@ mod tests {
                     &s_encrypted_two,
                     &random_id(),
                     &s_plaintext_one,
-                    &s_enctrypted_one,
+                    &s_encrypted_one,
                     &random_id(),
                     &s_plaintext_three,
                     &s_encrypted_three,
@@ -373,7 +373,7 @@ mod tests {
             .collect::<Vec<(&str, &str)>>();
 
         let expected = vec![
-            (s_plaintext_one, s_enctrypted_one),
+            (s_plaintext_one, s_encrypted_one),
             (s_plaintext_two, s_encrypted_two),
             (s_plaintext_three, s_encrypted_three),
         ];
