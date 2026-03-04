@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1772597264403,
+  "lastUpdate": 1772602704332,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -19393,6 +19393,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 38.178672,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "d5810639fdbebb4c51874769d4c54d693752e603",
+          "message": "fix(deps): patch aws-lc-sys to 0.38.0",
+          "timestamp": "2026-02-26T07:03:25Z",
+          "url": "https://github.com/cipherstash/proxy/pull/378/commits/d5810639fdbebb4c51874769d4c54d693752e603"
+        },
+        "date": 1772602703019,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 38.920345,
             "unit": "Number"
           }
         ]
