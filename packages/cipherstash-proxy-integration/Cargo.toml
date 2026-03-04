@@ -28,3 +28,4 @@ tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 uuid = { version = "1.11.0", features = ["serde", "v4"] }
 reqwest = { version = "0.13", features = ["rustls"] }
+serial_test = "3"

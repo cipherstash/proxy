@@ -10,6 +10,22 @@ use tokio_postgres::SimpleQueryMessage;
 
 use crate::common::{interleaved_indices, random_id};
 
+/// Sort direction for ORE ordering tests.
+#[derive(Clone, Copy)]
+pub enum SortDirection {
+    Asc,
+    Desc,
+}
+
+impl SortDirection {
+    pub fn as_sql(&self) -> &'static str {
+        match self {
+            SortDirection::Asc => "ASC",
+            SortDirection::Desc => "DESC",
+        }
+    }
+}
+
 /// Text ASC ordering.
 pub async fn ore_order_text(client: &tokio_postgres::Client) {
     let s_one = "a";
@@ -369,7 +385,7 @@ pub async fn ore_order_generic<T>(
     client: &tokio_postgres::Client,
     col_name: &str,
     values: Vec<T>,
-    direction: &str,
+    direction: SortDirection,
 ) where
     for<'a> T: Clone + PartialEq + ToSql + Sync + FromSql<'a> + PartialOrd + Debug,
 {
@@ -382,12 +398,13 @@ pub async fn ore_order_generic<T>(
             .unwrap();
     }
 
-    let select_sql = format!("SELECT {col_name} FROM encrypted ORDER BY {col_name} {direction}");
+    let dir = direction.as_sql();
+    let select_sql = format!("SELECT {col_name} FROM encrypted ORDER BY {col_name} {dir}");
     let rows = client.query(&select_sql, &[]).await.unwrap();
 
     let actual: Vec<T> = rows.iter().map(|row| row.get(0)).collect();
 
-    let expected: Vec<T> = if direction == "DESC" {
+    let expected: Vec<T> = if matches!(direction, SortDirection::Desc) {
         values.into_iter().rev().collect()
     } else {
         values
