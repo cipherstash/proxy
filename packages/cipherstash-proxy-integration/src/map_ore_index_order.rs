@@ -464,7 +464,7 @@ mod tests {
     #[tokio::test]
     async fn map_ore_order_float8() {
         let values: Vec<f64> = vec![
-            -99.9, -1.5, -0.001, 0.0, 0.001, 1.5, 3.14, 42.0, 99.9, 1000.5,
+            -99.9, -1.5, -0.001, 0.0, 0.001, 1.5, 3.25, 42.0, 99.9, 1000.5,
         ];
         map_ore_order_generic("encrypted_float8", values, "ASC").await;
     }
@@ -472,7 +472,7 @@ mod tests {
     #[tokio::test]
     async fn map_ore_order_float8_desc() {
         let values: Vec<f64> = vec![
-            -99.9, -1.5, -0.001, 0.0, 0.001, 1.5, 3.14, 42.0, 99.9, 1000.5,
+            -99.9, -1.5, -0.001, 0.0, 0.001, 1.5, 3.25, 42.0, 99.9, 1000.5,
         ];
         map_ore_order_generic("encrypted_float8", values, "DESC").await;
     }
