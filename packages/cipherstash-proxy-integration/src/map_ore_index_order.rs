@@ -1,5 +1,7 @@
 #[cfg(test)]
 mod tests {
+    use std::fmt::Debug;
+    use tokio_postgres::types::{FromSql, ToSql};
     use tokio_postgres::SimpleQueryMessage;
 
     use crate::common::{clear, connect_with_tls, random_id, trace, PROXY};
@@ -417,164 +419,109 @@ mod tests {
 
     #[tokio::test]
     async fn map_ore_order_int2() {
-        trace();
-
-        clear().await;
-
-        let client = connect_with_tls(PROXY).await;
-
-        let n_one = 10i16;
-        let n_two = 20i16;
-        let n_three = 30i16;
-
-        let sql = "
-            INSERT INTO encrypted (id, encrypted_int2)
-            VALUES ($1, $2), ($3, $4), ($5, $6)
-        ";
-
-        client
-            .query(
-                sql,
-                &[
-                    &random_id(),
-                    &n_two,
-                    &random_id(),
-                    &n_one,
-                    &random_id(),
-                    &n_three,
-                ],
-            )
-            .await
-            .unwrap();
-
-        let sql = "SELECT encrypted_int2 FROM encrypted ORDER BY encrypted_int2";
-        let rows = client.query(sql, &[]).await.unwrap();
-
-        let actual = rows.iter().map(|row| row.get(0)).collect::<Vec<i16>>();
-        let expected = vec![n_one, n_two, n_three];
-
-        assert_eq!(actual, expected);
+        let values: Vec<i16> = vec![-100, -10, -1, 0, 1, 5, 10, 20, 100, 200];
+        map_ore_order_generic("encrypted_int2", values, "ASC").await;
     }
 
     #[tokio::test]
     async fn map_ore_order_int2_desc() {
-        trace();
-
-        clear().await;
-
-        let client = connect_with_tls(PROXY).await;
-
-        let n_one = 10i16;
-        let n_two = 20i16;
-        let n_three = 30i16;
-
-        let sql = "
-            INSERT INTO encrypted (id, encrypted_int2)
-            VALUES ($1, $2), ($3, $4), ($5, $6)
-        ";
-
-        client
-            .query(
-                sql,
-                &[
-                    &random_id(),
-                    &n_two,
-                    &random_id(),
-                    &n_one,
-                    &random_id(),
-                    &n_three,
-                ],
-            )
-            .await
-            .unwrap();
-
-        let sql = "SELECT encrypted_int2 FROM encrypted ORDER BY encrypted_int2 DESC";
-        let rows = client.query(sql, &[]).await.unwrap();
-
-        let actual = rows.iter().map(|row| row.get(0)).collect::<Vec<i16>>();
-        let expected = vec![n_three, n_two, n_one];
-
-        assert_eq!(actual, expected);
+        let values: Vec<i16> = vec![-100, -10, -1, 0, 1, 5, 10, 20, 100, 200];
+        map_ore_order_generic("encrypted_int2", values, "DESC").await;
     }
 
     #[tokio::test]
     async fn map_ore_order_int4() {
-        trace();
+        let values: Vec<i32> = vec![-50_000, -1_000, -1, 0, 1, 42, 1_000, 10_000, 50_000, 100_000];
+        map_ore_order_generic("encrypted_int4", values, "ASC").await;
+    }
 
-        clear().await;
-
-        let client = connect_with_tls(PROXY).await;
-
-        let n_one = 10i32;
-        let n_two = 20i32;
-        let n_three = 30i32;
-
-        let sql = "
-            INSERT INTO encrypted (id, encrypted_int4)
-            VALUES ($1, $2), ($3, $4), ($5, $6)
-        ";
-
-        client
-            .query(
-                sql,
-                &[
-                    &random_id(),
-                    &n_two,
-                    &random_id(),
-                    &n_one,
-                    &random_id(),
-                    &n_three,
-                ],
-            )
-            .await
-            .unwrap();
-
-        let sql = "SELECT encrypted_int4 FROM encrypted ORDER BY encrypted_int4";
-        let rows = client.query(sql, &[]).await.unwrap();
-
-        let actual = rows.iter().map(|row| row.get(0)).collect::<Vec<i32>>();
-        let expected = vec![n_one, n_two, n_three];
-
-        assert_eq!(actual, expected);
+    #[tokio::test]
+    async fn map_ore_order_int4_desc() {
+        let values: Vec<i32> = vec![-50_000, -1_000, -1, 0, 1, 42, 1_000, 10_000, 50_000, 100_000];
+        map_ore_order_generic("encrypted_int4", values, "DESC").await;
     }
 
     #[tokio::test]
     async fn map_ore_order_int8() {
+        let values: Vec<i64> = vec![-1_000_000, -10_000, -1, 0, 1, 42, 10_000, 100_000, 1_000_000, 9_999_999];
+        map_ore_order_generic("encrypted_int8", values, "ASC").await;
+    }
+
+    #[tokio::test]
+    async fn map_ore_order_int8_desc() {
+        let values: Vec<i64> = vec![-1_000_000, -10_000, -1, 0, 1, 42, 10_000, 100_000, 1_000_000, 9_999_999];
+        map_ore_order_generic("encrypted_int8", values, "DESC").await;
+    }
+
+    #[tokio::test]
+    async fn map_ore_order_float8() {
+        let values: Vec<f64> = vec![-99.9, -1.5, -0.001, 0.0, 0.001, 1.5, 3.14, 42.0, 99.9, 1000.5];
+        map_ore_order_generic("encrypted_float8", values, "ASC").await;
+    }
+
+    #[tokio::test]
+    async fn map_ore_order_float8_desc() {
+        let values: Vec<f64> = vec![-99.9, -1.5, -0.001, 0.0, 0.001, 1.5, 3.14, 42.0, 99.9, 1000.5];
+        map_ore_order_generic("encrypted_float8", values, "DESC").await;
+    }
+
+    /// Returns indices in zigzag order so insertion is never accidentally sorted.
+    /// For len=5: [4, 0, 3, 1, 2]
+    fn interleaved_indices(len: usize) -> Vec<usize> {
+        let mut indices = Vec::with_capacity(len);
+        let mut lo = 0;
+        let mut hi = len;
+        let mut take_hi = true;
+        while lo < hi {
+            if take_hi {
+                hi -= 1;
+                indices.push(hi);
+            } else {
+                indices.push(lo);
+                lo += 1;
+            }
+            take_hi = !take_hi;
+        }
+        indices
+    }
+
+    /// Generic ORE ordering test.
+    ///
+    /// `values` must be provided in ascending sorted order.
+    /// Values are inserted in interleaved (non-sorted) order, then verified
+    /// via ORDER BY in the given direction.
+    async fn map_ore_order_generic<T>(col_name: &str, values: Vec<T>, direction: &str)
+    where
+        for<'a> T: Clone + PartialEq + ToSql + Sync + FromSql<'a> + PartialOrd + Debug,
+    {
         trace();
 
         clear().await;
 
         let client = connect_with_tls(PROXY).await;
 
-        let n_one = 10i64;
-        let n_two = 20i64;
-        let n_three = 30i64;
+        let insert_sql = format!("INSERT INTO encrypted (id, {col_name}) VALUES ($1, $2)");
 
-        let sql = "
-            INSERT INTO encrypted (id, encrypted_int8)
-            VALUES ($1, $2), ($3, $4), ($5, $6)
-        ";
+        // Insert in interleaved order to avoid accidentally-sorted insertion
+        for idx in interleaved_indices(values.len()) {
+            client
+                .query(&insert_sql, &[&random_id(), &values[idx]])
+                .await
+                .unwrap();
+        }
 
-        client
-            .query(
-                sql,
-                &[
-                    &random_id(),
-                    &n_two,
-                    &random_id(),
-                    &n_one,
-                    &random_id(),
-                    &n_three,
-                ],
-            )
-            .await
-            .unwrap();
+        let select_sql = format!(
+            "SELECT {col_name} FROM encrypted ORDER BY {col_name} {direction}"
+        );
+        let rows = client.query(&select_sql, &[]).await.unwrap();
 
-        let sql = "SELECT encrypted_int8 FROM encrypted ORDER BY encrypted_int8";
-        let rows = client.query(sql, &[]).await.unwrap();
+        let actual: Vec<T> = rows.iter().map(|row| row.get(0)).collect();
 
-        let actual = rows.iter().map(|row| row.get(0)).collect::<Vec<i64>>();
-        let expected = vec![n_one, n_two, n_three];
+        let expected: Vec<T> = if direction == "DESC" {
+            values.into_iter().rev().collect()
+        } else {
+            values
+        };
 
         assert_eq!(actual, expected);
     }
