@@ -53,9 +53,7 @@ pub trait PostgreSqlErrorHandler {
             Error::Encrypt(EncryptError::UnknownKeysetIdentifier { .. }) => {
                 ErrorResponse::system_error(err.to_string())
             }
-            Error::ConnectionTimeout { .. } => {
-                ErrorResponse::connection_timeout(err.to_string())
-            }
+            Error::ConnectionTimeout { .. } => ErrorResponse::connection_timeout(err.to_string()),
             _ => ErrorResponse::system_error(err.to_string()),
         }
     }

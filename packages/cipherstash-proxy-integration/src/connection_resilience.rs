@@ -7,7 +7,7 @@
 /// - Blocked backend connections don't affect other proxy connections
 #[cfg(test)]
 mod tests {
-    use crate::common::{connect_with_tls, PROXY, PG_PORT};
+    use crate::common::{connect_with_tls, PG_PORT, PROXY};
     use std::sync::Arc;
     use std::time::Instant;
     use tokio::sync::Notify;
@@ -27,10 +27,7 @@ mod tests {
 
             // Connection A: run a slow query
             let a_handle = tokio::spawn(async move {
-                client_a
-                    .simple_query("SELECT pg_sleep(5)")
-                    .await
-                    .unwrap();
+                client_a.simple_query("SELECT pg_sleep(5)").await.unwrap();
             });
 
             // Brief pause to ensure A's query is in flight
@@ -89,10 +86,7 @@ mod tests {
             for _ in 0..5 {
                 join_set.spawn(async {
                     let client = connect_with_tls(PROXY).await;
-                    client
-                        .simple_query("SELECT pg_sleep(3)")
-                        .await
-                        .unwrap();
+                    client.simple_query("SELECT pg_sleep(3)").await.unwrap();
                 });
             }
 

@@ -117,10 +117,7 @@ mod tests {
     #[test]
     fn connection_timeout_defaults_to_120_seconds() {
         let config = DatabaseConfig::for_testing();
-        assert_eq!(
-            config.connection_timeout(),
-            Some(Duration::from_secs(120))
-        );
+        assert_eq!(config.connection_timeout(), Some(Duration::from_secs(120)));
     }
 
     #[test]
