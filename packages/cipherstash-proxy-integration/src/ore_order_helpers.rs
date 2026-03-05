@@ -26,72 +26,62 @@ impl SortDirection {
     }
 }
 
-/// Text ASC ordering.
+/// Text ASC ordering with lexicographic edge cases.
 pub async fn ore_order_text(client: &tokio_postgres::Client) {
-    let s_one = "a";
-    let s_two = "b";
-    let s_three = "c";
+    let values = vec![
+        "aardvark",
+        "apparatus",
+        "aplomb",
+        "chimera",
+        "chrysalis",
+        "chrysanthemum",
+        "zephyr",
+    ];
 
-    let sql = "
-        INSERT INTO encrypted (id, encrypted_text)
-        VALUES ($1, $2), ($3, $4), ($5, $6)
-    ";
+    let insert_sql = "INSERT INTO encrypted (id, encrypted_text) VALUES ($1, $2)";
 
-    client
-        .query(
-            sql,
-            &[
-                &random_id(),
-                &s_two,
-                &random_id(),
-                &s_one,
-                &random_id(),
-                &s_three,
-            ],
-        )
-        .await
-        .unwrap();
+    for idx in interleaved_indices(values.len()) {
+        client
+            .query(insert_sql, &[&random_id(), &values[idx]])
+            .await
+            .unwrap();
+    }
 
     let sql = "SELECT encrypted_text FROM encrypted ORDER BY encrypted_text";
     let rows = client.query(sql, &[]).await.unwrap();
 
     let actual = rows.iter().map(|row| row.get(0)).collect::<Vec<String>>();
-    let expected = vec![s_one, s_two, s_three];
+    let expected: Vec<String> = values.iter().map(|s| s.to_string()).collect();
 
     assert_eq!(actual, expected);
 }
 
-/// Text DESC ordering.
+/// Text DESC ordering with lexicographic edge cases.
 pub async fn ore_order_text_desc(client: &tokio_postgres::Client) {
-    let s_one = "a";
-    let s_two = "b";
-    let s_three = "c";
+    let values = vec![
+        "aardvark",
+        "apparatus",
+        "aplomb",
+        "chimera",
+        "chrysalis",
+        "chrysanthemum",
+        "zephyr",
+    ];
 
-    let sql = "
-        INSERT INTO encrypted (id, encrypted_text)
-        VALUES ($1, $2), ($3, $4), ($5, $6)
-    ";
+    let insert_sql = "INSERT INTO encrypted (id, encrypted_text) VALUES ($1, $2)";
 
-    client
-        .query(
-            sql,
-            &[
-                &random_id(),
-                &s_two,
-                &random_id(),
-                &s_one,
-                &random_id(),
-                &s_three,
-            ],
-        )
-        .await
-        .unwrap();
+    for idx in interleaved_indices(values.len()) {
+        client
+            .query(insert_sql, &[&random_id(), &values[idx]])
+            .await
+            .unwrap();
+    }
 
     let sql = "SELECT encrypted_text FROM encrypted ORDER BY encrypted_text DESC";
     let rows = client.query(sql, &[]).await.unwrap();
 
     let actual = rows.iter().map(|row| row.get(0)).collect::<Vec<String>>();
-    let expected = vec![s_three, s_two, s_one];
+    let expected: Vec<String> = values.iter().rev().map(|s| s.to_string()).collect();
 
     assert_eq!(actual, expected);
 }
