@@ -28,7 +28,7 @@ impl SortDirection {
 
 /// Text ASC ordering with lexicographic edge cases.
 pub async fn ore_order_text(client: &tokio_postgres::Client) {
-    let values = vec![
+    let values = [
         "aardvark",
         "apparatus",
         "aplomb",
@@ -58,7 +58,7 @@ pub async fn ore_order_text(client: &tokio_postgres::Client) {
 
 /// Text DESC ordering with lexicographic edge cases.
 pub async fn ore_order_text_desc(client: &tokio_postgres::Client) {
-    let values = vec![
+    let values = [
         "aardvark",
         "apparatus",
         "aplomb",
