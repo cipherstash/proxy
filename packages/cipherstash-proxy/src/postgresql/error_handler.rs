@@ -53,7 +53,9 @@ pub trait PostgreSqlErrorHandler {
             Error::Encrypt(EncryptError::UnknownKeysetIdentifier { .. }) => {
                 ErrorResponse::system_error(err.to_string())
             }
-            Error::ConnectionTimeout { .. } => ErrorResponse::connection_timeout(),
+            Error::ConnectionTimeout { .. } => {
+                ErrorResponse::connection_timeout(err.to_string())
+            }
             _ => ErrorResponse::system_error(err.to_string()),
         }
     }
@@ -102,6 +104,14 @@ mod tests {
             .map(|f| f.value.as_str())
     }
 
+    fn error_message(response: &ErrorResponse) -> Option<&str> {
+        response
+            .fields
+            .iter()
+            .find(|f| f.code == ErrorResponseCode::Message)
+            .map(|f| f.value.as_str())
+    }
+
     #[test]
     fn connection_timeout_maps_to_57p05() {
         let handler = TestHandler;
@@ -110,6 +120,10 @@ mod tests {
         };
         let response = handler.error_to_response(err);
         assert_eq!(error_code(&response), Some(CODE_IDLE_SESSION_TIMEOUT));
+        assert_eq!(
+            error_message(&response),
+            Some("Connection timed out after 5000 ms")
+        );
     }
 
     #[test]

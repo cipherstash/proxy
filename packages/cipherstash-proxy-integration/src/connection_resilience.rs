@@ -14,6 +14,10 @@ mod tests {
     use tokio::task::JoinSet;
     use tokio::time::{timeout, Duration};
 
+    /// Advisory lock ID used in isolation tests. Arbitrary value — just needs to be
+    /// unique across concurrently running test suites against the same database.
+    const ADVISORY_LOCK_ID: i64 = 99_001;
+
     /// A slow query on one connection does not block other connections through the proxy.
     #[tokio::test]
     async fn slow_query_does_not_block_other_connections() {
@@ -121,18 +125,27 @@ mod tests {
     }
 
     /// An advisory-lock-blocked connection through the proxy does not block other proxy connections.
+    ///
+    /// Note: Connection B notifies readiness before `pg_advisory_lock` reaches PostgreSQL.
+    /// The 500ms sleep provides a generous margin for the lock attempt to reach PG, but is
+    /// not strictly guaranteed. In practice this has not caused flakiness.
     #[tokio::test]
     async fn advisory_lock_blocked_connection_does_not_block_proxy() {
+        let lock_query = format!("SELECT pg_advisory_lock({ADVISORY_LOCK_ID})");
+        let unlock_query = format!("SELECT pg_advisory_unlock({ADVISORY_LOCK_ID})");
+
         let result = timeout(Duration::from_secs(30), async {
             // Connection A: hold an advisory lock (connect directly to PG to avoid proxy interference)
             let client_a = connect_with_tls(PG_PORT).await;
             client_a
-                .simple_query("SELECT pg_advisory_lock(12345)")
+                .simple_query(&lock_query)
                 .await
                 .unwrap();
 
             let a_ready = Arc::new(Notify::new());
             let a_ready_tx = a_ready.clone();
+            let b_lock_query = lock_query.clone();
+            let b_unlock_query = unlock_query.clone();
 
             // Connection B: through proxy, attempt to acquire the same lock (will block)
             let b_handle = tokio::spawn(async move {
@@ -140,12 +153,12 @@ mod tests {
                 a_ready_tx.notify_one();
                 // This will block until A releases the lock
                 client_b
-                    .simple_query("SELECT pg_advisory_lock(12345)")
+                    .simple_query(&b_lock_query)
                     .await
                     .unwrap();
                 // Release after acquiring
                 client_b
-                    .simple_query("SELECT pg_advisory_unlock(12345)")
+                    .simple_query(&b_unlock_query)
                     .await
                     .unwrap();
             });
@@ -168,7 +181,7 @@ mod tests {
 
             // Release the lock so B can complete
             client_a
-                .simple_query("SELECT pg_advisory_unlock(12345)")
+                .simple_query(&unlock_query)
                 .await
                 .unwrap();
 

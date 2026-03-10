@@ -262,12 +262,15 @@ pub async fn handler(client_stream: AsyncStream, context: Context<ZeroKms>) -> R
     // Run frontend and backend tasks
     let result = tokio::try_join!(client_to_server, server_to_client);
 
-    if let Err(Error::ConnectionTimeout { .. }) = &result {
-        let error_response = ErrorResponse::connection_timeout();
+    if let Err(ref err @ Error::ConnectionTimeout { .. }) = &result {
+        let error_response = ErrorResponse::connection_timeout(err.to_string());
         if let Ok(bytes) = BytesMut::try_from(error_response) {
             let _ = timeout_sender.send(bytes);
         }
-        // Brief yield to allow ChannelWriter to flush
+        // Best-effort yield to allow ChannelWriter to flush the error response
+        // before the connection tears down. Not guaranteed — if the runtime doesn't
+        // schedule the writer task before teardown, the client may see a connection
+        // reset instead of the ErrorResponse.
         tokio::task::yield_now().await;
     }
 
