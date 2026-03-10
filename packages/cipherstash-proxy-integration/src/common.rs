@@ -165,7 +165,8 @@ pub fn connection_config(port: u16) -> tokio_postgres::Config {
         .port(port)
         .user(&username)
         .password(&password)
-        .dbname(&name);
+        .dbname(&name)
+        .connect_timeout(std::time::Duration::from_secs(10));
 
     db_config
 }

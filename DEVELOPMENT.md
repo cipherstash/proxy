@@ -321,6 +321,9 @@ mise run proxy:down
 Running Proxy in a container cross-compiles a binary for Linux and the current architecture (`amd64`, `arm64`), then copies the binary into the container.
 We cross-compile binary outside the container because it's generally faster, due to packages already being cached, and slower network and disk IO in Docker.
 
+> [!IMPORTANT]
+> **Proxy must always be built from source for testing.** The `proxy:up` task builds a binary from source (`build:binary`), packages it into a Docker image tagged `cipherstash/proxy:latest` (`build:docker`), then starts it via `docker compose up`. The `tests/docker-compose.yml` file uses `pull_policy: never` on the proxy services to ensure Docker never pulls the released image from Docker Hub. If you see an error like `pull access denied` or `image not found`, run `mise run build` first to build the local image.
+
 ### Building
 
 Build a binary and Docker image:
@@ -459,6 +462,8 @@ These are the Postgres instances and names currently provided:
 This project uses `docker compose` to manage containers and networking.
 
 The configuration for those containers is in `tests/docker-compose.yml`.
+
+The proxy services in `tests/docker-compose.yml` use `pull_policy: never` to ensure Docker never pulls the released `cipherstash/proxy:latest` image from Docker Hub. The image must be built locally from source via `mise run proxy:up` (or `mise run build`). This guarantees integration tests always run against the current source code.
 
 The integration tests use the `proxy:up` and `proxy:down` commands documented above to run containers in different configurations.
 

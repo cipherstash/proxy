@@ -53,6 +53,7 @@ pub trait PostgreSqlErrorHandler {
             Error::Encrypt(EncryptError::UnknownKeysetIdentifier { .. }) => {
                 ErrorResponse::system_error(err.to_string())
             }
+            Error::ConnectionTimeout { .. } => ErrorResponse::connection_timeout(),
             _ => ErrorResponse::system_error(err.to_string()),
         }
     }
@@ -66,4 +67,56 @@ pub trait PostgreSqlErrorHandler {
     ///
     /// * `error_response` - The ErrorResponse to send to the client
     fn send_error_response(&mut self, err: Error) -> Result<(), Error>;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::postgresql::messages::error_response::{
+        ErrorResponseCode, CODE_IDLE_SESSION_TIMEOUT, CODE_SYSTEM_ERROR,
+    };
+    use std::time::Duration;
+
+    /// Minimal implementation of PostgreSqlErrorHandler for testing the default method.
+    struct TestHandler;
+
+    impl PostgreSqlErrorHandler for TestHandler {
+        fn client_sender(&mut self) -> &mut Sender {
+            unimplemented!("not needed for error_to_response tests")
+        }
+
+        fn client_id(&self) -> i32 {
+            0
+        }
+
+        fn send_error_response(&mut self, _err: Error) -> Result<(), Error> {
+            unimplemented!("not needed for error_to_response tests")
+        }
+    }
+
+    fn error_code(response: &ErrorResponse) -> Option<&str> {
+        response
+            .fields
+            .iter()
+            .find(|f| f.code == ErrorResponseCode::Code)
+            .map(|f| f.value.as_str())
+    }
+
+    #[test]
+    fn connection_timeout_maps_to_57p05() {
+        let handler = TestHandler;
+        let err = Error::ConnectionTimeout {
+            duration: Duration::from_millis(5000),
+        };
+        let response = handler.error_to_response(err);
+        assert_eq!(error_code(&response), Some(CODE_IDLE_SESSION_TIMEOUT));
+    }
+
+    #[test]
+    fn unknown_error_maps_to_system_error() {
+        let handler = TestHandler;
+        let err = Error::Unknown;
+        let response = handler.error_to_response(err);
+        assert_eq!(error_code(&response), Some(CODE_SYSTEM_ERROR));
+    }
 }
