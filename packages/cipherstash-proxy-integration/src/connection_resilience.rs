@@ -8,11 +8,10 @@
 #[cfg(test)]
 mod tests {
     use crate::common::{connect_with_tls, PG_PORT, PROXY};
-    use std::sync::Arc;
     use std::time::Instant;
-    use tokio::sync::Notify;
     use tokio::task::JoinSet;
     use tokio::time::{timeout, Duration};
+    use tokio_postgres::SimpleQueryMessage;
 
     /// Advisory lock ID used in isolation tests. Arbitrary value — just needs to be
     /// unique across concurrently running test suites against the same database.
@@ -120,9 +119,8 @@ mod tests {
 
     /// An advisory-lock-blocked connection through the proxy does not block other proxy connections.
     ///
-    /// Note: Connection B notifies readiness before `pg_advisory_lock` reaches PostgreSQL.
-    /// The 500ms sleep provides a generous margin for the lock attempt to reach PG, but is
-    /// not strictly guaranteed. In practice this has not caused flakiness.
+    /// Uses pg_locks polling to deterministically wait for client_b to be blocked on the
+    /// advisory lock, rather than relying on a fixed sleep.
     #[tokio::test]
     async fn advisory_lock_blocked_connection_does_not_block_proxy() {
         let lock_query = format!("SELECT pg_advisory_lock({ADVISORY_LOCK_ID})");
@@ -136,15 +134,12 @@ mod tests {
                 .await
                 .unwrap();
 
-            let a_ready = Arc::new(Notify::new());
-            let a_ready_tx = a_ready.clone();
             let b_lock_query = lock_query.clone();
             let b_unlock_query = unlock_query.clone();
 
             // Connection B: through proxy, attempt to acquire the same lock (will block)
             let b_handle = tokio::spawn(async move {
                 let client_b = connect_with_tls(PROXY).await;
-                a_ready_tx.notify_one();
                 // This will block until A releases the lock
                 client_b
                     .simple_query(&b_lock_query)
@@ -157,9 +152,23 @@ mod tests {
                     .unwrap();
             });
 
-            // Wait for B to be connected and attempting the lock
-            a_ready.notified().await;
-            tokio::time::sleep(Duration::from_millis(500)).await;
+            // Poll pg_locks until client_b is observed waiting for the advisory lock
+            let poll_query = format!(
+                "SELECT 1 FROM pg_locks WHERE locktype = 'advisory' AND NOT granted AND classid = 0 AND objid = {ADVISORY_LOCK_ID}"
+            );
+            let deadline = Instant::now() + Duration::from_secs(10);
+            loop {
+                let result = client_a.simple_query(&poll_query).await.unwrap();
+                let has_waiting = result.iter().any(|m| matches!(m, SimpleQueryMessage::Row(_)));
+                if has_waiting {
+                    break;
+                }
+                assert!(
+                    Instant::now() < deadline,
+                    "Timed out waiting for client_b to be blocked on advisory lock"
+                );
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
 
             // Connection C: through proxy, should complete immediately despite B being blocked
             let start = Instant::now();

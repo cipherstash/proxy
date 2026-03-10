@@ -67,7 +67,14 @@ pub async fn handler(client_stream: AsyncStream, context: Context<ZeroKms>) -> R
 
     loop {
         let startup_message =
-            startup::read_message(&mut client_stream, context.connection_timeout()).await?;
+            match startup::read_message(&mut client_stream, context.connection_timeout()).await {
+                Ok(msg) => msg,
+                Err(err @ Error::ConnectionTimeout { .. }) => {
+                    send_timeout_error(&mut client_stream, &err).await;
+                    return Err(err);
+                }
+                Err(err) => return Err(err),
+            };
 
         match &startup_message.code {
             StartupCode::SSLRequest => {
@@ -119,7 +126,14 @@ pub async fn handler(client_stream: AsyncStream, context: Context<ZeroKms>) -> R
 
         let connection_timeout = context.connection_timeout();
         let (_code, bytes) =
-            protocol::read_message(&mut client_stream, client_id, connection_timeout).await?;
+            match protocol::read_message(&mut client_stream, client_id, connection_timeout).await {
+                Ok(result) => result,
+                Err(err @ Error::ConnectionTimeout { .. }) => {
+                    send_timeout_error(&mut client_stream, &err).await;
+                    return Err(err);
+                }
+                Err(err) => return Err(err),
+            };
 
         let password_message = PasswordMessage::try_from(&bytes)?;
 
@@ -367,5 +381,14 @@ async fn scram_sha_256_plus_handler<S: AsyncRead + AsyncWrite + Unpin>(
         Ok(())
     } else {
         Err(ProtocolError::AuthenticationFailed.into())
+    }
+}
+
+/// Best-effort send of a connection timeout ErrorResponse directly to a client stream.
+/// Used for pre-split timeout sites where no ChannelWriter exists yet.
+async fn send_timeout_error<S: AsyncWrite + Unpin>(stream: &mut S, err: &Error) {
+    let error_response = ErrorResponse::connection_timeout(err.to_string());
+    if let Ok(bytes) = BytesMut::try_from(error_response) {
+        let _ = stream.write_all(&bytes).await;
     }
 }
