@@ -7,7 +7,7 @@
 /// - Blocked backend connections don't affect other proxy connections
 #[cfg(test)]
 mod tests {
-    use crate::common::{connect_with_tls, PG_PORT, PROXY};
+    use crate::common::{connect_with_tls, get_database_port, PROXY};
     use std::time::Instant;
     use tokio::task::JoinSet;
     use tokio::time::{timeout, Duration};
@@ -128,7 +128,8 @@ mod tests {
 
         let result = timeout(Duration::from_secs(30), async {
             // Connection A: hold an advisory lock (connect directly to PG to avoid proxy interference)
-            let client_a = connect_with_tls(PG_PORT).await;
+            let pg_port = get_database_port();
+            let client_a = connect_with_tls(pg_port).await;
             client_a
                 .simple_query(&lock_query)
                 .await

@@ -272,7 +272,7 @@ where
 }
 
 /// Get database port from environment or use default.
-fn get_database_port() -> u16 {
+pub fn get_database_port() -> u16 {
     std::env::var("CS_DATABASE__PORT")
         .ok()
         .and_then(|s| s.parse().ok())
