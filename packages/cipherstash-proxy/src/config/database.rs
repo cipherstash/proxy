@@ -110,6 +110,19 @@ impl DatabaseConfig {
     }
 }
 
+///
+/// Password is NEVER EVER displayed
+///
+impl Display for DatabaseConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}@{}:{}/{}",
+            self.username, self.host, self.port, self.name,
+        )
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -135,18 +148,5 @@ mod tests {
             config.connection_timeout(),
             Some(Duration::from_millis(5000))
         );
-    }
-}
-
-///
-/// Password is NEVER EVER displayed
-///
-impl Display for DatabaseConfig {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "{}@{}:{}/{}",
-            self.username, self.host, self.port, self.name,
-        )
     }
 }
