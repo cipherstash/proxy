@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1773270696984,
+  "lastUpdate": 1773633776124,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -19797,6 +19797,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 37.629545,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "a6abdf01ffe00c6e7b3dcd3bd0afb6ff81edde82",
+          "message": "[Vanta] Remediate quinn-proto to 0.11.14 (CIP-2901)",
+          "timestamp": "2026-03-10T05:53:54Z",
+          "url": "https://github.com/cipherstash/proxy/pull/381/commits/a6abdf01ffe00c6e7b3dcd3bd0afb6ff81edde82"
+        },
+        "date": 1773633774761,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 38.43883,
             "unit": "Number"
           }
         ]
