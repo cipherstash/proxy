@@ -1,5 +1,40 @@
 #![allow(dead_code)]
 
+//! # Connection Management for Integration Tests
+//!
+//! ## Preventing File Descriptor Leaks
+//!
+//! Integration tests should reuse database connections within each test to prevent
+//! file descriptor exhaustion. Creating a new connection for every database operation
+//! causes connections to accumulate faster than the proxy's 60-second timeout can clean them up.
+//!
+//! ### Pattern: Connection Reuse
+//!
+//! **Good** - Reuse single connection per test:
+//! ```rust
+//! #[tokio::test]
+//! async fn my_test() {
+//!     let client = connect_with_tls(PROXY).await;
+//!     clear_with_client(&client).await;
+//!     insert_with_client(sql, params, &client).await;
+//!     query_by_with_client(sql, param, &client).await;
+//!     // Client drops and connection closes cleanly at test end
+//! }
+//! ```
+//!
+//! **Bad** - Creates new connection per operation (4+ connections per test):
+//! ```rust
+//! #[tokio::test]
+//! async fn my_test() {
+//!     clear().await;          // Connection 1
+//!     insert_jsonb().await;   // Connection 2
+//!     query_by(sql, p).await; // Connection 3
+//!     simple_query(sql).await;// Connection 4
+//! }
+//! ```
+//!
+//! Use the `*_with_client()` variants of helper functions to reuse connections.
+
 use rand::{distr::Alphanumeric, Rng};
 use rustls::{
     client::danger::ServerCertVerifier, crypto::aws_lc_rs::default_provider,
@@ -42,8 +77,10 @@ pub fn random_string() -> String {
 }
 
 pub async fn clear() {
-    let client = connect_with_tls(PROXY).await;
+    clear_with_client(&connect_with_tls(PROXY).await).await;
+}
 
+pub async fn clear_with_client(client: &Client) {
     let sql = "TRUNCATE encrypted";
     client.simple_query(sql).await.unwrap();
 
@@ -202,11 +239,33 @@ where
     query_by_params(sql, &[param]).await
 }
 
+pub async fn query_by_with_client<T>(
+    sql: &str,
+    param: &(dyn ToSql + Sync),
+    client: &Client,
+) -> Vec<T>
+where
+    T: for<'a> tokio_postgres::types::FromSql<'a> + Send + Sync,
+{
+    query_by_params_with_client(sql, &[param], client).await
+}
+
 pub async fn query_by_params<T>(sql: &str, params: &[&(dyn ToSql + Sync)]) -> Vec<T>
 where
     T: for<'a> tokio_postgres::types::FromSql<'a> + Send + Sync,
 {
     let client = connect_with_tls(PROXY).await;
+    query_by_params_with_client(sql, params, &client).await
+}
+
+pub async fn query_by_params_with_client<T>(
+    sql: &str,
+    params: &[&(dyn ToSql + Sync)],
+    client: &Client,
+) -> Vec<T>
+where
+    T: for<'a> tokio_postgres::types::FromSql<'a> + Send + Sync,
+{
     let rows = client.query(sql, params).await.unwrap();
     rows.iter().map(|row| row.get(0)).collect::<Vec<T>>()
 }
@@ -236,7 +295,6 @@ where
     <T as std::str::FromStr>::Err: std::fmt::Debug,
 {
     let client = connect_with_tls(PROXY).await;
-
     simple_query_with_client(sql, &client).await
 }
 
@@ -285,10 +343,19 @@ pub async fn simple_query_with_null(sql: &str) -> Vec<Option<String>> {
 
 pub async fn insert(sql: &str, params: &[&(dyn ToSql + Sync)]) {
     let client = connect_with_tls(PROXY).await;
+    insert_with_client(sql, params, &client).await;
+}
+
+pub async fn insert_with_client(sql: &str, params: &[&(dyn ToSql + Sync)], client: &Client) {
     client.query(sql, params).await.unwrap();
 }
 
 pub async fn insert_jsonb() -> Value {
+    let client = connect_with_tls(PROXY).await;
+    insert_jsonb_with_client(&client).await
+}
+
+pub async fn insert_jsonb_with_client(client: &Client) -> Value {
     let id = random_id();
 
     let encrypted_jsonb = serde_json::json!({
@@ -305,7 +372,7 @@ pub async fn insert_jsonb() -> Value {
 
     let sql = "INSERT INTO encrypted (id, encrypted_jsonb) VALUES ($1, $2)".to_string();
 
-    insert(&sql, &[&id, &encrypted_jsonb]).await;
+    insert_with_client(&sql, &[&id, &encrypted_jsonb], client).await;
 
     // Verify encryption actually occurred
     assert_encrypted_jsonb(id, &encrypted_jsonb).await;

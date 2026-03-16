@@ -232,7 +232,7 @@ pub async fn handler(client_stream: AsyncStream, context: Context<ZeroKms>) -> R
         }
     }
 
-    tokio::spawn(channel_writer.receive());
+    let channel_writer_task = tokio::spawn(channel_writer.receive());
 
     let client_to_server = async {
         loop {
@@ -258,8 +258,26 @@ pub async fn handler(client_stream: AsyncStream, context: Context<ZeroKms>) -> R
         Ok::<(), Error>(())
     };
 
-    tokio::try_join!(client_to_server, server_to_client)?;
+    // Run frontend and backend tasks
+    let result = tokio::try_join!(client_to_server, server_to_client);
 
+    // Drop frontend and backend to drop their senders and close the channel
+    // The async blocks above captured frontend/backend by reference, so they're still alive
+    drop(frontend);
+    drop(backend);
+
+    // Wait for channel writer to finish shutdown sequence
+    // The senders are now dropped, which closes the channel and allows
+    // the writer task to complete its shutdown
+    if let Err(err) = channel_writer_task.await {
+        error!(
+            client_id,
+            msg = "Channel writer task panicked",
+            error = ?err
+        );
+    }
+
+    result?;
     Ok(())
 }
 
