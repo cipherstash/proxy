@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1773633776124,
+  "lastUpdate": 1773811968949,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -19822,6 +19822,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 38.43883,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "toby@cipherstash.com",
+            "name": "Toby Hede",
+            "username": "tobyhede"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "7cab49e82a246640e61e7b4f68277320d5c71e7e",
+          "message": "Merge pull request #381 from cipherstash/toby/cip-2901-remediate-quinn-proto\n\n[Vanta] Remediate quinn-proto to 0.11.14 (CIP-2901)",
+          "timestamp": "2026-03-18T16:29:26+11:00",
+          "tree_id": "6c1ce44174dbc10575e14916d5afd1980118ff2b",
+          "url": "https://github.com/cipherstash/proxy/commit/7cab49e82a246640e61e7b4f68277320d5c71e7e"
+        },
+        "date": 1773811967637,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 39.018623,
             "unit": "Number"
           }
         ]
