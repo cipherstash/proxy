@@ -467,6 +467,26 @@ where
     );
 }
 
+/// Returns indices in zigzag order so insertion is never accidentally sorted.
+/// For len=5: [4, 0, 3, 1, 2]
+pub fn interleaved_indices(len: usize) -> Vec<usize> {
+    let mut indices = Vec::with_capacity(len);
+    let mut lo = 0;
+    let mut hi = len;
+    let mut take_hi = true;
+    while lo < hi {
+        if take_hi {
+            hi -= 1;
+            indices.push(hi);
+        } else {
+            indices.push(lo);
+            lo += 1;
+        }
+        take_hi = !take_hi;
+    }
+    indices
+}
+
 ///
 /// Configure the client TLS settings.
 /// These are the settings for connecting to the database with TLS.

@@ -24,7 +24,7 @@ eql-mapper = { path = "../eql-mapper" }
 exitcode = "1.1.2"
 hex = "0.4.3"
 md-5 = "0.10.6"
-metrics = "0.24.1"
+metrics = "0.24.3"
 metrics-exporter-prometheus = "0.17"
 moka = { version = "0.12", features = ["future"] }
 oid-registry = "0.8"
