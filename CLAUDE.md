@@ -18,9 +18,9 @@ Key capabilities:
 
 **Core Proxy (`packages/cipherstash-proxy/`):**
 - `postgresql/` - PostgreSQL wire protocol implementation, message parsing, and client handling
-- `encrypt/` - Integration with CipherStash ZeroKMS for key management and encryption operations
+- `proxy/zerokms/` - ZeroKMS client initialization and key management
 - `config/` - Configuration management for database connections, TLS, and encryption settings
-- `eql/` - EQL v2 types and encryption abstractions
+- `proxy/encrypt_config/` - Encryption configuration and schema management
 
 **EQL Mapper (`packages/eql-mapper/`):**
 - SQL parsing and type inference engine
@@ -29,7 +29,7 @@ Key capabilities:
 
 **Integration Tests (`packages/cipherstash-proxy-integration/`):**
 - Comprehensive test suite covering encryption scenarios
-- Language-specific integration tests (Python, Go, Elixir)
+- Language-specific integration tests (Python, Go)
 
 **Showcase (`packages/showcase/`):**
 - Healthcare data model demonstrating EQL v2 encryption
@@ -76,7 +76,7 @@ mise run reset
 # Full test suite (hygiene + unit + integration)
 mise run test
 
-# Hygiene checks only
+# Hygiene checks (compilation, formatting, clippy)
 mise run check
 
 # Unit tests only
@@ -111,6 +111,7 @@ mise run postgres:down
 ### Authentication & Encryption
 Proxy requires CipherStash credentials configured in `mise.local.toml`:
 ```toml
+[env]
 CS_WORKSPACE_CRN = "crn:region:workspace-id"
 CS_CLIENT_ACCESS_KEY = "your-access-key"
 CS_DEFAULT_KEYSET_ID = "your-keyset-id"

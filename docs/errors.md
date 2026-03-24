@@ -5,6 +5,7 @@
 - Authentication errors:
   - [Database](#authentication-failed-database)
   - [Client](#authentication-failed-client)
+  - [ZeroKMS](#zerokms-authentication-failed)
 
 - Mapping errors:
   - [Invalid parameter](#mapping-invalid-parameter)
@@ -15,8 +16,7 @@
 
 - Encrypt errors:
   - [Column could not be encrypted](#encrypt-column-could-not-be-encrypted)
-  - [Column could not be encrypted](#encrypt-column-could-not-be-encrypted)
-  - [Could not decrypt data for keyset](#encrypt-encrypt-could-not-decrypt-data-for-keyset)
+  - [Could not decrypt data for keyset](#encrypt-could-not-decrypt-data-for-keyset)
   - [KeysetId could not be parsed](#encrypt-keyset-id-could-not-be-parsed)
   - [KeysetId could not be set](#encrypt-keyset-id-could-not-be-set)
   - [KeysetName could not be set](#encrypt-keyset-name-could-not-be-set)
@@ -26,6 +26,8 @@
   - [Unknown table](#encrypt-unknown-table)
   - [Unknown index term](#encrypt-unknown-index-term)
   - [Column configuration mismatch](#encrypt-column-config-mismatch)
+  - [Missing encrypt configuration](#encrypt-missing-encrypt-configuration)
+  - [Unexpected SET keyset](#encrypt-unexpected-set-keyset)
 
 - Decrypt errors:
    - [Column could not be deserialised](#encrypt-column-could-not-be-deserialised)
@@ -91,7 +93,7 @@ Client authentication failed. Check username and password.
 <!-- ---------------------------------------------------------------------------------------------------- -->
 
 
-## ZeroKMS  <a id='authentication-failed-zerokms'></a>
+## ZeroKMS  <a id='zerokms-authentication-failed'></a>
 
 Authentication failed when connecting to ZeroKMS.
 
@@ -184,7 +186,7 @@ The parameter type is not supported.
 ### Error message
 
 ```
-Encryption of PostgreSQL {name} (OID {oid}) types is not currently supported.
+Encryption of EQL column {column_type} using strategy {eql_term} is not supported.
 ```
 
 ### How to fix
@@ -577,6 +579,41 @@ If the error persists, please contact CipherStash [support](https://cipherstash.
 <!-- ---------------------------------------------------------------------------------------------------- -->
 
 
+## Missing encrypt configuration <a id='encrypt-missing-encrypt-configuration'></a>
+
+The encrypted column type does not have a matching encrypt configuration.
+
+
+### Error message
+
+```
+Missing encrypt configuration for column type `{plaintext_type}`.
+```
+
+### How to fix
+
+1. Define the encrypted configuration for the column type using [EQL](https://github.com/cipherstash/encrypt-query-language).
+2. If this error persists, please contact CipherStash [support](https://cipherstash.com/support) as this may indicate a bug.
+
+
+<!-- ---------------------------------------------------------------------------------------------------- -->
+
+
+## Unexpected SET keyset <a id='encrypt-unexpected-set-keyset'></a>
+
+A `SET CIPHERSTASH.KEYSET` statement was used when a default keyset has already been configured.
+
+
+### Error message
+
+```
+Cannot SET CIPHERSTASH.KEYSET if a default keyset has been configured.
+```
+
+### How to fix
+
+1. Remove the `SET CIPHERSTASH.KEYSET` statement from your application code.
+2. Or remove the `default_keyset_id` from the proxy configuration to allow dynamic keyset selection.
 
 
 <!-- ---------------------------------------------------------------------------------------------------- -->
