@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1774394409884,
+  "lastUpdate": 1774395418206,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -20126,6 +20126,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 36.10276,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "toby@cipherstash.com",
+            "name": "Toby Hede",
+            "username": "tobyhede"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "70a58847da3fa4dfefa79ddec380591cb1765750",
+          "message": "Merge pull request #377 from cipherstash/expand-ore-order-coverage\n\ntest(integration): expand numeric ORE ordering tests with edge cases",
+          "timestamp": "2026-03-25T10:33:07+11:00",
+          "tree_id": "867f121301ab2d96cb924d7d678138500c4eafd6",
+          "url": "https://github.com/cipherstash/proxy/commit/70a58847da3fa4dfefa79ddec380591cb1765750"
+        },
+        "date": 1774395416683,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 37.853948,
             "unit": "Number"
           }
         ]
