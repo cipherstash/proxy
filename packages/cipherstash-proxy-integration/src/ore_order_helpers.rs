@@ -30,8 +30,8 @@ impl SortDirection {
 pub async fn ore_order_text(client: &tokio_postgres::Client) {
     let values = [
         "aardvark",
-        "apparatus",
         "aplomb",
+        "apparatus",
         "chimera",
         "chrysalis",
         "chrysanthemum",
@@ -60,8 +60,8 @@ pub async fn ore_order_text(client: &tokio_postgres::Client) {
 pub async fn ore_order_text_desc(client: &tokio_postgres::Client) {
     let values = [
         "aardvark",
-        "apparatus",
         "aplomb",
+        "apparatus",
         "chimera",
         "chrysalis",
         "chrysanthemum",
