@@ -24,6 +24,6 @@ workspace_crn = "workspace_crn"
 client_access_key = "client_access_key"
 
 [encrypt]
-default_keyset_id = "default_keyset_id"
-client_id = "client_id"
+default_keyset_id = "00000000-0000-0000-0000-000000000000"
+client_id = "00000000-0000-0000-0000-000000000000"
 client_key = "client_key"

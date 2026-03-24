@@ -137,7 +137,7 @@ impl ZeroKms {
                         }
                         .into())
                     }
-                    cipherstash_client::zerokms::Error::Credentials(_) => {
+                    cipherstash_client::zerokms::Error::Auth(_) => {
                         Err(ZeroKMSError::AuthenticationFailed.into())
                     }
                     _ => Err(Error::ZeroKMS(err.into())),
