@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1774410364943,
+  "lastUpdate": 1774411614535,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -20413,6 +20413,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 33.695729,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "james@cipherstash.com",
+            "name": "James Sadler",
+            "username": "freshtonic"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "0a412c9204731e1fc3456bb08ed896c63e575e13",
+          "message": "Merge pull request #384 from cipherstash/fix/file-descriptor-leaks\n\nfix(proxy): prevent file descriptor leakage",
+          "timestamp": "2026-03-25T15:04:10+11:00",
+          "tree_id": "257378ad36d4c65d98f3a21c5f72aa472d091331",
+          "url": "https://github.com/cipherstash/proxy/commit/0a412c9204731e1fc3456bb08ed896c63e575e13"
+        },
+        "date": 1774411613225,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 33.018435,
             "unit": "Number"
           }
         ]
