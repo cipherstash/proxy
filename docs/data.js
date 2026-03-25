@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1774398067494,
+  "lastUpdate": 1774399342966,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -20230,6 +20230,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 38.852663,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "toby@cipherstash.com",
+            "name": "Toby Hede",
+            "username": "tobyhede"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "5103ecece1b1f7922a613887a675425540e4e823",
+          "message": "Merge pull request #382 from cipherstash/proxy-2.1.24-alpha.1\n\nfix(deps): bump cipherstash-client to 0.34.0-alpha.4",
+          "timestamp": "2026-03-25T11:39:30+11:00",
+          "tree_id": "e63b2024ee6449a46aa377d647ccd23bdc6f02c8",
+          "url": "https://github.com/cipherstash/proxy/commit/5103ecece1b1f7922a613887a675425540e4e823"
+        },
+        "date": 1774399341520,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 36.065098,
             "unit": "Number"
           }
         ]
