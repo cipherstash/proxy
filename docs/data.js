@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1774400861324,
+  "lastUpdate": 1774402535263,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -20334,6 +20334,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 39.114765,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "toby@cipherstash.com",
+            "name": "Toby Hede",
+            "username": "tobyhede"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "6906b182b4602b6efabee2e7601095c6e390ecec",
+          "message": "Merge pull request #383 from cipherstash/release/2.2.0-alpha.1\n\nchore: bump version to 2.2.0-alpha.1",
+          "timestamp": "2026-03-25T12:32:45+11:00",
+          "tree_id": "1cde0c2169a03e3b36155c3db58fd16f3d36f773",
+          "url": "https://github.com/cipherstash/proxy/commit/6906b182b4602b6efabee2e7601095c6e390ecec"
+        },
+        "date": 1774402533754,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 38.552165,
             "unit": "Number"
           }
         ]
