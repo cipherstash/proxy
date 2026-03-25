@@ -55,8 +55,8 @@ tokio-util = { version = "0.7.13", features = ["rt"] }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 uuid = { version = "1.11.0", features = ["serde", "v4"] }
+vitaminc-protected = "0.1.0-pre4.2"
 x509-parser = "0.17.0"
-vitaminc-protected = "0.1.0-pre2"
 
 
 [dev-dependencies]

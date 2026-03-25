@@ -16,9 +16,6 @@ pub enum Error {
     CancelRequest,
 
     #[error(transparent)]
-    Client(#[from] cipherstash_client::config::errors::ConfigError),
-
-    #[error(transparent)]
     Config(#[from] ConfigError),
 
     #[error(transparent)]
@@ -73,6 +70,9 @@ pub enum ZeroKMSError {
     AuthenticationFailed,
 
     #[error(transparent)]
+    Builder(#[from] cipherstash_client::zerokms::ZeroKMSBuilderError),
+
+    #[error(transparent)]
     System(#[from] cipherstash_client::zerokms::Error),
 }
 
@@ -117,16 +117,19 @@ pub enum ConfigError {
     Certificate(#[from] rustls_pki_types::pem::Error),
 
     #[error(transparent)]
-    EncryptConfig(#[from] cipherstash_client::config::errors::ConfigError),
-
-    #[error(transparent)]
     Database(#[from] tokio_postgres::Error),
 
     #[error(transparent)]
     FileOrEnvironment(#[from] config::ConfigError),
 
-    #[error("Dataset id is not a valid UUID.")]
-    InvalidDatasetId,
+    #[error("Client key is not valid. For help visit {}", ERROR_DOC_CONFIG_URL)]
+    InvalidClientKey,
+
+    #[error(
+        "default_keyset_id is not a valid UUID. For help visit {}",
+        ERROR_DOC_CONFIG_URL
+    )]
+    InvalidDefaultKeysetId,
 
     #[error("Server host {name} is not a valid server name")]
     InvalidServerName { name: String },
@@ -433,6 +436,12 @@ pub enum ProtocolError {
 impl From<config::ConfigError> for Error {
     fn from(e: config::ConfigError) -> Self {
         Error::Config(e.into())
+    }
+}
+
+impl From<cipherstash_client::zerokms::ZeroKMSBuilderError> for Error {
+    fn from(e: cipherstash_client::zerokms::ZeroKMSBuilderError) -> Self {
+        Error::ZeroKMS(e.into())
     }
 }
 

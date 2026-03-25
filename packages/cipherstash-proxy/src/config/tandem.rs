@@ -9,6 +9,7 @@ use crate::Args;
 use cipherstash_client::config::vars::{
     CS_CLIENT_ACCESS_KEY, CS_CLIENT_ID, CS_CLIENT_KEY, CS_DEFAULT_KEYSET_ID, CS_WORKSPACE_CRN,
 };
+use cipherstash_client::zerokms::ClientKey;
 use config::{Config, Environment};
 use cts_common::Crn;
 use regex::Regex;
@@ -42,7 +43,7 @@ pub struct AuthConfig {
 
 #[derive(Debug, Deserialize, Clone, PartialEq)]
 pub struct EncryptConfig {
-    pub client_id: String,
+    pub client_id: Uuid,
     pub client_key: String,
     pub default_keyset_id: Option<Uuid>,
 }
@@ -66,12 +67,6 @@ pub struct DevelopmentConfig {
 
     #[serde(default)]
     pub enable_mapping_errors: bool,
-
-    #[serde(default)]
-    pub zerokms_host: Option<String>,
-
-    #[serde(default)]
-    pub cts_host: Option<String>,
 }
 
 /// Config defaults to a file called `tandem` in the current directory.
@@ -191,7 +186,7 @@ impl TandemConfig {
         }
 
         // Source order is important!
-        let config = Config::builder()
+        let config: TandemConfig = Config::builder()
             .add_source(config::File::with_name(&args.config_file_path).required(false))
             .add_source(cs_env_source)
             .add_source(stash_setup_source)
@@ -203,7 +198,16 @@ impl TandemConfig {
                 //  - missing parameters are returned by at least two different errors, depending the source of the error
                 // Easier to inspect the error message.
                 match err.to_string() {
-                    s if s.contains("UUID parsing failed") => ConfigError::InvalidDatasetId,
+                    s if s.contains("UUID parsing failed") => {
+                        if s.contains("client_id") && !s.contains("keyset") {
+                            ConfigError::InvalidParameter {
+                                name: "client_id".to_string(),
+                                value: "invalid UUID".to_string(),
+                            }
+                        } else {
+                            ConfigError::InvalidDefaultKeysetId
+                        }
+                    }
                     s if s.contains("missing field") => {
                         let (field, key) = extract_missing_field_and_key(&s);
                         match (field, key) {
@@ -221,6 +225,8 @@ impl TandemConfig {
                     _ => err.into(),
                 }
             })?;
+
+        config.encrypt.build_client_key()?;
 
         Ok(config)
     }
@@ -244,18 +250,6 @@ impl TandemConfig {
             Some(dev) => dev.enable_mapping_errors,
             None => false,
         }
-    }
-
-    pub fn zerokms_host(&self) -> Option<String> {
-        self.development
-            .as_ref()
-            .and_then(|dev| dev.zerokms_host.clone())
-    }
-
-    pub fn cts_host(&self) -> Option<String> {
-        self.development
-            .as_ref()
-            .and_then(|dev| dev.cts_host.clone())
     }
 
     pub fn use_structured_logging(&self) -> bool {
@@ -326,8 +320,8 @@ impl TandemConfig {
                 client_access_key: "test".to_string(),
             },
             encrypt: EncryptConfig {
-                client_id: "test".to_string(),
-                client_key: "test".to_string(),
+                client_id: Uuid::parse_str("00000000-0000-0000-0000-000000000001").unwrap(),
+                client_key: "a4627031a16b7065726d75746174696f6e900e05030d0608090007020c04010b0a0f6770325f66726f6da16b7065726d75746174696f6e900608000a0204030f01070d090e0b0c056570325f746fa16b7065726d75746174696f6e90000908060701030a05040e020d0b0c0f627033a16b7065726d75746174696f6e982107181d130d05181f08040a181c1002181e010311181818200b0f0e0915181b0c16171819060012181a14".to_string(),
                 default_keyset_id: Some(
                     Uuid::parse_str("00000000-0000-0000-0000-000000000000").unwrap(),
                 ),
@@ -337,6 +331,13 @@ impl TandemConfig {
             prometheus: PrometheusConfig::default(),
             development: None,
         }
+    }
+}
+
+impl EncryptConfig {
+    pub fn build_client_key(&self) -> Result<ClientKey, Error> {
+        ClientKey::from_hex_v1(self.client_id, &self.client_key)
+            .map_err(|_| Error::from(ConfigError::InvalidClientKey))
     }
 }
 
@@ -426,9 +427,12 @@ mod tests {
             temp_env::with_vars(
                 [
                     // Orignal recipe ENV var
-                    ("CS_ENCRYPT__CLIENT_ID", Some("CS_ENCRYPT__CLIENT_ID")),
-                    (CS_CLIENT_ID, Some("CS_CLIENT_ID")),
-                    (CS_CLIENT_KEY, Some("CS_CLIENT_KEY")),
+                    (
+                        "CS_ENCRYPT__CLIENT_ID",
+                        Some("11111111-1111-1111-1111-111111111111"),
+                    ),
+                    (CS_CLIENT_ID, Some("22222222-2222-2222-2222-222222222222")),
+                    (CS_CLIENT_KEY, Some("a4627031a16b7065726d75746174696f6e900e05030d0608090007020c04010b0a0f6770325f66726f6da16b7065726d75746174696f6e900608000a0204030f01070d090e0b0c056570325f746fa16b7065726d75746174696f6e90000908060701030a05040e020d0b0c0f627033a16b7065726d75746174696f6e982107181d130d05181f08040a181c1002181e010311181818200b0f0e0915181b0c16171819060012181a14")),
                     (
                         CS_DEFAULT_KEYSET_ID,
                         Some("dd0a239f-02e2-4c8e-ba20-d9f0f85af9ac"),
@@ -440,7 +444,10 @@ mod tests {
                         TandemConfig::build_path("tests/config/cipherstash-proxy-test.toml")
                             .unwrap();
 
-                    assert_eq!(config.encrypt.client_id, "CS_CLIENT_ID".to_string());
+                    assert_eq!(
+                        config.encrypt.client_id,
+                        Uuid::parse_str("22222222-2222-2222-2222-222222222222").unwrap()
+                    );
 
                     assert_eq!(
                         config.auth.client_access_key,
@@ -474,8 +481,8 @@ mod tests {
                             .unwrap();
 
                     assert_eq!(
-                        &config.encrypt.client_id,
-                        "dd0a239f-02e2-4c8e-ba20-d9f0f85af9ac"
+                        config.encrypt.client_id,
+                        Uuid::parse_str("dd0a239f-02e2-4c8e-ba20-d9f0f85af9ac").unwrap()
                     );
                 },
             );
@@ -509,6 +516,22 @@ mod tests {
 
             assert!(config.is_err());
             assert!(matches!(config.unwrap_err(), Error::Config(_)));
+        });
+    }
+
+    #[test]
+    fn invalid_client_id_uuid() {
+        with_no_cs_vars(|| {
+            let result =
+                TandemConfig::build_path("tests/config/cipherstash-proxy-bad-client-id.toml");
+            assert!(result.is_err());
+            let err = result.unwrap_err();
+            // Should produce InvalidParameter for client_id, not InvalidDatasetId
+            assert!(
+                err.to_string().contains("Invalid client_id"),
+                "Expected 'Invalid client_id' but got: {}",
+                err
+            );
         });
     }
 
@@ -584,7 +607,7 @@ mod tests {
     fn default_env_vars() -> Vec<(&'static str, Option<&'static str>)> {
         vec![
             ("CS_CLIENT_ID", Some("00000000-0000-0000-0000-000000000000")),
-            ("CS_CLIENT_KEY", Some("CS_CLIENT_KEY")),
+            ("CS_CLIENT_KEY", Some("a4627031a16b7065726d75746174696f6e900e05030d0608090007020c04010b0a0f6770325f66726f6da16b7065726d75746174696f6e900608000a0204030f01070d090e0b0c056570325f746fa16b7065726d75746174696f6e90000908060701030a05040e020d0b0c0f627033a16b7065726d75746174696f6e982107181d130d05181f08040a181c1002181e010311181818200b0f0e0915181b0c16171819060012181a14")),
             (
                 "CS_DEFAULT_KEYSET_ID",
                 Some("00000000-0000-0000-0000-000000000000"),

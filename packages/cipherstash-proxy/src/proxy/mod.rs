@@ -168,10 +168,10 @@ pub trait EncryptionService: Send + Sync {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate::config::TandemConfig;
     use crate::test_helpers::with_no_cs_vars;
-    use cts_common::WorkspaceId;
+
+    use super::zerokms;
 
     fn build_tandem_config(env: Vec<(&str, Option<&str>)>) -> TandemConfig {
         with_no_cs_vars(|| {
@@ -195,10 +195,10 @@ mod tests {
     }
 
     #[test]
-    fn build_zerokms_config_with_crn() {
+    fn init_zerokms_client_with_crn() {
         with_no_cs_vars(|| {
             let mut env = default_env_vars();
-            env.push(("CS_CLIENT_ACCESS_KEY", Some("client-access-key")));
+            env.push(("CS_CLIENT_ACCESS_KEY", Some("CSAKtestKeyId.testKeySecret")));
             env.push((
                 "CS_WORKSPACE_CRN",
                 Some("crn:ap-southeast-2.aws:3KISDURL3ZCWYZ2O"),
@@ -206,17 +206,12 @@ mod tests {
 
             let tandem_config = build_tandem_config(env);
 
-            let zerokms_config = zerokms::build_zerokms_config(&tandem_config).unwrap();
-
-            assert_eq!(
-                WorkspaceId::try_from("3KISDURL3ZCWYZ2O").unwrap(),
-                zerokms_config.workspace_id()
+            let result = zerokms::init_zerokms_client(&tandem_config);
+            assert!(
+                result.is_ok(),
+                "init_zerokms_client failed: {:?}",
+                result.err()
             );
-
-            assert!(zerokms_config
-                .base_url()
-                .to_string()
-                .contains("ap-southeast-2.aws"));
         });
     }
 }
