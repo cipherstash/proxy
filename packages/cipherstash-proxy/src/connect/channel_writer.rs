@@ -38,6 +38,16 @@ where
     }
 
     pub async fn receive(mut self) {
+        debug!(target: PROTOCOL,
+            client_id = self.client_id,
+            msg = "ChannelWriter task started",
+        );
+
+        // Drop our own sender so the channel can close when frontend/backend senders are dropped
+        // Without this, we have a circular dependency: receiver waits for all senders to drop,
+        // but we're holding one of them ourselves!
+        drop(self.sender);
+
         while let Some(bytes) = self.receiver.recv().await {
             debug!(target: PROTOCOL,
                 client_id = self.client_id,
@@ -58,9 +68,39 @@ where
                         msg = "Write error",
                         error = ?err
                     );
+                    break;
                 }
             }
         }
+
+        // Channel closed - shutdown the writer to properly close the connection
+        debug!(target: PROTOCOL,
+            client_id = self.client_id,
+            msg = "Recv loop exited - channel closed, beginning shutdown",
+        );
+
+        // Flush any pending writes before shutdown
+        if let Err(err) = self.writer.flush().await {
+            error!(target: PROTOCOL,
+                client_id = self.client_id,
+                msg = "Error flushing writer during shutdown",
+                error = ?err
+            );
+        }
+
+        // Shutdown the write half to send FIN and properly close the connection
+        if let Err(err) = self.writer.shutdown().await {
+            error!(target: PROTOCOL,
+                client_id = self.client_id,
+                msg = "Error shutting down writer",
+                error = ?err
+            );
+        }
+
+        debug!(target: PROTOCOL,
+            client_id = self.client_id,
+            msg = "Writer shutdown complete",
+        );
     }
 
     pub fn sender(&self) -> Sender {
