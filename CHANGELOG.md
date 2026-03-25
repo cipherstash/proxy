@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.2.0-alpha.1] - 2026-03-25
+
 ### Changed
 
 - **Log target renamed**: `KEYSET` log target renamed to `ZEROKMS`. The environment variable `CS_LOG__KEYSET_LEVEL` is now `CS_LOG__ZEROKMS_LEVEL`.
@@ -247,7 +249,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Integration with CipherStash ZeroKMS.
 - Encrypt Query Language (EQL) for indexing and searching encrypted data.
 
-[Unreleased]: https://github.com/cipherstash/proxy/compare/v2.1.20...HEAD
+[Unreleased]: https://github.com/cipherstash/proxy/compare/v2.2.0-alpha.1...HEAD
+[2.2.0-alpha.1]: https://github.com/cipherstash/proxy/compare/v2.1.22...v2.2.0-alpha.1
+[2.1.22]: https://github.com/cipherstash/proxy/releases/tag/v2.1.22
+[2.1.21]: https://github.com/cipherstash/proxy/releases/tag/v2.1.21
 [2.1.20]: https://github.com/cipherstash/proxy/releases/tag/v2.1.20
 [2.1.9]: https://github.com/cipherstash/proxy/releases/tag/v2.1.9
 [2.1.8]: https://github.com/cipherstash/proxy/releases/tag/v2.1.8
