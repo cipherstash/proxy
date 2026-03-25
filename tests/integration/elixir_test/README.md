@@ -8,6 +8,7 @@ The tests can be run using [mise](https://mise.jdx.dev/).
 
 From the project root directory, run:
 ```
-test:integration:lang:elixir
+mise run test:integration:lang:elixir
 ```
 
+> **Note:** Elixir integration tests are currently disabled pending a fix for test flakiness.

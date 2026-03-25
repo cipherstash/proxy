@@ -29,6 +29,8 @@ Key capabilities:
 
 **Integration Tests (`packages/cipherstash-proxy-integration/`):**
 - Comprehensive test suite covering encryption scenarios
+
+**Language Integration Tests (`tests/python/`, `tests/integration/golang/`):**
 - Language-specific integration tests (Python, Go)
 
 **Showcase (`packages/showcase/`):**

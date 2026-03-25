@@ -4,9 +4,6 @@ Below are the flow diagrams for the message handling in CipherStash Proxy for Po
 
 ### Parse
 
-![Parse message](./images/parse.svg "Parse")
-
-
 ```mermaid
 ---
 config:
@@ -26,8 +23,6 @@ flowchart LR
 ```
 
 ### Bind
-
-![Bind message](./images/bind.svg "Bind")
 
 ```mermaid
 ---

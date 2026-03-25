@@ -58,7 +58,7 @@ services:
 ```
 
 
-For a fully-working example, go to [`docker-compose.yml`](./docker-compose.yml).
+For a fully-working example, go to [`docker-compose.yml`](../../docker-compose.yml).
 Follow the steps in [Getting started](../README.md#getting-started) to see it in action.
 
 Once you have set up a `docker-compose.yml`, start the Proxy container:
@@ -132,7 +132,27 @@ Read the full list of configuration options and what they do in the [reference d
 
 ## Running Proxy locally
 
-TODO: Add instructions for running Proxy locally
+To run CipherStash Proxy locally for development:
+
+```bash
+# Install prerequisites
+mise trust --yes && mise install
+
+# Start PostgreSQL and install EQL
+mise run postgres:up --extra-args "--detach --wait"
+mise run postgres:setup
+
+# Run Proxy as a local process
+mise run proxy
+```
+
+Alternatively, run Proxy in a container:
+
+```bash
+mise run proxy:up --extra-args "--detach --wait"
+```
+
+See [Configuring Proxy](#configuring-proxy) for required environment variables and configuration options.
 
 ## Setting up the database schema
 
@@ -223,14 +243,14 @@ The first SQL statement adds a `match` index, which is used for partial matches 
 The second SQL statement adds an `ore` index, which is used for ordering with `ORDER BY`.
 
 
-> ![IMPORTANT]
+> [!IMPORTANT]
 > Adding, updating, or deleting encrypted indexes on columns that already contain encrypted data will not re-index that data. To use the new indexes, you must `SELECT` the data out of the column, and `UPDATE` it again.
 
 To learn how to use encrypted indexes for other encrypted data types like `text`, `int`, `boolean`, `date`, and `jsonb`, see the [EQL documentation](https://github.com/cipherstash/encrypt-query-language/blob/main/docs/reference/INDEX.md).
 
 When deploying CipherStash Proxy into production environments with real data, we recommend that you apply these database schema changes with the normal tools and process you use for making changes to your database schema.
 
-To see more examples of how to modify your database schema, check out [the example schema](./sql/schema-example.sql) from [Getting started](#getting-started).
+To see more examples of how to modify your database schema, check out [the example schema](../sql/schema-example.sql) from [Getting started](#getting-started).
 
 ## Encrypting data in an existing database
 
