@@ -75,8 +75,14 @@ impl DatabaseConfig {
         self.password.to_owned().risky_unwrap()
     }
 
+    const DEFAULT_CONNECTION_TIMEOUT_MS: u64 = 120_000;
+
     pub fn connection_timeout(&self) -> Option<Duration> {
-        self.connection_timeout.map(Duration::from_millis)
+        match self.connection_timeout {
+            Some(0) => None,
+            Some(ms) => Some(Duration::from_millis(ms)),
+            None => Some(Duration::from_millis(Self::DEFAULT_CONNECTION_TIMEOUT_MS)),
+        }
     }
 
     pub fn server_name(&self) -> Result<ServerName<'_>, Error> {
@@ -114,5 +120,33 @@ impl Display for DatabaseConfig {
             "{}@{}:{}/{}",
             self.username, self.host, self.port, self.name,
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn connection_timeout_defaults_to_120_seconds() {
+        let config = DatabaseConfig::for_testing();
+        assert_eq!(config.connection_timeout(), Some(Duration::from_secs(120)));
+    }
+
+    #[test]
+    fn connection_timeout_zero_disables_timeout() {
+        let mut config = DatabaseConfig::for_testing();
+        config.connection_timeout = Some(0);
+        assert_eq!(config.connection_timeout(), None);
+    }
+
+    #[test]
+    fn connection_timeout_custom_value_in_millis() {
+        let mut config = DatabaseConfig::for_testing();
+        config.connection_timeout = Some(5000);
+        assert_eq!(
+            config.connection_timeout(),
+            Some(Duration::from_millis(5000))
+        );
     }
 }

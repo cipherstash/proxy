@@ -24,7 +24,7 @@ pub enum Error {
     #[error("Connection closed by client")]
     ConnectionClosed,
 
-    #[error("Connection timed out after {} ms", duration.as_secs())]
+    #[error("Connection timed out after {} ms", duration.as_millis())]
     ConnectionTimeout { duration: Duration },
 
     #[error("Error creating connection")]
@@ -530,5 +530,13 @@ mod tests {
         let message = error.to_string();
 
         assert_eq!(format!("Statement encountered an internal error. This may be a bug in the statement mapping module of CipherStash Proxy. Please visit {ERROR_DOC_BASE_URL}#mapping-internal-error for more information."), message);
+    }
+
+    #[test]
+    fn connection_timeout_message_shows_millis() {
+        let error = Error::ConnectionTimeout {
+            duration: Duration::from_millis(5000),
+        };
+        assert_eq!(error.to_string(), "Connection timed out after 5000 ms");
     }
 }

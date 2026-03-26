@@ -56,6 +56,12 @@ mise run postgres:up --extra-args "--detach --wait"
 mise run postgres:setup  # Install EQL and schema
 ```
 
+> **macOS Note:** If you hit file descriptor limits during development (e.g. "Too many open files"), you may need to increase the limit:
+> ```bash
+> ulimit -n 10240
+> ```
+> To make this persistent, add it to your shell profile (e.g. `~/.zshrc`).
+
 ### Core Development Workflow
 ```bash
 # Build and run Proxy as a process (development)

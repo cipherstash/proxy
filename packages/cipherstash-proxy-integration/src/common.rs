@@ -165,7 +165,8 @@ pub fn connection_config(port: u16) -> tokio_postgres::Config {
         .port(port)
         .user(&username)
         .password(&password)
-        .dbname(&name);
+        .dbname(&name)
+        .connect_timeout(std::time::Duration::from_secs(10));
 
     db_config
 }
@@ -271,7 +272,7 @@ where
 }
 
 /// Get database port from environment or use default.
-fn get_database_port() -> u16 {
+pub fn get_database_port() -> u16 {
     std::env::var("CS_DATABASE__PORT")
         .ok()
         .and_then(|s| s.parse().ok())

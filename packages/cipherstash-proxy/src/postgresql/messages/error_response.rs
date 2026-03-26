@@ -60,7 +60,14 @@ pub enum ErrorResponseCode {
 }
 
 impl ErrorResponse {
-    pub fn connection_timeout() -> Self {
+    /// Create a FATAL error response for connection timeout.
+    ///
+    /// Uses PostgreSQL error code 57P05 (idle_session_timeout). While this code
+    /// is technically for idle session timeouts, it is the closest match for a
+    /// proxy-enforced connection timeout. The alternative 08006 (connection_failure)
+    /// implies a network-level failure, which is misleading — the proxy is
+    /// deliberately terminating a connection that exceeded its time limit.
+    pub fn connection_timeout(message: String) -> Self {
         Self {
             fields: vec![
                 Field {
@@ -77,7 +84,7 @@ impl ErrorResponse {
                 },
                 Field {
                     code: ErrorResponseCode::Message,
-                    value: "Connection timeout".to_string(),
+                    value: message,
                 },
             ],
         }

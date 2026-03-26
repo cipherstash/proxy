@@ -663,6 +663,9 @@ cp -v {{config_root}}/target/{{ target }}/release/cipherstash-proxy {{config_roo
 
 [tasks."build:docker"]
 depends = ["eql:download"]
+# Tags the image as cipherstash/proxy:latest locally.
+# tests/docker-compose.yml uses pull_policy: never to ensure this local image
+# is always used instead of the released image on Docker Hub.
 description = "Build a Docker image for cipherstash-proxy"
 run = """
 {% set default_platform = "linux/" ~ arch() | replace(from="x86_64", to="amd64") %}

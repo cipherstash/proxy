@@ -48,6 +48,11 @@ services:
 
   proxy:
     image: cipherstash/proxy:latest
+    # Never pull from Docker Hub. The proxy image must be built from source
+    # via `mise run proxy:up` (which runs build:binary + build:docker).
+    # This ensures integration tests always run against the current source,
+    # not the released version on Docker Hub.
+    pull_policy: never
     container_name: proxy
     ports:
       - 6432:6432
@@ -92,6 +97,8 @@ services:
 
   proxy-tls:
     image: cipherstash/proxy:latest
+    # See pull_policy comment on the proxy service above.
+    pull_policy: never
     container_name: proxy-tls
     ports:
       - 6432:6432
