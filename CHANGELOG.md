@@ -11,6 +11,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Changed
 
 - **Log target renamed**: `KEYSET` log target renamed to `ZEROKMS`. The environment variable `CS_LOG__KEYSET_LEVEL` is now `CS_LOG__ZEROKMS_LEVEL`.
+- **Dependency upgrade**: Updated `cipherstash-client` from 0.33.2 to 0.34.0-alpha.4 with new `ZeroKMSBuilder` API and `AutoStrategy` authentication.
 
 ### Removed
 
@@ -18,7 +19,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
-- **Cipher cache miss metric**: New Prometheus counter `cipherstash_proxy_keyset_cipher_cache_miss_total` tracks cache misses requiring cipher initialization. This complements the `cipherstash_proxy_keyset_cipher_cache_hit_total` metric, and can be used to calculate cache hit/miss ratio.
+- **Cipher cache miss metric**: New Prometheus counter `cipherstash_proxy_keyset_cipher_cache_miss_total` tracks cache misses requiring cipher initialization. This complements the `cipherstash_proxy_keyset_cipher_cache_hits_total` metric, and can be used to calculate cache hit/miss ratio.
 - **Cipher init duration metric**: New Prometheus histogram `cipherstash_proxy_keyset_cipher_init_duration_seconds` tracks cipher initialization time including ZeroKMS network calls.
 - **Encrypt/decrypt timing**: Debug logs for `encrypt_eql` and `decrypt_eql` now include `duration_ms`.
 - **Cache eviction logging**: ScopedCipher cache eviction events are now logged under the `ZEROKMS` target.

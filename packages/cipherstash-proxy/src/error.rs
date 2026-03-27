@@ -125,10 +125,7 @@ pub enum ConfigError {
     #[error("Client key is not valid. For help visit {}", ERROR_DOC_CONFIG_URL)]
     InvalidClientKey,
 
-    #[error(
-        "default_keyset_id is not a valid UUID. For help visit {}",
-        ERROR_DOC_CONFIG_URL
-    )]
+    #[error("default_keyset_id is not a valid UUID.")]
     InvalidDefaultKeysetId,
 
     #[error("Server host {name} is not a valid server name")]

@@ -1,14 +1,13 @@
 [tls]
-type = "Path"                         # To provide paths to PEM files
-certificate = "tests/tls/server.cert"
-private_key = "tests/tls/server.key"
+certificate_path = "tests/tls/server.cert"
+private_key_path = "tests/tls/server.key"
 
-# type = "Pem" # To directly provide PEM contents
-# certificate = """-----BEGIN CERTIFICATE-----
+# To directly provide PEM contents:
+# certificate_pem = """-----BEGIN CERTIFICATE-----
 # ...your certificate content here...
 # -----END CERTIFICATE-----
 # """
-# private_key = """-----BEGIN PRIVATE KEY-----
+# private_key_pem = """-----BEGIN PRIVATE KEY-----
 # ...your private key content here...
 # -----END PRIVATE KEY-----
 # """
