@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1774568820751,
+  "lastUpdate": 1774917836949,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -20521,6 +20521,33 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 36.672536,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "Toby Hede",
+            "username": "tobyhede",
+            "email": "toby@cipherstash.com"
+          },
+          "committer": {
+            "name": "GitHub",
+            "username": "web-flow",
+            "email": "noreply@github.com"
+          },
+          "id": "30aafc6e9c71cbf50d1ed4c45edafe3fe401695f",
+          "message": "Merge pull request #379 from cipherstash/connection-error-handling\n\nConnection error handling",
+          "timestamp": "2026-03-26T23:42:51Z",
+          "url": "https://github.com/cipherstash/proxy/commit/30aafc6e9c71cbf50d1ed4c45edafe3fe401695f"
+        },
+        "date": 1774917835594,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 37.479052,
             "unit": "Number"
           }
         ]
