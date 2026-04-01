@@ -8,12 +8,11 @@ use crate::{
 use arc_swap::ArcSwap;
 use cipherstash_client::eql;
 use cipherstash_client::schema::ColumnConfig;
+use cipherstash_config::CanonicalEncryptionConfig;
 use serde_json::Value;
 use std::{collections::HashMap, sync::Arc, time::Duration};
 use tokio::{task::JoinHandle, time};
 use tracing::{debug, error, info, warn};
-
-use super::config::ColumnEncryptionConfig;
 
 ///
 /// Column configuration keyed by table name and column name
@@ -213,8 +212,15 @@ pub async fn load_encrypt_config(config: &DatabaseConfig) -> Result<EncryptConfi
             let row = rows.first().unwrap();
 
             let json_value: Value = row.get("data");
-            let encrypt_config: ColumnEncryptionConfig = serde_json::from_value(json_value)?;
-            let encrypt_config = EncryptConfig::new_from_config(encrypt_config.into_config_map());
+            let canonical: CanonicalEncryptionConfig = serde_json::from_value(json_value)?;
+            let config_map = canonical
+                .into_config_map()
+                .map_err(crate::error::ConfigError::from)?;
+            let config_map = config_map
+                .into_iter()
+                .map(|(id, col)| (eql::Identifier::new(id.table, id.column), col))
+                .collect();
+            let encrypt_config = EncryptConfig::new_from_config(config_map);
 
             Ok(encrypt_config)
         }
