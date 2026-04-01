@@ -1,223 +1,21 @@
-use crate::error::{ConfigError, Error};
-use cipherstash_client::{
-    eql::Identifier,
-    schema::{
-        column::{ArrayIndexMode, Index, IndexType, TokenFilter, Tokenizer},
-        ColumnConfig, ColumnType,
-    },
-};
-use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, str::FromStr};
-
-#[derive(Debug, Deserialize, Serialize, Clone, Default)]
-pub struct ColumnEncryptionConfig {
-    #[serde(rename = "v")]
-    pub version: u32,
-    pub tables: Tables,
-}
-
-#[derive(Debug, Deserialize, Serialize, Clone, Default)]
-pub struct Tables(HashMap<String, Table>);
-
-impl IntoIterator for Tables {
-    type Item = (String, Table);
-    type IntoIter = std::collections::hash_map::IntoIter<String, Table>;
-
-    fn into_iter(self) -> Self::IntoIter {
-        self.0.into_iter()
-    }
-}
-
-#[derive(Debug, Deserialize, Serialize, Clone, Default)]
-pub struct Table(HashMap<String, Column>);
-
-impl IntoIterator for Table {
-    type Item = (String, Column);
-    type IntoIter = std::collections::hash_map::IntoIter<String, Column>;
-
-    fn into_iter(self) -> Self::IntoIter {
-        self.0.into_iter()
-    }
-}
-
-#[derive(Debug, Default, Deserialize, Serialize, Clone, PartialEq)]
-pub struct Column {
-    #[serde(default)]
-    cast_as: CastAs,
-    #[serde(default)]
-    indexes: Indexes,
-}
-
-#[derive(Debug, Default, Clone, Copy, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "snake_case")]
-pub enum CastAs {
-    BigInt,
-    Boolean,
-    Date,
-    Real,
-    Double,
-    Int,
-    SmallInt,
-    #[default]
-    Text,
-    #[serde(rename = "jsonb")]
-    JsonB,
-}
-
-#[derive(Debug, Deserialize, Serialize, Clone, Default, PartialEq)]
-pub struct Indexes {
-    #[serde(rename = "ore")]
-    ore_index: Option<OreIndexOpts>,
-    #[serde(rename = "unique")]
-    unique_index: Option<UniqueIndexOpts>,
-    #[serde(rename = "match")]
-    match_index: Option<MatchIndexOpts>,
-    #[serde(rename = "ste_vec")]
-    ste_vec_index: Option<SteVecIndexOpts>,
-}
-
-#[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
-pub struct OreIndexOpts {}
-
-#[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
-pub struct MatchIndexOpts {
-    #[serde(default = "default_tokenizer")]
-    tokenizer: Tokenizer,
-    #[serde(default)]
-    token_filters: Vec<TokenFilter>,
-    #[serde(default = "default_k")]
-    k: usize,
-    #[serde(default = "default_m")]
-    m: usize,
-    #[serde(default)]
-    include_original: bool,
-}
-
-#[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
-pub struct SteVecIndexOpts {
-    prefix: String,
-    #[serde(default)]
-    term_filters: Vec<TokenFilter>,
-    #[serde(default = "default_array_index_mode")]
-    array_index_mode: ArrayIndexMode,
-}
-
-fn default_array_index_mode() -> ArrayIndexMode {
-    ArrayIndexMode::ALL
-}
-
-fn default_tokenizer() -> Tokenizer {
-    Tokenizer::Standard
-}
-
-fn default_k() -> usize {
-    6
-}
-
-fn default_m() -> usize {
-    2048
-}
-
-#[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
-pub struct UniqueIndexOpts {
-    #[serde(default)]
-    token_filters: Vec<TokenFilter>,
-}
-
-impl From<CastAs> for ColumnType {
-    fn from(value: CastAs) -> Self {
-        match value {
-            CastAs::BigInt => ColumnType::BigInt,
-            CastAs::SmallInt => ColumnType::SmallInt,
-            CastAs::Int => ColumnType::Int,
-            CastAs::Boolean => ColumnType::Boolean,
-            CastAs::Date => ColumnType::Date,
-            CastAs::Real | CastAs::Double => ColumnType::Float,
-            CastAs::Text => ColumnType::Utf8Str,
-            CastAs::JsonB => ColumnType::JsonB,
-        }
-    }
-}
-
-impl FromStr for ColumnEncryptionConfig {
-    type Err = Error;
-
-    fn from_str(data: &str) -> Result<Self, Self::Err> {
-        let config = serde_json::from_str(data).map_err(ConfigError::Parse)?;
-        Ok(config)
-    }
-}
-
-impl ColumnEncryptionConfig {
-    pub fn is_empty(&self) -> bool {
-        self.tables.0.is_empty()
-    }
-
-    pub fn into_config_map(self) -> HashMap<Identifier, ColumnConfig> {
-        let mut map = HashMap::new();
-        for (table_name, columns) in self.tables.into_iter() {
-            for (column_name, column) in columns.into_iter() {
-                let column_config = column.into_column_config(&column_name);
-                let key = Identifier::new(&table_name, &column_name);
-                map.insert(key, column_config);
-            }
-        }
-        map
-    }
-}
-
-impl Column {
-    pub fn into_column_config(self, name: &String) -> ColumnConfig {
-        let mut config = ColumnConfig::build(name.to_string()).casts_as(self.cast_as.into());
-
-        if self.indexes.ore_index.is_some() {
-            config = config.add_index(Index::new_ore());
-        }
-
-        if let Some(opts) = self.indexes.match_index {
-            config = config.add_index(Index::new(IndexType::Match {
-                tokenizer: opts.tokenizer,
-                token_filters: opts.token_filters,
-                k: opts.k,
-                m: opts.m,
-                include_original: opts.include_original,
-            }));
-        }
-
-        if let Some(opts) = self.indexes.unique_index {
-            config = config.add_index(Index::new(IndexType::Unique {
-                token_filters: opts.token_filters,
-            }))
-        }
-
-        if let Some(SteVecIndexOpts {
-            prefix,
-            term_filters,
-            array_index_mode,
-        }) = self.indexes.ste_vec_index
-        {
-            config = config.add_index(Index::new(IndexType::SteVec {
-                prefix,
-                term_filters,
-                array_index_mode,
-            }))
-        }
-
-        config
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use cipherstash_client::eql::Identifier;
+    use cipherstash_client::schema::ColumnConfig;
+    use cipherstash_config::column::{ArrayIndexMode, IndexType, TokenFilter, Tokenizer};
+    use cipherstash_config::{CanonicalEncryptionConfig, ColumnType};
     use serde_json::json;
-
-    use super::*;
+    use std::collections::HashMap;
 
     fn parse(json: serde_json::Value) -> HashMap<Identifier, ColumnConfig> {
-        serde_json::from_value::<ColumnEncryptionConfig>(json)
-            .map(|config| config.into_config_map())
-            .expect("Error ok")
+        let config: CanonicalEncryptionConfig =
+            serde_json::from_value(json).expect("Failed to parse config");
+        config
+            .into_config_map()
+            .expect("Failed to build config map")
+            .into_iter()
+            .map(|(id, col)| (Identifier::new(id.table, id.column), col))
+            .collect()
     }
 
     #[test]
@@ -237,7 +35,7 @@ mod tests {
 
         let column = encrypt_config.get(&ident).expect("column exists");
 
-        assert_eq!(column.cast_type, ColumnType::Utf8Str);
+        assert_eq!(column.cast_type, ColumnType::Text);
         assert!(column.indexes.is_empty());
     }
 
@@ -461,6 +259,7 @@ mod tests {
             "tables": {
                 "users": {
                     "event_data": {
+                        "cast_as": "jsonb",
                         "indexes": {
                             "ste_vec": {
                                 "prefix": "event-data"
@@ -485,5 +284,160 @@ mod tests {
                 array_index_mode: ArrayIndexMode::ALL,
             },
         );
+    }
+
+    #[test]
+    fn config_map_preserves_table_and_column_names() {
+        let json = json!({
+            "v": 1,
+            "tables": {
+                "my_schema.users": {
+                    "email_address": {
+                        "cast_as": "text",
+                        "indexes": { "unique": {} }
+                    }
+                }
+            }
+        });
+
+        let config = parse(json);
+
+        let ident = Identifier::new("my_schema.users", "email_address");
+        let column = config.get(&ident).expect("column exists");
+        assert_eq!(column.name, "email_address");
+        assert_eq!(column.cast_type, ColumnType::Text);
+    }
+
+    #[test]
+    fn config_map_handles_multiple_tables() {
+        let json = json!({
+            "v": 1,
+            "tables": {
+                "users": {
+                    "email": { "cast_as": "text" }
+                },
+                "orders": {
+                    "total": { "cast_as": "int" }
+                }
+            }
+        });
+
+        let config = parse(json);
+
+        assert_eq!(config.len(), 2);
+
+        let email = config.get(&Identifier::new("users", "email")).expect("users.email exists");
+        assert_eq!(email.cast_type, ColumnType::Text);
+
+        let total = config.get(&Identifier::new("orders", "total")).expect("orders.total exists");
+        assert_eq!(total.cast_type, ColumnType::Int);
+    }
+
+    #[test]
+    fn invalid_config_returns_error() {
+        let json = json!({
+            "v": 1,
+            "tables": {
+                "users": {
+                    "email": {
+                        "cast_as": "text",
+                        "indexes": {
+                            "ste_vec": { "prefix": "test" }
+                        }
+                    }
+                }
+            }
+        });
+
+        let config: CanonicalEncryptionConfig = serde_json::from_value(json).unwrap();
+        let result = config.into_config_map();
+        assert!(result.is_err(), "ste_vec on text column should fail validation");
+    }
+
+    #[test]
+    fn real_eql_config_produces_correct_encrypt_config() {
+        let json = json!({
+            "v": 1,
+            "tables": {
+                "encrypted": {
+                    "encrypted_text": {
+                        "cast_as": "text",
+                        "indexes": { "unique": {}, "match": {}, "ore": {} }
+                    },
+                    "encrypted_bool": {
+                        "cast_as": "boolean",
+                        "indexes": { "unique": {}, "ore": {} }
+                    },
+                    "encrypted_int2": {
+                        "cast_as": "small_int",
+                        "indexes": { "unique": {}, "ore": {} }
+                    },
+                    "encrypted_int4": {
+                        "cast_as": "int",
+                        "indexes": { "unique": {}, "ore": {} }
+                    },
+                    "encrypted_int8": {
+                        "cast_as": "big_int",
+                        "indexes": { "unique": {}, "ore": {} }
+                    },
+                    "encrypted_float8": {
+                        "cast_as": "double",
+                        "indexes": { "unique": {}, "ore": {} }
+                    },
+                    "encrypted_date": {
+                        "cast_as": "date",
+                        "indexes": { "unique": {}, "ore": {} }
+                    },
+                    "encrypted_jsonb": {
+                        "cast_as": "jsonb",
+                        "indexes": {
+                            "ste_vec": { "prefix": "encrypted/encrypted_jsonb" }
+                        }
+                    },
+                    "encrypted_jsonb_filtered": {
+                        "cast_as": "jsonb",
+                        "indexes": {
+                            "ste_vec": {
+                                "prefix": "encrypted/encrypted_jsonb_filtered",
+                                "term_filters": [{ "kind": "downcase" }]
+                            }
+                        }
+                    }
+                }
+            }
+        });
+
+        let config = parse(json);
+
+        // All 9 columns present with correct Identifiers
+        assert_eq!(config.len(), 9);
+
+        // Verify legacy type aliases map correctly
+        let float_col = config.get(&Identifier::new("encrypted", "encrypted_float8")).unwrap();
+        assert_eq!(float_col.cast_type, ColumnType::Float);
+
+        let jsonb_col = config.get(&Identifier::new("encrypted", "encrypted_jsonb")).unwrap();
+        assert_eq!(jsonb_col.cast_type, ColumnType::Json);
+
+        // Verify index counts
+        let text_col = config.get(&Identifier::new("encrypted", "encrypted_text")).unwrap();
+        assert_eq!(text_col.indexes.len(), 3);
+
+        let bool_col = config.get(&Identifier::new("encrypted", "encrypted_bool")).unwrap();
+        assert_eq!(bool_col.indexes.len(), 2);
+
+        let jsonb_filtered = config.get(&Identifier::new("encrypted", "encrypted_jsonb_filtered")).unwrap();
+        assert_eq!(jsonb_filtered.indexes.len(), 1);
+    }
+
+    #[test]
+    fn malformed_json_returns_parse_error() {
+        let json = json!({
+            "v": 1,
+            "tables": "not a map"
+        });
+
+        let result = serde_json::from_value::<CanonicalEncryptionConfig>(json);
+        assert!(result.is_err());
     }
 }

@@ -185,6 +185,9 @@ pub enum ConfigError {
     #[error(transparent)]
     Parse(#[from] serde_json::Error),
 
+    #[error("Invalid encryption configuration: {0}")]
+    InvalidEncryptionConfig(#[from] cipherstash_config::errors::ConfigError),
+
     #[error("Database schema could not be loaded")]
     SchemaCouldNotBeLoaded,
 
