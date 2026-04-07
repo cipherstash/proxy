@@ -29,3 +29,5 @@ tests/benchmark/benchmark-*.png
 testing-chart.yaml
 
 .env.proxy.dev
+
+/.work
