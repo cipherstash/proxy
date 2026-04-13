@@ -326,10 +326,14 @@ mod tests {
 
         assert_eq!(config.len(), 2);
 
-        let email = config.get(&Identifier::new("users", "email")).expect("users.email exists");
+        let email = config
+            .get(&Identifier::new("users", "email"))
+            .expect("users.email exists");
         assert_eq!(email.cast_type, ColumnType::Text);
 
-        let total = config.get(&Identifier::new("orders", "total")).expect("orders.total exists");
+        let total = config
+            .get(&Identifier::new("orders", "total"))
+            .expect("orders.total exists");
         assert_eq!(total.cast_type, ColumnType::Int);
     }
 
@@ -351,7 +355,10 @@ mod tests {
 
         let config: CanonicalEncryptionConfig = serde_json::from_value(json).unwrap();
         let result = config.into_config_map();
-        assert!(result.is_err(), "ste_vec on text column should fail validation");
+        assert!(
+            result.is_err(),
+            "ste_vec on text column should fail validation"
+        );
     }
 
     #[test]
@@ -413,20 +420,30 @@ mod tests {
         assert_eq!(config.len(), 9);
 
         // Verify legacy type aliases map correctly
-        let float_col = config.get(&Identifier::new("encrypted", "encrypted_float8")).unwrap();
+        let float_col = config
+            .get(&Identifier::new("encrypted", "encrypted_float8"))
+            .unwrap();
         assert_eq!(float_col.cast_type, ColumnType::Float);
 
-        let jsonb_col = config.get(&Identifier::new("encrypted", "encrypted_jsonb")).unwrap();
+        let jsonb_col = config
+            .get(&Identifier::new("encrypted", "encrypted_jsonb"))
+            .unwrap();
         assert_eq!(jsonb_col.cast_type, ColumnType::Json);
 
         // Verify index counts
-        let text_col = config.get(&Identifier::new("encrypted", "encrypted_text")).unwrap();
+        let text_col = config
+            .get(&Identifier::new("encrypted", "encrypted_text"))
+            .unwrap();
         assert_eq!(text_col.indexes.len(), 3);
 
-        let bool_col = config.get(&Identifier::new("encrypted", "encrypted_bool")).unwrap();
+        let bool_col = config
+            .get(&Identifier::new("encrypted", "encrypted_bool"))
+            .unwrap();
         assert_eq!(bool_col.indexes.len(), 2);
 
-        let jsonb_filtered = config.get(&Identifier::new("encrypted", "encrypted_jsonb_filtered")).unwrap();
+        let jsonb_filtered = config
+            .get(&Identifier::new("encrypted", "encrypted_jsonb_filtered"))
+            .unwrap();
         assert_eq!(jsonb_filtered.indexes.len(), 1);
     }
 
