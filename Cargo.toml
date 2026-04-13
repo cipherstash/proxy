@@ -43,9 +43,9 @@ debug = true
 
 [workspace.dependencies]
 sqltk = { version = "0.10.0" }
-cipherstash-client = { version = "0.34.0-alpha.5" }
-cipherstash-config = { version = "0.34.0-alpha.5" }
-cts-common = { version = "0.34.0-alpha.5" }
+cipherstash-client = { version = "=0.34.1-alpha.3" }
+cipherstash-config = { version = "=0.34.1-alpha.3" }
+cts-common = { version = "=0.34.1-alpha.3" }
 
 thiserror = "2.0.9"
 tokio = { version = "1.44.2", features = ["full"] }
@@ -56,9 +56,3 @@ tracing-subscriber = { version = "^0.3.20", features = [
   "env-filter",
   "std",
 ] }
-
-[patch.crates-io]
-cipherstash-client = { path = "../cipherstash-suite/packages/cipherstash-client" }
-cipherstash-config = { path = "../cipherstash-suite/packages/cipherstash-config" }
-cts-common = { path = "../cipherstash-suite/packages/cts-common" }
-zerokms-protocol = { path = "../cipherstash-suite/packages/zerokms-protocol" }
