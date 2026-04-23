@@ -548,7 +548,7 @@ impl Projection {
                     &*col.ty.clone().follow_tvars(unifier)
                 {
                     let resolved = projection.flatten(unifier)?;
-                    acc.extend(resolved.0.into_iter());
+                    acc.extend(resolved.0);
                 } else {
                     let ty = col.ty.clone().follow_tvars(unifier);
                     acc.push(ProjectionColumn { ty, alias });
