@@ -30,10 +30,7 @@ impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
             }
 
             Expr::QualifiedWildcard(object_name, _) => {
-                self.unify_node_with_type(
-                    expr_val,
-                    self.resolve_qualified_wildcard(object_name)?,
-                )?;
+                self.unify_node_with_type(expr_val, self.resolve_qualified_wildcard(object_name)?)?;
             }
 
             Expr::JsonAccess { .. } => {
