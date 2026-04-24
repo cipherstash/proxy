@@ -404,33 +404,33 @@ async fn test_complex_nested_queries() -> Result<(), Box<dyn std::error::Error>>
     );
 
     // Test 2: Aggregation with JSONB extraction
-    println!("📝 Test 2: Calculate max risk scores by insurance provider");
-    let sql = r#"
-        SELECT jsonb_path_query_first(p.pii, '$.insurance.provider') as provider,
-               MAX(jsonb_path_query_first(p.pii, '$.medical_history.risk_factors.cardiovascular')) as max_cv_risk,
-               COUNT(*) as patient_count
-        FROM patients AS p
-        WHERE jsonb_path_exists(p.pii, '$.medical_history.risk_factors.cardiovascular')
-        GROUP BY jsonb_path_query_first(p.pii, '$.insurance.provider')
-        ORDER BY MAX(jsonb_path_query_first(p.pii, '$.medical_history.risk_factors.cardiovascular')) DESC
-    "#;
-    let rows = client.query(sql, &[]).await?;
-    println!(
-        "✅ Calculated risk scores for {} insurance providers",
-        rows.len()
-    );
+    println!("📝 Test 2: Calculate max risk scores by insurance provider [DISABLED until EQL reinstates GROUP BY support for JSONB terms]");
+    // let sql = r#"
+    //     SELECT jsonb_path_query_first(p.pii, '$.insurance.provider') as provider,
+    //            MAX(jsonb_path_query_first(p.pii, '$.medical_history.risk_factors.cardiovascular')) as max_cv_risk,
+    //            COUNT(*) as patient_count
+    //     FROM patients AS p
+    //     WHERE jsonb_path_exists(p.pii, '$.medical_history.risk_factors.cardiovascular')
+    //     GROUP BY jsonb_path_query_first(p.pii, '$.insurance.provider')
+    //     ORDER BY MAX(jsonb_path_query_first(p.pii, '$.medical_history.risk_factors.cardiovascular')) DESC
+    // "#;
+    // let rows = client.query(sql, &[]).await?;
+    // println!(
+    //     "✅ Calculated risk scores for {} insurance providers",
+    //     rows.len()
+    // );
 
-    for row in &rows {
-        let provider: Option<Value> = row.get("provider");
-        let provider: Option<&str> = provider.as_ref().and_then(|v| v.as_str());
+    // for row in &rows {
+    //     let provider: Option<Value> = row.get("provider");
+    //     let provider: Option<&str> = provider.as_ref().and_then(|v| v.as_str());
 
-        let avg_risk: Option<Value> = row.get("max_cv_risk");
-        let avg_risk: Option<i64> = avg_risk.as_ref().and_then(|v| v.as_i64());
+    //     let avg_risk: Option<Value> = row.get("max_cv_risk");
+    //     let avg_risk: Option<i64> = avg_risk.as_ref().and_then(|v| v.as_i64());
 
-        let count: Option<i64> = row.get("patient_count");
+    //     let count: Option<i64> = row.get("patient_count");
 
-        println!("   {provider:?}: Avg CV Risk = {avg_risk:?}, Patients = {count:?}");
-    }
+    //     println!("   {provider:?}: Avg CV Risk = {avg_risk:?}, Patients = {count:?}");
+    // }
 
     // Test 3: Complex filtering with multiple JSONB conditions
     println!("📝 Test 3: Find patients with allergies AND high deductibles");

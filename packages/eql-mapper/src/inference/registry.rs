@@ -101,7 +101,7 @@ impl<'ast> TypeRegistry<'ast> {
             .map(|(p, ty)| Param::try_from(*p).map(|p| (p, ty.clone().follow_tvars(unifier))))
             .collect::<Result<Vec<_>, _>>()?;
 
-        params.sort_by(|(a, _), (b, _)| a.cmp(b));
+        params.sort_by_key(|(param, _)| *param);
 
         Ok(params)
     }
