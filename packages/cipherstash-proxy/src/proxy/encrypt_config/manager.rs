@@ -102,6 +102,12 @@ async fn init_reloader(config: DatabaseConfig) -> Result<EncryptConfigManager, E
                     warn!(msg = "Encrypt requires the Encrypt Query Language (EQL) to be installed in the target database");
                     warn!(msg = "See https://github.com/cipherstash/encrypt-query-language");
                 }
+                Error::Config(ConfigError::InvalidEncryptionConfig(ref inner)) => {
+                    error!(
+                        msg = "Invalid Encrypt configuration in database",
+                        error = inner.to_string()
+                    );
+                }
                 _ => {
                     error!(
                         msg = "Error loading Encrypt configuration",
