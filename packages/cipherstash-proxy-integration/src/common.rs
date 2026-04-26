@@ -88,6 +88,17 @@ pub async fn clear_with_client(client: &Client) {
     client.simple_query(sql).await.unwrap();
 }
 
+/// OPE-specific clear that only touches the `encrypted_ope` table.
+/// Keeps OPE tests from racing with ORE tests via the shared `encrypted` table.
+pub async fn clear_ope_with_client(client: &Client) {
+    let sql = "TRUNCATE encrypted_ope";
+    client.simple_query(sql).await.unwrap();
+}
+
+pub async fn clear_ope() {
+    clear_ope_with_client(&connect_with_tls(PROXY).await).await;
+}
+
 pub async fn reset_schema() {
     let port = std::env::var("CS_DATABASE__PORT")
         .map(|s| s.parse().unwrap())
