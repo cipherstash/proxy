@@ -169,6 +169,47 @@ SELECT eql_v2.add_search_config(
 SELECT eql_v2.add_encrypted_constraint('encrypted', 'encrypted_text');
 
 
+-- OPE-indexed mirror of the `encrypted` table.
+-- Uses the new `ope` (Order-Preserving Encryption) index in place of `ore` for
+-- range/order operators. Same shape as `encrypted` so generic test helpers can
+-- swap table names and reuse logic.
+DROP TABLE IF EXISTS encrypted_ope;
+CREATE TABLE encrypted_ope (
+    id bigint,
+    plaintext text,
+    plaintext_date date,
+    encrypted_text eql_v2_encrypted,
+    encrypted_bool eql_v2_encrypted,
+    encrypted_int2 eql_v2_encrypted,
+    encrypted_int4 eql_v2_encrypted,
+    encrypted_int8 eql_v2_encrypted,
+    encrypted_float8 eql_v2_encrypted,
+    encrypted_date eql_v2_encrypted,
+    PRIMARY KEY(id)
+);
+
+SELECT eql_v2.add_search_config('encrypted_ope', 'encrypted_text', 'unique', 'text');
+SELECT eql_v2.add_search_config('encrypted_ope', 'encrypted_text', 'ope', 'text');
+
+SELECT eql_v2.add_search_config('encrypted_ope', 'encrypted_bool', 'unique', 'boolean');
+SELECT eql_v2.add_search_config('encrypted_ope', 'encrypted_bool', 'ope', 'boolean');
+
+SELECT eql_v2.add_search_config('encrypted_ope', 'encrypted_int2', 'unique', 'small_int');
+SELECT eql_v2.add_search_config('encrypted_ope', 'encrypted_int2', 'ope', 'small_int');
+
+SELECT eql_v2.add_search_config('encrypted_ope', 'encrypted_int4', 'unique', 'int');
+SELECT eql_v2.add_search_config('encrypted_ope', 'encrypted_int4', 'ope', 'int');
+
+SELECT eql_v2.add_search_config('encrypted_ope', 'encrypted_int8', 'unique', 'big_int');
+SELECT eql_v2.add_search_config('encrypted_ope', 'encrypted_int8', 'ope', 'big_int');
+
+SELECT eql_v2.add_search_config('encrypted_ope', 'encrypted_float8', 'unique', 'double');
+SELECT eql_v2.add_search_config('encrypted_ope', 'encrypted_float8', 'ope', 'double');
+
+SELECT eql_v2.add_search_config('encrypted_ope', 'encrypted_date', 'unique', 'date');
+SELECT eql_v2.add_search_config('encrypted_ope', 'encrypted_date', 'ope', 'date');
+
+
 -- This is the exact same schema as above but using a database-generated primary key.
 -- It is required to remove flake form the Elixir integration test suite.
 -- TODO: port all the rest of our integration tests to this schema.
