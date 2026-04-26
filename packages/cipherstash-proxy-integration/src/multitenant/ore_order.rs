@@ -36,13 +36,18 @@ mod tests {
                 use super::*;
                 use serial_test::serial;
 
+                // Multitenant tests share the `encrypted` table — isolation comes
+                // from the per-tenant keyset, and `#[serial]` keeps the shared
+                // table from racing across tests.
+                const TABLE: &str = "encrypted";
+
                 #[tokio::test]
                 #[serial]
                 async fn multitenant_ore_order_text() {
                     trace();
                     clear().await;
                     let client = connect_as_tenant(&keyset_id($env_var)).await;
-                    ore_order_helpers::ore_order_text(&client).await;
+                    ore_order_helpers::ore_order_text(&client, TABLE).await;
                 }
 
                 #[tokio::test]
@@ -51,7 +56,7 @@ mod tests {
                     trace();
                     clear().await;
                     let client = connect_as_tenant(&keyset_id($env_var)).await;
-                    ore_order_helpers::ore_order_text_desc(&client).await;
+                    ore_order_helpers::ore_order_text_desc(&client, TABLE).await;
                 }
 
                 #[tokio::test]
@@ -60,7 +65,7 @@ mod tests {
                     trace();
                     clear().await;
                     let client = connect_as_tenant(&keyset_id($env_var)).await;
-                    ore_order_helpers::ore_order_nulls_last_by_default(&client).await;
+                    ore_order_helpers::ore_order_nulls_last_by_default(&client, TABLE).await;
                 }
 
                 #[tokio::test]
@@ -69,7 +74,7 @@ mod tests {
                     trace();
                     clear().await;
                     let client = connect_as_tenant(&keyset_id($env_var)).await;
-                    ore_order_helpers::ore_order_nulls_first(&client).await;
+                    ore_order_helpers::ore_order_nulls_first(&client, TABLE).await;
                 }
 
                 #[tokio::test]
@@ -78,7 +83,7 @@ mod tests {
                     trace();
                     clear().await;
                     let client = connect_as_tenant(&keyset_id($env_var)).await;
-                    ore_order_helpers::ore_order_qualified_column(&client).await;
+                    ore_order_helpers::ore_order_qualified_column(&client, TABLE).await;
                 }
 
                 #[tokio::test]
@@ -87,7 +92,8 @@ mod tests {
                     trace();
                     clear().await;
                     let client = connect_as_tenant(&keyset_id($env_var)).await;
-                    ore_order_helpers::ore_order_qualified_column_with_alias(&client).await;
+                    ore_order_helpers::ore_order_qualified_column_with_alias(&client, TABLE)
+                        .await;
                 }
 
                 #[tokio::test]
@@ -96,7 +102,10 @@ mod tests {
                     trace();
                     clear().await;
                     let client = connect_as_tenant(&keyset_id($env_var)).await;
-                    ore_order_helpers::ore_order_no_eql_column_in_select_projection(&client).await;
+                    ore_order_helpers::ore_order_no_eql_column_in_select_projection(
+                        &client, TABLE,
+                    )
+                    .await;
                 }
 
                 #[tokio::test]
@@ -105,7 +114,7 @@ mod tests {
                     trace();
                     clear().await;
                     let client = connect_as_tenant(&keyset_id($env_var)).await;
-                    ore_order_helpers::ore_order_plaintext_column(&client).await;
+                    ore_order_helpers::ore_order_plaintext_column(&client, TABLE).await;
                 }
 
                 #[tokio::test]
@@ -114,7 +123,7 @@ mod tests {
                     trace();
                     clear().await;
                     let client = connect_as_tenant(&keyset_id($env_var)).await;
-                    ore_order_helpers::ore_order_plaintext_and_eql_columns(&client).await;
+                    ore_order_helpers::ore_order_plaintext_and_eql_columns(&client, TABLE).await;
                 }
 
                 #[tokio::test]
@@ -123,7 +132,7 @@ mod tests {
                     trace();
                     clear().await;
                     let client = connect_as_tenant(&keyset_id($env_var)).await;
-                    ore_order_helpers::ore_order_simple_protocol(&client).await;
+                    ore_order_helpers::ore_order_simple_protocol(&client, TABLE).await;
                 }
 
                 #[tokio::test]
@@ -135,6 +144,7 @@ mod tests {
                     let values: Vec<i16> = vec![-100, -10, -1, 0, 1, 5, 10, 20, 100, 200];
                     ore_order_helpers::ore_order_generic(
                         &client,
+                        TABLE,
                         "encrypted_int2",
                         values,
                         SortDirection::Asc,
@@ -151,6 +161,7 @@ mod tests {
                     let values: Vec<i16> = vec![-100, -10, -1, 0, 1, 5, 10, 20, 100, 200];
                     ore_order_helpers::ore_order_generic(
                         &client,
+                        TABLE,
                         "encrypted_int2",
                         values,
                         SortDirection::Desc,
@@ -169,6 +180,7 @@ mod tests {
                     ];
                     ore_order_helpers::ore_order_generic(
                         &client,
+                        TABLE,
                         "encrypted_int4",
                         values,
                         SortDirection::Asc,
@@ -187,6 +199,7 @@ mod tests {
                     ];
                     ore_order_helpers::ore_order_generic(
                         &client,
+                        TABLE,
                         "encrypted_int4",
                         values,
                         SortDirection::Desc,
@@ -205,6 +218,7 @@ mod tests {
                     ];
                     ore_order_helpers::ore_order_generic(
                         &client,
+                        TABLE,
                         "encrypted_int8",
                         values,
                         SortDirection::Asc,
@@ -223,6 +237,7 @@ mod tests {
                     ];
                     ore_order_helpers::ore_order_generic(
                         &client,
+                        TABLE,
                         "encrypted_int8",
                         values,
                         SortDirection::Desc,
@@ -241,6 +256,7 @@ mod tests {
                     ];
                     ore_order_helpers::ore_order_generic(
                         &client,
+                        TABLE,
                         "encrypted_float8",
                         values,
                         SortDirection::Asc,
@@ -259,6 +275,7 @@ mod tests {
                     ];
                     ore_order_helpers::ore_order_generic(
                         &client,
+                        TABLE,
                         "encrypted_float8",
                         values,
                         SortDirection::Desc,
