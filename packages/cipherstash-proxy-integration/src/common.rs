@@ -88,15 +88,16 @@ pub async fn clear_with_client(client: &Client) {
     client.simple_query(sql).await.unwrap();
 }
 
-/// OPE-specific clear that only touches the `encrypted_ope` table.
-/// Keeps OPE tests from racing with ORE tests via the shared `encrypted` table.
-pub async fn clear_ope_with_client(client: &Client) {
-    let sql = "TRUNCATE encrypted_ope";
-    client.simple_query(sql).await.unwrap();
+/// Truncate a single table by name. Useful for tests that own a dedicated
+/// fixture table (e.g. the per-test ORE/OPE tables) and don't need to wipe
+/// the shared `encrypted`/`plaintext` tables.
+pub async fn clear_table_with_client(client: &Client, table: &str) {
+    let sql = format!("TRUNCATE {}", table);
+    client.simple_query(&sql).await.unwrap();
 }
 
-pub async fn clear_ope() {
-    clear_ope_with_client(&connect_with_tls(PROXY).await).await;
+pub async fn clear_table(table: &str) {
+    clear_table_with_client(&connect_with_tls(PROXY).await, table).await;
 }
 
 pub async fn reset_schema() {
