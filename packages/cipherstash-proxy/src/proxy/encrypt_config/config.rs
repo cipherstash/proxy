@@ -133,8 +133,8 @@ impl From<CastAs> for ColumnType {
             CastAs::Boolean => ColumnType::Boolean,
             CastAs::Date => ColumnType::Date,
             CastAs::Real | CastAs::Double => ColumnType::Float,
-            CastAs::Text => ColumnType::Utf8Str,
-            CastAs::JsonB => ColumnType::JsonB,
+            CastAs::Text => ColumnType::Text,
+            CastAs::JsonB => ColumnType::Json,
         }
     }
 }
@@ -237,7 +237,7 @@ mod tests {
 
         let column = encrypt_config.get(&ident).expect("column exists");
 
-        assert_eq!(column.cast_type, ColumnType::Utf8Str);
+        assert_eq!(column.cast_type, ColumnType::Text);
         assert!(column.indexes.is_empty());
     }
 
