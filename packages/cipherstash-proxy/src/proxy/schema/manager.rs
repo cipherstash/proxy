@@ -1,9 +1,14 @@
 use crate::config::DatabaseConfig;
 use crate::error::Error;
+use crate::proxy::encrypt_config::{EncryptConfig, EncryptConfigManager};
 use crate::proxy::{AGGREGATE_QUERY, SCHEMA_QUERY};
 use crate::{connect, log::SCHEMA};
 use arc_swap::ArcSwap;
-use eql_mapper::{self, EqlTraits};
+use cipherstash_client::{
+    eql::Identifier,
+    schema::column::{Index, IndexType},
+};
+use eql_mapper::{self, EqlTrait, EqlTraits};
 use eql_mapper::{Column, Schema, Table};
 use sqltk::parser::ast::Ident;
 use std::sync::Arc;
@@ -14,14 +19,18 @@ use tracing::{debug, info, warn};
 #[derive(Clone, Debug)]
 pub struct SchemaManager {
     config: DatabaseConfig,
+    encrypt_config_manager: EncryptConfigManager,
     schema: Arc<ArcSwap<Schema>>,
     _reload_handle: Arc<JoinHandle<()>>,
 }
 
 impl SchemaManager {
-    pub async fn init(config: &DatabaseConfig) -> Result<Self, Error> {
+    pub async fn init(
+        config: &DatabaseConfig,
+        encrypt_config_manager: EncryptConfigManager,
+    ) -> Result<Self, Error> {
         let config = config.clone();
-        init_reloader(config).await
+        init_reloader(config, encrypt_config_manager).await
     }
 
     pub fn load(&self) -> Arc<Schema> {
@@ -29,7 +38,8 @@ impl SchemaManager {
     }
 
     pub async fn reload(&self) {
-        match load_schema_with_retry(&self.config).await {
+        let encrypt_config = self.encrypt_config_manager.load();
+        match load_schema_with_retry(&self.config, &encrypt_config).await {
             Ok(reloaded) => {
                 debug!(target: SCHEMA, msg = "Reloaded database schema");
                 self.schema.swap(Arc::new(reloaded));
@@ -44,15 +54,20 @@ impl SchemaManager {
     }
 }
 
-async fn init_reloader(config: DatabaseConfig) -> Result<SchemaManager, Error> {
+async fn init_reloader(
+    config: DatabaseConfig,
+    encrypt_config_manager: EncryptConfigManager,
+) -> Result<SchemaManager, Error> {
     // Skip retries on startup as the likely failure mode is configuration
-    let schema = load_schema(&config).await?;
+    let initial_encrypt_config = encrypt_config_manager.load();
+    let schema = load_schema(&config, &initial_encrypt_config).await?;
     info!(msg = "Loaded database schema");
 
     let schema = Arc::new(ArcSwap::new(Arc::new(schema)));
 
     let config_ref = config.clone();
     let schema_ref = schema.clone();
+    let encrypt_config_ref = encrypt_config_manager.clone();
 
     let reload_handle = tokio::spawn(async move {
         let reload_interval = tokio::time::Duration::from_secs(config_ref.config_reload_interval);
@@ -65,7 +80,8 @@ async fn init_reloader(config: DatabaseConfig) -> Result<SchemaManager, Error> {
         loop {
             interval.tick().await;
 
-            match load_schema_with_retry(&config_ref).await {
+            let encrypt_config = encrypt_config_ref.load();
+            match load_schema_with_retry(&config_ref, &encrypt_config).await {
                 Ok(reloaded) => {
                     schema_ref.swap(Arc::new(reloaded));
                 }
@@ -81,6 +97,7 @@ async fn init_reloader(config: DatabaseConfig) -> Result<SchemaManager, Error> {
 
     Ok(SchemaManager {
         config,
+        encrypt_config_manager,
         schema,
         _reload_handle: Arc::new(reload_handle),
     })
@@ -91,13 +108,16 @@ async fn init_reloader(config: DatabaseConfig) -> Result<SchemaManager, Error> {
 /// When databases and the proxy start up at the same time they might not be ready to accept connections before the
 /// proxy tries to query the schema. To give the proxy the best chance of initialising correctly this method will
 /// retry the query a few times before passing on the error.
-async fn load_schema_with_retry(config: &DatabaseConfig) -> Result<Schema, Error> {
+async fn load_schema_with_retry(
+    config: &DatabaseConfig,
+    encrypt_config: &EncryptConfig,
+) -> Result<Schema, Error> {
     let mut retry_count = 0;
     let max_retry_count = 10;
     let max_backoff = Duration::from_secs(2);
 
     loop {
-        match load_schema(config).await {
+        match load_schema(config, encrypt_config).await {
             Ok(schema) => {
                 return Ok(schema);
             }
@@ -117,7 +137,10 @@ async fn load_schema_with_retry(config: &DatabaseConfig) -> Result<Schema, Error
     }
 }
 
-pub async fn load_schema(config: &DatabaseConfig) -> Result<Schema, Error> {
+pub async fn load_schema(
+    config: &DatabaseConfig,
+    encrypt_config: &EncryptConfig,
+) -> Result<Schema, Error> {
     let client = connect::database(config).await?;
 
     let tables = client.query(SCHEMA_QUERY, &[]).await?;
@@ -141,9 +164,18 @@ pub async fn load_schema(config: &DatabaseConfig) -> Result<Schema, Error> {
 
             let column = match column_type_name.as_deref() {
                 Some("eql_v2_encrypted") => {
-                    debug!(target: SCHEMA, msg = "eql_v2_encrypted column", table = table_name, column = col);
-
-                    let eql_traits =  EqlTraits::all();
+                    let identifier = Identifier::new(&table_name, col);
+                    let eql_traits = encrypt_config
+                        .get_column_config(&identifier)
+                        .map(|config| eql_traits_from_indexes(&config.indexes))
+                        .unwrap_or_default();
+                    debug!(
+                        target: SCHEMA,
+                        msg = "eql_v2_encrypted column",
+                        table = table_name,
+                        column = col,
+                        traits = %eql_traits,
+                    );
                     Column::eql(ident, eql_traits)
                 }
                 _ => Column::native(ident),
@@ -165,4 +197,111 @@ pub async fn load_schema(config: &DatabaseConfig) -> Result<Schema, Error> {
         .collect();
 
     Ok(schema)
+}
+
+/// Translate the configured indexes for a column into the `EqlTraits` that
+/// describe which SQL operations the eql-mapper should permit on it.
+///
+/// Mapping:
+///   - `unique`      → `Eq`
+///   - `ore` / `ope` → `Ord` (implies `Eq`)
+///   - `match`       → `TokenMatch`
+///   - `ste_vec`     → `JsonLike` (implies `Ord` + `Eq`) and `Contain`
+fn eql_traits_from_indexes(indexes: &[Index]) -> EqlTraits {
+    indexes
+        .iter()
+        .flat_map(|index| match &index.index_type {
+            IndexType::Ore | IndexType::Ope => &[EqlTrait::Ord][..],
+            IndexType::Match { .. } => &[EqlTrait::TokenMatch][..],
+            IndexType::Unique { .. } => &[EqlTrait::Eq][..],
+            IndexType::SteVec { .. } => &[EqlTrait::JsonLike, EqlTrait::Contain][..],
+        })
+        .copied()
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use cipherstash_client::schema::column::{Index, Tokenizer};
+
+    #[test]
+    fn no_indexes_yields_no_traits() {
+        let traits = eql_traits_from_indexes(&[]);
+        assert_eq!(traits, EqlTraits::none());
+    }
+
+    #[test]
+    fn unique_index_yields_eq() {
+        let traits = eql_traits_from_indexes(&[Index::new_unique()]);
+        assert_eq!(traits, EqlTraits::from(EqlTrait::Eq));
+    }
+
+    #[test]
+    fn ore_index_yields_ord_and_eq() {
+        let traits = eql_traits_from_indexes(&[Index::new_ore()]);
+        assert!(traits.ord);
+        assert!(traits.eq, "Ord implies Eq");
+        assert!(!traits.token_match);
+        assert!(!traits.json_like);
+        assert!(!traits.contain);
+    }
+
+    #[test]
+    fn ope_index_yields_ord_and_eq() {
+        let traits = eql_traits_from_indexes(&[Index::new_ope()]);
+        assert!(traits.ord);
+        assert!(traits.eq, "Ord implies Eq");
+        assert!(!traits.token_match);
+        assert!(!traits.json_like);
+        assert!(!traits.contain);
+    }
+
+    #[test]
+    fn match_index_yields_token_match_only() {
+        let traits = eql_traits_from_indexes(&[Index::new(IndexType::Match {
+            tokenizer: Tokenizer::Standard,
+            token_filters: vec![],
+            k: 6,
+            m: 2048,
+            include_original: false,
+        })]);
+        assert!(traits.token_match);
+        assert!(!traits.eq);
+        assert!(!traits.ord);
+    }
+
+    #[test]
+    fn ste_vec_index_yields_json_like_and_contain() {
+        let traits = eql_traits_from_indexes(&[Index::new(IndexType::SteVec {
+            prefix: "doc".into(),
+            term_filters: vec![],
+            array_index_mode: Default::default(),
+        })]);
+        assert!(traits.json_like);
+        assert!(traits.contain);
+        assert!(traits.ord, "JsonLike implies Ord");
+        assert!(traits.eq, "JsonLike implies Eq");
+        assert!(!traits.token_match);
+    }
+
+    #[test]
+    fn multiple_indexes_unioned() {
+        let traits = eql_traits_from_indexes(&[
+            Index::new_ore(),
+            Index::new_unique(),
+            Index::new(IndexType::Match {
+                tokenizer: Tokenizer::Standard,
+                token_filters: vec![],
+                k: 6,
+                m: 2048,
+                include_original: false,
+            }),
+        ]);
+        assert!(traits.eq);
+        assert!(traits.ord);
+        assert!(traits.token_match);
+        assert!(!traits.json_like);
+        assert!(!traits.contain);
+    }
 }
