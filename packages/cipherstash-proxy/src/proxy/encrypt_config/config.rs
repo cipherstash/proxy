@@ -68,6 +68,8 @@ pub enum CastAs {
 pub struct Indexes {
     #[serde(rename = "ore")]
     ore_index: Option<OreIndexOpts>,
+    #[serde(rename = "ope")]
+    ope_index: Option<OpeIndexOpts>,
     #[serde(rename = "unique")]
     unique_index: Option<UniqueIndexOpts>,
     #[serde(rename = "match")]
@@ -78,6 +80,9 @@ pub struct Indexes {
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
 pub struct OreIndexOpts {}
+
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
+pub struct OpeIndexOpts {}
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
 pub struct MatchIndexOpts {
@@ -133,8 +138,8 @@ impl From<CastAs> for ColumnType {
             CastAs::Boolean => ColumnType::Boolean,
             CastAs::Date => ColumnType::Date,
             CastAs::Real | CastAs::Double => ColumnType::Float,
-            CastAs::Text => ColumnType::Utf8Str,
-            CastAs::JsonB => ColumnType::JsonB,
+            CastAs::Text => ColumnType::Text,
+            CastAs::JsonB => ColumnType::Json,
         }
     }
 }
@@ -172,6 +177,10 @@ impl Column {
 
         if self.indexes.ore_index.is_some() {
             config = config.add_index(Index::new_ore());
+        }
+
+        if self.indexes.ope_index.is_some() {
+            config = config.add_index(Index::new_ope());
         }
 
         if let Some(opts) = self.indexes.match_index {
@@ -237,7 +246,7 @@ mod tests {
 
         let column = encrypt_config.get(&ident).expect("column exists");
 
-        assert_eq!(column.cast_type, ColumnType::Utf8Str);
+        assert_eq!(column.cast_type, ColumnType::Text);
         assert!(column.indexes.is_empty());
     }
 
@@ -309,6 +318,30 @@ mod tests {
         let column = encrypt_config.get(&ident).expect("column exists");
 
         assert_eq!(column.indexes[0].index_type, IndexType::Ore);
+    }
+
+    #[test]
+    fn can_parse_ope_index() {
+        let json = json!({
+            "v": 1,
+            "tables": {
+                "users": {
+                    "email": {
+                        "indexes": {
+                            "ope": {}
+                        }
+                    }
+                }
+            }
+        });
+
+        let encrypt_config = parse(json);
+
+        let ident = Identifier::new("users", "email");
+
+        let column = encrypt_config.get(&ident).expect("column exists");
+
+        assert_eq!(column.indexes[0].index_type, IndexType::Ope);
     }
 
     #[test]

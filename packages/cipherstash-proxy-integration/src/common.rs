@@ -88,6 +88,18 @@ pub async fn clear_with_client(client: &Client) {
     client.simple_query(sql).await.unwrap();
 }
 
+/// Truncate a single table by name. Useful for tests that own a dedicated
+/// fixture table (e.g. the per-test ORE/OPE tables) and don't need to wipe
+/// the shared `encrypted`/`plaintext` tables.
+pub async fn clear_table_with_client(client: &Client, table: &str) {
+    let sql = format!("TRUNCATE {}", table);
+    client.simple_query(&sql).await.unwrap();
+}
+
+pub async fn clear_table(table: &str) {
+    clear_table_with_client(&connect_with_tls(PROXY).await, table).await;
+}
+
 pub async fn reset_schema() {
     let port = std::env::var("CS_DATABASE__PORT")
         .map(|s| s.parse().unwrap())

@@ -3,6 +3,10 @@
 //!
 //! Used by both `map_ore_index_order` (default keyset) and `multitenant::ore_order`
 //! (per-tenant keysets) to avoid duplicating test logic.
+//!
+//! Each helper takes a `table` name so callers can target their own per-test
+//! fixture table — this prevents parallel-test races on a shared `encrypted`
+//! table.
 
 use std::fmt::Debug;
 use tokio_postgres::types::{FromSql, ToSql};
@@ -27,7 +31,7 @@ impl SortDirection {
 }
 
 /// Text ASC ordering with lexicographic edge cases.
-pub async fn ore_order_text(client: &tokio_postgres::Client) {
+pub async fn ore_order_text(client: &tokio_postgres::Client, table: &str) {
     let values = [
         "aardvark",
         "aplomb",
@@ -38,17 +42,17 @@ pub async fn ore_order_text(client: &tokio_postgres::Client) {
         "zephyr",
     ];
 
-    let insert_sql = "INSERT INTO encrypted (id, encrypted_text) VALUES ($1, $2)";
+    let insert_sql = format!("INSERT INTO {table} (id, encrypted_text) VALUES ($1, $2)");
 
     for idx in interleaved_indices(values.len()) {
         client
-            .query(insert_sql, &[&random_id(), &values[idx]])
+            .query(&insert_sql, &[&random_id(), &values[idx]])
             .await
             .unwrap();
     }
 
-    let sql = "SELECT encrypted_text FROM encrypted ORDER BY encrypted_text";
-    let rows = client.query(sql, &[]).await.unwrap();
+    let sql = format!("SELECT encrypted_text FROM {table} ORDER BY encrypted_text");
+    let rows = client.query(&sql, &[]).await.unwrap();
 
     let actual = rows.iter().map(|row| row.get(0)).collect::<Vec<String>>();
     let expected: Vec<String> = values.iter().map(|s| s.to_string()).collect();
@@ -57,7 +61,7 @@ pub async fn ore_order_text(client: &tokio_postgres::Client) {
 }
 
 /// Text DESC ordering with lexicographic edge cases.
-pub async fn ore_order_text_desc(client: &tokio_postgres::Client) {
+pub async fn ore_order_text_desc(client: &tokio_postgres::Client, table: &str) {
     let values = [
         "aardvark",
         "aplomb",
@@ -68,17 +72,17 @@ pub async fn ore_order_text_desc(client: &tokio_postgres::Client) {
         "zephyr",
     ];
 
-    let insert_sql = "INSERT INTO encrypted (id, encrypted_text) VALUES ($1, $2)";
+    let insert_sql = format!("INSERT INTO {table} (id, encrypted_text) VALUES ($1, $2)");
 
     for idx in interleaved_indices(values.len()) {
         client
-            .query(insert_sql, &[&random_id(), &values[idx]])
+            .query(&insert_sql, &[&random_id(), &values[idx]])
             .await
             .unwrap();
     }
 
-    let sql = "SELECT encrypted_text FROM encrypted ORDER BY encrypted_text DESC";
-    let rows = client.query(sql, &[]).await.unwrap();
+    let sql = format!("SELECT encrypted_text FROM {table} ORDER BY encrypted_text DESC");
+    let rows = client.query(&sql, &[]).await.unwrap();
 
     let actual = rows.iter().map(|row| row.get(0)).collect::<Vec<String>>();
     let expected: Vec<String> = values.iter().rev().map(|s| s.to_string()).collect();
@@ -87,27 +91,32 @@ pub async fn ore_order_text_desc(client: &tokio_postgres::Client) {
 }
 
 /// NULLs sort last in ASC by default.
-pub async fn ore_order_nulls_last_by_default(client: &tokio_postgres::Client) {
+pub async fn ore_order_nulls_last_by_default(client: &tokio_postgres::Client, table: &str) {
     let s_one = "a";
     let s_two = "b";
 
     client
-        .query("INSERT INTO encrypted (id) values ($1)", &[&random_id()])
+        .query(
+            &format!("INSERT INTO {table} (id) values ($1)"),
+            &[&random_id()],
+        )
         .await
         .unwrap();
 
-    let sql = "
-        INSERT INTO encrypted (id, encrypted_text)
+    let sql = format!(
+        "
+        INSERT INTO {table} (id, encrypted_text)
         VALUES ($1, $2), ($3, $4)
-    ";
+    "
+    );
 
     client
-        .query(sql, &[&random_id(), &s_one, &random_id(), &s_two])
+        .query(&sql, &[&random_id(), &s_one, &random_id(), &s_two])
         .await
         .unwrap();
 
-    let sql = "SELECT encrypted_text FROM encrypted ORDER BY encrypted_text";
-    let rows = client.query(sql, &[]).await.unwrap();
+    let sql = format!("SELECT encrypted_text FROM {table} ORDER BY encrypted_text");
+    let rows = client.query(&sql, &[]).await.unwrap();
 
     let actual = rows
         .iter()
@@ -119,27 +128,34 @@ pub async fn ore_order_nulls_last_by_default(client: &tokio_postgres::Client) {
 }
 
 /// NULLS FIRST clause.
-pub async fn ore_order_nulls_first(client: &tokio_postgres::Client) {
+pub async fn ore_order_nulls_first(client: &tokio_postgres::Client, table: &str) {
     let s_one = "a";
     let s_two = "b";
 
-    let sql = "
-        INSERT INTO encrypted (id, encrypted_text)
+    let sql = format!(
+        "
+        INSERT INTO {table} (id, encrypted_text)
         VALUES ($1, $2), ($3, $4)
-    ";
+    "
+    );
 
     client
-        .query(sql, &[&random_id(), &s_one, &random_id(), &s_two])
+        .query(&sql, &[&random_id(), &s_one, &random_id(), &s_two])
         .await
         .unwrap();
 
     client
-        .query("INSERT INTO encrypted (id) values ($1)", &[&random_id()])
+        .query(
+            &format!("INSERT INTO {table} (id) values ($1)"),
+            &[&random_id()],
+        )
         .await
         .unwrap();
 
-    let sql = "SELECT encrypted_text FROM encrypted ORDER BY encrypted_text NULLS FIRST";
-    let rows = client.query(sql, &[]).await.unwrap();
+    let sql = format!(
+        "SELECT encrypted_text FROM {table} ORDER BY encrypted_text NULLS FIRST"
+    );
+    let rows = client.query(&sql, &[]).await.unwrap();
 
     let actual = rows
         .iter()
@@ -150,20 +166,22 @@ pub async fn ore_order_nulls_first(client: &tokio_postgres::Client) {
     assert_eq!(actual, expected);
 }
 
-/// Fully qualified column name: `encrypted.encrypted_text`.
-pub async fn ore_order_qualified_column(client: &tokio_postgres::Client) {
+/// Fully qualified column name: `<table>.encrypted_text`.
+pub async fn ore_order_qualified_column(client: &tokio_postgres::Client, table: &str) {
     let s_one = "a";
     let s_two = "b";
     let s_three = "c";
 
-    let sql = "
-        INSERT INTO encrypted (id, encrypted_text)
+    let sql = format!(
+        "
+        INSERT INTO {table} (id, encrypted_text)
         VALUES ($1, $2), ($3, $4), ($5, $6)
-    ";
+    "
+    );
 
     client
         .query(
-            sql,
+            &sql,
             &[
                 &random_id(),
                 &s_two,
@@ -176,8 +194,8 @@ pub async fn ore_order_qualified_column(client: &tokio_postgres::Client) {
         .await
         .unwrap();
 
-    let sql = "SELECT encrypted_text FROM encrypted ORDER BY encrypted.encrypted_text";
-    let rows = client.query(sql, &[]).await.unwrap();
+    let sql = format!("SELECT encrypted_text FROM {table} ORDER BY {table}.encrypted_text");
+    let rows = client.query(&sql, &[]).await.unwrap();
 
     let actual = rows.iter().map(|row| row.get(0)).collect::<Vec<String>>();
     let expected = vec![s_one, s_two, s_three];
@@ -186,19 +204,21 @@ pub async fn ore_order_qualified_column(client: &tokio_postgres::Client) {
 }
 
 /// Table alias: `e.encrypted_text`.
-pub async fn ore_order_qualified_column_with_alias(client: &tokio_postgres::Client) {
+pub async fn ore_order_qualified_column_with_alias(client: &tokio_postgres::Client, table: &str) {
     let s_one = "a";
     let s_two = "b";
     let s_three = "c";
 
-    let sql = "
-        INSERT INTO encrypted (id, encrypted_text)
+    let sql = format!(
+        "
+        INSERT INTO {table} (id, encrypted_text)
         VALUES ($1, $2), ($3, $4), ($5, $6)
-    ";
+    "
+    );
 
     client
         .query(
-            sql,
+            &sql,
             &[
                 &random_id(),
                 &s_two,
@@ -211,8 +231,8 @@ pub async fn ore_order_qualified_column_with_alias(client: &tokio_postgres::Clie
         .await
         .unwrap();
 
-    let sql = "SELECT encrypted_text FROM encrypted e ORDER BY e.encrypted_text";
-    let rows = client.query(sql, &[]).await.unwrap();
+    let sql = format!("SELECT encrypted_text FROM {table} e ORDER BY e.encrypted_text");
+    let rows = client.query(&sql, &[]).await.unwrap();
 
     let actual = rows.iter().map(|row| row.get(0)).collect::<Vec<String>>();
     let expected = vec![s_one, s_two, s_three];
@@ -221,7 +241,10 @@ pub async fn ore_order_qualified_column_with_alias(client: &tokio_postgres::Clie
 }
 
 /// ORDER BY column not in SELECT projection.
-pub async fn ore_order_no_eql_column_in_select_projection(client: &tokio_postgres::Client) {
+pub async fn ore_order_no_eql_column_in_select_projection(
+    client: &tokio_postgres::Client,
+    table: &str,
+) {
     let id_one = random_id();
     let s_one = "a";
     let id_two = random_id();
@@ -229,21 +252,23 @@ pub async fn ore_order_no_eql_column_in_select_projection(client: &tokio_postgre
     let id_three = random_id();
     let s_three = "c";
 
-    let sql = "
-        INSERT INTO encrypted (id, encrypted_text)
+    let sql = format!(
+        "
+        INSERT INTO {table} (id, encrypted_text)
         VALUES ($1, $2), ($3, $4), ($5, $6)
-    ";
+    "
+    );
 
     client
         .query(
-            sql,
+            &sql,
             &[&id_two, &s_two, &id_one, &s_one, &id_three, &s_three],
         )
         .await
         .unwrap();
 
-    let sql = "SELECT id FROM encrypted ORDER BY encrypted_text";
-    let rows = client.query(sql, &[]).await.unwrap();
+    let sql = format!("SELECT id FROM {table} ORDER BY encrypted_text");
+    let rows = client.query(&sql, &[]).await.unwrap();
 
     let actual = rows.iter().map(|row| row.get(0)).collect::<Vec<i64>>();
     let expected = vec![id_one, id_two, id_three];
@@ -252,19 +277,21 @@ pub async fn ore_order_no_eql_column_in_select_projection(client: &tokio_postgre
 }
 
 /// Plaintext column ordering (sanity check).
-pub async fn ore_order_plaintext_column(client: &tokio_postgres::Client) {
+pub async fn ore_order_plaintext_column(client: &tokio_postgres::Client, table: &str) {
     let s_one = "a";
     let s_two = "b";
     let s_three = "c";
 
-    let sql = "
-        INSERT INTO encrypted (id, plaintext)
+    let sql = format!(
+        "
+        INSERT INTO {table} (id, plaintext)
         VALUES ($1, $2), ($3, $4), ($5, $6)
-    ";
+    "
+    );
 
     client
         .query(
-            sql,
+            &sql,
             &[
                 &random_id(),
                 &s_two,
@@ -277,8 +304,8 @@ pub async fn ore_order_plaintext_column(client: &tokio_postgres::Client) {
         .await
         .unwrap();
 
-    let sql = "SELECT plaintext FROM encrypted ORDER BY plaintext";
-    let rows = client.query(sql, &[]).await.unwrap();
+    let sql = format!("SELECT plaintext FROM {table} ORDER BY plaintext");
+    let rows = client.query(&sql, &[]).await.unwrap();
 
     let actual = rows.iter().map(|row| row.get(0)).collect::<Vec<String>>();
     let expected = vec![s_one, s_two, s_three];
@@ -287,7 +314,7 @@ pub async fn ore_order_plaintext_column(client: &tokio_postgres::Client) {
 }
 
 /// Mixed plaintext + encrypted column ordering.
-pub async fn ore_order_plaintext_and_eql_columns(client: &tokio_postgres::Client) {
+pub async fn ore_order_plaintext_and_eql_columns(client: &tokio_postgres::Client, table: &str) {
     let s_plaintext_one = "a";
     let s_plaintext_two = "a";
     let s_plaintext_three = "b";
@@ -296,14 +323,16 @@ pub async fn ore_order_plaintext_and_eql_columns(client: &tokio_postgres::Client
     let s_encrypted_two = "b";
     let s_encrypted_three = "c";
 
-    let sql = "
-        INSERT INTO encrypted (id, plaintext, encrypted_text)
+    let sql = format!(
+        "
+        INSERT INTO {table} (id, plaintext, encrypted_text)
         VALUES ($1, $2, $3), ($4, $5, $6), ($7, $8, $9)
-    ";
+    "
+    );
 
     client
         .query(
-            sql,
+            &sql,
             &[
                 &random_id(),
                 &s_plaintext_two,
@@ -319,8 +348,10 @@ pub async fn ore_order_plaintext_and_eql_columns(client: &tokio_postgres::Client
         .await
         .unwrap();
 
-    let sql = "SELECT plaintext, encrypted_text FROM encrypted ORDER BY plaintext, encrypted_text";
-    let rows = client.query(sql, &[]).await.unwrap();
+    let sql = format!(
+        "SELECT plaintext, encrypted_text FROM {table} ORDER BY plaintext, encrypted_text"
+    );
+    let rows = client.query(&sql, &[]).await.unwrap();
 
     let actual = rows
         .iter()
@@ -337,9 +368,9 @@ pub async fn ore_order_plaintext_and_eql_columns(client: &tokio_postgres::Client
 }
 
 /// Simple query protocol ordering.
-pub async fn ore_order_simple_protocol(client: &tokio_postgres::Client) {
+pub async fn ore_order_simple_protocol(client: &tokio_postgres::Client, table: &str) {
     let sql = format!(
-        "INSERT INTO encrypted (id, encrypted_text) VALUES ({}, 'y'), ({}, 'x'), ({}, 'z')",
+        "INSERT INTO {table} (id, encrypted_text) VALUES ({}, 'y'), ({}, 'x'), ({}, 'z')",
         random_id(),
         random_id(),
         random_id()
@@ -347,8 +378,8 @@ pub async fn ore_order_simple_protocol(client: &tokio_postgres::Client) {
 
     client.simple_query(&sql).await.unwrap();
 
-    let sql = "SELECT encrypted_text FROM encrypted ORDER BY encrypted_text";
-    let rows = client.simple_query(sql).await.unwrap();
+    let sql = format!("SELECT encrypted_text FROM {table} ORDER BY encrypted_text");
+    let rows = client.simple_query(&sql).await.unwrap();
 
     let actual = rows
         .iter()
@@ -373,13 +404,14 @@ pub async fn ore_order_simple_protocol(client: &tokio_postgres::Client) {
 /// via ORDER BY in the given direction.
 pub async fn ore_order_generic<T>(
     client: &tokio_postgres::Client,
+    table: &str,
     col_name: &str,
     values: Vec<T>,
     direction: SortDirection,
 ) where
     for<'a> T: Clone + PartialEq + ToSql + Sync + FromSql<'a> + PartialOrd + Debug,
 {
-    let insert_sql = format!("INSERT INTO encrypted (id, {col_name}) VALUES ($1, $2)");
+    let insert_sql = format!("INSERT INTO {table} (id, {col_name}) VALUES ($1, $2)");
 
     for idx in interleaved_indices(values.len()) {
         client
@@ -389,7 +421,7 @@ pub async fn ore_order_generic<T>(
     }
 
     let dir = direction.as_sql();
-    let select_sql = format!("SELECT {col_name} FROM encrypted ORDER BY {col_name} {dir}");
+    let select_sql = format!("SELECT {col_name} FROM {table} ORDER BY {col_name} {dir}");
     let rows = client.query(&select_sql, &[]).await.unwrap();
 
     let actual: Vec<T> = rows.iter().map(|row| row.get(0)).collect();
