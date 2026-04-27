@@ -77,8 +77,8 @@ fn column_type_to_postgres_type(
         (ColumnType::Int, _) => postgres_types::Type::INT4,
         (ColumnType::SmallInt, _) => postgres_types::Type::INT2,
         (ColumnType::Timestamp, _) => postgres_types::Type::TIMESTAMPTZ,
-        (ColumnType::Utf8Str, _) => postgres_types::Type::TEXT,
-        (ColumnType::JsonB, EqlTermVariant::JsonAccessor) => postgres_types::Type::TEXT,
-        (ColumnType::JsonB, _) => postgres_types::Type::JSONB,
+        (ColumnType::Text, _) => postgres_types::Type::TEXT,
+        (ColumnType::Json, EqlTermVariant::JsonAccessor) => postgres_types::Type::TEXT,
+        (ColumnType::Json, _) => postgres_types::Type::JSONB,
     }
 }

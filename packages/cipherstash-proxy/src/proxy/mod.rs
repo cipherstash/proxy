@@ -63,7 +63,8 @@ impl Proxy {
 
         let encrypt_config_manager = EncryptConfigManager::init(&config.database).await?;
 
-        let schema_manager = SchemaManager::init(&config.database).await?;
+        let schema_manager =
+            SchemaManager::init(&config.database, encrypt_config_manager.clone()).await?;
 
         let eql_version = Proxy::eql_version(&config).await?;
 
@@ -114,8 +115,11 @@ impl Proxy {
                 debug!(msg = "ReloadCommand received", ?command);
                 match command {
                     ReloadCommand::DatabaseSchema(responder) => {
-                        schema_manager.reload().await;
+                        // Reload encrypt config first so the schema reload
+                        // sees the latest per-column index configuration when
+                        // deriving EqlTraits.
                         encrypt_config_manager.reload().await;
+                        schema_manager.reload().await;
                         let _ = responder.send(());
                     }
                     ReloadCommand::EncryptSchema(responder) => {

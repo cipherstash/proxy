@@ -43,8 +43,11 @@ debug = true
 
 [workspace.dependencies]
 sqltk = { version = "0.10.0" }
-cipherstash-client = { version = "0.34.0-alpha.4" }
-cts-common = { version = "0.34.0-alpha.4" }
+# TODO: revert to crates.io once the cipherstash-suite version with `IndexType::Ope`
+# is published. See https://github.com/cipherstash/cipherstash-suite for the
+# OPE-enabled change.
+cipherstash-client = { path = "../cipherstash-suite/packages/cipherstash-client" }
+cts-common = { path = "../cipherstash-suite/packages/cts-common" }
 
 thiserror = "2.0.9"
 tokio = { version = "1.44.2", features = ["full"] }
