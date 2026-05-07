@@ -34,7 +34,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b169f7a6d4742236a0a00c541b845991d0ac43e546831af1249753ab4c3aa3a0"
 dependencies = [
  "cfg-if",
- "cipher 0.4.4",
+ "cipher",
  "cpufeatures 0.2.17",
  "zeroize",
 ]
@@ -47,7 +47,7 @@ checksum = "ae0784134ba9375416d469ec31e7c5f9fa94405049cf08c5ce5b4698be673e0d"
 dependencies = [
  "aead",
  "aes",
- "cipher 0.4.4",
+ "cipher",
  "ctr",
  "polyval",
  "subtle",
@@ -546,19 +546,9 @@ dependencies = [
 
 [[package]]
 name = "block-modes"
-version = "0.8.1"
+version = "0.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2cb03d1bed155d89dce0f845b7899b18a9a163e148fd004e1c28421a783e2d8e"
-dependencies = [
- "block-padding",
- "cipher 0.3.0",
-]
-
-[[package]]
-name = "block-padding"
-version = "0.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8d696c370c750c948ada61c69a0ee2cbbb9c50b1019ddb86d9317157a99c2cae"
+checksum = "9e2211b0817f061502a8dd9f11a37e879e79763e3c698d2418cf824d8cb2f21e"
 
 [[package]]
 name = "borsh"
@@ -743,15 +733,6 @@ dependencies = [
 
 [[package]]
 name = "cipher"
-version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7ee52072ec15386f770805afd189a01c8841be8696bed250fa2f13c4c0d6dfb7"
-dependencies = [
- "generic-array",
-]
-
-[[package]]
-name = "cipher"
 version = "0.4.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "773f3b9af64447d2ce9850330c473515014aa235e6a783b02db81ff39e4a3dad"
@@ -762,9 +743,9 @@ dependencies = [
 
 [[package]]
 name = "cipherstash-client"
-version = "0.34.1-alpha.3"
+version = "0.34.1-alpha.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5ed912188c76e36b5e2fc569a9850712e416df2630837e2ca36c32cd48f5488f"
+checksum = "9f3d67cc26d8422509d2c20644576124e7344a4bf14ded06c7affa8dc18aabca"
 dependencies = [
  "aes-gcm-siv",
  "anyhow",
@@ -776,7 +757,7 @@ dependencies = [
  "blake3",
  "cfg-if",
  "chrono",
- "cipherstash-config 0.34.1-alpha.3",
+ "cipherstash-config",
  "cipherstash-core",
  "cllw-ore",
  "cts-common",
@@ -791,10 +772,11 @@ dependencies = [
  "miette",
  "opaque-debug",
  "open 3.2.0",
+ "orderable-bytes",
  "ore-rs",
  "percent-encoding",
- "rand 0.8.5",
- "recipher 0.2.1",
+ "rand 0.8.6",
+ "recipher 0.2.2",
  "reqwest",
  "reqwest-middleware",
  "reqwest-retry",
@@ -826,20 +808,9 @@ dependencies = [
 
 [[package]]
 name = "cipherstash-config"
-version = "0.2.6"
+version = "0.34.1-alpha.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "355b4213fd4076fd70b0cdd23e3b91b8825fdb7b7550b28abefac0c15a22c3e2"
-dependencies = [
- "bitflags",
- "serde",
- "thiserror 1.0.69",
-]
-
-[[package]]
-name = "cipherstash-config"
-version = "0.34.1-alpha.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f6ffe865456a86868f2f544991e3f24986e1eac330e20879a2c132f27d8befdf"
+checksum = "283fa04db19f9bf2cb2f09e8c1505a15560310bc50fdc066734072c616aa8ca9"
 dependencies = [
  "bitflags",
  "serde",
@@ -849,14 +820,14 @@ dependencies = [
 
 [[package]]
 name = "cipherstash-core"
-version = "0.34.1-alpha.3"
+version = "0.34.1-alpha.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b696354ee0947f14d2c88ec70300896411d291a3f32015938ccf20bf34f724b3"
+checksum = "b5bb7181053c3fc35569e0800fa7510c85ee2bffee21abbd2a7aeb498f5f0972"
 dependencies = [
  "hmac",
  "lazy_static",
  "num-bigint",
- "rand 0.8.5",
+ "rand 0.8.6",
  "regex",
  "sha2",
  "thiserror 1.0.69",
@@ -874,7 +845,7 @@ dependencies = [
  "bytes",
  "chrono",
  "cipherstash-client",
- "cipherstash-config 0.34.1-alpha.3",
+ "cipherstash-config",
  "clap",
  "config",
  "cts-common",
@@ -921,7 +892,7 @@ dependencies = [
  "bytes",
  "chrono",
  "cipherstash-client",
- "cipherstash-config 0.2.6",
+ "cipherstash-config",
  "cipherstash-proxy",
  "fake 4.2.0",
  "hex",
@@ -983,13 +954,16 @@ checksum = "f46ad14479a25103f283c0f10005961cf086d8dc42205bb44c46ac563475dca6"
 
 [[package]]
 name = "cllw-ore"
-version = "0.4.0"
+version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c676b8e0a3130e6f8b4398d9aa5b287c3ce7074ac89f1ccf1570ebeb22281629"
+checksum = "5d007a5be83ae12adbd17543f9631d64090d761c029d2f8f7eb8f8ddb2a87caf"
 dependencies = [
  "blake3",
+ "chrono",
  "hex",
+ "orderable-bytes",
  "postgres-types",
+ "rust_decimal",
  "subtle",
  "thiserror 1.0.69",
  "unicode-normalization",
@@ -1001,7 +975,7 @@ version = "0.7.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8543454e3c3f5126effff9cd44d562af4e31fb8ce1cc0d3dcd8f084515dbc1aa"
 dependencies = [
- "cipher 0.4.4",
+ "cipher",
  "dbl",
  "digest",
 ]
@@ -1189,14 +1163,14 @@ version = "0.9.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0369ee1ad671834580515889b80f2ea915f23b8be8d0daa4bbaf2ac5c7590835"
 dependencies = [
- "cipher 0.4.4",
+ "cipher",
 ]
 
 [[package]]
 name = "cts-common"
-version = "0.34.1-alpha.3"
+version = "0.34.1-alpha.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6b13e6862c6edffe9a8e9c36edb99dacf9e140f217c950f06801c570433bc038"
+checksum = "3b26644e630f2e690194c6b61f5b613b768061750f2060cf4db73ddb8058d284"
 dependencies = [
  "arrayvec",
  "axum",
@@ -1213,9 +1187,10 @@ dependencies = [
  "nom 8.0.0",
  "openssl-sys",
  "pq-sys",
- "rand 0.8.5",
+ "rand 0.8.6",
  "regex",
  "serde",
+ "serde_json",
  "thiserror 1.0.69",
  "tracing",
  "url",
@@ -1617,7 +1592,7 @@ checksum = "2d391ba4af7f1d93f01fcf7b2f29e2bc9348e109dfdbf4dcbdc51dfa38dab0b6"
 dependencies = [
  "deunicode",
  "dummy 0.8.0",
- "rand 0.8.5",
+ "rand 0.8.6",
  "uuid",
 ]
 
@@ -1629,7 +1604,7 @@ checksum = "aef603df4ba9adbca6a332db7da6f614f21eafefbaf8e087844e452fdec152d0"
 dependencies = [
  "deunicode",
  "dummy 0.9.2",
- "rand 0.8.5",
+ "rand 0.8.6",
 ]
 
 [[package]]
@@ -2641,7 +2616,7 @@ dependencies = [
  "hashbrown 0.15.2",
  "metrics",
  "quanta",
- "rand 0.8.5",
+ "rand 0.8.6",
  "rand_xoshiro",
  "sketches-ddsketch",
 ]
@@ -2922,20 +2897,32 @@ dependencies = [
 ]
 
 [[package]]
-name = "ore-rs"
-version = "0.8.0"
+name = "orderable-bytes"
+version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f17ced859adc3f4a6a80568b0b33519a496b00609b0be3b94d9dff136b5f3ec8"
+checksum = "adba0469737879cabc3bdcaa6a7beb4ff7f5bb4aa5d624816c8bb9d425a7d5df"
+dependencies = [
+ "chrono",
+ "rust_decimal",
+]
+
+[[package]]
+name = "ore-rs"
+version = "0.8.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d77fb65718f1aba7bb7f568db90a2b17a48871d83cd9d1101d19fce449dd8dea"
 dependencies = [
  "aes",
  "block-modes",
  "byteorder",
+ "chrono",
  "hex",
- "hex-literal",
  "lazy_static",
  "num",
- "rand 0.8.5",
+ "orderable-bytes",
+ "rand 0.8.6",
  "rand_chacha 0.3.1",
+ "rust_decimal",
  "subtle-ng",
  "thiserror 1.0.69",
  "zeroize",
@@ -3030,7 +3017,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3c80231409c20246a13fddb31776fb942c38553c51e871f8cbd687a4cfb5843d"
 dependencies = [
  "phf_shared",
- "rand 0.8.5",
+ "rand 0.8.6",
 ]
 
 [[package]]
@@ -3380,9 +3367,9 @@ checksum = "dc33ff2d4973d518d823d61aa239014831e521c75da58e3df4840d3f47749d09"
 
 [[package]]
 name = "rand"
-version = "0.8.5"
+version = "0.8.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "34af8d1a0e25924bc5b7c43c079c942339d8f0a8b57c39049bef581b46327404"
+checksum = "5ca0ecfa931c29007047d1bc58e623ab12e5590e8c7cc53200d5202b69266d8a"
 dependencies = [
  "libc",
  "rand_chacha 0.3.1",
@@ -3493,7 +3480,7 @@ dependencies = [
  "hex",
  "hex-literal",
  "opaque-debug",
- "rand 0.8.5",
+ "rand 0.8.6",
  "rand_chacha 0.3.1",
  "serde",
  "serde_cbor",
@@ -3504,9 +3491,9 @@ dependencies = [
 
 [[package]]
 name = "recipher"
-version = "0.2.1"
+version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "142637705fc952f975681a62dc0772aab3afec9e68955c5539f02cdb711c09aa"
+checksum = "2b3561e1082283a4c064635b7886aa4d24db57a43ac31c55930c10797ab5cdeb"
 dependencies = [
  "aes",
  "async-trait",
@@ -3514,7 +3501,7 @@ dependencies = [
  "hex",
  "hex-literal",
  "opaque-debug",
- "rand 0.8.5",
+ "rand 0.8.6",
  "rand_chacha 0.3.1",
  "serde",
  "serde_cbor",
@@ -3799,7 +3786,7 @@ dependencies = [
  "bytes",
  "num-traits",
  "postgres-types",
- "rand 0.8.5",
+ "rand 0.8.6",
  "rkyv",
  "serde",
  "serde_json",
@@ -4352,9 +4339,9 @@ checksum = "a8f112729512f8e442d81f95a8a7ddf2b7c6b8a1a6f509a95864142b30cab2d3"
 
 [[package]]
 name = "stack-auth"
-version = "0.34.1-alpha.3"
+version = "0.34.1-alpha.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "000f8c46c6e86f119af7fc38c61cd84b8f3b26f29086690a7112b164867c578d"
+checksum = "072e420b2bb179e7627f2e9e5ee4080d1f939c6710ecf91524d52fc87e40cbd0"
 dependencies = [
  "aquamarine",
  "cts-common",
@@ -4378,9 +4365,9 @@ dependencies = [
 
 [[package]]
 name = "stack-profile"
-version = "0.34.1-alpha.3"
+version = "0.34.1-alpha.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d84b6c5cb4759f2d6894c6ce4f3a76acbb4ab8ea592970733730ca76cea9f161"
+checksum = "1dd61bc4129d2258ec1ba89d742558308560fc0f585f9c24d478685def8efd14"
 dependencies = [
  "dirs",
  "gethostname",
@@ -6290,17 +6277,17 @@ dependencies = [
 
 [[package]]
 name = "zerokms-protocol"
-version = "0.12.8"
+version = "0.12.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7ca10678317fddf3aaead818e0226009925795f75050730413384154db98f98d"
+checksum = "0a2f045e2ee975a3d448419245c4621ea8844d2a004c63a96277181dc7cf8483"
 dependencies = [
  "base64",
- "cipherstash-config 0.34.1-alpha.3",
+ "cipherstash-config",
  "const-hex",
  "cts-common",
  "fake 2.10.0",
  "opaque-debug",
- "rand 0.8.5",
+ "rand 0.8.6",
  "serde",
  "static_assertions",
  "thiserror 1.0.69",
