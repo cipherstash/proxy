@@ -16,7 +16,7 @@ pub fn to_sql(plaintext: &Plaintext, format_code: &FormatCode) -> Result<Option<
 
 fn text_to_sql(plaintext: &Plaintext) -> Result<BytesMut, Error> {
     let s = match &plaintext {
-        Plaintext::Utf8Str(Some(x)) => x.to_string(),
+        Plaintext::Text(Some(x)) => x.to_string(),
         Plaintext::Int(Some(x)) => x.to_string(),
         Plaintext::BigInt(Some(x)) => x.to_string(),
         Plaintext::BigUInt(Some(x)) => x.to_string(),
@@ -26,7 +26,7 @@ fn text_to_sql(plaintext: &Plaintext) -> Result<BytesMut, Error> {
         Plaintext::NaiveDate(Some(x)) => x.to_string(),
         Plaintext::SmallInt(Some(x)) => x.to_string(),
         Plaintext::Timestamp(Some(x)) => x.to_string(),
-        Plaintext::JsonB(Some(x)) => x.to_string(),
+        Plaintext::Json(Some(x)) => x.to_string(),
         _ => "".to_string(),
     };
 
@@ -44,8 +44,8 @@ fn binary_to_sql(plaintext: &Plaintext) -> Result<BytesMut, Error> {
         Plaintext::NaiveDate(x) => x.to_sql_checked(&Type::DATE, &mut bytes),
         Plaintext::SmallInt(x) => x.to_sql_checked(&Type::INT2, &mut bytes),
         Plaintext::Timestamp(x) => x.to_sql_checked(&Type::TIMESTAMPTZ, &mut bytes),
-        Plaintext::Utf8Str(x) => x.to_sql_checked(&Type::TEXT, &mut bytes),
-        Plaintext::JsonB(x) => x.to_sql_checked(&Type::JSONB, &mut bytes),
+        Plaintext::Text(x) => x.to_sql_checked(&Type::TEXT, &mut bytes),
+        Plaintext::Json(x) => x.to_sql_checked(&Type::JSONB, &mut bytes),
         Plaintext::Decimal(x) => x.to_sql_checked(&Type::NUMERIC, &mut bytes),
         // TODO: Implement these
         Plaintext::BigUInt(_x) => unimplemented!(),

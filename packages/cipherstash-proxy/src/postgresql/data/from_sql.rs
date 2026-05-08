@@ -115,7 +115,7 @@ pub fn literal_from_sql(
 ///
 /// | Input Type | Target Column Type | Result |
 /// |------------|--------------------|--------|
-/// | `Type::INT4` | `ColumnType::Utf8Str` | `Plaintext::Utf8Str` |
+/// | `Type::INT4` | `ColumnType::Text` | `Plaintext::Text` |
 /// | `Type::INT2` | `ColumnType::Int` | `Plaintext::Int` |
 /// | `Type::INT8` | `ColumnType::Int` | `Error`` |
 fn text_from_sql(
@@ -126,7 +126,7 @@ fn text_from_sql(
     debug!(target: ENCODING, ?val, ?eql_term, ?col_type);
 
     match (eql_term, col_type) {
-        (EqlTermVariant::Full | EqlTermVariant::Partial, ColumnType::Utf8Str) => {
+        (EqlTermVariant::Full | EqlTermVariant::Partial, ColumnType::Text) => {
             Ok(Plaintext::new(val))
         }
         (EqlTermVariant::Full | EqlTermVariant::Partial, ColumnType::Float) => {
@@ -168,7 +168,7 @@ fn text_from_sql(
         }
 
         // If JSONB, JSONPATH values are treated as strings
-        (EqlTermVariant::JsonPath | EqlTermVariant::JsonAccessor, ColumnType::JsonB) => {
+        (EqlTermVariant::JsonPath | EqlTermVariant::JsonAccessor, ColumnType::Json) => {
             let val = if val.starts_with("$.") {
                 val.to_string()
             } else {
@@ -176,12 +176,12 @@ fn text_from_sql(
             };
             Ok(Plaintext::new(val))
         }
-        (EqlTermVariant::Full | EqlTermVariant::Partial, ColumnType::JsonB) => {
+        (EqlTermVariant::Full | EqlTermVariant::Partial, ColumnType::Json) => {
             serde_json::from_str::<serde_json::Value>(val)
                 .map_err(|_| MappingError::CouldNotParseParameter)
                 .map(Plaintext::new)
         }
-        (EqlTermVariant::Tokenized, ColumnType::Utf8Str) => Ok(Plaintext::new(val)),
+        (EqlTermVariant::Tokenized, ColumnType::Text) => Ok(Plaintext::new(val)),
 
         (eql_term, col_type) => Err(MappingError::UnsupportedParameterType {
             eql_term,
@@ -202,7 +202,7 @@ fn binary_from_sql(
     debug!(target: ENCODING, ?pg_type, ?eql_term, ?col_type);
 
     match (eql_term, col_type, pg_type) {
-        (EqlTermVariant::Full | EqlTermVariant::Partial, ColumnType::Utf8Str, _) => {
+        (EqlTermVariant::Full | EqlTermVariant::Partial, ColumnType::Text, _) => {
             parse_bytes_from_sql::<String>(bytes, pg_type).map(Plaintext::new)
         }
         (EqlTermVariant::Full | EqlTermVariant::Partial, ColumnType::Boolean, _) => {
@@ -253,7 +253,7 @@ fn binary_from_sql(
         }
 
         // If JSONB, JSONPATH values are treated as strings
-        (EqlTermVariant::JsonPath, ColumnType::JsonB, &Type::JSONPATH) => {
+        (EqlTermVariant::JsonPath, ColumnType::Json, &Type::JSONPATH) => {
             parse_bytes_from_sql::<String>(bytes, pg_type).map(|val| {
                 let val = if val.starts_with("$.") {
                     val
@@ -263,7 +263,7 @@ fn binary_from_sql(
                 Plaintext::new(val)
             })
         }
-        (EqlTermVariant::JsonAccessor, ColumnType::JsonB, &Type::TEXT | &Type::VARCHAR) => {
+        (EqlTermVariant::JsonAccessor, ColumnType::Json, &Type::TEXT | &Type::VARCHAR) => {
             parse_bytes_from_sql::<String>(bytes, pg_type).map(|val| {
                 let val = if val.starts_with("$.") {
                     val
@@ -276,7 +276,7 @@ fn binary_from_sql(
         // Python psycopg sends JSON/B as BYTEA
         (
             EqlTermVariant::Full | EqlTermVariant::Partial,
-            ColumnType::JsonB,
+            ColumnType::Json,
             &Type::JSON | &Type::JSONB | &Type::BYTEA,
         ) => parse_bytes_from_sql::<serde_json::Value>(bytes, pg_type).map(Plaintext::new),
 
@@ -356,9 +356,9 @@ fn decimal_from_sql(
             .ok_or(MappingError::CouldNotParseParameter)
             .map(Plaintext::new),
 
-        ColumnType::Utf8Str => Ok(Plaintext::new(decimal.to_string())),
+        ColumnType::Text => Ok(Plaintext::new(decimal.to_string())),
 
-        ColumnType::JsonB => {
+        ColumnType::Json => {
             let val: serde_json::Value = serde_json::from_str(&decimal.to_string())
                 .map_err(|_| MappingError::CouldNotParseParameter)?;
             Ok(Plaintext::new(val))
@@ -408,7 +408,7 @@ mod tests {
             config: ColumnConfig {
                 name: "column".to_owned(),
                 in_place: false,
-                cast_type: ColumnType::Utf8Str,
+                cast_type: ColumnType::Text,
                 indexes: vec![],
                 mode: ColumnMode::PlaintextDuplicate,
             },

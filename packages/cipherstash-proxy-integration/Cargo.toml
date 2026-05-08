@@ -6,7 +6,7 @@ edition = "2021"
 [dependencies]
 bytes = "1.10.1"
 cipherstash-client = { workspace = true, features = ["tokio"] }
-cipherstash-config = "0.2.3"
+cipherstash-config = { workspace = true }
 cipherstash-proxy = { path = "../cipherstash-proxy/" }
 chrono = { version = "0.4.39", features = ["clock"] }
 fake = { version = "4", features = ["chrono", "derive"] }

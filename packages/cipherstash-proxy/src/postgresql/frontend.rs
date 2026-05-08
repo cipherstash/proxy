@@ -660,7 +660,7 @@ where
         let encrypted_nodes = typed_statement
             .literals
             .iter()
-            .zip(encrypted_expressions.into_iter())
+            .zip(encrypted_expressions)
             .filter_map(|((_, original_node), en)| en.map(|en| (NodeKey::new(*original_node), en)))
             .collect::<HashMap<_, _>>();
 
