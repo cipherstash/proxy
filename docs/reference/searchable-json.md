@@ -127,7 +127,7 @@ Encrypted literals cannot be passed as arguments to SQL functions. Encrypted col
 
 Examples:
 - `AVG()` cannot be used on encrypted numeric values ❌
-- `MIN()` and `MAX()` can be used on encrypted values with ORE index ✅
+- `MIN()` and `MAX()` can be used on encrypted values with an `ore` or `ope` index ✅
 - `LOWER()` cannot be used on encrypted text (operates only on plaintext) ❌
 
 ⚠️ **CAST Operations**: CAST operations cannot work on encrypted data because casting would require decryption within the database, which is impossible. EQL's `ste_vec` configuration enables direct comparison and ordering operations on encrypted values without requiring CAST.
