@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1778161549470,
+  "lastUpdate": 1778215188250,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -20898,6 +20898,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 36.263674,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "james@cipherstash.com",
+            "name": "James Sadler",
+            "username": "freshtonic"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "8c7cac065951fb75959974d2f476f1c8a75628a2",
+          "message": "Merge pull request #386 from cipherstash/refactor/canonical-config\n\nCanonical shared encryption config",
+          "timestamp": "2026-05-08T14:36:12+10:00",
+          "tree_id": "b2f967c63f4a3ef6879674eb3334293e2556f2eb",
+          "url": "https://github.com/cipherstash/proxy/commit/8c7cac065951fb75959974d2f476f1c8a75628a2"
+        },
+        "date": 1778215186950,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 36.376268,
             "unit": "Number"
           }
         ]
