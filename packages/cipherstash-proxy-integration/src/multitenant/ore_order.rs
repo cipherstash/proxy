@@ -92,8 +92,7 @@ mod tests {
                     trace();
                     clear().await;
                     let client = connect_as_tenant(&keyset_id($env_var)).await;
-                    ore_order_helpers::ore_order_qualified_column_with_alias(&client, TABLE)
-                        .await;
+                    ore_order_helpers::ore_order_qualified_column_with_alias(&client, TABLE).await;
                 }
 
                 #[tokio::test]
@@ -102,10 +101,8 @@ mod tests {
                     trace();
                     clear().await;
                     let client = connect_as_tenant(&keyset_id($env_var)).await;
-                    ore_order_helpers::ore_order_no_eql_column_in_select_projection(
-                        &client, TABLE,
-                    )
-                    .await;
+                    ore_order_helpers::ore_order_no_eql_column_in_select_projection(&client, TABLE)
+                        .await;
                 }
 
                 #[tokio::test]

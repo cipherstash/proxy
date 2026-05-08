@@ -152,9 +152,7 @@ pub async fn ore_order_nulls_first(client: &tokio_postgres::Client, table: &str)
         .await
         .unwrap();
 
-    let sql = format!(
-        "SELECT encrypted_text FROM {table} ORDER BY encrypted_text NULLS FIRST"
-    );
+    let sql = format!("SELECT encrypted_text FROM {table} ORDER BY encrypted_text NULLS FIRST");
     let rows = client.query(&sql, &[]).await.unwrap();
 
     let actual = rows
@@ -348,9 +346,8 @@ pub async fn ore_order_plaintext_and_eql_columns(client: &tokio_postgres::Client
         .await
         .unwrap();
 
-    let sql = format!(
-        "SELECT plaintext, encrypted_text FROM {table} ORDER BY plaintext, encrypted_text"
-    );
+    let sql =
+        format!("SELECT plaintext, encrypted_text FROM {table} ORDER BY plaintext, encrypted_text");
     let rows = client.query(&sql, &[]).await.unwrap();
 
     let actual = rows

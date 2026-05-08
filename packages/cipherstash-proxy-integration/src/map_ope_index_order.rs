@@ -115,8 +115,7 @@ mod tests {
         let null_insert = format!("INSERT INTO {table} (id) VALUES ($1)");
         client.query(&null_insert, &[&random_id()]).await.unwrap();
 
-        let insert =
-            format!("INSERT INTO {table} (id, encrypted_text) VALUES ($1, $2), ($3, $4)");
+        let insert = format!("INSERT INTO {table} (id, encrypted_text) VALUES ($1, $2), ($3, $4)");
         client
             .query(&insert, &[&random_id(), &"a", &random_id(), &"b"])
             .await
@@ -140,8 +139,7 @@ mod tests {
         clear_table(table).await;
         let client = connect_with_tls(PROXY).await;
 
-        let insert =
-            format!("INSERT INTO {table} (id, encrypted_text) VALUES ($1, $2), ($3, $4)");
+        let insert = format!("INSERT INTO {table} (id, encrypted_text) VALUES ($1, $2), ($3, $4)");
         client
             .query(&insert, &[&random_id(), &"a", &random_id(), &"b"])
             .await
@@ -150,9 +148,8 @@ mod tests {
         let null_insert = format!("INSERT INTO {table} (id) VALUES ($1)");
         client.query(&null_insert, &[&random_id()]).await.unwrap();
 
-        let select = format!(
-            "SELECT encrypted_text FROM {table} ORDER BY encrypted_text NULLS FIRST"
-        );
+        let select =
+            format!("SELECT encrypted_text FROM {table} ORDER BY encrypted_text NULLS FIRST");
         let rows = client.query(&select, &[]).await.unwrap();
 
         let actual: Vec<Option<String>> = rows.iter().map(|r| r.get(0)).collect();

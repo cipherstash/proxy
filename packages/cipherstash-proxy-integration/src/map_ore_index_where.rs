@@ -7,35 +7,17 @@ mod tests {
 
     #[tokio::test]
     async fn map_ore_where_generic_int2() {
-        map_ore_where_generic(
-            "encrypted_ore_where_int2",
-            "encrypted_int2",
-            40i16,
-            99i16,
-        )
-        .await;
+        map_ore_where_generic("encrypted_ore_where_int2", "encrypted_int2", 40i16, 99i16).await;
     }
 
     #[tokio::test]
     async fn map_ore_where_generic_int4() {
-        map_ore_where_generic(
-            "encrypted_ore_where_int4",
-            "encrypted_int4",
-            40i32,
-            99i32,
-        )
-        .await;
+        map_ore_where_generic("encrypted_ore_where_int4", "encrypted_int4", 40i32, 99i32).await;
     }
 
     #[tokio::test]
     async fn map_ore_where_generic_int8() {
-        map_ore_where_generic(
-            "encrypted_ore_where_int8",
-            "encrypted_int8",
-            40i64,
-            99i64,
-        )
-        .await;
+        map_ore_where_generic("encrypted_ore_where_int8", "encrypted_int8", 40i64, 99i64).await;
     }
 
     #[tokio::test]
@@ -69,13 +51,7 @@ mod tests {
 
     #[tokio::test]
     async fn map_ore_where_generic_bool() {
-        map_ore_where_generic(
-            "encrypted_ore_where_bool",
-            "encrypted_bool",
-            false,
-            true,
-        )
-        .await;
+        map_ore_where_generic("encrypted_ore_where_bool", "encrypted_bool", false, true).await;
     }
 
     /// Tests ORE operations with 2 values - high & low - against a per-test
