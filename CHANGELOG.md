@@ -8,7 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
-- **OPE (Order-Preserving Encryption) index**: New `ope` index type alongside the existing `ore` for range and ordering queries. OPE ciphertexts compare under standard lexicographic byte ordering, so they're a drop-in alternative to ORE for range and `ORDER BY`. Configure with `SELECT eql_v2.add_search_config('table', 'column', 'ope', 'int')` (any cast type that `ore` supports). Requires EQL with OPE support and a CipherStash client/config build that includes `IndexType::Ope`.
+- **OPE (Order-Preserving Encryption) index**: New `ope` index type alongside the existing `ore` for range and `ORDER BY` queries on encrypted columns. Drop-in alternative to `ore` — pick one per column. See the [encrypted indexes documentation](docs/how-to/index.md) for configuration.
 
 ## [2.2.0-alpha.1] - 2026-03-25
 

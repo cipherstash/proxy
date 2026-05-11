@@ -40,11 +40,13 @@ mod tests {
 
     #[tokio::test]
     async fn map_ope_where_generic_text() {
+        // Differing lengths exercise lexicographic byte ordering across short
+        // and long values (prefix-of relationship and full content difference).
         map_ope_where_generic(
             "encrypted_ope_where_text",
             "encrypted_text",
-            "ABC".to_string(),
-            "BCD".to_string(),
+            "AB".to_string(),
+            "ABCDEFGH".to_string(),
         )
         .await;
     }
@@ -177,8 +179,6 @@ mod tests {
             expected.len(),
             "wrong row count for {col_name} via {sql}"
         );
-        for (a, e) in actual.iter().zip(expected.iter()) {
-            assert!(a == e, "value mismatch for {col_name} via {sql}");
-        }
+        assert_eq!(actual, expected, "value mismatch for {col_name} via {sql}");
     }
 }
