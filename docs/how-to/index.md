@@ -201,7 +201,7 @@ This statement adds a `unique` index for the `email` column in the `users` table
 
 `unique` indexes are used to find records with columns with unique values, like with the `=` operator.
 
-There are two other types of encrypted indexes you can use on `text` data:
+There are other types of encrypted indexes you can use on `text` data:
 
 ```sql
 SELECT eql_v2.add_search_config(
@@ -217,10 +217,20 @@ SELECT eql_v2.add_search_config(
   'ore',
   'text'
 );
+
+SELECT eql_v2.add_search_config(
+  'users',
+  'email',
+  'ope',
+  'text'
+);
 ```
 
 The first SQL statement adds a `match` index, which is used for partial matches with `LIKE`.
-The second SQL statement adds an `ore` index, which is used for ordering with `ORDER BY`.
+The second SQL statement adds an `ore` index, which is used for ordering with `ORDER BY` and range comparisons (`<`, `<=`, `>`, `>=`).
+The third SQL statement adds an `ope` index, which supports the same range and ordering operators as `ore`.
+
+`ore` and `ope` are alternatives for range and ordering queries — add one or the other to a column, not both. `ore` is the recommended default. `ope` produces ciphertexts that sort under PostgreSQL's native byte ordering, which makes ordering and range scans cheaper, but as an order-preserving scheme it reveals more about the relative order of stored values than `ore` does. Choose based on your performance and threat-model requirements; see the [EQL `INDEX` documentation](https://github.com/cipherstash/encrypt-query-language/blob/main/docs/reference/INDEX.md) for the full tradeoffs.
 
 
 > ![IMPORTANT]

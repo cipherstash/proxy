@@ -6,24 +6,24 @@ mod tests {
     use tokio_postgres::Client;
 
     #[tokio::test]
-    async fn map_ore_where_generic_int2() {
-        map_ore_where_generic("encrypted_ore_where_int2", "encrypted_int2", 40i16, 99i16).await;
+    async fn map_ope_where_generic_int2() {
+        map_ope_where_generic("encrypted_ope_where_int2", "encrypted_int2", 40i16, 99i16).await;
     }
 
     #[tokio::test]
-    async fn map_ore_where_generic_int4() {
-        map_ore_where_generic("encrypted_ore_where_int4", "encrypted_int4", 40i32, 99i32).await;
+    async fn map_ope_where_generic_int4() {
+        map_ope_where_generic("encrypted_ope_where_int4", "encrypted_int4", 40i32, 99i32).await;
     }
 
     #[tokio::test]
-    async fn map_ore_where_generic_int8() {
-        map_ore_where_generic("encrypted_ore_where_int8", "encrypted_int8", 40i64, 99i64).await;
+    async fn map_ope_where_generic_int8() {
+        map_ope_where_generic("encrypted_ope_where_int8", "encrypted_int8", 40i64, 99i64).await;
     }
 
     #[tokio::test]
-    async fn map_ore_where_generic_float8() {
-        map_ore_where_generic(
-            "encrypted_ore_where_float8",
+    async fn map_ope_where_generic_float8() {
+        map_ope_where_generic(
+            "encrypted_ope_where_float8",
             "encrypted_float8",
             40.0f64,
             99.0f64,
@@ -32,18 +32,18 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn map_ore_where_generic_date() {
+    async fn map_ope_where_generic_date() {
         let low = NaiveDate::parse_from_str("2024-01-01", "%Y-%m-%d").unwrap();
         let high = NaiveDate::parse_from_str("2027-01-01", "%Y-%m-%d").unwrap();
-        map_ore_where_generic("encrypted_ore_where_date", "encrypted_date", low, high).await;
+        map_ope_where_generic("encrypted_ope_where_date", "encrypted_date", low, high).await;
     }
 
     #[tokio::test]
-    async fn map_ore_where_generic_text() {
+    async fn map_ope_where_generic_text() {
         // Differing lengths exercise lexicographic byte ordering across short
         // and long values (prefix-of relationship and full content difference).
-        map_ore_where_generic(
-            "encrypted_ore_where_text",
+        map_ope_where_generic(
+            "encrypted_ope_where_text",
             "encrypted_text",
             "AB".to_string(),
             "ABCDEFGH".to_string(),
@@ -52,15 +52,15 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn map_ore_where_generic_bool() {
-        map_ore_where_generic("encrypted_ore_where_bool", "encrypted_bool", false, true).await;
+    async fn map_ope_where_generic_bool() {
+        map_ope_where_generic("encrypted_ope_where_bool", "encrypted_bool", false, true).await;
     }
 
-    /// Tests ORE operations with 2 values - high & low - against a per-test
-    /// fixture table. `table` and `col_name` must match.
-    async fn map_ore_where_generic<T>(table: &str, col_name: &str, low: T, high: T)
+    /// Tests OPE operations against a per-test fixture table.
+    /// Mirrors `map_ore_where_generic` but targets the OPE-indexed mirror tables.
+    async fn map_ope_where_generic<T>(table: &str, col_name: &str, low: T, high: T)
     where
-        for<'a> T: Clone + PartialEq + ToSql + Sync + FromSql<'a> + PartialOrd,
+        for<'a> T: Clone + ToSql + PartialEq + Sync + FromSql<'a> + PartialOrd,
     {
         trace();
 
@@ -86,8 +86,7 @@ mod tests {
 
         // GT: given [1, 3], `> 1` returns [3]
         let sql = format!("SELECT {col_name} FROM {table} WHERE {col_name} > $1");
-
-        test_ore_op(
+        test_ope_op(
             &client,
             col_name,
             &sql,
@@ -98,11 +97,11 @@ mod tests {
 
         // GT 2nd case: given [1, 3], `> 3` returns []
         let sql = format!("SELECT {col_name} FROM {table} WHERE {col_name} > $1");
-        test_ore_op::<T>(&client, col_name, &sql, &[&high], &[]).await;
+        test_ope_op::<T>(&client, col_name, &sql, &[&high], &[]).await;
 
         // LT: given [1, 3], `< 3` returns [1]
         let sql = format!("SELECT {col_name} FROM {table} WHERE {col_name} < $1");
-        test_ore_op(
+        test_ope_op(
             &client,
             col_name,
             &sql,
@@ -111,18 +110,18 @@ mod tests {
         )
         .await;
 
-        // LT 2nd case: given [1, 3], `< 3` returns []
+        // LT 2nd case: given [1, 3], `< 1` returns []
         let sql = format!("SELECT {col_name} FROM {table} WHERE {col_name} < $1");
-        test_ore_op(&client, col_name, &sql, &[&low], &[] as &[T]).await;
+        test_ope_op(&client, col_name, &sql, &[&low], &[] as &[T]).await;
 
         // GT && LT: given [1, 3], `> 1 and < 3` returns []
         let sql =
             format!("SELECT {col_name} FROM {table} WHERE {col_name} > $1 AND {col_name} < $2");
-        test_ore_op(&client, col_name, &sql, &[&low, &high], &[] as &[T]).await;
+        test_ope_op(&client, col_name, &sql, &[&low, &high], &[] as &[T]).await;
 
         // LTEQ: given [1, 3], `<= 3` returns [1, 3]
         let sql = format!("SELECT {col_name} FROM {table} WHERE {col_name} <= $1");
-        test_ore_op(
+        test_ope_op(
             &client,
             col_name,
             &sql,
@@ -133,7 +132,7 @@ mod tests {
 
         // GTEQ: given [1, 3], `>= 1` returns [1, 3]
         let sql = format!("SELECT {col_name} FROM {table} WHERE {col_name} >= $1");
-        test_ore_op(
+        test_ope_op(
             &client,
             col_name,
             &sql,
@@ -144,11 +143,11 @@ mod tests {
 
         // EQ: given [1, 3], `= 1` returns [1]
         let sql = format!("SELECT {col_name} FROM {table} WHERE {col_name} = $1");
-        test_ore_op(&client, col_name, &sql, &[&low], std::slice::from_ref(&low)).await;
+        test_ope_op(&client, col_name, &sql, &[&low], std::slice::from_ref(&low)).await;
 
         // NEQ: given [1, 3], `<> 3` returns [1]
         let sql = format!("SELECT {col_name} FROM {table} WHERE {col_name} <> $1");
-        test_ore_op(
+        test_ope_op(
             &client,
             col_name,
             &sql,
@@ -159,24 +158,27 @@ mod tests {
     }
 
     /// Runs the query and checks the returned results match the expected results.
-    /// The results are sorted after the query as there are separate tests for ordering
-    /// Using sort_by & partial_cmp here because this is used for floats too (NaN cannot be compared)
-    async fn test_ore_op<T>(
+    /// Sorts after the query (separate tests cover ordering).
+    async fn test_ope_op<T>(
         client: &Client,
         col_name: &str,
         sql: &str,
         params: &[&(dyn ToSql + Sync)],
         expected: &[T],
     ) where
-        for<'a> T: ToSql + PartialEq + Sync + FromSql<'a> + PartialOrd,
+        for<'a> T: Clone + ToSql + PartialEq + Sync + FromSql<'a> + PartialOrd,
     {
         let rows = client.query(sql, params).await.expect("query failed");
+        let mut actual: Vec<T> = rows.iter().map(|r| r.get(0)).collect();
+        actual.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        let mut expected: Vec<T> = expected.to_vec();
+        expected.sort_by(|a, b| a.partial_cmp(b).unwrap());
 
-        let mut results: Vec<_> = rows
-            .iter()
-            .map(|r| r.get::<&str, T>(col_name))
-            .collect::<Vec<_>>();
-        results.sort_by(|a, b| a.partial_cmp(b).unwrap());
-        assert_eq!(expected, &results);
+        assert_eq!(
+            actual.len(),
+            expected.len(),
+            "wrong row count for {col_name} via {sql}"
+        );
+        assert_eq!(actual, expected, "value mismatch for {col_name} via {sql}");
     }
 }

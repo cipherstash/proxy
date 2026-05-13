@@ -23,6 +23,8 @@ SELECT eql_v2.add_search_config(
   'text'
 );
 
+-- 'ore' supports ordering and range comparisons. 'ope' is a drop-in
+-- alternative with the same operator support — choose one per column.
 SELECT eql_v2.add_search_config(
   'users',
   'encrypted_email',

@@ -361,6 +361,23 @@ mod tests {
     }
 
     #[test]
+    fn can_parse_ope_index() {
+        let json = json!({
+            "v": 1,
+            "tables": {
+                "users": { "email": { "indexes": { "ope": {} } } }
+            }
+        });
+
+        let encrypt_config = parse(json);
+        let column = encrypt_config
+            .get(&Identifier::new("users", "email"))
+            .unwrap();
+
+        assert_eq!(column.indexes[0].index_type, IndexType::Ope);
+    }
+
+    #[test]
     fn can_parse_unique_index_with_defaults() {
         let json = json!({
             "v": 1,

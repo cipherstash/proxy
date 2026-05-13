@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- **OPE (Order-Preserving Encryption) index**: New `ope` index type alongside the existing `ore` for range and `ORDER BY` queries on encrypted columns. Drop-in alternative to `ore` — pick one per column. See the [encrypted indexes documentation](docs/how-to/index.md) for configuration.
+
 ## [2.2.0-alpha.1] - 2026-03-25
 
 ### Changed
