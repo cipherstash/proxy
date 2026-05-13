@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1778639704454,
+  "lastUpdate": 1778642189172,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -21027,6 +21027,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 36.914859,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "james@cipherstash.com",
+            "name": "James Sadler",
+            "username": "freshtonic"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "100829b7a7a08c099a3eb259fffd0e4d685cfed7",
+          "message": "Merge pull request #390 from cipherstash/feat/ope-index-type\n\nfeat(proxy): support OPE index type",
+          "timestamp": "2026-05-13T13:13:44+10:00",
+          "tree_id": "57385685e0856d4e5da38aec64c772b34f94d89f",
+          "url": "https://github.com/cipherstash/proxy/commit/100829b7a7a08c099a3eb259fffd0e4d685cfed7"
+        },
+        "date": 1778642187855,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 35.92213,
             "unit": "Number"
           }
         ]
