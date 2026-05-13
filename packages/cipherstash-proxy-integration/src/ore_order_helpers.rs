@@ -30,9 +30,10 @@ impl SortDirection {
     }
 }
 
-/// Text ASC ordering with lexicographic edge cases.
-pub async fn ore_order_text(client: &tokio_postgres::Client, table: &str) {
-    let values = [
+/// Text values with lexicographic edge cases (shared common prefixes), in
+/// ascending order.
+fn ore_order_text_values() -> Vec<String> {
+    [
         "aardvark",
         "aplomb",
         "apparatus",
@@ -40,54 +41,34 @@ pub async fn ore_order_text(client: &tokio_postgres::Client, table: &str) {
         "chrysalis",
         "chrysanthemum",
         "zephyr",
-    ];
+    ]
+    .iter()
+    .map(|s| s.to_string())
+    .collect()
+}
 
-    let insert_sql = format!("INSERT INTO {table} (id, encrypted_text) VALUES ($1, $2)");
-
-    for idx in interleaved_indices(values.len()) {
-        client
-            .query(&insert_sql, &[&random_id(), &values[idx]])
-            .await
-            .unwrap();
-    }
-
-    let sql = format!("SELECT encrypted_text FROM {table} ORDER BY encrypted_text");
-    let rows = client.query(&sql, &[]).await.unwrap();
-
-    let actual = rows.iter().map(|row| row.get(0)).collect::<Vec<String>>();
-    let expected: Vec<String> = values.iter().map(|s| s.to_string()).collect();
-
-    assert_eq!(actual, expected);
+/// Text ASC ordering with lexicographic edge cases.
+pub async fn ore_order_text(client: &tokio_postgres::Client, table: &str) {
+    ore_order_generic(
+        client,
+        table,
+        "encrypted_text",
+        ore_order_text_values(),
+        SortDirection::Asc,
+    )
+    .await;
 }
 
 /// Text DESC ordering with lexicographic edge cases.
 pub async fn ore_order_text_desc(client: &tokio_postgres::Client, table: &str) {
-    let values = [
-        "aardvark",
-        "aplomb",
-        "apparatus",
-        "chimera",
-        "chrysalis",
-        "chrysanthemum",
-        "zephyr",
-    ];
-
-    let insert_sql = format!("INSERT INTO {table} (id, encrypted_text) VALUES ($1, $2)");
-
-    for idx in interleaved_indices(values.len()) {
-        client
-            .query(&insert_sql, &[&random_id(), &values[idx]])
-            .await
-            .unwrap();
-    }
-
-    let sql = format!("SELECT encrypted_text FROM {table} ORDER BY encrypted_text DESC");
-    let rows = client.query(&sql, &[]).await.unwrap();
-
-    let actual = rows.iter().map(|row| row.get(0)).collect::<Vec<String>>();
-    let expected: Vec<String> = values.iter().rev().map(|s| s.to_string()).collect();
-
-    assert_eq!(actual, expected);
+    ore_order_generic(
+        client,
+        table,
+        "encrypted_text",
+        ore_order_text_values(),
+        SortDirection::Desc,
+    )
+    .await;
 }
 
 /// NULLs sort last in ASC by default.
