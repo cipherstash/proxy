@@ -12,7 +12,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
-- **EQL 2.3.0**: Proxy now uses the EQL 2.3.0 release. Install EQL 2.3.0 in your database to match this release.
+- **EQL 2.3.1**: Proxy now uses the EQL 2.3.1 release. Install EQL 2.3.1 in your database to match this release.
 
 ## [2.2.0-alpha.1] - 2026-03-25
 
