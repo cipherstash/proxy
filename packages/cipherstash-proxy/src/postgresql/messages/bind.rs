@@ -8,7 +8,7 @@ use crate::postgresql::protocol::BytesMutReadString;
 use crate::{SIZE_I16, SIZE_I32};
 use bytes::{Buf, BufMut, BytesMut};
 use cipherstash_client::encryption::Plaintext;
-use cipherstash_client::eql::EqlCiphertext;
+use cipherstash_client::eql::EqlOutput;
 use postgres_types::Type;
 use std::fmt::{self, Display, Formatter};
 use std::io::Cursor;
@@ -81,7 +81,7 @@ impl Bind {
         Ok(plaintexts)
     }
 
-    pub fn rewrite(&mut self, encrypted: Vec<Option<EqlCiphertext>>) -> Result<(), Error> {
+    pub fn rewrite(&mut self, encrypted: Vec<Option<EqlOutput>>) -> Result<(), Error> {
         for (idx, ct) in encrypted.iter().enumerate() {
             if let Some(ct) = ct {
                 let json = serde_json::to_value(ct)?;

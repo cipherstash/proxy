@@ -734,7 +734,7 @@ where
         &self,
         plaintexts: Vec<Option<cipherstash_client::encryption::Plaintext>>,
         columns: &[Option<Column>],
-    ) -> Result<Vec<Option<crate::EqlCiphertext>>, Error> {
+    ) -> Result<Vec<Option<crate::EqlOutput>>, Error> {
         let keyset_id = self.keyset_identifier();
 
         self.encryption
@@ -1059,7 +1059,7 @@ mod tests {
             _keyset_id: Option<KeysetIdentifier>,
             _plaintexts: Vec<Option<cipherstash_client::encryption::Plaintext>>,
             _columns: &[Option<Column>],
-        ) -> Result<Vec<Option<crate::EqlCiphertext>>, Error> {
+        ) -> Result<Vec<Option<crate::EqlOutput>>, Error> {
             Ok(vec![])
         }
 
