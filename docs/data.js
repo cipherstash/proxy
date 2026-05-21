@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1778642189172,
+  "lastUpdate": 1779335483316,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -21056,6 +21056,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 35.92213,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "c5f1f80abcbd5ad3f48194c717249ba1b2e28869",
+          "message": "deps: upgrade cipherstash-client to 0.35.0 and EQL to 2.3.0",
+          "timestamp": "2026-05-13T03:13:50Z",
+          "url": "https://github.com/cipherstash/proxy/pull/394/commits/c5f1f80abcbd5ad3f48194c717249ba1b2e28869"
+        },
+        "date": 1779335482032,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 40.421549,
             "unit": "Number"
           }
         ]
