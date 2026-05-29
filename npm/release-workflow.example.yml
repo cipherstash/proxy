@@ -1,0 +1,63 @@
+# EXAMPLE — not wired up. Sketch of the release machinery to publish
+# `npx stash proxy` to npm. Named `.example.yml` so it never triggers; copy to
+# .github/workflows/ and fill in secrets/versions to use it.
+#
+# Shape: build cipherstash-proxy for every target on the right runner, assemble
+# one npm package per platform, then publish all platform packages + the meta
+# `stash` package at the same version.
+
+name: npm-release (example)
+
+on:
+  workflow_dispatch:
+  # release:
+  #   types: [published]
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          # macOS runners ad-hoc-sign during linking — enough for Apple Silicon,
+          # no Developer ID / notarization needed for CLI-installed binaries.
+          - { os: macos-14,     target: aarch64-apple-darwin,      pkg: proxy-darwin-arm64 }
+          - { os: macos-13,     target: x86_64-apple-darwin,       pkg: proxy-darwin-x64 }
+          - { os: ubuntu-24.04, target: x86_64-unknown-linux-gnu,  pkg: proxy-linux-x64 }
+          - { os: ubuntu-24.04, target: aarch64-unknown-linux-gnu, pkg: proxy-linux-arm64 }
+          # - { os: windows-2022, target: x86_64-pc-windows-msvc,  pkg: proxy-win32-x64 }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup target add ${{ matrix.target }}
+      # Linux cross-targets need a cross-linker (e.g. cross, or the gcc the repo
+      # already uses for aarch64-unknown-linux-gnu). macOS targets build natively.
+      - run: cargo build --release --locked --target ${{ matrix.target }} -p cipherstash-proxy
+      - name: Assemble platform package
+        run: |
+          dest="npm/packages/${{ matrix.pkg }}/bin"
+          mkdir -p "$dest"
+          cp "target/${{ matrix.target }}/release/cipherstash-proxy" "$dest/"
+          # Re-assert ad-hoc signature on macOS (linker already does this).
+          if [[ "${{ runner.os }}" == "macOS" ]]; then codesign --force --sign - "$dest/cipherstash-proxy"; fi
+      - uses: actions/upload-artifact@v4
+        with: { name: "${{ matrix.pkg }}", path: "npm/packages/${{ matrix.pkg }}" }
+
+  publish:
+    needs: build
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with: { path: npm/packages }
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, registry-url: "https://registry.npmjs.org" }
+      - name: Set matching versions
+        run: |
+          # Stamp every platform package + the meta package to $VERSION, and pin
+          # the meta package's optionalDependencies to exact $VERSION (not file:).
+          echo "TODO: bump versions + rewrite optionalDependencies to ^$VERSION"
+      - name: Publish platform packages then meta
+        env: { NODE_AUTH_TOKEN: "${{ secrets.NPM_TOKEN }}" }
+        run: |
+          for p in npm/packages/proxy-*; do (cd "$p" && npm publish --access public); done
+          (cd npm/packages/stash && npm publish --access public)
