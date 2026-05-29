@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1780062255798,
+  "lastUpdate": 1780063187951,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -21131,6 +21131,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 36.506524,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "e387a424ce31fd3173463646a6a895c01e36fbc6",
+          "message": "test(mem-repro): passthrough memory-leak reproduction harness",
+          "timestamp": "2026-05-13T03:13:50Z",
+          "url": "https://github.com/cipherstash/proxy/pull/396/commits/e387a424ce31fd3173463646a6a895c01e36fbc6"
+        },
+        "date": 1780063186598,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 36.098729,
             "unit": "Number"
           }
         ]
