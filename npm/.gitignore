@@ -1,0 +1,8 @@
+# Native binaries are build artifacts, not source — populated by build-binaries.sh
+packages/*/bin/cipherstash-proxy
+packages/*/bin/cipherstash-proxy.exe
+
+# npm install / pack output
+**/node_modules/
+**/package-lock.json
+*.tgz

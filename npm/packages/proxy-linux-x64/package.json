@@ -1,0 +1,9 @@
+{
+  "name": "@cipherstash/proxy-linux-x64",
+  "version": "0.0.0-prototype",
+  "private": true,
+  "description": "CipherStash Proxy native binary for Linux x86_64 (glibc)",
+  "os": ["linux"],
+  "cpu": ["x64"],
+  "files": ["bin/cipherstash-proxy"]
+}
