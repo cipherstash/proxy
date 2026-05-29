@@ -1,0 +1,22 @@
+{
+  "name": "stash",
+  "version": "0.0.0-prototype",
+  "private": true,
+  "description": "Prototype: CipherStash CLI launcher — `npx stash proxy`",
+  "bin": {
+    "stash": "bin/stash.js"
+  },
+  "files": [
+    "bin/",
+    "lib/"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "optionalDependencies": {
+    "@cipherstash/proxy-darwin-arm64": "file:../proxy-darwin-arm64",
+    "@cipherstash/proxy-darwin-x64": "file:../proxy-darwin-x64",
+    "@cipherstash/proxy-linux-x64": "file:../proxy-linux-x64",
+    "@cipherstash/proxy-linux-arm64": "file:../proxy-linux-arm64"
+  }
+}
