@@ -178,6 +178,27 @@ where
                 msg = "Passthrough enabled"
             );
             self.write_with_flush(bytes).await?;
+
+            // The frontend starts a session and enqueues an execute for every
+            // statement (start_session / set_execute), regardless of whether
+            // the statement is mapped. Those per-connection queues are only
+            // drained by complete_execution()/finish_session(), which are
+            // normally called when an execute terminates (below). Because the
+            // passthrough path returns early, we must drain them here too —
+            // otherwise the execute and session_metrics queues grow by one
+            // entry per statement and never shrink, leaking memory until the
+            // process is OOM-killed. See BUG-300.
+            match code.into() {
+                BackendCode::CommandComplete
+                | BackendCode::EmptyQueryResponse
+                | BackendCode::PortalSuspended
+                | BackendCode::ErrorResponse => {
+                    self.context.complete_execution();
+                    self.context.finish_session();
+                }
+                _ => {}
+            }
+
             return Ok(());
         }
 

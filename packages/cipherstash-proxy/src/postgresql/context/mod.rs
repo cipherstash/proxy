@@ -1176,6 +1176,37 @@ mod tests {
         assert!(portal.is_some());
     }
 
+    /// Regression test for BUG-300 (passthrough memory leak).
+    ///
+    /// The frontend starts a session and enqueues an execute for every
+    /// statement — including passthrough statements. The `execute` and
+    /// `session_metrics` queues are only drained by `complete_execution()` /
+    /// `finish_session()`. Before the fix, the passthrough path in the backend
+    /// returned without calling these, so the queues grew by one entry per
+    /// statement and leaked memory until OOM. This asserts that a full
+    /// statement lifecycle leaves both queues empty, regardless of how many
+    /// statements are processed.
+    #[test]
+    pub fn statement_lifecycle_does_not_grow_queues() {
+        log::init(LogConfig::default());
+
+        let mut context = create_context();
+
+        for _ in 0..1000 {
+            // Frontend: a session + execute are enqueued for every statement.
+            let session_id = context.start_session();
+            context.set_execute(Name::unnamed(), Some(session_id));
+
+            // Backend: drain performed on an execute-terminating message
+            // (CommandComplete / ErrorResponse / ...), including in passthrough.
+            context.complete_execution();
+            context.finish_session();
+        }
+
+        assert_eq!(context.execute.read().unwrap().queue.len(), 0);
+        assert_eq!(context.session_metrics.read().unwrap().queue.len(), 0);
+    }
+
     #[test]
     pub fn add_and_close_portals() {
         log::init(LogConfig::default());
