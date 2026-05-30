@@ -108,7 +108,12 @@ async function runRepl({ host, port, user, password, database }) {
   });
 
   let buffer = "";
-  const promptText = () => (buffer ? "... " : `${label}=> `);
+  // Branded prompt (e.g. "stash:dbname=>"), with the prefix coloured on a TTY
+  // unless NO_COLOR is set, matching the psql prompt the launcher sets.
+  const useColor = Boolean(process.stdout.isTTY) && !process.env.NO_COLOR;
+  const cyan = useColor ? "\x1b[36m" : "";
+  const reset = useColor ? "\x1b[0m" : "";
+  const promptText = () => `${cyan}stash${reset}:${label}${buffer ? "-> " : "=> "}`;
 
   // Ctrl-C abandons the statement in progress (like psql); Ctrl-D (EOF) ends
   // the async iterator and exits.
