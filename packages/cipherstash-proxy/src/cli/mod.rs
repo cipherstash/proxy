@@ -59,8 +59,19 @@ pub struct Args {
     /// connections in plaintext. Overrides any CS_TLS__* env / config.
     /// Use for local development only. Does not affect the connection from the
     /// proxy to the database.
-    #[arg(long, verbatim_doc_comment)]
+    #[arg(long, verbatim_doc_comment, conflicts_with = "tls")]
     pub no_tls: bool,
+
+    /// Require inbound (client-facing) TLS. Startup fails if TLS is not
+    /// configured or the certificate/key are invalid. Without this flag the
+    /// proxy uses TLS when configured and falls back to plaintext otherwise.
+    #[arg(long, verbatim_doc_comment)]
+    pub tls: bool,
+
+    /// Enable verbose (debug) logging. Without it the proxy logs errors only.
+    /// An explicit --log-level / CS_LOG__LEVEL or a config file takes precedence.
+    #[arg(long, verbatim_doc_comment)]
+    pub debug: bool,
 
     /// Optional path to a CipherStash Proxy configuration file.
     ///

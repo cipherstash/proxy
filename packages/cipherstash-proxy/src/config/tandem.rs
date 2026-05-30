@@ -131,6 +131,8 @@ impl TandemConfig {
             db_user: None,
             db_password: None,
             no_tls: false,
+            tls: false,
+            debug: false,
             log_level: LogConfig::default_log_level(),
             log_format: LogConfig::default_log_format(),
             command: None,
