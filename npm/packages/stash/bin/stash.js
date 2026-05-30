@@ -134,7 +134,7 @@ function launchPsql(port, conn, proxy) {
   if (conn.dbname) env.PGDATABASE = conn.dbname;
   if (conn.password != null) env.PGPASSWORD = conn.password;
 
-  const psql = spawn("psql", [], { stdio: "inherit", env });
+  const psql = spawn("psql", psqlPromptArgs(), { stdio: "inherit", env });
 
   psql.on("error", (err) => {
     process.stderr.write(`stash: failed to launch psql: ${err.message}\n`);
@@ -204,6 +204,18 @@ function connectionInfo(args) {
 }
 
 // --- helpers -----------------------------------------------------------------
+
+// Branded psql prompt so a via-proxy session is visually distinct (e.g.
+// "stash:dbname=>" with "stash" in cyan). Override the whole prompt with
+// STASH_PSQL_PROMPT, or set it empty to use psql's default / your ~/.psqlrc.
+function psqlPromptArgs() {
+  const custom = process.env.STASH_PSQL_PROMPT;
+  if (custom === "") return [];
+  const ESC = "\x1b";
+  // %[ %] wrap non-printing bytes so psql counts the prompt width correctly.
+  const prompt = custom || `%[${ESC}[36m%]stash%[${ESC}[0m%]:%/%R%# `;
+  return ["--set", `PROMPT1=${prompt}`, "--set", `PROMPT2=${prompt}`];
+}
 
 function commandExists(cmd) {
   const probe = spawnSync(cmd, ["--version"], { stdio: "ignore" });
