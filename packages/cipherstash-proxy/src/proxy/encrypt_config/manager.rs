@@ -98,7 +98,9 @@ async fn init_reloader(config: DatabaseConfig) -> Result<EncryptConfigManager, E
                 // Similar messages are displayed on connection, defined in handler.rs
                 // Please keep the language in sync when making changes here.
                 Error::Config(ConfigError::MissingEncryptConfigTable) => {
-                    error!(msg = "No Encrypt configuration table in database.");
+                    // Not fatal: the proxy continues in passthrough. EQL is only
+                    // required if you want encryption, so log at warn, not error.
+                    warn!(msg = "No Encrypt configuration table in database.");
                     warn!(msg = "Encrypt requires the Encrypt Query Language (EQL) to be installed in the target database");
                     warn!(msg = "See https://github.com/cipherstash/encrypt-query-language");
                 }
