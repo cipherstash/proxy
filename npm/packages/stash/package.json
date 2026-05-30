@@ -13,6 +13,9 @@
   "engines": {
     "node": ">=18"
   },
+  "dependencies": {
+    "pg": "^8.13.0"
+  },
   "optionalDependencies": {
     "@cipherstash/proxy-darwin-arm64": "file:../proxy-darwin-arm64",
     "@cipherstash/proxy-darwin-x64": "file:../proxy-darwin-x64",
