@@ -67,15 +67,15 @@ function runProxy(binary, args) {
 // --- proxy + psql ------------------------------------------------------------
 
 function runProxyThenPsql(binary, args) {
-  if (!commandExists("psql")) {
-    process.stderr.write(
-      "stash: --psql requires the `psql` client on your PATH, which was not found.\n" +
-        "       Install the PostgreSQL client, or run without --psql and connect manually.\n"
-    );
-    process.exit(1);
-  }
-
   const conn = connectionInfo(args);
+
+  // Prefer the system psql; fall back to the built-in JS SQL shell when it's
+  // not installed (or when forced via STASH_USE_BUILTIN_SQL=1).
+  const forceBuiltin = process.env.STASH_USE_BUILTIN_SQL === "1";
+  const usePsql = !forceBuiltin && commandExists("psql");
+  if (!usePsql && !forceBuiltin) {
+    process.stderr.write("stash: psql not found on PATH; using the built-in SQL shell instead.\n");
+  }
 
   // stdin: ignore (the proxy is a server and never reads it; psql needs the tty).
   // stdout: piped so we can detect the listen address.
@@ -97,7 +97,12 @@ function runProxyThenPsql(binary, args) {
     const match = buffered.match(/listening on \S+?:(\d+)/i);
     if (match) {
       launchedPsql = true;
-      psql = launchPsql(parseInt(match[1], 10), conn, proxy);
+      const port = parseInt(match[1], 10);
+      if (usePsql) {
+        psql = launchPsql(port, conn, proxy);
+      } else {
+        launchRepl(port, conn, proxy);
+      }
     }
   });
 
@@ -144,6 +149,28 @@ function launchPsql(port, conn, proxy) {
   });
 
   return psql;
+}
+
+// Built-in JS SQL shell (fallback when psql isn't installed).
+function launchRepl(port, conn, proxy) {
+  process.stderr.write(`stash: opening built-in SQL shell to the proxy on 127.0.0.1:${port}\n`);
+  const { runRepl } = require("../lib/repl");
+  runRepl({
+    host: "127.0.0.1",
+    port,
+    user: conn.user,
+    password: conn.password,
+    database: conn.dbname,
+  })
+    .then(() => {
+      stop(proxy);
+      process.exit(0);
+    })
+    .catch((err) => {
+      process.stderr.write(`stash: SQL shell error: ${err.message}\n`);
+      stop(proxy);
+      process.exit(1);
+    });
 }
 
 // Extract user / password / dbname for the psql connection from --database-url
