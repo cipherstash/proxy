@@ -21,10 +21,22 @@ const DEFAULT_CONFIG_FILE: &str = "cipherstash-proxy.toml";
 /// CipherStash Proxy keeps your sensitive data in PostgreSQL encrypted and searchable, with no changes to SQL.
 ///
 pub struct Args {
+    /// Optional full PostgreSQL connection string, e.g.
+    /// "postgres://user:pass@host:5432/dbname".
+    /// Sets host, port, user, password and database name at once.
+    /// Individual flags below override matching parts of the URL.
+    #[arg(long, value_name = "URL", verbatim_doc_comment)]
+    pub database_url: Option<String>,
+
     /// Optional database host to connect to.
     /// Uses env or config file if not specified.
     #[arg(short = 'H', long)]
     pub db_host: Option<String>,
+
+    /// Optional database port to connect to.
+    /// Uses env or config file if not specified.
+    #[arg(short = 'P', long)]
+    pub db_port: Option<u16>,
 
     /// Optional database name to connect to.
     /// Uses env or config file if not specified.
@@ -35,6 +47,20 @@ pub struct Args {
     /// Uses env or config file if not specified.
     #[arg(short = 'u', long)]
     pub db_user: Option<String>,
+
+    /// Optional database password.
+    /// Uses env or config file if not specified.
+    /// Prefer CS_DATABASE__PASSWORD or --database-url to avoid leaking the
+    /// password into shell history / the process list.
+    #[arg(short = 'W', long, verbatim_doc_comment)]
+    pub db_password: Option<String>,
+
+    /// Disable inbound (client-facing) TLS: the proxy listens for client
+    /// connections in plaintext. Overrides any CS_TLS__* env / config.
+    /// Use for local development only. Does not affect the connection from the
+    /// proxy to the database.
+    #[arg(long, verbatim_doc_comment)]
+    pub no_tls: bool,
 
     /// Optional path to a CipherStash Proxy configuration file.
     ///
