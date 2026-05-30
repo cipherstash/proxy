@@ -211,9 +211,10 @@ function connectionInfo(args) {
 function psqlPromptArgs() {
   const custom = process.env.STASH_PSQL_PROMPT;
   if (custom === "") return [];
-  const ESC = "\x1b";
-  // %[ %] wrap non-printing bytes so psql counts the prompt width correctly.
-  const prompt = custom || `%[${ESC}[36m%]stash%[${ESC}[0m%]:%/%R%# `;
+  // psql renders ESC from its own octal escape `%033` (a literal ESC byte gets
+  // mangled in variable parsing); `%[ %]` wrap the non-printing bytes so psql
+  // counts the prompt width correctly. 36m = cyan, 0m = reset.
+  const prompt = custom || "%[%033[36m%]stash%[%033[0m%]:%/%R%# ";
   return ["--set", `PROMPT1=${prompt}`, "--set", `PROMPT2=${prompt}`];
 }
 
