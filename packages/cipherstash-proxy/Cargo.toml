@@ -1,6 +1,6 @@
 [package]
 name = "cipherstash-proxy"
-version = "2.2.0-alpha.1"
+version.workspace = true
 edition = "2021"
 
 [dependencies]
