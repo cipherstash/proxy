@@ -308,6 +308,24 @@ where
         self.set_execute(name, session_id);
     }
 
+    /// Number of entries currently queued in the `execute` queue.
+    ///
+    /// Test-only accessor used by the BUG-300 regression tests to assert the
+    /// per-connection queues are drained (and do not grow unbounded).
+    #[cfg(test)]
+    pub(crate) fn execute_queue_len(&self) -> usize {
+        self.execute.read().unwrap().queue.len()
+    }
+
+    /// Number of entries currently queued in the `session_metrics` queue.
+    ///
+    /// Test-only accessor used by the BUG-300 regression tests to assert the
+    /// per-connection queues are drained (and do not grow unbounded).
+    #[cfg(test)]
+    pub(crate) fn session_metrics_queue_len(&self) -> usize {
+        self.session_metrics.read().unwrap().queue.len()
+    }
+
     /// Marks the current Execution as Complete.
     ///
     /// Transfers accumulated timing data from ExecuteContext to SessionMetricsContext.phase_timing:
@@ -1176,18 +1194,20 @@ mod tests {
         assert!(portal.is_some());
     }
 
-    /// Regression test for BUG-300 (passthrough memory leak).
+    /// Unit test for the queue-draining primitives.
     ///
-    /// The frontend starts a session and enqueues an execute for every
-    /// statement — including passthrough statements. The `execute` and
-    /// `session_metrics` queues are only drained by `complete_execution()` /
-    /// `finish_session()`. Before the fix, the passthrough path in the backend
-    /// returned without calling these, so the queues grew by one entry per
-    /// statement and leaked memory until OOM. This asserts that a full
-    /// statement lifecycle leaves both queues empty, regardless of how many
-    /// statements are processed.
+    /// `complete_execution()` / `finish_session()` are the only drains for the
+    /// per-connection `execute` / `session_metrics` queues. This asserts that
+    /// calling them after enqueuing a session + execute leaves both queues
+    /// empty, across many iterations.
+    ///
+    /// Note: this exercises the primitives directly — it does *not* drive the
+    /// backend passthrough path that actually caused BUG-300 (that early
+    /// returned without calling these). The backend-level regression test for
+    /// BUG-300 lives in `backend.rs`
+    /// (`passthrough_drains_queues_on_execute_terminating_message`).
     #[test]
-    pub fn statement_lifecycle_does_not_grow_queues() {
+    pub fn complete_execution_and_finish_session_drain_queues() {
         log::init(LogConfig::default());
 
         let mut context = create_context();
@@ -1197,14 +1217,14 @@ mod tests {
             let session_id = context.start_session();
             context.set_execute(Name::unnamed(), Some(session_id));
 
-            // Backend: drain performed on an execute-terminating message
-            // (CommandComplete / ErrorResponse / ...), including in passthrough.
+            // Drain primitives, normally called by the backend on an
+            // execute-terminating message (CommandComplete / ErrorResponse / …).
             context.complete_execution();
             context.finish_session();
         }
 
-        assert_eq!(context.execute.read().unwrap().queue.len(), 0);
-        assert_eq!(context.session_metrics.read().unwrap().queue.len(), 0);
+        assert_eq!(context.execute_queue_len(), 0);
+        assert_eq!(context.session_metrics_queue_len(), 0);
     }
 
     #[test]

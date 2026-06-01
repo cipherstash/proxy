@@ -726,3 +726,133 @@ where
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::{LogConfig, TandemConfig};
+    use crate::log;
+    use crate::postgresql::context::KeysetIdentifier;
+    use crate::postgresql::messages::Name;
+    use crate::proxy::{EncryptConfig, EncryptionService};
+    use eql_mapper::Schema;
+    use std::io::Cursor;
+    use std::sync::Arc;
+    use tokio::sync::mpsc;
+
+    struct TestService {}
+
+    #[async_trait::async_trait]
+    impl EncryptionService for TestService {
+        async fn encrypt(
+            &self,
+            _keyset_id: Option<KeysetIdentifier>,
+            _plaintexts: Vec<Option<cipherstash_client::encryption::Plaintext>>,
+            _columns: &[Option<Column>],
+        ) -> Result<Vec<Option<crate::EqlCiphertext>>, Error> {
+            Ok(vec![])
+        }
+
+        async fn decrypt(
+            &self,
+            _keyset_id: Option<KeysetIdentifier>,
+            _ciphertexts: Vec<Option<crate::EqlCiphertext>>,
+        ) -> Result<Vec<Option<cipherstash_client::encryption::Plaintext>>, Error> {
+            Ok(vec![])
+        }
+    }
+
+    /// Builds a Context in passthrough mode (empty encrypt config), which is the
+    /// configuration that triggers BUG-300.
+    fn passthrough_context() -> Context<TestService> {
+        let config = Arc::new(TandemConfig::for_testing());
+        let encrypt_config = Arc::new(EncryptConfig::default());
+        let schema = Arc::new(Schema::new("public"));
+        let (reload_sender, _reload_receiver) = mpsc::unbounded_channel();
+
+        Context::new(
+            1,
+            config,
+            encrypt_config,
+            schema,
+            TestService {},
+            reload_sender,
+        )
+    }
+
+    /// Encodes a `CommandComplete` backend message on the wire:
+    /// `'C'` + Int32 length (body + 4) + null-terminated command tag.
+    fn command_complete_bytes() -> BytesMut {
+        let tag = b"SELECT 1\0";
+        let len = (tag.len() + 4) as i32;
+
+        let mut bytes = BytesMut::new();
+        bytes.extend_from_slice(b"C");
+        bytes.extend_from_slice(&len.to_be_bytes());
+        bytes.extend_from_slice(tag);
+        bytes
+    }
+
+    /// Regression test for BUG-300 (passthrough memory leak).
+    ///
+    /// The frontend enqueues a session + execute for *every* statement. Those
+    /// per-connection `execute` / `session_metrics` queues are only drained by
+    /// `complete_execution()` / `finish_session()`. Before the fix, the
+    /// passthrough branch in `rewrite()` returned early without calling these,
+    /// so the queues grew by one entry per statement and leaked until OOM.
+    ///
+    /// This drives `Backend::rewrite()` through the passthrough branch with an
+    /// execute-terminating `CommandComplete` message and asserts both queues
+    /// stay empty across many statements. It fails against the pre-fix backend
+    /// (which never drained in passthrough) — i.e. it actually guards the bug.
+    #[tokio::test]
+    async fn passthrough_drains_queues_on_execute_terminating_message() {
+        log::init(LogConfig::default());
+
+        const STATEMENTS: usize = 1000;
+
+        let context = passthrough_context();
+        assert!(
+            context.is_passthrough(),
+            "test context must be in passthrough mode"
+        );
+
+        // A stream of CommandComplete messages — one per statement — that the
+        // backend reads from the "server".
+        let message = command_complete_bytes();
+        let mut server_bytes = BytesMut::new();
+        for _ in 0..STATEMENTS {
+            server_bytes.extend_from_slice(&message);
+        }
+
+        // Keep the client receiver alive so write_with_flush succeeds.
+        let (client_sender, _client_receiver) = mpsc::unbounded_channel();
+        let reader = Cursor::new(server_bytes.to_vec());
+        let mut backend = Backend::new(client_sender, reader, context);
+
+        for i in 0..STATEMENTS {
+            // Frontend: enqueue a session + execute for the statement.
+            let session_id = backend.context.start_session();
+            backend
+                .context
+                .set_execute(Name::unnamed(), Some(session_id));
+
+            // Backend: process the server's CommandComplete via the passthrough
+            // path, which must drain the queues.
+            backend.rewrite().await.unwrap();
+
+            // The queues must be drained every iteration — not grow by one per
+            // statement (the BUG-300 leak).
+            assert_eq!(
+                backend.context.execute_queue_len(),
+                0,
+                "execute queue not drained at statement {i}"
+            );
+            assert_eq!(
+                backend.context.session_metrics_queue_len(),
+                0,
+                "session_metrics queue not drained at statement {i}"
+            );
+        }
+    }
+}
