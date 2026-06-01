@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1780112242544,
+  "lastUpdate": 1780275891362,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -21256,6 +21256,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 37.16443,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "15a4684fdbec7d253aeac5ecc0fe49e2927882ad",
+          "message": "fix(passthrough): drain per-statement queues to stop memory leak",
+          "timestamp": "2026-05-13T03:13:50Z",
+          "url": "https://github.com/cipherstash/proxy/pull/395/commits/15a4684fdbec7d253aeac5ecc0fe49e2927882ad"
+        },
+        "date": 1780275890135,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 36.306249,
             "unit": "Number"
           }
         ]
