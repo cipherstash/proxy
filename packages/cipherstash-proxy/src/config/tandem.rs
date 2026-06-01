@@ -391,9 +391,6 @@ impl Default for PrometheusConfig {
 
 static RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"`([^`]+)`").unwrap());
 
-///
-/// Extracts a field name (if present) from a config::ConfigError string
-/// This is called in `build` if a ConfigError message contains the string `missing field`
 /// Parse a PostgreSQL connection string (e.g.
 /// "postgres://user:pass@host:5432/dbname") and set the corresponding
 /// CS_DATABASE__* env vars for each component present. Individual --db-* flags
@@ -423,9 +420,15 @@ fn apply_database_url(url: &str) -> Result<(), Error> {
     }
 
     if let Some(password) = pg.get_password() {
-        if let Ok(password) = std::str::from_utf8(password) {
-            env::set_var("CS_DATABASE__PASSWORD", password);
-        }
+        // The password is required downstream as a String. Rather than silently
+        // dropping a non-UTF8 password (which would leave the proxy connecting
+        // with no password, or a stale env/config one), fail clearly.
+        let password =
+            std::str::from_utf8(password).map_err(|_| ConfigError::InvalidParameter {
+                name: "database-url".to_string(),
+                value: "password contains invalid UTF-8".to_string(),
+            })?;
+        env::set_var("CS_DATABASE__PASSWORD", password);
     }
 
     if let Some(dbname) = pg.get_dbname() {
@@ -524,6 +527,27 @@ mod tests {
                     assert!(std::env::var("CS_DATABASE__USER").is_err());
                 },
             );
+        });
+    }
+
+    #[test]
+    /// A non-UTF8 password in --database-url is an error, not a silent no-op.
+    /// tokio-postgres percent-decodes the password to raw bytes without UTF-8
+    /// validation, so `%FF` yields invalid UTF-8; we must reject it rather than
+    /// leave CS_DATABASE__PASSWORD unset (which would connect with no/stale
+    /// credentials).
+    fn database_url_rejects_non_utf8_password() {
+        use crate::config::tandem::apply_database_url;
+        with_no_cs_vars(|| {
+            temp_env::with_vars_unset(["CS_DATABASE__PASSWORD"], || {
+                let result = apply_database_url("postgres://alice:%FF@db.example.com/orders");
+                assert!(
+                    result.is_err(),
+                    "expected a non-UTF8 password to be rejected"
+                );
+                // And it must not have set a password from the bad URL.
+                assert!(std::env::var("CS_DATABASE__PASSWORD").is_err());
+            });
         });
     }
 
