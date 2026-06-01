@@ -16,8 +16,38 @@ env:
   REGISTRY_IMAGE: cipherstash/proxy
 
 jobs:
+  verify-release:
+    name: Verify release metadata
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      # Only enforced for numbered releases. On push/PR/workflow_dispatch this
+      # job is a no-op so it can still gate the build matrix below.
+      - name: Check version + changelog match the release tag
+        if: github.event_name == 'release'
+        run: |
+          tag='${{ github.event.release.tag_name }}'
+          version="${tag#v}"
+
+          cargo_version="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)"
+          if [ "$cargo_version" != "$version" ]; then
+            echo "::error::Cargo.toml workspace version ($cargo_version) does not match release tag $tag. Bump the version in a prepare-release PR before tagging."
+            exit 1
+          fi
+
+          # Fixed-string match so dots in the version aren't treated as regex wildcards.
+          if ! grep -qF "## [$version]" CHANGELOG.md; then
+            echo "::error::CHANGELOG.md has no '## [$version]' section. Add release notes in a prepare-release PR before tagging."
+            exit 1
+          fi
+
+          echo "OK: tag $tag matches Cargo.toml version and CHANGELOG has a [$version] section."
+
   build:
     name: Build binaries + Docker images
+    needs: verify-release
     strategy:
       fail-fast: false
       matrix:

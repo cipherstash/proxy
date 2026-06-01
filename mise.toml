@@ -700,15 +700,59 @@ mise --env tls run proxy:down
 """
 
 [tasks.release]
-description = "Create a GitHub release"
+description = "Create a GitHub release (run after the prepare-release PR is merged)"
 run = """
 #!/usr/bin/env bash
 set -euo pipefail
 
-VERSION="${1:?Version required, e.g., mise run release v2.1.9}"
+VERSION="${1:?Version required, e.g., mise run release v2.2.2}"
 
-echo "Creating release $VERSION..."
+# Tag must be vMAJOR.MINOR.PATCH with an optional pre-release suffix.
+if [[ ! "$VERSION" =~ ^v[0-9]+\\.[0-9]+\\.[0-9]+(-[0-9A-Za-z.]+)?$ ]]; then
+  echo "error: version must look like v2.2.2 (got '$VERSION')" >&2
+  exit 1
+fi
+BARE="${VERSION#v}"
 
+# Releases are cut from a clean, up-to-date main.
+BRANCH="$(git rev-parse --abbrev-ref HEAD)"
+if [ "$BRANCH" != "main" ]; then
+  echo "error: releases must be cut from main (currently on '$BRANCH')" >&2
+  exit 1
+fi
+if [ -n "$(git status --porcelain)" ]; then
+  echo "error: working tree is not clean; commit or stash changes first" >&2
+  exit 1
+fi
+git fetch origin main --quiet
+if [ "$(git rev-parse HEAD)" != "$(git rev-parse origin/main)" ]; then
+  echo "error: local main is not in sync with origin/main; pull first" >&2
+  exit 1
+fi
+
+# The prepare-release PR must have bumped the version and added release notes.
+CARGO_VERSION="$(sed -n 's/^version = "\\(.*\\)"/\\1/p' Cargo.toml | head -1)"
+if [ "$CARGO_VERSION" != "$BARE" ]; then
+  echo "error: Cargo.toml workspace version ($CARGO_VERSION) does not match $VERSION" >&2
+  echo "       bump the version in a prepare-release PR and merge it before releasing" >&2
+  exit 1
+fi
+# Fixed-string match so dots in the version aren't treated as regex wildcards.
+if ! grep -qF "## [$BARE]" CHANGELOG.md; then
+  echo "error: CHANGELOG.md has no '## [$BARE]' section" >&2
+  echo "       add release notes in a prepare-release PR and merge it before releasing" >&2
+  exit 1
+fi
+if git rev-parse -q --verify "refs/tags/$VERSION" >/dev/null; then
+  echo "error: tag $VERSION already exists locally" >&2
+  exit 1
+fi
+if git ls-remote --exit-code --tags origin "refs/tags/$VERSION" >/dev/null 2>&1; then
+  echo "error: tag $VERSION already exists on origin" >&2
+  exit 1
+fi
+
+echo "Releasing $VERSION (verified version + changelog)..."
 git tag "$VERSION"
 git push origin "$VERSION"
 gh release create "$VERSION" --generate-notes

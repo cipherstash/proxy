@@ -735,29 +735,51 @@ Note: not all errors do this at the moment, and we will change over time.
 
 Releases are published via GitHub Actions when a GitHub release is created.
 
-### Using mise (recommended)
+A release happens in two steps: first a **prepare-release PR** that records the
+version and notes, then **tagging** that merged commit.
+
+### 1. Prepare-release PR
+
+Open a PR against `main` that:
+
+1. Bumps `version` under `[workspace.package]` in the root `Cargo.toml` (and runs
+   `cargo update --workspace` so `Cargo.lock` matches).
+2. Adds a `## [X.Y.Z]` section to `CHANGELOG.md` describing the user-facing changes.
+
+Both are required: the release tooling (and the release workflow) will refuse to
+publish a tag whose version isn't reflected in `Cargo.toml` and `CHANGELOG.md`.
+
+### 2. Cut the release (recommended)
+
+Once the prepare-release PR is merged, from an up-to-date `main`:
 
 ```bash
-mise run release v2.1.9
+mise run release vX.Y.Z
 ```
 
-This will:
+This verifies you're on a clean, in-sync `main`, that `Cargo.toml` and
+`CHANGELOG.md` already describe `X.Y.Z`, and that the tag doesn't already exist.
+If those checks pass it will:
 1. Create a git tag for the version
 2. Push the tag to origin
 3. Create a GitHub release with auto-generated notes
 4. Trigger the release workflow which builds and publishes Docker images
 
+The release workflow re-runs the same version/changelog check (the
+`verify-release` job) before building, so a mismatched tag fails fast without
+publishing anything.
+
 ### Manual release
 
-If you need more control over the release process:
+If you need more control, the steps the task automates are:
 
 ```bash
-# Create and push the tag
-git tag v2.1.9
-git push origin v2.1.9
+# Create and push the tag (from the merged prepare-release commit on main)
+git tag vX.Y.Z
+git push origin vX.Y.Z
 
 # Create the GitHub release
-gh release create v2.1.9 --generate-notes
+gh release create vX.Y.Z --generate-notes
 ```
 
 ### Re-releasing a version
