@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.2.2] - 2026-06-01
+
+### Fixed
+
+- **Passthrough mode memory leak**: Fixed a per-statement memory leak that occurred in passthrough mode (empty encrypt config), where per-statement queues were not drained. Long-running connections could grow unbounded and eventually OOM. ([#400](https://github.com/cipherstash/proxy/issues/400))
+
+## [2.2.1] - 2026-05-14
+
 ### Added
 
 - **OPE (Order-Preserving Encryption) index**: New `ope` index type alongside the existing `ore` for range and `ORDER BY` queries on encrypted columns. Drop-in alternative to `ore` — pick one per column. See the [encrypted indexes documentation](docs/how-to/index.md) for configuration.
@@ -253,7 +261,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Integration with CipherStash ZeroKMS.
 - Encrypt Query Language (EQL) for indexing and searching encrypted data.
 
-[Unreleased]: https://github.com/cipherstash/proxy/compare/v2.2.0-alpha.1...HEAD
+[Unreleased]: https://github.com/cipherstash/proxy/compare/v2.2.2...HEAD
+[2.2.2]: https://github.com/cipherstash/proxy/compare/v2.2.1...v2.2.2
+[2.2.1]: https://github.com/cipherstash/proxy/compare/v2.2.0-alpha.1...v2.2.1
 [2.2.0-alpha.1]: https://github.com/cipherstash/proxy/compare/v2.1.22...v2.2.0-alpha.1
 [2.1.22]: https://github.com/cipherstash/proxy/releases/tag/v2.1.22
 [2.1.21]: https://github.com/cipherstash/proxy/releases/tag/v2.1.21
