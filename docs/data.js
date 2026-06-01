@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1780281308212,
+  "lastUpdate": 1780283163476,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -21331,6 +21331,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 35.924994,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "dan@cipherstash.com",
+            "name": "Dan Draper",
+            "username": "coderdan"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "cd5469d15a3e40b0ad7154dcb87025007ab77ab6",
+          "message": "Merge pull request #395 from cipherstash/dan/bug-300-passthrough-memory-leak\n\nfix(passthrough): drain per-statement queues to stop memory leak",
+          "timestamp": "2026-06-01T13:02:25+10:00",
+          "tree_id": "35db1e8278ece515e983118cf9ab22e0493860a0",
+          "url": "https://github.com/cipherstash/proxy/commit/cd5469d15a3e40b0ad7154dcb87025007ab77ab6"
+        },
+        "date": 1780283162106,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 36.657314,
             "unit": "Number"
           }
         ]
