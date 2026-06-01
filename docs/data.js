@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1780288113874,
+  "lastUpdate": 1780289446471,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -21489,6 +21489,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 37.160291,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "dan@cipherstash.com",
+            "name": "Dan Draper",
+            "username": "coderdan"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "bdeead3a970211f8775efa8c8cc11f5d05b283bc",
+          "message": "Merge pull request #405 from cipherstash/dan/release-guard",
+          "timestamp": "2026-06-01T14:47:29+10:00",
+          "tree_id": "97cbe452b2037fb51c8ebfb69d73d8ff6443a391",
+          "url": "https://github.com/cipherstash/proxy/commit/bdeead3a970211f8775efa8c8cc11f5d05b283bc"
+        },
+        "date": 1780289445132,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 36.181399,
             "unit": "Number"
           }
         ]
