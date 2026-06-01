@@ -308,6 +308,24 @@ where
         self.set_execute(name, session_id);
     }
 
+    /// Number of entries currently queued in the `execute` queue.
+    ///
+    /// Test-only accessor used by the BUG-300 regression tests to assert the
+    /// per-connection queues are drained (and do not grow unbounded).
+    #[cfg(test)]
+    pub(crate) fn execute_queue_len(&self) -> usize {
+        self.execute.read().unwrap().queue.len()
+    }
+
+    /// Number of entries currently queued in the `session_metrics` queue.
+    ///
+    /// Test-only accessor used by the BUG-300 regression tests to assert the
+    /// per-connection queues are drained (and do not grow unbounded).
+    #[cfg(test)]
+    pub(crate) fn session_metrics_queue_len(&self) -> usize {
+        self.session_metrics.read().unwrap().queue.len()
+    }
+
     /// Marks the current Execution as Complete.
     ///
     /// Transfers accumulated timing data from ExecuteContext to SessionMetricsContext.phase_timing:
@@ -1174,6 +1192,39 @@ mod tests {
         // Unamed portal is closed on complete
         let portal = context.get_portal(&portal_name);
         assert!(portal.is_some());
+    }
+
+    /// Unit test for the queue-draining primitives.
+    ///
+    /// `complete_execution()` / `finish_session()` are the only drains for the
+    /// per-connection `execute` / `session_metrics` queues. This asserts that
+    /// calling them after enqueuing a session + execute leaves both queues
+    /// empty, across many iterations.
+    ///
+    /// Note: this exercises the primitives directly — it does *not* drive the
+    /// backend passthrough path that actually caused BUG-300 (that early
+    /// returned without calling these). The backend-level regression test for
+    /// BUG-300 lives in `backend.rs`
+    /// (`passthrough_drains_queues_on_execute_terminating_message`).
+    #[test]
+    pub fn complete_execution_and_finish_session_drain_queues() {
+        log::init(LogConfig::default());
+
+        let mut context = create_context();
+
+        for _ in 0..1000 {
+            // Frontend: a session + execute are enqueued for every statement.
+            let session_id = context.start_session();
+            context.set_execute(Name::unnamed(), Some(session_id));
+
+            // Drain primitives, normally called by the backend on an
+            // execute-terminating message (CommandComplete / ErrorResponse / …).
+            context.complete_execution();
+            context.finish_session();
+        }
+
+        assert_eq!(context.execute_queue_len(), 0);
+        assert_eq!(context.session_metrics_queue_len(), 0);
     }
 
     #[test]
