@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1780286926083,
+  "lastUpdate": 1780287797450,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -21435,6 +21435,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 36.411353,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "dan@cipherstash.com",
+            "name": "Dan Draper",
+            "username": "coderdan"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "d36bea7b9a0daef8d1fa5b8b9ea110e1259330d3",
+          "message": "Merge pull request #404 from cipherstash/dan/release-2.2.2-changelog\n\nchore: prepare v2.2.2 release",
+          "timestamp": "2026-06-01T14:20:46+10:00",
+          "tree_id": "d192129c4a884959fcbe9ab45106431057fb1adc",
+          "url": "https://github.com/cipherstash/proxy/commit/d36bea7b9a0daef8d1fa5b8b9ea110e1259330d3"
+        },
+        "date": 1780287796144,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 37.143847,
             "unit": "Number"
           }
         ]
