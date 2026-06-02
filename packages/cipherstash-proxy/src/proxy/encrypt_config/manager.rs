@@ -248,7 +248,9 @@ fn canonical_to_map(canonical: CanonicalEncryptionConfig) -> Result<EncryptConfi
 mod tests {
     use super::*;
     use cipherstash_client::eql::Identifier;
-    use cipherstash_config::column::{ArrayIndexMode, IndexType, TokenFilter, Tokenizer};
+    use cipherstash_config::column::{
+        ArrayIndexMode, IndexType, SteVecMode, TokenFilter, Tokenizer,
+    };
     use cipherstash_config::ColumnType;
     use serde_json::json;
 
@@ -518,6 +520,7 @@ mod tests {
                 prefix: "event-data".into(),
                 term_filters: vec![],
                 array_index_mode: ArrayIndexMode::ALL,
+                mode: SteVecMode::Standard,
             },
         );
     }

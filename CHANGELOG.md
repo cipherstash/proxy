@@ -18,6 +18,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - **OPE (Order-Preserving Encryption) index**: New `ope` index type alongside the existing `ore` for range and `ORDER BY` queries on encrypted columns. Drop-in alternative to `ore` — pick one per column. See the [encrypted indexes documentation](docs/how-to/index.md) for configuration.
 
+### Changed
+
+- **EQL 2.3.1**: Proxy now uses the EQL 2.3.1 release. Install EQL 2.3.1 in your database to match this release.
+
 ## [2.2.0-alpha.1] - 2026-03-25
 
 ### Changed
