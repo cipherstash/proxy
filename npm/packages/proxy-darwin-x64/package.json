@@ -1,0 +1,9 @@
+{
+  "name": "@cipherstash/proxy-darwin-x64",
+  "version": "0.0.0-prototype",
+  "private": true,
+  "description": "CipherStash Proxy native binary for macOS x86_64",
+  "os": ["darwin"],
+  "cpu": ["x64"],
+  "files": ["bin/cipherstash-proxy"]
+}
