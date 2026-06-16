@@ -13,7 +13,7 @@ use cipherstash_client::{
     encryption::{Plaintext, QueryOp},
     eql::{
         decrypt_eql, encrypt_eql, EqlCiphertext, EqlDecryptOpts, EqlEncryptOpts, EqlOperation,
-        PreparedPlaintext,
+        EqlOutput, PreparedPlaintext,
     },
     schema::column::IndexType,
 };
@@ -157,7 +157,7 @@ impl EncryptionService for ZeroKms {
         keyset_id: Option<KeysetIdentifier>,
         plaintexts: Vec<Option<Plaintext>>,
         columns: &[Option<Column>],
-    ) -> Result<Vec<Option<EqlCiphertext>>, Error> {
+    ) -> Result<Vec<Option<EqlOutput>>, Error> {
         debug!(target: ENCRYPT, msg="Encrypt", ?keyset_id, default_keyset_id = ?self.default_keyset_id);
 
         // A keyset is required if no default keyset has been configured
@@ -216,7 +216,7 @@ impl EncryptionService for ZeroKms {
 
         // If no plaintexts to encrypt, return all None
         if prepared_plaintexts.is_empty() {
-            return Ok(vec![None; plaintexts.len()]);
+            return Ok((0..plaintexts.len()).map(|_| None).collect());
         }
 
         // Use default opts since cipher is already initialized with the correct keyset
@@ -231,9 +231,9 @@ impl EncryptionService for ZeroKms {
         debug!(target: ENCRYPT, msg="encrypt_eql completed", count = encrypted.len(), duration_ms = encrypt_duration.as_millis());
 
         // Reconstruct the result vector with None values in the right places
-        let mut result: Vec<Option<EqlCiphertext>> = vec![None; plaintexts.len()];
-        for (idx, ciphertext) in indices.into_iter().zip(encrypted.into_iter()) {
-            result[idx] = Some(ciphertext);
+        let mut result: Vec<Option<EqlOutput>> = (0..plaintexts.len()).map(|_| None).collect();
+        for (idx, output) in indices.into_iter().zip(encrypted.into_iter()) {
+            result[idx] = Some(output);
         }
 
         Ok(result)

@@ -16,7 +16,7 @@ pub use crate::config::{DatabaseConfig, ServerConfig, TandemConfig, TlsConfig};
 pub use crate::log::init;
 pub use crate::proxy::Proxy;
 pub use cipherstash_client::encryption::Plaintext;
-pub use cipherstash_client::eql::{EqlCiphertext, Identifier};
+pub use cipherstash_client::eql::{EqlCiphertext, EqlOutput, Identifier};
 
 use std::mem;
 

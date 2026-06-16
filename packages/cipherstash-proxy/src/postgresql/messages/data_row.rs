@@ -5,7 +5,7 @@ use crate::{
     postgresql::Column,
 };
 use bytes::{Buf, BufMut, BytesMut};
-use cipherstash_client::eql::EqlCiphertext;
+use cipherstash_client::eql::{EqlCiphertext, EQL_SCHEMA_VERSION};
 use std::io::Cursor;
 use tracing::{debug, error};
 
@@ -191,7 +191,7 @@ impl TryFrom<&mut DataColumn> for EqlCiphertext {
                 let input = String::from_utf8_lossy(sliced).to_string();
                 let input = input.replace("\"\"", "\"");
 
-                match serde_json::from_str(&input) {
+                match eql_ciphertext_from_json(input.as_bytes()) {
                     Ok(e) => return Ok(e),
                     Err(err) => {
                         debug!(target: DECRYPT, error = err.to_string());
@@ -221,7 +221,7 @@ impl TryFrom<&mut DataColumn> for EqlCiphertext {
                 let start = 12 + 1;
                 let sliced = &bytes[start..];
 
-                match serde_json::from_slice(sliced) {
+                match eql_ciphertext_from_json(sliced) {
                     Ok(e) => {
                         return Ok(e);
                     }
@@ -235,6 +235,64 @@ impl TryFrom<&mut DataColumn> for EqlCiphertext {
 
         Err(EncryptError::ColumnCouldNotBeParsed.into())
     }
+}
+
+/// Deserialize an EQL ciphertext payload read from the database.
+///
+/// Supports both the current EQL v2.x storage format (a tagged object
+/// discriminated by `"k"`, e.g. `{"k":"ct",...}`) and the legacy pre-v2.x flat
+/// format that predates the `cipherstash-client` 0.37 upgrade. Existing customer
+/// databases may still hold values written in the legacy format, so the proxy
+/// must continue to read them transparently.
+fn eql_ciphertext_from_json(input: &[u8]) -> Result<EqlCiphertext, serde_json::Error> {
+    let value: serde_json::Value = serde_json::from_slice(input)?;
+
+    // The current format always carries the `k` discriminator. Anything without
+    // it is a legacy payload and is remapped onto the current schema.
+    if value.get("k").is_some() {
+        serde_json::from_value(value)
+    } else {
+        serde_json::from_value(legacy_to_current(value))
+    }
+}
+
+/// Remap a legacy (pre-v2.x) EQL payload onto the current scalar storage shape.
+///
+/// The legacy format stored the encrypted record under `c`, the identifier under
+/// `i`, and index terms under `m` (bloom filter), `o` (block ORE), and `u`
+/// (HMAC). The current scalar payload (`k = "ct"`) renames these to `bf`, `ob`,
+/// and `hm` respectively. Decryption only requires the root ciphertext (`c`) and
+/// identifier (`i`); index terms are carried over best-effort. Legacy structured
+/// (JSON / STE-vec) payloads also retained a root `c`, so they decrypt correctly
+/// through the same scalar mapping.
+fn legacy_to_current(old: serde_json::Value) -> serde_json::Value {
+    use serde_json::Value;
+
+    let mut new = serde_json::Map::new();
+    new.insert("k".to_string(), Value::String("ct".to_string()));
+    new.insert(
+        "v".to_string(),
+        old.get("v")
+            .filter(|v| !v.is_null())
+            .cloned()
+            .unwrap_or_else(|| Value::from(EQL_SCHEMA_VERSION)),
+    );
+
+    // Carry over a field from the legacy payload under a (possibly renamed) key,
+    // skipping nulls so optional terms stay absent rather than `null`.
+    let mut carry = |old_key: &str, new_key: &str| {
+        if let Some(v) = old.get(old_key).filter(|v| !v.is_null()) {
+            new.insert(new_key.to_string(), v.clone());
+        }
+    };
+
+    carry("i", "i"); // identifier
+    carry("c", "c"); // encrypted record
+    carry("u", "hm"); // HMAC (exact match)
+    carry("m", "bf"); // bloom filter (LIKE / ILIKE)
+    carry("o", "ob"); // block ORE (ordering)
+
+    Value::Object(new)
 }
 
 #[cfg(test)]
@@ -284,7 +342,7 @@ mod tests {
 
         assert_eq!(
             column_config[1].as_ref().unwrap().identifier,
-            encrypted[1].as_ref().unwrap().identifier
+            *encrypted[1].as_ref().unwrap().identifier()
         );
     }
 
@@ -333,7 +391,7 @@ mod tests {
 
         assert_eq!(
             column_config[0].as_ref().unwrap().identifier,
-            encrypted[0].as_ref().unwrap().identifier
+            *encrypted[0].as_ref().unwrap().identifier()
         );
     }
 
@@ -374,7 +432,7 @@ mod tests {
 
         assert_eq!(
             column_config[2].as_ref().unwrap().identifier,
-            encrypted[2].as_ref().unwrap().identifier
+            *encrypted[2].as_ref().unwrap().identifier()
         );
     }
 

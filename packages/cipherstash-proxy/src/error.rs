@@ -340,9 +340,9 @@ impl From<cipherstash_client::eql::EqlError> for EncryptError {
             cipherstash_client::eql::EqlError::ColumnConfigurationMismatch { table, column } => {
                 Self::ColumnConfigurationMismatch { table, column }
             }
-            cipherstash_client::eql::EqlError::CouldNotDecryptDataForKeyset { keyset_id } => {
-                Self::CouldNotDecryptDataForKeyset { keyset_id }
-            }
+            cipherstash_client::eql::EqlError::CouldNotDecryptDataForKeyset {
+                keyset_id, ..
+            } => Self::CouldNotDecryptDataForKeyset { keyset_id },
             cipherstash_client::eql::EqlError::InvalidIndexTerm => Self::InvalidIndexTerm,
             cipherstash_client::eql::EqlError::MissingCiphertext(identifier) => {
                 Self::ColumnCouldNotBeDeserialised {

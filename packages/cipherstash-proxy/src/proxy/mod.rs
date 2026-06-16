@@ -156,7 +156,7 @@ pub trait EncryptionService: Send + Sync {
         keyset_id: Option<KeysetIdentifier>,
         plaintexts: Vec<Option<Plaintext>>,
         columns: &[Option<Column>],
-    ) -> Result<Vec<Option<crate::EqlCiphertext>>, Error>;
+    ) -> Result<Vec<Option<crate::EqlOutput>>, Error>;
 
     /// Decrypt values retrieved from the database
     async fn decrypt(
