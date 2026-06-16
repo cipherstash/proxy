@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1780289446471,
+  "lastUpdate": 1781644819044,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -21518,6 +21518,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 36.181399,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "aaa716190c52fe2c5401290db1d853c24d4fa0a6",
+          "message": "feat: upgrade cipherstash-client to 0.37.0",
+          "timestamp": "2026-06-01T04:47:34Z",
+          "url": "https://github.com/cipherstash/proxy/pull/406/commits/aaa716190c52fe2c5401290db1d853c24d4fa0a6"
+        },
+        "date": 1781644817733,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 37.495138,
             "unit": "Number"
           }
         ]
