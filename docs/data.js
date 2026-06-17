@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1781672948655,
+  "lastUpdate": 1781673802196,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -21568,6 +21568,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 39.323619,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "9411667d5cccd62bc0a7a7fc608623d7478c9458",
+          "message": "fix: backport stack-auth token-refresh fix; release 2.2.3",
+          "timestamp": "2026-06-01T04:47:34Z",
+          "url": "https://github.com/cipherstash/proxy/pull/407/commits/9411667d5cccd62bc0a7a7fc608623d7478c9458"
+        },
+        "date": 1781673800894,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 38.339837,
             "unit": "Number"
           }
         ]
