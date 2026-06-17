@@ -1,9 +1,11 @@
 [workspace]
 resolver = "2"
 members = ["packages/*"]
+# Vendored crate is consumed only via [patch.crates-io] below, not as a member.
+exclude = ["vendor/stack-auth"]
 
 [workspace.package]
-version = "2.2.2"
+version = "2.2.3"
 edition = "2021"
 
 [profile.dev]
@@ -56,3 +58,13 @@ tracing-subscriber = { version = "^0.3.20", features = [
   "env-filter",
   "std",
 ] }
+
+# HOTFIX (CIP-3159): backport the stack-auth token-refresh CancelGuard fix onto
+# the 0.34.1-alpha.4 source that cipherstash-client 0.34.1-alpha.4 pins. Without
+# this, a cancelled get_token() future could strand `refresh_in_progress = true`,
+# wedging all later refreshes and causing ZeroKMS "Request not authorized" exactly
+# ~15 min (token TTL) after startup. The patch keeps version 0.34.1-alpha.4 so it
+# satisfies cipherstash-client's exact pin while replacing the registry source.
+# Remove once Proxy moves to a cipherstash-client built against stack-auth >= 0.36.0.
+[patch.crates-io]
+stack-auth = { path = "vendor/stack-auth" }
