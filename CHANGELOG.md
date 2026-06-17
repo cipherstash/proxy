@@ -10,7 +10,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
-- **ZeroKMS authentication failures ~15 minutes after startup**: Fixed a token-refresh wedge in the access-key authentication path. When an in-flight request was cancelled at the wrong moment (for example, a client disconnecting mid-query), token refresh could permanently stall, causing `ZeroKMS error: Request not authorized` on all encrypt/decrypt operations roughly 15 minutes (the access-token lifetime) after connecting. Connections worked on startup and then began failing in lockstep. Backports the upstream `stack-auth` token-refresh fix (CIP-3159).
+- **ZeroKMS authentication failures ~15 minutes after startup**: Fixed an issue in the access-key authentication path where, after an in-flight request was interrupted at the wrong moment (for example, a client disconnecting mid-query), access-token renewal could stall. This caused `ZeroKMS error: Request not authorized` on all encrypt/decrypt operations roughly 15 minutes (the access-token lifetime) after connecting — connections worked on startup and then began failing in lockstep.
 
 ## [2.2.2] - 2026-06-01
 
