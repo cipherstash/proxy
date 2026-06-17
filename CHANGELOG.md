@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.2.3] - 2026-06-17
+
 ### Fixed
 
 - **ZeroKMS authentication failures ~15 minutes after startup**: Fixed a token-refresh wedge in the access-key authentication path. When an in-flight request was cancelled at the wrong moment (for example, a client disconnecting mid-query), token refresh could permanently stall, causing `ZeroKMS error: Request not authorized` on all encrypt/decrypt operations roughly 15 minutes (the access-token lifetime) after connecting. Connections worked on startup and then began failing in lockstep. Backports the upstream `stack-auth` token-refresh fix (CIP-3159).
@@ -265,7 +267,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Integration with CipherStash ZeroKMS.
 - Encrypt Query Language (EQL) for indexing and searching encrypted data.
 
-[Unreleased]: https://github.com/cipherstash/proxy/compare/v2.2.2...HEAD
+[Unreleased]: https://github.com/cipherstash/proxy/compare/v2.2.3...HEAD
+[2.2.3]: https://github.com/cipherstash/proxy/compare/v2.2.2...v2.2.3
 [2.2.2]: https://github.com/cipherstash/proxy/compare/v2.2.1...v2.2.2
 [2.2.1]: https://github.com/cipherstash/proxy/compare/v2.2.0-alpha.1...v2.2.1
 [2.2.0-alpha.1]: https://github.com/cipherstash/proxy/compare/v2.1.22...v2.2.0-alpha.1
