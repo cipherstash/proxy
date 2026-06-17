@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1781673802196,
+  "lastUpdate": 1781674605452,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -21593,6 +21593,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 38.339837,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "james@cipherstash.com",
+            "name": "James Sadler",
+            "username": "freshtonic"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "1e2807cba8ec1d7dbd564f46aed5be8dd5bc8a8e",
+          "message": "Merge pull request #407 from cipherstash/james/cip-3159-token-refresh\n\nfix: backport stack-auth token-refresh fix; release 2.2.3",
+          "timestamp": "2026-06-17T15:33:04+10:00",
+          "tree_id": "ae3694cf38ed2deef3aceca60daddda88746ceb3",
+          "url": "https://github.com/cipherstash/proxy/commit/1e2807cba8ec1d7dbd564f46aed5be8dd5bc8a8e"
+        },
+        "date": 1781674604074,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 37.882555,
             "unit": "Number"
           }
         ]
