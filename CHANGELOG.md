@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.2.4] - 2026-06-18
+
+### Fixed
+
+- **ZeroKMS authentication failures ~15 minutes after startup (access keys)**: Fixed the root cause of access tokens never being renewed when authenticating with an access key. The token's lifetime was misread, so renewal never triggered and every encrypt/decrypt operation began failing (`ZeroKMS error: Request not authorized`, "Could not decrypt data") roughly 15 minutes — the token lifetime — after connecting, recovering only on restart. Tokens now renew correctly ahead of expiry. This resolves the remaining cases not addressed by the 2.2.3 fix.
+
 ## [2.2.3] - 2026-06-17
 
 ### Fixed
@@ -267,7 +273,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Integration with CipherStash ZeroKMS.
 - Encrypt Query Language (EQL) for indexing and searching encrypted data.
 
-[Unreleased]: https://github.com/cipherstash/proxy/compare/v2.2.3...HEAD
+[Unreleased]: https://github.com/cipherstash/proxy/compare/v2.2.4...HEAD
+[2.2.4]: https://github.com/cipherstash/proxy/compare/v2.2.3...v2.2.4
 [2.2.3]: https://github.com/cipherstash/proxy/compare/v2.2.2...v2.2.3
 [2.2.2]: https://github.com/cipherstash/proxy/compare/v2.2.1...v2.2.2
 [2.2.1]: https://github.com/cipherstash/proxy/compare/v2.2.0-alpha.1...v2.2.1
