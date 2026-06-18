@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **ZeroKMS authentication failures ~15 minutes after startup (access keys)**: Fixed the root cause of access tokens never being renewed when authenticating with an access key. The token's lifetime was misread, so renewal never triggered and every encrypt/decrypt operation began failing (`ZeroKMS error: Request not authorized`, "Could not decrypt data") roughly 15 minutes — the token lifetime — after connecting, recovering only on restart. Tokens now renew correctly ahead of expiry. This resolves the remaining cases not addressed by the 2.2.3 fix.
+
 ## [2.2.3] - 2026-06-17
 
 ### Fixed
