@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1781746423578,
+  "lastUpdate": 1781752302320,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -21647,6 +21647,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 38.39819,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "james@cipherstash.com",
+            "name": "James Sadler",
+            "username": "freshtonic"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "4facf298bcdb27edc3306033d1ca09183cf4f614",
+          "message": "Merge pull request #408 from cipherstash/james/cip-3233-access-key-expiry\n\nfix: access-key token expiry parsed as relative — tokens never refresh (CIP-3233); release 2.2.4",
+          "timestamp": "2026-06-18T13:08:53+10:00",
+          "tree_id": "76819256724a4abafad8afe1b47eabe97aa8bebf",
+          "url": "https://github.com/cipherstash/proxy/commit/4facf298bcdb27edc3306033d1ca09183cf4f614"
+        },
+        "date": 1781752301026,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 38.136891,
             "unit": "Number"
           }
         ]
