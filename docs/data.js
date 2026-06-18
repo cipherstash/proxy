@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1781674605452,
+  "lastUpdate": 1781746423578,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -21622,6 +21622,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 37.882555,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "a239ebc1eca994d2bf99d8ec8bc7d798426b82fd",
+          "message": "fix: access-key token expiry parsed as relative — tokens never refresh (CIP-3233); release 2.2.4",
+          "timestamp": "2026-06-17T05:33:10Z",
+          "url": "https://github.com/cipherstash/proxy/pull/408/commits/a239ebc1eca994d2bf99d8ec8bc7d798426b82fd"
+        },
+        "date": 1781746422181,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 38.39819,
             "unit": "Number"
           }
         ]
