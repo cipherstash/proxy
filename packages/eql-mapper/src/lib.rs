@@ -2198,10 +2198,47 @@ mod test {
     }
 
     /// Equality (`=`) on a jsonb sv element must NOT be rewritten to a CLLW ORE
-    /// comparison: equality is hmac-based and resolves through the existing
-    /// `=` path. This guards against the ordering rule over-matching.
+    /// comparison: equality is hmac/oc-based and resolves through the
+    /// `eql_v2.eq_term` path, not the ordering `eql_v2.ore_cllw` path. This
+    /// guards against the ordering rule over-matching the equality operators.
     #[test]
     fn jsonb_sv_equality_is_not_rewritten_to_ore_cllw() {
+        let schema = resolver(schema! {
+            tables: {
+                encrypted: {
+                    id,
+                    encrypted_jsonb (EQL: JsonLike),
+                }
+            }
+        });
+
+        let statement =
+            parse("SELECT encrypted_jsonb FROM encrypted WHERE encrypted_jsonb -> $1 = $2");
+
+        match type_check(schema, &statement) {
+            Ok(typed) => match typed.transform(HashMap::new()) {
+                Ok(statement) => {
+                    let sql = statement.to_string();
+                    assert!(
+                        !sql.contains("ore_cllw"),
+                        "equality must not bind to ore_cllw, got: {sql}"
+                    );
+                }
+                Err(err) => panic!("transformation failed: {err}"),
+            },
+            Err(err) => panic!("type check failed: {err}"),
+        }
+    }
+
+    /// Group C (CIP-3281): equality (`=`) on a jsonb sv-element extracted via
+    /// `->` must be rewritten to compare the XOR-aware equality terms so the SQL
+    /// binds to `eql_v2.eq_term` rather than the root `eql_v2_encrypted`
+    /// equality path. The left operand (`col -> sel`) is an
+    /// `eql_v2.ste_vec_entry`, so `eql_v2.eq_term(...)` reads its `hm`/`oc`
+    /// term; the right operand is the query payload jsonb, whose `hm`/`oc` term
+    /// is read with the inlined `eq_term` body (`decode(coalesce(...), 'hex')`).
+    #[test]
+    fn jsonb_sv_equality_rewrites_to_eq_term() {
         let schema = resolver(schema! {
             tables: {
                 encrypted: {
@@ -2220,13 +2257,199 @@ mod test {
                     assert_eq!(
                         statement.to_string(),
                         "SELECT encrypted_jsonb FROM encrypted WHERE \
-                        encrypted_jsonb -> $1::JSONB::eql_v2_encrypted = $2::JSONB::eql_v2_encrypted"
+                        eql_v2.eq_term(encrypted_jsonb -> $1::JSONB::eql_v2_encrypted) = \
+                        decode(coalesce($2::JSONB ->> 'hm', $2::JSONB ->> 'oc'), 'hex')"
                     );
                 }
                 Err(err) => panic!("transformation failed: {err}"),
             },
             Err(err) => panic!("type check failed: {err}"),
         }
+    }
+
+    /// Inequality (`<>`) on a jsonb sv element must rewrite to the same
+    /// `eql_v2.eq_term` comparison, preserving the `<>` operator.
+    #[test]
+    fn jsonb_sv_inequality_rewrites_to_eq_term() {
+        let schema = resolver(schema! {
+            tables: {
+                encrypted: {
+                    id,
+                    encrypted_jsonb (EQL: JsonLike),
+                }
+            }
+        });
+
+        let statement =
+            parse("SELECT encrypted_jsonb FROM encrypted WHERE encrypted_jsonb -> $1 <> $2");
+
+        match type_check(schema, &statement) {
+            Ok(typed) => match typed.transform(HashMap::new()) {
+                Ok(statement) => {
+                    assert_eq!(
+                        statement.to_string(),
+                        "SELECT encrypted_jsonb FROM encrypted WHERE \
+                        eql_v2.eq_term(encrypted_jsonb -> $1::JSONB::eql_v2_encrypted) <> \
+                        decode(coalesce($2::JSONB ->> 'hm', $2::JSONB ->> 'oc'), 'hex')"
+                    );
+                }
+                Err(err) => panic!("transformation failed: {err}"),
+            },
+            Err(err) => panic!("type check failed: {err}"),
+        }
+    }
+
+    /// The `jsonb_path_query_first` form of a jsonb sv equality comparison must
+    /// also rewrite to the `eql_v2.eq_term` path. The function is first
+    /// rewritten to `eql_v2.jsonb_path_query_first` by
+    /// `RewriteStandardSqlFnsOnEqlTypes`; its result is an `eql_v2_encrypted`,
+    /// so it is cast to `::eql_v2.ste_vec_entry` (via jsonb) before `eq_term`.
+    #[test]
+    fn jsonb_sv_equality_path_query_first_rewrites_to_eq_term() {
+        let schema = resolver(schema! {
+            tables: {
+                encrypted: {
+                    id,
+                    encrypted_jsonb (EQL: JsonLike),
+                }
+            }
+        });
+
+        let statement = parse(
+            "SELECT encrypted_jsonb FROM encrypted WHERE jsonb_path_query_first(encrypted_jsonb, $1) = $2",
+        );
+
+        match type_check(schema, &statement) {
+            Ok(typed) => match typed.transform(HashMap::new()) {
+                Ok(statement) => {
+                    assert_eq!(
+                        statement.to_string(),
+                        "SELECT encrypted_jsonb FROM encrypted WHERE \
+                        eql_v2.eq_term(eql_v2.jsonb_path_query_first(encrypted_jsonb, $1::JSONB::eql_v2_encrypted)::JSONB::eql_v2.ste_vec_entry) = \
+                        decode(coalesce($2::JSONB ->> 'hm', $2::JSONB ->> 'oc'), 'hex')"
+                    );
+                }
+                Err(err) => panic!("transformation failed: {err}"),
+            },
+            Err(err) => panic!("type check failed: {err}"),
+        }
+    }
+
+    /// The RHS param of a jsonb sv equality comparison must resolve to
+    /// `EqlTerm::SteVecTerm` so the proxy encrypts it as the matching STE-vec
+    /// equality term (`hm`/`oc`) carried by the column's leaf.
+    #[test]
+    fn jsonb_sv_equality_rhs_param_is_ste_vec_term() {
+        use crate::unifier::EqlTerm;
+
+        let schema = resolver(schema! {
+            tables: {
+                encrypted: {
+                    id,
+                    encrypted_jsonb (EQL: JsonLike),
+                }
+            }
+        });
+
+        let statement =
+            parse("SELECT encrypted_jsonb FROM encrypted WHERE encrypted_jsonb -> $1 = $2");
+
+        let typed = type_check(schema, &statement)
+            .map_err(|err| err.to_string())
+            .unwrap();
+
+        let (_, value) = typed
+            .params
+            .iter()
+            .find(|(p, _)| *p == Param(2))
+            .expect("param $2 should be present");
+
+        assert!(
+            matches!(value, Value::Eql(EqlTerm::SteVecTerm(_))),
+            "expected $2 to be EqlTerm::SteVecTerm, got {value}"
+        );
+    }
+
+    /// The RHS *literal* of a jsonb sv equality comparison must also resolve to
+    /// `EqlTerm::SteVecTerm` so a simple-protocol query (inline literal) is
+    /// encrypted as the matching STE-vec equality term.
+    #[test]
+    fn jsonb_sv_equality_rhs_literal_is_ste_vec_term() {
+        use crate::unifier::EqlTerm;
+
+        let schema = resolver(schema! {
+            tables: {
+                encrypted: {
+                    id,
+                    encrypted_jsonb (EQL: JsonLike),
+                }
+            }
+        });
+
+        let statement =
+            parse("SELECT encrypted_jsonb FROM encrypted WHERE encrypted_jsonb -> 'number' = 4");
+
+        let typed = type_check(schema, &statement)
+            .map_err(|err| err.to_string())
+            .unwrap();
+
+        let ste_vec_term_count = typed
+            .literals
+            .iter()
+            .filter(|(eql_term, _)| matches!(eql_term, EqlTerm::SteVecTerm(_)))
+            .count();
+
+        assert_eq!(
+            ste_vec_term_count, 1,
+            "expected exactly one SteVecTerm literal (the comparison value), got {:?}",
+            typed.literals
+        );
+    }
+
+    /// The commutative form with the accessor on the *right*
+    /// (`value = col -> selector`) is intentionally NOT rewritten: the rule and
+    /// the reclassification both gate on `is_ste_vec_accessor(left)`, so they
+    /// agree to leave it as root `eql_v2_encrypted` equality. This guards that
+    /// intentional left-operand-only behaviour so a future change that "adds
+    /// commutativity" to only one of the two passes is caught.
+    #[test]
+    fn jsonb_sv_equality_commutative_form_is_not_rewritten() {
+        use crate::unifier::EqlTerm;
+
+        let schema = resolver(schema! {
+            tables: {
+                encrypted: {
+                    id,
+                    encrypted_jsonb (EQL: JsonLike),
+                }
+            }
+        });
+
+        let statement =
+            parse("SELECT encrypted_jsonb FROM encrypted WHERE $2 = encrypted_jsonb -> $1");
+
+        let typed = type_check(schema, &statement)
+            .map_err(|err| err.to_string())
+            .unwrap();
+
+        // The rewrite must not fire: no `eq_term` in the emitted SQL.
+        let sql = typed.transform(HashMap::new()).unwrap().to_string();
+        assert!(
+            !sql.contains("eq_term"),
+            "commutative form must not be rewritten to eq_term, got: {sql}"
+        );
+
+        // And the param must NOT be reclassified to SteVecTerm — the two passes
+        // must stay in lockstep.
+        let (_, value) = typed
+            .params
+            .iter()
+            .find(|(p, _)| *p == Param(2))
+            .expect("param $2 should be present");
+        assert!(
+            !matches!(value, Value::Eql(EqlTerm::SteVecTerm(_))),
+            "commutative-form RHS must NOT be reclassified to SteVecTerm, got {value}"
+        );
     }
 
     /// The RHS param of a jsonb sv ordering comparison must resolve to

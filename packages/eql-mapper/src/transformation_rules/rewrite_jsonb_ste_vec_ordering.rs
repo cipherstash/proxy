@@ -10,8 +10,10 @@ use sqltk::parser::ast::{
 use sqltk::parser::tokenizer::Span;
 use sqltk::{NodeKey, NodePath, Visitable};
 
-use crate::ste_vec_ordering::{is_ordering_operator, is_ste_vec_accessor};
-use crate::unifier::{Type, Value};
+use crate::ste_vec_ordering::{
+    is_eql_typed, is_ordering_operator, is_ste_vec_accessor, rhs_as_jsonb,
+};
+use crate::unifier::Type;
 use crate::EqlMapperError;
 
 use super::TransformationRule;
@@ -62,14 +64,6 @@ impl<'ast> RewriteJsonbSteVecOrdering<'ast> {
         Self { node_types }
     }
 
-    /// Returns `true` if `expr` is EQL-typed in `node_types`.
-    fn is_eql_typed(&self, expr: &Expr) -> bool {
-        matches!(
-            self.node_types.get(&NodeKey::new(expr)),
-            Some(Type::Value(Value::Eql(_)))
-        )
-    }
-
     /// Wraps `expr` in a `::JSONB` cast.
     ///
     /// When `expr` is a binary operator (e.g. the `->` / `->>` accessor) it is
@@ -111,50 +105,6 @@ impl<'ast> RewriteJsonbSteVecOrdering<'ast> {
             within_group: vec![],
         })
     }
-
-    /// Reduces a right-hand-side operand to a bare `::JSONB` value suitable for
-    /// `eql_v2.ore_cllw(jsonb)`.
-    ///
-    /// The casting rules wrap encrypted params/literals as
-    /// `<value>::JSONB::eql_v2_encrypted`. `eql_v2.ore_cllw` accepts `jsonb`,
-    /// so the outer `::eql_v2_encrypted` cast is stripped, leaving
-    /// `<value>::JSONB`. If the expression is not in the expected
-    /// double-cast shape it is wrapped in a `::JSONB` cast defensively.
-    fn rhs_as_jsonb(expr: Expr) -> Expr {
-        if let Expr::Cast {
-            kind: CastKind::DoubleColon,
-            expr: inner,
-            data_type: DataType::Custom(name, _),
-            ..
-        } = &expr
-        {
-            let is_encrypted = name.0.len() == 1
-                && matches!(
-                    &name.0[0],
-                    ObjectNamePart::Identifier(ident)
-                        if ident.value.eq_ignore_ascii_case("eql_v2_encrypted")
-                );
-
-            if is_encrypted {
-                if let Expr::Cast {
-                    data_type: DataType::JSONB,
-                    ..
-                } = &**inner
-                {
-                    // Strip the outer `::eql_v2_encrypted` cast, keeping `<value>::JSONB`.
-                    return (**inner).clone();
-                }
-            }
-        }
-
-        // Defensive fallback: cast whatever we have to JSONB.
-        Expr::Cast {
-            kind: CastKind::DoubleColon,
-            expr: Box::new(expr),
-            data_type: DataType::JSONB,
-            format: None,
-        }
-    }
 }
 
 impl<'ast> TransformationRule<'ast> for RewriteJsonbSteVecOrdering<'ast> {
@@ -180,7 +130,7 @@ impl<'ast> TransformationRule<'ast> for RewriteJsonbSteVecOrdering<'ast> {
                 // overload, which reads the `oc` term identically in either
                 // case.
                 **left = Self::wrap_ore_cllw(Self::cast_jsonb(left_expr));
-                **right = Self::wrap_ore_cllw(Self::rhs_as_jsonb(right_expr));
+                **right = Self::wrap_ore_cllw(rhs_as_jsonb(right_expr));
                 return Ok(true);
             }
         }
@@ -192,8 +142,8 @@ impl<'ast> TransformationRule<'ast> for RewriteJsonbSteVecOrdering<'ast> {
         if let Some((Expr::BinaryOp { left, op, right },)) = node_path.last_1_as::<Expr>() {
             if is_ordering_operator(op)
                 && is_ste_vec_accessor(left)
-                && self.is_eql_typed(left)
-                && self.is_eql_typed(right)
+                && is_eql_typed(&self.node_types, left)
+                && is_eql_typed(&self.node_types, right)
             {
                 return true;
             }

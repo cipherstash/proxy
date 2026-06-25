@@ -190,8 +190,10 @@ fn text_from_sql(
             };
             Ok(Plaintext::new(val))
         }
-        // A jsonb sv ordering comparison RHS must be reduced to its underlying
-        // scalar so it can be encrypted as a CLLW ORE term.
+        // A jsonb sv *term* comparison RHS (ordering or equality) must be
+        // reduced to its underlying scalar so it can be encrypted as a STE-vec
+        // query term (`oc` for CLLW ORE leaves, `hm` for hmac/term-filter
+        // leaves).
         (EqlTermVariant::SteVecTerm, ColumnType::Json) => {
             let value = serde_json::from_str::<serde_json::Value>(val)
                 .map_err(|_| MappingError::CouldNotParseParameter)?;
@@ -322,8 +324,10 @@ fn binary_from_sql(
                 Plaintext::new(val)
             })
         }
-        // A jsonb sv ordering comparison RHS must be reduced to its underlying
-        // scalar so it can be encrypted as a CLLW ORE term.
+        // A jsonb sv *term* comparison RHS (ordering or equality) must be
+        // reduced to its underlying scalar so it can be encrypted as a STE-vec
+        // query term (`oc` for CLLW ORE leaves, `hm` for hmac/term-filter
+        // leaves).
         (
             EqlTermVariant::SteVecTerm,
             ColumnType::Json,
@@ -377,10 +381,11 @@ where
 /// Converts a *scalar* `serde_json::Value` into the matching scalar
 /// [`Plaintext`].
 ///
-/// This is used for the right-hand side of a jsonb STE-vec ordering comparison
-/// (`col -> selector <op> $param`). The comparison is performed against a single
-/// extracted leaf value, so the parameter must be encrypted as a CLLW ORE term,
-/// which requires a scalar plaintext (number or string) rather than
+/// This is used for the right-hand side of a jsonb STE-vec *term* comparison —
+/// ordering (`col -> selector <op> $param`) or equality
+/// (`col -> selector = $param`). The comparison is performed against a single
+/// extracted leaf value, so the parameter must be encrypted as a STE-vec query
+/// term, which requires a scalar plaintext (number or string) rather than
 /// [`Plaintext::Json`].
 ///
 /// Numbers are mapped to [`Plaintext::Float`] (f64) so that the orderable
@@ -391,8 +396,8 @@ where
 /// query term as an integer (`Plaintext::Int` / `BigInt`) would use a different
 /// orderable byte representation and produce incorrect comparison results.
 ///
-/// Non-scalar values (objects, arrays) and JSON `null` are rejected — ordering
-/// comparisons are only defined against scalar leaves.
+/// Non-scalar values (objects, arrays) and JSON `null` are rejected — these
+/// term comparisons are only defined against scalar leaves.
 fn json_scalar_to_plaintext(value: &serde_json::Value) -> Result<Plaintext, MappingError> {
     match value {
         serde_json::Value::String(s) => Ok(Plaintext::new(s.to_owned())),
@@ -507,16 +512,16 @@ mod tests {
         }
     }
 
-    /// A jsonb sv ordering comparison RHS (`EqlTermVariant::SteVecTerm`) on a
-    /// `ColumnType::Json` column must produce a *scalar* `Plaintext` (the
-    /// underlying number/string), not `Plaintext::Json`, because the CLLW ORE
-    /// term generator only accepts scalar values.
+    /// A jsonb sv term comparison RHS (`EqlTermVariant::SteVecTerm`, ordering or
+    /// equality) on a `ColumnType::Json` column must produce a *scalar*
+    /// `Plaintext` (the underlying number/string), not `Plaintext::Json`,
+    /// because the STE-vec term generator only accepts scalar values.
     #[test]
     pub fn ste_vec_term_json_numeric_is_scalar_plaintext() {
         log::init(LogConfig::default());
 
         // Text-format numeric value `4` against a Json column, as the RHS of a
-        // jsonb sv ordering comparison.
+        // jsonb sv term comparison.
         let param = BindParam::new(FormatCode::Text, to_message(b"4"));
 
         let pt = bind_param_from_sql(

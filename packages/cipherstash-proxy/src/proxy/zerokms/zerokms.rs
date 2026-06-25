@@ -202,9 +202,15 @@ impl EncryptionService for ZeroKms {
                         })
                         .unwrap_or(EqlOperation::Store),
 
-                    // SteVecTerm generates a CLLW ORE comparison term (`oc`) for the
-                    // right-hand side of a jsonb sv ordering comparison
-                    // (`col -> selector <op> $param`).
+                    // SteVecTerm generates the STE-vec query term for the
+                    // right-hand side of a jsonb sv *term* comparison —
+                    // ordering (`col -> selector <op> $param`) or equality
+                    // (`col -> selector = $param`). The query op emits whichever
+                    // deterministic term the column's leaf carries: `oc` (CLLW
+                    // ORE) for string/number leaves, `hm` (HMAC) for
+                    // bool/null/array/object leaves. Ordering reads `oc` via
+                    // `eql_v2.ore_cllw`; equality reads `hm`/`oc` via
+                    // `eql_v2.eq_term`.
                     EqlTermVariant::SteVecTerm => col
                         .config
                         .indexes

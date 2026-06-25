@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- **Equality search on encrypted JSON fields**: `WHERE col -> 'field' = value` and
+  `WHERE jsonb_path_query_first(col, 'field') = value` (and their `<>` forms) now
+  match against the encrypted STE-vec element for that field, for both the extended
+  and simple query protocols. Works with term filters (e.g. downcase) for
+  case-insensitive matching.
+
 ## [2.2.4] - 2026-06-18
 
 ### Fixed

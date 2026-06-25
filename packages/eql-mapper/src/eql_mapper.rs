@@ -241,7 +241,7 @@ impl<'ast> EqlMapper<'ast> {
 
     fn param_types(&self, unifier: &Unifier<'ast>) -> Result<Vec<(Param, Value)>, EqlMapperError> {
         let params = self.registry.borrow().resolved_param_types(unifier)?;
-        let (ste_vec_params, _) = self.ste_vec_ordering_rhs_keys(unifier);
+        let (ste_vec_params, _) = self.ste_vec_term_rhs_keys(unifier);
 
         let params = params
             .into_iter()
@@ -265,22 +265,28 @@ impl<'ast> EqlMapper<'ast> {
         Ok(params)
     }
 
-    /// Collects the right-hand-side operand of every *ordering* comparison
-    /// (`<`, `<=`, `>`, `>=`) whose left-hand side is a jsonb STE-vec element
-    /// accessor (`->` / `->>` / `jsonb_path_query_first`).
+    /// Collects the right-hand-side operand of every jsonb STE-vec *term*
+    /// comparison — both *ordering* (`<`, `<=`, `>`, `>=`) and *equality*
+    /// (`=`, `<>`) — whose left-hand side is a jsonb STE-vec element accessor
+    /// (`->` / `->>` / `jsonb_path_query_first`).
     ///
     /// The returned sets identify the RHS values (params by [`Param`], literals
-    /// by [`NodeKey`]) that must be encrypted as a CLLW ORE STE-vec query term
-    /// (`oc`) rather than a full/partial root payload — see
-    /// [`EqlTerm::SteVecTerm`].
-    fn ste_vec_ordering_rhs_keys(
+    /// by [`NodeKey`]) that must be encrypted as a STE-vec query term
+    /// ([`EqlTerm::SteVecTerm`]) rather than a full/partial root payload.
+    /// Ordering binds the term to `eql_v2.ore_cllw(...)` (`oc`); equality binds
+    /// it to `eql_v2.eq_term(...)` (the XOR-aware `hm`/`oc` term the column's
+    /// leaf carries). Both require the same `SteVecTerm` reclassification — the
+    /// proxy's encrypt path emits whichever term the column's leaf carries.
+    fn ste_vec_term_rhs_keys(
         &self,
         unifier: &Unifier<'ast>,
     ) -> (
         std::collections::HashSet<Param>,
         std::collections::HashSet<NodeKey<'ast>>,
     ) {
-        use crate::ste_vec_ordering::{is_ordering_operator, is_ste_vec_accessor};
+        use crate::ste_vec_ordering::{
+            is_equality_operator, is_ordering_operator, is_ste_vec_accessor,
+        };
         use sqltk::parser::ast::Expr;
 
         let mut params = std::collections::HashSet::new();
@@ -288,10 +294,11 @@ impl<'ast> EqlMapper<'ast> {
 
         let registry = self.registry.borrow();
 
-        // `is_eql` mirrors the `RewriteJsonbSteVecOrdering` rule's
-        // `is_eql_typed` check on both operands, so the reclassification (which
-        // changes how the value is encrypted) marks exactly the comparisons the
-        // SQL rewrite will rewrite to `eql_v2.ore_cllw(...)`.
+        // `is_eql` mirrors the `RewriteJsonbSteVecOrdering` /
+        // `RewriteJsonbSteVecEquality` rules' `is_eql_typed` check on both
+        // operands, so the reclassification (which changes how the value is
+        // encrypted) marks exactly the comparisons the SQL rewrites will
+        // rewrite to `eql_v2.ore_cllw(...)` / `eql_v2.eq_term(...)`.
         let is_eql = |expr: &Expr| {
             registry
                 .peek_node_type(expr)
@@ -304,7 +311,7 @@ impl<'ast> EqlMapper<'ast> {
                 continue;
             };
 
-            if !is_ordering_operator(op)
+            if !(is_ordering_operator(op) || is_equality_operator(op))
                 || !is_ste_vec_accessor(left)
                 || !is_eql(left)
                 || !is_eql(right)
@@ -331,7 +338,7 @@ impl<'ast> EqlMapper<'ast> {
 
     /// Asks the [`TypeInferencer`] for a hashmap of literal types, validating that they are all `Value` types.
     fn literal_types(&self) -> Result<Vec<(EqlTerm, &'ast ast::Value)>, EqlMapperError> {
-        let (_, ste_vec_literals) = self.ste_vec_ordering_rhs_keys(&self.unifier.borrow());
+        let (_, ste_vec_literals) = self.ste_vec_term_rhs_keys(&self.unifier.borrow());
 
         let literals = {
             let registry = self.registry.borrow();
