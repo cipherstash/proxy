@@ -2699,8 +2699,8 @@ mod test {
                 transformed.to_string(),
                 format!(
                     "SELECT id FROM encrypted WHERE \
-                    decode(encrypted_int ->> 'op', 'hex') {op} \
-                    decode($1::JSONB::eql_v2_encrypted ->> 'op', 'hex')"
+                    decode(encrypted_int::JSONB ->> 'op', 'hex') {op} \
+                    decode($1::JSONB::eql_v2_encrypted::JSONB ->> 'op', 'hex')"
                 ),
                 "operator `{op}` must rewrite to a decode(op) byte comparison"
             );
@@ -2718,23 +2718,23 @@ mod test {
         let cases = [
             (
                 "ORDER BY encrypted_int",
-                "ORDER BY decode(encrypted_int ->> 'op', 'hex')",
+                "ORDER BY decode(encrypted_int::JSONB ->> 'op', 'hex')",
             ),
             (
                 "ORDER BY encrypted_int ASC",
-                "ORDER BY decode(encrypted_int ->> 'op', 'hex') ASC",
+                "ORDER BY decode(encrypted_int::JSONB ->> 'op', 'hex') ASC",
             ),
             (
                 "ORDER BY encrypted_int DESC",
-                "ORDER BY decode(encrypted_int ->> 'op', 'hex') DESC",
+                "ORDER BY decode(encrypted_int::JSONB ->> 'op', 'hex') DESC",
             ),
             (
                 "ORDER BY encrypted_int DESC NULLS LAST",
-                "ORDER BY decode(encrypted_int ->> 'op', 'hex') DESC NULLS LAST",
+                "ORDER BY decode(encrypted_int::JSONB ->> 'op', 'hex') DESC NULLS LAST",
             ),
             (
                 "ORDER BY encrypted_int ASC NULLS FIRST",
-                "ORDER BY decode(encrypted_int ->> 'op', 'hex') ASC NULLS FIRST",
+                "ORDER BY decode(encrypted_int::JSONB ->> 'op', 'hex') ASC NULLS FIRST",
             ),
         ];
 
@@ -2932,8 +2932,8 @@ mod test {
         assert_eq!(
             transformed.to_string(),
             "SELECT id FROM encrypted WHERE \
-            decode($1::JSONB::eql_v2_encrypted ->> 'op', 'hex') < \
-            decode(encrypted_int ->> 'op', 'hex')",
+            decode($1::JSONB::eql_v2_encrypted::JSONB ->> 'op', 'hex') < \
+            decode(encrypted_int::JSONB ->> 'op', 'hex')",
             "column-on-the-right comparison is rewritten symmetrically to decode(op)"
         );
     }
@@ -3057,7 +3057,7 @@ mod test {
         assert_eq!(
             transformed.to_string(),
             "SELECT id FROM encrypted ORDER BY \
-            decode(encrypted_int ->> 'op', 'hex') DESC NULLS LAST, id ASC",
+            decode(encrypted_int::JSONB ->> 'op', 'hex') DESC NULLS LAST, id ASC",
             "only the OPE sort key is rewritten; plaintext key and directions are preserved"
         );
     }

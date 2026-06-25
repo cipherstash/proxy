@@ -4,8 +4,9 @@ use std::sync::Arc;
 
 use sqltk::parser::ast::Value as SqltkValue;
 use sqltk::parser::ast::{
-    BinaryOperator, Expr, Function, FunctionArg, FunctionArgExpr, FunctionArgumentList,
-    FunctionArguments, Ident, ObjectName, ObjectNamePart, OrderByExpr, ValueWithSpan,
+    BinaryOperator, CastKind, DataType, Expr, Function, FunctionArg, FunctionArgExpr,
+    FunctionArgumentList, FunctionArguments, Ident, ObjectName, ObjectNamePart, OrderByExpr,
+    ValueWithSpan,
 };
 use sqltk::parser::tokenizer::Span;
 use sqltk::{NodeKey, NodePath, Visitable};
@@ -122,16 +123,31 @@ impl<'ast> RewriteScalarOpeOrdering<'ast> {
         )
     }
 
-    /// Wraps `expr` in `decode(<expr> ->> 'op', 'hex')`.
+    /// Wraps `expr` in `decode((<expr>)::jsonb ->> 'op', 'hex')`.
     ///
-    /// `<expr> ->> 'op'` extracts the order-preserving ciphertext as `text`, and
-    /// `decode(…, 'hex')` turns it into the `bytea` whose memcmp order is the OPE
-    /// order. A binary operand is wrapped in parentheses first so `->>` binds to
-    /// the whole operand rather than its right child.
+    /// `(<expr>)::jsonb ->> 'op'` extracts the order-preserving ciphertext as
+    /// `text`, and `decode(…, 'hex')` turns it into the `bytea` whose memcmp
+    /// order is the OPE order.
+    ///
+    /// The `::jsonb` cast is REQUIRED. `eql_v2_encrypted` defines its own `->>`
+    /// operator (a selector accessor, alias of `->`, that treats the right
+    /// operand as an encrypted selector), so `col ->> 'op'` on the encrypted
+    /// domain binds to that and misfires (`malformed record literal: "op"`).
+    /// Casting to the base `jsonb` type forces native jsonb field extraction.
+    /// A binary operand is wrapped in parentheses first so the cast applies to
+    /// the whole operand rather than binding tighter than `->` to its right
+    /// child.
     fn decode_op(expr: Expr) -> Expr {
         let expr = match expr {
             binary @ Expr::BinaryOp { .. } => Expr::Nested(Box::new(binary)),
             other => other,
+        };
+
+        let expr = Expr::Cast {
+            kind: CastKind::DoubleColon,
+            expr: Box::new(expr),
+            data_type: DataType::JSONB,
+            format: None,
         };
 
         let extract_op = Expr::BinaryOp {
