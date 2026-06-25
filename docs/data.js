@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1782283859641,
+  "lastUpdate": 1782348108621,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -21726,6 +21726,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 38.247386,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "b38eeb0ac507b808129997331344bcd7ca9368e6",
+          "message": "chore(deps): upgrade cipherstash-client to 0.38.0, drop vendored stack-auth patch (CIP-3233)",
+          "timestamp": "2026-06-24T22:13:30Z",
+          "url": "https://github.com/cipherstash/proxy/pull/409/commits/b38eeb0ac507b808129997331344bcd7ca9368e6"
+        },
+        "date": 1782348107122,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 40.187877,
             "unit": "Number"
           }
         ]
