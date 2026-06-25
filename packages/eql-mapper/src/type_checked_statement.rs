@@ -6,8 +6,9 @@ use sqltk::{AsNodeKey, NodeKey, Transformable};
 use crate::unifier::EqlTerm;
 use crate::{
     CastLiteralsAsEncrypted, CastParamsAsEncrypted, DryRunnable, EqlMapperError,
-    FailOnPlaceholderChange, Param, PreserveEffectiveAliases, RewriteContainmentOps,
-    RewriteJsonbSteVecOrdering, RewriteStandardSqlFnsOnEqlTypes, TransformationRule,
+    FailOnPlaceholderChange, IndexResolver, Param, PreserveEffectiveAliases, RewriteContainmentOps,
+    RewriteJsonbSteVecOrdering, RewriteScalarOpeOrdering, RewriteStandardSqlFnsOnEqlTypes,
+    TransformationRule,
 };
 
 use crate::unifier::{Projection, Type, Value};
@@ -43,6 +44,14 @@ pub struct TypeCheckedStatement<'ast> {
     /// [`Values`]: sqltk::parser::ast::Values
     /// [`Value`]: sqltk::parser::ast::Value
     pub node_types: Arc<HashMap<NodeKey<'ast>, Type>>,
+
+    /// Side-channel lookup of concrete encrypted-index types by `(table, column)`.
+    ///
+    /// Consumed only by index-aware transformation rules to choose
+    /// index-specific target functions. It does not participate in inference or
+    /// unification. Defaults to [`crate::EmptyIndexResolver`] when the statement
+    /// was produced by [`crate::type_check`].
+    index_resolver: Arc<dyn IndexResolver>,
 }
 
 impl<'ast> TypeCheckedStatement<'ast> {
@@ -52,6 +61,7 @@ impl<'ast> TypeCheckedStatement<'ast> {
         params: Vec<(Param, Value)>,
         literals: Vec<(EqlTerm, &'ast ast::Value)>,
         node_types: Arc<HashMap<NodeKey<'ast>, Type>>,
+        index_resolver: Arc<dyn IndexResolver>,
     ) -> Self {
         Self {
             statement,
@@ -59,6 +69,7 @@ impl<'ast> TypeCheckedStatement<'ast> {
             params,
             literals,
             node_types,
+            index_resolver,
         }
     }
 
@@ -154,6 +165,10 @@ impl<'ast> TypeCheckedStatement<'ast> {
             RewriteStandardSqlFnsOnEqlTypes::new(Arc::clone(&self.node_types)),
             RewriteContainmentOps::new(Arc::clone(&self.node_types)),
             RewriteJsonbSteVecOrdering::new(Arc::clone(&self.node_types)),
+            RewriteScalarOpeOrdering::new(
+                Arc::clone(&self.node_types),
+                Arc::clone(&self.index_resolver),
+            ),
             PreserveEffectiveAliases,
             CastLiteralsAsEncrypted::new(encrypted_literals),
             FailOnPlaceholderChange::new(),

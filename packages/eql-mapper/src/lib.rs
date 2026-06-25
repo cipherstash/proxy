@@ -4,6 +4,7 @@ mod dep;
 mod display_helpers;
 mod eql_mapper;
 mod importer;
+mod index_resolver;
 mod inference;
 mod iterator_ext;
 mod model;
@@ -18,6 +19,7 @@ mod test_helpers;
 
 pub use display_helpers::*;
 pub use eql_mapper::*;
+pub use index_resolver::*;
 pub use model::*;
 pub use param::*;
 pub use type_checked_statement::*;
@@ -33,7 +35,7 @@ pub(crate) use transformation_rules::*;
 
 #[cfg(test)]
 mod test {
-    use super::{test_helpers::*, type_check};
+    use super::{test_helpers::*, type_check, type_check_with_indexes};
     use crate::{
         projection, schema, test_helpers,
         unifier::{
@@ -2430,6 +2432,231 @@ mod test {
         type_check(schema, &statement)
             .map_err(|err| err.to_string())
             .unwrap();
+    }
+
+    /// A scalar (non-jsonb) `eql_v2_encrypted` column whose resolved index set
+    /// contains `Ope` must have ordering comparisons rewritten to compare the
+    /// order-preserving `op` ciphertext directly using Postgres built-ins.
+    ///
+    /// `col <op> $param`  →  `decode(col->>'op','hex') <op> decode($param->>'op','hex')`
+    #[test]
+    fn scalar_ope_ordering_rewrites_to_decode_op() {
+        use crate::{IndexKind, MapIndexResolver};
+        use std::collections::HashSet;
+
+        for op in ["<", "<=", ">", ">="] {
+            let schema = resolver(schema! {
+                tables: {
+                    encrypted: {
+                        id,
+                        encrypted_int (EQL: Ord),
+                    }
+                }
+            });
+
+            let index_resolver = Arc::new(MapIndexResolver::new(HashMap::from_iter([(
+                TableColumn {
+                    table: id("encrypted"),
+                    column: id("encrypted_int"),
+                },
+                HashSet::from_iter([IndexKind::Ope]),
+            )])));
+
+            let statement = parse(&format!(
+                "SELECT id FROM encrypted WHERE encrypted_int {op} $1"
+            ));
+
+            let typed = type_check_with_indexes(schema, &statement, index_resolver)
+                .map_err(|err| err.to_string())
+                .unwrap();
+
+            let transformed = typed.transform(HashMap::new()).unwrap();
+
+            assert_eq!(
+                transformed.to_string(),
+                format!(
+                    "SELECT id FROM encrypted WHERE \
+                    decode(encrypted_int ->> 'op', 'hex') {op} \
+                    decode($1::JSONB::eql_v2_encrypted ->> 'op', 'hex')"
+                ),
+                "operator `{op}` must rewrite to a decode(op) byte comparison"
+            );
+        }
+    }
+
+    /// `ORDER BY col [ASC|DESC] [NULLS …]` on a scalar OPE column must rewrite
+    /// the sort key to `decode(col->>'op','hex')`, preserving direction and
+    /// nulls ordering.
+    #[test]
+    fn scalar_ope_order_by_rewrites_to_decode_op() {
+        use crate::{IndexKind, MapIndexResolver};
+        use std::collections::HashSet;
+
+        let cases = [
+            (
+                "ORDER BY encrypted_int",
+                "ORDER BY decode(encrypted_int ->> 'op', 'hex')",
+            ),
+            (
+                "ORDER BY encrypted_int ASC",
+                "ORDER BY decode(encrypted_int ->> 'op', 'hex') ASC",
+            ),
+            (
+                "ORDER BY encrypted_int DESC",
+                "ORDER BY decode(encrypted_int ->> 'op', 'hex') DESC",
+            ),
+            (
+                "ORDER BY encrypted_int DESC NULLS LAST",
+                "ORDER BY decode(encrypted_int ->> 'op', 'hex') DESC NULLS LAST",
+            ),
+            (
+                "ORDER BY encrypted_int ASC NULLS FIRST",
+                "ORDER BY decode(encrypted_int ->> 'op', 'hex') ASC NULLS FIRST",
+            ),
+        ];
+
+        for (order_by, expected_order_by) in cases {
+            let schema = resolver(schema! {
+                tables: {
+                    encrypted: {
+                        id,
+                        encrypted_int (EQL: Ord),
+                    }
+                }
+            });
+
+            let index_resolver = Arc::new(MapIndexResolver::new(HashMap::from_iter([(
+                TableColumn {
+                    table: id("encrypted"),
+                    column: id("encrypted_int"),
+                },
+                HashSet::from_iter([IndexKind::Ope]),
+            )])));
+
+            let statement = parse(&format!("SELECT id FROM encrypted {order_by}"));
+
+            let typed = type_check_with_indexes(schema, &statement, index_resolver)
+                .map_err(|err| err.to_string())
+                .unwrap();
+
+            let transformed = typed.transform(HashMap::new()).unwrap();
+
+            assert_eq!(
+                transformed.to_string(),
+                format!("SELECT id FROM encrypted {expected_order_by}"),
+                "`{order_by}` must rewrite the sort key to decode(op)"
+            );
+        }
+    }
+
+    /// An ORE-only scalar column (resolved index set has `Ore`, no `Ope`) must
+    /// NOT be rewritten to the `decode(op)` form: it stays on the existing
+    /// root Block-ORE bare-operator path.
+    #[test]
+    fn scalar_ore_only_ordering_is_not_rewritten_to_decode_op() {
+        use crate::{IndexKind, MapIndexResolver};
+        use std::collections::HashSet;
+
+        let schema = resolver(schema! {
+            tables: {
+                encrypted: {
+                    id,
+                    encrypted_int (EQL: Ord),
+                }
+            }
+        });
+
+        let index_resolver = Arc::new(MapIndexResolver::new(HashMap::from_iter([(
+            TableColumn {
+                table: id("encrypted"),
+                column: id("encrypted_int"),
+            },
+            HashSet::from_iter([IndexKind::Ore]),
+        )])));
+
+        let statement = parse("SELECT id FROM encrypted WHERE encrypted_int > $1");
+
+        let typed = type_check_with_indexes(schema, &statement, index_resolver)
+            .map_err(|err| err.to_string())
+            .unwrap();
+
+        let transformed = typed.transform(HashMap::new()).unwrap();
+
+        assert_eq!(
+            transformed.to_string(),
+            "SELECT id FROM encrypted WHERE encrypted_int > $1::JSONB::eql_v2_encrypted",
+            "ORE-only column must remain on the bare-operator path"
+        );
+    }
+
+    /// With no concrete index information (empty resolver, the default), a
+    /// scalar ordering comparison must NOT be rewritten to `decode(op)`: it
+    /// retains today's behaviour. This is the guard that the default/empty
+    /// resolver reproduces existing behaviour.
+    #[test]
+    fn scalar_ordering_with_empty_resolver_is_not_rewritten() {
+        let schema = resolver(schema! {
+            tables: {
+                encrypted: {
+                    id,
+                    encrypted_int (EQL: Ord),
+                }
+            }
+        });
+
+        let statement = parse("SELECT id FROM encrypted WHERE encrypted_int > $1");
+
+        // `type_check` uses the empty resolver by default.
+        let typed = type_check(schema, &statement)
+            .map_err(|err| err.to_string())
+            .unwrap();
+
+        let transformed = typed.transform(HashMap::new()).unwrap();
+
+        assert_eq!(
+            transformed.to_string(),
+            "SELECT id FROM encrypted WHERE encrypted_int > $1::JSONB::eql_v2_encrypted",
+            "empty resolver must reproduce today's behaviour"
+        );
+    }
+
+    /// Equality (`=`) on a scalar OPE column must NOT be rewritten by the
+    /// ordering rule (equality is a separate concern, CIP-3281).
+    #[test]
+    fn scalar_ope_equality_is_not_rewritten_to_decode_op() {
+        use crate::{IndexKind, MapIndexResolver};
+        use std::collections::HashSet;
+
+        let schema = resolver(schema! {
+            tables: {
+                encrypted: {
+                    id,
+                    encrypted_int (EQL: Eq + Ord),
+                }
+            }
+        });
+
+        let index_resolver = Arc::new(MapIndexResolver::new(HashMap::from_iter([(
+            TableColumn {
+                table: id("encrypted"),
+                column: id("encrypted_int"),
+            },
+            HashSet::from_iter([IndexKind::Ope, IndexKind::Unique]),
+        )])));
+
+        let statement = parse("SELECT id FROM encrypted WHERE encrypted_int = $1");
+
+        let typed = type_check_with_indexes(schema, &statement, index_resolver)
+            .map_err(|err| err.to_string())
+            .unwrap();
+
+        let transformed = typed.transform(HashMap::new()).unwrap();
+
+        assert_eq!(
+            transformed.to_string(),
+            "SELECT id FROM encrypted WHERE encrypted_int = $1::JSONB::eql_v2_encrypted",
+            "equality must not be rewritten by the OPE ordering rule"
+        );
     }
 
     #[test]

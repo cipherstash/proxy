@@ -2,8 +2,8 @@ use super::importer::{ImportError, Importer};
 use crate::{
     inference::{TypeError, TypeInferencer},
     unifier::{EqlTerm, Projection, Type, Unifier, Value},
-    DepMut, Param, ParamError, ScopeError, ScopeTracker, TableResolver, TypeCheckedStatement,
-    TypeRegistry,
+    DepMut, EmptyIndexResolver, IndexResolver, Param, ParamError, ScopeError, ScopeTracker,
+    TableResolver, TypeCheckedStatement, TypeRegistry,
 };
 use sqltk::parser::ast::{self as ast, Statement};
 use sqltk::{Break, NodeKey, Visitable, Visitor};
@@ -35,9 +35,26 @@ pub fn type_check<'ast>(
     resolver: Arc<TableResolver>,
     statement: &'ast Statement,
 ) -> Result<TypeCheckedStatement<'ast>, EqlMapperError> {
+    type_check_with_indexes(resolver, statement, Arc::new(EmptyIndexResolver))
+}
+
+/// Like [`type_check`] but additionally takes an [`IndexResolver`] that exposes
+/// the concrete encrypted-index types of `(table, column)` pairs to the SQL
+/// *transformation* stage.
+///
+/// Type inference and unification are identical to [`type_check`]: the
+/// [`IndexResolver`] is a side-channel consulted only by transformation rules
+/// (via [`TypeCheckedStatement::transform`]) to choose index-specific target
+/// functions. Passing [`EmptyIndexResolver`] is exactly equivalent to calling
+/// [`type_check`].
+pub fn type_check_with_indexes<'ast>(
+    resolver: Arc<TableResolver>,
+    statement: &'ast Statement,
+    index_resolver: Arc<dyn IndexResolver>,
+) -> Result<TypeCheckedStatement<'ast>, EqlMapperError> {
     let mut mapper = EqlMapper::<'ast>::new_with_resolver(resolver);
     match statement.accept(&mut mapper) {
-        ControlFlow::Continue(()) => mapper.resolve(statement),
+        ControlFlow::Continue(()) => mapper.resolve(statement, index_resolver),
         ControlFlow::Break(Break::Err(err)) => Err(err),
         ControlFlow::Break(_) => Err(EqlMapperError::InternalError(String::from(
             "unexpected Break value in type_check",
@@ -138,6 +155,7 @@ impl<'ast> EqlMapper<'ast> {
     pub fn resolve(
         self,
         statement: &'ast Statement,
+        index_resolver: Arc<dyn IndexResolver>,
     ) -> Result<TypeCheckedStatement<'ast>, EqlMapperError> {
         let span_begin = span!(
             target: "eqlmapper::spans",
@@ -181,6 +199,7 @@ impl<'ast> EqlMapper<'ast> {
                     params,
                     literals,
                     Arc::new(node_types),
+                    index_resolver,
                 ))
             }
             Err(err) => {

@@ -236,7 +236,9 @@ fn configuration_table_not_found(e: &tokio_postgres::Error) -> bool {
     msg.contains("eql_v2_configuration") && msg.contains("does not exist")
 }
 
-fn canonical_to_map(canonical: CanonicalEncryptionConfig) -> Result<EncryptConfigMap, ConfigError> {
+pub(super) fn canonical_to_map(
+    canonical: CanonicalEncryptionConfig,
+) -> Result<EncryptConfigMap, ConfigError> {
     Ok(canonical
         .into_config_map()?
         .into_iter()

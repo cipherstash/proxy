@@ -26,7 +26,7 @@ use crate::prometheus::{
     STATEMENTS_ENCRYPTED_TOTAL, STATEMENTS_PASSTHROUGH_MAPPING_DISABLED_TOTAL,
     STATEMENTS_PASSTHROUGH_TOTAL, STATEMENTS_UNMAPPABLE_TOTAL,
 };
-use crate::proxy::EncryptionService;
+use crate::proxy::{EncryptConfigIndexResolver, EncryptionService};
 use crate::EqlOutput;
 use bytes::BytesMut;
 use cipherstash_client::encryption::Plaintext;
@@ -1084,7 +1084,21 @@ where
         &self,
         statement: &'a ast::Statement,
     ) -> Result<TypeCheckedStatement<'a>, Error> {
-        match eql_mapper::type_check(self.context.get_table_resolver(), statement) {
+        // The index resolver exposes the concrete encrypted-index types of a
+        // column to the SQL transformation stage (e.g. so a scalar OPE column's
+        // ordering is rewritten to a byte comparison of the `op` ciphertext). It
+        // is a side-channel: inference and unification are unaffected. A missing
+        // config maps every column to an empty set, reproducing the
+        // pre-resolver behaviour.
+        let index_resolver = Arc::new(EncryptConfigIndexResolver::new(
+            self.context.get_encrypt_config(),
+        ));
+
+        match eql_mapper::type_check_with_indexes(
+            self.context.get_table_resolver(),
+            statement,
+            index_resolver,
+        ) {
             Ok(typed_statement) => {
                 debug!(target: MAPPER,
                     client_id = self.context.client_id,

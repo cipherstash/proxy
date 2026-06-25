@@ -16,7 +16,7 @@ mod encrypt_config;
 mod schema;
 mod zerokms;
 
-pub use encrypt_config::EncryptConfig;
+pub use encrypt_config::{EncryptConfig, EncryptConfigIndexResolver};
 pub use zerokms::ZeroKms;
 
 pub type ReloadSender = UnboundedSender<ReloadCommand>;
