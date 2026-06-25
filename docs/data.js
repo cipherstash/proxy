@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1782394442989,
+  "lastUpdate": 1782395663316,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -21876,6 +21876,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 34.40746,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "93ac7b1d24fc41dee2c23dcd2970feadd3474412",
+          "message": "feat: client 0.38.0 migration — drop vendored stack-auth + EQL v2.3 mapper support (CIP-3233)",
+          "timestamp": "2026-06-24T22:13:30Z",
+          "url": "https://github.com/cipherstash/proxy/pull/409/commits/93ac7b1d24fc41dee2c23dcd2970feadd3474412"
+        },
+        "date": 1782395661931,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 39.400266,
             "unit": "Number"
           }
         ]
