@@ -195,6 +195,15 @@ pub enum EqlTerm {
     /// [`EqlValue`] that implements the EQL trait `TokenMatch`.
     #[display("EQL:Tokenized({})", _0)]
     Tokenized(EqlValue),
+
+    /// A single STE-vec element comparison term. This is the inferred type of the right hand side of an *ordering*
+    /// comparison (`<`, `<=`, `>`, `>=`) whose left hand side is a jsonb STE-vec element extracted via `->` / `->>` /
+    /// `jsonb_path_query_first`.
+    ///
+    /// It is distinct from [`EqlTerm::Partial`] because the value must be encrypted as a CLLW ORE STE-vec query term
+    /// (`oc`) so that the comparison binds to `eql_v2.ore_cllw(...)` rather than the root Block-ORE (`ob`) path.
+    #[display("EQL:SteVecTerm({})", _0)]
+    SteVecTerm(EqlValue),
 }
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Display, Hash)]
@@ -209,6 +218,8 @@ pub enum EqlTermVariant {
     JsonPath,
     #[display("EQL:Tokenized")]
     Tokenized,
+    #[display("EQL:SteVecTerm")]
+    SteVecTerm,
 }
 
 impl EqlTerm {
@@ -218,7 +229,8 @@ impl EqlTerm {
             | EqlTerm::Partial(eql_value, _)
             | EqlTerm::JsonAccessor(eql_value)
             | EqlTerm::JsonPath(eql_value)
-            | EqlTerm::Tokenized(eql_value) => eql_value.table_column(),
+            | EqlTerm::Tokenized(eql_value)
+            | EqlTerm::SteVecTerm(eql_value) => eql_value.table_column(),
         }
     }
 
@@ -229,6 +241,7 @@ impl EqlTerm {
             EqlTerm::JsonAccessor(_) => EqlTermVariant::JsonAccessor,
             EqlTerm::JsonPath(_) => EqlTermVariant::JsonPath,
             EqlTerm::Tokenized(_) => EqlTermVariant::Tokenized,
+            EqlTerm::SteVecTerm(_) => EqlTermVariant::SteVecTerm,
         }
     }
 }

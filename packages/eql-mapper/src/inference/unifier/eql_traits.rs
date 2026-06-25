@@ -320,6 +320,8 @@ impl EqlTerm {
             EqlTerm::JsonAccessor(_) => EqlTraits::none(),
             EqlTerm::JsonPath(_) => EqlTraits::none(),
             EqlTerm::Tokenized(_) => EqlTraits::none(),
+            // A STE-vec ordering term is a CLLW ORE comparison value, so it satisfies `Ord`.
+            EqlTerm::SteVecTerm(_) => EqlTraits::from(EqlTrait::Ord),
         }
     }
 }

@@ -201,6 +201,17 @@ impl EncryptionService for ZeroKms {
                             EqlOperation::Query(&index.index_type, QueryOp::SteVecSelector)
                         })
                         .unwrap_or(EqlOperation::Store),
+
+                    // SteVecTerm generates a CLLW ORE comparison term (`oc`) for the
+                    // right-hand side of a jsonb sv ordering comparison
+                    // (`col -> selector <op> $param`).
+                    EqlTermVariant::SteVecTerm => col
+                        .config
+                        .indexes
+                        .iter()
+                        .find(|i| matches!(i.index_type, IndexType::SteVec { .. }))
+                        .map(|index| EqlOperation::Query(&index.index_type, QueryOp::SteVecTerm))
+                        .unwrap_or(EqlOperation::Store),
                 };
 
                 let prepared = PreparedPlaintext::new(

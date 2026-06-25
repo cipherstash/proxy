@@ -9,6 +9,11 @@ use cipherstash_client::eql::{EqlCiphertext, EQL_SCHEMA_VERSION};
 use std::io::Cursor;
 use tracing::{debug, error};
 
+/// The version header byte that prefixes a PostgreSQL `jsonb` value in the
+/// binary wire format. A bare jsonb value is encoded as this byte followed by
+/// the UTF-8 JSON text.
+const JSONB_VERSION_HEADER: u8 = 1;
+
 #[derive(Debug, Clone)]
 pub struct DataRow {
     pub columns: Vec<DataColumn>,
@@ -180,7 +185,41 @@ impl TryFrom<&mut DataColumn> for EqlCiphertext {
 
     fn try_from(col: &mut DataColumn) -> Result<Self, Error> {
         if let Some(bytes) = &col.bytes {
-            if &bytes[0..=1] == b"(\"" {
+            if bytes.first() == Some(&b'{') {
+                // Bare jsonb text encoding.
+                //
+                // A jsonb sv-element projected via `->` / `->>` arrives as a
+                // plain jsonb object (`{...}`) rather than the `("...")`
+                // composite-record wrapper of an `eql_v2_encrypted` column
+                // value. Route it directly to the json deserializer, which
+                // reshapes the bare entry (carrying its own root ciphertext `c`,
+                // identifier `i`, and version `v`) into a decryptable
+                // `EqlCiphertext`.
+                match eql_ciphertext_from_json(bytes) {
+                    Ok(e) => return Ok(e),
+                    Err(err) => {
+                        debug!(target: DECRYPT, error = err.to_string());
+                        return Err(err.into());
+                    }
+                }
+            } else if bytes.first() == Some(&JSONB_VERSION_HEADER) {
+                // Bare jsonb binary encoding.
+                //
+                // The binary wire format for a bare `jsonb` value is a single
+                // version header byte (`0x01`) followed by the UTF-8 JSON text.
+                // This is how a jsonb sv-element projected via `->` / `->>`
+                // arrives when the column is returned in binary format (no
+                // 12-byte composite rowtype header, unlike an
+                // `eql_v2_encrypted` column value).
+                let sliced = &bytes[1..];
+                match eql_ciphertext_from_json(sliced) {
+                    Ok(e) => return Ok(e),
+                    Err(err) => {
+                        debug!(target: DECRYPT, error = err.to_string());
+                        return Err(err.into());
+                    }
+                }
+            } else if bytes.starts_with(b"(\"") {
                 // Text encoding
                 // Encrypted record is in the form ("{}")
                 // json data can be extracted by dropping the first and last two bytes to remove (" and ")
@@ -480,6 +519,62 @@ mod tests {
         let data_col = data_row.columns.first().unwrap();
 
         assert_eq!(data_col.bytes, None);
+    }
+
+    /// A jsonb sv-element projected via `->` arrives as a *bare* jsonb object
+    /// in text format (it does not have the `("...")` composite wrapper of an
+    /// `eql_v2_encrypted` column value). It carries the per-element ciphertext
+    /// `c`, the root identifier `i`, the version `v`, plus sv-element fields
+    /// (`s`, `oc`/`hm`, `a`). The proxy must recognise this shape and reshape
+    /// it into a decryptable `EqlCiphertext` whose `c` decrypts to the field
+    /// value.
+    #[test]
+    pub fn ste_vec_entry_text_is_parsed_as_ciphertext() {
+        use super::EqlCiphertext;
+
+        log::init(LogConfig::with_level(LogLevel::Debug));
+
+        let entry = br#"{"a": false, "c": "mBbMF!z<&zkCI#C(LG|JGgb4%8P*wqkS%pz;p$Q2dVbkzls&6BQKOW?wDZIup6=moW)AKnN}-xzJIMkO*^AoVomfFWT+0Br%3!kepuh", "i": {"c": "encrypted_jsonb", "t": "encrypted"}, "oc": "0d7c40c51d5ea764cc8720c6be8110abf88b683f518fabc85561ecbd22a2d0359d339cf773c040b031d17e05814032e691", "s": "aafcf9a9d134046781689e670a7ff8e8", "v": 2}"#;
+
+        let mut column = DataColumn {
+            bytes: Some(to_message(entry)),
+        };
+
+        let ciphertext = EqlCiphertext::try_from(&mut column)
+            .expect("bare ste_vec_entry should parse into an EqlCiphertext");
+
+        assert_eq!(
+            *ciphertext.identifier(),
+            Identifier::new("encrypted", "encrypted_jsonb")
+        );
+    }
+
+    /// A jsonb sv-element projected via `->` is also delivered in *binary*
+    /// jsonb format (version header byte `0x01` followed by the JSON text) when
+    /// the result column is returned in binary format. The proxy must strip the
+    /// version header and reshape the entry into a decryptable `EqlCiphertext`.
+    #[test]
+    pub fn ste_vec_entry_binary_jsonb_is_parsed_as_ciphertext() {
+        use super::EqlCiphertext;
+
+        log::init(LogConfig::with_level(LogLevel::Debug));
+
+        let json = br#"{"a": false, "c": "mBbMF!z<&zkCI#C(LG|JGgb4%8P*wqkS%pz;p$Q2dVbkzls&6BQKOW?wDZIup6=moW)AKnN}-xzJIMkO*^AoVomfFWT+0Br%3!kepuh", "i": {"c": "encrypted_jsonb", "t": "encrypted"}, "oc": "0d7c40c51d5ea764cc8720c6be8110abf88b683f518fabc85561ecbd22a2d0359d339cf773c040b031d17e05814032e691", "s": "aafcf9a9d134046781689e670a7ff8e8", "v": 2}"#;
+
+        // Binary jsonb wire format: version header byte (1) + JSON text.
+        let mut bytes = BytesMut::new();
+        bytes.extend_from_slice(&[1u8]);
+        bytes.extend_from_slice(json);
+
+        let mut column = DataColumn { bytes: Some(bytes) };
+
+        let ciphertext = EqlCiphertext::try_from(&mut column)
+            .expect("binary jsonb ste_vec_entry should parse into an EqlCiphertext");
+
+        assert_eq!(
+            *ciphertext.identifier(),
+            Identifier::new("encrypted", "encrypted_jsonb")
+        );
     }
 
     #[test]

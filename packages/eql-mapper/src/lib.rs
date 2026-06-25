@@ -9,6 +9,7 @@ mod iterator_ext;
 mod model;
 mod param;
 mod scope_tracker;
+mod ste_vec_ordering;
 mod transformation_rules;
 mod type_checked_statement;
 
@@ -2086,6 +2087,280 @@ mod test {
             typed.projection,
             projection![(EQL(patients.notes: JsonLike) as notes)]
         );
+    }
+
+    /// Group B (CIP-3279): ordering comparisons on a jsonb sv-element extracted
+    /// via `->` must be rewritten to compare CLLW ORE terms so the SQL binds to
+    /// the `eql_v2.ore_cllw <op> eql_v2.ore_cllw` operators instead of the root
+    /// Block-ORE (`ob`) path which raises `Expected an ore index (ob)`.
+    #[test]
+    fn jsonb_sv_ordering_rewrites_to_ore_cllw() {
+        // init_tracing();
+        let schema = resolver(schema! {
+            tables: {
+                encrypted: {
+                    id,
+                    encrypted_jsonb (EQL: JsonLike),
+                }
+            }
+        });
+
+        let statement =
+            parse("SELECT encrypted_jsonb FROM encrypted WHERE encrypted_jsonb -> $1 > $2");
+
+        match type_check(schema, &statement) {
+            Ok(typed) => match typed.transform(HashMap::new()) {
+                Ok(statement) => {
+                    assert_eq!(
+                        statement.to_string(),
+                        "SELECT encrypted_jsonb FROM encrypted WHERE \
+                        eql_v2.ore_cllw((encrypted_jsonb -> $1::JSONB::eql_v2_encrypted)::JSONB) > \
+                        eql_v2.ore_cllw($2::JSONB)"
+                    );
+                }
+                Err(err) => panic!("transformation failed: {err}"),
+            },
+            Err(err) => panic!("type check failed: {err}"),
+        }
+    }
+
+    /// The `jsonb_path_query_first` form of a jsonb sv ordering comparison must
+    /// also rewrite to a CLLW ORE comparison. The function is first rewritten to
+    /// `eql_v2.jsonb_path_query_first` by `RewriteStandardSqlFnsOnEqlTypes`.
+    #[test]
+    fn jsonb_sv_ordering_path_query_first_rewrites_to_ore_cllw() {
+        let schema = resolver(schema! {
+            tables: {
+                encrypted: {
+                    id,
+                    encrypted_jsonb (EQL: JsonLike),
+                }
+            }
+        });
+
+        let statement = parse(
+            "SELECT encrypted_jsonb FROM encrypted WHERE jsonb_path_query_first(encrypted_jsonb, $1) > $2",
+        );
+
+        match type_check(schema, &statement) {
+            Ok(typed) => match typed.transform(HashMap::new()) {
+                Ok(statement) => {
+                    assert_eq!(
+                        statement.to_string(),
+                        "SELECT encrypted_jsonb FROM encrypted WHERE \
+                        eql_v2.ore_cllw(eql_v2.jsonb_path_query_first(encrypted_jsonb, $1::JSONB::eql_v2_encrypted)::JSONB) > \
+                        eql_v2.ore_cllw($2::JSONB)"
+                    );
+                }
+                Err(err) => panic!("transformation failed: {err}"),
+            },
+            Err(err) => panic!("type check failed: {err}"),
+        }
+    }
+
+    /// Each ordering operator (`<`, `<=`, `>`, `>=`) on a jsonb sv element must
+    /// rewrite to the CLLW ORE comparison preserving the operator.
+    #[test]
+    fn jsonb_sv_ordering_all_operators_rewrite_to_ore_cllw() {
+        for op in ["<", "<=", ">", ">="] {
+            let schema = resolver(schema! {
+                tables: {
+                    encrypted: {
+                        id,
+                        encrypted_jsonb (EQL: JsonLike),
+                    }
+                }
+            });
+
+            let statement = parse(&format!(
+                "SELECT encrypted_jsonb FROM encrypted WHERE encrypted_jsonb -> $1 {op} $2"
+            ));
+
+            match type_check(schema, &statement) {
+                Ok(typed) => match typed.transform(HashMap::new()) {
+                    Ok(statement) => {
+                        assert_eq!(
+                            statement.to_string(),
+                            format!(
+                                "SELECT encrypted_jsonb FROM encrypted WHERE \
+                                eql_v2.ore_cllw((encrypted_jsonb -> $1::JSONB::eql_v2_encrypted)::JSONB) {op} \
+                                eql_v2.ore_cllw($2::JSONB)"
+                            )
+                        );
+                    }
+                    Err(err) => panic!("transformation failed for `{op}`: {err}"),
+                },
+                Err(err) => panic!("type check failed for `{op}`: {err}"),
+            }
+        }
+    }
+
+    /// Equality (`=`) on a jsonb sv element must NOT be rewritten to a CLLW ORE
+    /// comparison: equality is hmac-based and resolves through the existing
+    /// `=` path. This guards against the ordering rule over-matching.
+    #[test]
+    fn jsonb_sv_equality_is_not_rewritten_to_ore_cllw() {
+        let schema = resolver(schema! {
+            tables: {
+                encrypted: {
+                    id,
+                    encrypted_jsonb (EQL: JsonLike),
+                }
+            }
+        });
+
+        let statement =
+            parse("SELECT encrypted_jsonb FROM encrypted WHERE encrypted_jsonb -> $1 = $2");
+
+        match type_check(schema, &statement) {
+            Ok(typed) => match typed.transform(HashMap::new()) {
+                Ok(statement) => {
+                    assert_eq!(
+                        statement.to_string(),
+                        "SELECT encrypted_jsonb FROM encrypted WHERE \
+                        encrypted_jsonb -> $1::JSONB::eql_v2_encrypted = $2::JSONB::eql_v2_encrypted"
+                    );
+                }
+                Err(err) => panic!("transformation failed: {err}"),
+            },
+            Err(err) => panic!("type check failed: {err}"),
+        }
+    }
+
+    /// The RHS param of a jsonb sv ordering comparison must resolve to
+    /// `EqlTerm::SteVecTerm` so the proxy encrypts it as a CLLW ORE STE-vec
+    /// query term (`oc`).
+    #[test]
+    fn jsonb_sv_ordering_rhs_param_is_ste_vec_term() {
+        use crate::unifier::EqlTerm;
+
+        let schema = resolver(schema! {
+            tables: {
+                encrypted: {
+                    id,
+                    encrypted_jsonb (EQL: JsonLike),
+                }
+            }
+        });
+
+        let statement =
+            parse("SELECT encrypted_jsonb FROM encrypted WHERE encrypted_jsonb -> $1 > $2");
+
+        let typed = type_check(schema, &statement)
+            .map_err(|err| err.to_string())
+            .unwrap();
+
+        // $2 is the comparison RHS; it must be a SteVecTerm.
+        let (_, value) = typed
+            .params
+            .iter()
+            .find(|(p, _)| *p == Param(2))
+            .expect("param $2 should be present");
+
+        assert!(
+            matches!(value, Value::Eql(EqlTerm::SteVecTerm(_))),
+            "expected $2 to be EqlTerm::SteVecTerm, got {value}"
+        );
+    }
+
+    /// The RHS *literal* of a jsonb sv ordering comparison must also resolve to
+    /// `EqlTerm::SteVecTerm` so a simple-protocol query (inline literal) is
+    /// encrypted as a CLLW ORE STE-vec query term (`oc`).
+    #[test]
+    fn jsonb_sv_ordering_rhs_literal_is_ste_vec_term() {
+        use crate::unifier::EqlTerm;
+
+        let schema = resolver(schema! {
+            tables: {
+                encrypted: {
+                    id,
+                    encrypted_jsonb (EQL: JsonLike),
+                }
+            }
+        });
+
+        let statement =
+            parse("SELECT encrypted_jsonb FROM encrypted WHERE encrypted_jsonb -> 'number' > 4");
+
+        let typed = type_check(schema, &statement)
+            .map_err(|err| err.to_string())
+            .unwrap();
+
+        // The literals are (selector, comparison-value). The comparison value
+        // (`4`) must be a SteVecTerm; the selector (`'number'`) is a JsonAccessor.
+        let ste_vec_term_count = typed
+            .literals
+            .iter()
+            .filter(|(eql_term, _)| matches!(eql_term, EqlTerm::SteVecTerm(_)))
+            .count();
+
+        assert_eq!(
+            ste_vec_term_count, 1,
+            "expected exactly one SteVecTerm literal (the comparison value), got {:?}",
+            typed.literals
+        );
+    }
+
+    /// The RHS param of a root-scalar ordering comparison must remain
+    /// `EqlTerm::Partial` (root Block-ORE path), NOT be reclassified.
+    #[test]
+    fn root_scalar_ordering_rhs_param_is_partial() {
+        use crate::unifier::EqlTerm;
+
+        let schema = resolver(schema! {
+            tables: {
+                encrypted: {
+                    id,
+                    encrypted_int (EQL: Ord),
+                }
+            }
+        });
+
+        let statement = parse("SELECT id FROM encrypted WHERE encrypted_int > $1");
+
+        let typed = type_check(schema, &statement)
+            .map_err(|err| err.to_string())
+            .unwrap();
+
+        let (_, value) = typed
+            .params
+            .iter()
+            .find(|(p, _)| *p == Param(1))
+            .expect("param $1 should be present");
+
+        assert!(
+            !matches!(value, Value::Eql(EqlTerm::SteVecTerm(_))),
+            "root-scalar ordering RHS must NOT be reclassified to SteVecTerm, got {value}"
+        );
+    }
+
+    /// A root-scalar ordering comparison (not a jsonb sv accessor) must NOT be
+    /// rewritten — it relies on the root Block-ORE (`ob`) operators.
+    #[test]
+    fn root_scalar_ordering_is_not_rewritten_to_ore_cllw() {
+        let schema = resolver(schema! {
+            tables: {
+                encrypted: {
+                    id,
+                    encrypted_int (EQL: Ord),
+                }
+            }
+        });
+
+        let statement = parse("SELECT id FROM encrypted WHERE encrypted_int > $1");
+
+        match type_check(schema, &statement) {
+            Ok(typed) => match typed.transform(HashMap::new()) {
+                Ok(statement) => {
+                    assert_eq!(
+                        statement.to_string(),
+                        "SELECT id FROM encrypted WHERE encrypted_int > $1::JSONB::eql_v2_encrypted"
+                    );
+                }
+                Err(err) => panic!("transformation failed: {err}"),
+            },
+            Err(err) => panic!("type check failed: {err}"),
+        }
     }
 
     #[test]
