@@ -77,6 +77,24 @@ pub fn literal_from_sql(
         | Value::SingleQuotedByteStringLiteral(s)
         | Value::DoubleQuotedByteStringLiteral(s) => Some(Plaintext::new(s.to_owned())),
 
+        // A bare numeric literal used as the RHS of a jsonb sv *term* comparison
+        // (e.g. `jsonb_path_query_first(pii, '$...') > 70`) must be reduced to a
+        // *scalar* `Plaintext`, not `Plaintext::Json`. Unlike quoted string
+        // literals and params (which route through `text_from_sql` /
+        // `binary_from_sql`), `Value::Number` has its own literal path, so the
+        // STE-vec scalar reduction must be applied here too. Numbers map to f64
+        // to match how the stored jsonb numeric leaves are encoded (see
+        // `json_scalar_to_plaintext`).
+        Value::Number(d, _) if eql_term == EqlTermVariant::SteVecTerm => {
+            use bigdecimal::ToPrimitive;
+            // `BigDecimal::to_f64` returns `Some` for every finite decimal
+            // (out-of-range magnitudes saturate to +/-inf rather than `None`),
+            // so this branch is effectively infallible; the guard is defensive.
+            Some(Plaintext::new(
+                d.to_f64().ok_or(MappingError::CouldNotParseParameter)?,
+            ))
+        }
+
         // Parsed number types should be mapped according to the postgres_type/column type
         // #[cfg(not(feature = "bigdecimal"))]
         // Value::Number(s, _) => todo!("Number parsed type not implemented"),
@@ -480,10 +498,14 @@ mod tests {
         config::LogConfig,
         log,
         postgresql::{
-            data::bind_param_from_sql, format_code::FormatCode, messages::bind::BindParam, Column,
+            data::{bind_param_from_sql, literal_from_sql},
+            format_code::FormatCode,
+            messages::bind::BindParam,
+            Column,
         },
         Identifier,
     };
+    use bigdecimal::BigDecimal;
     use bytes::{BufMut, BytesMut};
     use chrono::NaiveDate;
     use cipherstash_client::{
@@ -492,6 +514,8 @@ mod tests {
     };
     use eql_mapper::EqlTermVariant;
     use postgres_types::{ToSql, Type};
+    use sqltk::parser::ast::Value;
+    use std::str::FromStr;
 
     fn to_message(s: &[u8]) -> BytesMut {
         BytesMut::from(s)
@@ -553,6 +577,91 @@ mod tests {
         )
         .unwrap()
         .unwrap();
+
+        assert_eq!(pt, Plaintext::Text(Some("C".to_string())));
+    }
+
+    /// Regression: a *bare numeric literal* used as the RHS of a jsonb sv term
+    /// comparison (e.g. `jsonb_path_query_first(pii, '$...') > 70`) is parsed as
+    /// `Value::Number`, a different literal path to quoted strings and params.
+    /// It must still reduce to a *scalar* `Plaintext::Float` (matching how the
+    /// stored jsonb numeric leaves are encoded), not `Plaintext::Json`, because
+    /// the STE-vec term generator only accepts scalar values.
+    #[test]
+    pub fn ste_vec_term_bare_numeric_literal_is_scalar_plaintext() {
+        log::init(LogConfig::default());
+
+        let literal = Value::Number(BigDecimal::from_str("70").unwrap(), false);
+
+        let pt = literal_from_sql(&literal, EqlTermVariant::SteVecTerm, ColumnType::Json)
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(pt, Plaintext::Float(Some(70.0)));
+    }
+
+    /// A *negative* numeric value reaching the sv-term literal arm must keep its
+    /// sign through the f64 reduction.
+    ///
+    /// Note: SQL `-70` is parsed by sqlparser as
+    /// `Expr::UnaryOp { op: Minus, expr: Value::Number("70") }`, so the
+    /// `Value::Number` seen here is the *positive* `70` and the sign lives in a
+    /// separate AST node — handling negation in the literal collection path is a
+    /// pre-existing concern outside this conversion. This test pins that the
+    /// conversion itself is sign-correct when it does receive a negative
+    /// `BigDecimal` (e.g. a directly-constructed value), so the f64 mapping is
+    /// not where a sign would be lost.
+    #[test]
+    pub fn ste_vec_term_negative_numeric_literal_keeps_sign() {
+        log::init(LogConfig::default());
+
+        let literal = Value::Number(BigDecimal::from_str("-70").unwrap(), false);
+
+        let pt = literal_from_sql(&literal, EqlTermVariant::SteVecTerm, ColumnType::Json)
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(pt, Plaintext::Float(Some(-70.0)));
+    }
+
+    /// Pins the intentional *symmetric-lossy* f64 contract for the sv-term
+    /// numeric literal arm. The stored jsonb numeric leaf and this query term
+    /// both reduce through f64, so for an integer beyond f64's exact-integer
+    /// range (`2^53`) the query term must equal the same f64 round-trip the
+    /// storage side performs — guarding against a future change that encoded the
+    /// query term as an integer (a different orderable encoding) and silently
+    /// broke ordering.
+    #[test]
+    pub fn ste_vec_term_large_integer_literal_uses_symmetric_f64() {
+        log::init(LogConfig::default());
+
+        // 2^53 + 1: the smallest positive integer not exactly representable as
+        // f64, so the f64 round-trip is observably lossy.
+        let big = "9007199254740993";
+        let literal = Value::Number(BigDecimal::from_str(big).unwrap(), false);
+
+        let pt = literal_from_sql(&literal, EqlTermVariant::SteVecTerm, ColumnType::Json)
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(pt, Plaintext::Float(Some(big.parse::<f64>().unwrap())));
+    }
+
+    /// A quoted string literal RHS of a jsonb sv term comparison must also
+    /// reduce to a scalar `Plaintext::Text` (the working pre-regression path,
+    /// kept as a guard against divergence between the literal value paths). The
+    /// SQL literal carries *JSON-encoded* text — `'"C"'` for the value `C` —
+    /// mirroring how `serde_json::Value`'s `Display` renders string scalars
+    /// (see the CIP-3279 `select_where_jsonb_gt` integration tests).
+    #[test]
+    pub fn ste_vec_term_quoted_string_literal_is_scalar_plaintext() {
+        log::init(LogConfig::default());
+
+        let literal = Value::SingleQuotedString("\"C\"".to_string());
+
+        let pt = literal_from_sql(&literal, EqlTermVariant::SteVecTerm, ColumnType::Json)
+            .unwrap()
+            .unwrap();
 
         assert_eq!(pt, Plaintext::Text(Some("C".to_string())));
     }

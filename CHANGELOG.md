@@ -14,6 +14,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   and simple query protocols. Works with term filters (e.g. downcase) for
   case-insensitive matching.
 
+### Fixed
+
+- **Comparison against an encrypted JSON field using a bare numeric literal**:
+  Queries like `WHERE jsonb_path_query_first(col, '$.path') > 70` (an unquoted
+  number on the right-hand side) failed with a fatal `SteVecTerm only supports
+  scalar values` error. Bare numeric literals took a different conversion path
+  to parameters and quoted literals and were not reduced to a scalar before
+  encryption. They are now encrypted as a scalar STE-vec term, matching the
+  parameter and quoted-literal behaviour.
+
 ## [2.2.4] - 2026-06-18
 
 ### Fixed
