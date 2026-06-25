@@ -1,3 +1,14 @@
+// TODO(CIP-3280): add a NULL-invariant end-to-end test for the scalar OPE
+// `decode(col->>'op','hex')` ordering rewrite (eql-mapper's
+// `RewriteScalarOpeOrdering`, CIP-3283). The test should confirm that rows whose
+// OPE column is NULL keep their `ORDER BY ... NULLS FIRST|LAST` placement after
+// the rewrite, and that `<`/`<=`/`>`/`>=` comparisons against a NULL operand
+// behave as plain SQL three-valued logic. It belongs in this module alongside the
+// existing `run_order_test` cases.
+//
+// Blocked on the unpublished CIP-3280 client: scalar OPE query terms cannot yet
+// carry an `op` slot end-to-end, so the rewritten `... ->> 'op'` extraction has
+// no value to read at runtime. Implement once that client ships.
 #[cfg(test)]
 mod tests {
     use crate::common::{

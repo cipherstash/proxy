@@ -2659,6 +2659,186 @@ mod test {
         );
     }
 
+    /// Pins the *actual* behaviour for column-on-the-right (`$param <op> col`).
+    ///
+    /// The rule's `would_edit_comparison` guard reads `is_scalar_ope_column(left)
+    /// && is_eql_typed(right)`, which textually looks like it only matches the
+    /// EQL column on the left. In practice a bare comparison param is unified to
+    /// the *same* `eql_v2_encrypted` column type, so `is_scalar_ope_column`
+    /// resolves the param's `TableColumn` to the OPE-indexed column and the rule
+    /// fires for *either* operand ordering. Both sides are therefore wrapped in
+    /// `decode(... ->> 'op', 'hex')`. The operator itself is unchanged (`<` stays
+    /// `<`); correctness rests on `decode(... ->> 'op')` being an order-preserving
+    /// transform applied to *both* operands, so the comparison still evaluates the
+    /// same OPE ordering it would have on the unwrapped values.
+    ///
+    /// This differs from `RewriteJsonbSteVecOrdering`, where the jsonb accessor
+    /// (`col -> selector`) only appears syntactically on one side. Here there is
+    /// no coverage gap to pin — column-on-the-right is handled. Recorded as a
+    /// test so the behaviour is locked in rather than incidental.
+    #[test]
+    fn scalar_ope_ordering_column_on_right_is_rewritten() {
+        use crate::{IndexKind, MapIndexResolver};
+        use std::collections::HashSet;
+
+        let schema = resolver(schema! {
+            tables: {
+                encrypted: {
+                    id,
+                    encrypted_int (EQL: Ord),
+                }
+            }
+        });
+
+        let index_resolver = Arc::new(MapIndexResolver::new(HashMap::from_iter([(
+            TableColumn {
+                table: id("encrypted"),
+                column: id("encrypted_int"),
+            },
+            HashSet::from_iter([IndexKind::Ope]),
+        )])));
+
+        let statement = parse("SELECT id FROM encrypted WHERE $1 < encrypted_int");
+
+        let typed = type_check_with_indexes(schema, &statement, index_resolver)
+            .map_err(|err| err.to_string())
+            .unwrap();
+
+        let transformed = typed.transform(HashMap::new()).unwrap();
+
+        assert_eq!(
+            transformed.to_string(),
+            "SELECT id FROM encrypted WHERE \
+            decode($1::JSONB::eql_v2_encrypted ->> 'op', 'hex') < \
+            decode(encrypted_int ->> 'op', 'hex')",
+            "column-on-the-right comparison is rewritten symmetrically to decode(op)"
+        );
+    }
+
+    /// Pins an accepted limitation: `col BETWEEN $a AND $b` is a distinct AST
+    /// node (`Expr::Between`), not the `Expr::BinaryOp` the OPE ordering rule
+    /// matches, so it is NOT rewritten to the `decode(op)` form.
+    #[test]
+    fn scalar_ope_ordering_between_is_not_rewritten() {
+        use crate::{IndexKind, MapIndexResolver};
+        use std::collections::HashSet;
+
+        let schema = resolver(schema! {
+            tables: {
+                encrypted: {
+                    id,
+                    encrypted_int (EQL: Ord),
+                }
+            }
+        });
+
+        let index_resolver = Arc::new(MapIndexResolver::new(HashMap::from_iter([(
+            TableColumn {
+                table: id("encrypted"),
+                column: id("encrypted_int"),
+            },
+            HashSet::from_iter([IndexKind::Ope]),
+        )])));
+
+        let statement = parse("SELECT id FROM encrypted WHERE encrypted_int BETWEEN $1 AND $2");
+
+        let typed = type_check_with_indexes(schema, &statement, index_resolver)
+            .map_err(|err| err.to_string())
+            .unwrap();
+
+        let transformed = typed.transform(HashMap::new()).unwrap();
+
+        assert_eq!(
+            transformed.to_string(),
+            "SELECT id FROM encrypted WHERE encrypted_int BETWEEN \
+            $1::JSONB::eql_v2_encrypted AND $2::JSONB::eql_v2_encrypted",
+            "BETWEEN must not be rewritten by the OPE ordering rule"
+        );
+    }
+
+    /// Pins an accepted limitation: `MIN(col)` / `MAX(col)` are aggregate
+    /// function calls, not ordering comparisons, so the OPE ordering rule does
+    /// not touch them. They are instead routed to the `eql_v2.min` / `eql_v2.max`
+    /// EQL aggregate functions by a separate rule.
+    #[test]
+    fn scalar_ope_min_max_are_not_rewritten_to_decode_op() {
+        use crate::{IndexKind, MapIndexResolver};
+        use std::collections::HashSet;
+
+        let schema = resolver(schema! {
+            tables: {
+                encrypted: {
+                    id,
+                    encrypted_int (EQL: Ord),
+                }
+            }
+        });
+
+        let index_resolver = Arc::new(MapIndexResolver::new(HashMap::from_iter([(
+            TableColumn {
+                table: id("encrypted"),
+                column: id("encrypted_int"),
+            },
+            HashSet::from_iter([IndexKind::Ope]),
+        )])));
+
+        let statement = parse("SELECT min(encrypted_int), max(encrypted_int) FROM encrypted");
+
+        let typed = type_check_with_indexes(schema, &statement, index_resolver)
+            .map_err(|err| err.to_string())
+            .unwrap();
+
+        let transformed = typed.transform(HashMap::new()).unwrap();
+
+        assert_eq!(
+            transformed.to_string(),
+            "SELECT eql_v2.min(encrypted_int), eql_v2.max(encrypted_int) FROM encrypted",
+            "MIN/MAX must route to eql_v2 aggregates, not decode(op)"
+        );
+    }
+
+    /// A multi-key `ORDER BY ope_col, plaintext_col` must rewrite *only* the
+    /// OPE sort key to `decode(col->>'op','hex')`, leaving the plaintext key
+    /// untouched and preserving each key's direction / nulls ordering.
+    #[test]
+    fn scalar_ope_multi_key_order_by_rewrites_only_ope_key() {
+        use crate::{IndexKind, MapIndexResolver};
+        use std::collections::HashSet;
+
+        let schema = resolver(schema! {
+            tables: {
+                encrypted: {
+                    id,
+                    encrypted_int (EQL: Ord),
+                }
+            }
+        });
+
+        let index_resolver = Arc::new(MapIndexResolver::new(HashMap::from_iter([(
+            TableColumn {
+                table: id("encrypted"),
+                column: id("encrypted_int"),
+            },
+            HashSet::from_iter([IndexKind::Ope]),
+        )])));
+
+        let statement =
+            parse("SELECT id FROM encrypted ORDER BY encrypted_int DESC NULLS LAST, id ASC");
+
+        let typed = type_check_with_indexes(schema, &statement, index_resolver)
+            .map_err(|err| err.to_string())
+            .unwrap();
+
+        let transformed = typed.transform(HashMap::new()).unwrap();
+
+        assert_eq!(
+            transformed.to_string(),
+            "SELECT id FROM encrypted ORDER BY \
+            decode(encrypted_int ->> 'op', 'hex') DESC NULLS LAST, id ASC",
+            "only the OPE sort key is rewritten; plaintext key and directions are preserved"
+        );
+    }
+
     #[test]
     fn functions_can_be_resolved_case_insensitively() {
         // init_tracing();

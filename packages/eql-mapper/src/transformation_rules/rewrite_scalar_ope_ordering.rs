@@ -64,11 +64,13 @@ use super::TransformationRule;
 /// - **Columns with no concrete index info** (empty resolver): no rewrite,
 ///   preserving the pre-resolver behaviour.
 ///
-/// The `op` slot is preserved on the right-hand-side operand because the inner
-/// param/literal node identity is retained via [`mem::replace`], so the
+/// The right-hand-side param/literal node is moved *intact* into the new
+/// `decode(...)` wrapper. ([`mem::replace`] is just the mechanism for taking
+/// ownership of the boxed operand out of the `&mut` binding — it leaves the
+/// original AST node untouched, not a copy.) Preserving that node means the
 /// downstream [`super::CastParamsAsEncrypted`] / [`super::CastLiteralsAsEncrypted`]
-/// rules still cast it to `::JSONB::eql_v2_encrypted`, yielding an EQL payload
-/// that carries its own `op` term for the same column.
+/// rules still recognise and cast it to `::JSONB::eql_v2_encrypted`, yielding an
+/// EQL payload that carries its own `op` term for the same column.
 #[derive(Debug)]
 pub struct RewriteScalarOpeOrdering<'ast> {
     node_types: Arc<HashMap<NodeKey<'ast>, Type>>,
