@@ -28,7 +28,7 @@ mod tests {
         }
     }
 
-    async fn select_where_jsonb_flag(value: bool, expected: &[Value]) {
+    async fn select_where_jsonb_flag(value: Value, expected: &[Value]) {
         clear().await;
         insert_jsonb_with_bool().await;
 
@@ -69,7 +69,7 @@ mod tests {
             "flag": true,
         })];
 
-        select_where_jsonb_flag(true, &expected).await;
+        select_where_jsonb_flag(Value::Bool(true), &expected).await;
     }
 
     #[tokio::test]
@@ -81,6 +81,6 @@ mod tests {
             "flag": false,
         })];
 
-        select_where_jsonb_flag(false, &expected).await;
+        select_where_jsonb_flag(Value::Bool(false), &expected).await;
     }
 }
