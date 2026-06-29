@@ -11,7 +11,7 @@ use sqltk::parser::ast::{
 use sqltk::parser::tokenizer::Span;
 use sqltk::{NodeKey, NodePath, Visitable};
 
-use crate::ste_vec_ordering::is_ste_vec_accessor;
+use crate::ste_vec_ordering::{is_eql_typed, is_ste_vec_accessor};
 use crate::unifier::{Type, Value};
 use crate::{EqlMapperError, IndexKind, IndexResolver, TableColumn};
 
@@ -115,14 +115,6 @@ impl<'ast> RewriteScalarOpeOrdering<'ast> {
         }
     }
 
-    /// Returns `true` if `expr` is EQL-typed (regardless of concrete index).
-    fn is_eql_typed(&self, expr: &Expr) -> bool {
-        matches!(
-            self.node_types.get(&NodeKey::new(expr)),
-            Some(Type::Value(Value::Eql(_)))
-        )
-    }
-
     /// Wraps `expr` in `decode((<expr>)::jsonb ->> 'op', 'hex')`.
     ///
     /// `(<expr>)::jsonb ->> 'op'` extracts the order-preserving ciphertext as
@@ -199,7 +191,7 @@ impl<'ast> RewriteScalarOpeOrdering<'ast> {
                     | BinaryOperator::Gt
                     | BinaryOperator::GtEq
             ) && self.is_scalar_ope_column(left)
-                && self.is_eql_typed(right);
+                && is_eql_typed(&self.node_types, right);
         }
         false
     }

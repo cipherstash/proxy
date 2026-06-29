@@ -1,14 +1,20 @@
-// TODO(CIP-3280): add a NULL-invariant end-to-end test for the scalar OPE
+// TODO(CIP-3280): add an end-to-end test for `<`/`<=`/`>`/`>=` comparisons
+// against a NULL operand on a scalar OPE column, confirming the
 // `decode(col->>'op','hex')` ordering rewrite (eql-mapper's
-// `RewriteScalarOpeOrdering`, CIP-3283). The test should confirm that rows whose
-// OPE column is NULL keep their `ORDER BY ... NULLS FIRST|LAST` placement after
-// the rewrite, and that `<`/`<=`/`>`/`>=` comparisons against a NULL operand
-// behave as plain SQL three-valued logic. It belongs in this module alongside the
-// existing `run_order_test` cases.
+// `RewriteScalarOpeOrdering`, CIP-3283) preserves plain SQL three-valued logic
+// (a comparison with NULL is UNKNOWN, so the row is excluded). It belongs in
+// this module alongside the existing `run_order_test` cases.
 //
-// Blocked on the unpublished CIP-3280 client: scalar OPE query terms cannot yet
-// carry an `op` slot end-to-end, so the rewritten `... ->> 'op'` extraction has
-// no value to read at runtime. Implement once that client ships.
+// NULL `ORDER BY` *placement* is already covered: `map_ope_order_nulls_last_by_default`
+// and `map_ope_order_nulls_first` (below) assert NULL rows keep their
+// `NULLS FIRST|LAST` placement after the rewrite. The comparison-against-NULL
+// case is the remaining gap.
+//
+// Gated on the cipherstash-client pin: the scalar OPE `op` slot is validated
+// end-to-end on the 0.38.1-alpha.1 prerelease, but the workspace pins client
+// 0.38.0 (see root `Cargo.toml`), on which the rewritten `... ->> 'op'`
+// extraction has no `op` value to read at runtime. Implement once the pin is
+// bumped to a release carrying the `op` slot.
 #[cfg(test)]
 mod tests {
     use crate::common::{

@@ -142,3 +142,160 @@ pub(crate) fn rhs_as_jsonb(expr: Expr) -> Expr {
         format: None,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::unifier::{EqlTerm, EqlTraits, EqlValue};
+    use crate::TableColumn;
+    use sqltk::parser::dialect::PostgreSqlDialect;
+    use sqltk::parser::parser::Parser;
+
+    fn parse_expr(sql: &str) -> Expr {
+        Parser::new(&PostgreSqlDialect {})
+            .try_with_sql(sql)
+            .unwrap()
+            .parse_expr()
+            .unwrap()
+    }
+
+    fn eql_type() -> Type {
+        Type::Value(Value::Eql(EqlTerm::Full(EqlValue(
+            TableColumn {
+                table: "users".into(),
+                column: "email".into(),
+            },
+            EqlTraits::default(),
+        ))))
+    }
+
+    #[test]
+    fn ordering_operators_are_recognised() {
+        for op in [
+            BinaryOperator::Lt,
+            BinaryOperator::LtEq,
+            BinaryOperator::Gt,
+            BinaryOperator::GtEq,
+        ] {
+            assert!(is_ordering_operator(&op), "{op:?} should be ordering");
+        }
+    }
+
+    #[test]
+    fn equality_operators_are_not_ordering() {
+        for op in [
+            BinaryOperator::Eq,
+            BinaryOperator::NotEq,
+            BinaryOperator::Plus,
+        ] {
+            assert!(!is_ordering_operator(&op), "{op:?} should not be ordering");
+        }
+    }
+
+    #[test]
+    fn equality_operators_are_recognised() {
+        for op in [BinaryOperator::Eq, BinaryOperator::NotEq] {
+            assert!(is_equality_operator(&op), "{op:?} should be equality");
+        }
+    }
+
+    #[test]
+    fn ordering_operators_are_not_equality() {
+        for op in [
+            BinaryOperator::Lt,
+            BinaryOperator::LtEq,
+            BinaryOperator::Gt,
+            BinaryOperator::GtEq,
+            BinaryOperator::Plus,
+        ] {
+            assert!(!is_equality_operator(&op), "{op:?} should not be equality");
+        }
+    }
+
+    #[test]
+    fn arrow_and_long_arrow_accessors_are_ste_vec_accessors() {
+        assert!(is_ste_vec_accessor(&parse_expr("col -> 'field'")));
+        assert!(is_ste_vec_accessor(&parse_expr("col ->> 'field'")));
+    }
+
+    #[test]
+    fn jsonb_path_query_first_is_a_ste_vec_accessor() {
+        assert!(is_ste_vec_accessor(&parse_expr(
+            "jsonb_path_query_first(col, '$.field')"
+        )));
+        // The `eql_v2.`-qualified rewritten form is matched case-insensitively.
+        assert!(is_ste_vec_accessor(&parse_expr(
+            "eql_v2.JSONB_PATH_QUERY_FIRST(col, '$.field')"
+        )));
+    }
+
+    #[test]
+    fn non_accessors_are_not_ste_vec_accessors() {
+        // A bare column, a different operator, and a different function are all
+        // rejected so the rewrite never fires on a non-sv-element operand.
+        assert!(!is_ste_vec_accessor(&parse_expr("col")));
+        assert!(!is_ste_vec_accessor(&parse_expr("col = 'field'")));
+        assert!(!is_ste_vec_accessor(&parse_expr("lower(col)")));
+    }
+
+    #[test]
+    fn is_eql_typed_true_only_for_mapped_eql_node() {
+        let expr = parse_expr("col -> 'field'");
+        let mut node_types = HashMap::new();
+        node_types.insert(NodeKey::new(&expr), eql_type());
+
+        assert!(is_eql_typed(&node_types, &expr));
+    }
+
+    #[test]
+    fn is_eql_typed_false_for_unmapped_node() {
+        let expr = parse_expr("col -> 'field'");
+        let node_types: HashMap<NodeKey<'_>, Type> = HashMap::new();
+
+        assert!(!is_eql_typed(&node_types, &expr));
+    }
+
+    #[test]
+    fn is_eql_typed_false_for_non_eql_value() {
+        use crate::unifier::NativeValue;
+
+        let expr = parse_expr("col -> 'field'");
+        let mut node_types = HashMap::new();
+        node_types.insert(
+            NodeKey::new(&expr),
+            Type::Value(Value::Native(NativeValue(None))),
+        );
+
+        assert!(!is_eql_typed(&node_types, &expr));
+    }
+
+    #[test]
+    fn rhs_as_jsonb_strips_outer_encrypted_cast() {
+        // `<value>::JSONB::eql_v2_encrypted` reduces to `<value>::JSONB`, so the
+        // STE-vec extractors operate on raw jsonb.
+        let expr = parse_expr("$1::JSONB::eql_v2_encrypted");
+        let reduced = rhs_as_jsonb(expr);
+
+        assert_eq!(reduced, parse_expr("$1::JSONB"));
+    }
+
+    #[test]
+    fn rhs_as_jsonb_wraps_bare_value_defensively() {
+        // A value that is not in the expected double-cast shape is wrapped in a
+        // `::JSONB` cast rather than passed through untouched.
+        let expr = parse_expr("$1");
+        let reduced = rhs_as_jsonb(expr);
+
+        assert_eq!(reduced, parse_expr("$1::JSONB"));
+    }
+
+    #[test]
+    fn rhs_as_jsonb_does_not_strip_non_encrypted_outer_cast() {
+        // Only an outer `::eql_v2_encrypted` over an inner `::JSONB` is stripped.
+        // A `::TEXT` outer cast is preserved (re-wrapped to JSONB), never peeled.
+        let expr = parse_expr("$1::JSONB::TEXT");
+        let reduced = rhs_as_jsonb(expr);
+
+        assert_eq!(reduced, parse_expr("$1::JSONB::TEXT::JSONB"));
+    }
+}

@@ -8,7 +8,12 @@ use crate::{
 use sqltk::parser::ast::{self as ast, Statement};
 use sqltk::{Break, NodeKey, Visitable, Visitor};
 use std::{
-    cell::RefCell, collections::HashMap, marker::PhantomData, ops::ControlFlow, rc::Rc, sync::Arc,
+    cell::RefCell,
+    collections::{HashMap, HashSet},
+    marker::PhantomData,
+    ops::ControlFlow,
+    rc::Rc,
+    sync::Arc,
 };
 use tracing::{event, span, Level};
 
@@ -173,9 +178,14 @@ impl<'ast> EqlMapper<'ast> {
 
         let _ = self.unifier.borrow_mut().resolve_unresolved_value_nodes();
 
+        // `ste_vec_term_rhs_keys` is a full O(nodes) AST scan whose params/literals
+        // halves feed `param_types`/`literal_types` independently. Compute it once
+        // here and split it across both rather than scanning the AST twice.
+        let (ste_vec_params, ste_vec_literals) = self.ste_vec_term_rhs_keys(&self.unifier.borrow());
+
         let projection = self.projection_type(statement);
-        let params = self.param_types(&self.unifier.borrow());
-        let literals = self.literal_types();
+        let params = self.param_types(&self.unifier.borrow(), &ste_vec_params);
+        let literals = self.literal_types(&ste_vec_literals);
         let node_types = self.node_types();
 
         let combine_results =
@@ -210,8 +220,8 @@ impl<'ast> EqlMapper<'ast> {
                 }
 
                 let projection = self.projection_type(statement);
-                let params = self.param_types(&self.unifier.borrow());
-                let literals = self.literal_types();
+                let params = self.param_types(&self.unifier.borrow(), &ste_vec_params);
+                let literals = self.literal_types(&ste_vec_literals);
                 let node_types = self.node_types();
 
                 event!(
@@ -239,9 +249,12 @@ impl<'ast> EqlMapper<'ast> {
         Ok(projection.flatten(&unifier)?)
     }
 
-    fn param_types(&self, unifier: &Unifier<'ast>) -> Result<Vec<(Param, Value)>, EqlMapperError> {
+    fn param_types(
+        &self,
+        unifier: &Unifier<'ast>,
+        ste_vec_params: &HashSet<Param>,
+    ) -> Result<Vec<(Param, Value)>, EqlMapperError> {
         let params = self.registry.borrow().resolved_param_types(unifier)?;
-        let (ste_vec_params, _) = self.ste_vec_term_rhs_keys(unifier);
 
         let params = params
             .into_iter()
@@ -280,17 +293,14 @@ impl<'ast> EqlMapper<'ast> {
     fn ste_vec_term_rhs_keys(
         &self,
         unifier: &Unifier<'ast>,
-    ) -> (
-        std::collections::HashSet<Param>,
-        std::collections::HashSet<NodeKey<'ast>>,
-    ) {
+    ) -> (HashSet<Param>, HashSet<NodeKey<'ast>>) {
         use crate::ste_vec_ordering::{
             is_equality_operator, is_ordering_operator, is_ste_vec_accessor,
         };
         use sqltk::parser::ast::Expr;
 
-        let mut params = std::collections::HashSet::new();
-        let mut literals = std::collections::HashSet::new();
+        let mut params = HashSet::new();
+        let mut literals = HashSet::new();
 
         let registry = self.registry.borrow();
 
@@ -337,9 +347,10 @@ impl<'ast> EqlMapper<'ast> {
     }
 
     /// Asks the [`TypeInferencer`] for a hashmap of literal types, validating that they are all `Value` types.
-    fn literal_types(&self) -> Result<Vec<(EqlTerm, &'ast ast::Value)>, EqlMapperError> {
-        let (_, ste_vec_literals) = self.ste_vec_term_rhs_keys(&self.unifier.borrow());
-
+    fn literal_types(
+        &self,
+        ste_vec_literals: &HashSet<NodeKey<'ast>>,
+    ) -> Result<Vec<(EqlTerm, &'ast ast::Value)>, EqlMapperError> {
         let literals = {
             let registry = self.registry.borrow();
             registry
