@@ -2406,6 +2406,78 @@ mod test {
         );
     }
 
+    /// Security regression: the inline RHS *literal* of a jsonb sv equality
+    /// comparison must be replaced by its encrypted ciphertext in the
+    /// transformed SQL — the plaintext value must never survive into the query
+    /// the proxy sends downstream.
+    ///
+    /// Because the transform walks bottom-up (children before parents), the RHS
+    /// literal node is cast to `<ct>::JSONB::eql_v2_encrypted` by
+    /// `CastLiteralsAsEncrypted` *before* `RewriteJsonbSteVecEquality` rewrites
+    /// the parent comparison. The equality rule then strips the outer
+    /// `::eql_v2_encrypted` cast (via `rhs_as_jsonb`) and reads `->> 'hm'/'oc'`
+    /// off the encrypted payload. The clone inside `build_eq_term_rhs` operates
+    /// on that already-encrypted output node, not on the original literal node
+    /// `CastLiteralsAsEncrypted` keys on, so it cannot leave the plaintext
+    /// uncast.
+    #[test]
+    fn jsonb_sv_equality_rhs_literal_is_encrypted_in_sql() {
+        let schema = resolver(schema! {
+            tables: {
+                encrypted: {
+                    id,
+                    encrypted_jsonb (EQL: JsonLike),
+                }
+            }
+        });
+
+        let statement =
+            parse("SELECT encrypted_jsonb FROM encrypted WHERE encrypted_jsonb -> 'number' = 4");
+
+        let typed = type_check(schema, &statement)
+            .map_err(|err| err.to_string())
+            .unwrap();
+
+        // Encrypt every literal to a distinguishable marker so we can assert the
+        // RHS comparison value (`4`) is encrypted, not left as plaintext.
+        let encrypted_literals: HashMap<NodeKey<'_>, ast::Value> = typed
+            .literals
+            .iter()
+            .map(|(_, node)| {
+                (
+                    node.as_node_key(),
+                    ast::Value::SingleQuotedString(format!("ENC({node})")),
+                )
+            })
+            .collect();
+
+        let sql = typed
+            .transform(encrypted_literals)
+            .map_err(|err| err.to_string())
+            .unwrap()
+            .to_string();
+
+        // The RHS comparison value must appear as its encrypted ciphertext,
+        // wrapped in the `::JSONB` cast the inlined `eq_term` body reads from.
+        assert!(
+            sql.contains("'ENC(4)'::JSONB ->> 'hm'") && sql.contains("'ENC(4)'::JSONB ->> 'oc'"),
+            "the RHS literal `4` must be encrypted in the SQL, got: {sql}"
+        );
+
+        // The plaintext value `4` must never survive bare in the SQL. Strip the
+        // encrypted-ciphertext markers first, then assert the digit `4` does not
+        // appear as a standalone numeric token anywhere in what remains. This is
+        // robust to formatting changes (unlike matching specific `= 4` spellings).
+        let without_ciphertext = sql.replace("'ENC(4)'", "");
+        let bare_number_4 = without_ciphertext
+            .split(|c: char| !c.is_ascii_digit())
+            .any(|token| token == "4");
+        assert!(
+            !bare_number_4,
+            "the plaintext value `4` must not appear bare in the SQL, got: {sql}"
+        );
+    }
+
     /// The commutative form with the accessor on the *right*
     /// (`value = col -> selector`) is intentionally NOT rewritten: the rule and
     /// the reclassification both gate on `is_ste_vec_accessor(left)`, so they
@@ -2526,6 +2598,80 @@ mod test {
         );
     }
 
+    /// A *negative* numeric RHS literal (`-70`) parses as
+    /// `Expr::UnaryOp { Minus, Number }`, which the type inferencer forces to
+    /// `Native` (see `Expr::UnaryOp` in `infer_type_impls/expr.rs`). It
+    /// therefore cannot unify against an EQL operand, so a jsonb sv comparison
+    /// with a negative literal RHS is *rejected at type-check time* rather than
+    /// being rewritten.
+    ///
+    /// This is the safety-critical guard the STE-vec rewrites depend on: because
+    /// the UnaryOp RHS is `Native`, the rewrite rules' `is_eql_typed(right)`
+    /// gate is `false`, so the SQL is **not** rewritten to `eql_v2.ore_cllw` /
+    /// `eql_v2.eq_term`. The dangerous "SQL rewritten as an sv term but the
+    /// value not reclassified as `SteVecTerm`" mismatch is structurally
+    /// impossible. (This UnaryOp→Native limitation is pre-existing and applies
+    /// identically to scalar EQL comparisons such as `encrypted_int > -70`.)
+    #[test]
+    fn jsonb_sv_ordering_rhs_negative_literal_is_rejected() {
+        let schema = resolver(schema! {
+            tables: {
+                encrypted: {
+                    id,
+                    encrypted_jsonb (EQL: JsonLike),
+                }
+            }
+        });
+
+        let statement =
+            parse("SELECT encrypted_jsonb FROM encrypted WHERE encrypted_jsonb -> 'number' > -70");
+
+        // Assert it is rejected *for the right reason*: a Native/EQL unification
+        // failure (the UnaryOp RHS forced to Native), not some unrelated error.
+        let err = type_check(schema, &statement)
+            .expect_err(
+                "negative-literal jsonb sv ordering comparison must be rejected at type-check time",
+            )
+            .to_string();
+
+        assert!(
+            err.contains("unify") && err.contains("Native"),
+            "expected a Native/EQL unification failure (UnaryOp RHS is Native), got: {err}"
+        );
+    }
+
+    /// Equality counterpart of [`jsonb_sv_ordering_rhs_negative_literal_is_rejected`]:
+    /// a negative-literal RHS of a jsonb sv equality comparison is likewise
+    /// rejected at type-check time, so it is never rewritten to `eql_v2.eq_term`
+    /// against an unreclassified value.
+    #[test]
+    fn jsonb_sv_equality_rhs_negative_literal_is_rejected() {
+        let schema = resolver(schema! {
+            tables: {
+                encrypted: {
+                    id,
+                    encrypted_jsonb (EQL: JsonLike),
+                }
+            }
+        });
+
+        let statement =
+            parse("SELECT encrypted_jsonb FROM encrypted WHERE encrypted_jsonb -> 'number' = -70");
+
+        // Assert it is rejected *for the right reason*: a Native/EQL unification
+        // failure (the UnaryOp RHS forced to Native), not some unrelated error.
+        let err = type_check(schema, &statement)
+            .expect_err(
+                "negative-literal jsonb sv equality comparison must be rejected at type-check time",
+            )
+            .to_string();
+
+        assert!(
+            err.contains("unify") && err.contains("Native"),
+            "expected a Native/EQL unification failure (UnaryOp RHS is Native), got: {err}"
+        );
+    }
+
     /// The RHS param of a root-scalar ordering comparison must remain
     /// `EqlTerm::Partial` (root Block-ORE path), NOT be reclassified.
     #[test]
@@ -2586,6 +2732,68 @@ mod test {
             },
             Err(err) => panic!("type check failed: {err}"),
         }
+    }
+
+    /// A jsonb sv ordering comparison whose RHS is a *different* encrypted
+    /// column (`accessor <op> other_encrypted -> sel`) is rejected by EQL term
+    /// unification — EQL ciphertexts are column-scoped, so two distinct columns
+    /// never unify. This is why the ordering rewrite's `is_eql_typed(right)`
+    /// gate is sufficient: the only EQL RHS that can reach the rewrite is one
+    /// that unified to the *same* `TableColumn` (a literal/param, or the same
+    /// column re-referenced), which carries the matching sv term. A mismatched
+    /// "other encrypted column on the RHS" shape is not representable.
+    #[test]
+    fn jsonb_sv_ordering_rhs_different_encrypted_column_is_rejected() {
+        let schema = resolver(schema! {
+            tables: {
+                encrypted: {
+                    id,
+                    encrypted_jsonb (EQL: JsonLike),
+                    other_jsonb (EQL: JsonLike),
+                }
+            }
+        });
+
+        let statement =
+            parse("SELECT id FROM encrypted WHERE encrypted_jsonb -> 'n' > other_jsonb -> 'n'");
+
+        let err = type_check(schema, &statement)
+            .expect_err("comparing two different encrypted columns must be rejected")
+            .to_string();
+
+        assert!(
+            err.contains("unify") && err.contains("EQL"),
+            "expected an EQL-term unification failure between the two columns, got: {err}"
+        );
+    }
+
+    /// Scalar OPE counterpart of
+    /// [`jsonb_sv_ordering_rhs_different_encrypted_column_is_rejected`]: a scalar
+    /// ordering comparison between two *different* encrypted columns is rejected
+    /// by EQL term unification, so the scalar OPE rewrite's `is_eql_typed(right)`
+    /// gate can never bind a non-OPE foreign column on the RHS.
+    #[test]
+    fn scalar_ordering_rhs_different_encrypted_column_is_rejected() {
+        let schema = resolver(schema! {
+            tables: {
+                encrypted: {
+                    id,
+                    a (EQL: Ord),
+                    b (EQL: Ord),
+                }
+            }
+        });
+
+        let statement = parse("SELECT id FROM encrypted WHERE a > b");
+
+        let err = type_check(schema, &statement)
+            .expect_err("comparing two different encrypted columns must be rejected")
+            .to_string();
+
+        assert!(
+            err.contains("unify") && err.contains("EQL"),
+            "expected an EQL-term unification failure between the two columns, got: {err}"
+        );
     }
 
     #[test]
