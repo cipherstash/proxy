@@ -414,10 +414,10 @@ where
 /// query term as an integer (`Plaintext::Int` / `BigInt`) would use a different
 /// orderable byte representation and produce incorrect comparison results.
 ///
-/// Booleans support *equality only* (via the `hm` term); the ordering rewrite
-/// never reaches this path for a boolean leaf. Non-scalar values (objects,
-/// arrays) and JSON `null` are rejected — these term comparisons are only
-/// defined against scalar leaves.
+/// Booleans, non-scalar values (objects, arrays), and JSON `null` are rejected:
+/// these term comparisons are only defined against string/number scalar leaves.
+/// (sv-leaf boolean *equality* is not yet wired end-to-end — it needs a
+/// cipherstash-client change; tracked as a follow-up.)
 fn json_scalar_to_plaintext(value: &serde_json::Value) -> Result<Plaintext, MappingError> {
     match value {
         serde_json::Value::String(s) => Ok(Plaintext::new(s.to_owned())),
@@ -425,12 +425,11 @@ fn json_scalar_to_plaintext(value: &serde_json::Value) -> Result<Plaintext, Mapp
             .as_f64()
             .map(Plaintext::new)
             .ok_or(MappingError::CouldNotParseParameter),
-        // A boolean sv leaf carries the `hm` (HMAC) equality term — not the `oc`
-        // CLLW ORE ordering term — so it supports *equality* (`col -> 'flag' =
-        // $param`) but not ordering. It still reduces to a scalar `Plaintext`
-        // (`Plaintext::Boolean`) so the proxy can encrypt it as the matching
-        // STE-vec query term.
-        serde_json::Value::Bool(b) => Ok(Plaintext::new(*b)),
+        // Booleans, non-scalar values (objects, arrays), and JSON null are
+        // rejected. sv-leaf boolean *equality* is not yet wired end-to-end: the
+        // SteVecTerm query encryption requires an orderable term, but a boolean
+        // has only the `hm` equality term (no `oc`), so the client rejects it.
+        // Enabling it needs a cipherstash-client change (tracked separately).
         _ => Err(MappingError::CouldNotParseParameter),
     }
 }
@@ -672,49 +671,6 @@ mod tests {
             .unwrap();
 
         assert_eq!(pt, Plaintext::Text(Some("C".to_string())));
-    }
-
-    /// A *boolean* leaf used as the RHS of a jsonb sv term *equality* comparison
-    /// (e.g. `col -> 'flag' = $param`) must reduce to a scalar
-    /// `Plaintext::Boolean`. Boolean sv leaves carry the `hm` (HMAC) equality
-    /// term (not the `oc` CLLW ORE ordering term), so they support equality, and
-    /// the query term must be a scalar boolean plaintext rather than
-    /// `Plaintext::Json`.
-    #[test]
-    pub fn ste_vec_term_json_boolean_is_scalar_plaintext() {
-        log::init(LogConfig::default());
-
-        // Text-format JSON boolean `true` against a Json column, as the RHS of a
-        // jsonb sv term equality comparison.
-        let param = BindParam::new(FormatCode::Text, to_message(b"true"));
-
-        let pt = bind_param_from_sql(
-            &param,
-            &Type::JSONB,
-            EqlTermVariant::SteVecTerm,
-            ColumnType::Json,
-        )
-        .unwrap()
-        .unwrap();
-
-        assert_eq!(pt, Plaintext::Boolean(Some(true)));
-    }
-
-    /// A *bare boolean literal* RHS of a jsonb sv term equality comparison
-    /// (`col -> 'flag' = false`) is parsed as `Value::Boolean`, a different
-    /// literal path to quoted strings and params. It must still reduce to a
-    /// scalar `Plaintext::Boolean`.
-    #[test]
-    pub fn ste_vec_term_bare_boolean_literal_is_scalar_plaintext() {
-        log::init(LogConfig::default());
-
-        let literal = Value::Boolean(false);
-
-        let pt = literal_from_sql(&literal, EqlTermVariant::SteVecTerm, ColumnType::Json)
-            .unwrap()
-            .unwrap();
-
-        assert_eq!(pt, Plaintext::Boolean(Some(false)));
     }
 
     #[test]
