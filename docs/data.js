@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1782734250382,
+  "lastUpdate": 1782782383647,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -22001,6 +22001,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 41.648149,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "james@cipherstash.com",
+            "name": "James Sadler",
+            "username": "freshtonic"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "4329a250e792a1ad96d61e4a14c5ce7125bc97a9",
+          "message": "Merge pull request #409 from cipherstash/james/cip-3233-proxy-drop-vendor-patch\n\nfeat: client 0.38.0 migration — drop vendored stack-auth + EQL v2.3 mapper support (CIP-3233)",
+          "timestamp": "2026-06-30T11:15:58+10:00",
+          "tree_id": "4e796a47a8a98a2f6df989f4a328c287c64dad2d",
+          "url": "https://github.com/cipherstash/proxy/commit/4329a250e792a1ad96d61e4a14c5ce7125bc97a9"
+        },
+        "date": 1782782382325,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 40.393437,
             "unit": "Number"
           }
         ]
