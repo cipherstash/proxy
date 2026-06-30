@@ -77,6 +77,24 @@ pub fn literal_from_sql(
         | Value::SingleQuotedByteStringLiteral(s)
         | Value::DoubleQuotedByteStringLiteral(s) => Some(Plaintext::new(s.to_owned())),
 
+        // A bare numeric literal used as the RHS of a jsonb sv *term* comparison
+        // (e.g. `jsonb_path_query_first(pii, '$...') > 70`) must be reduced to a
+        // *scalar* `Plaintext`, not `Plaintext::Json`. Unlike quoted string
+        // literals and params (which route through `text_from_sql` /
+        // `binary_from_sql`), `Value::Number` has its own literal path, so the
+        // STE-vec scalar reduction must be applied here too. Numbers map to f64
+        // to match how the stored jsonb numeric leaves are encoded (see
+        // `json_scalar_to_plaintext`).
+        Value::Number(d, _) if eql_term == EqlTermVariant::SteVecTerm => {
+            use bigdecimal::ToPrimitive;
+            // `BigDecimal::to_f64` returns `Some` for every finite decimal
+            // (out-of-range magnitudes saturate to +/-inf rather than `None`),
+            // so this branch is effectively infallible; the guard is defensive.
+            Some(Plaintext::new(
+                d.to_f64().ok_or(MappingError::CouldNotParseParameter)?,
+            ))
+        }
+
         // Parsed number types should be mapped according to the postgres_type/column type
         // #[cfg(not(feature = "bigdecimal"))]
         // Value::Number(s, _) => todo!("Number parsed type not implemented"),
@@ -126,25 +144,34 @@ fn text_from_sql(
     debug!(target: ENCODING, ?val, ?eql_term, ?col_type);
 
     match (eql_term, col_type) {
-        (EqlTermVariant::Full | EqlTermVariant::Partial, ColumnType::Text) => {
-            Ok(Plaintext::new(val))
-        }
-        (EqlTermVariant::Full | EqlTermVariant::Partial, ColumnType::Float) => {
-            parse_str_as_numeric_plaintext::<f64>(val)
-        }
-        (EqlTermVariant::Full | EqlTermVariant::Partial, ColumnType::SmallInt) => {
-            parse_str_as_numeric_plaintext::<i16>(val)
-        }
-        (EqlTermVariant::Full | EqlTermVariant::Partial, ColumnType::Int) => {
-            parse_str_as_numeric_plaintext::<i32>(val)
-        }
-        (EqlTermVariant::Full | EqlTermVariant::Partial, ColumnType::BigInt) => {
-            parse_str_as_numeric_plaintext::<i64>(val)
-        }
-        (EqlTermVariant::Full | EqlTermVariant::Partial, ColumnType::BigUInt) => {
-            parse_str_as_numeric_plaintext::<u64>(val)
-        }
-        (EqlTermVariant::Full | EqlTermVariant::Partial, ColumnType::Boolean) => {
+        (
+            EqlTermVariant::Full | EqlTermVariant::Partial | EqlTermVariant::SteVecTerm,
+            ColumnType::Text,
+        ) => Ok(Plaintext::new(val)),
+        (
+            EqlTermVariant::Full | EqlTermVariant::Partial | EqlTermVariant::SteVecTerm,
+            ColumnType::Float,
+        ) => parse_str_as_numeric_plaintext::<f64>(val),
+        (
+            EqlTermVariant::Full | EqlTermVariant::Partial | EqlTermVariant::SteVecTerm,
+            ColumnType::SmallInt,
+        ) => parse_str_as_numeric_plaintext::<i16>(val),
+        (
+            EqlTermVariant::Full | EqlTermVariant::Partial | EqlTermVariant::SteVecTerm,
+            ColumnType::Int,
+        ) => parse_str_as_numeric_plaintext::<i32>(val),
+        (
+            EqlTermVariant::Full | EqlTermVariant::Partial | EqlTermVariant::SteVecTerm,
+            ColumnType::BigInt,
+        ) => parse_str_as_numeric_plaintext::<i64>(val),
+        (
+            EqlTermVariant::Full | EqlTermVariant::Partial | EqlTermVariant::SteVecTerm,
+            ColumnType::BigUInt,
+        ) => parse_str_as_numeric_plaintext::<u64>(val),
+        (
+            EqlTermVariant::Full | EqlTermVariant::Partial | EqlTermVariant::SteVecTerm,
+            ColumnType::Boolean,
+        ) => {
             let val = match val {
                 "TRUE" | "true" | "t" | "y" | "yes" | "on" | "1" => true,
                 "FALSE" | "f" | "false" | "n" | "no" | "off" | "0" => false,
@@ -153,17 +180,22 @@ fn text_from_sql(
             Ok(Plaintext::new(val))
         }
         // NaiveDate::parse_from_str ignores time and offset so these are all valid
-        (EqlTermVariant::Full | EqlTermVariant::Partial, ColumnType::Date) => {
-            NaiveDate::parse_from_str(val, "%Y-%m-%d")
-                .map_err(|_| MappingError::CouldNotParseParameter)
-                .map(Plaintext::new)
-        }
-        (EqlTermVariant::Full | EqlTermVariant::Partial, ColumnType::Decimal) => {
-            Decimal::from_str(val)
-                .map_err(|_| MappingError::CouldNotParseParameter)
-                .map(Plaintext::new)
-        }
-        (EqlTermVariant::Full | EqlTermVariant::Partial, ColumnType::Timestamp) => {
+        (
+            EqlTermVariant::Full | EqlTermVariant::Partial | EqlTermVariant::SteVecTerm,
+            ColumnType::Date,
+        ) => NaiveDate::parse_from_str(val, "%Y-%m-%d")
+            .map_err(|_| MappingError::CouldNotParseParameter)
+            .map(Plaintext::new),
+        (
+            EqlTermVariant::Full | EqlTermVariant::Partial | EqlTermVariant::SteVecTerm,
+            ColumnType::Decimal,
+        ) => Decimal::from_str(val)
+            .map_err(|_| MappingError::CouldNotParseParameter)
+            .map(Plaintext::new),
+        (
+            EqlTermVariant::Full | EqlTermVariant::Partial | EqlTermVariant::SteVecTerm,
+            ColumnType::Timestamp,
+        ) => {
             unimplemented!("Timestamp")
         }
 
@@ -175,6 +207,15 @@ fn text_from_sql(
                 format!("$.{val}")
             };
             Ok(Plaintext::new(val))
+        }
+        // A jsonb sv *term* comparison RHS (ordering or equality) must be
+        // reduced to its underlying scalar so it can be encrypted as a STE-vec
+        // query term (`oc` for CLLW ORE leaves, `hm` for hmac/term-filter
+        // leaves).
+        (EqlTermVariant::SteVecTerm, ColumnType::Json) => {
+            let value = serde_json::from_str::<serde_json::Value>(val)
+                .map_err(|_| MappingError::CouldNotParseParameter)?;
+            json_scalar_to_plaintext(&value)
         }
         (EqlTermVariant::Full | EqlTermVariant::Partial, ColumnType::Json) => {
             serde_json::from_str::<serde_json::Value>(val)
@@ -202,55 +243,83 @@ fn binary_from_sql(
     debug!(target: ENCODING, ?pg_type, ?eql_term, ?col_type);
 
     match (eql_term, col_type, pg_type) {
-        (EqlTermVariant::Full | EqlTermVariant::Partial, ColumnType::Text, _) => {
-            parse_bytes_from_sql::<String>(bytes, pg_type).map(Plaintext::new)
-        }
-        (EqlTermVariant::Full | EqlTermVariant::Partial, ColumnType::Boolean, _) => {
-            parse_bytes_from_sql::<bool>(bytes, pg_type).map(Plaintext::new)
-        }
-        (EqlTermVariant::Full | EqlTermVariant::Partial, ColumnType::Date, _) => {
-            parse_bytes_from_sql::<NaiveDate>(bytes, pg_type).map(Plaintext::new)
-        }
-        (EqlTermVariant::Full | EqlTermVariant::Partial, ColumnType::Float, _) => {
-            parse_bytes_from_sql::<f64>(bytes, pg_type).map(Plaintext::new)
-        }
-        (EqlTermVariant::Full | EqlTermVariant::Partial, ColumnType::SmallInt, _) => {
-            parse_bytes_from_sql::<i16>(bytes, pg_type).map(Plaintext::new)
-        }
+        (
+            EqlTermVariant::Full | EqlTermVariant::Partial | EqlTermVariant::SteVecTerm,
+            ColumnType::Text,
+            _,
+        ) => parse_bytes_from_sql::<String>(bytes, pg_type).map(Plaintext::new),
+        (
+            EqlTermVariant::Full | EqlTermVariant::Partial | EqlTermVariant::SteVecTerm,
+            ColumnType::Boolean,
+            _,
+        ) => parse_bytes_from_sql::<bool>(bytes, pg_type).map(Plaintext::new),
+        (
+            EqlTermVariant::Full | EqlTermVariant::Partial | EqlTermVariant::SteVecTerm,
+            ColumnType::Date,
+            _,
+        ) => parse_bytes_from_sql::<NaiveDate>(bytes, pg_type).map(Plaintext::new),
+        (
+            EqlTermVariant::Full | EqlTermVariant::Partial | EqlTermVariant::SteVecTerm,
+            ColumnType::Float,
+            _,
+        ) => parse_bytes_from_sql::<f64>(bytes, pg_type).map(Plaintext::new),
+        (
+            EqlTermVariant::Full | EqlTermVariant::Partial | EqlTermVariant::SteVecTerm,
+            ColumnType::SmallInt,
+            _,
+        ) => parse_bytes_from_sql::<i16>(bytes, pg_type).map(Plaintext::new),
         // INT4 and INT2 can be converted to Int plaintext
-        (EqlTermVariant::Full | EqlTermVariant::Partial, ColumnType::Int, &Type::INT4) => {
-            parse_bytes_from_sql::<i32>(bytes, pg_type).map(Plaintext::new)
-        }
-        (EqlTermVariant::Full | EqlTermVariant::Partial, ColumnType::Int, &Type::INT2) => {
-            parse_bytes_from_sql::<i16>(bytes, pg_type).map(|i| Plaintext::new(i as i32))
-        }
+        (
+            EqlTermVariant::Full | EqlTermVariant::Partial | EqlTermVariant::SteVecTerm,
+            ColumnType::Int,
+            &Type::INT4,
+        ) => parse_bytes_from_sql::<i32>(bytes, pg_type).map(Plaintext::new),
+        (
+            EqlTermVariant::Full | EqlTermVariant::Partial | EqlTermVariant::SteVecTerm,
+            ColumnType::Int,
+            &Type::INT2,
+        ) => parse_bytes_from_sql::<i16>(bytes, pg_type).map(|i| Plaintext::new(i as i32)),
         // INT8, INT4 and INT2 can be converted to BigInt plaintext
-        (EqlTermVariant::Full | EqlTermVariant::Partial, ColumnType::BigInt, &Type::INT8) => {
-            parse_bytes_from_sql::<i64>(bytes, pg_type).map(Plaintext::new)
-        }
-        (EqlTermVariant::Full | EqlTermVariant::Partial, ColumnType::BigInt, &Type::INT4) => {
-            parse_bytes_from_sql::<i32>(bytes, pg_type).map(|i| Plaintext::new(i as i64))
-        }
-        (EqlTermVariant::Full | EqlTermVariant::Partial, ColumnType::BigInt, &Type::INT2) => {
-            parse_bytes_from_sql::<i16>(bytes, pg_type).map(|i| Plaintext::new(i as i64))
-        }
+        (
+            EqlTermVariant::Full | EqlTermVariant::Partial | EqlTermVariant::SteVecTerm,
+            ColumnType::BigInt,
+            &Type::INT8,
+        ) => parse_bytes_from_sql::<i64>(bytes, pg_type).map(Plaintext::new),
+        (
+            EqlTermVariant::Full | EqlTermVariant::Partial | EqlTermVariant::SteVecTerm,
+            ColumnType::BigInt,
+            &Type::INT4,
+        ) => parse_bytes_from_sql::<i32>(bytes, pg_type).map(|i| Plaintext::new(i as i64)),
+        (
+            EqlTermVariant::Full | EqlTermVariant::Partial | EqlTermVariant::SteVecTerm,
+            ColumnType::BigInt,
+            &Type::INT2,
+        ) => parse_bytes_from_sql::<i16>(bytes, pg_type).map(|i| Plaintext::new(i as i64)),
 
         // INT8, INT4 and INT2 can be converted to BigUInt plaintext (note the sign change)
-        (EqlTermVariant::Full | EqlTermVariant::Partial, ColumnType::BigUInt, &Type::INT8) => {
-            parse_bytes_from_sql::<i64>(bytes, pg_type).map(|b| Plaintext::new(b as u64))
-        }
-        (EqlTermVariant::Full | EqlTermVariant::Partial, ColumnType::BigUInt, &Type::INT4) => {
-            parse_bytes_from_sql::<i32>(bytes, pg_type).map(|b| Plaintext::new(b as u64))
-        }
-        (EqlTermVariant::Full | EqlTermVariant::Partial, ColumnType::BigUInt, &Type::INT2) => {
-            parse_bytes_from_sql::<i16>(bytes, pg_type).map(|b| Plaintext::new(b as u64))
-        }
+        (
+            EqlTermVariant::Full | EqlTermVariant::Partial | EqlTermVariant::SteVecTerm,
+            ColumnType::BigUInt,
+            &Type::INT8,
+        ) => parse_bytes_from_sql::<i64>(bytes, pg_type).map(|b| Plaintext::new(b as u64)),
+        (
+            EqlTermVariant::Full | EqlTermVariant::Partial | EqlTermVariant::SteVecTerm,
+            ColumnType::BigUInt,
+            &Type::INT4,
+        ) => parse_bytes_from_sql::<i32>(bytes, pg_type).map(|b| Plaintext::new(b as u64)),
+        (
+            EqlTermVariant::Full | EqlTermVariant::Partial | EqlTermVariant::SteVecTerm,
+            ColumnType::BigUInt,
+            &Type::INT2,
+        ) => parse_bytes_from_sql::<i16>(bytes, pg_type).map(|b| Plaintext::new(b as u64)),
 
         // Even though basically any number can be a decimal, `rust_decimal` only supports converting from NUMERIC
         // Text values will be handled by the text_from_sql function (see below)
-        (EqlTermVariant::Full | EqlTermVariant::Partial, ColumnType::Decimal, &Type::NUMERIC) => {
-            parse_bytes_from_sql::<Decimal>(bytes, pg_type).map(Plaintext::new)
-        }
+        (
+            EqlTermVariant::Full | EqlTermVariant::Partial | EqlTermVariant::SteVecTerm,
+            ColumnType::Decimal,
+            &Type::NUMERIC,
+        ) => parse_bytes_from_sql::<Decimal>(bytes, pg_type).map(Plaintext::new),
 
         // If JSONB, JSONPATH values are treated as strings
         (EqlTermVariant::JsonPath, ColumnType::Json, &Type::JSONPATH) => {
@@ -273,6 +342,19 @@ fn binary_from_sql(
                 Plaintext::new(val)
             })
         }
+        // A jsonb sv *term* comparison RHS (ordering or equality) must be
+        // reduced to its underlying scalar so it can be encrypted as a STE-vec
+        // query term (`oc` for CLLW ORE leaves, `hm` for hmac/term-filter
+        // leaves).
+        (
+            EqlTermVariant::SteVecTerm,
+            ColumnType::Json,
+            &Type::JSON | &Type::JSONB | &Type::BYTEA,
+        ) => {
+            let value = parse_bytes_from_sql::<serde_json::Value>(bytes, pg_type)?;
+            json_scalar_to_plaintext(&value)
+        }
+
         // Python psycopg sends JSON/B as BYTEA
         (
             EqlTermVariant::Full | EqlTermVariant::Partial,
@@ -312,6 +394,44 @@ where
     val.parse::<T>()
         .map_err(|_| MappingError::CouldNotParseParameter)
         .map(Plaintext::new)
+}
+
+/// Converts a *scalar* `serde_json::Value` into the matching scalar
+/// [`Plaintext`].
+///
+/// This is used for the right-hand side of a jsonb STE-vec *term* comparison —
+/// ordering (`col -> selector <op> $param`) or equality
+/// (`col -> selector = $param`). The comparison is performed against a single
+/// extracted leaf value, so the parameter must be encrypted as a STE-vec query
+/// term, which requires a scalar plaintext (number, string, or boolean) rather
+/// than [`Plaintext::Json`].
+///
+/// Numbers are mapped to [`Plaintext::Float`] (f64) so that the orderable
+/// encoding of the query term matches how the stored jsonb document's numeric
+/// leaves are encoded: cipherstash-client's STE-vec storage path always
+/// converts a JSON number leaf to its `f64` orderable representation (see
+/// `OrderableTerm::Number` derived via `f64::to_orderable_bytes`). Encoding the
+/// query term as an integer (`Plaintext::Int` / `BigInt`) would use a different
+/// orderable byte representation and produce incorrect comparison results.
+///
+/// Booleans, non-scalar values (objects, arrays), and JSON `null` are rejected:
+/// these term comparisons are only defined against string/number scalar leaves.
+/// (sv-leaf boolean *equality* is not yet wired end-to-end — it needs a
+/// cipherstash-client change; tracked as a follow-up.)
+fn json_scalar_to_plaintext(value: &serde_json::Value) -> Result<Plaintext, MappingError> {
+    match value {
+        serde_json::Value::String(s) => Ok(Plaintext::new(s.to_owned())),
+        serde_json::Value::Number(n) => n
+            .as_f64()
+            .map(Plaintext::new)
+            .ok_or(MappingError::CouldNotParseParameter),
+        // Booleans, non-scalar values (objects, arrays), and JSON null are
+        // rejected. sv-leaf boolean *equality* is not yet wired end-to-end: the
+        // SteVecTerm query encryption requires an orderable term, but a boolean
+        // has only the `hm` equality term (no `oc`), so the client rejects it.
+        // Enabling it needs a cipherstash-client change (tracked separately).
+        _ => Err(MappingError::CouldNotParseParameter),
+    }
 }
 
 fn decimal_from_sql(
@@ -385,10 +505,14 @@ mod tests {
         config::LogConfig,
         log,
         postgresql::{
-            data::bind_param_from_sql, format_code::FormatCode, messages::bind::BindParam, Column,
+            data::{bind_param_from_sql, literal_from_sql},
+            format_code::FormatCode,
+            messages::bind::BindParam,
+            Column,
         },
         Identifier,
     };
+    use bigdecimal::BigDecimal;
     use bytes::{BufMut, BytesMut};
     use chrono::NaiveDate;
     use cipherstash_client::{
@@ -397,6 +521,8 @@ mod tests {
     };
     use eql_mapper::EqlTermVariant;
     use postgres_types::{ToSql, Type};
+    use sqltk::parser::ast::Value;
+    use std::str::FromStr;
 
     fn to_message(s: &[u8]) -> BytesMut {
         BytesMut::from(s)
@@ -415,6 +541,136 @@ mod tests {
             postgres_type: ty,
             eql_term: EqlTermVariant::Full,
         }
+    }
+
+    /// A jsonb sv term comparison RHS (`EqlTermVariant::SteVecTerm`, ordering or
+    /// equality) on a `ColumnType::Json` column must produce a *scalar*
+    /// `Plaintext` (the underlying number/string), not `Plaintext::Json`,
+    /// because the STE-vec term generator only accepts scalar values.
+    #[test]
+    pub fn ste_vec_term_json_numeric_is_scalar_plaintext() {
+        log::init(LogConfig::default());
+
+        // Text-format numeric value `4` against a Json column, as the RHS of a
+        // jsonb sv term comparison.
+        let param = BindParam::new(FormatCode::Text, to_message(b"4"));
+
+        let pt = bind_param_from_sql(
+            &param,
+            &Type::JSONB,
+            EqlTermVariant::SteVecTerm,
+            ColumnType::Json,
+        )
+        .unwrap()
+        .unwrap();
+
+        // Numbers map to f64 so the orderable encoding matches the stored
+        // jsonb document's numeric leaves.
+        assert_eq!(pt, Plaintext::Float(Some(4.0)));
+    }
+
+    #[test]
+    pub fn ste_vec_term_json_string_is_scalar_plaintext() {
+        log::init(LogConfig::default());
+
+        // Text-format string value `"C"` (JSON-encoded) against a Json column.
+        let param = BindParam::new(FormatCode::Text, to_message(b"\"C\""));
+
+        let pt = bind_param_from_sql(
+            &param,
+            &Type::JSONB,
+            EqlTermVariant::SteVecTerm,
+            ColumnType::Json,
+        )
+        .unwrap()
+        .unwrap();
+
+        assert_eq!(pt, Plaintext::Text(Some("C".to_string())));
+    }
+
+    /// Regression: a *bare numeric literal* used as the RHS of a jsonb sv term
+    /// comparison (e.g. `jsonb_path_query_first(pii, '$...') > 70`) is parsed as
+    /// `Value::Number`, a different literal path to quoted strings and params.
+    /// It must still reduce to a *scalar* `Plaintext::Float` (matching how the
+    /// stored jsonb numeric leaves are encoded), not `Plaintext::Json`, because
+    /// the STE-vec term generator only accepts scalar values.
+    #[test]
+    pub fn ste_vec_term_bare_numeric_literal_is_scalar_plaintext() {
+        log::init(LogConfig::default());
+
+        let literal = Value::Number(BigDecimal::from_str("70").unwrap(), false);
+
+        let pt = literal_from_sql(&literal, EqlTermVariant::SteVecTerm, ColumnType::Json)
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(pt, Plaintext::Float(Some(70.0)));
+    }
+
+    /// A *negative* numeric value reaching the sv-term literal arm must keep its
+    /// sign through the f64 reduction.
+    ///
+    /// Note: SQL `-70` is parsed by sqlparser as
+    /// `Expr::UnaryOp { op: Minus, expr: Value::Number("70") }`, so the
+    /// `Value::Number` seen here is the *positive* `70` and the sign lives in a
+    /// separate AST node — handling negation in the literal collection path is a
+    /// pre-existing concern outside this conversion. This test pins that the
+    /// conversion itself is sign-correct when it does receive a negative
+    /// `BigDecimal` (e.g. a directly-constructed value), so the f64 mapping is
+    /// not where a sign would be lost.
+    #[test]
+    pub fn ste_vec_term_negative_numeric_literal_keeps_sign() {
+        log::init(LogConfig::default());
+
+        let literal = Value::Number(BigDecimal::from_str("-70").unwrap(), false);
+
+        let pt = literal_from_sql(&literal, EqlTermVariant::SteVecTerm, ColumnType::Json)
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(pt, Plaintext::Float(Some(-70.0)));
+    }
+
+    /// Pins the intentional *symmetric-lossy* f64 contract for the sv-term
+    /// numeric literal arm. The stored jsonb numeric leaf and this query term
+    /// both reduce through f64, so for an integer beyond f64's exact-integer
+    /// range (`2^53`) the query term must equal the same f64 round-trip the
+    /// storage side performs — guarding against a future change that encoded the
+    /// query term as an integer (a different orderable encoding) and silently
+    /// broke ordering.
+    #[test]
+    pub fn ste_vec_term_large_integer_literal_uses_symmetric_f64() {
+        log::init(LogConfig::default());
+
+        // 2^53 + 1: the smallest positive integer not exactly representable as
+        // f64, so the f64 round-trip is observably lossy.
+        let big = "9007199254740993";
+        let literal = Value::Number(BigDecimal::from_str(big).unwrap(), false);
+
+        let pt = literal_from_sql(&literal, EqlTermVariant::SteVecTerm, ColumnType::Json)
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(pt, Plaintext::Float(Some(big.parse::<f64>().unwrap())));
+    }
+
+    /// A quoted string literal RHS of a jsonb sv term comparison must also
+    /// reduce to a scalar `Plaintext::Text` (the working pre-regression path,
+    /// kept as a guard against divergence between the literal value paths). The
+    /// SQL literal carries *JSON-encoded* text — `'"C"'` for the value `C` —
+    /// mirroring how `serde_json::Value`'s `Display` renders string scalars
+    /// (see the CIP-3279 `select_where_jsonb_gt` integration tests).
+    #[test]
+    pub fn ste_vec_term_quoted_string_literal_is_scalar_plaintext() {
+        log::init(LogConfig::default());
+
+        let literal = Value::SingleQuotedString("\"C\"".to_string());
+
+        let pt = literal_from_sql(&literal, EqlTermVariant::SteVecTerm, ColumnType::Json)
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(pt, Plaintext::Text(Some("C".to_string())));
     }
 
     #[test]

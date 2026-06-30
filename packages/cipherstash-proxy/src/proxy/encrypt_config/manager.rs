@@ -236,7 +236,9 @@ fn configuration_table_not_found(e: &tokio_postgres::Error) -> bool {
     msg.contains("eql_v2_configuration") && msg.contains("does not exist")
 }
 
-fn canonical_to_map(canonical: CanonicalEncryptionConfig) -> Result<EncryptConfigMap, ConfigError> {
+pub(super) fn canonical_to_map(
+    canonical: CanonicalEncryptionConfig,
+) -> Result<EncryptConfigMap, ConfigError> {
     Ok(canonical
         .into_config_map()?
         .into_iter()
@@ -248,7 +250,9 @@ fn canonical_to_map(canonical: CanonicalEncryptionConfig) -> Result<EncryptConfi
 mod tests {
     use super::*;
     use cipherstash_client::eql::Identifier;
-    use cipherstash_config::column::{ArrayIndexMode, IndexType, TokenFilter, Tokenizer};
+    use cipherstash_config::column::{
+        ArrayIndexMode, IndexType, SteVecMode, TokenFilter, Tokenizer,
+    };
     use cipherstash_config::ColumnType;
     use serde_json::json;
 
@@ -518,6 +522,7 @@ mod tests {
                 prefix: "event-data".into(),
                 term_filters: vec![],
                 array_index_mode: ArrayIndexMode::ALL,
+                mode: SteVecMode::default(),
             },
         );
     }

@@ -10,7 +10,8 @@ use sqltk::parser::ast::{
 use sqltk::parser::tokenizer::Span;
 use sqltk::{NodeKey, NodePath, Visitable};
 
-use crate::unifier::{Type, Value};
+use crate::ste_vec_ordering::is_eql_typed;
+use crate::unifier::Type;
 use crate::EqlMapperError;
 
 use super::TransformationRule;
@@ -38,15 +39,7 @@ impl<'ast> RewriteContainmentOps<'ast> {
     /// because containment operators return Native (boolean), not EQL.
     #[inline]
     fn uses_eql_type(&self, left: &'ast Expr, right: &'ast Expr) -> bool {
-        self.is_eql_typed(left) || self.is_eql_typed(right)
-    }
-
-    /// Checks if an expression has an EQL type in node_types.
-    fn is_eql_typed(&self, expr: &'ast Expr) -> bool {
-        matches!(
-            self.node_types.get(&NodeKey::new(expr)),
-            Some(Type::Value(Value::Eql(_)))
-        )
+        is_eql_typed(&self.node_types, left) || is_eql_typed(&self.node_types, right)
     }
 
     fn make_function_call(fn_name: &str, left: Expr, right: Expr) -> Expr {

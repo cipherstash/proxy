@@ -578,6 +578,16 @@ where
         self.table_resolver.clone()
     }
 
+    /// Returns the per-context snapshot of the [`EncryptConfig`].
+    ///
+    /// Used by the SQL transformation stage to resolve the concrete encrypted
+    /// index types of a column (see [`EncryptConfigIndexResolver`]).
+    ///
+    /// [`EncryptConfigIndexResolver`]: crate::proxy::EncryptConfigIndexResolver
+    pub fn get_encrypt_config(&self) -> Arc<EncryptConfig> {
+        self.encrypt_config.clone()
+    }
+
     /// Examines a [`sqltk::parser::ast::Statement`] and if it is precisely equal to `SET UNSAFE_DISABLE_MAPPING = {boolean};`
     /// then it sets the flag [`Context::unsafe_disable_mapping`] to the provided `{boolean}`` value.
     ///
@@ -752,7 +762,7 @@ where
         &self,
         plaintexts: Vec<Option<cipherstash_client::encryption::Plaintext>>,
         columns: &[Option<Column>],
-    ) -> Result<Vec<Option<crate::EqlCiphertext>>, Error> {
+    ) -> Result<Vec<Option<crate::EqlOutput>>, Error> {
         let keyset_id = self.keyset_identifier();
 
         self.encryption
@@ -1077,7 +1087,7 @@ mod tests {
             _keyset_id: Option<KeysetIdentifier>,
             _plaintexts: Vec<Option<cipherstash_client::encryption::Plaintext>>,
             _columns: &[Option<Column>],
-        ) -> Result<Vec<Option<crate::EqlCiphertext>>, Error> {
+        ) -> Result<Vec<Option<crate::EqlOutput>>, Error> {
             Ok(vec![])
         }
 

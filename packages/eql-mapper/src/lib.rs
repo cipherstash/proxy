@@ -4,11 +4,13 @@ mod dep;
 mod display_helpers;
 mod eql_mapper;
 mod importer;
+mod index_resolver;
 mod inference;
 mod iterator_ext;
 mod model;
 mod param;
 mod scope_tracker;
+mod ste_vec_ordering;
 mod transformation_rules;
 mod type_checked_statement;
 
@@ -17,6 +19,7 @@ mod test_helpers;
 
 pub use display_helpers::*;
 pub use eql_mapper::*;
+pub use index_resolver::*;
 pub use model::*;
 pub use param::*;
 pub use type_checked_statement::*;
@@ -32,7 +35,7 @@ pub(crate) use transformation_rules::*;
 
 #[cfg(test)]
 mod test {
-    use super::{test_helpers::*, type_check};
+    use super::{test_helpers::*, type_check, type_check_with_indexes};
     use crate::{
         projection, schema, test_helpers,
         unifier::{
@@ -2088,6 +2091,711 @@ mod test {
         );
     }
 
+    /// Group B (CIP-3279): ordering comparisons on a jsonb sv-element extracted
+    /// via `->` must be rewritten to compare CLLW ORE terms so the SQL binds to
+    /// the `eql_v2.ore_cllw <op> eql_v2.ore_cllw` operators instead of the root
+    /// Block-ORE (`ob`) path which raises `Expected an ore index (ob)`.
+    #[test]
+    fn jsonb_sv_ordering_rewrites_to_ore_cllw() {
+        // init_tracing();
+        let schema = resolver(schema! {
+            tables: {
+                encrypted: {
+                    id,
+                    encrypted_jsonb (EQL: JsonLike),
+                }
+            }
+        });
+
+        let statement =
+            parse("SELECT encrypted_jsonb FROM encrypted WHERE encrypted_jsonb -> $1 > $2");
+
+        match type_check(schema, &statement) {
+            Ok(typed) => match typed.transform(HashMap::new()) {
+                Ok(statement) => {
+                    assert_eq!(
+                        statement.to_string(),
+                        "SELECT encrypted_jsonb FROM encrypted WHERE \
+                        eql_v2.ore_cllw((encrypted_jsonb -> $1::JSONB::eql_v2_encrypted)::JSONB) > \
+                        eql_v2.ore_cllw($2::JSONB)"
+                    );
+                }
+                Err(err) => panic!("transformation failed: {err}"),
+            },
+            Err(err) => panic!("type check failed: {err}"),
+        }
+    }
+
+    /// The `jsonb_path_query_first` form of a jsonb sv ordering comparison must
+    /// also rewrite to a CLLW ORE comparison. The function is first rewritten to
+    /// `eql_v2.jsonb_path_query_first` by `RewriteStandardSqlFnsOnEqlTypes`.
+    #[test]
+    fn jsonb_sv_ordering_path_query_first_rewrites_to_ore_cllw() {
+        let schema = resolver(schema! {
+            tables: {
+                encrypted: {
+                    id,
+                    encrypted_jsonb (EQL: JsonLike),
+                }
+            }
+        });
+
+        let statement = parse(
+            "SELECT encrypted_jsonb FROM encrypted WHERE jsonb_path_query_first(encrypted_jsonb, $1) > $2",
+        );
+
+        match type_check(schema, &statement) {
+            Ok(typed) => match typed.transform(HashMap::new()) {
+                Ok(statement) => {
+                    assert_eq!(
+                        statement.to_string(),
+                        "SELECT encrypted_jsonb FROM encrypted WHERE \
+                        eql_v2.ore_cllw(eql_v2.jsonb_path_query_first(encrypted_jsonb, $1::JSONB::eql_v2_encrypted)::JSONB) > \
+                        eql_v2.ore_cllw($2::JSONB)"
+                    );
+                }
+                Err(err) => panic!("transformation failed: {err}"),
+            },
+            Err(err) => panic!("type check failed: {err}"),
+        }
+    }
+
+    /// Each ordering operator (`<`, `<=`, `>`, `>=`) on a jsonb sv element must
+    /// rewrite to the CLLW ORE comparison preserving the operator.
+    #[test]
+    fn jsonb_sv_ordering_all_operators_rewrite_to_ore_cllw() {
+        for op in ["<", "<=", ">", ">="] {
+            let schema = resolver(schema! {
+                tables: {
+                    encrypted: {
+                        id,
+                        encrypted_jsonb (EQL: JsonLike),
+                    }
+                }
+            });
+
+            let statement = parse(&format!(
+                "SELECT encrypted_jsonb FROM encrypted WHERE encrypted_jsonb -> $1 {op} $2"
+            ));
+
+            match type_check(schema, &statement) {
+                Ok(typed) => match typed.transform(HashMap::new()) {
+                    Ok(statement) => {
+                        assert_eq!(
+                            statement.to_string(),
+                            format!(
+                                "SELECT encrypted_jsonb FROM encrypted WHERE \
+                                eql_v2.ore_cllw((encrypted_jsonb -> $1::JSONB::eql_v2_encrypted)::JSONB) {op} \
+                                eql_v2.ore_cllw($2::JSONB)"
+                            )
+                        );
+                    }
+                    Err(err) => panic!("transformation failed for `{op}`: {err}"),
+                },
+                Err(err) => panic!("type check failed for `{op}`: {err}"),
+            }
+        }
+    }
+
+    /// Equality (`=`) on a jsonb sv element must NOT be rewritten to a CLLW ORE
+    /// comparison: equality is hmac/oc-based and resolves through the
+    /// `eql_v2.eq_term` path, not the ordering `eql_v2.ore_cllw` path. This
+    /// guards against the ordering rule over-matching the equality operators.
+    #[test]
+    fn jsonb_sv_equality_is_not_rewritten_to_ore_cllw() {
+        let schema = resolver(schema! {
+            tables: {
+                encrypted: {
+                    id,
+                    encrypted_jsonb (EQL: JsonLike),
+                }
+            }
+        });
+
+        let statement =
+            parse("SELECT encrypted_jsonb FROM encrypted WHERE encrypted_jsonb -> $1 = $2");
+
+        match type_check(schema, &statement) {
+            Ok(typed) => match typed.transform(HashMap::new()) {
+                Ok(statement) => {
+                    let sql = statement.to_string();
+                    assert!(
+                        !sql.contains("ore_cllw"),
+                        "equality must not bind to ore_cllw, got: {sql}"
+                    );
+                }
+                Err(err) => panic!("transformation failed: {err}"),
+            },
+            Err(err) => panic!("type check failed: {err}"),
+        }
+    }
+
+    /// Group C (CIP-3281): equality (`=`) on a jsonb sv-element extracted via
+    /// `->` must be rewritten to compare the XOR-aware equality terms so the SQL
+    /// binds to `eql_v2.eq_term` rather than the root `eql_v2_encrypted`
+    /// equality path. The left operand (`col -> sel`) is an
+    /// `eql_v2.ste_vec_entry`, so `eql_v2.eq_term(...)` reads its `hm`/`oc`
+    /// term; the right operand is the query payload jsonb, whose `hm`/`oc` term
+    /// is read with the inlined `eq_term` body (`decode(coalesce(...), 'hex')`).
+    #[test]
+    fn jsonb_sv_equality_rewrites_to_eq_term() {
+        let schema = resolver(schema! {
+            tables: {
+                encrypted: {
+                    id,
+                    encrypted_jsonb (EQL: JsonLike),
+                }
+            }
+        });
+
+        let statement =
+            parse("SELECT encrypted_jsonb FROM encrypted WHERE encrypted_jsonb -> $1 = $2");
+
+        match type_check(schema, &statement) {
+            Ok(typed) => match typed.transform(HashMap::new()) {
+                Ok(statement) => {
+                    assert_eq!(
+                        statement.to_string(),
+                        "SELECT encrypted_jsonb FROM encrypted WHERE \
+                        eql_v2.eq_term(encrypted_jsonb -> $1::JSONB::eql_v2_encrypted) = \
+                        decode(coalesce($2::JSONB ->> 'hm', $2::JSONB ->> 'oc'), 'hex')"
+                    );
+                }
+                Err(err) => panic!("transformation failed: {err}"),
+            },
+            Err(err) => panic!("type check failed: {err}"),
+        }
+    }
+
+    /// Inequality (`<>`) on a jsonb sv element must rewrite to the same
+    /// `eql_v2.eq_term` comparison, preserving the `<>` operator.
+    #[test]
+    fn jsonb_sv_inequality_rewrites_to_eq_term() {
+        let schema = resolver(schema! {
+            tables: {
+                encrypted: {
+                    id,
+                    encrypted_jsonb (EQL: JsonLike),
+                }
+            }
+        });
+
+        let statement =
+            parse("SELECT encrypted_jsonb FROM encrypted WHERE encrypted_jsonb -> $1 <> $2");
+
+        match type_check(schema, &statement) {
+            Ok(typed) => match typed.transform(HashMap::new()) {
+                Ok(statement) => {
+                    assert_eq!(
+                        statement.to_string(),
+                        "SELECT encrypted_jsonb FROM encrypted WHERE \
+                        eql_v2.eq_term(encrypted_jsonb -> $1::JSONB::eql_v2_encrypted) <> \
+                        decode(coalesce($2::JSONB ->> 'hm', $2::JSONB ->> 'oc'), 'hex')"
+                    );
+                }
+                Err(err) => panic!("transformation failed: {err}"),
+            },
+            Err(err) => panic!("type check failed: {err}"),
+        }
+    }
+
+    /// The `jsonb_path_query_first` form of a jsonb sv equality comparison must
+    /// also rewrite to the `eql_v2.eq_term` path. The function is first
+    /// rewritten to `eql_v2.jsonb_path_query_first` by
+    /// `RewriteStandardSqlFnsOnEqlTypes`; its result is an `eql_v2_encrypted`,
+    /// so it is cast to `::eql_v2.ste_vec_entry` (via jsonb) before `eq_term`.
+    #[test]
+    fn jsonb_sv_equality_path_query_first_rewrites_to_eq_term() {
+        let schema = resolver(schema! {
+            tables: {
+                encrypted: {
+                    id,
+                    encrypted_jsonb (EQL: JsonLike),
+                }
+            }
+        });
+
+        let statement = parse(
+            "SELECT encrypted_jsonb FROM encrypted WHERE jsonb_path_query_first(encrypted_jsonb, $1) = $2",
+        );
+
+        match type_check(schema, &statement) {
+            Ok(typed) => match typed.transform(HashMap::new()) {
+                Ok(statement) => {
+                    assert_eq!(
+                        statement.to_string(),
+                        "SELECT encrypted_jsonb FROM encrypted WHERE \
+                        eql_v2.eq_term(eql_v2.jsonb_path_query_first(encrypted_jsonb, $1::JSONB::eql_v2_encrypted)::JSONB::eql_v2.ste_vec_entry) = \
+                        decode(coalesce($2::JSONB ->> 'hm', $2::JSONB ->> 'oc'), 'hex')"
+                    );
+                }
+                Err(err) => panic!("transformation failed: {err}"),
+            },
+            Err(err) => panic!("type check failed: {err}"),
+        }
+    }
+
+    /// The RHS param of a jsonb sv equality comparison must resolve to
+    /// `EqlTerm::SteVecTerm` so the proxy encrypts it as the matching STE-vec
+    /// equality term (`hm`/`oc`) carried by the column's leaf.
+    #[test]
+    fn jsonb_sv_equality_rhs_param_is_ste_vec_term() {
+        use crate::unifier::EqlTerm;
+
+        let schema = resolver(schema! {
+            tables: {
+                encrypted: {
+                    id,
+                    encrypted_jsonb (EQL: JsonLike),
+                }
+            }
+        });
+
+        let statement =
+            parse("SELECT encrypted_jsonb FROM encrypted WHERE encrypted_jsonb -> $1 = $2");
+
+        let typed = type_check(schema, &statement)
+            .map_err(|err| err.to_string())
+            .unwrap();
+
+        let (_, value) = typed
+            .params
+            .iter()
+            .find(|(p, _)| *p == Param(2))
+            .expect("param $2 should be present");
+
+        assert!(
+            matches!(value, Value::Eql(EqlTerm::SteVecTerm(_))),
+            "expected $2 to be EqlTerm::SteVecTerm, got {value}"
+        );
+    }
+
+    /// The RHS *literal* of a jsonb sv equality comparison must also resolve to
+    /// `EqlTerm::SteVecTerm` so a simple-protocol query (inline literal) is
+    /// encrypted as the matching STE-vec equality term.
+    #[test]
+    fn jsonb_sv_equality_rhs_literal_is_ste_vec_term() {
+        use crate::unifier::EqlTerm;
+
+        let schema = resolver(schema! {
+            tables: {
+                encrypted: {
+                    id,
+                    encrypted_jsonb (EQL: JsonLike),
+                }
+            }
+        });
+
+        let statement =
+            parse("SELECT encrypted_jsonb FROM encrypted WHERE encrypted_jsonb -> 'number' = 4");
+
+        let typed = type_check(schema, &statement)
+            .map_err(|err| err.to_string())
+            .unwrap();
+
+        let ste_vec_term_count = typed
+            .literals
+            .iter()
+            .filter(|(eql_term, _)| matches!(eql_term, EqlTerm::SteVecTerm(_)))
+            .count();
+
+        assert_eq!(
+            ste_vec_term_count, 1,
+            "expected exactly one SteVecTerm literal (the comparison value), got {:?}",
+            typed.literals
+        );
+    }
+
+    /// Security regression: the inline RHS *literal* of a jsonb sv equality
+    /// comparison must be replaced by its encrypted ciphertext in the
+    /// transformed SQL — the plaintext value must never survive into the query
+    /// the proxy sends downstream.
+    ///
+    /// Because the transform walks bottom-up (children before parents), the RHS
+    /// literal node is cast to `<ct>::JSONB::eql_v2_encrypted` by
+    /// `CastLiteralsAsEncrypted` *before* `RewriteJsonbSteVecEquality` rewrites
+    /// the parent comparison. The equality rule then strips the outer
+    /// `::eql_v2_encrypted` cast (via `rhs_as_jsonb`) and reads `->> 'hm'/'oc'`
+    /// off the encrypted payload. The clone inside `build_eq_term_rhs` operates
+    /// on that already-encrypted output node, not on the original literal node
+    /// `CastLiteralsAsEncrypted` keys on, so it cannot leave the plaintext
+    /// uncast.
+    #[test]
+    fn jsonb_sv_equality_rhs_literal_is_encrypted_in_sql() {
+        let schema = resolver(schema! {
+            tables: {
+                encrypted: {
+                    id,
+                    encrypted_jsonb (EQL: JsonLike),
+                }
+            }
+        });
+
+        let statement =
+            parse("SELECT encrypted_jsonb FROM encrypted WHERE encrypted_jsonb -> 'number' = 4");
+
+        let typed = type_check(schema, &statement)
+            .map_err(|err| err.to_string())
+            .unwrap();
+
+        // Encrypt every literal to a distinguishable marker so we can assert the
+        // RHS comparison value (`4`) is encrypted, not left as plaintext.
+        let encrypted_literals: HashMap<NodeKey<'_>, ast::Value> = typed
+            .literals
+            .iter()
+            .map(|(_, node)| {
+                (
+                    node.as_node_key(),
+                    ast::Value::SingleQuotedString(format!("ENC({node})")),
+                )
+            })
+            .collect();
+
+        let sql = typed
+            .transform(encrypted_literals)
+            .map_err(|err| err.to_string())
+            .unwrap()
+            .to_string();
+
+        // The RHS comparison value must appear as its encrypted ciphertext,
+        // wrapped in the `::JSONB` cast the inlined `eq_term` body reads from.
+        assert!(
+            sql.contains("'ENC(4)'::JSONB ->> 'hm'") && sql.contains("'ENC(4)'::JSONB ->> 'oc'"),
+            "the RHS literal `4` must be encrypted in the SQL, got: {sql}"
+        );
+
+        // The plaintext value `4` must never survive bare in the SQL. Strip the
+        // encrypted-ciphertext markers first, then assert the digit `4` does not
+        // appear as a standalone numeric token anywhere in what remains. This is
+        // robust to formatting changes (unlike matching specific `= 4` spellings).
+        let without_ciphertext = sql.replace("'ENC(4)'", "");
+        let bare_number_4 = without_ciphertext
+            .split(|c: char| !c.is_ascii_digit())
+            .any(|token| token == "4");
+        assert!(
+            !bare_number_4,
+            "the plaintext value `4` must not appear bare in the SQL, got: {sql}"
+        );
+    }
+
+    /// The commutative form with the accessor on the *right*
+    /// (`value = col -> selector`) is intentionally NOT rewritten: the rule and
+    /// the reclassification both gate on `is_ste_vec_accessor(left)`, so they
+    /// agree to leave it as root `eql_v2_encrypted` equality. This guards that
+    /// intentional left-operand-only behaviour so a future change that "adds
+    /// commutativity" to only one of the two passes is caught.
+    #[test]
+    fn jsonb_sv_equality_commutative_form_is_not_rewritten() {
+        use crate::unifier::EqlTerm;
+
+        let schema = resolver(schema! {
+            tables: {
+                encrypted: {
+                    id,
+                    encrypted_jsonb (EQL: JsonLike),
+                }
+            }
+        });
+
+        let statement =
+            parse("SELECT encrypted_jsonb FROM encrypted WHERE $2 = encrypted_jsonb -> $1");
+
+        let typed = type_check(schema, &statement)
+            .map_err(|err| err.to_string())
+            .unwrap();
+
+        // The rewrite must not fire: no `eq_term` in the emitted SQL.
+        let sql = typed.transform(HashMap::new()).unwrap().to_string();
+        assert!(
+            !sql.contains("eq_term"),
+            "commutative form must not be rewritten to eq_term, got: {sql}"
+        );
+
+        // And the param must NOT be reclassified to SteVecTerm — the two passes
+        // must stay in lockstep.
+        let (_, value) = typed
+            .params
+            .iter()
+            .find(|(p, _)| *p == Param(2))
+            .expect("param $2 should be present");
+        assert!(
+            !matches!(value, Value::Eql(EqlTerm::SteVecTerm(_))),
+            "commutative-form RHS must NOT be reclassified to SteVecTerm, got {value}"
+        );
+    }
+
+    /// The RHS param of a jsonb sv ordering comparison must resolve to
+    /// `EqlTerm::SteVecTerm` so the proxy encrypts it as a CLLW ORE STE-vec
+    /// query term (`oc`).
+    #[test]
+    fn jsonb_sv_ordering_rhs_param_is_ste_vec_term() {
+        use crate::unifier::EqlTerm;
+
+        let schema = resolver(schema! {
+            tables: {
+                encrypted: {
+                    id,
+                    encrypted_jsonb (EQL: JsonLike),
+                }
+            }
+        });
+
+        let statement =
+            parse("SELECT encrypted_jsonb FROM encrypted WHERE encrypted_jsonb -> $1 > $2");
+
+        let typed = type_check(schema, &statement)
+            .map_err(|err| err.to_string())
+            .unwrap();
+
+        // $2 is the comparison RHS; it must be a SteVecTerm.
+        let (_, value) = typed
+            .params
+            .iter()
+            .find(|(p, _)| *p == Param(2))
+            .expect("param $2 should be present");
+
+        assert!(
+            matches!(value, Value::Eql(EqlTerm::SteVecTerm(_))),
+            "expected $2 to be EqlTerm::SteVecTerm, got {value}"
+        );
+    }
+
+    /// The RHS *literal* of a jsonb sv ordering comparison must also resolve to
+    /// `EqlTerm::SteVecTerm` so a simple-protocol query (inline literal) is
+    /// encrypted as a CLLW ORE STE-vec query term (`oc`).
+    #[test]
+    fn jsonb_sv_ordering_rhs_literal_is_ste_vec_term() {
+        use crate::unifier::EqlTerm;
+
+        let schema = resolver(schema! {
+            tables: {
+                encrypted: {
+                    id,
+                    encrypted_jsonb (EQL: JsonLike),
+                }
+            }
+        });
+
+        let statement =
+            parse("SELECT encrypted_jsonb FROM encrypted WHERE encrypted_jsonb -> 'number' > 4");
+
+        let typed = type_check(schema, &statement)
+            .map_err(|err| err.to_string())
+            .unwrap();
+
+        // The literals are (selector, comparison-value). The comparison value
+        // (`4`) must be a SteVecTerm; the selector (`'number'`) is a JsonAccessor.
+        let ste_vec_term_count = typed
+            .literals
+            .iter()
+            .filter(|(eql_term, _)| matches!(eql_term, EqlTerm::SteVecTerm(_)))
+            .count();
+
+        assert_eq!(
+            ste_vec_term_count, 1,
+            "expected exactly one SteVecTerm literal (the comparison value), got {:?}",
+            typed.literals
+        );
+    }
+
+    /// A *negative* numeric RHS literal (`-70`) parses as
+    /// `Expr::UnaryOp { Minus, Number }`, which the type inferencer forces to
+    /// `Native` (see `Expr::UnaryOp` in `infer_type_impls/expr.rs`). It
+    /// therefore cannot unify against an EQL operand, so a jsonb sv comparison
+    /// with a negative literal RHS is *rejected at type-check time* rather than
+    /// being rewritten.
+    ///
+    /// This is the safety-critical guard the STE-vec rewrites depend on: because
+    /// the UnaryOp RHS is `Native`, the rewrite rules' `is_eql_typed(right)`
+    /// gate is `false`, so the SQL is **not** rewritten to `eql_v2.ore_cllw` /
+    /// `eql_v2.eq_term`. The dangerous "SQL rewritten as an sv term but the
+    /// value not reclassified as `SteVecTerm`" mismatch is structurally
+    /// impossible. (This UnaryOp→Native limitation is pre-existing and applies
+    /// identically to scalar EQL comparisons such as `encrypted_int > -70`.)
+    #[test]
+    fn jsonb_sv_ordering_rhs_negative_literal_is_rejected() {
+        let schema = resolver(schema! {
+            tables: {
+                encrypted: {
+                    id,
+                    encrypted_jsonb (EQL: JsonLike),
+                }
+            }
+        });
+
+        let statement =
+            parse("SELECT encrypted_jsonb FROM encrypted WHERE encrypted_jsonb -> 'number' > -70");
+
+        // Assert it is rejected *for the right reason*: a Native/EQL unification
+        // failure (the UnaryOp RHS forced to Native), not some unrelated error.
+        let err = type_check(schema, &statement)
+            .expect_err(
+                "negative-literal jsonb sv ordering comparison must be rejected at type-check time",
+            )
+            .to_string();
+
+        assert!(
+            err.contains("unify") && err.contains("Native"),
+            "expected a Native/EQL unification failure (UnaryOp RHS is Native), got: {err}"
+        );
+    }
+
+    /// Equality counterpart of [`jsonb_sv_ordering_rhs_negative_literal_is_rejected`]:
+    /// a negative-literal RHS of a jsonb sv equality comparison is likewise
+    /// rejected at type-check time, so it is never rewritten to `eql_v2.eq_term`
+    /// against an unreclassified value.
+    #[test]
+    fn jsonb_sv_equality_rhs_negative_literal_is_rejected() {
+        let schema = resolver(schema! {
+            tables: {
+                encrypted: {
+                    id,
+                    encrypted_jsonb (EQL: JsonLike),
+                }
+            }
+        });
+
+        let statement =
+            parse("SELECT encrypted_jsonb FROM encrypted WHERE encrypted_jsonb -> 'number' = -70");
+
+        // Assert it is rejected *for the right reason*: a Native/EQL unification
+        // failure (the UnaryOp RHS forced to Native), not some unrelated error.
+        let err = type_check(schema, &statement)
+            .expect_err(
+                "negative-literal jsonb sv equality comparison must be rejected at type-check time",
+            )
+            .to_string();
+
+        assert!(
+            err.contains("unify") && err.contains("Native"),
+            "expected a Native/EQL unification failure (UnaryOp RHS is Native), got: {err}"
+        );
+    }
+
+    /// The RHS param of a root-scalar ordering comparison must remain
+    /// `EqlTerm::Partial` (root Block-ORE path), NOT be reclassified.
+    #[test]
+    fn root_scalar_ordering_rhs_param_is_partial() {
+        use crate::unifier::EqlTerm;
+
+        let schema = resolver(schema! {
+            tables: {
+                encrypted: {
+                    id,
+                    encrypted_int (EQL: Ord),
+                }
+            }
+        });
+
+        let statement = parse("SELECT id FROM encrypted WHERE encrypted_int > $1");
+
+        let typed = type_check(schema, &statement)
+            .map_err(|err| err.to_string())
+            .unwrap();
+
+        let (_, value) = typed
+            .params
+            .iter()
+            .find(|(p, _)| *p == Param(1))
+            .expect("param $1 should be present");
+
+        assert!(
+            !matches!(value, Value::Eql(EqlTerm::SteVecTerm(_))),
+            "root-scalar ordering RHS must NOT be reclassified to SteVecTerm, got {value}"
+        );
+    }
+
+    /// A root-scalar ordering comparison (not a jsonb sv accessor) must NOT be
+    /// rewritten — it relies on the root Block-ORE (`ob`) operators.
+    #[test]
+    fn root_scalar_ordering_is_not_rewritten_to_ore_cllw() {
+        let schema = resolver(schema! {
+            tables: {
+                encrypted: {
+                    id,
+                    encrypted_int (EQL: Ord),
+                }
+            }
+        });
+
+        let statement = parse("SELECT id FROM encrypted WHERE encrypted_int > $1");
+
+        match type_check(schema, &statement) {
+            Ok(typed) => match typed.transform(HashMap::new()) {
+                Ok(statement) => {
+                    assert_eq!(
+                        statement.to_string(),
+                        "SELECT id FROM encrypted WHERE encrypted_int > $1::JSONB::eql_v2_encrypted"
+                    );
+                }
+                Err(err) => panic!("transformation failed: {err}"),
+            },
+            Err(err) => panic!("type check failed: {err}"),
+        }
+    }
+
+    /// A jsonb sv ordering comparison whose RHS is a *different* encrypted
+    /// column (`accessor <op> other_encrypted -> sel`) is rejected by EQL term
+    /// unification — EQL ciphertexts are column-scoped, so two distinct columns
+    /// never unify. This is why the ordering rewrite's `is_eql_typed(right)`
+    /// gate is sufficient: the only EQL RHS that can reach the rewrite is one
+    /// that unified to the *same* `TableColumn` (a literal/param, or the same
+    /// column re-referenced), which carries the matching sv term. A mismatched
+    /// "other encrypted column on the RHS" shape is not representable.
+    #[test]
+    fn jsonb_sv_ordering_rhs_different_encrypted_column_is_rejected() {
+        let schema = resolver(schema! {
+            tables: {
+                encrypted: {
+                    id,
+                    encrypted_jsonb (EQL: JsonLike),
+                    other_jsonb (EQL: JsonLike),
+                }
+            }
+        });
+
+        let statement =
+            parse("SELECT id FROM encrypted WHERE encrypted_jsonb -> 'n' > other_jsonb -> 'n'");
+
+        let err = type_check(schema, &statement)
+            .expect_err("comparing two different encrypted columns must be rejected")
+            .to_string();
+
+        assert!(
+            err.contains("unify") && err.contains("EQL"),
+            "expected an EQL-term unification failure between the two columns, got: {err}"
+        );
+    }
+
+    /// Scalar OPE counterpart of
+    /// [`jsonb_sv_ordering_rhs_different_encrypted_column_is_rejected`]: a scalar
+    /// ordering comparison between two *different* encrypted columns is rejected
+    /// by EQL term unification, so the scalar OPE rewrite's `is_eql_typed(right)`
+    /// gate can never bind a non-OPE foreign column on the RHS.
+    #[test]
+    fn scalar_ordering_rhs_different_encrypted_column_is_rejected() {
+        let schema = resolver(schema! {
+            tables: {
+                encrypted: {
+                    id,
+                    a (EQL: Ord),
+                    b (EQL: Ord),
+                }
+            }
+        });
+
+        let statement = parse("SELECT id FROM encrypted WHERE a > b");
+
+        let err = type_check(schema, &statement)
+            .expect_err("comparing two different encrypted columns must be rejected")
+            .to_string();
+
+        assert!(
+            err.contains("unify") && err.contains("EQL"),
+            "expected an EQL-term unification failure between the two columns, got: {err}"
+        );
+    }
+
     #[test]
     fn ensure_eql_mapper_does_not_choke_on_elixir_ecto_schema_metadata_query() {
         // init_tracing();
@@ -2155,6 +2863,411 @@ mod test {
         type_check(schema, &statement)
             .map_err(|err| err.to_string())
             .unwrap();
+    }
+
+    /// A scalar (non-jsonb) `eql_v2_encrypted` column whose resolved index set
+    /// contains `Ope` must have ordering comparisons rewritten to compare the
+    /// order-preserving `op` ciphertext directly using Postgres built-ins.
+    ///
+    /// `col <op> $param`  →  `decode(col->>'op','hex') <op> decode($param->>'op','hex')`
+    #[test]
+    fn scalar_ope_ordering_rewrites_to_decode_op() {
+        use crate::{IndexKind, MapIndexResolver};
+        use std::collections::HashSet;
+
+        for op in ["<", "<=", ">", ">="] {
+            let schema = resolver(schema! {
+                tables: {
+                    encrypted: {
+                        id,
+                        encrypted_int (EQL: Ord),
+                    }
+                }
+            });
+
+            let index_resolver = Arc::new(MapIndexResolver::new(HashMap::from_iter([(
+                TableColumn {
+                    table: id("encrypted"),
+                    column: id("encrypted_int"),
+                },
+                HashSet::from_iter([IndexKind::Ope]),
+            )])));
+
+            let statement = parse(&format!(
+                "SELECT id FROM encrypted WHERE encrypted_int {op} $1"
+            ));
+
+            let typed = type_check_with_indexes(schema, &statement, index_resolver)
+                .map_err(|err| err.to_string())
+                .unwrap();
+
+            let transformed = typed.transform(HashMap::new()).unwrap();
+
+            assert_eq!(
+                transformed.to_string(),
+                format!(
+                    "SELECT id FROM encrypted WHERE \
+                    decode(encrypted_int::JSONB ->> 'op', 'hex') {op} \
+                    decode($1::JSONB::eql_v2_encrypted::JSONB ->> 'op', 'hex')"
+                ),
+                "operator `{op}` must rewrite to a decode(op) byte comparison"
+            );
+        }
+    }
+
+    /// `ORDER BY col [ASC|DESC] [NULLS …]` on a scalar OPE column must rewrite
+    /// the sort key to `decode(col->>'op','hex')`, preserving direction and
+    /// nulls ordering.
+    #[test]
+    fn scalar_ope_order_by_rewrites_to_decode_op() {
+        use crate::{IndexKind, MapIndexResolver};
+        use std::collections::HashSet;
+
+        let cases = [
+            (
+                "ORDER BY encrypted_int",
+                "ORDER BY decode(encrypted_int::JSONB ->> 'op', 'hex')",
+            ),
+            (
+                "ORDER BY encrypted_int ASC",
+                "ORDER BY decode(encrypted_int::JSONB ->> 'op', 'hex') ASC",
+            ),
+            (
+                "ORDER BY encrypted_int DESC",
+                "ORDER BY decode(encrypted_int::JSONB ->> 'op', 'hex') DESC",
+            ),
+            (
+                "ORDER BY encrypted_int DESC NULLS LAST",
+                "ORDER BY decode(encrypted_int::JSONB ->> 'op', 'hex') DESC NULLS LAST",
+            ),
+            (
+                "ORDER BY encrypted_int ASC NULLS FIRST",
+                "ORDER BY decode(encrypted_int::JSONB ->> 'op', 'hex') ASC NULLS FIRST",
+            ),
+        ];
+
+        for (order_by, expected_order_by) in cases {
+            let schema = resolver(schema! {
+                tables: {
+                    encrypted: {
+                        id,
+                        encrypted_int (EQL: Ord),
+                    }
+                }
+            });
+
+            let index_resolver = Arc::new(MapIndexResolver::new(HashMap::from_iter([(
+                TableColumn {
+                    table: id("encrypted"),
+                    column: id("encrypted_int"),
+                },
+                HashSet::from_iter([IndexKind::Ope]),
+            )])));
+
+            let statement = parse(&format!("SELECT id FROM encrypted {order_by}"));
+
+            let typed = type_check_with_indexes(schema, &statement, index_resolver)
+                .map_err(|err| err.to_string())
+                .unwrap();
+
+            let transformed = typed.transform(HashMap::new()).unwrap();
+
+            assert_eq!(
+                transformed.to_string(),
+                format!("SELECT id FROM encrypted {expected_order_by}"),
+                "`{order_by}` must rewrite the sort key to decode(op)"
+            );
+        }
+    }
+
+    /// An ORE-only scalar column (resolved index set has `Ore`, no `Ope`) must
+    /// NOT be rewritten to the `decode(op)` form: it stays on the existing
+    /// root Block-ORE bare-operator path.
+    #[test]
+    fn scalar_ore_only_ordering_is_not_rewritten_to_decode_op() {
+        use crate::{IndexKind, MapIndexResolver};
+        use std::collections::HashSet;
+
+        let schema = resolver(schema! {
+            tables: {
+                encrypted: {
+                    id,
+                    encrypted_int (EQL: Ord),
+                }
+            }
+        });
+
+        let index_resolver = Arc::new(MapIndexResolver::new(HashMap::from_iter([(
+            TableColumn {
+                table: id("encrypted"),
+                column: id("encrypted_int"),
+            },
+            HashSet::from_iter([IndexKind::Ore]),
+        )])));
+
+        let statement = parse("SELECT id FROM encrypted WHERE encrypted_int > $1");
+
+        let typed = type_check_with_indexes(schema, &statement, index_resolver)
+            .map_err(|err| err.to_string())
+            .unwrap();
+
+        let transformed = typed.transform(HashMap::new()).unwrap();
+
+        assert_eq!(
+            transformed.to_string(),
+            "SELECT id FROM encrypted WHERE encrypted_int > $1::JSONB::eql_v2_encrypted",
+            "ORE-only column must remain on the bare-operator path"
+        );
+    }
+
+    /// With no concrete index information (empty resolver, the default), a
+    /// scalar ordering comparison must NOT be rewritten to `decode(op)`: it
+    /// retains today's behaviour. This is the guard that the default/empty
+    /// resolver reproduces existing behaviour.
+    #[test]
+    fn scalar_ordering_with_empty_resolver_is_not_rewritten() {
+        let schema = resolver(schema! {
+            tables: {
+                encrypted: {
+                    id,
+                    encrypted_int (EQL: Ord),
+                }
+            }
+        });
+
+        let statement = parse("SELECT id FROM encrypted WHERE encrypted_int > $1");
+
+        // `type_check` uses the empty resolver by default.
+        let typed = type_check(schema, &statement)
+            .map_err(|err| err.to_string())
+            .unwrap();
+
+        let transformed = typed.transform(HashMap::new()).unwrap();
+
+        assert_eq!(
+            transformed.to_string(),
+            "SELECT id FROM encrypted WHERE encrypted_int > $1::JSONB::eql_v2_encrypted",
+            "empty resolver must reproduce today's behaviour"
+        );
+    }
+
+    /// Equality (`=`) on a scalar OPE column must NOT be rewritten by the
+    /// ordering rule (equality is a separate concern, CIP-3281).
+    #[test]
+    fn scalar_ope_equality_is_not_rewritten_to_decode_op() {
+        use crate::{IndexKind, MapIndexResolver};
+        use std::collections::HashSet;
+
+        let schema = resolver(schema! {
+            tables: {
+                encrypted: {
+                    id,
+                    encrypted_int (EQL: Eq + Ord),
+                }
+            }
+        });
+
+        let index_resolver = Arc::new(MapIndexResolver::new(HashMap::from_iter([(
+            TableColumn {
+                table: id("encrypted"),
+                column: id("encrypted_int"),
+            },
+            HashSet::from_iter([IndexKind::Ope, IndexKind::Unique]),
+        )])));
+
+        let statement = parse("SELECT id FROM encrypted WHERE encrypted_int = $1");
+
+        let typed = type_check_with_indexes(schema, &statement, index_resolver)
+            .map_err(|err| err.to_string())
+            .unwrap();
+
+        let transformed = typed.transform(HashMap::new()).unwrap();
+
+        assert_eq!(
+            transformed.to_string(),
+            "SELECT id FROM encrypted WHERE encrypted_int = $1::JSONB::eql_v2_encrypted",
+            "equality must not be rewritten by the OPE ordering rule"
+        );
+    }
+
+    /// Pins the *actual* behaviour for column-on-the-right (`$param <op> col`).
+    ///
+    /// The rule's `would_edit_comparison` guard reads `is_scalar_ope_column(left)
+    /// && is_eql_typed(right)`, which textually looks like it only matches the
+    /// EQL column on the left. In practice a bare comparison param is unified to
+    /// the *same* `eql_v2_encrypted` column type, so `is_scalar_ope_column`
+    /// resolves the param's `TableColumn` to the OPE-indexed column and the rule
+    /// fires for *either* operand ordering. Both sides are therefore wrapped in
+    /// `decode(... ->> 'op', 'hex')`. The operator itself is unchanged (`<` stays
+    /// `<`); correctness rests on `decode(... ->> 'op')` being an order-preserving
+    /// transform applied to *both* operands, so the comparison still evaluates the
+    /// same OPE ordering it would have on the unwrapped values.
+    ///
+    /// This differs from `RewriteJsonbSteVecOrdering`, where the jsonb accessor
+    /// (`col -> selector`) only appears syntactically on one side. Here there is
+    /// no coverage gap to pin — column-on-the-right is handled. Recorded as a
+    /// test so the behaviour is locked in rather than incidental.
+    #[test]
+    fn scalar_ope_ordering_column_on_right_is_rewritten() {
+        use crate::{IndexKind, MapIndexResolver};
+        use std::collections::HashSet;
+
+        let schema = resolver(schema! {
+            tables: {
+                encrypted: {
+                    id,
+                    encrypted_int (EQL: Ord),
+                }
+            }
+        });
+
+        let index_resolver = Arc::new(MapIndexResolver::new(HashMap::from_iter([(
+            TableColumn {
+                table: id("encrypted"),
+                column: id("encrypted_int"),
+            },
+            HashSet::from_iter([IndexKind::Ope]),
+        )])));
+
+        let statement = parse("SELECT id FROM encrypted WHERE $1 < encrypted_int");
+
+        let typed = type_check_with_indexes(schema, &statement, index_resolver)
+            .map_err(|err| err.to_string())
+            .unwrap();
+
+        let transformed = typed.transform(HashMap::new()).unwrap();
+
+        assert_eq!(
+            transformed.to_string(),
+            "SELECT id FROM encrypted WHERE \
+            decode($1::JSONB::eql_v2_encrypted::JSONB ->> 'op', 'hex') < \
+            decode(encrypted_int::JSONB ->> 'op', 'hex')",
+            "column-on-the-right comparison is rewritten symmetrically to decode(op)"
+        );
+    }
+
+    /// Pins an accepted limitation: `col BETWEEN $a AND $b` is a distinct AST
+    /// node (`Expr::Between`), not the `Expr::BinaryOp` the OPE ordering rule
+    /// matches, so it is NOT rewritten to the `decode(op)` form.
+    #[test]
+    fn scalar_ope_ordering_between_is_not_rewritten() {
+        use crate::{IndexKind, MapIndexResolver};
+        use std::collections::HashSet;
+
+        let schema = resolver(schema! {
+            tables: {
+                encrypted: {
+                    id,
+                    encrypted_int (EQL: Ord),
+                }
+            }
+        });
+
+        let index_resolver = Arc::new(MapIndexResolver::new(HashMap::from_iter([(
+            TableColumn {
+                table: id("encrypted"),
+                column: id("encrypted_int"),
+            },
+            HashSet::from_iter([IndexKind::Ope]),
+        )])));
+
+        let statement = parse("SELECT id FROM encrypted WHERE encrypted_int BETWEEN $1 AND $2");
+
+        let typed = type_check_with_indexes(schema, &statement, index_resolver)
+            .map_err(|err| err.to_string())
+            .unwrap();
+
+        let transformed = typed.transform(HashMap::new()).unwrap();
+
+        assert_eq!(
+            transformed.to_string(),
+            "SELECT id FROM encrypted WHERE encrypted_int BETWEEN \
+            $1::JSONB::eql_v2_encrypted AND $2::JSONB::eql_v2_encrypted",
+            "BETWEEN must not be rewritten by the OPE ordering rule"
+        );
+    }
+
+    /// Pins an accepted limitation: `MIN(col)` / `MAX(col)` are aggregate
+    /// function calls, not ordering comparisons, so the OPE ordering rule does
+    /// not touch them. They are instead routed to the `eql_v2.min` / `eql_v2.max`
+    /// EQL aggregate functions by a separate rule.
+    #[test]
+    fn scalar_ope_min_max_are_not_rewritten_to_decode_op() {
+        use crate::{IndexKind, MapIndexResolver};
+        use std::collections::HashSet;
+
+        let schema = resolver(schema! {
+            tables: {
+                encrypted: {
+                    id,
+                    encrypted_int (EQL: Ord),
+                }
+            }
+        });
+
+        let index_resolver = Arc::new(MapIndexResolver::new(HashMap::from_iter([(
+            TableColumn {
+                table: id("encrypted"),
+                column: id("encrypted_int"),
+            },
+            HashSet::from_iter([IndexKind::Ope]),
+        )])));
+
+        let statement = parse("SELECT min(encrypted_int), max(encrypted_int) FROM encrypted");
+
+        let typed = type_check_with_indexes(schema, &statement, index_resolver)
+            .map_err(|err| err.to_string())
+            .unwrap();
+
+        let transformed = typed.transform(HashMap::new()).unwrap();
+
+        assert_eq!(
+            transformed.to_string(),
+            "SELECT eql_v2.min(encrypted_int), eql_v2.max(encrypted_int) FROM encrypted",
+            "MIN/MAX must route to eql_v2 aggregates, not decode(op)"
+        );
+    }
+
+    /// A multi-key `ORDER BY ope_col, plaintext_col` must rewrite *only* the
+    /// OPE sort key to `decode(col->>'op','hex')`, leaving the plaintext key
+    /// untouched and preserving each key's direction / nulls ordering.
+    #[test]
+    fn scalar_ope_multi_key_order_by_rewrites_only_ope_key() {
+        use crate::{IndexKind, MapIndexResolver};
+        use std::collections::HashSet;
+
+        let schema = resolver(schema! {
+            tables: {
+                encrypted: {
+                    id,
+                    encrypted_int (EQL: Ord),
+                }
+            }
+        });
+
+        let index_resolver = Arc::new(MapIndexResolver::new(HashMap::from_iter([(
+            TableColumn {
+                table: id("encrypted"),
+                column: id("encrypted_int"),
+            },
+            HashSet::from_iter([IndexKind::Ope]),
+        )])));
+
+        let statement =
+            parse("SELECT id FROM encrypted ORDER BY encrypted_int DESC NULLS LAST, id ASC");
+
+        let typed = type_check_with_indexes(schema, &statement, index_resolver)
+            .map_err(|err| err.to_string())
+            .unwrap();
+
+        let transformed = typed.transform(HashMap::new()).unwrap();
+
+        assert_eq!(
+            transformed.to_string(),
+            "SELECT id FROM encrypted ORDER BY \
+            decode(encrypted_int::JSONB ->> 'op', 'hex') DESC NULLS LAST, id ASC",
+            "only the OPE sort key is rewritten; plaintext key and directions are preserved"
+        );
     }
 
     #[test]

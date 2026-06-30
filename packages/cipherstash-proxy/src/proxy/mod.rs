@@ -16,7 +16,7 @@ mod encrypt_config;
 mod schema;
 mod zerokms;
 
-pub use encrypt_config::EncryptConfig;
+pub use encrypt_config::{EncryptConfig, EncryptConfigIndexResolver};
 pub use zerokms::ZeroKms;
 
 pub type ReloadSender = UnboundedSender<ReloadCommand>;
@@ -156,7 +156,7 @@ pub trait EncryptionService: Send + Sync {
         keyset_id: Option<KeysetIdentifier>,
         plaintexts: Vec<Option<Plaintext>>,
         columns: &[Option<Column>],
-    ) -> Result<Vec<Option<crate::EqlCiphertext>>, Error>;
+    ) -> Result<Vec<Option<crate::EqlOutput>>, Error>;
 
     /// Decrypt values retrieved from the database
     async fn decrypt(

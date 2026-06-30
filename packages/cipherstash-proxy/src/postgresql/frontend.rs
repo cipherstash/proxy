@@ -26,8 +26,8 @@ use crate::prometheus::{
     STATEMENTS_ENCRYPTED_TOTAL, STATEMENTS_PASSTHROUGH_MAPPING_DISABLED_TOTAL,
     STATEMENTS_PASSTHROUGH_TOTAL, STATEMENTS_UNMAPPABLE_TOTAL,
 };
-use crate::proxy::EncryptionService;
-use crate::EqlCiphertext;
+use crate::proxy::{EncryptConfigIndexResolver, EncryptionService};
+use crate::EqlOutput;
 use bytes::BytesMut;
 use cipherstash_client::encryption::Plaintext;
 use eql_mapper::{self, EqlMapperError, EqlTerm, TypeCheckedStatement};
@@ -582,13 +582,13 @@ where
     /// # Returns
     ///
     /// Vector of encrypted values corresponding to each literal, with `None` for
-    /// literals that don't require encryption and `Some(EqlCiphertext)` for encrypted values.
+    /// literals that don't require encryption and `Some(EqlOutput)` for encrypted values.
     async fn encrypt_literals(
         &mut self,
         session_id: SessionId,
         typed_statement: &TypeCheckedStatement<'_>,
         literal_columns: &Vec<Option<Column>>,
-    ) -> Result<Vec<Option<EqlCiphertext>>, Error> {
+    ) -> Result<Vec<Option<EqlOutput>>, Error> {
         let literal_values = typed_statement.literal_values();
         if literal_values.is_empty() {
             debug!(target: MAPPER,
@@ -643,7 +643,7 @@ where
     async fn transform_statement(
         &mut self,
         typed_statement: &TypeCheckedStatement<'_>,
-        encrypted_literals: &Vec<Option<EqlCiphertext>>,
+        encrypted_literals: &Vec<Option<EqlOutput>>,
     ) -> Result<Option<ast::Statement>, Error> {
         // Convert literals to ast Expr
         let mut encrypted_expressions = vec![];
@@ -1042,7 +1042,7 @@ where
         session_id: Option<SessionId>,
         bind: &Bind,
         statement: &Statement,
-    ) -> Result<Vec<Option<crate::EqlCiphertext>>, Error> {
+    ) -> Result<Vec<Option<crate::EqlOutput>>, Error> {
         let plaintexts =
             bind.to_plaintext(&statement.param_columns, &statement.postgres_param_types)?;
 
@@ -1084,7 +1084,21 @@ where
         &self,
         statement: &'a ast::Statement,
     ) -> Result<TypeCheckedStatement<'a>, Error> {
-        match eql_mapper::type_check(self.context.get_table_resolver(), statement) {
+        // The index resolver exposes the concrete encrypted-index types of a
+        // column to the SQL transformation stage (e.g. so a scalar OPE column's
+        // ordering is rewritten to a byte comparison of the `op` ciphertext). It
+        // is a side-channel: inference and unification are unaffected. A missing
+        // config maps every column to an empty set, reproducing the
+        // pre-resolver behaviour.
+        let index_resolver = Arc::new(EncryptConfigIndexResolver::new(
+            self.context.get_encrypt_config(),
+        ));
+
+        match eql_mapper::type_check_with_indexes(
+            self.context.get_table_resolver(),
+            statement,
+            index_resolver,
+        ) {
             Ok(typed_statement) => {
                 debug!(target: MAPPER,
                     client_id = self.context.client_id,

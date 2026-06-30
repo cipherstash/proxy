@@ -13,7 +13,7 @@ use cipherstash_client::{
     encryption::{Plaintext, QueryOp},
     eql::{
         decrypt_eql, encrypt_eql, EqlCiphertext, EqlDecryptOpts, EqlEncryptOpts, EqlOperation,
-        PreparedPlaintext,
+        EqlOutput, PreparedPlaintext,
     },
     schema::column::IndexType,
 };
@@ -157,7 +157,7 @@ impl EncryptionService for ZeroKms {
         keyset_id: Option<KeysetIdentifier>,
         plaintexts: Vec<Option<Plaintext>>,
         columns: &[Option<Column>],
-    ) -> Result<Vec<Option<EqlCiphertext>>, Error> {
+    ) -> Result<Vec<Option<EqlOutput>>, Error> {
         debug!(target: ENCRYPT, msg="Encrypt", ?keyset_id, default_keyset_id = ?self.default_keyset_id);
 
         // A keyset is required if no default keyset has been configured
@@ -174,34 +174,7 @@ impl EncryptionService for ZeroKms {
         for (idx, (plaintext_opt, col_opt)) in plaintexts.iter().zip(columns.iter()).enumerate() {
             if let (Some(plaintext), Some(col)) = (plaintext_opt, col_opt) {
                 // Determine the EQL operation based on the term variant
-                let eql_op = match col.eql_term {
-                    // Full, Partial, and Tokenized terms store encrypted data with all indexes
-                    EqlTermVariant::Full | EqlTermVariant::Partial | EqlTermVariant::Tokenized => {
-                        EqlOperation::Store
-                    }
-
-                    // JsonPath generates a selector term for SteVec queries (e.g., jsonb_path_query)
-                    EqlTermVariant::JsonPath => col
-                        .config
-                        .indexes
-                        .iter()
-                        .find(|i| matches!(i.index_type, IndexType::SteVec { .. }))
-                        .map(|index| {
-                            EqlOperation::Query(&index.index_type, QueryOp::SteVecSelector)
-                        })
-                        .unwrap_or(EqlOperation::Store),
-
-                    // JsonAccessor generates a selector for SteVec field access (-> operator)
-                    EqlTermVariant::JsonAccessor => col
-                        .config
-                        .indexes
-                        .iter()
-                        .find(|i| matches!(i.index_type, IndexType::SteVec { .. }))
-                        .map(|index| {
-                            EqlOperation::Query(&index.index_type, QueryOp::SteVecSelector)
-                        })
-                        .unwrap_or(EqlOperation::Store),
-                };
+                let eql_op = eql_operation_for_column(col)?;
 
                 let prepared = PreparedPlaintext::new(
                     Cow::Owned(col.config.clone()),
@@ -216,7 +189,7 @@ impl EncryptionService for ZeroKms {
 
         // If no plaintexts to encrypt, return all None
         if prepared_plaintexts.is_empty() {
-            return Ok(vec![None; plaintexts.len()]);
+            return Ok((0..plaintexts.len()).map(|_| None).collect());
         }
 
         // Use default opts since cipher is already initialized with the correct keyset
@@ -231,9 +204,9 @@ impl EncryptionService for ZeroKms {
         debug!(target: ENCRYPT, msg="encrypt_eql completed", count = encrypted.len(), duration_ms = encrypt_duration.as_millis());
 
         // Reconstruct the result vector with None values in the right places
-        let mut result: Vec<Option<EqlCiphertext>> = vec![None; plaintexts.len()];
-        for (idx, ciphertext) in indices.into_iter().zip(encrypted.into_iter()) {
-            result[idx] = Some(ciphertext);
+        let mut result: Vec<Option<EqlOutput>> = (0..plaintexts.len()).map(|_| None).collect();
+        for (idx, output) in indices.into_iter().zip(encrypted.into_iter()) {
+            result[idx] = Some(output);
         }
 
         Ok(result)
@@ -292,5 +265,136 @@ impl EncryptionService for ZeroKms {
         }
 
         Ok(result)
+    }
+}
+
+/// Selects the [`EqlOperation`] for a column based on its classified EQL term
+/// variant and configured indexes.
+///
+/// - `Full` / `Partial` / `Tokenized`: stored with all indexes.
+/// - `JsonPath` / `JsonAccessor`: a STE-vec *selector* term when a ste_vec index
+///   is configured, otherwise stored (a plain root payload, which the selector
+///   accessor SQL tolerates).
+/// - `SteVecTerm`: the STE-vec *query term* for the RHS of a jsonb sv comparison
+///   (ordering reads `oc` via `eql_v2.ore_cllw`; equality reads `hm`/`oc` via
+///   `eql_v2.eq_term`). This **requires** a ste_vec index: the SQL has already
+///   been rewritten to extract a STE-vec term, so storing the value as a generic
+///   payload (which carries no such term) would silently drop the predicate.
+///   When no ste_vec index is configured we fail fast with
+///   [`EncryptError::UnknownIndexTerm`] rather than masking the misconfiguration.
+fn eql_operation_for_column(col: &Column) -> Result<EqlOperation<'_>, Error> {
+    let ste_vec_index = || {
+        col.config
+            .indexes
+            .iter()
+            .find(|i| matches!(i.index_type, IndexType::SteVec { .. }))
+    };
+
+    let eql_op = match col.eql_term {
+        // Full, Partial, and Tokenized terms store encrypted data with all indexes
+        EqlTermVariant::Full | EqlTermVariant::Partial | EqlTermVariant::Tokenized => {
+            EqlOperation::Store
+        }
+
+        // JsonPath generates a selector term for SteVec queries (e.g., jsonb_path_query)
+        // JsonAccessor generates a selector for SteVec field access (-> operator)
+        EqlTermVariant::JsonPath | EqlTermVariant::JsonAccessor => ste_vec_index()
+            .map(|index| EqlOperation::Query(&index.index_type, QueryOp::SteVecSelector))
+            .unwrap_or(EqlOperation::Store),
+
+        // SteVecTerm generates the STE-vec query term for the right-hand side of
+        // a jsonb sv *term* comparison — ordering (`col -> selector <op> $param`)
+        // or equality (`col -> selector = $param`). The query op emits whichever
+        // deterministic term the column's leaf carries: `oc` (CLLW ORE) for
+        // string/number leaves, `hm` (HMAC) for bool/null/array/object leaves.
+        //
+        // This term is only meaningful against a ste_vec-indexed column. Because
+        // every `eql_v2_encrypted` column is granted `JsonLike` in the eql-mapper
+        // schema regardless of its configured indexes, a value can reach here
+        // classified `SteVecTerm` while its column lacks a ste_vec index. Falling
+        // back to `Store` would emit a generic payload while the SQL extracts a
+        // STE-vec term it does not carry — a silent wrong result. Fail fast.
+        EqlTermVariant::SteVecTerm => match ste_vec_index() {
+            Some(index) => EqlOperation::Query(&index.index_type, QueryOp::SteVecTerm),
+            None => return Err(EncryptError::UnknownIndexTerm(col.identifier.clone()).into()),
+        },
+    };
+
+    Ok(eql_op)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::Identifier;
+    use cipherstash_client::schema::column::{ArrayIndexMode, Index, SteVecMode};
+    use cipherstash_client::schema::{ColumnConfig, ColumnType};
+
+    fn column(eql_term: EqlTermVariant, config: ColumnConfig) -> Column {
+        Column::new(
+            Identifier::new("encrypted", "encrypted_jsonb"),
+            config,
+            None,
+            eql_term,
+        )
+    }
+
+    /// A `SteVecTerm`-classified value on a jsonb column that *has* a ste_vec
+    /// index resolves to the STE-vec query term operation.
+    #[test]
+    fn ste_vec_term_with_ste_vec_index_is_query_op() {
+        let config = ColumnConfig::build("encrypted_jsonb".to_string())
+            .casts_as(ColumnType::Json)
+            .add_index(Index::new(IndexType::SteVec {
+                prefix: "encrypted/encrypted_jsonb".into(),
+                term_filters: vec![],
+                array_index_mode: ArrayIndexMode::default(),
+                mode: SteVecMode::default(),
+            }));
+
+        let col = column(EqlTermVariant::SteVecTerm, config);
+
+        match eql_operation_for_column(&col).unwrap() {
+            EqlOperation::Query(IndexType::SteVec { .. }, QueryOp::SteVecTerm) => {}
+            other => panic!("expected SteVec query term op, got {other:?}"),
+        }
+    }
+
+    /// A `SteVecTerm`-classified value whose column has *no* ste_vec index must
+    /// fail fast rather than silently falling back to `Store`. The SQL was
+    /// rewritten to read a STE-vec query term (`oc`/`hm`); storing the value as
+    /// a generic payload would produce a payload that lacks that term, silently
+    /// dropping the query predicate. Surfacing the misconfiguration is correct.
+    #[test]
+    fn ste_vec_term_without_ste_vec_index_fails_fast() {
+        let config = ColumnConfig::build("encrypted_jsonb".to_string())
+            .casts_as(ColumnType::Json)
+            .add_index(Index::new_ore());
+
+        let col = column(EqlTermVariant::SteVecTerm, config);
+
+        let err = eql_operation_for_column(&col)
+            .expect_err("SteVecTerm without a ste_vec index must error, not fall back to Store");
+
+        assert!(
+            matches!(err, Error::Encrypt(EncryptError::UnknownIndexTerm(_))),
+            "expected UnknownIndexTerm, got {err:?}"
+        );
+    }
+
+    /// A plain `Full` value still stores with all indexes (unaffected by the
+    /// STE-vec fail-fast change).
+    #[test]
+    fn full_term_is_store_op() {
+        let config = ColumnConfig::build("encrypted_jsonb".to_string())
+            .casts_as(ColumnType::Json)
+            .add_index(Index::new_ore());
+
+        let col = column(EqlTermVariant::Full, config);
+
+        assert!(matches!(
+            eql_operation_for_column(&col).unwrap(),
+            EqlOperation::Store
+        ));
     }
 }

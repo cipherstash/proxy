@@ -2,13 +2,18 @@ use super::importer::{ImportError, Importer};
 use crate::{
     inference::{TypeError, TypeInferencer},
     unifier::{EqlTerm, Projection, Type, Unifier, Value},
-    DepMut, Param, ParamError, ScopeError, ScopeTracker, TableResolver, TypeCheckedStatement,
-    TypeRegistry,
+    DepMut, EmptyIndexResolver, IndexResolver, Param, ParamError, ScopeError, ScopeTracker,
+    TableResolver, TypeCheckedStatement, TypeRegistry,
 };
 use sqltk::parser::ast::{self as ast, Statement};
 use sqltk::{Break, NodeKey, Visitable, Visitor};
 use std::{
-    cell::RefCell, collections::HashMap, marker::PhantomData, ops::ControlFlow, rc::Rc, sync::Arc,
+    cell::RefCell,
+    collections::{HashMap, HashSet},
+    marker::PhantomData,
+    ops::ControlFlow,
+    rc::Rc,
+    sync::Arc,
 };
 use tracing::{event, span, Level};
 
@@ -35,9 +40,26 @@ pub fn type_check<'ast>(
     resolver: Arc<TableResolver>,
     statement: &'ast Statement,
 ) -> Result<TypeCheckedStatement<'ast>, EqlMapperError> {
+    type_check_with_indexes(resolver, statement, Arc::new(EmptyIndexResolver))
+}
+
+/// Like [`type_check`] but additionally takes an [`IndexResolver`] that exposes
+/// the concrete encrypted-index types of `(table, column)` pairs to the SQL
+/// *transformation* stage.
+///
+/// Type inference and unification are identical to [`type_check`]: the
+/// [`IndexResolver`] is a side-channel consulted only by transformation rules
+/// (via [`TypeCheckedStatement::transform`]) to choose index-specific target
+/// functions. Passing [`EmptyIndexResolver`] is exactly equivalent to calling
+/// [`type_check`].
+pub fn type_check_with_indexes<'ast>(
+    resolver: Arc<TableResolver>,
+    statement: &'ast Statement,
+    index_resolver: Arc<dyn IndexResolver>,
+) -> Result<TypeCheckedStatement<'ast>, EqlMapperError> {
     let mut mapper = EqlMapper::<'ast>::new_with_resolver(resolver);
     match statement.accept(&mut mapper) {
-        ControlFlow::Continue(()) => mapper.resolve(statement),
+        ControlFlow::Continue(()) => mapper.resolve(statement, index_resolver),
         ControlFlow::Break(Break::Err(err)) => Err(err),
         ControlFlow::Break(_) => Err(EqlMapperError::InternalError(String::from(
             "unexpected Break value in type_check",
@@ -138,6 +160,7 @@ impl<'ast> EqlMapper<'ast> {
     pub fn resolve(
         self,
         statement: &'ast Statement,
+        index_resolver: Arc<dyn IndexResolver>,
     ) -> Result<TypeCheckedStatement<'ast>, EqlMapperError> {
         let span_begin = span!(
             target: "eqlmapper::spans",
@@ -155,9 +178,14 @@ impl<'ast> EqlMapper<'ast> {
 
         let _ = self.unifier.borrow_mut().resolve_unresolved_value_nodes();
 
+        // `ste_vec_term_rhs_keys` is a full O(nodes) AST scan whose params/literals
+        // halves feed `param_types`/`literal_types` independently. Compute it once
+        // here and split it across both rather than scanning the AST twice.
+        let (ste_vec_params, ste_vec_literals) = self.ste_vec_term_rhs_keys(&self.unifier.borrow());
+
         let projection = self.projection_type(statement);
-        let params = self.param_types(&self.unifier.borrow());
-        let literals = self.literal_types();
+        let params = self.param_types(&self.unifier.borrow(), &ste_vec_params);
+        let literals = self.literal_types(&ste_vec_literals);
         let node_types = self.node_types();
 
         let combine_results =
@@ -181,6 +209,7 @@ impl<'ast> EqlMapper<'ast> {
                     params,
                     literals,
                     Arc::new(node_types),
+                    index_resolver,
                 ))
             }
             Err(err) => {
@@ -191,8 +220,8 @@ impl<'ast> EqlMapper<'ast> {
                 }
 
                 let projection = self.projection_type(statement);
-                let params = self.param_types(&self.unifier.borrow());
-                let literals = self.literal_types();
+                let params = self.param_types(&self.unifier.borrow(), &ste_vec_params);
+                let literals = self.literal_types(&ste_vec_literals);
                 let node_types = self.node_types();
 
                 event!(
@@ -220,7 +249,11 @@ impl<'ast> EqlMapper<'ast> {
         Ok(projection.flatten(&unifier)?)
     }
 
-    fn param_types(&self, unifier: &Unifier<'ast>) -> Result<Vec<(Param, Value)>, EqlMapperError> {
+    fn param_types(
+        &self,
+        unifier: &Unifier<'ast>,
+        ste_vec_params: &HashSet<Param>,
+    ) -> Result<Vec<(Param, Value)>, EqlMapperError> {
         let params = self.registry.borrow().resolved_param_types(unifier)?;
 
         let params = params
@@ -228,7 +261,13 @@ impl<'ast> EqlMapper<'ast> {
             .map(|(p, ty)| -> Result<(Param, Value), EqlMapperError> {
                 let ty = ty.follow_tvars(unifier);
                 match &*ty {
-                    Type::Value(value) => Ok((p, value.clone())),
+                    Type::Value(value) => {
+                        let value = reclassify_as_ste_vec_term_if(
+                            value.clone(),
+                            ste_vec_params.contains(&p),
+                        );
+                        Ok((p, value))
+                    }
                     other => Err(TypeError::Expected(format!(
                         "expected param '{p}' to resolve to a scalar type but got '{other}'"
                     )))?,
@@ -239,8 +278,79 @@ impl<'ast> EqlMapper<'ast> {
         Ok(params)
     }
 
+    /// Collects the right-hand-side operand of every jsonb STE-vec *term*
+    /// comparison — both *ordering* (`<`, `<=`, `>`, `>=`) and *equality*
+    /// (`=`, `<>`) — whose left-hand side is a jsonb STE-vec element accessor
+    /// (`->` / `->>` / `jsonb_path_query_first`).
+    ///
+    /// The returned sets identify the RHS values (params by [`Param`], literals
+    /// by [`NodeKey`]) that must be encrypted as a STE-vec query term
+    /// ([`EqlTerm::SteVecTerm`]) rather than a full/partial root payload.
+    /// Ordering binds the term to `eql_v2.ore_cllw(...)` (`oc`); equality binds
+    /// it to `eql_v2.eq_term(...)` (the XOR-aware `hm`/`oc` term the column's
+    /// leaf carries). Both require the same `SteVecTerm` reclassification — the
+    /// proxy's encrypt path emits whichever term the column's leaf carries.
+    fn ste_vec_term_rhs_keys(
+        &self,
+        unifier: &Unifier<'ast>,
+    ) -> (HashSet<Param>, HashSet<NodeKey<'ast>>) {
+        use crate::ste_vec_ordering::{
+            is_equality_operator, is_ordering_operator, is_ste_vec_accessor,
+        };
+        use sqltk::parser::ast::Expr;
+
+        let mut params = HashSet::new();
+        let mut literals = HashSet::new();
+
+        let registry = self.registry.borrow();
+
+        // `is_eql` mirrors the `RewriteJsonbSteVecOrdering` /
+        // `RewriteJsonbSteVecEquality` rules' `is_eql_typed` check on both
+        // operands, so the reclassification (which changes how the value is
+        // encrypted) marks exactly the comparisons the SQL rewrites will
+        // rewrite to `eql_v2.ore_cllw(...)` / `eql_v2.eq_term(...)`.
+        let is_eql = |expr: &Expr| {
+            registry
+                .peek_node_type(expr)
+                .map(|ty| matches!(&*ty.follow_tvars(unifier), Type::Value(Value::Eql(_))))
+                .unwrap_or(false)
+        };
+
+        for (expr, _) in registry.get_nodes_and_types::<Expr>() {
+            let Expr::BinaryOp { left, op, right } = expr else {
+                continue;
+            };
+
+            if !(is_ordering_operator(op) || is_equality_operator(op))
+                || !is_ste_vec_accessor(left)
+                || !is_eql(left)
+                || !is_eql(right)
+            {
+                continue;
+            }
+
+            if let Expr::Value(value_with_span) = &**right {
+                match &value_with_span.value {
+                    ast::Value::Placeholder(p) => {
+                        if let Ok(param) = Param::try_from(p) {
+                            params.insert(param);
+                        }
+                    }
+                    other => {
+                        literals.insert(NodeKey::new(other));
+                    }
+                }
+            }
+        }
+
+        (params, literals)
+    }
+
     /// Asks the [`TypeInferencer`] for a hashmap of literal types, validating that they are all `Value` types.
-    fn literal_types(&self) -> Result<Vec<(EqlTerm, &'ast ast::Value)>, EqlMapperError> {
+    fn literal_types(
+        &self,
+        ste_vec_literals: &HashSet<NodeKey<'ast>>,
+    ) -> Result<Vec<(EqlTerm, &'ast ast::Value)>, EqlMapperError> {
         let literals = {
             let registry = self.registry.borrow();
             registry
@@ -254,7 +364,12 @@ impl<'ast> EqlMapper<'ast> {
                 |(node, ty)| -> Result<Option<(EqlTerm, &'ast ast::Value)>, TypeError> {
                     let ty = ty.follow_tvars(&self.unifier.borrow());
                     if let Type::Value(Value::Eql(eql_term)) = &*ty {
-                        return Ok(Some((eql_term.clone(), node)));
+                        let is_ste_vec_rhs = ste_vec_literals.contains(&NodeKey::new(node));
+                        let eql_term = reclassify_eql_term_as_ste_vec_term_if(
+                            eql_term.clone(),
+                            is_ste_vec_rhs,
+                        );
+                        return Ok(Some((eql_term, node)));
                     }
                     Ok(None)
                 },
@@ -281,6 +396,35 @@ impl<'ast> EqlMapper<'ast> {
         }
 
         Ok(resolved_node_types)
+    }
+}
+
+/// Reclassifies a resolved param [`Value`] as a STE-vec ordering term when it
+/// is the right-hand side of a jsonb sv ordering comparison.
+///
+/// Only EQL `Partial` / `Full` values are reclassified; everything else is
+/// returned unchanged.
+fn reclassify_as_ste_vec_term_if(value: Value, is_ste_vec_rhs: bool) -> Value {
+    if let Value::Eql(eql_term) = value {
+        Value::Eql(reclassify_eql_term_as_ste_vec_term_if(
+            eql_term,
+            is_ste_vec_rhs,
+        ))
+    } else {
+        value
+    }
+}
+
+/// Reclassifies an [`EqlTerm`] as [`EqlTerm::SteVecTerm`] when `is_ste_vec_rhs`
+/// is `true` and the term is a `Partial` or `Full` value.
+fn reclassify_eql_term_as_ste_vec_term_if(eql_term: EqlTerm, is_ste_vec_rhs: bool) -> EqlTerm {
+    if !is_ste_vec_rhs {
+        return eql_term;
+    }
+
+    match eql_term {
+        EqlTerm::Partial(eql_value, _) | EqlTerm::Full(eql_value) => EqlTerm::SteVecTerm(eql_value),
+        other => other,
     }
 }
 
