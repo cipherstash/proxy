@@ -145,6 +145,19 @@ cat sql/benchmark-schema.sql | docker exec -i postgres${CONTAINER_SUFFIX} psql p
 docker compose run --rm postgres${CONTAINER_SUFFIX:-} pgbench --host=host.docker.internal --port=${CS_DATABASE__PORT} --scale=1 -i --no-vacuum
 """
 
+# GATED: EQL v3 variant of benchmark:setup. Opt-in while the eql-mapper cannot
+# speak v3. Requires EQL v3 to be installed first:
+#   CS_EQL_V3_PATH=../encrypt-query-language/release mise run postgres:eql:v3:setup
+# The pgbench transaction scripts are version-agnostic and shared with v2.
+[tasks."benchmark:setup:v3"]
+description = "Apply the EQL v3 benchmark schema (requires postgres:eql:v3:setup)"
+run = """
+cat sql/benchmark-schema-v3.sql | docker exec -i postgres${CONTAINER_SUFFIX} psql -v ON_ERROR_STOP=1 postgresql://${CS_DATABASE__USERNAME}:${CS_DATABASE__PASSWORD_ESCAPED_FOR_TESTS}@${CS_DATABASE__HOST}:${CS_DATABASE__PORT}/${CS_DATABASE__NAME} -f-
+
+# Initialize pgbench
+docker compose run --rm postgres${CONTAINER_SUFFIX:-} pgbench --host=host.docker.internal --port=${CS_DATABASE__PORT} --scale=1 -i --no-vacuum
+"""
+
 [tasks."benchmark:plot"]
 alias = 'b'
 description = "Plot graphs from benchmark results"
