@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1782782383647,
+  "lastUpdate": 1782999208953,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -22030,6 +22030,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 40.393437,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "eb3e534e0f6f08c32145713dbe0a5c0e34440680",
+          "message": "chore(eql): mise tasks to install a local EQL v3 build",
+          "timestamp": "2026-06-24T22:13:30Z",
+          "url": "https://github.com/cipherstash/proxy/pull/410/commits/eb3e534e0f6f08c32145713dbe0a5c0e34440680"
+        },
+        "date": 1782999207515,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 38.370394,
             "unit": "Number"
           }
         ]
