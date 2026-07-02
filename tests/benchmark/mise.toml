@@ -149,6 +149,10 @@ docker compose run --rm postgres${CONTAINER_SUFFIX:-} pgbench --host=host.docker
 # speak v3. Requires EQL v3 to be installed first:
 #   CS_EQL_V3_PATH=../encrypt-query-language/release mise run postgres:eql:v3:setup
 # The pgbench transaction scripts are version-agnostic and shared with v2.
+#
+# Re-run this task after any postgres:eql:v3:setup/teardown: the CASCADE
+# uninstall silently drops eql_v3-typed columns from tables it doesn't
+# recreate (benchmark_encrypted is not recreated by postgres:setup:v3).
 [tasks."benchmark:setup:v3"]
 description = "Apply the EQL v3 benchmark schema (requires postgres:eql:v3:setup)"
 run = """

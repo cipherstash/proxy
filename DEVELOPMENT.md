@@ -461,6 +461,9 @@ mise run postgres:setup
 
 The v3 benchmark schema (`tests/benchmark/sql/benchmark-schema-v3.sql`) is applied with `mise run benchmark:setup:v3` from `tests/benchmark` (it also requires `postgres:eql:v3:setup` to have been run).
 
+> [!IMPORTANT]
+> Re-run `benchmark:setup:v3` after any `postgres:eql:v3:setup` / `postgres:eql:v3:teardown`: the CASCADE uninstall silently drops `eql_v3`-typed columns from tables it doesn't recreate (`postgres:setup:v3` recreates the test fixture tables, but not `benchmark_encrypted`).
+
 #### Convention: PostgreSQL ports
 
 PostgreSQL port numbers are 4 digits:

@@ -19,6 +19,20 @@
 -- The pgbench transaction scripts (transaction-*.sql) are version-agnostic
 -- plain SQL over column names and are shared with the v2 benchmark.
 
+-- The v2 benchmark schema truncates its configuration table here. v3 has no
+-- database-side configuration table, but stale v2 configuration (e.g. the
+-- eql_v2.add_column row from a prior v2 benchmark:setup) must not be left
+-- pointing at tables whose columns are now v3 domains.
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.tables
+    WHERE table_schema = 'public' AND table_name = 'eql_v2_configuration'
+  ) THEN
+    TRUNCATE TABLE public.eql_v2_configuration;
+  END IF;
+END $$;
+
 DROP TABLE IF EXISTS benchmark_plaintext;
 CREATE TABLE benchmark_plaintext (
     id serial primary key,
