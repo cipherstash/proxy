@@ -629,6 +629,21 @@ mise run postgres:fail_if_not_running
 cat "{{config_root}}/cipherstash-encrypt-v3.sql" | docker exec -i postgres${CONTAINER_SUFFIX:-} psql postgresql://${CS_DATABASE__USERNAME}:${CS_DATABASE__PASSWORD_ESCAPED_FOR_TESTS}@${CS_DATABASE__HOST}:${CS_DATABASE__PORT}/${CS_DATABASE__NAME} -f-
 """
 
+# GATED: the EQL v3 test fixture is opt-in while the eql-mapper cannot speak
+# v3. This task is NOT part of `postgres:setup`; it replaces the v2 fixture
+# tables with their v3-domain equivalents (same table names). Re-run
+# `mise run postgres:setup` to restore the v2 fixture.
+[tasks."postgres:setup:v3"]
+depends = ["postgres:eql:v3:setup"]
+description = "Installs EQL v3 and applies the v3 test schema (tests/sql/schema-v3.sql) to the database"
+run = """
+#!/bin/bash
+cd tests
+mise run postgres:fail_if_not_running
+cat sql/schema-v3-uninstall.sql | docker exec -i postgres${CONTAINER_SUFFIX:-} psql -v ON_ERROR_STOP=1 postgresql://${CS_DATABASE__USERNAME}:${CS_DATABASE__PASSWORD_ESCAPED_FOR_TESTS}@${CS_DATABASE__HOST}:${CS_DATABASE__PORT}/${CS_DATABASE__NAME} -f-
+cat sql/schema-v3.sql | docker exec -i postgres${CONTAINER_SUFFIX:-} psql -v ON_ERROR_STOP=1 postgresql://${CS_DATABASE__USERNAME}:${CS_DATABASE__PASSWORD_ESCAPED_FOR_TESTS}@${CS_DATABASE__HOST}:${CS_DATABASE__PORT}/${CS_DATABASE__NAME} -f-
+"""
+
 [tasks."test:integration:lang:python"]
 dir = "{{config_root}}/tests"
 description = "Runs python tests"

@@ -443,6 +443,27 @@ CS_EQL_V3_PATH=../encrypt-query-language/release mise run postgres:eql:v3:setup
 
 Note: unlike `postgres:setup`, this does **not** apply `tests/sql/schema.sql` — that fixture is still EQL v2. Use `postgres:eql:v3:teardown` to just uninstall EQL v3.
 
+##### EQL v3 test fixtures (gated)
+
+The EQL v3 ports of the test fixtures are opt-in while the eql-mapper cannot speak v3:
+
+```shell
+# Install EQL v3 and apply the v3 test schema (tests/sql/schema-v3.sql).
+# This REPLACES the v2 fixture tables (same table names).
+CS_EQL_V3_PATH=../encrypt-query-language/release mise run postgres:setup:v3
+
+# Run the gated EQL v3 integration tests (all `#[ignore]`d by default)
+cargo nextest run -p cipherstash-proxy-integration -E 'test(eql_v3)' --run-ignored all
+
+# Restore the v2 fixture afterwards
+mise run postgres:setup
+```
+
+The v3 benchmark schema (`tests/benchmark/sql/benchmark-schema-v3.sql`) is applied with `mise run benchmark:setup:v3` from `tests/benchmark` (it also requires `postgres:eql:v3:setup` to have been run).
+
+> [!IMPORTANT]
+> Re-run `benchmark:setup:v3` after any `postgres:eql:v3:setup` / `postgres:eql:v3:teardown`: the CASCADE uninstall silently drops `eql_v3`-typed columns from tables it doesn't recreate (`postgres:setup:v3` recreates the test fixture tables, but not `benchmark_encrypted`).
+
 #### Convention: PostgreSQL ports
 
 PostgreSQL port numbers are 4 digits:
