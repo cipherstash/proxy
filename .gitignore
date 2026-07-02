@@ -14,6 +14,8 @@ rust-toolchain.toml
 /packages/cipherstash-proxy/eql-version-at-build-time.txt
 /cipherstash-encrypt.sql
 /cipherstash-encrypt-uninstall.sql
+/cipherstash-encrypt-v3.sql
+/cipherstash-encrypt-v3-uninstall.sql
 
 # credentials for local dev
 .env.proxy.docker
