@@ -424,7 +424,24 @@ EQL is a required dependency and the database setup uses the latest release.
 
 To use a different version of EQL, set the path to the desired EQL release file in the `CS_EQL_PATH` environment variable.
 
+#### Installing a local EQL v3 build
 
+To install a locally built EQL v3 schema (the `eql_v3` schema) into the test PostgreSQL container, alongside the existing v2 flow:
+
+```shell
+# Build the v3 artifact in your encrypt-query-language checkout (branch eql_v3)
+cd ../encrypt-query-language
+mise run build
+# writes release/cipherstash-encrypt.sql and release/cipherstash-encrypt-uninstall.sql
+
+# Install it into the running test postgres
+cd ../proxy
+CS_EQL_V3_PATH=../encrypt-query-language/release mise run postgres:eql:v3:setup
+```
+
+`postgres:eql:v3:setup` copies the install/uninstall SQL from `$CS_EQL_V3_PATH` (as `cipherstash-encrypt-v3.sql` / `cipherstash-encrypt-v3-uninstall.sql` in the repo root), drops any existing `eql_v3` schema, and installs the new one.
+
+Note: unlike `postgres:setup`, this does **not** apply `tests/sql/schema.sql` — that fixture is still EQL v2. Use `postgres:eql:v3:teardown` to just uninstall EQL v3.
 
 #### Convention: PostgreSQL ports
 
