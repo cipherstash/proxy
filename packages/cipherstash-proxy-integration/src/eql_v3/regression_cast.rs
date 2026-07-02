@@ -10,13 +10,7 @@
 
 #[cfg(test)]
 mod tests {
-    use crate::common::{clear, connect_with_tls, random_id, trace, PROXY};
-
-    fn get_database_port() -> u16 {
-        std::env::var("CS_DATABASE__PORT")
-            .map(|s| s.parse().unwrap())
-            .unwrap_or(5617) // Default to TLS port
-    }
+    use crate::common::{clear, connect_with_tls, get_database_port, random_id, trace, PROXY};
 
     ///
     /// Captures a proxy-encrypted v3 ciphertext, reinserts it directly with a

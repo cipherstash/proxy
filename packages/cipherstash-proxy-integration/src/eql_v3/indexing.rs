@@ -39,7 +39,7 @@ mod tests {
         let client = connect_with_tls(PROXY).await;
 
         let sql = "CREATE INDEX IF NOT EXISTS encrypted_text_ord_term_idx ON encrypted (eql_v3.ord_term(encrypted_text))";
-        let _ = client.simple_query(sql).await;
+        client.simple_query(sql).await.unwrap();
 
         let sql = "EXPLAIN ANALYZE SELECT encrypted_text FROM encrypted WHERE encrypted_text <= $1";
 
@@ -47,5 +47,8 @@ mod tests {
         let result = query_by::<String>(sql, &encrypted_text).await;
 
         info!("Result: {:?}", result);
+
+        // EXPLAIN ANALYZE returns the executed plan as rows of text
+        assert!(!result.is_empty());
     }
 }

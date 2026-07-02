@@ -36,9 +36,10 @@ mod tests {
         let sql = "SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING = true";
         client.query(sql, &[]).await.unwrap();
 
-        // Data should not be decrypted: the raw jsonb envelope comes back
-        let select_sql = "SELECT encrypted_text FROM encrypted";
-        let rows = simple_query_with_client::<String>(select_sql, &client).await;
+        // Data should not be decrypted: the raw jsonb envelope comes back.
+        // Scoped by id so the test stays parallel-safe on the shared table.
+        let select_sql = format!("SELECT encrypted_text FROM encrypted WHERE id = {id}");
+        let rows = simple_query_with_client::<String>(&select_sql, &client).await;
 
         assert_eq!(rows.len(), 1);
 
@@ -57,7 +58,7 @@ mod tests {
         let sql = "SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING = false";
         client.query(sql, &[]).await.unwrap();
 
-        let actual = query_with_client::<String>(select_sql, &client).await;
+        let actual = query_with_client::<String>(&select_sql, &client).await;
         assert_eq!(expected, actual);
     }
 }

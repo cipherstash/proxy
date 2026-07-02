@@ -28,8 +28,10 @@ mod tests {
 
         // 20 rows of {"string": "value_N", "number": n} with N = n % 10,
         // giving exactly 2 rows per "value_N".
+        let mut ids = Vec::with_capacity(20);
         for n in 1..=20_i64 {
             let id = random_id();
+            ids.push(id);
             let encrypted_jsonb = json!({
                 "string": format!("value_{}", n % 10),
                 "number": n,
@@ -39,10 +41,12 @@ mod tests {
             client.query(sql, &[&id, &encrypted_jsonb]).await.unwrap();
         }
 
+        // Scoped to the inserted ids so the test stays parallel-safe on the
+        // shared table (mirrors the id-range scoping in the v2 test).
         let search_value = json!({"string": "value_1"});
-        let sql = "SELECT COUNT(*) FROM encrypted WHERE encrypted_jsonb @> $1";
+        let sql = "SELECT COUNT(*) FROM encrypted WHERE encrypted_jsonb @> $1 AND id = ANY($2)";
 
-        let rows = client.query(sql, &[&search_value]).await.unwrap();
+        let rows = client.query(sql, &[&search_value, &ids]).await.unwrap();
         let count: i64 = rows[0].get(0);
 
         assert_eq!(count, 2);
