@@ -38,4 +38,4 @@ For more information see the [Code of Conduct FAQ](./CODE_OF_CONDUCT.md) or cont
 
 ## Licensing
 
-See the [LICENSE](./LICENSE) file for our project's licensing.
+See the [LICENSE](./LICENSE.md) file for our project's licensing.

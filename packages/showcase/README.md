@@ -464,7 +464,7 @@ Execute the comprehensive JSONB demonstration:
 cargo run --package showcase
 
 # Or run with mise
-mise run showcase
+mise run test:integration:showcase
 ```
 
 ### Expected Output

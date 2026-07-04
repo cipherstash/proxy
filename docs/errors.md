@@ -220,6 +220,8 @@ When `mapping_errors_enabled` is `false` (the default), then type check errors a
 
 When `mapping_errors_enabled` is `true`, then type check errors are raised, and statement execution halts.
 
+Configure this setting with the environment variable `CS_DEVELOPMENT__ENABLE_MAPPING_ERRORS` or in the TOML config file under `[development] enable_mapping_errors = true`.
+
 In our experience, most production systems have a relatively small number of columns that require protection.
 As SQL is large and complex, instead of blocking statements with type check errors that are false negatives, the default behaviour of Proxy is to allow the statement.
 
