@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1782999208953,
+  "lastUpdate": 1783156417331,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -22055,6 +22055,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 38.370394,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "6f9bbb6725bcf09d847db83a0bfd4e5d2cab214d",
+          "message": "docs: land the dormant doc-fix branch + meta-file staleness sweep",
+          "timestamp": "2026-06-24T22:13:30Z",
+          "url": "https://github.com/cipherstash/proxy/pull/412/commits/6f9bbb6725bcf09d847db83a0bfd4e5d2cab214d"
+        },
+        "date": 1783156416020,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 37.772298,
             "unit": "Number"
           }
         ]
