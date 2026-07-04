@@ -6,7 +6,7 @@ This document outlines the supported JSONB functions and operators in CipherStas
 ## Table of Contents
 
 - [Setup](#setup)
-- [Important Limtiations](#important-limitations)
+- [Important Limitations](#important-limitations)
 - [Operators](#operators)
 - [->](#field_access_operator)
 - [->>](#field_access_as_text_operator)
@@ -302,7 +302,7 @@ SELECT encrypted_jsonb @> '{"number": 99}' FROM cipherstash;
 
 ```sql
 -- nested object
-SELECT encrypted_jsonb @> '{"object": {"string": "world", "number": 99},' FROM cipherstash;
+SELECT encrypted_jsonb @> '{"object": {"string": "world", "number": 99}}' FROM cipherstash;
 
 ----------
  ?column?
@@ -334,7 +334,7 @@ SELECT '{ .. }' <@ encrypted_column FROM table_name;
 
 ```sql
 -- field/value returns true
-SELECT '{"number": 1}' @> encrypted_jsonb FROM cipherstash;
+SELECT '{"number": 1}' <@ encrypted_jsonb FROM cipherstash;
 
 ----------
  ?column?
@@ -345,7 +345,7 @@ SELECT '{"number": 1}' @> encrypted_jsonb FROM cipherstash;
 
 ```sql
 -- field/value returns false if no match
-SELECT '{"number": 99}' @> encrypted_jsonb FROM cipherstash;
+SELECT '{"number": 99}' <@ encrypted_jsonb FROM cipherstash;
 
 ----------
  ?column?
@@ -357,7 +357,7 @@ SELECT '{"number": 99}' @> encrypted_jsonb FROM cipherstash;
 
 ```sql
 -- nested object
-SELECT '{"object": {"string": "world", "number": 99}' @> encrypted_jsonb FROM cipherstash;
+SELECT '{"object": {"string": "world", "number": 99}}' <@ encrypted_jsonb FROM cipherstash;
 
 ----------
  ?column?
@@ -625,84 +625,6 @@ SELECT jsonb_array_length(jsonb_path_query(encrypted_jsonb, '$.unknown')) FROM c
  jsonb_array_length
 --------------------
 (0 rows)
-```
-
----------------------------------------------------------------
-
-
-
-
-
-
-
-
-
-=======================================
-
-
-
-
-
-
-
-
----------------------------------------------------------------
-
-
-
-## Containment Operators
-
-> **Note:** Containment operators work directly with JSONB literals without requiring explicit `::jsonb` type casts. The examples below use the simplified syntax intentionally.
-
-### `@>` (Contains Operator)
-
-Tests whether the left JSONB value contains the right JSONB value.
-
-**Syntax:**
-```sql
-SELECT encrypted_jsonb @> '{"field": "value"}' FROM table_name;
-```
-
-**Examples:**
-```sql
--- Check if contains string field
-SELECT encrypted_jsonb @> '{"string": "hello"}' FROM encrypted;
-
--- Check if contains numeric field
-SELECT encrypted_jsonb @> '{"number": 42}' FROM encrypted;
-
--- Check if contains array
-SELECT encrypted_jsonb @> '{"array_number": [42, 84]}' FROM encrypted;
-
--- Check if contains nested object
-SELECT encrypted_jsonb @> '{"nested": {"number": 1815, "string": "world"}}' FROM encrypted;
-```
-
-**Supported Containment Types:**
-- String fields
-- Numeric fields
-- Complete arrays
-- Nested objects
-
-### `<@` (Contained By Operator)
-
-Tests whether the left JSONB value is contained by the right JSONB value.
-
-**Syntax:**
-```sql
-SELECT '{"field": "value"}' <@ encrypted_jsonb FROM table_name;
-```
-
-**Examples:**
-```sql
--- Check if value is contained by the document
-SELECT '{"string": "hello"}' <@ encrypted_jsonb FROM encrypted;
-
--- Check numeric containment
-SELECT '{"number": 42}' <@ encrypted_jsonb FROM encrypted;
-
--- Check array containment
-SELECT '{"array_string": ["hello", "world"]}' <@ encrypted_jsonb FROM encrypted;
 ```
 
 ## Comparison Operators in WHERE Clauses

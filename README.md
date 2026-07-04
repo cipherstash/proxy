@@ -25,10 +25,6 @@
 
 <!-- start -->
 
-## Proxy V2 now available
-
-[Read the announcement](https://cipherstash.com/blog/introducing-proxy)
-
 CipherStash Proxy provides transparent, *searchable* encryption for your existing Postgres database.
 
 CipherStash Proxy:
@@ -68,9 +64,15 @@ cd proxy
 # Sign up, create a workspace, and generate credentials
 # Visit: https://dashboard.cipherstash.com/sign-up
 
-# Put credentials in .env.proxy.docker
-# Copy the credentials from the dashboard and paste them into .env.proxy.docker using your preferred text editor.
-nano .env.proxy.docker
+# Create .env.proxy.docker with your CipherStash credentials
+# Replace the placeholder values with your actual credentials from the dashboard
+cat > .env.proxy.docker << 'EOF'
+CS_WORKSPACE_CRN=crn:...your-workspace-crn...
+CS_CLIENT_ACCESS_KEY=your-client-access-key
+CS_DEFAULT_KEYSET_ID=your-keyset-id
+CS_CLIENT_ID=your-client-id
+CS_CLIENT_KEY=your-client-key
+EOF
 
 # Start the containers
 docker compose up

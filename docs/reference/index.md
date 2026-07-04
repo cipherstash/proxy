@@ -8,6 +8,9 @@ This page contains reference documentation for configuring CipherStash Proxy and
   - [Recommended settings for development](#recommended-settings-for-development)
   - [Per-target log levels](#per-target-log-levels)
   - [Docker-specific configuration](#docker-specific-configuration)
+- [Command line interface](#command-line-interface)
+- [Multitenant operation](#multitenant-operation)
+- [Disabling encrypted mapping](#disabling-encrypted-mapping)
 - [Prometheus metrics](#prometheus-metrics)
   - [Available metrics](#available-metrics)
 - [Troubleshooting ZeroKMS connections](#troubleshooting-zerokms-connections)
@@ -16,7 +19,7 @@ This page contains reference documentation for configuring CipherStash Proxy and
 
 ## Proxy config options
 
-You can configure CipherStash Proxy with a config file, enviroment variables, or a combination of the two – see [Configuring Proxy](#configuring-proxy) for instructions.
+You can configure CipherStash Proxy with a config file, environment variables, or a combination of the two – see [Configuring Proxy](../how-to/index.md#configuring-proxy) for instructions.
 
 The following are all the configuration options available for Proxy, with their equivalent environment variables:
 
@@ -29,7 +32,7 @@ The following are all the configuration options available for Proxy, with their 
 # Env: CS_SERVER__HOST
 host = "0.0.0.0"
 
-# Proxy host posgt
+# Proxy host port
 # Optional
 # Default: `6432`
 # Env: CS_SERVER__PORT
@@ -60,8 +63,8 @@ worker_threads = "4"
 # Env: CS_SERVER__THREAD_STACK_SIZE
 thread_stack_size = "2097152"
 
-# Cipher cache size (number of entries)
-# Sets the maximum number of encryption/decryption operations to cache
+# Cipher cache size (number of keyset-scoped ciphers)
+# Sets the maximum number of keyset-scoped ciphers to cache (internal sizing is calculated per entry)
 # Optional
 # Default: `64`
 # Env: CS_SERVER__CIPHER_CACHE_SIZE
@@ -78,11 +81,11 @@ cipher_cache_ttl_seconds = "3600"
 [database]
 # Database host address
 # Optional
-# Default: `0.0.0.0`
+# Default: `127.0.0.1`
 # Env: CS_DATABASE__HOST
-host = "0.0.0.0"
+host = "127.0.0.1"
 
-# Database host post
+# Database host port
 # Optional
 # Default: `5432`
 # Env: CS_DATABASE__PORT
@@ -199,7 +202,7 @@ format = "pretty"
 # Log format
 # Optional
 # Valid values: `stdout | stderr`
-# Default: `info`
+# Default: `stdout`
 # Env: CS_LOG__OUTPUT
 output = "stdout"
 
@@ -238,7 +241,7 @@ slow_db_response_min_duration_ms = "100"
 # Env: CS_PROMETHEUS__ENABLED
 enabled = "false"
 
-# Prometheus exporter post
+# Prometheus exporter port
 # Optional
 # Default: `9930`
 # Env: CS_PROMETHEUS__PORT
@@ -310,10 +313,6 @@ As a convenience for production deployments, with the below environment variable
 ```bash
 CS_DATABASE__INSTALL_AWS_RDS_CERT_BUNDLE="true"
 ```
-
-## Command line options
-
-
 
 ## Command line interface
 
@@ -562,6 +561,8 @@ If the proxy is running on a host other than localhost, access on that host.
 | `cipherstash_proxy_statements_session_duration_seconds_sum`     | Count     | Total time CipherStash Proxy spent processing SQL statements                |
 | `cipherstash_proxy_statements_encrypted_total`                  | Counter   | Number of SQL statements that required encryption                           |
 | `cipherstash_proxy_statements_passthrough_total`                | Counter   | Number of SQL statements that did not require encryption                    |
+| `cipherstash_proxy_statements_passthrough_mapping_disabled_total` | Counter   | Number of SQL statements passed through because mapping was disabled        |
+| `cipherstash_proxy_slow_statements_total`                         | Counter   | Number of SQL statements that exceeded the slow statement threshold         |
 | `cipherstash_proxy_statements_total`                            | Counter   | Total number of SQL statements processed by CipherStash Proxy               |
 | `cipherstash_proxy_statements_unmappable_total`                 | Counter   | Total number of unmappable SQL statements processed by CipherStash Proxy    |
 
@@ -629,9 +630,9 @@ rate(cipherstash_proxy_keyset_cipher_cache_hits_total[5m])
 
 ## Supported architectures
 
-CipherStash Proxy is [available as a Docker container image](https://hub.docker.com/r/cipherstash/proxy) for `linux/arm64` architectures.
+CipherStash Proxy is [available as a Docker container image](https://hub.docker.com/r/cipherstash/proxy) for `linux/arm64` and `linux/amd64` architectures.
 
-If you're interested in a Docker image for other architectures (like `linux/amd64`), upvote [this idea](https://github.com/cipherstash/proxy/discussions/214).
+For other architecture requests, see [this discussion](https://github.com/cipherstash/proxy/discussions/214).
 
 
 

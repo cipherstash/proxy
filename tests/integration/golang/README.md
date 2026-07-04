@@ -29,7 +29,7 @@ Alternatively, to run the tests outside of the container:
 
 ``` bash
 # Tell the tests where to find Proxy
-export DATABASE_URL="postgresql://cipherstash:password@localhost:6432/cipherstash"
+export DATABASE_URL="postgresql://cipherstash:p%40ssword@localhost:6432/cipherstash"
 
 # Run the tests
 go test -v ./...

@@ -214,7 +214,11 @@ packages/
 │       │   ├── parser.rs        # SQL parsing entry point
 │       │   └── context/         # Session state (statements, portals, metadata)
 │       ├── proxy/               # Encryption service, schema management, config
-│       └── config/              # Configuration parsing
+│       ├── config/              # Configuration parsing
+│       ├── cli/                 # CLI argument parsing
+│       ├── connect/             # Database connection management
+│       ├── tls/                 # TLS configuration and setup
+│       └── log/                 # Logging targets and configuration
 ├── eql-mapper/                  # SQL type inference and transformation
 │   └── src/
 │       ├── inference/           # Type inference engine
