@@ -69,9 +69,9 @@ cd proxy
 cat > .env.proxy.docker << 'EOF'
 CS_WORKSPACE_CRN=crn:...your-workspace-crn...
 CS_CLIENT_ACCESS_KEY=your-client-access-key
-CS_ENCRYPT__DEFAULT_KEYSET_ID=your-keyset-id
-CS_ENCRYPT__CLIENT_ID=your-client-id
-CS_ENCRYPT__CLIENT_KEY=your-client-key
+CS_DEFAULT_KEYSET_ID=your-keyset-id
+CS_CLIENT_ID=your-client-id
+CS_CLIENT_KEY=your-client-key
 EOF
 
 # Start the containers
