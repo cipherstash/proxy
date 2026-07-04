@@ -2,4 +2,4 @@
 
 The core proxy engine for CipherStash Proxy.
 
-Please refer to [the top level README](../../README.md) for local development documentation.
+Please refer to the [development guide](../../DEVELOPMENT.md) for local development documentation.

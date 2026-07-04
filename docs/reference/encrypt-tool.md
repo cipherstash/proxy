@@ -12,7 +12,7 @@ CipherStash Proxy includes an `encrypt` tool – a CLI application to encrypt ex
 ## Using the `encrypt` tool
 
 Encrypt the `source` column data in `table` into the specified encrypted `target` column.
-The `encrypt` tool connects to CipherStash Proxy using the `cipherstash.toml` configuration or `ENV` variables.
+The `encrypt` tool connects to CipherStash Proxy using the `cipherstash-proxy.toml` configuration or `ENV` variables.
 
 ```
 cipherstash-proxy encrypt [OPTIONS] --table <TABLE>  --columns <SOURCE_COLUMN=TARGET_COLUMN>...
@@ -25,7 +25,7 @@ At a high-level, the process for encrypting a column in the database is:
 1. Add a new encrypted destination column with the appropriate encryption configuration.
 2. Using CipherStash Proxy to process:
   1. Select from the original plaintext column.
-  2. Update the encrpted column to set the plaintext value.
+  2. Update the encrypted column to set the plaintext value.
 3. Drop the original plaintext column.
 4. Rename the encrypted column to the original plaintext column name.
 

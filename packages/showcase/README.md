@@ -443,6 +443,7 @@ ORDER BY jsonb_path_query_first(pii, '$.insurance.coverage.copays.primary_care')
 
 2. **Configure CipherStash credentials** in `mise.local.toml`:
    ```toml
+   [env]
    CS_WORKSPACE_CRN = "crn:region:workspace-id"
    CS_CLIENT_ACCESS_KEY = "your-access-key"
    CS_DEFAULT_KEYSET_ID = "your-keyset-id"

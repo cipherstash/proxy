@@ -25,10 +25,6 @@
 
 <!-- start -->
 
-## Proxy V2 now available
-
-[Read the announcement](https://cipherstash.com/blog/introducing-proxy)
-
 CipherStash Proxy provides transparent, *searchable* encryption for your existing Postgres database.
 
 CipherStash Proxy:

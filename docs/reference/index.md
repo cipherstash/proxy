@@ -8,6 +8,9 @@ This page contains reference documentation for configuring CipherStash Proxy and
   - [Recommended settings for development](#recommended-settings-for-development)
   - [Per-target log levels](#per-target-log-levels)
   - [Docker-specific configuration](#docker-specific-configuration)
+- [Command line interface](#command-line-interface)
+- [Multitenant operation](#multitenant-operation)
+- [Disabling encrypted mapping](#disabling-encrypted-mapping)
 - [Prometheus metrics](#prometheus-metrics)
   - [Available metrics](#available-metrics)
 - [Troubleshooting ZeroKMS connections](#troubleshooting-zerokms-connections)
@@ -16,7 +19,7 @@ This page contains reference documentation for configuring CipherStash Proxy and
 
 ## Proxy config options
 
-You can configure CipherStash Proxy with a config file, environment variables, or a combination of the two – see [Configuring Proxy](#configuring-proxy) for instructions.
+You can configure CipherStash Proxy with a config file, environment variables, or a combination of the two – see [Configuring Proxy](../how-to/index.md#configuring-proxy) for instructions.
 
 The following are all the configuration options available for Proxy, with their equivalent environment variables:
 
@@ -78,9 +81,9 @@ cipher_cache_ttl_seconds = "3600"
 [database]
 # Database host address
 # Optional
-# Default: `0.0.0.0`
+# Default: `127.0.0.1`
 # Env: CS_DATABASE__HOST
-host = "0.0.0.0"
+host = "127.0.0.1"
 
 # Database host port
 # Optional
@@ -310,10 +313,6 @@ As a convenience for production deployments, with the below environment variable
 ```bash
 CS_DATABASE__INSTALL_AWS_RDS_CERT_BUNDLE="true"
 ```
-
-## Command line options
-
-
 
 ## Command line interface
 

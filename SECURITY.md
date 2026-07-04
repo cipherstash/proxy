@@ -13,10 +13,7 @@ This repository contains the source code for CipherStash Proxy, including:
 
 ### CipherStash Proxy
 
-| Version | Supported          |
-| ------- | ------------------ |
-| 2.1.x   | :white_check_mark: |
-| < 2.1   | :x: |
+**Security fixes are released for the latest release line.** Security reports are welcome for any version, but fixes land in the latest release — if you are running an older version, plan to upgrade to receive them.
 
 
 All software follows semantic versioning and undergoes internal security review, automated analysis, and reproducible builds as part of our SDLC.
@@ -74,7 +71,7 @@ The following are **in scope**:
 
 The following are **out of scope**:
 
-- Example [schema](./docs/sql/schema-example.sql) and [configuration](./cipherstash-proxy-example.toml) (though we are still grateful for any relevant disclosires there)
+- Example [schema](./docs/sql/schema-example.sql) and [configuration](./cipherstash-proxy-example.toml) (though we are still grateful for any relevant disclosures there)
 - Social engineering, physical attacks, or denial-of-service  
 - Attacks requiring privileged access to developer machines or CI/CD infrastructure  
 
@@ -92,7 +89,7 @@ To maintain a strong security posture, contributors MUST:
 ### 🛡 Coding & dependency hygiene
 - Avoid adding dependencies unless necessary  
 - Keep dependencies updated and vetted  
-- Use TypeScript for all new code  
+- Use Rust for all new code  
 - Ensure all code paths that handle keys or encrypted data include type-safe boundaries  
 
 ### 🔍 Testing & review
