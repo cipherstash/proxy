@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1783157028829,
+  "lastUpdate": 1783157844515,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -22105,6 +22105,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 38.565988,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "dan@cipherstash.com",
+            "name": "Dan Draper",
+            "username": "coderdan"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "b9b84f12c5150ba500f6caaf2e9038667b853d5d",
+          "message": "Merge pull request #412 from cipherstash/docs/meta-refresh\n\ndocs: land the dormant doc-fix branch + meta-file staleness sweep",
+          "timestamp": "2026-07-04T19:33:53+10:00",
+          "tree_id": "0cc85968282dbd697814949d975d769a4cad1a39",
+          "url": "https://github.com/cipherstash/proxy/commit/b9b84f12c5150ba500f6caaf2e9038667b853d5d"
+        },
+        "date": 1783157843171,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 38.064796,
             "unit": "Number"
           }
         ]
