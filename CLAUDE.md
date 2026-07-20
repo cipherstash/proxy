@@ -245,6 +245,10 @@ For significant releases, write an `ANNOUNCEMENT.md` for the GitHub Discussions 
 
 Issues are tracked in **Linear** (team: Product Engineering, key `CIP-`), not GitHub Issues. GitHub holds code and PRs only. See `docs/agents/issue-tracker.md`.
 
+### Triage labels
+
+**Defaults** — the five canonical roles, each label string equal to its name. Only `wontfix` exists in Linear today; the rest are created on demand. See `docs/agents/triage-labels.md`.
+
 ### Domain docs
 
 **Multi-context** — the root `CONTEXT-MAP.md` points at per-package `CONTEXT.md` files under `packages/*/`. See `docs/agents/domain.md`.
