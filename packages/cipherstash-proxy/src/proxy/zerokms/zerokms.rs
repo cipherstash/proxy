@@ -10,12 +10,13 @@ use crate::{
     proxy::EncryptionService,
 };
 use cipherstash_client::{
-    encryption::{Plaintext, QueryOp},
+    encryption::{DecryptOptions, Plaintext, QueryOp},
     eql::{
-        decrypt_eql, encrypt_eql, EqlCiphertext, EqlDecryptOpts, EqlEncryptOpts, EqlOperation,
+        encrypt_eql_v3, EqlCiphertextV3, EqlEncryptOpts, EqlOperation, EqlOutputV3,
         PreparedPlaintext,
     },
     schema::column::IndexType,
+    zerokms::WithContext,
 };
 use eql_mapper::EqlTermVariant;
 use metrics::{counter, histogram};
@@ -157,7 +158,7 @@ impl EncryptionService for ZeroKms {
         keyset_id: Option<KeysetIdentifier>,
         plaintexts: Vec<Option<Plaintext>>,
         columns: &[Option<Column>],
-    ) -> Result<Vec<Option<EqlCiphertext>>, Error> {
+    ) -> Result<Vec<Option<EqlOutputV3>>, Error> {
         debug!(target: ENCRYPT, msg="Encrypt", ?keyset_id, default_keyset_id = ?self.default_keyset_id);
 
         // A keyset is required if no default keyset has been configured
@@ -222,16 +223,16 @@ impl EncryptionService for ZeroKms {
         // Use default opts since cipher is already initialized with the correct keyset
         let opts = EqlEncryptOpts::default();
 
-        debug!(target: ENCRYPT, msg="Calling encrypt_eql", count = prepared_plaintexts.len());
+        debug!(target: ENCRYPT, msg="Calling encrypt_eql_v3", count = prepared_plaintexts.len());
         let encrypt_start = Instant::now();
-        let encrypted = encrypt_eql(cipher, prepared_plaintexts, &opts)
+        let encrypted = encrypt_eql_v3(cipher, prepared_plaintexts, &opts)
             .await
             .map_err(EncryptError::from)?;
         let encrypt_duration = encrypt_start.elapsed();
-        debug!(target: ENCRYPT, msg="encrypt_eql completed", count = encrypted.len(), duration_ms = encrypt_duration.as_millis());
+        debug!(target: ENCRYPT, msg="encrypt_eql_v3 completed", count = encrypted.len(), duration_ms = encrypt_duration.as_millis());
 
         // Reconstruct the result vector with None values in the right places
-        let mut result: Vec<Option<EqlCiphertext>> = vec![None; plaintexts.len()];
+        let mut result: Vec<Option<EqlOutputV3>> = vec![None; plaintexts.len()];
         for (idx, ciphertext) in indices.into_iter().zip(encrypted.into_iter()) {
             result[idx] = Some(ciphertext);
         }
@@ -247,7 +248,7 @@ impl EncryptionService for ZeroKms {
     async fn decrypt(
         &self,
         keyset_id: Option<KeysetIdentifier>,
-        ciphertexts: Vec<Option<EqlCiphertext>>,
+        ciphertexts: Vec<Option<EqlCiphertextV3>>,
     ) -> Result<Vec<Option<Plaintext>>, Error> {
         debug!(target: ENCRYPT, msg="Decrypt", ?keyset_id, default_keyset_id = ?self.default_keyset_id);
 
@@ -258,32 +259,52 @@ impl EncryptionService for ZeroKms {
 
         let cipher = self.init_cipher(keyset_id.clone()).await?;
 
-        // Collect indices and ciphertexts for non-None values
+        // Collect indices and the root records for non-None values.
+        //
+        // cipherstash-client has no `decrypt_eql_v3` counterpart to
+        // `encrypt_eql_v3` — the v2 `decrypt_eql` only accepts `EqlCiphertext`.
+        // For scalar payloads that costs us nothing: `EncryptedPayloadV3.c` is
+        // the same `EncryptedRecord` the v2 path would have unwrapped, and
+        // `EncryptedRecord` is itself `Decryptable`, so we hand it straight to
+        // the cipher. SteVec documents are the part that genuinely needs the
+        // client (see `SteVecV3DecryptUnsupported`).
         let mut indices: Vec<usize> = Vec::new();
-        let mut ciphertexts_to_decrypt: Vec<EqlCiphertext> = Vec::new();
+        let mut records_to_decrypt = Vec::new();
 
         for (idx, ct_opt) in ciphertexts.iter().enumerate() {
             if let Some(ct) = ct_opt {
+                let record = match ct {
+                    EqlCiphertextV3::Encrypted(payload) => payload.ciphertext.clone(),
+                    EqlCiphertextV3::SteVec(_) => {
+                        return Err(EncryptError::SteVecV3DecryptUnsupported.into())
+                    }
+                };
                 indices.push(idx);
-                ciphertexts_to_decrypt.push(ct.clone());
+                records_to_decrypt.push(record);
             }
         }
 
         // If no ciphertexts to decrypt, return all None
-        if ciphertexts_to_decrypt.is_empty() {
+        if records_to_decrypt.is_empty() {
             return Ok(vec![None; ciphertexts.len()]);
         }
 
-        // Use default opts since cipher is already initialized with the correct keyset
-        let opts = EqlDecryptOpts::default();
+        // Default opts: the cipher is already scoped to the right keyset, and
+        // Proxy does not set a lock context.
+        let opts = DecryptOptions::default();
 
-        debug!(target: ENCRYPT, msg="Calling decrypt_eql", count = ciphertexts_to_decrypt.len());
+        debug!(target: ENCRYPT, msg="Decrypting EQL v3 records", count = records_to_decrypt.len());
         let decrypt_start = Instant::now();
-        let decrypted = decrypt_eql(cipher, ciphertexts_to_decrypt, &opts)
+        let decrypted = cipher
+            .decrypt(records_to_decrypt, &opts)
             .await
+            .map_err(ZeroKMSError::from)?
+            .into_iter()
+            .map(|bytes| Plaintext::from_slice(&bytes))
+            .collect::<Result<Vec<_>, _>>()
             .map_err(EncryptError::from)?;
         let decrypt_duration = decrypt_start.elapsed();
-        debug!(target: ENCRYPT, msg="decrypt_eql completed", count = decrypted.len(), duration_ms = decrypt_duration.as_millis());
+        debug!(target: ENCRYPT, msg="Decrypt completed", count = decrypted.len(), duration_ms = decrypt_duration.as_millis());
 
         // Reconstruct the result vector with None values in the right places
         let mut result: Vec<Option<Plaintext>> = vec![None; ciphertexts.len()];
