@@ -255,6 +255,7 @@ pub enum EncryptError {
     InvalidIndexTerm,
 
 <<<<<<< HEAD
+<<<<<<< HEAD
     /// EQL v3 orders encrypted jsonb entries by the CLLW-OPE (`op`) term and has
     /// no representation for CLLW-ORE (`oc`), so a column configured for
     /// Standard-mode ste_vec cannot be encrypted. The column has to be
@@ -262,6 +263,8 @@ pub enum EncryptError {
     #[error("An encrypted jsonb column is configured for ORE ordering, which EQL v3 does not support. For help visit {}#encrypt-ste-vec-ore-mode-unsupported", ERROR_DOC_BASE_URL)]
     SteVecOreModeUnsupported,
 
+=======
+>>>>>>> 2291ca06 (fix(decrypt): implement EQL v3 decrypt for scalar and SteVec payloads)
     /// `sv[0]` is the decryption root of a SteVec document, so an empty `sv`
     /// array leaves nothing to decrypt.
     #[error("Encrypted jsonb value has no root entry and cannot be decrypted")]
@@ -271,6 +274,7 @@ pub enum EncryptError {
     /// AAD), so it must be exactly 16 hex-encoded bytes.
     #[error("Encrypted jsonb entry has an invalid selector '{selector}'")]
     SteVecSelectorInvalid { selector: String },
+<<<<<<< HEAD
 =======
     /// EQL v3 SteVec (jsonb) documents carry the key header once at the document
     /// root and raw AEAD bytes per entry, so an `EncryptedRecord` has to be
@@ -281,6 +285,8 @@ pub enum EncryptError {
     #[error("Decrypting EQL v3 jsonb (SteVec) columns is not yet supported")]
     SteVecV3DecryptUnsupported,
 >>>>>>> 905dfb04 (feat(encrypt): produce EQL v3 payloads, retire v2)
+=======
+>>>>>>> 2291ca06 (fix(decrypt): implement EQL v3 decrypt for scalar and SteVec payloads)
 
     #[error(
         "KeysetId `{id}` could not be parsed using `SET CIPHERSTASH.KEYSET_ID`. KeysetId should be a valid UUID. For help visit {}#encrypt-keyset-id-could-not-be-parsed",

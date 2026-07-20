@@ -17,11 +17,16 @@ use cipherstash_client::{
     },
     schema::column::IndexType,
 <<<<<<< HEAD
+<<<<<<< HEAD
     zerokms::{Decryptable, EncryptedRecord, RecordWithNonce, RetrieveKeyPayload},
 =======
     zerokms::WithContext,
 >>>>>>> 905dfb04 (feat(encrypt): produce EQL v3 payloads, retire v2)
+=======
+    zerokms::{Decryptable, EncryptedRecord, RecordWithNonce, RetrieveKeyPayload},
+>>>>>>> 2291ca06 (fix(decrypt): implement EQL v3 decrypt for scalar and SteVec payloads)
 };
+use std::convert::Infallible;
 use eql_mapper::EqlTermVariant;
 use metrics::{counter, histogram};
 use moka::future::Cache;
@@ -347,6 +352,9 @@ impl EncryptionService for ZeroKms {
         // cipherstash-client has no `decrypt_eql_v3` counterpart to
         // `encrypt_eql_v3` — the v2 `decrypt_eql` only accepts `EqlCiphertext`.
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> 2291ca06 (fix(decrypt): implement EQL v3 decrypt for scalar and SteVec payloads)
         // We assemble the decryptable record ourselves, which is what
         // protect-ffi does too (`encrypted_record_from_value`).
         //
@@ -359,6 +367,7 @@ impl EncryptionService for ZeroKms {
         // decryption-root invariant v2 had). The selector is the AEAD binding —
         // its first 12 bytes are the nonce and all 16 go into the AAD — which is
         // why the reassembled record is a `RecordWithNonce`.
+<<<<<<< HEAD
         let mut indices: Vec<usize> = Vec::new();
         let mut records_to_decrypt: Vec<V3Record> = Vec::new();
 =======
@@ -370,11 +379,18 @@ impl EncryptionService for ZeroKms {
         let mut indices: Vec<usize> = Vec::new();
         let mut records_to_decrypt = Vec::new();
 >>>>>>> 905dfb04 (feat(encrypt): produce EQL v3 payloads, retire v2)
+=======
+        let mut indices: Vec<usize> = Vec::new();
+        let mut records_to_decrypt: Vec<V3Record> = Vec::new();
+>>>>>>> 2291ca06 (fix(decrypt): implement EQL v3 decrypt for scalar and SteVec payloads)
 
         for (idx, ct_opt) in ciphertexts.iter().enumerate() {
             if let Some(ct) = ct_opt {
                 let record = match ct {
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> 2291ca06 (fix(decrypt): implement EQL v3 decrypt for scalar and SteVec payloads)
                     EqlCiphertextV3::Encrypted(payload) => {
                         V3Record::Scalar(payload.ciphertext.clone())
                     }
@@ -390,11 +406,14 @@ impl EncryptionService for ZeroKms {
                                 .key_header
                                 .record_with_selector(root.ciphertext.clone(), selector),
                         )
+<<<<<<< HEAD
 =======
                     EqlCiphertextV3::Encrypted(payload) => payload.ciphertext.clone(),
                     EqlCiphertextV3::SteVec(_) => {
                         return Err(EncryptError::SteVecV3DecryptUnsupported.into())
 >>>>>>> 905dfb04 (feat(encrypt): produce EQL v3 payloads, retire v2)
+=======
+>>>>>>> 2291ca06 (fix(decrypt): implement EQL v3 decrypt for scalar and SteVec payloads)
                     }
                 };
                 indices.push(idx);
