@@ -254,6 +254,7 @@ pub enum EncryptError {
     #[error("InvalidIndexTerm")]
     InvalidIndexTerm,
 
+<<<<<<< HEAD
     /// EQL v3 orders encrypted jsonb entries by the CLLW-OPE (`op`) term and has
     /// no representation for CLLW-ORE (`oc`), so a column configured for
     /// Standard-mode ste_vec cannot be encrypted. The column has to be
@@ -270,6 +271,16 @@ pub enum EncryptError {
     /// AAD), so it must be exactly 16 hex-encoded bytes.
     #[error("Encrypted jsonb entry has an invalid selector '{selector}'")]
     SteVecSelectorInvalid { selector: String },
+=======
+    /// EQL v3 SteVec (jsonb) documents carry the key header once at the document
+    /// root and raw AEAD bytes per entry, so an `EncryptedRecord` has to be
+    /// reassembled from `h` + `sv[0].c` before it can be decrypted.
+    /// cipherstash-client exposes no `decrypt_eql_v3`, and reassembling the
+    /// record here would hard-code the envelope layout. Blocked until the client
+    /// provides a v3 decrypt path.
+    #[error("Decrypting EQL v3 jsonb (SteVec) columns is not yet supported")]
+    SteVecV3DecryptUnsupported,
+>>>>>>> 905dfb04 (feat(encrypt): produce EQL v3 payloads, retire v2)
 
     #[error(
         "KeysetId `{id}` could not be parsed using `SET CIPHERSTASH.KEYSET_ID`. KeysetId should be a valid UUID. For help visit {}#encrypt-keyset-id-could-not-be-parsed",
