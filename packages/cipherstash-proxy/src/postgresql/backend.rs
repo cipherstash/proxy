@@ -19,8 +19,8 @@ use crate::prometheus::{
     ROWS_PASSTHROUGH_TOTAL, ROWS_TOTAL, SERVER_BYTES_RECEIVED_TOTAL,
 };
 use crate::proxy::EncryptionService;
+use crate::EqlCiphertext;
 use bytes::BytesMut;
-use cipherstash_client::eql::EqlCiphertext;
 use metrics::{counter, histogram};
 use std::time::Instant;
 use tokio::io::AsyncRead;
@@ -538,7 +538,7 @@ where
         for (col, ct) in projection_columns.iter().zip(ciphertexts) {
             match (col, ct) {
                 (Some(col), Some(ct)) => {
-                    if col.identifier != ct.identifier {
+                    if &col.identifier != ct.identifier() {
                         return Err(EncryptError::ColumnConfigurationMismatch {
                             table: col.identifier.table.to_owned(),
                             column: col.identifier.column.to_owned(),
@@ -553,8 +553,8 @@ where
                 // ciphertext with no column configuration is bad
                 (None, Some(ct)) => {
                     return Err(EncryptError::ColumnConfigurationMismatch {
-                        table: ct.identifier.table.to_owned(),
-                        column: ct.identifier.column.to_owned(),
+                        table: ct.identifier().table.to_owned(),
+                        column: ct.identifier().column.to_owned(),
                     }
                     .into());
                 }
@@ -749,7 +749,7 @@ mod tests {
             _keyset_id: Option<KeysetIdentifier>,
             _plaintexts: Vec<Option<cipherstash_client::encryption::Plaintext>>,
             _columns: &[Option<Column>],
-        ) -> Result<Vec<Option<crate::EqlCiphertext>>, Error> {
+        ) -> Result<Vec<Option<crate::EqlOutput>>, Error> {
             Ok(vec![])
         }
 
