@@ -238,3 +238,13 @@ For significant releases, write an `ANNOUNCEMENT.md` for the GitHub Discussions 
    > Critical information users must know.
    ```
 4. After copying content to GitHub Discussions, delete `ANNOUNCEMENT.md` from the repo
+
+## Agent skills
+
+### Issue tracker
+
+Issues are tracked in **Linear** (team: Product Engineering, key `CIP-`), not GitHub Issues. GitHub holds code and PRs only. See `docs/agents/issue-tracker.md`.
+
+### Domain docs
+
+**Multi-context** — the root `CONTEXT-MAP.md` points at per-package `CONTEXT.md` files under `packages/*/`. See `docs/agents/domain.md`.
