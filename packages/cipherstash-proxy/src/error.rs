@@ -254,6 +254,15 @@ pub enum EncryptError {
     #[error("InvalidIndexTerm")]
     InvalidIndexTerm,
 
+    /// EQL v3 SteVec (jsonb) documents carry the key header once at the document
+    /// root and raw AEAD bytes per entry, so an `EncryptedRecord` has to be
+    /// reassembled from `h` + `sv[0].c` before it can be decrypted.
+    /// cipherstash-client exposes no `decrypt_eql_v3`, and reassembling the
+    /// record here would hard-code the envelope layout. Blocked until the client
+    /// provides a v3 decrypt path.
+    #[error("Decrypting EQL v3 jsonb (SteVec) columns is not yet supported")]
+    SteVecV3DecryptUnsupported,
+
     #[error(
         "KeysetId `{id}` could not be parsed using `SET CIPHERSTASH.KEYSET_ID`. KeysetId should be a valid UUID. For help visit {}#encrypt-keyset-id-could-not-be-parsed",
         ERROR_DOC_BASE_URL
