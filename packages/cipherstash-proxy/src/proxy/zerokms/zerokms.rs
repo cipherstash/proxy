@@ -16,8 +16,9 @@ use cipherstash_client::{
         PreparedPlaintext,
     },
     schema::column::IndexType,
-    zerokms::WithContext,
+    zerokms::{Decryptable, EncryptedRecord, RecordWithNonce, RetrieveKeyPayload},
 };
+use std::convert::Infallible;
 use eql_mapper::EqlTermVariant;
 use metrics::{counter, histogram};
 use moka::future::Cache;
@@ -33,6 +34,75 @@ use super::{init_zerokms_client, ScopedCipher, ZerokmsClient};
 
 /// Memory size of a single ScopedCipher instance for cache weighing
 const SCOPED_CIPHER_SIZE: usize = std::mem::size_of::<ScopedCipher>();
+
+/// An EQL v3 stored payload reduced to something the cipher can decrypt.
+///
+/// The two arms are not interchangeable, which is why this exists rather than a
+/// plain `Vec<RecordWithNonce>`: `RecordWithNonce` unconditionally reports a
+/// nonce override and an AAD selector, so wrapping a scalar record in one would
+/// decrypt against a nonce the value was never encrypted with.
+#[derive(Debug)]
+enum V3Record {
+    /// A scalar payload's `c` — self-describing, nonce derived from the data
+    /// key's IV, nothing bound into the AAD.
+    Scalar(EncryptedRecord),
+    /// A SteVec document's root entry, reassembled from the document's `h`
+    /// header. Nonce and AAD both derive from the entry's selector.
+    SteVecRoot(RecordWithNonce),
+}
+
+impl Decryptable for V3Record {
+    type Error = Infallible;
+
+    fn keyset_id(&self) -> Option<Uuid> {
+        match self {
+            V3Record::Scalar(record) => record.keyset_id(),
+            V3Record::SteVecRoot(record) => record.keyset_id(),
+        }
+    }
+
+    fn retrieve_key_payload(&self) -> Result<RetrieveKeyPayload<'_>, Self::Error> {
+        match self {
+            V3Record::Scalar(record) => record.retrieve_key_payload(),
+            V3Record::SteVecRoot(record) => record.retrieve_key_payload(),
+        }
+    }
+
+    fn into_encrypted_record(self) -> Result<EncryptedRecord, Self::Error> {
+        match self {
+            V3Record::Scalar(record) => record.into_encrypted_record(),
+            V3Record::SteVecRoot(record) => record.into_encrypted_record(),
+        }
+    }
+
+    fn nonce_override(&self) -> Option<[u8; 12]> {
+        match self {
+            V3Record::Scalar(_) => None,
+            V3Record::SteVecRoot(record) => record.nonce_override(),
+        }
+    }
+
+    fn aad_selector(&self) -> Option<[u8; 16]> {
+        match self {
+            V3Record::Scalar(_) => None,
+            V3Record::SteVecRoot(record) => record.aad_selector(),
+        }
+    }
+}
+
+/// Decode a SteVec entry's hex-encoded tokenized selector into the 16 bytes the
+/// AEAD binding needs.
+fn decode_ste_vec_selector(selector: &str) -> Result<[u8; 16], EncryptError> {
+    let bytes = hex::decode(selector).map_err(|_| EncryptError::SteVecSelectorInvalid {
+        selector: selector.to_string(),
+    })?;
+
+    bytes
+        .try_into()
+        .map_err(|_| EncryptError::SteVecSelectorInvalid {
+            selector: selector.to_string(),
+        })
+}
 
 #[derive(Clone)]
 pub struct ZeroKms {
@@ -263,20 +333,39 @@ impl EncryptionService for ZeroKms {
         //
         // cipherstash-client has no `decrypt_eql_v3` counterpart to
         // `encrypt_eql_v3` — the v2 `decrypt_eql` only accepts `EqlCiphertext`.
-        // For scalar payloads that costs us nothing: `EncryptedPayloadV3.c` is
-        // the same `EncryptedRecord` the v2 path would have unwrapped, and
-        // `EncryptedRecord` is itself `Decryptable`, so we hand it straight to
-        // the cipher. SteVec documents are the part that genuinely needs the
-        // client (see `SteVecV3DecryptUnsupported`).
+        // We assemble the decryptable record ourselves, which is what
+        // protect-ffi does too (`encrypted_record_from_value`).
+        //
+        // Scalar: `c` is already the `EncryptedRecord` the v2 path would have
+        // unwrapped, and `EncryptedRecord` is `Decryptable`.
+        //
+        // SteVec: the document holds the key material once in the `h` header
+        // and each entry carries only raw AEAD bytes, so the record has to be
+        // reassembled from the header plus the ROOT entry (`sv[0]`, the same
+        // decryption-root invariant v2 had). The selector is the AEAD binding —
+        // its first 12 bytes are the nonce and all 16 go into the AAD — which is
+        // why the reassembled record is a `RecordWithNonce`.
         let mut indices: Vec<usize> = Vec::new();
-        let mut records_to_decrypt = Vec::new();
+        let mut records_to_decrypt: Vec<V3Record> = Vec::new();
 
         for (idx, ct_opt) in ciphertexts.iter().enumerate() {
             if let Some(ct) = ct_opt {
                 let record = match ct {
-                    EqlCiphertextV3::Encrypted(payload) => payload.ciphertext.clone(),
-                    EqlCiphertextV3::SteVec(_) => {
-                        return Err(EncryptError::SteVecV3DecryptUnsupported.into())
+                    EqlCiphertextV3::Encrypted(payload) => {
+                        V3Record::Scalar(payload.ciphertext.clone())
+                    }
+                    EqlCiphertextV3::SteVec(document) => {
+                        let root = document
+                            .ste_vec
+                            .first()
+                            .ok_or(EncryptError::SteVecMissingRootEntry)?;
+
+                        let selector = decode_ste_vec_selector(&root.selector)?;
+                        V3Record::SteVecRoot(
+                            document
+                                .key_header
+                                .record_with_selector(root.ciphertext.clone(), selector),
+                        )
                     }
                 };
                 indices.push(idx);
