@@ -254,6 +254,13 @@ pub enum EncryptError {
     #[error("InvalidIndexTerm")]
     InvalidIndexTerm,
 
+    /// EQL v3 orders encrypted jsonb entries by the CLLW-OPE (`op`) term and has
+    /// no representation for CLLW-ORE (`oc`), so a column configured for
+    /// Standard-mode ste_vec cannot be encrypted. The column has to be
+    /// reconfigured and its data re-encrypted.
+    #[error("An encrypted jsonb column is configured for ORE ordering, which EQL v3 does not support. For help visit {}#encrypt-ste-vec-ore-mode-unsupported", ERROR_DOC_BASE_URL)]
+    SteVecOreModeUnsupported,
+
     /// `sv[0]` is the decryption root of a SteVec document, so an empty `sv`
     /// array leaves nothing to decrypt.
     #[error("Encrypted jsonb value has no root entry and cannot be decrypted")]
@@ -350,10 +357,28 @@ impl From<cipherstash_client::eql::EqlError> for EncryptError {
             cipherstash_client::eql::EqlError::ColumnConfigurationMismatch { table, column } => {
                 Self::ColumnConfigurationMismatch { table, column }
             }
-            cipherstash_client::eql::EqlError::CouldNotDecryptDataForKeyset { keyset_id } => {
-                Self::CouldNotDecryptDataForKeyset { keyset_id }
-            }
+            // cipherstash-client 0.42.0 added a `#[source]` zerokms::Error here
+            // so callers can walk the chain to the underlying RetrieveKeyError.
+            // Proxy's variant carries only the keyset id, so the chain stops at
+            // this boundary — worth threading through if a keyset decrypt
+            // failure ever needs diagnosing from Proxy's logs alone.
+            cipherstash_client::eql::EqlError::CouldNotDecryptDataForKeyset {
+                keyset_id, ..
+            } => Self::CouldNotDecryptDataForKeyset { keyset_id },
             cipherstash_client::eql::EqlError::InvalidIndexTerm => Self::InvalidIndexTerm,
+
+            // EQL v3 orders jsonb entries by the byte-comparable CLLW-OPE `op`
+            // term and has no CLLW-ORE (`oc`) representation, so a SteVec column
+            // still configured in Standard mode cannot be written at all.
+            cipherstash_client::eql::EqlError::UnsupportedSteVecOreInV3 => {
+                Self::SteVecOreModeUnsupported
+            }
+
+            cipherstash_client::eql::EqlError::UnsupportedV3QueryTerm => Self::InvalidIndexTerm,
+
+            // Only reachable by asking the client for a v2 payload, which Proxy
+            // never does — v3 is the only envelope it speaks.
+            cipherstash_client::eql::EqlError::UnsupportedSteVecInV2 => Self::InvalidIndexTerm,
             cipherstash_client::eql::EqlError::MissingCiphertext(identifier) => {
                 Self::ColumnCouldNotBeDeserialised {
                     table: identifier.table,
