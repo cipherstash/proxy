@@ -1,13 +1,17 @@
 use super::{BackendCode, NULL};
+use crate::EqlCiphertext;
 use crate::{
     error::{EncryptError, Error, ProtocolError},
     log::DECRYPT,
     postgresql::Column,
 };
 use bytes::{Buf, BufMut, BytesMut};
-use cipherstash_client::eql::EqlCiphertext;
 use std::io::Cursor;
 use tracing::{debug, error};
+
+/// Leading byte of `jsonb`'s binary wire format. PostgreSQL has only ever
+/// emitted version 1.
+const JSONB_BINARY_VERSION: u8 = 1;
 
 #[derive(Debug, Clone)]
 pub struct DataRow {
@@ -179,61 +183,33 @@ impl TryFrom<&mut DataColumn> for EqlCiphertext {
     type Error = Error;
 
     fn try_from(col: &mut DataColumn) -> Result<Self, Error> {
-        if let Some(bytes) = &col.bytes {
-            if &bytes[0..=1] == b"(\"" {
-                // Text encoding
-                // Encrypted record is in the form ("{}")
-                // json data can be extracted by dropping the first and last two bytes to remove (" and ")
-                let start = 2;
-                let end = bytes.len() - 2;
-                let sliced = &bytes[start..end];
+        // EQL v3 column types (`eql_v3_text_eq`, `eql_v3_integer_ord`, …) are
+        // DOMAINS over `jsonb`, so a value arrives with jsonb's representation.
+        //
+        // EQL v2's `eql_v2_encrypted` was a composite type, which is why this
+        // used to strip a `("…")` wrapper in text and a 12-byte rowtype header
+        // in binary. Neither exists any more — a domain is wire-identical to its
+        // base type.
+        //
+        //   text   — the JSON object itself, no wrapper and no doubled quotes
+        //   binary — a 1-byte jsonb version header followed by the JSON text
+        //
+        // The two are told apart by the leading byte: the version header is
+        // `0x01`, and JSON text for an EQL payload always starts with `{`.
+        let Some(bytes) = &col.bytes else {
+            return Err(EncryptError::ColumnCouldNotBeParsed.into());
+        };
 
-                let input = String::from_utf8_lossy(sliced).to_string();
-                let input = input.replace("\"\"", "\"");
+        let json = match bytes.first() {
+            Some(&JSONB_BINARY_VERSION) => &bytes[1..],
+            Some(_) => &bytes[..],
+            None => return Err(EncryptError::ColumnCouldNotBeParsed.into()),
+        };
 
-                match serde_json::from_str(&input) {
-                    Ok(e) => return Ok(e),
-                    Err(err) => {
-                        debug!(target: DECRYPT, error = err.to_string());
-                        return Err(err.into());
-                    }
-                }
-            } else {
-                // BINARY ENCODING
-                // 12 bytes for the binary rowtype header
-                // plus 1 byte for the jsonb header (value of 1)
-                // [Int32] Number of fields (N)
-                // [Int32] OID of the field’s type
-                // [Int32] Length of the field (in bytes), or -1 for NULL
-
-                let start = 4 + 4;
-                let end = 4 + 4 + 4;
-
-                let mut len_bytes = [0u8; 4]; // Create a fixed-size array
-                len_bytes.copy_from_slice(&bytes[start..end]);
-
-                let len = i32::from_be_bytes(len_bytes);
-
-                if len == NULL {
-                    return Err(EncryptError::ColumnIsNull.into());
-                }
-
-                let start = 12 + 1;
-                let sliced = &bytes[start..];
-
-                match serde_json::from_slice(sliced) {
-                    Ok(e) => {
-                        return Ok(e);
-                    }
-                    Err(err) => {
-                        debug!(target: DECRYPT, error = err.to_string());
-                        return Err(err.into());
-                    }
-                }
-            }
-        }
-
-        Err(EncryptError::ColumnCouldNotBeParsed.into())
+        serde_json::from_slice(json).map_err(|err| {
+            debug!(target: DECRYPT, error = err.to_string());
+            err.into()
+        })
     }
 }
 
@@ -293,8 +269,8 @@ mod tests {
         assert!(encrypted[1].is_some());
 
         assert_eq!(
-            column_config[1].as_ref().unwrap().identifier,
-            encrypted[1].as_ref().unwrap().identifier
+            &column_config[1].as_ref().unwrap().identifier,
+            encrypted[1].as_ref().unwrap().identifier()
         );
     }
 
@@ -344,8 +320,8 @@ mod tests {
         assert!(encrypted[0].is_some());
 
         assert_eq!(
-            column_config[0].as_ref().unwrap().identifier,
-            encrypted[0].as_ref().unwrap().identifier
+            &column_config[0].as_ref().unwrap().identifier,
+            encrypted[0].as_ref().unwrap().identifier()
         );
     }
 
@@ -386,8 +362,8 @@ mod tests {
         // etc
 
         assert_eq!(
-            column_config[2].as_ref().unwrap().identifier,
-            encrypted[2].as_ref().unwrap().identifier
+            &column_config[2].as_ref().unwrap().identifier,
+            encrypted[2].as_ref().unwrap().identifier()
         );
     }
 
