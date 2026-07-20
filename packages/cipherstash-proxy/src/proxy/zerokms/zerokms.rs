@@ -26,7 +26,6 @@ use cipherstash_client::{
     zerokms::{Decryptable, EncryptedRecord, RecordWithNonce, RetrieveKeyPayload},
 >>>>>>> 2291ca06 (fix(decrypt): implement EQL v3 decrypt for scalar and SteVec payloads)
 };
-use std::convert::Infallible;
 use eql_mapper::EqlTermVariant;
 use metrics::{counter, histogram};
 use moka::future::Cache;
@@ -317,10 +316,14 @@ impl EncryptionService for ZeroKms {
 
         // Reconstruct the result vector with None values in the right places
 <<<<<<< HEAD
+<<<<<<< HEAD
         let mut result: Vec<Option<EqlOutputV3>> = (0..plaintexts.len()).map(|_| None).collect();
 =======
         let mut result: Vec<Option<EqlOutputV3>> = vec![None; plaintexts.len()];
 >>>>>>> 905dfb04 (feat(encrypt): produce EQL v3 payloads, retire v2)
+=======
+        let mut result: Vec<Option<EqlOutputV3>> = (0..plaintexts.len()).map(|_| None).collect();
+>>>>>>> 461cd2a3 (refactor(eql): adopt the cipherstash-client 0.42.0 representation)
         for (idx, ciphertext) in indices.into_iter().zip(encrypted.into_iter()) {
             result[idx] = Some(ciphertext);
         }

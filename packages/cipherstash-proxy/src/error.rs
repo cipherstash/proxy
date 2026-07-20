@@ -256,6 +256,9 @@ pub enum EncryptError {
 
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> 461cd2a3 (refactor(eql): adopt the cipherstash-client 0.42.0 representation)
     /// EQL v3 orders encrypted jsonb entries by the CLLW-OPE (`op`) term and has
     /// no representation for CLLW-ORE (`oc`), so a column configured for
     /// Standard-mode ste_vec cannot be encrypted. The column has to be
@@ -263,8 +266,11 @@ pub enum EncryptError {
     #[error("An encrypted jsonb column is configured for ORE ordering, which EQL v3 does not support. For help visit {}#encrypt-ste-vec-ore-mode-unsupported", ERROR_DOC_BASE_URL)]
     SteVecOreModeUnsupported,
 
+<<<<<<< HEAD
 =======
 >>>>>>> 2291ca06 (fix(decrypt): implement EQL v3 decrypt for scalar and SteVec payloads)
+=======
+>>>>>>> 461cd2a3 (refactor(eql): adopt the cipherstash-client 0.42.0 representation)
     /// `sv[0]` is the decryption root of a SteVec document, so an empty `sv`
     /// array leaves nothing to decrypt.
     #[error("Encrypted jsonb value has no root entry and cannot be decrypted")]
