@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1784526082959,
+  "lastUpdate": 1784526893487,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -22159,6 +22159,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 38.880117,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "74b63721f9a2b1af0fa59dd29bb09f6d73e7bee8",
+          "message": "chore: configure agent skill conventions",
+          "timestamp": "2026-07-16T04:48:19Z",
+          "url": "https://github.com/cipherstash/proxy/pull/415/commits/74b63721f9a2b1af0fa59dd29bb09f6d73e7bee8"
+        },
+        "date": 1784526892116,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 38.373861,
             "unit": "Number"
           }
         ]
