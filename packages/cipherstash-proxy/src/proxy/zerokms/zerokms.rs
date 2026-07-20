@@ -18,10 +18,10 @@ use cipherstash_client::{
     schema::column::IndexType,
     zerokms::{Decryptable, EncryptedRecord, RecordWithNonce, RetrieveKeyPayload},
 };
-use std::convert::Infallible;
 use eql_mapper::EqlTermVariant;
 use metrics::{counter, histogram};
 use moka::future::Cache;
+use std::convert::Infallible;
 use std::{
     borrow::Cow,
     sync::Arc,
@@ -285,9 +285,14 @@ impl EncryptionService for ZeroKms {
             }
         }
 
-        // If no plaintexts to encrypt, return all None
+        // If no plaintexts to encrypt, return all None.
+        //
+        // Built by iteration rather than `vec![None; n]`: that needs `Clone`,
+        // and `EqlOutputV3` does not derive it (neither does the v2
+        // `EqlOutput` — the ciphertext types are `Clone`, the output wrappers
+        // are not).
         if prepared_plaintexts.is_empty() {
-            return Ok(vec![None; plaintexts.len()]);
+            return Ok((0..plaintexts.len()).map(|_| None).collect());
         }
 
         // Use default opts since cipher is already initialized with the correct keyset
@@ -302,7 +307,7 @@ impl EncryptionService for ZeroKms {
         debug!(target: ENCRYPT, msg="encrypt_eql_v3 completed", count = encrypted.len(), duration_ms = encrypt_duration.as_millis());
 
         // Reconstruct the result vector with None values in the right places
-        let mut result: Vec<Option<EqlOutputV3>> = vec![None; plaintexts.len()];
+        let mut result: Vec<Option<EqlOutputV3>> = (0..plaintexts.len()).map(|_| None).collect();
         for (idx, ciphertext) in indices.into_iter().zip(encrypted.into_iter()) {
             result[idx] = Some(ciphertext);
         }

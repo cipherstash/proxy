@@ -27,7 +27,7 @@ use crate::prometheus::{
     STATEMENTS_PASSTHROUGH_TOTAL, STATEMENTS_UNMAPPABLE_TOTAL,
 };
 use crate::proxy::EncryptionService;
-use crate::EqlCiphertext;
+use crate::EqlOutput;
 use bytes::BytesMut;
 use cipherstash_client::encryption::Plaintext;
 use eql_mapper::{self, EqlMapperError, EqlTerm, TypeCheckedStatement};
@@ -582,13 +582,13 @@ where
     /// # Returns
     ///
     /// Vector of encrypted values corresponding to each literal, with `None` for
-    /// literals that don't require encryption and `Some(EqlCiphertext)` for encrypted values.
+    /// literals that don't require encryption and `Some(EqlOutput)` for encrypted values.
     async fn encrypt_literals(
         &mut self,
         session_id: SessionId,
         typed_statement: &TypeCheckedStatement<'_>,
         literal_columns: &Vec<Option<Column>>,
-    ) -> Result<Vec<Option<EqlCiphertext>>, Error> {
+    ) -> Result<Vec<Option<EqlOutput>>, Error> {
         let literal_values = typed_statement.literal_values();
         if literal_values.is_empty() {
             debug!(target: MAPPER,
@@ -643,7 +643,7 @@ where
     async fn transform_statement(
         &mut self,
         typed_statement: &TypeCheckedStatement<'_>,
-        encrypted_literals: &Vec<Option<EqlCiphertext>>,
+        encrypted_literals: &Vec<Option<EqlOutput>>,
     ) -> Result<Option<ast::Statement>, Error> {
         // Convert literals to ast Expr
         let mut encrypted_expressions = vec![];
@@ -1042,7 +1042,7 @@ where
         session_id: Option<SessionId>,
         bind: &Bind,
         statement: &Statement,
-    ) -> Result<Vec<Option<crate::EqlCiphertext>>, Error> {
+    ) -> Result<Vec<Option<crate::EqlOutput>>, Error> {
         let plaintexts =
             bind.to_plaintext(&statement.param_columns, &statement.postgres_param_types)?;
 
