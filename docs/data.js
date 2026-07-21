@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1784600018594,
+  "lastUpdate": 1784600513678,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -22209,6 +22209,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 38.829957,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "c94867c3a9a38393ec28e255e40e6f614ff52797",
+          "message": "fix: satisfy clippy::for_kv_map in type_checked_statement",
+          "timestamp": "2026-07-16T04:48:19Z",
+          "url": "https://github.com/cipherstash/proxy/pull/419/commits/c94867c3a9a38393ec28e255e40e6f614ff52797"
+        },
+        "date": 1784600512373,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 38.497087,
             "unit": "Number"
           }
         ]
