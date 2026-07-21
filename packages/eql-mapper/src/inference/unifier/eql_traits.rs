@@ -220,13 +220,19 @@ impl EqlTraits {
         }
     }
 
+    /// The set of traits in `self` that are not in `other` (set difference,
+    /// `self ∧ ¬other`).
+    ///
+    /// Used to report the bounds a type is *missing*: `required.difference(&implemented)`.
+    /// Not symmetric — do not swap the operands (see [`Type::must_implement`] and
+    /// [`Unifier::satisfy_bounds`], which must call it the same way around).
     pub(crate) fn difference(&self, other: &Self) -> Self {
         EqlTraits {
-            eq: self.eq ^ other.eq,
-            ord: self.ord ^ other.ord,
-            token_match: self.token_match ^ other.token_match,
-            json_like: self.json_like ^ other.json_like,
-            contain: self.contain ^ other.contain,
+            eq: self.eq && !other.eq,
+            ord: self.ord && !other.ord,
+            token_match: self.token_match && !other.token_match,
+            json_like: self.json_like && !other.json_like,
+            contain: self.contain && !other.contain,
         }
     }
 }
@@ -408,3 +414,73 @@ impl EqlValue {
        ILIKE { expr: Self, pattern: Self::Tokenized, .. } -> Native;
    }
 */
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use crate::unifier::TableColumn;
+    use sqltk::parser::ast::Ident;
+
+    #[test]
+    fn difference_is_asymmetric_set_difference() {
+        let eq = EqlTraits {
+            eq: true,
+            ..EqlTraits::none()
+        };
+        let eq_ord = EqlTraits {
+            eq: true,
+            ord: true,
+            ..EqlTraits::none()
+        };
+        let ord_only = EqlTraits {
+            ord: true,
+            ..EqlTraits::none()
+        };
+
+        // `A.difference(B)` is `A ∧ ¬B` — elements in A but not in B.
+        assert_eq!(eq_ord.difference(&eq), ord_only);
+
+        // The discriminator against the old XOR (symmetric-difference) impl,
+        // which returned `{ord}` here instead of the empty set.
+        assert_eq!(eq.difference(&eq_ord), EqlTraits::none());
+
+        // Difference with self is always empty.
+        assert_eq!(eq_ord.difference(&eq_ord), EqlTraits::none());
+    }
+
+    #[test]
+    fn must_implement_reports_only_the_missing_bounds() {
+        // A column that implements TokenMatch but not Eq.
+        let ty = Type::Value(Value::Eql(EqlTerm::Full(EqlValue(
+            TableColumn {
+                table: Ident::new("t"),
+                column: Ident::new("c"),
+            },
+            EqlTraits {
+                token_match: true,
+                ..EqlTraits::none()
+            },
+        ))));
+
+        let eq = EqlTraits {
+            eq: true,
+            ..EqlTraits::none()
+        };
+
+        // Requiring a bound the type already has succeeds.
+        assert!(ty
+            .must_implement(&EqlTraits {
+                token_match: true,
+                ..EqlTraits::none()
+            })
+            .is_ok());
+
+        // Requiring Eq fails, and the reported set is exactly the missing bound
+        // (`{eq}`). The old reversed-operand + XOR bug reported `{eq, token_match}`
+        // — i.e. it listed a trait the type *has* but the bound never required.
+        match ty.must_implement(&eq) {
+            Err(TypeError::UnsatisfiedBounds(_, missing)) => assert_eq!(missing, eq),
+            other => panic!("expected UnsatisfiedBounds, got {other:?}"),
+        }
+    }
+}
