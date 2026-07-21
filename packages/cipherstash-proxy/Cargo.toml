@@ -21,6 +21,7 @@ config = { version = "0.15", features = [
     "toml",
 ], default-features = false }
 cts-common = { workspace = true }
+eql-bindings = { workspace = true }
 eql-mapper = { path = "../eql-mapper" }
 exitcode = "1.1.2"
 hex = "0.4.3"

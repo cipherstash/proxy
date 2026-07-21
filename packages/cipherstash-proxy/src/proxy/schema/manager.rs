@@ -1,3 +1,4 @@
+use super::eql_domains;
 use crate::config::DatabaseConfig;
 use crate::error::Error;
 use crate::proxy::{AGGREGATE_QUERY, SCHEMA_QUERY};
@@ -133,24 +134,42 @@ pub async fn load_schema(config: &DatabaseConfig) -> Result<Schema, Error> {
         let table_name: String = table.get("table_name");
         let columns: Vec<String> = table.get("columns");
         let column_type_names: Vec<Option<String>> = table.get("column_type_names");
+        let column_domain_names: Vec<Option<String>> = table.get("column_domain_names");
 
         let mut table = Table::new(Ident::new(&table_name));
 
-        columns.iter().zip(column_type_names).for_each(|(col, column_type_name)| {
-            let ident = Ident::with_quote('"', col);
+        columns
+            .iter()
+            .zip(column_type_names)
+            .zip(column_domain_names)
+            .for_each(|((col, column_type_name), column_domain_name)| {
+                let ident = Ident::with_quote('"', col);
 
-            let column = match column_type_name.as_deref() {
-                Some("eql_v2_encrypted") => {
-                    debug!(target: SCHEMA, msg = "eql_v2_encrypted column", table = table_name, column = col);
+                // Prefer the v3 domain: encrypted columns are jsonb-backed
+                // DOMAINs whose typname encodes the token type and capabilities.
+                // The domain identity and traits are read from the eql-bindings
+                // catalog (ADR-0002); a domain we do not recognise is treated as
+                // a plaintext column.
+                let v3 = column_domain_name
+                    .as_deref()
+                    .and_then(eql_domains::resolve);
 
-                    let eql_traits =  EqlTraits::all();
-                    Column::eql(ident, eql_traits)
-                }
-                _ => Column::native(ident),
-            };
+                let column = match (v3, column_type_name.as_deref()) {
+                    (Some((identity, eql_traits)), _) => {
+                        debug!(target: SCHEMA, msg = "eql_v3 column", table = table_name, column = col, domain = %identity.domain.value, traits = %eql_traits);
+                        Column::eql_with_identity(ident, eql_traits, Some(identity))
+                    }
+                    // Legacy EQL v2 columns are a composite type, reported by
+                    // `udt_name`. Retained for reading pre-v3 schemas.
+                    (None, Some("eql_v2_encrypted")) => {
+                        debug!(target: SCHEMA, msg = "eql_v2_encrypted column", table = table_name, column = col);
+                        Column::eql(ident, EqlTraits::all())
+                    }
+                    _ => Column::native(ident),
+                };
 
-            table.add_column(Arc::new(column));
-        });
+                table.add_column(Arc::new(column));
+            });
 
         schema.add_table(table);
     }
