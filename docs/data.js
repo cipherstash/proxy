@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1784600513678,
+  "lastUpdate": 1784605801253,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -22234,6 +22234,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 38.497087,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "89fed743f7bc8318b770bd16b9a20448d7fc4ac2",
+          "message": "fix: remove stray eql-mapper Cargo.lock with unresolved conflict markers",
+          "timestamp": "2026-07-16T04:48:19Z",
+          "url": "https://github.com/cipherstash/proxy/pull/418/commits/89fed743f7bc8318b770bd16b9a20448d7fc4ac2"
+        },
+        "date": 1784605799960,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 38.411421,
             "unit": "Number"
           }
         ]
