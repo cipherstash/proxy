@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1784615462401,
+  "lastUpdate": 1784639363745,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -22363,6 +22363,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 38.305188,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "ad363913eb3f429d93056c9fef80f8115ec28c64",
+          "message": "[1/3] docs: add domain glossaries for Proxy and EQL Mapper",
+          "timestamp": "2026-07-21T04:13:53Z",
+          "url": "https://github.com/cipherstash/proxy/pull/422/commits/ad363913eb3f429d93056c9fef80f8115ec28c64"
+        },
+        "date": 1784639362433,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 38.473505,
             "unit": "Number"
           }
         ]
