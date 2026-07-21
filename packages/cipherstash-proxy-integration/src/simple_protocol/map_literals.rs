@@ -56,13 +56,13 @@ mod tests {
             assert_eq!(Some(id.to_string().as_str()), r.get(0));
             assert_eq!(Some("hello@cipherstash.com"), r.get(1));
         } else {
-            panic!("Row(row) expected but got: {:?}", &rows[1]);
+            panic!("Row(row) expected but got: {:?}", rows[1]);
         }
 
         if let CommandComplete(n) = &rows[2] {
             assert_eq!(1, *n);
         } else {
-            panic!("CommandComplete(1) expected but got: {:?}", &rows[2]);
+            panic!("CommandComplete(1) expected but got: {:?}", rows[2]);
         }
     }
 
@@ -96,13 +96,13 @@ mod tests {
             assert_eq!(Some(id.to_string().as_str()), r.get(0));
             assert_eq!(Some(encrypted_int2.to_string().as_str()), r.get(1));
         } else {
-            panic!("Row expected but got: {:?}", &rows[1]);
+            panic!("Row expected but got: {:?}", rows[1]);
         }
 
         if let CommandComplete(n) = &rows[2] {
             assert_eq!(1, *n);
         } else {
-            panic!("CommandComplete(1) expected but got: {:?}", &rows[2]);
+            panic!("CommandComplete(1) expected but got: {:?}", rows[2]);
         }
     }
 
@@ -137,13 +137,13 @@ mod tests {
             assert_eq!(Some(id.to_string().as_str()), r.get(0));
             assert_eq!(Some(encrypted_date.to_string().as_str()), r.get(1));
         } else {
-            panic!("Row expected but got: {:?}", &rows[1]);
+            panic!("Row expected but got: {:?}", rows[1]);
         }
 
         if let CommandComplete(n) = &rows[2] {
             assert_eq!(1, *n);
         } else {
-            panic!("CommandComplete(1) expected but got: {:?}", &rows[2]);
+            panic!("CommandComplete(1) expected but got: {:?}", rows[2]);
         }
     }
 
@@ -179,13 +179,13 @@ mod tests {
             assert_eq!(Some(id.to_string().as_str()), r.get(0));
             assert_eq!(Some(encrypted_date.to_string().as_str()), r.get(1));
         } else {
-            panic!("Row expected but got: {:?}", &rows[1]);
+            panic!("Row expected but got: {:?}", rows[1]);
         }
 
         if let CommandComplete(n) = &rows[2] {
             assert_eq!(1, *n);
         } else {
-            panic!("CommandComplete(1) expected but got: {:?}", &rows[2]);
+            panic!("CommandComplete(1) expected but got: {:?}", rows[2]);
         }
     }
 
@@ -230,13 +230,13 @@ mod tests {
                 assert_eq!(Some(id.to_string().as_str()), r.get(0));
                 assert_eq!(Some(encrypted_int4.to_string().as_str()), r.get(1));
             } else {
-                panic!("Row expected but got: {:?}", &rows[1]);
+                panic!("Row expected but got: {:?}", rows[1]);
             }
 
             if let CommandComplete(n) = &rows[2] {
                 assert_eq!(1, *n);
             } else {
-                panic!("CommandComplete(1) expected but got: {:?}", &rows[2]);
+                panic!("CommandComplete(1) expected but got: {:?}", rows[2]);
             }
         }
     }
