@@ -454,7 +454,10 @@ impl Type {
         } else {
             Err(TypeError::UnsatisfiedBounds(
                 Arc::new(self.clone()),
-                self.effective_bounds().difference(bounds),
+                // Report the *missing* bounds: required (`bounds`) minus implemented
+                // (`self.effective_bounds()`). Operand order must match
+                // `Unifier::satisfy_bounds`.
+                bounds.difference(&self.effective_bounds()),
             ))
         }
     }
