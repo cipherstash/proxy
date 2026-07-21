@@ -78,7 +78,7 @@ impl SchemaWithEdits {
             .map(|col| SchemaTableColumn {
                 table: table.name.clone(),
                 column: col.name.clone(),
-                kind: col.kind,
+                kind: col.kind.clone(),
             })
             .collect())
     }
@@ -100,7 +100,7 @@ impl SchemaWithEdits {
                 Ok(SchemaTableColumn {
                     table: table_name.clone(),
                     column: column_name.clone(),
-                    kind: col.kind,
+                    kind: col.kind.clone(),
                 })
             }
             None => Err(SchemaError::ColumnNotFound(
@@ -444,7 +444,7 @@ mod test {
             Ok(SchemaTableColumn {
                 table: id("users"),
                 column: id("primary_email"),
-                kind: ColumnKind::Eql(EqlTraits::default())
+                kind: ColumnKind::Eql(EqlTraits::default(), None)
             })
         )
     }
@@ -476,7 +476,7 @@ mod test {
             Ok(SchemaTableColumn {
                 table: id("app_users"),
                 column: id("email"),
-                kind: ColumnKind::Eql(EqlTraits::default())
+                kind: ColumnKind::Eql(EqlTraits::default(), None)
             })
         )
     }
@@ -526,7 +526,7 @@ mod test {
             Ok(SchemaTableColumn {
                 table: id("users"),
                 column: id("email"),
-                kind: ColumnKind::Eql(EqlTraits::default())
+                kind: ColumnKind::Eql(EqlTraits::default(), None)
             })
         );
 

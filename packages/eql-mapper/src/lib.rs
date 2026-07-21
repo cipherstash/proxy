@@ -110,6 +110,7 @@ mod test {
                                 table: id("users"),
                                 column: id("email"),
                             },
+                            None,
                             EqlTraits::from(EqlTrait::Eq)
                         ),),
                         &ast::Value::SingleQuotedString("hello@cipherstash.com".into()),
@@ -143,6 +144,7 @@ mod test {
                             table: id("users"),
                             column: id("email")
                         },
+                        None,
                         EqlTraits::default()
                     )),
                     &ast::Value::SingleQuotedString("hello@cipherstash.com".into()),
@@ -175,6 +177,7 @@ mod test {
                             table: id("users"),
                             column: id("email")
                         },
+                        None,
                         EqlTraits::default()
                     )),
                     &ast::Value::SingleQuotedString("hello@cipherstash.com".into()),
@@ -208,6 +211,7 @@ mod test {
                             table: id("users"),
                             column: id("email")
                         },
+                        None,
                         EqlTraits::default()
                     )),
                     &ast::Value::SingleQuotedString("hello@cipherstash.com".into()),
@@ -549,6 +553,7 @@ mod test {
                         table: id("users"),
                         column: id("email"),
                     },
+                    None,
                     EqlTraits::default(),
                 )));
 
@@ -557,6 +562,7 @@ mod test {
                         table: id("users"),
                         column: id("first_name"),
                     },
+                    None,
                     EqlTraits::default(),
                 )));
 
@@ -597,6 +603,7 @@ mod test {
                         table: id("users"),
                         column: id("salary"),
                     },
+                    None,
                     EqlTraits::from(EqlTrait::Ord),
                 )));
 
@@ -605,6 +612,7 @@ mod test {
                         table: id("users"),
                         column: id("age"),
                     },
+                    None,
                     EqlTraits::from(EqlTrait::Ord),
                 )));
 
@@ -1118,6 +1126,7 @@ mod test {
                         table: id("employees"),
                         column: id("salary")
                     },
+                    None,
                     EqlTraits::from(EqlTrait::Ord)
                 ),),
                 &ast::Value::Number(200000.into(), false),
@@ -1168,6 +1177,7 @@ mod test {
                         table: id("employees"),
                         column: id("salary")
                     },
+                    None,
                     EqlTraits::default()
                 )),
                 &ast::Value::Number(20000.into(), false)

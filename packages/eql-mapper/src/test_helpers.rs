@@ -145,7 +145,7 @@ macro_rules! col {
             ty: Arc::new(Type::Value(Value::Eql(EqlTerm::Full(EqlValue(TableColumn {
                 table: id(stringify!($table)),
                 column: id(stringify!($column)),
-            }, $crate::to_eql_traits!($($($eql_traits)*)?)))))),
+            }, None, $crate::to_eql_traits!($($($eql_traits)*)?)))))),
             alias: None,
         }
     };
@@ -155,7 +155,7 @@ macro_rules! col {
             ty: Arc::new(Type::Value(Value::Eql(EqlTerm::Full(EqlValue(TableColumn {
                 table: id(stringify!($table)),
                 column: id(stringify!($column)),
-            }, $crate::to_eql_traits!($($($eql_traits)*)?)))))),
+            }, None, $crate::to_eql_traits!($($($eql_traits)*)?)))))),
             alias: Some(id(stringify!($alias))),
         }
     };
