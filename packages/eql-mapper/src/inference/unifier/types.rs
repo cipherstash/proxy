@@ -269,9 +269,51 @@ pub struct TableColumn {
     pub column: Ident,
 }
 
+/// The plaintext scalar half of a v3 domain — the "token type".
+///
+/// Crossed with a capability suffix (`_eq`, `_ord`, …) it names a v3 domain,
+/// e.g. `text` + `_ord_ore` ⇒ `eql_v3_text_ord_ore`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Display)]
+pub enum TokenType {
+    SmallInt,
+    Integer,
+    BigInt,
+    Real,
+    Double,
+    Numeric,
+    Text,
+    Boolean,
+    Date,
+    Timestamp,
+    Json,
+}
+
+/// The inert `(token type, v3 domain)` an encrypted column carries (ADR-0002).
+///
+/// Populated by the schema loader from the Postgres domain name; **never** a
+/// checked dimension of unification. It is read only at rewrite time — to name
+/// the cast target and to select the term-extraction-function variant
+/// (`ord_term` vs `ord_term_ore`) — so it threads through unification and the
+/// associated-type machinery untouched.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Display)]
+#[display("{}", domain)]
+pub struct DomainIdentity {
+    pub token: TokenType,
+    /// The v3 domain typname, e.g. `eql_v3_text_ord_ore`.
+    pub domain: Ident,
+}
+
+/// The identity of an encrypted column: its `TableColumn`, its inert
+/// [`DomainIdentity`] (see ADR-0002), and its [`EqlTraits`] capabilities.
+///
+/// The domain identity is `None` while the mapper still emits the EQL v2
+/// surface; the v3 schema loader (CIP-3598) populates it. It is deliberately
+/// not part of `PartialEq`/`Ord`-driven unification — two encrypted columns
+/// never share a type because their `TableColumn`s differ, so the identity
+/// never decides unification even though it is compared here.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Display, Hash)]
 #[display("EQL({})", _0)]
-pub struct EqlValue(pub TableColumn, pub EqlTraits);
+pub struct EqlValue(pub TableColumn, pub Option<DomainIdentity>, pub EqlTraits);
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Display, Hash)]
 #[display("{}", _0.as_ref().map(|tc| format!("Native({tc})")).unwrap_or(String::from("Native")))]
@@ -468,8 +510,14 @@ impl EqlValue {
         &self.0
     }
 
+    /// The inert v3 domain identity, if the schema loader has populated it.
+    /// `None` while the mapper still emits the EQL v2 surface.
+    pub fn domain_identity(&self) -> Option<&DomainIdentity> {
+        self.1.as_ref()
+    }
+
     pub fn trait_impls(&self) -> EqlTraits {
-        self.1
+        self.2
     }
 }
 
@@ -515,9 +563,9 @@ impl Projection {
 
                     let value_ty = match &col.kind {
                         ColumnKind::Native => Type::Value(Value::Native(NativeValue(Some(tc)))),
-                        ColumnKind::Eql(features) => {
-                            Type::Value(Value::Eql(EqlTerm::Full(EqlValue(tc, *features))))
-                        }
+                        ColumnKind::Eql(features, identity) => Type::Value(Value::Eql(
+                            EqlTerm::Full(EqlValue(tc, identity.clone(), *features)),
+                        )),
                     };
 
                     ProjectionColumn::new(value_ty, Some(col.name.clone()))

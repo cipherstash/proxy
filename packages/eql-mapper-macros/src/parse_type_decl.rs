@@ -310,6 +310,7 @@ impl Parse for EqlTerm {
                             table: #table.into(),
                             column: #column.into(),
                         },
+                        None,
                         #bounds,
                     ),
                 )
@@ -319,11 +320,12 @@ impl Parse for EqlTerm {
                 crate::inference::unifier::EqlTerm::Full(
                     crate::inference::unifier::EqlValue(
                         crate::inference::unifier::TableColumn {
-                            table: #table,
-                            column: #column
+                            table: #table.into(),
+                            column: #column.into(),
                         },
+                        None,
+                        crate::inference::unifier::EqlTraits::none(),
                     ),
-                    crate::inference::unifier::EqlTraits::none(),
                 )
             }))
         }
