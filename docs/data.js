@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1784606652594,
+  "lastUpdate": 1784607441029,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -22284,6 +22284,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 37.690192,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "james@cipherstash.com",
+            "name": "James Sadler",
+            "username": "freshtonic"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "43da7e41e7b2af2b2b8cdaa8edbf233bf3efdb8a",
+          "message": "Merge pull request #418 from cipherstash/fix/eql-mapper-lockfile-conflict-markers\n\nfix: remove stray eql-mapper Cargo.lock (with conflict markers) and satisfy clippy",
+          "timestamp": "2026-07-21T14:13:39+10:00",
+          "tree_id": "b4b5667f3dd42730658d9dc3811b988858fcd544",
+          "url": "https://github.com/cipherstash/proxy/commit/43da7e41e7b2af2b2b8cdaa8edbf233bf3efdb8a"
+        },
+        "date": 1784607439736,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 38.179119,
             "unit": "Number"
           }
         ]
