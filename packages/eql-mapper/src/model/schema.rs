@@ -3,7 +3,10 @@
 //! Column type information is unused currently.
 
 use super::ident_case::*;
-use crate::{iterator_ext::IteratorExt, unifier::EqlTraits};
+use crate::{
+    iterator_ext::IteratorExt,
+    unifier::{DomainIdentity, EqlTraits},
+};
 use core::fmt::Debug;
 use derive_more::Display;
 use sqltk::parser::ast::{Ident, ObjectName, ObjectNamePart};
@@ -38,17 +41,30 @@ pub struct Column {
     pub kind: ColumnKind,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Display, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Display, Hash)]
 pub enum ColumnKind {
+    #[display("Native")]
     Native,
-    Eql(EqlTraits),
+    /// An encrypted column: its capabilities, plus the inert v3 domain identity
+    /// (see ADR-0002). The identity is `None` while the mapper still emits the
+    /// EQL v2 surface; the v3 schema loader (CIP-3598) populates it.
+    #[display("Eql({})", _0)]
+    Eql(EqlTraits, Option<DomainIdentity>),
 }
 
 impl Column {
     pub fn eql(name: Ident, features: EqlTraits) -> Self {
+        Self::eql_with_identity(name, features, None)
+    }
+
+    pub fn eql_with_identity(
+        name: Ident,
+        features: EqlTraits,
+        identity: Option<DomainIdentity>,
+    ) -> Self {
         Self {
             name,
-            kind: ColumnKind::Eql(features),
+            kind: ColumnKind::Eql(features, identity),
         }
     }
 
@@ -123,7 +139,7 @@ impl Schema {
             .map(|col| SchemaTableColumn {
                 table: table.name.clone(),
                 column: col.name.clone(),
-                kind: col.kind,
+                kind: col.kind.clone(),
             })
             .collect())
     }
@@ -143,7 +159,7 @@ impl Schema {
                     Ok(column) => Ok(SchemaTableColumn {
                         table: table.name.clone(),
                         column: column.name.clone(),
-                        kind: column.kind,
+                        kind: column.kind.clone(),
                     }),
                     Err(_) => Err(SchemaError::ColumnNotFound(
                         table_name.to_string(),

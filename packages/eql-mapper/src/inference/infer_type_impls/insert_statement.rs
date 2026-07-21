@@ -44,9 +44,9 @@ impl<'ast> InferType<'ast, Insert> for TypeInferencer<'ast> {
 
                         let value_ty = match &stc.kind {
                             ColumnKind::Native => Value::Native(NativeValue(Some(tc.clone()))),
-                            ColumnKind::Eql(features) => {
-                                Value::Eql(EqlTerm::Full(EqlValue(tc.clone(), *features)))
-                            }
+                            ColumnKind::Eql(features, identity) => Value::Eql(EqlTerm::Full(
+                                EqlValue(tc.clone(), identity.clone(), *features),
+                            )),
                         };
 
                         (Arc::new(Type::Value(value_ty)), Some(tc.column.clone()))
