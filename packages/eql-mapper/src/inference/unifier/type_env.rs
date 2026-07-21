@@ -271,6 +271,7 @@ mod test {
                         table: "customer".into(),
                         column: "name".into()
                     },
+                    None,
                     EqlTraits::from(EqlTrait::JsonLike)
                 ),))))
             );

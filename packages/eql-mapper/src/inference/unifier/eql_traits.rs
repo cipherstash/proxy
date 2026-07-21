@@ -456,6 +456,7 @@ mod test {
                 table: Ident::new("t"),
                 column: Ident::new("c"),
             },
+            None,
             EqlTraits {
                 token_match: true,
                 ..EqlTraits::none()
