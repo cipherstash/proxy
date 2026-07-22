@@ -4,11 +4,13 @@ Parses SQL, infers a type for every node, and rewrites statements that touch enc
 columns into their EQL v3 equivalents. It knows nothing about the PostgreSQL wire
 protocol, ZeroKMS, or ciphertext — it reasons about types and rewrites syntax.
 
-> **Migration in flight.** The code still emits the EQL v2 surface
-> (`eql_v2_encrypted` casts, `eql_v2.*` calls); the vocabulary below is the **v3
-> target** the type-checker extension is being designed against. See
-> [`docs/adr/`](./docs/adr/) for the load-bearing decisions and
-> `docs/plans/2026-07-20-eql-v3-type-checker-handoff.md` for the impact maps.
+> **v3 migration.** The mapper now emits the EQL **v3** surface — v3 domain casts
+> (`::public.eql_v3_*` for stored values, `::eql_v3.query_*` for operands) and the
+> `eql_v3.*` functional-index form (term-extraction functions, `eql_v3.jsonb_*`,
+> `eql_v3."->"`, `match_term`). No `eql_v2.*` names remain in its output.
+> End-to-end validation against a live database with EQL v3 installed is still
+> pending. See [`docs/adr/`](./docs/adr/) for the load-bearing decisions and
+> `docs/plans/2026-07-20-eql-v3-type-checker-handoff.md` for the original impact maps.
 
 ## Language
 
