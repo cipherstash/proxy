@@ -1460,7 +1460,7 @@ mod test {
                 match typed.transform(HashMap::new()) {
                     Ok(statement) => assert_eq!(
                         statement.to_string(),
-                        "SELECT eql_v2.min(salary), eql_v2.max(salary), department FROM employees GROUP BY department".to_string()
+                        "SELECT eql_v3.min(salary), eql_v3.max(salary), department FROM employees GROUP BY department".to_string()
                     ),
                     Err(err) => panic!("transformation failed: {err}"),
                 }
@@ -1538,8 +1538,8 @@ mod test {
                         assert_eq!(
                             statement.to_string(),
                             "SELECT \
-                            eql_v2.jsonb_path_exists(eql_col, '<encrypted-selector($.another-secret)>'::JSONB::public.eql_v3_text_search), \
-                            eql_v2.jsonb_path_query(eql_col, '<encrypted-selector($.secret)>'::JSONB::public.eql_v3_text_search), \
+                            eql_v3.jsonb_path_exists(eql_col, '<encrypted-selector($.another-secret)>'::JSONB::public.eql_v3_text_search), \
+                            eql_v3.jsonb_path_query(eql_col, '<encrypted-selector($.secret)>'::JSONB::public.eql_v3_text_search), \
                             jsonb_path_query(native_col, '$.not-secret') \
                             FROM employees"
                         );
@@ -1677,7 +1677,7 @@ mod test {
         match type_check(schema, &statement) {
             Ok(typed) => match typed.transform(encrypted_literals) {
                 Ok(statement) => {
-                    let rewritten_fn_name = format!("eql_v2.{fn_name}");
+                    let rewritten_fn_name = format!("eql_v3.{fn_name}");
                     assert_eq!(
                         statement.to_string(),
                         format!(
@@ -2076,7 +2076,7 @@ mod test {
             }
         });
 
-        let statement = parse("SELECT eql_v2.jsonb_path_query(notes, $1) as notes FROM patients");
+        let statement = parse("SELECT eql_v3.jsonb_path_query(notes, $1) as notes FROM patients");
 
         let typed = type_check(schema, &statement)
             .map_err(|err| err.to_string())
