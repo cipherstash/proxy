@@ -27,8 +27,22 @@ in the identity and surface only during code generation.
   through the associated-type machinery and unification arms for free because it is never
   inspected there.
 - The source of truth for the identity is the Postgres domain name, parsed in
-  `cipherstash-proxy`'s `SchemaManager` via the `eql-bindings` inventory; the encrypt
-  config is demoted to a cross-check. `eql-mapper` stays wire-format-agnostic and takes no
-  dependency on `eql-bindings`.
+  `cipherstash-proxy`'s `SchemaManager` via the `eql-bindings` inventory. The domain name
+  is the **sole** authority for a column's capability; the encrypt config is **not**
+  consulted (a mismatch cross-check was considered and dropped — see the amendment below).
+  `eql-mapper` stays wire-format-agnostic and takes no dependency on `eql-bindings`.
 - If a future capability genuinely needs cross-column token-type checking (none does
   today), this decision is the thing to revisit.
+
+## Amendment (2026-07-22)
+
+Two points confirmed during implementation:
+
+- **Domain identity is non-optional.** `EqlValue` carries a `DomainIdentity`, not an
+  `Option<DomainIdentity>`. A migration-time `Option` was tried and rejected: the loader
+  always supplies the real identity, and a legacy `eql_v2_encrypted` column — which has no
+  v3 domain — is dropped (loaded as `Native` with a warning) rather than given a fabricated
+  identity, since v2 is retired on this build.
+- **No config cross-check.** The domain name is the sole authority; the encrypt config is
+  not cross-checked against it. The drift diagnostic was considered and dropped to avoid
+  coupling `SchemaManager` to `EncryptConfigManager` for a non-correctness check.
