@@ -32,7 +32,11 @@ fn is_query_operand(node_path: &NodePath<'_>) -> bool {
     let mut depth = 1;
     while let Some(expr) = node_path.nth_last_as::<Expr>(depth) {
         match expr {
-            Expr::BinaryOp { op, .. } if is_comparison_op(op) => return true,
+            Expr::BinaryOp { op, .. }
+                if is_comparison_op(op) || matches!(op, BinaryOperator::AtAt) =>
+            {
+                return true
+            }
             Expr::Like { .. } | Expr::ILike { .. } => return true,
             _ => {}
         }
