@@ -46,22 +46,14 @@ pub enum ColumnKind {
     #[display("Native")]
     Native,
     /// An encrypted column: its capabilities, plus the inert v3 domain identity
-    /// (see ADR-0002). The identity is `None` while the mapper still emits the
-    /// EQL v2 surface; the v3 schema loader (CIP-3598) populates it.
+    /// (see ADR-0002), which the v3 schema loader populates from the Postgres
+    /// domain name.
     #[display("Eql({})", _0)]
-    Eql(EqlTraits, Option<DomainIdentity>),
+    Eql(EqlTraits, DomainIdentity),
 }
 
 impl Column {
-    pub fn eql(name: Ident, features: EqlTraits) -> Self {
-        Self::eql_with_identity(name, features, None)
-    }
-
-    pub fn eql_with_identity(
-        name: Ident,
-        features: EqlTraits,
-        identity: Option<DomainIdentity>,
-    ) -> Self {
+    pub fn eql(name: Ident, features: EqlTraits, identity: DomainIdentity) -> Self {
         Self {
             name,
             kind: ColumnKind::Eql(features, identity),
@@ -289,11 +281,32 @@ macro_rules! schema {
     (@add_columns $table:ident $( $column_name:ident $(($($options:tt)+))? , )* ) => {
         $( schema!(@add_column $table $column_name $(($($options)*))? ); )*
     };
+    // Explicit v3 domain typname, e.g. `col (EQL("eql_v3_integer_ord_ore"): Ord)`.
+    // The token type is parsed from the domain name; use this when a test cares
+    // about the token type or the OPE-vs-ORE variant.
+    (@add_column $table:ident $column_name:ident (EQL($domain:literal) $(: $trait_:ident $(+ $trait_rest:ident)*)?) ) => {
+        {
+            let __traits = $crate::to_eql_trait_impls!($($trait_ $($trait_rest)*)?);
+            $table.add_column(std::sync::Arc::new($crate::model::Column::eql(
+                ::sqltk::parser::ast::Ident::new(stringify!($column_name)),
+                __traits,
+                $crate::unifier::DomainIdentity::from_domain_name($domain)
+                    .expect("EQL(<domain>) must be a valid v3 domain typname"),
+            )));
+        }
+    };
+    // Default: no explicit domain — synthesise a canonical `text`-token identity
+    // for the given capabilities (fine for the many tests that don't exercise the
+    // token type).
     (@add_column $table:ident $column_name:ident (EQL $(: $trait_:ident $(+ $trait_rest:ident)*)?) ) => {
-        $table.add_column(std::sync::Arc::new($crate::model::Column::eql(
-            ::sqltk::parser::ast::Ident::new(stringify!($column_name)),
-            $crate::to_eql_trait_impls!($($trait_ $($trait_rest)*)?)
-        )));
+        {
+            let __traits = $crate::to_eql_trait_impls!($($trait_ $($trait_rest)*)?);
+            $table.add_column(std::sync::Arc::new($crate::model::Column::eql(
+                ::sqltk::parser::ast::Ident::new(stringify!($column_name)),
+                __traits,
+                $crate::unifier::DomainIdentity::canonical($crate::unifier::TokenType::Text, __traits),
+            )));
+        }
     };
     (@add_column $table:ident $column_name:ident (PK) ) => {
         $table.add_column(

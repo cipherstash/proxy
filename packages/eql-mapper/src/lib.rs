@@ -105,12 +105,11 @@ mod test {
                 assert_eq!(
                     typed.literals,
                     vec![(
-                        EqlTerm::Full(EqlValue(
+                        EqlTerm::Full(EqlValue::with_canonical_identity(
                             TableColumn {
                                 table: id("users"),
                                 column: id("email"),
                             },
-                            None,
                             EqlTraits::from(EqlTrait::Eq)
                         ),),
                         &ast::Value::SingleQuotedString("hello@cipherstash.com".into()),
@@ -139,12 +138,11 @@ mod test {
         match type_check(schema, &statement) {
             Ok(typed) => {
                 assert!(typed.literals.contains(&(
-                    EqlTerm::Full(EqlValue(
+                    EqlTerm::Full(EqlValue::with_canonical_identity(
                         TableColumn {
                             table: id("users"),
                             column: id("email")
                         },
-                        None,
                         EqlTraits::default()
                     )),
                     &ast::Value::SingleQuotedString("hello@cipherstash.com".into()),
@@ -172,12 +170,11 @@ mod test {
         match type_check(schema, &statement) {
             Ok(typed) => {
                 assert!(typed.literals.contains(&(
-                    EqlTerm::Full(EqlValue(
+                    EqlTerm::Full(EqlValue::with_canonical_identity(
                         TableColumn {
                             table: id("users"),
                             column: id("email")
                         },
-                        None,
                         EqlTraits::default()
                     )),
                     &ast::Value::SingleQuotedString("hello@cipherstash.com".into()),
@@ -206,12 +203,11 @@ mod test {
         match type_check(schema, &statement) {
             Ok(typed) => {
                 assert!(typed.literals.contains(&(
-                    EqlTerm::Full(EqlValue(
+                    EqlTerm::Full(EqlValue::with_canonical_identity(
                         TableColumn {
                             table: id("users"),
                             column: id("email")
                         },
-                        None,
                         EqlTraits::default()
                     )),
                     &ast::Value::SingleQuotedString("hello@cipherstash.com".into()),
@@ -548,21 +544,19 @@ mod test {
 
         match type_check(schema, &statement) {
             Ok(typed) => {
-                let a = Value::Eql(EqlTerm::Full(EqlValue(
+                let a = Value::Eql(EqlTerm::Full(EqlValue::with_canonical_identity(
                     TableColumn {
                         table: id("users"),
                         column: id("email"),
                     },
-                    None,
                     EqlTraits::default(),
                 )));
 
-                let b = Value::Eql(EqlTerm::Full(EqlValue(
+                let b = Value::Eql(EqlTerm::Full(EqlValue::with_canonical_identity(
                     TableColumn {
                         table: id("users"),
                         column: id("first_name"),
                     },
-                    None,
                     EqlTraits::default(),
                 )));
 
@@ -598,21 +592,19 @@ mod test {
 
         match type_check(schema, &statement) {
             Ok(typed) => {
-                let a = Value::Eql(EqlTerm::Full(EqlValue(
+                let a = Value::Eql(EqlTerm::Full(EqlValue::with_canonical_identity(
                     TableColumn {
                         table: id("users"),
                         column: id("salary"),
                     },
-                    None,
                     EqlTraits::from(EqlTrait::Ord),
                 )));
 
-                let b = Value::Eql(EqlTerm::Full(EqlValue(
+                let b = Value::Eql(EqlTerm::Full(EqlValue::with_canonical_identity(
                     TableColumn {
                         table: id("users"),
                         column: id("age"),
                     },
-                    None,
                     EqlTraits::from(EqlTrait::Ord),
                 )));
 
@@ -1121,12 +1113,11 @@ mod test {
         assert_eq!(
             typed.literals,
             vec![(
-                EqlTerm::Full(EqlValue(
+                EqlTerm::Full(EqlValue::with_canonical_identity(
                     TableColumn {
                         table: id("employees"),
                         column: id("salary")
                     },
-                    None,
                     EqlTraits::from(EqlTrait::Ord)
                 ),),
                 &ast::Value::Number(200000.into(), false),
@@ -1172,12 +1163,11 @@ mod test {
         assert_eq!(
             typed.literals,
             vec![(
-                EqlTerm::Full(EqlValue(
+                EqlTerm::Full(EqlValue::with_canonical_identity(
                     TableColumn {
                         table: id("employees"),
                         column: id("salary")
                     },
-                    None,
                     EqlTraits::default()
                 )),
                 &ast::Value::Number(20000.into(), false)

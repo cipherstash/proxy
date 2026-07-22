@@ -142,20 +142,20 @@ macro_rules! col {
 
     ((EQL($table:ident . $column:ident $(: $($eql_traits:ident)*)?))) => {
         ProjectionColumn {
-            ty: Arc::new(Type::Value(Value::Eql(EqlTerm::Full(EqlValue(TableColumn {
+            ty: Arc::new(Type::Value(Value::Eql(EqlTerm::Full(EqlValue::with_canonical_identity(TableColumn {
                 table: id(stringify!($table)),
                 column: id(stringify!($column)),
-            }, None, $crate::to_eql_traits!($($($eql_traits)*)?)))))),
+            }, $crate::to_eql_traits!($($($eql_traits)*)?)))))),
             alias: None,
         }
     };
 
     ((EQL($table:ident . $column:ident $(: $($eql_traits:ident)*)?) as $alias:ident)) => {
         ProjectionColumn {
-            ty: Arc::new(Type::Value(Value::Eql(EqlTerm::Full(EqlValue(TableColumn {
+            ty: Arc::new(Type::Value(Value::Eql(EqlTerm::Full(EqlValue::with_canonical_identity(TableColumn {
                 table: id(stringify!($table)),
                 column: id(stringify!($column)),
-            }, None, $crate::to_eql_traits!($($($eql_traits)*)?)))))),
+            }, $crate::to_eql_traits!($($($eql_traits)*)?)))))),
             alias: Some(id(stringify!($alias))),
         }
     };

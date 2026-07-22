@@ -451,17 +451,18 @@ mod test {
     #[test]
     fn must_implement_reports_only_the_missing_bounds() {
         // A column that implements TokenMatch but not Eq.
-        let ty = Type::Value(Value::Eql(EqlTerm::Full(EqlValue(
-            TableColumn {
-                table: Ident::new("t"),
-                column: Ident::new("c"),
-            },
-            None,
-            EqlTraits {
-                token_match: true,
-                ..EqlTraits::none()
-            },
-        ))));
+        let ty = Type::Value(Value::Eql(EqlTerm::Full(
+            EqlValue::with_canonical_identity(
+                TableColumn {
+                    table: Ident::new("t"),
+                    column: Ident::new("c"),
+                },
+                EqlTraits {
+                    token_match: true,
+                    ..EqlTraits::none()
+                },
+            ),
+        )));
 
         let eq = EqlTraits {
             eq: true,
