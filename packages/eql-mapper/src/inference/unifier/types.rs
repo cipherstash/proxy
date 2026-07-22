@@ -288,6 +288,47 @@ pub enum TokenType {
     Json,
 }
 
+impl TokenType {
+    /// The token type's spelling inside a v3 domain typname
+    /// (`eql_v3_<token>_<suffix>`).
+    pub fn as_domain_str(&self) -> &'static str {
+        match self {
+            TokenType::SmallInt => "smallint",
+            TokenType::Integer => "integer",
+            TokenType::BigInt => "bigint",
+            TokenType::Real => "real",
+            TokenType::Double => "double",
+            TokenType::Numeric => "numeric",
+            TokenType::Text => "text",
+            TokenType::Boolean => "boolean",
+            TokenType::Date => "date",
+            TokenType::Timestamp => "timestamp",
+            TokenType::Json => "json",
+        }
+    }
+
+    /// Parse the token type from a v3 domain typname. The token type is the
+    /// first segment after the `eql_v3_` prefix; every token type is a single
+    /// underscore-free word, so a multi-part capability suffix never interferes.
+    pub fn from_domain_name(domain: &str) -> Option<Self> {
+        let rest = domain.strip_prefix("eql_v3_")?;
+        Some(match rest.split('_').next()? {
+            "smallint" => TokenType::SmallInt,
+            "integer" => TokenType::Integer,
+            "bigint" => TokenType::BigInt,
+            "real" => TokenType::Real,
+            "double" => TokenType::Double,
+            "numeric" => TokenType::Numeric,
+            "text" => TokenType::Text,
+            "boolean" => TokenType::Boolean,
+            "date" => TokenType::Date,
+            "timestamp" => TokenType::Timestamp,
+            "json" => TokenType::Json,
+            _ => return None,
+        })
+    }
+}
+
 /// The inert `(token type, v3 domain)` an encrypted column carries (ADR-0002).
 ///
 /// Populated by the schema loader from the Postgres domain name; **never** a
@@ -303,17 +344,63 @@ pub struct DomainIdentity {
     pub domain: Ident,
 }
 
+impl DomainIdentity {
+    /// Build an identity from a v3 domain typname, parsing the token type from
+    /// the name. The domain name is the authority (the schema loader passes the
+    /// real typname); returns `None` for a name that is not a v3 EQL domain.
+    pub fn from_domain_name(domain: &str) -> Option<Self> {
+        Some(Self {
+            token: TokenType::from_domain_name(domain)?,
+            domain: Ident::new(domain),
+        })
+    }
+
+    /// A canonical identity for a `(token, capabilities)` pair. This is a
+    /// **test/fixture convenience** for constructing identities where no live
+    /// schema loader supplies the real domain name — production identities always
+    /// come from [`Self::from_domain_name`] via the loader. The synthesised domain
+    /// name is deterministic so both sides of a test assertion agree; it is not
+    /// guaranteed to equal the exact catalog typname.
+    pub fn canonical(token: TokenType, traits: EqlTraits) -> Self {
+        let mut parts: Vec<&str> = Vec::new();
+        if traits.json_like {
+            parts.push("search");
+        } else {
+            if traits.ord {
+                parts.push("ord");
+            } else if traits.eq {
+                parts.push("eq");
+            }
+            if traits.token_match {
+                parts.push("match");
+            }
+            if traits.contain {
+                parts.push("contain");
+            }
+        }
+        let suffix = if parts.is_empty() {
+            String::new()
+        } else {
+            format!("_{}", parts.join("_"))
+        };
+        let domain = format!("eql_v3_{}{}", token.as_domain_str(), suffix);
+        Self {
+            token,
+            domain: Ident::new(domain),
+        }
+    }
+}
+
 /// The identity of an encrypted column: its `TableColumn`, its inert
 /// [`DomainIdentity`] (see ADR-0002), and its [`EqlTraits`] capabilities.
 ///
-/// The domain identity is `None` while the mapper still emits the EQL v2
-/// surface; the v3 schema loader (CIP-3598) populates it. It is deliberately
-/// not part of `PartialEq`/`Ord`-driven unification — two encrypted columns
-/// never share a type because their `TableColumn`s differ, so the identity
-/// never decides unification even though it is compared here.
+/// The domain identity is deliberately not part of `PartialEq`/`Ord`-driven
+/// unification — two encrypted columns never share a type because their
+/// `TableColumn`s differ, so the identity never decides unification even though
+/// it is compared here.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Display, Hash)]
 #[display("EQL({})", _0)]
-pub struct EqlValue(pub TableColumn, pub Option<DomainIdentity>, pub EqlTraits);
+pub struct EqlValue(pub TableColumn, pub DomainIdentity, pub EqlTraits);
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Display, Hash)]
 #[display("{}", _0.as_ref().map(|tc| format!("Native({tc})")).unwrap_or(String::from("Native")))]
@@ -510,10 +597,21 @@ impl EqlValue {
         &self.0
     }
 
-    /// The inert v3 domain identity, if the schema loader has populated it.
-    /// `None` while the mapper still emits the EQL v2 surface.
-    pub fn domain_identity(&self) -> Option<&DomainIdentity> {
-        self.1.as_ref()
+    /// The inert v3 domain identity — names the cast target and selects the
+    /// term-extraction-function variant at rewrite time (ADR-0002).
+    pub fn domain_identity(&self) -> &DomainIdentity {
+        &self.1
+    }
+
+    /// Test/fixture constructor: builds the value with the canonical `text`-token
+    /// [`DomainIdentity`] for `traits`. Production values come from the schema
+    /// loader with the real domain identity, never this.
+    pub fn with_canonical_identity(table_column: TableColumn, traits: EqlTraits) -> Self {
+        Self(
+            table_column,
+            DomainIdentity::canonical(TokenType::Text, traits),
+            traits,
+        )
     }
 
     pub fn trait_impls(&self) -> EqlTraits {
