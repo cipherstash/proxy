@@ -58,7 +58,7 @@ impl Procedure {
 
 /// Represents a patient in the healthcare system.
 ///
-/// This struct demonstrates the use of EQL v2 encryption for protecting sensitive patient data.
+/// This struct demonstrates the use of EQL v3 encryption for protecting sensitive patient data.
 /// The patient's personally identifiable information (PII) is encrypted to ensure privacy and compliance
 /// with healthcare regulations like HIPAA.
 #[derive(Serialize)]
@@ -111,7 +111,7 @@ impl Patient {
 
 /// Contains personally identifiable information for a patient.
 ///
-/// This data is sensitive and must be encrypted when stored in the database. EQL v2 provides
+/// This data is sensitive and must be encrypted when stored in the database. EQL v3 provides
 /// searchable encryption, allowing healthcare providers to query patient data while maintaining
 /// strong privacy protections. Enhanced fields are optional to support both basic and complex
 /// patient records.
@@ -279,7 +279,7 @@ pub struct LabResults {
 /// Represents a medication prescription for a patient.
 ///
 /// This struct links patients to their prescribed medications and contains sensitive medical information
-/// that requires encryption. The prescription details are stored using EQL v2 encryption to protect
+/// that requires encryption. The prescription details are stored using EQL v3 encryption to protect
 /// patient privacy while enabling necessary medical queries.
 #[derive(Serialize)]
 pub struct Prescription {
