@@ -23,17 +23,18 @@ pub(crate) fn is_comparison_op(op: &BinaryOperator) -> bool {
 }
 
 /// Whether an encrypted value at `node_path` is a **query operand** (the RHS of a
-/// comparison predicate) rather than a **stored value** (an INSERT `VALUES` item
-/// or UPDATE `SET` target). Walks the enclosing `Expr` ancestor chain looking for
-/// a comparison `BinaryOp`. The traversal is post-order, so when a cast rule runs
-/// on the operand the enclosing comparison is still intact in the path.
+/// comparison or match predicate) rather than a **stored value** (an INSERT
+/// `VALUES` item or UPDATE `SET` target). Walks the enclosing `Expr` ancestor
+/// chain looking for a comparison `BinaryOp` or a `LIKE`/`ILIKE` predicate. The
+/// traversal is post-order, so when a cast rule runs on the operand the enclosing
+/// predicate is still intact in the path.
 fn is_query_operand(node_path: &NodePath<'_>) -> bool {
     let mut depth = 1;
     while let Some(expr) = node_path.nth_last_as::<Expr>(depth) {
-        if let Expr::BinaryOp { op, .. } = expr {
-            if is_comparison_op(op) {
-                return true;
-            }
+        match expr {
+            Expr::BinaryOp { op, .. } if is_comparison_op(op) => return true,
+            Expr::Like { .. } | Expr::ILike { .. } => return true,
+            _ => {}
         }
         depth += 1;
     }
