@@ -1716,7 +1716,10 @@ mod test {
                         let expected = match op {
                             "@>" => "SELECT id, eql_v3.jsonb_contains(notes, '<encrypted-selector(medications)>'::JSONB::public.eql_v3_text_search) AS meds FROM patients".to_string(),
                             "<@" => "SELECT id, eql_v3.jsonb_contained_by(notes, '<encrypted-selector(medications)>'::JSONB::public.eql_v3_text_search) AS meds FROM patients".to_string(),
-                            // Other operators are not transformed
+                            // -> / ->> field access: functionalised to eql_v3."->"/"->>",
+                            // with the field selector passed as encrypted text.
+                            "->" => "SELECT id, eql_v3.\"->\"(notes, '<encrypted-selector(medications)>') AS meds FROM patients".to_string(),
+                            "->>" => "SELECT id, eql_v3.\"->>\"(notes, '<encrypted-selector(medications)>') AS meds FROM patients".to_string(),
                             _ => format!("SELECT id, notes {op} '<encrypted-selector(medications)>'::JSONB::public.eql_v3_text_search AS meds FROM patients"),
                         };
                         assert_eq!(statement.to_string(), expected)

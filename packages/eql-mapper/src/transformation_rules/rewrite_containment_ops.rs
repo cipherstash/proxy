@@ -15,14 +15,19 @@ use crate::EqlMapperError;
 
 use super::TransformationRule;
 
-/// Rewrites `@>` and `<@` containment operators on encrypted JSON columns to
-/// function calls (containment is retained in v3, scoped to JSON — ADR-0002).
+/// Rewrites JSON binary operators on encrypted columns to `eql_v3` function
+/// calls — containment (`@>`/`<@`, retained in v3 scoped to JSON, ADR-0002) and
+/// field access (`->`/`->>`, functionalised because managed Postgres forbids the
+/// operator DDL, ADR-0001):
 ///
-/// - `col @> val` → `eql_v3.jsonb_contains(col, val)`
-/// - `val <@ col` → `eql_v3.jsonb_contained_by(val, col)`
+/// - `col @> val`  → `eql_v3.jsonb_contains(col, val)`
+/// - `val <@ col`  → `eql_v3.jsonb_contained_by(val, col)`
+/// - `col -> sel`  → `eql_v3."->"(col, sel)`
+/// - `col ->> sel` → `eql_v3."->>"(col, sel)`
 ///
-/// This transformation enables GIN index usage when the index is created on
-/// `eql_v3.jsonb_array(encrypted_col)`.
+/// Containment enables GIN index usage via `eql_v3.jsonb_array(encrypted_col)`.
+/// The `->`/`->>` field selector is passed as encrypted text (see
+/// `CastLiteralsAsEncrypted`), matching the `eql_v3."->"(json, text)` signature.
 #[derive(Debug)]
 pub struct RewriteContainmentOps<'ast> {
     node_types: Arc<HashMap<NodeKey<'ast>, Type>>,
@@ -51,10 +56,17 @@ impl<'ast> RewriteContainmentOps<'ast> {
     }
 
     fn make_function_call(fn_name: &str, left: Expr, right: Expr) -> Expr {
+        // Operator-symbol function names (`->`, `->>`) must be quoted;
+        // ordinary names (`jsonb_contains`) are not.
+        let fn_ident = if fn_name.chars().all(|c| c.is_alphanumeric() || c == '_') {
+            Ident::new(fn_name)
+        } else {
+            Ident::with_quote('"', fn_name)
+        };
         Expr::Function(Function {
             name: ObjectName(vec![
                 ObjectNamePart::Identifier(Ident::new("eql_v3")),
-                ObjectNamePart::Identifier(Ident::new(fn_name)),
+                ObjectNamePart::Identifier(fn_ident),
             ]),
             uses_odbc_syntax: false,
             args: FunctionArguments::List(FunctionArgumentList {
@@ -86,6 +98,8 @@ impl<'ast> TransformationRule<'ast> for RewriteContainmentOps<'ast> {
                 let fn_name = match op {
                     BinaryOperator::AtArrow => "jsonb_contains",     // @>
                     BinaryOperator::ArrowAt => "jsonb_contained_by", // <@
+                    BinaryOperator::Arrow => "->",                   // ->  field access
+                    BinaryOperator::LongArrow => "->>",              // ->> field access (as text)
                     _ => return Ok(false),
                 };
 
@@ -107,7 +121,13 @@ impl<'ast> TransformationRule<'ast> for RewriteContainmentOps<'ast> {
     fn would_edit<N: Visitable>(&mut self, node_path: &NodePath<'ast>, _target_node: &N) -> bool {
         // Use node_path to get the original AST node (with correct NodeKey identity)
         if let Some((Expr::BinaryOp { left, op, right },)) = node_path.last_1_as::<Expr>() {
-            if matches!(op, BinaryOperator::AtArrow | BinaryOperator::ArrowAt) {
+            if matches!(
+                op,
+                BinaryOperator::AtArrow
+                    | BinaryOperator::ArrowAt
+                    | BinaryOperator::Arrow
+                    | BinaryOperator::LongArrow
+            ) {
                 // Only rewrite if at least one operand is EQL-typed
                 return self.uses_eql_type(left, right);
             }
