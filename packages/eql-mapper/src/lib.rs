@@ -121,6 +121,44 @@ mod test {
     }
 
     #[test]
+    fn like_on_token_match_column_type_checks() {
+        let schema = resolver(schema! {
+            tables: {
+                users: {
+                    id,
+                    email (EQL: TokenMatch),
+                }
+            }
+        });
+
+        let statement = parse("SELECT id FROM users WHERE email LIKE 'a%'");
+        assert!(
+            type_check(schema, &statement).is_ok(),
+            "LIKE on a TokenMatch column should type check"
+        );
+    }
+
+    #[test]
+    fn like_on_non_match_encrypted_column_is_rejected() {
+        // Regression: LIKE used to unify to Native and bypass capability checking.
+        // An encrypted column that only implements Eq must not accept LIKE.
+        let schema = resolver(schema! {
+            tables: {
+                users: {
+                    id,
+                    email (EQL: Eq),
+                }
+            }
+        });
+
+        let statement = parse("SELECT id FROM users WHERE email LIKE 'a%'");
+        assert!(
+            type_check(schema, &statement).is_err(),
+            "LIKE on a non-TokenMatch encrypted column should be a capability error"
+        );
+    }
+
+    #[test]
     fn insert_with_value() {
         // init_tracing();
         let schema = resolver(schema! {
