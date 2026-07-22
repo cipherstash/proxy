@@ -1714,8 +1714,8 @@ mod test {
                 )) {
                     Ok(statement) => {
                         let expected = match op {
-                            "@>" => "SELECT id, eql_v2.jsonb_contains(notes, '<encrypted-selector(medications)>'::JSONB::public.eql_v3_text_search) AS meds FROM patients".to_string(),
-                            "<@" => "SELECT id, eql_v2.jsonb_contained_by(notes, '<encrypted-selector(medications)>'::JSONB::public.eql_v3_text_search) AS meds FROM patients".to_string(),
+                            "@>" => "SELECT id, eql_v3.jsonb_contains(notes, '<encrypted-selector(medications)>'::JSONB::public.eql_v3_text_search) AS meds FROM patients".to_string(),
+                            "<@" => "SELECT id, eql_v3.jsonb_contained_by(notes, '<encrypted-selector(medications)>'::JSONB::public.eql_v3_text_search) AS meds FROM patients".to_string(),
                             // Other operators are not transformed
                             _ => format!("SELECT id, notes {op} '<encrypted-selector(medications)>'::JSONB::public.eql_v3_text_search AS meds FROM patients"),
                         };
@@ -1740,12 +1740,12 @@ mod test {
         });
 
         let statement = parse(
-            "SELECT id FROM patients WHERE eql_v2.jsonb_array(notes) @> eql_v2.jsonb_array(notes)",
+            "SELECT id FROM patients WHERE eql_v3.jsonb_array(notes) @> eql_v3.jsonb_array(notes)",
         );
 
         match type_check(schema, &statement) {
             Ok(_) => (),
-            Err(err) => panic!("type check failed for eql_v2.jsonb_array: {err}"),
+            Err(err) => panic!("type check failed for eql_v3.jsonb_array: {err}"),
         }
     }
 
@@ -1760,11 +1760,11 @@ mod test {
             }
         });
 
-        let statement = parse("SELECT id FROM patients WHERE eql_v2.jsonb_contains(notes, notes)");
+        let statement = parse("SELECT id FROM patients WHERE eql_v3.jsonb_contains(notes, notes)");
 
         match type_check(schema, &statement) {
             Ok(_) => (),
-            Err(err) => panic!("type check failed for eql_v2.jsonb_contains: {err}"),
+            Err(err) => panic!("type check failed for eql_v3.jsonb_contains: {err}"),
         }
     }
 
@@ -1780,16 +1780,16 @@ mod test {
         });
 
         let statement =
-            parse("SELECT id FROM patients WHERE eql_v2.jsonb_contained_by(notes, notes)");
+            parse("SELECT id FROM patients WHERE eql_v3.jsonb_contained_by(notes, notes)");
 
         match type_check(schema, &statement) {
             Ok(_) => (),
-            Err(err) => panic!("type check failed for eql_v2.jsonb_contained_by: {err}"),
+            Err(err) => panic!("type check failed for eql_v3.jsonb_contained_by: {err}"),
         }
     }
 
     #[test]
-    fn eql_v2_jsonb_contains_with_param() {
+    fn eql_v3_jsonb_contains_with_param() {
         let schema = resolver(schema! {
             tables: {
                 patients: {
@@ -1799,7 +1799,7 @@ mod test {
             }
         });
 
-        let statement = parse("SELECT id FROM patients WHERE eql_v2.jsonb_contains(notes, $1)");
+        let statement = parse("SELECT id FROM patients WHERE eql_v3.jsonb_contains(notes, $1)");
 
         let typed = type_check(schema, &statement)
             .map_err(|err| err.to_string())
@@ -1812,7 +1812,7 @@ mod test {
         match typed.transform(HashMap::new()) {
             Ok(statement) => assert_eq!(
                 statement.to_string(),
-                "SELECT id FROM patients WHERE eql_v2.jsonb_contains(notes, $1::JSONB::public.eql_v3_text_search)"
+                "SELECT id FROM patients WHERE eql_v3.jsonb_contains(notes, $1::JSONB::public.eql_v3_text_search)"
             ),
             Err(err) => panic!("transformation failed: {err}"),
         }
@@ -1840,8 +1840,8 @@ mod test {
 
         // Verify function call exists
         assert!(
-            sql.contains("eql_v2.jsonb_contains"),
-            "Expected @> to be transformed to eql_v2.jsonb_contains, got: {sql}"
+            sql.contains("eql_v3.jsonb_contains"),
+            "Expected @> to be transformed to eql_v3.jsonb_contains, got: {sql}"
         );
 
         // CRITICAL: Verify the parameter is cast to enable GIN index usage
@@ -1874,8 +1874,8 @@ mod test {
 
         // Verify function call exists
         assert!(
-            sql.contains("eql_v2.jsonb_contained_by"),
-            "Expected <@ to be transformed to eql_v2.jsonb_contained_by, got: {sql}"
+            sql.contains("eql_v3.jsonb_contained_by"),
+            "Expected <@ to be transformed to eql_v3.jsonb_contained_by, got: {sql}"
         );
 
         // CRITICAL: Verify the parameter is cast to enable GIN index usage
@@ -1914,8 +1914,8 @@ mod test {
 
         // Verify function call exists inside the EXPLAIN
         assert!(
-            sql.contains("eql_v2.jsonb_contains"),
-            "Expected @> inside EXPLAIN to be transformed to eql_v2.jsonb_contains, got: {sql}"
+            sql.contains("eql_v3.jsonb_contains"),
+            "Expected @> inside EXPLAIN to be transformed to eql_v3.jsonb_contains, got: {sql}"
         );
     }
 
