@@ -4,7 +4,6 @@ use crate::error::Error;
 use crate::proxy::{AGGREGATE_QUERY, SCHEMA_QUERY};
 use crate::{connect, log::SCHEMA};
 use arc_swap::ArcSwap;
-use eql_mapper::{self, EqlTraits};
 use eql_mapper::{Column, Schema, Table};
 use sqltk::parser::ast::Ident;
 use std::sync::Arc;
@@ -154,18 +153,21 @@ pub async fn load_schema(config: &DatabaseConfig) -> Result<Schema, Error> {
                     .as_deref()
                     .and_then(eql_domains::resolve);
 
-                let column = match (v3, column_type_name.as_deref()) {
-                    (Some((identity, eql_traits)), _) => {
+                let column = match v3 {
+                    Some((identity, eql_traits)) => {
                         debug!(target: SCHEMA, msg = "eql_v3 column", table = table_name, column = col, domain = %identity.domain.value, traits = %eql_traits);
-                        Column::eql_with_identity(ident, eql_traits, Some(identity))
+                        Column::eql(ident, eql_traits, identity)
                     }
-                    // Legacy EQL v2 columns are a composite type, reported by
-                    // `udt_name`. Retained for reading pre-v3 schemas.
-                    (None, Some("eql_v2_encrypted")) => {
-                        debug!(target: SCHEMA, msg = "eql_v2_encrypted column", table = table_name, column = col);
-                        Column::eql(ident, EqlTraits::all())
+                    None => {
+                        // Legacy EQL v2 columns (the `eql_v2_encrypted` composite
+                        // type) have no v3 domain identity and are unsupported on
+                        // this v3-only build — warn rather than silently treating
+                        // them as encrypted or plaintext.
+                        if column_type_name.as_deref() == Some("eql_v2_encrypted") {
+                            warn!(target: SCHEMA, msg = "ignoring unsupported eql_v2_encrypted column on a v3 build", table = table_name, column = col);
+                        }
+                        Column::native(ident)
                     }
-                    _ => Column::native(ident),
                 };
 
                 table.add_column(Arc::new(column));

@@ -305,12 +305,11 @@ impl Parse for EqlTerm {
 
             Ok(Self(quote! {
                 crate::inference::unifier::EqlTerm::Full(
-                    crate::inference::unifier::EqlValue(
+                    crate::inference::unifier::EqlValue::with_canonical_identity(
                         crate::inference::unifier::TableColumn {
                             table: #table.into(),
                             column: #column.into(),
                         },
-                        None,
                         #bounds,
                     ),
                 )
@@ -318,12 +317,11 @@ impl Parse for EqlTerm {
         } else {
             Ok(Self(quote! {
                 crate::inference::unifier::EqlTerm::Full(
-                    crate::inference::unifier::EqlValue(
+                    crate::inference::unifier::EqlValue::with_canonical_identity(
                         crate::inference::unifier::TableColumn {
                             table: #table.into(),
                             column: #column.into(),
                         },
-                        None,
                         crate::inference::unifier::EqlTraits::none(),
                     ),
                 )

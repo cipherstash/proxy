@@ -15,26 +15,24 @@
 //!
 //! `term_json_keys() == None` marks the JSON SteVec domains
 //! (`eql_v3_json_search`, `eql_v3_json_entry`), whose searchable terms live
-//! per-entry rather than on the domain. Those are mapped to `JsonLike`.
-//!
-//! NOTE (CIP-3598): the precise capability set for the JSON SteVec domains was
-//! not pinned down by the v3 type-checker ADRs; `JsonLike` is a provisional
-//! choice pending that decision.
+//! per-entry rather than on the domain. Verified against the installed v3 SQL
+//! (`cipherstash-encrypt.sql`), an encrypted JSON column supports `->`/`->>`
+//! (JsonLike) **and** `@>`/`<@` containment (Contain) — the latter are real
+//! implementations, not the raise-stubs the other jsonb operators get. So JSON
+//! domains map to `JsonLike + Contain`. (Note: `@>`/`<@` are removed only on
+//! *scalar* encrypted columns; on JSON they are the primary query surface.)
 
 use std::collections::HashMap;
 use std::sync::OnceLock;
 
 use eql_bindings::v3;
 use eql_mapper::{DomainIdentity, EqlTrait, EqlTraits, TokenType};
-use sqltk::parser::ast::Ident;
 
-/// The `eql_v3_` typname prefix every public-schema column domain carries.
-const DOMAIN_PREFIX: &str = "eql_v3_";
-
-/// `typname` (e.g. `eql_v3_integer_ord`) → (token type, capabilities), inverted
-/// once from the `eql-bindings` catalog.
-fn catalog() -> &'static HashMap<String, (TokenType, EqlTraits)> {
-    static MAP: OnceLock<HashMap<String, (TokenType, EqlTraits)>> = OnceLock::new();
+/// `typname` (e.g. `eql_v3_integer_ord`) → capabilities, inverted once from the
+/// `eql-bindings` catalog. Keyed only by the public column domains; the token
+/// type is recovered from the typname via [`DomainIdentity::from_domain_name`].
+fn catalog() -> &'static HashMap<String, EqlTraits> {
+    static MAP: OnceLock<HashMap<String, EqlTraits>> = OnceLock::new();
     MAP.get_or_init(|| {
         let mut map = HashMap::new();
         for domain in v3::all() {
@@ -42,9 +40,13 @@ fn catalog() -> &'static HashMap<String, (TokenType, EqlTraits)> {
             let qualified = domain.sql_domain();
             let typname = qualified.rsplit('.').next().unwrap_or(qualified);
 
-            if let Some(token) = token_type(typname) {
-                let traits = traits_from_terms(domain.term_json_keys());
-                map.insert(typname.to_string(), (token, traits));
+            // Only public column domains have a parseable token type; this skips
+            // the `eql_v3.query_*` operand twins that `all()` also yields.
+            if TokenType::from_domain_name(typname).is_some() {
+                map.insert(
+                    typname.to_string(),
+                    traits_from_terms(domain.term_json_keys()),
+                );
             }
         }
         map
@@ -54,40 +56,19 @@ fn catalog() -> &'static HashMap<String, (TokenType, EqlTraits)> {
 /// Resolve a Postgres domain typname to its inert v3 domain identity and
 /// capabilities, or `None` if it is not a recognised v3 EQL domain.
 pub(crate) fn resolve(typname: &str) -> Option<(DomainIdentity, EqlTraits)> {
-    let (token, traits) = catalog().get(typname).copied()?;
-    let identity = DomainIdentity {
-        token,
-        domain: Ident::new(typname),
-    };
+    let traits = *catalog().get(typname)?;
+    let identity = DomainIdentity::from_domain_name(typname)?;
     Some((identity, traits))
-}
-
-/// The token type is the first segment after the `eql_v3_` prefix; every token
-/// type is a single underscore-free word, so the capability suffix (which may
-/// itself contain underscores, e.g. `ord_ore`) never interferes.
-fn token_type(typname: &str) -> Option<TokenType> {
-    let rest = typname.strip_prefix(DOMAIN_PREFIX)?;
-    let token = rest.split('_').next()?;
-    Some(match token {
-        "smallint" => TokenType::SmallInt,
-        "integer" => TokenType::Integer,
-        "bigint" => TokenType::BigInt,
-        "real" => TokenType::Real,
-        "double" => TokenType::Double,
-        "numeric" => TokenType::Numeric,
-        "text" => TokenType::Text,
-        "boolean" => TokenType::Boolean,
-        "date" => TokenType::Date,
-        "timestamp" => TokenType::Timestamp,
-        "json" => TokenType::Json,
-        _ => return None,
-    })
 }
 
 fn traits_from_terms(term_keys: Option<&[&str]>) -> EqlTraits {
     match term_keys {
-        // JSON SteVec domains carry their terms per entry, not on the domain.
-        None => EqlTraits::from(EqlTrait::JsonLike),
+        // JSON SteVec domains: `->`/`->>` (JsonLike) plus `@>`/`<@` containment
+        // (Contain), per the installed v3 SQL. The per-entry terms (hm/op) are
+        // not column-level capabilities.
+        None => [EqlTrait::JsonLike, EqlTrait::Contain]
+            .into_iter()
+            .collect(),
         Some(terms) => terms
             .iter()
             .filter_map(|term| match *term {
@@ -168,11 +149,13 @@ mod test {
     }
 
     #[test]
-    fn json_search_domain_is_json_like() {
-        assert_eq!(
-            traits("eql_v3_json_search"),
-            EqlTraits::from(EqlTrait::JsonLike)
-        );
+    fn json_search_domain_is_json_like_and_contain() {
+        // Verified against cipherstash-encrypt.sql: -> / ->> (JsonLike) and
+        // @> / <@ (Contain) are real operators on eql_v3_json_search.
+        let json_caps: EqlTraits = [EqlTrait::JsonLike, EqlTrait::Contain]
+            .into_iter()
+            .collect();
+        assert_eq!(traits("eql_v3_json_search"), json_caps);
     }
 
     #[test]
