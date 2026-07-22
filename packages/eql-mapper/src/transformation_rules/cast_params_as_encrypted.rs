@@ -1,6 +1,6 @@
-use super::helpers::cast_as_encrypted;
+use super::helpers::{cast_to_v3_domain, v3_cast_target};
 use super::TransformationRule;
-use crate::unifier::Type;
+use crate::unifier::{Type, Value as UnifierValue};
 use crate::EqlMapperError;
 use sqltk::parser::ast::{Expr, Value, ValueWithSpan};
 use sqltk::parser::tokenizer::Span;
@@ -26,6 +26,19 @@ impl<'ast> TransformationRule<'ast> for CastParamsAsEncrypted<'ast> {
         target_node: &mut N,
     ) -> Result<bool, EqlMapperError> {
         if self.would_edit(node_path, target_node) {
+            // Resolve the operand's v3 cast target from its domain identity and
+            // its role (query operand → query twin; stored value → column domain).
+            let Some((original,)) = node_path.last_1_as::<Expr>() else {
+                return Ok(false);
+            };
+            let Some(Type::Value(UnifierValue::Eql(eql_term))) =
+                self.node_types.get(&NodeKey::new(original))
+            else {
+                return Ok(false);
+            };
+            let identity = eql_term.eql_value().domain_identity().clone();
+            let (schema, domain) = v3_cast_target(node_path, &identity);
+
             if let Some(
                 expr @ Expr::Value(ValueWithSpan {
                     value: Value::Placeholder(_),
@@ -48,7 +61,7 @@ impl<'ast> TransformationRule<'ast> for CastParamsAsEncrypted<'ast> {
                     unreachable!("the Expr is known to be Expr::Value(ValueWithSpan::{{ value: Value::Placeholder(_), .. }})")
                 };
 
-                *expr = cast_as_encrypted(value);
+                *expr = cast_to_v3_domain(value, &schema, &domain);
                 return Ok(true);
             }
         }

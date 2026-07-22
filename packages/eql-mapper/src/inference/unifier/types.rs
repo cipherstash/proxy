@@ -213,12 +213,18 @@ pub enum EqlTermVariant {
 
 impl EqlTerm {
     pub fn table_column(&self) -> &TableColumn {
+        self.eql_value().table_column()
+    }
+
+    /// The [`EqlValue`] every `EqlTerm` variant wraps — its `TableColumn`, inert
+    /// domain identity, and capabilities.
+    pub fn eql_value(&self) -> &EqlValue {
         match self {
             EqlTerm::Full(eql_value)
             | EqlTerm::Partial(eql_value, _)
             | EqlTerm::JsonAccessor(eql_value)
             | EqlTerm::JsonPath(eql_value)
-            | EqlTerm::Tokenized(eql_value) => eql_value.table_column(),
+            | EqlTerm::Tokenized(eql_value) => eql_value,
         }
     }
 
