@@ -169,6 +169,36 @@ mod test {
     }
 
     #[test]
+    fn at_at_rewrites_to_match_term() {
+        let schema = resolver(schema! {
+            tables: {
+                users: {
+                    id,
+                    email (EQL: TokenMatch),
+                }
+            }
+        });
+
+        let statement = parse("SELECT id FROM users WHERE email @@ 'a'");
+
+        let typed = match type_check(schema, &statement) {
+            Ok(typed) => typed,
+            Err(err) => panic!("type check failed: {err:#?}"),
+        };
+
+        match typed.transform(HashMap::from_iter([(
+            typed.literals[0].1.as_node_key(),
+            ast::Value::SingleQuotedString("ENCRYPTED".into()),
+        )])) {
+            Ok(transformed) => assert_eq!(
+                transformed.to_string(),
+                "SELECT id FROM users WHERE eql_v3.match_term(email) @> eql_v3.match_term('ENCRYPTED'::JSONB::eql_v3.query_text_match)"
+            ),
+            Err(err) => panic!("transformation failed: {err}"),
+        };
+    }
+
+    #[test]
     fn like_on_non_match_encrypted_column_is_rejected() {
         // Regression: LIKE used to unify to Native and bypass capability checking.
         // An encrypted column that only implements Eq must not accept LIKE.

@@ -28,6 +28,7 @@ static SQL_BINARY_OPERATORS: LazyLock<HashMap<BinaryOperator, BinaryOpDecl>> =
             <T>(T !~~ <T as TokenMatch>::Tokenized) -> Native where T: TokenMatch; // NOT LIKE
             <T>(T ~~* <T as TokenMatch>::Tokenized) -> Native where T: TokenMatch; // ILIKE
             <T>(T !~~* <T as TokenMatch>::Tokenized) -> Native where T: TokenMatch; // NOT ILIKE
+            <T>(T @@ <T as TokenMatch>::Tokenized) -> Native where T: TokenMatch; // @@ fuzzy match
         };
         ops.into_iter()
             .map(|binary_op_spec| (binary_op_spec.op.clone(), binary_op_spec))
