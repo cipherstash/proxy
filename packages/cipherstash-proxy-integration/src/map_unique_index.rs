@@ -28,33 +28,9 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn map_unique_index_bool() {
-        trace();
-
-        clear().await;
-
-        let client = connect_with_tls(PROXY).await;
-
-        let id = random_id();
-        let encrypted_bool: bool = true;
-
-        let sql = "INSERT INTO encrypted (id, encrypted_bool) VALUES ($1, $2)";
-        client.query(sql, &[&id, &encrypted_bool]).await.unwrap();
-
-        let sql = "SELECT id, encrypted_bool FROM encrypted WHERE encrypted_bool = $1";
-        let rows = client.query(sql, &[&encrypted_bool]).await.unwrap();
-
-        assert_eq!(rows.len(), 1);
-
-        for row in rows {
-            let result_id: i64 = row.get("id");
-            let result_bool: bool = row.get("encrypted_bool");
-
-            assert_eq!(id, result_id);
-            assert_eq!(encrypted_bool, result_bool);
-        }
-    }
+    // `map_unique_index_bool` removed: EQL v3 `boolean` is storage-only (a
+    // two-value column leaks its distribution under any index), so equality
+    // search on an encrypted bool is not supported.
 
     #[tokio::test]
     async fn map_unique_index_int2() {
