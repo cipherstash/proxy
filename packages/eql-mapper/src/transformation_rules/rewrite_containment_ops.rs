@@ -15,13 +15,14 @@ use crate::EqlMapperError;
 
 use super::TransformationRule;
 
-/// Rewrites `@>` and `<@` operators on EQL types to function calls.
+/// Rewrites `@>` and `<@` containment operators on encrypted JSON columns to
+/// function calls (containment is retained in v3, scoped to JSON — ADR-0002).
 ///
-/// - `col @> val` → `eql_v2.jsonb_contains(col, val)`
-/// - `val <@ col` → `eql_v2.jsonb_contained_by(val, col)`
+/// - `col @> val` → `eql_v3.jsonb_contains(col, val)`
+/// - `val <@ col` → `eql_v3.jsonb_contained_by(val, col)`
 ///
 /// This transformation enables GIN index usage when the index is created on
-/// `eql_v2.jsonb_array(encrypted_col)`.
+/// `eql_v3.jsonb_array(encrypted_col)`.
 #[derive(Debug)]
 pub struct RewriteContainmentOps<'ast> {
     node_types: Arc<HashMap<NodeKey<'ast>, Type>>,
@@ -52,7 +53,7 @@ impl<'ast> RewriteContainmentOps<'ast> {
     fn make_function_call(fn_name: &str, left: Expr, right: Expr) -> Expr {
         Expr::Function(Function {
             name: ObjectName(vec![
-                ObjectNamePart::Identifier(Ident::new("eql_v2")),
+                ObjectNamePart::Identifier(Ident::new("eql_v3")),
                 ObjectNamePart::Identifier(Ident::new(fn_name)),
             ]),
             uses_odbc_syntax: false,

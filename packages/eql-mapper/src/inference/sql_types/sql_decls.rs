@@ -73,11 +73,12 @@ static SQL_FUNCTION_TYPES: LazyLock<HashMap<IdentCase<ObjectName>, FunctionDecl>
             eql_v3.jsonb_array_length<T>(T) -> Native where T: JsonLike;
             eql_v3.jsonb_array_elements<T>(T) -> SetOf<T> where T: JsonLike;
             eql_v3.jsonb_array_elements_text<T>(T) -> SetOf<T> where T: JsonLike;
-            // Containment (JSON `@>`/`<@`) is retargeted in the containment slice;
-            // still declared under eql_v2 until then.
-            eql_v2.jsonb_array<T>(T) -> Native where T: Contain;
-            eql_v2.jsonb_contains<T>(T, T) -> Native where T: Contain;
-            eql_v2.jsonb_contained_by<T>(T, T) -> Native where T: Contain;
+            // JSON containment (`@>`/`<@`) — retained in v3, scoped to JSON
+            // columns (ADR-0002 amendment). `@>`/`<@` on scalar encrypted columns
+            // still raise.
+            eql_v3.jsonb_array<T>(T) -> Native where T: Contain;
+            eql_v3.jsonb_contains<T>(T, T) -> Native where T: Contain;
+            eql_v3.jsonb_contained_by<T>(T, T) -> Native where T: Contain;
         };
 
         HashMap::from_iter(
