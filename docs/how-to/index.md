@@ -173,7 +173,7 @@ You can also install EQL by running [the installation script](https://github.com
 Once you have installed EQL, you can see what version is installed by querying the database:
 
 ```sql
-SELECT eql_v2.version();
+SELECT eql_v3.version();
 ```
 
 This will output the version of EQL installed.
@@ -182,79 +182,44 @@ This will output the version of EQL installed.
 
 In your existing PostgreSQL database, you store your data in tables and columns.
 Those columns have types like `integer`, `text`, `timestamp`, and `boolean`.
-When storing encrypted data in PostgreSQL with Proxy, you use a special column type called `eql_v2_encrypted`, which is [provided by EQL](#setting-up-the-database-schema).
-`eql_v2_encrypted` is a container column type that can be used for any type of encrypted data you want to store or search, whether they are numbers (`int`, `small_int`, `big_int`), text (`text`), dates and times (`date`. `timestamp`), or booleans (`boolean`).
+When storing encrypted data in PostgreSQL with Proxy, you use one of EQL's **encrypted domain types**, which are [provided by EQL](#setting-up-the-database-schema).
 
-Create a table with an encrypted column for `email`:
+In EQL v3 these domain types are **self-configuring**: the type you choose for a column both marks it as encrypted *and* declares which searches it supports. This replaces EQL v2's model of a single opaque `eql_v2_encrypted` container type plus a separate `eql_v2.add_search_config` call per index — there is no separate index-configuration step, and no `eql_v2_configuration` table.
+
+Domain types follow the naming pattern `eql_v3_<token>_<capability>`:
+
+- **Storage only** — `eql_v3_text`, `eql_v3_integer`, `eql_v3_bigint`, `eql_v3_date`, `eql_v3_boolean`, and so on store an encrypted value that can be read back but not searched. (`boolean` is always storage-only: a two-value column would leak its distribution under any index.)
+- **Ordering and range** — the `_ord` suffix (e.g. `eql_v3_integer_ord`, `eql_v3_date_ord`) adds ordering (`ORDER BY`) and range comparisons (`<`, `<=`, `>`, `>=`), and also supports equality (`=`). This is the recommended default and uses CLLW-OPE ordering.
+- **Ordering and range via ORE** — the `_ord_ore` suffix (e.g. `eql_v3_integer_ord_ore`) is an alternative ordering scheme backed by block-ORE. Choose `_ord` or `_ord_ore` for a column, not both.
+- **Full text search** — for `text`, `eql_v3_text_search` bundles equality, ordering, and fuzzy `LIKE`/`ILIKE` match in one type; `eql_v3_text_search_ore` is the ORE-backed variant, and `eql_v3_text_ord_ope` provides OPE ordering.
+- **Encrypted JSON** — `eql_v3_json_search` stores encrypted JSON with SteVec containment (`@>`, `<@`) and path (`->`, `->>`) search. See [Searchable JSON](../reference/searchable-json.md).
+
+Create a `users` table with an encrypted, fully-searchable `email` column:
 
 ```sql
 CREATE TABLE users (
     id SERIAL PRIMARY KEY,
-    email eql_v2_encrypted
+    email eql_v3_text_search
 )
 ```
 
 This creates a `users` table with two columns:
 
  - `id`, an autoincrementing integer column that is the primary key for the record
- - `email`, a `eql_v2_encrypted` column
+ - `email`, an encrypted `text` column that supports equality (`=`), ordering, and fuzzy `LIKE`/`ILIKE` matching — because it uses the `eql_v3_text_search` domain type
 
 There are important differences between the plaintext columns you've traditionally used in PostgreSQL and encrypted columns with CipherStash Proxy:
 
 - **Plaintext columns can be searched if they don't have an index**, albeit with the performance cost of a full table scan.
-- **Encrypted columns cannot be searched without an encrypted index**, and the encrypted indexes you define determine what kind of searches you can do on encrypted data.
+- **An encrypted column can only be searched in the ways its domain type allows.** Choose the domain type up front to match the queries you need: `eql_v3_text` if you only store and retrieve the value, `eql_v3_text_search` if you also need to compare and match it.
 
-In the previous step we created a table with an encrypted column, but without any encrypted indexes.
+If you only needed equality on `email` — for example a lookup by exact address — you could store it as a scalar ordering type such as `eql_v3_text_ord_ope`, or use `eql_v3_text_search` when you also want partial matches with `LIKE`.
 
-Now you can add an encrypted index for that encrypted column:
-
-```sql
-SELECT eql_v2.add_search_config(
-  'users',
-  'email',
-  'unique',
-  'text'
-);
-```
-
-This statement adds a `unique` index for the `email` column in the `users` table, which has an underlying data type of `text`.
-
-`unique` indexes are used to find records with columns with unique values, like with the `=` operator.
-
-There are other types of encrypted indexes you can use on `text` data:
-
-```sql
-SELECT eql_v2.add_search_config(
-  'users',
-  'email',
-  'match',
-  'text'
-);
-
-SELECT eql_v2.add_search_config(
-  'users',
-  'email',
-  'ore',
-  'text'
-);
-
-SELECT eql_v2.add_search_config(
-  'users',
-  'email',
-  'ope',
-  'text'
-);
-```
-
-The first SQL statement adds a `match` index, which is used for partial matches with `LIKE`.
-The second SQL statement adds an `ore` index, which is used for ordering with `ORDER BY` and range comparisons (`<`, `<=`, `>`, `>=`).
-The third SQL statement adds an `ope` index, which supports the same range and ordering operators as `ore`.
-
-`ore` and `ope` are alternatives for range and ordering queries — add one or the other to a column, not both. `ore` is the recommended default. `ope` produces ciphertexts that sort under PostgreSQL's native byte ordering, which makes ordering and range scans cheaper, but as an order-preserving scheme it reveals more about the relative order of stored values than `ore` does. Choose based on your performance and threat-model requirements; see the [EQL `INDEX` documentation](https://github.com/cipherstash/encrypt-query-language/blob/main/docs/reference/INDEX.md) for the full tradeoffs.
+`_ord` (CLLW-OPE) produces ciphertexts that sort under PostgreSQL's native byte ordering, which makes ordering and range scans cheaper, but as an order-preserving scheme it reveals more about the relative order of stored values than the block-ORE `_ord_ore` variant does. Choose based on your performance and threat-model requirements; see the [EQL `INDEX` documentation](https://github.com/cipherstash/encrypt-query-language/blob/main/docs/reference/INDEX.md) for the full tradeoffs.
 
 
 > [!IMPORTANT]
-> Adding, updating, or deleting encrypted indexes on columns that already contain encrypted data will not re-index that data. To use the new indexes, you must `SELECT` the data out of the column, and `UPDATE` it again.
+> The searches an encrypted column supports are fixed by its domain type. To change them you change the column's type (e.g. `ALTER TABLE users ALTER COLUMN email TYPE eql_v3_text_search`), and any data already stored must be re-encrypted under the new type — `SELECT` it out of the column and `UPDATE` it back — before the new capabilities apply to it.
 
 To learn how to use encrypted indexes for other encrypted data types like `text`, `int`, `boolean`, `date`, and `jsonb`, see the [EQL documentation](https://github.com/cipherstash/encrypt-query-language/blob/main/docs/reference/INDEX.md).
 
