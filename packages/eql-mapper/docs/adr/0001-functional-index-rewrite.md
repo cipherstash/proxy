@@ -31,3 +31,8 @@ has no valid rewrite target, which is exactly the type error we raise.
   is read from the domain identity (see ADR-0002), not from the coarse `Ord` trait.
 - Native `@>`/`<@`/operators on **plaintext** columns are untouched; only encrypted
   operands are rewritten.
+- **Containment is not gone.** `@>`/`<@` raise on *scalar* encrypted columns, but on
+  encrypted **JSON** columns (`eql_v3_json_search`) they are real, supported operators
+  (verified against the installed `cipherstash-encrypt.sql`). The `Contain` trait is
+  therefore retained as a JSON-only capability, and its rewrite targets the SteVec
+  containment surface — it is not deleted.

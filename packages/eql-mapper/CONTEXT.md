@@ -53,8 +53,13 @@ A **capability**, not a storage structure — several SEM terms can satisfy one 
 is **coarse** by design: `Ord` says "ordering is allowed" without distinguishing OPE from
 ORE, because that variant lives in the domain identity. See the shared vocabulary in
 `CONTEXT-MAP.md`.
-_Avoid_: index, index type (those name the storage, not the capability); `Contain` (the
-v2 containment trait — removed in v3, where `@>`/`<@` on encrypted values raise).
+_Avoid_: index, index type (those name the storage, not the capability).
+
+**`Contain`** is **retained** in v3, scoped to encrypted **JSON** columns
+(`eql_v3_json_search`): `@>`/`<@` are real, supported operators there. On **scalar**
+encrypted columns `@>`/`<@` raise — so `Contain` is a JSON-only capability, not a
+general one. (An earlier note here claimed `Contain` was removed entirely in v3; that was
+verified wrong against the installed `cipherstash-encrypt.sql`.)
 
 **EqlTraits**:
 A set of `EqlTrait`s. Read in two opposite directions depending on position: as
