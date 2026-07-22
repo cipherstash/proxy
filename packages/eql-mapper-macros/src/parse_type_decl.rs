@@ -169,7 +169,7 @@ impl Parse for EqlTrait {
         Err(syn::Error::new(
             input.span(),
             format!(
-                "Expected Eq, Ord, TokenMatch or JsonLike while parsing EqlTrait; got: {}",
+                "Expected Eq, Ord, TokenMatch, JsonLike or Contain while parsing EqlTrait; got: {}",
                 input.cursor().token_stream()
             ),
         ))
@@ -557,7 +557,7 @@ impl Parse for SqltkBinOp {
 
         Err(syn::Error::new(
             input.span(),
-            "Expected an operator corresponding to one of the EQL traits Eq, Ord, TokenMatch or JsonLike".to_string(),
+            "Expected an operator corresponding to one of the EQL traits Eq, Ord, TokenMatch, JsonLike or Contain".to_string(),
         ))
     }
 }
