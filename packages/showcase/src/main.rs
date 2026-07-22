@@ -6,7 +6,7 @@
  * ║    │   medications   │       │     procedures      │       │      patients       │                            ║
  * ║    │                 │       │                     │       │                     │                            ║
  * ║    │ id (uuid) PK    │       │ id (uuid) PK        │       │ id (uuid) PK        │                            ║
- * ║    │ name (text)     │       │ name (text)         │       │ pii (eql_v2_enc)    │                            ║
+ * ║    │ name (text)     │       │ name (text)         │       │ pii (json_search)   │                            ║
  * ║    │ description     │       │ description (text)  │       │                     │                            ║
  * ║    │ (text)          │       │ code (text)         │       │ Contains:           │                            ║
  * ║    └─────────────────┘       │ procedure_type      │       │ • first_name        │                            ║
@@ -23,7 +23,7 @@
  * ║    │ FK → patients.id    │   │ FK → patients.id    │       │                     │                            ║
  * ║    │                     │   │                     │       │                     │                            ║
  * ║    │ medication          │   │ procedure           │       │                     │                            ║
- * ║    │ (eql_v2_encrypted)  │   │ (eql_v2_encrypted)  │       │                     │                            ║
+ * ║    │ (eql_v3_json_search)│   │ (eql_v3_json_search)│       │                     │                            ║
  * ║    │                     │   │                     │       │                     │                            ║
  * ║    │ Contains:           │   │ Contains:           │       │                     │                            ║
  * ║    │ • medication_id ────┼───┤ • procedure_id ─────┼───────┤                     │                            ║
@@ -43,7 +43,7 @@
  * ║  • All with CASCADE DELETE for referential integrity       │                     │                            ║
  * ║                                                            │                     │                            ║
  * ║  Encryption Details:                                       └─────────────────────┘                            ║
- * ║  • PII data in patients.pii is encrypted using EQL v2                                                         ║
+ * ║  • PII data in patients.pii is encrypted using EQL v3                                                         ║
  * ║  • Junction tables store encrypted procedure/medication details                                               ║
  * ║  • Foreign keys enforce referential integrity with CASCADE DELETE                                             ║
  * ║  • Reference tables contain plaintext lookup data                                                             ║
@@ -66,7 +66,7 @@ use crate::{
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    println!("🩺 Healthcare Database Showcase - EQL v2 Searchable Encryption");
+    println!("🩺 Healthcare Database Showcase - EQL v3 Searchable Encryption");
     println!("============================================================");
 
     trace();
@@ -148,7 +148,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("\n🎉 === ALL TESTS COMPLETED SUCCESSFULLY! ===");
     println!();
     println!("🔒 This comprehensive demonstration showcases:");
-    println!("   • EQL v2 searchable encryption for sensitive patient data");
+    println!("   • EQL v3 searchable encryption for sensitive patient data");
     println!("   • All supported JSONB operators: ->, ->>, @>, <@");
     println!("   • JSONB functions: jsonb_path_exists, jsonb_path_query_first, jsonb_path_query");
     println!("   • Comparison operations on extracted JSONB fields");
@@ -157,7 +157,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("   • Realistic medical data with nested objects, arrays, and mixed data types");
     println!("   • Secure querying of encrypted data while maintaining privacy");
     println!();
-    println!("✨ EQL v2 provides comprehensive JSONB support for encrypted healthcare data!");
+    println!("✨ EQL v3 provides comprehensive JSONB support for encrypted healthcare data!");
 
     Ok(())
 }
