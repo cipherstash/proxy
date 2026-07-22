@@ -169,6 +169,39 @@ mod test {
     }
 
     #[test]
+    fn ord_ore_column_rewrites_to_ord_term_ore() {
+        // The explicit EQL("<domain>") form pins a block-ORE ordering domain, so
+        // the rewrite must select ord_term_ore (not ord_term) and the query twin
+        // must be query_integer_ord_ore.
+        let schema = resolver(schema! {
+            tables: {
+                events: {
+                    id,
+                    seq (EQL("eql_v3_integer_ord_ore"): Ord),
+                }
+            }
+        });
+
+        let statement = parse("SELECT id FROM events WHERE seq > 5");
+
+        let typed = match type_check(schema, &statement) {
+            Ok(typed) => typed,
+            Err(err) => panic!("type check failed: {err:#?}"),
+        };
+
+        match typed.transform(HashMap::from_iter([(
+            typed.literals[0].1.as_node_key(),
+            ast::Value::SingleQuotedString("ENCRYPTED".into()),
+        )])) {
+            Ok(transformed) => assert_eq!(
+                transformed.to_string(),
+                "SELECT id FROM events WHERE eql_v3.ord_term_ore(seq) > eql_v3.ord_term_ore('ENCRYPTED'::JSONB::eql_v3.query_integer_ord_ore)"
+            ),
+            Err(err) => panic!("transformation failed: {err}"),
+        };
+    }
+
+    #[test]
     fn at_at_rewrites_to_match_term() {
         let schema = resolver(schema! {
             tables: {
