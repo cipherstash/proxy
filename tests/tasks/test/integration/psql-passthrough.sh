@@ -22,16 +22,10 @@ SELECT 1;
 EOF
 
 
-# Confirm that there is indeed no config
-set +e
-OUTPUT="$(docker exec -i postgres${CONTAINER_SUFFIX} psql postgresql://cipherstash:${encoded_password}@proxy:6432/cipherstash --command 'SELECT * FROM eql_v2_configuration' 2>&1)"
-retval=$?
-if echo ${OUTPUT} | grep -v 'relation "eql_v2_configuration" does not exist'; then
-    echo "error: did not see string in output: \"relation "eql_v2_configuration" does not exist\""
-    exit 1
-fi
-
-set -e
+# EQL v3 has no configuration table: encrypted columns are self-configuring
+# domain types (e.g. `eql_v3_text_search`) and the proxy infers the encrypt
+# config directly from the schema. There is no `eql_v2_configuration` table to
+# probe, so the passthrough sanity checks above are sufficient here.
 
 echo "----------------------------------"
 echo "Unconfigurated connection tests complete"
