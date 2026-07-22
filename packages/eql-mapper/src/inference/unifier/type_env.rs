@@ -266,14 +266,15 @@ mod test {
         if let Type::Associated(associated) = &*instance.get_type(&tvar!(A))? {
             assert_eq!(
                 associated.resolve_selector_target(&mut unifier)?.as_deref(),
-                Some(&Type::Value(Value::Eql(EqlTerm::JsonAccessor(EqlValue(
-                    TableColumn {
-                        table: "customer".into(),
-                        column: "name".into()
-                    },
-                    None,
-                    EqlTraits::from(EqlTrait::JsonLike)
-                ),))))
+                Some(&Type::Value(Value::Eql(EqlTerm::JsonAccessor(
+                    EqlValue::with_canonical_identity(
+                        TableColumn {
+                            table: "customer".into(),
+                            column: "name".into()
+                        },
+                        EqlTraits::from(EqlTrait::JsonLike)
+                    ),
+                ))))
             );
         } else {
             panic!("expected associated type");
