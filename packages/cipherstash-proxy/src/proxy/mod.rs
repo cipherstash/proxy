@@ -25,10 +25,10 @@ type ReloadReceiver = UnboundedReceiver<ReloadCommand>;
 
 pub type ReloadResponder = Sender<()>;
 
-/// SQL Statement for loading encrypt configuration from database
-const ENCRYPT_CONFIG_QUERY: &str = include_str!("./sql/select_config.sql");
-
-/// SQL Statement for loading database schema
+/// SQL Statement for loading database schema.
+///
+/// Both the schema (capabilities) and the encrypt config are inferred from this
+/// single schema load — EQL v3 columns are self-configuring domain types.
 const SCHEMA_QUERY: &str = include_str!("./sql/select_table_schemas.sql");
 
 /// SQL Statement for loading aggregates as part of database schema
