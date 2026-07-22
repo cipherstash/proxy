@@ -62,6 +62,7 @@ default-features = false
 
 [dependencies.jsonwebtoken]
 version = "10.3.0"
+features = ["aws_lc_rs"]
 
 [dependencies.miette]
 version = "7.5.0"

@@ -169,21 +169,12 @@ impl Token {
     /// This is safe because we already possess the token — we just need to read
     /// the claims it contains.
     fn decode_claims(&self) -> Result<Claims, AuthError> {
-        use jsonwebtoken::{decode, decode_header, DecodingKey, Validation};
-        use std::collections::HashSet;
+        use jsonwebtoken::{dangerous::insecure_decode, decode_header};
 
         let token_str = self.access_token.as_str();
-        let header = decode_header(token_str)
+        decode_header(token_str)
             .map_err(|e| AuthError::InvalidToken(format!("invalid JWT header: {e}")))?;
-
-        let dummy_key = DecodingKey::from_secret(&[]);
-        let mut validation = Validation::new(header.alg);
-        validation.validate_exp = false;
-        validation.validate_aud = false;
-        validation.required_spec_claims = HashSet::new();
-        validation.insecure_disable_signature_validation();
-
-        decode(token_str, &dummy_key, &validation)
+        insecure_decode(token_str)
             .map(|data| data.claims)
             .map_err(|e| AuthError::InvalidToken(format!("failed to decode JWT claims: {e}")))
     }
