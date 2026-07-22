@@ -7,7 +7,8 @@ use crate::unifier::EqlTerm;
 use crate::{
     CastLiteralsAsEncrypted, CastParamsAsEncrypted, DryRunnable, EqlMapperError,
     FailOnPlaceholderChange, Param, PreserveEffectiveAliases, RewriteContainmentOps,
-    RewriteEqlComparisonOps, RewriteStandardSqlFnsOnEqlTypes, TransformationRule,
+    RewriteEqlComparisonOps, RewriteEqlMatchOps, RewriteStandardSqlFnsOnEqlTypes,
+    TransformationRule,
 };
 
 use crate::unifier::{Projection, Type, Value};
@@ -154,6 +155,7 @@ impl<'ast> TypeCheckedStatement<'ast> {
             RewriteStandardSqlFnsOnEqlTypes::new(Arc::clone(&self.node_types)),
             RewriteContainmentOps::new(Arc::clone(&self.node_types)),
             RewriteEqlComparisonOps::new(Arc::clone(&self.node_types)),
+            RewriteEqlMatchOps::new(Arc::clone(&self.node_types)),
             PreserveEffectiveAliases,
             CastLiteralsAsEncrypted::new(encrypted_literals, Arc::clone(&self.node_types)),
             FailOnPlaceholderChange::new(),
