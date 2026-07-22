@@ -1,8 +1,8 @@
 //! Tests for JSONB containment operators
 //!
 //! Verifies that the containment operator transformation works correctly:
-//! - @> operator is transformed to eql_v2.jsonb_contains()
-//! - eql_v2.jsonb_contains() function works with encrypted data
+//! - @> operator is transformed to eql_v3.jsonb_contains()
+//! - eql_v3.jsonb_contains() function works with encrypted data
 //! - Both return correct results matching the expected data pattern
 //!
 //! ## Test Data
@@ -291,9 +291,9 @@ mod tests {
         rhs = EncryptedColumn
     );
 
-    /// Test: Verify eql_v2.jsonb_contains() function works through proxy
+    /// Test: Verify eql_v3.jsonb_contains() function works through proxy
     ///
-    /// Tests explicit eql_v2.jsonb_contains() function call works correctly.
+    /// Tests explicit eql_v3.jsonb_contains() function call works correctly.
     /// Uses fixture data in ID range FIXTURE_ID_START to FIXTURE_ID_END.
     ///
     /// With 500 rows and "string": "value_N" where N = n % 10,
@@ -309,11 +309,11 @@ mod tests {
         // Filter by fixture ID range to isolate from other test data
         let search_value = json!({"string": "value_1"});
         let sql = format!(
-            "SELECT COUNT(*) FROM encrypted WHERE eql_v2.jsonb_contains(encrypted_jsonb, $1) AND id BETWEEN {} AND {}",
+            "SELECT COUNT(*) FROM encrypted WHERE eql_v3.jsonb_contains(encrypted_jsonb, $1) AND id BETWEEN {} AND {}",
             FIXTURE_ID_START, FIXTURE_ID_END
         );
 
-        info!("Testing eql_v2.jsonb_contains() function with SQL: {}", sql);
+        info!("Testing eql_v3.jsonb_contains() function with SQL: {}", sql);
 
         let rows = client.query(&sql, &[&search_value]).await.unwrap();
         let count: i64 = rows[0].get(0);

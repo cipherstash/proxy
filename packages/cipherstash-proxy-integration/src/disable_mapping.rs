@@ -9,7 +9,7 @@ mod tests {
     use tokio_postgres::types::{FromSql, ToSql};
 
     #[derive(Clone, Debug, ToSql, FromSql, PartialEq, Deserialize)]
-    #[postgres(name = "eql_v2_encrypted")]
+    #[postgres(name = "eql_v3_text_search")]
     pub struct EqlEncrypted {
         pub data: Value,
     }
@@ -35,10 +35,10 @@ mod tests {
         let insert_sql = "INSERT INTO encrypted (id, encrypted_text) VALUES ($1, $2)";
         let result = client.query(insert_sql, &[&id, &encrypted_text]).await;
 
-        // This error is actually a `WrongType` error from the tokio client as encrypted_text is actually eql_v2_encrypted
+        // This error is actually a `WrongType` error from the tokio client as encrypted_text is actually eql_v3_text_search
         assert!(result.is_err());
 
-        // Force the eql_v2_encrypted type
+        // Force the eql_v3_text_search type
         let encrypted = EqlEncrypted {
             data: Value::from(encrypted_text.to_owned()),
         };
