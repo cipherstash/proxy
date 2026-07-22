@@ -492,24 +492,10 @@ pub async fn insert_test_data() {
 }
 
 pub async fn clear() {
-    // HAZARD!
-    //
-    // Deleting rows from the eql_v2_configuration table is not officially supported due to the risk of data loss.
-    //
-    let sql = r#"
-        DELETE
-          FROM public.eql_v2_configuration
-          WHERE
-            (data -> 'tables') ?| array[
-              'patients',
-              'patient_medications',
-              'patient_procedures'
-            ];
-    "#;
-
+    // EQL v3 encrypted columns are self-configuring domain types, so there is no
+    // `eql_v2_configuration` table to clean up (as there was in EQL v2) — clearing
+    // the demo just truncates the tables.
     let client = connect_with_tls(PROXY).await;
-
-    client.simple_query(sql).await.unwrap();
 
     let tables = &[
         "patient_medications",

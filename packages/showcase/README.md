@@ -1,6 +1,6 @@
-# EQL v2 JSONB Operations Showcase
+# EQL v3 JSONB Operations Showcase
 
-A comprehensive demonstration of EQL v2's JSONB support for searchable encryption with healthcare data.
+A comprehensive demonstration of EQL v3's JSONB support for searchable encryption with healthcare data.
 
 ## Table of Contents
 
@@ -31,7 +31,7 @@ A comprehensive demonstration of EQL v2's JSONB support for searchable encryptio
 
 ## Overview
 
-This showcase demonstrates EQL v2's comprehensive support for JSONB operations on encrypted data. All examples use a realistic healthcare database with encrypted patient information, showcasing how applications can query complex nested data while maintaining searchable encryption.
+This showcase demonstrates EQL v3's comprehensive support for JSONB operations on encrypted data. All examples use a realistic healthcare database with encrypted patient information, showcasing how applications can query complex nested data while maintaining searchable encryption.
 
 **Key Features:**
 - ✅ All JSONB operators work with encrypted data
@@ -45,20 +45,14 @@ This showcase demonstrates EQL v2's comprehensive support for JSONB operations o
 The healthcare database includes:
 
 ```sql
--- Patients table with encrypted PII
+-- Patients table with encrypted PII.
+-- EQL v3 uses self-configuring domain types: `eql_v3_json_search` is the
+-- searchable encrypted-JSON (SteVec) domain, so the column type alone declares
+-- the encryption and its searchability — no `add_search_config` call is needed.
 CREATE TABLE patients (
     id uuid,
-    pii eql_v2_encrypted,  -- Complex nested JSONB with medical data
+    pii eql_v3_json_search,  -- Complex nested JSONB with medical data
     PRIMARY KEY(id)
-);
-
--- EQL search configuration for patient data
-SELECT eql_v2.add_search_config(
-    'patients',
-    'pii',
-    'ste_vec',
-    'jsonb',
-    '{"prefix": "patients/pii"}'
 );
 ```
 
@@ -505,4 +499,4 @@ Examples:
 
 ⚠️ **Chained Operators**: The `->` operator cannot be chained on `ste_vec` encrypted columns. Use JSONPath functions like `jsonb_path_query_first()` for deep nested access instead.
 
-This showcase proves that EQL v2 provides comprehensive JSONB support for encrypted data, enabling sophisticated healthcare applications while maintaining strong privacy protections.
+This showcase proves that EQL v3 provides comprehensive JSONB support for encrypted data, enabling sophisticated healthcare applications while maintaining strong privacy protections.
