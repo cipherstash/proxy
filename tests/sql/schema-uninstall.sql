@@ -1,10 +1,12 @@
-DROP TABLE IF EXISTS public.eql_v2_configuration;
+-- EQL v3 has no `eql_v2_configuration` table (self-configuring domain types),
+-- so there is nothing to drop there — just remove the test tables.
 
--- Regular old table
 DROP TABLE IF EXISTS plaintext;
 
--- Exciting cipherstash table
 DROP TABLE IF EXISTS encrypted;
 
 DROP TABLE IF EXISTS unconfigured;
 
+DROP TABLE IF EXISTS encrypted_elixir;
+
+DROP TABLE IF EXISTS unconfigured_elixir;
