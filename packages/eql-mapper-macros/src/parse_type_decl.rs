@@ -477,6 +477,11 @@ impl Parse for SqltkBinOp {
 
         if input.peek(token::At) {
             let _: token::At = input.parse()?;
+            // `@@` (fuzzy match) or `@>` (containment).
+            if input.peek(token::At) {
+                let _: token::At = input.parse()?;
+                return Ok(Self(quote!(::sqltk::parser::ast::BinaryOperator::AtAt)));
+            }
             let _: token::Gt = input.parse()?;
             return Ok(Self(quote!(::sqltk::parser::ast::BinaryOperator::AtArrow)));
         }
