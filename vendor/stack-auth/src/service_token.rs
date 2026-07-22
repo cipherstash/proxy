@@ -144,22 +144,12 @@ impl ServiceToken {
     /// NOTE: This does not verify the token signature or validate any claims,
     /// it only decodes the claims if the token is a well-formed JWT.
     fn try_decode(secret: &SecretToken) -> Result<DecodedClaims, String> {
-        use jsonwebtoken::{decode, decode_header, DecodingKey, Validation};
-        use std::collections::HashSet;
+        use jsonwebtoken::{dangerous::insecure_decode, decode_header};
 
         let token_str = secret.as_str();
-        let header =
-            decode_header(token_str).map_err(|e| format!("failed to decode JWT header: {e}"))?;
-
-        let dummy_key = DecodingKey::from_secret(&[]);
-        let mut validation = Validation::new(header.alg);
-        validation.validate_exp = false;
-        validation.validate_aud = false;
-        validation.required_spec_claims = HashSet::new();
-        validation.insecure_disable_signature_validation();
-
+        decode_header(token_str).map_err(|e| format!("failed to decode JWT header: {e}"))?;
         let data: jsonwebtoken::TokenData<cts_common::claims::Claims> =
-            decode(token_str, &dummy_key, &validation)
+            insecure_decode(token_str)
                 .map_err(|e| format!("failed to decode JWT claims: {e}"))?;
 
         let issuer: Url = data
