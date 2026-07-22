@@ -1130,7 +1130,7 @@ mod test {
         )])) {
             Ok(transformed_statement) => assert_eq!(
                 transformed_statement.to_string(),
-                "SELECT * FROM employees WHERE salary > 'ENCRYPTED'::JSONB::eql_v2_encrypted"
+                "SELECT * FROM employees WHERE eql_v3.ord_term(salary) > eql_v3.ord_term('ENCRYPTED'::JSONB::eql_v3.query_text_ord)"
             ),
             Err(err) => panic!("statement transformation failed: {err}"),
         };
@@ -1180,7 +1180,7 @@ mod test {
         )])) {
             Ok(transformed_statement) => assert_eq!(
                 transformed_statement.to_string(),
-                "INSERT INTO employees (salary) VALUES ('ENCRYPTED'::JSONB::eql_v2_encrypted)"
+                "INSERT INTO employees (salary) VALUES ('ENCRYPTED'::JSONB::public.eql_v3_text)"
             ),
             Err(err) => panic!("statement transformation failed: {err}"),
         };
@@ -1476,7 +1476,7 @@ mod test {
             tables: {
                 employees: {
                     id,
-                    eql_col (EQL),
+                    eql_col (EQL: Eq),
                     native_col,
                 }
             }
@@ -1493,7 +1493,7 @@ mod test {
                 Ok(statement) => {
                     assert_eq!(
                             statement.to_string(),
-                            "SELECT * FROM employees WHERE eql_col = $1::JSONB::eql_v2_encrypted AND native_col = $2"
+                            "SELECT * FROM employees WHERE eql_v3.eq_term(eql_col) = eql_v3.eq_term($1::JSONB::eql_v3.query_text_eq) AND native_col = $2"
                         );
                 }
                 Err(err) => panic!("transformation failed: {err}"),
@@ -1538,8 +1538,8 @@ mod test {
                         assert_eq!(
                             statement.to_string(),
                             "SELECT \
-                            eql_v2.jsonb_path_exists(eql_col, '<encrypted-selector($.another-secret)>'::JSONB::eql_v2_encrypted), \
-                            eql_v2.jsonb_path_query(eql_col, '<encrypted-selector($.secret)>'::JSONB::eql_v2_encrypted), \
+                            eql_v2.jsonb_path_exists(eql_col, '<encrypted-selector($.another-secret)>'::JSONB::public.eql_v3_text_search), \
+                            eql_v2.jsonb_path_query(eql_col, '<encrypted-selector($.secret)>'::JSONB::public.eql_v3_text_search), \
                             jsonb_path_query(native_col, '$.not-secret') \
                             FROM employees"
                         );
@@ -1656,7 +1656,7 @@ mod test {
                     value: ast::Value::SingleQuotedString(s),
                     span: _,
                 }) => {
-                    format!("'<encrypted-selector({s})>'::JSONB::eql_v2_encrypted")
+                    format!("'<encrypted-selector({s})>'::JSONB::public.eql_v3_text_search")
                 }
                 _ => panic!("unsupported expr type in test util"),
             })
@@ -1714,10 +1714,10 @@ mod test {
                 )) {
                     Ok(statement) => {
                         let expected = match op {
-                            "@>" => "SELECT id, eql_v2.jsonb_contains(notes, '<encrypted-selector(medications)>'::JSONB::eql_v2_encrypted) AS meds FROM patients".to_string(),
-                            "<@" => "SELECT id, eql_v2.jsonb_contained_by(notes, '<encrypted-selector(medications)>'::JSONB::eql_v2_encrypted) AS meds FROM patients".to_string(),
+                            "@>" => "SELECT id, eql_v2.jsonb_contains(notes, '<encrypted-selector(medications)>'::JSONB::public.eql_v3_text_search) AS meds FROM patients".to_string(),
+                            "<@" => "SELECT id, eql_v2.jsonb_contained_by(notes, '<encrypted-selector(medications)>'::JSONB::public.eql_v3_text_search) AS meds FROM patients".to_string(),
                             // Other operators are not transformed
-                            _ => format!("SELECT id, notes {op} '<encrypted-selector(medications)>'::JSONB::eql_v2_encrypted AS meds FROM patients"),
+                            _ => format!("SELECT id, notes {op} '<encrypted-selector(medications)>'::JSONB::public.eql_v3_text_search AS meds FROM patients"),
                         };
                         assert_eq!(statement.to_string(), expected)
                     }
@@ -1812,7 +1812,7 @@ mod test {
         match typed.transform(HashMap::new()) {
             Ok(statement) => assert_eq!(
                 statement.to_string(),
-                "SELECT id FROM patients WHERE eql_v2.jsonb_contains(notes, $1::JSONB::eql_v2_encrypted)"
+                "SELECT id FROM patients WHERE eql_v2.jsonb_contains(notes, $1::JSONB::public.eql_v3_text_search)"
             ),
             Err(err) => panic!("transformation failed: {err}"),
         }
@@ -1845,10 +1845,10 @@ mod test {
         );
 
         // CRITICAL: Verify the parameter is cast to enable GIN index usage
-        // The cast ::JSONB::eql_v2_encrypted is required for GIN indexes to work
+        // The cast ::JSONB::public.eql_v3_text_search is required for GIN indexes to work
         assert!(
-            sql.contains("::JSONB::eql_v2_encrypted") || sql.contains("::jsonb::eql_v2_encrypted"),
-            "Expected parameter to be cast as ::JSONB::eql_v2_encrypted for GIN index support, got: {sql}"
+            sql.contains("::JSONB::public.eql_v3_text_search") || sql.contains("::jsonb::public.eql_v3_text_search"),
+            "Expected parameter to be cast as ::JSONB::public.eql_v3_text_search for GIN index support, got: {sql}"
         );
     }
 
@@ -1880,8 +1880,8 @@ mod test {
 
         // CRITICAL: Verify the parameter is cast to enable GIN index usage
         assert!(
-            sql.contains("::JSONB::eql_v2_encrypted") || sql.contains("::jsonb::eql_v2_encrypted"),
-            "Expected parameter to be cast as ::JSONB::eql_v2_encrypted for GIN index support, got: {sql}"
+            sql.contains("::JSONB::public.eql_v3_text_search") || sql.contains("::jsonb::public.eql_v3_text_search"),
+            "Expected parameter to be cast as ::JSONB::public.eql_v3_text_search for GIN index support, got: {sql}"
         );
     }
 
