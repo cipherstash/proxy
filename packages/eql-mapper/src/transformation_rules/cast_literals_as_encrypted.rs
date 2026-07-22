@@ -1,9 +1,10 @@
 use std::{any::type_name, collections::HashMap, sync::Arc};
 
 use sqltk::parser::ast::{Expr, Value, ValueWithSpan};
+use sqltk::parser::tokenizer::Span;
 use sqltk::{NodeKey, NodePath, Visitable};
 
-use crate::unifier::{Type, Value as UnifierValue};
+use crate::unifier::{EqlTerm, Type, Value as UnifierValue};
 use crate::EqlMapperError;
 
 use super::helpers::{cast_to_v3_domain, v3_cast_target};
@@ -49,11 +50,27 @@ impl<'ast> TransformationRule<'ast> for CastLiteralsAsEncrypted<'ast> {
                             type_name::<Self>()
                         )));
                     };
-                    let identity = eql_term.eql_value().domain_identity().clone();
-                    let (schema, domain) = v3_cast_target(node_path, &identity);
 
                     let target_node = target_node.downcast_mut::<Expr>().unwrap();
-                    *target_node = cast_to_v3_domain(replacement, &schema, &domain);
+                    *target_node = match eql_term {
+                        // A JSON field selector (the RHS of `->`/`->>`) is passed
+                        // to `eql_v3."->"(json, text)` as the encrypted-selector
+                        // *text*, not a jsonb-domain payload.
+                        //
+                        // NOTE (assumption to confirm against the encrypt pipeline):
+                        // the encrypted replacement is the selector string itself.
+                        // If it is instead a jsonb payload, this needs the selector
+                        // extracted rather than emitted verbatim.
+                        EqlTerm::JsonAccessor(_) => Expr::Value(ValueWithSpan {
+                            value: replacement,
+                            span: Span::empty(),
+                        }),
+                        _ => {
+                            let identity = eql_term.eql_value().domain_identity().clone();
+                            let (schema, domain) = v3_cast_target(node_path, &identity);
+                            cast_to_v3_domain(replacement, &schema, &domain)
+                        }
+                    };
                     return Ok(true);
                 }
             }
