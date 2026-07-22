@@ -479,7 +479,7 @@ For example:
 
 ## Unknown Column <a id='encrypt-unknown-column'></a>
 
-The column has an encrypted type (PostgreSQL `eql_v2_encrypted` type ) with no encryption configuration.
+The column has an encrypted type (an EQL v3 encrypted domain type, e.g. `eql_v3_text_search`) with no encryption configuration.
 
 Without the configuration, Cipherstash Proxy does not know how to encrypt the column.
 Any data is unprotected and unencrypted.
@@ -506,7 +506,7 @@ Column 'column_name' in table 'table_name' has no Encrypt configuration
 
 ## Unknown Table <a id='encrypt-unknown-table'></a>
 
-The table has one or more encrypted columns (PostgreSQL `eql_v2_encrypted` type ) with no encryption configuration.
+The table has one or more encrypted columns (an EQL v3 encrypted domain type, e.g. `eql_v3_text_search`) with no encryption configuration.
 
 Without the configuration, Cipherstash Proxy does not know how to encrypt the column.
 Any data is unprotected and unencrypted.
