@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1784699982011,
+  "lastUpdate": 1784723051752,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -22413,6 +22413,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 38.989819,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "5391b63dea8424bc47b2f30ddb48a81e16638d91",
+          "message": "chore(deps): address Dependabot vulnerabilities",
+          "timestamp": "2026-07-21T04:13:53Z",
+          "url": "https://github.com/cipherstash/proxy/pull/425/commits/5391b63dea8424bc47b2f30ddb48a81e16638d91"
+        },
+        "date": 1784723050278,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 37.4796,
             "unit": "Number"
           }
         ]
