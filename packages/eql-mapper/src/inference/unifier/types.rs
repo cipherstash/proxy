@@ -920,6 +920,26 @@ mod domain_identity_tests {
     }
 
     #[test]
+    fn double_token_does_not_swallow_the_capability_suffix() {
+        // `double` is the one token whose plain-English name could be mistaken
+        // for a two-word `double precision`. The catalog spells the domain
+        // `eql_v3_double_ord` (see tests/sql/schema.sql), so `as_domain_str()`
+        // ("double", 6 chars) must line the prefix up exactly on the `_ord`
+        // boundary. Pins the invariant that `suffix()`/`stores_*` documents as a
+        // comment: a hypothetical `eql_v3_double_precision_ord` would parse the
+        // suffix as "precision_ord" and silently report the column as
+        // non-orderable.
+        assert_eq!(di("eql_v3_double").suffix(), "");
+        assert_eq!(di("eql_v3_double_ord").suffix(), "ord");
+        assert_eq!(di("eql_v3_double_ord_ore").suffix(), "ord_ore");
+        assert_eq!(di("eql_v3_double_ord").ord_term_fn(), Some("ord_term"));
+        assert_eq!(
+            di("eql_v3_double_ord_ore").ord_term_fn(),
+            Some("ord_term_ore")
+        );
+    }
+
+    #[test]
     fn eq_term_uses_eq_term_only_when_hm_is_stored() {
         // _eq stores hm.
         assert_eq!(di("eql_v3_integer_eq").eq_term_fn(), Some("eq_term"));

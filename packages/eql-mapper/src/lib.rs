@@ -189,6 +189,155 @@ mod test {
     }
 
     #[test]
+    fn ilike_rewrites_to_match_term() {
+        // ILIKE takes the same match arm as LIKE (RewriteEqlMatchOps handles both),
+        // so it must rewrite to the identical match_term form.
+        let schema = resolver(schema! {
+            tables: {
+                users: {
+                    id,
+                    email (EQL: TokenMatch),
+                }
+            }
+        });
+
+        let statement = parse("SELECT id FROM users WHERE email ILIKE 'a%'");
+
+        let typed = match type_check(schema, &statement) {
+            Ok(typed) => typed,
+            Err(err) => panic!("type check failed: {err:#?}"),
+        };
+
+        match typed.transform(HashMap::from_iter([(
+            typed.literals[0].1.as_node_key(),
+            ast::Value::SingleQuotedString("ENCRYPTED".into()),
+        )])) {
+            Ok(transformed) => assert_eq!(
+                transformed.to_string(),
+                "SELECT id FROM users WHERE eql_v3.match_term(email) @> eql_v3.match_term('ENCRYPTED'::JSONB::eql_v3.query_text_match)"
+            ),
+            Err(err) => panic!("transformation failed: {err}"),
+        };
+    }
+
+    #[test]
+    fn not_like_rewrites_to_negated_match_term() {
+        // The `negated` arm wraps the containment in `NOT (...)` — otherwise
+        // untested (only the positive LIKE/ILIKE/@@ forms had rewrite coverage).
+        let schema = resolver(schema! {
+            tables: {
+                users: {
+                    id,
+                    email (EQL: TokenMatch),
+                }
+            }
+        });
+
+        let statement = parse("SELECT id FROM users WHERE email NOT LIKE 'a%'");
+
+        let typed = match type_check(schema, &statement) {
+            Ok(typed) => typed,
+            Err(err) => panic!("type check failed: {err:#?}"),
+        };
+
+        match typed.transform(HashMap::from_iter([(
+            typed.literals[0].1.as_node_key(),
+            ast::Value::SingleQuotedString("ENCRYPTED".into()),
+        )])) {
+            Ok(transformed) => assert_eq!(
+                transformed.to_string(),
+                "SELECT id FROM users WHERE NOT (eql_v3.match_term(email) @> eql_v3.match_term('ENCRYPTED'::JSONB::eql_v3.query_text_match))"
+            ),
+            Err(err) => panic!("transformation failed: {err}"),
+        };
+    }
+
+    #[test]
+    fn not_ilike_rewrites_to_negated_match_term() {
+        // NOT ILIKE takes the same negated match arm as NOT LIKE.
+        let schema = resolver(schema! {
+            tables: {
+                users: {
+                    id,
+                    email (EQL: TokenMatch),
+                }
+            }
+        });
+
+        let statement = parse("SELECT id FROM users WHERE email NOT ILIKE 'a%'");
+
+        let typed = match type_check(schema, &statement) {
+            Ok(typed) => typed,
+            Err(err) => panic!("type check failed: {err:#?}"),
+        };
+
+        match typed.transform(HashMap::from_iter([(
+            typed.literals[0].1.as_node_key(),
+            ast::Value::SingleQuotedString("ENCRYPTED".into()),
+        )])) {
+            Ok(transformed) => assert_eq!(
+                transformed.to_string(),
+                "SELECT id FROM users WHERE NOT (eql_v3.match_term(email) @> eql_v3.match_term('ENCRYPTED'::JSONB::eql_v3.query_text_match))"
+            ),
+            Err(err) => panic!("transformation failed: {err}"),
+        };
+    }
+
+    #[test]
+    fn native_like_still_type_checks() {
+        // Regression: routing LIKE/ILIKE through the TokenMatch-bounded rule must
+        // not regress plain LIKE on a native (non-encrypted) column — Native
+        // satisfies all bounds, so `WHERE native_col LIKE 'x'` still type checks.
+        let schema = resolver(schema! {
+            tables: {
+                users: {
+                    id,
+                    email,
+                }
+            }
+        });
+
+        let statement = parse("SELECT id FROM users WHERE email LIKE 'a%'");
+        assert!(
+            type_check(schema, &statement).is_ok(),
+            "LIKE on a native column should still type check"
+        );
+    }
+
+    #[test]
+    fn update_set_casts_stored_value() {
+        // ADR-0003's second stored-value context: an UPDATE SET on an encrypted
+        // column casts the assigned literal to the column domain, exactly like
+        // INSERT. Only INSERT had cast-target rewrite coverage before this.
+        let schema = resolver(schema! {
+            tables: {
+                employees: {
+                    id,
+                    salary (EQL),
+                }
+            }
+        });
+
+        let statement = parse("UPDATE employees SET salary = 20000 WHERE id = 123");
+
+        let typed = match type_check(schema, &statement) {
+            Ok(typed) => typed,
+            Err(err) => panic!("type check failed: {err:#?}"),
+        };
+
+        match typed.transform(HashMap::from_iter([(
+            typed.literals[0].1.as_node_key(),
+            ast::Value::SingleQuotedString("ENCRYPTED".into()),
+        )])) {
+            Ok(transformed) => assert_eq!(
+                transformed.to_string(),
+                "UPDATE employees SET salary = 'ENCRYPTED'::JSONB::public.eql_v3_text WHERE id = 123"
+            ),
+            Err(err) => panic!("transformation failed: {err}"),
+        };
+    }
+
+    #[test]
     fn insert_with_value() {
         // init_tracing();
         let schema = resolver(schema! {
