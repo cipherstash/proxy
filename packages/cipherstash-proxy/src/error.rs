@@ -256,12 +256,12 @@ pub enum EncryptError {
 
     /// `sv[0]` is the decryption root of a SteVec document, so an empty `sv`
     /// array leaves nothing to decrypt.
-    #[error("Encrypted jsonb value has no root entry and cannot be decrypted")]
+    #[error("Encrypted jsonb value has no root entry and cannot be decrypted. For help visit {}#encrypt-ste-vec-missing-root-entry", ERROR_DOC_BASE_URL)]
     SteVecMissingRootEntry,
 
     /// A SteVec entry's selector is the source of both AEAD bindings (nonce and
     /// AAD), so it must be exactly 16 hex-encoded bytes.
-    #[error("Encrypted jsonb entry has an invalid selector '{selector}'")]
+    #[error("Encrypted jsonb entry has an invalid selector '{selector}'. For help visit {}#encrypt-ste-vec-selector-invalid", ERROR_DOC_BASE_URL)]
     SteVecSelectorInvalid { selector: String },
 
     #[error(
