@@ -163,8 +163,14 @@ pub async fn load_schema(config: &DatabaseConfig) -> Result<Schema, Error> {
                         // type) have no v3 domain identity and are unsupported on
                         // this v3-only build — warn rather than silently treating
                         // them as encrypted or plaintext.
+                        //
+                        // The column is served as a native passthrough: Proxy runs
+                        // no encrypt/decrypt on it, so new writes are stored as-is
+                        // (in plaintext) and existing values are returned as-is.
+                        // This is a data-at-rest exposure on the write path, so the
+                        // warning must be impossible to miss in ops.
                         if column_type_name.as_deref() == Some("eql_v2_encrypted") {
-                            warn!(target: SCHEMA, msg = "ignoring unsupported eql_v2_encrypted column on a v3 build", table = table_name, column = col);
+                            warn!(target: SCHEMA, msg = "eql_v2_encrypted column is unsupported on this EQL v3 build and is being served as a PLAINTEXT (native) column: Proxy performs no encryption on writes or decryption on reads. Migrate the column to an EQL v3 domain before writing to it.", table = table_name, column = col);
                         }
                         Column::native(ident)
                     }
