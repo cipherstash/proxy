@@ -1,8 +1,6 @@
 [workspace]
 resolver = "2"
 members = ["packages/*"]
-# Vendored crate is consumed only via [patch.crates-io] below, not as a member.
-exclude = ["vendor/stack-auth"]
 
 [workspace.package]
 version = "2.2.4"
@@ -61,4 +59,5 @@ tracing-subscriber = { version = "^0.3.20", features = [
 
 # The CIP-3159 stack-auth hotfix patch was removed here: cipherstash-client 0.42.0
 # requires stack-auth ^0.42.0, which carries the CancelGuard token-refresh fix
-# upstream (landed in stack-auth 0.36.0). vendor/stack-auth is now unreferenced.
+# upstream (landed in stack-auth 0.36.0). The vendored copy under vendor/stack-auth
+# is no longer referenced and has been removed.
