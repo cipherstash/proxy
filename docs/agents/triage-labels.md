@@ -15,8 +15,6 @@ Engineering — see [issue-tracker.md](./issue-tracker.md)).
 When a skill mentions a role (e.g. "apply the AFK-ready triage label"), use the
 corresponding label string from this table.
 
-Edit the right-hand column to match whatever vocabulary you actually use.
-
 ## Creating the labels
 
 Only `wontfix` currently exists on the Product Engineering team. The other four are

@@ -25,7 +25,7 @@ not a glossary — read it for orientation, but domain *terms* belong in `CONTEX
 
 This repo is a Cargo workspace, so contexts live under `packages/`, not `src/`:
 
-```
+```text
 /
 ├── CONTEXT-MAP.md
 ├── docs/adr/                                  ← system-wide decisions
@@ -58,4 +58,4 @@ term against the context you're working in, not the other one.
 If your output contradicts an existing ADR, surface it explicitly rather than silently
 overriding:
 
-> _Contradicts ADR-0007 (event-sourced orders) — but worth reopening because…_
+> _Contradicts ADR-000N (its title) — but worth reopening because…_
