@@ -359,8 +359,17 @@ impl DomainIdentity {
     /// **test/fixture convenience** for constructing identities where no live
     /// schema loader supplies the real domain name — production identities always
     /// come from [`Self::from_domain_name`] via the loader. The synthesised domain
-    /// name is deterministic so both sides of a test assertion agree; it is not
-    /// guaranteed to equal the exact catalog typname.
+    /// name is deterministic so both sides of a test assertion agree.
+    ///
+    /// The synthesised name is NOT authoritative and must never be treated as the
+    /// column's real catalog domain: it may not only diverge from the real typname
+    /// but actively **collide with an unrelated real domain that means something
+    /// else**. For example `canonical(Text, {json_like})` produces
+    /// `eql_v3_text_search` — a real catalog domain whose terms are `[hm, op, bf]`
+    /// (Eq + Ord + TokenMatch), nothing to do with JSON — and it can equally emit
+    /// genuinely non-catalog names (`Eq + TokenMatch` → `eql_v3_text_eq_match`,
+    /// `Contain` → `eql_v3_text_contain`). Only [`Self::from_domain_name`] yields a
+    /// real domain identity.
     pub fn canonical(token: TokenType, traits: EqlTraits) -> Self {
         let mut parts: Vec<&str> = Vec::new();
         if traits.json_like {
