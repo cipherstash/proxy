@@ -28,6 +28,20 @@ use std::sync::OnceLock;
 use eql_bindings::v3;
 use eql_mapper::{DomainIdentity, EqlTrait, EqlTraits, TokenType};
 
+/// SteVec sub-structural domains that live in the `public` schema but are NOT
+/// user-declarable column types, so they must never resolve to a column
+/// capability set.
+///
+/// `eql_v3_json_entry` is the element a `->` traversal returns (one `sv` array
+/// entry); its per-entry terms are `hm` XOR `op` (equality/ordering), not the
+/// `JsonLike + Contain` that a `term_json_keys() == None` JSON *document* domain
+/// (`eql_v3_json_search`) carries. Left in the catalog it would type-check a
+/// column mistakenly declared with that type as supporting `->`/`@>` but not
+/// `=`/`<` — inverted. Excluding it makes that misclassification impossible
+/// rather than merely latent: a column so declared falls through to a native
+/// (plaintext) column instead. See PR #424 review.
+const NON_COLUMN_DOMAINS: &[&str] = &["eql_v3_json_entry"];
+
 /// `typname` (e.g. `eql_v3_integer_ord`) → capabilities, inverted once from the
 /// `eql-bindings` catalog. Keyed only by the public column domains; the token
 /// type is recovered from the typname via [`DomainIdentity::from_domain_name`].
@@ -41,8 +55,12 @@ fn catalog() -> &'static HashMap<String, EqlTraits> {
             let typname = qualified.rsplit('.').next().unwrap_or(qualified);
 
             // Only public column domains have a parseable token type; this skips
-            // the `eql_v3.query_*` operand twins that `all()` also yields.
-            if TokenType::from_domain_name(typname).is_some() {
+            // the `eql_v3.query_*` operand twins that `all()` also yields. The
+            // `public` SteVec sub-structural domains (`eql_v3_json_entry`) parse
+            // but are not column types, so exclude them explicitly.
+            if TokenType::from_domain_name(typname).is_some()
+                && !NON_COLUMN_DOMAINS.contains(&typname)
+            {
                 map.insert(
                     typname.to_string(),
                     traits_from_terms(domain.term_json_keys()),
@@ -192,6 +210,11 @@ mod test {
         for domain in v3::all() {
             let qualified = domain.sql_domain();
             if let Some(typname) = qualified.strip_prefix("public.") {
+                // SteVec sub-structural domains are `public` but not column
+                // types (see NON_COLUMN_DOMAINS), so they are excluded by design.
+                if NON_COLUMN_DOMAINS.contains(&typname) {
+                    continue;
+                }
                 assert!(
                     resolve(typname).is_some(),
                     "public column domain {typname} did not resolve to a token type"
@@ -200,6 +223,24 @@ mod test {
             }
         }
         assert!(checked > 0, "no public column domains found in the catalog");
+    }
+
+    #[test]
+    fn json_entry_operand_domain_is_not_a_column_type() {
+        // `eql_v3_json_entry` is the element `->` returns, not a declarable
+        // column type; its per-entry terms are `hm` XOR `op`, so resolving it to
+        // JsonLike+Contain (as `term_json_keys() == None` otherwise would) is
+        // inverted. It must not resolve as a column domain — a column mistakenly
+        // declared with it then falls through to a native column. (#424)
+        assert!(resolve("eql_v3_json_entry").is_none());
+        // The real JSON column domains still resolve.
+        assert!(resolve("eql_v3_json").is_some()); // storage-only
+        assert_eq!(
+            traits("eql_v3_json_search"),
+            [EqlTrait::JsonLike, EqlTrait::Contain]
+                .into_iter()
+                .collect()
+        );
     }
 
     #[test]
