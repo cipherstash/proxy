@@ -27,7 +27,7 @@ use crate::prometheus::{
     STATEMENTS_PASSTHROUGH_TOTAL, STATEMENTS_UNMAPPABLE_TOTAL,
 };
 use crate::proxy::EncryptionService;
-use crate::EqlOutput;
+use crate::{EqlOutput, EqlQueryPayload};
 use bytes::BytesMut;
 use cipherstash_client::encryption::Plaintext;
 use eql_mapper::{self, EqlMapperError, EqlTerm, TypeCheckedStatement};
@@ -649,6 +649,14 @@ where
         let mut encrypted_expressions = vec![];
         for encrypted in encrypted_literals {
             let e = match encrypted {
+                // A JSON selector (RHS of `->`/`->>`, or the `jsonb_path_query`
+                // path) is a bare tokenized-selector hash used directly as `text`
+                // by the eql_v3 functions (`eql_v3."->"(json, text)`). Bind the raw
+                // token: JSON-serializing it (below) would re-quote the bare string
+                // (`"<hash>"`), so it would never match the stored per-entry `s`.
+                Some(EqlOutput::Query(EqlQueryPayload::Selector(s))) => {
+                    Some(Value::SingleQuotedString(s.clone()))
+                }
                 Some(en) => Some(to_json_literal_value(&en)?),
                 None => None,
             };
