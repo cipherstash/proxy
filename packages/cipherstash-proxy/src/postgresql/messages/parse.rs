@@ -24,11 +24,12 @@ impl Parse {
     }
 
     ///
-    /// Encrypted columns are the eql_v2_encrypted Domain Type
-    /// eql_v2_encrypted wraps JSONB
+    /// EQL v3 encrypted columns are JSONB-backed domain types (e.g.
+    /// `eql_v3_text_search`).
     ///
-    /// Using JSONB to avoid the complexity of loading the OID of eql_v2_encrypted
-    /// PostgreSQL will coerce JSONB to eql_v2_encrypted if it passes the constaint check
+    /// Using JSONB to avoid the complexity of loading each domain's OID —
+    /// PostgreSQL coerces JSONB to the domain type if it passes the CHECK
+    /// constraint.
     ///
     pub fn rewrite_param_types(&mut self, columns: &[Option<Column>]) {
         for (idx, col) in columns.iter().enumerate() {

@@ -4,7 +4,7 @@ This document describes the internal architecture of CipherStash Proxy. It's int
 
 ## Overview
 
-CipherStash Proxy sits between an application and PostgreSQL. It intercepts SQL statements over the PostgreSQL wire protocol, determines which columns are encrypted, rewrites queries to use [EQL v2](https://github.com/cipherstash/encrypt-query-language) operations, encrypts literals and parameters, forwards the transformed query to PostgreSQL, and decrypts results before returning them to the application.
+CipherStash Proxy sits between an application and PostgreSQL. It intercepts SQL statements over the PostgreSQL wire protocol, determines which columns are encrypted, rewrites queries to use [EQL v3](https://github.com/cipherstash/encrypt-query-language) operations, encrypts literals and parameters, forwards the transformed query to PostgreSQL, and decrypts results before returning them to the application.
 
 The two most interesting pieces of the system are:
 
@@ -116,10 +116,12 @@ The current rules:
 
 | Rule | What it does |
 |---|---|
-| `CastLiteralsAsEncrypted` | Replaces plaintext literals with `eql_v2.cast_as_encrypted(ciphertext)` |
-| `CastParamsAsEncrypted` | Wraps parameter placeholders (`$1`, `$2`, ...) with encrypted casts |
-| `RewriteContainmentOps` | Transforms `col @> val` to `eql_v2.jsonb_contains(col, val)` |
-| `RewriteStandardSqlFnsOnEqlTypes` | Rewrites `min()`, `max()`, `jsonb_path_query()` etc. to `eql_v2.*` equivalents |
+| `RewriteEqlComparisonOps` | Rewrites scalar comparisons: `col <op> x` → `eql_v3.<term>(col) <op> eql_v3.<term>(x)` (term chosen from the column's domain: `eq_term`/`ord_term`/`ord_term_ore`) |
+| `RewriteEqlMatchOps` | Rewrites `LIKE`/`ILIKE`/`@@` to `eql_v3.match_term(a) @> eql_v3.match_term(b)` |
+| `RewriteContainmentOps` | Rewrites JSON `@>`/`<@` to `eql_v3.jsonb_contains`/`jsonb_contained_by`, and `->`/`->>` to `eql_v3."->"`/`"->>"` |
+| `RewriteStandardSqlFnsOnEqlTypes` | Rewrites `min()`, `max()`, `jsonb_path_query()` etc. to their `eql_v3.*` counterparts (`count()` stays native) |
+| `CastLiteralsAsEncrypted` | Replaces plaintext literals with the ciphertext cast to the column's v3 domain (`::public.eql_v3_*`) or, for a query operand, its query twin (`::eql_v3.query_*`) |
+| `CastParamsAsEncrypted` | Wraps parameter placeholders (`$1`, `$2`, ...) with the same v3 domain casts |
 | `PreserveEffectiveAliases` | Maintains column aliases through transformations |
 | `FailOnPlaceholderChange` | Postcondition check that prepared statement placeholders weren't corrupted |
 
@@ -191,7 +193,7 @@ When encrypting values for a statement, many columns may be `NULL` or non-encryp
 
 ## Schema Management
 
-The proxy discovers the database schema at startup and reloads it periodically. Schema loading queries PostgreSQL's `information_schema` to discover tables and columns, then checks `eql_v2_configuration` to determine which columns are encrypted and what index types they support.
+The proxy discovers the database schema at startup and reloads it periodically. Schema loading queries PostgreSQL's `information_schema` to discover tables and columns, including each column's domain type. EQL v3 columns are self-configuring domain types (e.g. `eql_v3_text_search`), so both the type-checker's capability view and the encrypt config are inferred from that single schema load — the column's domain name determines which columns are encrypted, their token type, and their searchable capabilities. There is no `eql_v2_configuration` table.
 
 Schema state is stored behind an `ArcSwap`, which provides lock-free reads with atomic updates. This means query processing never blocks on a schema reload — readers always get a consistent snapshot.
 

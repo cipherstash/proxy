@@ -28,24 +28,27 @@ This document outlines the supported JSONB functions and operators in CipherStas
 ```sql
   CREATE TABLE cipherstash (
     id SERIAL PRIMARY KEY,
-    encrypted_jsonb eql_v2_encrypted
+    encrypted_jsonb eql_v3_json_search
   )
 ```
 
 ### Encrypted column configuration
-```sql
-SELECT eql_v2.add_search_config(
-  'cipherstash',
-  'encrypted_jsonb',
-  'ste_vec',
-  'jsonb',
-  '{"prefix": "cipherstash/encrypted_jsonb"}'
-);
-```
+
+EQL v3 encrypted-JSON columns are self-configuring: the `eql_v3_json_search`
+domain type is the SteVec (searchable encrypted JSON) configuration, so the
+column type alone enables JSON search. There is no separate
+`add_search_config` call as in EQL v2.
 
 > **Note:** JSONB literals in INSERT and UPDATE statements work directly without explicit `::jsonb` type casts. The proxy infers the JSONB type from the target column and handles encryption transparently.
 
 #### Configuration options
+
+> **EQL v2 legacy:** In EQL v2 the `ste_vec` index was configured explicitly via
+> `add_search_config`, and the options below (and the `add_search_config` examples
+> in this section) describe that mechanism. In EQL v3 the `eql_v3_json_search`
+> domain type carries a fixed default configuration, so these options are not
+> set per-column via SQL. The descriptions are retained to explain the indexing
+> behaviour.
 
 The `ste_vec` index configuration accepts the following options:
 
@@ -144,7 +147,7 @@ Examples:
 ## Operators
 
 <a id='field_access_operator'></a>
-### `-> text returns eql_v2_encrypted decrypted as jsonb`
+### `-> text returns eql_v3_json_search decrypted as jsonb`
 
 Extracts JSON object field with the given key.
 
@@ -198,7 +201,7 @@ SELECT encrypted_jsonb -> 'string_array' FROM cipherstash;
 
 
 <a id='field_access_as_text_operator'></a>
-### `->> text returns eql_v2_encrypted decrypted as jsonb`
+### `->> text returns eql_v3_json_search decrypted as jsonb`
 
 Extracts JSON object field with the given key.
 
@@ -264,9 +267,9 @@ SELECT encrypted_jsonb -> 'string_array' FROM cipherstash;
 
 
 <a id='contains_operator'></a>
-### `eql_v2_encrypted @> eql_v2_encrypted returns boolean`
+### `eql_v3_json_search @> eql_v3_json_search returns boolean`
 
-Does the left `eql_v2_encrypted` value contain the right `eql_v2_encrypted` path/value entries at the top level?
+Does the left `eql_v3_json_search` value contain the right `eql_v3_json_search` path/value entries at the top level?
 
 
 #### Syntax
@@ -319,7 +322,7 @@ SELECT encrypted_jsonb @> '{"object": {"string": "world", "number": 99}}' FROM c
 
 
 <a id='contained_by_operator'></a>
-### `eql_v2_encrypted <@ eql_v2_encrypted returns boolean`
+### `eql_v3_json_search <@ eql_v3_json_search returns boolean`
 
 Is the first JSON value contained in the second?
 
@@ -373,7 +376,7 @@ SELECT '{"object": {"string": "world", "number": 99}}' <@ encrypted_jsonb FROM c
 ## Functions
 
 <a id='jsonb_path_query'></a>
-### `jsonb_path_query(target eql_v2_encrypted, path jsonpath) returns setof eql_v2_encrypted decrypted as jsonb`
+### `jsonb_path_query(target eql_v3_json_search, path jsonpath) returns setof eql_v3_json_search decrypted as jsonb`
 
 Returns all JSON items returned by the JSON path for the specified JSON value.
 
@@ -437,7 +440,7 @@ SELECT jsonb_path_query(encrypted_jsonb, '$.string_array') FROM cipherstash;
 
 
 <a id='jsonb_path_query_first'></a>
-### `jsonb_path_query_first(target eql_v2_encrypted, path jsonpath) returns eql_v2_encrypted decrypted as jsonb`
+### `jsonb_path_query_first(target eql_v3_json_search, path jsonpath) returns eql_v3_json_search decrypted as jsonb`
 
 Returns all JSON items returned by the JSON path for the specified JSON value.
 
@@ -476,7 +479,7 @@ SELECT jsonb_path_query_first(encrypted_jsonb, '$.numeric_array[*]') FROM cipher
 ---------------------------------------------------------------
 
 <a id='jsonb_path_exists'></a>
-### `jsonb_path_exists(target eql_v2_encrypted, path jsonpath) returns bool`
+### `jsonb_path_exists(target eql_v3_json_search, path jsonpath) returns bool`
 
 Checks whether the JSON path returns any item for the specified JSON value.
 
@@ -514,7 +517,7 @@ SELECT jsonb_path_exists(encrypted_jsonb, '$.unknown') FROM cipherstash;
 
 
 <a id='jsonb_array_elements'></a>
-### `jsonb_array_elements(target eql_v2_encrypted) returns setof eql_v2_encrypted decrypted as jsonb`
+### `jsonb_array_elements(target eql_v3_json_search) returns setof eql_v3_json_search decrypted as jsonb`
 
 Expands the top-level JSON array into a set of values.
 
@@ -571,7 +574,7 @@ SELECT jsonb_array_elements(jsonb_path_query(encrypted_jsonb, '$.numeric_array[@
 
 
 <a id='jsonb_array_length'></a>
-### `jsonb_array_length(target eql_v2_encrypted) returns integer`
+### `jsonb_array_length(target eql_v3_json_search) returns integer`
 
 Returns the number of elements in the top-level JSON array.
 

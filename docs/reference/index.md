@@ -470,10 +470,10 @@ The parameter is always scoped to the connection `SESSION` - mapping is only eve
 
 CipherStash Proxy and EQL do provide some protection against writing plaintext into and reading plaintext from encrypted columns.
 
-Always use `eql_v2.add_encrypted_constraint(table, column)` when defining encrypted columns to ensure plaintext data cannot be written.
+In EQL v3 this protection is built into the column's domain type: an `eql_v3_*` domain is a checked `jsonb` domain, so PostgreSQL rejects a plaintext value that is not a valid encrypted payload. There is no separate `eql_v2.add_encrypted_constraint` call to apply — defining the column with an `eql_v3_*` type is sufficient.
 
 Unmapped `SELECT` statements should always return the encrypted payload.
-If the constraint has been applied, unmapped `INSERT`/`UPDATE` statements should return a PostgreSQL type error.
+Unmapped `INSERT`/`UPDATE` statements that try to write plaintext should return a PostgreSQL type error.
 
 
 ### Disable mapping

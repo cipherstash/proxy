@@ -20,8 +20,8 @@ mod tests {
         // let id = random_id();
         // let encrypted_val = Domain("ZZ".to_string());
 
-        // CREATE INDEX ON encrypted (e eql_v2.encrypted_operator_class);
-        // SELECT ore.e FROM ore WHERE id = 42 INTO ore_term;
+        // EQL v3 uses functional indexes over the term-extraction functions:
+        // CREATE INDEX ON encrypted (eql_v3.ord_term(encrypted_text));
 
         for n in 1..=10 {
             let id = random_id();
@@ -34,12 +34,8 @@ mod tests {
 
         let client = connect_with_tls(PROXY).await;
 
-        let sql = "CREATE INDEX ON encrypted (encrypted_text eql_v2.encrypted_operator_class)";
+        let sql = "CREATE INDEX ON encrypted (eql_v3.ord_term(encrypted_text))";
         let _ = client.simple_query(sql).await;
-
-        // let sql =
-        //     "EXPLAIN ANALYZE SELECT encrypted_text FROM encrypted WHERE encrypted_text <= '{\"hm\": \"abc\"}'::jsonb::eql_v2_encrypted";
-        // let result = simple_query::<String>(sql).await;
 
         let sql = "EXPLAIN ANALYZE SELECT encrypted_text FROM encrypted WHERE encrypted_text <= $1";
 
