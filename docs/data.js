@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1784787051181,
+  "lastUpdate": 1784864257744,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -22488,6 +22488,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 38.756402,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "2f907354521eb112f6ce64b6f1bb2bc7830eb0e2",
+          "message": "[1/6] docs: set up agent-skill conventions and domain glossaries",
+          "timestamp": "2026-07-24T03:34:50Z",
+          "url": "https://github.com/cipherstash/proxy/pull/422/commits/2f907354521eb112f6ce64b6f1bb2bc7830eb0e2"
+        },
+        "date": 1784864256455,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 39.228834,
             "unit": "Number"
           }
         ]
