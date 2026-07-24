@@ -1818,8 +1818,8 @@ mod test {
                         assert_eq!(
                             statement.to_string(),
                             "SELECT \
-                            eql_v3.jsonb_path_exists(eql_col, '<encrypted-selector($.another-secret)>'::JSONB::public.eql_v3_text_search), \
-                            eql_v3.jsonb_path_query(eql_col, '<encrypted-selector($.secret)>'::JSONB::public.eql_v3_text_search), \
+                            eql_v3.jsonb_path_exists(eql_col, '<encrypted-selector($.another-secret)>'), \
+                            eql_v3.jsonb_path_query(eql_col, '<encrypted-selector($.secret)>'), \
                             jsonb_path_query(native_col, '$.not-secret') \
                             FROM employees"
                         );
@@ -1936,7 +1936,9 @@ mod test {
                     value: ast::Value::SingleQuotedString(s),
                     span: _,
                 }) => {
-                    format!("'<encrypted-selector({s})>'::JSONB::public.eql_v3_text_search")
+                    // A jsonb_path_query selector is emitted as bare encrypted-selector
+                    // text (eql_v3.jsonb_path_query(json, text)), not a jsonb cast.
+                    format!("'<encrypted-selector({s})>'")
                 }
                 _ => panic!("unsupported expr type in test util"),
             })

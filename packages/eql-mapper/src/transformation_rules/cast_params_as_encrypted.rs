@@ -1,6 +1,6 @@
 use super::helpers::{cast_to_v3_domain, v3_cast_target};
 use super::TransformationRule;
-use crate::unifier::{Type, Value as UnifierValue};
+use crate::unifier::{EqlTerm, Type, Value as UnifierValue};
 use crate::EqlMapperError;
 use sqltk::parser::ast::{Expr, Value, ValueWithSpan};
 use sqltk::parser::tokenizer::Span;
@@ -36,6 +36,19 @@ impl<'ast> TransformationRule<'ast> for CastParamsAsEncrypted<'ast> {
             else {
                 return Ok(false);
             };
+
+            // A JSON selector operand (RHS of `->`/`->>`, or the path argument of
+            // `jsonb_path_query`) is passed to the EQL v3 function as the encrypted
+            // selector *text* — `eql_v3."->"(json, text)`, `jsonb_path_query(json,
+            // text)` — not a jsonb query-domain payload. The proxy encrypts these
+            // params as SteVec selectors, so the placeholder is left bare (its type
+            // is inferred from the function signature) rather than cast to the
+            // `eql_v3.query_*` twin. Mirrors the JsonAccessor arm of
+            // `CastLiteralsAsEncrypted`.
+            if matches!(eql_term, EqlTerm::JsonAccessor(_) | EqlTerm::JsonPath(_)) {
+                return Ok(false);
+            }
+
             let identity = eql_term.eql_value().domain_identity().clone();
             let (schema, domain) = v3_cast_target(node_path, &identity);
 

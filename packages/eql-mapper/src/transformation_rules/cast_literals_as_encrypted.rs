@@ -53,18 +53,19 @@ impl<'ast> TransformationRule<'ast> for CastLiteralsAsEncrypted<'ast> {
 
                     let target_node = target_node.downcast_mut::<Expr>().unwrap();
                     *target_node = match eql_term {
-                        // A JSON field selector (the RHS of `->`/`->>`) is passed
-                        // to `eql_v3."->"(json, text)` as the encrypted-selector
-                        // *text*, not a jsonb-domain payload.
-                        //
-                        // NOTE (assumption to confirm against the encrypt pipeline):
-                        // the encrypted replacement is the selector string itself.
-                        // If it is instead a jsonb payload, this needs the selector
-                        // extracted rather than emitted verbatim.
-                        EqlTerm::JsonAccessor(_) => Expr::Value(ValueWithSpan {
-                            value: replacement,
-                            span: Span::empty(),
-                        }),
+                        // A JSON selector — the RHS of `->`/`->>`, or the path
+                        // argument of `jsonb_path_query` — is passed to the EQL v3
+                        // function as the encrypted-selector *text*
+                        // (`eql_v3."->"(json, text)`, `jsonb_path_query(json,
+                        // text)`), not a jsonb-domain payload. The encrypt pipeline
+                        // produces that selector text (a SteVec `QueryOp::SteVecSelector`
+                        // token), so it is emitted verbatim, uncast.
+                        EqlTerm::JsonAccessor(_) | EqlTerm::JsonPath(_) => {
+                            Expr::Value(ValueWithSpan {
+                                value: replacement,
+                                span: Span::empty(),
+                            })
+                        }
                         _ => {
                             let identity = eql_term.eql_value().domain_identity().clone();
                             let (schema, domain) = v3_cast_target(node_path, &identity);
