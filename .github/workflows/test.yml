@@ -1,8 +1,10 @@
 name: Test
 on:
+  # No `branches` filter: run on pull requests targeting ANY base branch, not
+  # just `main`. Stacked/queued PRs target intermediate branches (e.g.
+  # `queue/<name>/...`), so a `branches: [main]` filter skipped CI on every PR
+  # in a stack except the front one.
   pull_request:
-    branches:
-      - main
     paths-ignore:
      - '.github/workflows/release.yml' # ignore unrelated workflow
      - '.github/workflows/benchmark.yml' # ignore unrelated workflow
