@@ -10,16 +10,18 @@ use crate::{
     proxy::EncryptionService,
 };
 use cipherstash_client::{
-    encryption::{Plaintext, QueryOp},
+    encryption::{DecryptOptions, Plaintext, QueryOp},
     eql::{
-        decrypt_eql, encrypt_eql, EqlCiphertext, EqlDecryptOpts, EqlEncryptOpts, EqlOperation,
+        encrypt_eql_v3, EqlCiphertextV3, EqlEncryptOpts, EqlOperation, EqlOutputV3,
         PreparedPlaintext,
     },
     schema::column::IndexType,
+    zerokms::{Decryptable, EncryptedRecord, RecordWithNonce, RetrieveKeyPayload},
 };
 use eql_mapper::EqlTermVariant;
 use metrics::{counter, histogram};
 use moka::future::Cache;
+use std::convert::Infallible;
 use std::{
     borrow::Cow,
     sync::Arc,
@@ -32,6 +34,75 @@ use super::{init_zerokms_client, ScopedCipher, ZerokmsClient};
 
 /// Memory size of a single ScopedCipher instance for cache weighing
 const SCOPED_CIPHER_SIZE: usize = std::mem::size_of::<ScopedCipher>();
+
+/// An EQL v3 stored payload reduced to something the cipher can decrypt.
+///
+/// The two arms are not interchangeable, which is why this exists rather than a
+/// plain `Vec<RecordWithNonce>`: `RecordWithNonce` unconditionally reports a
+/// nonce override and an AAD selector, so wrapping a scalar record in one would
+/// decrypt against a nonce the value was never encrypted with.
+#[derive(Debug)]
+enum V3Record {
+    /// A scalar payload's `c` — self-describing, nonce derived from the data
+    /// key's IV, nothing bound into the AAD.
+    Scalar(EncryptedRecord),
+    /// A SteVec document's root entry, reassembled from the document's `h`
+    /// header. Nonce and AAD both derive from the entry's selector.
+    SteVecRoot(RecordWithNonce),
+}
+
+impl Decryptable for V3Record {
+    type Error = Infallible;
+
+    fn keyset_id(&self) -> Option<Uuid> {
+        match self {
+            V3Record::Scalar(record) => record.keyset_id(),
+            V3Record::SteVecRoot(record) => record.keyset_id(),
+        }
+    }
+
+    fn retrieve_key_payload(&self) -> Result<RetrieveKeyPayload<'_>, Self::Error> {
+        match self {
+            V3Record::Scalar(record) => record.retrieve_key_payload(),
+            V3Record::SteVecRoot(record) => record.retrieve_key_payload(),
+        }
+    }
+
+    fn into_encrypted_record(self) -> Result<EncryptedRecord, Self::Error> {
+        match self {
+            V3Record::Scalar(record) => record.into_encrypted_record(),
+            V3Record::SteVecRoot(record) => record.into_encrypted_record(),
+        }
+    }
+
+    fn nonce_override(&self) -> Option<[u8; 12]> {
+        match self {
+            V3Record::Scalar(_) => None,
+            V3Record::SteVecRoot(record) => record.nonce_override(),
+        }
+    }
+
+    fn aad_selector(&self) -> Option<[u8; 16]> {
+        match self {
+            V3Record::Scalar(_) => None,
+            V3Record::SteVecRoot(record) => record.aad_selector(),
+        }
+    }
+}
+
+/// Decode a SteVec entry's hex-encoded tokenized selector into the 16 bytes the
+/// AEAD binding needs.
+fn decode_ste_vec_selector(selector: &str) -> Result<[u8; 16], EncryptError> {
+    let bytes = hex::decode(selector).map_err(|_| EncryptError::SteVecSelectorInvalid {
+        selector: selector.to_string(),
+    })?;
+
+    bytes
+        .try_into()
+        .map_err(|_| EncryptError::SteVecSelectorInvalid {
+            selector: selector.to_string(),
+        })
+}
 
 #[derive(Clone)]
 pub struct ZeroKms {
@@ -157,7 +228,7 @@ impl EncryptionService for ZeroKms {
         keyset_id: Option<KeysetIdentifier>,
         plaintexts: Vec<Option<Plaintext>>,
         columns: &[Option<Column>],
-    ) -> Result<Vec<Option<EqlCiphertext>>, Error> {
+    ) -> Result<Vec<Option<EqlOutputV3>>, Error> {
         debug!(target: ENCRYPT, msg="Encrypt", ?keyset_id, default_keyset_id = ?self.default_keyset_id);
 
         // A keyset is required if no default keyset has been configured
@@ -214,24 +285,29 @@ impl EncryptionService for ZeroKms {
             }
         }
 
-        // If no plaintexts to encrypt, return all None
+        // If no plaintexts to encrypt, return all None.
+        //
+        // Built by iteration rather than `vec![None; n]`: that needs `Clone`,
+        // and `EqlOutputV3` does not derive it (neither does the v2
+        // `EqlOutput` — the ciphertext types are `Clone`, the output wrappers
+        // are not).
         if prepared_plaintexts.is_empty() {
-            return Ok(vec![None; plaintexts.len()]);
+            return Ok((0..plaintexts.len()).map(|_| None).collect());
         }
 
         // Use default opts since cipher is already initialized with the correct keyset
         let opts = EqlEncryptOpts::default();
 
-        debug!(target: ENCRYPT, msg="Calling encrypt_eql", count = prepared_plaintexts.len());
+        debug!(target: ENCRYPT, msg="Calling encrypt_eql_v3", count = prepared_plaintexts.len());
         let encrypt_start = Instant::now();
-        let encrypted = encrypt_eql(cipher, prepared_plaintexts, &opts)
+        let encrypted = encrypt_eql_v3(cipher, prepared_plaintexts, &opts)
             .await
             .map_err(EncryptError::from)?;
         let encrypt_duration = encrypt_start.elapsed();
-        debug!(target: ENCRYPT, msg="encrypt_eql completed", count = encrypted.len(), duration_ms = encrypt_duration.as_millis());
+        debug!(target: ENCRYPT, msg="encrypt_eql_v3 completed", count = encrypted.len(), duration_ms = encrypt_duration.as_millis());
 
         // Reconstruct the result vector with None values in the right places
-        let mut result: Vec<Option<EqlCiphertext>> = vec![None; plaintexts.len()];
+        let mut result: Vec<Option<EqlOutputV3>> = (0..plaintexts.len()).map(|_| None).collect();
         for (idx, ciphertext) in indices.into_iter().zip(encrypted.into_iter()) {
             result[idx] = Some(ciphertext);
         }
@@ -247,7 +323,7 @@ impl EncryptionService for ZeroKms {
     async fn decrypt(
         &self,
         keyset_id: Option<KeysetIdentifier>,
-        ciphertexts: Vec<Option<EqlCiphertext>>,
+        ciphertexts: Vec<Option<EqlCiphertextV3>>,
     ) -> Result<Vec<Option<Plaintext>>, Error> {
         debug!(target: ENCRYPT, msg="Decrypt", ?keyset_id, default_keyset_id = ?self.default_keyset_id);
 
@@ -258,32 +334,71 @@ impl EncryptionService for ZeroKms {
 
         let cipher = self.init_cipher(keyset_id.clone()).await?;
 
-        // Collect indices and ciphertexts for non-None values
+        // Collect indices and the root records for non-None values.
+        //
+        // cipherstash-client has no `decrypt_eql_v3` counterpart to
+        // `encrypt_eql_v3` — the v2 `decrypt_eql` only accepts `EqlCiphertext`.
+        // We assemble the decryptable record ourselves, which is what
+        // protect-ffi does too (`encrypted_record_from_value`).
+        //
+        // Scalar: `c` is already the `EncryptedRecord` the v2 path would have
+        // unwrapped, and `EncryptedRecord` is `Decryptable`.
+        //
+        // SteVec: the document holds the key material once in the `h` header
+        // and each entry carries only raw AEAD bytes, so the record has to be
+        // reassembled from the header plus the ROOT entry (`sv[0]`, the same
+        // decryption-root invariant v2 had). The selector is the AEAD binding —
+        // its first 12 bytes are the nonce and all 16 go into the AAD — which is
+        // why the reassembled record is a `RecordWithNonce`.
         let mut indices: Vec<usize> = Vec::new();
-        let mut ciphertexts_to_decrypt: Vec<EqlCiphertext> = Vec::new();
+        let mut records_to_decrypt: Vec<V3Record> = Vec::new();
 
         for (idx, ct_opt) in ciphertexts.iter().enumerate() {
             if let Some(ct) = ct_opt {
+                let record = match ct {
+                    EqlCiphertextV3::Encrypted(payload) => {
+                        V3Record::Scalar(payload.ciphertext.clone())
+                    }
+                    EqlCiphertextV3::SteVec(document) => {
+                        let root = document
+                            .ste_vec
+                            .first()
+                            .ok_or(EncryptError::SteVecMissingRootEntry)?;
+
+                        let selector = decode_ste_vec_selector(&root.selector)?;
+                        V3Record::SteVecRoot(
+                            document
+                                .key_header
+                                .record_with_selector(root.ciphertext.clone(), selector),
+                        )
+                    }
+                };
                 indices.push(idx);
-                ciphertexts_to_decrypt.push(ct.clone());
+                records_to_decrypt.push(record);
             }
         }
 
         // If no ciphertexts to decrypt, return all None
-        if ciphertexts_to_decrypt.is_empty() {
+        if records_to_decrypt.is_empty() {
             return Ok(vec![None; ciphertexts.len()]);
         }
 
-        // Use default opts since cipher is already initialized with the correct keyset
-        let opts = EqlDecryptOpts::default();
+        // Default opts: the cipher is already scoped to the right keyset, and
+        // Proxy does not set a lock context.
+        let opts = DecryptOptions::default();
 
-        debug!(target: ENCRYPT, msg="Calling decrypt_eql", count = ciphertexts_to_decrypt.len());
+        debug!(target: ENCRYPT, msg="Decrypting EQL v3 records", count = records_to_decrypt.len());
         let decrypt_start = Instant::now();
-        let decrypted = decrypt_eql(cipher, ciphertexts_to_decrypt, &opts)
+        let decrypted = cipher
+            .decrypt(records_to_decrypt, &opts)
             .await
+            .map_err(ZeroKMSError::from)?
+            .into_iter()
+            .map(|bytes| Plaintext::from_slice(&bytes))
+            .collect::<Result<Vec<_>, _>>()
             .map_err(EncryptError::from)?;
         let decrypt_duration = decrypt_start.elapsed();
-        debug!(target: ENCRYPT, msg="decrypt_eql completed", count = decrypted.len(), duration_ms = decrypt_duration.as_millis());
+        debug!(target: ENCRYPT, msg="Decrypt completed", count = decrypted.len(), duration_ms = decrypt_duration.as_millis());
 
         // Reconstruct the result vector with None values in the right places
         let mut result: Vec<Option<Plaintext>> = vec![None; ciphertexts.len()];
