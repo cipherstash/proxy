@@ -1,13 +1,10 @@
-use std::mem;
 use std::{collections::HashMap, sync::Arc};
 
-use sqltk::parser::ast::{
-    Expr, Function, FunctionArg, FunctionArguments, Ident, ObjectName, ObjectNamePart,
-};
+use sqltk::parser::ast::{Expr, Function, FunctionArg, FunctionArguments};
 use sqltk::{AsNodeKey, NodeKey, NodePath, Visitable};
 
 use crate::unifier::{Type, Value};
-use crate::{get_sql_function, EqlMapperError};
+use crate::{get_eql_v3_function_name, get_sql_function, EqlMapperError};
 
 use super::TransformationRule;
 
@@ -56,10 +53,10 @@ impl<'ast> TransformationRule<'ast> for RewriteStandardSqlFnsOnEqlTypes<'ast> {
     ) -> Result<bool, EqlMapperError> {
         if self.would_edit(node_path, target_node) {
             let function = target_node.downcast_mut::<Function>().unwrap();
-            let mut existing_name = mem::take(&mut function.name.0);
-            existing_name.insert(0, ObjectNamePart::Identifier(Ident::new("eql_v2")));
-            function.name = ObjectName(existing_name);
-            return Ok(true);
+            if let Some(v3_name) = get_eql_v3_function_name(&function.name) {
+                function.name = v3_name;
+                return Ok(true);
+            }
         }
 
         Ok(false)
@@ -67,8 +64,12 @@ impl<'ast> TransformationRule<'ast> for RewriteStandardSqlFnsOnEqlTypes<'ast> {
 
     fn would_edit<N: Visitable>(&mut self, node_path: &NodePath<'ast>, _target_node: &N) -> bool {
         if let Some((_expr, function)) = node_path.last_2_as::<Expr, Function>() {
+            // Rewrite a pg_catalog function on an EQL type to its eql_v3
+            // counterpart — but only when one exists (e.g. `count` has none and is
+            // left to run natively on the encrypted value).
             return get_sql_function(&function.name).should_rewrite()
-                && self.uses_eql_type(function);
+                && self.uses_eql_type(function)
+                && get_eql_v3_function_name(&function.name).is_some();
         }
 
         false

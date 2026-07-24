@@ -5,7 +5,7 @@ use crate::postgresql::context::column::Column;
 use crate::postgresql::data::bind_param_from_sql;
 use crate::postgresql::format_code::FormatCode;
 use crate::postgresql::protocol::BytesMutReadString;
-use crate::EqlOutput;
+use crate::{EqlOutput, EqlQueryPayload};
 use crate::{SIZE_I16, SIZE_I32};
 use bytes::{Buf, BufMut, BytesMut};
 use cipherstash_client::encryption::Plaintext;
@@ -84,12 +84,24 @@ impl Bind {
     pub fn rewrite(&mut self, encrypted: Vec<Option<EqlOutput>>) -> Result<(), Error> {
         for (idx, ct) in encrypted.iter().enumerate() {
             if let Some(ct) = ct {
-                let json = serde_json::to_value(ct)?;
-
-                // convert json to bytes
-                let bytes = json.to_string().into_bytes();
-
-                self.param_values[idx].rewrite(&bytes);
+                match ct {
+                    // A JSON selector (`->`/`->>`/`jsonb_path_query`) is a bare
+                    // tokenized-selector hash bound directly as `text`, NOT jsonb.
+                    // Use the raw token: JSON-serializing it re-quotes the bare
+                    // string (`"<hash>"`), which never matches the stored per-entry
+                    // `s`. It must also skip the jsonb version header a binary
+                    // rewrite would prepend — the binary wire form of `text` is
+                    // just its raw bytes, and a leading `0x01` corrupts the
+                    // selector so `->` matches nothing.
+                    EqlOutput::Query(EqlQueryPayload::Selector(s)) => {
+                        self.param_values[idx].rewrite_text(s.clone().into_bytes());
+                    }
+                    // convert json to bytes
+                    _ => {
+                        let bytes = serde_json::to_value(ct)?.to_string().into_bytes();
+                        self.param_values[idx].rewrite(&bytes);
+                    }
+                }
             }
         }
         Ok(())
@@ -153,6 +165,20 @@ impl BindParam {
         }
 
         self.bytes.extend_from_slice(bytes);
+        self.dirty = true;
+    }
+
+    /// Rewrite this param as a bare `text` value, without the jsonb version
+    /// header [`rewrite`] prepends for binary jsonb payloads.
+    ///
+    /// Used for the tokenized selector of a JSON field access (`->`/`->>`/
+    /// `jsonb_path_query`), which is bound as `text`, not jsonb. The binary
+    /// wire form of `text` is simply its raw UTF-8 bytes, so no header is
+    /// added in either format — a stray `0x01` would corrupt the selector and
+    /// stop `->` from matching any stored entry.
+    pub fn rewrite_text(&mut self, bytes: Vec<u8>) {
+        self.bytes.clear();
+        self.bytes.extend_from_slice(&bytes);
         self.dirty = true;
     }
 

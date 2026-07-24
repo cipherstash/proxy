@@ -121,6 +121,286 @@ mod test {
     }
 
     #[test]
+    fn like_on_token_match_column_type_checks() {
+        let schema = resolver(schema! {
+            tables: {
+                users: {
+                    id,
+                    email (EQL: TokenMatch),
+                }
+            }
+        });
+
+        let statement = parse("SELECT id FROM users WHERE email LIKE 'a%'");
+        assert!(
+            type_check(schema, &statement).is_ok(),
+            "LIKE on a TokenMatch column should type check"
+        );
+    }
+
+    #[test]
+    fn like_rewrites_to_match_term() {
+        let schema = resolver(schema! {
+            tables: {
+                users: {
+                    id,
+                    email (EQL: TokenMatch),
+                }
+            }
+        });
+
+        let statement = parse("SELECT id FROM users WHERE email LIKE 'a%'");
+
+        let typed = match type_check(schema, &statement) {
+            Ok(typed) => typed,
+            Err(err) => panic!("type check failed: {err:#?}"),
+        };
+
+        match typed.transform(HashMap::from_iter([(
+            typed.literals[0].1.as_node_key(),
+            ast::Value::SingleQuotedString("ENCRYPTED".into()),
+        )])) {
+            Ok(transformed) => assert_eq!(
+                transformed.to_string(),
+                "SELECT id FROM users WHERE eql_v3.match_term(email) @> eql_v3.match_term('ENCRYPTED'::JSONB::eql_v3.query_text_match)"
+            ),
+            Err(err) => panic!("transformation failed: {err}"),
+        };
+    }
+
+    #[test]
+    fn ord_ore_column_rewrites_to_ord_term_ore() {
+        // The explicit EQL("<domain>") form pins a block-ORE ordering domain, so
+        // the rewrite must select ord_term_ore (not ord_term) and the query twin
+        // must be query_integer_ord_ore.
+        let schema = resolver(schema! {
+            tables: {
+                events: {
+                    id,
+                    seq (EQL("eql_v3_integer_ord_ore"): Ord),
+                }
+            }
+        });
+
+        let statement = parse("SELECT id FROM events WHERE seq > 5");
+
+        let typed = match type_check(schema, &statement) {
+            Ok(typed) => typed,
+            Err(err) => panic!("type check failed: {err:#?}"),
+        };
+
+        match typed.transform(HashMap::from_iter([(
+            typed.literals[0].1.as_node_key(),
+            ast::Value::SingleQuotedString("ENCRYPTED".into()),
+        )])) {
+            Ok(transformed) => assert_eq!(
+                transformed.to_string(),
+                "SELECT id FROM events WHERE eql_v3.ord_term_ore(seq) > eql_v3.ord_term_ore('ENCRYPTED'::JSONB::eql_v3.query_integer_ord_ore)"
+            ),
+            Err(err) => panic!("transformation failed: {err}"),
+        };
+    }
+
+    #[test]
+    fn at_at_rewrites_to_match_term() {
+        let schema = resolver(schema! {
+            tables: {
+                users: {
+                    id,
+                    email (EQL: TokenMatch),
+                }
+            }
+        });
+
+        let statement = parse("SELECT id FROM users WHERE email @@ 'a'");
+
+        let typed = match type_check(schema, &statement) {
+            Ok(typed) => typed,
+            Err(err) => panic!("type check failed: {err:#?}"),
+        };
+
+        match typed.transform(HashMap::from_iter([(
+            typed.literals[0].1.as_node_key(),
+            ast::Value::SingleQuotedString("ENCRYPTED".into()),
+        )])) {
+            Ok(transformed) => assert_eq!(
+                transformed.to_string(),
+                "SELECT id FROM users WHERE eql_v3.match_term(email) @> eql_v3.match_term('ENCRYPTED'::JSONB::eql_v3.query_text_match)"
+            ),
+            Err(err) => panic!("transformation failed: {err}"),
+        };
+    }
+
+    #[test]
+    fn like_on_non_match_encrypted_column_is_rejected() {
+        // Regression: LIKE used to unify to Native and bypass capability checking.
+        // An encrypted column that only implements Eq must not accept LIKE.
+        let schema = resolver(schema! {
+            tables: {
+                users: {
+                    id,
+                    email (EQL: Eq),
+                }
+            }
+        });
+
+        let statement = parse("SELECT id FROM users WHERE email LIKE 'a%'");
+        assert!(
+            type_check(schema, &statement).is_err(),
+            "LIKE on a non-TokenMatch encrypted column should be a capability error"
+        );
+    }
+
+    #[test]
+    fn ilike_rewrites_to_match_term() {
+        // ILIKE takes the same match arm as LIKE (RewriteEqlMatchOps handles both),
+        // so it must rewrite to the identical match_term form.
+        let schema = resolver(schema! {
+            tables: {
+                users: {
+                    id,
+                    email (EQL: TokenMatch),
+                }
+            }
+        });
+
+        let statement = parse("SELECT id FROM users WHERE email ILIKE 'a%'");
+
+        let typed = match type_check(schema, &statement) {
+            Ok(typed) => typed,
+            Err(err) => panic!("type check failed: {err:#?}"),
+        };
+
+        match typed.transform(HashMap::from_iter([(
+            typed.literals[0].1.as_node_key(),
+            ast::Value::SingleQuotedString("ENCRYPTED".into()),
+        )])) {
+            Ok(transformed) => assert_eq!(
+                transformed.to_string(),
+                "SELECT id FROM users WHERE eql_v3.match_term(email) @> eql_v3.match_term('ENCRYPTED'::JSONB::eql_v3.query_text_match)"
+            ),
+            Err(err) => panic!("transformation failed: {err}"),
+        };
+    }
+
+    #[test]
+    fn not_like_rewrites_to_negated_match_term() {
+        // The `negated` arm wraps the containment in `NOT (...)` — otherwise
+        // untested (only the positive LIKE/ILIKE/@@ forms had rewrite coverage).
+        let schema = resolver(schema! {
+            tables: {
+                users: {
+                    id,
+                    email (EQL: TokenMatch),
+                }
+            }
+        });
+
+        let statement = parse("SELECT id FROM users WHERE email NOT LIKE 'a%'");
+
+        let typed = match type_check(schema, &statement) {
+            Ok(typed) => typed,
+            Err(err) => panic!("type check failed: {err:#?}"),
+        };
+
+        match typed.transform(HashMap::from_iter([(
+            typed.literals[0].1.as_node_key(),
+            ast::Value::SingleQuotedString("ENCRYPTED".into()),
+        )])) {
+            Ok(transformed) => assert_eq!(
+                transformed.to_string(),
+                "SELECT id FROM users WHERE NOT (eql_v3.match_term(email) @> eql_v3.match_term('ENCRYPTED'::JSONB::eql_v3.query_text_match))"
+            ),
+            Err(err) => panic!("transformation failed: {err}"),
+        };
+    }
+
+    #[test]
+    fn not_ilike_rewrites_to_negated_match_term() {
+        // NOT ILIKE takes the same negated match arm as NOT LIKE.
+        let schema = resolver(schema! {
+            tables: {
+                users: {
+                    id,
+                    email (EQL: TokenMatch),
+                }
+            }
+        });
+
+        let statement = parse("SELECT id FROM users WHERE email NOT ILIKE 'a%'");
+
+        let typed = match type_check(schema, &statement) {
+            Ok(typed) => typed,
+            Err(err) => panic!("type check failed: {err:#?}"),
+        };
+
+        match typed.transform(HashMap::from_iter([(
+            typed.literals[0].1.as_node_key(),
+            ast::Value::SingleQuotedString("ENCRYPTED".into()),
+        )])) {
+            Ok(transformed) => assert_eq!(
+                transformed.to_string(),
+                "SELECT id FROM users WHERE NOT (eql_v3.match_term(email) @> eql_v3.match_term('ENCRYPTED'::JSONB::eql_v3.query_text_match))"
+            ),
+            Err(err) => panic!("transformation failed: {err}"),
+        };
+    }
+
+    #[test]
+    fn native_like_still_type_checks() {
+        // Regression: routing LIKE/ILIKE through the TokenMatch-bounded rule must
+        // not regress plain LIKE on a native (non-encrypted) column — Native
+        // satisfies all bounds, so `WHERE native_col LIKE 'x'` still type checks.
+        let schema = resolver(schema! {
+            tables: {
+                users: {
+                    id,
+                    email,
+                }
+            }
+        });
+
+        let statement = parse("SELECT id FROM users WHERE email LIKE 'a%'");
+        assert!(
+            type_check(schema, &statement).is_ok(),
+            "LIKE on a native column should still type check"
+        );
+    }
+
+    #[test]
+    fn update_set_casts_stored_value() {
+        // ADR-0003's second stored-value context: an UPDATE SET on an encrypted
+        // column casts the assigned literal to the column domain, exactly like
+        // INSERT. Only INSERT had cast-target rewrite coverage before this.
+        let schema = resolver(schema! {
+            tables: {
+                employees: {
+                    id,
+                    salary (EQL),
+                }
+            }
+        });
+
+        let statement = parse("UPDATE employees SET salary = 20000 WHERE id = 123");
+
+        let typed = match type_check(schema, &statement) {
+            Ok(typed) => typed,
+            Err(err) => panic!("type check failed: {err:#?}"),
+        };
+
+        match typed.transform(HashMap::from_iter([(
+            typed.literals[0].1.as_node_key(),
+            ast::Value::SingleQuotedString("ENCRYPTED".into()),
+        )])) {
+            Ok(transformed) => assert_eq!(
+                transformed.to_string(),
+                "UPDATE employees SET salary = 'ENCRYPTED'::JSONB::public.eql_v3_text WHERE id = 123"
+            ),
+            Err(err) => panic!("transformation failed: {err}"),
+        };
+    }
+
+    #[test]
     fn insert_with_value() {
         // init_tracing();
         let schema = resolver(schema! {
@@ -1130,7 +1410,7 @@ mod test {
         )])) {
             Ok(transformed_statement) => assert_eq!(
                 transformed_statement.to_string(),
-                "SELECT * FROM employees WHERE salary > 'ENCRYPTED'::JSONB::eql_v2_encrypted"
+                "SELECT * FROM employees WHERE eql_v3.ord_term(salary) > eql_v3.ord_term('ENCRYPTED'::JSONB::eql_v3.query_text_ord)"
             ),
             Err(err) => panic!("statement transformation failed: {err}"),
         };
@@ -1180,7 +1460,7 @@ mod test {
         )])) {
             Ok(transformed_statement) => assert_eq!(
                 transformed_statement.to_string(),
-                "INSERT INTO employees (salary) VALUES ('ENCRYPTED'::JSONB::eql_v2_encrypted)"
+                "INSERT INTO employees (salary) VALUES ('ENCRYPTED'::JSONB::public.eql_v3_text)"
             ),
             Err(err) => panic!("statement transformation failed: {err}"),
         };
@@ -1460,7 +1740,7 @@ mod test {
                 match typed.transform(HashMap::new()) {
                     Ok(statement) => assert_eq!(
                         statement.to_string(),
-                        "SELECT eql_v2.min(salary), eql_v2.max(salary), department FROM employees GROUP BY department".to_string()
+                        "SELECT eql_v3.min(salary), eql_v3.max(salary), department FROM employees GROUP BY department".to_string()
                     ),
                     Err(err) => panic!("transformation failed: {err}"),
                 }
@@ -1476,7 +1756,7 @@ mod test {
             tables: {
                 employees: {
                     id,
-                    eql_col (EQL),
+                    eql_col (EQL: Eq),
                     native_col,
                 }
             }
@@ -1493,7 +1773,7 @@ mod test {
                 Ok(statement) => {
                     assert_eq!(
                             statement.to_string(),
-                            "SELECT * FROM employees WHERE eql_col = $1::JSONB::eql_v2_encrypted AND native_col = $2"
+                            "SELECT * FROM employees WHERE eql_v3.eq_term(eql_col) = eql_v3.eq_term($1::JSONB::eql_v3.query_text_eq) AND native_col = $2"
                         );
                 }
                 Err(err) => panic!("transformation failed: {err}"),
@@ -1538,8 +1818,8 @@ mod test {
                         assert_eq!(
                             statement.to_string(),
                             "SELECT \
-                            eql_v2.jsonb_path_exists(eql_col, '<encrypted-selector($.another-secret)>'::JSONB::eql_v2_encrypted), \
-                            eql_v2.jsonb_path_query(eql_col, '<encrypted-selector($.secret)>'::JSONB::eql_v2_encrypted), \
+                            eql_v3.jsonb_path_exists(eql_col, '<encrypted-selector($.another-secret)>'), \
+                            eql_v3.jsonb_path_query(eql_col, '<encrypted-selector($.secret)>'), \
                             jsonb_path_query(native_col, '$.not-secret') \
                             FROM employees"
                         );
@@ -1656,7 +1936,9 @@ mod test {
                     value: ast::Value::SingleQuotedString(s),
                     span: _,
                 }) => {
-                    format!("'<encrypted-selector({s})>'::JSONB::eql_v2_encrypted")
+                    // A jsonb_path_query selector is emitted as bare encrypted-selector
+                    // text (eql_v3.jsonb_path_query(json, text)), not a jsonb cast.
+                    format!("'<encrypted-selector({s})>'")
                 }
                 _ => panic!("unsupported expr type in test util"),
             })
@@ -1677,7 +1959,7 @@ mod test {
         match type_check(schema, &statement) {
             Ok(typed) => match typed.transform(encrypted_literals) {
                 Ok(statement) => {
-                    let rewritten_fn_name = format!("eql_v2.{fn_name}");
+                    let rewritten_fn_name = format!("eql_v3.{fn_name}");
                     assert_eq!(
                         statement.to_string(),
                         format!(
@@ -1714,10 +1996,13 @@ mod test {
                 )) {
                     Ok(statement) => {
                         let expected = match op {
-                            "@>" => "SELECT id, eql_v2.jsonb_contains(notes, '<encrypted-selector(medications)>'::JSONB::eql_v2_encrypted) AS meds FROM patients".to_string(),
-                            "<@" => "SELECT id, eql_v2.jsonb_contained_by(notes, '<encrypted-selector(medications)>'::JSONB::eql_v2_encrypted) AS meds FROM patients".to_string(),
-                            // Other operators are not transformed
-                            _ => format!("SELECT id, notes {op} '<encrypted-selector(medications)>'::JSONB::eql_v2_encrypted AS meds FROM patients"),
+                            "@>" => "SELECT id, eql_v3.jsonb_contains(notes, '<encrypted-selector(medications)>'::JSONB::public.eql_v3_text_search) AS meds FROM patients".to_string(),
+                            "<@" => "SELECT id, eql_v3.jsonb_contained_by(notes, '<encrypted-selector(medications)>'::JSONB::public.eql_v3_text_search) AS meds FROM patients".to_string(),
+                            // -> / ->> field access: functionalised to eql_v3."->"/"->>",
+                            // with the field selector passed as encrypted text.
+                            "->" => "SELECT id, eql_v3.\"->\"(notes, '<encrypted-selector(medications)>') AS meds FROM patients".to_string(),
+                            "->>" => "SELECT id, eql_v3.\"->>\"(notes, '<encrypted-selector(medications)>') AS meds FROM patients".to_string(),
+                            _ => format!("SELECT id, notes {op} '<encrypted-selector(medications)>'::JSONB::public.eql_v3_text_search AS meds FROM patients"),
                         };
                         assert_eq!(statement.to_string(), expected)
                     }
@@ -1740,12 +2025,12 @@ mod test {
         });
 
         let statement = parse(
-            "SELECT id FROM patients WHERE eql_v2.jsonb_array(notes) @> eql_v2.jsonb_array(notes)",
+            "SELECT id FROM patients WHERE eql_v3.jsonb_array(notes) @> eql_v3.jsonb_array(notes)",
         );
 
         match type_check(schema, &statement) {
             Ok(_) => (),
-            Err(err) => panic!("type check failed for eql_v2.jsonb_array: {err}"),
+            Err(err) => panic!("type check failed for eql_v3.jsonb_array: {err}"),
         }
     }
 
@@ -1760,11 +2045,11 @@ mod test {
             }
         });
 
-        let statement = parse("SELECT id FROM patients WHERE eql_v2.jsonb_contains(notes, notes)");
+        let statement = parse("SELECT id FROM patients WHERE eql_v3.jsonb_contains(notes, notes)");
 
         match type_check(schema, &statement) {
             Ok(_) => (),
-            Err(err) => panic!("type check failed for eql_v2.jsonb_contains: {err}"),
+            Err(err) => panic!("type check failed for eql_v3.jsonb_contains: {err}"),
         }
     }
 
@@ -1780,16 +2065,16 @@ mod test {
         });
 
         let statement =
-            parse("SELECT id FROM patients WHERE eql_v2.jsonb_contained_by(notes, notes)");
+            parse("SELECT id FROM patients WHERE eql_v3.jsonb_contained_by(notes, notes)");
 
         match type_check(schema, &statement) {
             Ok(_) => (),
-            Err(err) => panic!("type check failed for eql_v2.jsonb_contained_by: {err}"),
+            Err(err) => panic!("type check failed for eql_v3.jsonb_contained_by: {err}"),
         }
     }
 
     #[test]
-    fn eql_v2_jsonb_contains_with_param() {
+    fn eql_v3_jsonb_contains_with_param() {
         let schema = resolver(schema! {
             tables: {
                 patients: {
@@ -1799,7 +2084,7 @@ mod test {
             }
         });
 
-        let statement = parse("SELECT id FROM patients WHERE eql_v2.jsonb_contains(notes, $1)");
+        let statement = parse("SELECT id FROM patients WHERE eql_v3.jsonb_contains(notes, $1)");
 
         let typed = type_check(schema, &statement)
             .map_err(|err| err.to_string())
@@ -1812,7 +2097,7 @@ mod test {
         match typed.transform(HashMap::new()) {
             Ok(statement) => assert_eq!(
                 statement.to_string(),
-                "SELECT id FROM patients WHERE eql_v2.jsonb_contains(notes, $1::JSONB::eql_v2_encrypted)"
+                "SELECT id FROM patients WHERE eql_v3.jsonb_contains(notes, $1::JSONB::public.eql_v3_text_search)"
             ),
             Err(err) => panic!("transformation failed: {err}"),
         }
@@ -1840,15 +2125,15 @@ mod test {
 
         // Verify function call exists
         assert!(
-            sql.contains("eql_v2.jsonb_contains"),
-            "Expected @> to be transformed to eql_v2.jsonb_contains, got: {sql}"
+            sql.contains("eql_v3.jsonb_contains"),
+            "Expected @> to be transformed to eql_v3.jsonb_contains, got: {sql}"
         );
 
         // CRITICAL: Verify the parameter is cast to enable GIN index usage
-        // The cast ::JSONB::eql_v2_encrypted is required for GIN indexes to work
+        // The cast ::JSONB::public.eql_v3_text_search is required for GIN indexes to work
         assert!(
-            sql.contains("::JSONB::eql_v2_encrypted") || sql.contains("::jsonb::eql_v2_encrypted"),
-            "Expected parameter to be cast as ::JSONB::eql_v2_encrypted for GIN index support, got: {sql}"
+            sql.contains("::JSONB::public.eql_v3_text_search") || sql.contains("::jsonb::public.eql_v3_text_search"),
+            "Expected parameter to be cast as ::JSONB::public.eql_v3_text_search for GIN index support, got: {sql}"
         );
     }
 
@@ -1874,14 +2159,14 @@ mod test {
 
         // Verify function call exists
         assert!(
-            sql.contains("eql_v2.jsonb_contained_by"),
-            "Expected <@ to be transformed to eql_v2.jsonb_contained_by, got: {sql}"
+            sql.contains("eql_v3.jsonb_contained_by"),
+            "Expected <@ to be transformed to eql_v3.jsonb_contained_by, got: {sql}"
         );
 
         // CRITICAL: Verify the parameter is cast to enable GIN index usage
         assert!(
-            sql.contains("::JSONB::eql_v2_encrypted") || sql.contains("::jsonb::eql_v2_encrypted"),
-            "Expected parameter to be cast as ::JSONB::eql_v2_encrypted for GIN index support, got: {sql}"
+            sql.contains("::JSONB::public.eql_v3_text_search") || sql.contains("::jsonb::public.eql_v3_text_search"),
+            "Expected parameter to be cast as ::JSONB::public.eql_v3_text_search for GIN index support, got: {sql}"
         );
     }
 
@@ -1914,8 +2199,8 @@ mod test {
 
         // Verify function call exists inside the EXPLAIN
         assert!(
-            sql.contains("eql_v2.jsonb_contains"),
-            "Expected @> inside EXPLAIN to be transformed to eql_v2.jsonb_contains, got: {sql}"
+            sql.contains("eql_v3.jsonb_contains"),
+            "Expected @> inside EXPLAIN to be transformed to eql_v3.jsonb_contains, got: {sql}"
         );
     }
 
@@ -2076,7 +2361,7 @@ mod test {
             }
         });
 
-        let statement = parse("SELECT eql_v2.jsonb_path_query(notes, $1) as notes FROM patients");
+        let statement = parse("SELECT eql_v3.jsonb_path_query(notes, $1) as notes FROM patients");
 
         let typed = type_check(schema, &statement)
             .map_err(|err| err.to_string())

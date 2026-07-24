@@ -4,7 +4,7 @@ use crate::{
     EqlTrait, IdentCase, TypeInferencer,
 };
 use eql_mapper_macros::trace_infer;
-use sqltk::parser::ast::{AccessExpr, Array, Expr, Ident, Subscript};
+use sqltk::parser::ast::{AccessExpr, Array, BinaryOperator, Expr, Ident, Subscript};
 
 #[trace_infer]
 impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
@@ -112,23 +112,38 @@ impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
                 get_sql_binop_rule(op).apply_constraints(self, left, right, expr_val)?;
             }
 
-            //customer_name LIKE 'A%';
+            // `customer_name LIKE 'A%'`. Route LIKE/ILIKE through the `~~`/`~~*`
+            // operator rules so an encrypted LHS must implement `TokenMatch` (the
+            // pattern becomes its `Tokenized` type, the result is `Native`).
+            // Previously this only unified the result with `Native`, so LIKE on an
+            // encrypted column bypassed capability checking entirely.
             Expr::Like {
-                negated: _,
-                expr,
-                pattern,
-                escape_char: _,
-                any: false,
-            }
-            | Expr::ILike {
-                negated: _,
+                negated,
                 expr,
                 pattern,
                 escape_char: _,
                 any: false,
             } => {
-                self.unify_node_with_type(expr_val, Type::native())?;
-                self.unify_nodes(&**expr, &**pattern)?;
+                let op = if *negated {
+                    BinaryOperator::PGNotLikeMatch
+                } else {
+                    BinaryOperator::PGLikeMatch
+                };
+                get_sql_binop_rule(&op).apply_constraints(self, expr, pattern, expr_val)?;
+            }
+            Expr::ILike {
+                negated,
+                expr,
+                pattern,
+                escape_char: _,
+                any: false,
+            } => {
+                let op = if *negated {
+                    BinaryOperator::PGNotILikeMatch
+                } else {
+                    BinaryOperator::PGILikeMatch
+                };
+                get_sql_binop_rule(&op).apply_constraints(self, expr, pattern, expr_val)?;
             }
 
             Expr::Like { any: true, .. } | Expr::ILike { any: true, .. } => {

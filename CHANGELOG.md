@@ -6,6 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+
+- **EQL v3 (searchable encryption)**: Proxy now targets EQL v3. Encrypted columns are declared with self-configuring, typed `jsonb` domains (for example `eql_v3_text_search`, `eql_v3_integer_ord`, `eql_v3_json_search`) that encode both the scalar type and the column's searchable capabilities in the column type itself, replacing EQL v2's opaque `eql_v2_encrypted` composite type and its separate `eql_v2_configuration` table. The bundled `cipherstash-client` is upgraded to 0.42.0 and EQL to 3.0.2. Existing v2-encrypted data and schemas must be migrated to v3.
+
+### Added
+
+- **Encrypted full-text match with `@@`**: The `@@` operator is now supported on encrypted text columns whose domain carries a match (bloom-filter) term, rewritten to the EQL v3 `eql_v3.match_term` form.
+
+### Fixed
+
+- **`LIKE`/`ILIKE` capability checking**: `LIKE` and `ILIKE` on an encrypted column are now gated by the column's token-match capability. Previously these predicates bypassed capability checking and were silently accepted on columns that do not support fuzzy match; they are now rejected with a capability error.
+
 ## [2.2.4] - 2026-06-18
 
 ### Fixed

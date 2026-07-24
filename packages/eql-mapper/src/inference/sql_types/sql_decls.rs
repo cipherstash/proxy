@@ -28,6 +28,7 @@ static SQL_BINARY_OPERATORS: LazyLock<HashMap<BinaryOperator, BinaryOpDecl>> =
             <T>(T !~~ <T as TokenMatch>::Tokenized) -> Native where T: TokenMatch; // NOT LIKE
             <T>(T ~~* <T as TokenMatch>::Tokenized) -> Native where T: TokenMatch; // ILIKE
             <T>(T !~~* <T as TokenMatch>::Tokenized) -> Native where T: TokenMatch; // NOT ILIKE
+            <T>(T @@ <T as TokenMatch>::Tokenized) -> Native where T: TokenMatch; // @@ fuzzy match
         };
         ops.into_iter()
             .map(|binary_op_spec| (binary_op_spec.op.clone(), binary_op_spec))
@@ -65,17 +66,20 @@ static SQL_FUNCTION_TYPES: LazyLock<HashMap<IdentCase<ObjectName>, FunctionDecl>
             pg_catalog.jsonb_array_length<T>(T) -> Native where T: JsonLike;
             pg_catalog.jsonb_array_elements<T>(T) -> SetOf<T> where T: JsonLike;
             pg_catalog.jsonb_array_elements_text<T>(T) -> SetOf<T> where T: JsonLike;
-            eql_v2.min<T>(T) -> T where T: Ord;
-            eql_v2.max<T>(T) -> T where T: Ord;
-            eql_v2.jsonb_path_query<T>(T, <T as JsonLike>::Path) -> T where T: JsonLike;
-            eql_v2.jsonb_path_query_first<T>(T, <T as JsonLike>::Path) -> T where T: JsonLike;
-            eql_v2.jsonb_path_exists<T>(T, <T as JsonLike>::Path) -> Native where T: JsonLike;
-            eql_v2.jsonb_array_length<T>(T) -> Native where T: JsonLike;
-            eql_v2.jsonb_array_elements<T>(T) -> SetOf<T> where T: JsonLike;
-            eql_v2.jsonb_array_elements_text<T>(T) -> SetOf<T> where T: JsonLike;
-            eql_v2.jsonb_array<T>(T) -> Native where T: Contain;
-            eql_v2.jsonb_contains<T>(T, T) -> Native where T: Contain;
-            eql_v2.jsonb_contained_by<T>(T, T) -> Native where T: Contain;
+            eql_v3.min<T>(T) -> T where T: Ord;
+            eql_v3.max<T>(T) -> T where T: Ord;
+            eql_v3.jsonb_path_query<T>(T, <T as JsonLike>::Path) -> T where T: JsonLike;
+            eql_v3.jsonb_path_query_first<T>(T, <T as JsonLike>::Path) -> T where T: JsonLike;
+            eql_v3.jsonb_path_exists<T>(T, <T as JsonLike>::Path) -> Native where T: JsonLike;
+            eql_v3.jsonb_array_length<T>(T) -> Native where T: JsonLike;
+            eql_v3.jsonb_array_elements<T>(T) -> SetOf<T> where T: JsonLike;
+            eql_v3.jsonb_array_elements_text<T>(T) -> SetOf<T> where T: JsonLike;
+            // JSON containment (`@>`/`<@`) — retained in v3, scoped to JSON
+            // columns (ADR-0002 amendment). `@>`/`<@` on scalar encrypted columns
+            // still raise.
+            eql_v3.jsonb_array<T>(T) -> Native where T: Contain;
+            eql_v3.jsonb_contains<T>(T, T) -> Native where T: Contain;
+            eql_v3.jsonb_contained_by<T>(T, T) -> Native where T: Contain;
         };
 
         HashMap::from_iter(
@@ -100,6 +104,23 @@ pub(crate) fn get_sql_function(fn_name: &ObjectName) -> SqlFunction {
         .get(&fully_qualified_fn_name)
         .map(SqlFunction::Explicit)
         .unwrap_or(SqlFunction::Fallback)
+}
+
+/// The `eql_v3.<name>` counterpart a `pg_catalog` function is rewritten to on EQL
+/// types, or `None` if none is declared. `count`, for example, works on encrypted
+/// values natively (Postgres counts the domain directly), so it has no counterpart
+/// and is left untouched.
+pub(crate) fn get_eql_v3_function_name(fn_name: &ObjectName) -> Option<ObjectName> {
+    let bare = fn_name.0.last()?;
+    let eql_v3_name = ObjectName(vec![
+        ObjectNamePart::Identifier(Ident::new("eql_v3")),
+        bare.clone(),
+    ]);
+    if SQL_FUNCTION_TYPES.contains_key(&IdentCase(eql_v3_name.clone())) {
+        Some(eql_v3_name)
+    } else {
+        None
+    }
 }
 
 #[cfg(test)]

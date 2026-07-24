@@ -16,6 +16,8 @@ mod cast_params_as_encrypted;
 mod fail_on_placeholder_change;
 mod preserve_effective_aliases;
 mod rewrite_containment_ops;
+mod rewrite_eql_comparison_ops;
+mod rewrite_eql_match_ops;
 mod rewrite_standard_sql_fns_on_eql_types;
 
 use std::marker::PhantomData;
@@ -25,6 +27,8 @@ pub(crate) use cast_params_as_encrypted::*;
 pub(crate) use fail_on_placeholder_change::*;
 pub(crate) use preserve_effective_aliases::*;
 pub(crate) use rewrite_containment_ops::*;
+pub(crate) use rewrite_eql_comparison_ops::*;
+pub(crate) use rewrite_eql_match_ops::*;
 pub(crate) use rewrite_standard_sql_fns_on_eql_types::*;
 
 use crate::EqlMapperError;

@@ -169,7 +169,7 @@ impl Parse for EqlTrait {
         Err(syn::Error::new(
             input.span(),
             format!(
-                "Expected Eq, Ord, TokenMatch or JsonLike while parsing EqlTrait; got: {}",
+                "Expected Eq, Ord, TokenMatch, JsonLike or Contain while parsing EqlTrait; got: {}",
                 input.cursor().token_stream()
             ),
         ))
@@ -477,6 +477,11 @@ impl Parse for SqltkBinOp {
 
         if input.peek(token::At) {
             let _: token::At = input.parse()?;
+            // `@@` (fuzzy match) or `@>` (containment).
+            if input.peek(token::At) {
+                let _: token::At = input.parse()?;
+                return Ok(Self(quote!(::sqltk::parser::ast::BinaryOperator::AtAt)));
+            }
             let _: token::Gt = input.parse()?;
             return Ok(Self(quote!(::sqltk::parser::ast::BinaryOperator::AtArrow)));
         }
@@ -552,7 +557,7 @@ impl Parse for SqltkBinOp {
 
         Err(syn::Error::new(
             input.span(),
-            "Expected an operator corresponding to one of the EQL traits Eq, Ord, TokenMatch or JsonLike".to_string(),
+            "Expected an operator corresponding to one of the EQL traits Eq, Ord, TokenMatch, JsonLike or Contain".to_string(),
         ))
     }
 }
