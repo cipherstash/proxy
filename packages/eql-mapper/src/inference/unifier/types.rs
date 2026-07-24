@@ -441,6 +441,15 @@ impl DomainIdentity {
     /// operand casts to the twin (which carries the term-only payload), never to
     /// the column domain (whose CHECK requires the stored ciphertext).
     pub fn query_twin(&self) -> (&'static str, String) {
+        // Every JSON domain (`json`, `json_search`, `json_entry`) shares a single
+        // query-operand type in the catalog — `eql_v3.query_json` — because a
+        // jsonb query operand is a SteVec needle whose shape does not vary by the
+        // column's searchable capability. The generic `query_<bare>` rule below is
+        // correct only for the scalar families (e.g. `query_integer_ord`); applied
+        // to JSON it would emit a non-existent `eql_v3.query_json_search`.
+        if self.token == TokenType::Json {
+            return ("eql_v3", "query_json".to_string());
+        }
         let bare = self
             .domain
             .value
@@ -1006,6 +1015,21 @@ mod domain_identity_tests {
         assert_eq!(
             di("eql_v3_text_search_ore").query_twin(),
             ("eql_v3", "query_text_search_ore".to_string())
+        );
+    }
+
+    #[test]
+    fn json_domains_all_share_the_query_json_twin() {
+        // The catalog defines a single jsonb query operand type, eql_v3.query_json,
+        // for every JSON column domain — the generic query_<bare> rule would emit a
+        // non-existent eql_v3.query_json_search / eql_v3.query_json_entry.
+        assert_eq!(
+            di("eql_v3_json").query_twin(),
+            ("eql_v3", "query_json".to_string())
+        );
+        assert_eq!(
+            di("eql_v3_json_search").query_twin(),
+            ("eql_v3", "query_json".to_string())
         );
     }
 }
