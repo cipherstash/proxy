@@ -5,7 +5,7 @@ use crate::postgresql::context::column::Column;
 use crate::postgresql::data::bind_param_from_sql;
 use crate::postgresql::format_code::FormatCode;
 use crate::postgresql::protocol::BytesMutReadString;
-use crate::EqlOutput;
+use crate::{EqlOutput, EqlQueryPayload};
 use crate::{SIZE_I16, SIZE_I32};
 use bytes::{Buf, BufMut, BytesMut};
 use cipherstash_client::encryption::Plaintext;
@@ -84,10 +84,15 @@ impl Bind {
     pub fn rewrite(&mut self, encrypted: Vec<Option<EqlOutput>>) -> Result<(), Error> {
         for (idx, ct) in encrypted.iter().enumerate() {
             if let Some(ct) = ct {
-                let json = serde_json::to_value(ct)?;
-
-                // convert json to bytes
-                let bytes = json.to_string().into_bytes();
+                let bytes = match ct {
+                    // A JSON selector (`->`/`->>`/`jsonb_path_query`) is a bare
+                    // tokenized-selector hash bound directly as `text`. Use the raw
+                    // token: JSON-serializing it re-quotes the bare string
+                    // (`"<hash>"`), which never matches the stored per-entry `s`.
+                    EqlOutput::Query(EqlQueryPayload::Selector(s)) => s.clone().into_bytes(),
+                    // convert json to bytes
+                    _ => serde_json::to_value(ct)?.to_string().into_bytes(),
+                };
 
                 self.param_values[idx].rewrite(&bytes);
             }
