@@ -16,13 +16,30 @@ Its intended purposes are:
 
 ## Searchable encryption
 
-Searchable encryption allows queries over encrypted data so long as the data has enabled the appropriate encrypted search configuration for a column.
+Searchable encryption allows queries over encrypted data so long as the column's
+type declares the required capability.
 
-The following searchable encryption strategies are supported:
+**EQL v3 model — self-configuring domain types.** Unlike EQL v2 (which used an
+opaque `eql_v2_encrypted` type plus an `eql_v2.add_search_config` call per
+column), EQL v3 gives each `(token type × capability)` combination its own
+Postgres domain type over `jsonb`. The column type alone declares both the
+encryption and what can be searched — there is no separate config call. The
+capability groups below map to v3 domain-name suffixes:
+
+| Capability (v2 name)  | v3 domain suffix                          | Operations |
+|-----------------------|-------------------------------------------|------------|
+| match                 | `_match` (e.g. `eql_v3_text_match`)        | `LIKE`/`ILIKE`, `@@` |
+| ore / comparison      | `_ord` / `_ord_ore` (e.g. `eql_v3_integer_ord`) | `<` `<=` `=` `<>` `>` `>=`, `MIN`/`MAX` |
+| unique / equality     | `_eq` (e.g. `eql_v3_text_eq`)              | `=` `<>` |
+| ste_vec (encrypted JSON) | `json_search` (`eql_v3_json_search`)    | `->` `->>` `@>` `<@`, `jsonb_path_*` |
+
+The showcase uses **`eql_v3_json_search`** (the ste_vec/encrypted-JSON domain)
+for its encrypted columns.
 
 ### match
 
-Provides support for text search operations over encrypted data. Enables use of the SQL `LIKE`, `NOT LIKE`, `ILIKE`, `NOT ILIKE` keywords on encrypted text.
+Text search over encrypted text (`_match` domains). Enables `LIKE`, `NOT LIKE`,
+`ILIKE`, `NOT ILIKE` and the `@@` fuzzy-match operator.
 
 Operators:
 
@@ -30,10 +47,11 @@ Operators:
 - `!~~` (same as `NOT LIKE`)
 - `~~*` (same as `ILIKE`)
 - `!~~*` (same as `NOT LIKE`)
+- `@@` (fuzzy match)
 
 ### ore
 
-Provides support for compare & equality operators on encrypted data.
+Compare & equality operators on encrypted scalars (`_ord` / `_ord_ore` domains).
 
 - `<`  (less than)
 - `<=` (less than or equal)
@@ -42,13 +60,15 @@ Provides support for compare & equality operators on encrypted data.
 - `>`  (greater than)
 - `>=` (greater than or equal)
 
-This implies that the built-in SQL functions `MIN` and `MAX` work on encrypted columns when they have ORE enabled.
+This implies that the built-in SQL functions `MIN` and `MAX` work on encrypted
+columns typed as an ordering domain.
 
 ### unique
 
-Provides support for equality testing of encrypted columns (`=`).
+Equality testing of encrypted columns (`=`) via an `_eq` domain.
 
-This strategy is poorly named because it does NOT imply that there is a unique constraint.
+This capability is historically called "unique" but does NOT imply a unique
+constraint.
 
 ### ste_vec
 
@@ -70,7 +90,7 @@ Functions:
 - `jsonb_array_elements`
 - `jsonb_array_elements_text`
 
-When an `ste_vec` is created for a JSON document it allows the following operations to be performed:
+An `eql_v3_json_search` (ste_vec) column allows the following operations to be performed:
 
 - Containment operations (`@>` & `<@`)
 - Fields or array elements extracted using `->` or `json_query_path`
@@ -95,7 +115,7 @@ Encrypted columns can only be passed as arguments to a SQL function if the value
 
 For example, the SQL `AVG` function cannot be used on encrypted numeric values. But the SQL `MIN` and `MAX` functions can be used on an encrypted value that has an ORE index.
 
-**IMPORTANT: CAST operations cannot work on encrypted data** because casting would require decryption of the encrypted data within the database, which is impossible. When a column has an `ste_vec` configuration, comparison and ordering operations work directly on the encrypted values without requiring CAST operations.
+**IMPORTANT: CAST operations cannot work on encrypted data** because casting would require decryption of the encrypted data within the database, which is impossible. When a column is typed as an `eql_v3_json_search` (ste_vec) domain, comparison and ordering operations work directly on the encrypted values without requiring CAST operations.
 
 When generating tests, it is important that Claude understands the fundamental limitations of EQL so that it does not generate test cases or example code that can never work.
 
