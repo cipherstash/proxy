@@ -35,7 +35,7 @@ impl DataRow {
                 .filter(|_| data_column.is_not_null())
                 .and_then(|config| {
                     data_column
-                        .try_into()
+                        .to_eql_ciphertext()
                         .inspect_err(|err| match err {
                             Error::Encrypt(EncryptError::ColumnIsNull) => {
                                 debug!(target: DECRYPT, msg ="ColumnIsNull", ?config);
@@ -179,24 +179,36 @@ impl TryFrom<DataColumn> for BytesMut {
     }
 }
 
-impl TryFrom<&mut DataColumn> for EqlCiphertext {
-    type Error = Error;
-
-    fn try_from(col: &mut DataColumn) -> Result<Self, Error> {
-        // EQL v3 column types (`eql_v3_text_eq`, `eql_v3_integer_ord`, …) are
-        // DOMAINS over `jsonb`, so a value arrives with jsonb's representation.
-        //
-        // EQL v2's `eql_v2_encrypted` was a composite type, which is why this
-        // used to strip a `("…")` wrapper in text and a 12-byte rowtype header
-        // in binary. Neither exists any more — a domain is wire-identical to its
-        // base type.
-        //
-        //   text   — the JSON object itself, no wrapper and no doubled quotes
-        //   binary — a 1-byte jsonb version header followed by the JSON text
-        //
-        // The two are told apart by the leading byte: the version header is
-        // `0x01`, and JSON text for an EQL payload always starts with `{`.
-        let Some(bytes) = &col.bytes else {
+impl DataColumn {
+    /// Parse this column's bytes into an [`EqlCiphertext`].
+    ///
+    /// EQL v3 column types (`eql_v3_text_eq`, `eql_v3_integer_ord`, …) are
+    /// DOMAINS over `jsonb`, so a value arrives with jsonb's representation.
+    ///
+    /// EQL v2's `eql_v2_encrypted` was a composite type, which is why this
+    /// used to strip a `("…")` wrapper in text and a 12-byte rowtype header
+    /// in binary. Neither exists any more — a domain is wire-identical to its
+    /// base type.
+    ///
+    ///   text   — the JSON object itself, no wrapper and no doubled quotes
+    ///   binary — a 1-byte jsonb version header followed by the JSON text
+    ///
+    /// The two are told apart by the leading byte: the version header is
+    /// `0x01`, and JSON text for an EQL payload always starts with `{`.
+    ///
+    /// The JSON is usually a self-describing payload — a scalar `{v,i,c,…}` or
+    /// a SteVec document `{v,k:"sv",i,h,sv}` — and deserialises directly. The
+    /// exception is a JSON field access (`eql_v3."->"(…)` /
+    /// `eql_v3.jsonb_path_query(…)`), whose result is a single
+    /// `eql_v3_json_entry` (`{v,i,h,s,c,op}`) — one SteVec entry merged with
+    /// its document envelope. That has a `c`, so it would masquerade as a
+    /// scalar `Encrypted` payload, but its `c` is an *entry* ciphertext that
+    /// only decrypts with the entry's selector-derived nonce. So when the
+    /// payload is a bare entry (see [`is_json_entry`]) it is reshaped into a
+    /// one-entry SteVec document (see [`json_entry_into_ste_vec_document`]) and
+    /// the ordinary SteVec decrypt path recovers the field value.
+    fn to_eql_ciphertext(&self) -> Result<EqlCiphertext, Error> {
+        let Some(bytes) = &self.bytes else {
             return Err(EncryptError::ColumnCouldNotBeParsed.into());
         };
 
@@ -206,11 +218,58 @@ impl TryFrom<&mut DataColumn> for EqlCiphertext {
             None => return Err(EncryptError::ColumnCouldNotBeParsed.into()),
         };
 
-        serde_json::from_slice(json).map_err(|err| {
-            debug!(target: DECRYPT, error = err.to_string());
-            err.into()
-        })
+        let mut value: serde_json::Value =
+            serde_json::from_slice(json).map_err(log_deserialise_error)?;
+
+        if is_json_entry(&value) {
+            json_entry_into_ste_vec_document(&mut value)?;
+        }
+
+        serde_json::from_value(value).map_err(log_deserialise_error)
     }
+}
+
+/// Whether a decoded EQL payload is a bare `eql_v3_json_entry` — the result of
+/// a JSON field access (`eql_v3."->"(…)` / `eql_v3.jsonb_path_query(…)`).
+///
+/// A root-level selector `s` is the tell: a scalar `Encrypted` payload has no
+/// selector at all, and a SteVec document carries selectors only inside its
+/// `sv[]` entries, never at the root.
+fn is_json_entry(value: &serde_json::Value) -> bool {
+    value.get("s").is_some()
+}
+
+/// Reshape a single `eql_v3_json_entry` into a one-entry SteVec document.
+///
+/// The entry is `{v,i,h,s,c,op}`: document-envelope fields (`v`, `i`, `h`)
+/// alongside one SteVec entry's fields (`s`, `c`, the optional array marker
+/// `a`, and the optional ordering term `op`). Move the entry fields under
+/// `sv:[{…}]` and tag the object as a SteVec (`k:"sv"`), yielding
+/// `{v,k:"sv",i,h,sv:[{s,c,a?,op?}]}` — the shape an [`EqlCiphertext`] SteVec
+/// document deserialises from and the decrypt path knows how to open.
+fn json_entry_into_ste_vec_document(value: &mut serde_json::Value) -> Result<(), Error> {
+    use serde_json::Value;
+
+    let object = value
+        .as_object_mut()
+        .ok_or(EncryptError::ColumnCouldNotBeParsed)?;
+
+    let mut entry = serde_json::Map::new();
+    for key in ["s", "c", "a", "op"] {
+        if let Some(field) = object.remove(key) {
+            entry.insert(key.to_owned(), field);
+        }
+    }
+
+    object.insert("k".to_owned(), Value::String("sv".to_owned()));
+    object.insert("sv".to_owned(), Value::Array(vec![Value::Object(entry)]));
+
+    Ok(())
+}
+
+fn log_deserialise_error(err: serde_json::Error) -> Error {
+    debug!(target: DECRYPT, error = err.to_string());
+    err.into()
 }
 
 #[cfg(test)]
