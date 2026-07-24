@@ -46,6 +46,10 @@ sqltk = { version = "0.10.0" }
 cipherstash-client = { version = "=0.42.0" }
 cipherstash-config = { version = "=0.42.0" }
 cts-common = { version = "=0.42.0" }
+# EQL v3 domain catalog: maps Postgres domain names to (token type, SEM terms).
+# The authoritative source for a column's domain identity (ADR-0002); only the
+# SchemaManager depends on it, keeping eql-mapper wire-format-agnostic.
+eql-bindings = { version = "=3.0.1" }
 
 thiserror = "2.0.9"
 tokio = { version = "1.44.2", features = ["full"] }

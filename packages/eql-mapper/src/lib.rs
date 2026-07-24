@@ -21,8 +21,8 @@ pub use model::*;
 pub use param::*;
 pub use type_checked_statement::*;
 pub use unifier::{
-    Array, AssociatedType, EqlTerm, EqlTermVariant, EqlTrait, EqlTraits, EqlValue, NativeValue,
-    Projection, ProjectionColumn, SetOf, TableColumn, Type, Value,
+    Array, AssociatedType, DomainIdentity, EqlTerm, EqlTermVariant, EqlTrait, EqlTraits, EqlValue,
+    NativeValue, Projection, ProjectionColumn, SetOf, TableColumn, TokenType, Type, Value,
 };
 
 pub(crate) use dep::*;
@@ -105,7 +105,7 @@ mod test {
                 assert_eq!(
                     typed.literals,
                     vec![(
-                        EqlTerm::Full(EqlValue(
+                        EqlTerm::Full(EqlValue::with_canonical_identity(
                             TableColumn {
                                 table: id("users"),
                                 column: id("email"),
@@ -138,7 +138,7 @@ mod test {
         match type_check(schema, &statement) {
             Ok(typed) => {
                 assert!(typed.literals.contains(&(
-                    EqlTerm::Full(EqlValue(
+                    EqlTerm::Full(EqlValue::with_canonical_identity(
                         TableColumn {
                             table: id("users"),
                             column: id("email")
@@ -170,7 +170,7 @@ mod test {
         match type_check(schema, &statement) {
             Ok(typed) => {
                 assert!(typed.literals.contains(&(
-                    EqlTerm::Full(EqlValue(
+                    EqlTerm::Full(EqlValue::with_canonical_identity(
                         TableColumn {
                             table: id("users"),
                             column: id("email")
@@ -203,7 +203,7 @@ mod test {
         match type_check(schema, &statement) {
             Ok(typed) => {
                 assert!(typed.literals.contains(&(
-                    EqlTerm::Full(EqlValue(
+                    EqlTerm::Full(EqlValue::with_canonical_identity(
                         TableColumn {
                             table: id("users"),
                             column: id("email")
@@ -544,7 +544,7 @@ mod test {
 
         match type_check(schema, &statement) {
             Ok(typed) => {
-                let a = Value::Eql(EqlTerm::Full(EqlValue(
+                let a = Value::Eql(EqlTerm::Full(EqlValue::with_canonical_identity(
                     TableColumn {
                         table: id("users"),
                         column: id("email"),
@@ -552,7 +552,7 @@ mod test {
                     EqlTraits::default(),
                 )));
 
-                let b = Value::Eql(EqlTerm::Full(EqlValue(
+                let b = Value::Eql(EqlTerm::Full(EqlValue::with_canonical_identity(
                     TableColumn {
                         table: id("users"),
                         column: id("first_name"),
@@ -592,7 +592,7 @@ mod test {
 
         match type_check(schema, &statement) {
             Ok(typed) => {
-                let a = Value::Eql(EqlTerm::Full(EqlValue(
+                let a = Value::Eql(EqlTerm::Full(EqlValue::with_canonical_identity(
                     TableColumn {
                         table: id("users"),
                         column: id("salary"),
@@ -600,7 +600,7 @@ mod test {
                     EqlTraits::from(EqlTrait::Ord),
                 )));
 
-                let b = Value::Eql(EqlTerm::Full(EqlValue(
+                let b = Value::Eql(EqlTerm::Full(EqlValue::with_canonical_identity(
                     TableColumn {
                         table: id("users"),
                         column: id("age"),
@@ -1113,7 +1113,7 @@ mod test {
         assert_eq!(
             typed.literals,
             vec![(
-                EqlTerm::Full(EqlValue(
+                EqlTerm::Full(EqlValue::with_canonical_identity(
                     TableColumn {
                         table: id("employees"),
                         column: id("salary")
@@ -1163,7 +1163,7 @@ mod test {
         assert_eq!(
             typed.literals,
             vec![(
-                EqlTerm::Full(EqlValue(
+                EqlTerm::Full(EqlValue::with_canonical_identity(
                     TableColumn {
                         table: id("employees"),
                         column: id("salary")

@@ -3,7 +3,10 @@
 //! Column type information is unused currently.
 
 use super::ident_case::*;
-use crate::{iterator_ext::IteratorExt, unifier::EqlTraits};
+use crate::{
+    iterator_ext::IteratorExt,
+    unifier::{DomainIdentity, EqlTraits},
+};
 use core::fmt::Debug;
 use derive_more::Display;
 use sqltk::parser::ast::{Ident, ObjectName, ObjectNamePart};
@@ -38,17 +41,22 @@ pub struct Column {
     pub kind: ColumnKind,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Display, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Display, Hash)]
 pub enum ColumnKind {
+    #[display("Native")]
     Native,
-    Eql(EqlTraits),
+    /// An encrypted column: its capabilities, plus the inert v3 domain identity
+    /// (see ADR-0002), which the v3 schema loader populates from the Postgres
+    /// domain name.
+    #[display("Eql({})", _0)]
+    Eql(EqlTraits, DomainIdentity),
 }
 
 impl Column {
-    pub fn eql(name: Ident, features: EqlTraits) -> Self {
+    pub fn eql(name: Ident, features: EqlTraits, identity: DomainIdentity) -> Self {
         Self {
             name,
-            kind: ColumnKind::Eql(features),
+            kind: ColumnKind::Eql(features, identity),
         }
     }
 
@@ -123,7 +131,7 @@ impl Schema {
             .map(|col| SchemaTableColumn {
                 table: table.name.clone(),
                 column: col.name.clone(),
-                kind: col.kind,
+                kind: col.kind.clone(),
             })
             .collect())
     }
@@ -143,7 +151,7 @@ impl Schema {
                     Ok(column) => Ok(SchemaTableColumn {
                         table: table.name.clone(),
                         column: column.name.clone(),
-                        kind: column.kind,
+                        kind: column.kind.clone(),
                     }),
                     Err(_) => Err(SchemaError::ColumnNotFound(
                         table_name.to_string(),
@@ -273,11 +281,32 @@ macro_rules! schema {
     (@add_columns $table:ident $( $column_name:ident $(($($options:tt)+))? , )* ) => {
         $( schema!(@add_column $table $column_name $(($($options)*))? ); )*
     };
+    // Explicit v3 domain typname, e.g. `col (EQL("eql_v3_integer_ord_ore"): Ord)`.
+    // The token type is parsed from the domain name; use this when a test cares
+    // about the token type or the OPE-vs-ORE variant.
+    (@add_column $table:ident $column_name:ident (EQL($domain:literal) $(: $trait_:ident $(+ $trait_rest:ident)*)?) ) => {
+        {
+            let __traits = $crate::to_eql_trait_impls!($($trait_ $($trait_rest)*)?);
+            $table.add_column(std::sync::Arc::new($crate::model::Column::eql(
+                ::sqltk::parser::ast::Ident::new(stringify!($column_name)),
+                __traits,
+                $crate::unifier::DomainIdentity::from_domain_name($domain)
+                    .expect("EQL(<domain>) must be a valid v3 domain typname"),
+            )));
+        }
+    };
+    // Default: no explicit domain — synthesise a canonical `text`-token identity
+    // for the given capabilities (fine for the many tests that don't exercise the
+    // token type).
     (@add_column $table:ident $column_name:ident (EQL $(: $trait_:ident $(+ $trait_rest:ident)*)?) ) => {
-        $table.add_column(std::sync::Arc::new($crate::model::Column::eql(
-            ::sqltk::parser::ast::Ident::new(stringify!($column_name)),
-            $crate::to_eql_trait_impls!($($trait_ $($trait_rest)*)?)
-        )));
+        {
+            let __traits = $crate::to_eql_trait_impls!($($trait_ $($trait_rest)*)?);
+            $table.add_column(std::sync::Arc::new($crate::model::Column::eql(
+                ::sqltk::parser::ast::Ident::new(stringify!($column_name)),
+                __traits,
+                $crate::unifier::DomainIdentity::canonical($crate::unifier::TokenType::Text, __traits),
+            )));
+        }
     };
     (@add_column $table:ident $column_name:ident (PK) ) => {
         $table.add_column(

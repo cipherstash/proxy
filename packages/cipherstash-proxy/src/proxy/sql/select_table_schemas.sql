@@ -2,7 +2,11 @@ SELECT
     t.table_schema,
     t.table_name,
     array_agg(c.column_name)::text[] AS columns,
-    array_agg(c.udt_name)::text[] AS column_type_names
+    array_agg(c.udt_name)::text[] AS column_type_names,
+    -- EQL v3 encrypted columns are jsonb-backed DOMAINs, so `udt_name` reports
+    -- the base type (`jsonb`); the domain typname (e.g. `eql_v3_integer_ord`)
+    -- is only available via `domain_name`. NULL for non-domain columns.
+    array_agg(c.domain_name)::text[] AS column_domain_names
 FROM
     information_schema.tables t
 LEFT JOIN
