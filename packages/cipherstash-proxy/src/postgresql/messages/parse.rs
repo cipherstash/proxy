@@ -8,6 +8,9 @@ use bytes::{Buf, BufMut, BytesMut};
 use postgres_types::Type;
 use std::{ffi::CString, io::Cursor};
 
+/// PostgreSQL's "unspecified type, infer it" param OID in a Parse message.
+const UNSPECIFIED_TYPE_OID: i32 = 0;
+
 #[derive(Debug, Clone)]
 pub struct Parse {
     pub code: char,
@@ -37,6 +40,39 @@ impl Parse {
                 self.param_types[idx] = Type::JSONB.oid() as i32;
                 self.dirty = true;
             }
+        }
+    }
+
+    ///
+    /// Declares a param type for every placeholder the rewrite left
+    /// unreferenced.
+    ///
+    /// A JSON field equality (`col -> $1 = $2`) fuses both operands into one
+    /// needle, so `$1` disappears from the rewritten SQL while staying in the
+    /// client's Bind. PostgreSQL allows an unreferenced param, but only if its
+    /// type is declared — otherwise it fails with "could not determine data type
+    /// of parameter $1". Clients that let the server infer types (the common
+    /// case) send no types at all, so the array is grown here.
+    ///
+    /// Slots that are still referenced are left as OID 0, which PostgreSQL reads
+    /// as "unspecified, infer it" — so this never overrides a type the query
+    /// itself determines. The dropped selectors are bound as the encrypted
+    /// selector *text*, hence TEXT.
+    ///
+    pub fn declare_unreferenced_param_types(&mut self, indexes: &[usize]) {
+        let Some(required_len) = indexes.iter().max().map(|idx| idx + 1) else {
+            return;
+        };
+
+        if self.param_types.len() < required_len {
+            self.param_types.resize(required_len, UNSPECIFIED_TYPE_OID);
+            self.num_params = self.param_types.len() as i16;
+            self.dirty = true;
+        }
+
+        for idx in indexes {
+            self.param_types[*idx] = Type::TEXT.oid() as i32;
+            self.dirty = true;
         }
     }
 

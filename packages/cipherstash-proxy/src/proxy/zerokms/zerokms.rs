@@ -283,6 +283,23 @@ impl EncryptionService for ZeroKms {
                         .find(|i| matches!(i.index_type, IndexType::SteVec { .. }))
                         .map(|index| EqlOperation::Query(&index.index_type, QueryOp::SteVecTerm))
                         .unwrap_or(EqlOperation::Store),
+
+                    // JsonValueSelector is the fused value operand of a JSON
+                    // field equality (`col -> sel = value`). Its plaintext is the
+                    // composition input `{"path", "value"}` (built by the
+                    // frontend from BOTH SQL operands); the client MACs them
+                    // together into one selector, applying the column's term
+                    // filters to the value. The result is a one-entry containment
+                    // needle matched by `eql_v3.jsonb_contains`.
+                    EqlTermVariant::JsonValueSelector => col
+                        .config
+                        .indexes
+                        .iter()
+                        .find(|i| matches!(i.index_type, IndexType::SteVec { .. }))
+                        .map(|index| {
+                            EqlOperation::Query(&index.index_type, QueryOp::SteVecValueSelector)
+                        })
+                        .unwrap_or(EqlOperation::Store),
                 };
 
                 let prepared = PreparedPlaintext::new(

@@ -3,7 +3,11 @@ pub mod phase_timing;
 pub mod portal;
 pub mod statement;
 pub mod statement_metadata;
-pub use self::{phase_timing::PhaseTiming, portal::Portal, statement::Statement};
+pub use self::{
+    phase_timing::PhaseTiming,
+    portal::Portal,
+    statement::{JsonSelectorPath, Statement},
+};
 use super::{
     column_mapper::ColumnMapper,
     messages::{describe::Describe, Name, Target},
@@ -1116,6 +1120,7 @@ mod tests {
             projection_columns: vec![],
             literal_columns: vec![],
             postgres_param_types: vec![],
+            json_value_selectors: std::collections::HashMap::new(),
         }
     }
 
