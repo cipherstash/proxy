@@ -326,6 +326,7 @@ impl EqlTerm {
             EqlTerm::JsonAccessor(_) => EqlTraits::none(),
             EqlTerm::JsonPath(_) => EqlTraits::none(),
             EqlTerm::Tokenized(_) => EqlTraits::none(),
+            EqlTerm::JsonOrd(_) => EqlTraits::none(),
         }
     }
 }

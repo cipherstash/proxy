@@ -195,6 +195,13 @@ pub enum EqlTerm {
     /// [`EqlValue`] that implements the EQL trait `TokenMatch`.
     #[display("EQL:Tokenized({})", _0)]
     Tokenized(EqlValue),
+
+    /// A scalar ordering operand for an encrypted JSON field comparison — the
+    /// non-JSON side of `col -> sel <op> value` where `<op>` is `<`/`<=`/`>`/`>=`.
+    /// Encrypted as a SteVec ordering term (`{v,i,op}`, `QueryOp::SteVecTerm`) and
+    /// compared via `eql_v3.ord_term`, so it is NOT a whole JSON document.
+    #[display("EQL:JsonOrd({})", _0)]
+    JsonOrd(EqlValue),
 }
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Display, Hash)]
@@ -209,6 +216,8 @@ pub enum EqlTermVariant {
     JsonPath,
     #[display("EQL:Tokenized")]
     Tokenized,
+    #[display("EQL:JsonOrd")]
+    JsonOrd,
 }
 
 impl EqlTerm {
@@ -224,7 +233,8 @@ impl EqlTerm {
             | EqlTerm::Partial(eql_value, _)
             | EqlTerm::JsonAccessor(eql_value)
             | EqlTerm::JsonPath(eql_value)
-            | EqlTerm::Tokenized(eql_value) => eql_value,
+            | EqlTerm::Tokenized(eql_value)
+            | EqlTerm::JsonOrd(eql_value) => eql_value,
         }
     }
 
@@ -235,6 +245,7 @@ impl EqlTerm {
             EqlTerm::JsonAccessor(_) => EqlTermVariant::JsonAccessor,
             EqlTerm::JsonPath(_) => EqlTermVariant::JsonPath,
             EqlTerm::Tokenized(_) => EqlTermVariant::Tokenized,
+            EqlTerm::JsonOrd(_) => EqlTermVariant::JsonOrd,
         }
     }
 }

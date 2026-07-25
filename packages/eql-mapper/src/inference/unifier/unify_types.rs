@@ -113,6 +113,10 @@ impl UnifyTypes<EqlTerm, EqlTerm> for Unifier<'_> {
                 Ok(EqlTerm::Tokenized(lhs.clone()).into())
             }
 
+            (EqlTerm::JsonOrd(lhs), EqlTerm::JsonOrd(rhs)) if lhs == rhs => {
+                Ok(EqlTerm::JsonOrd(lhs.clone()).into())
+            }
+
             (_, _) => Err(TypeError::Conflict(format!(
                 "cannot unify EQL terms {lhs} and {rhs}"
             ))),
