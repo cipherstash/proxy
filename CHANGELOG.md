@@ -14,6 +14,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - **Encrypted full-text match with `@@`**: The `@@` operator is now supported on encrypted text columns whose domain carries a match (bloom-filter) term, rewritten to the EQL v3 `eql_v3.match_term` form.
 
+- **Equality on encrypted JSON fields**: `WHERE col -> 'field' = 'value'` now works on encrypted JSON columns, in both the simple and extended query protocols, and in the `->>` and `jsonb_path_query_first(col, path) = value` spellings. `<>` is supported as the negation. The field and the value are combined into a single encrypted value-selector needle and matched by containment, so a query never reveals the field and value separately. Matching is exact and case-sensitive; the value must be a JSON scalar (comparing a whole object or array to a field is rejected — use containment with `@>` instead).
+
 ### Fixed
 
 - **`LIKE`/`ILIKE` capability checking**: `LIKE` and `ILIKE` on an encrypted column are now gated by the column's token-match capability. Previously these predicates bypassed capability checking and were silently accepted on columns that do not support fuzzy match; they are now rejected with a capability error.
