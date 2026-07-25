@@ -202,6 +202,19 @@ pub enum EqlTerm {
     /// compared via `eql_v3.ord_term`, so it is NOT a whole JSON document.
     #[display("EQL:JsonOrd({})", _0)]
     JsonOrd(EqlValue),
+
+    /// The scalar value operand of an encrypted JSON field *equality* — the
+    /// non-JSON side of `col -> sel = value` (and the `->>` /
+    /// `jsonb_path_query_first` spellings).
+    ///
+    /// Exact JSON equality is selector containment, not a term comparison: the
+    /// needle is a single keyed MAC over `path ‖ canonical(value)`
+    /// (`QueryOp::SteVecValueSelector`), so this operand is **fused** from two
+    /// SQL operands — the path and the value — into one encrypted needle. The
+    /// mapper holds no encryption key, so it records only *where the path comes
+    /// from* ([`crate::JsonSelectorSource`]); the proxy composes and encrypts.
+    #[display("EQL:JsonValueSelector({})", _0)]
+    JsonValueSelector(EqlValue),
 }
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Display, Hash)]
@@ -218,6 +231,8 @@ pub enum EqlTermVariant {
     Tokenized,
     #[display("EQL:JsonOrd")]
     JsonOrd,
+    #[display("EQL:JsonValueSelector")]
+    JsonValueSelector,
 }
 
 impl EqlTerm {
@@ -234,7 +249,8 @@ impl EqlTerm {
             | EqlTerm::JsonAccessor(eql_value)
             | EqlTerm::JsonPath(eql_value)
             | EqlTerm::Tokenized(eql_value)
-            | EqlTerm::JsonOrd(eql_value) => eql_value,
+            | EqlTerm::JsonOrd(eql_value)
+            | EqlTerm::JsonValueSelector(eql_value) => eql_value,
         }
     }
 
@@ -246,6 +262,7 @@ impl EqlTerm {
             EqlTerm::JsonPath(_) => EqlTermVariant::JsonPath,
             EqlTerm::Tokenized(_) => EqlTermVariant::Tokenized,
             EqlTerm::JsonOrd(_) => EqlTermVariant::JsonOrd,
+            EqlTerm::JsonValueSelector(_) => EqlTermVariant::JsonValueSelector,
         }
     }
 }

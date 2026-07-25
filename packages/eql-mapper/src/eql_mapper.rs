@@ -180,6 +180,7 @@ impl<'ast> EqlMapper<'ast> {
                     projection,
                     params,
                     literals,
+                    self.inferencer.borrow().take_json_value_selectors(),
                     Arc::new(node_types),
                 ))
             }

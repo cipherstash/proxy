@@ -4,10 +4,13 @@ use crate::{
         unifier::{EqlTerm, EqlValue, TokenType, Type, Value},
         InferType, TypeError,
     },
-    EqlTrait, IdentCase, TypeInferencer,
+    EqlTrait, IdentCase, JsonSelectorSource, Param, TypeInferencer,
 };
 use eql_mapper_macros::trace_infer;
-use sqltk::parser::ast::{AccessExpr, Array, BinaryOperator, Expr, Ident, Subscript};
+use sqltk::parser::ast::{
+    self as ast, AccessExpr, Array, BinaryOperator, Expr, FunctionArg, FunctionArgExpr,
+    FunctionArguments, Ident, Subscript,
+};
 
 #[trace_infer]
 impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
@@ -150,6 +153,39 @@ impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
                 } else {
                     false
                 };
+
+                // Encrypted JSON field EQUALITY (`col -> sel = value`, `<>`).
+                // Exact equality is not a term comparison but *value-selector
+                // containment*: one keyed MAC over path and value together. Type
+                // the value operand `EqlTerm::JsonValueSelector` and record where
+                // its path half comes from, so the proxy can fuse the two into a
+                // single needle at encryption time (see `JsonValueSelectors`).
+                //
+                // Unlike the ordering case above this requires a genuine field
+                // ACCESS on the JSON side — a bare `col = $1` on a whole
+                // encrypted JSON column is document equality and must keep its
+                // ordinary typing.
+                let handled = handled
+                    || if matches!(op, BinaryOperator::Eq | BinaryOperator::NotEq) {
+                        match (
+                            self.eql_json_field_access(left),
+                            self.eql_json_field_access(right),
+                        ) {
+                            (Some((json, selector)), None) => {
+                                self.infer_json_value_selector(json, selector, right)?;
+                                self.unify_node_with_type(expr_val, Type::native())?;
+                                true
+                            }
+                            (None, Some((json, selector))) => {
+                                self.infer_json_value_selector(json, selector, left)?;
+                                self.unify_node_with_type(expr_val, Type::native())?;
+                                true
+                            }
+                            _ => false,
+                        }
+                    } else {
+                        false
+                    };
 
                 if !handled {
                     get_sql_binop_rule(op).apply_constraints(self, left, right, expr_val)?;
@@ -516,6 +552,102 @@ impl<'ast> TypeInferencer<'ast> {
                 let eql_value = eql_term.eql_value();
                 (eql_value.domain_identity().token == TokenType::Json).then(|| eql_value.clone())
             }
+            _ => None,
+        }
+    }
+
+    /// Deconstructs an encrypted-JSON **field access** into the accessed value
+    /// and the expression supplying its selector:
+    ///
+    /// - `col -> sel`, `col ->> sel`
+    /// - `jsonb_path_query_first(col, sel)`
+    ///
+    /// Returns `None` for anything else — importantly for a bare encrypted JSON
+    /// column, which is a whole document, not a field of one. Equality needs the
+    /// selector expression itself (not just the type), because the path is one
+    /// half of the fused value-selector needle.
+    fn eql_json_field_access(&self, expr: &'ast Expr) -> Option<(EqlValue, &'ast Expr)> {
+        let selector = match expr {
+            Expr::BinaryOp {
+                op: BinaryOperator::Arrow | BinaryOperator::LongArrow,
+                right,
+                ..
+            } => &**right,
+
+            // `jsonb_path_query_first(col, sel)` — and its already-rewritten
+            // `eql_v3.` spelling. The selector is the second argument.
+            Expr::Function(function) => match &function.args {
+                FunctionArguments::List(list) => match list.args.as_slice() {
+                    [_, FunctionArg::Unnamed(FunctionArgExpr::Expr(sel))] => sel,
+                    _ => return None,
+                },
+                _ => return None,
+            },
+
+            _ => return None,
+        };
+
+        self.eql_json_value(expr).map(|json| (json, selector))
+    }
+
+    /// Types `value` — the value half of `col -> sel = value` — as a fused
+    /// value selector, and records where its path half (`selector`) comes from.
+    ///
+    /// A path that is neither a literal nor a placeholder (a column reference, a
+    /// function call) cannot be resolved to a needle at encryption time, so the
+    /// fusion is declined and the comparison falls through to ordinary typing —
+    /// where it will fail the capability check with a clearer error than a
+    /// half-built needle would produce.
+    fn infer_json_value_selector(
+        &self,
+        json: EqlValue,
+        selector: &'ast Expr,
+        value: &'ast Expr,
+    ) -> Result<(), TypeError> {
+        let Some(source) = Self::json_selector_source(selector) else {
+            return Ok(());
+        };
+
+        self.unify_node_with_type(
+            value,
+            Type::Value(Value::Eql(EqlTerm::JsonValueSelector(json))),
+        )?;
+
+        match Self::as_ast_value(value) {
+            Some(ast::Value::Placeholder(placeholder)) => {
+                if let Ok(param) = Param::try_from(placeholder) {
+                    self.record_json_value_selector_param(param, source);
+                }
+            }
+            Some(node) => self.record_json_value_selector_literal(node, source),
+            None => {}
+        }
+
+        Ok(())
+    }
+
+    /// Classifies the path half of a fused value selector: a placeholder yields
+    /// the param it will arrive in, a literal yields its text inline.
+    fn json_selector_source(selector: &'ast Expr) -> Option<JsonSelectorSource> {
+        match Self::as_ast_value(selector)? {
+            ast::Value::Placeholder(placeholder) => Param::try_from(placeholder)
+                .ok()
+                .map(JsonSelectorSource::Param),
+            ast::Value::SingleQuotedString(s)
+            | ast::Value::DoubleQuotedString(s)
+            | ast::Value::EscapedStringLiteral(s) => Some(JsonSelectorSource::Literal(s.clone())),
+            ast::Value::Number(n, _) => Some(JsonSelectorSource::Literal(n.to_string())),
+            _ => None,
+        }
+    }
+
+    /// The [`ast::Value`] an expression ultimately is, seeing through casts
+    /// (`$1::jsonb`, `'a'::text`). Casts are common on both halves — the client
+    /// may write them and earlier rules may add them.
+    fn as_ast_value(expr: &'ast Expr) -> Option<&'ast ast::Value> {
+        match expr {
+            Expr::Value(value_with_span) => Some(&value_with_span.value),
+            Expr::Cast { expr, .. } => Self::as_ast_value(expr),
             _ => None,
         }
     }

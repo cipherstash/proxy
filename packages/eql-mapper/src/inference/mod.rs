@@ -18,7 +18,9 @@ use sqltk::parser::ast::{
 };
 use sqltk::{into_control_flow, AsNodeKey, Break, Visitable, Visitor};
 
-use crate::{ScopeError, ScopeTracker, TableResolver};
+use crate::{
+    JsonSelectorSource, JsonValueSelectors, Param, ScopeError, ScopeTracker, TableResolver,
+};
 
 pub(crate) use registry::*;
 pub(crate) use sequence::*;
@@ -51,6 +53,12 @@ pub struct TypeInferencer<'ast> {
     /// Implements the type unification algorithm.
     unifier: Rc<RefCell<Unifier<'ast>>>,
 
+    /// The fused JSON value selectors discovered while inferring `=`/`<>` over
+    /// encrypted JSON field accesses. Unification records *types* per node; this
+    /// records the one *relationship* the proxy needs — which operand supplies
+    /// the path for which value ([`crate::JsonValueSelectors`]).
+    json_value_selectors: RefCell<JsonValueSelectors<'ast>>,
+
     _ast: PhantomData<&'ast ()>,
 }
 
@@ -65,8 +73,35 @@ impl<'ast> TypeInferencer<'ast> {
             table_resolver: table_resolver.into(),
             scope_tracker: scope.into(),
             unifier: unifier.into(),
+            json_value_selectors: RefCell::new(JsonValueSelectors::default()),
             _ast: PhantomData,
         }
+    }
+
+    /// Takes the fused JSON value selectors accumulated during inference,
+    /// leaving the inferencer's set empty.
+    pub(crate) fn take_json_value_selectors(&self) -> JsonValueSelectors<'ast> {
+        std::mem::take(&mut self.json_value_selectors.borrow_mut())
+    }
+
+    pub(crate) fn record_json_value_selector_param(
+        &self,
+        param: Param,
+        source: JsonSelectorSource,
+    ) {
+        self.json_value_selectors
+            .borrow_mut()
+            .record_param(param, source);
+    }
+
+    pub(crate) fn record_json_value_selector_literal(
+        &self,
+        node: &'ast sqltk::parser::ast::Value,
+        source: JsonSelectorSource,
+    ) {
+        self.json_value_selectors
+            .borrow_mut()
+            .record_literal(node, source);
     }
 
     pub(crate) fn get_node_type<N: AsNodeKey>(&self, node: &'ast N) -> Arc<Type> {

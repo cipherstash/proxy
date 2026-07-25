@@ -6,6 +6,7 @@ mod eql_mapper;
 mod importer;
 mod inference;
 mod iterator_ext;
+mod json_value_selector;
 mod model;
 mod param;
 mod scope_tracker;
@@ -17,6 +18,7 @@ mod test_helpers;
 
 pub use display_helpers::*;
 pub use eql_mapper::*;
+pub use json_value_selector::*;
 pub use model::*;
 pub use param::*;
 pub use type_checked_statement::*;
@@ -39,7 +41,7 @@ mod test {
             EqlTerm, EqlTrait, EqlTraits, EqlValue, InstantiateType, NativeValue, Projection,
             ProjectionColumn, Type, Value,
         },
-        Param, Schema, TableColumn, TableResolver,
+        JsonSelectorSource, Param, Schema, TableColumn, TableResolver,
     };
     use eql_mapper_macros::concrete_ty;
     use pretty_assertions::assert_eq;
@@ -2347,6 +2349,135 @@ mod test {
             }
             Err(err) => panic!("type check failed: {err}"),
         }
+    }
+
+    /// A schema with one encrypted JSON column, for the value-selector tests.
+    ///
+    /// The domain is spelled out: value-selector fusion keys off the column's
+    /// *token* type being `Json`, and the macro's default synthesises a `text`
+    /// token regardless of the `JsonLike` capability.
+    fn json_eq_schema() -> Arc<TableResolver> {
+        resolver(schema! {
+            tables: {
+                patients: {
+                    id,
+                    notes (EQL("eql_v3_json_search"): JsonLike + Contain),
+                }
+            }
+        })
+    }
+
+    /// `col -> $1 = $2` fuses both operands into ONE containment needle: the
+    /// field access is discarded, the value operand becomes the needle, and the
+    /// selector placeholder is left declared-but-unreferenced (which keeps param
+    /// numbering identical between client and server).
+    #[test]
+    fn json_field_eq_params_rewrites_to_containment() {
+        let statement = parse("SELECT id FROM patients WHERE notes -> $1 = $2");
+
+        let typed = type_check(json_eq_schema(), &statement).unwrap();
+
+        assert_eq!(
+            typed.transform(HashMap::new()).unwrap().to_string(),
+            "SELECT id FROM patients WHERE eql_v3.jsonb_contains(notes, $2::JSONB::eql_v3.query_json)"
+        );
+
+        // The value operand ($2) carries the needle; its path comes from $1.
+        assert_eq!(
+            typed.json_value_selectors.for_param(Param(2)),
+            Some(&JsonSelectorSource::Param(Param(1)))
+        );
+        assert_eq!(typed.json_value_selectors.for_param(Param(1)), None);
+    }
+
+    /// The `->>` and `jsonb_path_query_first` spellings are the same access and
+    /// rewrite identically.
+    #[test]
+    fn json_field_eq_alternate_spellings_rewrite_to_containment() {
+        for access in ["notes ->> $1", "jsonb_path_query_first(notes, $1)"] {
+            let statement = parse(&format!("SELECT id FROM patients WHERE {access} = $2"));
+            let typed = type_check(json_eq_schema(), &statement).unwrap();
+
+            assert_eq!(
+                typed.transform(HashMap::new()).unwrap().to_string(),
+                "SELECT id FROM patients WHERE eql_v3.jsonb_contains(notes, $2::JSONB::eql_v3.query_json)",
+                "unexpected rewrite for `{access}`"
+            );
+        }
+    }
+
+    /// Both halves as literals: the selector text is captured inline at
+    /// type-check time, and the selector literal vanishes from the output.
+    #[test]
+    fn json_field_eq_literals_rewrites_to_containment() {
+        let statement =
+            parse("SELECT id FROM patients WHERE notes -> 'medications' = '\"aspirin\"'");
+
+        let typed = type_check(json_eq_schema(), &statement).unwrap();
+
+        assert_eq!(
+            typed
+                .json_value_selectors
+                .for_literal(&ast::Value::SingleQuotedString("\"aspirin\"".to_owned())),
+            None,
+            "for_literal is keyed by node identity, not by value"
+        );
+
+        // Both literals are encrypted operands; only the value one survives the
+        // rewrite, so the selector's replacement is simply never placed.
+        let encrypted = HashMap::from_iter([
+            (
+                test_helpers::get_node_key_of_json_selector(
+                    &statement,
+                    &ast::Value::SingleQuotedString("medications".to_owned()),
+                ),
+                ast::Value::SingleQuotedString("<selector>".to_owned()),
+            ),
+            (
+                test_helpers::get_node_key_of_json_selector(
+                    &statement,
+                    &ast::Value::SingleQuotedString("\"aspirin\"".to_owned()),
+                ),
+                ast::Value::SingleQuotedString("<needle>".to_owned()),
+            ),
+        ]);
+
+        assert_eq!(
+            typed.transform(encrypted).unwrap().to_string(),
+            "SELECT id FROM patients WHERE eql_v3.jsonb_contains(notes, '<needle>'::JSONB::eql_v3.query_json)"
+        );
+    }
+
+    /// `<>` is containment negated.
+    #[test]
+    fn json_field_not_eq_rewrites_to_negated_containment() {
+        let statement = parse("SELECT id FROM patients WHERE notes -> $1 <> $2");
+
+        let typed = type_check(json_eq_schema(), &statement).unwrap();
+
+        assert_eq!(
+            typed.transform(HashMap::new()).unwrap().to_string(),
+            "SELECT id FROM patients WHERE NOT (eql_v3.jsonb_contains(notes, $2::JSONB::eql_v3.query_json))"
+        );
+    }
+
+    /// Equality on the whole encrypted JSON column is document equality, NOT a
+    /// field access — it must keep its ordinary term rewrite. Guards against the
+    /// value-selector fusion swallowing every `=` on a JSON column.
+    #[test]
+    fn json_column_eq_is_not_value_selector_containment() {
+        let statement = parse("SELECT id FROM patients WHERE notes = $1");
+
+        let typed = type_check(json_eq_schema(), &statement).unwrap();
+
+        assert_eq!(typed.json_value_selectors.for_param(Param(1)), None);
+        assert!(typed.json_value_selectors.is_empty());
+
+        let sql = typed.transform(HashMap::new()).unwrap().to_string();
+        assert!(
+            !sql.contains("jsonb_contains"),
+            "whole-column equality must not become containment, got: {sql}"
+        );
     }
 
     #[test]

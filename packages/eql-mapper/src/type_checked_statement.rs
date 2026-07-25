@@ -6,9 +6,9 @@ use sqltk::{AsNodeKey, NodeKey, Transformable};
 use crate::unifier::EqlTerm;
 use crate::{
     CastLiteralsAsEncrypted, CastParamsAsEncrypted, DryRunnable, EqlMapperError,
-    FailOnPlaceholderChange, Param, PreserveEffectiveAliases, RewriteContainmentOps,
-    RewriteEqlComparisonOps, RewriteEqlMatchOps, RewriteStandardSqlFnsOnEqlTypes,
-    TransformationRule,
+    FailOnPlaceholderChange, JsonValueSelectors, Param, PreserveEffectiveAliases,
+    RewriteContainmentOps, RewriteEqlComparisonOps, RewriteEqlMatchOps, RewriteJsonValueSelectorEq,
+    RewriteStandardSqlFnsOnEqlTypes, TransformationRule,
 };
 
 use crate::unifier::{Projection, Type, Value};
@@ -27,6 +27,17 @@ pub struct TypeCheckedStatement<'ast> {
 
     /// The type ([`EqlTerm`]) and reference to an [`ast::Value`] nodes of all EQL literals from the SQL statement.
     pub literals: Vec<(EqlTerm, &'ast ast::Value)>,
+
+    /// The fused JSON value selectors: for each operand typed
+    /// [`EqlTerm::JsonValueSelector`], where the path half of its needle comes
+    /// from.
+    ///
+    /// This is the one place the mapper's output is **not** 1:1 with the input
+    /// SQL. `col -> sel = value` consumes two operands and emits one encrypted
+    /// needle; the path operand is dropped from the rewritten statement (its
+    /// placeholder stays declared but unreferenced, so param numbering is
+    /// untouched). The proxy consults this to compose the needle.
+    pub json_value_selectors: JsonValueSelectors<'ast>,
 
     /// A [`HashMap`] of AST node (using [`NodeKey`] as the key) to [`Type`].  The map contains a `Type` for every node
     /// in the AST with the node type is one of: [`Statement`], [`Query`], [`Insert`], [`Delete`], [`Expr`],
@@ -52,6 +63,7 @@ impl<'ast> TypeCheckedStatement<'ast> {
         projection: Projection,
         params: Vec<(Param, Value)>,
         literals: Vec<(EqlTerm, &'ast ast::Value)>,
+        json_value_selectors: JsonValueSelectors<'ast>,
         node_types: Arc<HashMap<NodeKey<'ast>, Type>>,
     ) -> Self {
         Self {
@@ -59,6 +71,7 @@ impl<'ast> TypeCheckedStatement<'ast> {
             projection,
             params,
             literals,
+            json_value_selectors,
             node_types,
         }
     }
@@ -154,6 +167,7 @@ impl<'ast> TypeCheckedStatement<'ast> {
         DryRunnable::new((
             RewriteStandardSqlFnsOnEqlTypes::new(Arc::clone(&self.node_types)),
             RewriteContainmentOps::new(Arc::clone(&self.node_types)),
+            RewriteJsonValueSelectorEq::new(Arc::clone(&self.node_types)),
             RewriteEqlComparisonOps::new(Arc::clone(&self.node_types)),
             RewriteEqlMatchOps::new(Arc::clone(&self.node_types)),
             PreserveEffectiveAliases,
