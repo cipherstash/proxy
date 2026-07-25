@@ -2,7 +2,10 @@ use super::{maybe_json, maybe_jsonb, Name, NULL};
 use crate::error::{Error, MappingError, ProtocolError};
 use crate::log::MAPPER;
 use crate::postgresql::context::column::Column;
-use crate::postgresql::data::bind_param_from_sql;
+use crate::postgresql::context::statement::JsonSelectorPath;
+use crate::postgresql::data::{
+    bind_param_from_sql, bind_param_json_value, json_value_selector_plaintext,
+};
 use crate::postgresql::format_code::FormatCode;
 use crate::postgresql::protocol::BytesMutReadString;
 use crate::{EqlOutput, EqlQueryPayload};
@@ -10,6 +13,7 @@ use crate::{SIZE_I16, SIZE_I32};
 use bytes::{Buf, BufMut, BytesMut};
 use cipherstash_client::encryption::Plaintext;
 use postgres_types::Type;
+use std::collections::HashMap;
 use std::fmt::{self, Display, Formatter};
 use std::io::Cursor;
 use std::{convert::TryFrom, ffi::CString};
@@ -44,10 +48,89 @@ impl Bind {
             .any(|param| param.requires_rewrite())
     }
 
+    /// Converts the bound params to plaintexts, one per param.
+    ///
+    /// `json_value_selectors` names the params that are *fused*: a JSON field
+    /// equality (`col -> $1 = $2`) has no plaintext of its own for `$2` — its
+    /// needle is composed from `$1` and `$2` together. Those params are resolved
+    /// in a second pass, once every param's own value is available.
     pub fn to_plaintext(
         &self,
         param_columns: &[Option<Column>],
         param_types: &[i32],
+        json_value_selectors: &HashMap<usize, JsonSelectorPath>,
+    ) -> Result<Vec<Option<Plaintext>>, Error> {
+        let mut plaintexts =
+            self.to_plaintext_positional(param_columns, param_types, json_value_selectors)?;
+
+        for (idx, path) in json_value_selectors.iter() {
+            if *idx >= plaintexts.len() {
+                continue;
+            }
+
+            let postgres_type = param_columns
+                .get(*idx)
+                .and_then(|col| col.as_ref())
+                .map(|col| get_param_type(*idx, param_types, col))
+                .unwrap_or(Type::JSONB);
+
+            plaintexts[*idx] = self.json_value_selector_plaintext(*idx, path, &postgres_type)?;
+        }
+
+        Ok(plaintexts)
+    }
+
+    /// Composes `{"path", "value"}` for the fused value-selector param at `idx`.
+    ///
+    /// The path comes either from the SQL (a literal selector) or from another
+    /// bind param, which is read from the wire directly rather than from its
+    /// plaintext — the plaintext pass has already been run for that param, but
+    /// its value is the selector *text*, and reading the raw bytes keeps the two
+    /// halves decoded the same way regardless of which pass ran first.
+    fn json_value_selector_plaintext(
+        &self,
+        idx: usize,
+        path: &JsonSelectorPath,
+        postgres_type: &Type,
+    ) -> Result<Option<Plaintext>, Error> {
+        let path = match path {
+            JsonSelectorPath::Literal(path) => path.to_owned(),
+            JsonSelectorPath::Param(path_idx) => match self.param_values.get(*path_idx) {
+                Some(param) if !param.is_null() => param.to_string(),
+                _ => return Ok(None),
+            },
+        };
+
+        let Some(param) = self.param_values.get(idx) else {
+            return Ok(None);
+        };
+
+        let Some(value) = bind_param_json_value(param, postgres_type)? else {
+            return Ok(None);
+        };
+
+        debug!(
+            target: MAPPER,
+            msg = "Fused JSON value selector",
+            ?idx,
+            ?path,
+            ?value
+        );
+
+        Ok(Some(json_value_selector_plaintext(&path, value)?))
+    }
+
+    /// The one-plaintext-per-param pass.
+    ///
+    /// Params named in `json_value_selectors` are skipped: a fused value
+    /// selector has no plaintext of its own — its own bytes are only half the
+    /// needle — and decoding it here would fail, since the scalar it carries is
+    /// not a valid standalone operand for the column.
+    fn to_plaintext_positional(
+        &self,
+        param_columns: &[Option<Column>],
+        param_types: &[i32],
+        json_value_selectors: &HashMap<usize, JsonSelectorPath>,
     ) -> Result<Vec<Option<Plaintext>>, Error> {
         let plaintexts = self
             .param_values
@@ -55,6 +138,7 @@ impl Bind {
             .zip(param_columns.iter())
             .enumerate()
             .map(|(idx, (param, col))| match col {
+                _ if json_value_selectors.contains_key(&idx) => Ok(None),
                 Some(col) => {
                     let bound_param_type = get_param_type(idx, param_types, col);
 

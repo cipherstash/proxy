@@ -14,8 +14,11 @@ use crate::error::{EncryptError, Error, MappingError};
 use crate::log::{MAPPER, PROTOCOL};
 use crate::postgresql::context::column::Column;
 use crate::postgresql::context::statement_metadata::{ProtocolType, StatementType};
+use crate::postgresql::context::JsonSelectorPath;
 use crate::postgresql::context::Portal;
-use crate::postgresql::data::literal_from_sql;
+use crate::postgresql::data::{
+    json_value_selector_plaintext, literal_from_sql, literal_json_value,
+};
 use crate::postgresql::messages::close::Close;
 use crate::postgresql::messages::ready_for_query::ReadyForQuery;
 use crate::postgresql::messages::terminate::Terminate;
@@ -30,7 +33,7 @@ use crate::proxy::EncryptionService;
 use crate::{EqlOutput, EqlQueryPayload};
 use bytes::BytesMut;
 use cipherstash_client::encryption::Plaintext;
-use eql_mapper::{self, EqlMapperError, EqlTerm, TypeCheckedStatement};
+use eql_mapper::{self, EqlMapperError, EqlTermVariant, JsonSelectorSource, TypeCheckedStatement};
 use metrics::{counter, histogram};
 use pg_escape::quote_literal;
 use serde::Serialize;
@@ -598,7 +601,7 @@ where
             return Ok(vec![]);
         }
 
-        let plaintexts = literals_to_plaintext(literal_values, literal_columns)?;
+        let plaintexts = literals_to_plaintext(typed_statement, literal_columns)?;
 
         let start = Instant::now();
 
@@ -816,6 +819,7 @@ where
                 counter!(STATEMENTS_ENCRYPTED_TOTAL).increment(1);
 
                 message.rewrite_param_types(&statement.param_columns);
+                message.declare_unreferenced_param_types(&statement.unreferenced_param_indexes());
                 self.context
                     .add_statement(message.name.to_owned(), statement);
             }
@@ -931,6 +935,7 @@ where
             projection_columns.to_owned(),
             literal_columns.to_owned(),
             param_types,
+            json_value_selector_params(typed_statement),
         );
 
         Ok(Some(statement))
@@ -1051,8 +1056,11 @@ where
         bind: &Bind,
         statement: &Statement,
     ) -> Result<Vec<Option<crate::EqlOutput>>, Error> {
-        let plaintexts =
-            bind.to_plaintext(&statement.param_columns, &statement.postgres_param_types)?;
+        let plaintexts = bind.to_plaintext(
+            &statement.param_columns,
+            &statement.postgres_param_types,
+            &statement.json_value_selectors,
+        )?;
 
         debug!(target: MAPPER, client_id = self.context.client_id, plaintexts = ?plaintexts);
 
@@ -1166,28 +1174,92 @@ where
     }
 }
 
+/// The fused JSON value-selector params of a statement, keyed by 0-based bind
+/// index. [`eql_mapper::Param`] is 1-based, so every index shifts by one here.
+///
+/// A value-selector param whose path is *also* a param records that param's
+/// index; a literal path is carried inline.
+fn json_value_selector_params(
+    typed_statement: &TypeCheckedStatement<'_>,
+) -> HashMap<usize, JsonSelectorPath> {
+    typed_statement
+        .params
+        .iter()
+        .enumerate()
+        .filter_map(|(idx, (param, _))| {
+            let path = match typed_statement.json_value_selectors.for_param(*param)? {
+                JsonSelectorSource::Literal(path) => JsonSelectorPath::Literal(path.to_owned()),
+                JsonSelectorSource::Param(path_param) => {
+                    JsonSelectorPath::Param(path_param.0.saturating_sub(1) as usize)
+                }
+            };
+            Some((idx, path))
+        })
+        .collect()
+}
+
 fn literals_to_plaintext(
-    literals: &Vec<(EqlTerm, &ast::Value)>,
+    typed_statement: &TypeCheckedStatement<'_>,
     literal_columns: &Vec<Option<Column>>,
 ) -> Result<Vec<Option<Plaintext>>, Error> {
+    let literals = typed_statement.literal_values();
+
     let plaintexts = literals
         .iter()
         .zip(literal_columns)
-        .map(|((_, val), col)| match col {
-            Some(col) => literal_from_sql(val, col.eql_term(), col.cast_type()).map_err(|err| {
-                debug!(
-                    target: MAPPER,
-                    msg = "Could not convert literal value",
-                    value = ?val,
-                    cast_type = ?col.cast_type(),
-                    error = err.to_string()
-                );
-                MappingError::InvalidParameter(Box::new(col.to_owned()))
-            }),
+        .map(|((eql_term, val), col)| match col {
+            Some(col) => {
+                let plaintext = if eql_term.variant() == EqlTermVariant::JsonValueSelector {
+                    json_value_selector_literal_plaintext(typed_statement, val)
+                } else {
+                    literal_from_sql(val, col.eql_term(), col.cast_type())
+                };
+
+                plaintext.map_err(|err| {
+                    debug!(
+                        target: MAPPER,
+                        msg = "Could not convert literal value",
+                        value = ?val,
+                        cast_type = ?col.cast_type(),
+                        error = err.to_string()
+                    );
+                    MappingError::InvalidParameter(Box::new(col.to_owned())).into()
+                })
+            }
             None => Ok(None),
         })
-        .collect::<Result<Vec<_>, _>>()?;
+        .collect::<Result<Vec<_>, Error>>()?;
     Ok(plaintexts)
+}
+
+/// Composes the needle for a JSON field equality whose value is a literal:
+/// `{"path": <selector>, "value": <literal>}`.
+///
+/// Only a literal path can be resolved here — the whole statement is encrypted
+/// at Parse time, before any param is bound. `col -> $1 = 'value'` (param path,
+/// literal value) is therefore not supported; it is also not a shape any client
+/// produces, since a client that parameterises the path parameterises the value
+/// too.
+fn json_value_selector_literal_plaintext(
+    typed_statement: &TypeCheckedStatement<'_>,
+    literal: &ast::Value,
+) -> Result<Option<Plaintext>, MappingError> {
+    let Some(JsonSelectorSource::Literal(path)) =
+        typed_statement.json_value_selectors.for_literal(literal)
+    else {
+        debug!(
+            target: MAPPER,
+            msg = "Encrypted JSON equality needs a literal selector when the value is a literal",
+            value = ?literal,
+        );
+        return Err(MappingError::CouldNotParseParameter);
+    };
+
+    let Some(value) = literal_json_value(literal)? else {
+        return Ok(None);
+    };
+
+    json_value_selector_plaintext(path, value).map(Some)
 }
 
 fn to_json_literal_value<T>(literal: &T) -> Result<Value, Error>
