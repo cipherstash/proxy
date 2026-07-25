@@ -41,7 +41,7 @@ pub(crate) fn column_config_from_domain(
             config = config.add_index(Index::new(IndexType::SteVec {
                 prefix: format!("{table}/{column}"),
                 term_filters: Vec::new(),
-                array_index_mode: ArrayIndexMode::default(),
+                array_index_mode: ArrayIndexMode::ALL,
                 mode: SteVecMode::default(), // Compat (CLLW-OPE), the v3 default
             }));
         }
