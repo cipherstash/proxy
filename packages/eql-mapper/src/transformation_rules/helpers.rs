@@ -19,9 +19,29 @@ use crate::unifier::{DomainIdentity, EqlTerm};
 /// text, dates, etc. — which is what makes JSON range work in the extended
 /// protocol, where the operand's scalar type is unknown at rewrite time.
 /// Returns `None` for any other term.
-pub(crate) fn json_ord_cast_target(eql_term: &EqlTerm) -> Option<(String, String)> {
-    matches!(eql_term, EqlTerm::JsonOrd(_))
-        .then(|| ("eql_v3".to_string(), "query_integer_ord".to_string()))
+/// The v3 cast target `(schema, domain)` for an encrypted-JSON *query operand*
+/// whose domain is fixed by the operand's role rather than by the column's
+/// domain identity. Returns `None` for any other term.
+///
+/// - [`EqlTerm::JsonOrd`] — the shape-only scalar ord twin
+///   `eql_v3.query_integer_ord`, regardless of the JSON leaf's scalar type.
+///   `eql_v3.ord_term` is type-agnostic (it extracts the `op` bytes as
+///   `ope_cllw` and compares them bytewise) and the twin's domain CHECK is
+///   shape-only (`{v,i,op}`, no `c`), so one twin serves numbers, text, dates.
+///   That is what makes JSON range work in the extended protocol, where the
+///   operand's scalar type is unknown at rewrite time.
+/// - [`EqlTerm::JsonValueSelector`] — `eql_v3.query_json`, the containment
+///   needle domain. The fused value selector is a one-entry, term-less
+///   containment payload (`{sv: [{s}]}`), which is what
+///   `eql_v3.jsonb_contains` matches against.
+pub(crate) fn json_query_operand_cast_target(eql_term: &EqlTerm) -> Option<(String, String)> {
+    let domain = match eql_term {
+        EqlTerm::JsonOrd(_) => "query_integer_ord",
+        EqlTerm::JsonValueSelector(_) => "query_json",
+        _ => return None,
+    };
+
+    Some(("eql_v3".to_string(), domain.to_string()))
 }
 
 /// The scalar comparison operators the v3 term-function rewrite handles.

@@ -18,6 +18,7 @@ mod preserve_effective_aliases;
 mod rewrite_containment_ops;
 mod rewrite_eql_comparison_ops;
 mod rewrite_eql_match_ops;
+mod rewrite_json_value_selector_eq;
 mod rewrite_standard_sql_fns_on_eql_types;
 
 use std::marker::PhantomData;
@@ -29,6 +30,7 @@ pub(crate) use preserve_effective_aliases::*;
 pub(crate) use rewrite_containment_ops::*;
 pub(crate) use rewrite_eql_comparison_ops::*;
 pub(crate) use rewrite_eql_match_ops::*;
+pub(crate) use rewrite_json_value_selector_eq::*;
 pub(crate) use rewrite_standard_sql_fns_on_eql_types::*;
 
 use crate::EqlMapperError;

@@ -7,7 +7,7 @@ use sqltk::parser::ast::{BinaryOperator, Expr, ValueWithSpan};
 use sqltk::parser::tokenizer::Span;
 use sqltk::{NodeKey, NodePath, Visitable};
 
-use crate::unifier::{DomainIdentity, Type, Value};
+use crate::unifier::{DomainIdentity, EqlTerm, Type, Value};
 use crate::EqlMapperError;
 
 use super::helpers::{eql_v3_term_call, is_comparison_op};
@@ -49,6 +49,19 @@ impl<'ast> RewriteEqlComparisonOps<'ast> {
         }
     }
 
+    /// Encrypted JSON field equality is value-selector containment, rewritten by
+    /// [`super::RewriteJsonValueSelectorEq`], not a term comparison. `eq_term`
+    /// has no unique overload for a JSON query operand, so wrapping one here
+    /// would produce SQL PostgreSQL rejects.
+    fn is_json_value_selector_eq(&self, left: &'ast Expr, right: &'ast Expr) -> bool {
+        [left, right].into_iter().any(|expr| {
+            matches!(
+                self.node_types.get(&NodeKey::new(expr)),
+                Some(Type::Value(Value::Eql(EqlTerm::JsonValueSelector(_))))
+            )
+        })
+    }
+
     /// The term function for `op` on a column with `identity`, or `None` if the
     /// domain provides no term for that operator.
     fn term_fn_for(op: &BinaryOperator, identity: &DomainIdentity) -> Option<&'static str> {
@@ -79,7 +92,7 @@ impl<'ast> TransformationRule<'ast> for RewriteEqlComparisonOps<'ast> {
         let Some((Expr::BinaryOp { left, op, right },)) = node_path.last_1_as::<Expr>() else {
             return Ok(false);
         };
-        if !is_comparison_op(op) {
+        if !is_comparison_op(op) || self.is_json_value_selector_eq(left, right) {
             return Ok(false);
         }
         let Some(identity) = self
@@ -113,7 +126,7 @@ impl<'ast> TransformationRule<'ast> for RewriteEqlComparisonOps<'ast> {
 
     fn would_edit<N: Visitable>(&mut self, node_path: &NodePath<'ast>, _target_node: &N) -> bool {
         if let Some((Expr::BinaryOp { left, op, right },)) = node_path.last_1_as::<Expr>() {
-            if is_comparison_op(op) {
+            if is_comparison_op(op) && !self.is_json_value_selector_eq(left, right) {
                 return self.eql_identity_of(left).is_some()
                     || self.eql_identity_of(right).is_some();
             }
