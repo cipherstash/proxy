@@ -272,6 +272,17 @@ impl EncryptionService for ZeroKms {
                             EqlOperation::Query(&index.index_type, QueryOp::SteVecSelector)
                         })
                         .unwrap_or(EqlOperation::Store),
+
+                    // JsonOrd is the scalar value operand of a JSON field ordering
+                    // comparison (`col -> sel < value`): a SteVec ordering term
+                    // (`{v,i,op}`) compared via `eql_v3.ord_term`.
+                    EqlTermVariant::JsonOrd => col
+                        .config
+                        .indexes
+                        .iter()
+                        .find(|i| matches!(i.index_type, IndexType::SteVec { .. }))
+                        .map(|index| EqlOperation::Query(&index.index_type, QueryOp::SteVecTerm))
+                        .unwrap_or(EqlOperation::Store),
                 };
 
                 let prepared = PreparedPlaintext::new(

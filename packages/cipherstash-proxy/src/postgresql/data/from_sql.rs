@@ -81,7 +81,20 @@ pub fn literal_from_sql(
         // #[cfg(not(feature = "bigdecimal"))]
         // Value::Number(s, _) => todo!("Number parsed type not implemented"),
         // #[cfg(feature = "bigdecimal")]
-        Value::Number(d, _) => Some(decimal_from_sql(d, col_type)?),
+        Value::Number(d, _) => {
+            // A JSON ordering operand (`col -> sel > 4`) is a scalar SteVec
+            // ordering term, encoded as a float like the stored JSON number leaf
+            // — NOT a JSON document (`decimal_from_sql` would make a `Json`
+            // plaintext, which `SteVecTerm` rejects).
+            if eql_term == EqlTermVariant::JsonOrd {
+                use bigdecimal::ToPrimitive;
+                Some(Plaintext::new(
+                    d.to_f64().ok_or(MappingError::CouldNotParseParameter)?,
+                ))
+            } else {
+                Some(decimal_from_sql(d, col_type)?)
+            }
+        }
 
         Value::Placeholder(_) => {
             return Err(MappingError::Internal(String::from(
@@ -91,6 +104,21 @@ pub fn literal_from_sql(
     };
 
     Ok(pt)
+}
+
+/// A JSON ordering operand (`EqlTerm::JsonOrd`) arriving as a jsonb param
+/// carries a single scalar. Encode a number as a float (matching the stored
+/// JSON number leaf's SteVec `op` encoding) and a string as text — the only
+/// scalar shapes `SteVecTerm` accepts (a full JSON value is rejected).
+fn json_ord_scalar_plaintext(value: serde_json::Value) -> Result<Plaintext, MappingError> {
+    match value {
+        serde_json::Value::Number(n) => n
+            .as_f64()
+            .ok_or(MappingError::CouldNotParseParameter)
+            .map(Plaintext::new),
+        serde_json::Value::String(s) => Ok(Plaintext::new(s)),
+        _ => Err(MappingError::CouldNotParseParameter),
+    }
 }
 
 /// Converts a string value to a Plaintext value based on input postgres type and target column type.
@@ -180,6 +208,21 @@ fn text_from_sql(
             serde_json::from_str::<serde_json::Value>(val)
                 .map_err(|_| MappingError::CouldNotParseParameter)
                 .map(Plaintext::new)
+        }
+        // A JSON ordering operand reaches here in two textual shapes: a bare SQL
+        // literal (`col -> sel > '4'` / `> 'C'` → `4` / `C`) and a text-format
+        // jsonb param (`4` / `"C"`, the value's jsonb rendering). Parse as JSON to
+        // recover the scalar type and its content: a number encodes as a float
+        // (matching the stored leaf's `for_json_value` SteVec `op`), a JSON string
+        // as its unquoted text. A bare word (`C`) is not valid JSON, so fall back
+        // to raw text. Mirrors `json_ord_scalar_plaintext` on the binary param path.
+        (EqlTermVariant::JsonOrd, ColumnType::Json) => {
+            match serde_json::from_str::<serde_json::Value>(val) {
+                Ok(value @ (serde_json::Value::Number(_) | serde_json::Value::String(_))) => {
+                    json_ord_scalar_plaintext(value)
+                }
+                _ => Ok(Plaintext::new(val)),
+            }
         }
         (EqlTermVariant::Tokenized, ColumnType::Text) => Ok(Plaintext::new(val)),
 
@@ -272,6 +315,13 @@ fn binary_from_sql(
                 };
                 Plaintext::new(val)
             })
+        }
+        // A JSON ordering operand (`col -> sel > $2`) arrives as a jsonb scalar;
+        // encode it as the scalar shape SteVecTerm accepts (number → float,
+        // string → text).
+        (EqlTermVariant::JsonOrd, ColumnType::Json, _) => {
+            parse_bytes_from_sql::<serde_json::Value>(bytes, pg_type)
+                .and_then(json_ord_scalar_plaintext)
         }
         // Python psycopg sends JSON/B as BYTEA
         (

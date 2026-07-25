@@ -1,6 +1,9 @@
 use crate::{
     get_sql_binop_rule,
-    inference::{unifier::Type, InferType, TypeError},
+    inference::{
+        unifier::{EqlTerm, EqlValue, TokenType, Type, Value},
+        InferType, TypeError,
+    },
     EqlTrait, IdentCase, TypeInferencer,
 };
 use eql_mapper_macros::trace_infer;
@@ -109,7 +112,48 @@ impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
             }
 
             Expr::BinaryOp { left, op, right } => {
-                get_sql_binop_rule(op).apply_constraints(self, left, right, expr_val)?;
+                // Encrypted JSON field ORDERING (`col -> sel < value`, `>`, `<=`,
+                // `>=`): the value operand is a scalar SteVec ordering term
+                // (`{v,i,op}`, `QueryOp::SteVecTerm`), not a JSON document, and the
+                // comparison runs through `eql_v3.ord_term` on both sides. Type the
+                // operand as `EqlTerm::JsonOrd` so it encrypts and casts as an
+                // ordering operand — the generic `T Ord T` rule would instead unify
+                // it to the whole JSON type (→ a full document, which cannot be an
+                // ordering operand). Equality (`=`) is intentionally NOT handled here
+                // (exact JSON equality is value-selector containment, not ordering).
+                let handled = if matches!(
+                    op,
+                    BinaryOperator::Lt
+                        | BinaryOperator::LtEq
+                        | BinaryOperator::Gt
+                        | BinaryOperator::GtEq
+                ) {
+                    match (self.eql_json_value(left), self.eql_json_value(right)) {
+                        (Some(json), None) => {
+                            self.unify_node_with_type(
+                                &**right,
+                                Type::Value(Value::Eql(EqlTerm::JsonOrd(json))),
+                            )?;
+                            self.unify_node_with_type(expr_val, Type::native())?;
+                            true
+                        }
+                        (None, Some(json)) => {
+                            self.unify_node_with_type(
+                                &**left,
+                                Type::Value(Value::Eql(EqlTerm::JsonOrd(json))),
+                            )?;
+                            self.unify_node_with_type(expr_val, Type::native())?;
+                            true
+                        }
+                        _ => false,
+                    }
+                } else {
+                    false
+                };
+
+                if !handled {
+                    get_sql_binop_rule(op).apply_constraints(self, left, right, expr_val)?;
+                }
             }
 
             // `customer_name LIKE 'A%'`. Route LIKE/ILIKE through the `~~`/`~~*`
@@ -457,5 +501,22 @@ impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
         }
 
         Ok(())
+    }
+}
+
+impl<'ast> TypeInferencer<'ast> {
+    /// If `expr` resolves to an encrypted JSON (`JsonLike`) value — the field
+    /// access side of a JSON ordering comparison (`col -> sel`, `col ->> sel`, or
+    /// `jsonb_path_query_first(col, sel)`) — return its [`EqlValue`]. Returns
+    /// `None` for scalar EQL columns (which compare via the ordinary term rewrite)
+    /// and for non-EQL types.
+    fn eql_json_value(&self, expr: &'ast Expr) -> Option<EqlValue> {
+        match &*self.get_node_type(expr) {
+            Type::Value(Value::Eql(eql_term)) => {
+                let eql_value = eql_term.eql_value();
+                (eql_value.domain_identity().token == TokenType::Json).then(|| eql_value.clone())
+            }
+            _ => None,
+        }
     }
 }

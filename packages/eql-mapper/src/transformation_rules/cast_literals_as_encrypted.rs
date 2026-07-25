@@ -7,7 +7,7 @@ use sqltk::{NodeKey, NodePath, Visitable};
 use crate::unifier::{EqlTerm, Type, Value as UnifierValue};
 use crate::EqlMapperError;
 
-use super::helpers::{cast_to_v3_domain, v3_cast_target};
+use super::helpers::{cast_to_v3_domain, json_ord_cast_target, v3_cast_target};
 use super::TransformationRule;
 
 #[derive(Debug)]
@@ -67,8 +67,11 @@ impl<'ast> TransformationRule<'ast> for CastLiteralsAsEncrypted<'ast> {
                             })
                         }
                         _ => {
-                            let identity = eql_term.eql_value().domain_identity().clone();
-                            let (schema, domain) = v3_cast_target(node_path, &identity);
+                            let (schema, domain) =
+                                json_ord_cast_target(eql_term).unwrap_or_else(|| {
+                                    let identity = eql_term.eql_value().domain_identity().clone();
+                                    v3_cast_target(node_path, &identity)
+                                });
                             cast_to_v3_domain(replacement, &schema, &domain)
                         }
                     };
