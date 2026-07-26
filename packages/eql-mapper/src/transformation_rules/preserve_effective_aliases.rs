@@ -126,23 +126,32 @@ impl PreserveEffectiveAliases {
     }
 
     fn derive_effective_alias(node: &SelectItem) -> Option<Ident> {
-        match node {
-            SelectItem::UnnamedExpr(expr) => Self::derive_effective_alias_for_expr(expr),
-            SelectItem::ExprWithAlias { expr: _, alias } => Some(alias.clone()),
-            _ => None,
-        }
+        derive_effective_alias(node)
     }
+}
 
-    fn derive_effective_alias_for_expr(expr: &Expr) -> Option<Ident> {
-        match expr {
-            Expr::Identifier(ident) => Some(ident.clone()),
-            Expr::CompoundIdentifier(idents) => Some(idents.last().unwrap().clone()),
-            Expr::Function(Function { name, .. }) => {
-                let ObjectNamePart::Identifier(ident) = name.0.last().unwrap().clone();
-                Some(ident)
-            }
-            Expr::Nested(expr) => Self::derive_effective_alias_for_expr(expr),
-            _ => None,
+/// The name PostgreSQL would give a projection column — its explicit alias, or
+/// the name derived from the expression.
+///
+/// Shared with [`super::RewriteEqlGroupBy`], which wraps a projected column in
+/// an aggregate and must give the result the name the client asked for.
+pub(crate) fn derive_effective_alias(node: &SelectItem) -> Option<Ident> {
+    match node {
+        SelectItem::UnnamedExpr(expr) => derive_effective_alias_for_expr(expr),
+        SelectItem::ExprWithAlias { expr: _, alias } => Some(alias.clone()),
+        _ => None,
+    }
+}
+
+fn derive_effective_alias_for_expr(expr: &Expr) -> Option<Ident> {
+    match expr {
+        Expr::Identifier(ident) => Some(ident.clone()),
+        Expr::CompoundIdentifier(idents) => Some(idents.last().unwrap().clone()),
+        Expr::Function(Function { name, .. }) => {
+            let ObjectNamePart::Identifier(ident) = name.0.last().unwrap().clone();
+            Some(ident)
         }
+        Expr::Nested(expr) => derive_effective_alias_for_expr(expr),
+        _ => None,
     }
 }

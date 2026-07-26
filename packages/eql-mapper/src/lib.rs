@@ -2581,6 +2581,93 @@ mod test {
         }
     }
 
+    /// `GROUP BY` on an encrypted column groups by its equality term. A bare
+    /// `GROUP BY col` groups on the jsonb payload, whose ciphertext is
+    /// randomised per row, so equal plaintexts land in different groups.
+    ///
+    /// Projecting the grouped column has to be lifted through `any_value`,
+    /// because PostgreSQL no longer sees it as functionally dependent on the
+    /// group key — and the projection keeps the name the client asked for.
+    #[test]
+    fn group_by_encrypted_column_uses_eq_term() {
+        let schema = resolver(schema! {
+            tables: {
+                employees: {
+                    id,
+                    email (EQL("eql_v3_text_search"): Eq + Ord + TokenMatch),
+                    salary (EQL("eql_v3_integer_ord"): Ord),
+                }
+            }
+        });
+
+        for (input, expected) in [
+            // The column is not projected: only the group key changes.
+            (
+                "SELECT COUNT(*) FROM employees GROUP BY email",
+                "SELECT COUNT(*) FROM employees GROUP BY eql_v3.eq_term(email)",
+            ),
+            // Projected: lifted through `any_value`, keeping its name.
+            (
+                "SELECT email FROM employees GROUP BY email",
+                "SELECT any_value(email) AS email FROM employees GROUP BY eql_v3.eq_term(email)",
+            ),
+            // An explicit alias is preserved as-is.
+            (
+                "SELECT email AS e FROM employees GROUP BY email",
+                "SELECT any_value(email) AS e FROM employees GROUP BY eql_v3.eq_term(email)",
+            ),
+            // Qualified projection of the same column still matches — the match
+            // is on the resolved column, not on syntax.
+            (
+                "SELECT employees.email FROM employees GROUP BY email",
+                "SELECT any_value(employees.email) AS email FROM employees GROUP BY eql_v3.eq_term(email)",
+            ),
+            // A domain that stores no `hm` groups by its ordering term, the same
+            // fallback `=` uses.
+            (
+                "SELECT COUNT(*) FROM employees GROUP BY salary",
+                "SELECT COUNT(*) FROM employees GROUP BY eql_v3.ord_term(salary)",
+            ),
+            // A native group key is left alone.
+            (
+                "SELECT COUNT(*) FROM employees GROUP BY id",
+                "SELECT COUNT(*) FROM employees GROUP BY id",
+            ),
+        ] {
+            let statement = parse(input);
+            let typed = type_check(schema.clone(), &statement).unwrap();
+
+            assert_eq!(
+                typed.transform(HashMap::new()).unwrap().to_string(),
+                expected,
+                "unexpected rewrite for `{input}`"
+            );
+        }
+    }
+
+    /// Grouping by a column whose domain carries no equality term is a
+    /// capability error, not a grouping on ciphertext.
+    #[test]
+    fn group_by_column_without_equality_term_is_an_error() {
+        let schema = resolver(schema! {
+            tables: {
+                employees: {
+                    id,
+                    name (EQL("eql_v3_text_match"): TokenMatch),
+                }
+            }
+        });
+
+        let statement = parse("SELECT COUNT(*) FROM employees GROUP BY name");
+        let typed = type_check(schema, &statement).unwrap();
+
+        let err = typed.transform(HashMap::new()).unwrap_err().to_string();
+        assert!(
+            err.contains("GROUP BY") && err.contains("no equality term"),
+            "expected a capability error, got: {err}"
+        );
+    }
+
     /// A block-ORE domain orders through `ord_term_ore`.
     #[test]
     fn order_by_ore_column_uses_ord_term_ore() {
