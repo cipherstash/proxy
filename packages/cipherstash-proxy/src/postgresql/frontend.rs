@@ -13,8 +13,10 @@ use crate::connect::Sender;
 use crate::error::{EncryptError, Error, MappingError};
 use crate::log::{MAPPER, PROTOCOL};
 use crate::postgresql::context::column::Column;
+use crate::postgresql::context::statement::{
+    output_params_from_plan, OutputParam, OutputParamSource,
+};
 use crate::postgresql::context::statement_metadata::{ProtocolType, StatementType};
-use crate::postgresql::context::JsonSelectorPath;
 use crate::postgresql::context::Portal;
 use crate::postgresql::data::{
     json_value_selector_plaintext, literal_from_sql, literal_json_value,
@@ -469,10 +471,12 @@ where
                         {
                             debug!(target: MAPPER,
                                 client_id = self.context.client_id,
-                                transformed_statement = ?transformed_statement,
+                                transformed_statement = ?transformed_statement.statement,
                             );
 
-                            transformed_statements.push(transformed_statement);
+                            // The simple protocol has no params, so the plan is
+                            // always empty here — only the SQL is needed.
+                            transformed_statements.push(transformed_statement.statement);
                             encrypted = true;
                         }
                     }
@@ -647,7 +651,7 @@ where
         &mut self,
         typed_statement: &TypeCheckedStatement<'_>,
         encrypted_literals: &Vec<Option<EqlOutput>>,
-    ) -> Result<Option<ast::Statement>, Error> {
+    ) -> Result<Option<eql_mapper::TransformedStatement>, Error> {
         // Convert literals to ast Expr
         let mut encrypted_expressions = vec![];
         for encrypted in encrypted_literals {
@@ -792,7 +796,7 @@ where
         let mut parse_duration_recorded = false;
 
         match self.to_encryptable_statement(&typed_statement, param_types)? {
-            Some(statement) => {
+            Some(mut statement) => {
                 if typed_statement.requires_transform() {
                     // Record parse duration before encryption work starts
                     self.context
@@ -809,17 +813,26 @@ where
                     {
                         debug!(target: MAPPER,
                             client_id = self.context.client_id,
-                            transformed_statement = ?transformed_statement,
+                            transformed_statement = ?transformed_statement.statement,
+                            param_plan = ?transformed_statement.params,
                         );
 
-                        message.rewrite_statement(transformed_statement.to_string());
+                        // The rewrite may have reshaped the params, so the
+                        // statement's output params come from the plan rather
+                        // than from its own input params.
+                        let output_columns = self
+                            .context
+                            .get_output_param_columns(&transformed_statement.params)?;
+                        statement.output_params =
+                            output_params_from_plan(&transformed_statement.params, output_columns);
+
+                        message.rewrite_statement(transformed_statement.statement.to_string());
                     }
                 }
 
                 counter!(STATEMENTS_ENCRYPTED_TOTAL).increment(1);
 
-                message.rewrite_param_types(&statement.param_columns);
-                message.declare_unreferenced_param_types(&statement.unreferenced_param_indexes());
+                message.rewrite_param_types(&statement.output_params);
                 self.context
                     .add_statement(message.name.to_owned(), statement);
             }
@@ -930,12 +943,24 @@ where
             literal_columns = ?literal_columns,
         );
 
+        // Until the statement is rewritten its output params are its input
+        // params — a statement that needs no transform never reshapes them, and
+        // one that does overwrites this from the rewrite's `ParamPlan`.
+        let output_params = param_columns
+            .iter()
+            .enumerate()
+            .map(|(idx, column)| OutputParam {
+                column: column.to_owned(),
+                source: OutputParamSource::Input(idx),
+            })
+            .collect();
+
         let statement = Statement::new(
             param_columns.to_owned(),
+            output_params,
             projection_columns.to_owned(),
             literal_columns.to_owned(),
             param_types,
-            json_value_selector_params(typed_statement),
         );
 
         Ok(Some(statement))
@@ -1012,7 +1037,7 @@ where
 
             if statement.has_params() {
                 let encrypted = self.encrypt_params(session_id, &bind, &statement).await?;
-                bind.rewrite(encrypted)?;
+                bind.rewrite(&statement.output_params, encrypted)?;
             }
             if statement.has_projection() {
                 portal = Portal::encrypted_with_format_codes(
@@ -1056,11 +1081,16 @@ where
         bind: &Bind,
         statement: &Statement,
     ) -> Result<Vec<Option<crate::EqlOutput>>, Error> {
-        let plaintexts = bind.to_plaintext(
-            &statement.param_columns,
-            &statement.postgres_param_types,
-            &statement.json_value_selectors,
-        )?;
+        let plaintexts =
+            bind.to_plaintext(&statement.output_params, &statement.postgres_param_types)?;
+
+        // Encryption is positional over the OUTPUT params — the values actually
+        // sent — not over what the client bound.
+        let output_param_columns = statement
+            .output_params
+            .iter()
+            .map(|output| output.column.to_owned())
+            .collect::<Vec<_>>();
 
         debug!(target: MAPPER, client_id = self.context.client_id, plaintexts = ?plaintexts);
 
@@ -1068,7 +1098,7 @@ where
 
         let encrypted = self
             .context
-            .encrypt(plaintexts, &statement.param_columns)
+            .encrypt(plaintexts, &output_param_columns)
             .await
             .inspect_err(|_| {
                 counter!(ENCRYPTION_ERROR_TOTAL).increment(1);
@@ -1172,30 +1202,6 @@ where
 
         Ok(bytes)
     }
-}
-
-/// The fused JSON value-selector params of a statement, keyed by 0-based bind
-/// index. [`eql_mapper::Param`] is 1-based, so every index shifts by one here.
-///
-/// A value-selector param whose path is *also* a param records that param's
-/// index; a literal path is carried inline.
-fn json_value_selector_params(
-    typed_statement: &TypeCheckedStatement<'_>,
-) -> HashMap<usize, JsonSelectorPath> {
-    typed_statement
-        .params
-        .iter()
-        .enumerate()
-        .filter_map(|(idx, (param, _))| {
-            let path = match typed_statement.json_value_selectors.for_param(*param)? {
-                JsonSelectorSource::Literal(path) => JsonSelectorPath::Literal(path.to_owned()),
-                JsonSelectorSource::Param(path_param) => {
-                    JsonSelectorPath::Param(path_param.0.saturating_sub(1) as usize)
-                }
-            };
-            Some((idx, path))
-        })
-        .collect()
 }
 
 fn literals_to_plaintext(

@@ -2,7 +2,9 @@ use super::{maybe_json, maybe_jsonb, Name, NULL};
 use crate::error::{Error, MappingError, ProtocolError};
 use crate::log::MAPPER;
 use crate::postgresql::context::column::Column;
-use crate::postgresql::context::statement::JsonSelectorPath;
+use crate::postgresql::context::statement::{
+    params_are_positional, JsonSelectorPath, OutputParam, OutputParamSource,
+};
 use crate::postgresql::data::{
     bind_param_from_sql, bind_param_json_value, json_value_selector_plaintext,
 };
@@ -13,7 +15,6 @@ use crate::{SIZE_I16, SIZE_I32};
 use bytes::{Buf, BufMut, BytesMut};
 use cipherstash_client::encryption::Plaintext;
 use postgres_types::Type;
-use std::collections::HashMap;
 use std::fmt::{self, Display, Formatter};
 use std::io::Cursor;
 use std::{convert::TryFrom, ffi::CString};
@@ -32,6 +33,10 @@ pub struct Bind {
     pub param_values: Vec<BindParam>,
     pub num_result_column_format_codes: i16,
     pub result_columns_format_codes: Vec<FormatCode>,
+    /// Set when the param list was rebuilt because the rewrite reshaped the
+    /// params. The message must then be re-sent even if no individual param was
+    /// itself edited, because the count and framing changed.
+    reshaped: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -43,54 +48,78 @@ pub struct BindParam {
 
 impl Bind {
     pub fn requires_rewrite(&self) -> bool {
-        self.param_values
-            .iter()
-            .any(|param| param.requires_rewrite())
+        self.reshaped
+            || self
+                .param_values
+                .iter()
+                .any(|param| param.requires_rewrite())
     }
 
-    /// Converts the bound params to plaintexts, one per param.
+    /// Converts the bound params to the plaintexts of the **output** params —
+    /// the values PostgreSQL will receive, which are not necessarily the values
+    /// the client bound.
     ///
-    /// `json_value_selectors` names the params that are *fused*: a JSON field
-    /// equality (`col -> $1 = $2`) has no plaintext of its own for `$2` — its
-    /// needle is composed from `$1` and `$2` together. Those params are resolved
-    /// in a second pass, once every param's own value is available.
+    /// Each output param pulls from the input param(s) its `source` names, so a
+    /// fused JSON value selector reads both halves here and a dropped path
+    /// operand is never decoded on its own (its bytes are only half a needle and
+    /// would not decode as a standalone operand for the column).
     pub fn to_plaintext(
         &self,
-        param_columns: &[Option<Column>],
+        output_params: &[OutputParam],
         param_types: &[i32],
-        json_value_selectors: &HashMap<usize, JsonSelectorPath>,
     ) -> Result<Vec<Option<Plaintext>>, Error> {
-        let mut plaintexts =
-            self.to_plaintext_positional(param_columns, param_types, json_value_selectors)?;
+        output_params
+            .iter()
+            .map(|output| {
+                let Some(col) = &output.column else {
+                    // Native param: forwarded verbatim, nothing to encrypt.
+                    return Ok(None);
+                };
 
-        for (idx, path) in json_value_selectors.iter() {
-            if *idx >= plaintexts.len() {
-                continue;
-            }
+                let input = output.source.primary_input();
+                let bound_param_type = get_param_type(input, param_types, col);
 
-            let postgres_type = param_columns
-                .get(*idx)
-                .and_then(|col| col.as_ref())
-                .map(|col| get_param_type(*idx, param_types, col))
-                .unwrap_or(Type::JSONB);
+                debug!(
+                    target: MAPPER,
+                    col = ?col, bound_param_type = ?bound_param_type, ?input
+                );
 
-            plaintexts[*idx] = self.json_value_selector_plaintext(*idx, path, &postgres_type)?;
-        }
+                match &output.source {
+                    OutputParamSource::Input(idx) => {
+                        let Some(param) = self.param_values.get(*idx) else {
+                            return Ok(None);
+                        };
 
-        Ok(plaintexts)
+                        // Convert param bytes into a Plaintext wrapping a Value
+                        // If the param type is different, will convert the bound type to the correct Plaintext variant identified by the cast_type
+                        bind_param_from_sql(
+                            param,
+                            &bound_param_type,
+                            col.eql_term(),
+                            col.cast_type(),
+                        )
+                        .map_err(|_| {
+                            MappingError::InvalidParameter(Box::new(col.to_owned())).into()
+                        })
+                    }
+                    OutputParamSource::JsonValueSelector { path, value } => {
+                        self.json_value_selector_plaintext(path, *value, &bound_param_type)
+                    }
+                }
+            })
+            .collect()
     }
 
-    /// Composes `{"path", "value"}` for the fused value-selector param at `idx`.
+    /// Composes `{"path", "value"}` — the input to `SteVecValueSelector` — from
+    /// the two operands of a JSON field equality.
     ///
-    /// The path comes either from the SQL (a literal selector) or from another
-    /// bind param, which is read from the wire directly rather than from its
-    /// plaintext — the plaintext pass has already been run for that param, but
-    /// its value is the selector *text*, and reading the raw bytes keeps the two
-    /// halves decoded the same way regardless of which pass ran first.
+    /// The path is either a literal from the SQL or another bind param, which is
+    /// read straight off the wire: it is the selector *text*, so it needs none
+    /// of the per-column decoding the value half goes through.
     fn json_value_selector_plaintext(
         &self,
-        idx: usize,
         path: &JsonSelectorPath,
+        value: usize,
         postgres_type: &Type,
     ) -> Result<Option<Plaintext>, Error> {
         let path = match path {
@@ -101,7 +130,7 @@ impl Bind {
             },
         };
 
-        let Some(param) = self.param_values.get(idx) else {
+        let Some(param) = self.param_values.get(value) else {
             return Ok(None);
         };
 
@@ -112,7 +141,6 @@ impl Bind {
         debug!(
             target: MAPPER,
             msg = "Fused JSON value selector",
-            ?idx,
             ?path,
             ?value
         );
@@ -120,74 +148,71 @@ impl Bind {
         Ok(Some(json_value_selector_plaintext(&path, value)?))
     }
 
-    /// The one-plaintext-per-param pass.
+    /// Replaces the bound params with the output params of the rewritten
+    /// statement.
     ///
-    /// Params named in `json_value_selectors` are skipped: a fused value
-    /// selector has no plaintext of its own — its own bytes are only half the
-    /// needle — and decoding it here would fail, since the scalar it carries is
-    /// not a valid standalone operand for the column.
-    fn to_plaintext_positional(
-        &self,
-        param_columns: &[Option<Column>],
-        param_types: &[i32],
-        json_value_selectors: &HashMap<usize, JsonSelectorPath>,
-    ) -> Result<Vec<Option<Plaintext>>, Error> {
-        let plaintexts = self
-            .param_values
-            .iter()
-            .zip(param_columns.iter())
-            .enumerate()
-            .map(|(idx, (param, col))| match col {
-                _ if json_value_selectors.contains_key(&idx) => Ok(None),
-                Some(col) => {
-                    let bound_param_type = get_param_type(idx, param_types, col);
+    /// When the plan is positional (the overwhelmingly common case) the params
+    /// are patched in place, leaving the client's framing — including its format
+    /// code encoding — exactly as sent. When the rewrite reshaped the params,
+    /// the list is rebuilt: each output param inherits the wire bytes and format
+    /// code of the input it was built around, and an explicit format code is
+    /// emitted per param since the counts no longer line up.
+    pub fn rewrite(
+        &mut self,
+        output_params: &[OutputParam],
+        encrypted: Vec<Option<EqlOutput>>,
+    ) -> Result<(), Error> {
+        if output_params.len() == self.param_values.len() && params_are_positional(output_params) {
+            for (param, ct) in self.param_values.iter_mut().zip(encrypted.iter()) {
+                Self::apply_encrypted(param, ct.as_ref())?;
+            }
+            return Ok(());
+        }
 
-                    debug!(
-                        target: MAPPER,
-                        col = ?col, bound_param_type = ?bound_param_type
-                    );
+        let mut param_values = Vec::with_capacity(output_params.len());
+        for (output, ct) in output_params.iter().zip(encrypted.iter()) {
+            let input = output.source.primary_input();
+            let mut param = self.param_values.get(input).cloned().ok_or(
+                ProtocolError::MissingBoundParameter {
+                    param: input + 1,
+                    received: self.param_values.len(),
+                },
+            )?;
 
-                    // Convert param bytes into a Plaintext wrapping a Value
-                    // If the param type is different, will convert the bound type to the correct Plaintext variant identified by the cast_type
-                    let plaintext = bind_param_from_sql(
-                        param,
-                        &bound_param_type,
-                        col.eql_term(),
-                        col.cast_type(),
-                    )
-                    .map_err(|_| MappingError::InvalidParameter(Box::new(col.to_owned())))?;
+            Self::apply_encrypted(&mut param, ct.as_ref())?;
+            param_values.push(param);
+        }
 
-                    Ok(plaintext)
-                }
-                None => Ok(None),
-            })
-            .collect::<Result<Vec<_>, Error>>()?;
-        Ok(plaintexts)
+        self.param_format_codes = param_values.iter().map(|param| param.format_code).collect();
+        self.num_param_format_codes = self.param_format_codes.len() as i16;
+        self.num_param_values = param_values.len() as i16;
+        self.param_values = param_values;
+        self.reshaped = true;
+
+        Ok(())
     }
 
-    pub fn rewrite(&mut self, encrypted: Vec<Option<EqlOutput>>) -> Result<(), Error> {
-        for (idx, ct) in encrypted.iter().enumerate() {
-            if let Some(ct) = ct {
-                match ct {
-                    // A JSON selector (`->`/`->>`/`jsonb_path_query`) is a bare
-                    // tokenized-selector hash bound directly as `text`, NOT jsonb.
-                    // Use the raw token: JSON-serializing it re-quotes the bare
-                    // string (`"<hash>"`), which never matches the stored per-entry
-                    // `s`. It must also skip the jsonb version header a binary
-                    // rewrite would prepend — the binary wire form of `text` is
-                    // just its raw bytes, and a leading `0x01` corrupts the
-                    // selector so `->` matches nothing.
-                    EqlOutput::Query(EqlQueryPayload::Selector(s)) => {
-                        self.param_values[idx].rewrite_text(s.clone().into_bytes());
-                    }
-                    // convert json to bytes
-                    _ => {
-                        let bytes = serde_json::to_value(ct)?.to_string().into_bytes();
-                        self.param_values[idx].rewrite(&bytes);
-                    }
-                }
+    fn apply_encrypted(param: &mut BindParam, ct: Option<&EqlOutput>) -> Result<(), Error> {
+        match ct {
+            // A JSON selector (`->`/`->>`/`jsonb_path_query`) is a bare
+            // tokenized-selector hash bound directly as `text`, NOT jsonb.
+            // Use the raw token: JSON-serializing it re-quotes the bare
+            // string (`"<hash>"`), which never matches the stored per-entry
+            // `s`. It must also skip the jsonb version header a binary
+            // rewrite would prepend — the binary wire form of `text` is
+            // just its raw bytes, and a leading `0x01` corrupts the
+            // selector so `->` matches nothing.
+            Some(EqlOutput::Query(EqlQueryPayload::Selector(s))) => {
+                param.rewrite_text(s.clone().into_bytes());
             }
+            // convert json to bytes
+            Some(ct) => {
+                let bytes = serde_json::to_value(ct)?.to_string().into_bytes();
+                param.rewrite(&bytes);
+            }
+            None => {}
         }
+
         Ok(())
     }
 }
@@ -369,6 +394,7 @@ impl TryFrom<&BytesMut> for Bind {
             param_values,
             num_result_column_format_codes,
             result_columns_format_codes,
+            reshaped: false,
         })
     }
 }

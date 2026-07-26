@@ -440,6 +440,9 @@ pub enum ProtocolError {
     #[error("Expected {expected} parameter format codes, received {received}")]
     ParameterResultFormatCodesMismatch { expected: usize, received: usize },
 
+    #[error("Rewritten statement binds parameter {param}, but only {received} were provided")]
+    MissingBoundParameter { param: usize, received: usize },
+
     #[error("Expected a {expected} message, received message code {received}")]
     UnexpectedAuthenticationResponse { expected: String, received: i32 },
 

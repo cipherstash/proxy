@@ -3,11 +3,7 @@ pub mod phase_timing;
 pub mod portal;
 pub mod statement;
 pub mod statement_metadata;
-pub use self::{
-    phase_timing::PhaseTiming,
-    portal::Portal,
-    statement::{JsonSelectorPath, Statement},
-};
+pub use self::{phase_timing::PhaseTiming, portal::Portal, statement::Statement};
 use super::{
     column_mapper::ColumnMapper,
     messages::{describe::Describe, Name, Target},
@@ -818,6 +814,13 @@ where
         self.column_mapper.get_param_columns(typed_statement)
     }
 
+    pub fn get_output_param_columns(
+        &self,
+        plan: &eql_mapper::ParamPlan,
+    ) -> Result<Vec<Option<Column>>, Error> {
+        self.column_mapper.get_output_param_columns(plan)
+    }
+
     pub fn get_literal_columns(
         &self,
         typed_statement: &eql_mapper::TypeCheckedStatement<'_>,
@@ -1120,7 +1123,7 @@ mod tests {
             projection_columns: vec![],
             literal_columns: vec![],
             postgres_param_types: vec![],
-            json_value_selectors: std::collections::HashMap::new(),
+            output_params: vec![],
         }
     }
 
