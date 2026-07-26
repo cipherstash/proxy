@@ -191,10 +191,12 @@ mod tests {
             OutputParam {
                 column: None,
                 source: OutputParamSource::Input(0),
+                query_operand: false,
             },
             OutputParam {
                 column: Some(column),
                 source: OutputParamSource::Input(1),
+                query_operand: false,
             },
         ];
 
@@ -225,6 +227,7 @@ mod tests {
         let output_params = vec![OutputParam {
             column: None,
             source: OutputParamSource::Input(1),
+            query_operand: false,
         }];
 
         parse.rewrite_param_types(&output_params);

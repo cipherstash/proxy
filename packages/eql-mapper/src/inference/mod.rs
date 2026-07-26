@@ -19,7 +19,8 @@ use sqltk::parser::ast::{
 use sqltk::{into_control_flow, AsNodeKey, Break, Visitable, Visitor};
 
 use crate::{
-    JsonSelectorSource, JsonValueSelectors, Param, ScopeError, ScopeTracker, TableResolver,
+    JsonSelectorSource, JsonValueSelectors, Param, QueryOperands, ScopeError, ScopeTracker,
+    TableResolver,
 };
 
 pub(crate) use registry::*;
@@ -59,6 +60,12 @@ pub struct TypeInferencer<'ast> {
     /// the path for which value ([`crate::JsonValueSelectors`]).
     json_value_selectors: RefCell<JsonValueSelectors<'ast>>,
 
+    /// The operands that appear in a query position, so the proxy can project
+    /// their payloads to query operands ([`crate::QueryOperands`]). Recorded
+    /// here rather than derived later because it is a fact about the statement's
+    /// shape, and the proxy needs it before it encrypts anything.
+    query_operands: RefCell<QueryOperands<'ast>>,
+
     _ast: PhantomData<&'ast ()>,
 }
 
@@ -74,6 +81,7 @@ impl<'ast> TypeInferencer<'ast> {
             scope_tracker: scope.into(),
             unifier: unifier.into(),
             json_value_selectors: RefCell::new(JsonValueSelectors::default()),
+            query_operands: RefCell::new(QueryOperands::default()),
             _ast: PhantomData,
         }
     }
@@ -82,6 +90,19 @@ impl<'ast> TypeInferencer<'ast> {
     /// leaving the inferencer's set empty.
     pub(crate) fn take_json_value_selectors(&self) -> JsonValueSelectors<'ast> {
         std::mem::take(&mut self.json_value_selectors.borrow_mut())
+    }
+
+    /// Takes the recorded query operands, leaving the inferencer's set empty.
+    pub(crate) fn take_query_operands(&self) -> QueryOperands<'ast> {
+        std::mem::take(&mut self.query_operands.borrow_mut())
+    }
+
+    pub(crate) fn record_query_operand_param(&self, param: Param) {
+        self.query_operands.borrow_mut().record_param(param);
+    }
+
+    pub(crate) fn record_query_operand_literal(&self, node: &'ast sqltk::parser::ast::Value) {
+        self.query_operands.borrow_mut().record_literal(node);
     }
 
     pub(crate) fn record_json_value_selector_param(

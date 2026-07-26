@@ -48,6 +48,10 @@ pub struct OutputParam {
 
     /// The input param(s) its value is built from.
     pub source: OutputParamSource,
+
+    /// Whether this param is a query operand, whose payload must be projected
+    /// to carry search terms without a ciphertext.
+    pub query_operand: bool,
 }
 
 ///
@@ -128,6 +132,7 @@ pub fn output_params_from_plan(
         .zip(output_columns)
         .map(|(output, column)| OutputParam {
             column,
+            query_operand: output.query_operand,
             source: match &output.source {
                 eql_mapper::OutputParamSource::Input(param) => {
                     OutputParamSource::Input(to_index(param.0))

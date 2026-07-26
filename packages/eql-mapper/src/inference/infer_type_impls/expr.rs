@@ -190,6 +190,24 @@ impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
                 if !handled {
                     get_sql_binop_rule(op).apply_constraints(self, left, right, expr_val)?;
                 }
+
+                // The operands of a predicate reach PostgreSQL as query
+                // operands — terms only, never a ciphertext. Record them so the
+                // proxy projects their payloads accordingly. Containment
+                // (`@>`/`<@`) is deliberately excluded: its needle is a whole
+                // document and keeps its full payload.
+                if matches!(
+                    op,
+                    BinaryOperator::Eq
+                        | BinaryOperator::NotEq
+                        | BinaryOperator::Lt
+                        | BinaryOperator::LtEq
+                        | BinaryOperator::Gt
+                        | BinaryOperator::GtEq
+                        | BinaryOperator::AtAt
+                ) {
+                    self.record_query_operands([&**left, &**right]);
+                }
             }
 
             // `customer_name LIKE 'A%'`. Route LIKE/ILIKE through the `~~`/`~~*`
@@ -210,6 +228,7 @@ impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
                     BinaryOperator::PGLikeMatch
                 };
                 get_sql_binop_rule(&op).apply_constraints(self, expr, pattern, expr_val)?;
+                self.record_query_operands([&**expr, &**pattern]);
             }
             Expr::ILike {
                 negated,
@@ -224,6 +243,7 @@ impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
                     BinaryOperator::PGILikeMatch
                 };
                 get_sql_binop_rule(&op).apply_constraints(self, expr, pattern, expr_val)?;
+                self.record_query_operands([&**expr, &**pattern]);
             }
 
             Expr::Like { any: true, .. } | Expr::ILike { any: true, .. } => {
@@ -588,6 +608,26 @@ impl<'ast> TypeInferencer<'ast> {
         };
 
         self.eql_json_value(expr).map(|json| (json, selector))
+    }
+
+    /// Records each of `exprs` that is a literal or placeholder as a query
+    /// operand — an operand of a predicate, which reaches PostgreSQL carrying
+    /// only search terms and never a ciphertext.
+    ///
+    /// Column references are ignored: they are already stored payloads, and it
+    /// is only the bound values whose encryption shape this decides.
+    fn record_query_operands(&self, exprs: impl IntoIterator<Item = &'ast Expr>) {
+        for expr in exprs {
+            match Self::as_ast_value(expr) {
+                Some(ast::Value::Placeholder(placeholder)) => {
+                    if let Ok(param) = Param::try_from(placeholder) {
+                        self.record_query_operand_param(param);
+                    }
+                }
+                Some(node) => self.record_query_operand_literal(node),
+                None => {}
+            }
+        }
     }
 
     /// Types `value` — the value half of `col -> sel = value` — as a fused

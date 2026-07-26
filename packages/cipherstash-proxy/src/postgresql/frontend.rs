@@ -609,13 +609,20 @@ where
 
         let start = Instant::now();
 
-        let encrypted = self
+        let mut encrypted = self
             .context
             .encrypt(plaintexts, literal_columns)
             .await
             .inspect_err(|_| {
                 counter!(ENCRYPTION_ERROR_TOTAL).increment(1);
             })?;
+
+        for ((_, literal), encrypted) in literal_values.iter().zip(encrypted.iter_mut()) {
+            project_query_operand(
+                typed_statement.query_operands.contains_literal(literal),
+                encrypted,
+            );
+        }
 
         debug!(target: MAPPER,
             client_id = self.context.client_id,
@@ -952,6 +959,7 @@ where
             .map(|(idx, column)| OutputParam {
                 column: column.to_owned(),
                 source: OutputParamSource::Input(idx),
+                query_operand: false,
             })
             .collect();
 
@@ -1096,13 +1104,17 @@ where
 
         let start = Instant::now();
 
-        let encrypted = self
+        let mut encrypted = self
             .context
             .encrypt(plaintexts, &output_param_columns)
             .await
             .inspect_err(|_| {
                 counter!(ENCRYPTION_ERROR_TOTAL).increment(1);
             })?;
+
+        for (output, encrypted) in statement.output_params.iter().zip(encrypted.iter_mut()) {
+            project_query_operand(output.query_operand, encrypted);
+        }
 
         let duration = Instant::now().duration_since(start);
 
@@ -1201,6 +1213,30 @@ where
         let bytes = BytesMut::try_from(query)?;
 
         Ok(bytes)
+    }
+}
+
+/// Projects a stored payload into its query operand when the value is bound in
+/// a predicate rather than stored.
+///
+/// A query operand carries the column's search terms but never a decryptable
+/// ciphertext — the `eql_v3.query_*` domains reject `c` outright. It cannot be
+/// produced by encrypting differently: a single `EqlOperation::Query` yields
+/// only ONE term, while an operand may need several (`{v,i,hm,ob}`), so the
+/// value is encrypted in Store mode and projected here.
+///
+/// Terms that are already query-shaped (the JSON selectors and SteVec terms,
+/// which the encryptor produces via `EqlOperation::Query`) are left alone.
+fn project_query_operand(query_operand: bool, encrypted: &mut Option<EqlOutput>) {
+    if !query_operand {
+        return;
+    }
+
+    match encrypted.take() {
+        Some(EqlOutput::Store(ciphertext)) => {
+            *encrypted = Some(EqlOutput::Query(ciphertext.into_query_operand()));
+        }
+        already_query_shaped => *encrypted = already_query_shaped,
     }
 }
 

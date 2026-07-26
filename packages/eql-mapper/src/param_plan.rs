@@ -60,6 +60,11 @@ pub struct OutputParam {
 
     /// The input params it is built from.
     pub source: OutputParamSource,
+
+    /// Whether this param is a **query operand** — an operand of a predicate,
+    /// which must reach PostgreSQL carrying only search terms and no
+    /// ciphertext. See [`crate::QueryOperands`].
+    pub query_operand: bool,
 }
 
 /// The params of the rewritten statement, in the order PostgreSQL will see them.

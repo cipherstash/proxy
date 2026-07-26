@@ -4,6 +4,7 @@ use sqltk::parser::ast::{self, Statement};
 use sqltk::{AsNodeKey, NodeKey, Transformable};
 
 use crate::unifier::EqlTerm;
+use crate::QueryOperands;
 use crate::{
     CastFullPayloadOperands, DryRunnable, EqlMapperError, FailOnPlaceholderChange,
     JsonValueSelectors, OutputParam, OutputParamSource, Param, ParamPlan, PreserveEffectiveAliases,
@@ -66,6 +67,14 @@ pub struct TypeCheckedStatement<'ast> {
     /// the proxy binds against.
     pub json_value_selectors: JsonValueSelectors<'ast>,
 
+    /// The operands that appear in a query position rather than a storing one.
+    ///
+    /// A query operand carries only search terms; a stored value carries the
+    /// ciphertext too. The two are the same [`EqlTerm`], so this is the only
+    /// thing telling the proxy which payload shape to send — see
+    /// [`QueryOperands`].
+    pub query_operands: QueryOperands<'ast>,
+
     /// A [`HashMap`] of AST node (using [`NodeKey`] as the key) to [`Type`].  The map contains a `Type` for every node
     /// in the AST with the node type is one of: [`Statement`], [`Query`], [`Insert`], [`Delete`], [`Expr`],
     /// [`SetExpr`], [`Select`], [`SelectItem`], [`Vec<SelectItem>`], [`Function`], [`Values`], [`Value`].
@@ -91,6 +100,7 @@ impl<'ast> TypeCheckedStatement<'ast> {
         params: Vec<(Param, Value)>,
         literals: Vec<(EqlTerm, &'ast ast::Value)>,
         json_value_selectors: JsonValueSelectors<'ast>,
+        query_operands: QueryOperands<'ast>,
         node_types: Arc<HashMap<NodeKey<'ast>, Type>>,
     ) -> Self {
         Self {
@@ -99,6 +109,7 @@ impl<'ast> TypeCheckedStatement<'ast> {
             params,
             literals,
             json_value_selectors,
+            query_operands,
             node_types,
         }
     }
@@ -182,6 +193,7 @@ impl<'ast> TypeCheckedStatement<'ast> {
                     param: Param((idx + 1) as u16),
                     value,
                     source,
+                    query_operand: self.query_operands.contains_param(input),
                 })
             })
             .collect::<Result<Vec<_>, EqlMapperError>>()?;

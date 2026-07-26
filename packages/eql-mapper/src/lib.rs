@@ -10,6 +10,7 @@ mod json_value_selector;
 mod model;
 mod param;
 mod param_plan;
+mod query_operands;
 mod renumber_params;
 mod scope_tracker;
 mod transformation_rules;
@@ -24,6 +25,7 @@ pub use json_value_selector::*;
 pub use model::*;
 pub use param::*;
 pub use param_plan::*;
+pub use query_operands::*;
 pub use type_checked_statement::*;
 pub use unifier::{
     Array, AssociatedType, DomainIdentity, EqlTerm, EqlTermVariant, EqlTrait, EqlTraits, EqlValue,
