@@ -10,7 +10,7 @@ use sqltk::{NodeKey, NodePath, Visitable};
 use crate::unifier::{DomainIdentity, Type, Value};
 use crate::EqlMapperError;
 
-use super::helpers::eql_v3_term_call;
+use super::helpers::{cast_encrypted_operand, eql_v3_term_call, query_operand_domain};
 use super::TransformationRule;
 
 /// Rewrites fuzzy-match predicates on encrypted columns into the EQL v3
@@ -92,20 +92,44 @@ impl<'ast> TransformationRule<'ast> for RewriteEqlMatchOps<'ast> {
             )));
         };
 
+        // The pattern is a query operand of this predicate — cast it to the
+        // column's `eql_v3.query_*` twin before wrapping. This rule owns the
+        // predicate, so no ancestor inspection is needed to know that.
+        let (original_col, original_pat) = match original {
+            Expr::Like { expr, pattern, .. } | Expr::ILike { expr, pattern, .. } => {
+                (&**expr, &**pattern)
+            }
+            Expr::BinaryOp { left, right, .. } => (&**left, &**right),
+            _ => return Ok(false),
+        };
+
         let dummy = Expr::Value(ValueWithSpan {
             value: SqltkValue::Null,
             span: Span::empty(),
         });
         let expr = target_node.downcast_mut::<Expr>().unwrap();
         let (col_expr, pat_expr) = match expr {
-            Expr::Like { expr, pattern, .. } | Expr::ILike { expr, pattern, .. } => (
-                mem::replace(&mut **expr, dummy.clone()),
-                mem::replace(&mut **pattern, dummy),
-            ),
-            Expr::BinaryOp { left, right, .. } => (
-                mem::replace(&mut **left, dummy.clone()),
-                mem::replace(&mut **right, dummy),
-            ),
+            Expr::Like { expr, pattern, .. } | Expr::ILike { expr, pattern, .. } => {
+                cast_encrypted_operand(&self.node_types, original_col, expr, query_operand_domain);
+                cast_encrypted_operand(
+                    &self.node_types,
+                    original_pat,
+                    pattern,
+                    query_operand_domain,
+                );
+                (
+                    mem::replace(&mut **expr, dummy.clone()),
+                    mem::replace(&mut **pattern, dummy),
+                )
+            }
+            Expr::BinaryOp { left, right, .. } => {
+                cast_encrypted_operand(&self.node_types, original_col, left, query_operand_domain);
+                cast_encrypted_operand(&self.node_types, original_pat, right, query_operand_domain);
+                (
+                    mem::replace(&mut **left, dummy.clone()),
+                    mem::replace(&mut **right, dummy),
+                )
+            }
             _ => return Ok(false),
         };
 

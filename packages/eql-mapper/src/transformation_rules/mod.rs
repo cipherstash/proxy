@@ -11,8 +11,7 @@
 
 mod helpers;
 
-mod cast_literals_as_encrypted;
-mod cast_params_as_encrypted;
+mod cast_full_payload_operands;
 mod fail_on_placeholder_change;
 mod preserve_effective_aliases;
 mod rewrite_containment_ops;
@@ -20,11 +19,11 @@ mod rewrite_eql_comparison_ops;
 mod rewrite_eql_match_ops;
 mod rewrite_json_value_selector_eq;
 mod rewrite_standard_sql_fns_on_eql_types;
+mod substitute_encrypted_literals;
 
 use std::marker::PhantomData;
 
-pub(crate) use cast_literals_as_encrypted::*;
-pub(crate) use cast_params_as_encrypted::*;
+pub(crate) use cast_full_payload_operands::*;
 pub(crate) use fail_on_placeholder_change::*;
 pub(crate) use preserve_effective_aliases::*;
 pub(crate) use rewrite_containment_ops::*;
@@ -32,6 +31,7 @@ pub(crate) use rewrite_eql_comparison_ops::*;
 pub(crate) use rewrite_eql_match_ops::*;
 pub(crate) use rewrite_json_value_selector_eq::*;
 pub(crate) use rewrite_standard_sql_fns_on_eql_types::*;
+pub(crate) use substitute_encrypted_literals::*;
 
 use crate::EqlMapperError;
 use sqltk::{NodePath, Transform, Visitable};

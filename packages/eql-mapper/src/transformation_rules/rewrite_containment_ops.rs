@@ -13,6 +13,7 @@ use sqltk::{NodeKey, NodePath, Visitable};
 use crate::unifier::{Type, Value};
 use crate::EqlMapperError;
 
+use super::helpers::{cast_encrypted_operand, full_payload_domain};
 use super::TransformationRule;
 
 /// Rewrites JSON binary operators on encrypted columns to `eql_v3` function
@@ -93,6 +94,17 @@ impl<'ast> TransformationRule<'ast> for RewriteContainmentOps<'ast> {
         target_node: &mut N,
     ) -> Result<bool, EqlMapperError> {
         if self.would_edit(node_path, target_node) {
+            // Read the original operands: `node_types` is keyed by them, and the
+            // cast this rule applies depends on which operator it is.
+            let Some((Expr::BinaryOp {
+                left: original_left,
+                right: original_right,
+                ..
+            },)) = node_path.last_1_as::<Expr>()
+            else {
+                return Ok(false);
+            };
+
             let expr = target_node.downcast_mut::<Expr>().unwrap();
             if let Expr::BinaryOp { left, op, right } = expr {
                 let fn_name = match op {
@@ -103,8 +115,21 @@ impl<'ast> TransformationRule<'ast> for RewriteContainmentOps<'ast> {
                     _ => return Ok(false),
                 };
 
+                // A containment needle is a whole encrypted document, so it
+                // casts to the column domain, not to a query twin. A `->`/`->>`
+                // selector takes no cast at all — `full_payload_domain` returns
+                // `None` for it — because `eql_v3."->"(json, text)` wants the
+                // bare encrypted selector text.
+                cast_encrypted_operand(&self.node_types, original_left, left, full_payload_domain);
+                cast_encrypted_operand(
+                    &self.node_types,
+                    original_right,
+                    right,
+                    full_payload_domain,
+                );
+
                 // Use mem::replace to move (not copy) the original nodes,
-                // preserving their NodeKey identity for downstream casting rules
+                // preserving their NodeKey identity for downstream rules
                 let dummy = Expr::Value(ValueWithSpan {
                     value: SqltkValue::Null,
                     span: Span::empty(),

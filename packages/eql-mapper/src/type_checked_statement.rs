@@ -5,10 +5,10 @@ use sqltk::{AsNodeKey, NodeKey, Transformable};
 
 use crate::unifier::EqlTerm;
 use crate::{
-    CastLiteralsAsEncrypted, CastParamsAsEncrypted, DryRunnable, EqlMapperError,
-    FailOnPlaceholderChange, JsonValueSelectors, OutputParam, OutputParamSource, Param, ParamPlan,
-    PreserveEffectiveAliases, RenumberParams, RewriteContainmentOps, RewriteEqlComparisonOps,
-    RewriteEqlMatchOps, RewriteJsonValueSelectorEq, RewriteStandardSqlFnsOnEqlTypes,
+    CastFullPayloadOperands, DryRunnable, EqlMapperError, FailOnPlaceholderChange,
+    JsonValueSelectors, OutputParam, OutputParamSource, Param, ParamPlan, PreserveEffectiveAliases,
+    RenumberParams, RewriteContainmentOps, RewriteEqlComparisonOps, RewriteEqlMatchOps,
+    RewriteJsonValueSelectorEq, RewriteStandardSqlFnsOnEqlTypes, SubstituteEncryptedLiterals,
     TransformationRule,
 };
 
@@ -249,16 +249,20 @@ impl<'ast> TypeCheckedStatement<'ast> {
         &self,
         encrypted_literals: HashMap<NodeKey<'ast>, sqltk::parser::ast::Value>,
     ) -> DryRunnable<'_, impl TransformationRule<'_>> {
+        // Substitution runs first so every encrypted literal is in place before
+        // any rule wraps it. Each rewrite rule then applies the cast its own
+        // context requires, and `CastFullPayloadOperands` covers the one
+        // context that has no rewrite of its own — INSERT and UPDATE values.
         DryRunnable::new((
+            SubstituteEncryptedLiterals::new(encrypted_literals),
             RewriteStandardSqlFnsOnEqlTypes::new(Arc::clone(&self.node_types)),
             RewriteContainmentOps::new(Arc::clone(&self.node_types)),
             RewriteJsonValueSelectorEq::new(Arc::clone(&self.node_types)),
             RewriteEqlComparisonOps::new(Arc::clone(&self.node_types)),
             RewriteEqlMatchOps::new(Arc::clone(&self.node_types)),
+            CastFullPayloadOperands::new(Arc::clone(&self.node_types)),
             PreserveEffectiveAliases,
-            CastLiteralsAsEncrypted::new(encrypted_literals, Arc::clone(&self.node_types)),
             FailOnPlaceholderChange::new(),
-            CastParamsAsEncrypted::new(Arc::clone(&self.node_types)),
         ))
     }
 }

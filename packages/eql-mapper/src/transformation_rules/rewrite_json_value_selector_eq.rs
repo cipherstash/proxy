@@ -13,6 +13,7 @@ use sqltk::{NodeKey, NodePath, Visitable};
 use crate::unifier::{EqlTerm, Type, Value};
 use crate::EqlMapperError;
 
+use super::helpers::{cast_encrypted_operand, query_operand_domain};
 use super::TransformationRule;
 
 /// Rewrites equality on an encrypted JSON **field** into value-selector
@@ -160,15 +161,25 @@ impl<'ast> TransformationRule<'ast> for RewriteJsonValueSelectorEq<'ast> {
         // Move (not clone) the transformed value operand so its NodeKey identity
         // survives; the container comes from the original AST, where it is still
         // the bare column reference the containment call needs.
+        // The needle is a query operand of this rule's own predicate: cast it to
+        // `eql_v3.query_json`, the containment-needle domain.
+        let (original_needle, target_needle) = if value_on_right {
+            (right, target_right)
+        } else {
+            (left, target_left)
+        };
+        cast_encrypted_operand(
+            &self.node_types,
+            original_needle,
+            target_needle,
+            query_operand_domain,
+        );
+
         let dummy = Expr::Value(ValueWithSpan {
             value: SqltkValue::Null,
             span: Span::empty(),
         });
-        let needle = if value_on_right {
-            mem::replace(&mut **target_right, dummy)
-        } else {
-            mem::replace(&mut **target_left, dummy)
-        };
+        let needle = mem::replace(&mut **target_needle, dummy);
 
         let contains = Self::jsonb_contains(container.clone(), needle);
 
