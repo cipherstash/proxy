@@ -9,6 +9,8 @@ mod iterator_ext;
 mod json_value_selector;
 mod model;
 mod param;
+mod param_plan;
+mod renumber_params;
 mod scope_tracker;
 mod transformation_rules;
 mod type_checked_statement;
@@ -21,6 +23,7 @@ pub use eql_mapper::*;
 pub use json_value_selector::*;
 pub use model::*;
 pub use param::*;
+pub use param_plan::*;
 pub use type_checked_statement::*;
 pub use unifier::{
     Array, AssociatedType, DomainIdentity, EqlTerm, EqlTermVariant, EqlTrait, EqlTraits, EqlValue,
@@ -29,6 +32,7 @@ pub use unifier::{
 
 pub(crate) use dep::*;
 pub(crate) use inference::*;
+pub(crate) use renumber_params::*;
 pub(crate) use scope_tracker::*;
 pub(crate) use transformation_rules::*;
 
@@ -41,7 +45,7 @@ mod test {
             EqlTerm, EqlTrait, EqlTraits, EqlValue, InstantiateType, NativeValue, Projection,
             ProjectionColumn, Type, Value,
         },
-        JsonSelectorSource, Param, Schema, TableColumn, TableResolver,
+        JsonSelectorSource, OutputParamSource, Param, Schema, TableColumn, TableResolver,
     };
     use eql_mapper_macros::concrete_ty;
     use pretty_assertions::assert_eq;
@@ -2368,26 +2372,30 @@ mod test {
     }
 
     /// `col -> $1 = $2` fuses both operands into ONE containment needle: the
-    /// field access is discarded, the value operand becomes the needle, and the
-    /// selector placeholder is left declared-but-unreferenced (which keeps param
-    /// numbering identical between client and server).
+    /// field access is discarded and the two input params become a single
+    /// output param, renumbered `$1`.
     #[test]
     fn json_field_eq_params_rewrites_to_containment() {
         let statement = parse("SELECT id FROM patients WHERE notes -> $1 = $2");
 
         let typed = type_check(json_eq_schema(), &statement).unwrap();
+        let transformed = typed.transform(HashMap::new()).unwrap();
 
         assert_eq!(
-            typed.transform(HashMap::new()).unwrap().to_string(),
-            "SELECT id FROM patients WHERE eql_v3.jsonb_contains(notes, $2::JSONB::eql_v3.query_json)"
+            transformed.to_string(),
+            "SELECT id FROM patients WHERE eql_v3.jsonb_contains(notes, $1::JSONB::eql_v3.query_json)"
         );
 
-        // The value operand ($2) carries the needle; its path comes from $1.
+        // Two input params, one output param, derived from both.
+        assert_eq!(transformed.params.len(), 1);
         assert_eq!(
-            typed.json_value_selectors.for_param(Param(2)),
-            Some(&JsonSelectorSource::Param(Param(1)))
+            transformed.params.outputs()[0].source,
+            OutputParamSource::JsonValueSelector {
+                path: JsonSelectorSource::Param(Param(1)),
+                value: Param(2),
+            }
         );
-        assert_eq!(typed.json_value_selectors.for_param(Param(1)), None);
+        assert!(!transformed.params.is_identity());
     }
 
     /// The `->>` and `jsonb_path_query_first` spellings are the same access and
@@ -2400,10 +2408,59 @@ mod test {
 
             assert_eq!(
                 typed.transform(HashMap::new()).unwrap().to_string(),
-                "SELECT id FROM patients WHERE eql_v3.jsonb_contains(notes, $2::JSONB::eql_v3.query_json)",
+                "SELECT id FROM patients WHERE eql_v3.jsonb_contains(notes, $1::JSONB::eql_v3.query_json)",
                 "unexpected rewrite for `{access}`"
             );
         }
+    }
+
+    /// Params around a fusion are renumbered to close the gap it leaves, and the
+    /// plan records where each surviving output param came from.
+    #[test]
+    fn json_field_eq_renumbers_surrounding_params() {
+        let statement =
+            parse("SELECT id FROM patients WHERE id = $1 AND notes -> $2 = $3 AND id <> $4");
+
+        let typed = type_check(json_eq_schema(), &statement).unwrap();
+        let transformed = typed.transform(HashMap::new()).unwrap();
+
+        assert_eq!(
+            transformed.to_string(),
+            "SELECT id FROM patients WHERE id = $1 AND eql_v3.jsonb_contains(notes, $2::JSONB::eql_v3.query_json) AND id <> $3"
+        );
+
+        let outputs = transformed.params.outputs();
+        assert_eq!(outputs.len(), 3);
+        assert_eq!(outputs[0].source, OutputParamSource::Input(Param(1)));
+        assert_eq!(
+            outputs[1].source,
+            OutputParamSource::JsonValueSelector {
+                path: JsonSelectorSource::Param(Param(2)),
+                value: Param(3),
+            }
+        );
+        assert_eq!(outputs[2].source, OutputParamSource::Input(Param(4)));
+    }
+
+    /// A statement whose params the rewrite leaves alone reports an identity
+    /// plan, so the proxy can keep binding by position.
+    #[test]
+    fn ordinary_params_produce_an_identity_plan() {
+        let schema = resolver(schema! {
+            tables: {
+                patients: {
+                    id,
+                    name (EQL: Eq),
+                }
+            }
+        });
+
+        let statement = parse("SELECT id FROM patients WHERE id = $1 AND name = $2");
+        let typed = type_check(schema, &statement).unwrap();
+        let transformed = typed.transform(HashMap::new()).unwrap();
+
+        assert_eq!(transformed.params.len(), 2);
+        assert!(transformed.params.is_identity());
     }
 
     /// Both halves as literals: the selector text is captured inline at
@@ -2457,7 +2514,7 @@ mod test {
 
         assert_eq!(
             typed.transform(HashMap::new()).unwrap().to_string(),
-            "SELECT id FROM patients WHERE NOT (eql_v3.jsonb_contains(notes, $2::JSONB::eql_v3.query_json))"
+            "SELECT id FROM patients WHERE NOT (eql_v3.jsonb_contains(notes, $1::JSONB::eql_v3.query_json))"
         );
     }
 

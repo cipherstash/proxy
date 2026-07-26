@@ -6,12 +6,39 @@ use sqltk::{AsNodeKey, NodeKey, Transformable};
 use crate::unifier::EqlTerm;
 use crate::{
     CastLiteralsAsEncrypted, CastParamsAsEncrypted, DryRunnable, EqlMapperError,
-    FailOnPlaceholderChange, JsonValueSelectors, Param, PreserveEffectiveAliases,
-    RewriteContainmentOps, RewriteEqlComparisonOps, RewriteEqlMatchOps, RewriteJsonValueSelectorEq,
-    RewriteStandardSqlFnsOnEqlTypes, TransformationRule,
+    FailOnPlaceholderChange, JsonValueSelectors, OutputParam, OutputParamSource, Param, ParamPlan,
+    PreserveEffectiveAliases, RenumberParams, RewriteContainmentOps, RewriteEqlComparisonOps,
+    RewriteEqlMatchOps, RewriteJsonValueSelectorEq, RewriteStandardSqlFnsOnEqlTypes,
+    TransformationRule,
 };
 
 use crate::unifier::{Projection, Type, Value};
+
+/// The result of [`TypeCheckedStatement::transform`]: the rewritten statement
+/// and the correspondence between its params and the input's.
+///
+/// Derefs to the [`Statement`] so a caller that only wants the SQL can treat it
+/// as one; a caller that binds params must consult [`Self::params`], because
+/// the two param lists are not guaranteed to correspond by position.
+#[derive(Debug)]
+pub struct TransformedStatement {
+    pub statement: Statement,
+    pub params: ParamPlan,
+}
+
+impl std::ops::Deref for TransformedStatement {
+    type Target = Statement;
+
+    fn deref(&self) -> &Self::Target {
+        &self.statement
+    }
+}
+
+impl std::fmt::Display for TransformedStatement {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.statement.fmt(f)
+    }
+}
 
 /// A `TypeCheckedStatement` is returned from a successful call to [`crate::type_check`].
 #[derive(Debug)]
@@ -32,11 +59,11 @@ pub struct TypeCheckedStatement<'ast> {
     /// [`EqlTerm::JsonValueSelector`], where the path half of its needle comes
     /// from.
     ///
-    /// This is the one place the mapper's output is **not** 1:1 with the input
-    /// SQL. `col -> sel = value` consumes two operands and emits one encrypted
-    /// needle; the path operand is dropped from the rewritten statement (its
-    /// placeholder stays declared but unreferenced, so param numbering is
-    /// untouched). The proxy consults this to compose the needle.
+    /// This is why the mapper's output is **not** 1:1 with the input SQL:
+    /// `col -> sel = value` consumes two operands and emits one encrypted
+    /// needle. The path operand is dropped from the rewritten statement, and
+    /// the remaining params are renumbered — see [`ParamPlan`], which is what
+    /// the proxy binds against.
     pub json_value_selectors: JsonValueSelectors<'ast>,
 
     /// A [`HashMap`] of AST node (using [`NodeKey`] as the key) to [`Type`].  The map contains a `Type` for every node
@@ -99,14 +126,72 @@ impl<'ast> TypeCheckedStatement<'ast> {
 
     /// Transforms the SQL statement by replacing all plaintext literals with EQL equivalents
     /// and inserting EQL helper functions where necessary.
+    ///
+    /// Returns the rewritten statement together with its [`ParamPlan`] — the
+    /// params of the rewritten statement are **not** guaranteed to correspond
+    /// 1:1 with the input's, so the caller must bind through the plan rather
+    /// than by position.
     pub fn transform(
         &self,
         encrypted_literals: HashMap<NodeKey<'ast>, sqltk::parser::ast::Value>,
-    ) -> Result<Statement, EqlMapperError> {
+    ) -> Result<TransformedStatement, EqlMapperError> {
         self.check_all_encrypted_literals_provided(&encrypted_literals)?;
         let mut transformer = self.make_transformer(encrypted_literals);
         transformer.set_real_run_mode();
-        self.statement.apply_transform(&mut transformer)
+        let rewritten = self.statement.apply_transform(&mut transformer)?;
+
+        // Renumber in a second pass, so the rules above are free to drop or
+        // duplicate placeholders without having to maintain `$n` themselves —
+        // and so `FailOnPlaceholderChange` still governs the rules' own edits.
+        let mut renumber = RenumberParams::new();
+        let statement = rewritten.apply_transform(&mut renumber)?;
+        let params = self.param_plan(renumber.into_sources())?;
+
+        Ok(TransformedStatement { statement, params })
+    }
+
+    /// Builds the [`ParamPlan`] from the input param each output placeholder was
+    /// renumbered from.
+    ///
+    /// An output param whose input is a fused JSON value selector carries both
+    /// operands; every other output forwards its input alone.
+    fn param_plan(&self, sources: Vec<Param>) -> Result<ParamPlan, EqlMapperError> {
+        let outputs = sources
+            .into_iter()
+            .enumerate()
+            .map(|(idx, input)| {
+                let value = self
+                    .params
+                    .iter()
+                    .find_map(|(param, value)| (*param == input).then(|| value.clone()))
+                    .ok_or_else(|| {
+                        EqlMapperError::InternalError(format!(
+                            "rewritten statement refers to param {input}, which the input statement does not declare"
+                        ))
+                    })?;
+
+                let source = match self.json_value_selectors.for_param(input) {
+                    Some(path) => OutputParamSource::JsonValueSelector {
+                        path: path.clone(),
+                        value: input,
+                    },
+                    None => OutputParamSource::Input(input),
+                };
+
+                Ok(OutputParam {
+                    param: Param((idx + 1) as u16),
+                    value,
+                    source,
+                })
+            })
+            .collect::<Result<Vec<_>, EqlMapperError>>()?;
+
+        let plan = ParamPlan::new(outputs);
+
+        let inputs: Vec<Param> = self.params.iter().map(|(param, _)| *param).collect();
+        plan.check_covers(&inputs)?;
+
+        Ok(plan)
     }
 
     pub fn literal_values(&self) -> &Vec<(EqlTerm, &'ast sqltk::parser::ast::Value)> {

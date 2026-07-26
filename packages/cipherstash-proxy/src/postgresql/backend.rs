@@ -4,7 +4,7 @@ use super::error_handler::PostgreSqlErrorHandler;
 use super::message_buffer::MessageBuffer;
 use super::messages::error_response::ErrorResponse;
 use super::messages::row_description::RowDescription;
-use super::messages::BackendCode;
+use super::messages::{BackendCode, UNSPECIFIED_TYPE_OID};
 use super::Column;
 use crate::connect::Sender;
 use crate::error::{EncryptError, Error};
@@ -572,20 +572,34 @@ where
         debug!(target: PROTOCOL, client_id = self.context.client_id, ParamDescription = ?description);
 
         if let Some(statement) = self.context.get_statement_from_describe() {
+            // Describe the params the CLIENT wrote, not the ones PostgreSQL was
+            // sent. A rewrite may have fused or dropped params, in which case
+            // the server's description is both shorter than and shifted from
+            // what the client needs in order to bind.
             let param_types = statement
                 .param_columns
                 .iter()
-                .map(|col| {
-                    col.as_ref().map(|col| {
+                .enumerate()
+                .map(|(idx, col)| match col {
+                    Some(col) => {
                         debug!(target: MAPPER, client_id = self.context.client_id, ColumnConfig = ?col);
-                        col.postgres_type.clone()
-                    })
+                        col.postgres_type.oid() as i32
+                    }
+                    // A native param is never fused, so it reaches PostgreSQL
+                    // as some output param; take the type the server inferred
+                    // for it.
+                    None => statement
+                        .output_params
+                        .iter()
+                        .position(|output| output.source.primary_input() == idx)
+                        .and_then(|output_idx| description.types.get(output_idx).copied())
+                        .unwrap_or(UNSPECIFIED_TYPE_OID),
                 })
                 .collect::<Vec<_>>();
 
             debug!(target: MAPPER, client_id = self.context.client_id, param_types = ?param_types);
 
-            description.map_types(&param_types);
+            description.set_types(param_types);
         }
 
         if description.requires_rewrite() {
