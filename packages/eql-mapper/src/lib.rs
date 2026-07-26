@@ -2537,6 +2537,92 @@ mod test {
         );
     }
 
+    /// `ORDER BY` on an encrypted column must order by its ordering TERM. A bare
+    /// `ORDER BY col` compares the jsonb payloads, whose first field is the
+    /// randomised ciphertext — silently returning rows in an arbitrary order
+    /// that differs on every insert.
+    #[test]
+    fn order_by_encrypted_column_uses_ord_term() {
+        let schema = resolver(schema! {
+            tables: {
+                employees: {
+                    id,
+                    salary (EQL("eql_v3_integer_ord"): Ord),
+                }
+            }
+        });
+
+        for (order_by, expected) in [
+            ("salary", "eql_v3.ord_term(salary)"),
+            ("salary DESC", "eql_v3.ord_term(salary) DESC"),
+            (
+                "salary ASC NULLS FIRST",
+                "eql_v3.ord_term(salary) ASC NULLS FIRST",
+            ),
+            (
+                "employees.salary DESC NULLS LAST",
+                "eql_v3.ord_term(employees.salary) DESC NULLS LAST",
+            ),
+            // A native column is left alone; a mixed list rewrites only the
+            // encrypted term.
+            ("id", "id"),
+            ("id, salary", "id, eql_v3.ord_term(salary)"),
+        ] {
+            let statement = parse(&format!("SELECT id FROM employees ORDER BY {order_by}"));
+            let typed = type_check(schema.clone(), &statement).unwrap();
+
+            assert_eq!(
+                typed.transform(HashMap::new()).unwrap().to_string(),
+                format!("SELECT id FROM employees ORDER BY {expected}"),
+                "unexpected rewrite for `ORDER BY {order_by}`"
+            );
+        }
+    }
+
+    /// A block-ORE domain orders through `ord_term_ore`.
+    #[test]
+    fn order_by_ore_column_uses_ord_term_ore() {
+        let schema = resolver(schema! {
+            tables: {
+                employees: {
+                    id,
+                    salary (EQL("eql_v3_integer_ord_ore"): Ord),
+                }
+            }
+        });
+
+        let statement = parse("SELECT id FROM employees ORDER BY salary");
+        let typed = type_check(schema, &statement).unwrap();
+
+        assert_eq!(
+            typed.transform(HashMap::new()).unwrap().to_string(),
+            "SELECT id FROM employees ORDER BY eql_v3.ord_term_ore(salary)"
+        );
+    }
+
+    /// Ordering by a column whose domain carries no ordering term is a
+    /// capability error, not an arbitrary sort.
+    #[test]
+    fn order_by_column_without_ordering_term_is_an_error() {
+        let schema = resolver(schema! {
+            tables: {
+                employees: {
+                    id,
+                    name (EQL("eql_v3_text_match"): TokenMatch),
+                }
+            }
+        });
+
+        let statement = parse("SELECT id FROM employees ORDER BY name");
+        let typed = type_check(schema, &statement).unwrap();
+
+        let err = typed.transform(HashMap::new()).unwrap_err().to_string();
+        assert!(
+            err.contains("ORDER BY") && err.contains("no ordering term"),
+            "expected a capability error, got: {err}"
+        );
+    }
+
     #[test]
     fn jsonb_path_query_param_to_eql() {
         // init_tracing();

@@ -8,8 +8,8 @@ use crate::{
     CastFullPayloadOperands, DryRunnable, EqlMapperError, FailOnPlaceholderChange,
     JsonValueSelectors, OutputParam, OutputParamSource, Param, ParamPlan, PreserveEffectiveAliases,
     RenumberParams, RewriteContainmentOps, RewriteEqlComparisonOps, RewriteEqlMatchOps,
-    RewriteJsonValueSelectorEq, RewriteStandardSqlFnsOnEqlTypes, SubstituteEncryptedLiterals,
-    TransformationRule,
+    RewriteEqlOrderBy, RewriteJsonValueSelectorEq, RewriteStandardSqlFnsOnEqlTypes,
+    SubstituteEncryptedLiterals, TransformationRule,
 };
 
 use crate::unifier::{Projection, Type, Value};
@@ -260,6 +260,7 @@ impl<'ast> TypeCheckedStatement<'ast> {
             RewriteJsonValueSelectorEq::new(Arc::clone(&self.node_types)),
             RewriteEqlComparisonOps::new(Arc::clone(&self.node_types)),
             RewriteEqlMatchOps::new(Arc::clone(&self.node_types)),
+            RewriteEqlOrderBy::new(Arc::clone(&self.node_types)),
             CastFullPayloadOperands::new(Arc::clone(&self.node_types)),
             PreserveEffectiveAliases,
             FailOnPlaceholderChange::new(),
