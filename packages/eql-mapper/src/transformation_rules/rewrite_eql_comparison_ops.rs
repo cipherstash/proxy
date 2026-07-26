@@ -10,7 +10,9 @@ use sqltk::{NodeKey, NodePath, Visitable};
 use crate::unifier::{DomainIdentity, EqlTerm, Type, Value};
 use crate::EqlMapperError;
 
-use super::helpers::{eql_v3_term_call, is_comparison_op};
+use super::helpers::{
+    cast_encrypted_operand, eql_v3_term_call, is_comparison_op, query_operand_domain,
+};
 use super::TransformationRule;
 
 /// Rewrites scalar comparison operators on encrypted columns into the EQL v3
@@ -109,15 +111,26 @@ impl<'ast> TransformationRule<'ast> for RewriteEqlComparisonOps<'ast> {
             )));
         };
 
-        if let Expr::BinaryOp { left, right, .. } = target_node.downcast_mut::<Expr>().unwrap() {
+        if let Expr::BinaryOp {
+            left: target_left,
+            right: target_right,
+            ..
+        } = target_node.downcast_mut::<Expr>().unwrap()
+        {
+            // Cast the operands before wrapping them: this rule owns the
+            // comparison, so it knows both are query operands and casts them to
+            // the term-only `eql_v3.query_*` twin.
+            cast_encrypted_operand(&self.node_types, left, target_left, query_operand_domain);
+            cast_encrypted_operand(&self.node_types, right, target_right, query_operand_domain);
+
             let dummy = Expr::Value(ValueWithSpan {
                 value: SqltkValue::Null,
                 span: Span::empty(),
             });
-            let left_expr = mem::replace(&mut **left, dummy.clone());
-            let right_expr = mem::replace(&mut **right, dummy);
-            **left = eql_v3_term_call(term_fn, left_expr);
-            **right = eql_v3_term_call(term_fn, right_expr);
+            let left_expr = mem::replace(&mut **target_left, dummy.clone());
+            let right_expr = mem::replace(&mut **target_right, dummy);
+            **target_left = eql_v3_term_call(term_fn, left_expr);
+            **target_right = eql_v3_term_call(term_fn, right_expr);
             return Ok(true);
         }
 

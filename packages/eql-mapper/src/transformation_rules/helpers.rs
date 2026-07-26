@@ -1,28 +1,24 @@
+use std::collections::HashMap;
+use std::mem;
+
 use sqltk::parser::{
     ast::{
         BinaryOperator, CastKind, DataType, Expr, Function, FunctionArg, FunctionArgExpr,
         FunctionArgumentList, FunctionArguments, Ident, ObjectName, ObjectNamePart,
+        Value as SqltkValue, ValueWithSpan,
     },
     tokenizer::Span,
 };
-use sqltk::NodePath;
+use sqltk::NodeKey;
 
-use crate::unifier::{DomainIdentity, EqlTerm};
+use crate::unifier::{EqlTerm, Type, Value};
 
-/// The v3 cast target `(schema, domain)` for a JSON ordering operand
-/// ([`EqlTerm::JsonOrd`]) — always the shape-only scalar ord twin
-/// `eql_v3.query_integer_ord`, regardless of the JSON leaf's scalar type.
+/// The v3 domain an encrypted **query operand** — the value side of a
+/// predicate — casts to, or `None` if it takes no cast.
 ///
-/// `eql_v3.ord_term` is type-agnostic (it extracts the `op` bytes as
-/// `ope_cllw` and compares them bytewise), and `query_integer_ord`'s domain
-/// CHECK is shape-only (`{v,i,op}`, no `c`). So a single twin serves numbers,
-/// text, dates, etc. — which is what makes JSON range work in the extended
-/// protocol, where the operand's scalar type is unknown at rewrite time.
-/// Returns `None` for any other term.
-/// The v3 cast target `(schema, domain)` for an encrypted-JSON *query operand*
-/// whose domain is fixed by the operand's role rather than by the column's
-/// domain identity. Returns `None` for any other term.
-///
+/// - [`EqlTerm::JsonAccessor`] / [`EqlTerm::JsonPath`] — no cast. A JSON field
+///   selector is passed to the eql_v3 function as bare encrypted *text*
+///   (`eql_v3."->"(json, text)`), not as a jsonb query payload.
 /// - [`EqlTerm::JsonOrd`] — the shape-only scalar ord twin
 ///   `eql_v3.query_integer_ord`, regardless of the JSON leaf's scalar type.
 ///   `eql_v3.ord_term` is type-agnostic (it extracts the `op` bytes as
@@ -34,14 +30,37 @@ use crate::unifier::{DomainIdentity, EqlTerm};
 ///   needle domain. The fused value selector is a one-entry, term-less
 ///   containment payload (`{sv: [{s}]}`), which is what
 ///   `eql_v3.jsonb_contains` matches against.
-pub(crate) fn json_query_operand_cast_target(eql_term: &EqlTerm) -> Option<(String, String)> {
-    let domain = match eql_term {
-        EqlTerm::JsonOrd(_) => "query_integer_ord",
-        EqlTerm::JsonValueSelector(_) => "query_json",
-        _ => return None,
-    };
+/// - Everything else — the column domain's `eql_v3.query_*` twin, which carries
+///   only the search terms the predicate needs, not a whole ciphertext.
+pub(crate) fn query_operand_domain(eql_term: &EqlTerm) -> Option<(String, String)> {
+    match eql_term {
+        EqlTerm::JsonAccessor(_) | EqlTerm::JsonPath(_) => None,
+        EqlTerm::JsonOrd(_) => Some(("eql_v3".to_string(), "query_integer_ord".to_string())),
+        EqlTerm::JsonValueSelector(_) => Some(("eql_v3".to_string(), "query_json".to_string())),
+        _ => {
+            let (schema, twin) = eql_term.eql_value().domain_identity().query_twin();
+            Some((schema.to_string(), twin))
+        }
+    }
+}
 
-    Some(("eql_v3".to_string(), domain.to_string()))
+/// The v3 domain an encrypted **full-payload** operand casts to: the column's
+/// own domain, carrying the ciphertext plus every search term the column
+/// indexes.
+///
+/// This is what an `INSERT` value, an `UPDATE` assignment and a containment
+/// needle all need — as opposed to a predicate operand, which needs only the
+/// terms of [`query_operand_domain`].
+///
+/// Returns `None` for a JSON selector, which is bare text in every position.
+pub(crate) fn full_payload_domain(eql_term: &EqlTerm) -> Option<(String, String)> {
+    match eql_term {
+        EqlTerm::JsonAccessor(_) | EqlTerm::JsonPath(_) => None,
+        _ => Some((
+            "public".to_string(),
+            eql_term.eql_value().domain_identity().domain.value.clone(),
+        )),
+    }
 }
 
 /// The scalar comparison operators the v3 term-function rewrite handles.
@@ -57,58 +76,51 @@ pub(crate) fn is_comparison_op(op: &BinaryOperator) -> bool {
     )
 }
 
-/// Whether an encrypted value at `node_path` is a **query operand** (the RHS of a
-/// comparison or match predicate) rather than a **stored value** (an INSERT
-/// `VALUES` item or UPDATE `SET` target). Walks the enclosing `Expr` ancestor
-/// chain looking for a comparison `BinaryOp` or a `LIKE`/`ILIKE` predicate. The
-/// traversal is post-order, so when a cast rule runs on the operand the enclosing
-/// predicate is still intact in the path.
-fn is_query_operand(node_path: &NodePath<'_>) -> bool {
-    let mut depth = 1;
-    while let Some(expr) = node_path.nth_last_as::<Expr>(depth) {
-        match expr {
-            Expr::BinaryOp { op, .. }
-                if is_comparison_op(op) || matches!(op, BinaryOperator::AtAt) =>
-            {
-                return true
-            }
-            Expr::Like { .. } | Expr::ILike { .. } => return true,
-            _ => {}
-        }
-        depth += 1;
+/// Casts `target` — the already-transformed form of `original` — to the v3
+/// domain `domain_of` chooses for its EQL type.
+///
+/// Only a literal or placeholder is cast. A column reference is already of its
+/// domain type, and any other expression belongs to whichever rule owns it.
+/// Returns `true` if a cast was applied.
+///
+/// This is called by the rule that *owns the context* — a comparison, a match,
+/// a containment, an INSERT value — so the choice of domain never has to be
+/// inferred from where the node happens to sit in the tree.
+pub(crate) fn cast_encrypted_operand(
+    node_types: &HashMap<NodeKey<'_>, Type>,
+    original: &Expr,
+    target: &mut Expr,
+    domain_of: fn(&EqlTerm) -> Option<(String, String)>,
+) -> bool {
+    if !matches!(original, Expr::Value(_)) {
+        return false;
     }
-    false
+
+    let Some(Type::Value(Value::Eql(eql_term))) = node_types.get(&NodeKey::new(original)) else {
+        return false;
+    };
+
+    let Some((schema, domain)) = domain_of(eql_term) else {
+        return false;
+    };
+
+    let wrapped = mem::replace(
+        target,
+        Expr::Value(ValueWithSpan {
+            value: SqltkValue::Null,
+            span: Span::empty(),
+        }),
+    );
+
+    *target = cast_expr_to_v3_domain(wrapped, &schema, &domain);
+    true
 }
 
-/// The v3 cast target `(schema, domain typname)` for an encrypted value carrying
-/// `identity` at `node_path`. A query operand casts to the `eql_v3.query_*` twin
-/// (term-only payload); a stored value casts to the `public` column domain.
-pub(crate) fn v3_cast_target(
-    node_path: &NodePath<'_>,
-    identity: &DomainIdentity,
-) -> (String, String) {
-    if is_query_operand(node_path) {
-        let (schema, twin) = identity.query_twin();
-        (schema.to_string(), twin)
-    } else {
-        ("public".to_string(), identity.domain.value.clone())
-    }
-}
-
-/// Builds `<wrapped>::JSONB::<schema>.<domain>` — the cast that wraps an encrypted
-/// value (a jsonb payload) as an EQL v3 domain. `schema` is `public` for a stored
-/// column domain and `eql_v3` for a query-operand twin.
-pub(crate) fn cast_to_v3_domain(
-    wrapped: sqltk::parser::ast::Value,
-    schema: &str,
-    domain: &str,
-) -> Expr {
+/// Builds `<wrapped>::JSONB::<schema>.<domain>` around an arbitrary expression.
+pub(crate) fn cast_expr_to_v3_domain(wrapped: Expr, schema: &str, domain: &str) -> Expr {
     let cast_jsonb = Expr::Cast {
         kind: CastKind::DoubleColon,
-        expr: Box::new(Expr::Value(sqltk::parser::ast::ValueWithSpan {
-            value: wrapped,
-            span: Span::empty(),
-        })),
+        expr: Box::new(wrapped),
         data_type: DataType::JSONB,
         format: None,
     };
