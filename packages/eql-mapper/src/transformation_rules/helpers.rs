@@ -138,25 +138,6 @@ pub(crate) fn cast_expr_to_v3_domain(wrapped: Expr, schema: &str, domain: &str) 
     }
 }
 
-/// Builds `<fn_name>(<arg>)` — an unqualified, single-argument function call
-/// resolved from `search_path` (i.e. a built-in such as `any_value`).
-pub(crate) fn pg_catalog_fn_call(fn_name: &str, arg: Expr) -> Expr {
-    Expr::Function(Function {
-        name: ObjectName(vec![ObjectNamePart::Identifier(Ident::new(fn_name))]),
-        uses_odbc_syntax: false,
-        args: FunctionArguments::List(FunctionArgumentList {
-            args: vec![FunctionArg::Unnamed(FunctionArgExpr::Expr(arg))],
-            duplicate_treatment: None,
-            clauses: vec![],
-        }),
-        parameters: FunctionArguments::None,
-        filter: None,
-        null_treatment: None,
-        over: None,
-        within_group: vec![],
-    })
-}
-
 /// Builds `eql_v3.<fn_name>(<arg>)` — a call to an EQL v3 term-extraction function
 /// (`eq_term`, `ord_term`, `ord_term_ore`, `match_term`).
 pub(crate) fn eql_v3_term_call(fn_name: &str, arg: Expr) -> Expr {

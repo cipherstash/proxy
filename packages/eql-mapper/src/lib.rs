@@ -2585,9 +2585,10 @@ mod test {
     /// `GROUP BY col` groups on the jsonb payload, whose ciphertext is
     /// randomised per row, so equal plaintexts land in different groups.
     ///
-    /// Projecting the grouped column has to be lifted through `any_value`,
-    /// because PostgreSQL no longer sees it as functionally dependent on the
-    /// group key — and the projection keeps the name the client asked for.
+    /// Projecting the grouped column has to be lifted through
+    /// `eql_v3.grouped_value`, because PostgreSQL no longer sees it as
+    /// functionally dependent on the group key — and the projection keeps the
+    /// name the client asked for.
     #[test]
     fn group_by_encrypted_column_uses_eq_term() {
         let schema = resolver(schema! {
@@ -2606,21 +2607,21 @@ mod test {
                 "SELECT COUNT(*) FROM employees GROUP BY email",
                 "SELECT COUNT(*) FROM employees GROUP BY eql_v3.eq_term(email)",
             ),
-            // Projected: lifted through `any_value`, keeping its name.
+            // Projected: lifted through `grouped_value`, keeping its name.
             (
                 "SELECT email FROM employees GROUP BY email",
-                "SELECT any_value(email) AS email FROM employees GROUP BY eql_v3.eq_term(email)",
+                "SELECT eql_v3.grouped_value(email) AS email FROM employees GROUP BY eql_v3.eq_term(email)",
             ),
             // An explicit alias is preserved as-is.
             (
                 "SELECT email AS e FROM employees GROUP BY email",
-                "SELECT any_value(email) AS e FROM employees GROUP BY eql_v3.eq_term(email)",
+                "SELECT eql_v3.grouped_value(email) AS e FROM employees GROUP BY eql_v3.eq_term(email)",
             ),
             // Qualified projection of the same column still matches — the match
             // is on the resolved column, not on syntax.
             (
                 "SELECT employees.email FROM employees GROUP BY email",
-                "SELECT any_value(employees.email) AS email FROM employees GROUP BY eql_v3.eq_term(email)",
+                "SELECT eql_v3.grouped_value(employees.email) AS email FROM employees GROUP BY eql_v3.eq_term(email)",
             ),
             // A domain that stores no `hm` groups by its ordering term, the same
             // fallback `=` uses.
