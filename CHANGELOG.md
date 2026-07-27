@@ -8,7 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
-- **EQL v3 (searchable encryption)**: Proxy now targets EQL v3. Encrypted columns are declared with self-configuring, typed `jsonb` domains (for example `eql_v3_text_search`, `eql_v3_integer_ord`, `eql_v3_json_search`) that encode both the scalar type and the column's searchable capabilities in the column type itself, replacing EQL v2's opaque `eql_v2_encrypted` composite type and its separate `eql_v2_configuration` table. The bundled `cipherstash-client` is upgraded to 0.42.0 and EQL to 3.0.2. Existing v2-encrypted data and schemas must be migrated to v3.
+- **EQL v3 (searchable encryption)**: Proxy now targets EQL v3. Encrypted columns are declared with self-configuring, typed `jsonb` domains (for example `eql_v3_text_search`, `eql_v3_integer_ord`, `eql_v3_json_search`) that encode both the scalar type and the column's searchable capabilities in the column type itself, replacing EQL v2's opaque `eql_v2_encrypted` composite type and its separate `eql_v2_configuration` table. The bundled `cipherstash-client` is upgraded to 0.42.0 and EQL to 3.0.3. Existing v2-encrypted data and schemas must be migrated to v3.
 
 ### Added
 
