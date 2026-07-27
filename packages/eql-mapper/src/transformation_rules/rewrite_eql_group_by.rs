@@ -10,7 +10,7 @@ use sqltk::{NodeKey, NodePath, Visitable};
 use crate::unifier::{EqlValue, Type, Value};
 use crate::EqlMapperError;
 
-use super::helpers::{eql_v3_term_call, pg_catalog_fn_call};
+use super::helpers::eql_v3_term_call;
 use super::preserve_effective_aliases::derive_effective_alias;
 use super::TransformationRule;
 
@@ -21,7 +21,7 @@ use super::TransformationRule;
 /// ```sql
 /// SELECT col, COUNT(*) FROM t GROUP BY col
 /// -- becomes
-/// SELECT any_value(col) AS col, COUNT(*) FROM t GROUP BY eql_v3.eq_term(col)
+/// SELECT eql_v3.grouped_value(col) AS col, COUNT(*) FROM t GROUP BY eql_v3.eq_term(col)
 /// ```
 ///
 /// **Without this rewrite the grouping is silently wrong.** An encrypted column
@@ -34,13 +34,15 @@ use super::TransformationRule;
 /// (`ord_term` for a domain that stores no `hm`).
 ///
 /// Once the key is `eq_term(col)`, PostgreSQL no longer sees the bare column as
-/// functionally dependent on it and would reject `SELECT col`. `any_value`
-/// resolves that: every row in a group holds the same plaintext, so any of them
-/// decrypts to the right answer. The original projection name is preserved, so
-/// clients selecting by name are unaffected.
+/// functionally dependent on it and would reject `SELECT col`.
+/// `eql_v3.grouped_value` — the aggregate EQL provides for exactly this — returns
+/// one representative value per group, which is enough because every row in a
+/// group is an encryption of the same plaintext. The original projection name is
+/// preserved, so clients selecting by name are unaffected.
 ///
-/// `any_value` requires PostgreSQL 16 or later. Only the projection case needs
-/// it; grouping without selecting the column works on any version.
+/// Requires an EQL release carrying `eql_v3.grouped_value` (CIP-3657, EQL PR
+/// 423) — later than the 3.0.2 currently pinned in `mise.toml`. Only the
+/// projection case needs it; grouping without selecting the column does not.
 #[derive(Debug)]
 pub struct RewriteEqlGroupBy<'ast> {
     node_types: Arc<HashMap<NodeKey<'ast>, Type>>,
@@ -157,7 +159,7 @@ impl<'ast> TransformationRule<'ast> for RewriteEqlGroupBy<'ast> {
                     span: Span::empty(),
                 }),
             );
-            let aggregated = pg_catalog_fn_call("any_value", projected);
+            let aggregated = eql_v3_term_call("grouped_value", projected);
 
             *target_item = match alias {
                 Some(alias) => SelectItem::ExprWithAlias {
