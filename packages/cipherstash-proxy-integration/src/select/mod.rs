@@ -10,6 +10,7 @@ mod jsonb_get_field_as_ciphertext;
 mod jsonb_path_exists;
 mod jsonb_path_query;
 mod jsonb_path_query_first;
+mod jsonb_selector_param_types;
 mod jsonb_term_filter;
 mod order_by;
 mod order_by_with_null;

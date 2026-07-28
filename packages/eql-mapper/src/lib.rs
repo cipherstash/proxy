@@ -2788,6 +2788,87 @@ mod test {
         }
     }
 
+    /// An aggregate over a grouped encrypted column must not be lifted through
+    /// `grouped_value`. `MIN(col)` resolves to the same `EqlValue` as `col`, so
+    /// a naive match wraps it as `grouped_value(eql_v3.min(col))` — an aggregate
+    /// inside an aggregate, which PostgreSQL rejects. An aggregate already
+    /// yields one value per group.
+    #[test]
+    fn group_by_does_not_lift_aggregate_projections() {
+        let schema = resolver(schema! {
+            tables: {
+                employees: {
+                    id,
+                    salary (EQL("eql_v3_integer_ord"): Ord),
+                }
+            }
+        });
+
+        for (input, expected) in [
+            // The aggregate is retargeted but NOT wrapped.
+            (
+                "SELECT MIN(salary) FROM employees GROUP BY salary",
+                "SELECT eql_v3.MIN(salary) FROM employees GROUP BY eql_v3.ord_term(salary)",
+            ),
+            (
+                "SELECT MAX(salary) FROM employees GROUP BY salary",
+                "SELECT eql_v3.MAX(salary) FROM employees GROUP BY eql_v3.ord_term(salary)",
+            ),
+            // A direct projection of the grouped column still is wrapped — that
+            // is the case `grouped_value` exists for.
+            (
+                "SELECT salary, COUNT(*) FROM employees GROUP BY salary",
+                "SELECT eql_v3.grouped_value(salary) AS salary, COUNT(*) FROM employees \
+                 GROUP BY eql_v3.ord_term(salary)",
+            ),
+        ] {
+            let statement = parse(input);
+            let typed = type_check(schema.clone(), &statement).unwrap();
+
+            assert_eq!(
+                typed.transform(HashMap::new()).unwrap().to_string(),
+                expected.split_whitespace().collect::<Vec<_>>().join(" "),
+                "unexpected rewrite for `{input}`"
+            );
+        }
+    }
+
+    /// `SELECT *` hides the projected columns, so a grouped encrypted column
+    /// cannot be lifted through `grouped_value` — and left alone it is no longer
+    /// functionally dependent on the rewritten key. Rejected by name rather than
+    /// left to fail as a bare PostgreSQL error.
+    #[test]
+    fn group_by_rejects_wildcard_projections() {
+        let schema = resolver(schema! {
+            tables: {
+                employees: {
+                    id,
+                    salary (EQL("eql_v3_integer_ord"): Ord),
+                }
+            }
+        });
+
+        let statement = parse("SELECT * FROM employees GROUP BY id, salary");
+        let typed = type_check(schema.clone(), &statement).unwrap();
+
+        let err = typed
+            .transform(HashMap::new())
+            .expect_err("SELECT * with GROUP BY on an encrypted column should be rejected");
+
+        assert!(
+            err.to_string().contains("SELECT *"),
+            "unexpected error: {err}"
+        );
+
+        // Grouping only on plaintext columns leaves the wildcard alone.
+        let statement = parse("SELECT * FROM employees GROUP BY id");
+        let typed = type_check(schema, &statement).unwrap();
+        assert_eq!(
+            typed.transform(HashMap::new()).unwrap().to_string(),
+            "SELECT * FROM employees GROUP BY id"
+        );
+    }
+
     /// Shapes the subquery rewrite cannot express are reported as such, rather
     /// than left to fail as a bare PostgreSQL syntax error.
     #[test]

@@ -5,6 +5,7 @@ use crate::{
     SIZE_I16, SIZE_I32,
 };
 use bytes::{Buf, BufMut, BytesMut};
+use eql_mapper::EqlTermVariant;
 use postgres_types::Type;
 use std::{ffi::CString, io::Cursor};
 
@@ -37,9 +38,21 @@ impl Parse {
     /// encrypted value is declared JSONB regardless — that is the wire type of
     /// every EQL payload, whatever the client thought it was binding.
     ///
+    /// A JSON *selector* is the exception. It is passed to the rewritten
+    /// function as bare encrypted text — `eql_v3."->"(json, text)`,
+    /// `eql_v3.jsonb_path_exists(json, text)` — not as a jsonb query payload, so
+    /// declaring JSONB leaves PostgreSQL looking for an overload that does not
+    /// exist:
+    ///
+    /// ```text
+    /// ERROR: function eql_v3.jsonb_path_exists(eql_v3_json_search, jsonb) does not exist
+    /// ```
+    ///
     /// A client that declares no types at all (the common case — it lets the
     /// server infer them) is left alone: every output param is referenced by the
-    /// rewritten SQL, so PostgreSQL can always infer them.
+    /// rewritten SQL, so PostgreSQL can always infer them. That is why this only
+    /// bites clients that send their own Parse OIDs, such as pgx in
+    /// `cache_describe` mode.
     pub fn rewrite_param_types(&mut self, output_params: &[OutputParam]) {
         if self.param_types.is_empty() {
             return;
@@ -48,7 +61,12 @@ impl Parse {
         let param_types = output_params
             .iter()
             .map(|output| match &output.column {
-                Some(_) => Type::JSONB.oid() as i32,
+                Some(column) => match column.eql_term {
+                    EqlTermVariant::JsonAccessor | EqlTermVariant::JsonPath => {
+                        Type::TEXT.oid() as i32
+                    }
+                    _ => Type::JSONB.oid() as i32,
+                },
                 None => self
                     .param_types
                     .get(output.source.primary_input())

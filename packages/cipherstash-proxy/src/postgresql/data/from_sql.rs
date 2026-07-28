@@ -210,13 +210,45 @@ pub fn bind_param_json_value(
             serde_json::from_str::<serde_json::Value>(&text)
                 .unwrap_or(serde_json::Value::String(text))
         }
-        FormatCode::Binary => {
-            parse_bytes_from_sql::<serde_json::Value>(&param.bytes, postgres_type)
-                .map_err(|_| MappingError::CouldNotParseParameter)?
-        }
+        FormatCode::Binary => binary_json_value(&param.bytes, postgres_type)?,
     };
 
     Ok(Some(value))
+}
+
+/// Whether `ty` is one of PostgreSQL's textual types, whose binary
+/// representation is the string's own bytes rather than anything JSON-shaped.
+fn is_textual(ty: &Type) -> bool {
+    matches!(
+        *ty,
+        Type::TEXT | Type::VARCHAR | Type::BPCHAR | Type::NAME | Type::UNKNOWN
+    )
+}
+
+/// The JSON value a binary-format operand carries.
+///
+/// `serde_json::Value` only decodes JSON and JSONB, so a textual type has to be
+/// read as a string first — otherwise ordinary bytes such as `Alice` are handed
+/// to `serde_json::Value::from_sql` and rejected outright, even though the same
+/// operand in text format would have been accepted.
+///
+/// Once read, it gets exactly the treatment the text format gets: parsed as
+/// JSON, and taken as the string itself when that fails, so `Alice` behaves like
+/// `"Alice"`.
+fn binary_json_value(
+    bytes: &BytesMut,
+    postgres_type: &Type,
+) -> Result<serde_json::Value, MappingError> {
+    if is_textual(postgres_type) {
+        let text = parse_bytes_from_sql::<String>(bytes, postgres_type)
+            .map_err(|_| MappingError::CouldNotParseParameter)?;
+
+        return Ok(serde_json::from_str::<serde_json::Value>(&text)
+            .unwrap_or(serde_json::Value::String(text)));
+    }
+
+    parse_bytes_from_sql::<serde_json::Value>(bytes, postgres_type)
+        .map_err(|_| MappingError::CouldNotParseParameter)
 }
 
 /// A JSON ordering operand (`EqlTerm::JsonOrd`) arriving as a jsonb param
@@ -416,8 +448,10 @@ fn binary_from_sql(
         // encode it as the scalar shape SteVecTerm accepts (number → float,
         // string → text).
         (EqlTermVariant::JsonOrd, ColumnType::Json, _) => {
-            parse_bytes_from_sql::<serde_json::Value>(bytes, pg_type)
-                .and_then(json_ord_scalar_plaintext)
+            // Via `binary_json_value` rather than straight to `serde_json`: this
+            // arm matches any incoming type, so a textual operand has to be read
+            // as a string before it can be parsed as JSON.
+            binary_json_value(bytes, pg_type).and_then(json_ord_scalar_plaintext)
         }
         // Python psycopg sends JSON/B as BYTEA
         (
@@ -521,6 +555,71 @@ fn decimal_from_sql(
             .to_i64()
             .ok_or(MappingError::CouldNotParseParameter)
             .map(Plaintext::new),
+    }
+}
+
+#[cfg(test)]
+mod binary_json_value_tests {
+    use super::*;
+    use crate::postgresql::{format_code::FormatCode, messages::bind::BindParam};
+    use bytes::BytesMut;
+
+    fn binary_param(bytes: &[u8]) -> BindParam {
+        BindParam::new(FormatCode::Binary, BytesMut::from(bytes))
+    }
+
+    /// A textual operand in binary format is the string's own bytes. Reading it
+    /// as JSON rejects anything that is not JSON-shaped, so it is read as a
+    /// string first and then given the text format's treatment.
+    #[test]
+    fn binary_textual_operand_is_read_as_a_string() {
+        for ty in [Type::TEXT, Type::VARCHAR, Type::BPCHAR, Type::NAME] {
+            let param = binary_param(b"Alice");
+
+            assert_eq!(
+                Some(serde_json::Value::String("Alice".to_string())),
+                bind_param_json_value(&param, &ty).unwrap(),
+                "unexpected decoding of a binary {ty} operand"
+            );
+        }
+    }
+
+    /// A textual operand that *is* valid JSON still parses as JSON, so a client
+    /// sending `"Alice"` or `42` as text gets the same value as one sending
+    /// jsonb.
+    #[test]
+    fn binary_textual_operand_that_is_json_parses_as_json() {
+        assert_eq!(
+            Some(serde_json::Value::String("Alice".to_string())),
+            bind_param_json_value(&binary_param(b"\"Alice\""), &Type::TEXT).unwrap()
+        );
+
+        assert_eq!(
+            Some(serde_json::json!(42)),
+            bind_param_json_value(&binary_param(b"42"), &Type::TEXT).unwrap()
+        );
+    }
+
+    /// The jsonb path is untouched: version header byte, then the JSON text.
+    #[test]
+    fn binary_jsonb_operand_still_decodes_as_jsonb() {
+        let mut bytes = BytesMut::from(&b"\x01"[..]);
+        bytes.extend_from_slice(b"{\"a\":1}");
+
+        assert_eq!(
+            Some(serde_json::json!({"a": 1})),
+            bind_param_json_value(&BindParam::new(FormatCode::Binary, bytes), &Type::JSONB)
+                .unwrap()
+        );
+    }
+
+    /// A NULL param carries no value at all.
+    #[test]
+    fn null_param_has_no_value() {
+        assert_eq!(
+            None,
+            bind_param_json_value(&BindParam::null(), &Type::TEXT).unwrap()
+        );
     }
 }
 

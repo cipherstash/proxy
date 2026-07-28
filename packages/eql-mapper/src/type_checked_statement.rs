@@ -1,9 +1,12 @@
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+};
 
 use sqltk::parser::ast::{self, Statement};
 use sqltk::{AsNodeKey, NodeKey, Transformable};
 
-use crate::unifier::EqlTerm;
+use crate::unifier::{EqlTerm, EqlTermVariant};
 use crate::QueryOperands;
 use crate::{
     CastFullPayloadOperands, DryRunnable, EqlMapperError, FailOnPlaceholderChange,
@@ -157,7 +160,8 @@ impl<'ast> TypeCheckedStatement<'ast> {
         // and so `FailOnPlaceholderChange` still governs the rules' own edits.
         let mut renumber = RenumberParams::new();
         let statement = rewritten.apply_transform(&mut renumber)?;
-        let params = self.param_plan(renumber.into_sources())?;
+        let (sources, query_operands) = renumber.into_parts();
+        let params = self.param_plan(sources, query_operands)?;
 
         Ok(TransformedStatement { statement, params })
     }
@@ -167,7 +171,17 @@ impl<'ast> TypeCheckedStatement<'ast> {
     ///
     /// An output param whose input is a fused JSON value selector carries both
     /// operands; every other output forwards its input alone.
-    fn param_plan(&self, sources: Vec<Param>) -> Result<ParamPlan, EqlMapperError> {
+    ///
+    /// `query_operands` holds the outputs the rewritten statement casts to an
+    /// `eql_v3.query_*` twin. It is keyed by *output* param because the role
+    /// belongs to the occurrence, not to the input: `UPDATE t SET enc = $1 WHERE
+    /// enc = $1` binds one input in both roles, and treating the whole param as
+    /// a query operand strips the ciphertext from the stored value.
+    fn param_plan(
+        &self,
+        sources: Vec<Param>,
+        query_operands: HashSet<Param>,
+    ) -> Result<ParamPlan, EqlMapperError> {
         let outputs = sources
             .into_iter()
             .enumerate()
@@ -190,11 +204,22 @@ impl<'ast> TypeCheckedStatement<'ast> {
                     None => OutputParamSource::Input(input),
                 };
 
+                let output = Param((idx + 1) as u16);
+
+                // A JSON selector takes no cast at all — it is passed to the
+                // eql_v3 function as bare encrypted text — so it never appears
+                // in `query_operands`, but it is always a query operand.
+                let is_selector = matches!(
+                    &value,
+                    Value::Eql(term)
+                        if matches!(term.variant(), EqlTermVariant::JsonAccessor | EqlTermVariant::JsonPath)
+                );
+
                 Ok(OutputParam {
-                    param: Param((idx + 1) as u16),
+                    param: output,
                     value,
                     source,
-                    query_operand: self.query_operands.contains_param(input),
+                    query_operand: is_selector || query_operands.contains(&output),
                 })
             })
             .collect::<Result<Vec<_>, EqlMapperError>>()?;

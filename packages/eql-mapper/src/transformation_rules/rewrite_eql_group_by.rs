@@ -78,15 +78,37 @@ impl<'ast> RewriteEqlGroupBy<'ast> {
         }
     }
 
-    /// Whether `item` projects one of the grouped encrypted columns, and so must
-    /// be lifted through an aggregate.
+    /// Whether `item` projects one of the grouped encrypted columns *directly*,
+    /// and so must be lifted through an aggregate.
     ///
     /// Matched on the resolved column rather than on syntax, so `SELECT t.col …
     /// GROUP BY col` — which PostgreSQL accepts today — keeps working.
+    ///
+    /// "Directly" excludes an expression that merely *contains* the column.
+    /// `MIN(col)` resolves to the same [`EqlValue`] as `col` itself, so without
+    /// this it would be lifted too, producing `grouped_value(eql_v3.min(col))` —
+    /// an aggregate inside an aggregate, which PostgreSQL rejects. An aggregate
+    /// already yields one value per group and needs no lifting.
     fn projects_grouped_column(&self, item: &'ast SelectItem, grouped: &[EqlValue]) -> bool {
-        Self::select_item_expr(item)
-            .and_then(|expr| self.eql_value_of(expr))
+        let Some(expr) = Self::select_item_expr(item) else {
+            return false;
+        };
+
+        if !Self::is_direct_column_reference(expr) {
+            return false;
+        }
+
+        self.eql_value_of(expr)
             .is_some_and(|value| grouped.contains(&value))
+    }
+
+    /// Whether `expr` names a column and nothing more.
+    fn is_direct_column_reference(expr: &'ast Expr) -> bool {
+        match expr {
+            Expr::Identifier(_) | Expr::CompoundIdentifier(_) => true,
+            Expr::Nested(inner) => Self::is_direct_column_reference(inner),
+            _ => false,
+        }
     }
 }
 
@@ -105,6 +127,28 @@ impl<'ast> TransformationRule<'ast> for RewriteEqlGroupBy<'ast> {
         let grouped = self.grouped_eql_values(&original.group_by);
         if grouped.iter().all(Option::is_none) {
             return Ok(false);
+        }
+
+        // A wildcard hides the projected columns, so a grouped encrypted column
+        // cannot be lifted through `grouped_value` — and left alone it is no
+        // longer functionally dependent on the rewritten key, which PostgreSQL
+        // rejects with "column must appear in the GROUP BY clause". Rejecting
+        // here names the query shape instead.
+        //
+        // Consistent with `SELECT DISTINCT *`, which is refused for the same
+        // reason: the projection has to be written out for the rewrite to reach
+        // the encrypted columns in it.
+        if original
+            .projection
+            .iter()
+            .any(|item| Self::select_item_expr(item).is_none())
+        {
+            return Err(EqlMapperError::Transform(
+                "SELECT * cannot be combined with GROUP BY on an encrypted column: grouping uses \
+                 the column's equality term, so the column has to be listed explicitly to be \
+                 projected through eql_v3.grouped_value"
+                    .to_string(),
+            ));
         }
 
         let Some(target) = target_node.downcast_mut::<Select>() else {

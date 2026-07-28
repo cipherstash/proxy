@@ -22,6 +22,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **A param bound as both a stored value and a query operand**: `UPDATE t SET enc = $1 WHERE enc = $1` failed with a domain CHECK violation. The two occurrences need different payloads — the stored one carries the ciphertext, the query one only search terms — but the role was tracked per input param, so marking the param as a query operand stripped the ciphertext from the value being stored. The role is now taken from the rewritten statement, per occurrence.
+
+- **JSON selector params when the client declares its own types**: a client that sends param OIDs in Parse (pgx in `cache_describe` mode, for example) got `function eql_v3.jsonb_path_exists(eql_v3_json_search, jsonb) does not exist`. A JSON field selector is passed to the rewritten function as bare text, but was being declared as `jsonb` like every other encrypted operand. Affects `->`, `->>`, `jsonb_path_exists`, `jsonb_path_query` and `jsonb_path_query_first`.
+
+- **Binary-format text operands on encrypted JSON fields**: a TEXT/VARCHAR operand arriving in binary format was handed straight to the JSON decoder and rejected, even though the same value in text format was accepted. Textual types are now read as a string first and then given the text format's treatment, so `Alice` behaves like `"Alice"`.
+
+- **Aggregates over a grouped encrypted column**: `SELECT MIN(enc) FROM t GROUP BY enc` produced `grouped_value(eql_v3.min(enc))` — an aggregate inside an aggregate, which PostgreSQL rejects. An aggregate already returns one value per group, so it is no longer lifted; only a direct projection of the grouped column is.
+
+- **`SELECT *` with `GROUP BY` on an encrypted column** is now rejected with an explanatory error instead of PostgreSQL's "column must appear in the GROUP BY clause". A wildcard hides the projected columns, so the grouped column cannot be projected through `eql_v3.grouped_value` — list the columns explicitly. This matches the existing treatment of `SELECT DISTINCT *`.
+
 - **`LIKE`/`ILIKE` capability checking**: `LIKE` and `ILIKE` on an encrypted column are now gated by the column's token-match capability. Previously these predicates bypassed capability checking and were silently accepted on columns that do not support fuzzy match; they are now rejected with a capability error.
 
 ## [2.2.4] - 2026-06-18
