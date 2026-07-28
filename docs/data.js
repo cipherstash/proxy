@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1785161650714,
+  "lastUpdate": 1785214764642,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -22538,6 +22538,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 39.073088,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "james@cipherstash.com",
+            "name": "James Sadler",
+            "username": "freshtonic"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "bfa9b3b70c799ce6bb94df636a3797e765ed6140",
+          "message": "Merge pull request #422 from cipherstash/queue/eql-v3/setup-skills\n\n[1/7] docs: set up agent-skill conventions and domain glossaries",
+          "timestamp": "2026-07-28T14:50:48+10:00",
+          "tree_id": "6e733061c0292fb2ff97d24241a2ebd92a11c134",
+          "url": "https://github.com/cipherstash/proxy/commit/bfa9b3b70c799ce6bb94df636a3797e765ed6140"
+        },
+        "date": 1785214763246,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 35.645167,
             "unit": "Number"
           }
         ]
