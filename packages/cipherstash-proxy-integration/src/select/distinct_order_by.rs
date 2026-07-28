@@ -6,9 +6,13 @@
 //! into a subquery that also projects the term, and ordering the (non-`DISTINCT`)
 //! outer query by it.
 //!
-//! These tests assert the two things that rewrite has to get right: the rows
-//! come back in the correct plaintext order, and the ordering term the subquery
-//! projects does not leak into the client's result set.
+//! `DISTINCT` itself also has to be rewritten: deduplicating on the raw payload
+//! compares randomised ciphertext, so equal plaintexts never collapse. The
+//! mapper keys the `DISTINCT` on the column's equality term instead.
+//!
+//! These tests assert what those rewrites have to get right: equal plaintexts
+//! collapse, the rows come back in the correct plaintext order, and the ordering
+//! term the subquery projects does not leak into the client's result set.
 
 #[cfg(test)]
 mod tests {
@@ -58,6 +62,40 @@ mod tests {
 
         let actual = simple_query::<String>(sql).await;
         assert_eq!(vec!["date", "cherry", "banana", "apple"], actual);
+    }
+
+    /// Equal plaintexts collapse to one row.
+    ///
+    /// Encryption is randomised, so duplicates of the same plaintext hold
+    /// different ciphertexts. Deduplicating on the payload would compare those
+    /// ciphertexts and keep every row; the mapper keys on the equality term
+    /// instead, which is equal exactly when the plaintexts are.
+    #[tokio::test]
+    async fn distinct_deduplicates_equal_plaintexts() {
+        trace();
+        clear().await;
+
+        // Six rows, three distinct plaintexts.
+        insert_text(&["cherry", "apple", "banana", "apple", "cherry", "apple"]).await;
+
+        let client = connect_with_tls(PROXY).await;
+
+        // Without ORDER BY: deduplicated in place, no subquery wrapping.
+        let sql = "SELECT DISTINCT encrypted_text FROM encrypted";
+        let rows = client.query(sql, &[]).await.unwrap();
+        let mut actual: Vec<String> = rows.iter().map(|r| r.get("encrypted_text")).collect();
+        actual.sort();
+        assert_eq!(vec!["apple", "banana", "cherry"], actual);
+
+        // With ORDER BY: deduplicated inside the wrapping subquery, ordered
+        // outside it.
+        let sql = "SELECT DISTINCT encrypted_text FROM encrypted ORDER BY encrypted_text";
+        let rows = client.query(sql, &[]).await.unwrap();
+        let actual: Vec<String> = rows.iter().map(|r| r.get("encrypted_text")).collect();
+        assert_eq!(vec!["apple", "banana", "cherry"], actual);
+
+        let actual = simple_query::<String>(sql).await;
+        assert_eq!(vec!["apple", "banana", "cherry"], actual);
     }
 
     /// The ordering term the subquery projects must not reach the client: the

@@ -132,15 +132,39 @@ impl<'ast> RewriteEqlDistinctOrderBy<'ast> {
         }
     }
 
-    /// Whether this query is a `SELECT DISTINCT` ordered by an encrypted column,
-    /// and so needs restructuring.
+    /// Whether this `SELECT DISTINCT … ORDER BY …` needs restructuring.
+    ///
+    /// Either half of the query can force it:
+    ///
+    /// - the `ORDER BY` names an encrypted column, so it becomes an ordering
+    ///   term that `DISTINCT` will not accept outside the select list; or
+    /// - the projection contains an encrypted column, so
+    ///   [`super::RewriteEqlDistinct`] turns the `DISTINCT` into a `DISTINCT ON`
+    ///   — and PostgreSQL then demands that the `ORDER BY` *begin with* the
+    ///   `DISTINCT ON` expressions, which an arbitrary `ORDER BY` will not.
+    ///
+    /// Wrapping settles both: the subquery keeps the `DISTINCT`/`DISTINCT ON`
+    /// with no `ORDER BY` to align with, and the outer query keeps the
+    /// `ORDER BY` with no `DISTINCT` to constrain it.
     fn applies_to(&self, query: &'ast Query) -> bool {
         let (Some(select), Some(order_by)) = (Self::select_of(query), Self::order_by_exprs(query))
         else {
             return false;
         };
 
-        select.distinct.is_some() && order_by.iter().any(|obe| self.is_eql(&obe.expr))
+        if select.distinct.is_none() {
+            return false;
+        }
+
+        let orders_by_encrypted = order_by.iter().any(|obe| self.is_eql(&obe.expr));
+
+        let dedupes_encrypted = select
+            .projection
+            .iter()
+            .filter_map(Self::select_item_expr)
+            .any(|expr| self.is_eql(expr));
+
+        orders_by_encrypted || dedupes_encrypted
     }
 
     /// Works out, for each `ORDER BY` expression, how the wrapping query will

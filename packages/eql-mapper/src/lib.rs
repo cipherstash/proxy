@@ -822,8 +822,9 @@ mod test {
             tables: {
                 users: {
                     id,
-                    email (EQL),
-                    first_name (EQL),
+                    // `=` is equality, so both columns have to declare it.
+                    email (EQL: Eq),
+                    first_name (EQL: Eq),
                 }
             }
         });
@@ -837,7 +838,7 @@ mod test {
                         table: id("users"),
                         column: id("email"),
                     },
-                    EqlTraits::default(),
+                    EqlTraits::from(EqlTrait::Eq),
                 )));
 
                 let b = Value::Eql(EqlTerm::Full(EqlValue::with_canonical_identity(
@@ -845,7 +846,7 @@ mod test {
                         table: id("users"),
                         column: id("first_name"),
                     },
-                    EqlTraits::default(),
+                    EqlTraits::from(EqlTrait::Eq),
                 )));
 
                 assert_eq!(typed.params, vec![(Param(1), a,), (Param(2), b,)]);
@@ -854,8 +855,8 @@ mod test {
                     typed.projection,
                     projection![
                         (NATIVE(users.id) as id),
-                        (EQL(users.email) as email),
-                        (EQL(users.first_name) as first_name)
+                        (EQL(users.email: Eq) as email),
+                        (EQL(users.first_name: Eq) as first_name)
                     ]
                 );
             }
@@ -1735,7 +1736,8 @@ mod test {
                 employees: {
                     id,
                     department,
-                    salary (EQL),
+                    // `min`/`max` are ordering, so the column has to declare it.
+                    salary (EQL: Ord),
                 }
             }
         });
@@ -2604,7 +2606,8 @@ mod test {
             (
                 "SELECT DISTINCT id, salary FROM employees ORDER BY salary",
                 "SELECT __eql_col_0 AS id, __eql_col_1 AS salary \
-                 FROM (SELECT DISTINCT id AS __eql_col_0, salary AS __eql_col_1, \
+                 FROM (SELECT DISTINCT ON (id, eql_v3.ord_term(salary)) id AS __eql_col_0, \
+                 salary AS __eql_col_1, \
                  eql_v3.ord_term(salary) AS __eql_ord_0 FROM employees) AS __eql_distinct \
                  ORDER BY __eql_ord_0",
             ),
@@ -2612,7 +2615,8 @@ mod test {
             (
                 "SELECT DISTINCT id, salary FROM employees ORDER BY salary DESC NULLS FIRST",
                 "SELECT __eql_col_0 AS id, __eql_col_1 AS salary \
-                 FROM (SELECT DISTINCT id AS __eql_col_0, salary AS __eql_col_1, \
+                 FROM (SELECT DISTINCT ON (id, eql_v3.ord_term(salary)) id AS __eql_col_0, \
+                 salary AS __eql_col_1, \
                  eql_v3.ord_term(salary) AS __eql_ord_0 FROM employees) AS __eql_distinct \
                  ORDER BY __eql_ord_0 DESC NULLS FIRST",
             ),
@@ -2621,7 +2625,8 @@ mod test {
             (
                 "SELECT DISTINCT id, salary FROM employees ORDER BY id, salary",
                 "SELECT __eql_col_0 AS id, __eql_col_1 AS salary \
-                 FROM (SELECT DISTINCT id AS __eql_col_0, salary AS __eql_col_1, \
+                 FROM (SELECT DISTINCT ON (id, eql_v3.ord_term(salary)) id AS __eql_col_0, \
+                 salary AS __eql_col_1, \
                  eql_v3.ord_term(salary) AS __eql_ord_0 FROM employees) AS __eql_distinct \
                  ORDER BY __eql_col_0, __eql_ord_0",
             ),
@@ -2630,7 +2635,8 @@ mod test {
             (
                 "SELECT DISTINCT id, salary FROM employees ORDER BY 1, salary",
                 "SELECT __eql_col_0 AS id, __eql_col_1 AS salary \
-                 FROM (SELECT DISTINCT id AS __eql_col_0, salary AS __eql_col_1, \
+                 FROM (SELECT DISTINCT ON (id, eql_v3.ord_term(salary)) id AS __eql_col_0, \
+                 salary AS __eql_col_1, \
                  eql_v3.ord_term(salary) AS __eql_ord_0 FROM employees) AS __eql_distinct \
                  ORDER BY 1, __eql_ord_0",
             ),
@@ -2638,7 +2644,8 @@ mod test {
             (
                 "SELECT DISTINCT id AS employee_id, salary FROM employees ORDER BY salary",
                 "SELECT __eql_col_0 AS employee_id, __eql_col_1 AS salary \
-                 FROM (SELECT DISTINCT id AS __eql_col_0, salary AS __eql_col_1, \
+                 FROM (SELECT DISTINCT ON (id, eql_v3.ord_term(salary)) id AS __eql_col_0, \
+                 salary AS __eql_col_1, \
                  eql_v3.ord_term(salary) AS __eql_ord_0 FROM employees) AS __eql_distinct \
                  ORDER BY __eql_ord_0",
             ),
@@ -2654,9 +2661,10 @@ mod test {
         }
     }
 
-    /// The subquery wrapping is applied only when it is actually needed.
+    /// The subquery wrapping is applied only where the `DISTINCT` and
+    /// `ORDER BY` constraints actually collide.
     #[test]
-    fn distinct_order_by_leaves_other_queries_alone() {
+    fn distinct_order_by_wraps_only_when_needed() {
         let schema = resolver(schema! {
             tables: {
                 employees: {
@@ -2667,10 +2675,15 @@ mod test {
         });
 
         for (input, expected) in [
-            // DISTINCT, but ordered by a native column — no term to hide.
+            // Ordered by a native column, but the projection still dedupes an
+            // encrypted one — so the DISTINCT ON that produces has to be kept
+            // away from the ORDER BY, which means wrapping.
             (
                 "SELECT DISTINCT id, salary FROM employees ORDER BY id",
-                "SELECT DISTINCT id, salary FROM employees ORDER BY id",
+                "SELECT __eql_col_0 AS id, __eql_col_1 AS salary \
+                 FROM (SELECT DISTINCT ON (id, eql_v3.ord_term(salary)) id AS __eql_col_0, \
+                 salary AS __eql_col_1 FROM employees) AS __eql_distinct \
+                 ORDER BY __eql_col_0",
             ),
             // Ordered by an encrypted column, but not DISTINCT — the term is
             // allowed to sit in ORDER BY on its own.
@@ -2678,10 +2691,11 @@ mod test {
                 "SELECT id, salary FROM employees ORDER BY salary",
                 "SELECT id, salary FROM employees ORDER BY eql_v3.ord_term(salary)",
             ),
-            // DISTINCT with no ORDER BY at all.
+            // DISTINCT with no ORDER BY: dedupes on the term in place, no
+            // wrapping needed.
             (
                 "SELECT DISTINCT id, salary FROM employees",
-                "SELECT DISTINCT id, salary FROM employees",
+                "SELECT DISTINCT ON (id, eql_v3.ord_term(salary)) id, salary FROM employees",
             ),
         ] {
             let statement = parse(input);
@@ -2691,6 +2705,85 @@ mod test {
                 typed.transform(HashMap::new()).unwrap().to_string(),
                 expected,
                 "unexpected rewrite for `{input}`"
+            );
+        }
+    }
+
+    /// `SELECT DISTINCT` on an encrypted column must deduplicate on the column's
+    /// equality term. A bare `DISTINCT` compares whole jsonb payloads, whose
+    /// ciphertext is randomised per row, so equal plaintexts never collapse and
+    /// `DISTINCT` silently returns duplicates.
+    #[test]
+    fn distinct_on_encrypted_column_dedupes_on_eq_term() {
+        let schema = resolver(schema! {
+            tables: {
+                employees: {
+                    id,
+                    email (EQL("eql_v3_text_search"): Eq + Ord + TokenMatch),
+                    salary (EQL("eql_v3_integer_ord"): Ord),
+                }
+            }
+        });
+
+        for (input, expected) in [
+            // A domain that stores `hm` keys on `eq_term`.
+            (
+                "SELECT DISTINCT email FROM employees",
+                "SELECT DISTINCT ON (eql_v3.eq_term(email)) email FROM employees",
+            ),
+            // An ord-only domain stores no `hm`, so equality falls back to the
+            // ordering term — the same fallback `=` uses.
+            (
+                "SELECT DISTINCT salary FROM employees",
+                "SELECT DISTINCT ON (eql_v3.ord_term(salary)) salary FROM employees",
+            ),
+            // A plaintext column keys on itself.
+            (
+                "SELECT DISTINCT id, email FROM employees",
+                "SELECT DISTINCT ON (id, eql_v3.eq_term(email)) id, email FROM employees",
+            ),
+            // No encrypted column in the projection: left alone entirely.
+            (
+                "SELECT DISTINCT id FROM employees",
+                "SELECT DISTINCT id FROM employees",
+            ),
+        ] {
+            let statement = parse(input);
+            let typed = type_check(schema.clone(), &statement).unwrap();
+
+            assert_eq!(
+                typed.transform(HashMap::new()).unwrap().to_string(),
+                expected,
+                "unexpected rewrite for `{input}`"
+            );
+        }
+    }
+
+    /// Deduplication is equality, so `DISTINCT` on a column whose domain carries
+    /// no equality term is a capability error — caught during type checking,
+    /// before any rewrite is attempted.
+    #[test]
+    fn distinct_on_a_column_without_equality_is_a_type_error() {
+        let schema = resolver(schema! {
+            tables: {
+                employees: {
+                    id,
+                    // Storage-only: a two-value column leaks its distribution
+                    // under any index, so v3 gives boolean no searchable terms.
+                    active (EQL("eql_v3_boolean")),
+                }
+            }
+        });
+
+        for input in [
+            "SELECT DISTINCT active FROM employees",
+            "SELECT DISTINCT ON (active) id FROM employees",
+        ] {
+            let statement = parse(input);
+
+            assert!(
+                type_check(schema.clone(), &statement).is_err(),
+                "expected `{input}` to fail type checking"
             );
         }
     }

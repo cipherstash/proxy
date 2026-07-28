@@ -212,6 +212,17 @@ impl<'ast> Unifier<'ast> {
                         ty.clone()
                     }
                 } else {
+                    // A concrete type has to prove the bound before it may stand
+                    // in for the variable.
+                    //
+                    // Previously this branch substituted unchecked, so a bound
+                    // was only ever enforced on the *second* type unified with
+                    // the same variable — the first substituted silently. A
+                    // constraint applied to a single expression (`SELECT
+                    // DISTINCT enc`) was therefore never checked at all, while
+                    // the same constraint applied to a pair (`a IS DISTINCT FROM
+                    // b`) was.
+                    self.satisfy_bounds(&ty, tvar_bounds)?;
                     ty.clone()
                 }
             }
