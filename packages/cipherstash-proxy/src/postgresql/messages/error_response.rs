@@ -60,6 +60,15 @@ pub enum ErrorResponseCode {
 }
 
 impl ErrorResponse {
+    /// Value of the first field with the given code (e.g. the SQLSTATE `Code`
+    /// or the human-readable `Message`), if present.
+    pub fn field(&self, code: ErrorResponseCode) -> Option<&str> {
+        self.fields
+            .iter()
+            .find(|f| f.code == code)
+            .map(|f| f.value.as_str())
+    }
+
     /// Create a FATAL error response for connection timeout.
     ///
     /// Uses PostgreSQL error code 57P05 (idle_session_timeout). While this code
@@ -512,6 +521,19 @@ mod tests {
         let bytes = BytesMut::try_from(error_response).unwrap();
         let message = to_message(b"E\0\0\0kSERROR\0VERROR\0C26000\0Mprepared statement \"a37\" does not exist\0Fprepare.c\0L454\0RFetchPreparedStatement\0\0");
         assert_eq!(bytes, message);
+    }
+
+    #[test]
+    pub fn field_returns_value_by_code() {
+        let message = to_message(b"E\0\0\0kSERROR\0VERROR\0C26000\0Mprepared statement \"a37\" does not exist\0Fprepare.c\0L454\0RFetchPreparedStatement\0\0Z\0\0\0\x05I");
+        let error_response = ErrorResponse::try_from(&message).unwrap();
+
+        assert_eq!(error_response.field(ErrorResponseCode::Code), Some("26000"));
+        assert_eq!(
+            error_response.field(ErrorResponseCode::Message),
+            Some("prepared statement \"a37\" does not exist")
+        );
+        assert_eq!(error_response.field(ErrorResponseCode::Detail), None);
     }
 
     #[test]

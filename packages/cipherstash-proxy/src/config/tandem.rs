@@ -108,15 +108,31 @@ impl TandemConfig {
             config.log.format = args.log_format;
         }
 
+        // --no-tls forces a plaintext inbound listener, ignoring any CS_TLS__*
+        // env / config. (Does not affect the proxy -> database connection.)
+        if args.no_tls {
+            if config.tls.is_some() {
+                println!("Disabling inbound TLS (--no-tls): the proxy will listen without TLS");
+            }
+            config.tls = None;
+            config.server.require_tls = false;
+        }
+
         Ok(config)
     }
 
     pub fn build_path(path: &str) -> Result<Self, Error> {
         let args = Args {
             config_file_path: path.to_string(),
+            database_url: None,
             db_host: None,
+            db_port: None,
             db_name: None,
             db_user: None,
+            db_password: None,
+            no_tls: false,
+            tls: false,
+            debug: false,
             log_level: LogConfig::default_log_level(),
             log_format: LogConfig::default_log_format(),
             command: None,
@@ -169,10 +185,22 @@ impl TandemConfig {
                 env
             }));
 
-        // Command line arguments override env vars
+        // Command line arguments override env vars.
+        // A full connection string is applied first; individual flags below
+        // then override matching parts of it.
+        if let Some(url) = &args.database_url {
+            println!("Overriding database connection from --database-url");
+            apply_database_url(url)?;
+        }
+
         if let Some(db_host) = &args.db_host {
             println!("Overriding database host from command line argument");
             env::set_var("CS_DATABASE__HOST", db_host);
+        }
+
+        if let Some(db_port) = &args.db_port {
+            println!("Overriding database port from command line argument");
+            env::set_var("CS_DATABASE__PORT", db_port.to_string());
         }
 
         if let Some(dbname) = &args.db_name {
@@ -182,7 +210,12 @@ impl TandemConfig {
 
         if let Some(db_user) = &args.db_user {
             println!("Overriding database user from command line argument");
-            env::set_var("CS_DATABASE__USER", db_user);
+            env::set_var("CS_DATABASE__USERNAME", db_user);
+        }
+
+        if let Some(db_password) = &args.db_password {
+            println!("Overriding database password from command line argument");
+            env::set_var("CS_DATABASE__PASSWORD", db_password);
         }
 
         // Source order is important!
@@ -358,9 +391,53 @@ impl Default for PrometheusConfig {
 
 static RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"`([^`]+)`").unwrap());
 
-///
-/// Extracts a field name (if present) from a config::ConfigError string
-/// This is called in `build` if a ConfigError message contains the string `missing field`
+/// Parse a PostgreSQL connection string (e.g.
+/// "postgres://user:pass@host:5432/dbname") and set the corresponding
+/// CS_DATABASE__* env vars for each component present. Individual --db-* flags
+/// are applied after this and take precedence.
+fn apply_database_url(url: &str) -> Result<(), Error> {
+    use std::str::FromStr;
+
+    let pg =
+        tokio_postgres::Config::from_str(url).map_err(|err| ConfigError::InvalidParameter {
+            name: "database-url".to_string(),
+            value: err.to_string(),
+        })?;
+
+    if let Some(host) = pg.get_hosts().iter().find_map(|h| match h {
+        tokio_postgres::config::Host::Tcp(host) => Some(host.clone()),
+        _ => None,
+    }) {
+        env::set_var("CS_DATABASE__HOST", host);
+    }
+
+    if let Some(port) = pg.get_ports().first() {
+        env::set_var("CS_DATABASE__PORT", port.to_string());
+    }
+
+    if let Some(user) = pg.get_user() {
+        env::set_var("CS_DATABASE__USERNAME", user);
+    }
+
+    if let Some(password) = pg.get_password() {
+        // The password is required downstream as a String. Rather than silently
+        // dropping a non-UTF8 password (which would leave the proxy connecting
+        // with no password, or a stale env/config one), fail clearly.
+        let password =
+            std::str::from_utf8(password).map_err(|_| ConfigError::InvalidParameter {
+                name: "database-url".to_string(),
+                value: "password contains invalid UTF-8".to_string(),
+            })?;
+        env::set_var("CS_DATABASE__PASSWORD", password);
+    }
+
+    if let Some(dbname) = pg.get_dbname() {
+        env::set_var("CS_DATABASE__NAME", dbname);
+    }
+
+    Ok(())
+}
+
 /// Expected string is in the forms:
 ///     "missing field `{field}}` for key `{key}`"
 ///     "missing field `{field}}`"
@@ -418,6 +495,61 @@ mod tests {
     use uuid::Uuid;
 
     const CS_PREFIX: &str = "CS_TEST";
+
+    #[test]
+    /// --database-url sets each CS_DATABASE__* var, including USERNAME (not USER
+    /// -- a previous bug set the wrong var so --db-user was a silent no-op).
+    fn database_url_sets_connection_env() {
+        use crate::config::tandem::apply_database_url;
+        with_no_cs_vars(|| {
+            temp_env::with_vars_unset(
+                [
+                    "CS_DATABASE__HOST",
+                    "CS_DATABASE__PORT",
+                    "CS_DATABASE__USERNAME",
+                    "CS_DATABASE__USER",
+                    "CS_DATABASE__PASSWORD",
+                    "CS_DATABASE__NAME",
+                ],
+                || {
+                    apply_database_url("postgres://alice:s3cret@db.example.com:5430/orders")
+                        .unwrap();
+
+                    assert_eq!(
+                        std::env::var("CS_DATABASE__HOST").unwrap(),
+                        "db.example.com"
+                    );
+                    assert_eq!(std::env::var("CS_DATABASE__PORT").unwrap(), "5430");
+                    assert_eq!(std::env::var("CS_DATABASE__USERNAME").unwrap(), "alice");
+                    assert_eq!(std::env::var("CS_DATABASE__PASSWORD").unwrap(), "s3cret");
+                    assert_eq!(std::env::var("CS_DATABASE__NAME").unwrap(), "orders");
+                    // The old (buggy) variable name must not be set.
+                    assert!(std::env::var("CS_DATABASE__USER").is_err());
+                },
+            );
+        });
+    }
+
+    #[test]
+    /// A non-UTF8 password in --database-url is an error, not a silent no-op.
+    /// tokio-postgres percent-decodes the password to raw bytes without UTF-8
+    /// validation, so `%FF` yields invalid UTF-8; we must reject it rather than
+    /// leave CS_DATABASE__PASSWORD unset (which would connect with no/stale
+    /// credentials).
+    fn database_url_rejects_non_utf8_password() {
+        use crate::config::tandem::apply_database_url;
+        with_no_cs_vars(|| {
+            temp_env::with_vars_unset(["CS_DATABASE__PASSWORD"], || {
+                let result = apply_database_url("postgres://alice:%FF@db.example.com/orders");
+                assert!(
+                    result.is_err(),
+                    "expected a non-UTF8 password to be rejected"
+                );
+                // And it must not have set a password from the bad URL.
+                assert!(std::env::var("CS_DATABASE__PASSWORD").is_err());
+            });
+        });
+    }
 
     #[test]
     /// the env vars from stash setup should be the preferred option

@@ -2,7 +2,7 @@ use super::context::Context;
 use super::data::to_sql;
 use super::error_handler::PostgreSqlErrorHandler;
 use super::message_buffer::MessageBuffer;
-use super::messages::error_response::ErrorResponse;
+use super::messages::error_response::{ErrorResponse, ErrorResponseCode};
 use super::messages::row_description::RowDescription;
 use super::messages::BackendCode;
 use super::Column;
@@ -24,7 +24,7 @@ use cipherstash_client::eql::EqlCiphertext;
 use metrics::{counter, histogram};
 use std::time::Instant;
 use tokio::io::AsyncRead;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, warn};
 
 /// The PostgreSQL proxy backend that handles server-to-client message processing.
 ///
@@ -337,8 +337,16 @@ where
     /// to forward to the client unchanged.
     fn error_response_handler(&mut self, bytes: &BytesMut) -> Result<Option<BytesMut>, Error> {
         let error_response = ErrorResponse::try_from(bytes)?;
-        error!(msg = "PostgreSQL Error", error = ?error_response);
-        info!(msg = "PostgreSQL Errors originate in the database");
+        // A database error forwarded to the client is normal proxy operation --
+        // the client surfaces it -- so log concisely at debug, not error. (The
+        // full message is available to the client; --debug shows it here too.)
+        debug!(
+            target: PROTOCOL,
+            client_id = self.context.client_id,
+            msg = "Database returned an error",
+            code = error_response.field(ErrorResponseCode::Code).unwrap_or("?"),
+            error = error_response.field(ErrorResponseCode::Message).unwrap_or(""),
+        );
         Ok(Some(bytes.to_owned()))
     }
 

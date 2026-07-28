@@ -51,15 +51,34 @@ pub async fn database(config: &DatabaseConfig) -> Result<Client, Error> {
     Ok(client)
 }
 
-pub async fn bind_with_retry(server: &ServerConfig) -> TcpListener {
-    let address = &server.to_socket_address();
+pub async fn bind_with_retry(server: &ServerConfig, allow_random_fallback: bool) -> TcpListener {
+    let address = server.to_socket_address();
     let mut retry_count = 0;
 
     loop {
-        match TcpListener::bind(address).await {
+        match TcpListener::bind(&address).await {
             Ok(listener) => {
-                info!(msg = "Server waiting for connections", address);
+                report_listening(&listener);
                 return listener;
+            }
+            // The configured port is in use, but it's only the default (not
+            // explicitly set), so fall back to an OS-assigned port and report it
+            // rather than failing.
+            Err(err) if err.kind() == std::io::ErrorKind::AddrInUse && allow_random_fallback => {
+                match TcpListener::bind(format!("{}:0", server.host)).await {
+                    Ok(listener) => {
+                        println!(
+                            "Port {} is already in use; listening on an OS-assigned port instead.",
+                            server.port
+                        );
+                        report_listening(&listener);
+                        return listener;
+                    }
+                    Err(err) => {
+                        error!(msg = "Error binding connection", error = err.to_string());
+                        std::process::exit(exitcode::CONFIG);
+                    }
+                }
             }
             Err(err) => {
                 if retry_count > MAX_RETRY_COUNT {
@@ -77,6 +96,21 @@ pub async fn bind_with_retry(server: &ServerConfig) -> TcpListener {
         time::sleep(Duration::from_millis(sleep_duration_ms)).await;
 
         retry_count += 1;
+    }
+}
+
+/// Report the address the proxy is listening on. Uses `println!` so the
+/// listening address (including an OS-assigned fallback port) is always visible,
+/// even when logging is quiet.
+fn report_listening(listener: &TcpListener) {
+    match listener.local_addr() {
+        Ok(addr) => {
+            println!("CipherStash Proxy listening on {addr}");
+            info!(msg = "Server waiting for connections", address = %addr);
+        }
+        Err(_) => {
+            info!(msg = "Server waiting for connections");
+        }
     }
 }
 
@@ -155,5 +189,30 @@ pub fn configure(stream: &TcpStream) {
                 error = err.to_string()
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn bind_falls_back_to_random_port_when_default_in_use() {
+        // Occupy a port, then ask bind_with_retry to bind the same one.
+        let occupied = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let occupied_port = occupied.local_addr().unwrap().port();
+
+        let server = ServerConfig {
+            host: "127.0.0.1".to_string(),
+            port: occupied_port,
+            ..ServerConfig::default()
+        };
+
+        // With fallback allowed, it binds a different OS-assigned port.
+        let listener = bind_with_retry(&server, true).await;
+        let bound_port = listener.local_addr().unwrap().port();
+
+        assert_ne!(bound_port, occupied_port);
+        assert_ne!(bound_port, 0);
     }
 }
