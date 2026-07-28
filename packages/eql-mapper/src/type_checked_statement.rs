@@ -8,8 +8,8 @@ use crate::QueryOperands;
 use crate::{
     CastFullPayloadOperands, DryRunnable, EqlMapperError, FailOnPlaceholderChange,
     JsonValueSelectors, OutputParam, OutputParamSource, Param, ParamPlan, PreserveEffectiveAliases,
-    RenumberParams, RewriteContainmentOps, RewriteEqlComparisonOps, RewriteEqlGroupBy,
-    RewriteEqlMatchOps, RewriteEqlOrderBy, RewriteJsonValueSelectorEq,
+    RenumberParams, RewriteContainmentOps, RewriteEqlComparisonOps, RewriteEqlDistinctOrderBy,
+    RewriteEqlGroupBy, RewriteEqlMatchOps, RewriteEqlOrderBy, RewriteJsonValueSelectorEq,
     RewriteStandardSqlFnsOnEqlTypes, SubstituteEncryptedLiterals, TransformationRule,
 };
 
@@ -273,6 +273,7 @@ impl<'ast> TypeCheckedStatement<'ast> {
             RewriteEqlComparisonOps::new(Arc::clone(&self.node_types)),
             RewriteEqlMatchOps::new(Arc::clone(&self.node_types)),
             RewriteEqlOrderBy::new(Arc::clone(&self.node_types)),
+            RewriteEqlDistinctOrderBy::new(Arc::clone(&self.node_types)),
             RewriteEqlGroupBy::new(Arc::clone(&self.node_types)),
             CastFullPayloadOperands::new(Arc::clone(&self.node_types)),
             PreserveEffectiveAliases,

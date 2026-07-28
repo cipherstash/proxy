@@ -2581,6 +2581,161 @@ mod test {
         }
     }
 
+    /// `SELECT DISTINCT` ordered by an encrypted column has to be restructured.
+    ///
+    /// `RewriteEqlOrderBy` must order by `ord_term(col)`, but PostgreSQL requires
+    /// every `ORDER BY` expression under `DISTINCT` to appear in the select list
+    /// — and the term does not. The select is pushed into a subquery that also
+    /// projects the term, and the (non-DISTINCT) outer query orders by it.
+    #[test]
+    fn distinct_order_by_encrypted_column_wraps_in_subquery() {
+        let schema = resolver(schema! {
+            tables: {
+                employees: {
+                    id,
+                    salary (EQL("eql_v3_integer_ord"): Ord),
+                }
+            }
+        });
+
+        for (input, expected) in [
+            // The ordering term is projected by the subquery, not by the client's
+            // result set.
+            (
+                "SELECT DISTINCT id, salary FROM employees ORDER BY salary",
+                "SELECT __eql_col_0 AS id, __eql_col_1 AS salary \
+                 FROM (SELECT DISTINCT id AS __eql_col_0, salary AS __eql_col_1, \
+                 eql_v3.ord_term(salary) AS __eql_ord_0 FROM employees) AS __eql_distinct \
+                 ORDER BY __eql_ord_0",
+            ),
+            // Sort options ride along with the hoisted term.
+            (
+                "SELECT DISTINCT id, salary FROM employees ORDER BY salary DESC NULLS FIRST",
+                "SELECT __eql_col_0 AS id, __eql_col_1 AS salary \
+                 FROM (SELECT DISTINCT id AS __eql_col_0, salary AS __eql_col_1, \
+                 eql_v3.ord_term(salary) AS __eql_ord_0 FROM employees) AS __eql_distinct \
+                 ORDER BY __eql_ord_0 DESC NULLS FIRST",
+            ),
+            // A native term in the same ORDER BY is carried through as a
+            // reference to the column the subquery already projects.
+            (
+                "SELECT DISTINCT id, salary FROM employees ORDER BY id, salary",
+                "SELECT __eql_col_0 AS id, __eql_col_1 AS salary \
+                 FROM (SELECT DISTINCT id AS __eql_col_0, salary AS __eql_col_1, \
+                 eql_v3.ord_term(salary) AS __eql_ord_0 FROM employees) AS __eql_distinct \
+                 ORDER BY __eql_col_0, __eql_ord_0",
+            ),
+            // An ordinal still refers to the right column: the outer projection
+            // preserves both the order and the count.
+            (
+                "SELECT DISTINCT id, salary FROM employees ORDER BY 1, salary",
+                "SELECT __eql_col_0 AS id, __eql_col_1 AS salary \
+                 FROM (SELECT DISTINCT id AS __eql_col_0, salary AS __eql_col_1, \
+                 eql_v3.ord_term(salary) AS __eql_ord_0 FROM employees) AS __eql_distinct \
+                 ORDER BY 1, __eql_ord_0",
+            ),
+            // The client's column names survive the round trip.
+            (
+                "SELECT DISTINCT id AS employee_id, salary FROM employees ORDER BY salary",
+                "SELECT __eql_col_0 AS employee_id, __eql_col_1 AS salary \
+                 FROM (SELECT DISTINCT id AS __eql_col_0, salary AS __eql_col_1, \
+                 eql_v3.ord_term(salary) AS __eql_ord_0 FROM employees) AS __eql_distinct \
+                 ORDER BY __eql_ord_0",
+            ),
+        ] {
+            let statement = parse(input);
+            let typed = type_check(schema.clone(), &statement).unwrap();
+
+            assert_eq!(
+                typed.transform(HashMap::new()).unwrap().to_string(),
+                expected.split_whitespace().collect::<Vec<_>>().join(" "),
+                "unexpected rewrite for `{input}`"
+            );
+        }
+    }
+
+    /// The subquery wrapping is applied only when it is actually needed.
+    #[test]
+    fn distinct_order_by_leaves_other_queries_alone() {
+        let schema = resolver(schema! {
+            tables: {
+                employees: {
+                    id,
+                    salary (EQL("eql_v3_integer_ord"): Ord),
+                }
+            }
+        });
+
+        for (input, expected) in [
+            // DISTINCT, but ordered by a native column — no term to hide.
+            (
+                "SELECT DISTINCT id, salary FROM employees ORDER BY id",
+                "SELECT DISTINCT id, salary FROM employees ORDER BY id",
+            ),
+            // Ordered by an encrypted column, but not DISTINCT — the term is
+            // allowed to sit in ORDER BY on its own.
+            (
+                "SELECT id, salary FROM employees ORDER BY salary",
+                "SELECT id, salary FROM employees ORDER BY eql_v3.ord_term(salary)",
+            ),
+            // DISTINCT with no ORDER BY at all.
+            (
+                "SELECT DISTINCT id, salary FROM employees",
+                "SELECT DISTINCT id, salary FROM employees",
+            ),
+        ] {
+            let statement = parse(input);
+            let typed = type_check(schema.clone(), &statement).unwrap();
+
+            assert_eq!(
+                typed.transform(HashMap::new()).unwrap().to_string(),
+                expected,
+                "unexpected rewrite for `{input}`"
+            );
+        }
+    }
+
+    /// Shapes the subquery rewrite cannot express are reported as such, rather
+    /// than left to fail as a bare PostgreSQL syntax error.
+    #[test]
+    fn distinct_order_by_rejects_inexpressible_shapes() {
+        let schema = resolver(schema! {
+            tables: {
+                employees: {
+                    id,
+                    salary (EQL("eql_v3_integer_ord"): Ord),
+                }
+            }
+        });
+
+        for (input, expected_fragment) in [
+            // DISTINCT ON constrains ORDER BY to begin with its own expressions;
+            // wrapping would silently break that.
+            (
+                "SELECT DISTINCT ON (id) id, salary FROM employees ORDER BY id, salary",
+                "DISTINCT ON",
+            ),
+            // A wildcard cannot be named, so the outer projection cannot
+            // reproduce it column for column.
+            (
+                "SELECT DISTINCT * FROM employees ORDER BY salary",
+                "wildcard",
+            ),
+        ] {
+            let statement = parse(input);
+            let typed = type_check(schema.clone(), &statement).unwrap();
+
+            let err = typed
+                .transform(HashMap::new())
+                .expect_err(&format!("expected `{input}` to be rejected"));
+
+            assert!(
+                err.to_string().contains(expected_fragment),
+                "unexpected error for `{input}`: {err}"
+            );
+        }
+    }
+
     /// `GROUP BY` on an encrypted column groups by its equality term. A bare
     /// `GROUP BY col` groups on the jsonb payload, whose ciphertext is
     /// randomised per row, so equal plaintexts land in different groups.

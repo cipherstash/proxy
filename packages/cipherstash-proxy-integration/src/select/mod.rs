@@ -1,3 +1,4 @@
+mod distinct_order_by;
 mod group_by;
 mod jsonb_array_elements;
 mod jsonb_array_length;
