@@ -43,8 +43,21 @@ mod tests {
         }
     }
 
+    /// A storage-only encrypted column round-trips.
+    ///
+    /// Under EQL v2 this asserted the opposite: `unconfigured.encrypted_unconfigured`
+    /// was an `eql_v2_encrypted` column with no matching row in
+    /// `eql_v2_configuration`, so it was encrypted-but-unconfigured and the proxy
+    /// rejected writes with `EncryptUnknownColumn`.
+    ///
+    /// v3 makes that state unreachable. A column is encrypted precisely because
+    /// it has an EQL domain type, and every recognised domain yields a
+    /// `ColumnConfig` — `eql_v3_text` simply yields one with no search indexes.
+    /// "Encrypted but unconfigured" no longer exists as a condition, so the
+    /// column is now a working storage-only column: encrypted on write, decrypted
+    /// on read, with no searchable terms.
     #[tokio::test]
-    async fn encrypted_column_with_no_configuration() {
+    async fn storage_only_encrypted_column_round_trips() {
         trace();
 
         reset_schema().await;
@@ -53,23 +66,19 @@ mod tests {
 
         let _reset = Reset;
 
-        // Create a record
-        // If select returns no results, no configuration is required
         let id = random_id();
         let encrypted_text = "hello@cipherstash.com";
 
         let sql = "INSERT INTO unconfigured (id, encrypted_unconfigured) VALUES ($1, $2)";
-        let result = client.query(sql, &[&id, &encrypted_text]).await;
+        client.query(sql, &[&id, &encrypted_text]).await.unwrap();
 
-        assert!(result.is_err());
+        let sql = "SELECT encrypted_unconfigured FROM unconfigured WHERE id = $1";
+        let rows = client.query(sql, &[&id]).await.unwrap();
 
-        if let Err(err) = result {
-            let msg = err.to_string();
+        assert_eq!(rows.len(), 1);
 
-            assert_eq!(msg, "db error: ERROR: Column 'encrypted_unconfigured' in table 'unconfigured' has no Encrypt configuration. For help visit https://github.com/cipherstash/proxy/blob/main/docs/errors.md#encrypt-unknown-column");
-        } else {
-            unreachable!();
-        }
+        let actual: String = rows[0].get("encrypted_unconfigured");
+        assert_eq!(encrypted_text, actual);
     }
 
     /// The error here is in the Tokio/Postgres layer

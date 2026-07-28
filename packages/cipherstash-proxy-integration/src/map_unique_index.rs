@@ -232,13 +232,21 @@ mod tests {
             .await
             .unwrap();
 
-        let sql = "SELECT * FROM encrypted WHERE encrypted_text = $1 AND encrypted_bool = $2 AND encrypted_int2 = $3 AND encrypted_int4 = $4 AND encrypted_int8 = $5 AND encrypted_float8 = $6";
+        // `encrypted_bool` is deliberately absent from this WHERE clause.
+        //
+        // Under EQL v2 every encrypted column got a unique index, so equality on
+        // an encrypted boolean worked. EQL v3 makes boolean storage-only
+        // (`eql_v3_boolean` carries no searchable terms) because a two-value
+        // column leaks its distribution under any index — so `encrypted_bool = $n`
+        // is now correctly rejected with a capability error. The column is still
+        // encrypted, decrypted and asserted on in the projection below; it just
+        // cannot be searched.
+        let sql = "SELECT * FROM encrypted WHERE encrypted_text = $1 AND encrypted_int2 = $2 AND encrypted_int4 = $3 AND encrypted_int8 = $4 AND encrypted_float8 = $5";
         let rows = client
             .query(
                 sql,
                 &[
                     &encrypted_text,
-                    &encrypted_bool,
                     &encrypted_int2,
                     &encrypted_int4,
                     &encrypted_int8,

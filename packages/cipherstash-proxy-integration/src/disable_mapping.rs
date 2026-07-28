@@ -87,11 +87,20 @@ mod tests {
         let sql = "SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING = true";
         client.query(sql, &[]).await.unwrap();
 
-        // Data should not be decrypted
+        // Data should not be decrypted.
+        //
+        // Read it as `Value`, not as `EqlEncrypted`: a v3 encrypted column is a
+        // DOMAIN over `jsonb`, and PostgreSQL reports a domain's *base* type in
+        // RowDescription. The client therefore sees `jsonb`, and a struct whose
+        // `FromSql` is pinned to the domain name is rejected outright. (Under v2
+        // this worked because `eql_v2_encrypted` was a real composite type with
+        // its own OID.)
         let select_sql = "SELECT encrypted_text FROM encrypted";
-        let rows = query_with_client::<EqlEncrypted>(select_sql, &client).await;
+        let rows = query_with_client::<Value>(select_sql, &client).await;
 
         assert_eq!(rows.len(), 1);
+        // Undecrypted, so the raw EQL payload still carries the column identifier.
+        assert_eq!(rows[0]["i"]["c"], "encrypted_text");
 
         // Simple query using same client
         let rows = simple_query_with_client::<String>(select_sql, &client).await;
