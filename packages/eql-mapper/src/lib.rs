@@ -3825,9 +3825,8 @@ mod test {
     /// `pg_catalog` cannot be type checked, and every PostgreSQL driver issues it.
     #[test]
     fn may_touch_eql_columns_ignores_tables_absent_from_the_schema() {
-        let statement = parse(
-            "SELECT attname, atttypid FROM pg_catalog.pg_attribute WHERE attnum > 0",
-        );
+        let statement =
+            parse("SELECT attname, atttypid FROM pg_catalog.pg_attribute WHERE attnum > 0");
 
         // Precondition: this statement genuinely cannot be type checked.
         assert!(type_check(mixed_schema(), &statement).is_err());

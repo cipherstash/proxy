@@ -112,14 +112,12 @@ pub fn may_touch_eql_columns(resolver: Arc<TableResolver>, statement: &Statement
 
             let bare = ast::ObjectName(vec![ast::ObjectNamePart::Identifier(ident.clone())]);
 
-            self.resolver
-                .resolve_table(&bare)
-                .is_ok_and(|table| {
-                    table
-                        .columns
-                        .iter()
-                        .any(|col| matches!(col.kind, ColumnKind::Eql(_, _)))
-                })
+            self.resolver.resolve_table(&bare).is_ok_and(|table| {
+                table
+                    .columns
+                    .iter()
+                    .any(|col| matches!(col.kind, ColumnKind::Eql(_, _)))
+            })
         }
     }
 

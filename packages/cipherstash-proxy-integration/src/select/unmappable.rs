@@ -79,15 +79,19 @@ mod tests {
     /// payloads — `{"c": "mBbK<n$E_kDWiD#g9BY2...", "i": {...}, "v": 3}` — straight to the client
     /// with no error at all. It must be refused instead.
     ///
+    /// The connection is fresh, which is load bearing — see
+    /// `select_distinct_on_a_storage_only_column_is_refused_on_a_reused_connection`.
+    ///
     #[tokio::test]
     async fn select_distinct_on_a_storage_only_column_is_refused() {
         clear().await;
 
-        let client = connect_with_tls(*PROXY).await;
-
+        let setup = connect_with_tls(*PROXY).await;
         let id = random_id();
         let sql = "INSERT INTO encrypted (id, encrypted_bool) VALUES ($1, $2)";
-        client.query(sql, &[&id, &true]).await.unwrap();
+        setup.query(sql, &[&id, &true]).await.unwrap();
+
+        let client = connect_with_tls(*PROXY).await;
 
         let sql = "SELECT DISTINCT encrypted_bool FROM encrypted";
         let result = client.query(sql, &[]).await;
@@ -110,6 +114,54 @@ mod tests {
             message.contains("could not be type checked"),
             "Expected a mapping error, got: {message}"
         );
+    }
+
+    ///
+    /// The same refusal on a connection that has already run a statement — which is every
+    /// connection in a pool, and so the case that actually matters in production.
+    ///
+    /// The statement is still refused, and that is the security property this file exists to pin.
+    /// But the client cannot read *why*: it gets tokio-postgres' `unexpected message from server`
+    /// instead of the mapping error, and the connection is broken rather than reusable. The
+    /// assertion is deliberately weak here so the test documents the defect instead of asserting
+    /// it away.
+    ///
+    /// The cause is an ordering bug in Proxy, not in this test, and it is older than the removal
+    /// of `enable_mapping_errors` — that flag simply kept the path from being reached by default.
+    /// Frontend and backend are separate tasks writing to one unbounded channel, so a synthetic
+    /// ErrorResponse raised on the frontend is queued immediately and overtakes responses the
+    /// server still owes for earlier messages. Observed byte order for
+    /// `Close(s0) Sync | Parse(s1) Describe(s1) Sync`:
+    ///
+    /// ```text
+    /// sent:     ErrorResponse, ReadyForQuery, CloseComplete, ReadyForQuery
+    /// expected: CloseComplete, ReadyForQuery, ErrorResponse, ReadyForQuery
+    /// ```
+    ///
+    /// The client is waiting for `CloseComplete` and gets `ErrorResponse`, so it gives up. Fixing
+    /// it needs the frontend to hold a synthetic error until the backend has drained what the
+    /// server owes, which is a change to the proxy's concurrency model and not in scope here.
+    ///
+    #[tokio::test]
+    async fn select_distinct_on_a_storage_only_column_is_refused_on_a_reused_connection() {
+        clear().await;
+
+        let client = connect_with_tls(*PROXY).await;
+
+        let id = random_id();
+        let sql = "INSERT INTO encrypted (id, encrypted_bool) VALUES ($1, $2)";
+        client.query(sql, &[&id, &true]).await.unwrap();
+
+        let sql = "SELECT DISTINCT encrypted_bool FROM encrypted";
+        let result = client.query(sql, &[]).await;
+
+        if let Ok(rows) = result {
+            panic!(
+                "Expected DISTINCT on a storage-only encrypted column to be refused, \
+                 but Proxy returned {} row(s) of raw ciphertext",
+                rows.len()
+            );
+        }
     }
 
     ///

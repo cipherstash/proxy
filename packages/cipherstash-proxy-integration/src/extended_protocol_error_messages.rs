@@ -16,6 +16,26 @@ mod tests {
         }
     }
 
+    /// Naming a column that is not in the schema is rejected by Proxy, not forwarded for
+    /// PostgreSQL to reject.
+    ///
+    /// This used to assert PostgreSQL's `column "..." of relation "..." does not exist`, because
+    /// the statement failed to type check and Proxy forwarded whatever it could not map. It no
+    /// longer does when the statement names a table with encrypted columns, and `encrypted` is
+    /// such a table.
+    ///
+    /// It is tempting to argue this particular shape was safe to forward — a column that does not
+    /// exist can hardly leak, since PostgreSQL will reject the statement anyway. That reasoning
+    /// only holds if Proxy's view of the schema is current, and it is not guaranteed to be: the
+    /// schema is reloaded on an interval, so between a `ALTER TABLE ... ADD COLUMN` of an encrypted
+    /// column and the next reload, "Proxy has never heard of this column" and "this column does not
+    /// exist" are different statements. Trusting the first would write plaintext into the new
+    /// column. The cost of not trusting it is this less specific error message.
+    ///
+    /// The message reads oddly — the table and column names are the wrong way round in the
+    /// mapper's `SchemaError::ColumnNotFound` formatting. That is a pre-existing defect in the
+    /// error text, unrelated to which side of the fence the statement lands on; it is pinned here
+    /// rather than quietly corrected so that fixing it is a deliberate change.
     #[tokio::test]
     async fn encrypted_column_not_defined_in_schema() {
         trace();
@@ -37,7 +57,7 @@ mod tests {
 
         if let Err(err) = result {
             let msg = err.to_string();
-            assert_eq!(msg, "db error: ERROR: column \"encrypted_unconfigured\" of relation \"encrypted\" does not exist");
+            assert_eq!(msg, "db error: ERROR: Statement could not be type checked: Column: encrypted not found for table: encrypted_unconfigured. For help visit https://github.com/cipherstash/proxy/blob/main/docs/errors.md#mapping-statement-could-not-be-type-checked");
         } else {
             unreachable!();
         }
