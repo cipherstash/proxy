@@ -32,6 +32,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - **`SELECT *` with `GROUP BY` on an encrypted column** is now rejected with an explanatory error instead of PostgreSQL's "column must appear in the GROUP BY clause". A wildcard hides the projected columns, so the grouped column cannot be projected through `eql_v3.grouped_value` — list the columns explicitly. This matches the existing treatment of `SELECT DISTINCT *`.
 
+- **A prepared statement name reused for an unmapped statement**: `Parse` rebinds its name, but a statement Proxy does not map — `BEGIN`, `COMMIT`, or anything needing no type check — left the *previous* statement cached under that name. The next `Bind` for the name was then rewritten against a statement the client never parsed, failing with `Rewritten statement binds parameter 1, but only 0 were provided`. Affects any client that reuses the unnamed prepared statement across a transaction, which includes pgbench in extended mode and psycopg with `prepare=False`.
+
 - **`LIKE`/`ILIKE` capability checking**: `LIKE` and `ILIKE` on an encrypted column are now gated by the column's token-match capability. Previously these predicates bypassed capability checking and were silently accepted on columns that do not support fuzzy match; they are now rejected with a capability error.
 
 ## [2.2.4] - 2026-06-18

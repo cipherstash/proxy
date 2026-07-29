@@ -760,6 +760,23 @@ where
             parse = ?message
         );
 
+        // A Parse rebinds the name: whatever it referred to before is gone.
+        //
+        // Dropping it here rather than only on the mapped path matters, because
+        // every path below can return without caching anything — a statement
+        // that needs no type check (`BEGIN`, `END`), one parsed while mapping is
+        // disabled, or one that fails to type check. Leaving the previous entry
+        // in place means the next Bind for this name is rewritten against a
+        // statement the client never parsed, and the param counts do not line
+        // up:
+        //
+        //     FATAL: Rewritten statement binds parameter 1, but only 0 were provided
+        //
+        // pgbench in extended mode is exactly this shape: it reuses the unnamed
+        // statement for every command, so the `END` at the close of a
+        // transaction binds against the `SELECT` that preceded it.
+        self.context.close_statement(&message.name);
+
         let statement = SqlParser::parse_statement(&message.statement)?;
 
         if let Some(mapping_disabled) = self.context.maybe_set_unsafe_disable_mapping(&statement) {
