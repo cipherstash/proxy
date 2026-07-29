@@ -264,6 +264,15 @@ impl<'ast> TransformationRule<'ast> for RewriteEqlDistinctOrderBy<'ast> {
             return Ok(false);
         };
 
+        // Check the shape BEFORE moving anything: past this point the body has
+        // been swapped out for a placeholder, so bailing with `Ok(false)` would
+        // leave the caller holding a query rewritten into `VALUES ()` with its
+        // original body dropped. `applies_to` already established this on the
+        // original, so a mismatch here is a bug rather than an unhandled shape.
+        if !matches!(target.body.as_ref(), SetExpr::Select(_)) {
+            return Ok(false);
+        }
+
         // Move the rewritten body out; it becomes the subquery.
         let body = mem::replace(
             &mut target.body,
@@ -274,7 +283,10 @@ impl<'ast> TransformationRule<'ast> for RewriteEqlDistinctOrderBy<'ast> {
         );
 
         let SetExpr::Select(mut inner_select) = *body else {
-            return Ok(false);
+            return Err(EqlMapperError::InternalError(
+                "SELECT DISTINCT rewrite: query body was a SELECT when checked but not when moved"
+                    .to_string(),
+            ));
         };
 
         // Give every projected column a synthetic name inside the subquery, and
@@ -290,13 +302,19 @@ impl<'ast> TransformationRule<'ast> for RewriteEqlDistinctOrderBy<'ast> {
         {
             let inner_alias = Ident::new(format!("{COLUMN_PREFIX}{idx}"));
 
-            let expr = match inner_item {
-                SelectItem::UnnamedExpr(expr) | SelectItem::ExprWithAlias { expr, .. } => {
-                    mem::replace(expr, Expr::Value(SqltkValue::Null.into()))
-                }
-                // `plan_order_sources` has already rejected wildcards.
-                _ => return Ok(false),
-            };
+            let expr =
+                match inner_item {
+                    SelectItem::UnnamedExpr(expr) | SelectItem::ExprWithAlias { expr, .. } => {
+                        mem::replace(expr, Expr::Value(SqltkValue::Null.into()))
+                    }
+                    // `plan_order_sources` has already rejected wildcards, and the
+                    // body has been moved by now — erroring rather than bailing
+                    // keeps a corrupted statement from reaching PostgreSQL.
+                    _ => return Err(EqlMapperError::InternalError(
+                        "SELECT DISTINCT rewrite: wildcard projection survived the wildcard check"
+                            .to_string(),
+                    )),
+                };
 
             *inner_item = SelectItem::ExprWithAlias {
                 expr,

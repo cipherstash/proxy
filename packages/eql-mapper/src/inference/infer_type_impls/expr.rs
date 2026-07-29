@@ -172,14 +172,19 @@ impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
                             self.eql_json_field_access(right),
                         ) {
                             (Some((json, selector)), None) => {
-                                self.infer_json_value_selector(json, selector, right)?;
-                                self.unify_node_with_type(expr_val, Type::native())?;
-                                true
+                                let fused =
+                                    self.infer_json_value_selector(json, selector, right)?;
+                                if fused {
+                                    self.unify_node_with_type(expr_val, Type::native())?;
+                                }
+                                fused
                             }
                             (None, Some((json, selector))) => {
-                                self.infer_json_value_selector(json, selector, left)?;
-                                self.unify_node_with_type(expr_val, Type::native())?;
-                                true
+                                let fused = self.infer_json_value_selector(json, selector, left)?;
+                                if fused {
+                                    self.unify_node_with_type(expr_val, Type::native())?;
+                                }
+                                fused
                             }
                             _ => false,
                         }
@@ -638,14 +643,20 @@ impl<'ast> TypeInferencer<'ast> {
     /// fusion is declined and the comparison falls through to ordinary typing —
     /// where it will fail the capability check with a clearer error than a
     /// half-built needle would produce.
+    ///
+    /// Returns whether the fusion was applied. The caller must not treat a
+    /// declined fusion as handled: doing so skips the binop rule that is the
+    /// promised fall-through, leaving `value` with an unconstrained type
+    /// variable and surfacing an opaque "incomplete type" error instead of the
+    /// capability error.
     fn infer_json_value_selector(
         &self,
         json: EqlValue,
         selector: &'ast Expr,
         value: &'ast Expr,
-    ) -> Result<(), TypeError> {
+    ) -> Result<bool, TypeError> {
         let Some(source) = Self::json_selector_source(selector) else {
-            return Ok(());
+            return Ok(false);
         };
 
         self.unify_node_with_type(
@@ -663,7 +674,7 @@ impl<'ast> TypeInferencer<'ast> {
             None => {}
         }
 
-        Ok(())
+        Ok(true)
     }
 
     /// Classifies the path half of a fused value selector: a placeholder yields

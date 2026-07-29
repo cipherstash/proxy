@@ -110,8 +110,22 @@ pub(crate) fn get_sql_function(fn_name: &ObjectName) -> SqlFunction {
 /// types, or `None` if none is declared. `count`, for example, works on encrypted
 /// values natively (Postgres counts the domain directly), so it has no counterpart
 /// and is left untouched.
+///
+/// Only a built-in is eligible: an unqualified name, or one explicitly qualified
+/// with `pg_catalog`. Matching on the last identifier alone would rewrite a
+/// user's `custom_schema.min(...)` into `eql_v3.min(...)`, silently calling a
+/// different function than the one written.
 pub(crate) fn get_eql_v3_function_name(fn_name: &ObjectName) -> Option<ObjectName> {
-    let bare = fn_name.0.last()?;
+    let bare = match &fn_name.0[..] {
+        [name] => name,
+        [ObjectNamePart::Identifier(schema), name]
+            if schema.value.eq_ignore_ascii_case("pg_catalog") =>
+        {
+            name
+        }
+        _ => return None,
+    };
+
     let eql_v3_name = ObjectName(vec![
         ObjectNamePart::Identifier(Ident::new("eql_v3")),
         bare.clone(),

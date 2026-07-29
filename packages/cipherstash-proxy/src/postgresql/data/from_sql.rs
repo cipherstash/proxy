@@ -111,8 +111,13 @@ pub fn literal_from_sql(
 /// `->`/`->>` take a bare field name (`name`), `jsonb_path_query*` takes a path
 /// (`nested.title`, or already-rooted `$.nested.title`). The client's
 /// `Selector::parse` only accepts the rooted form.
+///
+/// A path is already rooted if it *starts with* `$`, not merely if it starts
+/// with `$.`: `jsonb_path_query` also accepts `$`, `$[0]`, `$["a"]` and
+/// `$[*].b`. Re-rooting those would produce `$.$[0]` and friends — a selector
+/// that matches nothing rather than erroring.
 pub fn json_selector_path(val: &str) -> String {
-    if val.starts_with("$.") {
+    if val.starts_with('$') {
         val.to_string()
     } else {
         format!("$.{val}")

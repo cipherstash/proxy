@@ -34,7 +34,7 @@ the inference pass is where the context is already known.
 A comparison with an encrypted operand is rewritten by wrapping **both** operands in the
 term function the operator's capability selects:
 
-```
+```text
 col <op> operand   →   eql_v3.<term>(col) <op> eql_v3.<term>(operand)
 ```
 
@@ -69,7 +69,7 @@ The right-hand operand casts to the **query twin** `eql_v3.query_<token>_<cap>` 
 **term-only** payload (`{v,i,<terms>}`, no stored ciphertext `c`) that a query value actually
 is, and have their own `ord_term`/`eq_term` overloads. So:
 
-```
+```text
 salary > 'x'   →   eql_v3.ord_term(salary) > eql_v3.ord_term('<ct>'::jsonb::eql_v3.query_numeric_ord)
 ```
 

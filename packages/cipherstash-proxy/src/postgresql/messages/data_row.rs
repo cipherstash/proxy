@@ -301,10 +301,15 @@ mod tests {
 
     // The four `to_ciphertext_*` fixtures below are REAL EQL v3 wire captures
     // taken from Postgres -> Proxy `DataRow` messages for the `encrypted` test
-    // table (regenerated via a live encrypt round-trip against ZeroKMS + EQL
-    // v3.0.2). They exercise `DataRow::try_from` + `as_ciphertext` across the
-    // binary (jsonb `0x01` version header) and text (bare JSON) wire encodings,
-    // and NULL columns.
+    // table, via a live encrypt round-trip against ZeroKMS. They exercise
+    // `DataRow::try_from` + `as_ciphertext` across the binary (jsonb `0x01`
+    // version header) and text (bare JSON) wire encodings, and NULL columns.
+    //
+    // Captured against EQL v3.0.2. The build has since moved to the version
+    // pinned by `CS_EQL_VERSION` in `mise.toml`, and these still pass — the
+    // shapes under test (the jsonb version header, the bare-JSON text form, and
+    // the payload's `i`/`v` fields) have not changed. Regenerate against the
+    // pinned version, not against 3.0.2, if a future release does change them.
     #[test]
     pub fn to_ciphertext_with_binary_encoding() {
         log::init(LogConfig::with_level(LogLevel::Debug));

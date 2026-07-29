@@ -63,13 +63,19 @@ def test_storage_only_encrypted_column_round_trips():
 
                 val = "hello@cipherstash.com"
 
-                sql = "INSERT INTO unconfigured (id, encrypted_unconfigured) VALUES (%s, %s)"
-                cursor.execute(sql, [id, val])
+                try:
+                    sql = "INSERT INTO unconfigured (id, encrypted_unconfigured) VALUES (%s, %s)"
+                    cursor.execute(sql, [id, val])
 
-                sql = "SELECT encrypted_unconfigured FROM unconfigured WHERE id = %s"
-                cursor.execute(sql, [id])
+                    sql = "SELECT encrypted_unconfigured FROM unconfigured WHERE id = %s"
+                    cursor.execute(sql, [id])
 
-                assert cursor.fetchone() == (val,)
+                    assert cursor.fetchone() == (val,)
+                finally:
+                    # This test commits, so clean up rather than leaving a row
+                    # behind for every run to accumulate.
+                    cursor.execute(
+                        "DELETE FROM unconfigured WHERE id = %s", [id])
 
 
 def test_mapper_unsupported_parameter_type():

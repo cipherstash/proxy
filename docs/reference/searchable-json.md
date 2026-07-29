@@ -147,7 +147,7 @@ Examples:
 ## Operators
 
 <a id='field_access_operator'></a>
-### `-> text returns eql_v3_json_search decrypted as jsonb`
+### `eql_v3_json_search -> text returns eql_v3_json_search decrypted as jsonb`
 
 Extracts JSON object field with the given key.
 
@@ -201,7 +201,7 @@ SELECT encrypted_jsonb -> 'string_array' FROM cipherstash;
 
 
 <a id='field_access_as_text_operator'></a>
-### `->> text returns eql_v3_json_search decrypted as jsonb`
+### `eql_v3_json_search ->> text returns eql_v3_json_search decrypted as jsonb`
 
 Extracts JSON object field with the given key.
 

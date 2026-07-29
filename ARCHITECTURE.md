@@ -112,16 +112,22 @@ When a SQL statement contains DDL (`CREATE TABLE`, `ALTER TABLE`, `DROP TABLE`, 
 
 After type inference determines which parts of a statement touch encrypted columns, the transformation pipeline rewrites the AST. Transformation rules are modular and composable — they implement a `TransformationRule` trait and are composed into a single rule via tuple implementation (supporting chains of 1 to 16 rules).
 
-The current rules:
+The current rules, in the order they are composed in
+`type_checked_statement.rs::make_transformer`:
 
 | Rule | What it does |
 |---|---|
+| `SubstituteEncryptedLiterals` | Replaces each plaintext literal with its ciphertext, before any rule wraps it |
+| `RewriteStandardSqlFnsOnEqlTypes` | Rewrites `min()`, `max()`, `jsonb_path_query()` etc. to their `eql_v3.*` counterparts (`count()` stays native) |
+| `RewriteContainmentOps` | Rewrites JSON `@>`/`<@` to `eql_v3.jsonb_contains`/`jsonb_contained_by`, and `->`/`->>` to `eql_v3."->"`/`"->>"` |
+| `RewriteJsonValueSelectorEq` | Fuses `col -> 'field' = value` into a single encrypted value-selector needle matched by containment |
 | `RewriteEqlComparisonOps` | Rewrites scalar comparisons: `col <op> x` → `eql_v3.<term>(col) <op> eql_v3.<term>(x)` (term chosen from the column's domain: `eq_term`/`ord_term`/`ord_term_ore`) |
 | `RewriteEqlMatchOps` | Rewrites `LIKE`/`ILIKE`/`@@` to `eql_v3.match_term(a) @> eql_v3.match_term(b)` |
-| `RewriteContainmentOps` | Rewrites JSON `@>`/`<@` to `eql_v3.jsonb_contains`/`jsonb_contained_by`, and `->`/`->>` to `eql_v3."->"`/`"->>"` |
-| `RewriteStandardSqlFnsOnEqlTypes` | Rewrites `min()`, `max()`, `jsonb_path_query()` etc. to their `eql_v3.*` counterparts (`count()` stays native) |
-| `CastLiteralsAsEncrypted` | Replaces plaintext literals with the ciphertext cast to the column's v3 domain (`::public.eql_v3_*`) or, for a query operand, its query twin (`::eql_v3.query_*`) |
-| `CastParamsAsEncrypted` | Wraps parameter placeholders (`$1`, `$2`, ...) with the same v3 domain casts |
+| `RewriteEqlOrderBy` | Rewrites `ORDER BY col` to order by the column's ordering term, `eql_v3.ord_term(col)` |
+| `RewriteEqlDistinct` | Rewrites `SELECT DISTINCT col` to deduplicate on the equality term, `SELECT DISTINCT ON (eql_v3.eq_term(col))` |
+| `RewriteEqlDistinctOrderBy` | Wraps a `DISTINCT` query ordered by an encrypted column in a subquery that projects the ordering term, so the outer query can order by it |
+| `RewriteEqlGroupBy` | Groups by the equality term, and lifts a projected grouped column through `eql_v3.grouped_value` |
+| `CastFullPayloadOperands` | Casts the operands with no rewrite of their own — `INSERT` and `UPDATE` values — to the column's v3 domain (`::public.eql_v3_*`). Query operands are cast to the query twin (`::eql_v3.query_*`) by the rewrite rule that produces them |
 | `PreserveEffectiveAliases` | Maintains column aliases through transformations |
 | `FailOnPlaceholderChange` | Postcondition check that prepared statement placeholders weren't corrupted |
 
