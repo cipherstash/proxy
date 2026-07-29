@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1785308143389,
+  "lastUpdate": 1785309197933,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -22667,6 +22667,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 39.644388,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "james@cipherstash.com",
+            "name": "James Sadler",
+            "username": "freshtonic"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "f1a90f8794fb6967aa48e227c67c0818651392e4",
+          "message": "Merge pull request #432 from cipherstash/feat/upgrade-to-eql-v3\n\nfeat: upgrade to EQL v3 — cipherstash-client 0.42, typed jsonb domains, v3 typecheck & transform",
+          "timestamp": "2026-07-29T17:07:40+10:00",
+          "tree_id": "6d9df7f46a6744a59bcbe10cb5d4547547bcc0f2",
+          "url": "https://github.com/cipherstash/proxy/commit/f1a90f8794fb6967aa48e227c67c0818651392e4"
+        },
+        "date": 1785309196415,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 39.742841,
             "unit": "Number"
           }
         ]
