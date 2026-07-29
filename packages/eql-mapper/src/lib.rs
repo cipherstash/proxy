@@ -3161,7 +3161,6 @@ mod test {
         let schema = forms_schema();
 
         for (input, required_term) in [
-            ("SELECT DISTINCT ON (txt) txt FROM t", "eql_v3.eq_term("),
             ("SELECT txt FROM t ORDER BY 1", "eql_v3.ord_term("),
             ("SELECT txt FROM t GROUP BY 1", "eql_v3.eq_term("),
             (
@@ -3364,6 +3363,35 @@ mod test {
             assert!(
                 type_check(schema.clone(), &statement).is_ok(),
                 "`{input}` should be accepted"
+            );
+        }
+    }
+
+    /// `DISTINCT ON (col)` deduplicates, so each encrypted key is keyed on its
+    /// equality term — in place, since the keys are named explicitly.
+    #[test]
+    fn distinct_on_keys_on_the_equality_term() {
+        let schema = forms_schema();
+
+        for (input, expected) in [
+            (
+                "SELECT DISTINCT ON (txt) txt FROM t",
+                "SELECT DISTINCT ON (eql_v3.eq_term(txt)) txt FROM t",
+            ),
+            // A plaintext key is left alone.
+            (
+                "SELECT DISTINCT ON (id, txt) txt FROM t",
+                "SELECT DISTINCT ON (id, eql_v3.eq_term(txt)) txt FROM t",
+            ),
+            (
+                "SELECT DISTINCT ON (id) id FROM t",
+                "SELECT DISTINCT ON (id) id FROM t",
+            ),
+        ] {
+            assert_eq!(
+                transform_with_dummy_literals(schema.clone(), input),
+                expected,
+                "unexpected rewrite for `{input}`"
             );
         }
     }

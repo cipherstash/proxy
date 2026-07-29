@@ -57,9 +57,6 @@ mod tests {
     /// `DISTINCT ON (enc)` written by the client is passed through, so it
     /// deduplicates on the raw payload and keeps every row.
     #[tokio::test]
-    #[ignore = "DISTINCT ON (<encrypted column>) is not rewritten: it deduplicates on the raw \
-                jsonb payload, whose ciphertext is randomised, so no rows collapse. Needs the \
-                same eq_term keying SELECT DISTINCT already gets, or a loud rejection."]
     async fn distinct_on_encrypted_column_deduplicates() {
         trace();
         clear().await;
@@ -139,53 +136,36 @@ mod tests {
         assert_eq!(vec![1, 1, 1, 2, 2], ranks);
     }
 
-    /// A deduplicating set operation on an encrypted column is refused.
+    /// `UNION ALL` deduplicates nothing, so it is unaffected by the encrypted
+    /// column and returns both branches in full.
     ///
-    /// Deduplication compares whole payloads, so `UNION` would keep every
-    /// duplicate. It cannot be keyed on the equality term in place — the
-    /// comparison spans both branches' whole projections — so it is rejected
-    /// rather than silently wrong. `UNION ALL` deduplicates nothing and works.
+    /// The deduplicating forms — `UNION`, `INTERSECT`, `EXCEPT` — are refused by
+    /// the type checker; that rejection is asserted in the eql-mapper tests
+    /// (`deduplicating_set_operations_on_encrypted_columns_are_rejected`), not
+    /// here, since a capability error is not observable through the proxy while
+    /// mapping errors fall back to passthrough.
     #[tokio::test]
-    #[ignore = "The rejection is a type-check error, and with CS_DEVELOPMENT__ENABLE_MAPPING_ERRORS \
-                unset — the default, and what the proxy container runs with, since \
-                tests/docker-compose.yml does not pass it through — a type error falls back to \
-                passthrough. The statement then reaches PostgreSQL unrewritten and returns the \
-                un-deduplicated rows this test exists to prevent. The mapper-level test \
-                (deduplicating_set_operations_on_encrypted_columns_are_rejected) covers the \
-                rejection itself; this becomes runnable once mapping errors are always on \
-                (CIP-3680)."]
-    async fn deduplicating_set_operations_are_rejected() {
+    async fn union_all_is_unaffected_by_encrypted_columns() {
         trace();
         clear().await;
         insert_fixture().await;
 
         let client = connect_with_tls(PROXY).await;
 
-        for sql in [
-            "SELECT encrypted_text FROM encrypted UNION SELECT encrypted_text FROM encrypted",
-            "SELECT encrypted_text FROM encrypted INTERSECT SELECT encrypted_text FROM encrypted",
-            "SELECT encrypted_text FROM encrypted EXCEPT SELECT encrypted_text FROM encrypted",
-        ] {
-            let err = client
-                .query(sql, &[])
-                .await
-                .expect_err(&format!("`{sql}` should be refused"));
-
-            assert!(
-                err.to_string()
-                    .contains("deduplication would compare ciphertexts"),
-                "unexpected error for `{sql}`: {err}"
-            );
-        }
-
-        // UNION ALL keeps duplicates by definition, so it is unaffected.
         let sql =
             "SELECT encrypted_text FROM encrypted UNION ALL SELECT encrypted_text FROM encrypted";
         let rows = client.query(sql, &[]).await.unwrap();
+
         assert_eq!(
             10,
             rows.len(),
             "UNION ALL should return both branches in full"
+        );
+
+        let actual: Vec<String> = rows.iter().map(|r| r.get("encrypted_text")).collect();
+        assert_eq!(
+            vec!["apple", "apple", "banana", "banana", "cherry"],
+            sorted(actual.iter().take(5).cloned().collect())
         );
     }
 }

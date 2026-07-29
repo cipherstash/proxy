@@ -1,7 +1,8 @@
 use std::collections::HashMap;
+use std::mem;
 use std::sync::Arc;
 
-use sqltk::parser::ast::{Distinct, Expr, Select, SelectItem};
+use sqltk::parser::ast::{Distinct, Expr, Select, SelectItem, Value as SqltkValue};
 use sqltk::{NodeKey, NodePath, Visitable};
 
 use crate::unifier::{EqlValue, NativeValue, Projection, Type, Value};
@@ -128,9 +129,25 @@ impl<'ast> RewriteEqlDistinct<'ast> {
         Some(())
     }
 
+    /// The `DISTINCT ON (…)` keys that name an encrypted column, positionally.
+    fn distinct_on_eql_values(&self, select: &'ast Select) -> Vec<Option<EqlValue>> {
+        match &select.distinct {
+            Some(Distinct::On(exprs)) => exprs.iter().map(|expr| self.eql_value_of(expr)).collect(),
+            _ => vec![],
+        }
+    }
+
     /// Whether this `SELECT DISTINCT` deduplicates any encrypted column,
     /// including ones a wildcard hides.
     fn dedupes_encrypted(&self, select: &'ast Select) -> bool {
+        if self
+            .distinct_on_eql_values(select)
+            .iter()
+            .any(Option::is_some)
+        {
+            return true;
+        }
+
         if !matches!(select.distinct, Some(Distinct::Distinct)) {
             return false;
         }
@@ -164,6 +181,42 @@ impl<'ast> TransformationRule<'ast> for RewriteEqlDistinct<'ast> {
 
         if !self.dedupes_encrypted(original) {
             return Ok(false);
+        }
+
+        // `DISTINCT ON (col)` names its keys explicitly, so each encrypted one
+        // is keyed on its equality term in place — no projection rewriting
+        // needed, unlike bare `DISTINCT`.
+        //
+        // `DISTINCT ON` combined with an `ORDER BY` over an encrypted column is
+        // refused by `RewriteEqlDistinctOrderBy`: PostgreSQL requires the
+        // `ORDER BY` to begin with the `DISTINCT ON` expressions, and the two
+        // need different terms — `eq_term` to deduplicate, `ord_term` to sort.
+        let distinct_on = self.distinct_on_eql_values(original);
+        if distinct_on.iter().any(Option::is_some) {
+            let Some(target) = target_node.downcast_mut::<Select>() else {
+                return Ok(false);
+            };
+
+            let Some(Distinct::On(exprs)) = &mut target.distinct else {
+                return Ok(false);
+            };
+
+            for (expr, eql_value) in exprs.iter_mut().zip(distinct_on.iter()) {
+                let Some(eql_value) = eql_value else { continue };
+
+                let identity = eql_value.domain_identity();
+                let Some(term_fn) = identity.eq_term_fn() else {
+                    return Err(EqlMapperError::Transform(format!(
+                        "encrypted column {} cannot be used in DISTINCT ON (domain {} carries no equality term)",
+                        identity.token, identity.domain.value
+                    )));
+                };
+
+                let keyed = mem::replace(expr, Expr::Value(SqltkValue::Null.into()));
+                *expr = eql_v3_term_call(term_fn, keyed);
+            }
+
+            return Ok(true);
         }
 
         let Some(target) = target_node.downcast_mut::<Select>() else {
