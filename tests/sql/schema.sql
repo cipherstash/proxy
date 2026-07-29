@@ -62,6 +62,34 @@ CREATE TABLE unconfigured (
 );
 
 
+-- A table left behind by a partly-completed EQL v2 -> v3 migration: the text
+-- column moved to a v3 domain, one column did not.
+--
+-- EQL v3 never creates `eql_v2_encrypted`, so it is declared here to reproduce
+-- the catalog shape the schema loader actually sees on a database migrated from
+-- EQL v2. EQL v2 shipped it as a *composite* type, which
+-- `information_schema.columns` reports as `udt_name = 'eql_v2_encrypted'` with a
+-- NULL `domain_name` — the mirror image of a v3 encrypted column, where
+-- `udt_name` is the `jsonb` base type and the domain name is in `domain_name`.
+-- Getting this the wrong way round would exercise a condition adjacent to the
+-- real one rather than the real one.
+--
+-- Proxy refuses every statement referencing this table rather than serve the v2
+-- column as a plaintext passthrough (CIP-3688), so nothing else in the suite may
+-- read or write it.
+DROP TABLE IF EXISTS encrypted_v2_legacy;
+DROP TYPE IF EXISTS eql_v2_encrypted;
+CREATE TYPE eql_v2_encrypted AS (data jsonb);
+
+CREATE TABLE encrypted_v2_legacy (
+    id bigint,
+    plaintext text,
+    encrypted_text eql_v3_text_search,
+    encrypted_v2 eql_v2_encrypted,
+    PRIMARY KEY(id)
+);
+
+
 -- Per-test encrypted index fixture tables.
 --
 -- Each integration test that exercises ORE/OPE range or order operators gets

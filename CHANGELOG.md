@@ -44,6 +44,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - **Equality on encrypted JSON fields**: `WHERE col -> 'field' = 'value'` now works on encrypted JSON columns, in both the simple and extended query protocols, and in the `->>` and `jsonb_path_query_first(col, path) = value` spellings. `<>` is supported as the negation. The field and the value are combined into a single encrypted value-selector needle and matched by containment, so a query never reveals the field and value separately. Matching is exact and case-sensitive; the value must be a JSON scalar (comparing a whole object or array to a field is rejected — use containment with `@>` instead).
 
+### Security
+
+- **A surviving `eql_v2_encrypted` column was served as plaintext**: after migrating to EQL v3, a column still declared with EQL v2's `eql_v2_encrypted` type had no v3 domain identity, so Proxy fell back to treating it as an ordinary plaintext column — no encryption on writes, no decryption on reads. An application writing to such a column stored plaintext in a database it believed was encrypted, and saw no error doing so; the only signal was a single warning at startup. This is the shape of a partly-completed migration, where most columns move to v3 domains and one is left behind.
+
+  Proxy now refuses every statement referencing a table that has such a column, with an error naming the column, its type and the need to migrate it. Other tables are unaffected, so one unmigrated column no longer costs you a deployment. The refusal is not subject to the `mapping_errors_enabled` passthrough — it applies whatever `CS_DEVELOPMENT__ENABLE_MAPPING_ERRORS` is set to. See [Unmappable encrypted column](docs/errors.md#mapping-unmappable-encrypted-column).
+
 ### Fixed
 
 - **Statement errors no longer desync the connection**: when a statement failed inside the proxy (an unsupported operation on an encrypted column, for instance), the error was written straight to the client and could overtake responses still in flight from the server — with connection pools and prepared-statement caching, the client then saw a protocol error (`unexpected message from server` in tokio_postgres) instead of the proxy's message, typically right after an encrypted statement had run on the same connection. The proxy now delivers statement errors through the server, so clients always receive the proxy's actual error message, in order, and the connection remains usable.

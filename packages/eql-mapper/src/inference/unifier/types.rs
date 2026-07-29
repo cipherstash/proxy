@@ -850,10 +850,15 @@ impl Projection {
                     ))),
                     ColumnKind::UnmappableEncrypted(column_type) => {
                         return Err(TypeError::UnmappableEncryptedColumn {
-                            table: table.name.to_string(),
-                            column: col.name.to_string(),
+                            table: table.name.value.clone(),
+                            // `.value`, not `.to_string()`: the schema loader
+                            // builds column idents with `Ident::with_quote`, so
+                            // `to_string` would render `"col"` and the operator
+                            // would be told to migrate a column whose name
+                            // appears to include quote characters.
+                            column: col.name.value.clone(),
                             column_type: column_type.clone(),
-                        })
+                        });
                     }
                 };
 

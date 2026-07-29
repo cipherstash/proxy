@@ -68,8 +68,10 @@ impl<'ast> InferType<'ast, Statement> for TypeInferencer<'ast> {
                                 // accepting it would store plaintext. (CIP-3688)
                                 ColumnKind::UnmappableEncrypted(column_type) => {
                                     return Err(TypeError::UnmappableEncryptedColumn {
-                                        table: stc.table.to_string(),
-                                        column: stc.column.to_string(),
+                                        table: stc.table.value.clone(),
+                                        // `.value` rather than `.to_string()` —
+                                        // see the matching note in `Projection`.
+                                        column: stc.column.value.clone(),
                                         column_type: column_type.clone(),
                                     })
                                 }

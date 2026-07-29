@@ -133,7 +133,8 @@ const EQL_V2_ENCRYPTED_TYPE: &str = "eql_v2_encrypted";
 /// Checking `udt_name` alone — as this loader previously did — silently misses
 /// the domain shape, and a missed v2 column is precisely a plaintext column.
 fn is_legacy_eql_v2(column_type_name: Option<&str>, column_domain_name: Option<&str>) -> bool {
-    column_type_name == Some(EQL_V2_ENCRYPTED_TYPE) || column_domain_name == Some(EQL_V2_ENCRYPTED_TYPE)
+    column_type_name == Some(EQL_V2_ENCRYPTED_TYPE)
+        || column_domain_name == Some(EQL_V2_ENCRYPTED_TYPE)
 }
 
 /// Decides what a single catalog row means for the type checker.
@@ -284,6 +285,9 @@ mod test {
             ColumnKind::Native
         );
         // Only the exact v2 type name refuses; a lookalike does not.
-        assert_eq!(kind(Some("eql_v2_encrypted_backup"), None), ColumnKind::Native);
+        assert_eq!(
+            kind(Some("eql_v2_encrypted_backup"), None),
+            ColumnKind::Native
+        );
     }
 }
