@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1785327942678,
+  "lastUpdate": 1785329769171,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -22721,6 +22721,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 38.727631,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "james@cipherstash.com",
+            "name": "James Sadler",
+            "username": "freshtonic"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "15b7f996c8158bfad7054a626578d8fc9661bf2b",
+          "message": "Merge pull request #433 from cipherstash/chore/eql-3.0.4\n\nchore(deps): upgrade EQL and eql-bindings to 3.0.4\n\nThis is trivial, so I'm taking responsibility and merging it.",
+          "timestamp": "2026-07-29T22:50:35+10:00",
+          "tree_id": "1266a58f104092ee60a977b7d0998050153a978b",
+          "url": "https://github.com/cipherstash/proxy/commit/15b7f996c8158bfad7054a626578d8fc9661bf2b"
+        },
+        "date": 1785329767653,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 37.612389,
             "unit": "Number"
           }
         ]
