@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1785309197933,
+  "lastUpdate": 1785327942678,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -22696,6 +22696,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 39.742841,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "7de0a79341a0c757283500b964d5a0c62e03b72e",
+          "message": "chore(deps): upgrade EQL and eql-bindings to 3.0.4",
+          "timestamp": "2026-07-29T07:08:46Z",
+          "url": "https://github.com/cipherstash/proxy/pull/433/commits/7de0a79341a0c757283500b964d5a0c62e03b72e"
+        },
+        "date": 1785327941153,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 38.727631,
             "unit": "Number"
           }
         ]
