@@ -3851,6 +3851,37 @@ mod test {
         assert!(!may_touch_eql_columns(mixed_schema(), &parse("SELECT 1")));
     }
 
+    /// `Schema::resolve_table` only accepts a bare name and answers `TableNotFound` for anything
+    /// qualified, so a check written in terms of it would wave `public.patients` straight through
+    /// — the exact shape it exists to stop. Qualified names are matched on their last identifier.
+    #[test]
+    fn may_touch_eql_columns_detects_a_schema_qualified_encrypted_table() {
+        let statement = parse("SELECT age FROM public.patients");
+
+        // Precondition: the resolver really cannot resolve the qualified name, so this test is
+        // exercising the fallback and not passing for some other reason.
+        assert!(mixed_schema()
+            .resolve_table(&ast::ObjectName(vec![
+                ast::ObjectNamePart::Identifier(Ident::new("public")),
+                ast::ObjectNamePart::Identifier(Ident::new("patients")),
+            ]))
+            .is_err());
+
+        assert!(may_touch_eql_columns(mixed_schema(), &statement));
+    }
+
+    /// The price of matching on the last identifier: a qualified name whose final part collides
+    /// with an encrypted table is treated as that table. Over-strict, and deliberately so — it
+    /// costs an error on a statement that could have been forwarded, where being wrong the other
+    /// way costs plaintext on disk.
+    #[test]
+    fn may_touch_eql_columns_treats_a_colliding_qualified_name_as_encrypted() {
+        assert!(may_touch_eql_columns(
+            mixed_schema(),
+            &parse("SELECT age FROM some_other_schema.patients")
+        ));
+    }
+
     /// A schema with no encrypted columns anywhere must never make a type check failure fatal —
     /// Proxy in front of an unencrypted database should stay out of the way.
     #[test]

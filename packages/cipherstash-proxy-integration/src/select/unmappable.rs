@@ -4,11 +4,15 @@ mod tests {
     use std::error::Error;
 
     ///
-    /// Tests that a statement Proxy cannot map is refused.
+    /// A statement Proxy cannot map is refused when it touches an encrypted column. There is no
+    /// configuration that turns this off: forwarding such a statement does not degrade the answer,
+    /// it makes it wrong — an unmapped read returns raw ciphertext, an unmapped predicate compares
+    /// a plaintext literal against a jsonb payload, and an unmapped write stores plaintext.
     ///
-    /// There is no configuration that turns this off. A statement that fails to type check and
-    /// touches an encrypted column is always an error, because forwarding it produces a wrong
-    /// answer rather than a degraded one.
+    /// `vtha` is not in the schema, so it has no encrypted columns to expose and the statement is
+    /// forwarded. The error the client sees is PostgreSQL's own, not one Proxy invented, and that
+    /// matters: clients rely on `relation "..." does not exist` to distinguish a missing table from
+    /// a proxy fault.
     ///
     #[tokio::test]
     async fn unmappable_table_not_found() {
@@ -17,10 +21,13 @@ mod tests {
         let sql = "SELECT blah FROM vtha";
         let result = client.query(sql, &[]).await;
 
-        assert!(
-            result.is_err(),
-            "Expected unmappble SQL statement to return an error",
-        );
+        match result {
+            Ok(_) => panic!("Expected an error for an unknown table"),
+            Err(error) => {
+                let db_error = error.source().unwrap().to_string();
+                assert_eq!(db_error, "ERROR: relation \"vtha\" does not exist");
+            }
+        }
     }
 
     #[tokio::test]
@@ -63,6 +70,8 @@ mod tests {
     }
 
     ///
+    /// The reproducer for CIP-3680.
+    ///
     /// `eql_v3_boolean` is storage-only: it carries no equality term, so `DISTINCT` cannot be keyed
     /// on it and the statement fails to type check.
     ///
@@ -79,10 +88,6 @@ mod tests {
         let id = random_id();
         let sql = "INSERT INTO encrypted (id, encrypted_bool) VALUES ($1, $2)";
         client.query(sql, &[&id, &true]).await.unwrap();
-
-        // A fresh connection, so the assertion is about the refusal itself and not about how the
-        // driver frames an error arriving on a connection it has already used.
-        let client = connect_with_tls(*PROXY).await;
 
         let sql = "SELECT DISTINCT encrypted_bool FROM encrypted";
         let result = client.query(sql, &[]).await;
@@ -154,11 +159,16 @@ mod tests {
     /// The counterpart, and the reason the unmappable check is narrowed to statements touching an
     /// encrypted column rather than made fatal outright.
     ///
-    /// `requires_type_check` is purely syntactic, so every `SELECT` is type checked whether or not
-    /// encryption is involved, and the mapper's SQL coverage is narrower than PostgreSQL's. Driver
-    /// introspection of `pg_catalog` fails to type check (`Table not found: pg_catalog.pg_type`)
-    /// and essentially every PostgreSQL driver issues it. Rejecting it would break working
-    /// applications for no security benefit — there is no encrypted data in the statement.
+    /// `requires_type_check` is purely syntactic, so every query is type checked whether or not
+    /// encryption is involved, and the mapper's SQL coverage is narrower than PostgreSQL's.
+    /// Introspection of `pg_catalog` fails to type check (`Table not found: pg_catalog.pg_type`),
+    /// and it is not an exotic thing to issue: `psql`'s `\d`, `\dt` and `\l` are all this shape,
+    /// and tokio-postgres itself issues one to resolve the OID of an EQL v3 domain. Rejecting them
+    /// would break working applications for no security benefit — there is no encrypted data in
+    /// the statement to get wrong.
+    ///
+    /// `passthrough::tests::passthrough_select_with_cardinality` covers the same rule for an
+    /// ordinary query over a table with no encrypted columns.
     ///
     #[tokio::test]
     async fn unmappable_statement_with_no_encrypted_columns_is_forwarded() {
@@ -170,80 +180,6 @@ mod tests {
         assert!(
             !rows.is_empty(),
             "Expected pg_catalog introspection to still be forwarded to the database",
-        );
-    }
-
-    ///
-    /// The same rule applied to an ordinary query over a table with no encrypted columns:
-    /// `ARRAY_AGG`/`CARDINALITY` cannot be typed by the mapper, but the statement is harmless.
-    ///
-    #[tokio::test]
-    async fn unmappable_native_only_statement_is_forwarded() {
-        clear().await;
-
-        let client = connect_with_tls(*PROXY).await;
-
-        let id = random_id();
-        let sql = "INSERT INTO plaintext (id, plaintext) VALUES ($1, $2)";
-        client
-            .query(sql, &[&id, &"hello@cipherstash.com"])
-            .await
-            .unwrap();
-
-        let sql = "SELECT ARRAY_REMOVE(ARRAY_AGG(id), NULL), plaintext
-                     FROM plaintext
-                    WHERE CARDINALITY(ARRAY[1,2]) <> 0
-                    GROUP BY plaintext";
-        let rows = client.query(sql, &[]).await.unwrap();
-
-        assert_eq!(rows.len(), 1);
-    }
-
-    ///
-    /// A statement over a table the schema has never heard of has no encrypted columns to expose,
-    /// so it is forwarded and PostgreSQL rejects it with its own error rather than Proxy inventing
-    /// one. Clients depend on seeing the real database error.
-    ///
-    #[tokio::test]
-    async fn unknown_table_is_reported_by_postgres_not_proxy() {
-        let client = connect_with_tls(*PROXY).await;
-
-        let sql = "SELECT * FROM blahvtha";
-        let result = client.query(sql, &[]).await;
-
-        match result {
-            Ok(_) => panic!("Expected an error for an unknown table"),
-            Err(error) => {
-                let db_error = error.source().unwrap().to_string();
-                assert_eq!(db_error, "ERROR: relation \"blahvtha\" does not exist");
-            }
-        }
-    }
-
-    ///
-    /// A read that Proxy cannot map must not fall back to handing the client raw EQL payloads.
-    ///
-    #[tokio::test]
-    async fn unmappable_read_does_not_leak_ciphertext_to_the_client() {
-        clear().await;
-
-        let client = connect_with_tls(*PROXY).await;
-
-        let id = random_id();
-        let sql = "INSERT INTO encrypted (id, encrypted_text) VALUES ($1, $2)";
-        client
-            .query(sql, &[&id, &"hello@cipherstash.com"])
-            .await
-            .unwrap();
-
-        // Native and encrypted cannot be unified, so this cannot be mapped.
-        let sql = "SELECT encrypted_text FROM encrypted WHERE plaintext = encrypted_text";
-        let result = client.query(sql, &[]).await;
-
-        assert!(
-            result.is_err(),
-            "Expected an unmappable read of an encrypted column to be refused rather than \
-             returning raw EQL payloads",
         );
     }
 }

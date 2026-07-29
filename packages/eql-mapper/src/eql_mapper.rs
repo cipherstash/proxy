@@ -76,29 +76,51 @@ pub fn requires_type_check(statement: &Statement) -> bool {
 /// This exists to answer one question, and only that question: when [`type_check`] has *failed*, is
 /// it safe to send the statement to the database unmodified?
 ///
-/// A failed type check leaves no typing information behind, so the statement's every [`ObjectName`]
-/// is resolved against the schema instead. That over-collects — a function name is an `ObjectName`
-/// too — but over-collecting is the harmless direction: an unresolvable name is simply not a table
-/// with encrypted columns.
+/// A failed type check leaves no typing information behind, so the statement's every
+/// [`ast::ObjectName`] is resolved against the schema instead. That over-collects — a function name
+/// is an `ObjectName` too — but over-collecting is the harmless direction: it can only make a
+/// statement fatal that would have been safe to forward, never the reverse.
 ///
 /// The answer is deliberately asymmetric:
 ///
 /// - A name that resolves to a table carrying at least one EQL column => `true`. The statement is
-///   unsafe to pass through, because an unmapped read returns raw ciphertext and an unmapped write
-///   stores plaintext.
+///   unsafe to pass through, because an unmapped read returns raw ciphertext, an unmapped predicate
+///   compares a plaintext literal against a jsonb payload, and an unmapped write stores plaintext.
 /// - A name that does not resolve => *not* evidence of encryption. The schema has never heard of
 ///   it, so it has no encrypted columns to expose. `pg_catalog` introspection, which every
 ///   PostgreSQL driver issues and which the mapper cannot type, lands here.
 /// - No name resolves to an encrypted table => `false`. The statement touches only native columns
 ///   and passing it through is exactly as safe as it was before Proxy sat in the path.
 ///
-/// Because every table reference in a statement *is* an `ObjectName`, this cannot miss a table. It
-/// can only be defeated by a reference that hides encrypted columns behind a name the schema
-/// records as native — a schema-loading concern, not one this function can address.
+/// Qualified names are matched on their final identifier, not handed to
+/// [`TableResolver::resolve_table`] whole. `resolve_table` only accepts a bare name — the schema
+/// model has no notion of a namespace — so it answers `TableNotFound` for `public.encrypted`, and
+/// taking that at face value would report the one shape this function exists to catch as safe. The
+/// cost is that `anything.encrypted` is treated as the encrypted `encrypted`, which is the
+/// conservative direction and matches how the rest of the mapper already reads such a name.
 pub fn may_touch_eql_columns(resolver: Arc<TableResolver>, statement: &Statement) -> bool {
     struct EncryptedTableFinder {
         resolver: Arc<TableResolver>,
         found: bool,
+    }
+
+    impl EncryptedTableFinder {
+        fn is_encrypted_table(&self, name: &ast::ObjectName) -> bool {
+            let Some(ast::ObjectNamePart::Identifier(ident)) = name.0.last() else {
+                return false;
+            };
+
+            let bare = ast::ObjectName(vec![ast::ObjectNamePart::Identifier(ident.clone())]);
+
+            self.resolver
+                .resolve_table(&bare)
+                .is_ok_and(|table| {
+                    table
+                        .columns
+                        .iter()
+                        .any(|col| matches!(col.kind, ColumnKind::Eql(_, _)))
+                })
+        }
     }
 
     impl<'ast> Visitor<'ast> for EncryptedTableFinder {
@@ -106,15 +128,9 @@ pub fn may_touch_eql_columns(resolver: Arc<TableResolver>, statement: &Statement
 
         fn enter<N: Visitable>(&mut self, node: &'ast N) -> ControlFlow<Break<Self::Error>> {
             if let Some(name) = node.downcast_ref::<ast::ObjectName>() {
-                if let Ok(table) = self.resolver.resolve_table(name) {
-                    if table
-                        .columns
-                        .iter()
-                        .any(|col| matches!(col.kind, ColumnKind::Eql(_, _)))
-                    {
-                        self.found = true;
-                        return ControlFlow::Break(Break::Finished);
-                    }
+                if self.is_encrypted_table(name) {
+                    self.found = true;
+                    return ControlFlow::Break(Break::Finished);
                 }
             }
             ControlFlow::Continue(())

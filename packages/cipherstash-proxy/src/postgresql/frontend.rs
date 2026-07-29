@@ -1202,12 +1202,24 @@ where
     /// forwarded unmodified as before. This is not a loophole left open for convenience — it is
     /// load bearing. `requires_type_check` is purely syntactic, so *every* query, insert, update,
     /// delete, merge, prepare and explain is type checked whether or not encryption is involved,
-    /// and the mapper's SQL coverage is narrower than PostgreSQL's. Statements that legitimately
-    /// fail here today include `pg_catalog` introspection (`Table not found: pg_catalog.pg_type`),
-    /// which essentially every PostgreSQL driver issues on connect, and plaintext-only queries
-    /// using constructs the type system cannot model (`ARRAY_AGG`/`CARDINALITY`, for instance).
-    /// Rejecting those would break working applications for no security benefit, since there is no
-    /// encrypted data anywhere in the statement to get wrong.
+    /// and the mapper's SQL coverage is narrower than PostgreSQL's.
+    ///
+    /// Making the failure fatal unconditionally was measured before it was rejected, and it is not
+    /// survivable. With the old `enable_mapping_errors` flag forced on — which is exactly that
+    /// behaviour — `psql` loses every catalogue metacommand:
+    ///
+    /// ```text
+    /// \d  => ERROR: Statement could not be type checked: Table not found: pg_catalog.pg_class
+    /// \l  => ERROR: Statement could not be type checked: Table not found: pg_catalog.pg_database
+    /// \dn => ERROR: Statement could not be type checked: Table not found: pg_catalog.pg_namespace
+    /// ```
+    ///
+    /// and 253 of the 349 integration tests fail, because tokio-postgres queries
+    /// `pg_catalog.pg_type` to resolve the OID of an EQL v3 domain — so under EQL v3 an ordinary
+    /// client issues one of these on the way to almost every encrypted statement. Plaintext-only
+    /// queries using constructs the type system cannot model (`ARRAY_AGG`/`CARDINALITY`) fail here
+    /// too. Rejecting any of it would break working applications for no security benefit, since
+    /// there is no encrypted data anywhere in those statements to get wrong.
     ///
     fn statement_may_touch_eql_columns(&self, statement: &ast::Statement) -> bool {
         let may_touch =
