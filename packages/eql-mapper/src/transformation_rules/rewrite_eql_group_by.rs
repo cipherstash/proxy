@@ -42,8 +42,8 @@ use super::TransformationRule;
 /// preserved, so clients selecting by name are unaffected.
 ///
 /// Requires an EQL release carrying `eql_v3.grouped_value` (CIP-3657, EQL PR
-/// 423) — later than the 3.0.2 currently pinned in `mise.toml`. Only the
-/// projection case needs it; grouping without selecting the column does not.
+/// 423), which the pinned 3.0.4 does. Only the projection case needs it;
+/// grouping without selecting the column does not.
 #[derive(Debug)]
 pub struct RewriteEqlGroupBy<'ast> {
     node_types: Arc<HashMap<NodeKey<'ast>, Type>>,
