@@ -117,6 +117,63 @@ async fn load_schema_with_retry(config: &DatabaseConfig) -> Result<Schema, Error
     }
 }
 
+/// The legacy EQL v2 encrypted column type.
+const EQL_V2_ENCRYPTED_TYPE: &str = "eql_v2_encrypted";
+
+/// Whether a column is declared with the legacy EQL v2 encrypted type.
+///
+/// Both catalog columns are checked because the two shapes EQL v2 shipped land
+/// in different places in `information_schema.columns`:
+///
+/// - as a composite type (what EQL v2 installs), `udt_name` is
+///   `eql_v2_encrypted` and `domain_name` is NULL;
+/// - as a DOMAIN, `udt_name` is the base type (`jsonb`) and only `domain_name`
+///   carries `eql_v2_encrypted`.
+///
+/// Checking `udt_name` alone — as this loader previously did — silently misses
+/// the domain shape, and a missed v2 column is precisely a plaintext column.
+fn is_legacy_eql_v2(column_type_name: Option<&str>, column_domain_name: Option<&str>) -> bool {
+    column_type_name == Some(EQL_V2_ENCRYPTED_TYPE) || column_domain_name == Some(EQL_V2_ENCRYPTED_TYPE)
+}
+
+/// Decides what a single catalog row means for the type checker.
+///
+/// Split out from [`load_schema`] so the classification — the security-relevant
+/// part — is testable without a database.
+fn classify_column(
+    table_name: &str,
+    column_name: &str,
+    column_type_name: Option<&str>,
+    column_domain_name: Option<&str>,
+) -> Column {
+    let ident = Ident::with_quote('"', column_name);
+
+    // Prefer the v3 domain: encrypted columns are jsonb-backed DOMAINs whose
+    // typname encodes the token type and capabilities. The domain identity and
+    // traits are read from the eql-bindings catalog (ADR-0002).
+    if let Some((identity, eql_traits)) = column_domain_name.and_then(eql_domains::resolve) {
+        debug!(target: SCHEMA, msg = "eql_v3 column", table = table_name, column = column_name, domain = %identity.domain.value, traits = %eql_traits);
+        return Column::eql(ident, eql_traits, identity);
+    }
+
+    // Legacy EQL v2 columns have no v3 domain identity, so this v3-only build
+    // can neither encrypt writes to them nor decrypt reads from them.
+    //
+    // They are NOT served as native (plaintext) columns. That was the CIP-3688
+    // defect: a partially-completed migration left one column behind, and Proxy
+    // silently accumulated plaintext in it, with nothing but a startup log line
+    // to say so. The column is marked unmappable instead, which makes the type
+    // checker refuse every statement referencing the table — failing closed, and
+    // naming the column that needs migrating.
+    if is_legacy_eql_v2(column_type_name, column_domain_name) {
+        warn!(target: SCHEMA, msg = "Column is declared with the legacy EQL v2 encrypted type, which this EQL v3 build cannot encrypt or decrypt. Statements referencing this table will be REFUSED so that plaintext is never written to the column. Migrate the column to an EQL v3 domain type.", table = table_name, column = column_name);
+        return Column::unmappable_encrypted(ident, EQL_V2_ENCRYPTED_TYPE);
+    }
+
+    // Any other unrecognised type is an ordinary plaintext column.
+    Column::native(ident)
+}
+
 pub async fn load_schema(config: &DatabaseConfig) -> Result<Schema, Error> {
     let client = connect::database(config).await?;
 
@@ -142,39 +199,12 @@ pub async fn load_schema(config: &DatabaseConfig) -> Result<Schema, Error> {
             .zip(column_type_names)
             .zip(column_domain_names)
             .for_each(|((col, column_type_name), column_domain_name)| {
-                let ident = Ident::with_quote('"', col);
-
-                // Prefer the v3 domain: encrypted columns are jsonb-backed
-                // DOMAINs whose typname encodes the token type and capabilities.
-                // The domain identity and traits are read from the eql-bindings
-                // catalog (ADR-0002); a domain we do not recognise is treated as
-                // a plaintext column.
-                let v3 = column_domain_name
-                    .as_deref()
-                    .and_then(eql_domains::resolve);
-
-                let column = match v3 {
-                    Some((identity, eql_traits)) => {
-                        debug!(target: SCHEMA, msg = "eql_v3 column", table = table_name, column = col, domain = %identity.domain.value, traits = %eql_traits);
-                        Column::eql(ident, eql_traits, identity)
-                    }
-                    None => {
-                        // Legacy EQL v2 columns (the `eql_v2_encrypted` composite
-                        // type) have no v3 domain identity and are unsupported on
-                        // this v3-only build — warn rather than silently treating
-                        // them as encrypted or plaintext.
-                        //
-                        // The column is served as a native passthrough: Proxy runs
-                        // no encrypt/decrypt on it, so new writes are stored as-is
-                        // (in plaintext) and existing values are returned as-is.
-                        // This is a data-at-rest exposure on the write path, so the
-                        // warning must be impossible to miss in ops.
-                        if column_type_name.as_deref() == Some("eql_v2_encrypted") {
-                            warn!(target: SCHEMA, msg = "eql_v2_encrypted column is unsupported on this EQL v3 build and is being served as a PLAINTEXT (native) column: Proxy performs no encryption on writes or decryption on reads. Migrate the column to an EQL v3 domain before writing to it.", table = table_name, column = col);
-                        }
-                        Column::native(ident)
-                    }
-                };
+                let column = classify_column(
+                    &table_name,
+                    col,
+                    column_type_name.as_deref(),
+                    column_domain_name.as_deref(),
+                );
 
                 table.add_column(Arc::new(column));
             });
@@ -192,4 +222,68 @@ pub async fn load_schema(config: &DatabaseConfig) -> Result<Schema, Error> {
         .collect();
 
     Ok(schema)
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use eql_mapper::ColumnKind;
+
+    /// The shape `information_schema.columns` reports for a column declared with
+    /// the EQL v2 composite type, verified against PostgreSQL 17: `udt_name` is
+    /// the type name, `domain_name` is NULL.
+    const V2_COMPOSITE: (Option<&str>, Option<&str>) = (Some("eql_v2_encrypted"), None);
+
+    /// The same column had EQL v2 shipped `eql_v2_encrypted` as a DOMAIN over
+    /// jsonb: `udt_name` is the base type, `domain_name` carries the type name.
+    const V2_DOMAIN: (Option<&str>, Option<&str>) = (Some("jsonb"), Some("eql_v2_encrypted"));
+
+    fn kind(column_type_name: Option<&str>, column_domain_name: Option<&str>) -> ColumnKind {
+        classify_column("users", "secret", column_type_name, column_domain_name).kind
+    }
+
+    #[test]
+    fn legacy_v2_composite_column_is_never_native() {
+        // The regression this pins: `Native` here is a plaintext passthrough, so
+        // classifying a v2 column that way makes Proxy write plaintext into a
+        // column its operator believes is encrypted (CIP-3688). Assert the exact
+        // kind rather than `!= Native` so a future third "just serve it" kind
+        // cannot quietly take its place either.
+        assert_eq!(
+            kind(V2_COMPOSITE.0, V2_COMPOSITE.1),
+            ColumnKind::UnmappableEncrypted("eql_v2_encrypted".to_string())
+        );
+    }
+
+    #[test]
+    fn legacy_v2_domain_column_is_never_native() {
+        // The loader originally keyed only on `udt_name`, which misses this
+        // shape entirely — and a missed v2 column is a plaintext column.
+        assert_eq!(
+            kind(V2_DOMAIN.0, V2_DOMAIN.1),
+            ColumnKind::UnmappableEncrypted("eql_v2_encrypted".to_string())
+        );
+    }
+
+    #[test]
+    fn v3_domain_columns_still_resolve_to_eql() {
+        assert!(matches!(
+            kind(Some("jsonb"), Some("eql_v3_text_search")),
+            ColumnKind::Eql(_, _)
+        ));
+    }
+
+    #[test]
+    fn ordinary_columns_are_still_native() {
+        assert_eq!(kind(Some("text"), None), ColumnKind::Native);
+        assert_eq!(kind(Some("int4"), None), ColumnKind::Native);
+        // An unrecognised domain is a plaintext column, not a refusal: refusing
+        // every user-defined domain would be a very different change.
+        assert_eq!(
+            kind(Some("text"), Some("domain_type_with_check")),
+            ColumnKind::Native
+        );
+        // Only the exact v2 type name refuses; a lookalike does not.
+        assert_eq!(kind(Some("eql_v2_encrypted_backup"), None), ColumnKind::Native);
+    }
 }

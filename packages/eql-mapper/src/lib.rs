@@ -376,6 +376,98 @@ mod test {
         );
     }
 
+    /// A table left behind by a partial EQL v2 -> v3 migration: 19 columns
+    /// migrated, one still declared with the legacy `eql_v2_encrypted` type.
+    fn legacy_v2_schema() -> Arc<TableResolver> {
+        resolver(schema! {
+            tables: {
+                users: {
+                    id,
+                    email (EQL: Eq),
+                    legacy (UNMAPPABLE("eql_v2_encrypted")),
+                }
+            }
+        })
+    }
+
+    /// Asserts the statement is refused, and specifically that it is refused as
+    /// the unmappable-column *refusal* rather than as some incidental type
+    /// error. That distinction is load-bearing: only the refusal is exempt from
+    /// the proxy's passthrough fallback, so a statement that failed for any
+    /// other reason would still be forwarded to the database in plaintext.
+    fn assert_refused(sql: &str) {
+        let statement = parse(sql);
+        let err = match type_check(legacy_v2_schema(), &statement) {
+            Ok(_) => panic!("statement was accepted but must be refused: {sql}"),
+            Err(err) => err,
+        };
+
+        assert_eq!(
+            err.as_unmappable_encrypted_column(),
+            Some(("users", "legacy", "eql_v2_encrypted")),
+            "refused for the wrong reason ({err}): {sql}"
+        );
+    }
+
+    #[test]
+    fn insert_into_a_legacy_v2_column_is_refused() {
+        // The write path this refusal exists for. Accepting it stores plaintext.
+        assert_refused("INSERT INTO users (id, legacy) VALUES (1, 'secret')");
+        assert_refused("INSERT INTO users VALUES (1, 'a', 'secret')");
+        assert_refused("UPDATE users SET legacy = 'secret' WHERE id = 1");
+    }
+
+    #[test]
+    fn reading_a_legacy_v2_column_is_refused() {
+        // Reading back v2 ciphertext is not itself an exposure, but it is served
+        // undecrypted and a client cannot tell that from plaintext. More
+        // importantly a *predicate* on the column sends the comparison value to
+        // the database in the clear, which is an exposure on a nominally
+        // read-only statement. Both are refused.
+        assert_refused("SELECT legacy FROM users");
+        assert_refused("SELECT * FROM users");
+        assert_refused("SELECT id FROM users WHERE legacy = 'secret'");
+        assert_refused("DELETE FROM users WHERE legacy = 'secret'");
+    }
+
+    #[test]
+    fn the_whole_table_is_refused_not_just_the_column() {
+        // Deliberately coarse. Proving that a statement can never route a value
+        // into or out of the column — across `*`, CTEs, subqueries, RETURNING and
+        // defaults — is the kind of negative that fails *open* when it is wrong,
+        // which is the bug being fixed. Refusing on the table needs no such
+        // proof. The blast radius stays bounded to the one unmigrated table.
+        assert_refused("SELECT id FROM users");
+        assert_refused("INSERT INTO users (id) VALUES (1)");
+        assert_refused("SELECT u.id FROM users AS u");
+        assert_refused("SELECT id FROM (SELECT id FROM users) AS sub");
+        assert_refused("WITH c AS (SELECT id FROM users) SELECT id FROM c");
+    }
+
+    #[test]
+    fn other_tables_are_unaffected() {
+        // The reason this is not a startup refusal: one unmigrated table must
+        // not take down a whole deployment.
+        let schema = resolver(schema! {
+            tables: {
+                users: {
+                    id,
+                    legacy (UNMAPPABLE("eql_v2_encrypted")),
+                }
+                accounts: {
+                    id,
+                    email (EQL: Eq),
+                }
+            }
+        });
+
+        let statement = parse("SELECT id FROM accounts WHERE email = 'a@b.com'");
+        assert!(
+            type_check(schema, &statement).is_ok(),
+            "a table with no legacy column must still be served"
+        );
+    }
+
     #[test]
     fn update_set_casts_stored_value() {
         // ADR-0003's second stored-value context: an UPDATE SET on an encrypted
