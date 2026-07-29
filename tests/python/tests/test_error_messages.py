@@ -41,7 +41,18 @@ def test_encrypted_column_not_defined_in_schema():
                     cursor.execute(sql, [id, val])
 
 
-def test_encrypted_column_with_no_configuration():
+def test_storage_only_encrypted_column_round_trips():
+    """A storage-only encrypted column encrypts, stores and decrypts.
+
+    Under EQL v2 this asserted the opposite: `unconfigured.encrypted_unconfigured`
+    was an `eql_v2_encrypted` column with no row in `eql_v2_configuration`, so it
+    was encrypted-but-unconfigured and writes were rejected.
+
+    v3 makes that state unreachable. A column is encrypted precisely because it
+    has an EQL domain type, and every recognised domain yields a config —
+    `eql_v3_text` simply yields one with no search indexes. So the column now
+    works, with no searchable capability.
+    """
     with psycopg.connect(connection_str, autocommit=True) as conn:
 
         with conn.cursor() as cursor:
@@ -50,12 +61,15 @@ def test_encrypted_column_with_no_configuration():
 
                 id = make_id()
 
-                val = '{"hello": "world"}'
+                val = "hello@cipherstash.com"
 
                 sql = "INSERT INTO unconfigured (id, encrypted_unconfigured) VALUES (%s, %s)"
+                cursor.execute(sql, [id, val])
 
-                with pytest.raises(psycopg.Error, match=r"Column 'encrypted_unconfigured' in table 'unconfigured' has no Encrypt configuration."):
-                    cursor.execute(sql, [id, val])
+                sql = "SELECT encrypted_unconfigured FROM unconfigured WHERE id = %s"
+                cursor.execute(sql, [id])
+
+                assert cursor.fetchone() == (val,)
 
 
 def test_mapper_unsupported_parameter_type():
