@@ -76,10 +76,6 @@ mod tests {
     /// The ordinal is left untouched, so PostgreSQL sorts the payload by jsonb
     /// rules rather than by the column's ordering term.
     #[tokio::test]
-    #[ignore = "ORDER BY <ordinal> referring to an encrypted column is not rewritten: the ordinal \
-                is left as-is, so the sort falls back to jsonb ordering over the randomised \
-                ciphertext and the order is arbitrary. RewriteEqlOrderBy only handles named \
-                columns."]
     async fn order_by_ordinal_sorts_by_the_encrypted_column() {
         trace();
         clear().await;
@@ -96,9 +92,6 @@ mod tests {
 
     /// `GROUP BY 1` groups by the first projected column, encrypted or not.
     #[tokio::test]
-    #[ignore = "GROUP BY <ordinal> referring to an encrypted column is not rewritten: the ordinal \
-                is left as-is, so grouping happens on the raw payload and every row becomes its \
-                own group. RewriteEqlGroupBy only handles named columns."]
     async fn group_by_ordinal_groups_by_the_encrypted_column() {
         trace();
         clear().await;
@@ -115,9 +108,6 @@ mod tests {
 
     /// A window partitioned by an encrypted column groups equal plaintexts.
     #[tokio::test]
-    #[ignore = "PARTITION BY <encrypted column> is not rewritten — no rule covers a window \
-                specification — so partitioning happens on the raw payload and every row lands \
-                in its own partition, making every rank 1."]
     async fn window_partition_by_encrypted_column_groups_equal_plaintexts() {
         trace();
         clear().await;

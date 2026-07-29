@@ -1,6 +1,7 @@
 use eql_mapper_macros::trace_infer;
-use sqltk::parser::ast::{Distinct, Expr, Select, SelectItem};
+use sqltk::parser::ast::{Distinct, Expr, GroupByExpr, Select, SelectItem};
 
+use super::query_statement::resolve_positional_key;
 use crate::unifier::{Projection, Type, Value};
 use crate::{
     inference::{type_error::TypeError, InferType},
@@ -46,6 +47,17 @@ impl<'ast> InferType<'ast, Select> for TypeInferencer<'ast> {
             }
 
             None => {}
+        }
+
+        // Grouping is equality, so every `GROUP BY` key needs an equality term.
+        // As with `ORDER BY`, a key written as an ordinal is resolved against
+        // the projection — otherwise `GROUP BY 1` over an encrypted column is
+        // unconstrained and every row becomes its own group.
+        if let GroupByExpr::Expressions(exprs, _) = &select.group_by {
+            for expr in exprs {
+                let key = resolve_positional_key(Some(select), expr);
+                self.unify_node_with_bound(key, EqlTrait::Eq)?;
+            }
         }
 
         Ok(())

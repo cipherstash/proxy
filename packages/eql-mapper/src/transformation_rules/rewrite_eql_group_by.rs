@@ -12,6 +12,7 @@ use crate::EqlMapperError;
 
 use super::helpers::eql_v3_term_call;
 use super::preserve_effective_aliases::derive_effective_alias;
+use super::RewriteEqlOrdinalOrderBy;
 use super::TransformationRule;
 
 /// Rewrites `GROUP BY` on an encrypted column to group by its **equality term**,
@@ -61,11 +62,30 @@ impl<'ast> RewriteEqlGroupBy<'ast> {
     }
 
     /// The encrypted columns a `GROUP BY` groups on, in order.
-    fn grouped_eql_values(&self, group_by: &'ast GroupByExpr) -> Vec<Option<EqlValue>> {
-        match group_by {
-            GroupByExpr::Expressions(exprs, _) => {
-                exprs.iter().map(|expr| self.eql_value_of(expr)).collect()
-            }
+    ///
+    /// A key may be written as an ordinal (`GROUP BY 1`), which names no column
+    /// of its own, so it is resolved against the projection — otherwise the key
+    /// is left ungrouped and every row becomes its own group. The projected
+    /// expression is carried along so the ordinal can be replaced by the term
+    /// applied to the column it selects.
+    fn grouped_eql_values(
+        &self,
+        select: &'ast Select,
+    ) -> Vec<Option<(EqlValue, Option<&'ast Expr>)>> {
+        match &select.group_by {
+            GroupByExpr::Expressions(exprs, _) => exprs
+                .iter()
+                .map(|expr| match self.eql_value_of(expr) {
+                    Some(eql_value) => Some((eql_value, None)),
+                    None => {
+                        let ordinal = RewriteEqlOrdinalOrderBy::ordinal_of(expr)?;
+                        let projected = RewriteEqlOrdinalOrderBy::projected_expr(select, ordinal)?;
+
+                        self.eql_value_of(projected)
+                            .map(|eql_value| (eql_value, Some(projected)))
+                    }
+                })
+                .collect(),
             GroupByExpr::All(_) => vec![],
         }
     }
@@ -124,7 +144,7 @@ impl<'ast> TransformationRule<'ast> for RewriteEqlGroupBy<'ast> {
             return Ok(false);
         };
 
-        let grouped = self.grouped_eql_values(&original.group_by);
+        let grouped = self.grouped_eql_values(original);
         if grouped.iter().all(Option::is_none) {
             return Ok(false);
         }
@@ -157,8 +177,10 @@ impl<'ast> TransformationRule<'ast> for RewriteEqlGroupBy<'ast> {
 
         // Group by the equality term.
         if let GroupByExpr::Expressions(exprs, _) = &mut target.group_by {
-            for (expr, eql_value) in exprs.iter_mut().zip(grouped.iter()) {
-                let Some(eql_value) = eql_value else { continue };
+            for (expr, grouped) in exprs.iter_mut().zip(grouped.iter()) {
+                let Some((eql_value, projected)) = grouped else {
+                    continue;
+                };
 
                 let identity = eql_value.domain_identity();
                 let Some(term_fn) = identity.eq_term_fn() else {
@@ -168,20 +190,29 @@ impl<'ast> TransformationRule<'ast> for RewriteEqlGroupBy<'ast> {
                     )));
                 };
 
-                let grouped_expr = mem::replace(
-                    expr,
-                    Expr::Value(ValueWithSpan {
-                        value: SqltkValue::Null,
-                        span: Span::empty(),
-                    }),
-                );
+                // An ordinal names nothing to wrap, so the column it selects
+                // is substituted for it; a named key wraps in place.
+                let grouped_expr = match projected {
+                    Some(projected) => (*projected).clone(),
+                    None => mem::replace(
+                        expr,
+                        Expr::Value(ValueWithSpan {
+                            value: SqltkValue::Null,
+                            span: Span::empty(),
+                        }),
+                    ),
+                };
                 *expr = eql_v3_term_call(term_fn, grouped_expr);
             }
         }
 
         // Lift any projection of a grouped column through `any_value`, keeping
         // the name the client asked for.
-        let grouped: Vec<EqlValue> = grouped.into_iter().flatten().collect();
+        let grouped: Vec<EqlValue> = grouped
+            .into_iter()
+            .flatten()
+            .map(|(eql_value, _)| eql_value)
+            .collect();
         for (original_item, target_item) in
             original.projection.iter().zip(target.projection.iter_mut())
         {
@@ -220,7 +251,7 @@ impl<'ast> TransformationRule<'ast> for RewriteEqlGroupBy<'ast> {
     fn would_edit<N: Visitable>(&mut self, node_path: &NodePath<'ast>, _target_node: &N) -> bool {
         match node_path.last_1_as::<Select>() {
             Some((original,)) => self
-                .grouped_eql_values(&original.group_by)
+                .grouped_eql_values(original)
                 .iter()
                 .any(Option::is_some),
             None => false,

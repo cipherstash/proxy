@@ -1630,7 +1630,9 @@ mod test {
                 employees: {
                     id,
                     name,
-                    salary (EQL),
+                    // `group by salary` is equality, so the column has to
+                    // declare it.
+                    salary (EQL: Eq),
                 }
             }
         });
@@ -1644,7 +1646,7 @@ mod test {
 
         assert_eq!(
             typed.projection,
-            projection![(NATIVE as count), (EQL(employees.salary) as salary)]
+            projection![(NATIVE as count), (EQL(employees.salary: Eq) as salary)]
         );
     }
 
@@ -3143,64 +3145,6 @@ mod test {
         assert!(err.to_string().contains("Eq"), "unexpected error: {err}");
     }
 
-    /// Shapes that sort, group or deduplicate an encrypted column through
-    /// PostgreSQL's operator class rather than through an operator.
-    ///
-    /// None is rewritten, so each reaches jsonb's own btree/hash operator class
-    /// and compares whole payloads — including the randomised ciphertext. The
-    /// assertion is deliberately a necessary condition rather than an exact
-    /// string: whatever form the fix takes, the encrypted column cannot reach
-    /// the clause unwrapped. Rejecting the shape loudly is an equally acceptable
-    /// outcome, in which case these should be rewritten to assert the error.
-    #[test]
-    #[ignore = "None of these shapes is rewritten: DISTINCT ON, ordinal ORDER BY/GROUP BY, \
-                PARTITION BY and set operations all reach jsonb's operator class, comparing raw \
-                payloads. Each needs the term-based rewrite its named-column equivalent already \
-                has, or a loud rejection."]
-    fn operator_class_shapes_use_the_columns_term() {
-        let schema = forms_schema();
-
-        for (input, required_term) in [
-            ("SELECT txt FROM t ORDER BY 1", "eql_v3.ord_term("),
-            ("SELECT txt FROM t GROUP BY 1", "eql_v3.eq_term("),
-            (
-                "SELECT rank() OVER (PARTITION BY txt) FROM t",
-                "eql_v3.eq_term(",
-            ),
-        ] {
-            let rewritten = transform_with_dummy_literals(schema.clone(), input);
-
-            assert!(
-                rewritten.contains(required_term),
-                "`{input}` must compare the column by `{required_term}…)`, got: {rewritten}"
-            );
-        }
-    }
-
-    /// The same shapes must refuse a column that cannot support them.
-    #[test]
-    #[ignore = "None of these shapes applies a capability bound, so a storage-only column is \
-                accepted and silently mis-sorted or mis-grouped. Fixing the rewrites should \
-                come with the matching bound, as SELECT DISTINCT and DISTINCT ON already have."]
-    fn operator_class_shapes_require_their_capability() {
-        let schema = forms_schema();
-
-        for (input, bound) in [
-            ("SELECT flag FROM t ORDER BY 1", "Ord"),
-            ("SELECT flag FROM t GROUP BY 1", "Eq"),
-            ("SELECT rank() OVER (PARTITION BY flag) FROM t", "Eq"),
-        ] {
-            let statement = parse(input);
-            let err = type_check(schema.clone(), &statement)
-                .expect_err(&format!("`{input}` should fail the capability check"));
-
-            assert!(
-                err.to_string().contains(bound),
-                "expected a `{bound}` bound error for `{input}`, got: {err}"
-            );
-        }
-    }
-
     /// One placeholder bound as both a stored value and a query operand.
     ///
     /// The two occurrences need different payloads — the stored one carries the
@@ -3396,6 +3340,112 @@ mod test {
         }
     }
 
+    /// `ORDER BY <ordinal>` and `GROUP BY <ordinal>` selecting an encrypted
+    /// column are rewritten to that column's term.
+    ///
+    /// An ordinal names no column of its own, so the rules that match on the
+    /// key's type saw only a number and left the clause alone — sorting and
+    /// grouping then fell back to jsonb over the randomised ciphertext.
+    /// PostgreSQL defines `ORDER BY n` as ordering by the n-th output column, so
+    /// substituting that column is semantics-preserving.
+    #[test]
+    fn ordinal_sort_and_group_keys_use_the_columns_term() {
+        let schema = forms_schema();
+
+        for (input, expected) in [
+            (
+                "SELECT txt FROM t ORDER BY 1",
+                "SELECT txt FROM t ORDER BY eql_v3.ord_term(txt)",
+            ),
+            // Sort options ride along, and the ordinal may be any position.
+            (
+                "SELECT id, txt FROM t ORDER BY 2 DESC",
+                "SELECT id, txt FROM t ORDER BY eql_v3.ord_term(txt) DESC",
+            ),
+            // Grouping keys on the equality term, and the projected column is
+            // lifted through `grouped_value` exactly as for a named key.
+            (
+                "SELECT txt FROM t GROUP BY 1",
+                "SELECT eql_v3.grouped_value(txt) AS txt FROM t GROUP BY eql_v3.eq_term(txt)",
+            ),
+            // An ordinal selecting a plaintext column is left alone.
+            ("SELECT id FROM t ORDER BY 1", "SELECT id FROM t ORDER BY 1"),
+            ("SELECT id FROM t GROUP BY 1", "SELECT id FROM t GROUP BY 1"),
+        ] {
+            assert_eq!(
+                transform_with_dummy_literals(schema.clone(), input),
+                expected,
+                "unexpected rewrite for `{input}`"
+            );
+        }
+    }
+
+    /// An ordinal key carries the same capability requirement as a named one.
+    #[test]
+    fn ordinal_sort_and_group_keys_require_their_capability() {
+        let schema = forms_schema();
+
+        for (input, bound) in [
+            ("SELECT flag FROM t ORDER BY 1", "Ord"),
+            ("SELECT flag FROM t GROUP BY 1", "Eq"),
+        ] {
+            let statement = parse(input);
+            let err = type_check(schema.clone(), &statement)
+                .expect_err(&format!("`{input}` should fail the capability check"));
+
+            assert!(
+                err.to_string().contains(bound),
+                "expected a `{bound}` bound error for `{input}`, got: {err}"
+            );
+        }
+    }
+
+    /// `PARTITION BY` groups rows by equality, so an encrypted key is
+    /// partitioned on its equality term.
+    ///
+    /// The window's own `ORDER BY` is handled by `RewriteEqlOrderBy`, which
+    /// matches `OrderByExpr` wherever it appears — including inside a window.
+    #[test]
+    fn window_partition_by_uses_the_columns_term() {
+        let schema = forms_schema();
+
+        for (input, expected) in [
+            (
+                "SELECT rank() OVER (PARTITION BY txt) FROM t",
+                "SELECT rank() OVER (PARTITION BY eql_v3.eq_term(txt)) FROM t",
+            ),
+            (
+                "SELECT rank() OVER (PARTITION BY txt ORDER BY num) FROM t",
+                "SELECT rank() OVER (PARTITION BY eql_v3.eq_term(txt) \
+                 ORDER BY eql_v3.ord_term(num)) FROM t",
+            ),
+            // A plaintext partition key is left alone.
+            (
+                "SELECT rank() OVER (PARTITION BY id ORDER BY txt) FROM t",
+                "SELECT rank() OVER (PARTITION BY id ORDER BY eql_v3.ord_term(txt)) FROM t",
+            ),
+        ] {
+            assert_eq!(
+                transform_with_dummy_literals(schema.clone(), input),
+                expected.split_whitespace().collect::<Vec<_>>().join(" "),
+                "unexpected rewrite for `{input}`"
+            );
+        }
+    }
+
+    /// Partitioning is equality, so the key's domain must carry an equality
+    /// term.
+    #[test]
+    fn window_partition_by_requires_equality() {
+        let schema = forms_schema();
+
+        let statement = parse("SELECT rank() OVER (PARTITION BY flag) FROM t");
+        let err = type_check(schema, &statement)
+            .expect_err("PARTITION BY a storage-only column should fail the capability check");
+
+        assert!(err.to_string().contains("Eq"), "unexpected error: {err}");
+    }
+
     /// Shapes the subquery rewrite cannot express are reported as such, rather
     /// than left to fail as a bare PostgreSQL syntax error.
     #[test]
@@ -3515,13 +3565,17 @@ mod test {
             }
         });
 
+        // Caught by the `Eq` bound during type checking rather than by the
+        // rewrite: the clause is typed now, so the capability is checked before
+        // any SQL is produced.
         let statement = parse("SELECT COUNT(*) FROM employees GROUP BY name");
-        let typed = type_check(schema, &statement).unwrap();
+        let err = type_check(schema, &statement)
+            .expect_err("GROUP BY on a match-only column should fail the capability check")
+            .to_string();
 
-        let err = typed.transform(HashMap::new()).unwrap_err().to_string();
         assert!(
-            err.contains("GROUP BY") && err.contains("no equality term"),
-            "expected a capability error, got: {err}"
+            err.contains("Eq"),
+            "expected an `Eq` bound error, got: {err}"
         );
     }
 
@@ -3559,13 +3613,16 @@ mod test {
             }
         });
 
+        // Caught by the `Ord` bound during type checking rather than by the
+        // rewrite, as for GROUP BY above.
         let statement = parse("SELECT id FROM employees ORDER BY name");
-        let typed = type_check(schema, &statement).unwrap();
+        let err = type_check(schema, &statement)
+            .expect_err("ORDER BY on a match-only column should fail the capability check")
+            .to_string();
 
-        let err = typed.transform(HashMap::new()).unwrap_err().to_string();
         assert!(
-            err.contains("ORDER BY") && err.contains("no ordering term"),
-            "expected a capability error, got: {err}"
+            err.contains("Ord"),
+            "expected an `Ord` bound error, got: {err}"
         );
     }
 

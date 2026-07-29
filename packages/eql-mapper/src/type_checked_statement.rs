@@ -13,8 +13,8 @@ use crate::{
     JsonValueSelectors, OutputParam, OutputParamSource, Param, ParamPlan, PreserveEffectiveAliases,
     RenumberParams, RewriteContainmentOps, RewriteEqlComparisonOps, RewriteEqlDistinct,
     RewriteEqlDistinctOrderBy, RewriteEqlGroupBy, RewriteEqlMatchOps, RewriteEqlOrderBy,
-    RewriteJsonValueSelectorEq, RewriteStandardSqlFnsOnEqlTypes, SubstituteEncryptedLiterals,
-    TransformationRule,
+    RewriteEqlOrdinalOrderBy, RewriteEqlPartitionBy, RewriteJsonValueSelectorEq,
+    RewriteStandardSqlFnsOnEqlTypes, SubstituteEncryptedLiterals, TransformationRule,
 };
 
 use crate::unifier::{Projection, Type, Value};
@@ -299,6 +299,8 @@ impl<'ast> TypeCheckedStatement<'ast> {
             RewriteEqlComparisonOps::new(Arc::clone(&self.node_types)),
             RewriteEqlMatchOps::new(Arc::clone(&self.node_types)),
             RewriteEqlOrderBy::new(Arc::clone(&self.node_types)),
+            RewriteEqlOrdinalOrderBy::new(Arc::clone(&self.node_types)),
+            RewriteEqlPartitionBy::new(Arc::clone(&self.node_types)),
             RewriteEqlDistinct::new(Arc::clone(&self.node_types)),
             RewriteEqlDistinctOrderBy::new(Arc::clone(&self.node_types)),
             RewriteEqlGroupBy::new(Arc::clone(&self.node_types)),
