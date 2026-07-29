@@ -25,10 +25,10 @@ type ReloadReceiver = UnboundedReceiver<ReloadCommand>;
 
 pub type ReloadResponder = Sender<()>;
 
-/// SQL Statement for loading encrypt configuration from database
-const ENCRYPT_CONFIG_QUERY: &str = include_str!("./sql/select_config.sql");
-
-/// SQL Statement for loading database schema
+/// SQL Statement for loading database schema.
+///
+/// Both the schema (capabilities) and the encrypt config are inferred from this
+/// single schema load — EQL v3 columns are self-configuring domain types.
 const SCHEMA_QUERY: &str = include_str!("./sql/select_table_schemas.sql");
 
 /// SQL Statement for loading aggregates as part of database schema
@@ -88,7 +88,7 @@ impl Proxy {
     pub async fn eql_version(config: &TandemConfig) -> Result<Option<String>, Error> {
         let client = connect::database(&config.database).await?;
         let rows = client
-            .query("SELECT eql_v2.version() AS version;", &[])
+            .query("SELECT eql_v3.version() AS version;", &[])
             .await;
 
         let version = match rows {
@@ -156,7 +156,7 @@ pub trait EncryptionService: Send + Sync {
         keyset_id: Option<KeysetIdentifier>,
         plaintexts: Vec<Option<Plaintext>>,
         columns: &[Option<Column>],
-    ) -> Result<Vec<Option<crate::EqlCiphertext>>, Error>;
+    ) -> Result<Vec<Option<crate::EqlOutput>>, Error>;
 
     /// Decrypt values retrieved from the database
     async fn decrypt(

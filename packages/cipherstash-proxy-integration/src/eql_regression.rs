@@ -154,6 +154,7 @@ mod tests {
     ///
     /// Set CS_GENERATE_EQL_FIXTURES=1 to enable fixture generation.
     #[tokio::test]
+    #[ignore = "EQL v2->v3 backwards-compat regression: prior releases are not in use, and v2 ciphertext / ::eql_v2_encrypted casts do not exist under v3. Regenerate fixtures from a v3 baseline to re-enable."]
     async fn generate_fixtures() {
         if std::env::var("CS_GENERATE_EQL_FIXTURES").is_err() {
             println!("Skipping fixture generation. Set CS_GENERATE_EQL_FIXTURES=1 to generate.");
@@ -264,6 +265,7 @@ mod tests {
     /// Regression test: verify that data encrypted by a previous proxy version
     /// can still be decrypted by the current version.
     #[tokio::test]
+    #[ignore = "EQL v2->v3 backwards-compat regression: prior releases are not in use, and v2 ciphertext / ::eql_v2_encrypted casts do not exist under v3. Regenerate fixtures from a v3 baseline to re-enable."]
     async fn regression_decrypt_legacy_text() {
         trace();
 
@@ -295,6 +297,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "EQL v2->v3 backwards-compat regression: prior releases are not in use, and v2 ciphertext / ::eql_v2_encrypted casts do not exist under v3. Regenerate fixtures from a v3 baseline to re-enable."]
     async fn regression_decrypt_legacy_int2() {
         trace();
 
@@ -324,6 +327,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "EQL v2->v3 backwards-compat regression: prior releases are not in use, and v2 ciphertext / ::eql_v2_encrypted casts do not exist under v3. Regenerate fixtures from a v3 baseline to re-enable."]
     async fn regression_decrypt_legacy_int4() {
         trace();
 
@@ -353,6 +357,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "EQL v2->v3 backwards-compat regression: prior releases are not in use, and v2 ciphertext / ::eql_v2_encrypted casts do not exist under v3. Regenerate fixtures from a v3 baseline to re-enable."]
     async fn regression_decrypt_legacy_int8() {
         trace();
 
@@ -382,6 +387,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "EQL v2->v3 backwards-compat regression: prior releases are not in use, and v2 ciphertext / ::eql_v2_encrypted casts do not exist under v3. Regenerate fixtures from a v3 baseline to re-enable."]
     async fn regression_decrypt_legacy_float8() {
         trace();
 
@@ -411,6 +417,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "EQL v2->v3 backwards-compat regression: prior releases are not in use, and v2 ciphertext / ::eql_v2_encrypted casts do not exist under v3. Regenerate fixtures from a v3 baseline to re-enable."]
     async fn regression_decrypt_legacy_bool() {
         trace();
 
@@ -440,6 +447,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "EQL v2->v3 backwards-compat regression: prior releases are not in use, and v2 ciphertext / ::eql_v2_encrypted casts do not exist under v3. Regenerate fixtures from a v3 baseline to re-enable."]
     async fn regression_decrypt_legacy_jsonb() {
         trace();
 
@@ -469,6 +477,7 @@ mod tests {
 
     /// Test JSONB field access (-> operator) on legacy encrypted data
     #[tokio::test]
+    #[ignore = "EQL v2->v3 backwards-compat regression: prior releases are not in use, and v2 ciphertext / ::eql_v2_encrypted casts do not exist under v3. Regenerate fixtures from a v3 baseline to re-enable."]
     async fn regression_jsonb_field_access() {
         trace();
 
@@ -520,6 +529,7 @@ mod tests {
 
     /// Test JSONB array operations on legacy encrypted data
     #[tokio::test]
+    #[ignore = "EQL v2->v3 backwards-compat regression: prior releases are not in use, and v2 ciphertext / ::eql_v2_encrypted casts do not exist under v3. Regenerate fixtures from a v3 baseline to re-enable."]
     async fn regression_jsonb_array_operations() {
         trace();
 

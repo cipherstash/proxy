@@ -5,7 +5,7 @@ use crate::{
     proxy::EncryptConfig,
 };
 use cipherstash_client::eql::Identifier;
-use eql_mapper::{EqlTerm, TableColumn, TypeCheckedStatement};
+use eql_mapper::{EqlTerm, ParamPlan, TableColumn, TypeCheckedStatement};
 use postgres_types::Type;
 use std::sync::Arc;
 use tracing::{debug, warn};
@@ -93,6 +93,40 @@ impl ColumnMapper {
         }
 
         Ok(param_columns)
+    }
+
+    /// Maps the params of the *rewritten* statement to an Encrypt column
+    /// configuration, positionally over [`ParamPlan::outputs`].
+    ///
+    /// These are the values actually sent to PostgreSQL, which after a fusion
+    /// are not the values the client bound — hence a separate mapping from
+    /// [`Self::get_param_columns`].
+    pub fn get_output_param_columns(&self, plan: &ParamPlan) -> Result<Vec<Option<Column>>, Error> {
+        let mut output_columns = vec![];
+
+        for output in plan.outputs() {
+            let configured_column = match &output.value {
+                eql_mapper::Value::Eql(eql_term) => {
+                    let TableColumn { table, column } = eql_term.table_column();
+                    let identifier =
+                        Identifier::new(table.value.to_string(), column.value.to_string());
+
+                    debug!(
+                        target: MAPPER,
+                        msg = "Encrypted output parameter",
+                        param = %output.param,
+                        column = ?identifier,
+                        ?eql_term,
+                    );
+
+                    self.get_column(identifier, eql_term)?
+                }
+                _ => None,
+            };
+            output_columns.push(configured_column);
+        }
+
+        Ok(output_columns)
     }
 
     /// Maps typed statement literal columns to an Encrypt column configuration

@@ -752,7 +752,7 @@ where
         &self,
         plaintexts: Vec<Option<cipherstash_client::encryption::Plaintext>>,
         columns: &[Option<Column>],
-    ) -> Result<Vec<Option<crate::EqlCiphertext>>, Error> {
+    ) -> Result<Vec<Option<crate::EqlOutput>>, Error> {
         let keyset_id = self.keyset_identifier();
 
         self.encryption
@@ -812,6 +812,13 @@ where
         typed_statement: &eql_mapper::TypeCheckedStatement<'_>,
     ) -> Result<Vec<Option<Column>>, Error> {
         self.column_mapper.get_param_columns(typed_statement)
+    }
+
+    pub fn get_output_param_columns(
+        &self,
+        plan: &eql_mapper::ParamPlan,
+    ) -> Result<Vec<Option<Column>>, Error> {
+        self.column_mapper.get_output_param_columns(plan)
     }
 
     pub fn get_literal_columns(
@@ -1077,7 +1084,7 @@ mod tests {
             _keyset_id: Option<KeysetIdentifier>,
             _plaintexts: Vec<Option<cipherstash_client::encryption::Plaintext>>,
             _columns: &[Option<Column>],
-        ) -> Result<Vec<Option<crate::EqlCiphertext>>, Error> {
+        ) -> Result<Vec<Option<crate::EqlOutput>>, Error> {
             Ok(vec![])
         }
 
@@ -1116,6 +1123,7 @@ mod tests {
             projection_columns: vec![],
             literal_columns: vec![],
             postgres_param_types: vec![],
+            output_params: vec![],
         }
     }
 

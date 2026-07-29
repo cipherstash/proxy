@@ -51,10 +51,7 @@ mod tests {
         .await;
     }
 
-    #[tokio::test]
-    async fn map_ore_where_generic_bool() {
-        map_ore_where_generic("encrypted_ore_where_bool", "encrypted_bool", false, true).await;
-    }
+    // bool ORE-range case removed: EQL v3 `boolean` is storage-only.
 
     /// Tests ORE operations with 2 values - high & low - against a per-test
     /// fixture table. `table` and `col_name` must match.

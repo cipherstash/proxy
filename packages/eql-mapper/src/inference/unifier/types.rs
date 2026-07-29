@@ -195,6 +195,26 @@ pub enum EqlTerm {
     /// [`EqlValue`] that implements the EQL trait `TokenMatch`.
     #[display("EQL:Tokenized({})", _0)]
     Tokenized(EqlValue),
+
+    /// A scalar ordering operand for an encrypted JSON field comparison — the
+    /// non-JSON side of `col -> sel <op> value` where `<op>` is `<`/`<=`/`>`/`>=`.
+    /// Encrypted as a SteVec ordering term (`{v,i,op}`, `QueryOp::SteVecTerm`) and
+    /// compared via `eql_v3.ord_term`, so it is NOT a whole JSON document.
+    #[display("EQL:JsonOrd({})", _0)]
+    JsonOrd(EqlValue),
+
+    /// The scalar value operand of an encrypted JSON field *equality* — the
+    /// non-JSON side of `col -> sel = value` (and the `->>` /
+    /// `jsonb_path_query_first` spellings).
+    ///
+    /// Exact JSON equality is selector containment, not a term comparison: the
+    /// needle is a single keyed MAC over `path ‖ canonical(value)`
+    /// (`QueryOp::SteVecValueSelector`), so this operand is **fused** from two
+    /// SQL operands — the path and the value — into one encrypted needle. The
+    /// mapper holds no encryption key, so it records only *where the path comes
+    /// from* ([`crate::JsonSelectorSource`]); the proxy composes and encrypts.
+    #[display("EQL:JsonValueSelector({})", _0)]
+    JsonValueSelector(EqlValue),
 }
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Display, Hash)]
@@ -209,16 +229,28 @@ pub enum EqlTermVariant {
     JsonPath,
     #[display("EQL:Tokenized")]
     Tokenized,
+    #[display("EQL:JsonOrd")]
+    JsonOrd,
+    #[display("EQL:JsonValueSelector")]
+    JsonValueSelector,
 }
 
 impl EqlTerm {
     pub fn table_column(&self) -> &TableColumn {
+        self.eql_value().table_column()
+    }
+
+    /// The [`EqlValue`] every `EqlTerm` variant wraps — its `TableColumn`, inert
+    /// domain identity, and capabilities.
+    pub fn eql_value(&self) -> &EqlValue {
         match self {
             EqlTerm::Full(eql_value)
             | EqlTerm::Partial(eql_value, _)
             | EqlTerm::JsonAccessor(eql_value)
             | EqlTerm::JsonPath(eql_value)
-            | EqlTerm::Tokenized(eql_value) => eql_value.table_column(),
+            | EqlTerm::Tokenized(eql_value)
+            | EqlTerm::JsonOrd(eql_value)
+            | EqlTerm::JsonValueSelector(eql_value) => eql_value,
         }
     }
 
@@ -229,6 +261,8 @@ impl EqlTerm {
             EqlTerm::JsonAccessor(_) => EqlTermVariant::JsonAccessor,
             EqlTerm::JsonPath(_) => EqlTermVariant::JsonPath,
             EqlTerm::Tokenized(_) => EqlTermVariant::Tokenized,
+            EqlTerm::JsonOrd(_) => EqlTermVariant::JsonOrd,
+            EqlTerm::JsonValueSelector(_) => EqlTermVariant::JsonValueSelector,
         }
     }
 }
@@ -269,9 +303,244 @@ pub struct TableColumn {
     pub column: Ident,
 }
 
+/// The plaintext scalar half of a v3 domain — the "token type".
+///
+/// Crossed with a capability suffix (`_eq`, `_ord`, …) it names a v3 domain,
+/// e.g. `text` + `_ord_ore` ⇒ `eql_v3_text_ord_ore`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Display)]
+pub enum TokenType {
+    SmallInt,
+    Integer,
+    BigInt,
+    Real,
+    Double,
+    Numeric,
+    Text,
+    Boolean,
+    Date,
+    Timestamp,
+    Json,
+}
+
+impl TokenType {
+    /// The token type's spelling inside a v3 domain typname
+    /// (`eql_v3_<token>_<suffix>`).
+    pub fn as_domain_str(&self) -> &'static str {
+        match self {
+            TokenType::SmallInt => "smallint",
+            TokenType::Integer => "integer",
+            TokenType::BigInt => "bigint",
+            TokenType::Real => "real",
+            TokenType::Double => "double",
+            TokenType::Numeric => "numeric",
+            TokenType::Text => "text",
+            TokenType::Boolean => "boolean",
+            TokenType::Date => "date",
+            TokenType::Timestamp => "timestamp",
+            TokenType::Json => "json",
+        }
+    }
+
+    /// Parse the token type from a v3 domain typname. The token type is the
+    /// first segment after the `eql_v3_` prefix; every token type is a single
+    /// underscore-free word, so a multi-part capability suffix never interferes.
+    pub fn from_domain_name(domain: &str) -> Option<Self> {
+        let rest = domain.strip_prefix("eql_v3_")?;
+        Some(match rest.split('_').next()? {
+            "smallint" => TokenType::SmallInt,
+            "integer" => TokenType::Integer,
+            "bigint" => TokenType::BigInt,
+            "real" => TokenType::Real,
+            "double" => TokenType::Double,
+            "numeric" => TokenType::Numeric,
+            "text" => TokenType::Text,
+            "boolean" => TokenType::Boolean,
+            "date" => TokenType::Date,
+            "timestamp" => TokenType::Timestamp,
+            "json" => TokenType::Json,
+            _ => return None,
+        })
+    }
+}
+
+/// The inert `(token type, v3 domain)` an encrypted column carries (ADR-0002).
+///
+/// Populated by the schema loader from the Postgres domain name; **never** a
+/// checked dimension of unification. It is read only at rewrite time — to name
+/// the cast target and to select the term-extraction-function variant
+/// (`ord_term` vs `ord_term_ore`) — so it threads through unification and the
+/// associated-type machinery untouched.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Display)]
+#[display("{}", domain)]
+pub struct DomainIdentity {
+    pub token: TokenType,
+    /// The v3 domain typname, e.g. `eql_v3_text_ord_ore`.
+    pub domain: Ident,
+}
+
+impl DomainIdentity {
+    /// Build an identity from a v3 domain typname, parsing the token type from
+    /// the name. The domain name is the authority (the schema loader passes the
+    /// real typname); returns `None` for a name that is not a v3 EQL domain.
+    pub fn from_domain_name(domain: &str) -> Option<Self> {
+        Some(Self {
+            token: TokenType::from_domain_name(domain)?,
+            domain: Ident::new(domain),
+        })
+    }
+
+    /// The capability suffix of the domain typname (`eql_v3_<token>_<suffix>`),
+    /// e.g. `ord_ore` for `eql_v3_text_ord_ore`, or `""` for a storage-only
+    /// domain like `eql_v3_integer`.
+    fn suffix(&self) -> &str {
+        let prefix_len = "eql_v3_".len() + self.token.as_domain_str().len();
+        self.domain
+            .value
+            .get(prefix_len..)
+            .map(|rest| rest.strip_prefix('_').unwrap_or(rest))
+            .unwrap_or("")
+    }
+
+    // Which SEM terms the domain stores, derived from its typname. The catalog is
+    // the authority (ADR-0002) and these mirror the term → domain mapping the
+    // schema loader inverts. `text` is the exception: `text_ord*` stores `hm`
+    // alongside its ordering term, because lexicographic ORE/OPE over text is not
+    // equality-lossless.
+
+    /// The domain stores the `hm` (HMAC equality) term ⇒ `eq_term` is available.
+    pub fn stores_hm(&self) -> bool {
+        matches!(self.suffix(), "eq" | "search" | "search_ore")
+            || (self.token == TokenType::Text
+                && matches!(self.suffix(), "ord" | "ord_ope" | "ord_ore"))
+    }
+
+    /// The domain stores the `op` (CLLW-OPE) term ⇒ `ord_term` is available.
+    pub fn stores_op(&self) -> bool {
+        matches!(self.suffix(), "ord" | "ord_ope" | "search")
+    }
+
+    /// The domain stores the `ob` (block-ORE) term ⇒ `ord_term_ore` is available.
+    pub fn stores_ob(&self) -> bool {
+        matches!(self.suffix(), "ord_ore" | "search_ore")
+    }
+
+    /// The domain stores the `bf` (bloom-filter) term ⇒ `match_term` is available.
+    pub fn stores_bf(&self) -> bool {
+        matches!(self.suffix(), "match" | "search" | "search_ore")
+    }
+
+    /// The `eql_v3` term-extraction function for equality (`=`, `<>`), or `None`
+    /// if the domain supports no equality. `eq_term` when the domain stores `hm`;
+    /// otherwise equality falls back to the ordering term (an ord-only scalar such
+    /// as `integer_ord` compares via `ord_term`, mirroring `eql_v3.eq`).
+    pub fn eq_term_fn(&self) -> Option<&'static str> {
+        if self.stores_hm() {
+            Some("eq_term")
+        } else {
+            self.ord_term_fn()
+        }
+    }
+
+    /// The `eql_v3` term-extraction function for ordering (`<`, `<=`, `>`, `>=`,
+    /// `MIN`/`MAX`), or `None` if the domain is not orderable. `ord_term` for `op`
+    /// domains, `ord_term_ore` for `ob` (block-ORE) domains.
+    pub fn ord_term_fn(&self) -> Option<&'static str> {
+        if self.stores_op() {
+            Some("ord_term")
+        } else if self.stores_ob() {
+            Some("ord_term_ore")
+        } else {
+            None
+        }
+    }
+
+    /// The `eql_v3` term-extraction function for fuzzy match (`@@`), or `None` if
+    /// the domain has no bloom filter.
+    pub fn match_term_fn(&self) -> Option<&'static str> {
+        if self.stores_bf() {
+            Some("match_term")
+        } else {
+            None
+        }
+    }
+
+    /// The query-operand twin of this column domain — `(schema, typname)`, e.g.
+    /// `("eql_v3", "query_integer_ord")` for `public.eql_v3_integer_ord`. A query
+    /// operand casts to the twin (which carries the term-only payload), never to
+    /// the column domain (whose CHECK requires the stored ciphertext).
+    pub fn query_twin(&self) -> (&'static str, String) {
+        // Every JSON domain (`json`, `json_search`, `json_entry`) shares a single
+        // query-operand type in the catalog — `eql_v3.query_json` — because a
+        // jsonb query operand is a SteVec needle whose shape does not vary by the
+        // column's searchable capability. The generic `query_<bare>` rule below is
+        // correct only for the scalar families (e.g. `query_integer_ord`); applied
+        // to JSON it would emit a non-existent `eql_v3.query_json_search`.
+        if self.token == TokenType::Json {
+            return ("eql_v3", "query_json".to_string());
+        }
+        let bare = self
+            .domain
+            .value
+            .strip_prefix("eql_v3_")
+            .unwrap_or(&self.domain.value);
+        ("eql_v3", format!("query_{bare}"))
+    }
+
+    /// A canonical identity for a `(token, capabilities)` pair. This is a
+    /// **test/fixture convenience** for constructing identities where no live
+    /// schema loader supplies the real domain name — production identities always
+    /// come from [`Self::from_domain_name`] via the loader. The synthesised domain
+    /// name is deterministic so both sides of a test assertion agree.
+    ///
+    /// The synthesised name is NOT authoritative and must never be treated as the
+    /// column's real catalog domain: it may not only diverge from the real typname
+    /// but actively **collide with an unrelated real domain that means something
+    /// else**. For example `canonical(Text, {json_like})` produces
+    /// `eql_v3_text_search` — a real catalog domain whose terms are `[hm, op, bf]`
+    /// (Eq + Ord + TokenMatch), nothing to do with JSON — and it can equally emit
+    /// genuinely non-catalog names (`Eq + TokenMatch` → `eql_v3_text_eq_match`,
+    /// `Contain` → `eql_v3_text_contain`). Only [`Self::from_domain_name`] yields a
+    /// real domain identity.
+    pub fn canonical(token: TokenType, traits: EqlTraits) -> Self {
+        let mut parts: Vec<&str> = Vec::new();
+        if traits.json_like {
+            parts.push("search");
+        } else {
+            if traits.ord {
+                parts.push("ord");
+            } else if traits.eq {
+                parts.push("eq");
+            }
+            if traits.token_match {
+                parts.push("match");
+            }
+            if traits.contain {
+                parts.push("contain");
+            }
+        }
+        let suffix = if parts.is_empty() {
+            String::new()
+        } else {
+            format!("_{}", parts.join("_"))
+        };
+        let domain = format!("eql_v3_{}{}", token.as_domain_str(), suffix);
+        Self {
+            token,
+            domain: Ident::new(domain),
+        }
+    }
+}
+
+/// The identity of an encrypted column: its `TableColumn`, its inert
+/// [`DomainIdentity`] (see ADR-0002), and its [`EqlTraits`] capabilities.
+///
+/// The domain identity is deliberately not part of `PartialEq`/`Ord`-driven
+/// unification — two encrypted columns never share a type because their
+/// `TableColumn`s differ, so the identity never decides unification even though
+/// it is compared here.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Display, Hash)]
 #[display("EQL({})", _0)]
-pub struct EqlValue(pub TableColumn, pub EqlTraits);
+pub struct EqlValue(pub TableColumn, pub DomainIdentity, pub EqlTraits);
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Display, Hash)]
 #[display("{}", _0.as_ref().map(|tc| format!("Native({tc})")).unwrap_or(String::from("Native")))]
@@ -454,7 +723,10 @@ impl Type {
         } else {
             Err(TypeError::UnsatisfiedBounds(
                 Arc::new(self.clone()),
-                self.effective_bounds().difference(bounds),
+                // Report the *missing* bounds: required (`bounds`) minus implemented
+                // (`self.effective_bounds()`). Operand order must match
+                // `Unifier::satisfy_bounds`.
+                bounds.difference(&self.effective_bounds()),
             ))
         }
     }
@@ -465,8 +737,25 @@ impl EqlValue {
         &self.0
     }
 
+    /// The inert v3 domain identity — names the cast target and selects the
+    /// term-extraction-function variant at rewrite time (ADR-0002).
+    pub fn domain_identity(&self) -> &DomainIdentity {
+        &self.1
+    }
+
+    /// Test/fixture constructor: builds the value with the canonical `text`-token
+    /// [`DomainIdentity`] for `traits`. Production values come from the schema
+    /// loader with the real domain identity, never this.
+    pub fn with_canonical_identity(table_column: TableColumn, traits: EqlTraits) -> Self {
+        Self(
+            table_column,
+            DomainIdentity::canonical(TokenType::Text, traits),
+            traits,
+        )
+    }
+
     pub fn trait_impls(&self) -> EqlTraits {
-        self.1
+        self.2
     }
 }
 
@@ -512,9 +801,9 @@ impl Projection {
 
                     let value_ty = match &col.kind {
                         ColumnKind::Native => Type::Value(Value::Native(NativeValue(Some(tc)))),
-                        ColumnKind::Eql(features) => {
-                            Type::Value(Value::Eql(EqlTerm::Full(EqlValue(tc, *features))))
-                        }
+                        ColumnKind::Eql(features, identity) => Type::Value(Value::Eql(
+                            EqlTerm::Full(EqlValue(tc, identity.clone(), *features)),
+                        )),
                     };
 
                     ProjectionColumn::new(value_ty, Some(col.name.clone()))
@@ -644,5 +933,131 @@ impl From<NativeValue> for Type {
 impl From<Array> for Type {
     fn from(array: Array) -> Self {
         Type::Value(Value::Array(array))
+    }
+}
+
+#[cfg(test)]
+mod domain_identity_tests {
+    use super::DomainIdentity;
+
+    fn di(domain: &str) -> DomainIdentity {
+        DomainIdentity::from_domain_name(domain)
+            .unwrap_or_else(|| panic!("{domain} is not a v3 domain name"))
+    }
+
+    #[test]
+    fn suffix_is_parsed_across_tokens_and_variants() {
+        assert_eq!(di("eql_v3_integer").suffix(), "");
+        assert_eq!(di("eql_v3_integer_eq").suffix(), "eq");
+        assert_eq!(di("eql_v3_integer_ord").suffix(), "ord");
+        assert_eq!(di("eql_v3_integer_ord_ope").suffix(), "ord_ope");
+        assert_eq!(di("eql_v3_integer_ord_ore").suffix(), "ord_ore");
+        assert_eq!(di("eql_v3_text_search_ore").suffix(), "search_ore");
+        assert_eq!(di("eql_v3_bigint_ord_ore").suffix(), "ord_ore");
+    }
+
+    #[test]
+    fn double_token_does_not_swallow_the_capability_suffix() {
+        // `double` is the one token whose plain-English name could be mistaken
+        // for a two-word `double precision`. The catalog spells the domain
+        // `eql_v3_double_ord` (see tests/sql/schema.sql), so `as_domain_str()`
+        // ("double", 6 chars) must line the prefix up exactly on the `_ord`
+        // boundary. Pins the invariant that `suffix()`/`stores_*` documents as a
+        // comment: a hypothetical `eql_v3_double_precision_ord` would parse the
+        // suffix as "precision_ord" and silently report the column as
+        // non-orderable.
+        assert_eq!(di("eql_v3_double").suffix(), "");
+        assert_eq!(di("eql_v3_double_ord").suffix(), "ord");
+        assert_eq!(di("eql_v3_double_ord_ore").suffix(), "ord_ore");
+        assert_eq!(di("eql_v3_double_ord").ord_term_fn(), Some("ord_term"));
+        assert_eq!(
+            di("eql_v3_double_ord_ore").ord_term_fn(),
+            Some("ord_term_ore")
+        );
+    }
+
+    #[test]
+    fn eq_term_uses_eq_term_only_when_hm_is_stored() {
+        // _eq stores hm.
+        assert_eq!(di("eql_v3_integer_eq").eq_term_fn(), Some("eq_term"));
+        // ord-only scalar has no hm -> equality falls back to ord_term
+        // (mirrors eql_v3.eq(integer_ord, ...) = ord_term(a) = ord_term(b)).
+        assert_eq!(di("eql_v3_integer_ord").eq_term_fn(), Some("ord_term"));
+        assert_eq!(
+            di("eql_v3_integer_ord_ore").eq_term_fn(),
+            Some("ord_term_ore")
+        );
+        // text is the exception: text_ord* stores hm, so eq_term is available.
+        assert_eq!(di("eql_v3_text_ord").eq_term_fn(), Some("eq_term"));
+        assert_eq!(di("eql_v3_text_ord_ore").eq_term_fn(), Some("eq_term"));
+        // storage-only and match-only have no equality.
+        assert_eq!(di("eql_v3_integer").eq_term_fn(), None);
+        assert_eq!(di("eql_v3_text_match").eq_term_fn(), None);
+    }
+
+    #[test]
+    fn ord_term_picks_ope_vs_ore_from_the_domain() {
+        assert_eq!(di("eql_v3_integer_ord").ord_term_fn(), Some("ord_term"));
+        assert_eq!(di("eql_v3_integer_ord_ope").ord_term_fn(), Some("ord_term"));
+        assert_eq!(
+            di("eql_v3_integer_ord_ore").ord_term_fn(),
+            Some("ord_term_ore")
+        );
+        assert_eq!(di("eql_v3_text_search").ord_term_fn(), Some("ord_term"));
+        assert_eq!(
+            di("eql_v3_text_search_ore").ord_term_fn(),
+            Some("ord_term_ore")
+        );
+        // not orderable
+        assert_eq!(di("eql_v3_integer_eq").ord_term_fn(), None);
+        assert_eq!(di("eql_v3_text_match").ord_term_fn(), None);
+        assert_eq!(di("eql_v3_integer").ord_term_fn(), None);
+    }
+
+    #[test]
+    fn match_term_needs_a_bloom_filter() {
+        assert_eq!(di("eql_v3_text_match").match_term_fn(), Some("match_term"));
+        assert_eq!(di("eql_v3_text_search").match_term_fn(), Some("match_term"));
+        assert_eq!(
+            di("eql_v3_text_search_ore").match_term_fn(),
+            Some("match_term")
+        );
+        assert_eq!(di("eql_v3_text_ord").match_term_fn(), None);
+        assert_eq!(di("eql_v3_integer_eq").match_term_fn(), None);
+    }
+
+    #[test]
+    fn storage_only_domain_supports_no_operations() {
+        let d = di("eql_v3_integer");
+        assert_eq!(d.eq_term_fn(), None);
+        assert_eq!(d.ord_term_fn(), None);
+        assert_eq!(d.match_term_fn(), None);
+    }
+
+    #[test]
+    fn query_twin_prefixes_the_bare_domain() {
+        assert_eq!(
+            di("eql_v3_integer_ord").query_twin(),
+            ("eql_v3", "query_integer_ord".to_string())
+        );
+        assert_eq!(
+            di("eql_v3_text_search_ore").query_twin(),
+            ("eql_v3", "query_text_search_ore".to_string())
+        );
+    }
+
+    #[test]
+    fn json_domains_all_share_the_query_json_twin() {
+        // The catalog defines a single jsonb query operand type, eql_v3.query_json,
+        // for every JSON column domain — the generic query_<bare> rule would emit a
+        // non-existent eql_v3.query_json_search / eql_v3.query_json_entry.
+        assert_eq!(
+            di("eql_v3_json").query_twin(),
+            ("eql_v3", "query_json".to_string())
+        );
+        assert_eq!(
+            di("eql_v3_json_search").query_twin(),
+            ("eql_v3", "query_json".to_string())
+        );
     }
 }

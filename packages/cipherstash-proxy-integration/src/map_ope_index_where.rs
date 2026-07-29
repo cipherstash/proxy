@@ -51,10 +51,7 @@ mod tests {
         .await;
     }
 
-    #[tokio::test]
-    async fn map_ope_where_generic_bool() {
-        map_ope_where_generic("encrypted_ope_where_bool", "encrypted_bool", false, true).await;
-    }
+    // bool OPE-range case removed: EQL v3 `boolean` is storage-only.
 
     /// Tests OPE operations against a per-test fixture table.
     /// Mirrors `map_ore_where_generic` but targets the OPE-indexed mirror tables.

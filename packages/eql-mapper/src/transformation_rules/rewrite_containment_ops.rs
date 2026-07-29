@@ -13,15 +13,22 @@ use sqltk::{NodeKey, NodePath, Visitable};
 use crate::unifier::{Type, Value};
 use crate::EqlMapperError;
 
+use super::helpers::{cast_encrypted_operand, full_payload_domain};
 use super::TransformationRule;
 
-/// Rewrites `@>` and `<@` operators on EQL types to function calls.
+/// Rewrites JSON binary operators on encrypted columns to `eql_v3` function
+/// calls — containment (`@>`/`<@`, retained in v3 scoped to JSON, ADR-0002) and
+/// field access (`->`/`->>`, functionalised because managed Postgres forbids the
+/// operator DDL, ADR-0001):
 ///
-/// - `col @> val` → `eql_v2.jsonb_contains(col, val)`
-/// - `val <@ col` → `eql_v2.jsonb_contained_by(val, col)`
+/// - `col @> val`  → `eql_v3.jsonb_contains(col, val)`
+/// - `val <@ col`  → `eql_v3.jsonb_contained_by(val, col)`
+/// - `col -> sel`  → `eql_v3."->"(col, sel)`
+/// - `col ->> sel` → `eql_v3."->>"(col, sel)`
 ///
-/// This transformation enables GIN index usage when the index is created on
-/// `eql_v2.jsonb_array(encrypted_col)`.
+/// Containment enables GIN index usage via `eql_v3.jsonb_array(encrypted_col)`.
+/// The `->`/`->>` field selector is passed as encrypted text (see
+/// `CastLiteralsAsEncrypted`), matching the `eql_v3."->"(json, text)` signature.
 #[derive(Debug)]
 pub struct RewriteContainmentOps<'ast> {
     node_types: Arc<HashMap<NodeKey<'ast>, Type>>,
@@ -50,10 +57,17 @@ impl<'ast> RewriteContainmentOps<'ast> {
     }
 
     fn make_function_call(fn_name: &str, left: Expr, right: Expr) -> Expr {
+        // Operator-symbol function names (`->`, `->>`) must be quoted;
+        // ordinary names (`jsonb_contains`) are not.
+        let fn_ident = if fn_name.chars().all(|c| c.is_alphanumeric() || c == '_') {
+            Ident::new(fn_name)
+        } else {
+            Ident::with_quote('"', fn_name)
+        };
         Expr::Function(Function {
             name: ObjectName(vec![
-                ObjectNamePart::Identifier(Ident::new("eql_v2")),
-                ObjectNamePart::Identifier(Ident::new(fn_name)),
+                ObjectNamePart::Identifier(Ident::new("eql_v3")),
+                ObjectNamePart::Identifier(fn_ident),
             ]),
             uses_odbc_syntax: false,
             args: FunctionArguments::List(FunctionArgumentList {
@@ -80,16 +94,42 @@ impl<'ast> TransformationRule<'ast> for RewriteContainmentOps<'ast> {
         target_node: &mut N,
     ) -> Result<bool, EqlMapperError> {
         if self.would_edit(node_path, target_node) {
+            // Read the original operands: `node_types` is keyed by them, and the
+            // cast this rule applies depends on which operator it is.
+            let Some((Expr::BinaryOp {
+                left: original_left,
+                right: original_right,
+                ..
+            },)) = node_path.last_1_as::<Expr>()
+            else {
+                return Ok(false);
+            };
+
             let expr = target_node.downcast_mut::<Expr>().unwrap();
             if let Expr::BinaryOp { left, op, right } = expr {
                 let fn_name = match op {
                     BinaryOperator::AtArrow => "jsonb_contains",     // @>
                     BinaryOperator::ArrowAt => "jsonb_contained_by", // <@
+                    BinaryOperator::Arrow => "->",                   // ->  field access
+                    BinaryOperator::LongArrow => "->>",              // ->> field access (as text)
                     _ => return Ok(false),
                 };
 
+                // A containment needle is a whole encrypted document, so it
+                // casts to the column domain, not to a query twin. A `->`/`->>`
+                // selector takes no cast at all — `full_payload_domain` returns
+                // `None` for it — because `eql_v3."->"(json, text)` wants the
+                // bare encrypted selector text.
+                cast_encrypted_operand(&self.node_types, original_left, left, full_payload_domain);
+                cast_encrypted_operand(
+                    &self.node_types,
+                    original_right,
+                    right,
+                    full_payload_domain,
+                );
+
                 // Use mem::replace to move (not copy) the original nodes,
-                // preserving their NodeKey identity for downstream casting rules
+                // preserving their NodeKey identity for downstream rules
                 let dummy = Expr::Value(ValueWithSpan {
                     value: SqltkValue::Null,
                     span: Span::empty(),
@@ -106,7 +146,13 @@ impl<'ast> TransformationRule<'ast> for RewriteContainmentOps<'ast> {
     fn would_edit<N: Visitable>(&mut self, node_path: &NodePath<'ast>, _target_node: &N) -> bool {
         // Use node_path to get the original AST node (with correct NodeKey identity)
         if let Some((Expr::BinaryOp { left, op, right },)) = node_path.last_1_as::<Expr>() {
-            if matches!(op, BinaryOperator::AtArrow | BinaryOperator::ArrowAt) {
+            if matches!(
+                op,
+                BinaryOperator::AtArrow
+                    | BinaryOperator::ArrowAt
+                    | BinaryOperator::Arrow
+                    | BinaryOperator::LongArrow
+            ) {
                 // Only rewrite if at least one operand is EQL-typed
                 return self.uses_eql_type(left, right);
             }

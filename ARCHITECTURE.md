@@ -4,7 +4,7 @@ This document describes the internal architecture of CipherStash Proxy. It's int
 
 ## Overview
 
-CipherStash Proxy sits between an application and PostgreSQL. It intercepts SQL statements over the PostgreSQL wire protocol, determines which columns are encrypted, rewrites queries to use [EQL v2](https://github.com/cipherstash/encrypt-query-language) operations, encrypts literals and parameters, forwards the transformed query to PostgreSQL, and decrypts results before returning them to the application.
+CipherStash Proxy sits between an application and PostgreSQL. It intercepts SQL statements over the PostgreSQL wire protocol, determines which columns are encrypted, rewrites queries to use [EQL v3](https://github.com/cipherstash/encrypt-query-language) operations, encrypts literals and parameters, forwards the transformed query to PostgreSQL, and decrypts results before returning them to the application.
 
 The two most interesting pieces of the system are:
 
@@ -112,14 +112,22 @@ When a SQL statement contains DDL (`CREATE TABLE`, `ALTER TABLE`, `DROP TABLE`, 
 
 After type inference determines which parts of a statement touch encrypted columns, the transformation pipeline rewrites the AST. Transformation rules are modular and composable — they implement a `TransformationRule` trait and are composed into a single rule via tuple implementation (supporting chains of 1 to 16 rules).
 
-The current rules:
+The current rules, in the order they are composed in
+`type_checked_statement.rs::make_transformer`:
 
 | Rule | What it does |
 |---|---|
-| `CastLiteralsAsEncrypted` | Replaces plaintext literals with `eql_v2.cast_as_encrypted(ciphertext)` |
-| `CastParamsAsEncrypted` | Wraps parameter placeholders (`$1`, `$2`, ...) with encrypted casts |
-| `RewriteContainmentOps` | Transforms `col @> val` to `eql_v2.jsonb_contains(col, val)` |
-| `RewriteStandardSqlFnsOnEqlTypes` | Rewrites `min()`, `max()`, `jsonb_path_query()` etc. to `eql_v2.*` equivalents |
+| `SubstituteEncryptedLiterals` | Replaces each plaintext literal with its ciphertext, before any rule wraps it |
+| `RewriteStandardSqlFnsOnEqlTypes` | Rewrites `min()`, `max()`, `jsonb_path_query()` etc. to their `eql_v3.*` counterparts (`count()` stays native) |
+| `RewriteContainmentOps` | Rewrites JSON `@>`/`<@` to `eql_v3.jsonb_contains`/`jsonb_contained_by`, and `->`/`->>` to `eql_v3."->"`/`"->>"` |
+| `RewriteJsonValueSelectorEq` | Fuses `col -> 'field' = value` into a single encrypted value-selector needle matched by containment |
+| `RewriteEqlComparisonOps` | Rewrites scalar comparisons: `col <op> x` → `eql_v3.<term>(col) <op> eql_v3.<term>(x)` (term chosen from the column's domain: `eq_term`/`ord_term`/`ord_term_ore`) |
+| `RewriteEqlMatchOps` | Rewrites `LIKE`/`ILIKE`/`@@` to `eql_v3.match_term(a) @> eql_v3.match_term(b)` |
+| `RewriteEqlOrderBy` | Rewrites `ORDER BY col` to order by the column's ordering term, `eql_v3.ord_term(col)` |
+| `RewriteEqlDistinct` | Rewrites `SELECT DISTINCT col` to deduplicate on the equality term, `SELECT DISTINCT ON (eql_v3.eq_term(col))` |
+| `RewriteEqlDistinctOrderBy` | Wraps a `DISTINCT` query ordered by an encrypted column in a subquery that projects the ordering term, so the outer query can order by it |
+| `RewriteEqlGroupBy` | Groups by the equality term, and lifts a projected grouped column through `eql_v3.grouped_value` |
+| `CastFullPayloadOperands` | Casts the operands with no rewrite of their own — `INSERT` and `UPDATE` values — to the column's v3 domain (`::public.eql_v3_*`). Query operands are cast to the query twin (`::eql_v3.query_*`) by the rewrite rule that produces them |
 | `PreserveEffectiveAliases` | Maintains column aliases through transformations |
 | `FailOnPlaceholderChange` | Postcondition check that prepared statement placeholders weren't corrupted |
 
@@ -191,7 +199,7 @@ When encrypting values for a statement, many columns may be `NULL` or non-encryp
 
 ## Schema Management
 
-The proxy discovers the database schema at startup and reloads it periodically. Schema loading queries PostgreSQL's `information_schema` to discover tables and columns, then checks `eql_v2_configuration` to determine which columns are encrypted and what index types they support.
+The proxy discovers the database schema at startup and reloads it periodically. Schema loading queries PostgreSQL's `information_schema` to discover tables and columns, including each column's domain type. EQL v3 columns are self-configuring domain types (e.g. `eql_v3_text_search`), so both the type-checker's capability view and the encrypt config are inferred from that single schema load — the column's domain name determines which columns are encrypted, their token type, and their searchable capabilities. There is no `eql_v2_configuration` table.
 
 Schema state is stored behind an `ArcSwap`, which provides lock-free reads with atomic updates. This means query processing never blocks on a schema reload — readers always get a consistent snapshot.
 

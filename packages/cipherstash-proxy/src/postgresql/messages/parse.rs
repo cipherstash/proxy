@@ -1,10 +1,11 @@
-use super::{FrontendCode, Name};
+use super::{FrontendCode, Name, UNSPECIFIED_TYPE_OID};
 use crate::{
     error::{Error, ProtocolError},
-    postgresql::{context::column::Column, protocol::BytesMutReadString},
+    postgresql::{context::statement::OutputParam, protocol::BytesMutReadString},
     SIZE_I16, SIZE_I32,
 };
 use bytes::{Buf, BufMut, BytesMut};
+use eql_mapper::EqlTermVariant;
 use postgres_types::Type;
 use std::{ffi::CString, io::Cursor};
 
@@ -23,19 +24,61 @@ impl Parse {
         self.dirty
     }
 
+    /// Rewrites the declared param types to describe the params of the
+    /// *rewritten* statement.
     ///
-    /// Encrypted columns are the eql_v2_encrypted Domain Type
-    /// eql_v2_encrypted wraps JSONB
+    /// EQL v3 encrypted columns are JSONB-backed domain types (e.g.
+    /// `eql_v3_text_search`). JSONB is declared rather than the domain itself to
+    /// avoid loading each domain's OID — PostgreSQL coerces JSONB to the domain
+    /// if it passes the CHECK constraint.
     ///
-    /// Using JSONB to avoid the complexity of loading the OID of eql_v2_encrypted
-    /// PostgreSQL will coerce JSONB to eql_v2_encrypted if it passes the constaint check
+    /// The client declares types for the params it wrote; the rewrite may have
+    /// dropped or fused some of those, so each declaration is carried across to
+    /// the output param that consumes it. An output param that carries an
+    /// encrypted value is declared JSONB regardless — that is the wire type of
+    /// every EQL payload, whatever the client thought it was binding.
     ///
-    pub fn rewrite_param_types(&mut self, columns: &[Option<Column>]) {
-        for (idx, col) in columns.iter().enumerate() {
-            if self.param_types.get(idx).is_some() && col.is_some() {
-                self.param_types[idx] = Type::JSONB.oid() as i32;
-                self.dirty = true;
-            }
+    /// A JSON *selector* is the exception. It is passed to the rewritten
+    /// function as bare encrypted text — `eql_v3."->"(json, text)`,
+    /// `eql_v3.jsonb_path_exists(json, text)` — not as a jsonb query payload, so
+    /// declaring JSONB leaves PostgreSQL looking for an overload that does not
+    /// exist:
+    ///
+    /// ```text
+    /// ERROR: function eql_v3.jsonb_path_exists(eql_v3_json_search, jsonb) does not exist
+    /// ```
+    ///
+    /// A client that declares no types at all (the common case — it lets the
+    /// server infer them) is left alone: every output param is referenced by the
+    /// rewritten SQL, so PostgreSQL can always infer them. That is why this only
+    /// bites clients that send their own Parse OIDs, such as pgx in
+    /// `cache_describe` mode.
+    pub fn rewrite_param_types(&mut self, output_params: &[OutputParam]) {
+        if self.param_types.is_empty() {
+            return;
+        }
+
+        let param_types = output_params
+            .iter()
+            .map(|output| match &output.column {
+                Some(column) => match column.eql_term {
+                    EqlTermVariant::JsonAccessor | EqlTermVariant::JsonPath => {
+                        Type::TEXT.oid() as i32
+                    }
+                    _ => Type::JSONB.oid() as i32,
+                },
+                None => self
+                    .param_types
+                    .get(output.source.primary_input())
+                    .copied()
+                    .unwrap_or(UNSPECIFIED_TYPE_OID),
+            })
+            .collect::<Vec<_>>();
+
+        if param_types != self.param_types {
+            self.num_params = param_types.len() as i16;
+            self.param_types = param_types;
+            self.dirty = true;
         }
     }
 
@@ -119,7 +162,11 @@ mod tests {
     use crate::{
         config::LogConfig,
         log,
-        postgresql::{messages::parse::Parse, Column},
+        postgresql::{
+            context::statement::{OutputParam, OutputParamSource},
+            messages::parse::Parse,
+            Column,
+        },
         Identifier,
     };
     use bytes::BytesMut;
@@ -158,9 +205,55 @@ mod tests {
         let config = ColumnConfig::build("column".to_string()).casts_as(ColumnType::SmallInt);
 
         let column = Column::new(identifier, config, None, eql_mapper::EqlTermVariant::Full);
-        let columns = vec![None, Some(column)];
+        let output_params = vec![
+            OutputParam {
+                column: None,
+                source: OutputParamSource::Input(0),
+                query_operand: false,
+            },
+            OutputParam {
+                column: Some(column),
+                source: OutputParamSource::Input(1),
+                query_operand: false,
+            },
+        ];
 
-        parse.rewrite_param_types(&columns);
+        parse.rewrite_param_types(&output_params);
         assert!(parse.requires_rewrite());
+        assert_eq!(
+            parse.param_types,
+            vec![
+                postgres_types::Type::INT2.oid() as i32,
+                postgres_types::Type::JSONB.oid() as i32
+            ]
+        );
+    }
+
+    /// A rewrite that fuses two params into one must leave the client's
+    /// declaration for the surviving param, not the one it happened to sit at.
+    #[test]
+    pub fn test_parse_rewrite_param_types_after_fusion() {
+        log::init(LogConfig::default());
+        let bytes = to_message(
+             b"P\0\0\0J\0INSERT INTO encrypted (id, encrypted_int2) VALUES ($1, $2)\0\0\x02\0\0\0\x15\0\0\0\x15"
+        );
+
+        let mut parse = Parse::try_from(&bytes).unwrap();
+
+        // Two input params collapse to a single native output param sourced
+        // from input 1.
+        let output_params = vec![OutputParam {
+            column: None,
+            source: OutputParamSource::Input(1),
+            query_operand: false,
+        }];
+
+        parse.rewrite_param_types(&output_params);
+        assert!(parse.requires_rewrite());
+        assert_eq!(parse.num_params, 1);
+        assert_eq!(
+            parse.param_types,
+            vec![postgres_types::Type::INT2.oid() as i32]
+        );
     }
 }

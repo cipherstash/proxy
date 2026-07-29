@@ -81,7 +81,20 @@ pub fn literal_from_sql(
         // #[cfg(not(feature = "bigdecimal"))]
         // Value::Number(s, _) => todo!("Number parsed type not implemented"),
         // #[cfg(feature = "bigdecimal")]
-        Value::Number(d, _) => Some(decimal_from_sql(d, col_type)?),
+        Value::Number(d, _) => {
+            // A JSON ordering operand (`col -> sel > 4`) is a scalar SteVec
+            // ordering term, encoded as a float like the stored JSON number leaf
+            // — NOT a JSON document (`decimal_from_sql` would make a `Json`
+            // plaintext, which `SteVecTerm` rejects).
+            if eql_term == EqlTermVariant::JsonOrd {
+                use bigdecimal::ToPrimitive;
+                Some(Plaintext::new(
+                    d.to_f64().ok_or(MappingError::CouldNotParseParameter)?,
+                ))
+            } else {
+                Some(decimal_from_sql(d, col_type)?)
+            }
+        }
 
         Value::Placeholder(_) => {
             return Err(MappingError::Internal(String::from(
@@ -91,6 +104,171 @@ pub fn literal_from_sql(
     };
 
     Ok(pt)
+}
+
+/// Normalises a JSON field selector to an eJSONPath rooted at `$`.
+///
+/// `->`/`->>` take a bare field name (`name`), `jsonb_path_query*` takes a path
+/// (`nested.title`, or already-rooted `$.nested.title`). The client's
+/// `Selector::parse` only accepts the rooted form.
+///
+/// A path is already rooted if it *starts with* `$`, not merely if it starts
+/// with `$.`: `jsonb_path_query` also accepts `$`, `$[0]`, `$["a"]` and
+/// `$[*].b`. Re-rooting those would produce `$.$[0]` and friends — a selector
+/// that matches nothing rather than erroring.
+pub fn json_selector_path(val: &str) -> String {
+    if val.starts_with('$') {
+        val.to_string()
+    } else {
+        format!("$.{val}")
+    }
+}
+
+/// Builds the composition input for a fused JSON value selector:
+/// `{"path": <jsonpath>, "value": <scalar>}`.
+///
+/// This is the one place two SQL operands become one encrypted operand.
+/// `QueryOp::SteVecValueSelector` MACs the path and the canonicalised value
+/// together into a single selector; its presence in the stored `sv` is the
+/// equality match. The client applies the column's term filters (e.g. downcase)
+/// to `value` as part of that, so case-insensitive columns work unchanged here.
+///
+/// `value` must be a scalar. A single value selector is only injective for
+/// scalars — a container MACs just its structural tag, so every object at a path
+/// would collapse to one selector. The client rejects those; rejecting here too
+/// gives a message naming the query shape rather than the encryption internals.
+pub fn json_value_selector_plaintext(
+    path: &str,
+    value: serde_json::Value,
+) -> Result<Plaintext, MappingError> {
+    if value.is_object() || value.is_array() {
+        debug!(
+            target: ENCODING,
+            msg = "Encrypted JSON equality requires a scalar value",
+            ?path,
+            ?value
+        );
+        return Err(MappingError::CouldNotParseParameter);
+    }
+
+    Ok(Plaintext::new(serde_json::json!({
+        "path": json_selector_path(path),
+        "value": value,
+    })))
+}
+
+/// The JSON value a literal carries, for fusing into a value selector.
+///
+/// The value half of `col -> sel = value` is written as a quoted JSON scalar
+/// (`= '"B"'`, `= '3'`) or as a bare SQL number (`= 3`). A quoted string that is
+/// not valid JSON is taken as the string itself, so `= 'B'` behaves like
+/// `= '"B"'`.
+pub fn literal_json_value(literal: &Value) -> Result<Option<serde_json::Value>, MappingError> {
+    let value = match literal {
+        Value::Null => None,
+
+        Value::Number(d, _) => Some(
+            serde_json::from_str::<serde_json::Value>(&d.to_string())
+                .map_err(|_| MappingError::CouldNotParseParameter)?,
+        ),
+
+        Value::Boolean(b) => Some(serde_json::Value::Bool(*b)),
+
+        Value::SingleQuotedString(s)
+        | Value::DoubleQuotedString(s)
+        | Value::TripleSingleQuotedString(s)
+        | Value::TripleDoubleQuotedString(s)
+        | Value::EscapedStringLiteral(s)
+        | Value::UnicodeStringLiteral(s)
+        | Value::NationalStringLiteral(s) => Some(
+            serde_json::from_str::<serde_json::Value>(s)
+                .unwrap_or_else(|_| serde_json::Value::String(s.to_owned())),
+        ),
+
+        Value::DollarQuotedString(s) => Some(
+            serde_json::from_str::<serde_json::Value>(&s.value)
+                .unwrap_or_else(|_| serde_json::Value::String(s.value.to_owned())),
+        ),
+
+        _ => return Err(MappingError::CouldNotParseParameter),
+    };
+
+    Ok(value)
+}
+
+/// The JSON value a bind param carries, for fusing into a value selector.
+///
+/// Mirrors [`literal_json_value`] for the extended protocol: a jsonb param
+/// arrives either as its text rendering (`4`, `"C"`) or as binary jsonb. A text
+/// payload that is not valid JSON is taken as the string itself.
+pub fn bind_param_json_value(
+    param: &BindParam,
+    postgres_type: &Type,
+) -> Result<Option<serde_json::Value>, MappingError> {
+    if param.is_null() {
+        return Ok(None);
+    }
+
+    let value = match param.format_code {
+        FormatCode::Text => {
+            let text = param.to_string();
+            serde_json::from_str::<serde_json::Value>(&text)
+                .unwrap_or(serde_json::Value::String(text))
+        }
+        FormatCode::Binary => binary_json_value(&param.bytes, postgres_type)?,
+    };
+
+    Ok(Some(value))
+}
+
+/// Whether `ty` is one of PostgreSQL's textual types, whose binary
+/// representation is the string's own bytes rather than anything JSON-shaped.
+fn is_textual(ty: &Type) -> bool {
+    matches!(
+        *ty,
+        Type::TEXT | Type::VARCHAR | Type::BPCHAR | Type::NAME | Type::UNKNOWN
+    )
+}
+
+/// The JSON value a binary-format operand carries.
+///
+/// `serde_json::Value` only decodes JSON and JSONB, so a textual type has to be
+/// read as a string first — otherwise ordinary bytes such as `Alice` are handed
+/// to `serde_json::Value::from_sql` and rejected outright, even though the same
+/// operand in text format would have been accepted.
+///
+/// Once read, it gets exactly the treatment the text format gets: parsed as
+/// JSON, and taken as the string itself when that fails, so `Alice` behaves like
+/// `"Alice"`.
+fn binary_json_value(
+    bytes: &BytesMut,
+    postgres_type: &Type,
+) -> Result<serde_json::Value, MappingError> {
+    if is_textual(postgres_type) {
+        let text = parse_bytes_from_sql::<String>(bytes, postgres_type)
+            .map_err(|_| MappingError::CouldNotParseParameter)?;
+
+        return Ok(serde_json::from_str::<serde_json::Value>(&text)
+            .unwrap_or(serde_json::Value::String(text)));
+    }
+
+    parse_bytes_from_sql::<serde_json::Value>(bytes, postgres_type)
+        .map_err(|_| MappingError::CouldNotParseParameter)
+}
+
+/// A JSON ordering operand (`EqlTerm::JsonOrd`) arriving as a jsonb param
+/// carries a single scalar. Encode a number as a float (matching the stored
+/// JSON number leaf's SteVec `op` encoding) and a string as text — the only
+/// scalar shapes `SteVecTerm` accepts (a full JSON value is rejected).
+fn json_ord_scalar_plaintext(value: serde_json::Value) -> Result<Plaintext, MappingError> {
+    match value {
+        serde_json::Value::Number(n) => n
+            .as_f64()
+            .ok_or(MappingError::CouldNotParseParameter)
+            .map(Plaintext::new),
+        serde_json::Value::String(s) => Ok(Plaintext::new(s)),
+        _ => Err(MappingError::CouldNotParseParameter),
+    }
 }
 
 /// Converts a string value to a Plaintext value based on input postgres type and target column type.
@@ -169,17 +347,27 @@ fn text_from_sql(
 
         // If JSONB, JSONPATH values are treated as strings
         (EqlTermVariant::JsonPath | EqlTermVariant::JsonAccessor, ColumnType::Json) => {
-            let val = if val.starts_with("$.") {
-                val.to_string()
-            } else {
-                format!("$.{val}")
-            };
-            Ok(Plaintext::new(val))
+            Ok(Plaintext::new(json_selector_path(val)))
         }
         (EqlTermVariant::Full | EqlTermVariant::Partial, ColumnType::Json) => {
             serde_json::from_str::<serde_json::Value>(val)
                 .map_err(|_| MappingError::CouldNotParseParameter)
                 .map(Plaintext::new)
+        }
+        // A JSON ordering operand reaches here in two textual shapes: a bare SQL
+        // literal (`col -> sel > '4'` / `> 'C'` → `4` / `C`) and a text-format
+        // jsonb param (`4` / `"C"`, the value's jsonb rendering). Parse as JSON to
+        // recover the scalar type and its content: a number encodes as a float
+        // (matching the stored leaf's `for_json_value` SteVec `op`), a JSON string
+        // as its unquoted text. A bare word (`C`) is not valid JSON, so fall back
+        // to raw text. Mirrors `json_ord_scalar_plaintext` on the binary param path.
+        (EqlTermVariant::JsonOrd, ColumnType::Json) => {
+            match serde_json::from_str::<serde_json::Value>(val) {
+                Ok(value @ (serde_json::Value::Number(_) | serde_json::Value::String(_))) => {
+                    json_ord_scalar_plaintext(value)
+                }
+                _ => Ok(Plaintext::new(val)),
+            }
         }
         (EqlTermVariant::Tokenized, ColumnType::Text) => Ok(Plaintext::new(val)),
 
@@ -254,24 +442,21 @@ fn binary_from_sql(
 
         // If JSONB, JSONPATH values are treated as strings
         (EqlTermVariant::JsonPath, ColumnType::Json, &Type::JSONPATH) => {
-            parse_bytes_from_sql::<String>(bytes, pg_type).map(|val| {
-                let val = if val.starts_with("$.") {
-                    val
-                } else {
-                    format!("$.{val}")
-                };
-                Plaintext::new(val)
-            })
+            parse_bytes_from_sql::<String>(bytes, pg_type)
+                .map(|val| Plaintext::new(json_selector_path(&val)))
         }
         (EqlTermVariant::JsonAccessor, ColumnType::Json, &Type::TEXT | &Type::VARCHAR) => {
-            parse_bytes_from_sql::<String>(bytes, pg_type).map(|val| {
-                let val = if val.starts_with("$.") {
-                    val
-                } else {
-                    format!("$.{val}")
-                };
-                Plaintext::new(val)
-            })
+            parse_bytes_from_sql::<String>(bytes, pg_type)
+                .map(|val| Plaintext::new(json_selector_path(&val)))
+        }
+        // A JSON ordering operand (`col -> sel > $2`) arrives as a jsonb scalar;
+        // encode it as the scalar shape SteVecTerm accepts (number → float,
+        // string → text).
+        (EqlTermVariant::JsonOrd, ColumnType::Json, _) => {
+            // Via `binary_json_value` rather than straight to `serde_json`: this
+            // arm matches any incoming type, so a textual operand has to be read
+            // as a string before it can be parsed as JSON.
+            binary_json_value(bytes, pg_type).and_then(json_ord_scalar_plaintext)
         }
         // Python psycopg sends JSON/B as BYTEA
         (
@@ -375,6 +560,71 @@ fn decimal_from_sql(
             .to_i64()
             .ok_or(MappingError::CouldNotParseParameter)
             .map(Plaintext::new),
+    }
+}
+
+#[cfg(test)]
+mod binary_json_value_tests {
+    use super::*;
+    use crate::postgresql::{format_code::FormatCode, messages::bind::BindParam};
+    use bytes::BytesMut;
+
+    fn binary_param(bytes: &[u8]) -> BindParam {
+        BindParam::new(FormatCode::Binary, BytesMut::from(bytes))
+    }
+
+    /// A textual operand in binary format is the string's own bytes. Reading it
+    /// as JSON rejects anything that is not JSON-shaped, so it is read as a
+    /// string first and then given the text format's treatment.
+    #[test]
+    fn binary_textual_operand_is_read_as_a_string() {
+        for ty in [Type::TEXT, Type::VARCHAR, Type::BPCHAR, Type::NAME] {
+            let param = binary_param(b"Alice");
+
+            assert_eq!(
+                Some(serde_json::Value::String("Alice".to_string())),
+                bind_param_json_value(&param, &ty).unwrap(),
+                "unexpected decoding of a binary {ty} operand"
+            );
+        }
+    }
+
+    /// A textual operand that *is* valid JSON still parses as JSON, so a client
+    /// sending `"Alice"` or `42` as text gets the same value as one sending
+    /// jsonb.
+    #[test]
+    fn binary_textual_operand_that_is_json_parses_as_json() {
+        assert_eq!(
+            Some(serde_json::Value::String("Alice".to_string())),
+            bind_param_json_value(&binary_param(b"\"Alice\""), &Type::TEXT).unwrap()
+        );
+
+        assert_eq!(
+            Some(serde_json::json!(42)),
+            bind_param_json_value(&binary_param(b"42"), &Type::TEXT).unwrap()
+        );
+    }
+
+    /// The jsonb path is untouched: version header byte, then the JSON text.
+    #[test]
+    fn binary_jsonb_operand_still_decodes_as_jsonb() {
+        let mut bytes = BytesMut::from(&b"\x01"[..]);
+        bytes.extend_from_slice(b"{\"a\":1}");
+
+        assert_eq!(
+            Some(serde_json::json!({"a": 1})),
+            bind_param_json_value(&BindParam::new(FormatCode::Binary, bytes), &Type::JSONB)
+                .unwrap()
+        );
+    }
+
+    /// A NULL param carries no value at all.
+    #[test]
+    fn null_param_has_no_value() {
+        assert_eq!(
+            None,
+            bind_param_json_value(&BindParam::null(), &Type::TEXT).unwrap()
+        );
     }
 }
 

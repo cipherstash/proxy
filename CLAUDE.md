@@ -8,7 +8,7 @@ CipherStash Proxy is a PostgreSQL proxy that provides **transparent, searchable 
 
 Key capabilities:
 - Zero-change SQL queries - applications connect to Proxy instead of directly to PostgreSQL
-- EQL v2 (Encrypt Query Language) for searchable encryption using CipherStash ZeroKMS
+- EQL v3 (Encrypt Query Language) for searchable encryption using CipherStash ZeroKMS
 - Support for encrypted equality, comparison, ordering, and grouping operations
 - Written in Rust for performance with strongly-typed SQL statement mapping
 
@@ -34,14 +34,14 @@ Key capabilities:
 - Language-specific integration tests (Python, Go)
 
 **Showcase (`packages/showcase/`):**
-- Healthcare data model demonstrating EQL v2 encryption
+- Healthcare data model demonstrating EQL v3 encryption
 - Example of realistic encrypted application with foreign keys and relationships
 
 ### Request Flow
 
 1. Application connects to Proxy (port 6432) using standard PostgreSQL protocol
 2. Proxy intercepts SQL statements and uses EQL Mapper to analyze query structure
-3. For encrypted columns, Proxy transforms SQL using EQL v2 operations
+3. For encrypted columns, Proxy transforms SQL using EQL v3 operations
 4. Encrypted queries are sent to actual PostgreSQL database
 5. Results are decrypted before returning to application
 
@@ -166,12 +166,17 @@ Available targets: `DEVELOPMENT`, `AUTHENTICATION`, `CONFIG`, `CONTEXT`, `ENCODI
 
 ## EQL Integration
 
-CipherStash Proxy uses EQL v2 for searchable encryption. Key concepts:
+CipherStash Proxy uses EQL v3 for searchable encryption. Key concepts:
 
 - **Plaintext columns** - standard PostgreSQL data types
-- **Encrypted columns** - use `eql_v2_encrypted` type in schema
-- **Searchable operations** - equality, comparison, ordering work on encrypted data
-- **Index support** - ORE (Order Revealing Encryption) and Match indexes for performance
+- **Encrypted columns** - use a self-configuring EQL v3 domain type in the schema
+  (e.g. `eql_v3_text_search`, `eql_v3_integer_ord`, `eql_v3_json_search`); the
+  domain encodes the token type and searchable capabilities, so there is no
+  separate `add_search_config` call
+- **Searchable operations** - equality, comparison, ordering, text match, and JSON
+  traversal work on encrypted data, gated by the column's domain capability
+- **Index support** - functional indexes over the term-extraction functions
+  (e.g. `CREATE INDEX ON t (eql_v3.ord_term(col))`)
 
 EQL is automatically downloaded and installed during setup. Use `CS_EQL_PATH` to point to local EQL development version.
 

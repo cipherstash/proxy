@@ -6,6 +6,42 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+
+- **EQL v3 (searchable encryption)**: Proxy now targets EQL v3. Encrypted columns are declared with self-configuring, typed `jsonb` domains (for example `eql_v3_text_search`, `eql_v3_integer_ord`, `eql_v3_json_search`) that encode both the scalar type and the column's searchable capabilities in the column type itself, replacing EQL v2's opaque `eql_v2_encrypted` composite type and its separate `eql_v2_configuration` table. The bundled `cipherstash-client` is upgraded to 0.42.0 and EQL to 3.0.3. Existing v2-encrypted data and schemas must be migrated to v3.
+
+### Added
+
+- **Encrypted full-text match with `@@`**: The `@@` operator is now supported on encrypted text columns whose domain carries a match (bloom-filter) term, rewritten to the EQL v3 `eql_v3.match_term` form.
+
+- **`SELECT DISTINCT` on an encrypted column now deduplicates**: `DISTINCT` used to compare whole encrypted payloads, whose ciphertext is randomised per row, so equal plaintexts never collapsed and `DISTINCT` silently returned duplicates. It is now keyed on the column's equality term — `SELECT DISTINCT ON (eql_v3.eq_term(col)) col …` — so one row is returned per distinct plaintext. Deduplication is equality, so a column whose domain carries no equality term (`eql_v3_boolean`, for instance, which is storage-only) is now rejected with a capability error rather than silently returning every row.
+
+- **`SELECT DISTINCT` ordered by an encrypted column**: `SELECT DISTINCT … ORDER BY <encrypted column>` now works. Ordering an encrypted column requires its ordering term, which PostgreSQL will not accept under `DISTINCT` unless it also appears in the select list, so the query is rewritten to project the term from a subquery and order the outer query by it. The term is never returned to the client and column names are preserved. Two shapes remain unsupported and are reported as such: `SELECT DISTINCT ON (…)` and `SELECT DISTINCT *`, both when combined with `ORDER BY` on an encrypted column — list the columns explicitly for the latter.
+
+- **Equality on encrypted JSON fields**: `WHERE col -> 'field' = 'value'` now works on encrypted JSON columns, in both the simple and extended query protocols, and in the `->>` and `jsonb_path_query_first(col, path) = value` spellings. `<>` is supported as the negation. The field and the value are combined into a single encrypted value-selector needle and matched by containment, so a query never reveals the field and value separately. Matching is exact and case-sensitive; the value must be a JSON scalar (comparing a whole object or array to a field is rejected — use containment with `@>` instead).
+
+### Fixed
+
+- **A param bound as both a stored value and a query operand**: `UPDATE t SET enc = $1 WHERE enc = $1` failed with a domain CHECK violation. The two occurrences need different payloads — the stored one carries the ciphertext, the query one only search terms — but the role was tracked per input param, so marking the param as a query operand stripped the ciphertext from the value being stored. The role is now taken from the rewritten statement, per occurrence.
+
+- **JSON selector params when the client declares its own types**: a client that sends param OIDs in Parse (pgx in `cache_describe` mode, for example) got `function eql_v3.jsonb_path_exists(eql_v3_json_search, jsonb) does not exist`. A JSON field selector is passed to the rewritten function as bare text, but was being declared as `jsonb` like every other encrypted operand. Affects `->`, `->>`, `jsonb_path_exists`, `jsonb_path_query` and `jsonb_path_query_first`.
+
+- **Binary-format text operands on encrypted JSON fields**: a TEXT/VARCHAR operand arriving in binary format was handed straight to the JSON decoder and rejected, even though the same value in text format was accepted. Textual types are now read as a string first and then given the text format's treatment, so `Alice` behaves like `"Alice"`.
+
+- **Aggregates over a grouped encrypted column**: `SELECT MIN(enc) FROM t GROUP BY enc` produced `grouped_value(eql_v3.min(enc))` — an aggregate inside an aggregate, which PostgreSQL rejects. An aggregate already returns one value per group, so it is no longer lifted; only a direct projection of the grouped column is.
+
+- **`SELECT *` with `GROUP BY` on an encrypted column** is now rejected with an explanatory error instead of PostgreSQL's "column must appear in the GROUP BY clause". A wildcard hides the projected columns, so the grouped column cannot be projected through `eql_v3.grouped_value` — list the columns explicitly. This matches the existing treatment of `SELECT DISTINCT *`.
+
+- **`SELECT DISTINCT *` skipped the encrypted-column protection**: a wildcard hides the columns `DISTINCT` deduplicates on, so neither the equality-term keying nor the capability check applied and duplicates were returned silently. The wildcard is now expanded to its columns, which are keyed like any other; a wildcard hiding a column with no equality term is rejected.
+
+- **`@@` with the encrypted column on the right**: `'pattern' @@ col` produced `match_term('pattern') @> match_term(col)` — a backwards containment, with the pattern never encrypted, that silently matched nothing. `@@` is symmetric in PostgreSQL, so both spellings now produce the same query.
+
+- **Encrypt config could pick up a same-named table from another schema**: the config is keyed on `(table, column)` while the schema query scanned every schema, so a table of the same name elsewhere — another tenant's, a staging copy — could overwrite the served one and give a column the wrong domain config or drop its encryption. The scan is now limited to the connection's search path, in precedence order.
+
+- **A prepared statement name reused for an unmapped statement**: `Parse` rebinds its name, but a statement Proxy does not map — `BEGIN`, `COMMIT`, or anything needing no type check — left the *previous* statement cached under that name. The next `Bind` for the name was then rewritten against a statement the client never parsed, failing with `Rewritten statement binds parameter 1, but only 0 were provided`. Affects any client that reuses the unnamed prepared statement across a transaction, which includes pgbench in extended mode and psycopg with `prepare=False`.
+
+- **`LIKE`/`ILIKE` capability checking**: `LIKE` and `ILIKE` on an encrypted column are now gated by the column's token-match capability. Previously these predicates bypassed capability checking and were silently accepted on columns that do not support fuzzy match; they are now rejected with a capability error.
+
 ## [2.2.4] - 2026-06-18
 
 ### Fixed

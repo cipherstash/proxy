@@ -6,8 +6,12 @@ mod eql_mapper;
 mod importer;
 mod inference;
 mod iterator_ext;
+mod json_value_selector;
 mod model;
 mod param;
+mod param_plan;
+mod query_operands;
+mod renumber_params;
 mod scope_tracker;
 mod transformation_rules;
 mod type_checked_statement;
@@ -17,16 +21,20 @@ mod test_helpers;
 
 pub use display_helpers::*;
 pub use eql_mapper::*;
+pub use json_value_selector::*;
 pub use model::*;
 pub use param::*;
+pub use param_plan::*;
+pub use query_operands::*;
 pub use type_checked_statement::*;
 pub use unifier::{
-    Array, AssociatedType, EqlTerm, EqlTermVariant, EqlTrait, EqlTraits, EqlValue, NativeValue,
-    Projection, ProjectionColumn, SetOf, TableColumn, Type, Value,
+    Array, AssociatedType, DomainIdentity, EqlTerm, EqlTermVariant, EqlTrait, EqlTraits, EqlValue,
+    NativeValue, Projection, ProjectionColumn, SetOf, TableColumn, TokenType, Type, Value,
 };
 
 pub(crate) use dep::*;
 pub(crate) use inference::*;
+pub(crate) use renumber_params::*;
 pub(crate) use scope_tracker::*;
 pub(crate) use transformation_rules::*;
 
@@ -39,7 +47,7 @@ mod test {
             EqlTerm, EqlTrait, EqlTraits, EqlValue, InstantiateType, NativeValue, Projection,
             ProjectionColumn, Type, Value,
         },
-        Param, Schema, TableColumn, TableResolver,
+        JsonSelectorSource, OutputParamSource, Param, Schema, TableColumn, TableResolver,
     };
     use eql_mapper_macros::concrete_ty;
     use pretty_assertions::assert_eq;
@@ -105,7 +113,7 @@ mod test {
                 assert_eq!(
                     typed.literals,
                     vec![(
-                        EqlTerm::Full(EqlValue(
+                        EqlTerm::Full(EqlValue::with_canonical_identity(
                             TableColumn {
                                 table: id("users"),
                                 column: id("email"),
@@ -118,6 +126,286 @@ mod test {
             }
             Err(err) => panic!("type check failed: {err}"),
         }
+    }
+
+    #[test]
+    fn like_on_token_match_column_type_checks() {
+        let schema = resolver(schema! {
+            tables: {
+                users: {
+                    id,
+                    email (EQL: TokenMatch),
+                }
+            }
+        });
+
+        let statement = parse("SELECT id FROM users WHERE email LIKE 'a%'");
+        assert!(
+            type_check(schema, &statement).is_ok(),
+            "LIKE on a TokenMatch column should type check"
+        );
+    }
+
+    #[test]
+    fn like_rewrites_to_match_term() {
+        let schema = resolver(schema! {
+            tables: {
+                users: {
+                    id,
+                    email (EQL: TokenMatch),
+                }
+            }
+        });
+
+        let statement = parse("SELECT id FROM users WHERE email LIKE 'a%'");
+
+        let typed = match type_check(schema, &statement) {
+            Ok(typed) => typed,
+            Err(err) => panic!("type check failed: {err:#?}"),
+        };
+
+        match typed.transform(HashMap::from_iter([(
+            typed.literals[0].1.as_node_key(),
+            ast::Value::SingleQuotedString("ENCRYPTED".into()),
+        )])) {
+            Ok(transformed) => assert_eq!(
+                transformed.to_string(),
+                "SELECT id FROM users WHERE eql_v3.match_term(email) @> eql_v3.match_term('ENCRYPTED'::JSONB::eql_v3.query_text_match)"
+            ),
+            Err(err) => panic!("transformation failed: {err}"),
+        };
+    }
+
+    #[test]
+    fn ord_ore_column_rewrites_to_ord_term_ore() {
+        // The explicit EQL("<domain>") form pins a block-ORE ordering domain, so
+        // the rewrite must select ord_term_ore (not ord_term) and the query twin
+        // must be query_integer_ord_ore.
+        let schema = resolver(schema! {
+            tables: {
+                events: {
+                    id,
+                    seq (EQL("eql_v3_integer_ord_ore"): Ord),
+                }
+            }
+        });
+
+        let statement = parse("SELECT id FROM events WHERE seq > 5");
+
+        let typed = match type_check(schema, &statement) {
+            Ok(typed) => typed,
+            Err(err) => panic!("type check failed: {err:#?}"),
+        };
+
+        match typed.transform(HashMap::from_iter([(
+            typed.literals[0].1.as_node_key(),
+            ast::Value::SingleQuotedString("ENCRYPTED".into()),
+        )])) {
+            Ok(transformed) => assert_eq!(
+                transformed.to_string(),
+                "SELECT id FROM events WHERE eql_v3.ord_term_ore(seq) > eql_v3.ord_term_ore('ENCRYPTED'::JSONB::eql_v3.query_integer_ord_ore)"
+            ),
+            Err(err) => panic!("transformation failed: {err}"),
+        };
+    }
+
+    #[test]
+    fn at_at_rewrites_to_match_term() {
+        let schema = resolver(schema! {
+            tables: {
+                users: {
+                    id,
+                    email (EQL: TokenMatch),
+                }
+            }
+        });
+
+        let statement = parse("SELECT id FROM users WHERE email @@ 'a'");
+
+        let typed = match type_check(schema, &statement) {
+            Ok(typed) => typed,
+            Err(err) => panic!("type check failed: {err:#?}"),
+        };
+
+        match typed.transform(HashMap::from_iter([(
+            typed.literals[0].1.as_node_key(),
+            ast::Value::SingleQuotedString("ENCRYPTED".into()),
+        )])) {
+            Ok(transformed) => assert_eq!(
+                transformed.to_string(),
+                "SELECT id FROM users WHERE eql_v3.match_term(email) @> eql_v3.match_term('ENCRYPTED'::JSONB::eql_v3.query_text_match)"
+            ),
+            Err(err) => panic!("transformation failed: {err}"),
+        };
+    }
+
+    #[test]
+    fn like_on_non_match_encrypted_column_is_rejected() {
+        // Regression: LIKE used to unify to Native and bypass capability checking.
+        // An encrypted column that only implements Eq must not accept LIKE.
+        let schema = resolver(schema! {
+            tables: {
+                users: {
+                    id,
+                    email (EQL: Eq),
+                }
+            }
+        });
+
+        let statement = parse("SELECT id FROM users WHERE email LIKE 'a%'");
+        assert!(
+            type_check(schema, &statement).is_err(),
+            "LIKE on a non-TokenMatch encrypted column should be a capability error"
+        );
+    }
+
+    #[test]
+    fn ilike_rewrites_to_match_term() {
+        // ILIKE takes the same match arm as LIKE (RewriteEqlMatchOps handles both),
+        // so it must rewrite to the identical match_term form.
+        let schema = resolver(schema! {
+            tables: {
+                users: {
+                    id,
+                    email (EQL: TokenMatch),
+                }
+            }
+        });
+
+        let statement = parse("SELECT id FROM users WHERE email ILIKE 'a%'");
+
+        let typed = match type_check(schema, &statement) {
+            Ok(typed) => typed,
+            Err(err) => panic!("type check failed: {err:#?}"),
+        };
+
+        match typed.transform(HashMap::from_iter([(
+            typed.literals[0].1.as_node_key(),
+            ast::Value::SingleQuotedString("ENCRYPTED".into()),
+        )])) {
+            Ok(transformed) => assert_eq!(
+                transformed.to_string(),
+                "SELECT id FROM users WHERE eql_v3.match_term(email) @> eql_v3.match_term('ENCRYPTED'::JSONB::eql_v3.query_text_match)"
+            ),
+            Err(err) => panic!("transformation failed: {err}"),
+        };
+    }
+
+    #[test]
+    fn not_like_rewrites_to_negated_match_term() {
+        // The `negated` arm wraps the containment in `NOT (...)` — otherwise
+        // untested (only the positive LIKE/ILIKE/@@ forms had rewrite coverage).
+        let schema = resolver(schema! {
+            tables: {
+                users: {
+                    id,
+                    email (EQL: TokenMatch),
+                }
+            }
+        });
+
+        let statement = parse("SELECT id FROM users WHERE email NOT LIKE 'a%'");
+
+        let typed = match type_check(schema, &statement) {
+            Ok(typed) => typed,
+            Err(err) => panic!("type check failed: {err:#?}"),
+        };
+
+        match typed.transform(HashMap::from_iter([(
+            typed.literals[0].1.as_node_key(),
+            ast::Value::SingleQuotedString("ENCRYPTED".into()),
+        )])) {
+            Ok(transformed) => assert_eq!(
+                transformed.to_string(),
+                "SELECT id FROM users WHERE NOT (eql_v3.match_term(email) @> eql_v3.match_term('ENCRYPTED'::JSONB::eql_v3.query_text_match))"
+            ),
+            Err(err) => panic!("transformation failed: {err}"),
+        };
+    }
+
+    #[test]
+    fn not_ilike_rewrites_to_negated_match_term() {
+        // NOT ILIKE takes the same negated match arm as NOT LIKE.
+        let schema = resolver(schema! {
+            tables: {
+                users: {
+                    id,
+                    email (EQL: TokenMatch),
+                }
+            }
+        });
+
+        let statement = parse("SELECT id FROM users WHERE email NOT ILIKE 'a%'");
+
+        let typed = match type_check(schema, &statement) {
+            Ok(typed) => typed,
+            Err(err) => panic!("type check failed: {err:#?}"),
+        };
+
+        match typed.transform(HashMap::from_iter([(
+            typed.literals[0].1.as_node_key(),
+            ast::Value::SingleQuotedString("ENCRYPTED".into()),
+        )])) {
+            Ok(transformed) => assert_eq!(
+                transformed.to_string(),
+                "SELECT id FROM users WHERE NOT (eql_v3.match_term(email) @> eql_v3.match_term('ENCRYPTED'::JSONB::eql_v3.query_text_match))"
+            ),
+            Err(err) => panic!("transformation failed: {err}"),
+        };
+    }
+
+    #[test]
+    fn native_like_still_type_checks() {
+        // Regression: routing LIKE/ILIKE through the TokenMatch-bounded rule must
+        // not regress plain LIKE on a native (non-encrypted) column — Native
+        // satisfies all bounds, so `WHERE native_col LIKE 'x'` still type checks.
+        let schema = resolver(schema! {
+            tables: {
+                users: {
+                    id,
+                    email,
+                }
+            }
+        });
+
+        let statement = parse("SELECT id FROM users WHERE email LIKE 'a%'");
+        assert!(
+            type_check(schema, &statement).is_ok(),
+            "LIKE on a native column should still type check"
+        );
+    }
+
+    #[test]
+    fn update_set_casts_stored_value() {
+        // ADR-0003's second stored-value context: an UPDATE SET on an encrypted
+        // column casts the assigned literal to the column domain, exactly like
+        // INSERT. Only INSERT had cast-target rewrite coverage before this.
+        let schema = resolver(schema! {
+            tables: {
+                employees: {
+                    id,
+                    salary (EQL),
+                }
+            }
+        });
+
+        let statement = parse("UPDATE employees SET salary = 20000 WHERE id = 123");
+
+        let typed = match type_check(schema, &statement) {
+            Ok(typed) => typed,
+            Err(err) => panic!("type check failed: {err:#?}"),
+        };
+
+        match typed.transform(HashMap::from_iter([(
+            typed.literals[0].1.as_node_key(),
+            ast::Value::SingleQuotedString("ENCRYPTED".into()),
+        )])) {
+            Ok(transformed) => assert_eq!(
+                transformed.to_string(),
+                "UPDATE employees SET salary = 'ENCRYPTED'::JSONB::public.eql_v3_text WHERE id = 123"
+            ),
+            Err(err) => panic!("transformation failed: {err}"),
+        };
     }
 
     #[test]
@@ -138,7 +426,7 @@ mod test {
         match type_check(schema, &statement) {
             Ok(typed) => {
                 assert!(typed.literals.contains(&(
-                    EqlTerm::Full(EqlValue(
+                    EqlTerm::Full(EqlValue::with_canonical_identity(
                         TableColumn {
                             table: id("users"),
                             column: id("email")
@@ -170,7 +458,7 @@ mod test {
         match type_check(schema, &statement) {
             Ok(typed) => {
                 assert!(typed.literals.contains(&(
-                    EqlTerm::Full(EqlValue(
+                    EqlTerm::Full(EqlValue::with_canonical_identity(
                         TableColumn {
                             table: id("users"),
                             column: id("email")
@@ -203,7 +491,7 @@ mod test {
         match type_check(schema, &statement) {
             Ok(typed) => {
                 assert!(typed.literals.contains(&(
-                    EqlTerm::Full(EqlValue(
+                    EqlTerm::Full(EqlValue::with_canonical_identity(
                         TableColumn {
                             table: id("users"),
                             column: id("email")
@@ -534,8 +822,9 @@ mod test {
             tables: {
                 users: {
                     id,
-                    email (EQL),
-                    first_name (EQL),
+                    // `=` is equality, so both columns have to declare it.
+                    email (EQL: Eq),
+                    first_name (EQL: Eq),
                 }
             }
         });
@@ -544,20 +833,20 @@ mod test {
 
         match type_check(schema, &statement) {
             Ok(typed) => {
-                let a = Value::Eql(EqlTerm::Full(EqlValue(
+                let a = Value::Eql(EqlTerm::Full(EqlValue::with_canonical_identity(
                     TableColumn {
                         table: id("users"),
                         column: id("email"),
                     },
-                    EqlTraits::default(),
+                    EqlTraits::from(EqlTrait::Eq),
                 )));
 
-                let b = Value::Eql(EqlTerm::Full(EqlValue(
+                let b = Value::Eql(EqlTerm::Full(EqlValue::with_canonical_identity(
                     TableColumn {
                         table: id("users"),
                         column: id("first_name"),
                     },
-                    EqlTraits::default(),
+                    EqlTraits::from(EqlTrait::Eq),
                 )));
 
                 assert_eq!(typed.params, vec![(Param(1), a,), (Param(2), b,)]);
@@ -566,8 +855,8 @@ mod test {
                     typed.projection,
                     projection![
                         (NATIVE(users.id) as id),
-                        (EQL(users.email) as email),
-                        (EQL(users.first_name) as first_name)
+                        (EQL(users.email: Eq) as email),
+                        (EQL(users.first_name: Eq) as first_name)
                     ]
                 );
             }
@@ -592,7 +881,7 @@ mod test {
 
         match type_check(schema, &statement) {
             Ok(typed) => {
-                let a = Value::Eql(EqlTerm::Full(EqlValue(
+                let a = Value::Eql(EqlTerm::Full(EqlValue::with_canonical_identity(
                     TableColumn {
                         table: id("users"),
                         column: id("salary"),
@@ -600,7 +889,7 @@ mod test {
                     EqlTraits::from(EqlTrait::Ord),
                 )));
 
-                let b = Value::Eql(EqlTerm::Full(EqlValue(
+                let b = Value::Eql(EqlTerm::Full(EqlValue::with_canonical_identity(
                     TableColumn {
                         table: id("users"),
                         column: id("age"),
@@ -1113,7 +1402,7 @@ mod test {
         assert_eq!(
             typed.literals,
             vec![(
-                EqlTerm::Full(EqlValue(
+                EqlTerm::Full(EqlValue::with_canonical_identity(
                     TableColumn {
                         table: id("employees"),
                         column: id("salary")
@@ -1130,7 +1419,7 @@ mod test {
         )])) {
             Ok(transformed_statement) => assert_eq!(
                 transformed_statement.to_string(),
-                "SELECT * FROM employees WHERE salary > 'ENCRYPTED'::JSONB::eql_v2_encrypted"
+                "SELECT * FROM employees WHERE eql_v3.ord_term(salary) > eql_v3.ord_term('ENCRYPTED'::JSONB::eql_v3.query_text_ord)"
             ),
             Err(err) => panic!("statement transformation failed: {err}"),
         };
@@ -1163,7 +1452,7 @@ mod test {
         assert_eq!(
             typed.literals,
             vec![(
-                EqlTerm::Full(EqlValue(
+                EqlTerm::Full(EqlValue::with_canonical_identity(
                     TableColumn {
                         table: id("employees"),
                         column: id("salary")
@@ -1180,7 +1469,7 @@ mod test {
         )])) {
             Ok(transformed_statement) => assert_eq!(
                 transformed_statement.to_string(),
-                "INSERT INTO employees (salary) VALUES ('ENCRYPTED'::JSONB::eql_v2_encrypted)"
+                "INSERT INTO employees (salary) VALUES ('ENCRYPTED'::JSONB::public.eql_v3_text)"
             ),
             Err(err) => panic!("statement transformation failed: {err}"),
         };
@@ -1213,7 +1502,10 @@ mod test {
                             )
                         )
                     )
-                    union
+                    -- `union all`, not `union`: deduplicating here would compare
+                    -- the encrypted payloads rather than the salaries, which the
+                    -- type checker now refuses.
+                    union all
                     (
                         select salary as y from employees
                             where salary >= (select min(max(foo)) from (
@@ -1338,7 +1630,9 @@ mod test {
                 employees: {
                     id,
                     name,
-                    salary (EQL),
+                    // `group by salary` is equality, so the column has to
+                    // declare it.
+                    salary (EQL: Eq),
                 }
             }
         });
@@ -1352,7 +1646,7 @@ mod test {
 
         assert_eq!(
             typed.projection,
-            projection![(NATIVE as count), (EQL(employees.salary) as salary)]
+            projection![(NATIVE as count), (EQL(employees.salary: Eq) as salary)]
         );
     }
 
@@ -1447,7 +1741,8 @@ mod test {
                 employees: {
                     id,
                     department,
-                    salary (EQL),
+                    // `min`/`max` are ordering, so the column has to declare it.
+                    salary (EQL: Ord),
                 }
             }
         });
@@ -1460,7 +1755,7 @@ mod test {
                 match typed.transform(HashMap::new()) {
                     Ok(statement) => assert_eq!(
                         statement.to_string(),
-                        "SELECT eql_v2.min(salary), eql_v2.max(salary), department FROM employees GROUP BY department".to_string()
+                        "SELECT eql_v3.min(salary), eql_v3.max(salary), department FROM employees GROUP BY department".to_string()
                     ),
                     Err(err) => panic!("transformation failed: {err}"),
                 }
@@ -1476,7 +1771,7 @@ mod test {
             tables: {
                 employees: {
                     id,
-                    eql_col (EQL),
+                    eql_col (EQL: Eq),
                     native_col,
                 }
             }
@@ -1493,7 +1788,7 @@ mod test {
                 Ok(statement) => {
                     assert_eq!(
                             statement.to_string(),
-                            "SELECT * FROM employees WHERE eql_col = $1::JSONB::eql_v2_encrypted AND native_col = $2"
+                            "SELECT * FROM employees WHERE eql_v3.eq_term(eql_col) = eql_v3.eq_term($1::JSONB::eql_v3.query_text_eq) AND native_col = $2"
                         );
                 }
                 Err(err) => panic!("transformation failed: {err}"),
@@ -1538,8 +1833,8 @@ mod test {
                         assert_eq!(
                             statement.to_string(),
                             "SELECT \
-                            eql_v2.jsonb_path_exists(eql_col, '<encrypted-selector($.another-secret)>'::JSONB::eql_v2_encrypted), \
-                            eql_v2.jsonb_path_query(eql_col, '<encrypted-selector($.secret)>'::JSONB::eql_v2_encrypted), \
+                            eql_v3.jsonb_path_exists(eql_col, '<encrypted-selector($.another-secret)>'), \
+                            eql_v3.jsonb_path_query(eql_col, '<encrypted-selector($.secret)>'), \
                             jsonb_path_query(native_col, '$.not-secret') \
                             FROM employees"
                         );
@@ -1656,7 +1951,9 @@ mod test {
                     value: ast::Value::SingleQuotedString(s),
                     span: _,
                 }) => {
-                    format!("'<encrypted-selector({s})>'::JSONB::eql_v2_encrypted")
+                    // A jsonb_path_query selector is emitted as bare encrypted-selector
+                    // text (eql_v3.jsonb_path_query(json, text)), not a jsonb cast.
+                    format!("'<encrypted-selector({s})>'")
                 }
                 _ => panic!("unsupported expr type in test util"),
             })
@@ -1677,7 +1974,7 @@ mod test {
         match type_check(schema, &statement) {
             Ok(typed) => match typed.transform(encrypted_literals) {
                 Ok(statement) => {
-                    let rewritten_fn_name = format!("eql_v2.{fn_name}");
+                    let rewritten_fn_name = format!("eql_v3.{fn_name}");
                     assert_eq!(
                         statement.to_string(),
                         format!(
@@ -1714,10 +2011,13 @@ mod test {
                 )) {
                     Ok(statement) => {
                         let expected = match op {
-                            "@>" => "SELECT id, eql_v2.jsonb_contains(notes, '<encrypted-selector(medications)>'::JSONB::eql_v2_encrypted) AS meds FROM patients".to_string(),
-                            "<@" => "SELECT id, eql_v2.jsonb_contained_by(notes, '<encrypted-selector(medications)>'::JSONB::eql_v2_encrypted) AS meds FROM patients".to_string(),
-                            // Other operators are not transformed
-                            _ => format!("SELECT id, notes {op} '<encrypted-selector(medications)>'::JSONB::eql_v2_encrypted AS meds FROM patients"),
+                            "@>" => "SELECT id, eql_v3.jsonb_contains(notes, '<encrypted-selector(medications)>'::JSONB::public.eql_v3_text_search) AS meds FROM patients".to_string(),
+                            "<@" => "SELECT id, eql_v3.jsonb_contained_by(notes, '<encrypted-selector(medications)>'::JSONB::public.eql_v3_text_search) AS meds FROM patients".to_string(),
+                            // -> / ->> field access: functionalised to eql_v3."->"/"->>",
+                            // with the field selector passed as encrypted text.
+                            "->" => "SELECT id, eql_v3.\"->\"(notes, '<encrypted-selector(medications)>') AS meds FROM patients".to_string(),
+                            "->>" => "SELECT id, eql_v3.\"->>\"(notes, '<encrypted-selector(medications)>') AS meds FROM patients".to_string(),
+                            _ => format!("SELECT id, notes {op} '<encrypted-selector(medications)>'::JSONB::public.eql_v3_text_search AS meds FROM patients"),
                         };
                         assert_eq!(statement.to_string(), expected)
                     }
@@ -1740,12 +2040,12 @@ mod test {
         });
 
         let statement = parse(
-            "SELECT id FROM patients WHERE eql_v2.jsonb_array(notes) @> eql_v2.jsonb_array(notes)",
+            "SELECT id FROM patients WHERE eql_v3.jsonb_array(notes) @> eql_v3.jsonb_array(notes)",
         );
 
         match type_check(schema, &statement) {
             Ok(_) => (),
-            Err(err) => panic!("type check failed for eql_v2.jsonb_array: {err}"),
+            Err(err) => panic!("type check failed for eql_v3.jsonb_array: {err}"),
         }
     }
 
@@ -1760,11 +2060,11 @@ mod test {
             }
         });
 
-        let statement = parse("SELECT id FROM patients WHERE eql_v2.jsonb_contains(notes, notes)");
+        let statement = parse("SELECT id FROM patients WHERE eql_v3.jsonb_contains(notes, notes)");
 
         match type_check(schema, &statement) {
             Ok(_) => (),
-            Err(err) => panic!("type check failed for eql_v2.jsonb_contains: {err}"),
+            Err(err) => panic!("type check failed for eql_v3.jsonb_contains: {err}"),
         }
     }
 
@@ -1780,16 +2080,16 @@ mod test {
         });
 
         let statement =
-            parse("SELECT id FROM patients WHERE eql_v2.jsonb_contained_by(notes, notes)");
+            parse("SELECT id FROM patients WHERE eql_v3.jsonb_contained_by(notes, notes)");
 
         match type_check(schema, &statement) {
             Ok(_) => (),
-            Err(err) => panic!("type check failed for eql_v2.jsonb_contained_by: {err}"),
+            Err(err) => panic!("type check failed for eql_v3.jsonb_contained_by: {err}"),
         }
     }
 
     #[test]
-    fn eql_v2_jsonb_contains_with_param() {
+    fn eql_v3_jsonb_contains_with_param() {
         let schema = resolver(schema! {
             tables: {
                 patients: {
@@ -1799,7 +2099,7 @@ mod test {
             }
         });
 
-        let statement = parse("SELECT id FROM patients WHERE eql_v2.jsonb_contains(notes, $1)");
+        let statement = parse("SELECT id FROM patients WHERE eql_v3.jsonb_contains(notes, $1)");
 
         let typed = type_check(schema, &statement)
             .map_err(|err| err.to_string())
@@ -1812,7 +2112,7 @@ mod test {
         match typed.transform(HashMap::new()) {
             Ok(statement) => assert_eq!(
                 statement.to_string(),
-                "SELECT id FROM patients WHERE eql_v2.jsonb_contains(notes, $1::JSONB::eql_v2_encrypted)"
+                "SELECT id FROM patients WHERE eql_v3.jsonb_contains(notes, $1::JSONB::public.eql_v3_text_search)"
             ),
             Err(err) => panic!("transformation failed: {err}"),
         }
@@ -1840,15 +2140,15 @@ mod test {
 
         // Verify function call exists
         assert!(
-            sql.contains("eql_v2.jsonb_contains"),
-            "Expected @> to be transformed to eql_v2.jsonb_contains, got: {sql}"
+            sql.contains("eql_v3.jsonb_contains"),
+            "Expected @> to be transformed to eql_v3.jsonb_contains, got: {sql}"
         );
 
         // CRITICAL: Verify the parameter is cast to enable GIN index usage
-        // The cast ::JSONB::eql_v2_encrypted is required for GIN indexes to work
+        // The cast ::JSONB::public.eql_v3_text_search is required for GIN indexes to work
         assert!(
-            sql.contains("::JSONB::eql_v2_encrypted") || sql.contains("::jsonb::eql_v2_encrypted"),
-            "Expected parameter to be cast as ::JSONB::eql_v2_encrypted for GIN index support, got: {sql}"
+            sql.contains("::JSONB::public.eql_v3_text_search") || sql.contains("::jsonb::public.eql_v3_text_search"),
+            "Expected parameter to be cast as ::JSONB::public.eql_v3_text_search for GIN index support, got: {sql}"
         );
     }
 
@@ -1874,14 +2174,14 @@ mod test {
 
         // Verify function call exists
         assert!(
-            sql.contains("eql_v2.jsonb_contained_by"),
-            "Expected <@ to be transformed to eql_v2.jsonb_contained_by, got: {sql}"
+            sql.contains("eql_v3.jsonb_contained_by"),
+            "Expected <@ to be transformed to eql_v3.jsonb_contained_by, got: {sql}"
         );
 
         // CRITICAL: Verify the parameter is cast to enable GIN index usage
         assert!(
-            sql.contains("::JSONB::eql_v2_encrypted") || sql.contains("::jsonb::eql_v2_encrypted"),
-            "Expected parameter to be cast as ::JSONB::eql_v2_encrypted for GIN index support, got: {sql}"
+            sql.contains("::JSONB::public.eql_v3_text_search") || sql.contains("::jsonb::public.eql_v3_text_search"),
+            "Expected parameter to be cast as ::JSONB::public.eql_v3_text_search for GIN index support, got: {sql}"
         );
     }
 
@@ -1914,8 +2214,8 @@ mod test {
 
         // Verify function call exists inside the EXPLAIN
         assert!(
-            sql.contains("eql_v2.jsonb_contains"),
-            "Expected @> inside EXPLAIN to be transformed to eql_v2.jsonb_contains, got: {sql}"
+            sql.contains("eql_v3.jsonb_contains"),
+            "Expected @> inside EXPLAIN to be transformed to eql_v3.jsonb_contains, got: {sql}"
         );
     }
 
@@ -2064,6 +2364,1268 @@ mod test {
         }
     }
 
+    /// A schema with one encrypted JSON column, for the value-selector tests.
+    ///
+    /// The domain is spelled out: value-selector fusion keys off the column's
+    /// *token* type being `Json`, and the macro's default synthesises a `text`
+    /// token regardless of the `JsonLike` capability.
+    fn json_eq_schema() -> Arc<TableResolver> {
+        resolver(schema! {
+            tables: {
+                patients: {
+                    id,
+                    notes (EQL("eql_v3_json_search"): JsonLike + Contain),
+                }
+            }
+        })
+    }
+
+    /// `col -> $1 = $2` fuses both operands into ONE containment needle: the
+    /// field access is discarded and the two input params become a single
+    /// output param, renumbered `$1`.
+    #[test]
+    fn json_field_eq_params_rewrites_to_containment() {
+        let statement = parse("SELECT id FROM patients WHERE notes -> $1 = $2");
+
+        let typed = type_check(json_eq_schema(), &statement).unwrap();
+        let transformed = typed.transform(HashMap::new()).unwrap();
+
+        assert_eq!(
+            transformed.to_string(),
+            "SELECT id FROM patients WHERE eql_v3.jsonb_contains(notes, $1::JSONB::eql_v3.query_json)"
+        );
+
+        // Two input params, one output param, derived from both.
+        assert_eq!(transformed.params.len(), 1);
+        assert_eq!(
+            transformed.params.outputs()[0].source,
+            OutputParamSource::JsonValueSelector {
+                path: JsonSelectorSource::Param(Param(1)),
+                value: Param(2),
+            }
+        );
+        assert!(!transformed.params.is_identity());
+    }
+
+    /// The `->>` and `jsonb_path_query_first` spellings are the same access and
+    /// rewrite identically.
+    #[test]
+    fn json_field_eq_alternate_spellings_rewrite_to_containment() {
+        for access in ["notes ->> $1", "jsonb_path_query_first(notes, $1)"] {
+            let statement = parse(&format!("SELECT id FROM patients WHERE {access} = $2"));
+            let typed = type_check(json_eq_schema(), &statement).unwrap();
+
+            assert_eq!(
+                typed.transform(HashMap::new()).unwrap().to_string(),
+                "SELECT id FROM patients WHERE eql_v3.jsonb_contains(notes, $1::JSONB::eql_v3.query_json)",
+                "unexpected rewrite for `{access}`"
+            );
+        }
+    }
+
+    /// Params around a fusion are renumbered to close the gap it leaves, and the
+    /// plan records where each surviving output param came from.
+    #[test]
+    fn json_field_eq_renumbers_surrounding_params() {
+        let statement =
+            parse("SELECT id FROM patients WHERE id = $1 AND notes -> $2 = $3 AND id <> $4");
+
+        let typed = type_check(json_eq_schema(), &statement).unwrap();
+        let transformed = typed.transform(HashMap::new()).unwrap();
+
+        assert_eq!(
+            transformed.to_string(),
+            "SELECT id FROM patients WHERE id = $1 AND eql_v3.jsonb_contains(notes, $2::JSONB::eql_v3.query_json) AND id <> $3"
+        );
+
+        let outputs = transformed.params.outputs();
+        assert_eq!(outputs.len(), 3);
+        assert_eq!(outputs[0].source, OutputParamSource::Input(Param(1)));
+        assert_eq!(
+            outputs[1].source,
+            OutputParamSource::JsonValueSelector {
+                path: JsonSelectorSource::Param(Param(2)),
+                value: Param(3),
+            }
+        );
+        assert_eq!(outputs[2].source, OutputParamSource::Input(Param(4)));
+    }
+
+    /// A statement whose params the rewrite leaves alone reports an identity
+    /// plan, so the proxy can keep binding by position.
+    #[test]
+    fn ordinary_params_produce_an_identity_plan() {
+        let schema = resolver(schema! {
+            tables: {
+                patients: {
+                    id,
+                    name (EQL: Eq),
+                }
+            }
+        });
+
+        let statement = parse("SELECT id FROM patients WHERE id = $1 AND name = $2");
+        let typed = type_check(schema, &statement).unwrap();
+        let transformed = typed.transform(HashMap::new()).unwrap();
+
+        assert_eq!(transformed.params.len(), 2);
+        assert!(transformed.params.is_identity());
+    }
+
+    /// Both halves as literals: the selector text is captured inline at
+    /// type-check time, and the selector literal vanishes from the output.
+    #[test]
+    fn json_field_eq_literals_rewrites_to_containment() {
+        let statement =
+            parse("SELECT id FROM patients WHERE notes -> 'medications' = '\"aspirin\"'");
+
+        let typed = type_check(json_eq_schema(), &statement).unwrap();
+
+        assert_eq!(
+            typed
+                .json_value_selectors
+                .for_literal(&ast::Value::SingleQuotedString("\"aspirin\"".to_owned())),
+            None,
+            "for_literal is keyed by node identity, not by value"
+        );
+
+        // Both literals are encrypted operands; only the value one survives the
+        // rewrite, so the selector's replacement is simply never placed.
+        let encrypted = HashMap::from_iter([
+            (
+                test_helpers::get_node_key_of_json_selector(
+                    &statement,
+                    &ast::Value::SingleQuotedString("medications".to_owned()),
+                ),
+                ast::Value::SingleQuotedString("<selector>".to_owned()),
+            ),
+            (
+                test_helpers::get_node_key_of_json_selector(
+                    &statement,
+                    &ast::Value::SingleQuotedString("\"aspirin\"".to_owned()),
+                ),
+                ast::Value::SingleQuotedString("<needle>".to_owned()),
+            ),
+        ]);
+
+        assert_eq!(
+            typed.transform(encrypted).unwrap().to_string(),
+            "SELECT id FROM patients WHERE eql_v3.jsonb_contains(notes, '<needle>'::JSONB::eql_v3.query_json)"
+        );
+    }
+
+    /// `<>` is containment negated.
+    #[test]
+    fn json_field_not_eq_rewrites_to_negated_containment() {
+        let statement = parse("SELECT id FROM patients WHERE notes -> $1 <> $2");
+
+        let typed = type_check(json_eq_schema(), &statement).unwrap();
+
+        assert_eq!(
+            typed.transform(HashMap::new()).unwrap().to_string(),
+            "SELECT id FROM patients WHERE NOT (eql_v3.jsonb_contains(notes, $1::JSONB::eql_v3.query_json))"
+        );
+    }
+
+    /// Equality on the whole encrypted JSON column is document equality, NOT a
+    /// field access — it must keep its ordinary term rewrite. Guards against the
+    /// value-selector fusion swallowing every `=` on a JSON column.
+    #[test]
+    fn json_column_eq_is_not_value_selector_containment() {
+        let statement = parse("SELECT id FROM patients WHERE notes = $1");
+
+        let typed = type_check(json_eq_schema(), &statement).unwrap();
+
+        assert_eq!(typed.json_value_selectors.for_param(Param(1)), None);
+        assert!(typed.json_value_selectors.is_empty());
+
+        let sql = typed.transform(HashMap::new()).unwrap().to_string();
+        assert!(
+            !sql.contains("jsonb_contains"),
+            "whole-column equality must not become containment, got: {sql}"
+        );
+    }
+
+    /// `ORDER BY` on an encrypted column must order by its ordering TERM. A bare
+    /// `ORDER BY col` compares the jsonb payloads, whose first field is the
+    /// randomised ciphertext — silently returning rows in an arbitrary order
+    /// that differs on every insert.
+    #[test]
+    fn order_by_encrypted_column_uses_ord_term() {
+        let schema = resolver(schema! {
+            tables: {
+                employees: {
+                    id,
+                    salary (EQL("eql_v3_integer_ord"): Ord),
+                }
+            }
+        });
+
+        for (order_by, expected) in [
+            ("salary", "eql_v3.ord_term(salary)"),
+            ("salary DESC", "eql_v3.ord_term(salary) DESC"),
+            (
+                "salary ASC NULLS FIRST",
+                "eql_v3.ord_term(salary) ASC NULLS FIRST",
+            ),
+            (
+                "employees.salary DESC NULLS LAST",
+                "eql_v3.ord_term(employees.salary) DESC NULLS LAST",
+            ),
+            // A native column is left alone; a mixed list rewrites only the
+            // encrypted term.
+            ("id", "id"),
+            ("id, salary", "id, eql_v3.ord_term(salary)"),
+        ] {
+            let statement = parse(&format!("SELECT id FROM employees ORDER BY {order_by}"));
+            let typed = type_check(schema.clone(), &statement).unwrap();
+
+            assert_eq!(
+                typed.transform(HashMap::new()).unwrap().to_string(),
+                format!("SELECT id FROM employees ORDER BY {expected}"),
+                "unexpected rewrite for `ORDER BY {order_by}`"
+            );
+        }
+    }
+
+    /// `SELECT DISTINCT` ordered by an encrypted column has to be restructured.
+    ///
+    /// `RewriteEqlOrderBy` must order by `ord_term(col)`, but PostgreSQL requires
+    /// every `ORDER BY` expression under `DISTINCT` to appear in the select list
+    /// — and the term does not. The select is pushed into a subquery that also
+    /// projects the term, and the (non-DISTINCT) outer query orders by it.
+    #[test]
+    fn distinct_order_by_encrypted_column_wraps_in_subquery() {
+        let schema = resolver(schema! {
+            tables: {
+                employees: {
+                    id,
+                    salary (EQL("eql_v3_integer_ord"): Ord),
+                }
+            }
+        });
+
+        for (input, expected) in [
+            // The ordering term is projected by the subquery, not by the client's
+            // result set.
+            (
+                "SELECT DISTINCT id, salary FROM employees ORDER BY salary",
+                "SELECT __eql_col_0 AS id, __eql_col_1 AS salary \
+                 FROM (SELECT DISTINCT ON (id, eql_v3.ord_term(salary)) id AS __eql_col_0, \
+                 salary AS __eql_col_1, \
+                 eql_v3.ord_term(salary) AS __eql_ord_0 FROM employees) AS __eql_distinct \
+                 ORDER BY __eql_ord_0",
+            ),
+            // Sort options ride along with the hoisted term.
+            (
+                "SELECT DISTINCT id, salary FROM employees ORDER BY salary DESC NULLS FIRST",
+                "SELECT __eql_col_0 AS id, __eql_col_1 AS salary \
+                 FROM (SELECT DISTINCT ON (id, eql_v3.ord_term(salary)) id AS __eql_col_0, \
+                 salary AS __eql_col_1, \
+                 eql_v3.ord_term(salary) AS __eql_ord_0 FROM employees) AS __eql_distinct \
+                 ORDER BY __eql_ord_0 DESC NULLS FIRST",
+            ),
+            // A native term in the same ORDER BY is carried through as a
+            // reference to the column the subquery already projects.
+            (
+                "SELECT DISTINCT id, salary FROM employees ORDER BY id, salary",
+                "SELECT __eql_col_0 AS id, __eql_col_1 AS salary \
+                 FROM (SELECT DISTINCT ON (id, eql_v3.ord_term(salary)) id AS __eql_col_0, \
+                 salary AS __eql_col_1, \
+                 eql_v3.ord_term(salary) AS __eql_ord_0 FROM employees) AS __eql_distinct \
+                 ORDER BY __eql_col_0, __eql_ord_0",
+            ),
+            // An ordinal still refers to the right column: the outer projection
+            // preserves both the order and the count.
+            (
+                "SELECT DISTINCT id, salary FROM employees ORDER BY 1, salary",
+                "SELECT __eql_col_0 AS id, __eql_col_1 AS salary \
+                 FROM (SELECT DISTINCT ON (id, eql_v3.ord_term(salary)) id AS __eql_col_0, \
+                 salary AS __eql_col_1, \
+                 eql_v3.ord_term(salary) AS __eql_ord_0 FROM employees) AS __eql_distinct \
+                 ORDER BY 1, __eql_ord_0",
+            ),
+            // The client's column names survive the round trip.
+            (
+                "SELECT DISTINCT id AS employee_id, salary FROM employees ORDER BY salary",
+                "SELECT __eql_col_0 AS employee_id, __eql_col_1 AS salary \
+                 FROM (SELECT DISTINCT ON (id, eql_v3.ord_term(salary)) id AS __eql_col_0, \
+                 salary AS __eql_col_1, \
+                 eql_v3.ord_term(salary) AS __eql_ord_0 FROM employees) AS __eql_distinct \
+                 ORDER BY __eql_ord_0",
+            ),
+        ] {
+            let statement = parse(input);
+            let typed = type_check(schema.clone(), &statement).unwrap();
+
+            assert_eq!(
+                typed.transform(HashMap::new()).unwrap().to_string(),
+                expected.split_whitespace().collect::<Vec<_>>().join(" "),
+                "unexpected rewrite for `{input}`"
+            );
+        }
+    }
+
+    /// The subquery wrapping is applied only where the `DISTINCT` and
+    /// `ORDER BY` constraints actually collide.
+    #[test]
+    fn distinct_order_by_wraps_only_when_needed() {
+        let schema = resolver(schema! {
+            tables: {
+                employees: {
+                    id,
+                    salary (EQL("eql_v3_integer_ord"): Ord),
+                }
+            }
+        });
+
+        for (input, expected) in [
+            // Ordered by a native column, but the projection still dedupes an
+            // encrypted one — so the DISTINCT ON that produces has to be kept
+            // away from the ORDER BY, which means wrapping.
+            (
+                "SELECT DISTINCT id, salary FROM employees ORDER BY id",
+                "SELECT __eql_col_0 AS id, __eql_col_1 AS salary \
+                 FROM (SELECT DISTINCT ON (id, eql_v3.ord_term(salary)) id AS __eql_col_0, \
+                 salary AS __eql_col_1 FROM employees) AS __eql_distinct \
+                 ORDER BY __eql_col_0",
+            ),
+            // Ordered by an encrypted column, but not DISTINCT — the term is
+            // allowed to sit in ORDER BY on its own.
+            (
+                "SELECT id, salary FROM employees ORDER BY salary",
+                "SELECT id, salary FROM employees ORDER BY eql_v3.ord_term(salary)",
+            ),
+            // DISTINCT with no ORDER BY: dedupes on the term in place, no
+            // wrapping needed.
+            (
+                "SELECT DISTINCT id, salary FROM employees",
+                "SELECT DISTINCT ON (id, eql_v3.ord_term(salary)) id, salary FROM employees",
+            ),
+        ] {
+            let statement = parse(input);
+            let typed = type_check(schema.clone(), &statement).unwrap();
+
+            assert_eq!(
+                typed.transform(HashMap::new()).unwrap().to_string(),
+                expected,
+                "unexpected rewrite for `{input}`"
+            );
+        }
+    }
+
+    /// `SELECT DISTINCT` on an encrypted column must deduplicate on the column's
+    /// equality term. A bare `DISTINCT` compares whole jsonb payloads, whose
+    /// ciphertext is randomised per row, so equal plaintexts never collapse and
+    /// `DISTINCT` silently returns duplicates.
+    #[test]
+    fn distinct_on_encrypted_column_dedupes_on_eq_term() {
+        let schema = resolver(schema! {
+            tables: {
+                employees: {
+                    id,
+                    email (EQL("eql_v3_text_search"): Eq + Ord + TokenMatch),
+                    salary (EQL("eql_v3_integer_ord"): Ord),
+                }
+            }
+        });
+
+        for (input, expected) in [
+            // A domain that stores `hm` keys on `eq_term`.
+            (
+                "SELECT DISTINCT email FROM employees",
+                "SELECT DISTINCT ON (eql_v3.eq_term(email)) email FROM employees",
+            ),
+            // An ord-only domain stores no `hm`, so equality falls back to the
+            // ordering term — the same fallback `=` uses.
+            (
+                "SELECT DISTINCT salary FROM employees",
+                "SELECT DISTINCT ON (eql_v3.ord_term(salary)) salary FROM employees",
+            ),
+            // A plaintext column keys on itself.
+            (
+                "SELECT DISTINCT id, email FROM employees",
+                "SELECT DISTINCT ON (id, eql_v3.eq_term(email)) id, email FROM employees",
+            ),
+            // No encrypted column in the projection: left alone entirely.
+            (
+                "SELECT DISTINCT id FROM employees",
+                "SELECT DISTINCT id FROM employees",
+            ),
+        ] {
+            let statement = parse(input);
+            let typed = type_check(schema.clone(), &statement).unwrap();
+
+            assert_eq!(
+                typed.transform(HashMap::new()).unwrap().to_string(),
+                expected,
+                "unexpected rewrite for `{input}`"
+            );
+        }
+    }
+
+    /// Deduplication is equality, so `DISTINCT` on a column whose domain carries
+    /// no equality term is a capability error — caught during type checking,
+    /// before any rewrite is attempted.
+    #[test]
+    fn distinct_on_a_column_without_equality_is_a_type_error() {
+        let schema = resolver(schema! {
+            tables: {
+                employees: {
+                    id,
+                    // Storage-only: a two-value column leaks its distribution
+                    // under any index, so v3 gives boolean no searchable terms.
+                    active (EQL("eql_v3_boolean")),
+                }
+            }
+        });
+
+        for input in [
+            "SELECT DISTINCT active FROM employees",
+            "SELECT DISTINCT ON (active) id FROM employees",
+        ] {
+            let statement = parse(input);
+
+            assert!(
+                type_check(schema.clone(), &statement).is_err(),
+                "expected `{input}` to fail type checking"
+            );
+        }
+    }
+
+    /// An aggregate over a grouped encrypted column must not be lifted through
+    /// `grouped_value`. `MIN(col)` resolves to the same `EqlValue` as `col`, so
+    /// a naive match wraps it as `grouped_value(eql_v3.min(col))` — an aggregate
+    /// inside an aggregate, which PostgreSQL rejects. An aggregate already
+    /// yields one value per group.
+    #[test]
+    fn group_by_does_not_lift_aggregate_projections() {
+        let schema = resolver(schema! {
+            tables: {
+                employees: {
+                    id,
+                    salary (EQL("eql_v3_integer_ord"): Ord),
+                }
+            }
+        });
+
+        for (input, expected) in [
+            // The aggregate is retargeted but NOT wrapped.
+            (
+                "SELECT MIN(salary) FROM employees GROUP BY salary",
+                "SELECT eql_v3.MIN(salary) FROM employees GROUP BY eql_v3.ord_term(salary)",
+            ),
+            (
+                "SELECT MAX(salary) FROM employees GROUP BY salary",
+                "SELECT eql_v3.MAX(salary) FROM employees GROUP BY eql_v3.ord_term(salary)",
+            ),
+            // A direct projection of the grouped column still is wrapped — that
+            // is the case `grouped_value` exists for.
+            (
+                "SELECT salary, COUNT(*) FROM employees GROUP BY salary",
+                "SELECT eql_v3.grouped_value(salary) AS salary, COUNT(*) FROM employees \
+                 GROUP BY eql_v3.ord_term(salary)",
+            ),
+        ] {
+            let statement = parse(input);
+            let typed = type_check(schema.clone(), &statement).unwrap();
+
+            assert_eq!(
+                typed.transform(HashMap::new()).unwrap().to_string(),
+                expected.split_whitespace().collect::<Vec<_>>().join(" "),
+                "unexpected rewrite for `{input}`"
+            );
+        }
+    }
+
+    /// `SELECT *` hides the projected columns, so a grouped encrypted column
+    /// cannot be lifted through `grouped_value` — and left alone it is no longer
+    /// functionally dependent on the rewritten key. Rejected by name rather than
+    /// left to fail as a bare PostgreSQL error.
+    #[test]
+    fn group_by_rejects_wildcard_projections() {
+        let schema = resolver(schema! {
+            tables: {
+                employees: {
+                    id,
+                    salary (EQL("eql_v3_integer_ord"): Ord),
+                }
+            }
+        });
+
+        let statement = parse("SELECT * FROM employees GROUP BY id, salary");
+        let typed = type_check(schema.clone(), &statement).unwrap();
+
+        let err = typed
+            .transform(HashMap::new())
+            .expect_err("SELECT * with GROUP BY on an encrypted column should be rejected");
+
+        assert!(
+            err.to_string().contains("SELECT *"),
+            "unexpected error: {err}"
+        );
+
+        // Grouping only on plaintext columns leaves the wildcard alone.
+        let statement = parse("SELECT * FROM employees GROUP BY id");
+        let typed = type_check(schema, &statement).unwrap();
+        assert_eq!(
+            typed.transform(HashMap::new()).unwrap().to_string(),
+            "SELECT * FROM employees GROUP BY id"
+        );
+    }
+
+    /// The wrapper's synthetic names must not be shadowed by a user column of
+    /// the same name — the outer `ORDER BY` would resolve to the user's column
+    /// instead of the projected ordering term.
+    #[test]
+    fn distinct_order_by_synthetic_names_avoid_user_columns() {
+        let schema = resolver(schema! {
+            tables: {
+                employees: {
+                    __eql_col_0,
+                    __eql_ord_0,
+                    salary (EQL("eql_v3_integer_ord"): Ord),
+                }
+            }
+        });
+
+        let statement = parse(
+            "SELECT DISTINCT __eql_col_0, __eql_ord_0, salary FROM employees ORDER BY salary",
+        );
+        let typed = type_check(schema, &statement).unwrap();
+        let sql = typed.transform(HashMap::new()).unwrap().to_string();
+
+        // The prefix grew past the user's columns, so the names it generates
+        // cannot be the ones the query already mentions.
+        assert!(
+            sql.contains("___eql_col_0"),
+            "expected a lengthened prefix, got: {sql}"
+        );
+        assert!(
+            sql.contains("___eql_ord_0"),
+            "expected a lengthened ordering name, got: {sql}"
+        );
+        // The user's own columns are still projected under their own names.
+        assert!(
+            sql.contains("AS __eql_col_0") && sql.contains("AS __eql_ord_0"),
+            "user columns lost their names: {sql}"
+        );
+    }
+
+    /// `@@` is symmetric in PostgreSQL, so the encrypted column may be written
+    /// on either side. Both spellings must produce the same containment, with
+    /// the pattern — not the column — as the encrypted needle.
+    #[test]
+    fn match_op_normalises_reversed_operands() {
+        let schema = resolver(schema! {
+            tables: {
+                employees: {
+                    id,
+                    email (EQL("eql_v3_text_search"): Eq + Ord + TokenMatch),
+                }
+            }
+        });
+
+        let expected = "SELECT id FROM employees WHERE eql_v3.match_term(email) @> \
+                        eql_v3.match_term('<ENCRYPTED>'::JSONB::eql_v3.query_text_search)";
+
+        for sql in [
+            "SELECT id FROM employees WHERE email @@ 'a%'",
+            // Reversed: previously emitted match_term('a%') @> match_term(email),
+            // with the pattern left unencrypted.
+            "SELECT id FROM employees WHERE 'a%' @@ email",
+        ] {
+            let statement = parse(sql);
+            let typed = type_check(schema.clone(), &statement).unwrap();
+
+            // One literal — the pattern — must be encrypted, whichever side it
+            // was written on.
+            assert_eq!(1, typed.literals.len(), "unexpected literals for `{sql}`");
+
+            let encrypted = typed
+                .literals
+                .iter()
+                .map(|(_, v)| {
+                    (
+                        NodeKey::new(*v),
+                        ast::Value::SingleQuotedString("<ENCRYPTED>".to_string()),
+                    )
+                })
+                .collect::<HashMap<_, _>>();
+
+            assert_eq!(
+                typed.transform(encrypted).unwrap().to_string(),
+                expected.split_whitespace().collect::<Vec<_>>().join(" "),
+                "unexpected rewrite for `{sql}`"
+            );
+        }
+    }
+
+    /// `SELECT DISTINCT *` must not be exempt from the equality-term keying:
+    /// the wildcard hides the encrypted columns, but they are still what
+    /// `DISTINCT` deduplicates on.
+    #[test]
+    fn distinct_wildcard_is_expanded_and_keyed() {
+        let schema = resolver(schema! {
+            tables: {
+                employees: {
+                    id,
+                    email (EQL("eql_v3_text_search"): Eq + Ord + TokenMatch),
+                }
+            }
+        });
+
+        let statement = parse("SELECT DISTINCT * FROM employees");
+        let typed = type_check(schema.clone(), &statement).unwrap();
+
+        assert_eq!(
+            typed.transform(HashMap::new()).unwrap().to_string(),
+            "SELECT DISTINCT ON (employees.id, eql_v3.eq_term(employees.email)) \
+             employees.id, employees.email FROM employees"
+                .split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" "),
+        );
+    }
+
+    /// And a wildcard hiding a column that cannot be deduplicated is a
+    /// capability error, not a silent no-op.
+    #[test]
+    fn distinct_wildcard_over_a_column_without_equality_is_rejected() {
+        let schema = resolver(schema! {
+            tables: {
+                employees: {
+                    id,
+                    active (EQL("eql_v3_boolean")),
+                }
+            }
+        });
+
+        let statement = parse("SELECT DISTINCT * FROM employees");
+
+        assert!(
+            type_check(schema, &statement).is_err(),
+            "DISTINCT * over a storage-only column should fail type checking"
+        );
+    }
+
+    /// The schema the syntactic-form tests below share.
+    ///
+    /// `flag` is storage-only (`eql_v3_boolean` implements nothing), which is
+    /// what the capability assertions use to check a form refuses a column that
+    /// cannot support it.
+    fn forms_schema() -> Arc<TableResolver> {
+        resolver(schema! {
+            tables: {
+                t: {
+                    id,
+                    txt (EQL("eql_v3_text_search"): Eq + Ord + TokenMatch),
+                    num (EQL("eql_v3_integer_ord"): Ord),
+                    flag (EQL("eql_v3_boolean")),
+                }
+            }
+        })
+    }
+
+    /// Transforms `sql` with every encrypted literal replaced by `'<CT>'`.
+    fn transform_with_dummy_literals(schema: Arc<TableResolver>, sql: &str) -> String {
+        let statement = parse(sql);
+        let typed = type_check(schema, &statement).unwrap();
+
+        let encrypted = typed
+            .literals
+            .iter()
+            .map(|(_, v)| {
+                (
+                    NodeKey::new(*v),
+                    ast::Value::SingleQuotedString("<CT>".to_string()),
+                )
+            })
+            .collect::<HashMap<_, _>>();
+
+        typed.transform(encrypted).unwrap().to_string()
+    }
+
+    /// Predicates that reduce to EQL's own operator overloads need no rewrite.
+    ///
+    /// EQL v3 ships `=`, `<`, `<=`, `>`, `>=` for every encrypted domain, each
+    /// comparing the relevant term (`eql_v3.eq` is `eq_term(a) = eq_term(b)`).
+    /// `IN` desugars to `= ANY(…)`, `BETWEEN` to `>= AND <=`, and
+    /// `IS DISTINCT FROM` to a NULL-safe `=`, so all three are correct with the
+    /// literals merely substituted.
+    ///
+    /// Pinning the pass-through matters because it looks wrong: the emitted SQL
+    /// compares against a payload carrying the randomised ciphertext, and only
+    /// operator resolution — invisible here — makes it right. The end-to-end
+    /// rows are asserted in the integration suite.
+    #[test]
+    fn operator_backed_predicates_substitute_literals_without_wrapping() {
+        let schema = forms_schema();
+
+        for (input, expected) in [
+            (
+                "SELECT id FROM t WHERE txt IN ('a', 'b')",
+                "SELECT id FROM t WHERE txt IN ('<CT>', '<CT>')",
+            ),
+            (
+                "SELECT id FROM t WHERE txt NOT IN ('a', 'b')",
+                "SELECT id FROM t WHERE txt NOT IN ('<CT>', '<CT>')",
+            ),
+            (
+                "SELECT id FROM t WHERE num BETWEEN 1 AND 2",
+                "SELECT id FROM t WHERE num BETWEEN '<CT>' AND '<CT>'",
+            ),
+            (
+                "SELECT id FROM t WHERE txt IS DISTINCT FROM 'a'",
+                "SELECT id FROM t WHERE txt IS DISTINCT FROM '<CT>'",
+            ),
+        ] {
+            assert_eq!(
+                transform_with_dummy_literals(schema.clone(), input),
+                expected,
+                "unexpected rewrite for `{input}`"
+            );
+        }
+    }
+
+    /// `BETWEEN` is ordering and `IS DISTINCT FROM` is equality, so each refuses
+    /// a column whose domain carries no such term.
+    #[test]
+    fn operator_backed_predicates_require_their_capability() {
+        let schema = forms_schema();
+
+        for (input, bound) in [
+            ("SELECT id FROM t WHERE flag BETWEEN true AND false", "Ord"),
+            ("SELECT id FROM t WHERE flag IS DISTINCT FROM true", "Eq"),
+        ] {
+            let statement = parse(input);
+            let err = type_check(schema.clone(), &statement)
+                .expect_err(&format!("`{input}` should fail the capability check"));
+
+            assert!(
+                err.to_string().contains(bound),
+                "expected a `{bound}` bound error for `{input}`, got: {err}"
+            );
+        }
+    }
+
+    /// `DISTINCT ON (col)` deduplicates, so it requires equality — and does
+    /// enforce it, unlike the shapes below.
+    #[test]
+    fn distinct_on_requires_equality() {
+        let schema = forms_schema();
+
+        let statement = parse("SELECT DISTINCT ON (flag) flag FROM t");
+        let err = type_check(schema, &statement)
+            .expect_err("DISTINCT ON a storage-only column should fail the capability check");
+
+        assert!(err.to_string().contains("Eq"), "unexpected error: {err}");
+    }
+
+    /// `IN` is equality, so it should refuse a column with no equality term.
+    ///
+    /// It does not: the `InList` arm of inference unifies the list against the
+    /// column's type without a bound, so the shape type-checks and reaches the
+    /// database.
+    ///
+    /// EQL is right to refuse it there — `eql_v3_boolean` is storage-only and
+    /// `=` is deliberately unsupported on it, so the query fails with
+    /// `operator = is not supported for public.eql_v3_boolean`. The gap is
+    /// where the refusal comes from: `=` on the same column is caught by the
+    /// capability check, `IN` is not, so the same mistake produces two very
+    /// different errors depending on how it was written.
+    #[test]
+    fn in_list_requires_equality() {
+        let schema = forms_schema();
+
+        let statement = parse("SELECT id FROM t WHERE flag IN (true)");
+        let err = type_check(schema, &statement)
+            .expect_err("IN on a storage-only column should fail the capability check");
+
+        assert!(err.to_string().contains("Eq"), "unexpected error: {err}");
+    }
+
+    /// One placeholder bound as both a stored value and a query operand.
+    ///
+    /// The two occurrences need different payloads — the stored one carries the
+    /// ciphertext, the query one only search terms — so the role is per
+    /// occurrence, not per input param. The rewritten SQL is the authority: the
+    /// `SET` operand casts to the column's own domain, the `WHERE` operand to
+    /// the `query_*` twin.
+    #[test]
+    fn param_reused_for_storage_and_query_keeps_separate_roles() {
+        let schema = forms_schema();
+
+        let statement = parse("UPDATE t SET txt = $1 WHERE txt = $1");
+        let typed = type_check(schema, &statement).unwrap();
+        let transformed = typed.transform(HashMap::new()).unwrap();
+
+        assert_eq!(
+            transformed.statement.to_string(),
+            "UPDATE t SET txt = $1::JSONB::public.eql_v3_text_search \
+             WHERE eql_v3.eq_term(txt) = eql_v3.eq_term($2::JSONB::eql_v3.query_text_search)"
+        );
+
+        // Both outputs come from input $1, but only the WHERE one is a query
+        // operand — marking both would strip the ciphertext from the stored
+        // value and fail the column domain's CHECK.
+        let roles: Vec<bool> = transformed
+            .params
+            .outputs()
+            .iter()
+            .map(|output| output.query_operand)
+            .collect();
+
+        assert_eq!(vec![false, true], roles);
+    }
+
+    /// A chained JSON accessor must not leave the intermediate selector in the
+    /// statement, nor apply native `->` to the encrypted payload.
+    ///
+    /// The container is cloned from the *original* AST, so `-> 'nested'`
+    /// survives untouched: the plaintext field name ships in the SQL text and
+    /// native jsonb `->` runs on the encrypted column, which also makes the
+    /// predicate match nothing.
+    #[test]
+    #[ignore = "Chained JSON accessor clones its container from the original AST, so the inner \
+                selector stays plaintext in the SQL and native jsonb -> is applied to the \
+                encrypted payload. See rewrite_json_value_selector_eq.rs."]
+    fn chained_json_accessor_does_not_emit_the_plaintext_selector() {
+        let schema = resolver(schema! {
+            tables: {
+                t: {
+                    id,
+                    j (EQL("eql_v3_json_search"): Eq + Ord + JsonLike + Contain),
+                }
+            }
+        });
+
+        let rewritten = transform_with_dummy_literals(
+            schema,
+            "SELECT id FROM t WHERE j -> 'nested' -> 'string' = '\"world\"'",
+        );
+
+        assert!(
+            !rewritten.contains("'nested'"),
+            "the intermediate selector must not reach the database in plaintext: {rewritten}"
+        );
+        assert!(
+            !rewritten.contains("j -> "),
+            "native jsonb -> must not be applied to the encrypted column: {rewritten}"
+        );
+    }
+
+    /// JSON field access requires the column to support field selection.
+    #[test]
+    fn json_field_access_requires_json_like() {
+        let schema = forms_schema();
+
+        let statement = parse("SELECT id FROM t WHERE txt -> 'a' = '\"b\"'");
+
+        assert!(
+            type_check(schema, &statement).is_err(),
+            "field access on a non-JSON encrypted column should fail the capability check"
+        );
+    }
+
+    /// A simple `CASE` compares its operand for equality and returns its
+    /// results — two independent types.
+    ///
+    /// Conflating them typed the results as the operand: the integer arms of
+    /// `CASE enc WHEN 'a' THEN 1 ELSE 0 END` were encrypted as values of the
+    /// encrypted column and shipped as EQL payloads where plain integers belong.
+    #[test]
+    fn simple_case_keeps_its_result_type_independent_of_the_operand() {
+        let schema = forms_schema();
+
+        assert_eq!(
+            transform_with_dummy_literals(
+                schema.clone(),
+                "SELECT CASE txt WHEN 'a' THEN 1 ELSE 0 END AS c FROM t",
+            ),
+            "SELECT CASE txt WHEN '<CT>' THEN 1 ELSE 0 END AS c FROM t",
+        );
+
+        // The searched form was always correct; it stays that way.
+        assert_eq!(
+            transform_with_dummy_literals(
+                schema,
+                "SELECT CASE WHEN txt = 'a' THEN 1 ELSE 0 END AS c FROM t",
+            ),
+            "SELECT CASE WHEN eql_v3.eq_term(txt) = \
+             eql_v3.eq_term('<CT>'::JSONB::eql_v3.query_text_search) THEN 1 ELSE 0 END AS c FROM t",
+        );
+    }
+
+    /// The operand is compared for equality, so its domain must carry an
+    /// equality term.
+    #[test]
+    fn simple_case_operand_requires_equality() {
+        let schema = forms_schema();
+
+        let statement = parse("SELECT CASE flag WHEN true THEN 1 ELSE 0 END AS c FROM t");
+        let err = type_check(schema, &statement)
+            .expect_err("CASE on a storage-only operand should fail the capability check");
+
+        assert!(err.to_string().contains("Eq"), "unexpected error: {err}");
+    }
+
+    /// A set operation that deduplicates cannot do so on an encrypted column.
+    ///
+    /// Deduplication goes through the type's default operator class rather than
+    /// EQL's `=` overload, so it compares whole payloads including the
+    /// randomised ciphertext — `UNION` keeps every duplicate. Unlike
+    /// `SELECT DISTINCT` it cannot be keyed on the equality term in place,
+    /// because deduplication spans the whole projection of both branches, so it
+    /// is refused rather than silently wrong.
+    #[test]
+    fn deduplicating_set_operations_on_encrypted_columns_are_rejected() {
+        let schema = forms_schema();
+
+        for input in [
+            "SELECT txt FROM t UNION SELECT txt FROM t",
+            "SELECT txt FROM t INTERSECT SELECT txt FROM t",
+            "SELECT txt FROM t EXCEPT SELECT txt FROM t",
+        ] {
+            let statement = parse(input);
+            let err = type_check(schema.clone(), &statement)
+                .expect_err(&format!("`{input}` should be refused"));
+
+            assert!(
+                err.to_string()
+                    .contains("deduplication would compare ciphertexts"),
+                "unexpected error for `{input}`: {err}"
+            );
+        }
+
+        // `ALL` performs no deduplication, so it is unaffected.
+        for input in [
+            "SELECT txt FROM t UNION ALL SELECT txt FROM t",
+            "SELECT id FROM t UNION SELECT id FROM t",
+        ] {
+            let statement = parse(input);
+            assert!(
+                type_check(schema.clone(), &statement).is_ok(),
+                "`{input}` should be accepted"
+            );
+        }
+    }
+
+    /// `DISTINCT ON (col)` deduplicates, so each encrypted key is keyed on its
+    /// equality term — in place, since the keys are named explicitly.
+    #[test]
+    fn distinct_on_keys_on_the_equality_term() {
+        let schema = forms_schema();
+
+        for (input, expected) in [
+            (
+                "SELECT DISTINCT ON (txt) txt FROM t",
+                "SELECT DISTINCT ON (eql_v3.eq_term(txt)) txt FROM t",
+            ),
+            // A plaintext key is left alone.
+            (
+                "SELECT DISTINCT ON (id, txt) txt FROM t",
+                "SELECT DISTINCT ON (id, eql_v3.eq_term(txt)) txt FROM t",
+            ),
+            (
+                "SELECT DISTINCT ON (id) id FROM t",
+                "SELECT DISTINCT ON (id) id FROM t",
+            ),
+        ] {
+            assert_eq!(
+                transform_with_dummy_literals(schema.clone(), input),
+                expected,
+                "unexpected rewrite for `{input}`"
+            );
+        }
+    }
+
+    /// `ORDER BY <ordinal>` and `GROUP BY <ordinal>` selecting an encrypted
+    /// column are rewritten to that column's term.
+    ///
+    /// An ordinal names no column of its own, so the rules that match on the
+    /// key's type saw only a number and left the clause alone — sorting and
+    /// grouping then fell back to jsonb over the randomised ciphertext.
+    /// PostgreSQL defines `ORDER BY n` as ordering by the n-th output column, so
+    /// substituting that column is semantics-preserving.
+    #[test]
+    fn ordinal_sort_and_group_keys_use_the_columns_term() {
+        let schema = forms_schema();
+
+        for (input, expected) in [
+            (
+                "SELECT txt FROM t ORDER BY 1",
+                "SELECT txt FROM t ORDER BY eql_v3.ord_term(txt)",
+            ),
+            // Sort options ride along, and the ordinal may be any position.
+            (
+                "SELECT id, txt FROM t ORDER BY 2 DESC",
+                "SELECT id, txt FROM t ORDER BY eql_v3.ord_term(txt) DESC",
+            ),
+            // Grouping keys on the equality term, and the projected column is
+            // lifted through `grouped_value` exactly as for a named key.
+            (
+                "SELECT txt FROM t GROUP BY 1",
+                "SELECT eql_v3.grouped_value(txt) AS txt FROM t GROUP BY eql_v3.eq_term(txt)",
+            ),
+            // An ordinal selecting a plaintext column is left alone.
+            ("SELECT id FROM t ORDER BY 1", "SELECT id FROM t ORDER BY 1"),
+            ("SELECT id FROM t GROUP BY 1", "SELECT id FROM t GROUP BY 1"),
+        ] {
+            assert_eq!(
+                transform_with_dummy_literals(schema.clone(), input),
+                expected,
+                "unexpected rewrite for `{input}`"
+            );
+        }
+    }
+
+    /// An ordinal key carries the same capability requirement as a named one.
+    #[test]
+    fn ordinal_sort_and_group_keys_require_their_capability() {
+        let schema = forms_schema();
+
+        for (input, bound) in [
+            ("SELECT flag FROM t ORDER BY 1", "Ord"),
+            ("SELECT flag FROM t GROUP BY 1", "Eq"),
+        ] {
+            let statement = parse(input);
+            let err = type_check(schema.clone(), &statement)
+                .expect_err(&format!("`{input}` should fail the capability check"));
+
+            assert!(
+                err.to_string().contains(bound),
+                "expected a `{bound}` bound error for `{input}`, got: {err}"
+            );
+        }
+    }
+
+    /// `PARTITION BY` groups rows by equality, so an encrypted key is
+    /// partitioned on its equality term.
+    ///
+    /// The window's own `ORDER BY` is handled by `RewriteEqlOrderBy`, which
+    /// matches `OrderByExpr` wherever it appears — including inside a window.
+    #[test]
+    fn window_partition_by_uses_the_columns_term() {
+        let schema = forms_schema();
+
+        for (input, expected) in [
+            (
+                "SELECT rank() OVER (PARTITION BY txt) FROM t",
+                "SELECT rank() OVER (PARTITION BY eql_v3.eq_term(txt)) FROM t",
+            ),
+            (
+                "SELECT rank() OVER (PARTITION BY txt ORDER BY num) FROM t",
+                "SELECT rank() OVER (PARTITION BY eql_v3.eq_term(txt) \
+                 ORDER BY eql_v3.ord_term(num)) FROM t",
+            ),
+            // A plaintext partition key is left alone.
+            (
+                "SELECT rank() OVER (PARTITION BY id ORDER BY txt) FROM t",
+                "SELECT rank() OVER (PARTITION BY id ORDER BY eql_v3.ord_term(txt)) FROM t",
+            ),
+        ] {
+            assert_eq!(
+                transform_with_dummy_literals(schema.clone(), input),
+                expected.split_whitespace().collect::<Vec<_>>().join(" "),
+                "unexpected rewrite for `{input}`"
+            );
+        }
+    }
+
+    /// Partitioning is equality, so the key's domain must carry an equality
+    /// term.
+    #[test]
+    fn window_partition_by_requires_equality() {
+        let schema = forms_schema();
+
+        let statement = parse("SELECT rank() OVER (PARTITION BY flag) FROM t");
+        let err = type_check(schema, &statement)
+            .expect_err("PARTITION BY a storage-only column should fail the capability check");
+
+        assert!(err.to_string().contains("Eq"), "unexpected error: {err}");
+    }
+
+    /// Shapes the subquery rewrite cannot express are reported as such, rather
+    /// than left to fail as a bare PostgreSQL syntax error.
+    #[test]
+    fn distinct_order_by_rejects_inexpressible_shapes() {
+        let schema = resolver(schema! {
+            tables: {
+                employees: {
+                    id,
+                    salary (EQL("eql_v3_integer_ord"): Ord),
+                }
+            }
+        });
+
+        for (input, expected_fragment) in [
+            // DISTINCT ON constrains ORDER BY to begin with its own expressions;
+            // wrapping would silently break that.
+            (
+                "SELECT DISTINCT ON (id) id, salary FROM employees ORDER BY id, salary",
+                "DISTINCT ON",
+            ),
+            // A wildcard cannot be named, so the outer projection cannot
+            // reproduce it column for column.
+            (
+                "SELECT DISTINCT * FROM employees ORDER BY salary",
+                "wildcard",
+            ),
+        ] {
+            let statement = parse(input);
+            let typed = type_check(schema.clone(), &statement).unwrap();
+
+            let err = typed
+                .transform(HashMap::new())
+                .expect_err(&format!("expected `{input}` to be rejected"));
+
+            assert!(
+                err.to_string().contains(expected_fragment),
+                "unexpected error for `{input}`: {err}"
+            );
+        }
+    }
+
+    /// `GROUP BY` on an encrypted column groups by its equality term. A bare
+    /// `GROUP BY col` groups on the jsonb payload, whose ciphertext is
+    /// randomised per row, so equal plaintexts land in different groups.
+    ///
+    /// Projecting the grouped column has to be lifted through
+    /// `eql_v3.grouped_value`, because PostgreSQL no longer sees it as
+    /// functionally dependent on the group key — and the projection keeps the
+    /// name the client asked for.
+    #[test]
+    fn group_by_encrypted_column_uses_eq_term() {
+        let schema = resolver(schema! {
+            tables: {
+                employees: {
+                    id,
+                    email (EQL("eql_v3_text_search"): Eq + Ord + TokenMatch),
+                    salary (EQL("eql_v3_integer_ord"): Ord),
+                }
+            }
+        });
+
+        for (input, expected) in [
+            // The column is not projected: only the group key changes.
+            (
+                "SELECT COUNT(*) FROM employees GROUP BY email",
+                "SELECT COUNT(*) FROM employees GROUP BY eql_v3.eq_term(email)",
+            ),
+            // Projected: lifted through `grouped_value`, keeping its name.
+            (
+                "SELECT email FROM employees GROUP BY email",
+                "SELECT eql_v3.grouped_value(email) AS email FROM employees GROUP BY eql_v3.eq_term(email)",
+            ),
+            // An explicit alias is preserved as-is.
+            (
+                "SELECT email AS e FROM employees GROUP BY email",
+                "SELECT eql_v3.grouped_value(email) AS e FROM employees GROUP BY eql_v3.eq_term(email)",
+            ),
+            // Qualified projection of the same column still matches — the match
+            // is on the resolved column, not on syntax.
+            (
+                "SELECT employees.email FROM employees GROUP BY email",
+                "SELECT eql_v3.grouped_value(employees.email) AS email FROM employees GROUP BY eql_v3.eq_term(email)",
+            ),
+            // A domain that stores no `hm` groups by its ordering term, the same
+            // fallback `=` uses.
+            (
+                "SELECT COUNT(*) FROM employees GROUP BY salary",
+                "SELECT COUNT(*) FROM employees GROUP BY eql_v3.ord_term(salary)",
+            ),
+            // A native group key is left alone.
+            (
+                "SELECT COUNT(*) FROM employees GROUP BY id",
+                "SELECT COUNT(*) FROM employees GROUP BY id",
+            ),
+        ] {
+            let statement = parse(input);
+            let typed = type_check(schema.clone(), &statement).unwrap();
+
+            assert_eq!(
+                typed.transform(HashMap::new()).unwrap().to_string(),
+                expected,
+                "unexpected rewrite for `{input}`"
+            );
+        }
+    }
+
+    /// Grouping by a column whose domain carries no equality term is a
+    /// capability error, not a grouping on ciphertext.
+    #[test]
+    fn group_by_column_without_equality_term_is_an_error() {
+        let schema = resolver(schema! {
+            tables: {
+                employees: {
+                    id,
+                    name (EQL("eql_v3_text_match"): TokenMatch),
+                }
+            }
+        });
+
+        // Caught by the `Eq` bound during type checking rather than by the
+        // rewrite: the clause is typed now, so the capability is checked before
+        // any SQL is produced.
+        let statement = parse("SELECT COUNT(*) FROM employees GROUP BY name");
+        let err = type_check(schema, &statement)
+            .expect_err("GROUP BY on a match-only column should fail the capability check")
+            .to_string();
+
+        assert!(
+            err.contains("Eq"),
+            "expected an `Eq` bound error, got: {err}"
+        );
+    }
+
+    /// A block-ORE domain orders through `ord_term_ore`.
+    #[test]
+    fn order_by_ore_column_uses_ord_term_ore() {
+        let schema = resolver(schema! {
+            tables: {
+                employees: {
+                    id,
+                    salary (EQL("eql_v3_integer_ord_ore"): Ord),
+                }
+            }
+        });
+
+        let statement = parse("SELECT id FROM employees ORDER BY salary");
+        let typed = type_check(schema, &statement).unwrap();
+
+        assert_eq!(
+            typed.transform(HashMap::new()).unwrap().to_string(),
+            "SELECT id FROM employees ORDER BY eql_v3.ord_term_ore(salary)"
+        );
+    }
+
+    /// Ordering by a column whose domain carries no ordering term is a
+    /// capability error, not an arbitrary sort.
+    #[test]
+    fn order_by_column_without_ordering_term_is_an_error() {
+        let schema = resolver(schema! {
+            tables: {
+                employees: {
+                    id,
+                    name (EQL("eql_v3_text_match"): TokenMatch),
+                }
+            }
+        });
+
+        // Caught by the `Ord` bound during type checking rather than by the
+        // rewrite, as for GROUP BY above.
+        let statement = parse("SELECT id FROM employees ORDER BY name");
+        let err = type_check(schema, &statement)
+            .expect_err("ORDER BY on a match-only column should fail the capability check")
+            .to_string();
+
+        assert!(
+            err.contains("Ord"),
+            "expected an `Ord` bound error, got: {err}"
+        );
+    }
+
     #[test]
     fn jsonb_path_query_param_to_eql() {
         // init_tracing();
@@ -2076,7 +3638,7 @@ mod test {
             }
         });
 
-        let statement = parse("SELECT eql_v2.jsonb_path_query(notes, $1) as notes FROM patients");
+        let statement = parse("SELECT eql_v3.jsonb_path_query(notes, $1) as notes FROM patients");
 
         let typed = type_check(schema, &statement)
             .map_err(|err| err.to_string())

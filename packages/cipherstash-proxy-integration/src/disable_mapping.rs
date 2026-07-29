@@ -9,7 +9,7 @@ mod tests {
     use tokio_postgres::types::{FromSql, ToSql};
 
     #[derive(Clone, Debug, ToSql, FromSql, PartialEq, Deserialize)]
-    #[postgres(name = "eql_v2_encrypted")]
+    #[postgres(name = "eql_v3_text_search")]
     pub struct EqlEncrypted {
         pub data: Value,
     }
@@ -35,10 +35,10 @@ mod tests {
         let insert_sql = "INSERT INTO encrypted (id, encrypted_text) VALUES ($1, $2)";
         let result = client.query(insert_sql, &[&id, &encrypted_text]).await;
 
-        // This error is actually a `WrongType` error from the tokio client as encrypted_text is actually eql_v2_encrypted
+        // This error is actually a `WrongType` error from the tokio client as encrypted_text is actually eql_v3_text_search
         assert!(result.is_err());
 
-        // Force the eql_v2_encrypted type
+        // Force the eql_v3_text_search type
         let encrypted = EqlEncrypted {
             data: Value::from(encrypted_text.to_owned()),
         };
@@ -87,11 +87,20 @@ mod tests {
         let sql = "SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING = true";
         client.query(sql, &[]).await.unwrap();
 
-        // Data should not be decrypted
+        // Data should not be decrypted.
+        //
+        // Read it as `Value`, not as `EqlEncrypted`: a v3 encrypted column is a
+        // DOMAIN over `jsonb`, and PostgreSQL reports a domain's *base* type in
+        // RowDescription. The client therefore sees `jsonb`, and a struct whose
+        // `FromSql` is pinned to the domain name is rejected outright. (Under v2
+        // this worked because `eql_v2_encrypted` was a real composite type with
+        // its own OID.)
         let select_sql = "SELECT encrypted_text FROM encrypted";
-        let rows = query_with_client::<EqlEncrypted>(select_sql, &client).await;
+        let rows = query_with_client::<Value>(select_sql, &client).await;
 
         assert_eq!(rows.len(), 1);
+        // Undecrypted, so the raw EQL payload still carries the column identifier.
+        assert_eq!(rows[0]["i"]["c"], "encrypted_text");
 
         // Simple query using same client
         let rows = simple_query_with_client::<String>(select_sql, &client).await;

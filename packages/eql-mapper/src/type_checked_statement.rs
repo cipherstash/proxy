@@ -1,16 +1,49 @@
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+};
 
 use sqltk::parser::ast::{self, Statement};
 use sqltk::{AsNodeKey, NodeKey, Transformable};
 
-use crate::unifier::EqlTerm;
+use crate::unifier::{EqlTerm, EqlTermVariant};
+use crate::QueryOperands;
 use crate::{
-    CastLiteralsAsEncrypted, CastParamsAsEncrypted, DryRunnable, EqlMapperError,
-    FailOnPlaceholderChange, Param, PreserveEffectiveAliases, RewriteContainmentOps,
-    RewriteStandardSqlFnsOnEqlTypes, TransformationRule,
+    CastFullPayloadOperands, DryRunnable, EqlMapperError, FailOnPlaceholderChange,
+    JsonValueSelectors, OutputParam, OutputParamSource, Param, ParamPlan, PreserveEffectiveAliases,
+    RenumberParams, RewriteContainmentOps, RewriteEqlComparisonOps, RewriteEqlDistinct,
+    RewriteEqlDistinctOrderBy, RewriteEqlGroupBy, RewriteEqlMatchOps, RewriteEqlOrderBy,
+    RewriteEqlOrdinalOrderBy, RewriteEqlPartitionBy, RewriteJsonValueSelectorEq,
+    RewriteStandardSqlFnsOnEqlTypes, SubstituteEncryptedLiterals, TransformationRule,
 };
 
 use crate::unifier::{Projection, Type, Value};
+
+/// The result of [`TypeCheckedStatement::transform`]: the rewritten statement
+/// and the correspondence between its params and the input's.
+///
+/// Derefs to the [`Statement`] so a caller that only wants the SQL can treat it
+/// as one; a caller that binds params must consult [`Self::params`], because
+/// the two param lists are not guaranteed to correspond by position.
+#[derive(Debug)]
+pub struct TransformedStatement {
+    pub statement: Statement,
+    pub params: ParamPlan,
+}
+
+impl std::ops::Deref for TransformedStatement {
+    type Target = Statement;
+
+    fn deref(&self) -> &Self::Target {
+        &self.statement
+    }
+}
+
+impl std::fmt::Display for TransformedStatement {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.statement.fmt(f)
+    }
+}
 
 /// A `TypeCheckedStatement` is returned from a successful call to [`crate::type_check`].
 #[derive(Debug)]
@@ -26,6 +59,25 @@ pub struct TypeCheckedStatement<'ast> {
 
     /// The type ([`EqlTerm`]) and reference to an [`ast::Value`] nodes of all EQL literals from the SQL statement.
     pub literals: Vec<(EqlTerm, &'ast ast::Value)>,
+
+    /// The fused JSON value selectors: for each operand typed
+    /// [`EqlTerm::JsonValueSelector`], where the path half of its needle comes
+    /// from.
+    ///
+    /// This is why the mapper's output is **not** 1:1 with the input SQL:
+    /// `col -> sel = value` consumes two operands and emits one encrypted
+    /// needle. The path operand is dropped from the rewritten statement, and
+    /// the remaining params are renumbered — see [`ParamPlan`], which is what
+    /// the proxy binds against.
+    pub json_value_selectors: JsonValueSelectors<'ast>,
+
+    /// The operands that appear in a query position rather than a storing one.
+    ///
+    /// A query operand carries only search terms; a stored value carries the
+    /// ciphertext too. The two are the same [`EqlTerm`], so this is the only
+    /// thing telling the proxy which payload shape to send — see
+    /// [`QueryOperands`].
+    pub query_operands: QueryOperands<'ast>,
 
     /// A [`HashMap`] of AST node (using [`NodeKey`] as the key) to [`Type`].  The map contains a `Type` for every node
     /// in the AST with the node type is one of: [`Statement`], [`Query`], [`Insert`], [`Delete`], [`Expr`],
@@ -51,6 +103,8 @@ impl<'ast> TypeCheckedStatement<'ast> {
         projection: Projection,
         params: Vec<(Param, Value)>,
         literals: Vec<(EqlTerm, &'ast ast::Value)>,
+        json_value_selectors: JsonValueSelectors<'ast>,
+        query_operands: QueryOperands<'ast>,
         node_types: Arc<HashMap<NodeKey<'ast>, Type>>,
     ) -> Self {
         Self {
@@ -58,6 +112,8 @@ impl<'ast> TypeCheckedStatement<'ast> {
             projection,
             params,
             literals,
+            json_value_selectors,
+            query_operands,
             node_types,
         }
     }
@@ -85,14 +141,95 @@ impl<'ast> TypeCheckedStatement<'ast> {
 
     /// Transforms the SQL statement by replacing all plaintext literals with EQL equivalents
     /// and inserting EQL helper functions where necessary.
+    ///
+    /// Returns the rewritten statement together with its [`ParamPlan`] — the
+    /// params of the rewritten statement are **not** guaranteed to correspond
+    /// 1:1 with the input's, so the caller must bind through the plan rather
+    /// than by position.
     pub fn transform(
         &self,
         encrypted_literals: HashMap<NodeKey<'ast>, sqltk::parser::ast::Value>,
-    ) -> Result<Statement, EqlMapperError> {
+    ) -> Result<TransformedStatement, EqlMapperError> {
         self.check_all_encrypted_literals_provided(&encrypted_literals)?;
         let mut transformer = self.make_transformer(encrypted_literals);
         transformer.set_real_run_mode();
-        self.statement.apply_transform(&mut transformer)
+        let rewritten = self.statement.apply_transform(&mut transformer)?;
+
+        // Renumber in a second pass, so the rules above are free to drop or
+        // duplicate placeholders without having to maintain `$n` themselves —
+        // and so `FailOnPlaceholderChange` still governs the rules' own edits.
+        let mut renumber = RenumberParams::new();
+        let statement = rewritten.apply_transform(&mut renumber)?;
+        let (sources, query_operands) = renumber.into_parts();
+        let params = self.param_plan(sources, query_operands)?;
+
+        Ok(TransformedStatement { statement, params })
+    }
+
+    /// Builds the [`ParamPlan`] from the input param each output placeholder was
+    /// renumbered from.
+    ///
+    /// An output param whose input is a fused JSON value selector carries both
+    /// operands; every other output forwards its input alone.
+    ///
+    /// `query_operands` holds the outputs the rewritten statement casts to an
+    /// `eql_v3.query_*` twin. It is keyed by *output* param because the role
+    /// belongs to the occurrence, not to the input: `UPDATE t SET enc = $1 WHERE
+    /// enc = $1` binds one input in both roles, and treating the whole param as
+    /// a query operand strips the ciphertext from the stored value.
+    fn param_plan(
+        &self,
+        sources: Vec<Param>,
+        query_operands: HashSet<Param>,
+    ) -> Result<ParamPlan, EqlMapperError> {
+        let outputs = sources
+            .into_iter()
+            .enumerate()
+            .map(|(idx, input)| {
+                let value = self
+                    .params
+                    .iter()
+                    .find_map(|(param, value)| (*param == input).then(|| value.clone()))
+                    .ok_or_else(|| {
+                        EqlMapperError::InternalError(format!(
+                            "rewritten statement refers to param {input}, which the input statement does not declare"
+                        ))
+                    })?;
+
+                let source = match self.json_value_selectors.for_param(input) {
+                    Some(path) => OutputParamSource::JsonValueSelector {
+                        path: path.clone(),
+                        value: input,
+                    },
+                    None => OutputParamSource::Input(input),
+                };
+
+                let output = Param((idx + 1) as u16);
+
+                // A JSON selector takes no cast at all — it is passed to the
+                // eql_v3 function as bare encrypted text — so it never appears
+                // in `query_operands`, but it is always a query operand.
+                let is_selector = matches!(
+                    &value,
+                    Value::Eql(term)
+                        if matches!(term.variant(), EqlTermVariant::JsonAccessor | EqlTermVariant::JsonPath)
+                );
+
+                Ok(OutputParam {
+                    param: output,
+                    value,
+                    source,
+                    query_operand: is_selector || query_operands.contains(&output),
+                })
+            })
+            .collect::<Result<Vec<_>, EqlMapperError>>()?;
+
+        let plan = ParamPlan::new(outputs);
+
+        let inputs: Vec<Param> = self.params.iter().map(|(param, _)| *param).collect();
+        plan.check_covers(&inputs)?;
+
+        Ok(plan)
     }
 
     pub fn literal_values(&self) -> &Vec<(EqlTerm, &'ast sqltk::parser::ast::Value)> {
@@ -150,13 +287,26 @@ impl<'ast> TypeCheckedStatement<'ast> {
         &self,
         encrypted_literals: HashMap<NodeKey<'ast>, sqltk::parser::ast::Value>,
     ) -> DryRunnable<'_, impl TransformationRule<'_>> {
+        // Substitution runs first so every encrypted literal is in place before
+        // any rule wraps it. Each rewrite rule then applies the cast its own
+        // context requires, and `CastFullPayloadOperands` covers the one
+        // context that has no rewrite of its own — INSERT and UPDATE values.
         DryRunnable::new((
+            SubstituteEncryptedLiterals::new(encrypted_literals),
             RewriteStandardSqlFnsOnEqlTypes::new(Arc::clone(&self.node_types)),
             RewriteContainmentOps::new(Arc::clone(&self.node_types)),
+            RewriteJsonValueSelectorEq::new(Arc::clone(&self.node_types)),
+            RewriteEqlComparisonOps::new(Arc::clone(&self.node_types)),
+            RewriteEqlMatchOps::new(Arc::clone(&self.node_types)),
+            RewriteEqlOrderBy::new(Arc::clone(&self.node_types)),
+            RewriteEqlOrdinalOrderBy::new(Arc::clone(&self.node_types)),
+            RewriteEqlPartitionBy::new(Arc::clone(&self.node_types)),
+            RewriteEqlDistinct::new(Arc::clone(&self.node_types)),
+            RewriteEqlDistinctOrderBy::new(Arc::clone(&self.node_types)),
+            RewriteEqlGroupBy::new(Arc::clone(&self.node_types)),
+            CastFullPayloadOperands::new(Arc::clone(&self.node_types)),
             PreserveEffectiveAliases,
-            CastLiteralsAsEncrypted::new(encrypted_literals),
             FailOnPlaceholderChange::new(),
-            CastParamsAsEncrypted::new(Arc::clone(&self.node_types)),
         ))
     }
 }

@@ -28,33 +28,9 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn map_unique_index_bool() {
-        trace();
-
-        clear().await;
-
-        let client = connect_with_tls(PROXY).await;
-
-        let id = random_id();
-        let encrypted_bool: bool = true;
-
-        let sql = "INSERT INTO encrypted (id, encrypted_bool) VALUES ($1, $2)";
-        client.query(sql, &[&id, &encrypted_bool]).await.unwrap();
-
-        let sql = "SELECT id, encrypted_bool FROM encrypted WHERE encrypted_bool = $1";
-        let rows = client.query(sql, &[&encrypted_bool]).await.unwrap();
-
-        assert_eq!(rows.len(), 1);
-
-        for row in rows {
-            let result_id: i64 = row.get("id");
-            let result_bool: bool = row.get("encrypted_bool");
-
-            assert_eq!(id, result_id);
-            assert_eq!(encrypted_bool, result_bool);
-        }
-    }
+    // `map_unique_index_bool` removed: EQL v3 `boolean` is storage-only (a
+    // two-value column leaks its distribution under any index), so equality
+    // search on an encrypted bool is not supported.
 
     #[tokio::test]
     async fn map_unique_index_int2() {
@@ -256,13 +232,21 @@ mod tests {
             .await
             .unwrap();
 
-        let sql = "SELECT * FROM encrypted WHERE encrypted_text = $1 AND encrypted_bool = $2 AND encrypted_int2 = $3 AND encrypted_int4 = $4 AND encrypted_int8 = $5 AND encrypted_float8 = $6";
+        // `encrypted_bool` is deliberately absent from this WHERE clause.
+        //
+        // Under EQL v2 every encrypted column got a unique index, so equality on
+        // an encrypted boolean worked. EQL v3 makes boolean storage-only
+        // (`eql_v3_boolean` carries no searchable terms) because a two-value
+        // column leaks its distribution under any index — so `encrypted_bool = $n`
+        // is now correctly rejected with a capability error. The column is still
+        // encrypted, decrypted and asserted on in the projection below; it just
+        // cannot be searched.
+        let sql = "SELECT * FROM encrypted WHERE encrypted_text = $1 AND encrypted_int2 = $2 AND encrypted_int4 = $3 AND encrypted_int8 = $4 AND encrypted_float8 = $5";
         let rows = client
             .query(
                 sql,
                 &[
                     &encrypted_text,
-                    &encrypted_bool,
                     &encrypted_int2,
                     &encrypted_int4,
                     &encrypted_int8,

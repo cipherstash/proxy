@@ -1,6 +1,7 @@
 import json
 import os
 import psycopg
+import pytest
 import random
 from itertools import product
 
@@ -26,10 +27,23 @@ val = {
 }
 
 
+# `jsonb_array_length` over an encrypted array returns 1 rather than the element
+# count: the array is indexed for search (ArrayIndexMode::ALL) but its length is
+# not recoverable from the encrypted form. Skipped until v3 exposes array length.
+# The Rust twins of these two are `#[ignore]`d for the same reason — see
+# packages/cipherstash-proxy-integration/src/select/jsonb_array_length.rs.
+ARRAY_LENGTH_UNSUPPORTED = (
+    "EQL v3 SteVec array encoding: jsonb_array_length over an encrypted array "
+    "returns 1 instead of the element count"
+)
+
+
+@pytest.mark.skip(reason=ARRAY_LENGTH_UNSUPPORTED)
 def test_length_with_number():
     select_jsonb("encrypted_jsonb", val, "$.array_number[@]", 3)
 
 
+@pytest.mark.skip(reason=ARRAY_LENGTH_UNSUPPORTED)
 def test_length_with_string():
     select_jsonb("encrypted_jsonb", val, "$.array_string[@]", 2)
 

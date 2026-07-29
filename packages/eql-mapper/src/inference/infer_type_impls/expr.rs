@@ -1,10 +1,28 @@
 use crate::{
     get_sql_binop_rule,
-    inference::{unifier::Type, InferType, TypeError},
-    EqlTrait, IdentCase, TypeInferencer,
+    inference::{
+        unifier::{EqlTerm, EqlValue, TokenType, Type, Value},
+        InferType, TypeError,
+    },
+    EqlTrait, IdentCase, JsonSelectorSource, Param, TypeInferencer,
 };
 use eql_mapper_macros::trace_infer;
-use sqltk::parser::ast::{AccessExpr, Array, Expr, Ident, Subscript};
+use sqltk::parser::ast::{
+    self as ast, AccessExpr, Array, BinaryOperator, Expr, FunctionArg, FunctionArgExpr,
+    FunctionArguments, Ident, Subscript,
+};
+
+/// The capability a comparison operator requires of its operands, or `None` if
+/// it is not a comparison.
+fn comparison_capability(op: &BinaryOperator) -> Option<EqlTrait> {
+    match op {
+        BinaryOperator::Eq | BinaryOperator::NotEq => Some(EqlTrait::Eq),
+        BinaryOperator::Lt | BinaryOperator::LtEq | BinaryOperator::Gt | BinaryOperator::GtEq => {
+            Some(EqlTrait::Ord)
+        }
+        _ => None,
+    }
+}
 
 #[trace_infer]
 impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
@@ -76,6 +94,14 @@ impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
                         self.unify(a, self.get_node_type(b))
                     })?,
                 )?;
+
+                // `IN` is equality against each element, so the operand's
+                // domain has to carry an equality term. Without this the shape
+                // type-checks on a storage-only column and the refusal comes
+                // from EQL at the database instead — correct of EQL, but
+                // inconsistent with `=` on the same column, which is caught
+                // here.
+                self.unify_node_with_bound(&**expr, EqlTrait::Eq)?;
             }
 
             Expr::InSubquery {
@@ -86,6 +112,9 @@ impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
                 self.unify_node_with_type(expr_val, Type::native())?;
                 let ty = Type::projection(&[(self.get_node_type(&**expr), None)]);
                 self.unify_node_with_type(&**subquery, ty)?;
+
+                // Equality against each returned row, as for `IN (…)`.
+                self.unify_node_with_bound(&**expr, EqlTrait::Eq)?;
             }
 
             Expr::InUnnest { .. } => {
@@ -109,26 +138,158 @@ impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
             }
 
             Expr::BinaryOp { left, op, right } => {
-                get_sql_binop_rule(op).apply_constraints(self, left, right, expr_val)?;
+                // Encrypted JSON field ORDERING (`col -> sel < value`, `>`, `<=`,
+                // `>=`): the value operand is a scalar SteVec ordering term
+                // (`{v,i,op}`, `QueryOp::SteVecTerm`), not a JSON document, and the
+                // comparison runs through `eql_v3.ord_term` on both sides. Type the
+                // operand as `EqlTerm::JsonOrd` so it encrypts and casts as an
+                // ordering operand — the generic `T Ord T` rule would instead unify
+                // it to the whole JSON type (→ a full document, which cannot be an
+                // ordering operand). Equality (`=`) is intentionally NOT handled here
+                // (exact JSON equality is value-selector containment, not ordering).
+                let handled = if matches!(
+                    op,
+                    BinaryOperator::Lt
+                        | BinaryOperator::LtEq
+                        | BinaryOperator::Gt
+                        | BinaryOperator::GtEq
+                ) {
+                    match (self.eql_json_value(left), self.eql_json_value(right)) {
+                        (Some(json), None) => {
+                            self.unify_node_with_type(
+                                &**right,
+                                Type::Value(Value::Eql(EqlTerm::JsonOrd(json))),
+                            )?;
+                            self.unify_node_with_type(expr_val, Type::native())?;
+                            true
+                        }
+                        (None, Some(json)) => {
+                            self.unify_node_with_type(
+                                &**left,
+                                Type::Value(Value::Eql(EqlTerm::JsonOrd(json))),
+                            )?;
+                            self.unify_node_with_type(expr_val, Type::native())?;
+                            true
+                        }
+                        _ => false,
+                    }
+                } else {
+                    false
+                };
+
+                // Encrypted JSON field EQUALITY (`col -> sel = value`, `<>`).
+                // Exact equality is not a term comparison but *value-selector
+                // containment*: one keyed MAC over path and value together. Type
+                // the value operand `EqlTerm::JsonValueSelector` and record where
+                // its path half comes from, so the proxy can fuse the two into a
+                // single needle at encryption time (see `JsonValueSelectors`).
+                //
+                // Unlike the ordering case above this requires a genuine field
+                // ACCESS on the JSON side — a bare `col = $1` on a whole
+                // encrypted JSON column is document equality and must keep its
+                // ordinary typing.
+                let handled = handled
+                    || if matches!(op, BinaryOperator::Eq | BinaryOperator::NotEq) {
+                        match (
+                            self.eql_json_field_access(left),
+                            self.eql_json_field_access(right),
+                        ) {
+                            (Some((json, selector)), None) => {
+                                let fused =
+                                    self.infer_json_value_selector(json, selector, right)?;
+                                if fused {
+                                    self.unify_node_with_type(expr_val, Type::native())?;
+                                }
+                                fused
+                            }
+                            (None, Some((json, selector))) => {
+                                let fused = self.infer_json_value_selector(json, selector, left)?;
+                                if fused {
+                                    self.unify_node_with_type(expr_val, Type::native())?;
+                                }
+                                fused
+                            }
+                            _ => false,
+                        }
+                    } else {
+                        false
+                    };
+
+                if !handled {
+                    // `@@` is symmetric in PostgreSQL, so the encrypted column
+                    // may be written on either side. The operator rule is
+                    // positional (`T @@ <T as TokenMatch>::Tokenized`), so hand
+                    // it the operands in the order it expects rather than the
+                    // order they were written. Applying them positionally types
+                    // the column as the *pattern*: the pattern is then never
+                    // encrypted, and the rewrite emits `match_term(pattern) @>
+                    // match_term(col)` — a backwards containment that silently
+                    // matches nothing.
+                    let (lhs, rhs) = if matches!(op, BinaryOperator::AtAt)
+                        && self.is_eql_typed(right)
+                        && !self.is_eql_typed(left)
+                    {
+                        (&**right, &**left)
+                    } else {
+                        (&**left, &**right)
+                    };
+
+                    get_sql_binop_rule(op).apply_constraints(self, lhs, rhs, expr_val)?;
+                }
+
+                // The operands of a predicate reach PostgreSQL as query
+                // operands — terms only, never a ciphertext. Record them so the
+                // proxy projects their payloads accordingly. Containment
+                // (`@>`/`<@`) is deliberately excluded: its needle is a whole
+                // document and keeps its full payload.
+                if matches!(
+                    op,
+                    BinaryOperator::Eq
+                        | BinaryOperator::NotEq
+                        | BinaryOperator::Lt
+                        | BinaryOperator::LtEq
+                        | BinaryOperator::Gt
+                        | BinaryOperator::GtEq
+                        | BinaryOperator::AtAt
+                ) {
+                    self.record_query_operands([&**left, &**right]);
+                }
             }
 
-            //customer_name LIKE 'A%';
+            // `customer_name LIKE 'A%'`. Route LIKE/ILIKE through the `~~`/`~~*`
+            // operator rules so an encrypted LHS must implement `TokenMatch` (the
+            // pattern becomes its `Tokenized` type, the result is `Native`).
+            // Previously this only unified the result with `Native`, so LIKE on an
+            // encrypted column bypassed capability checking entirely.
             Expr::Like {
-                negated: _,
-                expr,
-                pattern,
-                escape_char: _,
-                any: false,
-            }
-            | Expr::ILike {
-                negated: _,
+                negated,
                 expr,
                 pattern,
                 escape_char: _,
                 any: false,
             } => {
-                self.unify_node_with_type(expr_val, Type::native())?;
-                self.unify_nodes(&**expr, &**pattern)?;
+                let op = if *negated {
+                    BinaryOperator::PGNotLikeMatch
+                } else {
+                    BinaryOperator::PGLikeMatch
+                };
+                get_sql_binop_rule(&op).apply_constraints(self, expr, pattern, expr_val)?;
+                self.record_query_operands([&**expr, &**pattern]);
+            }
+            Expr::ILike {
+                negated,
+                expr,
+                pattern,
+                escape_char: _,
+                any: false,
+            } => {
+                let op = if *negated {
+                    BinaryOperator::PGNotILikeMatch
+                } else {
+                    BinaryOperator::PGILikeMatch
+                };
+                get_sql_binop_rule(&op).apply_constraints(self, expr, pattern, expr_val)?;
+                self.record_query_operands([&**expr, &**pattern]);
             }
 
             Expr::Like { any: true, .. } | Expr::ILike { any: true, .. } => {
@@ -153,17 +314,24 @@ impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
 
             Expr::AnyOp {
                 left,
-                compare_op: _,
+                compare_op,
                 right,
                 is_some: _,
             }
             | Expr::AllOp {
                 left,
-                compare_op: _,
+                compare_op,
                 right,
             } => {
                 self.unify_node_with_type(expr_val, Type::native())?;
                 self.unify_nodes(&**left, &**right)?;
+
+                // `x <op> ANY/ALL (…)` applies `<op>` to every element, so the
+                // capability is the operator's. Discarding `compare_op` left
+                // both `= ANY` and `> ANY` unconstrained.
+                if let Some(eql_trait) = comparison_capability(compare_op) {
+                    self.unify_node_with_bound(&**left, eql_trait)?;
+                }
             }
 
             Expr::Ceil { expr, .. }
@@ -288,14 +456,26 @@ impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
                 let result_ty = self.fresh_tvar();
 
                 match operand {
+                    // `CASE x WHEN y THEN z` compares `x` to each `y` for
+                    // equality and returns `z`. The operand and the conditions
+                    // share a type; the CASE's own type is `z`'s and must stay
+                    // independent of it.
+                    //
+                    // Unifying `expr_val` with the operand here instead forced
+                    // the result to the operand's type, so
+                    // `CASE enc WHEN 'a' THEN 1 ELSE 0 END` typed the integer
+                    // results as values of the encrypted column and encrypted
+                    // them.
                     Some(operand) => {
+                        let operand_ty = self.get_node_type(&**operand);
+
                         for cond_when in conditions {
-                            self.unify_nodes_with_type(
-                                expr_val,
-                                &**operand,
-                                self.unify_node_with_type(&cond_when.condition, self.fresh_tvar())?,
-                            )?;
+                            self.unify_node_with_type(&cond_when.condition, operand_ty.clone())?;
                         }
+
+                        // The comparison is equality, so the operand's domain
+                        // has to carry an equality term.
+                        self.unify_node_with_bound(&**operand, EqlTrait::Eq)?;
                     }
                     None => {
                         for cond_when in conditions {
@@ -442,5 +622,149 @@ impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
         }
 
         Ok(())
+    }
+}
+
+impl<'ast> TypeInferencer<'ast> {
+    /// If `expr` resolves to an encrypted JSON (`JsonLike`) value — the field
+    /// access side of a JSON ordering comparison (`col -> sel`, `col ->> sel`, or
+    /// `jsonb_path_query_first(col, sel)`) — return its [`EqlValue`]. Returns
+    /// `None` for scalar EQL columns (which compare via the ordinary term rewrite)
+    /// and for non-EQL types.
+    /// Whether `expr` has resolved to an encrypted value.
+    fn is_eql_typed(&self, expr: &'ast Expr) -> bool {
+        matches!(&*self.get_node_type(expr), Type::Value(Value::Eql(_)))
+    }
+
+    fn eql_json_value(&self, expr: &'ast Expr) -> Option<EqlValue> {
+        match &*self.get_node_type(expr) {
+            Type::Value(Value::Eql(eql_term)) => {
+                let eql_value = eql_term.eql_value();
+                (eql_value.domain_identity().token == TokenType::Json).then(|| eql_value.clone())
+            }
+            _ => None,
+        }
+    }
+
+    /// Deconstructs an encrypted-JSON **field access** into the accessed value
+    /// and the expression supplying its selector:
+    ///
+    /// - `col -> sel`, `col ->> sel`
+    /// - `jsonb_path_query_first(col, sel)`
+    ///
+    /// Returns `None` for anything else — importantly for a bare encrypted JSON
+    /// column, which is a whole document, not a field of one. Equality needs the
+    /// selector expression itself (not just the type), because the path is one
+    /// half of the fused value-selector needle.
+    fn eql_json_field_access(&self, expr: &'ast Expr) -> Option<(EqlValue, &'ast Expr)> {
+        let selector = match expr {
+            Expr::BinaryOp {
+                op: BinaryOperator::Arrow | BinaryOperator::LongArrow,
+                right,
+                ..
+            } => &**right,
+
+            // `jsonb_path_query_first(col, sel)` — and its already-rewritten
+            // `eql_v3.` spelling. The selector is the second argument.
+            Expr::Function(function) => match &function.args {
+                FunctionArguments::List(list) => match list.args.as_slice() {
+                    [_, FunctionArg::Unnamed(FunctionArgExpr::Expr(sel))] => sel,
+                    _ => return None,
+                },
+                _ => return None,
+            },
+
+            _ => return None,
+        };
+
+        self.eql_json_value(expr).map(|json| (json, selector))
+    }
+
+    /// Records each of `exprs` that is a literal or placeholder as a query
+    /// operand — an operand of a predicate, which reaches PostgreSQL carrying
+    /// only search terms and never a ciphertext.
+    ///
+    /// Column references are ignored: they are already stored payloads, and it
+    /// is only the bound values whose encryption shape this decides.
+    fn record_query_operands(&self, exprs: impl IntoIterator<Item = &'ast Expr>) {
+        for expr in exprs {
+            match Self::as_ast_value(expr) {
+                Some(ast::Value::Placeholder(placeholder)) => {
+                    if let Ok(param) = Param::try_from(placeholder) {
+                        self.record_query_operand_param(param);
+                    }
+                }
+                Some(node) => self.record_query_operand_literal(node),
+                None => {}
+            }
+        }
+    }
+
+    /// Types `value` — the value half of `col -> sel = value` — as a fused
+    /// value selector, and records where its path half (`selector`) comes from.
+    ///
+    /// A path that is neither a literal nor a placeholder (a column reference, a
+    /// function call) cannot be resolved to a needle at encryption time, so the
+    /// fusion is declined and the comparison falls through to ordinary typing —
+    /// where it will fail the capability check with a clearer error than a
+    /// half-built needle would produce.
+    ///
+    /// Returns whether the fusion was applied. The caller must not treat a
+    /// declined fusion as handled: doing so skips the binop rule that is the
+    /// promised fall-through, leaving `value` with an unconstrained type
+    /// variable and surfacing an opaque "incomplete type" error instead of the
+    /// capability error.
+    fn infer_json_value_selector(
+        &self,
+        json: EqlValue,
+        selector: &'ast Expr,
+        value: &'ast Expr,
+    ) -> Result<bool, TypeError> {
+        let Some(source) = Self::json_selector_source(selector) else {
+            return Ok(false);
+        };
+
+        self.unify_node_with_type(
+            value,
+            Type::Value(Value::Eql(EqlTerm::JsonValueSelector(json))),
+        )?;
+
+        match Self::as_ast_value(value) {
+            Some(ast::Value::Placeholder(placeholder)) => {
+                if let Ok(param) = Param::try_from(placeholder) {
+                    self.record_json_value_selector_param(param, source);
+                }
+            }
+            Some(node) => self.record_json_value_selector_literal(node, source),
+            None => {}
+        }
+
+        Ok(true)
+    }
+
+    /// Classifies the path half of a fused value selector: a placeholder yields
+    /// the param it will arrive in, a literal yields its text inline.
+    fn json_selector_source(selector: &'ast Expr) -> Option<JsonSelectorSource> {
+        match Self::as_ast_value(selector)? {
+            ast::Value::Placeholder(placeholder) => Param::try_from(placeholder)
+                .ok()
+                .map(JsonSelectorSource::Param),
+            ast::Value::SingleQuotedString(s)
+            | ast::Value::DoubleQuotedString(s)
+            | ast::Value::EscapedStringLiteral(s) => Some(JsonSelectorSource::Literal(s.clone())),
+            ast::Value::Number(n, _) => Some(JsonSelectorSource::Literal(n.to_string())),
+            _ => None,
+        }
+    }
+
+    /// The [`ast::Value`] an expression ultimately is, seeing through casts
+    /// (`$1::jsonb`, `'a'::text`). Casts are common on both halves — the client
+    /// may write them and earlier rules may add them.
+    fn as_ast_value(expr: &'ast Expr) -> Option<&'ast ast::Value> {
+        match expr {
+            Expr::Value(value_with_span) => Some(&value_with_span.value),
+            Expr::Cast { expr, .. } => Self::as_ast_value(expr),
+            _ => None,
+        }
     }
 }

@@ -13,9 +13,14 @@ use crate::connect::Sender;
 use crate::error::{EncryptError, Error, MappingError};
 use crate::log::{MAPPER, PROTOCOL};
 use crate::postgresql::context::column::Column;
+use crate::postgresql::context::statement::{
+    output_params_from_plan, OutputParam, OutputParamSource,
+};
 use crate::postgresql::context::statement_metadata::{ProtocolType, StatementType};
 use crate::postgresql::context::Portal;
-use crate::postgresql::data::literal_from_sql;
+use crate::postgresql::data::{
+    json_value_selector_plaintext, literal_from_sql, literal_json_value,
+};
 use crate::postgresql::messages::close::Close;
 use crate::postgresql::messages::ready_for_query::ReadyForQuery;
 use crate::postgresql::messages::terminate::Terminate;
@@ -27,10 +32,10 @@ use crate::prometheus::{
     STATEMENTS_PASSTHROUGH_TOTAL, STATEMENTS_UNMAPPABLE_TOTAL,
 };
 use crate::proxy::EncryptionService;
-use crate::EqlCiphertext;
+use crate::{EqlOutput, EqlQueryPayload};
 use bytes::BytesMut;
 use cipherstash_client::encryption::Plaintext;
-use eql_mapper::{self, EqlMapperError, EqlTerm, TypeCheckedStatement};
+use eql_mapper::{self, EqlMapperError, EqlTermVariant, JsonSelectorSource, TypeCheckedStatement};
 use metrics::{counter, histogram};
 use pg_escape::quote_literal;
 use serde::Serialize;
@@ -466,10 +471,12 @@ where
                         {
                             debug!(target: MAPPER,
                                 client_id = self.context.client_id,
-                                transformed_statement = ?transformed_statement,
+                                transformed_statement = ?transformed_statement.statement,
                             );
 
-                            transformed_statements.push(transformed_statement);
+                            // The simple protocol has no params, so the plan is
+                            // always empty here — only the SQL is needed.
+                            transformed_statements.push(transformed_statement.statement);
                             encrypted = true;
                         }
                     }
@@ -582,13 +589,13 @@ where
     /// # Returns
     ///
     /// Vector of encrypted values corresponding to each literal, with `None` for
-    /// literals that don't require encryption and `Some(EqlCiphertext)` for encrypted values.
+    /// literals that don't require encryption and `Some(EqlOutput)` for encrypted values.
     async fn encrypt_literals(
         &mut self,
         session_id: SessionId,
         typed_statement: &TypeCheckedStatement<'_>,
         literal_columns: &Vec<Option<Column>>,
-    ) -> Result<Vec<Option<EqlCiphertext>>, Error> {
+    ) -> Result<Vec<Option<EqlOutput>>, Error> {
         let literal_values = typed_statement.literal_values();
         if literal_values.is_empty() {
             debug!(target: MAPPER,
@@ -598,17 +605,24 @@ where
             return Ok(vec![]);
         }
 
-        let plaintexts = literals_to_plaintext(literal_values, literal_columns)?;
+        let plaintexts = literals_to_plaintext(typed_statement, literal_columns)?;
 
         let start = Instant::now();
 
-        let encrypted = self
+        let mut encrypted = self
             .context
             .encrypt(plaintexts, literal_columns)
             .await
             .inspect_err(|_| {
                 counter!(ENCRYPTION_ERROR_TOTAL).increment(1);
             })?;
+
+        for ((_, literal), encrypted) in literal_values.iter().zip(encrypted.iter_mut()) {
+            project_query_operand(
+                typed_statement.query_operands.contains_literal(literal),
+                encrypted,
+            );
+        }
 
         debug!(target: MAPPER,
             client_id = self.context.client_id,
@@ -643,12 +657,20 @@ where
     async fn transform_statement(
         &mut self,
         typed_statement: &TypeCheckedStatement<'_>,
-        encrypted_literals: &Vec<Option<EqlCiphertext>>,
-    ) -> Result<Option<ast::Statement>, Error> {
+        encrypted_literals: &Vec<Option<EqlOutput>>,
+    ) -> Result<Option<eql_mapper::TransformedStatement>, Error> {
         // Convert literals to ast Expr
         let mut encrypted_expressions = vec![];
         for encrypted in encrypted_literals {
             let e = match encrypted {
+                // A JSON selector (RHS of `->`/`->>`, or the `jsonb_path_query`
+                // path) is a bare tokenized-selector hash used directly as `text`
+                // by the eql_v3 functions (`eql_v3."->"(json, text)`). Bind the raw
+                // token: JSON-serializing it (below) would re-quote the bare string
+                // (`"<hash>"`), so it would never match the stored per-entry `s`.
+                Some(EqlOutput::Query(EqlQueryPayload::Selector(s))) => {
+                    Some(Value::SingleQuotedString(s.clone()))
+                }
                 Some(en) => Some(to_json_literal_value(&en)?),
                 None => None,
             };
@@ -738,6 +760,23 @@ where
             parse = ?message
         );
 
+        // A Parse rebinds the name: whatever it referred to before is gone.
+        //
+        // Dropping it here rather than only on the mapped path matters, because
+        // every path below can return without caching anything — a statement
+        // that needs no type check (`BEGIN`, `END`), one parsed while mapping is
+        // disabled, or one that fails to type check. Leaving the previous entry
+        // in place means the next Bind for this name is rewritten against a
+        // statement the client never parsed, and the param counts do not line
+        // up:
+        //
+        //     FATAL: Rewritten statement binds parameter 1, but only 0 were provided
+        //
+        // pgbench in extended mode is exactly this shape: it reuses the unnamed
+        // statement for every command, so the `END` at the close of a
+        // transaction binds against the `SELECT` that preceded it.
+        self.context.close_statement(&message.name);
+
         let statement = SqlParser::parse_statement(&message.statement)?;
 
         if let Some(mapping_disabled) = self.context.maybe_set_unsafe_disable_mapping(&statement) {
@@ -781,7 +820,7 @@ where
         let mut parse_duration_recorded = false;
 
         match self.to_encryptable_statement(&typed_statement, param_types)? {
-            Some(statement) => {
+            Some(mut statement) => {
                 if typed_statement.requires_transform() {
                     // Record parse duration before encryption work starts
                     self.context
@@ -798,16 +837,26 @@ where
                     {
                         debug!(target: MAPPER,
                             client_id = self.context.client_id,
-                            transformed_statement = ?transformed_statement,
+                            transformed_statement = ?transformed_statement.statement,
+                            param_plan = ?transformed_statement.params,
                         );
 
-                        message.rewrite_statement(transformed_statement.to_string());
+                        // The rewrite may have reshaped the params, so the
+                        // statement's output params come from the plan rather
+                        // than from its own input params.
+                        let output_columns = self
+                            .context
+                            .get_output_param_columns(&transformed_statement.params)?;
+                        statement.output_params =
+                            output_params_from_plan(&transformed_statement.params, output_columns);
+
+                        message.rewrite_statement(transformed_statement.statement.to_string());
                     }
                 }
 
                 counter!(STATEMENTS_ENCRYPTED_TOTAL).increment(1);
 
-                message.rewrite_param_types(&statement.param_columns);
+                message.rewrite_param_types(&statement.output_params);
                 self.context
                     .add_statement(message.name.to_owned(), statement);
             }
@@ -918,8 +967,22 @@ where
             literal_columns = ?literal_columns,
         );
 
+        // Until the statement is rewritten its output params are its input
+        // params — a statement that needs no transform never reshapes them, and
+        // one that does overwrites this from the rewrite's `ParamPlan`.
+        let output_params = param_columns
+            .iter()
+            .enumerate()
+            .map(|(idx, column)| OutputParam {
+                column: column.to_owned(),
+                source: OutputParamSource::Input(idx),
+                query_operand: false,
+            })
+            .collect();
+
         let statement = Statement::new(
             param_columns.to_owned(),
+            output_params,
             projection_columns.to_owned(),
             literal_columns.to_owned(),
             param_types,
@@ -999,7 +1062,7 @@ where
 
             if statement.has_params() {
                 let encrypted = self.encrypt_params(session_id, &bind, &statement).await?;
-                bind.rewrite(encrypted)?;
+                bind.rewrite(&statement.output_params, encrypted)?;
             }
             if statement.has_projection() {
                 portal = Portal::encrypted_with_format_codes(
@@ -1042,21 +1105,33 @@ where
         session_id: Option<SessionId>,
         bind: &Bind,
         statement: &Statement,
-    ) -> Result<Vec<Option<crate::EqlCiphertext>>, Error> {
+    ) -> Result<Vec<Option<crate::EqlOutput>>, Error> {
         let plaintexts =
-            bind.to_plaintext(&statement.param_columns, &statement.postgres_param_types)?;
+            bind.to_plaintext(&statement.output_params, &statement.postgres_param_types)?;
+
+        // Encryption is positional over the OUTPUT params — the values actually
+        // sent — not over what the client bound.
+        let output_param_columns = statement
+            .output_params
+            .iter()
+            .map(|output| output.column.to_owned())
+            .collect::<Vec<_>>();
 
         debug!(target: MAPPER, client_id = self.context.client_id, plaintexts = ?plaintexts);
 
         let start = Instant::now();
 
-        let encrypted = self
+        let mut encrypted = self
             .context
-            .encrypt(plaintexts, &statement.param_columns)
+            .encrypt(plaintexts, &output_param_columns)
             .await
             .inspect_err(|_| {
                 counter!(ENCRYPTION_ERROR_TOTAL).increment(1);
             })?;
+
+        for (output, encrypted) in statement.output_params.iter().zip(encrypted.iter_mut()) {
+            project_query_operand(output.query_operand, encrypted);
+        }
 
         let duration = Instant::now().duration_since(start);
 
@@ -1158,28 +1233,92 @@ where
     }
 }
 
+/// Projects a stored payload into its query operand when the value is bound in
+/// a predicate rather than stored.
+///
+/// A query operand carries the column's search terms but never a decryptable
+/// ciphertext — the `eql_v3.query_*` domains reject `c` outright. It cannot be
+/// produced by encrypting differently: a single `EqlOperation::Query` yields
+/// only ONE term, while an operand may need several (`{v,i,hm,ob}`), so the
+/// value is encrypted in Store mode and projected here.
+///
+/// Terms that are already query-shaped (the JSON selectors and SteVec terms,
+/// which the encryptor produces via `EqlOperation::Query`) are left alone.
+fn project_query_operand(query_operand: bool, encrypted: &mut Option<EqlOutput>) {
+    if !query_operand {
+        return;
+    }
+
+    match encrypted.take() {
+        Some(EqlOutput::Store(ciphertext)) => {
+            *encrypted = Some(EqlOutput::Query(ciphertext.into_query_operand()));
+        }
+        already_query_shaped => *encrypted = already_query_shaped,
+    }
+}
+
 fn literals_to_plaintext(
-    literals: &Vec<(EqlTerm, &ast::Value)>,
+    typed_statement: &TypeCheckedStatement<'_>,
     literal_columns: &Vec<Option<Column>>,
 ) -> Result<Vec<Option<Plaintext>>, Error> {
+    let literals = typed_statement.literal_values();
+
     let plaintexts = literals
         .iter()
         .zip(literal_columns)
-        .map(|((_, val), col)| match col {
-            Some(col) => literal_from_sql(val, col.eql_term(), col.cast_type()).map_err(|err| {
-                debug!(
-                    target: MAPPER,
-                    msg = "Could not convert literal value",
-                    value = ?val,
-                    cast_type = ?col.cast_type(),
-                    error = err.to_string()
-                );
-                MappingError::InvalidParameter(Box::new(col.to_owned()))
-            }),
+        .map(|((eql_term, val), col)| match col {
+            Some(col) => {
+                let plaintext = if eql_term.variant() == EqlTermVariant::JsonValueSelector {
+                    json_value_selector_literal_plaintext(typed_statement, val)
+                } else {
+                    literal_from_sql(val, col.eql_term(), col.cast_type())
+                };
+
+                plaintext.map_err(|err| {
+                    debug!(
+                        target: MAPPER,
+                        msg = "Could not convert literal value",
+                        value = ?val,
+                        cast_type = ?col.cast_type(),
+                        error = err.to_string()
+                    );
+                    MappingError::InvalidParameter(Box::new(col.to_owned())).into()
+                })
+            }
             None => Ok(None),
         })
-        .collect::<Result<Vec<_>, _>>()?;
+        .collect::<Result<Vec<_>, Error>>()?;
     Ok(plaintexts)
+}
+
+/// Composes the needle for a JSON field equality whose value is a literal:
+/// `{"path": <selector>, "value": <literal>}`.
+///
+/// Only a literal path can be resolved here — the whole statement is encrypted
+/// at Parse time, before any param is bound. `col -> $1 = 'value'` (param path,
+/// literal value) is therefore not supported; it is also not a shape any client
+/// produces, since a client that parameterises the path parameterises the value
+/// too.
+fn json_value_selector_literal_plaintext(
+    typed_statement: &TypeCheckedStatement<'_>,
+    literal: &ast::Value,
+) -> Result<Option<Plaintext>, MappingError> {
+    let Some(JsonSelectorSource::Literal(path)) =
+        typed_statement.json_value_selectors.for_literal(literal)
+    else {
+        debug!(
+            target: MAPPER,
+            msg = "Encrypted JSON equality needs a literal selector when the value is a literal",
+            value = ?literal,
+        );
+        return Err(MappingError::CouldNotParseParameter);
+    };
+
+    let Some(value) = literal_json_value(literal)? else {
+        return Ok(None);
+    };
+
+    json_value_selector_plaintext(path, value).map(Some)
 }
 
 fn to_json_literal_value<T>(literal: &T) -> Result<Value, Error>

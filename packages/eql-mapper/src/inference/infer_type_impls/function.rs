@@ -1,7 +1,9 @@
 use eql_mapper_macros::trace_infer;
-use sqltk::parser::ast::{Function, FunctionArguments};
+use sqltk::parser::ast::{Function, FunctionArguments, WindowType};
 
-use crate::{get_sql_function, inference::infer_type::InferType, TypeError, TypeInferencer};
+use crate::{
+    get_sql_function, inference::infer_type::InferType, EqlTrait, TypeError, TypeInferencer,
+};
 
 /// Looks up the function signature.
 ///
@@ -15,6 +17,15 @@ impl<'ast> InferType<'ast, Function> for TypeInferencer<'ast> {
             return Err(TypeError::UnsupportedSqlFeature(
                 "Clickhouse-style function parameters".into(),
             ));
+        }
+
+        // Partitioning groups rows by equality, so each key needs an equality
+        // term — the window specification is otherwise never given a type, and
+        // `PARTITION BY enc` silently partitions on ciphertext.
+        if let Some(WindowType::WindowSpec(spec)) = &function.over {
+            for expr in &spec.partition_by {
+                self.unify_node_with_bound(expr, EqlTrait::Eq)?;
+            }
         }
 
         get_sql_function(&function.name).apply_constraints(self, function)

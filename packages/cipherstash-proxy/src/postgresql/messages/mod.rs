@@ -24,6 +24,10 @@ pub use target::Target;
 
 pub const NULL: i32 = -1;
 
+/// PostgreSQL's "unspecified type, infer it" param OID, used in `Parse` and
+/// when a param's type is not known to the proxy.
+pub const UNSPECIFIED_TYPE_OID: i32 = 0;
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum FrontendCode {
     Bind,

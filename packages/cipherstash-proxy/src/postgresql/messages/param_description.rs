@@ -46,6 +46,21 @@ impl ParamDescription {
         }
     }
 
+    /// Replaces the described params wholesale.
+    ///
+    /// PostgreSQL describes the params of the *rewritten* statement, but the
+    /// client must be told about the params it wrote — a rewrite that fuses two
+    /// params into one would otherwise describe too few, and the client would
+    /// bind the wrong number of values.
+    pub fn set_types(&mut self, types: Vec<i32>) {
+        debug!(target: MAPPER, ?types);
+
+        if types != self.types {
+            self.types = types;
+            self.dirty = true;
+        }
+    }
+
     pub fn requires_rewrite(&self) -> bool {
         self.dirty
     }

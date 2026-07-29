@@ -18,7 +18,10 @@ use sqltk::parser::ast::{
 };
 use sqltk::{into_control_flow, AsNodeKey, Break, Visitable, Visitor};
 
-use crate::{ScopeError, ScopeTracker, TableResolver};
+use crate::{
+    JsonSelectorSource, JsonValueSelectors, Param, QueryOperands, ScopeError, ScopeTracker,
+    TableResolver,
+};
 
 pub(crate) use registry::*;
 pub(crate) use sequence::*;
@@ -51,6 +54,18 @@ pub struct TypeInferencer<'ast> {
     /// Implements the type unification algorithm.
     unifier: Rc<RefCell<Unifier<'ast>>>,
 
+    /// The fused JSON value selectors discovered while inferring `=`/`<>` over
+    /// encrypted JSON field accesses. Unification records *types* per node; this
+    /// records the one *relationship* the proxy needs — which operand supplies
+    /// the path for which value ([`crate::JsonValueSelectors`]).
+    json_value_selectors: RefCell<JsonValueSelectors<'ast>>,
+
+    /// The operands that appear in a query position, so the proxy can project
+    /// their payloads to query operands ([`crate::QueryOperands`]). Recorded
+    /// here rather than derived later because it is a fact about the statement's
+    /// shape, and the proxy needs it before it encrypts anything.
+    query_operands: RefCell<QueryOperands<'ast>>,
+
     _ast: PhantomData<&'ast ()>,
 }
 
@@ -65,12 +80,77 @@ impl<'ast> TypeInferencer<'ast> {
             table_resolver: table_resolver.into(),
             scope_tracker: scope.into(),
             unifier: unifier.into(),
+            json_value_selectors: RefCell::new(JsonValueSelectors::default()),
+            query_operands: RefCell::new(QueryOperands::default()),
             _ast: PhantomData,
         }
     }
 
+    /// Takes the fused JSON value selectors accumulated during inference,
+    /// leaving the inferencer's set empty.
+    pub(crate) fn take_json_value_selectors(&self) -> JsonValueSelectors<'ast> {
+        std::mem::take(&mut self.json_value_selectors.borrow_mut())
+    }
+
+    /// Takes the recorded query operands, leaving the inferencer's set empty.
+    pub(crate) fn take_query_operands(&self) -> QueryOperands<'ast> {
+        std::mem::take(&mut self.query_operands.borrow_mut())
+    }
+
+    pub(crate) fn record_query_operand_param(&self, param: Param) {
+        self.query_operands.borrow_mut().record_param(param);
+    }
+
+    pub(crate) fn record_query_operand_literal(&self, node: &'ast sqltk::parser::ast::Value) {
+        self.query_operands.borrow_mut().record_literal(node);
+    }
+
+    pub(crate) fn record_json_value_selector_param(
+        &self,
+        param: Param,
+        source: JsonSelectorSource,
+    ) {
+        self.json_value_selectors
+            .borrow_mut()
+            .record_param(param, source);
+    }
+
+    pub(crate) fn record_json_value_selector_literal(
+        &self,
+        node: &'ast sqltk::parser::ast::Value,
+        source: JsonSelectorSource,
+    ) {
+        self.json_value_selectors
+            .borrow_mut()
+            .record_literal(node, source);
+    }
+
     pub(crate) fn get_node_type<N: AsNodeKey>(&self, node: &'ast N) -> Arc<Type> {
         self.unifier.borrow_mut().get_node_type(node)
+    }
+
+    /// Requires `node` to have a type implementing `eql_trait`.
+    ///
+    /// A native type satisfies every bound trivially, so this only bites for an
+    /// encrypted column, whose domain must carry the corresponding term.
+    ///
+    /// The node's *resolved* type is unified with the bound rather than the node
+    /// merely being pointed at a bounded variable: an unresolved variable
+    /// satisfies any bound vacuously, so binding alone defers the check
+    /// indefinitely and never rejects the column.
+    pub(crate) fn unify_node_with_bound<N: AsNodeKey>(
+        &self,
+        node: &'ast N,
+        eql_trait: EqlTrait,
+    ) -> Result<(), TypeError> {
+        let bounded = self
+            .unifier
+            .borrow_mut()
+            .fresh_bounded_tvar(eql_trait.into());
+        let unified = self.unify(self.get_node_type(node), bounded)?;
+        self.unify_node_with_type(node, unified)?;
+
+        Ok(())
     }
 
     #[allow(unused)]

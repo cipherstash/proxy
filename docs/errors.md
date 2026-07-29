@@ -28,9 +28,12 @@
   - [Column configuration mismatch](#encrypt-column-config-mismatch)
   - [Missing encrypt configuration](#encrypt-missing-encrypt-configuration)
   - [Unexpected SET keyset](#encrypt-unexpected-set-keyset)
+  - [Encrypted jsonb column configured for ORE ordering](#encrypt-ste-vec-ore-mode-unsupported)
 
 - Decrypt errors:
    - [Column could not be deserialised](#encrypt-column-could-not-be-deserialised)
+   - [Encrypted jsonb value has no root entry](#encrypt-ste-vec-missing-root-entry)
+   - [Encrypted jsonb entry has an invalid selector](#encrypt-ste-vec-selector-invalid)
 
 - Configuration errors:
   - [Missing or invalid TLS configuration](#config-missing-or-invalid-tls)
@@ -476,7 +479,7 @@ For example:
 
 ## Unknown Column <a id='encrypt-unknown-column'></a>
 
-The column has an encrypted type (PostgreSQL `eql_v2_encrypted` type ) with no encryption configuration.
+The column has an encrypted type (an EQL v3 encrypted domain type, e.g. `eql_v3_text_search`) with no encryption configuration.
 
 Without the configuration, Cipherstash Proxy does not know how to encrypt the column.
 Any data is unprotected and unencrypted.
@@ -503,7 +506,7 @@ Column 'column_name' in table 'table_name' has no Encrypt configuration
 
 ## Unknown Table <a id='encrypt-unknown-table'></a>
 
-The table has one or more encrypted columns (PostgreSQL `eql_v2_encrypted` type ) with no encryption configuration.
+The table has one or more encrypted columns (an EQL v3 encrypted domain type, e.g. `eql_v3_text_search`) with no encryption configuration.
 
 Without the configuration, Cipherstash Proxy does not know how to encrypt the column.
 Any data is unprotected and unencrypted.
@@ -621,6 +624,29 @@ Cannot SET CIPHERSTASH.KEYSET if a default keyset has been configured.
 <!-- ---------------------------------------------------------------------------------------------------- -->
 
 
+## Encrypted jsonb column configured for ORE ordering <a id='encrypt-ste-vec-ore-mode-unsupported'></a>
+
+An encrypted `jsonb` (SteVec) column is configured for Standard-mode ORE ordering, which EQL v3 does not support.
+
+EQL v3 orders encrypted `jsonb` entries by the CLLW-OPE (`op`) term and has no representation for CLLW-ORE (`oc`). A column carried over from an earlier configuration that used ORE ordering therefore cannot be encrypted under EQL v3.
+
+
+### Error message
+
+```
+An encrypted jsonb column is configured for ORE ordering, which EQL v3 does not support.
+```
+
+
+### How to fix
+
+1. Reconfigure the column to use a supported ordering mode.
+2. Re-encrypt the column's data under the new configuration.
+
+
+<!-- ---------------------------------------------------------------------------------------------------- -->
+
+
 # Decrypt errors
 
 
@@ -657,6 +683,47 @@ If the error persists, please contact CipherStash [support](https://cipherstash.
 <!-- ---------------------------------------------------------------------------------------------------- -->
 
 
+## Encrypted jsonb value has no root entry <a id='encrypt-ste-vec-missing-root-entry'></a>
+
+An encrypted `jsonb` (SteVec) value has an empty `sv` array and cannot be decrypted.
+
+The first entry of a SteVec document (`sv[0]`) is its decryption root. A document with no entries has nothing to decrypt, which indicates the stored value has been truncated or altered by another process.
+
+
+### Error message
+
+```
+Encrypted jsonb value has no root entry and cannot be decrypted.
+```
+
+
+### How to fix
+
+1. Check that the data in the encrypted column has not been modified outside CipherStash Proxy.
+2. If the error persists, please contact CipherStash [support](https://cipherstash.com/support).
+
+
+<!-- ---------------------------------------------------------------------------------------------------- -->
+
+
+## Encrypted jsonb entry has an invalid selector <a id='encrypt-ste-vec-selector-invalid'></a>
+
+An encrypted `jsonb` (SteVec) entry has a selector that is not exactly 16 hex-encoded bytes.
+
+A SteVec entry's selector is the source of both AEAD bindings (nonce and AAD), so it must be exactly 16 hex-encoded bytes. A selector of any other length indicates the stored value has been altered by another process.
+
+
+### Error message
+
+```
+Encrypted jsonb entry has an invalid selector '{selector}'.
+```
+
+
+### How to fix
+
+1. Check that the data in the encrypted column has not been modified outside CipherStash Proxy.
+2. If the error persists, please contact CipherStash [support](https://cipherstash.com/support).
 
 
 <!-- ---------------------------------------------------------------------------------------------------- -->
