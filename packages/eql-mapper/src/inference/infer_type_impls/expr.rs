@@ -12,6 +12,18 @@ use sqltk::parser::ast::{
     FunctionArguments, Ident, Subscript,
 };
 
+/// The capability a comparison operator requires of its operands, or `None` if
+/// it is not a comparison.
+fn comparison_capability(op: &BinaryOperator) -> Option<EqlTrait> {
+    match op {
+        BinaryOperator::Eq | BinaryOperator::NotEq => Some(EqlTrait::Eq),
+        BinaryOperator::Lt | BinaryOperator::LtEq | BinaryOperator::Gt | BinaryOperator::GtEq => {
+            Some(EqlTrait::Ord)
+        }
+        _ => None,
+    }
+}
+
 #[trace_infer]
 impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
     fn infer_exit(&mut self, expr_val: &'ast Expr) -> Result<(), TypeError> {
@@ -82,6 +94,14 @@ impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
                         self.unify(a, self.get_node_type(b))
                     })?,
                 )?;
+
+                // `IN` is equality against each element, so the operand's
+                // domain has to carry an equality term. Without this the shape
+                // type-checks on a storage-only column and the refusal comes
+                // from EQL at the database instead — correct of EQL, but
+                // inconsistent with `=` on the same column, which is caught
+                // here.
+                self.unify_node_with_bound(&**expr, EqlTrait::Eq)?;
             }
 
             Expr::InSubquery {
@@ -92,6 +112,9 @@ impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
                 self.unify_node_with_type(expr_val, Type::native())?;
                 let ty = Type::projection(&[(self.get_node_type(&**expr), None)]);
                 self.unify_node_with_type(&**subquery, ty)?;
+
+                // Equality against each returned row, as for `IN (…)`.
+                self.unify_node_with_bound(&**expr, EqlTrait::Eq)?;
             }
 
             Expr::InUnnest { .. } => {
@@ -291,17 +314,24 @@ impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
 
             Expr::AnyOp {
                 left,
-                compare_op: _,
+                compare_op,
                 right,
                 is_some: _,
             }
             | Expr::AllOp {
                 left,
-                compare_op: _,
+                compare_op,
                 right,
             } => {
                 self.unify_node_with_type(expr_val, Type::native())?;
                 self.unify_nodes(&**left, &**right)?;
+
+                // `x <op> ANY/ALL (…)` applies `<op>` to every element, so the
+                // capability is the operator's. Discarding `compare_op` left
+                // both `= ANY` and `> ANY` unconstrained.
+                if let Some(eql_trait) = comparison_capability(compare_op) {
+                    self.unify_node_with_bound(&**left, eql_trait)?;
+                }
             }
 
             Expr::Ceil { expr, .. }
@@ -426,14 +456,26 @@ impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
                 let result_ty = self.fresh_tvar();
 
                 match operand {
+                    // `CASE x WHEN y THEN z` compares `x` to each `y` for
+                    // equality and returns `z`. The operand and the conditions
+                    // share a type; the CASE's own type is `z`'s and must stay
+                    // independent of it.
+                    //
+                    // Unifying `expr_val` with the operand here instead forced
+                    // the result to the operand's type, so
+                    // `CASE enc WHEN 'a' THEN 1 ELSE 0 END` typed the integer
+                    // results as values of the encrypted column and encrypted
+                    // them.
                     Some(operand) => {
+                        let operand_ty = self.get_node_type(&**operand);
+
                         for cond_when in conditions {
-                            self.unify_nodes_with_type(
-                                expr_val,
-                                &**operand,
-                                self.unify_node_with_type(&cond_when.condition, self.fresh_tvar())?,
-                            )?;
+                            self.unify_node_with_type(&cond_when.condition, operand_ty.clone())?;
                         }
+
+                        // The comparison is equality, so the operand's domain
+                        // has to carry an equality term.
+                        self.unify_node_with_bound(&**operand, EqlTrait::Eq)?;
                     }
                     None => {
                         for cond_when in conditions {

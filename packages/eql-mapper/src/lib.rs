@@ -1502,7 +1502,10 @@ mod test {
                             )
                         )
                     )
-                    union
+                    -- `union all`, not `union`: deduplicating here would compare
+                    -- the encrypted payloads rather than the salaries, which the
+                    -- type checker now refuses.
+                    union all
                     (
                         select salary as y from employees
                             where salary >= (select min(max(foo)) from (
@@ -3130,9 +3133,6 @@ mod test {
     /// capability check, `IN` is not, so the same mistake produces two very
     /// different errors depending on how it was written.
     #[test]
-    #[ignore = "IN does not apply an Eq bound: inference's InList arm unifies the list with the \
-                column's type but adds no capability constraint, so a storage-only column is \
-                accepted and the error comes from EQL at runtime instead of from type checking."]
     fn in_list_requires_equality() {
         let schema = forms_schema();
 
@@ -3168,14 +3168,6 @@ mod test {
                 "SELECT rank() OVER (PARTITION BY txt) FROM t",
                 "eql_v3.eq_term(",
             ),
-            (
-                "SELECT txt FROM t UNION SELECT txt FROM t",
-                "eql_v3.eq_term(",
-            ),
-            (
-                "SELECT txt FROM t INTERSECT SELECT txt FROM t",
-                "eql_v3.eq_term(",
-            ),
         ] {
             let rewritten = transform_with_dummy_literals(schema.clone(), input);
 
@@ -3198,8 +3190,6 @@ mod test {
             ("SELECT flag FROM t ORDER BY 1", "Ord"),
             ("SELECT flag FROM t GROUP BY 1", "Eq"),
             ("SELECT rank() OVER (PARTITION BY flag) FROM t", "Eq"),
-            ("SELECT flag FROM t UNION SELECT flag FROM t", "Eq"),
-            ("SELECT flag FROM t INTERSECT SELECT flag FROM t", "Eq"),
         ] {
             let statement = parse(input);
             let err = type_check(schema.clone(), &statement)
@@ -3293,6 +3283,89 @@ mod test {
             type_check(schema, &statement).is_err(),
             "field access on a non-JSON encrypted column should fail the capability check"
         );
+    }
+
+    /// A simple `CASE` compares its operand for equality and returns its
+    /// results — two independent types.
+    ///
+    /// Conflating them typed the results as the operand: the integer arms of
+    /// `CASE enc WHEN 'a' THEN 1 ELSE 0 END` were encrypted as values of the
+    /// encrypted column and shipped as EQL payloads where plain integers belong.
+    #[test]
+    fn simple_case_keeps_its_result_type_independent_of_the_operand() {
+        let schema = forms_schema();
+
+        assert_eq!(
+            transform_with_dummy_literals(
+                schema.clone(),
+                "SELECT CASE txt WHEN 'a' THEN 1 ELSE 0 END AS c FROM t",
+            ),
+            "SELECT CASE txt WHEN '<CT>' THEN 1 ELSE 0 END AS c FROM t",
+        );
+
+        // The searched form was always correct; it stays that way.
+        assert_eq!(
+            transform_with_dummy_literals(
+                schema,
+                "SELECT CASE WHEN txt = 'a' THEN 1 ELSE 0 END AS c FROM t",
+            ),
+            "SELECT CASE WHEN eql_v3.eq_term(txt) = \
+             eql_v3.eq_term('<CT>'::JSONB::eql_v3.query_text_search) THEN 1 ELSE 0 END AS c FROM t",
+        );
+    }
+
+    /// The operand is compared for equality, so its domain must carry an
+    /// equality term.
+    #[test]
+    fn simple_case_operand_requires_equality() {
+        let schema = forms_schema();
+
+        let statement = parse("SELECT CASE flag WHEN true THEN 1 ELSE 0 END AS c FROM t");
+        let err = type_check(schema, &statement)
+            .expect_err("CASE on a storage-only operand should fail the capability check");
+
+        assert!(err.to_string().contains("Eq"), "unexpected error: {err}");
+    }
+
+    /// A set operation that deduplicates cannot do so on an encrypted column.
+    ///
+    /// Deduplication goes through the type's default operator class rather than
+    /// EQL's `=` overload, so it compares whole payloads including the
+    /// randomised ciphertext — `UNION` keeps every duplicate. Unlike
+    /// `SELECT DISTINCT` it cannot be keyed on the equality term in place,
+    /// because deduplication spans the whole projection of both branches, so it
+    /// is refused rather than silently wrong.
+    #[test]
+    fn deduplicating_set_operations_on_encrypted_columns_are_rejected() {
+        let schema = forms_schema();
+
+        for input in [
+            "SELECT txt FROM t UNION SELECT txt FROM t",
+            "SELECT txt FROM t INTERSECT SELECT txt FROM t",
+            "SELECT txt FROM t EXCEPT SELECT txt FROM t",
+        ] {
+            let statement = parse(input);
+            let err = type_check(schema.clone(), &statement)
+                .expect_err(&format!("`{input}` should be refused"));
+
+            assert!(
+                err.to_string()
+                    .contains("deduplication would compare ciphertexts"),
+                "unexpected error for `{input}`: {err}"
+            );
+        }
+
+        // `ALL` performs no deduplication, so it is unaffected.
+        for input in [
+            "SELECT txt FROM t UNION ALL SELECT txt FROM t",
+            "SELECT id FROM t UNION SELECT id FROM t",
+        ] {
+            let statement = parse(input);
+            assert!(
+                type_check(schema.clone(), &statement).is_ok(),
+                "`{input}` should be accepted"
+            );
+        }
     }
 
     /// Shapes the subquery rewrite cannot express are reported as such, rather

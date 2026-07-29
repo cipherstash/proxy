@@ -139,42 +139,53 @@ mod tests {
         assert_eq!(vec![1, 1, 1, 2, 2], ranks);
     }
 
-    /// `UNION` deduplicates; `UNION ALL` does not.
+    /// A deduplicating set operation on an encrypted column is refused.
+    ///
+    /// Deduplication compares whole payloads, so `UNION` would keep every
+    /// duplicate. It cannot be keyed on the equality term in place — the
+    /// comparison spans both branches' whole projections — so it is rejected
+    /// rather than silently wrong. `UNION ALL` deduplicates nothing and works.
     #[tokio::test]
-    #[ignore = "UNION on an encrypted column is not rewritten — no rule covers set operations — \
-                so its implicit deduplication compares raw payloads and every duplicate \
-                survives."]
-    async fn union_deduplicates_equal_plaintexts() {
+    #[ignore = "The rejection is a type-check error, and with CS_DEVELOPMENT__ENABLE_MAPPING_ERRORS \
+                unset — the default, and what the proxy container runs with, since \
+                tests/docker-compose.yml does not pass it through — a type error falls back to \
+                passthrough. The statement then reaches PostgreSQL unrewritten and returns the \
+                un-deduplicated rows this test exists to prevent. The mapper-level test \
+                (deduplicating_set_operations_on_encrypted_columns_are_rejected) covers the \
+                rejection itself; this becomes runnable once mapping errors are always on \
+                (CIP-3680)."]
+    async fn deduplicating_set_operations_are_rejected() {
         trace();
         clear().await;
         insert_fixture().await;
 
         let client = connect_with_tls(PROXY).await;
 
-        let sql = "SELECT encrypted_text FROM encrypted UNION SELECT encrypted_text FROM encrypted";
+        for sql in [
+            "SELECT encrypted_text FROM encrypted UNION SELECT encrypted_text FROM encrypted",
+            "SELECT encrypted_text FROM encrypted INTERSECT SELECT encrypted_text FROM encrypted",
+            "SELECT encrypted_text FROM encrypted EXCEPT SELECT encrypted_text FROM encrypted",
+        ] {
+            let err = client
+                .query(sql, &[])
+                .await
+                .expect_err(&format!("`{sql}` should be refused"));
+
+            assert!(
+                err.to_string()
+                    .contains("deduplication would compare ciphertexts"),
+                "unexpected error for `{sql}`: {err}"
+            );
+        }
+
+        // UNION ALL keeps duplicates by definition, so it is unaffected.
+        let sql =
+            "SELECT encrypted_text FROM encrypted UNION ALL SELECT encrypted_text FROM encrypted";
         let rows = client.query(sql, &[]).await.unwrap();
-        let actual: Vec<String> = rows.iter().map(|r| r.get("encrypted_text")).collect();
-
-        assert_eq!(vec!["apple", "banana", "cherry"], sorted(actual));
-    }
-
-    /// `INTERSECT` of a set with itself is that set, deduplicated.
-    #[tokio::test]
-    #[ignore = "INTERSECT on an encrypted column is not rewritten — no rule covers set \
-                operations — so it matches on raw payloads and returns one row per stored \
-                payload rather than one per distinct plaintext."]
-    async fn intersect_matches_equal_plaintexts() {
-        trace();
-        clear().await;
-        insert_fixture().await;
-
-        let client = connect_with_tls(PROXY).await;
-
-        let sql = "SELECT encrypted_text FROM encrypted \
-                   INTERSECT SELECT encrypted_text FROM encrypted";
-        let rows = client.query(sql, &[]).await.unwrap();
-        let actual: Vec<String> = rows.iter().map(|r| r.get("encrypted_text")).collect();
-
-        assert_eq!(vec!["apple", "banana", "cherry"], sorted(actual));
+        assert_eq!(
+            10,
+            rows.len(),
+            "UNION ALL should return both branches in full"
+        );
     }
 }

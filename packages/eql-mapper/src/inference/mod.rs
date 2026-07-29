@@ -129,6 +129,30 @@ impl<'ast> TypeInferencer<'ast> {
         self.unifier.borrow_mut().get_node_type(node)
     }
 
+    /// Requires `node` to have a type implementing `eql_trait`.
+    ///
+    /// A native type satisfies every bound trivially, so this only bites for an
+    /// encrypted column, whose domain must carry the corresponding term.
+    ///
+    /// The node's *resolved* type is unified with the bound rather than the node
+    /// merely being pointed at a bounded variable: an unresolved variable
+    /// satisfies any bound vacuously, so binding alone defers the check
+    /// indefinitely and never rejects the column.
+    pub(crate) fn unify_node_with_bound<N: AsNodeKey>(
+        &self,
+        node: &'ast N,
+        eql_trait: EqlTrait,
+    ) -> Result<(), TypeError> {
+        let bounded = self
+            .unifier
+            .borrow_mut()
+            .fresh_bounded_tvar(eql_trait.into());
+        let unified = self.unify(self.get_node_type(node), bounded)?;
+        self.unify_node_with_type(node, unified)?;
+
+        Ok(())
+    }
+
     #[allow(unused)]
     pub(crate) fn peek_node_type<N: AsNodeKey>(&self, node: &'ast N) -> Option<Arc<Type>> {
         self.unifier.borrow_mut().peek_node_type(node)
