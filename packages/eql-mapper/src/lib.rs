@@ -47,7 +47,8 @@ mod test {
             EqlTerm, EqlTrait, EqlTraits, EqlValue, InstantiateType, NativeValue, Projection,
             ProjectionColumn, Type, Value,
         },
-        JsonSelectorSource, OutputParamSource, Param, Schema, TableColumn, TableResolver,
+        JsonSelectorSegment, JsonSelectorSource, OutputParamSource, Param, Schema, TableColumn,
+        TableResolver, TypeCheckedStatement,
     };
     use eql_mapper_macros::concrete_ty;
     use pretty_assertions::assert_eq;
@@ -2598,7 +2599,7 @@ mod test {
         assert_eq!(
             transformed.params.outputs()[0].source,
             OutputParamSource::JsonValueSelector {
-                path: JsonSelectorSource::Param(Param(1)),
+                path: JsonSelectorSource::param(Param(1)),
                 value: Param(2),
             }
         );
@@ -2642,7 +2643,7 @@ mod test {
         assert_eq!(
             outputs[1].source,
             OutputParamSource::JsonValueSelector {
-                path: JsonSelectorSource::Param(Param(2)),
+                path: JsonSelectorSource::param(Param(2)),
                 value: Param(3),
             }
         );
@@ -3225,12 +3226,11 @@ mod test {
         })
     }
 
-    /// Transforms `sql` with every encrypted literal replaced by `'<CT>'`.
-    fn transform_with_dummy_literals(schema: Arc<TableResolver>, sql: &str) -> String {
-        let statement = parse(sql);
-        let typed = type_check(schema, &statement).unwrap();
-
-        let encrypted = typed
+    /// Every encrypted literal of `typed`, replaced by `'<CT>'`.
+    fn dummy_encrypted_literals<'ast>(
+        typed: &TypeCheckedStatement<'ast>,
+    ) -> HashMap<NodeKey<'ast>, ast::Value> {
+        typed
             .literals
             .iter()
             .map(|(_, v)| {
@@ -3239,7 +3239,14 @@ mod test {
                     ast::Value::SingleQuotedString("<CT>".to_string()),
                 )
             })
-            .collect::<HashMap<_, _>>();
+            .collect()
+    }
+
+    /// Transforms `sql` with every encrypted literal replaced by `'<CT>'`.
+    fn transform_with_dummy_literals(schema: Arc<TableResolver>, sql: &str) -> String {
+        let statement = parse(sql);
+        let typed = type_check(schema, &statement).unwrap();
+        let encrypted = dummy_encrypted_literals(&typed);
 
         typed.transform(encrypted).unwrap().to_string()
     }
@@ -3377,30 +3384,37 @@ mod test {
         assert_eq!(vec![false, true], roles);
     }
 
-    /// A chained JSON accessor must not leave the intermediate selector in the
-    /// statement, nor apply native `->` to the encrypted payload.
-    ///
-    /// The container is cloned from the *original* AST, so `-> 'nested'`
-    /// survives untouched: the plaintext field name ships in the SQL text and
-    /// native jsonb `->` runs on the encrypted column, which also makes the
-    /// predicate match nothing.
-    #[test]
-    #[ignore = "Chained JSON accessor clones its container from the original AST, so the inner \
-                selector stays plaintext in the SQL and native jsonb -> is applied to the \
-                encrypted payload. See rewrite_json_value_selector_eq.rs."]
-    fn chained_json_accessor_does_not_emit_the_plaintext_selector() {
-        let schema = resolver(schema! {
+    /// A column that can be both traversed and compared for JSON equality.
+    fn chained_json_schema() -> Arc<TableResolver> {
+        resolver(schema! {
             tables: {
                 t: {
                     id,
                     j (EQL("eql_v3_json_search"): Eq + Ord + JsonLike + Contain),
                 }
             }
-        });
+        })
+    }
 
+    /// A chained JSON accessor must not leave the intermediate selector in the
+    /// statement, nor apply native `->` to the encrypted payload.
+    ///
+    /// The chain collapses into a single containment against the ROOT column:
+    /// `j -> 'nested' -> 'string'` is the path `$.nested.string` of one
+    /// document, and the needle is keyed on that whole path. Keeping the inner
+    /// accessor (the container was cloned from the original AST) shipped the
+    /// plaintext field name in the SQL text AND ran native jsonb `->` over an
+    /// encrypted payload, so the predicate matched nothing either.
+    #[test]
+    fn chained_json_accessor_does_not_emit_the_plaintext_selector() {
         let rewritten = transform_with_dummy_literals(
-            schema,
+            chained_json_schema(),
             "SELECT id FROM t WHERE j -> 'nested' -> 'string' = '\"world\"'",
+        );
+
+        assert_eq!(
+            rewritten,
+            "SELECT id FROM t WHERE eql_v3.jsonb_contains(j, '<CT>'::JSONB::eql_v3.query_json)"
         );
 
         assert!(
@@ -3410,6 +3424,97 @@ mod test {
         assert!(
             !rewritten.contains("j -> "),
             "native jsonb -> must not be applied to the encrypted column: {rewritten}"
+        );
+    }
+
+    /// Every spelling and depth of chain collapses the same way, and none of
+    /// them leaves a selector behind.
+    #[test]
+    fn chained_json_accessor_spellings_all_collapse_to_root_containment() {
+        let cases = [
+            // Depth 3, and deeper.
+            "j -> 'a' -> 'b' -> 'c' = '\"v\"'",
+            "j -> 'a' -> 'b' -> 'c' -> 'd' = '\"v\"'",
+            // The `->>` spelling, and mixed with `->`.
+            "j ->> 'a' = '\"v\"'",
+            "j -> 'a' ->> 'b' = '\"v\"'",
+            "j ->> 'a' ->> 'b' = '\"v\"'",
+            // The function spelling, rooted and chained.
+            "jsonb_path_query_first(j, '$.a') = '\"v\"'",
+            "jsonb_path_query_first(j, '$.a') -> 'b' = '\"v\"'",
+            // The value operand written on the left.
+            "'\"v\"' = j -> 'a' -> 'b'",
+        ];
+
+        for case in cases {
+            let rewritten = transform_with_dummy_literals(
+                chained_json_schema(),
+                &format!("SELECT id FROM t WHERE {case}"),
+            );
+
+            assert_eq!(
+                rewritten,
+                "SELECT id FROM t WHERE eql_v3.jsonb_contains(j, '<CT>'::JSONB::eql_v3.query_json)",
+                "unexpected rewrite for `{case}`"
+            );
+        }
+    }
+
+    /// `<>` on a chain is the same containment, negated — the selectors are
+    /// discarded there too.
+    #[test]
+    fn chained_json_accessor_not_eq_rewrites_to_negated_containment() {
+        let rewritten = transform_with_dummy_literals(
+            chained_json_schema(),
+            "SELECT id FROM t WHERE j -> 'nested' -> 'string' <> '\"world\"'",
+        );
+
+        assert_eq!(
+            rewritten,
+            "SELECT id FROM t WHERE NOT (eql_v3.jsonb_contains(j, '<CT>'::JSONB::eql_v3.query_json))"
+        );
+    }
+
+    /// The path a chain composes is recorded step by step, so the proxy can
+    /// build `$.a.<$1>.c` once the placeholder steps are bound. Every step is an
+    /// input the plan must consume — dropping one would leave the client binding
+    /// a param that never reaches the needle.
+    #[test]
+    fn chained_json_accessor_records_every_path_step() {
+        let statement = parse("SELECT id FROM t WHERE j -> 'a' -> $1 -> 'c' = $2");
+
+        let typed = type_check(chained_json_schema(), &statement).unwrap();
+        let transformed = typed.transform(dummy_encrypted_literals(&typed)).unwrap();
+
+        assert_eq!(
+            transformed.to_string(),
+            "SELECT id FROM t WHERE eql_v3.jsonb_contains(j, $1::JSONB::eql_v3.query_json)"
+        );
+
+        let source = OutputParamSource::JsonValueSelector {
+            path: JsonSelectorSource::new(vec![
+                JsonSelectorSegment::Literal("a".to_owned()),
+                JsonSelectorSegment::Param(Param(1)),
+                JsonSelectorSegment::Literal("c".to_owned()),
+            ]),
+            value: Param(2),
+        };
+
+        assert_eq!(transformed.params.outputs()[0].source, source);
+        assert_eq!(source.inputs(), vec![Param(1), Param(2)]);
+    }
+
+    /// A chain with a step that is neither a literal nor a placeholder cannot
+    /// be composed into a path, so the fusion is declined and the comparison
+    /// falls through to the ordinary capability check — an error, not a
+    /// half-built needle and not a leak.
+    #[test]
+    fn chained_json_accessor_with_an_unresolvable_step_is_rejected() {
+        let statement = parse("SELECT id FROM t WHERE j -> 'a' -> id = '\"v\"'");
+
+        assert!(
+            type_check(chained_json_schema(), &statement).is_err(),
+            "a path step that is not a literal or a placeholder must not fuse"
         );
     }
 

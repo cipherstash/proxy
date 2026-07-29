@@ -10,6 +10,7 @@ use sqltk::parser::ast::{
 use sqltk::parser::tokenizer::Span;
 use sqltk::{NodeKey, NodePath, Visitable};
 
+use crate::json_value_selector::json_accessor_chain;
 use crate::unifier::{EqlTerm, Type, Value};
 use crate::EqlMapperError;
 
@@ -22,6 +23,8 @@ use super::TransformationRule;
 /// - `col -> sel  = value` → `eql_v3.jsonb_contains(col, <needle>)`
 /// - `col ->> sel = value` → same
 /// - `jsonb_path_query_first(col, sel) = value` → same
+/// - `col -> 'a' -> 'b' = value` → same, against the ROOT `col`: a chain is one
+///   path (`$.a.b`) into one document, and the whole chain is discarded
 /// - `<>` negates: `NOT eql_v3.jsonb_contains(col, <needle>)`
 ///
 /// where `<needle>` is the value operand, already cast to `eql_v3.query_json`
@@ -57,30 +60,22 @@ impl<'ast> RewriteJsonValueSelectorEq<'ast> {
         )
     }
 
-    /// The container expression of a JSON field access — the `col` of
-    /// `col -> sel` or of `jsonb_path_query_first(col, sel)`.
+    /// The expression a JSON field access is ROOTED at — the `col` of
+    /// `col -> sel`, of `jsonb_path_query_first(col, sel)`, and of a chain like
+    /// `col -> 'a' -> 'b'`.
+    ///
+    /// The whole chain is stripped, not just its outermost step. The path the
+    /// needle is keyed on is composed from every selector in the chain
+    /// (`$.a.b`), so what containment tests is the root document. Keeping an
+    /// intermediate accessor would both leak its plaintext selector into the
+    /// statement text and apply native jsonb `->` to an encrypted payload,
+    /// which matches nothing.
     ///
     /// Read from the ORIGINAL AST (via `node_path`), because by the time this
     /// rule runs the field access has already been rewritten to
     /// `eql_v3."->"(col, sel)` by [`super::RewriteContainmentOps`].
     fn container_of(expr: &Expr) -> Option<&Expr> {
-        match expr {
-            Expr::BinaryOp {
-                left,
-                op: BinaryOperator::Arrow | BinaryOperator::LongArrow,
-                ..
-            } => Some(&**left),
-
-            Expr::Function(function) => match &function.args {
-                FunctionArguments::List(list) => match list.args.as_slice() {
-                    [FunctionArg::Unnamed(FunctionArgExpr::Expr(container)), _] => Some(container),
-                    _ => None,
-                },
-                _ => None,
-            },
-
-            _ => None,
-        }
+        json_accessor_chain(expr).map(|(container, _)| container)
     }
 
     /// Splits a comparison into `(container, value operand is on the right)`, or

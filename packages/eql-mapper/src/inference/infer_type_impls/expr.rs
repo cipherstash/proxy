@@ -4,13 +4,11 @@ use crate::{
         unifier::{EqlTerm, EqlValue, TokenType, Type, Value},
         InferType, TypeError,
     },
-    EqlTrait, IdentCase, JsonSelectorSource, Param, TypeInferencer,
+    json_value_selector::json_accessor_chain,
+    EqlTrait, IdentCase, JsonSelectorSegment, JsonSelectorSource, Param, TypeInferencer,
 };
 use eql_mapper_macros::trace_infer;
-use sqltk::parser::ast::{
-    self as ast, AccessExpr, Array, BinaryOperator, Expr, FunctionArg, FunctionArgExpr,
-    FunctionArguments, Ident, Subscript,
-};
+use sqltk::parser::ast::{self as ast, AccessExpr, Array, BinaryOperator, Expr, Ident, Subscript};
 
 /// The capability a comparison operator requires of its operands, or `None` if
 /// it is not a comparison.
@@ -194,16 +192,17 @@ impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
                             self.eql_json_field_access(left),
                             self.eql_json_field_access(right),
                         ) {
-                            (Some((json, selector)), None) => {
+                            (Some((json, selectors)), None) => {
                                 let fused =
-                                    self.infer_json_value_selector(json, selector, right)?;
+                                    self.infer_json_value_selector(json, selectors, right)?;
                                 if fused {
                                     self.unify_node_with_type(expr_val, Type::native())?;
                                 }
                                 fused
                             }
-                            (None, Some((json, selector))) => {
-                                let fused = self.infer_json_value_selector(json, selector, left)?;
+                            (None, Some((json, selectors))) => {
+                                let fused =
+                                    self.infer_json_value_selector(json, selectors, left)?;
                                 if fused {
                                     self.unify_node_with_type(expr_val, Type::native())?;
                                 }
@@ -647,37 +646,25 @@ impl<'ast> TypeInferencer<'ast> {
     }
 
     /// Deconstructs an encrypted-JSON **field access** into the accessed value
-    /// and the expression supplying its selector:
+    /// and the expressions supplying its selectors, outermost last:
     ///
     /// - `col -> sel`, `col ->> sel`
     /// - `jsonb_path_query_first(col, sel)`
+    /// - and chains of those: `col -> 'a' -> 'b'`
     ///
     /// Returns `None` for anything else — importantly for a bare encrypted JSON
     /// column, which is a whole document, not a field of one. Equality needs the
-    /// selector expression itself (not just the type), because the path is one
-    /// half of the fused value-selector needle.
-    fn eql_json_field_access(&self, expr: &'ast Expr) -> Option<(EqlValue, &'ast Expr)> {
-        let selector = match expr {
-            Expr::BinaryOp {
-                op: BinaryOperator::Arrow | BinaryOperator::LongArrow,
-                right,
-                ..
-            } => &**right,
+    /// selector expressions themselves (not just the type), because the path
+    /// they compose is one half of the fused value-selector needle.
+    ///
+    /// A chain yields ALL of its selectors, not just the outermost. Its
+    /// intermediate accessors have no independent existence for the database:
+    /// the payload is encrypted, so native `->` applied to it selects nothing.
+    /// The chain is one path into one document, and it is fused as one.
+    fn eql_json_field_access(&self, expr: &'ast Expr) -> Option<(EqlValue, Vec<&'ast Expr>)> {
+        let (_, selectors) = json_accessor_chain(expr)?;
 
-            // `jsonb_path_query_first(col, sel)` — and its already-rewritten
-            // `eql_v3.` spelling. The selector is the second argument.
-            Expr::Function(function) => match &function.args {
-                FunctionArguments::List(list) => match list.args.as_slice() {
-                    [_, FunctionArg::Unnamed(FunctionArgExpr::Expr(sel))] => sel,
-                    _ => return None,
-                },
-                _ => return None,
-            },
-
-            _ => return None,
-        };
-
-        self.eql_json_value(expr).map(|json| (json, selector))
+        self.eql_json_value(expr).map(|json| (json, selectors))
     }
 
     /// Records each of `exprs` that is a literal or placeholder as a query
@@ -701,13 +688,14 @@ impl<'ast> TypeInferencer<'ast> {
     }
 
     /// Types `value` — the value half of `col -> sel = value` — as a fused
-    /// value selector, and records where its path half (`selector`) comes from.
+    /// value selector, and records where its path half (`selectors`) comes from.
     ///
-    /// A path that is neither a literal nor a placeholder (a column reference, a
-    /// function call) cannot be resolved to a needle at encryption time, so the
-    /// fusion is declined and the comparison falls through to ordinary typing —
-    /// where it will fail the capability check with a clearer error than a
-    /// half-built needle would produce.
+    /// A path step that is neither a literal nor a placeholder (a column
+    /// reference, a function call) cannot be resolved to a needle at encryption
+    /// time, so the fusion is declined and the comparison falls through to
+    /// ordinary typing — where it will fail the capability check with a clearer
+    /// error than a half-built needle would produce. One unresolvable step
+    /// declines the whole chain: a partial path is not a path.
     ///
     /// Returns whether the fusion was applied. The caller must not treat a
     /// declined fusion as handled: doing so skips the binop rule that is the
@@ -717,12 +705,18 @@ impl<'ast> TypeInferencer<'ast> {
     fn infer_json_value_selector(
         &self,
         json: EqlValue,
-        selector: &'ast Expr,
+        selectors: Vec<&'ast Expr>,
         value: &'ast Expr,
     ) -> Result<bool, TypeError> {
-        let Some(source) = Self::json_selector_source(selector) else {
+        let Some(segments) = selectors
+            .into_iter()
+            .map(Self::json_selector_segment)
+            .collect::<Option<Vec<_>>>()
+        else {
             return Ok(false);
         };
+
+        let source = JsonSelectorSource::new(segments);
 
         self.unify_node_with_type(
             value,
@@ -742,17 +736,18 @@ impl<'ast> TypeInferencer<'ast> {
         Ok(true)
     }
 
-    /// Classifies the path half of a fused value selector: a placeholder yields
-    /// the param it will arrive in, a literal yields its text inline.
-    fn json_selector_source(selector: &'ast Expr) -> Option<JsonSelectorSource> {
+    /// Classifies one step of the path half of a fused value selector: a
+    /// placeholder yields the param it will arrive in, a literal yields its text
+    /// inline.
+    fn json_selector_segment(selector: &'ast Expr) -> Option<JsonSelectorSegment> {
         match Self::as_ast_value(selector)? {
             ast::Value::Placeholder(placeholder) => Param::try_from(placeholder)
                 .ok()
-                .map(JsonSelectorSource::Param),
+                .map(JsonSelectorSegment::Param),
             ast::Value::SingleQuotedString(s)
             | ast::Value::DoubleQuotedString(s)
-            | ast::Value::EscapedStringLiteral(s) => Some(JsonSelectorSource::Literal(s.clone())),
-            ast::Value::Number(n, _) => Some(JsonSelectorSource::Literal(n.to_string())),
+            | ast::Value::EscapedStringLiteral(s) => Some(JsonSelectorSegment::Literal(s.clone())),
+            ast::Value::Number(n, _) => Some(JsonSelectorSegment::Literal(n.to_string())),
             _ => None,
         }
     }

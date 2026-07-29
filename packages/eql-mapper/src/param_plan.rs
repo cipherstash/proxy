@@ -25,9 +25,10 @@ pub enum OutputParamSource {
     /// encrypted if the param is EQL-typed).
     Input(Param),
 
-    /// Fused from two operands into one encrypted value-selector needle: the
-    /// JSON path and the value it must equal. The path may itself be a param or
-    /// a literal in the SQL; the value is always the param carrying this output.
+    /// Fused from several operands into one encrypted value-selector needle:
+    /// the JSON path and the value it must equal. Each step of the path is
+    /// itself a param or a literal in the SQL; the value is always the param
+    /// carrying this output.
     ///
     /// See [`crate::JsonValueSelectors`].
     JsonValueSelector {
@@ -41,10 +42,9 @@ impl OutputParamSource {
     pub fn inputs(&self) -> Vec<Param> {
         match self {
             OutputParamSource::Input(param) => vec![*param],
-            OutputParamSource::JsonValueSelector { path, value } => match path {
-                JsonSelectorSource::Param(path_param) => vec![*path_param, *value],
-                JsonSelectorSource::Literal(_) => vec![*value],
-            },
+            OutputParamSource::JsonValueSelector { path, value } => {
+                path.params().chain([*value]).collect()
+            }
         }
     }
 }
