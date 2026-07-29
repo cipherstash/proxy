@@ -15,14 +15,52 @@ use crate::EqlMapperError;
 use super::preserve_effective_aliases::derive_effective_alias;
 use super::TransformationRule;
 
-/// Alias given to the wrapping subquery.
-const SUBQUERY_ALIAS: &str = "__eql_distinct";
+/// The prefix the synthetic names start from, before it is made unique against
+/// the query being rewritten.
+const BASE_PREFIX: &str = "__eql_";
 
-/// Prefix for the synthetic name given to each projected column of the subquery.
-const COLUMN_PREFIX: &str = "__eql_col_";
+/// The synthetic names this rule introduces: the subquery's alias, one name per
+/// projected column, and one per hoisted ordering term.
+///
+/// They are unquoted identifiers, so a column literally named `__eql_col_0`
+/// would shadow the one the wrapper projects and the outer `ORDER BY` would
+/// resolve to the user's column instead. The prefix is therefore grown until it
+/// appears nowhere in the query, which makes a collision impossible rather than
+/// unlikely.
+struct SyntheticNames {
+    prefix: String,
+}
 
-/// Prefix for the synthetic name given to each hoisted ordering term.
-const ORDER_PREFIX: &str = "__eql_ord_";
+impl SyntheticNames {
+    /// Derives a prefix that appears nowhere in `query`.
+    ///
+    /// Testing against the rendered SQL is deliberately conservative: it also
+    /// rules out matches in string literals and in scopes the synthetic names
+    /// could never reach. Each iteration lengthens the prefix, and the query is
+    /// finite, so this terminates.
+    fn for_query(query: &Query) -> Self {
+        let rendered = query.to_string();
+        let mut prefix = BASE_PREFIX.to_string();
+
+        while rendered.contains(&prefix) {
+            prefix.insert(0, '_');
+        }
+
+        Self { prefix }
+    }
+
+    fn subquery_alias(&self) -> Ident {
+        Ident::new(format!("{}distinct", self.prefix))
+    }
+
+    fn column(&self, idx: usize) -> Ident {
+        Ident::new(format!("{}col_{}", self.prefix, idx))
+    }
+
+    fn order(&self, idx: usize) -> Ident {
+        Ident::new(format!("{}ord_{}", self.prefix, idx))
+    }
+}
 
 /// The name PostgreSQL displays for a projection column that has no derivable
 /// alias. Re-applied on the outer projection so wrapping does not rename a
@@ -173,6 +211,7 @@ impl<'ast> RewriteEqlDistinctOrderBy<'ast> {
         &self,
         select: &'ast Select,
         order_by: &'ast [sqltk::parser::ast::OrderByExpr],
+        names: &SyntheticNames,
     ) -> Result<Vec<OrderSource>, EqlMapperError> {
         // `DISTINCT ON` constrains ORDER BY to *begin* with the ON expressions,
         // an invariant that wrapping would silently break.
@@ -205,7 +244,7 @@ impl<'ast> RewriteEqlDistinctOrderBy<'ast> {
             .iter()
             .map(|obe| {
                 if self.is_eql(&obe.expr) {
-                    let ident = Ident::new(format!("{ORDER_PREFIX}{hoisted}"));
+                    let ident = names.order(hoisted);
                     hoisted += 1;
                     return Ok(OrderSource::Hoisted(ident));
                 }
@@ -223,7 +262,7 @@ impl<'ast> RewriteEqlDistinctOrderBy<'ast> {
                     .projection
                     .iter()
                     .position(|item| Self::select_item_expr(item) == Some(&obe.expr))
-                    .map(|idx| OrderSource::Column(Ident::new(format!("{COLUMN_PREFIX}{idx}"))))
+                    .map(|idx| OrderSource::Column(names.column(idx)))
                     .ok_or_else(|| {
                         EqlMapperError::Transform(format!(
                             "ORDER BY {} is not in the SELECT DISTINCT list, so it cannot be \
@@ -258,7 +297,8 @@ impl<'ast> TransformationRule<'ast> for RewriteEqlDistinctOrderBy<'ast> {
             return Ok(false);
         };
 
-        let sources = self.plan_order_sources(original_select, original_order_by)?;
+        let names = SyntheticNames::for_query(original);
+        let sources = self.plan_order_sources(original_select, original_order_by, &names)?;
 
         let Some(target) = target_node.downcast_mut::<Query>() else {
             return Ok(false);
@@ -300,7 +340,7 @@ impl<'ast> TransformationRule<'ast> for RewriteEqlDistinctOrderBy<'ast> {
             .zip(inner_select.projection.iter_mut())
             .enumerate()
         {
-            let inner_alias = Ident::new(format!("{COLUMN_PREFIX}{idx}"));
+            let inner_alias = names.column(idx);
 
             let expr =
                 match inner_item {
@@ -382,7 +422,7 @@ impl<'ast> TransformationRule<'ast> for RewriteEqlDistinctOrderBy<'ast> {
                     lateral: false,
                     subquery: Box::new(subquery),
                     alias: Some(TableAlias {
-                        name: Ident::new(SUBQUERY_ALIAS),
+                        name: names.subquery_alias(),
                         columns: vec![],
                     }),
                 },

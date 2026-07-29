@@ -214,10 +214,12 @@ pub async fn load_encrypt_config(config: &DatabaseConfig) -> Result<EncryptConfi
                     column = column,
                     domain = domain
                 );
-                map.insert(
-                    eql::Identifier::new(table_name.clone(), column.clone()),
-                    column_config,
-                );
+                // First wins. The query returns the search path in precedence
+                // order, so if a table name does appear in more than one
+                // searched schema this keeps the one PostgreSQL itself would
+                // resolve to, rather than whichever happened to come last.
+                map.entry(eql::Identifier::new(table_name.clone(), column.clone()))
+                    .or_insert(column_config);
             }
         }
     }

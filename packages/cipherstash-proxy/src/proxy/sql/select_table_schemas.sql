@@ -18,8 +18,23 @@ LEFT JOIN
                                             AND c.table_name = t.table_name
 WHERE
     t.table_type = 'BASE TABLE'
+    -- Only the schemas this connection resolves unqualified names in.
+    --
+    -- Both this schema map and the encrypt config are keyed on the bare table
+    -- name, so without this a same-named table in ANY other schema — another
+    -- tenant's, a staging copy, a leftover eql_v2 — overwrites the served one,
+    -- and a column can pick up the wrong domain config or lose its encryption
+    -- mapping entirely.
+    --
+    -- `false` excludes the implicitly-searched pg_catalog, leaving exactly the
+    -- schemas an unqualified `users` could mean.
+    AND t.table_schema::text = ANY (current_schemas(false)::text[])
 GROUP BY
     t.table_schema, t.table_name
 ORDER BY
-    t.table_schema, t.table_name;
+    -- Search-path order, so the first row for a name is the one PostgreSQL
+    -- itself would resolve to. Consumers keep the first and ignore later
+    -- duplicates.
+    array_position(current_schemas(false)::text[], t.table_schema::text),
+    t.table_name;
 

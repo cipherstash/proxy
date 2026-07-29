@@ -193,7 +193,25 @@ impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
                     };
 
                 if !handled {
-                    get_sql_binop_rule(op).apply_constraints(self, left, right, expr_val)?;
+                    // `@@` is symmetric in PostgreSQL, so the encrypted column
+                    // may be written on either side. The operator rule is
+                    // positional (`T @@ <T as TokenMatch>::Tokenized`), so hand
+                    // it the operands in the order it expects rather than the
+                    // order they were written. Applying them positionally types
+                    // the column as the *pattern*: the pattern is then never
+                    // encrypted, and the rewrite emits `match_term(pattern) @>
+                    // match_term(col)` — a backwards containment that silently
+                    // matches nothing.
+                    let (lhs, rhs) = if matches!(op, BinaryOperator::AtAt)
+                        && self.is_eql_typed(right)
+                        && !self.is_eql_typed(left)
+                    {
+                        (&**right, &**left)
+                    } else {
+                        (&**left, &**right)
+                    };
+
+                    get_sql_binop_rule(op).apply_constraints(self, lhs, rhs, expr_val)?;
                 }
 
                 // The operands of a predicate reach PostgreSQL as query
@@ -571,6 +589,11 @@ impl<'ast> TypeInferencer<'ast> {
     /// `jsonb_path_query_first(col, sel)`) — return its [`EqlValue`]. Returns
     /// `None` for scalar EQL columns (which compare via the ordinary term rewrite)
     /// and for non-EQL types.
+    /// Whether `expr` has resolved to an encrypted value.
+    fn is_eql_typed(&self, expr: &'ast Expr) -> bool {
+        matches!(&*self.get_node_type(expr), Type::Value(Value::Eql(_)))
+    }
+
     fn eql_json_value(&self, expr: &'ast Expr) -> Option<EqlValue> {
         match &*self.get_node_type(expr) {
             Type::Value(Value::Eql(eql_term)) => {

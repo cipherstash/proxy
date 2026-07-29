@@ -4,7 +4,7 @@ use std::sync::Arc;
 use sqltk::parser::ast::{Distinct, Expr, Select, SelectItem};
 use sqltk::{NodeKey, NodePath, Visitable};
 
-use crate::unifier::{EqlValue, Type, Value};
+use crate::unifier::{EqlValue, NativeValue, Projection, Type, Value};
 use crate::EqlMapperError;
 
 use super::helpers::eql_v3_term_call;
@@ -62,24 +62,91 @@ impl<'ast> RewriteEqlDistinct<'ast> {
     }
 
     /// The expression a select item projects, if it is a plain one.
-    fn select_item_expr(item: &'ast SelectItem) -> Option<&'ast Expr> {
+    ///
+    /// Elided lifetime: this is called on both the original (`'ast`) items and
+    /// the shorter-lived rewritten ones.
+    fn select_item_expr(item: &SelectItem) -> Option<&Expr> {
         match item {
             SelectItem::UnnamedExpr(expr) | SelectItem::ExprWithAlias { expr, .. } => Some(expr),
             _ => None,
         }
     }
 
-    /// The encrypted columns a plain `DISTINCT` would deduplicate on, positionally.
-    fn distinct_eql_values(&self, select: &'ast Select) -> Vec<Option<EqlValue>> {
-        if !matches!(select.distinct, Some(Distinct::Distinct)) {
-            return vec![];
+    /// The columns a wildcard projects, as `(expression to key on, encrypted
+    /// value if it is one)`.
+    ///
+    /// A wildcard carries no per-column expression, so the columns are read off
+    /// the projection type it resolved to and named explicitly. `None` if any
+    /// column has no name to write — a wildcard over a derived table's computed
+    /// column, say — since the projection cannot then be reproduced.
+    fn wildcard_columns(&self, item: &'ast SelectItem) -> Option<Vec<(Expr, Option<EqlValue>)>> {
+        let Some(Type::Value(Value::Projection(projection))) =
+            self.node_types.get(&NodeKey::new(item))
+        else {
+            return None;
+        };
+
+        let mut columns = Vec::new();
+        Self::collect_columns(projection, &mut columns)?;
+        Some(columns)
+    }
+
+    /// Flattens a projection into named columns.
+    ///
+    /// A wildcard's projection nests: one entry per relation in the `FROM`,
+    /// each holding that relation's columns. Returns `None` if any leaf has no
+    /// name to write.
+    fn collect_columns(
+        projection: &Projection,
+        out: &mut Vec<(Expr, Option<EqlValue>)>,
+    ) -> Option<()> {
+        for column in projection.columns() {
+            let (table_column, eql) = match &*column.ty {
+                Type::Value(Value::Projection(nested)) => {
+                    Self::collect_columns(nested, out)?;
+                    continue;
+                }
+                Type::Value(Value::Eql(eql_term)) => (
+                    eql_term.eql_value().table_column().clone(),
+                    Some(eql_term.eql_value().clone()),
+                ),
+                Type::Value(Value::Native(NativeValue(Some(table_column)))) => {
+                    (table_column.clone(), None)
+                }
+                _ => return None,
+            };
+
+            out.push((
+                Expr::CompoundIdentifier(vec![
+                    table_column.table.clone(),
+                    table_column.column.clone(),
+                ]),
+                eql,
+            ));
         }
 
-        select
-            .projection
-            .iter()
-            .map(|item| Self::select_item_expr(item).and_then(|expr| self.eql_value_of(expr)))
-            .collect()
+        Some(())
+    }
+
+    /// Whether this `SELECT DISTINCT` deduplicates any encrypted column,
+    /// including ones a wildcard hides.
+    fn dedupes_encrypted(&self, select: &'ast Select) -> bool {
+        if !matches!(select.distinct, Some(Distinct::Distinct)) {
+            return false;
+        }
+
+        select.projection.iter().any(|item| {
+            match Self::select_item_expr(item) {
+                Some(expr) => self.eql_value_of(expr).is_some(),
+                // A wildcard that cannot be resolved is reported in `apply`
+                // rather than skipped here — treating it as "no encrypted
+                // columns" is what let `SELECT DISTINCT *` slip through
+                // unprotected.
+                None => self
+                    .wildcard_columns(item)
+                    .is_none_or(|cols| cols.iter().any(|(_, eql)| eql.is_some())),
+            }
+        })
     }
 }
 
@@ -95,56 +162,79 @@ impl<'ast> TransformationRule<'ast> for RewriteEqlDistinct<'ast> {
             return Ok(false);
         };
 
-        let distinct = self.distinct_eql_values(original);
-        if distinct.iter().all(Option::is_none) {
+        if !self.dedupes_encrypted(original) {
             return Ok(false);
-        }
-
-        // A wildcard hides the columns being deduplicated on, so the key list
-        // cannot be built and the encrypted columns would dedupe on ciphertext.
-        if original
-            .projection
-            .iter()
-            .any(|item| Self::select_item_expr(item).is_none())
-        {
-            return Err(EqlMapperError::Transform(
-                "SELECT DISTINCT with a wildcard cannot deduplicate an encrypted column: list the \
-                 columns explicitly so each one can be keyed on its equality term"
-                    .to_string(),
-            ));
         }
 
         let Some(target) = target_node.downcast_mut::<Select>() else {
             return Ok(false);
         };
 
+        // Build the projection plan: a plain item keys on its own (already
+        // rewritten) expression; a wildcard contributes one entry per column it
+        // resolves to, named explicitly so it can be keyed at all.
         let mut keys = Vec::with_capacity(target.projection.len());
+        let mut projection = Vec::with_capacity(target.projection.len());
+        let mut expanded_a_wildcard = false;
 
-        for (item, eql_value) in target.projection.iter().zip(distinct.iter()) {
-            let Some(expr) = (match item {
-                SelectItem::UnnamedExpr(expr) | SelectItem::ExprWithAlias { expr, .. } => {
-                    Some(expr)
-                }
-                _ => None,
-            }) else {
-                return Ok(false);
-            };
+        let target_items = target.projection.clone();
 
-            match eql_value {
-                Some(eql_value) => {
-                    let identity = eql_value.domain_identity();
-                    let Some(term_fn) = identity.eq_term_fn() else {
-                        return Err(EqlMapperError::Transform(format!(
-                            "encrypted column {} cannot be used in SELECT DISTINCT (domain {} carries no equality term)",
-                            identity.token, identity.domain.value
-                        )));
+        for (original_item, target_item) in original.projection.iter().zip(target_items.iter()) {
+            let planned = match Self::select_item_expr(original_item) {
+                Some(original_expr) => {
+                    let Some(target_expr) = Self::select_item_expr(target_item) else {
+                        return Ok(false);
                     };
 
-                    keys.push(eql_v3_term_call(term_fn, expr.clone()));
+                    projection.push(target_item.clone());
+                    vec![(target_expr.clone(), self.eql_value_of(original_expr))]
                 }
-                // A plaintext column keys on itself.
-                None => keys.push(expr.clone()),
+
+                None => {
+                    // The wildcard has to be written out: `DISTINCT ON` keys are
+                    // expressions, and `*` names nothing to key on. Expanding it
+                    // projects the same columns in the same order, so the result
+                    // the client sees is unchanged.
+                    let Some(columns) = self.wildcard_columns(original_item) else {
+                        return Err(EqlMapperError::Transform(
+                            "SELECT DISTINCT with a wildcard cannot deduplicate an encrypted \
+                             column: the wildcard's columns cannot be named, so list them \
+                             explicitly to key each one on its equality term"
+                                .to_string(),
+                        ));
+                    };
+
+                    expanded_a_wildcard = true;
+                    projection.extend(
+                        columns
+                            .iter()
+                            .map(|(expr, _)| SelectItem::UnnamedExpr(expr.clone())),
+                    );
+                    columns
+                }
+            };
+
+            for (expr, eql_value) in planned {
+                match eql_value {
+                    Some(eql_value) => {
+                        let identity = eql_value.domain_identity();
+                        let Some(term_fn) = identity.eq_term_fn() else {
+                            return Err(EqlMapperError::Transform(format!(
+                                "encrypted column {} cannot be used in SELECT DISTINCT (domain {} carries no equality term)",
+                                identity.token, identity.domain.value
+                            )));
+                        };
+
+                        keys.push(eql_v3_term_call(term_fn, expr));
+                    }
+                    // A plaintext column keys on itself.
+                    None => keys.push(expr),
+                }
             }
+        }
+
+        if expanded_a_wildcard {
+            target.projection = projection;
         }
 
         target.distinct = Some(Distinct::On(keys));
@@ -154,10 +244,7 @@ impl<'ast> TransformationRule<'ast> for RewriteEqlDistinct<'ast> {
 
     fn would_edit<N: Visitable>(&mut self, node_path: &NodePath<'ast>, _target_node: &N) -> bool {
         match node_path.last_1_as::<Select>() {
-            Some((original,)) => self
-                .distinct_eql_values(original)
-                .iter()
-                .any(Option::is_some),
+            Some((original,)) => self.dedupes_encrypted(original),
             None => false,
         }
     }

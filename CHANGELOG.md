@@ -32,6 +32,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - **`SELECT *` with `GROUP BY` on an encrypted column** is now rejected with an explanatory error instead of PostgreSQL's "column must appear in the GROUP BY clause". A wildcard hides the projected columns, so the grouped column cannot be projected through `eql_v3.grouped_value` — list the columns explicitly. This matches the existing treatment of `SELECT DISTINCT *`.
 
+- **`SELECT DISTINCT *` skipped the encrypted-column protection**: a wildcard hides the columns `DISTINCT` deduplicates on, so neither the equality-term keying nor the capability check applied and duplicates were returned silently. The wildcard is now expanded to its columns, which are keyed like any other; a wildcard hiding a column with no equality term is rejected.
+
+- **`@@` with the encrypted column on the right**: `'pattern' @@ col` produced `match_term('pattern') @> match_term(col)` — a backwards containment, with the pattern never encrypted, that silently matched nothing. `@@` is symmetric in PostgreSQL, so both spellings now produce the same query.
+
+- **Encrypt config could pick up a same-named table from another schema**: the config is keyed on `(table, column)` while the schema query scanned every schema, so a table of the same name elsewhere — another tenant's, a staging copy — could overwrite the served one and give a column the wrong domain config or drop its encryption. The scan is now limited to the connection's search path, in precedence order.
+
 - **A prepared statement name reused for an unmapped statement**: `Parse` rebinds its name, but a statement Proxy does not map — `BEGIN`, `COMMIT`, or anything needing no type check — left the *previous* statement cached under that name. The next `Bind` for the name was then rewritten against a statement the client never parsed, failing with `Rewritten statement binds parameter 1, but only 0 were provided`. Affects any client that reuses the unnamed prepared statement across a transaction, which includes pgbench in extended mode and psycopg with `prepare=False`.
 
 - **`LIKE`/`ILIKE` capability checking**: `LIKE` and `ILIKE` on an encrypted column are now gated by the column's token-match capability. Previously these predicates bypassed capability checking and were silently accepted on columns that do not support fuzzy match; they are now rejected with a capability error.

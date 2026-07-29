@@ -7,7 +7,7 @@ use sqltk::parser::ast::{BinaryOperator, Expr, UnaryOperator, ValueWithSpan};
 use sqltk::parser::tokenizer::Span;
 use sqltk::{NodeKey, NodePath, Visitable};
 
-use crate::unifier::{DomainIdentity, Type, Value};
+use crate::unifier::{DomainIdentity, EqlTerm, Type, Value};
 use crate::EqlMapperError;
 
 use super::helpers::{cast_encrypted_operand, eql_v3_term_call, query_operand_domain};
@@ -42,6 +42,19 @@ impl<'ast> RewriteEqlMatchOps<'ast> {
             }
             _ => None,
         }
+    }
+
+    /// Whether `expr` is the *pattern* half of a fuzzy match rather than the
+    /// column.
+    ///
+    /// Both operands are EQL-typed once the predicate has been inferred — the
+    /// column carries the stored value, the pattern its `Tokenized` twin — so
+    /// the two are told apart by term variant, not by being encrypted at all.
+    fn is_tokenized_pattern(&self, expr: &'ast Expr) -> bool {
+        matches!(
+            self.node_types.get(&NodeKey::new(expr)),
+            Some(Type::Value(Value::Eql(EqlTerm::Tokenized(_))))
+        )
     }
 
     /// The encrypted column's `(domain identity, negated)` if `expr` is a fuzzy-
@@ -95,11 +108,22 @@ impl<'ast> TransformationRule<'ast> for RewriteEqlMatchOps<'ast> {
         // The pattern is a query operand of this predicate — cast it to the
         // column's `eql_v3.query_*` twin before wrapping. This rule owns the
         // predicate, so no ancestor inspection is needed to know that.
-        let (original_col, original_pat) = match original {
+        // `LIKE`/`ILIKE` are positional by grammar, but `@@` is symmetric in
+        // PostgreSQL and the column may be written on either side. Order the
+        // pair by which operand actually resolves to the encrypted column —
+        // binding positionally would emit `match_term(pattern) @>
+        // match_term(col)`, a backwards containment that matches nothing.
+        let (original_col, original_pat, column_on_left) = match original {
             Expr::Like { expr, pattern, .. } | Expr::ILike { expr, pattern, .. } => {
-                (&**expr, &**pattern)
+                (&**expr, &**pattern, true)
             }
-            Expr::BinaryOp { left, right, .. } => (&**left, &**right),
+            Expr::BinaryOp { left, right, .. } => {
+                if self.is_tokenized_pattern(left) {
+                    (&**right, &**left, false)
+                } else {
+                    (&**left, &**right, true)
+                }
+            }
             _ => return Ok(false),
         };
 
@@ -123,11 +147,30 @@ impl<'ast> TransformationRule<'ast> for RewriteEqlMatchOps<'ast> {
                 )
             }
             Expr::BinaryOp { left, right, .. } => {
-                cast_encrypted_operand(&self.node_types, original_col, left, query_operand_domain);
-                cast_encrypted_operand(&self.node_types, original_pat, right, query_operand_domain);
+                // Keep the target sides paired with the originals they were
+                // matched from, so a reversed `@@` casts the pattern and not
+                // the column.
+                let (col_side, pat_side) = if column_on_left {
+                    (left, right)
+                } else {
+                    (right, left)
+                };
+
+                cast_encrypted_operand(
+                    &self.node_types,
+                    original_col,
+                    col_side,
+                    query_operand_domain,
+                );
+                cast_encrypted_operand(
+                    &self.node_types,
+                    original_pat,
+                    pat_side,
+                    query_operand_domain,
+                );
                 (
-                    mem::replace(&mut **left, dummy.clone()),
-                    mem::replace(&mut **right, dummy),
+                    mem::replace(&mut **col_side, dummy.clone()),
+                    mem::replace(&mut **pat_side, dummy),
                 )
             }
             _ => return Ok(false),

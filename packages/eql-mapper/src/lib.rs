@@ -2869,6 +2869,141 @@ mod test {
         );
     }
 
+    /// The wrapper's synthetic names must not be shadowed by a user column of
+    /// the same name — the outer `ORDER BY` would resolve to the user's column
+    /// instead of the projected ordering term.
+    #[test]
+    fn distinct_order_by_synthetic_names_avoid_user_columns() {
+        let schema = resolver(schema! {
+            tables: {
+                employees: {
+                    __eql_col_0,
+                    __eql_ord_0,
+                    salary (EQL("eql_v3_integer_ord"): Ord),
+                }
+            }
+        });
+
+        let statement = parse(
+            "SELECT DISTINCT __eql_col_0, __eql_ord_0, salary FROM employees ORDER BY salary",
+        );
+        let typed = type_check(schema, &statement).unwrap();
+        let sql = typed.transform(HashMap::new()).unwrap().to_string();
+
+        // The prefix grew past the user's columns, so the names it generates
+        // cannot be the ones the query already mentions.
+        assert!(
+            sql.contains("___eql_col_0"),
+            "expected a lengthened prefix, got: {sql}"
+        );
+        assert!(
+            sql.contains("___eql_ord_0"),
+            "expected a lengthened ordering name, got: {sql}"
+        );
+        // The user's own columns are still projected under their own names.
+        assert!(
+            sql.contains("AS __eql_col_0") && sql.contains("AS __eql_ord_0"),
+            "user columns lost their names: {sql}"
+        );
+    }
+
+    /// `@@` is symmetric in PostgreSQL, so the encrypted column may be written
+    /// on either side. Both spellings must produce the same containment, with
+    /// the pattern — not the column — as the encrypted needle.
+    #[test]
+    fn match_op_normalises_reversed_operands() {
+        let schema = resolver(schema! {
+            tables: {
+                employees: {
+                    id,
+                    email (EQL("eql_v3_text_search"): Eq + Ord + TokenMatch),
+                }
+            }
+        });
+
+        let expected = "SELECT id FROM employees WHERE eql_v3.match_term(email) @> \
+                        eql_v3.match_term('<ENCRYPTED>'::JSONB::eql_v3.query_text_search)";
+
+        for sql in [
+            "SELECT id FROM employees WHERE email @@ 'a%'",
+            // Reversed: previously emitted match_term('a%') @> match_term(email),
+            // with the pattern left unencrypted.
+            "SELECT id FROM employees WHERE 'a%' @@ email",
+        ] {
+            let statement = parse(sql);
+            let typed = type_check(schema.clone(), &statement).unwrap();
+
+            // One literal — the pattern — must be encrypted, whichever side it
+            // was written on.
+            assert_eq!(1, typed.literals.len(), "unexpected literals for `{sql}`");
+
+            let encrypted = typed
+                .literals
+                .iter()
+                .map(|(_, v)| {
+                    (
+                        NodeKey::new(*v),
+                        ast::Value::SingleQuotedString("<ENCRYPTED>".to_string()),
+                    )
+                })
+                .collect::<HashMap<_, _>>();
+
+            assert_eq!(
+                typed.transform(encrypted).unwrap().to_string(),
+                expected.split_whitespace().collect::<Vec<_>>().join(" "),
+                "unexpected rewrite for `{sql}`"
+            );
+        }
+    }
+
+    /// `SELECT DISTINCT *` must not be exempt from the equality-term keying:
+    /// the wildcard hides the encrypted columns, but they are still what
+    /// `DISTINCT` deduplicates on.
+    #[test]
+    fn distinct_wildcard_is_expanded_and_keyed() {
+        let schema = resolver(schema! {
+            tables: {
+                employees: {
+                    id,
+                    email (EQL("eql_v3_text_search"): Eq + Ord + TokenMatch),
+                }
+            }
+        });
+
+        let statement = parse("SELECT DISTINCT * FROM employees");
+        let typed = type_check(schema.clone(), &statement).unwrap();
+
+        assert_eq!(
+            typed.transform(HashMap::new()).unwrap().to_string(),
+            "SELECT DISTINCT ON (employees.id, eql_v3.eq_term(employees.email)) \
+             employees.id, employees.email FROM employees"
+                .split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" "),
+        );
+    }
+
+    /// And a wildcard hiding a column that cannot be deduplicated is a
+    /// capability error, not a silent no-op.
+    #[test]
+    fn distinct_wildcard_over_a_column_without_equality_is_rejected() {
+        let schema = resolver(schema! {
+            tables: {
+                employees: {
+                    id,
+                    active (EQL("eql_v3_boolean")),
+                }
+            }
+        });
+
+        let statement = parse("SELECT DISTINCT * FROM employees");
+
+        assert!(
+            type_check(schema, &statement).is_err(),
+            "DISTINCT * over a storage-only column should fail type checking"
+        );
+    }
+
     /// Shapes the subquery rewrite cannot express are reported as such, rather
     /// than left to fail as a bare PostgreSQL syntax error.
     #[test]
