@@ -3004,6 +3004,297 @@ mod test {
         );
     }
 
+    /// The schema the syntactic-form tests below share.
+    ///
+    /// `flag` is storage-only (`eql_v3_boolean` implements nothing), which is
+    /// what the capability assertions use to check a form refuses a column that
+    /// cannot support it.
+    fn forms_schema() -> Arc<TableResolver> {
+        resolver(schema! {
+            tables: {
+                t: {
+                    id,
+                    txt (EQL("eql_v3_text_search"): Eq + Ord + TokenMatch),
+                    num (EQL("eql_v3_integer_ord"): Ord),
+                    flag (EQL("eql_v3_boolean")),
+                }
+            }
+        })
+    }
+
+    /// Transforms `sql` with every encrypted literal replaced by `'<CT>'`.
+    fn transform_with_dummy_literals(schema: Arc<TableResolver>, sql: &str) -> String {
+        let statement = parse(sql);
+        let typed = type_check(schema, &statement).unwrap();
+
+        let encrypted = typed
+            .literals
+            .iter()
+            .map(|(_, v)| {
+                (
+                    NodeKey::new(*v),
+                    ast::Value::SingleQuotedString("<CT>".to_string()),
+                )
+            })
+            .collect::<HashMap<_, _>>();
+
+        typed.transform(encrypted).unwrap().to_string()
+    }
+
+    /// Predicates that reduce to EQL's own operator overloads need no rewrite.
+    ///
+    /// EQL v3 ships `=`, `<`, `<=`, `>`, `>=` for every encrypted domain, each
+    /// comparing the relevant term (`eql_v3.eq` is `eq_term(a) = eq_term(b)`).
+    /// `IN` desugars to `= ANY(…)`, `BETWEEN` to `>= AND <=`, and
+    /// `IS DISTINCT FROM` to a NULL-safe `=`, so all three are correct with the
+    /// literals merely substituted.
+    ///
+    /// Pinning the pass-through matters because it looks wrong: the emitted SQL
+    /// compares against a payload carrying the randomised ciphertext, and only
+    /// operator resolution — invisible here — makes it right. The end-to-end
+    /// rows are asserted in the integration suite.
+    #[test]
+    fn operator_backed_predicates_substitute_literals_without_wrapping() {
+        let schema = forms_schema();
+
+        for (input, expected) in [
+            (
+                "SELECT id FROM t WHERE txt IN ('a', 'b')",
+                "SELECT id FROM t WHERE txt IN ('<CT>', '<CT>')",
+            ),
+            (
+                "SELECT id FROM t WHERE txt NOT IN ('a', 'b')",
+                "SELECT id FROM t WHERE txt NOT IN ('<CT>', '<CT>')",
+            ),
+            (
+                "SELECT id FROM t WHERE num BETWEEN 1 AND 2",
+                "SELECT id FROM t WHERE num BETWEEN '<CT>' AND '<CT>'",
+            ),
+            (
+                "SELECT id FROM t WHERE txt IS DISTINCT FROM 'a'",
+                "SELECT id FROM t WHERE txt IS DISTINCT FROM '<CT>'",
+            ),
+        ] {
+            assert_eq!(
+                transform_with_dummy_literals(schema.clone(), input),
+                expected,
+                "unexpected rewrite for `{input}`"
+            );
+        }
+    }
+
+    /// `BETWEEN` is ordering and `IS DISTINCT FROM` is equality, so each refuses
+    /// a column whose domain carries no such term.
+    #[test]
+    fn operator_backed_predicates_require_their_capability() {
+        let schema = forms_schema();
+
+        for (input, bound) in [
+            ("SELECT id FROM t WHERE flag BETWEEN true AND false", "Ord"),
+            ("SELECT id FROM t WHERE flag IS DISTINCT FROM true", "Eq"),
+        ] {
+            let statement = parse(input);
+            let err = type_check(schema.clone(), &statement)
+                .expect_err(&format!("`{input}` should fail the capability check"));
+
+            assert!(
+                err.to_string().contains(bound),
+                "expected a `{bound}` bound error for `{input}`, got: {err}"
+            );
+        }
+    }
+
+    /// `DISTINCT ON (col)` deduplicates, so it requires equality — and does
+    /// enforce it, unlike the shapes below.
+    #[test]
+    fn distinct_on_requires_equality() {
+        let schema = forms_schema();
+
+        let statement = parse("SELECT DISTINCT ON (flag) flag FROM t");
+        let err = type_check(schema, &statement)
+            .expect_err("DISTINCT ON a storage-only column should fail the capability check");
+
+        assert!(err.to_string().contains("Eq"), "unexpected error: {err}");
+    }
+
+    /// `IN` is equality, so it should refuse a column with no equality term.
+    ///
+    /// It does not: the `InList` arm of inference unifies the list against the
+    /// column's type without a bound, so the shape type-checks and reaches the
+    /// database.
+    ///
+    /// EQL is right to refuse it there — `eql_v3_boolean` is storage-only and
+    /// `=` is deliberately unsupported on it, so the query fails with
+    /// `operator = is not supported for public.eql_v3_boolean`. The gap is
+    /// where the refusal comes from: `=` on the same column is caught by the
+    /// capability check, `IN` is not, so the same mistake produces two very
+    /// different errors depending on how it was written.
+    #[test]
+    #[ignore = "IN does not apply an Eq bound: inference's InList arm unifies the list with the \
+                column's type but adds no capability constraint, so a storage-only column is \
+                accepted and the error comes from EQL at runtime instead of from type checking."]
+    fn in_list_requires_equality() {
+        let schema = forms_schema();
+
+        let statement = parse("SELECT id FROM t WHERE flag IN (true)");
+        let err = type_check(schema, &statement)
+            .expect_err("IN on a storage-only column should fail the capability check");
+
+        assert!(err.to_string().contains("Eq"), "unexpected error: {err}");
+    }
+
+    /// Shapes that sort, group or deduplicate an encrypted column through
+    /// PostgreSQL's operator class rather than through an operator.
+    ///
+    /// None is rewritten, so each reaches jsonb's own btree/hash operator class
+    /// and compares whole payloads — including the randomised ciphertext. The
+    /// assertion is deliberately a necessary condition rather than an exact
+    /// string: whatever form the fix takes, the encrypted column cannot reach
+    /// the clause unwrapped. Rejecting the shape loudly is an equally acceptable
+    /// outcome, in which case these should be rewritten to assert the error.
+    #[test]
+    #[ignore = "None of these shapes is rewritten: DISTINCT ON, ordinal ORDER BY/GROUP BY, \
+                PARTITION BY and set operations all reach jsonb's operator class, comparing raw \
+                payloads. Each needs the term-based rewrite its named-column equivalent already \
+                has, or a loud rejection."]
+    fn operator_class_shapes_use_the_columns_term() {
+        let schema = forms_schema();
+
+        for (input, required_term) in [
+            ("SELECT DISTINCT ON (txt) txt FROM t", "eql_v3.eq_term("),
+            ("SELECT txt FROM t ORDER BY 1", "eql_v3.ord_term("),
+            ("SELECT txt FROM t GROUP BY 1", "eql_v3.eq_term("),
+            (
+                "SELECT rank() OVER (PARTITION BY txt) FROM t",
+                "eql_v3.eq_term(",
+            ),
+            (
+                "SELECT txt FROM t UNION SELECT txt FROM t",
+                "eql_v3.eq_term(",
+            ),
+            (
+                "SELECT txt FROM t INTERSECT SELECT txt FROM t",
+                "eql_v3.eq_term(",
+            ),
+        ] {
+            let rewritten = transform_with_dummy_literals(schema.clone(), input);
+
+            assert!(
+                rewritten.contains(required_term),
+                "`{input}` must compare the column by `{required_term}…)`, got: {rewritten}"
+            );
+        }
+    }
+
+    /// The same shapes must refuse a column that cannot support them.
+    #[test]
+    #[ignore = "None of these shapes applies a capability bound, so a storage-only column is \
+                accepted and silently mis-sorted or mis-grouped. Fixing the rewrites should \
+                come with the matching bound, as SELECT DISTINCT and DISTINCT ON already have."]
+    fn operator_class_shapes_require_their_capability() {
+        let schema = forms_schema();
+
+        for (input, bound) in [
+            ("SELECT flag FROM t ORDER BY 1", "Ord"),
+            ("SELECT flag FROM t GROUP BY 1", "Eq"),
+            ("SELECT rank() OVER (PARTITION BY flag) FROM t", "Eq"),
+            ("SELECT flag FROM t UNION SELECT flag FROM t", "Eq"),
+            ("SELECT flag FROM t INTERSECT SELECT flag FROM t", "Eq"),
+        ] {
+            let statement = parse(input);
+            let err = type_check(schema.clone(), &statement)
+                .expect_err(&format!("`{input}` should fail the capability check"));
+
+            assert!(
+                err.to_string().contains(bound),
+                "expected a `{bound}` bound error for `{input}`, got: {err}"
+            );
+        }
+    }
+
+    /// One placeholder bound as both a stored value and a query operand.
+    ///
+    /// The two occurrences need different payloads — the stored one carries the
+    /// ciphertext, the query one only search terms — so the role is per
+    /// occurrence, not per input param. The rewritten SQL is the authority: the
+    /// `SET` operand casts to the column's own domain, the `WHERE` operand to
+    /// the `query_*` twin.
+    #[test]
+    fn param_reused_for_storage_and_query_keeps_separate_roles() {
+        let schema = forms_schema();
+
+        let statement = parse("UPDATE t SET txt = $1 WHERE txt = $1");
+        let typed = type_check(schema, &statement).unwrap();
+        let transformed = typed.transform(HashMap::new()).unwrap();
+
+        assert_eq!(
+            transformed.statement.to_string(),
+            "UPDATE t SET txt = $1::JSONB::public.eql_v3_text_search \
+             WHERE eql_v3.eq_term(txt) = eql_v3.eq_term($2::JSONB::eql_v3.query_text_search)"
+        );
+
+        // Both outputs come from input $1, but only the WHERE one is a query
+        // operand — marking both would strip the ciphertext from the stored
+        // value and fail the column domain's CHECK.
+        let roles: Vec<bool> = transformed
+            .params
+            .outputs()
+            .iter()
+            .map(|output| output.query_operand)
+            .collect();
+
+        assert_eq!(vec![false, true], roles);
+    }
+
+    /// A chained JSON accessor must not leave the intermediate selector in the
+    /// statement, nor apply native `->` to the encrypted payload.
+    ///
+    /// The container is cloned from the *original* AST, so `-> 'nested'`
+    /// survives untouched: the plaintext field name ships in the SQL text and
+    /// native jsonb `->` runs on the encrypted column, which also makes the
+    /// predicate match nothing.
+    #[test]
+    #[ignore = "Chained JSON accessor clones its container from the original AST, so the inner \
+                selector stays plaintext in the SQL and native jsonb -> is applied to the \
+                encrypted payload. See rewrite_json_value_selector_eq.rs."]
+    fn chained_json_accessor_does_not_emit_the_plaintext_selector() {
+        let schema = resolver(schema! {
+            tables: {
+                t: {
+                    id,
+                    j (EQL("eql_v3_json_search"): Eq + Ord + JsonLike + Contain),
+                }
+            }
+        });
+
+        let rewritten = transform_with_dummy_literals(
+            schema,
+            "SELECT id FROM t WHERE j -> 'nested' -> 'string' = '\"world\"'",
+        );
+
+        assert!(
+            !rewritten.contains("'nested'"),
+            "the intermediate selector must not reach the database in plaintext: {rewritten}"
+        );
+        assert!(
+            !rewritten.contains("j -> "),
+            "native jsonb -> must not be applied to the encrypted column: {rewritten}"
+        );
+    }
+
+    /// JSON field access requires the column to support field selection.
+    #[test]
+    fn json_field_access_requires_json_like() {
+        let schema = forms_schema();
+
+        let statement = parse("SELECT id FROM t WHERE txt -> 'a' = '\"b\"'");
+
+        assert!(
+            type_check(schema, &statement).is_err(),
+            "field access on a non-JSON encrypted column should fail the capability check"
+        );
+    }
+
     /// Shapes the subquery rewrite cannot express are reported as such, rather
     /// than left to fail as a bare PostgreSQL syntax error.
     #[test]
