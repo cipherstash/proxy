@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1785291757735,
+  "lastUpdate": 1785308143389,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -22642,6 +22642,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 40.252793,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "0532e2bbb76d8248405eda0396fdfeefc6569a9e",
+          "message": "feat: upgrade to EQL v3 — cipherstash-client 0.42, typed jsonb domains, v3 typecheck & transform",
+          "timestamp": "2026-07-28T04:51:01Z",
+          "url": "https://github.com/cipherstash/proxy/pull/432/commits/0532e2bbb76d8248405eda0396fdfeefc6569a9e"
+        },
+        "date": 1785308141891,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 39.644388,
             "unit": "Number"
           }
         ]
