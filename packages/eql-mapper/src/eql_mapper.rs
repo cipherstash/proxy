@@ -2,13 +2,14 @@ use super::importer::{ImportError, Importer};
 use crate::{
     inference::{TypeError, TypeInferencer},
     unifier::{EqlTerm, Projection, Type, Unifier, Value},
-    DepMut, Param, ParamError, ScopeError, ScopeTracker, TableResolver, TypeCheckedStatement,
-    TypeRegistry,
+    ColumnKind, DepMut, Param, ParamError, ScopeError, ScopeTracker, TableResolver,
+    TypeCheckedStatement, TypeRegistry,
 };
 use sqltk::parser::ast::{self as ast, Statement};
 use sqltk::{Break, NodeKey, Visitable, Visitor};
 use std::{
-    cell::RefCell, collections::HashMap, marker::PhantomData, ops::ControlFlow, rc::Rc, sync::Arc,
+    cell::RefCell, collections::HashMap, convert::Infallible, marker::PhantomData,
+    ops::ControlFlow, rc::Rc, sync::Arc,
 };
 use tracing::{event, span, Level};
 
@@ -68,6 +69,66 @@ pub fn requires_type_check(statement: &Statement) -> bool {
             | Statement::Prepare { .. }
             | Statement::Explain { .. }
     )
+}
+
+/// Returns whether a [`Statement`] could possibly read or write an encrypted column.
+///
+/// This exists to answer one question, and only that question: when [`type_check`] has *failed*, is
+/// it safe to send the statement to the database unmodified?
+///
+/// A failed type check leaves no typing information behind, so the statement's every [`ObjectName`]
+/// is resolved against the schema instead. That over-collects — a function name is an `ObjectName`
+/// too — but over-collecting is the harmless direction: an unresolvable name is simply not a table
+/// with encrypted columns.
+///
+/// The answer is deliberately asymmetric:
+///
+/// - A name that resolves to a table carrying at least one EQL column => `true`. The statement is
+///   unsafe to pass through, because an unmapped read returns raw ciphertext and an unmapped write
+///   stores plaintext.
+/// - A name that does not resolve => *not* evidence of encryption. The schema has never heard of
+///   it, so it has no encrypted columns to expose. `pg_catalog` introspection, which every
+///   PostgreSQL driver issues and which the mapper cannot type, lands here.
+/// - No name resolves to an encrypted table => `false`. The statement touches only native columns
+///   and passing it through is exactly as safe as it was before Proxy sat in the path.
+///
+/// Because every table reference in a statement *is* an `ObjectName`, this cannot miss a table. It
+/// can only be defeated by a reference that hides encrypted columns behind a name the schema
+/// records as native — a schema-loading concern, not one this function can address.
+pub fn may_touch_eql_columns(resolver: Arc<TableResolver>, statement: &Statement) -> bool {
+    struct EncryptedTableFinder {
+        resolver: Arc<TableResolver>,
+        found: bool,
+    }
+
+    impl<'ast> Visitor<'ast> for EncryptedTableFinder {
+        type Error = Infallible;
+
+        fn enter<N: Visitable>(&mut self, node: &'ast N) -> ControlFlow<Break<Self::Error>> {
+            if let Some(name) = node.downcast_ref::<ast::ObjectName>() {
+                if let Ok(table) = self.resolver.resolve_table(name) {
+                    if table
+                        .columns
+                        .iter()
+                        .any(|col| matches!(col.kind, ColumnKind::Eql(_, _)))
+                    {
+                        self.found = true;
+                        return ControlFlow::Break(Break::Finished);
+                    }
+                }
+            }
+            ControlFlow::Continue(())
+        }
+    }
+
+    let mut visitor = EncryptedTableFinder {
+        resolver,
+        found: false,
+    };
+
+    let _ = statement.accept(&mut visitor);
+
+    visitor.found
 }
 
 /// The error type returned by various functions in the `eql_mapper` crate.

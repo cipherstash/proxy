@@ -64,9 +64,6 @@ pub struct DevelopmentConfig {
 
     #[serde(default)]
     pub disable_database_tls: bool,
-
-    #[serde(default)]
-    pub enable_mapping_errors: bool,
 }
 
 /// Config defaults to a file called `tandem` in the current directory.
@@ -241,13 +238,6 @@ impl TandemConfig {
     pub fn mapping_disabled(&self) -> bool {
         match &self.development {
             Some(dev) => dev.disable_mapping,
-            None => false,
-        }
-    }
-
-    pub fn mapping_errors_enabled(&self) -> bool {
-        match &self.development {
-            Some(dev) => dev.enable_mapping_errors,
             None => false,
         }
     }

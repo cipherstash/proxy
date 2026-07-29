@@ -837,10 +837,6 @@ where
         self.config.mapping_disabled()
     }
 
-    pub fn mapping_errors_enabled(&self) -> bool {
-        self.config.mapping_errors_enabled()
-    }
-
     pub fn slow_db_response_min_duration(&self) -> std::time::Duration {
         self.config.slow_db_response_min_duration()
     }

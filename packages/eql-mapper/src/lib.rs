@@ -40,7 +40,7 @@ pub(crate) use transformation_rules::*;
 
 #[cfg(test)]
 mod test {
-    use super::{test_helpers::*, type_check};
+    use super::{may_touch_eql_columns, test_helpers::*, type_check};
     use crate::{
         projection, schema, test_helpers,
         unifier::{
@@ -3738,5 +3738,135 @@ mod test {
         );
 
         type_check(schema, &statement).unwrap();
+    }
+
+    /// A schema with one encrypted table and one that is entirely native.
+    fn mixed_schema() -> Arc<TableResolver> {
+        resolver(schema! {
+            tables: {
+                patients: {
+                    id,
+                    name,
+                    age (EQL: Ord),
+                }
+                plaintext: {
+                    id,
+                    note,
+                }
+            }
+        })
+    }
+
+    /// `may_touch_eql_columns` decides whether a statement that failed to type check is safe to
+    /// forward to the database unmodified. Anything touching an encrypted table must not be.
+    #[test]
+    fn may_touch_eql_columns_detects_an_encrypted_table() {
+        assert!(may_touch_eql_columns(
+            mixed_schema(),
+            &parse("SELECT age FROM patients")
+        ));
+    }
+
+    #[test]
+    fn may_touch_eql_columns_detects_an_encrypted_table_on_the_write_path() {
+        assert!(may_touch_eql_columns(
+            mixed_schema(),
+            &parse("INSERT INTO patients (id, age) VALUES (1, 42)")
+        ));
+
+        assert!(may_touch_eql_columns(
+            mixed_schema(),
+            &parse("UPDATE patients SET age = 42 WHERE id = 1")
+        ));
+
+        assert!(may_touch_eql_columns(
+            mixed_schema(),
+            &parse("DELETE FROM patients WHERE age = 42")
+        ));
+    }
+
+    /// The encrypted table is only named in the source of the insert, never the target. It still
+    /// has to be seen: an unmapped read of `patients.age` would copy raw ciphertext into a native
+    /// column.
+    #[test]
+    fn may_touch_eql_columns_detects_an_encrypted_table_nested_in_a_statement() {
+        assert!(may_touch_eql_columns(
+            mixed_schema(),
+            &parse("INSERT INTO plaintext (id, note) SELECT id, age FROM patients")
+        ));
+
+        assert!(may_touch_eql_columns(
+            mixed_schema(),
+            &parse("SELECT id FROM plaintext WHERE id IN (SELECT id FROM patients)")
+        ));
+
+        assert!(may_touch_eql_columns(
+            mixed_schema(),
+            &parse("WITH p AS (SELECT age FROM patients) SELECT * FROM p")
+        ));
+    }
+
+    /// A statement over native columns only carries no encrypted data to get wrong, so a type
+    /// check failure on it is not a correctness problem and it is forwarded as before.
+    #[test]
+    fn may_touch_eql_columns_ignores_a_native_only_statement() {
+        assert!(!may_touch_eql_columns(
+            mixed_schema(),
+            &parse("SELECT note FROM plaintext WHERE id = 1")
+        ));
+
+        assert!(!may_touch_eql_columns(
+            mixed_schema(),
+            &parse("INSERT INTO plaintext (id, note) VALUES (1, 'hello')")
+        ));
+    }
+
+    /// The case that makes this check load bearing rather than a nicety: driver introspection of
+    /// `pg_catalog` cannot be type checked, and every PostgreSQL driver issues it.
+    #[test]
+    fn may_touch_eql_columns_ignores_tables_absent_from_the_schema() {
+        let statement = parse(
+            "SELECT attname, atttypid FROM pg_catalog.pg_attribute WHERE attnum > 0",
+        );
+
+        // Precondition: this statement genuinely cannot be type checked.
+        assert!(type_check(mixed_schema(), &statement).is_err());
+
+        assert!(!may_touch_eql_columns(mixed_schema(), &statement));
+    }
+
+    /// A table the schema has never heard of has no encrypted columns to expose. PostgreSQL
+    /// rejects the statement itself with `relation "..." does not exist`.
+    #[test]
+    fn may_touch_eql_columns_ignores_an_unknown_table() {
+        assert!(!may_touch_eql_columns(
+            mixed_schema(),
+            &parse("SELECT * FROM no_such_table")
+        ));
+    }
+
+    /// A statement referencing no table at all cannot touch an encrypted column.
+    #[test]
+    fn may_touch_eql_columns_ignores_a_tableless_statement() {
+        assert!(!may_touch_eql_columns(mixed_schema(), &parse("SELECT 1")));
+    }
+
+    /// A schema with no encrypted columns anywhere must never make a type check failure fatal —
+    /// Proxy in front of an unencrypted database should stay out of the way.
+    #[test]
+    fn may_touch_eql_columns_is_false_for_a_schema_with_no_encrypted_columns() {
+        let schema = resolver(schema! {
+            tables: {
+                plaintext: {
+                    id,
+                    note,
+                }
+            }
+        });
+
+        assert!(!may_touch_eql_columns(
+            schema,
+            &parse("SELECT note FROM plaintext")
+        ));
     }
 }

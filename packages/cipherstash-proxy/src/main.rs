@@ -171,10 +171,6 @@ async fn init(mut config: TandemConfig) -> Proxy {
         warn!(msg = "Encrypted statement mapping is not enabled");
     }
 
-    if config.mapping_errors_enabled() {
-        info!(msg = "Encrypted statement mapping errors are enabled");
-    }
-
     let _ = rustls::crypto::aws_lc_rs::default_provider()
         .install_default()
         .inspect_err(|err| {
