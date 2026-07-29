@@ -4,7 +4,7 @@ mod tests {
 
     #[tokio::test]
     async fn empty_result_regression() {
-        let client = connect_with_tls(PROXY).await;
+        let client = connect_with_tls(*PROXY).await;
 
         let sql = "SELECT ''";
 

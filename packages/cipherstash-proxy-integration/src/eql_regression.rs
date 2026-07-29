@@ -73,7 +73,7 @@ mod tests {
         let id = random_id();
 
         // Insert via proxy (will encrypt)
-        let proxy_client = connect_with_tls(PROXY).await;
+        let proxy_client = connect_with_tls(*PROXY).await;
         let sql = format!("INSERT INTO encrypted (id, {column}) VALUES ($1, $2)");
         proxy_client
             .execute(&sql, &[&id, plaintext])
@@ -117,7 +117,7 @@ mod tests {
     where
         T: for<'a> tokio_postgres::types::FromSql<'a>,
     {
-        let proxy_client = connect_with_tls(PROXY).await;
+        let proxy_client = connect_with_tls(*PROXY).await;
         let sql = format!("SELECT {column} FROM encrypted WHERE id = $1");
         let rows = proxy_client
             .query(&sql, &[&id])
@@ -496,7 +496,7 @@ mod tests {
             insert_encrypted_directly(id, "encrypted_jsonb", &fixture.ciphertext).await;
 
             // Test field access via proxy
-            let proxy_client = connect_with_tls(PROXY).await;
+            let proxy_client = connect_with_tls(*PROXY).await;
 
             // Access string field
             let sql = "SELECT encrypted_jsonb->'string' FROM encrypted WHERE id = $1";
@@ -547,7 +547,7 @@ mod tests {
             let id = random_id();
             insert_encrypted_directly(id, "encrypted_jsonb", &fixture.ciphertext).await;
 
-            let proxy_client = connect_with_tls(PROXY).await;
+            let proxy_client = connect_with_tls(*PROXY).await;
 
             // Access array field
             let sql = "SELECT encrypted_jsonb->'array_number' FROM encrypted WHERE id = $1";

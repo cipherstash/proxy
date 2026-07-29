@@ -9,7 +9,7 @@ mod tests {
 
         clear().await;
 
-        let client = connect_with_tls(PROXY).await;
+        let client = connect_with_tls(*PROXY).await;
 
         let id = random_id();
         let encrypted_text = "hello@cipherstash.com";
@@ -38,7 +38,7 @@ mod tests {
 
         clear().await;
 
-        let client = connect_with_tls(PROXY).await;
+        let client = connect_with_tls(*PROXY).await;
 
         let id = random_id();
         let encrypted_int2: i16 = 42;
@@ -66,7 +66,7 @@ mod tests {
 
         clear().await;
 
-        let client = connect_with_tls(PROXY).await;
+        let client = connect_with_tls(*PROXY).await;
 
         let id = random_id();
         let encrypted_int4: i32 = 42;
@@ -94,7 +94,7 @@ mod tests {
 
         clear().await;
 
-        let client = connect_with_tls(PROXY).await;
+        let client = connect_with_tls(*PROXY).await;
 
         let id = random_id();
         let encrypted_int8: i64 = 42;
@@ -122,7 +122,7 @@ mod tests {
 
         clear().await;
 
-        let client = connect_with_tls(PROXY).await;
+        let client = connect_with_tls(*PROXY).await;
 
         let id = random_id();
         let encrypted_float8: f64 = 42.00;
@@ -150,7 +150,7 @@ mod tests {
 
         clear().await;
 
-        let client = connect_with_tls(PROXY).await;
+        let client = connect_with_tls(*PROXY).await;
 
         let id = random_id();
         let encrypted_date = NaiveDate::parse_from_str("2025-01-01", "%Y-%m-%d").unwrap();
@@ -178,7 +178,7 @@ mod tests {
 
         clear().await;
 
-        let client = connect_with_tls(PROXY).await;
+        let client = connect_with_tls(*PROXY).await;
 
         let id = random_id();
         let plaintext = "hello@cipherstash.com";
@@ -203,7 +203,7 @@ mod tests {
 
         clear().await;
 
-        let client = connect_with_tls(PROXY).await;
+        let client = connect_with_tls(*PROXY).await;
 
         let id = random_id();
         let plaintext = "hello@cipherstash.com";

@@ -39,7 +39,7 @@ mod tests {
 
         insert_rows(&[("a", 1), ("b", 2), ("c", 3), ("d", 4), ("e", 5)]).await;
 
-        let client = connect_with_tls(PROXY).await;
+        let client = connect_with_tls(*PROXY).await;
 
         let sql = "SELECT encrypted_int4 FROM encrypted WHERE encrypted_int4 BETWEEN 2 AND 4 \
                    ORDER BY encrypted_int4";
@@ -65,7 +65,7 @@ mod tests {
 
         insert_rows(&[("apple", 1), ("banana", 2), ("cherry", 3)]).await;
 
-        let client = connect_with_tls(PROXY).await;
+        let client = connect_with_tls(*PROXY).await;
 
         let sql =
             "SELECT encrypted_text FROM encrypted WHERE encrypted_text IS DISTINCT FROM 'apple'";

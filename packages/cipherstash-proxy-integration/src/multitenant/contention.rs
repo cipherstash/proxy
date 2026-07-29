@@ -39,7 +39,7 @@ mod tests {
     /// Establish a connection and set the keyset for a tenant.
     /// Returns the ready-to-use client (connection setup is excluded from timing).
     async fn connect_as_tenant(keyset_id: &str) -> tokio_postgres::Client {
-        let client = connect_with_tls(PROXY).await;
+        let client = connect_with_tls(*PROXY).await;
         // SET doesn't support parameterized values; keyset_id is from trusted env vars
         let sql = format!("SET CIPHERSTASH.KEYSET_ID = '{keyset_id}'");
         client.execute(&sql, &[]).await.unwrap();

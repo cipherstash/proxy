@@ -14,7 +14,7 @@ mod tests {
 
     /// Fetch metrics with retry logic to handle CI timing variability.
     async fn fetch_metrics_with_retry(max_retries: u32, delay_ms: u64) -> String {
-        let url = format!("http://localhost:{}/metrics", PROXY_METRICS_PORT);
+        let url = format!("http://localhost:{}/metrics", *PROXY_METRICS_PORT);
         let mut last_error = None;
 
         for attempt in 0..max_retries {
@@ -40,7 +40,7 @@ mod tests {
 
     #[tokio::test]
     async fn metrics_include_statement_labels() {
-        let client = connect_with_tls(PROXY).await;
+        let client = connect_with_tls(*PROXY).await;
 
         clear().await;
 
@@ -80,7 +80,7 @@ mod tests {
 
     #[tokio::test]
     async fn slow_statement_metrics_and_logs() {
-        let client = connect_with_tls(PROXY).await;
+        let client = connect_with_tls(*PROXY).await;
 
         clear().await;
 

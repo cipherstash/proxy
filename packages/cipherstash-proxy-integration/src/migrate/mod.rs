@@ -55,7 +55,7 @@ mod tests {
             }
         };
 
-        let client = connect_with_tls(PROXY).await;
+        let client = connect_with_tls(*PROXY).await;
 
         for _ in 1..10 {
             let id = random_id();

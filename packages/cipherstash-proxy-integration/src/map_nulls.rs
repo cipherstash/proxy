@@ -7,7 +7,7 @@ mod tests {
     async fn map_insert_null_param() {
         trace();
 
-        let client = connect_with_tls(PROXY).await;
+        let client = connect_with_tls(*PROXY).await;
 
         let id = random_id();
         let encrypted_text: Option<String> = None;
@@ -30,7 +30,7 @@ mod tests {
     async fn map_update_null_param() {
         trace();
 
-        let client = connect_with_tls(PROXY).await;
+        let client = connect_with_tls(*PROXY).await;
 
         let id = random_id();
         let encrypted_text = "hello@cipherstash.com";
@@ -68,7 +68,7 @@ mod tests {
     async fn map_insert_encrypted_null_literal() {
         trace();
 
-        let client = connect_with_tls(PROXY).await;
+        let client = connect_with_tls(*PROXY).await;
 
         let id = random_id();
 
@@ -93,7 +93,7 @@ mod tests {
     async fn map_insert_null_literal_with_param() {
         trace();
 
-        let client = connect_with_tls(PROXY).await;
+        let client = connect_with_tls(*PROXY).await;
 
         let id = random_id();
         let encrypted_int2: i16 = 42;
@@ -125,7 +125,7 @@ mod tests {
 
         clear().await;
 
-        let client = connect_with_tls(PROXY).await;
+        let client = connect_with_tls(*PROXY).await;
 
         let id = random_id();
         let plaintext: Option<String> = None;

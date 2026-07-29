@@ -6,7 +6,7 @@ mod tests {
     async fn map_literal() {
         clear().await;
 
-        let client = connect_with_tls(PROXY).await;
+        let client = connect_with_tls(*PROXY).await;
 
         let id = random_id();
         let encrypted_text = "hello@cipherstash.com";
@@ -26,7 +26,7 @@ mod tests {
     async fn map_literal_with_param() {
         clear().await;
 
-        let client = connect_with_tls(PROXY).await;
+        let client = connect_with_tls(*PROXY).await;
 
         let id = random_id();
         let encrypted_text = "hello@cipherstash.com";
@@ -55,7 +55,7 @@ mod tests {
         trace();
         clear().await;
 
-        let client = connect_with_tls(PROXY).await;
+        let client = connect_with_tls(*PROXY).await;
 
         let id = random_id();
         let encrypted_jsonb = serde_json::json!({"key": "value"});
@@ -94,7 +94,7 @@ mod tests {
         let plaintext_json = serde_json::json!({"key": "value"});
 
         // Insert through proxy (should encrypt)
-        let client = connect_with_tls(PROXY).await;
+        let client = connect_with_tls(*PROXY).await;
         let sql = "INSERT INTO encrypted (id, encrypted_jsonb) VALUES ($1, $2)";
         client.query(sql, &[&id, &plaintext_json]).await.unwrap();
 
@@ -136,7 +136,7 @@ mod tests {
     async fn map_repeated_literals_different_columns_regression() {
         clear().await;
 
-        let client = connect_with_tls(PROXY).await;
+        let client = connect_with_tls(*PROXY).await;
 
         let id = random_id();
 
@@ -158,7 +158,7 @@ mod tests {
     async fn map_repeated_literals_same_column_regression() {
         clear().await;
 
-        let client = connect_with_tls(PROXY).await;
+        let client = connect_with_tls(*PROXY).await;
 
         let sql =
             format!("INSERT INTO encrypted (id, encrypted_text) VALUES ({}, 'a'), ({}, 'a') RETURNING encrypted_text", random_id(), random_id());

@@ -58,7 +58,7 @@ mod tests {
         let sql =
             "SELECT encrypted_text FROM encrypted WHERE encrypted_text IN ('apple', 'banana')";
 
-        let client = connect_with_tls(PROXY).await;
+        let client = connect_with_tls(*PROXY).await;
         let rows = client.query(sql, &[]).await.unwrap();
         let actual: Vec<String> = rows.iter().map(|r| r.get("encrypted_text")).collect();
         assert_eq!(vec!["apple", "banana"], sorted(actual));
@@ -78,7 +78,7 @@ mod tests {
         let sql =
             "SELECT encrypted_text FROM encrypted WHERE encrypted_text NOT IN ('apple', 'banana')";
 
-        let client = connect_with_tls(PROXY).await;
+        let client = connect_with_tls(*PROXY).await;
         let rows = client.query(sql, &[]).await.unwrap();
         let actual: Vec<String> = rows.iter().map(|r| r.get("encrypted_text")).collect();
         assert_eq!(vec!["cherry"], actual);
@@ -96,7 +96,7 @@ mod tests {
 
         insert_text(&["apple", "banana", "cherry"]).await;
 
-        let client = connect_with_tls(PROXY).await;
+        let client = connect_with_tls(*PROXY).await;
 
         let sql = "SELECT encrypted_text FROM encrypted WHERE encrypted_text IN ($1, $2)";
         let rows = client
@@ -127,7 +127,7 @@ mod tests {
 
         let sql = "SELECT encrypted_text FROM encrypted WHERE encrypted_text IN ('durian')";
 
-        let client = connect_with_tls(PROXY).await;
+        let client = connect_with_tls(*PROXY).await;
         let rows = client.query(sql, &[]).await.unwrap();
         assert!(rows.is_empty());
 

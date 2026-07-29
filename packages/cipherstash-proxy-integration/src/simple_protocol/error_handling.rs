@@ -4,7 +4,7 @@ mod tests {
 
     #[tokio::test]
     async fn frontend_error_does_not_crash_connection() {
-        let client = connect_with_tls(PROXY).await;
+        let client = connect_with_tls(*PROXY).await;
 
         // Statement has the wrong column name
         let sql = format!(

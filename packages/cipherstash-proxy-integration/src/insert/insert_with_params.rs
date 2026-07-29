@@ -71,7 +71,7 @@ mod tests {
     pub async fn query<T: for<'a> tokio_postgres::types::FromSql<'a> + Send + Sync>(
         sql: &str,
     ) -> Vec<T> {
-        let client = connect_with_tls(PROXY).await;
+        let client = connect_with_tls(*PROXY).await;
         let rows = client.query(sql, &[]).await.unwrap();
         rows.iter().map(|row| row.get(0)).collect::<Vec<T>>()
     }

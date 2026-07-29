@@ -45,7 +45,7 @@ mod tests {
 
         insert_text(&["cherry", "apple", "date", "banana"]).await;
 
-        let client = connect_with_tls(PROXY).await;
+        let client = connect_with_tls(*PROXY).await;
 
         let sql = "SELECT DISTINCT encrypted_text FROM encrypted ORDER BY encrypted_text ASC";
         let rows = client.query(sql, &[]).await.unwrap();
@@ -78,7 +78,7 @@ mod tests {
         // Six rows, three distinct plaintexts.
         insert_text(&["cherry", "apple", "banana", "apple", "cherry", "apple"]).await;
 
-        let client = connect_with_tls(PROXY).await;
+        let client = connect_with_tls(*PROXY).await;
 
         // Without ORDER BY: deduplicated in place, no subquery wrapping.
         let sql = "SELECT DISTINCT encrypted_text FROM encrypted";
@@ -108,7 +108,7 @@ mod tests {
 
         insert_text(&["cherry", "apple"]).await;
 
-        let client = connect_with_tls(PROXY).await;
+        let client = connect_with_tls(*PROXY).await;
 
         let sql = "SELECT DISTINCT id, encrypted_text FROM encrypted ORDER BY encrypted_text";
         let rows = client.query(sql, &[]).await.unwrap();
@@ -130,7 +130,7 @@ mod tests {
 
         insert_text(&["cherry", "apple"]).await;
 
-        let client = connect_with_tls(PROXY).await;
+        let client = connect_with_tls(*PROXY).await;
 
         let sql = "SELECT DISTINCT encrypted_text AS fruit FROM encrypted ORDER BY encrypted_text";
         let rows = client.query(sql, &[]).await.unwrap();
@@ -166,7 +166,7 @@ mod tests {
             .await;
         }
 
-        let client = connect_with_tls(PROXY).await;
+        let client = connect_with_tls(*PROXY).await;
 
         let sql = "SELECT DISTINCT plaintext, encrypted_text FROM encrypted \
                    ORDER BY plaintext, encrypted_text";
@@ -204,7 +204,7 @@ mod tests {
             .await;
         }
 
-        let client = connect_with_tls(PROXY).await;
+        let client = connect_with_tls(*PROXY).await;
 
         // `1` is `plaintext`.
         let sql = "SELECT DISTINCT plaintext, encrypted_text FROM encrypted \
@@ -235,7 +235,7 @@ mod tests {
 
         insert_text(&["cherry", "apple", "date", "banana"]).await;
 
-        let client = connect_with_tls(PROXY).await;
+        let client = connect_with_tls(*PROXY).await;
 
         let sql = "SELECT DISTINCT encrypted_text FROM encrypted \
                    ORDER BY encrypted_text ASC LIMIT 2";

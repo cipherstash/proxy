@@ -9,7 +9,7 @@ mod tests {
         trace();
         clear().await;
 
-        let client = connect_with_tls(PROXY).await;
+        let client = connect_with_tls(*PROXY).await;
 
         let data = (0..5)
             .map(|_| (random_id(), Faker.fake::<String>()))
@@ -53,7 +53,7 @@ mod tests {
         trace();
         clear().await;
 
-        let client = connect_with_tls(PROXY).await;
+        let client = connect_with_tls(*PROXY).await;
 
         let data = (0..5)
             .map(|_| (random_id(), Faker.fake::<String>(), Faker.fake::<String>()))

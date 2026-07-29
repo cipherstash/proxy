@@ -8,7 +8,7 @@ mod tests {
 
         reset_schema().await;
 
-        let client = connect_with_tls(PROXY).await;
+        let client = connect_with_tls(*PROXY).await;
 
         let id = random_id();
         let plaintext = "hello@cipherstash.com";
