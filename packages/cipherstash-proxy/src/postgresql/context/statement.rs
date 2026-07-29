@@ -1,17 +1,29 @@
 use super::Column;
-use eql_mapper::{JsonSelectorSource, ParamPlan};
+use eql_mapper::{JsonSelectorSegment, ParamPlan};
 
-/// Where the path half of a fused JSON value selector comes from.
+/// Where one step of the path half of a fused JSON value selector comes from.
 ///
-/// The proxy's copy of [`eql_mapper::JsonSelectorSource`], with param numbers
+/// The proxy's copy of [`eql_mapper::JsonSelectorSegment`], with param numbers
 /// converted to 0-based bind indexes.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum JsonSelectorPath {
-    /// A literal path in the SQL, known at Parse time.
+pub enum JsonSelectorStep {
+    /// A literal selector in the SQL, known at Parse time.
     Literal(String),
 
-    /// A placeholder path, arriving in this (0-based) input param.
+    /// A placeholder selector, arriving in this (0-based) input param.
     Param(usize),
+}
+
+/// The path half of a fused JSON value selector: the steps of the accessor
+/// chain, outermost last.
+///
+/// A chain (`col -> 'a' -> 'b'`) is one path into one document — the payload
+/// between the steps is encrypted, so there is nothing for the database to
+/// traverse. The steps are resolved and composed into a single eJSONPath at
+/// encryption time, once any placeholder step is bound.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct JsonSelectorPath {
+    pub steps: Vec<JsonSelectorStep>,
 }
 
 /// How the value bound to one output param is built from the input params.
@@ -139,13 +151,19 @@ pub fn output_params_from_plan(
                 }
                 eql_mapper::OutputParamSource::JsonValueSelector { path, value } => {
                     OutputParamSource::JsonValueSelector {
-                        path: match path {
-                            JsonSelectorSource::Literal(path) => {
-                                JsonSelectorPath::Literal(path.to_owned())
-                            }
-                            JsonSelectorSource::Param(param) => {
-                                JsonSelectorPath::Param(to_index(param.0))
-                            }
+                        path: JsonSelectorPath {
+                            steps: path
+                                .segments()
+                                .iter()
+                                .map(|segment| match segment {
+                                    JsonSelectorSegment::Literal(selector) => {
+                                        JsonSelectorStep::Literal(selector.to_owned())
+                                    }
+                                    JsonSelectorSegment::Param(param) => {
+                                        JsonSelectorStep::Param(to_index(param.0))
+                                    }
+                                })
+                                .collect(),
                         },
                         value: to_index(value.0),
                     }

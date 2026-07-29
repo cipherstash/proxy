@@ -36,7 +36,7 @@ use crate::proxy::EncryptionService;
 use crate::{EqlOutput, EqlQueryPayload};
 use bytes::BytesMut;
 use cipherstash_client::encryption::Plaintext;
-use eql_mapper::{self, EqlMapperError, EqlTermVariant, JsonSelectorSource, TypeCheckedStatement};
+use eql_mapper::{self, EqlMapperError, EqlTermVariant, JsonSelectorSegment, TypeCheckedStatement};
 use metrics::{counter, histogram};
 use pg_escape::quote_literal;
 use serde::Serialize;
@@ -1407,9 +1407,21 @@ fn json_value_selector_literal_plaintext(
     typed_statement: &TypeCheckedStatement<'_>,
     literal: &ast::Value,
 ) -> Result<Option<Plaintext>, MappingError> {
-    let Some(JsonSelectorSource::Literal(path)) =
-        typed_statement.json_value_selectors.for_literal(literal)
-    else {
+    let path: Option<Vec<&str>> = typed_statement
+        .json_value_selectors
+        .for_literal(literal)
+        .and_then(|source| {
+            source
+                .segments()
+                .iter()
+                .map(|segment| match segment {
+                    JsonSelectorSegment::Literal(selector) => Some(selector.as_str()),
+                    JsonSelectorSegment::Param(_) => None,
+                })
+                .collect::<Option<Vec<_>>>()
+        });
+
+    let Some(path) = path else {
         debug!(
             target: MAPPER,
             msg = "Encrypted JSON equality needs a literal selector when the value is a literal",
@@ -1422,7 +1434,7 @@ fn json_value_selector_literal_plaintext(
         return Ok(None);
     };
 
-    json_value_selector_plaintext(path, value).map(Some)
+    json_value_selector_plaintext(&path, value).map(Some)
 }
 
 fn to_json_literal_value<T>(literal: &T) -> Result<Value, Error>

@@ -117,28 +117,65 @@ pub fn literal_from_sql(
 /// `$[*].b`. Re-rooting those would produce `$.$[0]` and friends — a selector
 /// that matches nothing rather than erroring.
 pub fn json_selector_path(val: &str) -> String {
-    if val.starts_with('$') {
-        val.to_string()
-    } else {
-        format!("$.{val}")
+    compose_json_selector_path(std::slice::from_ref(&val))
+}
+
+/// Composes the steps of an accessor chain into one eJSONPath rooted at `$`.
+///
+/// `col -> 'a' -> 'b'` is the single path `$.a.b` of the root document, not two
+/// hops: the intermediate value is an encrypted payload the database cannot
+/// traverse, so the whole chain has to be keyed into one selector.
+///
+/// Every step is normalised the way [`json_selector_path`] normalises a lone
+/// one, so the spellings mix freely: `jsonb_path_query_first(col, '$.a') -> 'b'`
+/// composes to `$.a.b`, and a subscript step keeps its bracket
+/// (`$.a[0]`) rather than gaining a spurious dot.
+pub fn compose_json_selector_path(segments: &[&str]) -> String {
+    let mut path = String::from("$");
+
+    for segment in segments {
+        // A step written as a path of its own is already rooted, and its root
+        // is this path so far — drop the `$` and splice the remainder on.
+        let (rooted, rest) = match segment.strip_prefix('$') {
+            Some(rest) => (true, rest),
+            None => (false, *segment),
+        };
+
+        // A bare `$` selects the document itself and adds no step.
+        if rooted && rest.is_empty() {
+            continue;
+        }
+
+        if !rest.starts_with('.') && !rest.starts_with('[') {
+            path.push('.');
+        }
+
+        path.push_str(rest);
     }
+
+    path
 }
 
 /// Builds the composition input for a fused JSON value selector:
 /// `{"path": <jsonpath>, "value": <scalar>}`.
 ///
-/// This is the one place two SQL operands become one encrypted operand.
-/// `QueryOp::SteVecValueSelector` MACs the path and the canonicalised value
-/// together into a single selector; its presence in the stored `sv` is the
-/// equality match. The client applies the column's term filters (e.g. downcase)
-/// to `value` as part of that, so case-insensitive columns work unchanged here.
+/// This is the one place the operands of a JSON field equality become one
+/// encrypted operand. `QueryOp::SteVecValueSelector` MACs the path and the
+/// canonicalised value together into a single selector; its presence in the
+/// stored `sv` is the equality match. The client applies the column's term
+/// filters (e.g. downcase) to `value` as part of that, so case-insensitive
+/// columns work unchanged here.
+///
+/// `path` arrives as the steps of the accessor chain, already resolved to text;
+/// they are composed into one eJSONPath here so that a chained accessor keys the
+/// same needle as the equivalent single-step path.
 ///
 /// `value` must be a scalar. A single value selector is only injective for
 /// scalars — a container MACs just its structural tag, so every object at a path
 /// would collapse to one selector. The client rejects those; rejecting here too
 /// gives a message naming the query shape rather than the encryption internals.
 pub fn json_value_selector_plaintext(
-    path: &str,
+    path: &[&str],
     value: serde_json::Value,
 ) -> Result<Plaintext, MappingError> {
     if value.is_object() || value.is_array() {
@@ -152,7 +189,7 @@ pub fn json_value_selector_plaintext(
     }
 
     Ok(Plaintext::new(serde_json::json!({
-        "path": json_selector_path(path),
+        "path": compose_json_selector_path(path),
         "value": value,
     })))
 }
@@ -625,6 +662,67 @@ mod binary_json_value_tests {
             None,
             bind_param_json_value(&BindParam::null(), &Type::TEXT).unwrap()
         );
+    }
+
+    /// A chain of steps composes into ONE path, so `col -> 'a' -> 'b'` keys the
+    /// same needle as the equivalent `jsonb_path_query_first(col, '$.a.b')`.
+    #[test]
+    fn accessor_chain_composes_into_one_path() {
+        assert_eq!("$.a.b", compose_json_selector_path(&["a", "b"]));
+        assert_eq!(
+            "$.a.b.c.d",
+            compose_json_selector_path(&["a", "b", "c", "d"])
+        );
+        assert_eq!(
+            compose_json_selector_path(&["$.a.b"]),
+            compose_json_selector_path(&["a", "b"]),
+            "the spellings of one path must agree"
+        );
+    }
+
+    /// A step already written as a path is rooted at the path so far, not at a
+    /// second `$`.
+    #[test]
+    fn a_rooted_step_splices_onto_the_path_so_far() {
+        assert_eq!("$.a.b", compose_json_selector_path(&["$.a", "b"]));
+        assert_eq!("$.a.b", compose_json_selector_path(&["a", "$.b"]));
+        assert_eq!("$.a[0].b", compose_json_selector_path(&["a", "$[0]", "b"]));
+        // A bare `$` is the document itself and adds no step.
+        assert_eq!("$.a", compose_json_selector_path(&["$", "a"]));
+    }
+
+    /// A single step composes exactly as it always did.
+    #[test]
+    fn a_single_step_keeps_its_rooting_rules() {
+        for path in [
+            "name",
+            "nested.title",
+            "$.nested.title",
+            "$",
+            "$[0]",
+            "$[*].b",
+        ] {
+            assert_eq!(
+                json_selector_path(path),
+                compose_json_selector_path(&[path]),
+                "unexpected composition of `{path}`"
+            );
+        }
+
+        assert_eq!("$.name", json_selector_path("name"));
+        assert_eq!("$[0]", json_selector_path("$[0]"));
+    }
+
+    /// The needle is keyed on the composed path, and containers are rejected
+    /// whatever the path's shape.
+    #[test]
+    fn a_needle_is_keyed_on_the_composed_path() {
+        assert_eq!(
+            Plaintext::new(serde_json::json!({"path": "$.a.b", "value": "v"})),
+            json_value_selector_plaintext(&["a", "b"], serde_json::json!("v")).unwrap()
+        );
+
+        assert!(json_value_selector_plaintext(&["a", "b"], serde_json::json!({"x": 1})).is_err());
     }
 }
 

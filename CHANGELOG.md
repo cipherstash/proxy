@@ -30,6 +30,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - **Equality on encrypted JSON fields**: `WHERE col -> 'field' = 'value'` now works on encrypted JSON columns, in both the simple and extended query protocols, and in the `->>` and `jsonb_path_query_first(col, path) = value` spellings. `<>` is supported as the negation. The field and the value are combined into a single encrypted value-selector needle and matched by containment, so a query never reveals the field and value separately. Matching is exact and case-sensitive; the value must be a JSON scalar (comparing a whole object or array to a field is rejected — use containment with `@>` instead).
 
+### Security
+
+- **Chained JSON field accessors sent the intermediate field name to the database in plaintext**: `WHERE col -> 'a' -> 'b' = $1` on an encrypted JSON column emitted `eql_v3.jsonb_contains(col -> 'a', …)`, so the field name `a` appeared in the statement text PostgreSQL received (and in its logs), and native `jsonb ->` was applied to the encrypted payload — which also made the predicate match nothing. A chain is now treated as the single path it is: `$.a.b` of the whole document, folded into the one encrypted needle and matched against the bare column. Chains of any depth are supported, in the `->`, `->>` and `jsonb_path_query_first` spellings, with `=` and `<>`, and with each step written as a literal or a placeholder.
+
 ### Fixed
 
 - **Statement errors no longer desync the connection**: when a statement failed inside the proxy (an unsupported operation on an encrypted column, for instance), the error was written straight to the client and could overtake responses still in flight from the server — with connection pools and prepared-statement caching, the client then saw a protocol error (`unexpected message from server` in tokio_postgres) instead of the proxy's message, typically right after an encrypted statement had run on the same connection. The proxy now delivers statement errors through the server, so clients always receive the proxy's actual error message, in order, and the connection remains usable.

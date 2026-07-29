@@ -3,7 +3,7 @@ use crate::error::{Error, MappingError, ProtocolError};
 use crate::log::MAPPER;
 use crate::postgresql::context::column::Column;
 use crate::postgresql::context::statement::{
-    params_are_positional, JsonSelectorPath, OutputParam, OutputParamSource,
+    params_are_positional, JsonSelectorPath, JsonSelectorStep, OutputParam, OutputParamSource,
 };
 use crate::postgresql::data::{
     bind_param_from_sql, bind_param_json_value, json_value_selector_plaintext,
@@ -111,24 +111,33 @@ impl Bind {
     }
 
     /// Composes `{"path", "value"}` — the input to `SteVecValueSelector` — from
-    /// the two operands of a JSON field equality.
+    /// the operands of a JSON field equality.
     ///
-    /// The path is either a literal from the SQL or another bind param, which is
-    /// read straight off the wire: it is the selector *text*, so it needs none
-    /// of the per-column decoding the value half goes through.
+    /// Each step of the path is either a literal from the SQL or another bind
+    /// param, which is read straight off the wire: it is the selector *text*, so
+    /// it needs none of the per-column decoding the value half goes through.
+    ///
+    /// A NULL step (or a NULL value) yields no needle: `col -> NULL = x` is NULL
+    /// in SQL, so there is nothing to match. The caller must then bind NULL —
+    /// forwarding the operand the client sent would put it on the wire in
+    /// plaintext.
     fn json_value_selector_plaintext(
         &self,
         path: &JsonSelectorPath,
         value: usize,
         postgres_type: &Type,
     ) -> Result<Option<Plaintext>, Error> {
-        let path = match path {
-            JsonSelectorPath::Literal(path) => path.to_owned(),
-            JsonSelectorPath::Param(path_idx) => match self.param_values.get(*path_idx) {
-                Some(param) if !param.is_null() => param.to_string(),
-                _ => return Ok(None),
-            },
-        };
+        let mut steps = Vec::with_capacity(path.steps.len());
+
+        for step in &path.steps {
+            match step {
+                JsonSelectorStep::Literal(selector) => steps.push(selector.to_owned()),
+                JsonSelectorStep::Param(step_idx) => match self.param_values.get(*step_idx) {
+                    Some(param) if !param.is_null() => steps.push(param.to_string()),
+                    _ => return Ok(None),
+                },
+            }
+        }
 
         let Some(param) = self.param_values.get(value) else {
             return Ok(None);
@@ -141,11 +150,13 @@ impl Bind {
         debug!(
             target: MAPPER,
             msg = "Fused JSON value selector",
-            ?path,
+            path = ?steps,
             ?value
         );
 
-        Ok(Some(json_value_selector_plaintext(&path, value)?))
+        let steps: Vec<&str> = steps.iter().map(String::as_str).collect();
+
+        Ok(Some(json_value_selector_plaintext(&steps, value)?))
     }
 
     /// Replaces the bound params with the output params of the rewritten
@@ -180,6 +191,7 @@ impl Bind {
             )?;
 
             Self::apply_encrypted(&mut param, ct.as_ref())?;
+
             param_values.push(param);
         }
 
