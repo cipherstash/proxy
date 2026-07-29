@@ -7,15 +7,11 @@
 //! not handle, and in each case something the client wrote in plaintext was
 //! forwarded to PostgreSQL (CIP-3682).
 //!
-//! A chained accessor is now one path (`$.nested.string`) rooted at the bare
-//! column. Its tests assert the behaviour AND, by reading the stored row on a
-//! direct connection that bypasses Proxy, that nothing the client wrote in the
-//! clear is visible to the database.
-//!
-//! # The NULL-selector test is ignored, not deleted
-//!
-//! It asserts the behaviour that shape must have. It fails today; un-ignoring it
-//! is the acceptance test for its fix.
+//! Both are fixed. A chained accessor is now one path (`$.nested.string`)
+//! rooted at the bare column, and a fusion that cannot build a needle binds
+//! NULL instead of the client's bytes. The tests assert the behaviour AND, by
+//! reading the stored row on a direct connection that bypasses Proxy, that
+//! nothing the client wrote in the clear is visible to the database.
 
 #[cfg(test)]
 mod tests {
@@ -182,10 +178,6 @@ mod tests {
     /// `col -> NULL = x` is NULL in SQL, so the correct result is simply no
     /// rows.
     #[tokio::test]
-    #[ignore = "A NULL selector param forwards the VALUE operand to the database in plaintext: \
-                json_value_selector_plaintext yields nothing, encryption is skipped, and \
-                bind.rs's rebuild path passes the client's raw bytes through. Should bind NULL \
-                and return no rows."]
     async fn null_selector_param_does_not_forward_plaintext() {
         trace();
         clear().await;
@@ -205,5 +197,47 @@ mod tests {
             rows.is_empty(),
             "col -> NULL = x is NULL in SQL, so no rows should match"
         );
+    }
+
+    /// A NULL step anywhere in a chain is the same: no needle, no rows, and
+    /// nothing of the client's forwarded.
+    #[tokio::test]
+    async fn null_step_in_a_chain_does_not_forward_plaintext() {
+        trace();
+        clear().await;
+        insert_nested().await;
+
+        let client = connect_with_tls(*PROXY).await;
+
+        let selector: Option<String> = None;
+        let sql = "SELECT id FROM encrypted WHERE encrypted_jsonb -> 'nested' -> $1 = $2";
+
+        let rows = client
+            .query(sql, &[&selector, &Value::String("world".to_string())])
+            .await
+            .expect("a NULL step should compare as NULL, not send the value in plaintext");
+
+        assert!(rows.is_empty(), "a NULL step matches nothing");
+    }
+
+    /// A NULL *value* is the mirror case: nothing to encrypt, and nothing of the
+    /// client's to forward.
+    #[tokio::test]
+    async fn null_value_param_does_not_forward_plaintext() {
+        trace();
+        clear().await;
+        insert_nested().await;
+
+        let client = connect_with_tls(*PROXY).await;
+
+        let value: Option<Value> = None;
+        let sql = "SELECT id FROM encrypted WHERE encrypted_jsonb -> $1 = $2";
+
+        let rows = client
+            .query(sql, &[&"nested", &value])
+            .await
+            .expect("a NULL value should compare as NULL");
+
+        assert!(rows.is_empty(), "col -> 'nested' = NULL matches nothing");
     }
 }

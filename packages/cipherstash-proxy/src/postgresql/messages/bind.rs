@@ -174,8 +174,13 @@ impl Bind {
         encrypted: Vec<Option<EqlOutput>>,
     ) -> Result<(), Error> {
         if output_params.len() == self.param_values.len() && params_are_positional(output_params) {
-            for (param, ct) in self.param_values.iter_mut().zip(encrypted.iter()) {
-                Self::apply_encrypted(param, ct.as_ref())?;
+            for ((param, output), ct) in self
+                .param_values
+                .iter_mut()
+                .zip(output_params.iter())
+                .zip(encrypted.iter())
+            {
+                Self::apply_output(param, output, ct.as_ref())?;
             }
             return Ok(());
         }
@@ -190,7 +195,7 @@ impl Bind {
                 },
             )?;
 
-            Self::apply_encrypted(&mut param, ct.as_ref())?;
+            Self::apply_output(&mut param, output, ct.as_ref())?;
 
             param_values.push(param);
         }
@@ -202,6 +207,29 @@ impl Bind {
         self.reshaped = true;
 
         Ok(())
+    }
+
+    /// Writes what PostgreSQL receives for one output param.
+    ///
+    /// An output param the plan says must be ENCRYPTED, but for which no
+    /// ciphertext was produced, is bound NULL. Its bytes are the client's
+    /// plaintext operand, so leaving them in place would send it to the
+    /// database: that is the shape a fusion takes when it cannot build a needle
+    /// (`col -> NULL = $1`), where the operand went unencrypted precisely
+    /// because there is nothing to match. NULL is also what the SQL means — a
+    /// comparison against NULL is NULL — so the predicate correctly returns no
+    /// rows.
+    fn apply_output(
+        param: &mut BindParam,
+        output: &OutputParam,
+        ct: Option<&EqlOutput>,
+    ) -> Result<(), Error> {
+        if output.column.is_some() && ct.is_none() {
+            param.rewrite_null();
+            return Ok(());
+        }
+
+        Self::apply_encrypted(param, ct)
     }
 
     fn apply_encrypted(param: &mut BindParam, ct: Option<&EqlOutput>) -> Result<(), Error> {
@@ -300,6 +328,21 @@ impl BindParam {
     pub fn rewrite_text(&mut self, bytes: Vec<u8>) {
         self.bytes.clear();
         self.bytes.extend_from_slice(&bytes);
+        self.dirty = true;
+    }
+
+    /// Rewrite this param as NULL, discarding whatever the client bound.
+    ///
+    /// Used for an encrypted operand that produced no ciphertext: its bytes are
+    /// plaintext, so they must not reach the database. An already-NULL param is
+    /// left alone rather than marked dirty — there is nothing to replace, and
+    /// dirtying it would re-send a Bind message that has not changed.
+    pub fn rewrite_null(&mut self) {
+        if self.is_null() {
+            return;
+        }
+
+        self.bytes.clear();
         self.dirty = true;
     }
 
@@ -485,13 +528,18 @@ impl TryFrom<Bind> for BytesMut {
 
 #[cfg(test)]
 mod tests {
-    use super::BindParam;
+    use super::{BindParam, JsonSelectorPath, JsonSelectorStep, OutputParam, OutputParamSource};
     use crate::{
         config::LogConfig,
         log,
-        postgresql::{format_code::FormatCode, messages::bind::Bind},
+        postgresql::{
+            context::column::Column, format_code::FormatCode, messages::bind::Bind, messages::Name,
+        },
+        Identifier,
     };
     use bytes::BytesMut;
+    use cipherstash_client::schema::{ColumnConfig, ColumnMode, ColumnType};
+    use eql_mapper::EqlTermVariant;
 
     fn to_message(s: &[u8]) -> BytesMut {
         BytesMut::from(s)
@@ -542,5 +590,133 @@ mod tests {
         param.rewrite("world".as_bytes());
 
         assert!(param.requires_rewrite());
+    }
+
+    fn text_param(value: &str) -> BindParam {
+        BindParam::new(FormatCode::Text, BytesMut::from(value.as_bytes()))
+    }
+
+    fn encrypted_column() -> Column {
+        Column {
+            identifier: Identifier::new("encrypted", "encrypted_jsonb"),
+            config: ColumnConfig {
+                name: "encrypted_jsonb".to_owned(),
+                in_place: false,
+                cast_type: ColumnType::Json,
+                indexes: vec![],
+                mode: ColumnMode::PlaintextDuplicate,
+            },
+            postgres_type: postgres_types::Type::JSONB,
+            eql_term: EqlTermVariant::JsonValueSelector,
+        }
+    }
+
+    fn bind_with(param_values: Vec<BindParam>) -> Bind {
+        Bind {
+            code: 'B',
+            portal: Name::unnamed(),
+            prepared_statement: Name::unnamed(),
+            num_param_format_codes: param_values.len() as i16,
+            param_format_codes: param_values.iter().map(|p| p.format_code).collect(),
+            num_param_values: param_values.len() as i16,
+            param_values,
+            num_result_column_format_codes: 0,
+            result_columns_format_codes: vec![],
+            reshaped: false,
+        }
+    }
+
+    /// `col -> $1 = $2` with `$1` bound NULL builds no needle, so `$2` is never
+    /// encrypted. Its bytes are the client's plaintext comparand: binding them
+    /// would send the value to the database in the clear. NULL is bound instead,
+    /// which is also what the SQL means.
+    #[test]
+    fn a_fusion_with_no_needle_binds_null_rather_than_the_clients_value() {
+        log::init(LogConfig::default());
+
+        let mut bind = bind_with(vec![BindParam::null(), text_param("\"world\"")]);
+
+        let output_params = vec![OutputParam {
+            column: Some(encrypted_column()),
+            source: OutputParamSource::JsonValueSelector {
+                path: JsonSelectorPath {
+                    steps: vec![JsonSelectorStep::Param(0)],
+                },
+                value: 1,
+            },
+            query_operand: true,
+        }];
+
+        // What `to_plaintext` yields for this Bind: no needle, so no ciphertext.
+        assert_eq!(
+            vec![None],
+            bind.to_plaintext(&output_params, &[]).unwrap(),
+            "a NULL selector must not produce a needle"
+        );
+
+        bind.rewrite(&output_params, vec![None]).unwrap();
+
+        assert_eq!(1, bind.param_values.len());
+        assert!(
+            bind.param_values[0].is_null(),
+            "the value operand must be bound NULL, not forwarded: {:?}",
+            bind.param_values[0].to_string()
+        );
+        assert!(bind.requires_rewrite());
+    }
+
+    /// The same holds when it is the VALUE that is NULL: nothing to encrypt, and
+    /// nothing of the client's to forward.
+    #[test]
+    fn a_fusion_with_a_null_value_binds_null() {
+        log::init(LogConfig::default());
+
+        let mut bind = bind_with(vec![text_param("nested"), BindParam::null()]);
+
+        let output_params = vec![OutputParam {
+            column: Some(encrypted_column()),
+            source: OutputParamSource::JsonValueSelector {
+                path: JsonSelectorPath {
+                    steps: vec![JsonSelectorStep::Param(0)],
+                },
+                value: 1,
+            },
+            query_operand: true,
+        }];
+
+        assert_eq!(vec![None], bind.to_plaintext(&output_params, &[]).unwrap());
+
+        bind.rewrite(&output_params, vec![None]).unwrap();
+
+        assert_eq!(1, bind.param_values.len());
+        assert!(bind.param_values[0].is_null());
+    }
+
+    /// A NATIVE param has no column, so it is forwarded exactly as bound — the
+    /// NULL rule is about operands that were supposed to be encrypted.
+    #[test]
+    fn a_native_param_is_still_forwarded_unchanged() {
+        log::init(LogConfig::default());
+
+        let mut bind = bind_with(vec![text_param("42"), text_param("plaintext")]);
+
+        let output_params = vec![
+            OutputParam {
+                column: None,
+                source: OutputParamSource::Input(0),
+                query_operand: false,
+            },
+            OutputParam {
+                column: None,
+                source: OutputParamSource::Input(1),
+                query_operand: false,
+            },
+        ];
+
+        bind.rewrite(&output_params, vec![None, None]).unwrap();
+
+        assert_eq!("42", bind.param_values[0].to_string());
+        assert_eq!("plaintext", bind.param_values[1].to_string());
+        assert!(!bind.requires_rewrite());
     }
 }
