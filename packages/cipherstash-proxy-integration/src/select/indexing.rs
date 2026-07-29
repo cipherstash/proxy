@@ -32,7 +32,7 @@ mod tests {
             insert(&sql, &[&id, &encrypted_text]).await;
         }
 
-        let client = connect_with_tls(PROXY).await;
+        let client = connect_with_tls(*PROXY).await;
 
         let sql = "CREATE INDEX ON encrypted (eql_v3.ord_term(encrypted_text))";
         let _ = client.simple_query(sql).await;

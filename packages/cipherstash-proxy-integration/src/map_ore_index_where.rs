@@ -63,7 +63,7 @@ mod tests {
 
         clear_table(table).await;
 
-        let client = connect_with_tls(PROXY).await;
+        let client = connect_with_tls(*PROXY).await;
 
         // Insert test data
         let sql = format!("INSERT INTO {table} (id, {col_name}) VALUES ($1, $2)");

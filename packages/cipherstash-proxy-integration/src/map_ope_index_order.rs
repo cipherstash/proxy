@@ -66,7 +66,7 @@ mod tests {
     {
         trace();
         clear_table(table).await;
-        let client = connect_with_tls(PROXY).await;
+        let client = connect_with_tls(*PROXY).await;
 
         let insert = format!("INSERT INTO {table} (id, {col_name}) VALUES ($1, $2)");
         for idx in interleaved_indices(values.len()) {
@@ -94,7 +94,7 @@ mod tests {
         trace();
         let table = "encrypted_ope_order_nulls_last";
         clear_table(table).await;
-        let client = connect_with_tls(PROXY).await;
+        let client = connect_with_tls(*PROXY).await;
 
         let null_insert = format!("INSERT INTO {table} (id) VALUES ($1)");
         client.query(&null_insert, &[&random_id()]).await.unwrap();
@@ -121,7 +121,7 @@ mod tests {
         trace();
         let table = "encrypted_ope_order_nulls_first";
         clear_table(table).await;
-        let client = connect_with_tls(PROXY).await;
+        let client = connect_with_tls(*PROXY).await;
 
         let insert = format!("INSERT INTO {table} (id, encrypted_text) VALUES ($1, $2), ($3, $4)");
         client

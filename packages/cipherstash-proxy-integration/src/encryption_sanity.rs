@@ -22,7 +22,7 @@ mod tests {
         let plaintext = "hello world";
 
         // Insert through proxy (should encrypt)
-        let client = connect_with_tls(PROXY).await;
+        let client = connect_with_tls(*PROXY).await;
         let sql = "INSERT INTO encrypted (id, encrypted_text) VALUES ($1, $2)";
         client.query(sql, &[&id, &plaintext]).await.unwrap();
 
@@ -49,7 +49,7 @@ mod tests {
         let plaintext_json = serde_json::json!({"key": "value", "number": 42});
 
         // Insert through proxy (should encrypt)
-        let client = connect_with_tls(PROXY).await;
+        let client = connect_with_tls(*PROXY).await;
         let sql = "INSERT INTO encrypted (id, encrypted_jsonb) VALUES ($1, $2)";
         client.query(sql, &[&id, &plaintext_json]).await.unwrap();
 
@@ -76,7 +76,7 @@ mod tests {
         let plaintext: f64 = 123.456;
 
         // Insert through proxy (should encrypt)
-        let client = connect_with_tls(PROXY).await;
+        let client = connect_with_tls(*PROXY).await;
         let sql = "INSERT INTO encrypted (id, encrypted_float8) VALUES ($1, $2)";
         client.query(sql, &[&id, &plaintext]).await.unwrap();
 
@@ -103,7 +103,7 @@ mod tests {
         let plaintext: bool = true;
 
         // Insert through proxy (should encrypt)
-        let client = connect_with_tls(PROXY).await;
+        let client = connect_with_tls(*PROXY).await;
         let sql = "INSERT INTO encrypted (id, encrypted_bool) VALUES ($1, $2)";
         client.query(sql, &[&id, &plaintext]).await.unwrap();
 
@@ -130,7 +130,7 @@ mod tests {
         let plaintext = NaiveDate::from_ymd_opt(2024, 6, 15).unwrap();
 
         // Insert through proxy (should encrypt)
-        let client = connect_with_tls(PROXY).await;
+        let client = connect_with_tls(*PROXY).await;
         let sql = "INSERT INTO encrypted (id, encrypted_date) VALUES ($1, $2)";
         client.query(sql, &[&id, &plaintext]).await.unwrap();
 
@@ -157,7 +157,7 @@ mod tests {
         let plaintext: i16 = 42;
 
         // Insert through proxy (should encrypt)
-        let client = connect_with_tls(PROXY).await;
+        let client = connect_with_tls(*PROXY).await;
         let sql = "INSERT INTO encrypted (id, encrypted_int2) VALUES ($1, $2)";
         client.query(sql, &[&id, &plaintext]).await.unwrap();
 
@@ -184,7 +184,7 @@ mod tests {
         let plaintext: i32 = 12345;
 
         // Insert through proxy (should encrypt)
-        let client = connect_with_tls(PROXY).await;
+        let client = connect_with_tls(*PROXY).await;
         let sql = "INSERT INTO encrypted (id, encrypted_int4) VALUES ($1, $2)";
         client.query(sql, &[&id, &plaintext]).await.unwrap();
 
@@ -211,7 +211,7 @@ mod tests {
         let plaintext: i64 = 9876543210;
 
         // Insert through proxy (should encrypt)
-        let client = connect_with_tls(PROXY).await;
+        let client = connect_with_tls(*PROXY).await;
         let sql = "INSERT INTO encrypted (id, encrypted_int8) VALUES ($1, $2)";
         client.query(sql, &[&id, &plaintext]).await.unwrap();
 

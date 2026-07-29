@@ -6,7 +6,7 @@ mod tests {
 
     #[tokio::test]
     async fn passthrough_statement() {
-        let client = connect_with_tls(PROXY).await;
+        let client = connect_with_tls(*PROXY).await;
 
         clear().await;
 
@@ -29,7 +29,7 @@ mod tests {
 
     #[tokio::test]
     async fn passthrough_invalid_statement() {
-        let client = connect_with_tls(PROXY).await;
+        let client = connect_with_tls(*PROXY).await;
 
         clear().await;
 
@@ -56,7 +56,7 @@ mod tests {
     async fn passthrough_statement_parallel() {
         for _x in 1..100 {
             tokio::spawn(async move {
-                let client = connect_with_tls(PROXY).await;
+                let client = connect_with_tls(*PROXY).await;
 
                 for _x in 1..10 {
                     let id = random_id();
@@ -86,7 +86,7 @@ mod tests {
 
     #[tokio::test]
     async fn passthrough_insert_from_select() {
-        let client = connect_with_tls(PROXY).await;
+        let client = connect_with_tls(*PROXY).await;
 
         clear().await;
 
@@ -118,7 +118,7 @@ mod tests {
 
     #[tokio::test]
     async fn passthrough_insert_with_value_from_select() {
-        let client = connect_with_tls(PROXY).await;
+        let client = connect_with_tls(*PROXY).await;
 
         clear().await;
 
@@ -149,7 +149,7 @@ mod tests {
 
     #[tokio::test]
     async fn passthrough_insert_with_returning() {
-        let client = connect_with_tls(PROXY).await;
+        let client = connect_with_tls(*PROXY).await;
 
         clear().await;
 
@@ -170,7 +170,7 @@ mod tests {
 
     #[tokio::test]
     async fn passthrough_select_with_cardinality() {
-        let client = connect_with_tls(PROXY).await;
+        let client = connect_with_tls(*PROXY).await;
 
         clear().await;
 
@@ -198,7 +198,7 @@ mod tests {
 
     #[tokio::test]
     async fn passthrough_delete_with_select() {
-        let client = connect_with_tls(PROXY).await;
+        let client = connect_with_tls(*PROXY).await;
 
         clear().await;
 

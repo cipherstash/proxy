@@ -6,7 +6,7 @@ mod tests {
 
     #[tokio::test]
     async fn simple_protocol_without_encryption() {
-        let client = connect_with_tls(PROXY).await;
+        let client = connect_with_tls(*PROXY).await;
         let id = random_id();
         let sql = format!("INSERT INTO encrypted (id, plaintext) VALUES ({id}, 'plain')");
         client
@@ -28,7 +28,7 @@ mod tests {
 
     #[tokio::test]
     async fn simple_protocol_text() {
-        let client = connect_with_tls(PROXY).await;
+        let client = connect_with_tls(*PROXY).await;
 
         let id = random_id();
         let encrypted_text = "hello@cipherstash.com";
@@ -68,7 +68,7 @@ mod tests {
 
     #[tokio::test]
     async fn simple_protocol_int2() {
-        let client = connect_with_tls(PROXY).await;
+        let client = connect_with_tls(*PROXY).await;
 
         let id = random_id();
         let encrypted_int2: i16 = 42;
@@ -108,7 +108,7 @@ mod tests {
 
     #[tokio::test]
     async fn simple_protocol_date() {
-        let client = connect_with_tls(PROXY).await;
+        let client = connect_with_tls(*PROXY).await;
 
         let id = random_id();
         let encrypted_date = NaiveDate::parse_from_str("2025-01-01", "%Y-%m-%d").unwrap();
@@ -149,7 +149,7 @@ mod tests {
 
     #[tokio::test]
     async fn simple_protocol_date_with_iso() {
-        let client = connect_with_tls(PROXY).await;
+        let client = connect_with_tls(*PROXY).await;
 
         let id = random_id();
         let encrypted_date =
@@ -191,7 +191,7 @@ mod tests {
 
     #[tokio::test]
     async fn simple_protocol_int4() {
-        let client = connect_with_tls(PROXY).await;
+        let client = connect_with_tls(*PROXY).await;
 
         let id = random_id();
         let encrypted_int4: i32 = 42;
@@ -243,7 +243,7 @@ mod tests {
 
     #[tokio::test]
     async fn frontend_error_does_not_crash_connection() {
-        let client = connect_with_tls(PROXY).await;
+        let client = connect_with_tls(*PROXY).await;
 
         // Statement has the wrong column name
         let sql = format!(

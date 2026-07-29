@@ -28,7 +28,7 @@ mod tests {
 
         // KEYSET_NAME IS SCOPED TO A CONNECTION
         // The same client/connection is used for tests
-        let client = connect_with_tls(PROXY).await;
+        let client = connect_with_tls(*PROXY).await;
 
         // DEFAULT_KEYSET_ID SHOULD BE DISABLED FOR THIS TEST
         // SET KEYSET IS REQUIRED
@@ -93,7 +93,7 @@ mod tests {
 
         // KEYSET_ID IS SCOPED TO A CONNECTION
         // The same client/connection is used for tests
-        let client = connect_with_tls(PROXY).await;
+        let client = connect_with_tls(*PROXY).await;
 
         // DEFAULT_KEYSET_ID SHOULD BE DISABLED FOR THIS TEST
         // SET KEYSET IS REQUIRED
@@ -181,8 +181,8 @@ mod tests {
         let tenant_1_text = "TENANT_1".to_string();
         let tenant_2_text = "TENANT_2".to_string();
 
-        let tenant_1_client = connect_with_tls(PROXY).await;
-        let tenant_2_client = connect_with_tls(PROXY).await;
+        let tenant_1_client = connect_with_tls(*PROXY).await;
+        let tenant_2_client = connect_with_tls(*PROXY).await;
 
         // DEFAULT_KEYSET_ID SHOULD BE DISABLED FOR THIS TEST
         // SET KEYSET IS REQUIRED
@@ -263,8 +263,8 @@ mod tests {
         let tenant_1_text = "TENANT_1_DATA".to_string();
         let tenant_2_text = "TENANT_2_DATA".to_string();
 
-        let tenant_1_client = connect_with_tls(PROXY).await;
-        let tenant_2_client = connect_with_tls(PROXY).await;
+        let tenant_1_client = connect_with_tls(*PROXY).await;
+        let tenant_2_client = connect_with_tls(*PROXY).await;
 
         // Set tenant keysets for each client
         let sql = format!("SET CIPHERSTASH.KEYSET_NAME = '{tenant_keyset_name_1}'");
@@ -327,7 +327,7 @@ mod tests {
 
         clear().await;
 
-        let client = connect_with_tls(PROXY).await;
+        let client = connect_with_tls(*PROXY).await;
 
         let tenant_keyset_name_1 = std::env::var("CS_TENANT_KEYSET_NAME_1").unwrap();
 
@@ -372,7 +372,7 @@ mod tests {
 
         clear().await;
 
-        let client = connect_with_tls(PROXY).await;
+        let client = connect_with_tls(*PROXY).await;
 
         let tenant_keyset_name_1 = std::env::var("CS_TENANT_KEYSET_NAME_1").unwrap();
 

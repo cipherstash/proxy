@@ -26,7 +26,7 @@ mod tests {
 
         let id = random_id();
 
-        let client = connect_with_tls(PROXY).await;
+        let client = connect_with_tls(*PROXY).await;
 
         let encrypted_text = "hello@cipherstash.com";
 
@@ -62,7 +62,7 @@ mod tests {
 
         reset_schema().await;
 
-        let client = connect_with_tls(PROXY).await;
+        let client = connect_with_tls(*PROXY).await;
 
         let _reset = Reset;
 
@@ -89,7 +89,7 @@ mod tests {
     async fn mapper_unsupported_parameter_type_with_date() {
         trace();
 
-        let client = connect_with_tls(PROXY).await;
+        let client = connect_with_tls(*PROXY).await;
 
         let id = random_id();
         // let encrypted_date = NaiveDate::parse_from_str("2025-01-01", "%Y-%m-%d").unwrap();
@@ -114,7 +114,7 @@ mod tests {
 
         reset_schema().await;
 
-        let client = connect_with_tls(PROXY).await;
+        let client = connect_with_tls(*PROXY).await;
 
         let _reset = Reset;
 

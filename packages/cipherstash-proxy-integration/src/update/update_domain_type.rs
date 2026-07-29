@@ -54,7 +54,7 @@ mod tests {
         // Then update with RETURNING clause
         let sql = "UPDATE encrypted SET plaintext_domain = $1, encrypted_text = $2 WHERE id = $3 RETURNING id, plaintext_domain, encrypted_text";
 
-        let client = connect_with_tls(PROXY).await;
+        let client = connect_with_tls(*PROXY).await;
         let result = client
             .query(sql, &[&updated_domain, &updated_text, &id])
             .await

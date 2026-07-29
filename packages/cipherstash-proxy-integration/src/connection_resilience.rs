@@ -21,8 +21,8 @@ mod tests {
     #[tokio::test]
     async fn slow_query_does_not_block_other_connections() {
         let result = timeout(Duration::from_secs(30), async {
-            let client_a = connect_with_tls(PROXY).await;
-            let client_b = connect_with_tls(PROXY).await;
+            let client_a = connect_with_tls(*PROXY).await;
+            let client_b = connect_with_tls(*PROXY).await;
 
             // Connection A: run a slow query
             let a_handle = tokio::spawn(async move {
@@ -56,7 +56,7 @@ mod tests {
         let result = timeout(Duration::from_secs(10), async {
             // First connection: query, then drop
             {
-                let client = connect_with_tls(PROXY).await;
+                let client = connect_with_tls(*PROXY).await;
                 let rows = client.simple_query("SELECT 1").await.unwrap();
                 assert!(!rows.is_empty());
             }
@@ -66,7 +66,7 @@ mod tests {
             tokio::time::sleep(Duration::from_millis(100)).await;
 
             // Second connection: should work fine
-            let client = connect_with_tls(PROXY).await;
+            let client = connect_with_tls(*PROXY).await;
             let rows = client.simple_query("SELECT 1").await.unwrap();
             assert!(!rows.is_empty());
         })
@@ -84,7 +84,7 @@ mod tests {
             // 5 slow connections
             for _ in 0..5 {
                 join_set.spawn(async {
-                    let client = connect_with_tls(PROXY).await;
+                    let client = connect_with_tls(*PROXY).await;
                     client.simple_query("SELECT pg_sleep(3)").await.unwrap();
                 });
             }
@@ -96,7 +96,7 @@ mod tests {
             for _ in 0..5 {
                 join_set.spawn(async {
                     let start = Instant::now();
-                    let client = connect_with_tls(PROXY).await;
+                    let client = connect_with_tls(*PROXY).await;
                     let rows = client.simple_query("SELECT 1").await.unwrap();
                     let elapsed = start.elapsed();
 
@@ -140,7 +140,7 @@ mod tests {
 
             // Connection B: through proxy, attempt to acquire the same lock (will block)
             let b_handle = tokio::spawn(async move {
-                let client_b = connect_with_tls(PROXY).await;
+                let client_b = connect_with_tls(*PROXY).await;
                 // This will block until A releases the lock
                 client_b
                     .simple_query(&b_lock_query)
@@ -173,7 +173,7 @@ mod tests {
 
             // Connection C: through proxy, should complete immediately despite B being blocked
             let start = Instant::now();
-            let client_c = connect_with_tls(PROXY).await;
+            let client_c = connect_with_tls(*PROXY).await;
             let rows = client_c.simple_query("SELECT 1").await.unwrap();
             let elapsed = start.elapsed();
 

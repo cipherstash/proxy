@@ -34,7 +34,7 @@ mod tests {
     #[tokio::test]
     async fn select_jsonb_path_query_number() {
         trace();
-        let client = connect_with_tls(PROXY).await;
+        let client = connect_with_tls(*PROXY).await;
 
         clear_with_client(&client).await;
         insert_jsonb_with_client(&client).await;
@@ -45,7 +45,7 @@ mod tests {
     #[tokio::test]
     async fn select_jsonb_path_query_string() {
         trace();
-        let client = connect_with_tls(PROXY).await;
+        let client = connect_with_tls(*PROXY).await;
 
         clear_with_client(&client).await;
         insert_jsonb_with_client(&client).await;
@@ -56,7 +56,7 @@ mod tests {
     #[tokio::test]
     async fn select_jsonb_path_query_value() {
         trace();
-        let client = connect_with_tls(PROXY).await;
+        let client = connect_with_tls(*PROXY).await;
 
         clear_with_client(&client).await;
         insert_jsonb_with_client(&client).await;
@@ -72,7 +72,7 @@ mod tests {
     #[tokio::test]
     async fn select_jsonb_path_query_with_unknown() {
         trace();
-        let client = connect_with_tls(PROXY).await;
+        let client = connect_with_tls(*PROXY).await;
 
         clear_with_client(&client).await;
         insert_jsonb_with_client(&client).await;
@@ -97,7 +97,7 @@ mod tests {
     #[tokio::test]
     async fn select_jsonb_path_query_with_alias() {
         trace();
-        let client = connect_with_tls(PROXY).await;
+        let client = connect_with_tls(*PROXY).await;
 
         clear_with_client(&client).await;
         insert_jsonb_with_client(&client).await;
