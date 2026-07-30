@@ -16,7 +16,7 @@
 #[cfg(test)]
 mod tests {
     use crate::common::{
-        clear, connect, connect_with_tls, execute_query, random_id, trace, PG_PORT, PROXY,
+        clear, connect_with_tls, execute_query, get_database_port, random_id, trace, PROXY,
     };
     use serde_json::Value;
 
@@ -38,8 +38,13 @@ mod tests {
 
     /// The stored payload, read on a connection straight to PostgreSQL so that
     /// Proxy never gets to decrypt it. This is what the database actually holds.
+    ///
+    /// The port comes from `get_database_port()` — the database Proxy is backed
+    /// by — not from `PG_PORT`. Under the TLS suite Proxy sits in front of
+    /// `postgres-tls` on 5617 while `PG_PORT` is 5532, so a hardcoded `PG_PORT`
+    /// reads a different, empty database and finds no row at all.
     async fn stored_payload(id: i64) -> String {
-        let client = connect(*PG_PORT).await;
+        let client = connect_with_tls(get_database_port()).await;
 
         let rows = client
             .query(
