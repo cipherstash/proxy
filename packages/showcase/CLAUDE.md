@@ -119,22 +119,48 @@ For example, the SQL `AVG` function cannot be used on encrypted numeric values. 
 
 When generating tests, it is important that Claude understands the fundamental limitations of EQL so that it does not generate test cases or example code that can never work.
 
-### JSON operator limitations
+### JSON operator chaining
 
-**CRITICAL LIMITATION: The `->` operator CANNOT be chained on `ste_vec` encrypted columns!**
+**The `->` / `->>` operators CAN be chained on `ste_vec` encrypted columns**, as
+long as the whole path is written in one expression. The mapper collapses the
+chain into a single keyed path against the root document (an encrypted
+intermediate value cannot be traversed by the database, so `pii -> 'vitals' ->
+'blood_type'` is resolved as the one path `$.vitals.blood_type`, not as two
+hops).
 
-Examples of what DOES NOT WORK:
+All of these work, and are equivalent:
 
-- `pii -> 'vitals' -> 'blood_type'` ❌ (chained -> operators)
+- `pii -> 'vitals' -> 'blood_type'` ✅
+- `(pii -> 'vitals') -> 'blood_type'` ✅ (parentheses are transparent)
+- `pii -> 'vitals' ->> 'blood_type'` ✅ (spellings mix freely)
+- `jsonb_path_query_first(pii, '$.vitals') -> 'blood_type'` ✅
+- `jsonb_path_query_first(pii, '$.vitals.blood_type')` ✅ (a single path is
+  always fine, and often the clearest)
 
-This is a fundamental limitation in the searchable encryption. This limitation will be lifted in a future release.
+Chains work in every position: projections, `WHERE` equality (`= <>` — fused
+with the compared value into one containment needle), `WHERE` comparisons
+(`< <= > >=`), and `ORDER BY`.
 
-**WORKAROUND: Use `jsonb_path_query_first` or `jsonb_path_query` instead for deep nested access:**
-- `jsonb_path_query_first(pii, '$.vitals.blood_type')` ✅
-- `jsonb_path_query_first(pii, '$.medical_history.allergies')` ✅
-- `jsonb_path_query(pii, '$.medical_history.allergies')` ✅
+Placeholder steps work (`pii -> 'vitals' -> $1`), with one exception: a
+placeholder step **followed by a literal step** (`pii -> $1 -> 'blood_type'`)
+is refused, because the literal selector is encrypted before `$1` is bound.
+Give the whole path via placeholders or put the literal steps first.
 
-**REMEMBER: Always use JSONPath functions for accessing nested JSON data in encrypted columns, never chain `->` operators!**
+**Real limitations that remain:**
+
+- **A path cannot be split across a subquery, CTE, or view.**
+  `SELECT a -> 'x' FROM (SELECT pii -> 'vitals' AS a FROM patients) s` ❌ —
+  the extracted value is a single encrypted entry with nothing left to
+  traverse, and the root column is out of scope on the far side of the
+  boundary. This is rejected with a type error, not silently wrong. Write the
+  whole path in one expression instead.
+- **An extracted field is not a document.** It supports equality, comparison,
+  and `ORDER BY` (it carries equality and ordering terms), but it cannot be
+  traversed further or used where a whole document is required.
+- **Nested `jsonb_path_query*` calls are not collapsed.**
+  `jsonb_path_query_first(jsonb_path_query_first(pii, '$.a'), '$.b')` ❌ —
+  write the single path `'$.a.b'` instead. (Chaining `->` on top of a
+  `jsonb_path_query*` root is fine, per the examples above.)
 
 
 ## Test generation
