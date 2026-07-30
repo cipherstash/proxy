@@ -300,6 +300,15 @@ impl EncryptionService for ZeroKms {
                             EqlOperation::Query(&index.index_type, QueryOp::SteVecValueSelector)
                         })
                         .unwrap_or(EqlOperation::Store),
+
+                    // The result of an extraction, not an operand: it is read
+                    // back from the database and decrypted, never encrypted on
+                    // the way in. Refuse rather than fall through to `Store`,
+                    // which would encrypt it in the wrong shape and silently
+                    // return the wrong rows.
+                    EqlTermVariant::JsonExtracted => {
+                        return Err(EncryptError::JsonExtractedIsNotAnOperand.into())
+                    }
                 };
 
                 let prepared = PreparedPlaintext::new(

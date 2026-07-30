@@ -214,6 +214,61 @@ impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
                         false
                     };
 
+                // Encrypted JSON field ACCESS (`->`, `->>`).
+                //
+                // This is the fusion-aware half of `EqlTerm::JsonExtracted`. The
+                // operator declaration is compositional — it can only see the
+                // type of its immediate left operand — but a chain is not
+                // compositional: `j -> 'a' -> 'b'` is ONE path into ONE
+                // document, and its intermediate `j -> 'a'` has no independent
+                // existence for the database. Typing it step by step would make
+                // the first link `JsonExtracted` and the second link fail, which
+                // would reject every chain including the ones that fuse
+                // correctly.
+                //
+                // So the rule consults the chain BELOW this node rather than the
+                // type of its operand. Within one expression the walker can
+                // always reach the root, so being handed an extracted
+                // intermediate is fine — what matters is whether the root is a
+                // document. Across a subquery boundary the walker cannot reach
+                // it, the root is itself `JsonExtracted`, and the access is
+                // refused.
+                let handled = handled
+                    || if matches!(op, BinaryOperator::Arrow | BinaryOperator::LongArrow) {
+                        match json_accessor_chain(expr_val) {
+                            Some((root, _)) => match self.eql_json_document(root) {
+                                // A chain rooted at a document: type the whole
+                                // access as one extraction from that document,
+                                // and the selector as its accessor so it is
+                                // encrypted.
+                                Some(json) => {
+                                    self.unify_node_with_type(
+                                        &**right,
+                                        Type::Value(Value::Eql(EqlTerm::JsonAccessor(
+                                            json.clone(),
+                                        ))),
+                                    )?;
+                                    self.unify_node_with_type(
+                                        expr_val,
+                                        Type::Value(Value::Eql(EqlTerm::JsonExtracted(json))),
+                                    )?;
+                                    true
+                                }
+                                // Rooted at an entry someone already extracted:
+                                // there is no `sv` left to traverse.
+                                None if self.is_eql_json_extracted(root) => {
+                                    return Err(TypeError::UnqueryableJsonExtraction);
+                                }
+                                // Native JSON: the declaration is correct for it,
+                                // and plaintext `jsonb` chains legitimately.
+                                None => false,
+                            },
+                            None => false,
+                        }
+                    } else {
+                        false
+                    };
+
                 if !handled {
                     // `@@` is symmetric in PostgreSQL, so the encrypted column
                     // may be written on either side. The operator rule is
@@ -645,6 +700,37 @@ impl<'ast> TypeInferencer<'ast> {
         }
     }
 
+    /// An encrypted JSON **document** — something with an `sv` array that a path
+    /// can be traversed into.
+    ///
+    /// Unlike [`Self::eql_json_value`] this inspects the term *variant*, because
+    /// the distinction it draws is the whole point of
+    /// [`EqlTerm::JsonExtracted`]: an already-extracted entry carries the same
+    /// `EqlValue` as the document it came from, so ignoring the variant would
+    /// accept it and re-derive the bug. An entry has no `sv`, so traversing it
+    /// selects nothing.
+    fn eql_json_document(&self, expr: &'ast Expr) -> Option<EqlValue> {
+        match &*self.get_node_type(expr) {
+            Type::Value(Value::Eql(eql_term @ (EqlTerm::Full(_) | EqlTerm::Partial(_, _)))) => {
+                let eql_value = eql_term.eql_value();
+                (eql_value.domain_identity().token == TokenType::Json).then(|| eql_value.clone())
+            }
+            _ => None,
+        }
+    }
+
+    /// Whether `expr` is an already-extracted encrypted JSON entry.
+    ///
+    /// Used to turn a second traversal into a precise error rather than letting
+    /// it fall through to the operator declaration, where the failure would be
+    /// an opaque unsatisfied-`JsonLike` bound.
+    fn is_eql_json_extracted(&self, expr: &'ast Expr) -> bool {
+        matches!(
+            &*self.get_node_type(expr),
+            Type::Value(Value::Eql(EqlTerm::JsonExtracted(_)))
+        )
+    }
+
     /// Deconstructs an encrypted-JSON **field access** into the accessed value
     /// and the expressions supplying its selectors, outermost last:
     ///
@@ -662,9 +748,13 @@ impl<'ast> TypeInferencer<'ast> {
     /// the payload is encrypted, so native `->` applied to it selects nothing.
     /// The chain is one path into one document, and it is fused as one.
     fn eql_json_field_access(&self, expr: &'ast Expr) -> Option<(EqlValue, Vec<&'ast Expr>)> {
-        let (_, selectors) = json_accessor_chain(expr)?;
+        let (root, selectors) = json_accessor_chain(expr)?;
 
-        self.eql_json_value(expr).map(|json| (json, selectors))
+        // Resolved from the ROOT, which must be a whole document. Reading the
+        // node's own type instead would accept a chain rooted at an
+        // already-extracted entry (`a -> 'foo'` where `a` came from a subquery)
+        // and fuse a needle keyed on `$.foo` when the real path is `$.bar.foo`.
+        self.eql_json_document(root).map(|json| (json, selectors))
     }
 
     /// Records each of `exprs` that is a literal or placeholder as a query

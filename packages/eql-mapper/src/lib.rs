@@ -3427,6 +3427,71 @@ mod test {
         );
     }
 
+    /// A JSON operation on the RESULT of a JSON operation must be refused when
+    /// the two are not in the same expression.
+    ///
+    /// `->` yields `EqlTerm::JsonExtracted` — one SteVec entry, which carries no
+    /// `sv` array and so cannot be traversed. A chain written in one expression
+    /// is fused into a single path against the document instead, but once the
+    /// halves are separated by a subquery the selectors cannot be composed: the
+    /// walker sees only `a -> 'foo'` and has no way to learn that `a` is already
+    /// `$.bar`. It used to emit a second entry-scoped accessor over an entry and
+    /// return NULL, silently, or fuse a needle keyed on `$.foo` when the real
+    /// path was `$.bar.foo` — wrong rows, no error (CIP-3682).
+    ///
+    /// A type crosses a subquery boundary where a syntactic pattern does not,
+    /// which is why this is carried in the type system rather than by the walker.
+    #[test]
+    fn json_operation_on_an_extracted_value_is_refused() {
+        let schema = chained_json_schema();
+
+        for sql in [
+            // The reported shape: the chain split across a subquery.
+            "SELECT a -> 'foo' FROM (SELECT j -> 'bar' AS a FROM t) s",
+            // The same split, but where the outer half is a fusable predicate.
+            // The fusion must NOT claim this: its root is an entry, not a
+            // document, so the path it would compose is wrong.
+            "SELECT id FROM (SELECT j -> 'bar' AS a, id FROM t) s WHERE a -> 'foo' = '\"x\"'",
+            // The `->>` spelling is the same operation.
+            "SELECT a ->> 'foo' FROM (SELECT j -> 'bar' AS a FROM t) s",
+        ] {
+            let statement = parse(sql);
+            let err = type_check(schema.clone(), &statement)
+                .expect_err(&format!("`{sql}` must not type check"));
+
+            assert!(
+                err.to_string()
+                    .contains("result of an encrypted JSON operation"),
+                "expected an unqueryable-extraction error for `{sql}`, got: {err}"
+            );
+        }
+    }
+
+    /// Extracting one field, and projecting an extracted field, both still work.
+    ///
+    /// The point of `JsonExtracted` is to forbid *traversing* an extracted entry,
+    /// not to make extraction useless: a single access is the common case, and
+    /// the result is projectable and decryptable exactly as before.
+    #[test]
+    fn extracting_and_projecting_one_json_field_still_works() {
+        let schema = chained_json_schema();
+
+        assert_eq!(
+            transform_with_dummy_literals(schema.clone(), "SELECT j -> 'foo' FROM t"),
+            "SELECT eql_v3.\"->\"(j, '<CT>') FROM t"
+        );
+
+        // An extracted entry crossing a subquery boundary is fine as long as
+        // nothing traverses it on the far side.
+        assert_eq!(
+            transform_with_dummy_literals(
+                schema,
+                "SELECT a FROM (SELECT j -> 'bar' AS a FROM t) s"
+            ),
+            "SELECT a FROM (SELECT eql_v3.\"->\"(j, '<CT>') AS a FROM t) AS s"
+        );
+    }
+
     /// Parentheses must not defeat the chain walker.
     ///
     /// `(j -> 'foo') -> 'bar'` is `j -> 'foo' -> 'bar'` with redundant brackets,

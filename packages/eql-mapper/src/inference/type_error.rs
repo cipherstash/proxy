@@ -18,6 +18,22 @@ pub enum TypeError {
     #[error("Type `{}` does not satisfy bounds `{}`", _0, _1)]
     UnsatisfiedBounds(Arc<Type>, EqlTraits),
 
+    /// A second JSON traversal of a value that is already the result of one.
+    ///
+    /// An extracted entry is not a document — it has no `sv` array — so a
+    /// further accessor selects nothing and the query silently returns NULL.
+    /// A chain written in one expression is fused into a single path instead,
+    /// so this is reached only when the chain is broken up such that the
+    /// selectors cannot be composed: across a subquery boundary, a CTE, or a
+    /// view.
+    #[error(
+        "cannot apply a JSON operator to the result of an encrypted JSON \
+         operation. Write the whole path in one expression (`col -> 'a' -> 'b'`) \
+         so it can be resolved against the document, rather than extracting a \
+         field and traversing the result"
+    )]
+    UnqueryableJsonExtraction,
+
     #[error("unified type contains unresolved type variable: {}", _0)]
     Incomplete(String),
 

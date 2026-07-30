@@ -328,6 +328,9 @@ impl EqlTerm {
             EqlTerm::Tokenized(_) => EqlTraits::none(),
             EqlTerm::JsonOrd(_) => EqlTraits::none(),
             EqlTerm::JsonValueSelector(_) => EqlTraits::none(),
+            // Unqueryable by construction: no operator or function can require
+            // any capability of an already-extracted JSON entry.
+            EqlTerm::JsonExtracted(_) => EqlTraits::none(),
         }
     }
 }
