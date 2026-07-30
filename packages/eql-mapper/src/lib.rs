@@ -3432,12 +3432,17 @@ mod test {
     ///
     /// `->` yields `EqlTerm::JsonExtracted` — one SteVec entry, which carries no
     /// `sv` array and so cannot be traversed. A chain written in one expression
-    /// is fused into a single path against the document instead, but once the
+    /// is collapsed into a single path against the document instead, but once the
     /// halves are separated by a subquery the selectors cannot be composed: the
     /// walker sees only `a -> 'foo'` and has no way to learn that `a` is already
     /// `$.bar`. It used to emit a second entry-scoped accessor over an entry and
     /// return NULL, silently, or fuse a needle keyed on `$.foo` when the real
     /// path was `$.bar.foo` — wrong rows, no error (CIP-3682).
+    ///
+    /// This one is impossible rather than unimplemented, and stays refused even
+    /// though a chain in one expression now works everywhere: `JsonExtracted` does
+    /// not carry the path that produced it, and the root column is not in scope in
+    /// the outer query, so there is nothing to root a composed path at.
     ///
     /// A type crosses a subquery boundary where a syntactic pattern does not,
     /// which is why this is carried in the type system rather than by the walker.
@@ -3467,43 +3472,217 @@ mod test {
         }
     }
 
-    /// A multi-step chain is only legal where something will fuse it into a
-    /// single path. Nothing else has a correct rewrite.
+    /// A multi-step chain collapses to a SINGLE accessor on the root document,
+    /// in every context — not only under an equality.
     ///
-    /// Only exact equality collapses a chain, into one value-selector containment
-    /// against the root document. Everywhere else the chain would survive into
-    /// the emitted SQL as nested entry-scoped accessors applied to an entry,
-    /// which selects nothing and yields NULL — the silent-wrong-answer failure
-    /// this whole family of types exists to prevent.
+    /// A chain cannot be two hops: `eql_v3."->"` searches the document's `sv`
+    /// array and returns one entry, which has no `sv` of its own, so an accessor
+    /// over an accessor finds nothing and returns NULL. The emission that IS
+    /// correct is one accessor carrying the composed path, and it is correct
+    /// wherever a single access is — so a projection, an ordering comparison and a
+    /// mixed spelling all produce exactly the shape the equivalent single access
+    /// would.
     ///
-    /// Typing is post-order, so when the outermost `->` of a chain is typed its
-    /// parent is not yet known. `infer_enter` on the comparison marks the chain's
-    /// spine on the way down, which is what lets the `->` rule distinguish
-    /// "about to be fused" from "nothing will collapse this".
+    /// The plaintext selectors of the discarded inner accessors must go with them:
+    /// leaving one behind ships a field name to PostgreSQL in the clear
+    /// (CIP-3682) and applies native jsonb `->` to an encrypted payload.
     #[test]
-    fn a_multi_step_chain_is_refused_where_nothing_fuses_it() {
+    fn a_multi_step_chain_collapses_to_one_accessor_in_every_context() {
         let schema = chained_json_schema();
 
-        for sql in [
-            // A projection has no comparison to fuse into.
-            "SELECT j -> 'foo' -> 'bar' FROM t",
-            "SELECT (j -> 'foo') -> 'bar' FROM t",
-            "SELECT j -> 'foo' ->> 'bar' FROM t",
-            // Ordering types the scalar operand but leaves the chain standing,
-            // so a multi-step ordering comparison has no correct rewrite either.
-            "SELECT id FROM t WHERE j -> 'foo' -> 'bar' < '\"x\"'",
-            "SELECT id FROM t WHERE j -> 'foo' -> 'bar' >= '\"x\"'",
+        // Each case pairs a chain with the emission expected of it. The selector
+        // is `'<CT>'` in every one: the whole path is keyed into that single
+        // encrypted operand, so the SQL cannot show how many steps there were.
+        for (sql, expected) in [
+            // A projection, which has no comparison to fuse into.
+            (
+                "SELECT j -> 'foo' -> 'bar' FROM t",
+                "SELECT eql_v3.\"->\"(j, '<CT>') FROM t",
+            ),
+            // Brackets are not meaning: the same query, the same emission.
+            (
+                "SELECT (j -> 'foo') -> 'bar' FROM t",
+                "SELECT eql_v3.\"->\"(j, '<CT>') FROM t",
+            ),
+            // Mixed spellings. The OUTERMOST step decides the call, exactly as it
+            // would for a single access: `->>` yields text.
+            (
+                "SELECT j -> 'foo' ->> 'bar' FROM t",
+                "SELECT eql_v3.\"->>\"(j, '<CT>') FROM t",
+            ),
+            // Depth beyond two.
+            (
+                "SELECT j -> 'a' -> 'b' -> 'c' FROM t",
+                "SELECT eql_v3.\"->\"(j, '<CT>') FROM t",
+            ),
+            // The function spelling as a step of the chain.
+            (
+                "SELECT jsonb_path_query_first(j, '$.a') -> 'b' FROM t",
+                "SELECT eql_v3.\"->\"(j, '<CT>') FROM t",
+            ),
+            // Ordering. The accessor survives here — the comparison wraps it in
+            // `ord_term` rather than absorbing it — so it must be the collapsed
+            // single-accessor form.
+            (
+                "SELECT id FROM t WHERE j -> 'foo' -> 'bar' < '\"x\"'",
+                "SELECT id FROM t WHERE eql_v3.ord_term(eql_v3.\"->\"(j, '<CT>')) < \
+                 eql_v3.ord_term('<CT>'::JSONB::eql_v3.query_integer_ord)",
+            ),
+            (
+                "SELECT id FROM t WHERE j -> 'foo' -> 'bar' >= '\"x\"'",
+                "SELECT id FROM t WHERE eql_v3.ord_term(eql_v3.\"->\"(j, '<CT>')) >= \
+                 eql_v3.ord_term('<CT>'::JSONB::eql_v3.query_integer_ord)",
+            ),
         ] {
-            let statement = parse(sql);
-            let err = type_check(schema.clone(), &statement)
-                .expect_err(&format!("`{sql}` must not type check"));
+            let rewritten = transform_with_dummy_literals(schema.clone(), sql);
 
+            assert_eq!(rewritten, expected, "unexpected rewrite for `{sql}`");
+
+            for selector in ["'foo'", "'bar'", "'a'", "'b'", "'$.a'"] {
+                assert!(
+                    !rewritten.contains(selector),
+                    "selector {selector} must not reach the database in plaintext for `{sql}`: {rewritten}"
+                );
+            }
             assert!(
-                err.to_string()
-                    .contains("result of an encrypted JSON operation"),
-                "expected an unqueryable-extraction error for `{sql}`, got: {err}"
+                !rewritten.contains("j -> "),
+                "native jsonb -> must not be applied to the encrypted column for `{sql}`: {rewritten}"
             );
         }
+    }
+
+    /// A chain collapsed outside an equality records its composed path against
+    /// the SURVIVING selector operand, which is the outermost step.
+    ///
+    /// That operand's own text is one segment (`'c'`); the selector it must key is
+    /// the whole path (`$.a.<$1>.c`). Nothing the proxy is handed at encryption
+    /// time could recover the difference, so the record is the only way the inner
+    /// steps reach the needle — and every step is an input the plan must consume,
+    /// or the client would bind a param that goes nowhere.
+    #[test]
+    fn a_collapsed_chain_records_its_composed_path_against_the_surviving_selector() {
+        // The outermost step is the param, so the whole path resolves at Bind.
+        let statement = parse("SELECT j -> 'a' -> $1 FROM t");
+
+        let typed = type_check(chained_json_schema(), &statement).unwrap();
+        let transformed = typed.transform(dummy_encrypted_literals(&typed)).unwrap();
+
+        assert_eq!(
+            transformed.to_string(),
+            "SELECT eql_v3.\"->\"(j, $1) FROM t"
+        );
+
+        let source = OutputParamSource::JsonAccessorPath {
+            path: JsonSelectorSource::new(vec![
+                JsonSelectorSegment::Literal("a".to_owned()),
+                JsonSelectorSegment::Param(Param(1)),
+            ]),
+            selector: Param(1),
+        };
+
+        assert_eq!(transformed.params.outputs()[0].source, source);
+        assert_eq!(source.inputs(), vec![Param(1)]);
+
+        // The selector is a query operand: it reaches PostgreSQL as a search term
+        // and never as a decryptable ciphertext.
+        assert!(transformed.params.outputs()[0].query_operand);
+    }
+
+    /// An EQUALITY over a chain must keep fusing, not degrade to an accessor plus
+    /// a comparison.
+    ///
+    /// The fused needle keys the path and the value together into one MAC, and its
+    /// presence in the stored `sv` IS the match. An accessor followed by `eq_term`
+    /// would be two operations where one suffices, and `eql_v3.eq_term` has no
+    /// overload for a JSON query operand anyway. The chain-collapsing rule fires
+    /// on the accessor below the comparison, and the equality rule then discards
+    /// its result and re-roots the containment at the bare column.
+    #[test]
+    fn equality_over_a_chain_still_fuses_rather_than_collapsing_to_an_accessor() {
+        let schema = chained_json_schema();
+
+        for (sql, expected) in [
+            (
+                "SELECT id FROM t WHERE j -> 'a' -> 'b' = '\"v\"'",
+                "SELECT id FROM t WHERE \
+                 eql_v3.jsonb_contains(j, '<CT>'::JSONB::eql_v3.query_json)",
+            ),
+            (
+                "SELECT id FROM t WHERE j -> 'a' -> 'b' <> '\"v\"'",
+                "SELECT id FROM t WHERE \
+                 NOT (eql_v3.jsonb_contains(j, '<CT>'::JSONB::eql_v3.query_json))",
+            ),
+        ] {
+            let rewritten = transform_with_dummy_literals(schema.clone(), sql);
+
+            assert_eq!(rewritten, expected, "unexpected rewrite for `{sql}`");
+            assert!(
+                !rewritten.contains("eql_v3.\"->\""),
+                "equality must fuse, not emit an accessor, for `{sql}`: {rewritten}"
+            );
+        }
+    }
+
+    /// A fused equality records its path in the value-selector channel ONLY.
+    ///
+    /// Recording it in both would be worse than recording it in neither: the
+    /// accessor channel is resolved at Parse time for a literal operand, and
+    /// `j -> $1 -> 'b' = $2` has a placeholder step in front of a literal
+    /// selector, which cannot resolve then. Writing the path to both channels
+    /// would refuse a query that works.
+    #[test]
+    fn a_fused_chain_records_no_accessor_path() {
+        let statement = parse("SELECT id FROM t WHERE j -> 'a' -> 'b' = $1");
+        let typed = type_check(chained_json_schema(), &statement).unwrap();
+
+        assert!(
+            typed.json_accessor_paths.is_empty(),
+            "a chain the equality absorbs has no surviving selector to key"
+        );
+        assert!(!typed.json_value_selectors.is_empty());
+    }
+
+    /// Every step of a collapsed chain must be resolvable to path text.
+    ///
+    /// The chain is collapsed either way, so a step the proxy cannot resolve — a
+    /// column reference, a function call — would simply vanish from the statement
+    /// and the query would read a different field. Unlike the fused-equality case
+    /// there is no capability check to fall through to, so it is refused outright.
+    #[test]
+    fn a_collapsed_chain_with_an_unresolvable_step_is_refused() {
+        let statement = parse("SELECT j -> 'a' -> id FROM t");
+
+        let err = type_check(chained_json_schema(), &statement)
+            .expect_err("a path step that is not a literal or a placeholder must be refused");
+
+        assert!(
+            err.to_string()
+                .contains("must be a literal or a placeholder"),
+            "expected an uncomposable-path error, got: {err}"
+        );
+    }
+
+    /// One placeholder cannot be the selector of two chains with different paths.
+    ///
+    /// The path is recorded against the param it arrives in, because at Bind time
+    /// the param number is all the proxy has. Two different paths for one param
+    /// cannot both be honoured, and silently keeping either would answer one of
+    /// the two projections from the wrong field.
+    #[test]
+    fn one_placeholder_cannot_key_two_different_paths() {
+        let statement = parse("SELECT j -> 'a' -> $1, j -> 'b' -> $1 FROM t");
+
+        let err = type_check(chained_json_schema(), &statement)
+            .expect_err("one param cannot carry two different paths");
+
+        assert!(
+            err.to_string().contains("two different"),
+            "expected an ambiguous-path error, got: {err}"
+        );
+
+        // The same path twice is not a conflict — it is one path.
+        let statement = parse("SELECT j -> 'a' -> $1, j -> 'a' -> $1 FROM t");
+        type_check(chained_json_schema(), &statement).unwrap();
     }
 
     /// A SINGLE access is legal anywhere, fused or not.

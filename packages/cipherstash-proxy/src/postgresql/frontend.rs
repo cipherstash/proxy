@@ -19,7 +19,7 @@ use crate::postgresql::context::statement::{
 use crate::postgresql::context::statement_metadata::{ProtocolType, StatementType};
 use crate::postgresql::context::Portal;
 use crate::postgresql::data::{
-    json_value_selector_plaintext, literal_from_sql, literal_json_value,
+    compose_json_selector_path, json_value_selector_plaintext, literal_from_sql, literal_json_value,
 };
 use crate::postgresql::messages::close::Close;
 use crate::postgresql::messages::error_response::ErrorResponseCode;
@@ -1372,10 +1372,23 @@ fn literals_to_plaintext(
         .zip(literal_columns)
         .map(|((eql_term, val), col)| match col {
             Some(col) => {
-                let plaintext = if eql_term.variant() == EqlTermVariant::JsonValueSelector {
-                    json_value_selector_literal_plaintext(typed_statement, val)
-                } else {
-                    literal_from_sql(val, col.eql_term(), col.cast_type())
+                let plaintext = match eql_term.variant() {
+                    EqlTermVariant::JsonValueSelector => {
+                        json_value_selector_literal_plaintext(typed_statement, val)
+                    }
+                    // A selector that carries a collapsed chain keys the composed
+                    // path, not the one segment it spells. Only a selector the
+                    // mapper recorded a chain for: a single access has no record
+                    // and takes the ordinary single-segment route below.
+                    EqlTermVariant::JsonAccessor
+                        if typed_statement
+                            .json_accessor_paths
+                            .for_literal(val)
+                            .is_some() =>
+                    {
+                        json_accessor_path_literal_plaintext(typed_statement, val)
+                    }
+                    _ => literal_from_sql(val, col.eql_term(), col.cast_type()),
                 };
 
                 plaintext.map_err(|err| {
@@ -1435,6 +1448,49 @@ fn json_value_selector_literal_plaintext(
     };
 
     json_value_selector_plaintext(&path, value).map(Some)
+}
+
+/// Composes the eJSONPath for the selector of a collapsed accessor chain whose
+/// steps are all literals: `j -> 'a' -> 'b'` keys `$.a.b`.
+///
+/// Only an all-literal path can be resolved here — the whole statement is
+/// encrypted at Parse time, before any param is bound. `j -> $1 -> 'b'` (param
+/// step, literal outermost selector) is therefore not supported: the surviving
+/// operand is the literal, which must be encrypted now, while the step in front
+/// of it is not known until Bind. The mirror image, `j -> 'a' -> $1`, works — the
+/// surviving operand is the param, so the whole path resolves at Bind.
+///
+/// Refusing is the only safe answer. Composing what is known would key `$.b` and
+/// read a different field, silently.
+fn json_accessor_path_literal_plaintext(
+    typed_statement: &TypeCheckedStatement<'_>,
+    literal: &ast::Value,
+) -> Result<Option<Plaintext>, MappingError> {
+    let path: Option<Vec<&str>> = typed_statement
+        .json_accessor_paths
+        .for_literal(literal)
+        .and_then(|source| {
+            source
+                .segments()
+                .iter()
+                .map(|segment| match segment {
+                    JsonSelectorSegment::Literal(selector) => Some(selector.as_str()),
+                    JsonSelectorSegment::Param(_) => None,
+                })
+                .collect::<Option<Vec<_>>>()
+        });
+
+    let Some(path) = path else {
+        debug!(
+            target: MAPPER,
+            msg = "An encrypted JSON path with a placeholder step must end in a placeholder, \
+                   so that the whole path can be resolved when the params are bound",
+            value = ?literal,
+        );
+        return Err(MappingError::CouldNotParseParameter);
+    };
+
+    Ok(Some(Plaintext::new(compose_json_selector_path(&path))))
 }
 
 fn to_json_literal_value<T>(literal: &T) -> Result<Value, Error>

@@ -9,11 +9,12 @@ use sqltk::{AsNodeKey, NodeKey, Transformable};
 use crate::unifier::{EqlTerm, EqlTermVariant};
 use crate::QueryOperands;
 use crate::{
-    CastFullPayloadOperands, DryRunnable, EqlMapperError, FailOnPlaceholderChange,
-    JsonValueSelectors, OutputParam, OutputParamSource, Param, ParamPlan, PreserveEffectiveAliases,
-    RenumberParams, RewriteContainmentOps, RewriteEqlAggregateDistinct, RewriteEqlComparisonOps,
-    RewriteEqlDistinct, RewriteEqlDistinctOrderBy, RewriteEqlGroupBy, RewriteEqlMatchOps,
-    RewriteEqlOrderBy, RewriteEqlOrdinalOrderBy, RewriteEqlPartitionBy, RewriteJsonValueSelectorEq,
+    CastFullPayloadOperands, CollapseJsonAccessorChain, DryRunnable, EqlMapperError,
+    FailOnPlaceholderChange, JsonAccessorPaths, JsonValueSelectors, OutputParam, OutputParamSource,
+    Param, ParamPlan, PreserveEffectiveAliases, RenumberParams, RewriteContainmentOps,
+    RewriteEqlAggregateDistinct, RewriteEqlComparisonOps, RewriteEqlDistinct,
+    RewriteEqlDistinctOrderBy, RewriteEqlGroupBy, RewriteEqlMatchOps, RewriteEqlOrderBy,
+    RewriteEqlOrdinalOrderBy, RewriteEqlPartitionBy, RewriteJsonValueSelectorEq,
     RewriteStandardSqlFnsOnEqlTypes, SubstituteEncryptedLiterals, TransformationRule,
 };
 
@@ -71,6 +72,14 @@ pub struct TypeCheckedStatement<'ast> {
     /// the proxy binds against.
     pub json_value_selectors: JsonValueSelectors<'ast>,
 
+    /// The composed paths of the multi-step JSON accessor chains that survive as a
+    /// single accessor: for each selector operand typed [`EqlTerm::JsonAccessor`]
+    /// that carries a whole chain, every step of the path it must key.
+    ///
+    /// A selector's own text is one segment of that path, so the proxy cannot
+    /// derive the rest — see [`JsonAccessorPaths`].
+    pub json_accessor_paths: JsonAccessorPaths<'ast>,
+
     /// The operands that appear in a query position rather than a storing one.
     ///
     /// A query operand carries only search terms; a stored value carries the
@@ -98,12 +107,17 @@ pub struct TypeCheckedStatement<'ast> {
 }
 
 impl<'ast> TypeCheckedStatement<'ast> {
+    // One call site, and every argument a distinct type — including the two
+    // selector channels, which are distinguished by their role marker precisely so
+    // that passing one where the other belongs does not compile.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         statement: &'ast Statement,
         projection: Projection,
         params: Vec<(Param, Value)>,
         literals: Vec<(EqlTerm, &'ast ast::Value)>,
         json_value_selectors: JsonValueSelectors<'ast>,
+        json_accessor_paths: JsonAccessorPaths<'ast>,
         query_operands: QueryOperands<'ast>,
         node_types: Arc<HashMap<NodeKey<'ast>, Type>>,
     ) -> Self {
@@ -113,6 +127,7 @@ impl<'ast> TypeCheckedStatement<'ast> {
             params,
             literals,
             json_value_selectors,
+            json_accessor_paths,
             query_operands,
             node_types,
         }
@@ -196,12 +211,23 @@ impl<'ast> TypeCheckedStatement<'ast> {
                         ))
                     })?;
 
-                let source = match self.json_value_selectors.for_param(input) {
-                    Some(path) => OutputParamSource::JsonValueSelector {
+                // The two selector channels are mutually exclusive by
+                // construction — a chain is either fused away by an equality or
+                // collapsed to a surviving accessor, never both — so the order of
+                // these arms is not load-bearing.
+                let source = match (
+                    self.json_value_selectors.for_param(input),
+                    self.json_accessor_paths.for_param(input),
+                ) {
+                    (Some(path), _) => OutputParamSource::JsonValueSelector {
                         path: path.clone(),
                         value: input,
                     },
-                    None => OutputParamSource::Input(input),
+                    (None, Some(path)) => OutputParamSource::JsonAccessorPath {
+                        path: path.clone(),
+                        selector: input,
+                    },
+                    (None, None) => OutputParamSource::Input(input),
                 };
 
                 let output = Param((idx + 1) as u16);
@@ -294,6 +320,10 @@ impl<'ast> TypeCheckedStatement<'ast> {
         DryRunnable::new((
             SubstituteEncryptedLiterals::new(encrypted_literals),
             RewriteStandardSqlFnsOnEqlTypes::new(Arc::clone(&self.node_types)),
+            // Before `RewriteContainmentOps`: a collapsed chain is emitted as the
+            // finished `eql_v3."->"` call, which makes that rule decline rather
+            // than functionalise a node this one has already replaced.
+            CollapseJsonAccessorChain::new(Arc::clone(&self.node_types)),
             RewriteContainmentOps::new(Arc::clone(&self.node_types)),
             RewriteJsonValueSelectorEq::new(Arc::clone(&self.node_types)),
             RewriteEqlComparisonOps::new(Arc::clone(&self.node_types)),

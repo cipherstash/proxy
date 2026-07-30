@@ -9,7 +9,10 @@ use rust_decimal::{prelude::FromPrimitive, Decimal};
 use tracing::{debug, warn};
 
 pub use from_sql::literal_from_sql;
-pub use from_sql::{bind_param_json_value, json_value_selector_plaintext, literal_json_value};
+pub use from_sql::{
+    bind_param_json_value, compose_json_selector_path, json_value_selector_plaintext,
+    literal_json_value,
+};
 pub use to_sql::to_sql;
 ///
 /// Fun fact: some clients can specify a parameter type with a parse message

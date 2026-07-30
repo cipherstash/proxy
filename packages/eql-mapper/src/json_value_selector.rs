@@ -14,6 +14,7 @@
 //! [`EqlTerm::JsonValueSelector`]: crate::EqlTerm::JsonValueSelector
 
 use std::collections::HashMap;
+use std::marker::PhantomData;
 
 use sqltk::parser::ast::{self};
 use sqltk::parser::ast::{
@@ -173,35 +174,96 @@ fn is_json_accessor_fn(name: &ast::ObjectName) -> bool {
     )
 }
 
-/// The set of fused JSON value selectors in a statement: for each operand that
-/// carries the *value* half, where its *path* half comes from.
+/// A second, *different* path recorded against the same operand.
+///
+/// The map is keyed by operand, so one param used as the outermost selector of
+/// two chains with different prefixes (`SELECT j -> 'a' -> $1, j -> 'b' -> $1`)
+/// would silently overwrite one path with the other and answer one of the two
+/// projections from the wrong field. There is no key that could tell them apart:
+/// at Bind time the proxy has only the param number.
+#[derive(Debug)]
+pub struct ConflictingSelectorPath;
+
+/// Role marker: the path half of a fused equality needle, which the proxy MACs
+/// together with a value (`QueryOp::SteVecValueSelector`).
+#[derive(Debug, Default)]
+pub struct FusedValue;
+
+/// Role marker: the composed path of a collapsed accessor chain, which the proxy
+/// MACs on its own (`QueryOp::SteVecSelector`).
+#[derive(Debug, Default)]
+pub struct AccessorChain;
+
+/// For each operand that carries a JSON selector, where the *path* it keys comes
+/// from.
 ///
 /// Keyed separately for the two protocols the proxy has to serve — params are
 /// addressed by number (the extended protocol has no AST at Bind time),
 /// literals by AST node.
 #[derive(Debug, Default)]
-pub struct JsonValueSelectors<'ast> {
+pub struct JsonSelectorSources<'ast, Role> {
     by_param: HashMap<Param, JsonSelectorSource>,
     by_literal: HashMap<NodeKey<'ast>, JsonSelectorSource>,
+    _role: PhantomData<Role>,
 }
 
-impl<'ast> JsonValueSelectors<'ast> {
-    pub(crate) fn record_param(&mut self, param: Param, source: JsonSelectorSource) {
-        self.by_param.insert(param, source);
+/// The fused JSON value selectors in a statement: for each operand that carries
+/// the *value* half of an exact JSON equality, where its *path* half comes from.
+///
+/// The path operand is dropped from the rewritten SQL — the proxy MACs path and
+/// value together into one needle — so this is the only record of it.
+pub type JsonValueSelectors<'ast> = JsonSelectorSources<'ast, FusedValue>;
+
+/// The composed paths of collapsed accessor chains: for each *selector* operand
+/// that survives a multi-step chain, every step of the path it must key.
+///
+/// `j -> 'a' -> 'b'` emits the single accessor `eql_v3."->"(j, <sel>)`, where
+/// `<sel>` is the outermost selector operand and the path it keys is `$.a.b` —
+/// the whole chain, not the one segment its own text spells. The inner
+/// accessors are dropped from the SQL, so without this record the proxy would
+/// key `$.b` and select nothing.
+///
+/// Distinct from [`JsonValueSelectors`] because the two produce different
+/// encryption ops: a bare selector (`QueryOp::SteVecSelector`) against a
+/// path-and-value needle (`QueryOp::SteVecValueSelector`).
+pub type JsonAccessorPaths<'ast> = JsonSelectorSources<'ast, AccessorChain>;
+
+impl<'ast, Role> JsonSelectorSources<'ast, Role> {
+    /// Records the path for an operand arriving in `param`.
+    ///
+    /// Recording the *same* path twice is fine — the same param may legitimately
+    /// select the same path in several places. A different one is not: see
+    /// [`ConflictingSelectorPath`].
+    pub(crate) fn record_param(
+        &mut self,
+        param: Param,
+        source: JsonSelectorSource,
+    ) -> Result<(), ConflictingSelectorPath> {
+        match self.by_param.get(&param) {
+            Some(existing) if *existing != source => Err(ConflictingSelectorPath),
+            _ => {
+                self.by_param.insert(param, source);
+                Ok(())
+            }
+        }
     }
 
+    /// Records the path for a literal operand.
+    ///
+    /// Unlike a param, a literal is keyed by AST *node* identity, so two
+    /// occurrences of the same text are distinct keys and cannot conflict.
     pub(crate) fn record_literal(&mut self, node: &'ast ast::Value, source: JsonSelectorSource) {
         self.by_literal.insert(NodeKey::new(node), source);
     }
 
-    /// The path source for the value-selector operand bound to `param`, or
-    /// `None` if that param is not one.
+    /// The path source for the operand bound to `param`, or `None` if that param
+    /// is not one.
     pub fn for_param(&self, param: Param) -> Option<&JsonSelectorSource> {
         self.by_param.get(&param)
     }
 
-    /// The path source for the value-selector operand at literal `node`, or
-    /// `None` if that literal is not one.
+    /// The path source for the operand at literal `node`, or `None` if that
+    /// literal is not one.
     pub fn for_literal(&self, node: &'ast ast::Value) -> Option<&JsonSelectorSource> {
         self.by_literal.get(&NodeKey::new(node))
     }

@@ -22,18 +22,51 @@ pub enum TypeError {
     ///
     /// An extracted entry is not a document — it has no `sv` array — so a
     /// further accessor selects nothing and the query silently returns NULL.
-    /// A chain written in one expression is fused into a single path instead,
-    /// so this is reached only when the chain is broken up such that the
-    /// selectors cannot be composed: across a subquery boundary, a CTE, or a
-    /// view.
+    /// A chain written in ONE expression is collapsed into a single accessor
+    /// carrying the composed path, so this is reached only when the chain is
+    /// broken up such that the path cannot be composed: across a subquery
+    /// boundary, a CTE, or a view.
+    ///
+    /// That case is not merely unimplemented. The type of an extracted value does
+    /// not carry the path that produced it, and the root document is not even in
+    /// scope on the far side of the boundary, so there is nothing to root a
+    /// composed path at.
     #[error(
         "cannot apply a JSON operator to the result of an encrypted JSON \
          operation: an extracted field is a single encrypted entry, not a \
-         document, so there is nothing left to traverse. A multi-step path is \
-         resolved against the whole document only by exact equality (`col -> 'a' \
-         -> 'b' = $1`, or `<>`); anywhere else, select the one field you need"
+         document, so there is nothing left to traverse. Write the whole path in \
+         one expression (`col -> 'a' -> 'b'`), which is resolved against the \
+         document as a single path, rather than splitting it across a subquery, \
+         CTE or view"
     )]
     UnqueryableJsonExtraction,
+
+    /// A step of an encrypted JSON accessor chain that is neither a literal nor a
+    /// placeholder.
+    ///
+    /// A chain collapses to ONE accessor keyed on the composed path, so every
+    /// step has to be resolvable to path text by the time the proxy encrypts the
+    /// selector. A step the proxy cannot resolve — a column reference, a function
+    /// call — would be dropped from the statement along with the rest of the
+    /// chain, silently changing which field the query reads.
+    #[error(
+        "every step of an encrypted JSON path must be a literal or a placeholder: \
+         the whole chain is collapsed into one keyed path, so a step computed by \
+         the database cannot contribute to it"
+    )]
+    UncomposableJsonPath,
+
+    /// One placeholder used as the selector of two chains with different paths.
+    ///
+    /// The path a selector operand keys is recorded against the param it arrives
+    /// in, because at Bind time the param number is all the proxy has. Two
+    /// different paths for one param cannot both be honoured, and picking either
+    /// answers the other occurrence from the wrong field.
+    #[error(
+        "placeholder ${0} is used as an encrypted JSON selector for two different \
+         paths; give each path its own placeholder"
+    )]
+    AmbiguousJsonSelectorPath(u16),
 
     #[error("unified type contains unresolved type variable: {}", _0)]
     Incomplete(String),

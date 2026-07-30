@@ -6,13 +6,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- **Multi-step JSON paths on encrypted columns, everywhere**: `col -> 'a' -> 'b'` now works wherever a single field access does — in the select list, in an ordering comparison (`<`, `<=`, `>`, `>=`), and in the `->`, `->>` and `jsonb_path_query_first` spellings mixed freely, to any depth, with each step written as a literal or a placeholder. Previously only exact equality accepted a multi-step path and everything else was rejected. A chain is a single path into a single document, so it is now rewritten to one field access keyed on the whole composed path (`$.a.b`) instead of the nested accessors that would search an already-extracted entry and return NULL. Exact equality continues to fold the path and the value into one needle, which remains the stronger match.
+
+  Two shapes are still rejected rather than answered. A path split across a subquery, CTE or view (`SELECT a -> 'foo' FROM (SELECT col -> 'bar' AS a FROM t) s`) cannot be composed at all — the extracted value does not carry the path that produced it, and the document it came from is not in scope — so write the whole path in one expression. A placeholder step in front of a *literal* final step (`col -> $1 -> 'b'`) cannot be composed either, because a literal is encrypted before any parameter is bound; parameterise the final step too (`col -> $1 -> $2`), or write the whole path as literals.
+
 ### Fixed
+
+- **One placeholder used as the JSON selector of two different paths**: `col -> 'a' -> $1 = $2` alongside `col -> 'b' -> $1 = $3` silently kept only one of the two paths, so one of the predicates was matched against the wrong field. The path a selector placeholder keys is recorded against the parameter it arrives in — at Bind time the parameter number is all Proxy has — so two different paths for one parameter cannot both be honoured. This is now reported as an error naming the parameter, rather than answered from whichever path was recorded last.
 
 - **`UPDATE … SET … FROM` with same-named columns**: an `UPDATE` was rejected as ambiguous when a table in the `FROM` clause had a column with the same name as the column being assigned. The assignment now always refers to the table being updated, so these statements work and the assigned value gets the target column's type — encrypted or not.
 
 - **Encrypted values as row counts are rejected**: an encrypted column used in `LIMIT`, `OFFSET`, or `FETCH` (for example `LIMIT enc_col`) is now rejected with a type error instead of being forwarded to the database.
 
 - **Statements Proxy cannot type-check fail with a clear error**: a statement Proxy admits for type checking but has no support for is now rejected immediately with an error naming the statement, instead of surfacing later as an opaque resolution error. No currently-supported statement is affected.
+
+### Security
+
+- **Chained JSON field accessors sent the intermediate field name to the database in plaintext**: `WHERE col -> 'a' -> 'b' = $1` on an encrypted JSON column emitted `eql_v3.jsonb_contains(col -> 'a', …)`, so the field name `a` appeared in the statement text PostgreSQL received (and in its logs), and native `jsonb ->` was applied to the encrypted payload — which also made the predicate match nothing. A chain is now treated as the single path it is: `$.a.b` of the whole document, folded into the one encrypted needle and matched against the bare column. Chains of any depth are supported, in the `->`, `->>` and `jsonb_path_query_first` spellings, with `=` and `<>`, and with each step written as a literal or a placeholder.
+
+- **A NULL JSON selector forwarded the compared value to the database in plaintext**: `WHERE col -> $1 = $2` with `$1` bound NULL builds no needle, so `$2` was never encrypted — and it was then sent to PostgreSQL exactly as the client bound it, putting the plaintext comparand on the wire and into the server log when the column's domain CHECK rejected it. An encrypted operand that produced no ciphertext is now bound NULL, which is also what the SQL means: a comparison against NULL is NULL, so the query returns no rows.
 
 ## [3.0.0] - 2026-08-05
 
@@ -29,12 +43,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **`SELECT DISTINCT` ordered by an encrypted column**: `SELECT DISTINCT … ORDER BY <encrypted column>` now works. Ordering an encrypted column requires its ordering term, which PostgreSQL will not accept under `DISTINCT` unless it also appears in the select list, so the query is rewritten to project the term from a subquery and order the outer query by it. The term is never returned to the client and column names are preserved. Two shapes remain unsupported and are reported as such: `SELECT DISTINCT ON (…)` and `SELECT DISTINCT *`, both when combined with `ORDER BY` on an encrypted column — list the columns explicitly for the latter.
 
 - **Equality on encrypted JSON fields**: `WHERE col -> 'field' = 'value'` now works on encrypted JSON columns, in both the simple and extended query protocols, and in the `->>` and `jsonb_path_query_first(col, path) = value` spellings. `<>` is supported as the negation. The field and the value are combined into a single encrypted value-selector needle and matched by containment, so a query never reveals the field and value separately. Matching is exact and case-sensitive; the value must be a JSON scalar (comparing a whole object or array to a field is rejected — use containment with `@>` instead).
-
-### Security
-
-- **Chained JSON field accessors sent the intermediate field name to the database in plaintext**: `WHERE col -> 'a' -> 'b' = $1` on an encrypted JSON column emitted `eql_v3.jsonb_contains(col -> 'a', …)`, so the field name `a` appeared in the statement text PostgreSQL received (and in its logs), and native `jsonb ->` was applied to the encrypted payload — which also made the predicate match nothing. A chain is now treated as the single path it is: `$.a.b` of the whole document, folded into the one encrypted needle and matched against the bare column. Chains of any depth are supported, in the `->`, `->>` and `jsonb_path_query_first` spellings, with `=` and `<>`, and with each step written as a literal or a placeholder.
-
-- **A NULL JSON selector forwarded the compared value to the database in plaintext**: `WHERE col -> $1 = $2` with `$1` bound NULL builds no needle, so `$2` was never encrypted — and it was then sent to PostgreSQL exactly as the client bound it, putting the plaintext comparand on the wire and into the server log when the column's domain CHECK rejected it. An encrypted operand that produced no ciphertext is now bound NULL, which is also what the SQL means: a comparison against NULL is NULL, so the query returns no rows.
 
 ### Fixed
 

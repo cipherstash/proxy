@@ -6,7 +6,8 @@ use crate::postgresql::context::statement::{
     params_are_positional, JsonSelectorPath, JsonSelectorStep, OutputParam, OutputParamSource,
 };
 use crate::postgresql::data::{
-    bind_param_from_sql, bind_param_json_value, json_value_selector_plaintext,
+    bind_param_from_sql, bind_param_json_value, compose_json_selector_path,
+    json_value_selector_plaintext,
 };
 use crate::postgresql::format_code::FormatCode;
 use crate::postgresql::protocol::BytesMutReadString;
@@ -105,6 +106,9 @@ impl Bind {
                     OutputParamSource::JsonValueSelector { path, value } => {
                         self.json_value_selector_plaintext(path, *value, &bound_param_type)
                     }
+                    OutputParamSource::JsonAccessorPath { path, .. } => {
+                        self.json_accessor_path_plaintext(path)
+                    }
                 }
             })
             .collect()
@@ -127,17 +131,9 @@ impl Bind {
         value: usize,
         postgres_type: &Type,
     ) -> Result<Option<Plaintext>, Error> {
-        let mut steps = Vec::with_capacity(path.steps.len());
-
-        for step in &path.steps {
-            match step {
-                JsonSelectorStep::Literal(selector) => steps.push(selector.to_owned()),
-                JsonSelectorStep::Param(step_idx) => match self.param_values.get(*step_idx) {
-                    Some(param) if !param.is_null() => steps.push(param.to_string()),
-                    _ => return Ok(None),
-                },
-            }
-        }
+        let Some(steps) = self.resolve_selector_path(path) else {
+            return Ok(None);
+        };
 
         let Some(param) = self.param_values.get(value) else {
             return Ok(None);
@@ -157,6 +153,59 @@ impl Bind {
         let steps: Vec<&str> = steps.iter().map(String::as_str).collect();
 
         Ok(Some(json_value_selector_plaintext(&steps, value)?))
+    }
+
+    /// Composes the eJSONPath a collapsed accessor chain traverses.
+    ///
+    /// The whole plaintext of this operand IS the path: `j -> 'a' -> $1` emits one
+    /// accessor whose selector must key `$.a.<$1>`, so the step the client bound
+    /// here is only the last of them. Everything else about this operand — its
+    /// column, its encryption as a bare selector — is the same as for a
+    /// single-step accessor; only the text differs.
+    ///
+    /// A NULL step yields no path: `j -> NULL -> 'b'` is NULL in SQL, so there is
+    /// nothing to select. The caller must then bind NULL rather than forward what
+    /// the client sent, which would put a selector on the wire in plaintext.
+    fn json_accessor_path_plaintext(
+        &self,
+        path: &JsonSelectorPath,
+    ) -> Result<Option<Plaintext>, Error> {
+        let Some(steps) = self.resolve_selector_path(path) else {
+            return Ok(None);
+        };
+
+        let steps: Vec<&str> = steps.iter().map(String::as_str).collect();
+        let composed = compose_json_selector_path(&steps);
+
+        debug!(
+            target: MAPPER,
+            msg = "Composed JSON accessor path",
+            path = ?steps,
+            ?composed
+        );
+
+        Ok(Some(Plaintext::new(composed)))
+    }
+
+    /// Resolves each step of a selector path to its text, or `None` if any step is
+    /// unbound or NULL.
+    ///
+    /// A param step is read straight off the wire: it is the selector *text*, so
+    /// it needs none of the per-column decoding a value operand goes through.
+    fn resolve_selector_path(&self, path: &JsonSelectorPath) -> Option<Vec<String>> {
+        let mut steps = Vec::with_capacity(path.steps.len());
+
+        for step in &path.steps {
+            match step {
+                JsonSelectorStep::Literal(selector) => steps.push(selector.to_owned()),
+                JsonSelectorStep::Param(step_idx) => match self.param_values.get(*step_idx) {
+                    Some(param) if !param.is_null() => steps.push(param.to_string()),
+                    _ => return None,
+                },
+            }
+        }
+
+        Some(steps)
     }
 
     /// Replaces the bound params with the output params of the rewritten
