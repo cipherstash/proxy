@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Removed
+
+- **`CS_DEVELOPMENT__ENABLE_MAPPING_ERRORS` (breaking behavioural change)**: this setting defaulted to off, which meant that when Proxy could not map a statement it logged a warning and sent the statement to PostgreSQL unmapped. That is not a degraded answer, it is a wrong one: an unmapped `SELECT` returned the raw EQL payload instead of the decrypted value, an unmapped `WHERE` compared a plaintext literal against a jsonb payload and so matched nothing or the wrong rows, and an unmapped `INSERT`/`UPDATE` wrote the value to disk without encrypting it — none of which reported an error.
+
+  A statement that fails to type check **and references a table with encrypted columns** is now always an error. The setting is gone; there is no way to restore the old behaviour. If you were relying on passthrough, the statement was almost certainly not doing what you thought.
+
+  A statement that fails to type check and references **no** encrypted column is still forwarded unchanged, exactly as before. This is what keeps `pg_catalog` introspection working — `psql`'s `\d`, `\dt` and `\l`, and the type lookups client libraries issue to resolve an EQL domain OID, cannot be type checked and never could be.
+
+  The `cipherstash_proxy_statements_unmappable_total` metric is unchanged and still counts every statement that failed to type check, so it remains comparable across the upgrade.
+
 ### Changed
 
 - **EQL v3 (searchable encryption)**: Proxy now targets EQL v3. Encrypted columns are declared with self-configuring, typed `jsonb` domains (for example `eql_v3_text_search`, `eql_v3_integer_ord`, `eql_v3_json_search`) that encode both the scalar type and the column's searchable capabilities in the column type itself, replacing EQL v2's opaque `eql_v2_encrypted` composite type and its separate `eql_v2_configuration` table. The bundled `cipherstash-client` is upgraded to 0.42.0 and EQL to 3.0.4. Existing v2-encrypted data and schemas must be migrated to v3.

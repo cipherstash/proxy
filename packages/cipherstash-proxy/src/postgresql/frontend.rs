@@ -434,11 +434,11 @@ where
             let typed_statement = match self.type_check(statement) {
                 Ok(ts) => ts,
                 Err(err) => {
-                    if self.context.mapping_errors_enabled() {
+                    if self.statement_may_touch_eql_columns(statement) {
                         return Err(err);
-                    } else {
-                        return Ok(None);
-                    };
+                    }
+                    counter!(STATEMENTS_PASSTHROUGH_TOTAL).increment(1);
+                    return Ok(None);
                 }
             };
 
@@ -805,11 +805,11 @@ where
         let typed_statement = match self.type_check(&statement) {
             Ok(ts) => ts,
             Err(err) => {
-                if self.context.mapping_errors_enabled() {
+                if self.statement_may_touch_eql_columns(&statement) {
                     return Err(err);
-                } else {
-                    return Ok(None);
-                };
+                }
+                counter!(STATEMENTS_PASSTHROUGH_TOTAL).increment(1);
+                return Ok(None);
             }
         };
 
@@ -1172,7 +1172,6 @@ where
                 warn!(
                     client_id = self.context.client_id,
                     msg = "Internal Error in EQL Mapper",
-                    mapping_errors_enabled = self.context.mapping_errors_enabled(),
                     error = str,
                 );
                 counter!(STATEMENTS_UNMAPPABLE_TOTAL).increment(1);
@@ -1182,13 +1181,58 @@ where
                 warn!(
                     client_id = self.context.client_id,
                     msg = "Unmappable statement",
-                    mapping_errors_enabled = self.context.mapping_errors_enabled(),
                     error = err.to_string(),
                 );
                 counter!(STATEMENTS_UNMAPPABLE_TOTAL).increment(1);
                 Err(MappingError::StatementCouldNotBeTypeChecked(err.to_string()).into())
             }
         }
+    }
+
+    ///
+    /// Decides what to do with a statement that could not be type checked.
+    ///
+    /// Returns `true` if the statement references a table carrying at least one encrypted column,
+    /// in which case the type check failure must be fatal. Passing such a statement through is
+    /// never a graceful degradation: an unmapped read hands the client raw ciphertext, an unmapped
+    /// predicate compares a plaintext literal against a jsonb payload, and an unmapped write stores
+    /// the value unencrypted.
+    ///
+    /// Returns `false` when the statement touches no encrypted column, in which case it is
+    /// forwarded unmodified as before. This is not a loophole left open for convenience — it is
+    /// load bearing. `requires_type_check` is purely syntactic, so *every* query, insert, update,
+    /// delete, merge, prepare and explain is type checked whether or not encryption is involved,
+    /// and the mapper's SQL coverage is narrower than PostgreSQL's.
+    ///
+    /// Making the failure fatal unconditionally was measured before it was rejected, and it is not
+    /// survivable. With the old `enable_mapping_errors` flag forced on — which is exactly that
+    /// behaviour — `psql` loses every catalogue metacommand:
+    ///
+    /// ```text
+    /// \d  => ERROR: Statement could not be type checked: Table not found: pg_catalog.pg_class
+    /// \l  => ERROR: Statement could not be type checked: Table not found: pg_catalog.pg_database
+    /// \dn => ERROR: Statement could not be type checked: Table not found: pg_catalog.pg_namespace
+    /// ```
+    ///
+    /// and 253 of the 349 integration tests fail, because tokio-postgres queries
+    /// `pg_catalog.pg_type` to resolve the OID of an EQL v3 domain — so under EQL v3 an ordinary
+    /// client issues one of these on the way to almost every encrypted statement. Plaintext-only
+    /// queries using constructs the type system cannot model (`ARRAY_AGG`/`CARDINALITY`) fail here
+    /// too. Rejecting any of it would break working applications for no security benefit, since
+    /// there is no encrypted data anywhere in those statements to get wrong.
+    ///
+    fn statement_may_touch_eql_columns(&self, statement: &ast::Statement) -> bool {
+        let may_touch =
+            eql_mapper::may_touch_eql_columns(self.context.get_table_resolver(), statement);
+
+        if !may_touch {
+            debug!(target: MAPPER,
+                client_id = self.context.client_id,
+                msg = "Unmappable statement references no encrypted columns, passing through",
+            );
+        }
+
+        may_touch
     }
 
     ///

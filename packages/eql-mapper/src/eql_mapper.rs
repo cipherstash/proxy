@@ -2,13 +2,14 @@ use super::importer::{ImportError, Importer};
 use crate::{
     inference::{TypeError, TypeInferencer},
     unifier::{EqlTerm, Projection, Type, Unifier, Value},
-    DepMut, Param, ParamError, ScopeError, ScopeTracker, TableResolver, TypeCheckedStatement,
-    TypeRegistry,
+    ColumnKind, DepMut, Param, ParamError, ScopeError, ScopeTracker, TableResolver,
+    TypeCheckedStatement, TypeRegistry,
 };
 use sqltk::parser::ast::{self as ast, Statement};
 use sqltk::{Break, NodeKey, Visitable, Visitor};
 use std::{
-    cell::RefCell, collections::HashMap, marker::PhantomData, ops::ControlFlow, rc::Rc, sync::Arc,
+    cell::RefCell, collections::HashMap, convert::Infallible, marker::PhantomData,
+    ops::ControlFlow, rc::Rc, sync::Arc,
 };
 use tracing::{event, span, Level};
 
@@ -68,6 +69,80 @@ pub fn requires_type_check(statement: &Statement) -> bool {
             | Statement::Prepare { .. }
             | Statement::Explain { .. }
     )
+}
+
+/// Returns whether a [`Statement`] could possibly read or write an encrypted column.
+///
+/// This exists to answer one question, and only that question: when [`type_check`] has *failed*, is
+/// it safe to send the statement to the database unmodified?
+///
+/// A failed type check leaves no typing information behind, so the statement's every
+/// [`ast::ObjectName`] is resolved against the schema instead. That over-collects — a function name
+/// is an `ObjectName` too — but over-collecting is the harmless direction: it can only make a
+/// statement fatal that would have been safe to forward, never the reverse.
+///
+/// The answer is deliberately asymmetric:
+///
+/// - A name that resolves to a table carrying at least one EQL column => `true`. The statement is
+///   unsafe to pass through, because an unmapped read returns raw ciphertext, an unmapped predicate
+///   compares a plaintext literal against a jsonb payload, and an unmapped write stores plaintext.
+/// - A name that does not resolve => *not* evidence of encryption. The schema has never heard of
+///   it, so it has no encrypted columns to expose. `pg_catalog` introspection, which every
+///   PostgreSQL driver issues and which the mapper cannot type, lands here.
+/// - No name resolves to an encrypted table => `false`. The statement touches only native columns
+///   and passing it through is exactly as safe as it was before Proxy sat in the path.
+///
+/// Qualified names are matched on their final identifier, not handed to
+/// [`TableResolver::resolve_table`] whole. `resolve_table` only accepts a bare name — the schema
+/// model has no notion of a namespace — so it answers `TableNotFound` for `public.encrypted`, and
+/// taking that at face value would report the one shape this function exists to catch as safe. The
+/// cost is that `anything.encrypted` is treated as the encrypted `encrypted`, which is the
+/// conservative direction and matches how the rest of the mapper already reads such a name.
+pub fn may_touch_eql_columns(resolver: Arc<TableResolver>, statement: &Statement) -> bool {
+    struct EncryptedTableFinder {
+        resolver: Arc<TableResolver>,
+        found: bool,
+    }
+
+    impl EncryptedTableFinder {
+        fn is_encrypted_table(&self, name: &ast::ObjectName) -> bool {
+            let Some(ast::ObjectNamePart::Identifier(ident)) = name.0.last() else {
+                return false;
+            };
+
+            let bare = ast::ObjectName(vec![ast::ObjectNamePart::Identifier(ident.clone())]);
+
+            self.resolver.resolve_table(&bare).is_ok_and(|table| {
+                table
+                    .columns
+                    .iter()
+                    .any(|col| matches!(col.kind, ColumnKind::Eql(_, _)))
+            })
+        }
+    }
+
+    impl<'ast> Visitor<'ast> for EncryptedTableFinder {
+        type Error = Infallible;
+
+        fn enter<N: Visitable>(&mut self, node: &'ast N) -> ControlFlow<Break<Self::Error>> {
+            if let Some(name) = node.downcast_ref::<ast::ObjectName>() {
+                if self.is_encrypted_table(name) {
+                    self.found = true;
+                    return ControlFlow::Break(Break::Finished);
+                }
+            }
+            ControlFlow::Continue(())
+        }
+    }
+
+    let mut visitor = EncryptedTableFinder {
+        resolver,
+        found: false,
+    };
+
+    let _ = statement.accept(&mut visitor);
+
+    visitor.found
 }
 
 /// The error type returned by various functions in the `eql_mapper` crate.

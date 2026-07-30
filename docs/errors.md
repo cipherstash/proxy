@@ -217,30 +217,26 @@ Statement could not be type checked: '{type-check-error-message}'
 
 CipherStash Proxy checks SQL statements against the database schema to transparently encrypt and decrypt data.
 
-The behaviour of Proxy depends on the `mapping_errors_enabled` configuration.
+What Proxy does when that check fails depends on whether the statement references a table with encrypted columns.
 
-When `mapping_errors_enabled` is `false` (the default), then type check errors are logged, and the statement is passed through to the database.
+**If it does, the statement is refused.** SQL is large and complex and the mapper's coverage is narrower than PostgreSQL's, so a type check failure is not always a real defect in your statement — but sending an unmapped statement to the database is not a lesser version of the right answer, it is a wrong one:
 
-When `mapping_errors_enabled` is `true`, then type check errors are raised, and statement execution halts.
+- a `SELECT` returns the raw EQL payload (`{"c": "mBbK<n$E_kDWiD#g9BY2…", "i": {…}, "v": 3}`) instead of the decrypted value;
+- a `WHERE` compares your plaintext literal against that payload, so it matches nothing, or the wrong rows;
+- an `INSERT` or `UPDATE` writes the value to disk **without encrypting it**.
 
-Configure this setting with the environment variable `CS_DEVELOPMENT__ENABLE_MAPPING_ERRORS` or in the TOML config file under `[development] enable_mapping_errors = true`.
+Because none of those announce themselves, Proxy raises this error instead and statement execution halts.
 
-In our experience, most production systems have a relatively small number of columns that require protection.
-As SQL is large and complex, instead of blocking statements with type check errors that are false negatives, the default behaviour of Proxy is to allow the statement.
+**If it does not, the statement is passed through unchanged.** A statement that names no encrypted column has no encrypted data to get wrong, so a type check failure on it costs nothing. This is what keeps ordinary traffic working: `pg_catalog` introspection cannot be type checked, and `psql`'s `\d`, `\dt` and `\l`, as well as the type lookups client libraries issue to resolve an EQL domain OID, are all that shape. Any error you see for such a statement comes from PostgreSQL itself, not from Proxy.
 
-However, this does mean it is possible that a statement that references encrypted columns cannot be type-checked, and it will be passed through to the database.
-When a statement is passed through to the database, the database's column constraints (provided by EQL) will catch the statement, and return a PostgreSQL error.
-
-Example constraint error:
-```sql
-ERROR:  Encrypted column missing version (v) field: 34234
-CONTEXT:  PL/pgSQL function _cs_encrypted_check_v(jsonb) line 6 at RAISE
-SQL function "cs_check_encrypted_v1" statement 1
-```
+> [!NOTE]
+> This behaviour used to be governed by a `CS_DEVELOPMENT__ENABLE_MAPPING_ERRORS` setting that defaulted to off, which meant unmappable statements touching encrypted columns were silently forwarded. The setting has been removed. See the [changelog](../CHANGELOG.md).
 
 ### How to fix
 
 In most cases, this error will occur if the statement contains invalid or unsupported syntax.
+
+The error message names the specific problem. A common one is asking for an operation the column's EQL domain does not support — ordering a column whose domain carries no ordering term, for instance, or `SELECT DISTINCT` on a storage-only domain such as `eql_v3_boolean`, which carries no equality term. In that case either use a domain with the capability you need, or drop the operation.
 
 Check if you are running the latest version of CipherStash Proxy, and update to the latest version if not.
 
