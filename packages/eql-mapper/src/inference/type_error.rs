@@ -28,9 +28,10 @@ pub enum TypeError {
     /// view.
     #[error(
         "cannot apply a JSON operator to the result of an encrypted JSON \
-         operation. Write the whole path in one expression (`col -> 'a' -> 'b'`) \
-         so it can be resolved against the document, rather than extracting a \
-         field and traversing the result"
+         operation: an extracted field is a single encrypted entry, not a \
+         document, so there is nothing left to traverse. A multi-step path is \
+         resolved against the whole document only by exact equality (`col -> 'a' \
+         -> 'b' = $1`, or `<>`); anywhere else, select the one field you need"
     )]
     UnqueryableJsonExtraction,
 

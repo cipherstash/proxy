@@ -4,7 +4,7 @@ use crate::{
         unifier::{EqlTerm, EqlValue, TokenType, Type, Value},
         InferType, TypeError,
     },
-    json_value_selector::json_accessor_chain,
+    json_value_selector::{json_accessor, json_accessor_chain, unnest},
     EqlTrait, IdentCase, JsonSelectorSegment, JsonSelectorSource, Param, TypeInferencer,
 };
 use eql_mapper_macros::trace_infer;
@@ -24,6 +24,59 @@ fn comparison_capability(op: &BinaryOperator) -> Option<EqlTrait> {
 
 #[trace_infer]
 impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
+    /// Marks JSON accessor chains that a comparison will fuse, on the way DOWN.
+    ///
+    /// Typing is post-order, so by the time a chain's outermost `->` is typed its
+    /// parent is not yet known — and the parent is exactly what decides whether
+    /// the chain is legal. `j -> 'a' -> 'b' = $1` is one path into one document
+    /// and fuses into a single containment; the same chain in a projection has
+    /// nothing to collapse it and would apply an entry-scoped accessor to an
+    /// entry, silently returning NULL. Recording the intent here is what lets the
+    /// `->` rule tell them apart.
+    ///
+    /// Syntactic only: no child has a type yet. Whether the chain's root is
+    /// really an encrypted document is checked on the way back up.
+    fn infer_enter(&mut self, expr_val: &'ast Expr) -> Result<(), TypeError> {
+        if let Expr::BinaryOp { left, op, right } = expr_val {
+            // Only EQUALITY fuses a chain. It collapses the whole path into
+            // one value-selector containment against the root document, so the
+            // intermediate accessors disappear from the emitted SQL.
+            //
+            // Ordering does NOT: `RewriteEqlComparisonOps` types the scalar
+            // operand as a SteVec ordering term but leaves the accessor chain
+            // standing, so a multi-step ordering chain would emit nested
+            // accessors over an entry and compare NULL. There is no correct
+            // rewrite for it, so it must not be marked — being refused is the
+            // right outcome until ordering learns to compose a path too.
+            let fuses = matches!(op, BinaryOperator::Eq | BinaryOperator::NotEq);
+
+            if fuses {
+                for operand in [&**left, &**right] {
+                    // Mark every accessor node along the chain's spine, not just
+                    // the outermost. `j -> 'a' -> 'b' -> 'c'` is three nested
+                    // `BinaryOp`s and EVERY one of them is typed, so marking only
+                    // the top would leave `j -> 'a' -> 'b'` looking like an
+                    // unfused chain and refuse the whole query.
+                    //
+                    // Unnest at each step: `((j -> 'a') -> 'b') = $1` reaches the
+                    // `->` rule as the bare accessor, so marking the bracket
+                    // would mark a node that rule never asks about.
+                    // One step at a time: `json_accessor_chain` would jump
+                    // straight to the root and skip the intermediates that need
+                    // marking.
+                    let mut node = unnest(operand);
+
+                    while let Some((container, _)) = json_accessor(node) {
+                        self.mark_fusable_json_chain(node);
+                        node = unnest(container);
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     fn infer_exit(&mut self, expr_val: &'ast Expr) -> Result<(), TypeError> {
         match expr_val {
             // Resolve an identifier using the scope, except if it happens to to be the DEFAULT keyword
@@ -235,7 +288,38 @@ impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
                 // refused.
                 let handled = handled
                     || if matches!(op, BinaryOperator::Arrow | BinaryOperator::LongArrow) {
-                        match json_accessor_chain(expr_val) {
+                        // Only a MULTI-step chain needs special treatment. A
+                        // single access is handled correctly by the declaration
+                        // (`-> <T as JsonLike>::Output`), for native and
+                        // encrypted alike, and is legal anywhere.
+                        // A root that is already an extracted entry is the
+                        // cross-subquery case, at any chain length: `a -> 'foo'`
+                        // where `a` is `j -> 'bar'`. Report it precisely instead
+                        // of leaving the declaration to say `JsonExtracted` does
+                        // not satisfy `JsonLike`.
+                        if let Some((root, _)) = json_accessor_chain(expr_val) {
+                            if self.is_eql_json_extracted(root) {
+                                return Err(TypeError::UnqueryableJsonExtraction);
+                            }
+                        }
+
+                        match json_accessor_chain(expr_val)
+                            .filter(|(_, selectors)| selectors.len() > 1)
+                        {
+                            Some((root, _)) if !self.is_fusable_json_chain(expr_val) => {
+                                // Nothing above will collapse this chain, so
+                                // there is no rewrite that would be correct: it
+                                // would apply an entry-scoped accessor to an
+                                // entry and return NULL. Refuse with a message
+                                // that names the fix, rather than letting the
+                                // declaration report an unsatisfied `JsonLike`.
+                                if self.eql_json_document(root).is_some()
+                                    || self.is_eql_json_extracted(root)
+                                {
+                                    return Err(TypeError::UnqueryableJsonExtraction);
+                                }
+                                false
+                            }
                             Some((root, _)) => match self.eql_json_document(root) {
                                 // A chain rooted at a document: type the whole
                                 // access as one extraction from that document,

@@ -121,7 +121,7 @@ pub(crate) fn json_accessor_chain(expr: &Expr) -> Option<(&Expr, Vec<&Expr>)> {
 ///
 /// `Expr::Nested` carries no meaning of its own — it records that the author
 /// wrote brackets. Every consumer of a chain wants the expression inside them.
-fn unnest(expr: &Expr) -> &Expr {
+pub(crate) fn unnest(expr: &Expr) -> &Expr {
     let mut current = expr;
 
     while let Expr::Nested(inner) = current {
@@ -132,7 +132,7 @@ fn unnest(expr: &Expr) -> &Expr {
 }
 
 /// One step of a field access: `(container, selector)`.
-fn json_accessor(expr: &Expr) -> Option<(&Expr, &Expr)> {
+pub(crate) fn json_accessor(expr: &Expr) -> Option<(&Expr, &Expr)> {
     match expr {
         Expr::BinaryOp {
             left,

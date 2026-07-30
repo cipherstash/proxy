@@ -3467,6 +3467,67 @@ mod test {
         }
     }
 
+    /// A multi-step chain is only legal where something will fuse it into a
+    /// single path. Nothing else has a correct rewrite.
+    ///
+    /// Only exact equality collapses a chain, into one value-selector containment
+    /// against the root document. Everywhere else the chain would survive into
+    /// the emitted SQL as nested entry-scoped accessors applied to an entry,
+    /// which selects nothing and yields NULL — the silent-wrong-answer failure
+    /// this whole family of types exists to prevent.
+    ///
+    /// Typing is post-order, so when the outermost `->` of a chain is typed its
+    /// parent is not yet known. `infer_enter` on the comparison marks the chain's
+    /// spine on the way down, which is what lets the `->` rule distinguish
+    /// "about to be fused" from "nothing will collapse this".
+    #[test]
+    fn a_multi_step_chain_is_refused_where_nothing_fuses_it() {
+        let schema = chained_json_schema();
+
+        for sql in [
+            // A projection has no comparison to fuse into.
+            "SELECT j -> 'foo' -> 'bar' FROM t",
+            "SELECT (j -> 'foo') -> 'bar' FROM t",
+            "SELECT j -> 'foo' ->> 'bar' FROM t",
+            // Ordering types the scalar operand but leaves the chain standing,
+            // so a multi-step ordering comparison has no correct rewrite either.
+            "SELECT id FROM t WHERE j -> 'foo' -> 'bar' < '\"x\"'",
+            "SELECT id FROM t WHERE j -> 'foo' -> 'bar' >= '\"x\"'",
+        ] {
+            let statement = parse(sql);
+            let err = type_check(schema.clone(), &statement)
+                .expect_err(&format!("`{sql}` must not type check"));
+
+            assert!(
+                err.to_string()
+                    .contains("result of an encrypted JSON operation"),
+                "expected an unqueryable-extraction error for `{sql}`, got: {err}"
+            );
+        }
+    }
+
+    /// A SINGLE access is legal anywhere, fused or not.
+    ///
+    /// The declaration handles it: `-> <T as JsonLike>::Output` yields an
+    /// extracted entry, which is projectable and decryptable. Only *traversing*
+    /// that result is refused, so ordinary field access and single-field
+    /// comparisons are unaffected.
+    #[test]
+    fn a_single_json_access_is_legal_anywhere() {
+        let schema = chained_json_schema();
+
+        for sql in [
+            "SELECT j -> 'foo' FROM t",
+            "SELECT j ->> 'foo' FROM t",
+            "SELECT id FROM t WHERE j -> 'foo' = '\"x\"'",
+            "SELECT id FROM t WHERE j -> 'foo' < '\"x\"'",
+        ] {
+            let statement = parse(sql);
+            type_check(schema.clone(), &statement)
+                .unwrap_or_else(|e| panic!("`{sql}` should type check, got: {e}"));
+        }
+    }
+
     /// Extracting one field, and projecting an extracted field, both still work.
     ///
     /// The point of `JsonExtracted` is to forbid *traversing* an extracted entry,

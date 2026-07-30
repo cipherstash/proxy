@@ -9,14 +9,17 @@ pub mod unifier;
 
 use unifier::{Unifier, *};
 
-use std::{cell::RefCell, fmt::Debug, marker::PhantomData, ops::ControlFlow, rc::Rc, sync::Arc};
+use std::{
+    cell::RefCell, collections::HashSet, fmt::Debug, marker::PhantomData, ops::ControlFlow, rc::Rc,
+    sync::Arc,
+};
 
 use infer_type::InferType;
 use sqltk::parser::ast::{
     Delete, Expr, Function, FunctionArgExpr, Ident, Insert, ObjectName, Query, Select, SelectItem,
     SetExpr, Statement, ValueWithSpan, Values, WindowSpec,
 };
-use sqltk::{into_control_flow, AsNodeKey, Break, Visitable, Visitor};
+use sqltk::{into_control_flow, AsNodeKey, Break, NodeKey, Visitable, Visitor};
 
 use crate::{
     JsonSelectorSource, JsonValueSelectors, Param, QueryOperands, ScopeError, ScopeTracker,
@@ -67,6 +70,22 @@ pub struct TypeInferencer<'ast> {
     /// shape, and the proxy needs it before it encrypts anything.
     query_operands: RefCell<QueryOperands<'ast>>,
 
+    /// The JSON accessor chains that a fusable comparison sits above, recorded
+    /// on the way DOWN the tree.
+    ///
+    /// Typing is post-order, so when a chain's outermost `->` is typed its
+    /// parent does not exist yet — and whether the chain is legal depends
+    /// entirely on that parent. `j -> 'a' -> 'b' = $1` is one path into one
+    /// document and fuses; the same chain in a projection has no fusion to
+    /// collapse it and would emit an entry-scoped accessor over an entry,
+    /// returning NULL. `infer_enter` on the comparison marks the chain before
+    /// any of it is typed, so the `->` rule can tell the two apart.
+    ///
+    /// Purely syntactic — at enter time no child has a type yet. Whether the
+    /// chain's root is really an encrypted document is still checked on the way
+    /// back up.
+    fusable_json_chains: RefCell<HashSet<NodeKey<'ast>>>,
+
     _ast: PhantomData<&'ast ()>,
 }
 
@@ -83,6 +102,7 @@ impl<'ast> TypeInferencer<'ast> {
             unifier: unifier.into(),
             json_value_selectors: RefCell::new(JsonValueSelectors::default()),
             query_operands: RefCell::new(QueryOperands::default()),
+            fusable_json_chains: RefCell::new(HashSet::new()),
             _ast: PhantomData,
         }
     }
@@ -96,6 +116,23 @@ impl<'ast> TypeInferencer<'ast> {
     /// Takes the recorded query operands, leaving the inferencer's set empty.
     pub(crate) fn take_query_operands(&self) -> QueryOperands<'ast> {
         std::mem::take(&mut self.query_operands.borrow_mut())
+    }
+
+    /// Marks a JSON accessor chain as sitting under a comparison that will fuse
+    /// it, before any of it has been typed.
+    pub(crate) fn mark_fusable_json_chain<N: AsNodeKey>(&self, node: &'ast N) {
+        self.fusable_json_chains
+            .borrow_mut()
+            .insert(node.as_node_key());
+    }
+
+    /// Whether this node is the outermost accessor of a chain a comparison will
+    /// fuse. A chain nothing fuses has no correct rewrite, so it must not be
+    /// permitted past the type check.
+    pub(crate) fn is_fusable_json_chain<N: AsNodeKey>(&self, node: &'ast N) -> bool {
+        self.fusable_json_chains
+            .borrow()
+            .contains(&node.as_node_key())
     }
 
     pub(crate) fn record_query_operand_param(&self, param: Param) {
