@@ -495,7 +495,7 @@ pub async fn clear() {
     // EQL v3 encrypted columns are self-configuring domain types, so there is no
     // `eql_v2_configuration` table to clean up (as there was in EQL v2) — clearing
     // the demo just truncates the tables.
-    let client = connect_with_tls(PROXY).await;
+    let client = connect_with_tls(*PROXY).await;
 
     let tables = &[
         "patient_medications",

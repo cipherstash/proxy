@@ -3685,6 +3685,29 @@ mod test {
         type_check(chained_json_schema(), &statement).unwrap();
     }
 
+    /// Sorting by an extracted JSON field sorts by its ordering term.
+    ///
+    /// An extracted SteVec entry carries ordering and equality terms, so
+    /// `ORDER BY col -> 'field'` is legitimate — it sorts by
+    /// `ord_term(eql_v3."->"(col, sel))`. This pins the capability grant on
+    /// `EqlTerm::JsonExtracted`: when it briefly had NO capabilities at all,
+    /// this exact shape failed the `Ord` bound, and with mapping errors
+    /// disabled (the container default) the statement was forwarded unmapped —
+    /// native `->` over ciphertext, zero rows, silently. The showcase's
+    /// "active Aspirin prescriptions" query was the first thing to notice.
+    #[test]
+    fn order_by_an_extracted_json_field_sorts_by_its_ordering_term() {
+        let rewritten = transform_with_dummy_literals(
+            chained_json_schema(),
+            "SELECT id FROM t ORDER BY j -> 'email'",
+        );
+
+        assert_eq!(
+            rewritten,
+            "SELECT id FROM t ORDER BY eql_v3.ord_term(eql_v3.\"->\"(j, '<CT>'))"
+        );
+    }
+
     /// A SINGLE access is legal anywhere, fused or not.
     ///
     /// The declaration handles it: `-> <T as JsonLike>::Output` yields an

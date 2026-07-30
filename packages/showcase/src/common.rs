@@ -4,13 +4,27 @@ use rustls::{
     client::danger::ServerCertVerifier, crypto::aws_lc_rs::default_provider,
     pki_types::CertificateDer, ClientConfig,
 };
-use std::sync::{Arc, Once};
+use std::sync::{Arc, LazyLock, Once};
 use tokio_postgres::{types::ToSql, Client, SimpleQueryMessage};
 use tracing_subscriber::{filter::Directive, EnvFilter, FmtSubscriber};
 
-pub const PROXY: u16 = 6432;
-pub const PG_PORT: u16 = 5532;
-pub const PG_TLS_PORT: u16 = 5617;
+/// Environment-overridable, mirroring the integration suite's ports: several
+/// copies of these tools need to run at once, each against its own Proxy.
+/// A malformed value panics rather than falling back — silently connecting to
+/// whatever else is on 6432 is the one failure that looks like a pass.
+pub static PROXY: LazyLock<u16> = LazyLock::new(|| port_from_env("CS_TEST_PROXY_PORT", 6432));
+pub static PG_PORT: LazyLock<u16> = LazyLock::new(|| port_from_env("CS_TEST_PG_PORT", 5532));
+pub static PG_TLS_PORT: LazyLock<u16> =
+    LazyLock::new(|| port_from_env("CS_TEST_PG_TLS_PORT", 5617));
+
+fn port_from_env(var: &str, default: u16) -> u16 {
+    match std::env::var(var) {
+        Ok(value) => value
+            .parse()
+            .unwrap_or_else(|_| panic!("{var} must be a port number, got: {value:?}")),
+        Err(_) => default,
+    }
+}
 
 static INIT: Once = Once::new();
 
@@ -33,7 +47,7 @@ pub async fn table_exists(table: &str) -> bool {
 
     let port = std::env::var("CS_DATABASE__PORT")
         .map(|s| s.parse().unwrap())
-        .unwrap_or(PG_PORT);
+        .unwrap_or(*PG_PORT);
 
     let client = connect_with_tls(port).await;
     let messages = client.simple_query(&query).await.unwrap();
@@ -102,7 +116,7 @@ pub async fn connect_with_tls(port: u16) -> Client {
 }
 
 pub async fn insert(sql: &str, params: &[&(dyn ToSql + Sync)]) {
-    let client = connect_with_tls(PROXY).await;
+    let client = connect_with_tls(*PROXY).await;
     client.query(sql, params).await.unwrap();
 }
 

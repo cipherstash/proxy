@@ -343,9 +343,23 @@ impl EqlTerm {
             EqlTerm::Tokenized(_) => EqlTraits::none(),
             EqlTerm::JsonOrd(_) => EqlTraits::none(),
             EqlTerm::JsonValueSelector(_) => EqlTraits::none(),
-            // Unqueryable by construction: no operator or function can require
-            // any capability of an already-extracted JSON entry.
-            EqlTerm::JsonExtracted(_) => EqlTraits::none(),
+            // An extracted SteVec entry is not a document, but it is not inert
+            // either: entries carry ordering and equality terms, which is what
+            // lets `ORDER BY col -> 'field'` sort by `ord_term(...)` and a
+            // comparison run over the extracted value. What an entry cannot do
+            // is be TRAVERSED — it has no `sv` — so the JSON capabilities are
+            // masked off while `eq`/`ord` are inherited from the column.
+            //
+            // Masked, not granted: a JSON domain that carries no ordering term
+            // must not gain one by extraction.
+            EqlTerm::JsonExtracted(eql_value) => {
+                let column = eql_value.effective_bounds();
+                EqlTraits {
+                    eq: column.eq,
+                    ord: column.ord,
+                    ..EqlTraits::none()
+                }
+            }
         }
     }
 }
