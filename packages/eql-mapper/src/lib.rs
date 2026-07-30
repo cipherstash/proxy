@@ -3427,6 +3427,47 @@ mod test {
         );
     }
 
+    /// Parentheses must not defeat the chain walker.
+    ///
+    /// `(j -> 'foo') -> 'bar'` is `j -> 'foo' -> 'bar'` with redundant brackets,
+    /// and must fuse to the same needle rooted at the same bare column. Before
+    /// the walker saw through `Expr::Nested` it stopped at the bracket, treated
+    /// the parenthesised accessor as the ROOT container, and emitted
+    /// `eql_v3.jsonb_contains((j -> 'foo'), …)` — shipping the plaintext selector
+    /// `'foo'` to PostgreSQL and applying native jsonb `->` to the encrypted
+    /// payload. The same CIP-3682 leak, reachable with one pair of brackets.
+    #[test]
+    fn parenthesised_json_accessor_chains_fuse_identically() {
+        let schema = chained_json_schema();
+
+        // Every spelling below is the same query, so every one must produce the
+        // same fused containment against the bare root column.
+        let expected =
+            "SELECT id FROM t WHERE eql_v3.jsonb_contains(j, '<CT>'::JSONB::eql_v3.query_json)";
+
+        for sql in [
+            "SELECT id FROM t WHERE j -> 'foo' -> 'bar' = '\"x\"'",
+            "SELECT id FROM t WHERE (j -> 'foo') -> 'bar' = '\"x\"'",
+            "SELECT id FROM t WHERE ((j -> 'foo') -> 'bar') = '\"x\"'",
+            "SELECT id FROM t WHERE (((j -> 'foo')) -> 'bar') = '\"x\"'",
+            "SELECT id FROM t WHERE (j) -> 'foo' -> 'bar' = '\"x\"'",
+            "SELECT id FROM t WHERE j -> ('foo') -> 'bar' = '\"x\"'",
+        ] {
+            let rewritten = transform_with_dummy_literals(schema.clone(), sql);
+
+            assert_eq!(rewritten, expected, "unexpected rewrite for `{sql}`");
+
+            assert!(
+                !rewritten.contains("'foo'"),
+                "the intermediate selector must not reach the database in plaintext for `{sql}`: {rewritten}"
+            );
+            assert!(
+                !rewritten.contains("j -> "),
+                "native jsonb -> must not be applied to the encrypted column for `{sql}`: {rewritten}"
+            );
+        }
+    }
+
     /// Every spelling and depth of chain collapses the same way, and none of
     /// them leaves a selector behind.
     #[test]

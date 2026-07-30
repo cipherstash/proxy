@@ -92,13 +92,20 @@ impl JsonSelectorSource {
 ///
 /// Returns `None` for anything that is not a field access — importantly for a
 /// bare column, which is a whole document rather than a field of one.
+///
+/// Parentheses are transparent at every position. `(col -> 'a') -> 'b'` is the
+/// same query as `col -> 'a' -> 'b'` and must decompose to the same root and the
+/// same path: a chain the walker fails to see through is not merely unfused, it
+/// is a leak. The unseen inner accessor gets treated as the root container, so
+/// its selector reaches PostgreSQL in cleartext and native jsonb `->` is applied
+/// to an encrypted payload.
 pub(crate) fn json_accessor_chain(expr: &Expr) -> Option<(&Expr, Vec<&Expr>)> {
     let mut selectors = Vec::new();
-    let mut container = expr;
+    let mut container = unnest(expr);
 
     while let Some((inner, selector)) = json_accessor(container) {
-        selectors.push(selector);
-        container = inner;
+        selectors.push(unnest(selector));
+        container = unnest(inner);
     }
 
     if selectors.is_empty() {
@@ -108,6 +115,20 @@ pub(crate) fn json_accessor_chain(expr: &Expr) -> Option<(&Expr, Vec<&Expr>)> {
     selectors.reverse();
 
     Some((container, selectors))
+}
+
+/// Strips redundant parentheses, however many deep.
+///
+/// `Expr::Nested` carries no meaning of its own — it records that the author
+/// wrote brackets. Every consumer of a chain wants the expression inside them.
+fn unnest(expr: &Expr) -> &Expr {
+    let mut current = expr;
+
+    while let Expr::Nested(inner) = current {
+        current = inner;
+    }
+
+    current
 }
 
 /// One step of a field access: `(container, selector)`.
