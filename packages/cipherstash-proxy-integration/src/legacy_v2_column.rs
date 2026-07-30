@@ -27,7 +27,7 @@
 //! rejected the statement.
 #[cfg(test)]
 mod tests {
-    use crate::common::{connect_with_tls, random_id, PG_PORT, PROXY};
+    use crate::common::{connect_with_tls, get_database_port, random_id, PROXY};
     use tokio_postgres::Client;
 
     /// A connection that does not go through Proxy.
@@ -36,8 +36,14 @@ mod tests {
     /// Proxy what is in the table cannot answer the question, because Proxy
     /// refuses to read the table at all — and even if it did, a decrypting read
     /// would hide the very thing being looked for.
+    ///
+    /// The port must be `get_database_port()`, the database Proxy is backed by,
+    /// not `PG_PORT`. Under the TLS suite Proxy sits in front of `postgres-tls`
+    /// on 5617 while `PG_PORT` is 5532, so a hardcoded `PG_PORT` would inspect a
+    /// different database — and a test that asserts a row is *absent* passes
+    /// trivially against the wrong, empty one.
     async fn direct_to_postgres() -> Client {
-        connect_with_tls(*PG_PORT).await
+        connect_with_tls(get_database_port()).await
     }
 
     async fn rows_in_fixture(pg: &Client) -> i64 {
