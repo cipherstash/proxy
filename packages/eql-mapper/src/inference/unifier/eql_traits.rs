@@ -34,7 +34,7 @@ const ASSOC_TYPES_ORD: &EqlTraitAssociatedTypes = &EqlTraitAssociatedTypes(&["On
 const ASSOC_TYPES_TOKEN_MATCH: &EqlTraitAssociatedTypes = &EqlTraitAssociatedTypes(&["Tokenized"]);
 
 const ASSOC_TYPES_JSON_LIKE: &EqlTraitAssociatedTypes =
-    &EqlTraitAssociatedTypes(&["Path", "Accessor"]);
+    &EqlTraitAssociatedTypes(&["Path", "Accessor", "Output"]);
 
 const ASSOC_TYPES_CONTAIN: &EqlTraitAssociatedTypes = &EqlTraitAssociatedTypes(&["Only"]);
 
@@ -70,6 +70,10 @@ impl EqlTrait {
                     | (EqlTrait::TokenMatch, "Tokenized")
                     | (EqlTrait::JsonLike, "Accessor")
                     | (EqlTrait::JsonLike, "Path")
+                    // Traversing native `jsonb` yields native `jsonb`, which is
+                    // itself traversable — plaintext chains are legitimate SQL
+                    // and must keep working.
+                    | (EqlTrait::JsonLike, "Output")
                     | (EqlTrait::Contain, "Only") => Ok(ty.clone()),
                     (_, unknown_associated_type) => Err(TypeError::InternalError(format!(
                         "Unknown associated type {self}::{unknown_associated_type}"
@@ -98,6 +102,17 @@ impl EqlTrait {
                     }
                     (EqlTrait::JsonLike, "Path") => Ok(Arc::new(Type::Value(Value::Eql(EqlTerm::JsonPath(eql_col.clone()))),
                     )),
+                    // The result of traversing an ENCRYPTED document is one
+                    // SteVec entry, which carries no `sv` and so cannot be
+                    // traversed again. This is where native and encrypted JSON
+                    // diverge: `Output` is the type the operator declaration
+                    // returns, so the difference lives in the trait rather than
+                    // in a special case at the call site.
+                    (EqlTrait::JsonLike, "Output") => {
+                        Ok(Arc::new(Type::Value(Value::Eql(
+                            EqlTerm::JsonExtracted(eql_col.clone()),
+                        ))))
+                    }
                     (EqlTrait::Contain, "Only") => {
                         Ok(Arc::new(Type::Value(Value::Eql(
                             EqlTerm::Partial(eql_col.clone(), EqlTraits::from(EqlTrait::Contain)),

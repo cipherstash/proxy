@@ -4053,6 +4053,17 @@ mod test {
             .map_err(|err| err.to_string())
             .unwrap();
 
+        // A path query still yields the column's own type, NOT `JsonExtracted`.
+        //
+        // `->`/`->>` return `<T as JsonLike>::Output` so a second traversal of an
+        // encrypted result is refused. The path-query functions deliberately do
+        // NOT, because two supported shapes depend on the old typing:
+        // `jsonb_array_elements`/`jsonb_array_length` consume an extracted entry
+        // rather than traversing it, and the rewrite that retargets these
+        // functions and encrypts their Path operand keys off the result type —
+        // changing it sent the caller's literal jsonpath to PostgreSQL
+        // unencrypted. Closing that needs the array functions taught to accept
+        // an extracted value first.
         assert_eq!(
             typed.projection,
             projection![(EQL(patients.notes: JsonLike) as notes)]
