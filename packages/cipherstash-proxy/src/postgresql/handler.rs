@@ -16,6 +16,7 @@ use bytes::{BufMut, Bytes, BytesMut};
 use md5::{Digest, Md5};
 use pg_proto::pre_startup::PreStartupMessage;
 use pg_proto::{
+    auth::{AuthCompletion, AuthEvent, AuthOffer, SaslEvent},
     codec::{
         Authentication, Backend as BackendDirection, BackendMessage, Frontend as FrontendDirection,
         FrontendMessage,
@@ -81,6 +82,169 @@ async fn receive_frontend_auth<S: AsyncRead + Unpin>(
     match received {
         Ok(message) => Ok((conn, message)),
         Err(error) => Err((conn, error.into())),
+    }
+}
+
+async fn receive_backend_conn<S, Phase>(
+    mut conn: Conn<Buffered<S, BackendDirection>, Phase>,
+) -> Result<(Conn<Buffered<S, BackendDirection>, Phase>, BackendMessage), Error>
+where
+    S: AsyncRead + Unpin,
+{
+    let duration = Duration::from_secs(10);
+    let message = timeout(duration, conn.receive_backend_wire())
+        .await
+        .map_err(|_| Error::ConnectionTimeout { duration })??;
+    Ok((conn, message))
+}
+
+async fn authenticate_upstream(
+    startup: Conn<Buffered<AsyncStream, BackendDirection>, pg_proto::pre_startup::Startup>,
+    context: &Context<ZeroKms>,
+    channel_binding: ChannelBinding,
+) -> Result<Buffered<AsyncStream, BackendDirection>, Error> {
+    let mut auth = startup.authentication();
+    let offer = loop {
+        let (current, message) = receive_backend_conn(auth).await?;
+        match current.offer_backend(message) {
+            Ok(AuthEvent::Authentication(offer)) => break offer,
+            Ok(AuthEvent::Negotiate { conn, .. }) => auth = conn,
+            Ok(AuthEvent::Error { conn, .. }) => {
+                conn.into_transport();
+                return Err(ProtocolError::AuthenticationFailed.into());
+            }
+            Err((conn, _message, source)) => {
+                conn.into_transport();
+                return Err(source
+                    .unwrap_or_else(|| {
+                        std::io::Error::new(
+                            std::io::ErrorKind::InvalidData,
+                            "unexpected message during upstream authentication",
+                        )
+                    })
+                    .into());
+            }
+        }
+    };
+
+    match offer {
+        AuthOffer::Ok(conn) => Ok(conn.into_transport()),
+        AuthOffer::Cleartext(conn) => {
+            let (mut awaiting, frame) = conn.password(context.database_password().as_bytes())?;
+            awaiting.push_frame(frame)?;
+            awaiting.flush().await?;
+            complete_upstream_auth(awaiting).await
+        }
+        AuthOffer::Md5 { conn, salt } => {
+            let hash = md5_hash(
+                context.database_username().as_bytes(),
+                context.database_password().as_bytes(),
+                &salt,
+            );
+            let (mut awaiting, frame) = conn.password(hash.as_bytes())?;
+            awaiting.push_frame(frame)?;
+            awaiting.flush().await?;
+            complete_upstream_auth(awaiting).await
+        }
+        AuthOffer::Sasl { conn, mechanisms } => {
+            let mechanism = sasl_mechanism(&mechanisms)?;
+            if mechanism == SaslMechanism::ScramSha256Plus {
+                // pg-proto's SCRAM-PLUS entry point currently requires its own
+                // TLS transport trait. Keep only the cryptographic exchange as
+                // an adapter until custom channel-binding bytes are accepted.
+                let mut transport = conn.into_transport();
+                scram_sha_256_plus_handler(
+                    &mut transport,
+                    mechanism,
+                    context.database_password().as_bytes(),
+                    channel_binding,
+                )
+                .await?;
+                return Ok(transport);
+            }
+
+            let mut scram = ScramSha256::new(
+                context.database_password().as_bytes(),
+                ChannelBinding::unsupported(),
+            );
+            let (mut sasl, frame) = conn.scram_sha_256(scram.message())?;
+            sasl.push_frame(frame)?;
+            sasl.flush().await?;
+
+            let (sasl, message) = receive_backend_conn(sasl).await?;
+            let BackendMessage::Authentication(authentication) = message else {
+                sasl.into_transport();
+                return Err(ProtocolError::UnexpectedStartupMessage.into());
+            };
+            let SaslEvent::Continue {
+                conn: challenge,
+                challenge: server_first,
+            } = sasl.offer(authentication).map_err(|(conn, _)| {
+                conn.into_transport();
+                ProtocolError::AuthenticationFailed
+            })?
+            else {
+                return Err(ProtocolError::AuthenticationFailed.into());
+            };
+            scram.update(&server_first)?;
+            let (mut sasl, frame) = challenge.respond(Bytes::copy_from_slice(scram.message()));
+            sasl.push_frame(frame)?;
+            sasl.flush().await?;
+
+            let (sasl, message) = receive_backend_conn(sasl).await?;
+            let BackendMessage::Authentication(authentication) = message else {
+                sasl.into_transport();
+                return Err(ProtocolError::UnexpectedStartupMessage.into());
+            };
+            let SaslEvent::Final {
+                conn: final_state,
+                server_final,
+            } = sasl.offer(authentication).map_err(|(conn, _)| {
+                conn.into_transport();
+                ProtocolError::AuthenticationFailed
+            })?
+            else {
+                return Err(ProtocolError::AuthenticationFailed.into());
+            };
+            scram.finish(&server_final)?;
+            complete_upstream_auth(final_state.verified()).await
+        }
+        AuthOffer::Gss(conn) | AuthOffer::Sspi(conn) | AuthOffer::KerberosV5(conn) => {
+            conn.into_transport();
+            Err(ProtocolError::UnsupportedAuthentication { method_code: -1 }.into())
+        }
+    }
+}
+
+async fn complete_upstream_auth(
+    awaiting: Conn<Buffered<AsyncStream, BackendDirection>, pg_proto::auth::AwaitingAuthOk>,
+) -> Result<Buffered<AsyncStream, BackendDirection>, Error> {
+    let (awaiting, message) = receive_backend_conn(awaiting).await?;
+    match awaiting.offer(message) {
+        Ok(AuthCompletion::Ok(conn)) => Ok(conn.into_transport()),
+        Ok(AuthCompletion::Error { conn, .. }) => {
+            conn.into_transport();
+            Err(ProtocolError::AuthenticationFailed.into())
+        }
+        Err((conn, _)) => {
+            conn.into_transport();
+            Err(ProtocolError::AuthenticationFailed.into())
+        }
+    }
+}
+
+async fn drain_upstream_startup(
+    database: &mut Buffered<AsyncStream, BackendDirection>,
+    client: &mut Buffered<AsyncStream, FrontendDirection>,
+) -> Result<(), Error> {
+    loop {
+        let message = database.receive_backend().await?;
+        let ready = matches!(message, BackendMessage::ReadyForQuery(_));
+        let _ = database.project_backend(message.clone());
+        send_backend_message(client, message).await?;
+        if ready {
+            return Ok(());
+        }
     }
 }
 
@@ -159,13 +323,7 @@ pub async fn handler(client_stream: AsyncStream, context: Context<ZeroKms>) -> R
                     .await?;
                 return Err(Error::CancelRequest);
             }
-            PreStartupOffer::Startup { conn, message } => {
-                let startup_message = PreStartupMessage::Startup(message.clone());
-                database_stream
-                    .write_all(&startup_message.to_packet()?)
-                    .await?;
-                break (conn, message);
-            }
+            PreStartupOffer::Startup { conn, message } => break (conn, message),
             PreStartupOffer::Gss(conn) => {
                 conn.into_transport();
                 return Err(ProtocolError::UnexpectedStartupMessage.into());
@@ -173,7 +331,13 @@ pub async fn handler(client_stream: AsyncStream, context: Context<ZeroKms>) -> R
         }
     };
 
-    let mut database_stream = Buffered::<_, BackendDirection>::new(database_stream);
+    let (mut database_startup, startup_packet) =
+        Conn::new(Buffered::<_, BackendDirection>::new(database_stream))
+            .startup(&startup_message)?;
+    database_startup.push_startup_packet(&startup_packet);
+    database_startup.flush().await?;
+    let mut database_stream =
+        authenticate_upstream(database_startup, &context, database_channel_binding).await?;
 
     // Proxy -> Client Authentication
     // Uses MD5
@@ -246,64 +410,6 @@ pub async fn handler(client_stream: AsyncStream, context: Context<ZeroKms>) -> R
         startup_ready.into_transport()
     };
 
-    // Database authentication flow
-    //   1. Database -> Authentication message (SASL)
-    //               -> Proxy -> Auth Reponse flow with SASL
-    //
-    //   2. Proxy -> Auth message to the client Md5, SASL etc
-    //            -> Client -> Auth response
-    //
-
-    // First message should always be Auth
-    let auth = protocol::read_auth_message(&mut database_stream).await?;
-
-    match &auth {
-        Authentication::Ok => {
-            debug!(target: AUTHENTICATION, msg = "AuthenticationOk");
-        }
-        Authentication::CleartextPassword => {
-            debug!(target: AUTHENTICATION, msg = "AuthenticationCleartextPassword");
-            let password = context.database_password();
-            send_frontend_message(&mut database_stream, password_message(password)?).await?;
-        }
-        Authentication::Md5Password { salt } => {
-            debug!(target: AUTHENTICATION, msg = "Md5Password");
-            let username = context.database_username().as_bytes();
-            let password = context.database_password();
-            let password = password.as_bytes();
-
-            let hash = md5_hash(username, password, salt);
-            send_frontend_message(&mut database_stream, password_message(hash)?).await?;
-        }
-        Authentication::Sasl { mechanisms } => {
-            debug!(target: AUTHENTICATION, msg = "Sasl");
-            let mechanism = sasl_mechanism(mechanisms)?;
-            let password = context.database_password();
-            let password = password.as_bytes();
-            scram_sha_256_plus_handler(
-                &mut database_stream,
-                mechanism,
-                password,
-                database_channel_binding,
-            )
-            .await?;
-        }
-        Authentication::KerberosV5
-        | Authentication::Gss
-        | Authentication::GssContinue(_)
-        | Authentication::Sspi => {
-            debug!(target: AUTHENTICATION, msg = "UnsupportedAuthentication");
-            return Err(ProtocolError::UnsupportedAuthentication {
-                method_code: authentication_method_code(&auth),
-            }
-            .into());
-        }
-        Authentication::SaslContinue(_) | Authentication::SaslFinal(_) => {
-            debug!(target: AUTHENTICATION, msg = "UnexpectedStartupMessage", authentication_method = ?auth);
-            return Err(ProtocolError::UnexpectedStartupMessage.into());
-        }
-    }
-
     if context.require_tls() && !client_is_tls {
         let message = ErrorResponse::tls_required();
         send_backend_message(&mut client_stream, message.into_backend_message()).await?;
@@ -311,6 +417,8 @@ pub async fn handler(client_stream: AsyncStream, context: Context<ZeroKms>) -> R
         error!(msg = "Client must connect with Transport Layer Security (TLS)");
         return Err(ConfigError::TlsRequired.into());
     }
+
+    drain_upstream_startup(&mut database_stream, &mut client_stream).await?;
 
     let (client_reader, client_writer) = client_stream.into_inner().split();
     let (server_reader, server_writer) = database_stream.into_inner().split();
@@ -369,10 +477,7 @@ pub async fn handler(client_stream: AsyncStream, context: Context<ZeroKms>) -> R
 
     if let Err(ref err @ Error::ConnectionTimeout { .. }) = &result {
         let error_response = ErrorResponse::connection_timeout(err.to_string());
-        if let Ok(bytes) = protocol::encode_backend_message(&error_response.into_backend_message())
-        {
-            let _ = timeout_sender.send(bytes);
-        }
+        let _ = timeout_sender.send(error_response.into_backend_message());
         // Best-effort yield to allow ChannelWriter to flush the error response
         // before the connection tears down. Not guaranteed — if the runtime doesn't
         // schedule the writer task before teardown, the client may see a connection

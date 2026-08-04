@@ -1,20 +1,13 @@
 use bytes::BytesMut;
 
 pub mod bind;
-pub mod close;
 pub mod data_row;
-pub mod describe;
 pub mod error_response;
-pub mod execute;
-pub mod name;
 pub mod param_description;
 pub mod parse;
 pub mod query;
 pub mod row_description;
-pub mod target;
-
-pub use name::Name;
-pub use target::Target;
+pub type Name = bytes::Bytes;
 
 pub const NULL: i32 = -1;
 

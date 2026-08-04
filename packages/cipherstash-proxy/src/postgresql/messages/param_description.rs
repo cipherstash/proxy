@@ -1,8 +1,10 @@
+use crate::log::MAPPER;
+#[cfg(test)]
 use crate::{
     error::{Error, ProtocolError},
-    log::MAPPER,
     postgresql::protocol::{decode_backend_frame, encode_backend_message},
 };
+#[cfg(test)]
 use bytes::BytesMut;
 use pg_proto::codec::BackendMessage;
 use postgres_types::Type;
@@ -65,6 +67,7 @@ impl ParamDescription {
     }
 }
 
+#[cfg(test)]
 impl TryFrom<&BytesMut> for ParamDescription {
     type Error = Error;
 
@@ -84,6 +87,16 @@ impl TryFrom<&BytesMut> for ParamDescription {
     }
 }
 
+impl From<Vec<u32>> for ParamDescription {
+    fn from(types: Vec<u32>) -> Self {
+        Self {
+            types: types.into_iter().map(|oid| oid as i32).collect(),
+            dirty: false,
+        }
+    }
+}
+
+#[cfg(test)]
 impl TryFrom<ParamDescription> for BytesMut {
     type Error = Error;
 
@@ -94,6 +107,18 @@ impl TryFrom<ParamDescription> for BytesMut {
             .map(|oid| oid as u32)
             .collect();
         encode_backend_message(&BackendMessage::ParameterDescription(types))
+    }
+}
+
+impl From<ParamDescription> for BackendMessage {
+    fn from(parameter_description: ParamDescription) -> Self {
+        Self::ParameterDescription(
+            parameter_description
+                .types
+                .into_iter()
+                .map(|oid| oid as u32)
+                .collect(),
+        )
     }
 }
 

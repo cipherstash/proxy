@@ -10,9 +10,10 @@ use crate::postgresql::data::{
     json_value_selector_plaintext,
 };
 use crate::postgresql::format_code::FormatCode;
+#[cfg(test)]
 use crate::postgresql::protocol::{decode_frontend_frame, encode_frontend_message};
 use crate::{EqlOutput, EqlQueryPayload};
-use bytes::{BufMut, Bytes, BytesMut};
+use bytes::{BufMut, BytesMut};
 use cipherstash_client::encryption::Plaintext;
 use pg_proto::codec::{Bind as PgBind, FrontendMessage};
 use postgres_types::Type;
@@ -300,6 +301,55 @@ impl Bind {
     }
 }
 
+impl TryFrom<PgBind> for Bind {
+    type Error = Error;
+
+    fn try_from(bind: PgBind) -> Result<Self, Self::Error> {
+        let portal = bind.portal;
+        let prepared_statement = bind.statement;
+        let param_format_codes = bind
+            .parameter_formats
+            .iter()
+            .copied()
+            .map(FormatCode::from)
+            .collect::<Vec<_>>();
+        let num_param_values = bind.parameters.len();
+        let mut param_values = Vec::with_capacity(num_param_values);
+        for (idx, parameter) in bind.parameters.into_iter().enumerate() {
+            let format_code = match param_format_codes.len() {
+                0 => FormatCode::Text,
+                1 => param_format_codes[0],
+                len if len == num_param_values => param_format_codes[idx],
+                _ => {
+                    return Err(ProtocolError::ParameterFormatCodesMismatch {
+                        expected: num_param_values,
+                        received: param_format_codes.len(),
+                    }
+                    .into());
+                }
+            };
+            match parameter {
+                None => param_values.push(BindParam::null_with_format(format_code)),
+                Some(bytes) => {
+                    param_values.push(BindParam::new(format_code, BytesMut::from(&bytes[..])));
+                }
+            }
+        }
+        Ok(Self {
+            portal,
+            prepared_statement,
+            param_format_codes,
+            param_values,
+            result_columns_format_codes: bind
+                .result_formats
+                .into_iter()
+                .map(FormatCode::from)
+                .collect(),
+            reshaped: false,
+        })
+    }
+}
+
 ///
 /// Param type is either provided with Parse message or the column type
 /// Column type is the cast of the encrypted column
@@ -441,6 +491,7 @@ impl Display for BindParam {
     }
 }
 
+#[cfg(test)]
 impl TryFrom<&BytesMut> for Bind {
     type Error = Error;
 
@@ -452,8 +503,8 @@ impl TryFrom<&BytesMut> for Bind {
             }
             .into());
         };
-        let portal = Name::from(String::from_utf8_lossy(&bind.portal).into_owned());
-        let prepared_statement = Name::from(String::from_utf8_lossy(&bind.statement).into_owned());
+        let portal = bind.portal;
+        let prepared_statement = bind.statement;
         let param_format_codes = bind
             .parameter_formats
             .iter()
@@ -499,13 +550,14 @@ impl TryFrom<&BytesMut> for Bind {
     }
 }
 
+#[cfg(test)]
 impl TryFrom<Bind> for BytesMut {
     type Error = Error;
 
     fn try_from(bind: Bind) -> Result<BytesMut, Self::Error> {
         encode_frontend_message(&FrontendMessage::Bind(PgBind {
-            portal: Bytes::copy_from_slice(bind.portal.as_str().as_bytes()),
-            statement: Bytes::copy_from_slice(bind.prepared_statement.as_str().as_bytes()),
+            portal: bind.portal,
+            statement: bind.prepared_statement,
             parameter_formats: bind.param_format_codes.into_iter().map(i16::from).collect(),
             parameters: bind
                 .param_values
@@ -518,6 +570,26 @@ impl TryFrom<Bind> for BytesMut {
                 .map(i16::from)
                 .collect(),
         }))
+    }
+}
+
+impl From<Bind> for FrontendMessage {
+    fn from(bind: Bind) -> Self {
+        Self::Bind(PgBind {
+            portal: bind.portal,
+            statement: bind.prepared_statement,
+            parameter_formats: bind.param_format_codes.into_iter().map(i16::from).collect(),
+            parameters: bind
+                .param_values
+                .into_iter()
+                .map(|param| (!param.null).then(|| param.bytes.freeze()))
+                .collect(),
+            result_formats: bind
+                .result_columns_format_codes
+                .into_iter()
+                .map(i16::from)
+                .collect(),
+        })
     }
 }
 

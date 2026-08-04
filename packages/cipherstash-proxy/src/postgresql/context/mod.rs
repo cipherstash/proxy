@@ -4,12 +4,7 @@ pub mod portal;
 pub mod statement;
 pub mod statement_metadata;
 pub use self::{phase_timing::PhaseTiming, portal::Portal, statement::Statement};
-use super::{
-    column_mapper::ColumnMapper,
-    messages::{describe::Describe, Name, Target},
-    protocol::decode_backend_frame,
-    Column,
-};
+use super::{column_mapper::ColumnMapper, messages::Name, Column};
 use crate::{
     config::TandemConfig,
     error::{EncryptError, Error},
@@ -20,12 +15,11 @@ use crate::{
     },
     proxy::{EncryptConfig, EncryptionService, ReloadCommand, ReloadSender},
 };
-use bytes::BytesMut;
 use cipherstash_client::IdentifiedBy;
 use eql_mapper::{Schema, TableResolver};
 use metrics::{counter, histogram};
 use pg_proto::{
-    codec::FrontendMessage,
+    codec::{BackendMessage, Describe, DescribeTarget, FrontendMessage},
     intermediary::Intermediary,
     pipeline::{BackendAction, BoundedPipeline, FrontendAction, FrontendHandling},
 };
@@ -272,8 +266,10 @@ where
 
     /// Records a message accepted from the upstream database.
     /// Records a backend response actually emitted to the downstream client.
-    pub async fn protocol_backend_forwarded(&self, bytes: &BytesMut) -> Result<(), Error> {
-        let mut message = decode_backend_frame(bytes)?;
+    pub async fn protocol_backend_forwarded(
+        &self,
+        mut message: BackendMessage,
+    ) -> Result<(), Error> {
         loop {
             let notified = self.protocol_changed.notified();
             tokio::pin!(notified);
@@ -487,7 +483,7 @@ where
             )
             .record(execute.duration());
 
-            if execute.name.is_unnamed() {
+            if execute.name.is_empty() {
                 self.close_portal(&execute.name);
             }
         }
@@ -562,7 +558,7 @@ where
             warn!(
                 target: CONTEXT,
                 client_id = self.client_id,
-                prepared_statement = %name.as_str(),
+                prepared_statement = %String::from_utf8_lossy(name),
                 msg = "Session lookup failed for prepared statement, using latest session"
             );
         }
@@ -632,11 +628,11 @@ where
         match describe {
             Describe {
                 ref name,
-                target: Target::Portal,
+                target: DescribeTarget::Portal,
             } => self.get_portal_statement(name),
             Describe {
                 ref name,
-                target: Target::Statement,
+                target: DescribeTarget::Statement,
             } => self.get_statement(name),
         }
     }
@@ -1165,10 +1161,7 @@ mod tests {
         config::LogConfig,
         error::Error,
         log,
-        postgresql::{
-            messages::{Name, Target},
-            Column,
-        },
+        postgresql::{messages::Name, Column},
         proxy::{EncryptConfig, EncryptionService, ReloadCommand},
         TandemConfig,
     };
@@ -1176,7 +1169,7 @@ mod tests {
     use cipherstash_client::IdentifiedBy;
     use eql_mapper::Schema;
     use pg_proto::codec::{
-        BackendMessage, Bind, Execute, FrontendMessage, Parse, TransactionStatus,
+        BackendMessage, Bind, DescribeTarget, Execute, FrontendMessage, Parse, TransactionStatus,
     };
     use pg_proto::pipeline::{BackendAction, FrontendAction, FrontendHandling, PipelineState};
     use sqltk::parser::{dialect::PostgreSqlDialect, parser::Parser};
@@ -1378,7 +1371,7 @@ mod tests {
 
         let describe = Describe {
             name,
-            target: Target::Statement,
+            target: DescribeTarget::Statement,
         };
         context.set_describe(describe);
 
@@ -1447,7 +1440,7 @@ mod tests {
         for _ in 0..1000 {
             // Frontend: a session + execute are enqueued for every statement.
             let session_id = context.start_session();
-            context.set_execute(Name::unnamed(), Some(session_id));
+            context.set_execute(Name::new(), Some(session_id));
 
             // Drain primitives, normally called by the backend on an
             // execute-terminating message (CommandComplete / ErrorResponse / …).
@@ -1514,10 +1507,10 @@ mod tests {
         let mut context = create_context();
 
         let statement_name_1 = Name::from("statement_1");
-        let portal_name_1 = Name::unnamed();
+        let portal_name_1 = Name::new();
 
         let statement_name_2 = Name::from("statement_2");
-        let portal_name_2 = Name::unnamed();
+        let portal_name_2 = Name::new();
 
         let statement_name_3 = Name::from("statement_3");
         let portal_name_3 = Name::from("portal_3");

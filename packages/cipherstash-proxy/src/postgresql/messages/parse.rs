@@ -1,12 +1,13 @@
 use super::{Name, UNSPECIFIED_TYPE_OID};
+use crate::postgresql::context::statement::OutputParam;
+#[cfg(test)]
 use crate::{
     error::{Error, ProtocolError},
-    postgresql::{
-        context::statement::OutputParam,
-        protocol::{decode_frontend_frame, encode_frontend_message},
-    },
+    postgresql::protocol::{decode_frontend_frame, encode_frontend_message},
 };
-use bytes::{Bytes, BytesMut};
+use bytes::Bytes;
+#[cfg(test)]
+use bytes::BytesMut;
 use eql_mapper::EqlTermVariant;
 use pg_proto::codec::{FrontendMessage, Parse as PgParse};
 use postgres_types::Type;
@@ -87,6 +88,22 @@ impl Parse {
     }
 }
 
+impl From<PgParse> for Parse {
+    fn from(parse: PgParse) -> Self {
+        Self {
+            name: parse.statement,
+            statement: String::from_utf8_lossy(&parse.query).into_owned(),
+            param_types: parse
+                .parameter_types
+                .into_iter()
+                .map(|oid| oid as i32)
+                .collect(),
+            dirty: false,
+        }
+    }
+}
+
+#[cfg(test)]
 impl TryFrom<&BytesMut> for Parse {
     type Error = Error;
 
@@ -98,7 +115,7 @@ impl TryFrom<&BytesMut> for Parse {
             }
             .into());
         };
-        let name = Name::from(String::from_utf8_lossy(&parse.statement).into_owned());
+        let name = parse.statement;
         let statement = String::from_utf8_lossy(&parse.query).into_owned();
         let param_types = parse
             .parameter_types
@@ -115,12 +132,13 @@ impl TryFrom<&BytesMut> for Parse {
     }
 }
 
+#[cfg(test)]
 impl TryFrom<Parse> for BytesMut {
     type Error = Error;
 
     fn try_from(parse: Parse) -> Result<BytesMut, Error> {
         encode_frontend_message(&FrontendMessage::Parse(PgParse {
-            statement: Bytes::copy_from_slice(parse.name.as_str().as_bytes()),
+            statement: parse.name,
             query: Bytes::from(parse.statement),
             parameter_types: parse
                 .param_types
@@ -128,6 +146,20 @@ impl TryFrom<Parse> for BytesMut {
                 .map(|oid| oid as u32)
                 .collect(),
         }))
+    }
+}
+
+impl From<Parse> for FrontendMessage {
+    fn from(parse: Parse) -> Self {
+        Self::Parse(PgParse {
+            statement: parse.name,
+            query: Bytes::from(parse.statement),
+            parameter_types: parse
+                .param_types
+                .into_iter()
+                .map(|oid| oid as u32)
+                .collect(),
+        })
     }
 }
 
