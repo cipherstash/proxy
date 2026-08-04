@@ -6,9 +6,17 @@ mod tests {
         clear, connect_with_tls, proxy_port, random_id, reset_schema, trace, PROXY,
     };
 
-    /// A statement that always fails during transformation: `eql_v3_boolean` is
-    /// storage-only, so an equality predicate on it cannot be mapped.
-    const UNMAPPABLE: &str = "SELECT id FROM encrypted WHERE encrypted_bool = $1";
+    /// A statement that always fails inside the proxy, at Parse, in every
+    /// configuration: the proxy's SQL parser rejects it before it reaches the
+    /// server (same shape as [`invalid_sql_statement`]).
+    ///
+    /// A transformation failure (e.g. equality on the storage-only
+    /// `eql_v3_boolean`) cannot be used here: type-check errors only surface
+    /// when `CS_DEVELOPMENT__ENABLE_MAPPING_ERRORS` is on, and the CI proxy
+    /// (like production) runs with it off, silently passing such statements
+    /// through. A parse error takes the same failure path in the proxy
+    /// (`handle_statement_error`) regardless of that flag.
+    const FAILS_IN_PROXY: &str = "INSERT INTO encrypted id, encrypted_text VALUES ($1, $2)";
 
     struct Reset;
 
@@ -114,13 +122,14 @@ mod tests {
         }
     }
 
-    /// CIP-3678 regression: a transformation failure on a connection that has
-    /// already run a MAPPED (encrypted) statement must surface the proxy's own
-    /// error as a clean `db error` — not desync the extended-protocol stream
-    /// into a client-side protocol error (`unexpected message from server`) —
-    /// and the connection must remain usable afterwards.
+    /// CIP-3678 regression: a statement that fails inside the proxy on a
+    /// connection that has already run a MAPPED (encrypted) statement must
+    /// surface the proxy's own error as a clean `db error` — not desync the
+    /// extended-protocol stream into a client-side protocol error
+    /// (`unexpected message from server`) — and the connection must remain
+    /// usable afterwards.
     #[tokio::test]
-    async fn transformation_error_after_mapped_statement() {
+    async fn proxy_error_after_mapped_statement() {
         trace();
 
         let client = connect_with_tls(proxy_port()).await;
@@ -135,15 +144,18 @@ mod tests {
             .await
             .unwrap();
 
-        // A statement that fails during transformation must return the proxy's
+        // A statement that fails inside the proxy must return the proxy's
         // error, delivered as a database error.
-        let err = client.query(UNMAPPABLE, &[&false]).await.unwrap_err();
+        let err = client
+            .query(FAILS_IN_PROXY, &[&random_id(), &"cip-3678"])
+            .await
+            .unwrap_err();
         let db_err = err.as_db_error().unwrap_or_else(|| {
             panic!("expected a db error carrying the proxy's message, got: {err:?}")
         });
         assert!(
-            db_err.message().contains("encrypted_bool"),
-            "expected the proxy's transformation error, got: {db_err:?}"
+            db_err.message().contains("sql parser error"),
+            "expected the proxy's parse error, got: {db_err:?}"
         );
 
         // The connection must remain usable.
@@ -152,11 +164,11 @@ mod tests {
         assert_eq!(one, 1);
     }
 
-    /// Companion to [`transformation_error_after_mapped_statement`]: the same
-    /// failing statement on a connection that has only run passthrough
-    /// statements. This path already worked; keep it covered.
+    /// Companion to [`proxy_error_after_mapped_statement`]: the same failing
+    /// statement on a connection that has only run passthrough statements.
+    /// This path already worked; keep it covered.
     #[tokio::test]
-    async fn transformation_error_after_passthrough_statement() {
+    async fn proxy_error_after_passthrough_statement() {
         trace();
 
         let client = connect_with_tls(proxy_port()).await;
@@ -164,13 +176,16 @@ mod tests {
         // Passthrough warm-up.
         client.query("SELECT 1::int4", &[]).await.unwrap();
 
-        let err = client.query(UNMAPPABLE, &[&false]).await.unwrap_err();
+        let err = client
+            .query(FAILS_IN_PROXY, &[&random_id(), &"cip-3678"])
+            .await
+            .unwrap_err();
         let db_err = err.as_db_error().unwrap_or_else(|| {
             panic!("expected a db error carrying the proxy's message, got: {err:?}")
         });
         assert!(
-            db_err.message().contains("encrypted_bool"),
-            "expected the proxy's transformation error, got: {db_err:?}"
+            db_err.message().contains("sql parser error"),
+            "expected the proxy's parse error, got: {db_err:?}"
         );
 
         // The connection must remain usable.
