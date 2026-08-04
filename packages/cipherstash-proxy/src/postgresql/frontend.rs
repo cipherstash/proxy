@@ -102,21 +102,6 @@ where
     server_writer: W,
     /// Session context tracking statements, portals, and keyset IDs
     context: Context<S>,
-    /// Error state flag for extended query protocol error handling
-    error_state: Option<ErrorState>,
-}
-
-/// How a frontend failure was delivered, which determines how the batch's
-/// Sync must be answered.
-#[derive(Debug)]
-enum ErrorState {
-    /// An exception statement was forwarded to the server in place of the
-    /// failed message. The server produces the ErrorResponse and ReadyForQuery
-    /// for this batch, so the client's Sync is discarded.
-    ExceptionInjected,
-    /// A FATAL error was written directly to the client; nothing was forwarded
-    /// to the server, so the proxy answers the Sync with its own ReadyForQuery.
-    ErrorResponseSent,
 }
 
 impl<R, W, S> Frontend<R, W, S>
@@ -144,7 +129,6 @@ where
             client_sender,
             server_writer,
             context,
-            error_state: None,
         }
     }
 
@@ -178,7 +162,10 @@ where
         )
         .await?;
 
-        self.context.protocol_frontend_received(&protocol_message)?;
+        let recovering_from_extended_error = self.context.protocol_in_extended_error()?;
+        self.context
+            .protocol_frontend_received(protocol_message.clone())
+            .await?;
 
         let sent: u64 = bytes.len() as u64;
         counter!(CLIENTS_BYTES_RECEIVED_TOTAL).increment(sent);
@@ -190,10 +177,9 @@ where
 
         // When an error is detected while processing any extended-query message, the backend issues ErrorResponse, then reads and discards messages until a Sync is reached,
         // https://www.postgresql.org/docs/current/protocol-flow.html#PROTOCOL-FLOW-EXT-QUERY
-        if self.error_state.is_some() {
+        if recovering_from_extended_error {
             warn!(target: PROTOCOL,
                 client_id = self.context.client_id,
-                error_state = ?self.error_state,
                 message = ?protocol_message,
             );
             if !matches!(protocol_message, FrontendMessage::Sync) {
@@ -213,18 +199,9 @@ where
                             msg = "Query Handler Error",
                             error = ?err.to_string(),
                         );
-                        // Replace the failed Query with an exception statement.
-                        // The server's ErrorResponse and ReadyForQuery answer
-                        // the client's Query in order. See handle_statement_error.
-                        match self.handle_statement_error(err)? {
-                            Some(exception) => bytes = exception,
-                            // FATAL error written directly to the client; the
-                            // simple protocol still expects a ReadyForQuery.
-                            None => {
-                                self.send_ready_for_query()?;
-                                return Ok(());
-                            }
-                        }
+                        self.send_error_response(err).await?;
+                        self.send_ready_for_query().await?;
+                        return Ok(());
                     }
                 }
             }
@@ -245,20 +222,8 @@ where
                             msg = "Parse Handler Error",
                             error = ?err.to_string(),
                         );
-                        // Replace the failed Parse with an exception statement
-                        // and drop the rest of the batch until Sync. The
-                        // server's ErrorResponse and ReadyForQuery answer the
-                        // client's batch in order. See handle_statement_error.
-                        match self.handle_statement_error(err)? {
-                            Some(exception) => {
-                                self.error_state = Some(ErrorState::ExceptionInjected);
-                                bytes = exception;
-                            }
-                            None => {
-                                self.error_state = Some(ErrorState::ErrorResponseSent);
-                                return Ok(());
-                            }
-                        }
+                        self.send_error_response(err).await?;
+                        return Ok(());
                     }
                 }
             }
@@ -267,27 +232,33 @@ where
                     Ok(Some(mapped)) => bytes = mapped,
                     // No mapping needed, don't change the bytes
                     Ok(None) => (),
-                    Err(err) => {
-                        warn!(target: PROTOCOL,
-                            client_id = self.context.client_id,
-                            msg = "Bind Handler Error",
-                            error = ?err.to_string(),
-                        );
-                        // Replace the failed Bind with an exception statement
-                        // and drop the rest of the batch until Sync. The
-                        // server's ErrorResponse and ReadyForQuery answer the
-                        // client's batch in order. See handle_statement_error.
-                        match self.handle_statement_error(err)? {
-                            Some(exception) => {
-                                self.error_state = Some(ErrorState::ExceptionInjected);
-                                bytes = exception;
-                            }
-                            None => {
-                                self.error_state = Some(ErrorState::ErrorResponseSent);
-                                return Ok(());
-                            }
+                    Err(err) => match err {
+                        Error::Mapping(MappingError::InvalidParameter(_)) => {
+                            warn!(target: PROTOCOL,
+                                client_id = self.context.client_id,
+                                msg = "EncryptError::InvalidParameter",
+                            );
+                            self.send_error_response(err).await?;
+                            return Ok(());
                         }
-                    }
+                        Error::Encrypt(EncryptError::UnknownKeysetIdentifier { .. }) => {
+                            warn!(target: PROTOCOL,
+                                client_id = self.context.client_id,
+                                msg = "EncryptError::UnknownKeysetIdentifier",
+                            );
+                            self.send_error_response(err).await?;
+                            return Ok(());
+                        }
+                        _ => {
+                            warn!(target: PROTOCOL,
+                                client_id = self.context.client_id,
+                                msg = "Bind Error",
+                                err = err.to_string()
+                            );
+                            self.send_error_response(err).await?;
+                            return Ok(());
+                        }
+                    },
                 }
             }
             FrontendMessage::Sync => {
@@ -298,25 +269,13 @@ where
 
                 self.context.reload_schema_if_changed().await;
 
-                match self.error_state.take() {
-                    Some(ErrorState::ExceptionInjected) => {
-                        // The exception statement injected on failure already
-                        // elicits the ErrorResponse and ReadyForQuery for this
-                        // batch from the server. Forwarding the Sync would
-                        // produce a second ReadyForQuery and desync the client.
-                        debug!(target: PROTOCOL,
-                            client_id = self.context.client_id,
-                            msg = "Discard Sync for failed batch",
-                        );
-                        return Ok(());
-                    }
-                    Some(ErrorState::ErrorResponseSent) => {
-                        // Nothing was forwarded to the server for this batch;
-                        // answer the Sync directly.
-                        self.send_ready_for_query()?;
-                        return Ok(());
-                    }
-                    None => {}
+                if recovering_from_extended_error {
+                    debug!(target: PROTOCOL,
+                        client_id = self.context.client_id,
+                        msg = "Ready for Query",
+                    );
+                    self.send_ready_for_query().await?;
+                    return Ok(());
                 }
             }
             FrontendMessage::Close(_) => {
@@ -336,7 +295,6 @@ where
     }
 
     pub async fn write_to_server(&mut self, bytes: BytesMut) -> Result<(), Error> {
-        self.context.protocol_frontend_forwarded(&bytes)?;
         debug!(target: PROTOCOL, msg = "Write to server", ?bytes);
         let sent: u64 = bytes.len() as u64;
         counter!(SERVER_BYTES_SENT_TOTAL).increment(sent);
@@ -1262,7 +1220,7 @@ where
     /// Send a ReadyForQuery to the client, answering a Sync (or simple Query)
     /// for a batch of which nothing reached the server.
     ///
-    fn send_ready_for_query(&mut self) -> Result<(), Error> {
+    async fn send_ready_for_query(&mut self) -> Result<(), Error> {
         let message = protocol::encode_backend_message(&BackendMessage::ReadyForQuery(
             TransactionStatus::Idle,
         ))?;
@@ -1273,9 +1231,9 @@ where
             ?message,
         );
 
-        self.context.protocol_backend_forwarded(&message)?;
+        self.context.protocol_backend_forwarded(&message).await?;
         self.client_sender.send(message)?;
-
+        self.context.protocol_backend_sent();
         Ok(())
     }
 
@@ -1541,14 +1499,15 @@ where
     fn client_id(&self) -> i32 {
         self.context.client_id
     }
+}
 
-    /// Write an ErrorResponse directly to the client.
-    ///
-    /// Statement failures must NOT use this — they go through the server via
-    /// [`Frontend::handle_statement_error`] so the error is sequenced after any
-    /// in-flight responses (CIP-3678). A direct write is only safe when the
-    /// connection is being abandoned.
-    fn send_error_response(&mut self, err: Error) -> Result<(), Error> {
+impl<R, W, S> Frontend<R, W, S>
+where
+    R: AsyncRead + Unpin,
+    W: AsyncWrite + Unpin,
+    S: EncryptionService,
+{
+    async fn send_error_response(&mut self, err: Error) -> Result<(), Error> {
         let error_response = self.error_to_response(err);
         let message = protocol::encode_backend_message(&error_response.into_backend_message())?;
 
@@ -1558,11 +1517,9 @@ where
             ?message,
         );
 
-        self.context.protocol_backend_forwarded(&message)?;
+        self.context.protocol_backend_forwarded(&message).await?;
         self.client_sender.send(message)?;
-        // Frontend-specific: set error state for extended query protocol
-        self.error_state = Some(ErrorState::ErrorResponseSent);
-
+        self.context.protocol_backend_sent();
         Ok(())
     }
 }
