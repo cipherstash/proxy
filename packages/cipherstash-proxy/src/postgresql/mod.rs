@@ -9,8 +9,9 @@ mod handler;
 mod message_buffer;
 mod messages;
 mod parser;
-mod protocol;
 mod startup;
+#[cfg(test)]
+mod test_codec;
 
 pub use context::column::Column;
 pub use context::Context;

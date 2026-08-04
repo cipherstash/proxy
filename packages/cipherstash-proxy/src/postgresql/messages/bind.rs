@@ -11,7 +11,7 @@ use crate::postgresql::data::{
 };
 use crate::postgresql::format_code::FormatCode;
 #[cfg(test)]
-use crate::postgresql::protocol::{decode_frontend_frame, encode_frontend_message};
+use crate::postgresql::test_codec::{decode_frontend_frame, encode_frontend_message};
 use crate::{EqlOutput, EqlQueryPayload};
 use bytes::{BufMut, BytesMut};
 use cipherstash_client::encryption::Plaintext;

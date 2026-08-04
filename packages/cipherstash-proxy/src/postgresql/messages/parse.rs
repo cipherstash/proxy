@@ -3,7 +3,7 @@ use crate::postgresql::context::statement::OutputParam;
 #[cfg(test)]
 use crate::{
     error::{Error, ProtocolError},
-    postgresql::protocol::{decode_frontend_frame, encode_frontend_message},
+    postgresql::test_codec::{decode_frontend_frame, encode_frontend_message},
 };
 use bytes::Bytes;
 #[cfg(test)]

@@ -12,7 +12,6 @@ use crate::log::{CONTEXT, DEVELOPMENT, MAPPER, PROTOCOL};
 use crate::postgresql::context::Portal;
 use crate::postgresql::messages::data_row::DataRow;
 use crate::postgresql::messages::param_description::ParamDescription;
-use crate::postgresql::protocol::{self};
 use crate::prometheus::{
     CLIENTS_BYTES_SENT_TOTAL, DECRYPTED_VALUES_TOTAL, DECRYPTION_DURATION_SECONDS,
     DECRYPTION_ERROR_TOTAL, DECRYPTION_REQUESTS_TOTAL, ROWS_ENCRYPTED_TOTAL,
@@ -28,6 +27,19 @@ use pg_proto::{
 use std::time::Instant;
 use tokio::io::AsyncRead;
 use tracing::{debug, error, info, warn};
+
+async fn receive_backend<S: AsyncRead + Unpin>(
+    reader: &mut Buffered<S, BackendDirection>,
+    connection_timeout: Option<std::time::Duration>,
+) -> Result<BackendMessage, Error> {
+    match connection_timeout {
+        Some(duration) => tokio::time::timeout(duration, reader.receive_backend())
+            .await
+            .map_err(|_| Error::ConnectionTimeout { duration })?
+            .map_err(Into::into),
+        None => reader.receive_backend().await.map_err(Into::into),
+    }
+}
 
 /// The PostgreSQL proxy backend that handles server-to-client message processing.
 ///
@@ -153,11 +165,8 @@ where
     /// error occurs that should terminate the connection.
     pub async fn rewrite(&mut self) -> Result<(), Error> {
         let read_start = Instant::now();
-        let protocol_message = protocol::read_backend_message(
-            &mut self.server_reader,
-            self.context.connection_timeout(),
-        )
-        .await?;
+        let protocol_message =
+            receive_backend(&mut self.server_reader, self.context.connection_timeout()).await?;
         let mut outbound_message = protocol_message.clone();
 
         let session_item = self.server_reader.project_backend(protocol_message.clone());

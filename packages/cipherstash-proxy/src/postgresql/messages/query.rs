@@ -1,7 +1,7 @@
 #[cfg(test)]
 use crate::error::{Error, ProtocolError};
 #[cfg(test)]
-use crate::postgresql::protocol::{decode_frontend_frame, encode_frontend_message};
+use crate::postgresql::test_codec::{decode_frontend_frame, encode_frontend_message};
 
 use bytes::Bytes;
 #[cfg(test)]

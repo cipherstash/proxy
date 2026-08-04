@@ -10,7 +10,7 @@ use crate::postgresql::format_code::FormatCode;
 #[cfg(test)]
 use crate::{
     error::{Error, ProtocolError},
-    postgresql::protocol::{decode_backend_frame, encode_backend_message},
+    postgresql::test_codec::{decode_backend_frame, encode_backend_message},
 };
 
 #[derive(Debug)]

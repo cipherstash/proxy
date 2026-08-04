@@ -2,7 +2,7 @@ use crate::EqlCiphertext;
 #[cfg(test)]
 use crate::{
     error::ProtocolError,
-    postgresql::protocol::{decode_backend_frame, encode_backend_message},
+    postgresql::test_codec::{decode_backend_frame, encode_backend_message},
 };
 use crate::{
     error::{EncryptError, Error},
