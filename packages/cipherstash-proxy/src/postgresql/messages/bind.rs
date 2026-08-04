@@ -24,14 +24,10 @@ use tracing::debug;
 /// See: <https://www.postgresql.org/docs/current/protocol-message-formats.html>
 #[derive(Clone, Debug)]
 pub struct Bind {
-    pub code: char,
     pub portal: Name,
     pub prepared_statement: Name,
-    pub num_param_format_codes: i16,
     pub param_format_codes: Vec<FormatCode>,
-    pub num_param_values: i16,
     pub param_values: Vec<BindParam>,
-    pub num_result_column_format_codes: i16,
     pub result_columns_format_codes: Vec<FormatCode>,
     /// Set when the param list was rebuilt because the rewrite reshaped the
     /// params. The message must then be re-sent even if no individual param was
@@ -250,8 +246,6 @@ impl Bind {
         }
 
         self.param_format_codes = param_values.iter().map(|param| param.format_code).collect();
-        self.num_param_format_codes = self.param_format_codes.len() as i16;
-        self.num_param_values = param_values.len() as i16;
         self.param_values = param_values;
         self.reshaped = true;
 
@@ -466,17 +460,16 @@ impl TryFrom<&BytesMut> for Bind {
             .copied()
             .map(FormatCode::from)
             .collect::<Vec<_>>();
-        let num_param_format_codes = param_format_codes.len() as i16;
-        let num_param_values = bind.parameters.len() as i16;
+        let num_param_values = bind.parameters.len();
         let mut param_values = Vec::with_capacity(bind.parameters.len());
         for (idx, parameter) in bind.parameters.into_iter().enumerate() {
             let format_code = match param_format_codes.len() {
                 0 => FormatCode::Text,
                 1 => param_format_codes[0],
-                len if len == num_param_values as usize => param_format_codes[idx],
+                len if len == num_param_values => param_format_codes[idx],
                 _ => {
                     return Err(ProtocolError::ParameterFormatCodesMismatch {
-                        expected: num_param_values as usize,
+                        expected: num_param_values,
                         received: param_format_codes.len(),
                     }
                     .into())
@@ -495,17 +488,11 @@ impl TryFrom<&BytesMut> for Bind {
             .copied()
             .map(FormatCode::from)
             .collect::<Vec<_>>();
-        let num_result_column_format_codes = result_columns_format_codes.len() as i16;
-
         Ok(Bind {
-            code: 'B',
             portal,
             prepared_statement,
-            num_param_format_codes,
             param_format_codes,
-            num_param_values,
             param_values,
-            num_result_column_format_codes,
             result_columns_format_codes,
             reshaped: false,
         })
@@ -516,22 +503,6 @@ impl TryFrom<Bind> for BytesMut {
     type Error = Error;
 
     fn try_from(bind: Bind) -> Result<BytesMut, Self::Error> {
-        if bind.num_param_format_codes != bind.param_format_codes.len() as i16 {
-            let err = ProtocolError::ParameterFormatCodesMismatch {
-                expected: bind.num_param_format_codes as usize,
-                received: bind.param_format_codes.len(),
-            };
-            return Err(err.into());
-        }
-
-        if bind.num_result_column_format_codes != bind.result_columns_format_codes.len() as i16 {
-            let err = ProtocolError::ParameterResultFormatCodesMismatch {
-                expected: bind.num_result_column_format_codes as usize,
-                received: bind.result_columns_format_codes.len(),
-            };
-            return Err(err.into());
-        }
-
         encode_frontend_message(&FrontendMessage::Bind(PgBind {
             portal: Bytes::copy_from_slice(bind.portal.as_str().as_bytes()),
             statement: Bytes::copy_from_slice(bind.prepared_statement.as_str().as_bytes()),

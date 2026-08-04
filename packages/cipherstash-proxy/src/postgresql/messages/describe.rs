@@ -8,23 +8,7 @@ use std::convert::TryFrom;
 use super::target::Target;
 use super::Name;
 
-///
-/// Describe b'D' (Frontend) message.
-///
-/// See: <https://www.postgresql.org/docs/current/protocol-message-formats.html>
-///
-///     Byte1('D')
-///     Identifies the message as a Describe command.
-///
-///     Int32
-///     Length of message contents in bytes, including self.
-///
-///     Byte1
-///     'S' to describe a prepared statement; or 'P' to describe a portal.
-///
-///     String
-///     The name of the prepared statement or portal to describe (an empty string selects the unnamed prepared statement or portal).
-
+/// Proxy state extracted from a typed frontend `Describe` message.
 #[derive(Debug, Clone)]
 pub struct Describe {
     pub target: Target,

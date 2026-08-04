@@ -151,9 +151,8 @@ where
     /// error occurs that should terminate the connection.
     pub async fn rewrite(&mut self) -> Result<(), Error> {
         let read_start = Instant::now();
-        let (code, mut bytes, protocol_message) = protocol::read_backend_message(
+        let (mut bytes, protocol_message) = protocol::read_backend_message(
             &mut self.server_reader,
-            self.context.client_id,
             self.context.connection_timeout(),
         )
         .await?;
@@ -171,7 +170,7 @@ where
                 client_id = self.context.client_id,
                 msg = "Slow database response",
                 duration_ms = read_duration.as_millis(),
-                message_code = ?code,
+                message = ?protocol_message,
             );
         }
 
@@ -235,8 +234,8 @@ where
                 self.context.complete_execution();
                 self.context.finish_session();
             }
-            BackendMessage::ErrorResponse(_) => {
-                if let Some(b) = self.error_response_handler(&bytes)? {
+            BackendMessage::ErrorResponse(ref response) => {
+                if let Some(b) = self.error_response_handler(response, &bytes) {
                     bytes = b
                 }
 
@@ -292,7 +291,7 @@ where
                 debug!(target: PROTOCOL,
                     client_id = self.context.client_id,
                     msg = "Passthrough",
-                    ?code,
+                    message = ?protocol_message,
                 );
             }
         }
@@ -338,11 +337,15 @@ where
     ///
     /// Always returns `Some(bytes)` containing the original error response
     /// to forward to the client unchanged.
-    fn error_response_handler(&mut self, bytes: &BytesMut) -> Result<Option<BytesMut>, Error> {
-        let error_response = ErrorResponse::try_from(bytes)?;
+    fn error_response_handler(
+        &mut self,
+        response: &pg_proto::codec::DiagnosticResponse,
+        bytes: &BytesMut,
+    ) -> Option<BytesMut> {
+        let error_response = ErrorResponse::from(response);
         error!(msg = "PostgreSQL Error", error = ?error_response);
         info!(msg = "PostgreSQL Errors originate in the database");
-        Ok(Some(bytes.to_owned()))
+        Some(bytes.to_owned())
     }
 
     ///
@@ -730,7 +733,7 @@ where
         // Ensure any buffered data is cleared before sending error
         self.buffer.clear();
 
-        let message = BytesMut::try_from(error_response)?;
+        let message = protocol::encode_backend_message(&error_response.into_backend_message())?;
 
         debug!(
             target: "PROTOCOL",
