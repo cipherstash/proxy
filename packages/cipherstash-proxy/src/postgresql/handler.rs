@@ -4,7 +4,7 @@ use crate::connect::ChannelWriter;
 use crate::error::ConfigError;
 use crate::log::AUTHENTICATION;
 use crate::postgresql::messages::error_response::ErrorResponse;
-use crate::postgresql::{protocol, startup};
+use crate::postgresql::startup;
 use crate::proxy::ZeroKms;
 use crate::{
     connect::AsyncStream,
@@ -96,6 +96,23 @@ where
         .await
         .map_err(|_| Error::ConnectionTimeout { duration })??;
     Ok((conn, message))
+}
+
+async fn receive_auth_message<S: AsyncRead + Unpin>(
+    stream: &mut Buffered<S, BackendDirection>,
+) -> Result<Authentication, Error> {
+    let duration = Duration::from_secs(10);
+    let message = timeout(duration, stream.receive_backend())
+        .await
+        .map_err(|_| Error::ConnectionTimeout { duration })??;
+    let BackendMessage::Authentication(authentication) = message else {
+        return Err(ProtocolError::UnexpectedAuthenticationResponse {
+            expected: "Authentication".into(),
+            received: -1,
+        }
+        .into());
+    };
+    Ok(authentication)
 }
 
 async fn authenticate_upstream(
@@ -291,8 +308,17 @@ pub async fn handler(client_stream: AsyncStream, context: Context<ZeroKms>) -> R
 
         match pre_startup.offer_pre_startup(startup_message) {
             PreStartupOffer::Ssl(decision) => {
-                let mut stream = decision.into_transport().into_inner();
-                startup::send_ssl_response(&mut stream, context.use_tls()).await?;
+                let mut stream = if context.use_tls() {
+                    let (accepted, reply) = decision.accept_ssl();
+                    let mut stream = accepted.into_transport().into_inner();
+                    stream.write_all(&[reply]).await?;
+                    stream
+                } else {
+                    let (rejected, reply) = decision.reject_ssl();
+                    let mut stream = rejected.into_transport().into_inner();
+                    stream.write_all(&[reply]).await?;
+                    stream
+                };
                 if let Some(ref tls) = context.tls_config() {
                     stream = match stream {
                         AsyncStream::Tcp(tcp_stream) => {
@@ -532,13 +558,6 @@ fn authentication_method_code(authentication: &Authentication) -> i32 {
     }
 }
 
-fn password_message(password: String) -> Result<FrontendMessage, Error> {
-    let password = std::ffi::CString::new(password)?;
-    Ok(FrontendMessage::PasswordResponse(Bytes::copy_from_slice(
-        password.as_bytes_with_nul(),
-    )))
-}
-
 pub fn md5_hash(username: &[u8], password: &[u8], salt: &[u8; 4]) -> String {
     let mut md5 = Md5::new();
     md5.update(password);
@@ -581,7 +600,7 @@ async fn scram_sha_256_plus_handler<S: AsyncRead + AsyncWrite + Unpin>(
     initial.extend_from_slice(&bytes);
     send_frontend_message(stream, FrontendMessage::PasswordResponse(initial.freeze())).await?;
 
-    let auth = protocol::read_auth_message(stream).await?;
+    let auth = receive_auth_message(stream).await?;
 
     let Authentication::SaslContinue(bytes) = auth else {
         return Err(ProtocolError::UnexpectedAuthenticationResponse {
@@ -598,7 +617,7 @@ async fn scram_sha_256_plus_handler<S: AsyncRead + AsyncWrite + Unpin>(
     )
     .await?;
 
-    let auth = protocol::read_auth_message(stream).await?;
+    let auth = receive_auth_message(stream).await?;
     let Authentication::SaslFinal(bytes) = auth else {
         return Err(ProtocolError::UnexpectedAuthenticationResponse {
             expected: "SaslFinal".into(),
@@ -608,7 +627,7 @@ async fn scram_sha_256_plus_handler<S: AsyncRead + AsyncWrite + Unpin>(
     };
     scram.finish(&bytes)?;
 
-    let auth = protocol::read_auth_message(stream).await?;
+    let auth = receive_auth_message(stream).await?;
 
     if matches!(auth, Authentication::Ok) {
         debug!(target: AUTHENTICATION, msg = "SASL authentication successful");
