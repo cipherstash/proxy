@@ -5,7 +5,8 @@ use crate::{
     Relation, ScopeError, ScopeTracker,
 };
 use sqltk::parser::ast::{
-    Cte, Ident, Insert, ObjectNamePart, TableAlias, TableFactor, TableObject,
+    Cte, Ident, Insert, ObjectNamePart, OnConflict, OnConflictAction, OnInsert, TableAlias,
+    TableFactor, TableObject,
 };
 use sqltk::{Break, Visitable, Visitor};
 use std::{cell::RefCell, fmt::Debug, marker::PhantomData, ops::ControlFlow, rc::Rc, sync::Arc};
@@ -38,6 +39,7 @@ impl<'ast> Importer<'ast> {
         if let Insert {
             table: TableObject::TableName(table_name),
             table_alias,
+            on,
             ..
         } = insert
         {
@@ -45,10 +47,38 @@ impl<'ast> Importer<'ast> {
 
             let projection = Projection::new_from_schema_table(table.clone());
 
+            // The relation is named — by its alias when one is written, by the
+            // table name otherwise — so that qualified references (`t.col` in
+            // `RETURNING` or in `ON CONFLICT DO UPDATE`) can resolve.
+            let name = table_alias.clone().or_else(|| {
+                let ObjectNamePart::Identifier(ident) = table_name.0.last().unwrap();
+                Some(ident.clone())
+            });
+
             self.scope_tracker.borrow_mut().add_relation(Relation {
-                name: table_alias.clone(),
-                projection_type: Type::Value(Value::Projection(projection)).into(),
+                name,
+                projection_type: Type::Value(Value::Projection(projection.clone())).into(),
             })?;
+
+            // `ON CONFLICT DO UPDATE` can read the row proposed for insertion
+            // through the `excluded` pseudo-table, which projects exactly the
+            // target table's columns. Bringing it into scope is what gives
+            // `excluded.<col>` a type — including the column's EQL type, so an
+            // upsert like `SET enc = excluded.enc` is fully constrained.
+            //
+            // An unqualified column reference in the `DO UPDATE` expressions is
+            // now ambiguous (both relations project it), which mirrors
+            // PostgreSQL's own `column reference is ambiguous` error there.
+            if let Some(OnInsert::OnConflict(OnConflict {
+                action: OnConflictAction::DoUpdate(_),
+                ..
+            })) = on
+            {
+                self.scope_tracker.borrow_mut().add_relation(Relation {
+                    name: Some(Ident::new("excluded")),
+                    projection_type: Type::Value(Value::Projection(projection)).into(),
+                })?;
+            }
 
             Ok(())
         } else {

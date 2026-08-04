@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::mem;
 use std::sync::Arc;
 
-use sqltk::parser::ast::{Expr, Value as SqltkValue, WindowType};
+use sqltk::parser::ast::{Expr, Value as SqltkValue, WindowSpec};
 use sqltk::{NodeKey, NodePath, Visitable};
 
 use crate::unifier::{DomainIdentity, Type, Value};
@@ -26,6 +26,11 @@ use super::TransformationRule;
 /// `c`, the randomised ciphertext — so every row lands in its own partition and
 /// every window function silently sees a partition of one.
 ///
+/// The rule matches the [`WindowSpec`] node itself, so it fires wherever a
+/// window specification is written: inline in `OVER (...)`, or as a named
+/// window definition in `WINDOW w AS (...)` — which `OVER w` then refers to
+/// without containing a spec of its own.
+///
 /// The window's own `ORDER BY` needs no handling here:
 /// [`super::RewriteEqlOrderBy`] matches on `OrderByExpr` wherever it appears,
 /// including inside a window specification.
@@ -48,23 +53,12 @@ impl<'ast> RewriteEqlPartitionBy<'ast> {
         }
     }
 
-    /// The `PARTITION BY` expressions of a function's window, if it has one.
-    fn partition_by(expr: &Expr) -> Option<&Vec<Expr>> {
-        let Expr::Function(function) = expr else {
-            return None;
-        };
-
-        match function.over.as_ref()? {
-            WindowType::WindowSpec(spec) => Some(&spec.partition_by),
-            WindowType::NamedWindow(_) => None,
-        }
-    }
-
-    /// The encrypted columns a window partitions on, positionally.
-    fn partitioned_identities(&self, expr: &'ast Expr) -> Vec<Option<DomainIdentity>> {
-        Self::partition_by(expr)
-            .map(|exprs| exprs.iter().map(|e| self.eql_identity_of(e)).collect())
-            .unwrap_or_default()
+    /// The encrypted columns a window specification partitions on, positionally.
+    fn partitioned_identities(&self, spec: &'ast WindowSpec) -> Vec<Option<DomainIdentity>> {
+        spec.partition_by
+            .iter()
+            .map(|e| self.eql_identity_of(e))
+            .collect()
     }
 }
 
@@ -74,9 +68,9 @@ impl<'ast> TransformationRule<'ast> for RewriteEqlPartitionBy<'ast> {
         node_path: &NodePath<'ast>,
         target_node: &mut N,
     ) -> Result<bool, EqlMapperError> {
-        // Read the identities from the ORIGINAL expression — `node_types` is
-        // keyed by it, and the target's children are already rewritten.
-        let Some((original,)) = node_path.last_1_as::<Expr>() else {
+        // Read the identities from the ORIGINAL spec — `node_types` is keyed
+        // by it, and the target's children are already rewritten.
+        let Some((original,)) = node_path.last_1_as::<WindowSpec>() else {
             return Ok(false);
         };
 
@@ -85,15 +79,11 @@ impl<'ast> TransformationRule<'ast> for RewriteEqlPartitionBy<'ast> {
             return Ok(false);
         }
 
-        let Some(Expr::Function(target)) = target_node.downcast_mut::<Expr>() else {
+        let Some(target) = target_node.downcast_mut::<WindowSpec>() else {
             return Ok(false);
         };
 
-        let Some(WindowType::WindowSpec(spec)) = target.over.as_mut() else {
-            return Ok(false);
-        };
-
-        for (expr, identity) in spec.partition_by.iter_mut().zip(partitioned.iter()) {
+        for (expr, identity) in target.partition_by.iter_mut().zip(partitioned.iter()) {
             let Some(identity) = identity else { continue };
 
             let Some(term_fn) = identity.eq_term_fn() else {
@@ -111,7 +101,7 @@ impl<'ast> TransformationRule<'ast> for RewriteEqlPartitionBy<'ast> {
     }
 
     fn would_edit<N: Visitable>(&mut self, node_path: &NodePath<'ast>, _target_node: &N) -> bool {
-        match node_path.last_1_as::<Expr>() {
+        match node_path.last_1_as::<WindowSpec>() {
             Some((original,)) => self
                 .partitioned_identities(original)
                 .iter()
