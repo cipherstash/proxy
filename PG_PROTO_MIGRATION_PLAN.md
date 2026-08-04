@@ -5,7 +5,7 @@
 - Create `/Users/jamessadler/cipherstash/proxy-pg-proto` from current `main` (`15b7f996`) on branch `refactor/pg-proto`.
 - Save this migration plan as `PG_PROTO_MIGRATION_PLAN.md` in that worktree’s repository root.
 - Limit the initial deliverable to the worktree, branch, and plan document; implementation follows separately.
-- Target a full migration to published [`pg-proto` 0.1.0](https://crates.io/crates/pg-proto/0.1.0), covering codecs, startup/authentication, and runtime protocol-state validation.
+- Target a full migration to published [`pg-proto` 0.2.1](https://crates.io/crates/pg-proto/0.2.1), covering codecs, startup/authentication, runtime protocol-state validation, and bounded pipeline orchestration.
 
 ## Implementation Changes
 
