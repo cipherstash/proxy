@@ -1,14 +1,16 @@
 use crate::error::{Error, ProtocolError};
+#[cfg(test)]
 use bytes::BytesMut;
-use pg_proto::codec::{
-    Authentication, Backend, BackendMessage, Frontend, FrontendMessage, PgCodec,
-};
+#[cfg(test)]
+use pg_proto::codec::PgCodec;
+use pg_proto::codec::{Authentication, Backend, BackendMessage, Frontend, FrontendMessage};
 use pg_proto::transport::Buffered;
 use std::time::Duration;
 use tokio::{io::AsyncRead, time::timeout};
-use tokio_util::codec::Decoder;
-use tokio_util::codec::Encoder;
+#[cfg(test)]
+use tokio_util::codec::{Decoder, Encoder};
 
+#[cfg(test)]
 pub fn decode_frontend_frame(bytes: &BytesMut) -> Result<FrontendMessage, Error> {
     let mut bytes = bytes.clone();
     PgCodec::<Frontend>::default()
@@ -18,6 +20,7 @@ pub fn decode_frontend_frame(bytes: &BytesMut) -> Result<FrontendMessage, Error>
         })
 }
 
+#[cfg(test)]
 pub fn decode_backend_frame(bytes: &BytesMut) -> Result<BackendMessage, Error> {
     let mut bytes = bytes.clone();
     PgCodec::<Backend>::default()
@@ -27,12 +30,14 @@ pub fn decode_backend_frame(bytes: &BytesMut) -> Result<BackendMessage, Error> {
         })
 }
 
+#[cfg(test)]
 pub fn encode_frontend_message(message: &FrontendMessage) -> Result<BytesMut, Error> {
     let mut bytes = BytesMut::new();
     PgCodec::<Frontend>::default().encode(message.to_frame()?, &mut bytes)?;
     Ok(bytes)
 }
 
+#[cfg(test)]
 pub fn encode_backend_message(message: &BackendMessage) -> Result<BytesMut, Error> {
     let mut bytes = BytesMut::new();
     PgCodec::<Backend>::default().encode(message.to_frame()?, &mut bytes)?;
@@ -50,7 +55,7 @@ pub async fn read_auth_message<S: AsyncRead + Unpin>(
     stream: &mut Buffered<S, Backend>,
 ) -> Result<Authentication, Error> {
     let connection_timeout = Duration::from_millis(1000 * 10);
-    let (_bytes, message) = read_backend_message_with_timeout(stream, connection_timeout).await?;
+    let message = read_backend_message_with_timeout(stream, connection_timeout).await?;
     match message {
         BackendMessage::Authentication(authentication) => Ok(authentication),
         _ => Err(ProtocolError::UnexpectedAuthenticationResponse {
@@ -70,7 +75,7 @@ pub async fn read_auth_message<S: AsyncRead + Unpin>(
 pub async fn read_frontend_message<S: AsyncRead + Unpin>(
     stream: &mut Buffered<S, Frontend>,
     connection_timeout: Option<Duration>,
-) -> Result<(BytesMut, FrontendMessage), Error> {
+) -> Result<FrontendMessage, Error> {
     match connection_timeout {
         Some(duration) => read_frontend_message_with_timeout(stream, duration).await,
         None => read_frontend(stream).await,
@@ -80,7 +85,7 @@ pub async fn read_frontend_message<S: AsyncRead + Unpin>(
 pub async fn read_backend_message<S: AsyncRead + Unpin>(
     stream: &mut Buffered<S, Backend>,
     connection_timeout: Option<Duration>,
-) -> Result<(BytesMut, BackendMessage), Error> {
+) -> Result<BackendMessage, Error> {
     match connection_timeout {
         Some(duration) => read_backend_message_with_timeout(stream, duration).await,
         None => read_backend(stream).await,
@@ -96,7 +101,7 @@ pub async fn read_backend_message<S: AsyncRead + Unpin>(
 async fn read_frontend_message_with_timeout<S: AsyncRead + Unpin>(
     stream: &mut Buffered<S, Frontend>,
     duration: Duration,
-) -> Result<(BytesMut, FrontendMessage), Error> {
+) -> Result<FrontendMessage, Error> {
     timeout(duration, read_frontend(stream))
         .await
         .map_err(|_| Error::ConnectionTimeout { duration })?
@@ -105,7 +110,7 @@ async fn read_frontend_message_with_timeout<S: AsyncRead + Unpin>(
 async fn read_backend_message_with_timeout<S: AsyncRead + Unpin>(
     stream: &mut Buffered<S, Backend>,
     duration: Duration,
-) -> Result<(BytesMut, BackendMessage), Error> {
+) -> Result<BackendMessage, Error> {
     timeout(duration, read_backend(stream))
         .await
         .map_err(|_| Error::ConnectionTimeout { duration })?
@@ -120,18 +125,14 @@ async fn read_backend_message_with_timeout<S: AsyncRead + Unpin>(
 ///
 async fn read_frontend<S: AsyncRead + Unpin>(
     stream: &mut Buffered<S, Frontend>,
-) -> Result<(BytesMut, FrontendMessage), Error> {
-    let message = stream.receive_wire().await?;
-    let bytes = encode_frontend_message(&message)?;
-    Ok((bytes, message))
+) -> Result<FrontendMessage, Error> {
+    Ok(stream.receive_wire().await?)
 }
 
 async fn read_backend<S: AsyncRead + Unpin>(
     stream: &mut Buffered<S, Backend>,
-) -> Result<(BytesMut, BackendMessage), Error> {
-    let message = stream.receive_backend().await?;
-    let bytes = encode_backend_message(&message)?;
-    Ok((bytes, message))
+) -> Result<BackendMessage, Error> {
+    Ok(stream.receive_backend().await?)
 }
 
 #[cfg(test)]
@@ -160,8 +161,11 @@ mod tests {
         });
         let mut reader = Buffered::new_frontend(reader);
 
-        let (bytes, _) = read_frontend_message(&mut reader, None).await.unwrap();
-        assert_eq!(&bytes[..], b"Q\0\0\0\x0dselect 1\0");
+        let message = read_frontend_message(&mut reader, None).await.unwrap();
+        assert_eq!(
+            message,
+            FrontendMessage::Query(bytes::Bytes::from_static(b"select 1"))
+        );
         task.await.unwrap();
     }
 

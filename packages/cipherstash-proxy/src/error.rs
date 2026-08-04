@@ -1,5 +1,4 @@
 use crate::{postgresql::Column, Identifier};
-use bytes::BytesMut;
 use cipherstash_client::{encryption, schema::ColumnType};
 use eql_mapper::{EqlMapperError, EqlTermVariant};
 use metrics_exporter_prometheus::BuildError;
@@ -55,7 +54,7 @@ pub enum Error {
     Unknown,
 
     #[error(transparent)]
-    SendError(#[from] tokio::sync::mpsc::error::SendError<BytesMut>),
+    SendError(#[from] tokio::sync::mpsc::error::SendError<pg_proto::codec::BackendMessage>),
 }
 
 impl Error {

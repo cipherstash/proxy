@@ -1,11 +1,13 @@
 use crate::EqlCiphertext;
+#[cfg(test)]
 use crate::{
-    error::{EncryptError, Error, ProtocolError},
+    error::ProtocolError,
+    postgresql::protocol::{decode_backend_frame, encode_backend_message},
+};
+use crate::{
+    error::{EncryptError, Error},
     log::DECRYPT,
-    postgresql::{
-        protocol::{decode_backend_frame, encode_backend_message},
-        Column,
-    },
+    postgresql::Column,
 };
 use bytes::BytesMut;
 use pg_proto::codec::{BackendMessage, DataRow as PgDataRow};
@@ -98,6 +100,7 @@ impl DataColumn {
     }
 }
 
+#[cfg(test)]
 impl TryFrom<&BytesMut> for DataRow {
     type Error = Error;
 
@@ -121,6 +124,21 @@ impl TryFrom<&BytesMut> for DataRow {
     }
 }
 
+impl From<PgDataRow> for DataRow {
+    fn from(row: PgDataRow) -> Self {
+        Self {
+            columns: row
+                .columns
+                .into_iter()
+                .map(|bytes| DataColumn {
+                    bytes: bytes.map(BytesMut::from),
+                })
+                .collect(),
+        }
+    }
+}
+
+#[cfg(test)]
 impl TryFrom<DataRow> for BytesMut {
     type Error = Error;
 
@@ -132,6 +150,18 @@ impl TryFrom<DataRow> for BytesMut {
                 .map(|column| column.bytes.map(|bytes| bytes.freeze()))
                 .collect(),
         }))
+    }
+}
+
+impl From<DataRow> for BackendMessage {
+    fn from(data_row: DataRow) -> Self {
+        Self::DataRow(PgDataRow {
+            columns: data_row
+                .columns
+                .into_iter()
+                .map(|column| column.bytes.map(|bytes| bytes.freeze()))
+                .collect(),
+        })
     }
 }
 

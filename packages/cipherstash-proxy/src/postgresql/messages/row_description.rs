@@ -1,15 +1,16 @@
-use bytes::{Bytes, BytesMut};
+use bytes::Bytes;
+#[cfg(test)]
+use bytes::BytesMut;
 use pg_proto::codec::{
     BackendMessage, FieldDescription as PgFieldDescription, RowDescription as PgRowDescription,
 };
 use postgres_types::Type;
 
+use crate::postgresql::format_code::FormatCode;
+#[cfg(test)]
 use crate::{
     error::{Error, ProtocolError},
-    postgresql::{
-        format_code::FormatCode,
-        protocol::{decode_backend_frame, encode_backend_message},
-    },
+    postgresql::protocol::{decode_backend_frame, encode_backend_message},
 };
 
 #[derive(Debug)]
@@ -57,6 +58,7 @@ impl RowDescriptionField {
     }
 }
 
+#[cfg(test)]
 impl TryFrom<&BytesMut> for RowDescription {
     type Error = Error;
 
@@ -88,6 +90,28 @@ impl TryFrom<&BytesMut> for RowDescription {
     }
 }
 
+impl From<PgRowDescription> for RowDescription {
+    fn from(description: PgRowDescription) -> Self {
+        Self {
+            fields: description
+                .fields
+                .into_iter()
+                .map(|field| RowDescriptionField {
+                    name: String::from_utf8_lossy(&field.name).into_owned(),
+                    table_oid: field.table_oid as i32,
+                    table_column: field.column,
+                    type_oid: field.type_oid as i32,
+                    type_size: field.type_size,
+                    type_modifier: field.type_modifier,
+                    format_code: field.format.into(),
+                    dirty: false,
+                })
+                .collect(),
+        }
+    }
+}
+
+#[cfg(test)]
 impl TryFrom<RowDescription> for BytesMut {
     type Error = Error;
 
@@ -107,6 +131,26 @@ impl TryFrom<RowDescription> for BytesMut {
             .collect();
 
         encode_backend_message(&BackendMessage::RowDescription(PgRowDescription { fields }))
+    }
+}
+
+impl From<RowDescription> for BackendMessage {
+    fn from(row_description: RowDescription) -> Self {
+        Self::RowDescription(PgRowDescription {
+            fields: row_description
+                .fields
+                .into_iter()
+                .map(|field| PgFieldDescription {
+                    name: Bytes::from(field.name),
+                    table_oid: field.table_oid as u32,
+                    column: field.table_column,
+                    type_oid: field.type_oid as u32,
+                    type_size: field.type_size,
+                    type_modifier: field.type_modifier,
+                    format: field.format_code.into(),
+                })
+                .collect(),
+        })
     }
 }
 

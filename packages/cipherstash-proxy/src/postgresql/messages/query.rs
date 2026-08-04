@@ -1,8 +1,13 @@
+#[cfg(test)]
 use crate::error::{Error, ProtocolError};
+#[cfg(test)]
 use crate::postgresql::protocol::{decode_frontend_frame, encode_frontend_message};
 
-use bytes::{Bytes, BytesMut};
+use bytes::Bytes;
+#[cfg(test)]
+use bytes::BytesMut;
 use pg_proto::codec::FrontendMessage;
+#[cfg(test)]
 use std::convert::TryFrom;
 
 #[derive(Debug, Clone)]
@@ -30,6 +35,16 @@ impl Query {
     }
 }
 
+impl From<Bytes> for Query {
+    fn from(query: Bytes) -> Self {
+        Self {
+            statement: String::from_utf8_lossy(&query).into_owned(),
+            dirty: false,
+        }
+    }
+}
+
+#[cfg(test)]
 impl TryFrom<&BytesMut> for Query {
     type Error = Error;
 
@@ -49,10 +64,17 @@ impl TryFrom<&BytesMut> for Query {
     }
 }
 
+#[cfg(test)]
 impl TryFrom<Query> for BytesMut {
     type Error = Error;
 
     fn try_from(query: Query) -> Result<BytesMut, Error> {
         encode_frontend_message(&FrontendMessage::Query(Bytes::from(query.statement)))
+    }
+}
+
+impl From<Query> for FrontendMessage {
+    fn from(query: Query) -> Self {
+        Self::Query(Bytes::from(query.statement))
     }
 }
