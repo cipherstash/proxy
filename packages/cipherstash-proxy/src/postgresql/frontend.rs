@@ -6,7 +6,6 @@ use super::messages::describe::Describe;
 use super::messages::execute::Execute;
 use super::messages::parse::Parse;
 use super::messages::query::Query;
-use super::messages::FrontendCode as Code;
 use super::parser::SqlParser;
 use super::protocol::{self};
 use crate::connect::Sender;
@@ -22,9 +21,6 @@ use crate::postgresql::data::{
     compose_json_selector_path, json_value_selector_plaintext, literal_from_sql, literal_json_value,
 };
 use crate::postgresql::messages::close::Close;
-use crate::postgresql::messages::error_response::ErrorResponseCode;
-use crate::postgresql::messages::ready_for_query::ReadyForQuery;
-use crate::postgresql::messages::terminate::Terminate;
 use crate::postgresql::messages::{Name, Target};
 use crate::prometheus::{
     CLIENTS_BYTES_RECEIVED_TOTAL, ENCRYPTED_VALUES_TOTAL, ENCRYPTION_DURATION_SECONDS,
@@ -39,7 +35,7 @@ use cipherstash_client::encryption::Plaintext;
 use eql_mapper::{self, EqlMapperError, EqlTermVariant, JsonSelectorSegment, TypeCheckedStatement};
 use metrics::{counter, histogram};
 use pg_escape::quote_literal;
-use pg_proto::codec::FrontendMessage;
+use pg_proto::codec::{BackendMessage, FrontendMessage, TransactionStatus};
 use serde::Serialize;
 use sqltk::parser::ast::{self, Value};
 use sqltk::NodeKey;
@@ -176,9 +172,8 @@ where
     /// Returns `Ok(())` on successful message processing, or an `Error` if a fatal
     /// error occurs that should terminate the connection.
     pub async fn rewrite(&mut self) -> Result<(), Error> {
-        let (code, mut bytes, protocol_message) = protocol::read_frontend_message(
+        let (mut bytes, protocol_message) = protocol::read_frontend_message(
             &mut self.client_reader,
-            self.context.client_id,
             self.context.connection_timeout(),
         )
         .await?;
@@ -193,15 +188,13 @@ where
             return Ok(());
         }
 
-        let code = Code::from(code);
-
         // When an error is detected while processing any extended-query message, the backend issues ErrorResponse, then reads and discards messages until a Sync is reached,
         // https://www.postgresql.org/docs/current/protocol-flow.html#PROTOCOL-FLOW-EXT-QUERY
         if self.error_state.is_some() {
             warn!(target: PROTOCOL,
                 client_id = self.context.client_id,
                 error_state = ?self.error_state,
-                ?code,
+                message = ?protocol_message,
             );
             if !matches!(protocol_message, FrontendMessage::Sync) {
                 return Ok(());
@@ -300,7 +293,7 @@ where
             FrontendMessage::Sync => {
                 debug!(target: PROTOCOL,
                     client_id = self.context.client_id,
-                    ?code,
+                    message = ?protocol_message,
                 );
 
                 self.context.reload_schema_if_changed().await;
@@ -333,7 +326,7 @@ where
                 debug!(target: PROTOCOL,
                     client_id = self.context.client_id,
                     msg = "Passthrough",
-                    ?code,
+                    message = ?protocol_message,
                 );
             }
         }
@@ -360,7 +353,7 @@ where
 
     pub async fn terminate(&mut self) -> Result<(), Error> {
         debug!(target: PROTOCOL, msg = "Terminate server connection");
-        let bytes = Terminate::message();
+        let bytes = protocol::encode_frontend_message(&FrontendMessage::Terminate)?;
         self.write_to_server(bytes).await?;
         Ok(())
     }
@@ -1270,7 +1263,9 @@ where
     /// for a batch of which nothing reached the server.
     ///
     fn send_ready_for_query(&mut self) -> Result<(), Error> {
-        let message = BytesMut::from(ReadyForQuery);
+        let message = protocol::encode_backend_message(&BackendMessage::ReadyForQuery(
+            TransactionStatus::Idle,
+        ))?;
 
         debug!(target: PROTOCOL,
             client_id = self.context.client_id,
@@ -1555,7 +1550,7 @@ where
     /// connection is being abandoned.
     fn send_error_response(&mut self, err: Error) -> Result<(), Error> {
         let error_response = self.error_to_response(err);
-        let message = BytesMut::try_from(error_response)?;
+        let message = protocol::encode_backend_message(&error_response.into_backend_message())?;
 
         debug!(target: PROTOCOL,
             client_id = self.context.client_id,

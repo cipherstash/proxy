@@ -1,9 +1,7 @@
 use std::time::Duration;
 
-use bytes::{BufMut, BytesMut};
-use pg_proto::pre_startup::{
-    decode_pre_startup, EncryptionReply, PreStartupMessage, DEFAULT_MAX_PRE_STARTUP_PACKET_LEN,
-};
+use bytes::BytesMut;
+use pg_proto::pre_startup::{decode_pre_startup, EncryptionReply, PreStartupMessage};
 use tokio::{
     io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt},
     time::timeout,
@@ -14,10 +12,8 @@ use crate::{
     connect::AsyncStream,
     error::{Error, ProtocolError},
     log::PROTOCOL,
-    tls, TandemConfig, SIZE_I32,
+    tls, TandemConfig,
 };
-
-use super::protocol::StartupMessage;
 
 pub async fn with_tls(stream: AsyncStream, config: &TandemConfig) -> Result<AsyncStream, Error> {
     if config.database_tls_disabled() {
@@ -56,7 +52,7 @@ pub async fn with_tls(stream: AsyncStream, config: &TandemConfig) -> Result<Asyn
 pub async fn read_message<S: AsyncRead + Unpin>(
     mut stream: S,
     connection_timeout: Option<Duration>,
-) -> Result<StartupMessage, Error> {
+) -> Result<PreStartupMessage, Error> {
     match connection_timeout {
         Some(duration) => read_message_with_timeout(stream, duration).await,
         None => read(&mut stream).await,
@@ -72,7 +68,7 @@ pub async fn read_message<S: AsyncRead + Unpin>(
 async fn read_message_with_timeout<S: AsyncRead + Unpin>(
     mut stream: S,
     duration: Duration,
-) -> Result<StartupMessage, Error> {
+) -> Result<PreStartupMessage, Error> {
     timeout(duration, read(&mut stream))
         .await
         .map_err(|_| Error::ConnectionTimeout { duration })?
@@ -84,44 +80,20 @@ async fn read_message_with_timeout<S: AsyncRead + Unpin>(
 ///
 ///
 ///
-async fn read<C>(client: &mut C) -> Result<StartupMessage, Error>
+async fn read<C>(client: &mut C) -> Result<PreStartupMessage, Error>
 where
     C: AsyncRead + Unpin,
 {
-    let len = client.read_i32().await?;
-
-    if len < 8 || len as usize > DEFAULT_MAX_PRE_STARTUP_PACKET_LEN {
-        return Err(ProtocolError::UnexpectedMessageLength {
-            code: 0,
-            len: len.max(0) as usize,
+    let mut bytes = BytesMut::with_capacity(4);
+    loop {
+        if let Some(message) = decode_pre_startup(&mut bytes)? {
+            debug!(target: PROTOCOL, pre_startup = ?message);
+            return Ok(message);
         }
-        .into());
+        if client.read_buf(&mut bytes).await? == 0 {
+            return Err(Error::ConnectionClosed);
+        }
     }
-
-    let capacity = len as usize;
-
-    let mut bytes = BytesMut::with_capacity(capacity);
-    bytes.put_i32(len);
-    bytes.resize(capacity, b'0');
-
-    let slice_start = SIZE_I32;
-    client.read_exact(&mut bytes[slice_start..]).await?;
-
-    let mut decode_buffer = bytes.clone();
-    let decoded = decode_pre_startup(&mut decode_buffer)?.ok_or_else(|| {
-        std::io::Error::new(std::io::ErrorKind::UnexpectedEof, "partial startup packet")
-    })?;
-    let code = match decoded {
-        PreStartupMessage::SslRequest => super::protocol::StartupCode::SSLRequest,
-        PreStartupMessage::GssEncRequest => super::protocol::StartupCode::GSSENCRequest,
-        PreStartupMessage::CancelRequest { .. } => super::protocol::StartupCode::CancelRequest,
-        PreStartupMessage::Startup(_) => super::protocol::StartupCode::ProtocolVersionNumber,
-    };
-
-    let message = StartupMessage { code, bytes };
-    debug!(target: PROTOCOL, StartupMessage = ?message);
-
-    Ok(message)
 }
 
 ///
@@ -179,7 +151,6 @@ pub async fn send_ssl_response<T: AsyncWrite + Unpin>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::postgresql::protocol::StartupCode;
     use tokio::io::{duplex, AsyncReadExt, AsyncWriteExt};
 
     #[tokio::test]
@@ -190,7 +161,7 @@ mod tests {
             .await
             .unwrap();
         let ssl = read_message(&mut reader, None).await.unwrap();
-        assert_eq!(ssl.code, StartupCode::SSLRequest);
+        assert!(matches!(ssl, PreStartupMessage::SslRequest));
 
         let cancel = PreStartupMessage::CancelRequest {
             process_id: 42,
@@ -200,8 +171,8 @@ mod tests {
         .unwrap();
         writer.write_all(&cancel).await.unwrap();
         let decoded = read_message(&mut reader, None).await.unwrap();
-        assert_eq!(decoded.code, StartupCode::CancelRequest);
-        assert_eq!(&decoded.bytes[..], &cancel[..]);
+        assert!(matches!(decoded, PreStartupMessage::CancelRequest { .. }));
+        assert_eq!(decoded.to_packet().unwrap(), cancel);
     }
 
     #[tokio::test]

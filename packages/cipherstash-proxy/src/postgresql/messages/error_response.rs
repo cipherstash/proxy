@@ -1,13 +1,8 @@
-use super::BackendCode;
-use crate::error::{Error, ProtocolError};
-use crate::postgresql::protocol::BytesMutReadString;
-use crate::SIZE_I32;
-use bytes::{Buf, BufMut, BytesMut};
+use bytes::Bytes;
 use core::fmt;
+use pg_proto::codec::{BackendMessage, DiagnosticField, DiagnosticResponse};
 use regex::Regex;
-use std::io::Cursor;
 use std::sync::LazyLock;
-use std::{convert::TryFrom, ffi::CString};
 ///
 /// Postgres Error Codes
 /// https://www.postgresql.org/docs/current/errcodes-appendix.html
@@ -60,6 +55,9 @@ pub enum ErrorResponseCode {
 }
 
 impl ErrorResponse {
+    pub fn into_backend_message(self) -> BackendMessage {
+        BackendMessage::ErrorResponse(self.into())
+    }
     /// Create a FATAL error response for connection timeout.
     ///
     /// Uses PostgreSQL error code 57P05 (idle_session_timeout). While this code
@@ -301,6 +299,36 @@ impl ErrorResponse {
     }
 }
 
+impl From<&DiagnosticResponse> for ErrorResponse {
+    fn from(response: &DiagnosticResponse) -> Self {
+        Self {
+            fields: response
+                .fields
+                .iter()
+                .map(|field| Field {
+                    code: field.code.into(),
+                    value: String::from_utf8_lossy(&field.value).into_owned(),
+                })
+                .collect(),
+        }
+    }
+}
+
+impl From<ErrorResponse> for DiagnosticResponse {
+    fn from(response: ErrorResponse) -> Self {
+        Self {
+            fields: response
+                .fields
+                .into_iter()
+                .map(|field| DiagnosticField {
+                    code: field.code.into(),
+                    value: Bytes::from(field.value),
+                })
+                .collect(),
+        }
+    }
+}
+
 ///
 /// Extracts line (if present) from a SQL Parser error message
 ///
@@ -319,73 +347,6 @@ fn extract_position_from_parse_error(error_message: &str) -> Option<usize> {
 
     RE.captures(error_message)
         .and_then(|c| c.get(1)?.as_str().parse::<usize>().ok())
-}
-
-impl TryFrom<&BytesMut> for ErrorResponse {
-    type Error = Error;
-
-    fn try_from(buf: &BytesMut) -> Result<ErrorResponse, Error> {
-        let mut cursor = Cursor::new(buf);
-        let code = cursor.get_u8();
-
-        if BackendCode::from(code) != BackendCode::ErrorResponse {
-            return Err(ProtocolError::UnexpectedMessageCode {
-                expected: BackendCode::ErrorResponse.into(),
-                received: code as char,
-            }
-            .into());
-        }
-
-        let _len = cursor.get_i32();
-
-        // The message body consists of one or more identified fields, followed by a zero byte as a terminator.
-        let mut fields = Vec::new();
-
-        loop {
-            let code = cursor.get_u8();
-
-            // zero byte is terminator
-            if code == 0 {
-                break;
-            }
-
-            let value = cursor.read_string()?;
-            let field = Field {
-                code: code.into(),
-                value,
-            };
-            fields.push(field);
-        }
-
-        Ok(ErrorResponse { fields })
-    }
-}
-
-impl TryFrom<ErrorResponse> for BytesMut {
-    type Error = Error;
-
-    fn try_from(error_response: ErrorResponse) -> Result<BytesMut, Error> {
-        let mut field_bytes = BytesMut::new();
-
-        for field in error_response.fields {
-            let value = CString::new(field.value)?;
-            let value = value.as_bytes_with_nul();
-
-            field_bytes.put_u8(field.code.into());
-            field_bytes.put_slice(value);
-        }
-        field_bytes.put_u8(0); // field terminator
-
-        let mut bytes = BytesMut::new();
-
-        let len = SIZE_I32 + field_bytes.len(); // len + fields
-
-        bytes.put_u8(BackendCode::ErrorResponse.into());
-        bytes.put_i32(len as i32);
-        bytes.put_slice(&field_bytes);
-
-        Ok(bytes)
-    }
 }
 
 impl fmt::Display for ErrorResponse {
@@ -501,7 +462,9 @@ impl From<u8> for ErrorResponseCode {
 mod tests {
     use super::ErrorResponseCode;
     use crate::postgresql::messages::error_response::ErrorResponse;
+    use crate::postgresql::protocol::{decode_backend_frame, encode_backend_message};
     use bytes::BytesMut;
+    use pg_proto::codec::BackendMessage;
 
     fn to_message(s: &[u8]) -> BytesMut {
         BytesMut::from(s)
@@ -511,13 +474,17 @@ mod tests {
     pub fn parse_error_response_message() {
         let message = to_message(b"E\0\0\0kSERROR\0VERROR\0C26000\0Mprepared statement \"a37\" does not exist\0Fprepare.c\0L454\0RFetchPreparedStatement\0\0Z\0\0\0\x05I");
 
-        let error_response = ErrorResponse::try_from(&message).unwrap();
+        let BackendMessage::ErrorResponse(response) = decode_backend_frame(&message).unwrap()
+        else {
+            panic!("expected ErrorResponse")
+        };
+        let error_response = ErrorResponse::from(&response);
         assert_eq!(error_response.fields.len(), 7);
 
         // let next = cursor.get_u8() as char;
         // assert_eq!(next, 'Z');
 
-        let bytes = BytesMut::try_from(error_response).unwrap();
+        let bytes = encode_backend_message(&error_response.into_backend_message()).unwrap();
         let message = to_message(b"E\0\0\0kSERROR\0VERROR\0C26000\0Mprepared statement \"a37\" does not exist\0Fprepare.c\0L454\0RFetchPreparedStatement\0\0");
         assert_eq!(bytes, message);
     }

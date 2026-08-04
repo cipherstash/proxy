@@ -13,10 +13,8 @@ use postgres_types::Type;
 
 #[derive(Debug, Clone)]
 pub struct Parse {
-    pub code: char,
     pub name: Name,
     pub statement: String,
-    pub num_params: i16,
     pub param_types: Vec<i32>,
     dirty: bool,
 }
@@ -78,7 +76,6 @@ impl Parse {
             .collect::<Vec<_>>();
 
         if param_types != self.param_types {
-            self.num_params = param_types.len() as i16;
             self.param_types = param_types;
             self.dirty = true;
         }
@@ -110,10 +107,8 @@ impl TryFrom<&BytesMut> for Parse {
             .collect::<Vec<_>>();
 
         Ok(Parse {
-            code: 'P',
             name,
             statement,
-            num_params: param_types.len() as i16,
             param_types,
             dirty: false,
         })
@@ -124,13 +119,6 @@ impl TryFrom<Parse> for BytesMut {
     type Error = Error;
 
     fn try_from(parse: Parse) -> Result<BytesMut, Error> {
-        if parse.num_params as usize != parse.param_types.len() {
-            return Err(ProtocolError::UnexpectedMessageLength {
-                code: b'P',
-                len: parse.param_types.len(),
-            }
-            .into());
-        }
         encode_frontend_message(&FrontendMessage::Parse(PgParse {
             statement: Bytes::copy_from_slice(parse.name.as_str().as_bytes()),
             query: Bytes::from(parse.statement),
@@ -236,7 +224,7 @@ mod tests {
 
         parse.rewrite_param_types(&output_params);
         assert!(parse.requires_rewrite());
-        assert_eq!(parse.num_params, 1);
+        assert_eq!(parse.param_types.len(), 1);
         assert_eq!(
             parse.param_types,
             vec![postgres_types::Type::INT2.oid() as i32]
