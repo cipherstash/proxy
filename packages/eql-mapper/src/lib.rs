@@ -1502,6 +1502,141 @@ mod test {
         }
     }
 
+    /// `WHERE`, `HAVING` and join `ON` conditions are boolean expressions and
+    /// booleans are always native, so a bare placeholder condition is pinned to
+    /// `Native` where the clause is inferred — it must not depend on the late
+    /// unresolved-value fallback (which is now fail-closed).
+    #[test]
+    fn where_condition_placeholder_infers_native() {
+        let schema = resolver(schema! {
+            tables: {
+                users: {
+                    id,
+                    email (EQL: Eq),
+                }
+            }
+        });
+
+        let statement = parse("SELECT id FROM users WHERE $1");
+
+        let typed = match type_check(schema, &statement) {
+            Ok(typed) => typed,
+            Err(err) => panic!("type check failed: {err}"),
+        };
+
+        assert_eq!(
+            typed.params,
+            vec![(Param(1), Value::Native(NativeValue(None)))]
+        );
+    }
+
+    /// Same as `where_condition_placeholder_infers_native`, but for a literal
+    /// condition in `HAVING`.
+    #[test]
+    fn having_constant_condition_type_checks() {
+        let schema = resolver(schema! {
+            tables: {
+                users: {
+                    id,
+                }
+            }
+        });
+
+        let statement = parse("SELECT id FROM users GROUP BY id HAVING true");
+
+        if let Err(err) = type_check(schema, &statement) {
+            panic!("type check failed: {err}");
+        }
+    }
+
+    /// Same as `where_condition_placeholder_infers_native`, but for a literal
+    /// join `ON` condition (common in lateral joins: `JOIN ... ON true`).
+    #[test]
+    fn join_on_constant_condition_type_checks() {
+        let schema = resolver(schema! {
+            tables: {
+                users: {
+                    id,
+                }
+                aux: {
+                    id,
+                }
+            }
+        });
+
+        let statement = parse("SELECT u.id FROM users AS u JOIN aux AS a ON true");
+
+        if let Err(err) = type_check(schema, &statement) {
+            panic!("type check failed: {err}");
+        }
+    }
+
+    /// Because a `WHERE` condition is pinned to `Native`, an encrypted column
+    /// cannot itself be the condition — the mapper refuses the statement
+    /// instead of forwarding SQL that would compare against the raw jsonb
+    /// payload.
+    #[test]
+    fn encrypted_column_as_bare_where_condition_is_rejected() {
+        let schema = resolver(schema! {
+            tables: {
+                users: {
+                    id,
+                    email (EQL: Eq),
+                }
+            }
+        });
+
+        let statement = parse("SELECT id FROM users WHERE email");
+
+        type_check(schema, &statement)
+            .expect_err("an encrypted column must not type check as a WHERE condition");
+    }
+
+    /// An `ORDER BY` ordinal after a set operation cannot be resolved against a
+    /// single `SELECT`'s projection, but the literal is still a plain constant
+    /// to the database and is pinned to `Native` where the clause is inferred.
+    #[test]
+    fn order_by_ordinal_after_set_operation_type_checks() {
+        let schema = resolver(schema! {
+            tables: {
+                users: {
+                    id,
+                }
+            }
+        });
+
+        let statement = parse("SELECT id FROM users UNION ALL SELECT id FROM users ORDER BY 1");
+
+        if let Err(err) = type_check(schema, &statement) {
+            panic!("type check failed: {err}");
+        }
+    }
+
+    /// A literal in a derived-table column that the outer query never
+    /// references relates to nothing — its type escapes only through the
+    /// subquery's projection, so it resolves to `Native` rather than being
+    /// treated as an inference gap.
+    #[test]
+    fn unreferenced_derived_table_value_column_type_checks() {
+        let schema = resolver(schema! {
+            tables: {
+                users: {
+                    id,
+                    email (EQL: Eq),
+                }
+            }
+        });
+
+        let statement = parse("SELECT id FROM (SELECT id, 'lit' AS unused FROM users) AS sub");
+
+        let typed = match type_check(schema, &statement) {
+            Ok(typed) => typed,
+            Err(err) => panic!("type check failed: {err}"),
+        };
+
+        assert_eq!(typed.projection, projection![(NATIVE(users.id) as id)]);
+    }
+
     #[test]
     fn delete() {
         // init_tracing();

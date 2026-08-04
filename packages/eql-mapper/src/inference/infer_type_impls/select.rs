@@ -1,5 +1,7 @@
 use eql_mapper_macros::trace_infer;
-use sqltk::parser::ast::{Distinct, Expr, GroupByExpr, Select, SelectItem};
+use sqltk::parser::ast::{
+    Distinct, Expr, GroupByExpr, JoinConstraint, JoinOperator, Select, SelectItem,
+};
 
 use super::query_statement::resolve_positional_key;
 use crate::unifier::{Projection, Type, Value};
@@ -27,6 +29,58 @@ impl<'ast> InferType<'ast, Select> for TypeInferencer<'ast> {
                     return Err(TypeError::UnsupportedSqlFeature(
                         "SELECT INTO with an encrypted column".into(),
                     ));
+                }
+            }
+        }
+
+        // `WHERE`, `HAVING` and join `ON` conditions are boolean expressions,
+        // and booleans are always native — every EQL comparison produces a
+        // native result. Pin the condition to `Native` so that a bare literal
+        // or placeholder condition (`WHERE true`, `ON true`, `WHERE $1`) is
+        // typed where the clause is inferred instead of relying on the late
+        // unresolved-value fallback, and so that an encrypted value can never
+        // itself be the condition.
+        if let Some(selection) = &select.selection {
+            self.unify_node_with_type(selection, Type::native())?;
+        }
+
+        if let Some(having) = &select.having {
+            self.unify_node_with_type(having, Type::native())?;
+        }
+
+        for table_with_joins in &select.from {
+            for join in &table_with_joins.joins {
+                let constraint = match &join.join_operator {
+                    JoinOperator::Join(constraint)
+                    | JoinOperator::Inner(constraint)
+                    | JoinOperator::Left(constraint)
+                    | JoinOperator::LeftOuter(constraint)
+                    | JoinOperator::Right(constraint)
+                    | JoinOperator::RightOuter(constraint)
+                    | JoinOperator::FullOuter(constraint)
+                    | JoinOperator::Semi(constraint)
+                    | JoinOperator::LeftSemi(constraint)
+                    | JoinOperator::RightSemi(constraint)
+                    | JoinOperator::Anti(constraint)
+                    | JoinOperator::LeftAnti(constraint)
+                    | JoinOperator::RightAnti(constraint)
+                    | JoinOperator::StraightJoin(constraint) => Some(constraint),
+
+                    JoinOperator::AsOf {
+                        match_condition,
+                        constraint,
+                    } => {
+                        self.unify_node_with_type(match_condition, Type::native())?;
+                        Some(constraint)
+                    }
+
+                    JoinOperator::CrossJoin
+                    | JoinOperator::CrossApply
+                    | JoinOperator::OuterApply => None,
+                };
+
+                if let Some(JoinConstraint::On(condition)) = constraint {
+                    self.unify_node_with_type(condition, Type::native())?;
                 }
             }
         }
@@ -75,6 +129,14 @@ impl<'ast> InferType<'ast, Select> for TypeInferencer<'ast> {
             for expr in exprs {
                 let key = resolve_positional_key(Some(select), expr);
                 self.unify_node_with_bound(key, EqlTrait::Eq)?;
+
+                // A key written as a literal (`GROUP BY 1`) reaches the
+                // database as a plain constant — PostgreSQL only accepts
+                // integer ordinals here — so the literal itself is always
+                // native, independently of the projected column it selects.
+                if matches!(expr, Expr::Value(_)) {
+                    self.unify_node_with_type(expr, Type::native())?;
+                }
             }
         }
 

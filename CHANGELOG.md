@@ -78,6 +78,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - **`SELECT … INTO` an encrypted column is now rejected**: the statement copies data into a table the encryption schema has never seen, leaving unreachable ciphertext there. Native-only projections pass through as before.
 
+- **Literals and params that escape type checking now fail closed**: a literal or parameter whose type was never worked out during type checking used to be silently assumed to be plaintext — so a value in a clause the type checker did not cover could skip encryption without any error. Proxy now only makes that assumption where it is provably safe (a value that only flows to the client through a `SELECT` projection, such as `SELECT 'lit'` or `SELECT $1`); anywhere else the statement is rejected with an error naming the value. As part of this, `WHERE`/`HAVING`/join `ON` conditions and `ORDER BY`/`GROUP BY` ordinals are now explicitly typed as plaintext where they appear, and an encrypted column used bare as a boolean condition (for example `WHERE enc_col`) is rejected instead of being forwarded to the database.
+
 ## [2.2.4] - 2026-06-18
 
 ### Fixed

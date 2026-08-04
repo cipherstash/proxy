@@ -153,7 +153,10 @@ impl<'ast> EqlMapper<'ast> {
             .borrow_mut()
             .resolve_unresolved_associated_types();
 
-        let _ = self.unifier.borrow_mut().resolve_unresolved_value_nodes();
+        // A failure here is a genuine type-checking failure: it means a value node escaped
+        // inference entirely, and assuming it is native would be fail-open (the value could
+        // relate to an encrypted column and silently skip encryption).
+        self.unifier.borrow_mut().resolve_unresolved_value_nodes()?;
 
         let projection = self.projection_type(statement);
         let params = self.param_types(&self.unifier.borrow());
