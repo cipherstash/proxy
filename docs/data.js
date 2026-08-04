@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1785821966260,
+  "lastUpdate": 1785822744398,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -22800,6 +22800,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 39.979241,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "39d03e563c64628f9c91e960909a7bb3dc6e02dc",
+          "message": "fix(mapper): close inference gaps on AST fields of type-checked statements (CIP-3699)",
+          "timestamp": "2026-07-30T11:33:05Z",
+          "url": "https://github.com/cipherstash/proxy/pull/440/commits/39d03e563c64628f9c91e960909a7bb3dc6e02dc"
+        },
+        "date": 1785822743112,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 40.363223,
             "unit": "Number"
           }
         ]
