@@ -1,10 +1,11 @@
 use eql_mapper_macros::trace_infer;
 use sqltk::parser::ast::{
-    Expr, OrderBy, OrderByKind, Query, Select, SelectItem, SetExpr, Value as SqltkValue,
+    Expr, Fetch, LimitClause, Offset, OrderBy, OrderByKind, Query, Select, SelectItem, SetExpr,
+    Value as SqltkValue,
 };
 
 use crate::{
-    inference::{InferType, TypeError},
+    inference::{unifier::Type, InferType, TypeError},
     EqlTrait, TypeInferencer,
 };
 
@@ -45,7 +46,13 @@ pub(crate) fn resolve_positional_key<'ast>(
 #[trace_infer]
 impl<'ast> InferType<'ast, Query> for TypeInferencer<'ast> {
     fn infer_exit(&mut self, query: &'ast Query) -> Result<(), TypeError> {
-        let Query { body, order_by, .. } = query;
+        let Query {
+            body,
+            order_by,
+            limit_clause,
+            fetch,
+            ..
+        } = query;
 
         self.unify_nodes(query, &**body)?;
 
@@ -76,6 +83,45 @@ impl<'ast> InferType<'ast, Query> for TypeInferencer<'ast> {
                     return Err(TypeError::UnsupportedSqlFeature("ORDER BY ALL".into()));
                 }
             }
+        }
+
+        // Row-count expressions in LIMIT/OFFSET/FETCH are evaluated by the
+        // database as plain integers and can never be encrypted, so pin them
+        // to `Native`. Without this a placeholder in `LIMIT $1` is left as an
+        // unconstrained type variable, which later surfaces as an opaque
+        // "unresolved type variable" error instead of type-checking cleanly.
+        // `Query::locks` (FOR UPDATE/SHARE) carries no expressions, so there
+        // is nothing to constrain there.
+        if let Some(limit_clause) = limit_clause {
+            match limit_clause {
+                LimitClause::LimitOffset {
+                    limit,
+                    offset,
+                    limit_by,
+                } => {
+                    if let Some(limit) = limit {
+                        self.unify_node_with_type(limit, Type::native())?;
+                    }
+                    if let Some(Offset { value, .. }) = offset {
+                        self.unify_node_with_type(value, Type::native())?;
+                    }
+                    for expr in limit_by {
+                        self.unify_node_with_type(expr, Type::native())?;
+                    }
+                }
+                LimitClause::OffsetCommaLimit { offset, limit } => {
+                    self.unify_node_with_type(offset, Type::native())?;
+                    self.unify_node_with_type(limit, Type::native())?;
+                }
+            }
+        }
+
+        if let Some(Fetch {
+            quantity: Some(quantity),
+            ..
+        }) = fetch
+        {
+            self.unify_node_with_type(quantity, Type::native())?;
         }
 
         Ok(())
