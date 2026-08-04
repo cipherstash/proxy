@@ -1343,6 +1343,53 @@ mod test {
         assert_eq!(typed.projection, Projection(vec![]));
     }
 
+    /// Proxy loads its schema from the database with *quoted* column idents
+    /// (`Ident::with_quote('"', ..)`) behind an editable resolver, while SQL
+    /// usually spells the same columns unquoted. A type identity derived from
+    /// an assignment target must still unify with one derived from the scope,
+    /// so the resolver has to return the schema's canonical idents rather than
+    /// echo the caller's spelling. With the caller's spelling,
+    /// `UPDATE t SET c = $1 WHERE c = $1` pinned the same param to
+    /// `EQL(t."c")` and `EQL(t.c)` and failed with "cannot unify EQL terms".
+    #[test]
+    fn update_reused_param_unifies_against_quoted_schema_idents() {
+        let eq = EqlTraits::from(EqlTrait::Eq);
+
+        let mut schema = Schema::new("public");
+        let mut table = crate::model::Table::new(Ident::new("encrypted"));
+        table.add_column(Arc::new(crate::model::Column::native(Ident::with_quote(
+            '"', "id",
+        ))));
+        table.add_column(Arc::new(crate::model::Column::eql(
+            Ident::with_quote('"', "encrypted_text"),
+            eq,
+            crate::unifier::DomainIdentity::canonical(crate::unifier::TokenType::Text, eq),
+        )));
+        schema.add_table(table);
+
+        // The editable resolver is the one Proxy uses at runtime; it resolves
+        // through `SchemaDelta`, not `Schema`.
+        let resolver = Arc::new(TableResolver::new_editable(Arc::new(schema)));
+
+        let statement = parse("UPDATE encrypted SET encrypted_text = $1 WHERE encrypted_text = $1");
+
+        let typed = match type_check(resolver, &statement) {
+            Ok(typed) => typed,
+            Err(err) => panic!("type check failed: {err}"),
+        };
+
+        // The param's identity is the canonical (quoted) schema spelling.
+        let target = Value::Eql(EqlTerm::Full(EqlValue::with_canonical_identity(
+            TableColumn {
+                table: id("encrypted"),
+                column: Ident::with_quote('"', "encrypted_text"),
+            },
+            eq,
+        )));
+
+        assert_eq!(typed.params, vec![(Param(1), target)]);
+    }
+
     /// The row-count expressions in `LIMIT`/`OFFSET` can never be encrypted,
     /// so placeholders there must be pinned to `Native` at inference time.
     /// Previously they were left as unconstrained type variables and only

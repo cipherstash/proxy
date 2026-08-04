@@ -94,15 +94,17 @@ impl SchemaWithEdits {
             .iter()
             .find(|col| IdentCase(&col.name) == IdentCase(column_name))
         {
-            Some(col) => {
-                let ObjectName(parts) = table_name;
-                let ObjectNamePart::Identifier(table_name) = parts.last().unwrap();
-                Ok(SchemaTableColumn {
-                    table: table_name.clone(),
-                    column: column_name.clone(),
-                    kind: col.kind.clone(),
-                })
-            }
+            // Return the *schema's* idents, not the caller's. The caller's
+            // spelling can differ from the canonical one in quoting (and, for
+            // unquoted idents, case), and types derived from this result must
+            // compare equal to types derived from the schema elsewhere —
+            // `Schema::resolve_table_column` and `resolve_table_columns` both
+            // already return the canonical idents.
+            Some(col) => Ok(SchemaTableColumn {
+                table: table.name.clone(),
+                column: col.name.clone(),
+                kind: col.kind.clone(),
+            }),
             None => Err(SchemaError::ColumnNotFound(
                 table_name.to_string(),
                 column_name.to_string(),
