@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1785372857718,
+  "lastUpdate": 1785821966260,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -22775,6 +22775,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 39.696436,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "5abfdf5e2d0a7e55deb610728c0dcf282e7bdb07",
+          "message": "fix(mapper): inference hardening — LIMIT/FETCH, UPDATE targets, unmatched statements (CIP-3700)",
+          "timestamp": "2026-07-30T11:33:05Z",
+          "url": "https://github.com/cipherstash/proxy/pull/439/commits/5abfdf5e2d0a7e55deb610728c0dcf282e7bdb07"
+        },
+        "date": 1785821964951,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 39.979241,
             "unit": "Number"
           }
         ]
