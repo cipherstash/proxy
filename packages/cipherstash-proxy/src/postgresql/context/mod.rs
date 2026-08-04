@@ -7,6 +7,7 @@ pub use self::{phase_timing::PhaseTiming, portal::Portal, statement::Statement};
 use super::{
     column_mapper::ColumnMapper,
     messages::{describe::Describe, Name, Target},
+    protocol::{decode_backend_frame, decode_frontend_frame},
     Column,
 };
 use crate::{
@@ -19,9 +20,15 @@ use crate::{
     },
     proxy::{EncryptConfig, EncryptionService, ReloadCommand, ReloadSender},
 };
+use bytes::BytesMut;
 use cipherstash_client::IdentifiedBy;
 use eql_mapper::{Schema, TableResolver};
 use metrics::{counter, histogram};
+use pg_proto::{
+    codec::{BackendMessage, FrontendMessage},
+    grammar::{backend as server_role, frontend as client_role},
+    intermediary::Intermediary,
+};
 use serde_json::json;
 use sqltk::parser::ast::{Expr, Ident, ObjectName, ObjectNamePart, Set, Value, ValueWithSpan};
 pub use statement_metadata::StatementMetadata;
@@ -29,7 +36,7 @@ use std::{
     collections::{HashMap, VecDeque},
     sync::{
         atomic::{AtomicU64, Ordering},
-        Arc, LazyLock, RwLock,
+        Arc, LazyLock, Mutex, RwLock,
     },
     time::{Duration, Instant},
 };
@@ -41,6 +48,83 @@ type DescribeQueue = Queue<Describe>;
 type ExecuteQueue = Queue<ExecuteContext>;
 type SessionMetricsQueue = Queue<SessionMetricsContext>;
 type PortalQueue = Queue<Arc<Portal>>;
+
+fn protocol_lock_error<T>(_: std::sync::PoisonError<T>) -> Error {
+    std::io::Error::other("PostgreSQL protocol state lock poisoned").into()
+}
+
+fn protocol_transition_error(error: impl std::fmt::Debug) -> Error {
+    std::io::Error::new(std::io::ErrorKind::InvalidData, format!("{error:?}")).into()
+}
+
+fn protocol_neutral_backend_message(message: &BackendMessage) -> bool {
+    matches!(
+        message,
+        BackendMessage::ParameterStatus { .. }
+            | BackendMessage::NoticeResponse(_)
+            | BackendMessage::NotificationResponse { .. }
+            | BackendMessage::BackendKeyData { .. }
+            | BackendMessage::NegotiateProtocolVersion(_)
+    )
+}
+
+#[derive(Debug)]
+struct ProtocolState {
+    sides: Intermediary<server_role::RuntimeFsm, client_role::RuntimeFsm>,
+    upstream_startup_ready: bool,
+    downstream_startup_ready: bool,
+    runtime_started: bool,
+    downstream_frontend_queue: VecDeque<FrontendMessage>,
+    upstream_backend_queue: VecDeque<BackendMessage>,
+}
+
+impl ProtocolState {
+    fn new() -> Self {
+        Self {
+            sides: Intermediary::new(
+                server_role::RuntimeFsm::new(),
+                client_role::RuntimeFsm::new(),
+            ),
+            upstream_startup_ready: false,
+            downstream_startup_ready: false,
+            runtime_started: false,
+            downstream_frontend_queue: VecDeque::new(),
+            upstream_backend_queue: VecDeque::new(),
+        }
+    }
+
+    fn advance_downstream_frontend(&mut self, message: &FrontendMessage) -> bool {
+        let (downstream, _) = self.sides.sides_mut();
+        downstream
+            .step_projected(message, server_role::project_external)
+            .is_ok()
+    }
+
+    fn drain_downstream_frontend(&mut self) {
+        while let Some(message) = self.downstream_frontend_queue.front().cloned() {
+            if !self.advance_downstream_frontend(&message) {
+                break;
+            }
+            self.downstream_frontend_queue.pop_front();
+        }
+    }
+
+    fn advance_upstream_backend(&mut self, message: &BackendMessage) -> bool {
+        let (_, upstream) = self.sides.sides_mut();
+        upstream
+            .step_projected(message, client_role::project_external)
+            .is_ok()
+    }
+
+    fn drain_upstream_backend(&mut self) {
+        while let Some(message) = self.upstream_backend_queue.front().cloned() {
+            if !self.advance_upstream_backend(&message) {
+                break;
+            }
+            self.upstream_backend_queue.pop_front();
+        }
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct SessionId(u64);
@@ -76,6 +160,7 @@ where
     unsafe_disable_mapping: bool,
     keyset_id: Arc<RwLock<Option<KeysetIdentifier>>>,
     session_id_counter: Arc<AtomicU64>,
+    protocol: Arc<Mutex<ProtocolState>>,
 }
 
 /// Context for tracking an in-flight Execute operation.
@@ -197,7 +282,95 @@ where
             unsafe_disable_mapping: false,
             keyset_id: Arc::new(RwLock::new(None)),
             session_id_counter: Arc::new(AtomicU64::new(1)),
+            protocol: Arc::new(Mutex::new(ProtocolState::new())),
         }
+    }
+
+    /// Records a message accepted from the downstream client. The downstream
+    /// server-role state advances even when proxy policy intercepts the message.
+    pub fn protocol_frontend_received(&self, message: &FrontendMessage) -> Result<(), Error> {
+        let mut protocol = self.protocol.lock().map_err(protocol_lock_error)?;
+        protocol.runtime_started = true;
+        if !protocol.downstream_frontend_queue.is_empty()
+            || !protocol.advance_downstream_frontend(message)
+        {
+            protocol
+                .downstream_frontend_queue
+                .push_back(message.clone());
+        }
+        Ok(())
+    }
+
+    /// Records a frontend message actually forwarded upstream after rewriting.
+    pub fn protocol_frontend_forwarded(&self, bytes: &BytesMut) -> Result<(), Error> {
+        let message = decode_frontend_frame(bytes)?;
+        let mut protocol = self.protocol.lock().map_err(protocol_lock_error)?;
+        let (_, upstream) = protocol.sides.sides_mut();
+        if upstream.state() == client_role::RuntimeState::Ready
+            && matches!(
+                message,
+                FrontendMessage::Parse(_)
+                    | FrontendMessage::Bind(_)
+                    | FrontendMessage::Describe(_)
+                    | FrontendMessage::Execute(_)
+                    | FrontendMessage::Close(_)
+                    | FrontendMessage::Flush
+                    | FrontendMessage::Sync
+            )
+        {
+            upstream
+                .step(client_role::Event::BeginExtended)
+                .map_err(protocol_transition_error)?;
+        }
+        upstream
+            .step_projected(&message, client_role::project_internal)
+            .map_err(protocol_transition_error)?;
+        protocol.drain_upstream_backend();
+        Ok(())
+    }
+
+    /// Records a message accepted from the upstream database.
+    pub fn protocol_backend_received(&self, message: &BackendMessage) -> Result<(), Error> {
+        if protocol_neutral_backend_message(message) {
+            return Ok(());
+        }
+        let mut protocol = self.protocol.lock().map_err(protocol_lock_error)?;
+        if matches!(message, BackendMessage::ReadyForQuery(_)) && !protocol.upstream_startup_ready {
+            protocol.upstream_startup_ready = true;
+            return Ok(());
+        }
+        if !protocol.runtime_started {
+            return Ok(());
+        }
+        if !protocol.upstream_backend_queue.is_empty()
+            || !protocol.advance_upstream_backend(message)
+        {
+            protocol.upstream_backend_queue.push_back(message.clone());
+        }
+        Ok(())
+    }
+
+    /// Records a backend response actually emitted to the downstream client.
+    pub fn protocol_backend_forwarded(&self, bytes: &BytesMut) -> Result<(), Error> {
+        let message = decode_backend_frame(bytes)?;
+        if protocol_neutral_backend_message(&message) {
+            return Ok(());
+        }
+        let mut protocol = self.protocol.lock().map_err(protocol_lock_error)?;
+        if matches!(message, BackendMessage::ReadyForQuery(_)) && !protocol.downstream_startup_ready
+        {
+            protocol.downstream_startup_ready = true;
+            return Ok(());
+        }
+        if !protocol.runtime_started {
+            return Ok(());
+        }
+        let (downstream, _) = protocol.sides.sides_mut();
+        downstream
+            .step_projected(&message, server_role::project_internal)
+            .map_err(protocol_transition_error)?;
+        protocol.drain_downstream_frontend();
+        Ok(())
     }
 
     pub fn set_describe(&mut self, describe: Describe) {
@@ -1056,7 +1229,9 @@ impl<T> Queue<T> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Context, Describe, KeysetIdentifier, Portal, Statement};
+    use super::{
+        server_role, Context, Describe, KeysetIdentifier, Portal, ProtocolState, Statement,
+    };
     use crate::{
         config::LogConfig,
         error::Error,
@@ -1068,8 +1243,12 @@ mod tests {
         proxy::{EncryptConfig, EncryptionService},
         TandemConfig,
     };
+    use bytes::Bytes;
     use cipherstash_client::IdentifiedBy;
     use eql_mapper::Schema;
+    use pg_proto::codec::{
+        BackendMessage, Bind, Execute, FrontendMessage, Parse, TransactionStatus,
+    };
     use sqltk::parser::{dialect::PostgreSqlDialect, parser::Parser};
     use std::sync::Arc;
     use tokio::sync::mpsc;
@@ -1115,6 +1294,56 @@ mod tests {
             service,
             reload_sender,
         )
+    }
+
+    #[test]
+    fn server_role_fsm_tracks_pipelined_extended_messages_in_processing_order() {
+        let mut protocol = ProtocolState::new();
+        let messages = [
+            FrontendMessage::Parse(Parse {
+                statement: Bytes::new(),
+                query: Bytes::from_static(b"select $1"),
+                parameter_types: vec![23],
+            }),
+            FrontendMessage::Bind(Bind {
+                portal: Bytes::new(),
+                statement: Bytes::new(),
+                parameter_formats: vec![0],
+                parameters: vec![Some(Bytes::from_static(b"1"))],
+                result_formats: vec![0],
+            }),
+            FrontendMessage::Execute(Execute {
+                portal: Bytes::new(),
+                max_rows: 0,
+            }),
+            FrontendMessage::Sync,
+        ];
+        for message in messages {
+            if !protocol.downstream_frontend_queue.is_empty()
+                || !protocol.advance_downstream_frontend(&message)
+            {
+                protocol.downstream_frontend_queue.push_back(message);
+            }
+        }
+
+        for response in [
+            BackendMessage::ParseComplete,
+            BackendMessage::BindComplete,
+            BackendMessage::CommandComplete(Bytes::from_static(b"SELECT 1")),
+            BackendMessage::ReadyForQuery(TransactionStatus::Idle),
+        ] {
+            let (downstream, _) = protocol.sides.sides_mut();
+            downstream
+                .step_projected(&response, server_role::project_internal)
+                .unwrap();
+            protocol.drain_downstream_frontend();
+        }
+
+        assert!(protocol.downstream_frontend_queue.is_empty());
+        assert_eq!(
+            protocol.sides.downstream().state(),
+            server_role::RuntimeState::Ready
+        );
     }
 
     fn statement() -> Statement {

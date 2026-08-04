@@ -1,6 +1,9 @@
 use std::time::Duration;
 
 use bytes::{BufMut, BytesMut};
+use pg_proto::pre_startup::{
+    decode_pre_startup, EncryptionReply, PreStartupMessage, DEFAULT_MAX_PRE_STARTUP_PACKET_LEN,
+};
 use tokio::{
     io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt},
     time::timeout,
@@ -11,7 +14,6 @@ use crate::{
     connect::AsyncStream,
     error::{Error, ProtocolError},
     log::PROTOCOL,
-    postgresql::{SSL_REQUEST, SSL_RESPONSE_NO, SSL_RESPONSE_YES},
     tls, TandemConfig, SIZE_I32,
 };
 
@@ -88,6 +90,14 @@ where
 {
     let len = client.read_i32().await?;
 
+    if len < 8 || len as usize > DEFAULT_MAX_PRE_STARTUP_PACKET_LEN {
+        return Err(ProtocolError::UnexpectedMessageLength {
+            code: 0,
+            len: len.max(0) as usize,
+        }
+        .into());
+    }
+
     let capacity = len as usize;
 
     let mut bytes = BytesMut::with_capacity(capacity);
@@ -97,20 +107,18 @@ where
     let slice_start = SIZE_I32;
     client.read_exact(&mut bytes[slice_start..]).await?;
 
-    // code is the first 4 bytes after len
-    let code_bytes: [u8; 4] = [
-        bytes.as_ref()[4],
-        bytes.as_ref()[5],
-        bytes.as_ref()[6],
-        bytes.as_ref()[7],
-    ];
-
-    let code = i32::from_be_bytes(code_bytes);
-
-    let message = StartupMessage {
-        code: code.into(),
-        bytes,
+    let mut decode_buffer = bytes.clone();
+    let decoded = decode_pre_startup(&mut decode_buffer)?.ok_or_else(|| {
+        std::io::Error::new(std::io::ErrorKind::UnexpectedEof, "partial startup packet")
+    })?;
+    let code = match decoded {
+        PreStartupMessage::SslRequest => super::protocol::StartupCode::SSLRequest,
+        PreStartupMessage::GssEncRequest => super::protocol::StartupCode::GSSENCRequest,
+        PreStartupMessage::CancelRequest { .. } => super::protocol::StartupCode::CancelRequest,
+        PreStartupMessage::Startup(_) => super::protocol::StartupCode::ProtocolVersionNumber,
     };
+
+    let message = StartupMessage { code, bytes };
     debug!(target: PROTOCOL, StartupMessage = ?message);
 
     Ok(message)
@@ -123,17 +131,19 @@ where
 pub async fn send_ssl_request<T: AsyncRead + AsyncWrite + Unpin>(
     stream: &mut T,
 ) -> Result<bool, Error> {
-    let mut bytes = BytesMut::with_capacity(12);
-    bytes.put_i32(8);
-    bytes.put_i32(SSL_REQUEST);
-
-    stream.write_all(&bytes).await?;
+    stream
+        .write_all(&PreStartupMessage::SslRequest.to_packet()?)
+        .await?;
 
     // Server supports TLS
-    let response = match stream.read_u8().await? {
-        SSL_RESPONSE_YES => true,
-        SSL_RESPONSE_NO => false,
-        code => {
+    let response = match EncryptionReply::try_from(stream.read_u8().await?) {
+        Ok(EncryptionReply::Accepted) => true,
+        Ok(EncryptionReply::Rejected) => false,
+        Ok(EncryptionReply::LegacyError) => {
+            return Err(ProtocolError::UnexpectedStartupMessage.into());
+        }
+        Err(err) => {
+            let code = err.0;
             error!(msg = "Unexpected startup message", code = ?(code as char));
             return Err(ProtocolError::UnexpectedStartupMessage.into());
         }
@@ -153,11 +163,57 @@ pub async fn send_ssl_response<T: AsyncWrite + Unpin>(
     stream: &mut T,
     tls: bool,
 ) -> Result<(), Error> {
-    let response = if tls { b'S' } else { b'N' };
+    let response = if tls {
+        EncryptionReply::Accepted
+    } else {
+        EncryptionReply::Rejected
+    };
 
     debug!(target: PROTOCOL, msg = "SSLResponse to Client", SSLResponse = ?response);
 
-    stream.write_all(&[response]).await?;
+    stream.write_all(&[response.as_byte()]).await?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::postgresql::protocol::StartupCode;
+    use tokio::io::{duplex, AsyncReadExt, AsyncWriteExt};
+
+    #[tokio::test]
+    async fn ssl_and_cancellation_packets_use_pg_proto_pre_startup_decoding() {
+        let (mut writer, mut reader) = duplex(64);
+        writer
+            .write_all(&PreStartupMessage::SslRequest.to_packet().unwrap())
+            .await
+            .unwrap();
+        let ssl = read_message(&mut reader, None).await.unwrap();
+        assert_eq!(ssl.code, StartupCode::SSLRequest);
+
+        let cancel = PreStartupMessage::CancelRequest {
+            process_id: 42,
+            secret_key: bytes::Bytes::from_static(b"key!"),
+        }
+        .to_packet()
+        .unwrap();
+        writer.write_all(&cancel).await.unwrap();
+        let decoded = read_message(&mut reader, None).await.unwrap();
+        assert_eq!(decoded.code, StartupCode::CancelRequest);
+        assert_eq!(&decoded.bytes[..], &cancel[..]);
+    }
+
+    #[tokio::test]
+    async fn ssl_reply_rejects_unknown_bytes() {
+        let (mut writer, mut reader) = duplex(8);
+        writer.write_all(b"?").await.unwrap();
+        assert!(send_ssl_request(&mut reader).await.is_err());
+
+        let (mut client, mut server) = duplex(8);
+        send_ssl_response(&mut server, true).await.unwrap();
+        let mut response = [0];
+        client.read_exact(&mut response).await.unwrap();
+        assert_eq!(response, [EncryptionReply::Accepted.as_byte()]);
+    }
 }

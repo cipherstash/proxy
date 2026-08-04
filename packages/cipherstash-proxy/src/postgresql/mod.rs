@@ -16,13 +16,3 @@ pub use context::column::Column;
 pub use context::Context;
 pub use context::KeysetIdentifier;
 pub use handler::handler;
-
-pub const PROTOCOL_VERSION_NUMBER: i32 = 196608;
-
-pub const SSL_REQUEST: i32 = 80877103;
-
-pub const CANCEL_REQUEST: i32 = 80877102;
-
-pub const SSL_RESPONSE_NO: u8 = b'N';
-
-pub const SSL_RESPONSE_YES: u8 = b'S';
