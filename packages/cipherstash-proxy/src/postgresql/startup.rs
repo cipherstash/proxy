@@ -1,7 +1,10 @@
 use std::time::Duration;
 
-use bytes::BytesMut;
-use pg_proto::pre_startup::{decode_pre_startup, EncryptionReply, PreStartupMessage};
+use pg_proto::{
+    codec::Frontend,
+    pre_startup::{EncryptionReply, PreStartupMessage},
+    transport::Buffered,
+};
 use tokio::{
     io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt},
     time::timeout,
@@ -50,12 +53,12 @@ pub async fn with_tls(stream: AsyncStream, config: &TandemConfig) -> Result<Asyn
 ///
 ///
 pub async fn read_message<S: AsyncRead + Unpin>(
-    mut stream: S,
+    stream: &mut Buffered<S, Frontend>,
     connection_timeout: Option<Duration>,
 ) -> Result<PreStartupMessage, Error> {
     match connection_timeout {
         Some(duration) => read_message_with_timeout(stream, duration).await,
-        None => read(&mut stream).await,
+        None => read(stream).await,
     }
 }
 
@@ -66,10 +69,10 @@ pub async fn read_message<S: AsyncRead + Unpin>(
 ///
 ///
 async fn read_message_with_timeout<S: AsyncRead + Unpin>(
-    mut stream: S,
+    stream: &mut Buffered<S, Frontend>,
     duration: Duration,
 ) -> Result<PreStartupMessage, Error> {
-    timeout(duration, read(&mut stream))
+    timeout(duration, read(stream))
         .await
         .map_err(|_| Error::ConnectionTimeout { duration })?
 }
@@ -80,20 +83,13 @@ async fn read_message_with_timeout<S: AsyncRead + Unpin>(
 ///
 ///
 ///
-async fn read<C>(client: &mut C) -> Result<PreStartupMessage, Error>
+async fn read<C>(client: &mut Buffered<C, Frontend>) -> Result<PreStartupMessage, Error>
 where
     C: AsyncRead + Unpin,
 {
-    let mut bytes = BytesMut::with_capacity(4);
-    loop {
-        if let Some(message) = decode_pre_startup(&mut bytes)? {
-            debug!(target: PROTOCOL, pre_startup = ?message);
-            return Ok(message);
-        }
-        if client.read_buf(&mut bytes).await? == 0 {
-            return Err(Error::ConnectionClosed);
-        }
-    }
+    let message = client.receive_pre_startup().await?;
+    debug!(target: PROTOCOL, pre_startup = ?message);
+    Ok(message)
 }
 
 ///
@@ -155,11 +151,12 @@ mod tests {
 
     #[tokio::test]
     async fn ssl_and_cancellation_packets_use_pg_proto_pre_startup_decoding() {
-        let (mut writer, mut reader) = duplex(64);
+        let (mut writer, reader) = duplex(64);
         writer
             .write_all(&PreStartupMessage::SslRequest.to_packet().unwrap())
             .await
             .unwrap();
+        let mut reader = Buffered::new_frontend(reader);
         let ssl = read_message(&mut reader, None).await.unwrap();
         assert!(matches!(ssl, PreStartupMessage::SslRequest));
 

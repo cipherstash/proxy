@@ -22,7 +22,10 @@ use crate::proxy::EncryptionService;
 use crate::EqlCiphertext;
 use bytes::BytesMut;
 use metrics::{counter, histogram};
-use pg_proto::codec::BackendMessage;
+use pg_proto::{
+    codec::{Backend as BackendDirection, BackendMessage},
+    transport::Buffered,
+};
 use std::time::Instant;
 use tokio::io::AsyncRead;
 use tracing::{debug, error, info, warn};
@@ -79,7 +82,7 @@ where
     /// Sender for outgoing messages to client
     client_sender: Sender,
     /// Reader for incoming messages from server
-    server_reader: R,
+    server_reader: Buffered<R, BackendDirection>,
     /// Session context with portal and statement metadata
     context: Context<S>,
     /// Buffer for batching DataRow messages before decryption
@@ -103,7 +106,7 @@ where
         let buffer = MessageBuffer::new();
         Backend {
             client_sender,
-            server_reader,
+            server_reader: Buffered::new(server_reader),
             context,
             buffer,
         }

@@ -35,7 +35,10 @@ use cipherstash_client::encryption::Plaintext;
 use eql_mapper::{self, EqlMapperError, EqlTermVariant, JsonSelectorSegment, TypeCheckedStatement};
 use metrics::{counter, histogram};
 use pg_escape::quote_literal;
-use pg_proto::codec::{BackendMessage, FrontendMessage, TransactionStatus};
+use pg_proto::{
+    codec::{BackendMessage, Frontend as FrontendDirection, FrontendMessage, TransactionStatus},
+    transport::Buffered,
+};
 use serde::Serialize;
 use sqltk::parser::ast::{self, Value};
 use sqltk::NodeKey;
@@ -95,7 +98,7 @@ where
     S: EncryptionService,
 {
     /// Reader for incoming client messages
-    client_reader: R,
+    client_reader: Buffered<R, FrontendDirection>,
     /// Sender for outgoing messages to client
     client_sender: Sender,
     /// Writer for forwarding messages to server
@@ -125,7 +128,7 @@ where
         context: Context<S>,
     ) -> Self {
         Frontend {
-            client_reader,
+            client_reader: Buffered::new_frontend(client_reader),
             client_sender,
             server_writer,
             context,
