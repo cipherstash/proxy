@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1785822744398,
+  "lastUpdate": 1785823166871,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -22825,6 +22825,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 40.363223,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "0f616ae25fa8b9ff0bc69e7358cbd9f9577daabb",
+          "message": "fix(proxy): protocol desync on transformation error after a mapped statement (CIP-3678)",
+          "timestamp": "2026-07-30T11:33:05Z",
+          "url": "https://github.com/cipherstash/proxy/pull/441/commits/0f616ae25fa8b9ff0bc69e7358cbd9f9577daabb"
+        },
+        "date": 1785823165570,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 36.451154,
             "unit": "Number"
           }
         ]
