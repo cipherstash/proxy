@@ -2,7 +2,7 @@ use crate::log::MAPPER;
 #[cfg(test)]
 use crate::{
     error::{Error, ProtocolError},
-    postgresql::protocol::{decode_backend_frame, encode_backend_message},
+    postgresql::test_codec::{decode_backend_frame, encode_backend_message},
 };
 #[cfg(test)]
 use bytes::BytesMut;

@@ -5,7 +5,6 @@ use super::messages::bind::Bind;
 use super::messages::parse::Parse;
 use super::messages::query::Query;
 use super::parser::SqlParser;
-use super::protocol::{self};
 use crate::connect::Sender;
 use crate::error::{EncryptError, Error, MappingError};
 use crate::log::{MAPPER, PROTOCOL};
@@ -42,9 +41,22 @@ use sqltk::parser::ast::{self, Value};
 use sqltk::NodeKey;
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tracing::{debug, info, warn};
+
+async fn receive_frontend<S: AsyncRead + Unpin>(
+    reader: &mut Buffered<S, FrontendDirection>,
+    connection_timeout: Option<Duration>,
+) -> Result<FrontendMessage, Error> {
+    match connection_timeout {
+        Some(duration) => tokio::time::timeout(duration, reader.receive_wire())
+            .await
+            .map_err(|_| Error::ConnectionTimeout { duration })?
+            .map_err(Into::into),
+        None => reader.receive_wire().await.map_err(Into::into),
+    }
+}
 
 /// The PostgreSQL proxy frontend that handles client-to-server message processing.
 ///
@@ -157,11 +169,8 @@ where
     /// Returns `Ok(())` on successful message processing, or an `Error` if a fatal
     /// error occurs that should terminate the connection.
     pub async fn rewrite(&mut self) -> Result<(), Error> {
-        let protocol_message = protocol::read_frontend_message(
-            &mut self.client_reader,
-            self.context.connection_timeout(),
-        )
-        .await?;
+        let protocol_message =
+            receive_frontend(&mut self.client_reader, self.context.connection_timeout()).await?;
         let mut outbound_message = protocol_message.clone();
 
         let recovering_from_extended_error = self.context.protocol_in_extended_error()?;
