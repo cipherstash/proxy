@@ -1,13 +1,11 @@
 use crate::error::{Error, ProtocolError};
 use bytes::BytesMut;
 use pg_proto::codec::{
-    Authentication, Backend, BackendMessage, Direction, Frontend, FrontendMessage, PgCodec,
+    Authentication, Backend, BackendMessage, Frontend, FrontendMessage, PgCodec,
 };
+use pg_proto::transport::Buffered;
 use std::time::Duration;
-use tokio::{
-    io::{AsyncRead, AsyncReadExt},
-    time::timeout,
-};
+use tokio::{io::AsyncRead, time::timeout};
 use tokio_util::codec::Decoder;
 use tokio_util::codec::Encoder;
 
@@ -49,11 +47,10 @@ pub fn encode_backend_message(message: &BackendMessage) -> Result<BytesMut, Erro
 ///
 ///
 pub async fn read_auth_message<S: AsyncRead + Unpin>(
-    mut stream: S,
+    stream: &mut Buffered<S, Backend>,
 ) -> Result<Authentication, Error> {
     let connection_timeout = Duration::from_millis(1000 * 10);
-    let (_bytes, message) =
-        read_backend_message_with_timeout(&mut stream, connection_timeout).await?;
+    let (_bytes, message) = read_backend_message_with_timeout(stream, connection_timeout).await?;
     match message {
         BackendMessage::Authentication(authentication) => Ok(authentication),
         _ => Err(ProtocolError::UnexpectedAuthenticationResponse {
@@ -71,22 +68,22 @@ pub async fn read_auth_message<S: AsyncRead + Unpin>(
 ///
 ///
 pub async fn read_frontend_message<S: AsyncRead + Unpin>(
-    mut stream: S,
+    stream: &mut Buffered<S, Frontend>,
     connection_timeout: Option<Duration>,
 ) -> Result<(BytesMut, FrontendMessage), Error> {
     match connection_timeout {
         Some(duration) => read_frontend_message_with_timeout(stream, duration).await,
-        None => read_frontend(&mut stream).await,
+        None => read_frontend(stream).await,
     }
 }
 
 pub async fn read_backend_message<S: AsyncRead + Unpin>(
-    mut stream: S,
+    stream: &mut Buffered<S, Backend>,
     connection_timeout: Option<Duration>,
 ) -> Result<(BytesMut, BackendMessage), Error> {
     match connection_timeout {
         Some(duration) => read_backend_message_with_timeout(stream, duration).await,
-        None => read_backend(&mut stream).await,
+        None => read_backend(stream).await,
     }
 }
 
@@ -97,19 +94,19 @@ pub async fn read_backend_message<S: AsyncRead + Unpin>(
 ///
 ///
 async fn read_frontend_message_with_timeout<S: AsyncRead + Unpin>(
-    mut stream: S,
+    stream: &mut Buffered<S, Frontend>,
     duration: Duration,
 ) -> Result<(BytesMut, FrontendMessage), Error> {
-    timeout(duration, read_frontend(&mut stream))
+    timeout(duration, read_frontend(stream))
         .await
         .map_err(|_| Error::ConnectionTimeout { duration })?
 }
 
 async fn read_backend_message_with_timeout<S: AsyncRead + Unpin>(
-    mut stream: S,
+    stream: &mut Buffered<S, Backend>,
     duration: Duration,
 ) -> Result<(BytesMut, BackendMessage), Error> {
-    timeout(duration, read_backend(&mut stream))
+    timeout(duration, read_backend(stream))
         .await
         .map_err(|_| Error::ConnectionTimeout { duration })?
 }
@@ -122,32 +119,19 @@ async fn read_backend_message_with_timeout<S: AsyncRead + Unpin>(
 ///
 ///
 async fn read_frontend<S: AsyncRead + Unpin>(
-    stream: &mut S,
+    stream: &mut Buffered<S, Frontend>,
 ) -> Result<(BytesMut, FrontendMessage), Error> {
-    let message = read::<Frontend, _>(stream).await?;
+    let message = stream.receive_wire().await?;
     let bytes = encode_frontend_message(&message)?;
     Ok((bytes, message))
 }
 
 async fn read_backend<S: AsyncRead + Unpin>(
-    stream: &mut S,
+    stream: &mut Buffered<S, Backend>,
 ) -> Result<(BytesMut, BackendMessage), Error> {
-    let message = read::<Backend, _>(stream).await?;
+    let message = stream.receive_backend().await?;
     let bytes = encode_backend_message(&message)?;
     Ok((bytes, message))
-}
-
-async fn read<D: Direction, S: AsyncRead + Unpin>(stream: &mut S) -> Result<D::Message, Error> {
-    let mut codec = PgCodec::<D>::default();
-    let mut bytes = BytesMut::with_capacity(5);
-    loop {
-        if let Some(message) = codec.decode(&mut bytes)? {
-            return Ok(message);
-        }
-        if stream.read_buf(&mut bytes).await? == 0 {
-            return Err(Error::ConnectionClosed);
-        }
-    }
 }
 
 #[cfg(test)]
@@ -169,11 +153,12 @@ mod tests {
 
     #[tokio::test]
     async fn frontend_frame_can_arrive_in_partial_writes() {
-        let (mut writer, mut reader) = duplex(64);
+        let (mut writer, reader) = duplex(64);
         let task = tokio::spawn(async move {
             writer.write_all(b"Q\0\0").await.unwrap();
             writer.write_all(b"\0\x0dselect 1\0").await.unwrap();
         });
+        let mut reader = Buffered::new_frontend(reader);
 
         let (bytes, _) = read_frontend_message(&mut reader, None).await.unwrap();
         assert_eq!(&bytes[..], b"Q\0\0\0\x0dselect 1\0");
@@ -182,8 +167,9 @@ mod tests {
 
     #[tokio::test]
     async fn unknown_frontend_tag_is_rejected() {
-        let (mut writer, mut reader) = duplex(16);
+        let (mut writer, reader) = duplex(16);
         writer.write_all(b"?\0\0\0\x04").await.unwrap();
+        let mut reader = Buffered::new_frontend(reader);
 
         let error = read_frontend_message(&mut reader, None).await.unwrap_err();
         assert!(error.to_string().contains("unknown frontend message tag"));
@@ -191,14 +177,16 @@ mod tests {
 
     #[tokio::test]
     async fn malformed_and_oversized_frames_are_rejected_before_body_allocation() {
-        let (mut writer, mut reader) = duplex(16);
+        let (mut writer, reader) = duplex(16);
         writer.write_all(b"Q\0\0\0\x03").await.unwrap();
+        let mut reader = Buffered::new_frontend(reader);
         assert!(read_frontend_message(&mut reader, None).await.is_err());
 
-        let (mut writer, mut reader) = duplex(16);
+        let (mut writer, reader) = duplex(16);
         let oversized = (DEFAULT_MAX_FRAME_LEN as u32).to_be_bytes();
         writer.write_all(b"Q").await.unwrap();
         writer.write_all(&oversized).await.unwrap();
+        let mut reader = Buffered::new_frontend(reader);
         assert!(read_frontend_message(&mut reader, None).await.is_err());
     }
 
@@ -214,13 +202,14 @@ mod tests {
         ];
 
         for authentication in messages {
-            let (mut writer, mut reader) = duplex(128);
+            let (mut writer, reader) = duplex(128);
             writer
                 .write_all(&encode_backend(BackendMessage::Authentication(
                     authentication,
                 )))
                 .await
                 .unwrap();
+            let mut reader = Buffered::new(reader);
             read_auth_message(&mut reader).await.unwrap();
         }
     }
