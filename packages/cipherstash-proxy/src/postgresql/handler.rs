@@ -1,14 +1,8 @@
 use super::backend::Backend;
 use super::frontend::Frontend;
-use super::protocol::StartupCode;
 use crate::connect::ChannelWriter;
 use crate::error::ConfigError;
 use crate::log::{AUTHENTICATION, PROTOCOL};
-use crate::postgresql::messages::authentication::auth::{AuthenticationMethod, SaslMechanism};
-use crate::postgresql::messages::authentication::sasl::SASLResponse;
-use crate::postgresql::messages::authentication::{
-    Authentication, PasswordMessage, SASLInitialResponse,
-};
 use crate::postgresql::messages::error_response::ErrorResponse;
 use crate::postgresql::{protocol, startup};
 use crate::proxy::ZeroKms;
@@ -18,40 +12,27 @@ use crate::{
     postgresql::context::Context,
     tls,
 };
-use bytes::BytesMut;
+use bytes::{BufMut, Bytes, BytesMut};
 use md5::{Digest, Md5};
+use pg_proto::codec::{Authentication, BackendMessage, FrontendMessage};
+use pg_proto::pre_startup::PreStartupMessage;
 use postgres_protocol::authentication::sasl::{ChannelBinding, ScramSha256};
 use rand::Rng;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use tracing::{debug, error, info, warn};
+
+const SCRAM_SHA_256_PLUS: &[u8] = b"SCRAM-SHA-256-PLUS";
+const SCRAM_SHA_256: &[u8] = b"SCRAM-SHA-256";
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum SaslMechanism {
+    ScramSha256,
+    ScramSha256Plus,
+}
+/// Handles one downstream PostgreSQL connection and its paired upstream connection.
 ///
-///
-/// Entry point for handling postgres protocol connections
-/// Each inbound client connection is mapped to a database connection
-/// Hilarity ensues
-///
-/// Startup flow
-///
-///     Connect to database with TLS if required
-///     First message is either:
-///         - SSLRequest
-///         - ProtocolVersionNumber
-///         - CancelRequest
-///
-///     On SSLRequest
-///         Send SSLResponse
-///         Connect with TLS if configured
-///
-///         On TLS Connect
-///             Expect message containing ProtocolVersionNumber is sent
-///
-///     On CancelRequest
-///         Propagate and disconnect
-///
-///     On ProtocolVersionNumber
-///         Propagate and continue
-///
-///
+/// Negotiation and message validation are delegated to `pg-proto`; this function
+/// retains the proxy-specific TLS policy, authentication policy, and forwarding.
 pub async fn handler(client_stream: AsyncStream, context: Context<ZeroKms>) -> Result<(), Error> {
     let mut client_stream = client_stream;
     let client_id = context.client_id;
@@ -76,8 +57,8 @@ pub async fn handler(client_stream: AsyncStream, context: Context<ZeroKms>) -> R
                 Err(err) => return Err(err),
             };
 
-        match &startup_message.code {
-            StartupCode::SSLRequest => {
+        match &startup_message {
+            PreStartupMessage::SslRequest => {
                 startup::send_ssl_response(&mut client_stream, context.use_tls()).await?;
                 if let Some(ref tls) = context.tls_config() {
                     match client_stream {
@@ -92,15 +73,19 @@ pub async fn handler(client_stream: AsyncStream, context: Context<ZeroKms>) -> R
                     }
                 }
             }
-            StartupCode::CancelRequest => {
-                database_stream.write_all(&startup_message.bytes).await?;
+            PreStartupMessage::CancelRequest { .. } => {
+                database_stream
+                    .write_all(&startup_message.to_packet()?)
+                    .await?;
                 return Err(Error::CancelRequest);
             }
-            StartupCode::ProtocolVersionNumber => {
-                database_stream.write_all(&startup_message.bytes).await?;
+            PreStartupMessage::Startup(_) => {
+                database_stream
+                    .write_all(&startup_message.to_packet()?)
+                    .await?;
                 break;
             }
-            StartupCode::GSSENCRequest => {
+            PreStartupMessage::GssEncRequest => {
                 return Err(ProtocolError::UnexpectedStartupMessage.into());
             }
         }
@@ -123,39 +108,47 @@ pub async fn handler(client_stream: AsyncStream, context: Context<ZeroKms>) -> R
 
         let hash = md5_hash(username, password, &salt);
 
-        let message = Authentication::md5_password(salt);
-        let bytes = BytesMut::try_from(message)?;
+        let bytes = protocol::encode_backend_message(&BackendMessage::Authentication(
+            Authentication::Md5Password { salt },
+        ))?;
         client_stream.write_all(&bytes).await?;
 
         let connection_timeout = context.connection_timeout();
-        let (_code, bytes, _message) = match protocol::read_frontend_message(
-            &mut client_stream,
-            client_id,
-            connection_timeout,
-        )
-        .await
-        {
-            Ok(result) => result,
-            Err(err @ Error::ConnectionTimeout { .. }) => {
-                send_timeout_error(&mut client_stream, &err).await;
-                return Err(err);
+        let (_bytes, message) =
+            match protocol::read_frontend_message(&mut client_stream, connection_timeout).await {
+                Ok(result) => result,
+                Err(err @ Error::ConnectionTimeout { .. }) => {
+                    send_timeout_error(&mut client_stream, &err).await;
+                    return Err(err);
+                }
+                Err(err) => return Err(err),
+            };
+
+        let FrontendMessage::PasswordResponse(password) = message else {
+            return Err(ProtocolError::UnexpectedAuthenticationResponse {
+                expected: "PasswordResponse".into(),
+                received: -1,
             }
-            Err(err) => return Err(err),
+            .into());
         };
+        let password = password
+            .strip_suffix(&[0])
+            .ok_or(ProtocolError::UnexpectedStartupMessage)?;
+        let password =
+            std::str::from_utf8(password).map_err(|_| ProtocolError::AuthenticationFailed)?;
 
-        let password_message = PasswordMessage::try_from(&bytes)?;
-
-        if hash == password_message.password {
-            let message = Authentication::authentication_ok();
+        if hash == password {
             debug!(target: AUTHENTICATION, msg = "Client AuthenticationOk");
-            let bytes = BytesMut::try_from(message)?;
+            let bytes = protocol::encode_backend_message(&BackendMessage::Authentication(
+                Authentication::Ok,
+            ))?;
             client_stream.write_all(&bytes).await?;
         } else {
             let message = ProtocolError::ClientAuthenticationFailed.to_string();
             error!(msg = message);
 
             let message = ErrorResponse::invalid_password(message);
-            let bytes = BytesMut::try_from(message)?;
+            let bytes = protocol::encode_backend_message(&message.into_backend_message())?;
             client_stream.write_all(&bytes).await?;
         }
     }
@@ -169,33 +162,31 @@ pub async fn handler(client_stream: AsyncStream, context: Context<ZeroKms>) -> R
     //
 
     // First message should always be Auth
-    let auth = protocol::read_auth_message(&mut database_stream, client_id).await?;
+    let auth = protocol::read_auth_message(&mut database_stream).await?;
 
-    match &auth.method {
-        AuthenticationMethod::AuthenticationOk => {
+    match &auth {
+        Authentication::Ok => {
             debug!(target: AUTHENTICATION, msg = "AuthenticationOk");
         }
-        AuthenticationMethod::AuthenticationCleartextPassword => {
+        Authentication::CleartextPassword => {
             debug!(target: AUTHENTICATION, msg = "AuthenticationCleartextPassword");
             let password = context.database_password();
-            let message = PasswordMessage::new(password);
-            let bytes = BytesMut::try_from(message)?;
+            let bytes = password_message(password)?;
             database_stream.write_all(&bytes).await?;
         }
-        AuthenticationMethod::Md5Password { salt } => {
+        Authentication::Md5Password { salt } => {
             debug!(target: AUTHENTICATION, msg = "Md5Password");
             let username = context.database_username().as_bytes();
             let password = context.database_password();
             let password = password.as_bytes();
 
             let hash = md5_hash(username, password, salt);
-            let message = PasswordMessage::new(hash);
-            let bytes = BytesMut::try_from(message)?;
+            let bytes = password_message(hash)?;
             database_stream.write_all(&bytes).await?;
         }
-        AuthenticationMethod::Sasl { .. } => {
+        Authentication::Sasl { mechanisms } => {
             debug!(target: AUTHENTICATION, msg = "Sasl");
-            let mechanism = auth.sasl_mechanism()?;
+            let mechanism = sasl_mechanism(mechanisms)?;
             sanity_check_sasl_mechanism(&mechanism, &client_stream);
 
             // Toby: I don't think we need to do anything here
@@ -207,22 +198,25 @@ pub async fn handler(client_stream: AsyncStream, context: Context<ZeroKms>) -> R
             scram_sha_256_plus_handler(&mut database_stream, mechanism, password, channel_binding)
                 .await?;
         }
-        AuthenticationMethod::Other { method_code, .. } => {
+        Authentication::KerberosV5
+        | Authentication::Gss
+        | Authentication::GssContinue(_)
+        | Authentication::Sspi => {
             debug!(target: AUTHENTICATION, msg = "UnsupportedAuthentication");
             return Err(ProtocolError::UnsupportedAuthentication {
-                method_code: *method_code,
+                method_code: authentication_method_code(&auth),
             }
             .into());
         }
-        method => {
-            debug!(target: AUTHENTICATION, msg = "UnexpectedStartupMessage", authentication_method = ?method);
+        Authentication::SaslContinue(_) | Authentication::SaslFinal(_) => {
+            debug!(target: AUTHENTICATION, msg = "UnexpectedStartupMessage", authentication_method = ?auth);
             return Err(ProtocolError::UnexpectedStartupMessage.into());
         }
     }
 
     if context.require_tls() && !client_stream.is_tls() {
         let message = ErrorResponse::tls_required();
-        let bytes = BytesMut::try_from(message)?;
+        let bytes = protocol::encode_backend_message(&message.into_backend_message())?;
         client_stream.write_all(&bytes).await?;
 
         error!(msg = "Client must connect with Transport Layer Security (TLS)");
@@ -286,7 +280,8 @@ pub async fn handler(client_stream: AsyncStream, context: Context<ZeroKms>) -> R
 
     if let Err(ref err @ Error::ConnectionTimeout { .. }) = &result {
         let error_response = ErrorResponse::connection_timeout(err.to_string());
-        if let Ok(bytes) = BytesMut::try_from(error_response) {
+        if let Ok(bytes) = protocol::encode_backend_message(&error_response.into_backend_message())
+        {
             let _ = timeout_sender.send(bytes);
         }
         // Best-effort yield to allow ChannelWriter to flush the error response
@@ -338,6 +333,40 @@ fn sanity_check_sasl_mechanism(mechanism: &SaslMechanism, client_stream: &AsyncS
     }
 }
 
+fn sasl_mechanism(mechanisms: &[Bytes]) -> Result<SaslMechanism, Error> {
+    match mechanisms.first().map(Bytes::as_ref) {
+        Some(SCRAM_SHA_256) => Ok(SaslMechanism::ScramSha256),
+        Some(SCRAM_SHA_256_PLUS) => Ok(SaslMechanism::ScramSha256Plus),
+        Some(mechanism) => Err(ProtocolError::UnexpectedSaslAuthenticationMethod(
+            String::from_utf8_lossy(mechanism).into_owned(),
+        )
+        .into()),
+        None => Err(ProtocolError::UnexpectedSaslAuthenticationMethod("None".to_string()).into()),
+    }
+}
+
+fn authentication_method_code(authentication: &Authentication) -> i32 {
+    match authentication {
+        Authentication::Ok => 0,
+        Authentication::KerberosV5 => 2,
+        Authentication::CleartextPassword => 3,
+        Authentication::Md5Password { .. } => 5,
+        Authentication::Gss => 7,
+        Authentication::GssContinue(_) => 8,
+        Authentication::Sspi => 9,
+        Authentication::Sasl { .. } => 10,
+        Authentication::SaslContinue(_) => 11,
+        Authentication::SaslFinal(_) => 12,
+    }
+}
+
+fn password_message(password: String) -> Result<BytesMut, Error> {
+    let password = std::ffi::CString::new(password)?;
+    protocol::encode_frontend_message(&FrontendMessage::PasswordResponse(Bytes::copy_from_slice(
+        password.as_bytes_with_nul(),
+    )))
+}
+
 pub fn md5_hash(username: &[u8], password: &[u8], salt: &[u8; 4]) -> String {
     let mut md5 = Md5::new();
     md5.update(password);
@@ -364,27 +393,53 @@ async fn scram_sha_256_plus_handler<S: AsyncRead + AsyncWrite + Unpin>(
     let mut scram = ScramSha256::new(password, channel_binding);
     let bytes = scram.message().to_vec();
 
-    let sasl_initial_response = SASLInitialResponse::new(mechanism, bytes);
-    let bytes = BytesMut::try_from(sasl_initial_response)?;
+    let mechanism = match mechanism {
+        SaslMechanism::ScramSha256 => SCRAM_SHA_256,
+        SaslMechanism::ScramSha256Plus => SCRAM_SHA_256_PLUS,
+    };
+    let mut initial = BytesMut::new();
+    initial.extend_from_slice(mechanism);
+    initial.put_u8(0);
+    initial.put_i32(bytes.len().try_into().map_err(|_| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "SASL response is too large",
+        )
+    })?);
+    initial.extend_from_slice(&bytes);
+    let bytes =
+        protocol::encode_frontend_message(&FrontendMessage::PasswordResponse(initial.freeze()))?;
     stream.write_all(&bytes).await?;
 
-    let auth = protocol::read_auth_message(&mut stream, 1).await?;
+    let auth = protocol::read_auth_message(&mut stream).await?;
 
-    let bytes = auth.sasl_continue()?;
-    scram.update(bytes)?;
+    let Authentication::SaslContinue(bytes) = auth else {
+        return Err(ProtocolError::UnexpectedAuthenticationResponse {
+            expected: "SaslContinue".into(),
+            received: authentication_method_code(&auth),
+        }
+        .into());
+    };
+    scram.update(&bytes)?;
 
-    let sasl_response = SASLResponse::new(scram.message().to_vec());
-
-    let bytes = BytesMut::try_from(sasl_response)?;
+    let bytes = protocol::encode_frontend_message(&FrontendMessage::PasswordResponse(
+        Bytes::copy_from_slice(scram.message()),
+    ))?;
     stream.write_all(&bytes).await?;
 
-    let auth = protocol::read_auth_message(&mut stream, 1).await?;
-    let bytes = auth.sasl_final()?;
-    scram.finish(bytes)?;
+    let auth = protocol::read_auth_message(&mut stream).await?;
+    let Authentication::SaslFinal(bytes) = auth else {
+        return Err(ProtocolError::UnexpectedAuthenticationResponse {
+            expected: "SaslFinal".into(),
+            received: authentication_method_code(&auth),
+        }
+        .into());
+    };
+    scram.finish(&bytes)?;
 
-    let auth = protocol::read_auth_message(&mut stream, 1).await?;
+    let auth = protocol::read_auth_message(&mut stream).await?;
 
-    if auth.is_ok() {
+    if matches!(auth, Authentication::Ok) {
         debug!(target: AUTHENTICATION, msg = "SASL authentication successful");
         Ok(())
     } else {
@@ -396,7 +451,7 @@ async fn scram_sha_256_plus_handler<S: AsyncRead + AsyncWrite + Unpin>(
 /// Used for pre-split timeout sites where no ChannelWriter exists yet.
 async fn send_timeout_error<S: AsyncWrite + Unpin>(stream: &mut S, err: &Error) {
     let error_response = ErrorResponse::connection_timeout(err.to_string());
-    if let Ok(bytes) = BytesMut::try_from(error_response) {
+    if let Ok(bytes) = protocol::encode_backend_message(&error_response.into_backend_message()) {
         let _ = stream.write_all(&bytes).await;
     }
 }
