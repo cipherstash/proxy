@@ -1,15 +1,16 @@
-use std::{ffi::CString, io::Cursor};
-
-use bytes::{Buf, BufMut, BytesMut};
+use bytes::{Bytes, BytesMut};
+use pg_proto::codec::{
+    BackendMessage, FieldDescription as PgFieldDescription, RowDescription as PgRowDescription,
+};
 use postgres_types::Type;
 
 use crate::{
     error::{Error, ProtocolError},
-    postgresql::{format_code::FormatCode, protocol::BytesMutReadString},
-    SIZE_I16, SIZE_I32,
+    postgresql::{
+        format_code::FormatCode,
+        protocol::{decode_backend_frame, encode_backend_message},
+    },
 };
-
-use super::BackendCode;
 
 #[derive(Debug)]
 pub struct RowDescription {
@@ -60,24 +61,28 @@ impl TryFrom<&BytesMut> for RowDescription {
     type Error = Error;
 
     fn try_from(bytes: &BytesMut) -> Result<RowDescription, Error> {
-        let mut cursor = Cursor::new(bytes);
-
-        let code = cursor.get_u8();
-
-        if BackendCode::from(code) != BackendCode::RowDescription {
+        let BackendMessage::RowDescription(description) = decode_backend_frame(bytes)? else {
             return Err(ProtocolError::UnexpectedMessageCode {
-                expected: BackendCode::RowDescription.into(),
-                received: code as char,
+                expected: 'T',
+                received: bytes.first().copied().unwrap_or_default() as char,
             }
             .into());
-        }
+        };
 
-        let _len = cursor.get_i32(); // move the cursor
-        let num_fields = cursor.get_i16() as usize;
-
-        let fields = std::iter::repeat_with(|| RowDescriptionField::try_from(&mut cursor))
-            .take(num_fields)
-            .collect::<Result<_, _>>()?;
+        let fields = description
+            .fields
+            .into_iter()
+            .map(|field| RowDescriptionField {
+                name: String::from_utf8_lossy(&field.name).into_owned(),
+                table_oid: field.table_oid as i32,
+                table_column: field.column,
+                type_oid: field.type_oid as i32,
+                type_size: field.type_size,
+                type_modifier: field.type_modifier,
+                format_code: field.format.into(),
+                dirty: false,
+            })
+            .collect();
 
         Ok(RowDescription { fields })
     }
@@ -87,78 +92,21 @@ impl TryFrom<RowDescription> for BytesMut {
     type Error = Error;
 
     fn try_from(row_description: RowDescription) -> Result<BytesMut, Error> {
-        let mut bytes = BytesMut::new();
-
-        // Convert each field to bytes
         let fields = row_description
             .fields
             .into_iter()
-            .map(BytesMut::try_from)
-            .collect::<Result<Vec<_>, _>>()?;
+            .map(|field| PgFieldDescription {
+                name: Bytes::from(field.name),
+                table_oid: field.table_oid as u32,
+                column: field.table_column,
+                type_oid: field.type_oid as u32,
+                type_size: field.type_size,
+                type_modifier: field.type_modifier,
+                format: field.format_code.into(),
+            })
+            .collect();
 
-        let field_count = fields.len();
-        let field_size = fields.iter().map(|x| x.len()).sum::<usize>();
-
-        let len = SIZE_I32 + SIZE_I16 + field_size;
-
-        bytes.put_u8(BackendCode::RowDescription.into());
-        bytes.put_i32(len as i32);
-        bytes.put_i16(field_count as i16);
-
-        for field in fields.into_iter() {
-            bytes.put_slice(&field);
-        }
-
-        Ok(bytes)
-    }
-}
-
-// impl TryFrom<&BytesMut> for RowDescriptionField {
-impl TryFrom<&mut Cursor<&BytesMut>> for RowDescriptionField {
-    type Error = Error;
-
-    fn try_from(cursor: &mut Cursor<&BytesMut>) -> Result<RowDescriptionField, Self::Error> {
-        let name = cursor.read_string()?;
-
-        let table_oid = cursor.get_i32();
-        let table_column = cursor.get_i16();
-        let type_oid = cursor.get_i32();
-
-        let type_size = cursor.get_i16();
-        let type_modifier = cursor.get_i32();
-        let format_code = cursor.get_i16().into();
-
-        Ok(Self {
-            name,
-            table_oid,
-            table_column,
-            type_oid,
-            type_size,
-            type_modifier,
-            format_code,
-            dirty: false,
-        })
-    }
-}
-
-impl TryFrom<RowDescriptionField> for BytesMut {
-    type Error = Error;
-
-    fn try_from(field: RowDescriptionField) -> Result<Self, Self::Error> {
-        let mut bytes = BytesMut::new();
-
-        let name = CString::new(field.name)?;
-        let name = name.as_bytes_with_nul();
-
-        bytes.put_slice(name);
-        bytes.put_i32(field.table_oid);
-        bytes.put_i16(field.table_column);
-        bytes.put_i32(field.type_oid);
-        bytes.put_i16(field.type_size);
-        bytes.put_i32(field.type_modifier);
-        bytes.put_i16(field.format_code.into());
-
-        Ok(bytes)
+        encode_backend_message(&BackendMessage::RowDescription(PgRowDescription { fields }))
     }
 }
 

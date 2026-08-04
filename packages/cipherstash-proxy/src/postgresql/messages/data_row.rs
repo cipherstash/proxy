@@ -1,12 +1,14 @@
-use super::{BackendCode, NULL};
 use crate::EqlCiphertext;
 use crate::{
     error::{EncryptError, Error, ProtocolError},
     log::DECRYPT,
-    postgresql::Column,
+    postgresql::{
+        protocol::{decode_backend_frame, encode_backend_message},
+        Column,
+    },
 };
-use bytes::{Buf, BufMut, BytesMut};
-use std::io::Cursor;
+use bytes::BytesMut;
+use pg_proto::codec::{BackendMessage, DataRow as PgDataRow};
 use tracing::{debug, error};
 
 /// Leading byte of `jsonb`'s binary wire format. PostgreSQL has only ever
@@ -63,11 +65,9 @@ impl DataRow {
     }
 
     fn len_of_columns(&self) -> usize {
-        let column_len_size = size_of::<i32>(); // len of column len
-
         self.columns
             .iter()
-            .map(|col| column_len_size + col.bytes.as_ref().map(|b| b.len()).unwrap_or(0))
+            .map(|column| size_of::<i32>() + column.bytes.as_ref().map_or(0, BytesMut::len))
             .sum()
     }
 
@@ -102,38 +102,20 @@ impl TryFrom<&BytesMut> for DataRow {
     type Error = Error;
 
     fn try_from(buf: &BytesMut) -> Result<DataRow, Error> {
-        let mut cursor = Cursor::new(buf);
-
-        let code = cursor.get_u8();
-
-        if BackendCode::from(code) != BackendCode::DataRow {
+        let BackendMessage::DataRow(row) = decode_backend_frame(buf)? else {
             return Err(ProtocolError::UnexpectedMessageCode {
-                expected: BackendCode::DataRow.into(),
-                received: code as char,
+                expected: 'D',
+                received: buf.first().copied().unwrap_or_default() as char,
             }
             .into());
-        }
-
-        let _len = cursor.get_i32();
-
-        let num_columns = cursor.get_i16();
-
-        let mut columns = Vec::new();
-        for _ in 0..num_columns {
-            let len = cursor.get_i32();
-
-            if len == NULL {
-                columns.push(DataColumn { bytes: None });
-            } else {
-                let len = len as usize;
-
-                let mut bytes = BytesMut::with_capacity(len);
-                bytes.resize(len, 0);
-                cursor.copy_to_slice(&mut bytes);
-
-                columns.push(DataColumn { bytes: Some(bytes) });
-            }
-        }
+        };
+        let columns = row
+            .columns
+            .into_iter()
+            .map(|bytes| DataColumn {
+                bytes: bytes.map(BytesMut::from),
+            })
+            .collect();
 
         Ok(DataRow { columns })
     }
@@ -143,39 +125,13 @@ impl TryFrom<DataRow> for BytesMut {
     type Error = Error;
 
     fn try_from(data_row: DataRow) -> Result<BytesMut, Error> {
-        let mut bytes = BytesMut::new();
-
-        let len = size_of::<i32>() // len of len
-                        + size_of::<i16>() // num columns
-                        + data_row.len_of_columns(); // len data columns
-
-        bytes.put_u8(BackendCode::DataRow.into());
-        bytes.put_i32(len as i32);
-        bytes.put_i16(data_row.columns.len() as i16);
-
-        for col in data_row.columns.into_iter() {
-            let b = BytesMut::try_from(col)?;
-            bytes.put_slice(&b);
-        }
-
-        Ok(bytes)
-    }
-}
-
-impl TryFrom<DataColumn> for BytesMut {
-    type Error = Error;
-
-    fn try_from(data_column: DataColumn) -> Result<BytesMut, Error> {
-        let mut bytes = BytesMut::new();
-
-        if let Some(data) = data_column.bytes {
-            bytes.put_i32(data.len() as i32);
-            bytes.put_slice(&data);
-        } else {
-            bytes.put_i32(NULL);
-        }
-
-        Ok(bytes)
+        encode_backend_message(&BackendMessage::DataRow(PgDataRow {
+            columns: data_row
+                .columns
+                .into_iter()
+                .map(|column| column.bytes.map(|bytes| bytes.freeze()))
+                .collect(),
+        }))
     }
 }
 
