@@ -57,16 +57,6 @@ pub trait PostgreSqlErrorHandler {
             _ => ErrorResponse::system_error(err.to_string()),
         }
     }
-
-    /// Send an ErrorResponse message to the client.
-    ///
-    /// Converts the error to a PostgreSQL ErrorResponse and sends it
-    /// to the client via the component's sender channel.
-    ///
-    /// # Arguments
-    ///
-    /// * `error_response` - The ErrorResponse to send to the client
-    fn send_error_response(&mut self, err: Error) -> Result<(), Error>;
 }
 
 #[cfg(test)]
@@ -87,10 +77,6 @@ mod tests {
 
         fn client_id(&self) -> i32 {
             0
-        }
-
-        fn send_error_response(&mut self, _err: Error) -> Result<(), Error> {
-            unimplemented!("not needed for error_to_response tests")
         }
     }
 

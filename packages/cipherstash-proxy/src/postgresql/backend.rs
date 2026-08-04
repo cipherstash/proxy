@@ -157,7 +157,6 @@ where
         )
         .await?;
 
-        self.context.protocol_backend_received(&protocol_message)?;
         let read_duration = read_start.elapsed();
         self.context.record_execute_server_timing(read_duration);
 
@@ -227,7 +226,7 @@ where
                     Ok(_) => (),
                     Err(err) => {
                         warn!(client_id = self.client_id(), error = err.to_string());
-                        self.send_error_response(err)?;
+                        self.send_error_response(err).await?;
                     }
                 }
 
@@ -243,7 +242,7 @@ where
                     Ok(_) => (),
                     Err(err) => {
                         warn!(client_id = self.client_id(), error = err.to_string());
-                        self.send_error_response(err)?;
+                        self.send_error_response(err).await?;
                     }
                 }
 
@@ -375,7 +374,7 @@ where
             Ok(_) => (),
             Err(err) => {
                 warn!(client_id = self.client_id(), error = err.to_string());
-                self.send_error_response(err)?;
+                self.send_error_response(err).await?;
             }
         }
 
@@ -387,12 +386,13 @@ where
     /// Write a message to the client
     ///
     pub async fn write(&mut self, bytes: BytesMut) -> Result<(), Error> {
-        self.context.protocol_backend_forwarded(&bytes)?;
+        self.context.protocol_backend_forwarded(&bytes).await?;
         let sent: u64 = bytes.len() as u64;
         counter!(CLIENTS_BYTES_SENT_TOTAL).increment(sent);
 
         let start = Instant::now();
         self.client_sender.send(bytes)?;
+        self.context.protocol_backend_sent();
         let duration = start.elapsed();
         self.context.add_client_write_duration_for_execute(duration);
 
@@ -722,13 +722,14 @@ where
     fn client_id(&self) -> i32 {
         self.context.client_id
     }
+}
 
-    /// Backend-specific error response handling.
-    ///
-    /// Unlike the frontend, the backend doesn't need to set an error state
-    /// since errors during result processing should immediately terminate
-    /// the current query execution.
-    fn send_error_response(&mut self, err: Error) -> Result<(), Error> {
+impl<R, S> Backend<R, S>
+where
+    R: AsyncRead + Unpin,
+    S: EncryptionService,
+{
+    async fn send_error_response(&mut self, err: Error) -> Result<(), Error> {
         let error_response = self.error_to_response(err);
         // Ensure any buffered data is cleared before sending error
         self.buffer.clear();
@@ -742,7 +743,9 @@ where
             ?message,
         );
 
+        self.context.protocol_backend_forwarded(&message).await?;
         self.client_sender.send(message)?;
+        self.context.protocol_backend_sent();
 
         Ok(())
     }
@@ -756,7 +759,9 @@ mod tests {
     use crate::postgresql::context::KeysetIdentifier;
     use crate::postgresql::messages::Name;
     use crate::proxy::{EncryptConfig, EncryptionService};
+    use bytes::Bytes;
     use eql_mapper::Schema;
+    use pg_proto::codec::FrontendMessage;
     use std::io::Cursor;
     use std::sync::Arc;
     use tokio::sync::mpsc;
@@ -892,10 +897,38 @@ mod tests {
                 backend
                     .context
                     .set_execute(Name::unnamed(), Some(session_id));
+                backend
+                    .context
+                    .protocol_frontend_received(FrontendMessage::Execute(
+                        pg_proto::codec::Execute {
+                            portal: Bytes::new(),
+                            max_rows: 0,
+                        },
+                    ))
+                    .await
+                    .unwrap();
 
                 // Backend: process the terminating message via the passthrough
                 // path, which must drain the queues.
                 backend.rewrite().await.unwrap();
+
+                if label == "ErrorResponse" {
+                    backend
+                        .context
+                        .protocol_frontend_received(FrontendMessage::Sync)
+                        .await
+                        .unwrap();
+                    let ready = protocol::encode_backend_message(&BackendMessage::ReadyForQuery(
+                        pg_proto::codec::TransactionStatus::Idle,
+                    ))
+                    .unwrap();
+                    backend
+                        .context
+                        .protocol_backend_forwarded(&ready)
+                        .await
+                        .unwrap();
+                    backend.context.protocol_backend_sent();
+                }
 
                 // The queues must be drained every iteration — not grow by one
                 // per statement (the BUG-300 leak).
