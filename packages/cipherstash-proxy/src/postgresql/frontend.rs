@@ -39,6 +39,7 @@ use cipherstash_client::encryption::Plaintext;
 use eql_mapper::{self, EqlMapperError, EqlTermVariant, JsonSelectorSegment, TypeCheckedStatement};
 use metrics::{counter, histogram};
 use pg_escape::quote_literal;
+use pg_proto::codec::FrontendMessage;
 use serde::Serialize;
 use sqltk::parser::ast::{self, Value};
 use sqltk::NodeKey;
@@ -175,12 +176,14 @@ where
     /// Returns `Ok(())` on successful message processing, or an `Error` if a fatal
     /// error occurs that should terminate the connection.
     pub async fn rewrite(&mut self) -> Result<(), Error> {
-        let (code, mut bytes) = protocol::read_message(
+        let (code, mut bytes, protocol_message) = protocol::read_frontend_message(
             &mut self.client_reader,
             self.context.client_id,
             self.context.connection_timeout(),
         )
         .await?;
+
+        self.context.protocol_frontend_received(&protocol_message)?;
 
         let sent: u64 = bytes.len() as u64;
         counter!(CLIENTS_BYTES_RECEIVED_TOTAL).increment(sent);
@@ -200,13 +203,13 @@ where
                 error_state = ?self.error_state,
                 ?code,
             );
-            if code != Code::Sync {
+            if !matches!(protocol_message, FrontendMessage::Sync) {
                 return Ok(());
             }
         }
 
-        match code {
-            Code::Query => {
+        match protocol_message {
+            FrontendMessage::Query(_) => {
                 match self.query_handler(&bytes).await {
                     Ok(Some(mapped)) => bytes = mapped,
                     // No mapping needed, don't change the bytes
@@ -232,13 +235,13 @@ where
                     }
                 }
             }
-            Code::Describe => {
+            FrontendMessage::Describe(_) => {
                 self.describe_handler(&bytes).await?;
             }
-            Code::Execute => {
+            FrontendMessage::Execute(_) => {
                 self.execute_handler(&bytes).await?;
             }
-            Code::Parse => {
+            FrontendMessage::Parse(_) => {
                 match self.parse_handler(&bytes).await {
                     Ok(Some(mapped)) => bytes = mapped,
                     // No mapping needed, don't change the bytes
@@ -266,7 +269,7 @@ where
                     }
                 }
             }
-            Code::Bind => {
+            FrontendMessage::Bind(_) => {
                 match self.bind_handler(&bytes).await {
                     Ok(Some(mapped)) => bytes = mapped,
                     // No mapping needed, don't change the bytes
@@ -294,7 +297,7 @@ where
                     }
                 }
             }
-            Code::Sync => {
+            FrontendMessage::Sync => {
                 debug!(target: PROTOCOL,
                     client_id = self.context.client_id,
                     ?code,
@@ -323,10 +326,10 @@ where
                     None => {}
                 }
             }
-            Code::Close => {
+            FrontendMessage::Close(_) => {
                 self.close_handler(&bytes).await?;
             }
-            code => {
+            _ => {
                 debug!(target: PROTOCOL,
                     client_id = self.context.client_id,
                     msg = "Passthrough",
@@ -340,6 +343,7 @@ where
     }
 
     pub async fn write_to_server(&mut self, bytes: BytesMut) -> Result<(), Error> {
+        self.context.protocol_frontend_forwarded(&bytes)?;
         debug!(target: PROTOCOL, msg = "Write to server", ?bytes);
         let sent: u64 = bytes.len() as u64;
         counter!(SERVER_BYTES_SENT_TOTAL).increment(sent);
@@ -1274,6 +1278,7 @@ where
             ?message,
         );
 
+        self.context.protocol_backend_forwarded(&message)?;
         self.client_sender.send(message)?;
 
         Ok(())
@@ -1558,6 +1563,7 @@ where
             ?message,
         );
 
+        self.context.protocol_backend_forwarded(&message)?;
         self.client_sender.send(message)?;
         // Frontend-specific: set error state for extended query protocol
         self.error_state = Some(ErrorState::ErrorResponseSent);

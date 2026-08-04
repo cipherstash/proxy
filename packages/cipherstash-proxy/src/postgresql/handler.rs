@@ -100,6 +100,9 @@ pub async fn handler(client_stream: AsyncStream, context: Context<ZeroKms>) -> R
                 database_stream.write_all(&startup_message.bytes).await?;
                 break;
             }
+            StartupCode::GSSENCRequest => {
+                return Err(ProtocolError::UnexpectedStartupMessage.into());
+            }
         }
     }
 
@@ -125,15 +128,20 @@ pub async fn handler(client_stream: AsyncStream, context: Context<ZeroKms>) -> R
         client_stream.write_all(&bytes).await?;
 
         let connection_timeout = context.connection_timeout();
-        let (_code, bytes) =
-            match protocol::read_message(&mut client_stream, client_id, connection_timeout).await {
-                Ok(result) => result,
-                Err(err @ Error::ConnectionTimeout { .. }) => {
-                    send_timeout_error(&mut client_stream, &err).await;
-                    return Err(err);
-                }
-                Err(err) => return Err(err),
-            };
+        let (_code, bytes, _message) = match protocol::read_frontend_message(
+            &mut client_stream,
+            client_id,
+            connection_timeout,
+        )
+        .await
+        {
+            Ok(result) => result,
+            Err(err @ Error::ConnectionTimeout { .. }) => {
+                send_timeout_error(&mut client_stream, &err).await;
+                return Err(err);
+            }
+            Err(err) => return Err(err),
+        };
 
         let password_message = PasswordMessage::try_from(&bytes)?;
 

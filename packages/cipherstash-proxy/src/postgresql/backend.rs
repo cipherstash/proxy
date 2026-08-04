@@ -4,7 +4,7 @@ use super::error_handler::PostgreSqlErrorHandler;
 use super::message_buffer::MessageBuffer;
 use super::messages::error_response::ErrorResponse;
 use super::messages::row_description::RowDescription;
-use super::messages::{BackendCode, UNSPECIFIED_TYPE_OID};
+use super::messages::UNSPECIFIED_TYPE_OID;
 use super::Column;
 use crate::connect::Sender;
 use crate::error::{EncryptError, Error};
@@ -22,6 +22,7 @@ use crate::proxy::EncryptionService;
 use crate::EqlCiphertext;
 use bytes::BytesMut;
 use metrics::{counter, histogram};
+use pg_proto::codec::BackendMessage;
 use std::time::Instant;
 use tokio::io::AsyncRead;
 use tracing::{debug, error, info, warn};
@@ -150,12 +151,14 @@ where
     /// error occurs that should terminate the connection.
     pub async fn rewrite(&mut self) -> Result<(), Error> {
         let read_start = Instant::now();
-        let (code, mut bytes) = protocol::read_message(
+        let (code, mut bytes, protocol_message) = protocol::read_backend_message(
             &mut self.server_reader,
             self.context.client_id,
             self.context.connection_timeout(),
         )
         .await?;
+
+        self.context.protocol_backend_received(&protocol_message)?;
         let read_duration = read_start.elapsed();
         self.context.record_execute_server_timing(read_duration);
 
@@ -199,11 +202,11 @@ where
             // otherwise the execute and session_metrics queues grow by one
             // entry per statement and never shrink, leaking memory until the
             // process is OOM-killed. See BUG-300.
-            match code.into() {
-                BackendCode::CommandComplete
-                | BackendCode::EmptyQueryResponse
-                | BackendCode::PortalSuspended
-                | BackendCode::ErrorResponse => {
+            match protocol_message {
+                BackendMessage::CommandComplete(_)
+                | BackendMessage::EmptyQueryResponse
+                | BackendMessage::PortalSuspended
+                | BackendMessage::ErrorResponse(_) => {
                     self.context.complete_execution();
                     self.context.finish_session();
                 }
@@ -216,8 +219,8 @@ where
         let keyset_id = self.context.keyset_identifier();
         debug!(target: CONTEXT, client_id = ?self.context.client_id, ?keyset_id);
 
-        match code.into() {
-            BackendCode::DataRow => {
+        match protocol_message {
+            BackendMessage::DataRow(_) => {
                 // Encrypted DataRows are added to the buffer and we return early
                 // Otherwise, continue and write
                 if self.data_row_handler(&bytes).await? {
@@ -227,9 +230,9 @@ where
 
             // Execute phase is always terminated by the appearance of exactly one of these messages:
             //      CommandComplete, EmptyQueryResponse (if the portal was created from an empty query string), ErrorResponse, or PortalSuspended.
-            BackendCode::CommandComplete
-            | BackendCode::EmptyQueryResponse
-            | BackendCode::PortalSuspended => {
+            BackendMessage::CommandComplete(_)
+            | BackendMessage::EmptyQueryResponse
+            | BackendMessage::PortalSuspended => {
                 debug!(target: PROTOCOL, client_id = self.context.client_id, msg = "CommandComplete | EmptyQueryResponse | PortalSuspended");
 
                 match self.flush().await {
@@ -243,7 +246,7 @@ where
                 self.context.complete_execution();
                 self.context.finish_session();
             }
-            BackendCode::ErrorResponse => {
+            BackendMessage::ErrorResponse(_) => {
                 if let Some(b) = self.error_response_handler(&bytes)? {
                     bytes = b
                 }
@@ -262,7 +265,7 @@ where
             // Describe with Target:Statement
             // Returns a ParameterDescription followed by RowDescription
             // The Describe is complete after the RowDescription
-            BackendCode::ParameterDescription => {
+            BackendMessage::ParameterDescription(_) => {
                 if let Some(b) = self.parameter_description_handler(&bytes).await? {
                     bytes = b
                 }
@@ -272,7 +275,7 @@ where
             // Target::Portal returns a RowDescription
             // If no rows are returned, NoData is returned instead of a RowDescription
             // Complete the Describe
-            BackendCode::RowDescription => {
+            BackendMessage::RowDescription(_) => {
                 if let Some(b) = self.row_description_handler(&bytes).await? {
                     bytes = b
                 }
@@ -280,13 +283,13 @@ where
             }
             // Describe with Target:Statement or Target::Portal
             // If the statement returns no rows, NoData is returned instead of a RowDescription
-            BackendCode::NoData => {
+            BackendMessage::NoData => {
                 self.context.complete_describe();
             }
             // Reload for SompleQuery flow
             // Reload is potentially triggered by a FrontEnd Sync message.
             // However, the SimpleQuery flow does not use Sync so we check here as well
-            BackendCode::ReadyForQuery => {
+            BackendMessage::ReadyForQuery(_) => {
                 debug!(target: PROTOCOL,
                     client_id = self.context.client_id,
                     msg = "ReadyForQuery"
@@ -294,7 +297,7 @@ where
                 self.context.reload_schema_if_changed().await;
             }
 
-            code => {
+            _ => {
                 debug!(target: PROTOCOL,
                     client_id = self.context.client_id,
                     msg = "Passthrough",
@@ -390,6 +393,7 @@ where
     /// Write a message to the client
     ///
     pub async fn write(&mut self, bytes: BytesMut) -> Result<(), Error> {
+        self.context.protocol_backend_forwarded(&bytes)?;
         let sent: u64 = bytes.len() as u64;
         counter!(CLIENTS_BYTES_SENT_TOTAL).increment(sent);
 

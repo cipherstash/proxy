@@ -1,14 +1,12 @@
 use crate::error::{Error, ProtocolError};
-use crate::postgresql::protocol::BytesMutReadString;
-use crate::{SIZE_I32, SIZE_U8};
+use crate::postgresql::protocol::{decode_frontend_frame, encode_frontend_message};
 
-use bytes::{Buf, BufMut, BytesMut};
+use bytes::{Bytes, BytesMut};
+use pg_proto::codec::{Describe as PgDescribe, DescribeTarget, FrontendMessage};
 use std::convert::TryFrom;
-use std::ffi::CString;
-use std::io::Cursor;
 
 use super::target::Target;
-use super::{FrontendCode, Name};
+use super::Name;
 
 ///
 /// Describe b'D' (Frontend) message.
@@ -37,22 +35,18 @@ impl TryFrom<&BytesMut> for Describe {
     type Error = Error;
 
     fn try_from(bytes: &BytesMut) -> Result<Describe, Self::Error> {
-        let mut cursor = Cursor::new(bytes);
-        let code = cursor.get_u8();
-
-        if FrontendCode::from(code) != FrontendCode::Describe {
+        let FrontendMessage::Describe(description) = decode_frontend_frame(bytes)? else {
             return Err(ProtocolError::UnexpectedMessageCode {
-                expected: FrontendCode::Describe.into(),
-                received: code as char,
+                expected: 'D',
+                received: bytes.first().copied().unwrap_or_default() as char,
             }
             .into());
-        }
-
-        let _len = cursor.get_i32(); // read and progress cursor
-        let target = cursor.get_u8();
-        let target = Target::try_from(target)?;
-        let name = cursor.read_string()?;
-        let name = Name::from(name);
+        };
+        let target = match description.target {
+            DescribeTarget::Statement => Target::Statement,
+            DescribeTarget::Portal => Target::Portal,
+        };
+        let name = Name::from(String::from_utf8_lossy(&description.name).into_owned());
 
         Ok(Describe { target, name })
     }
@@ -62,18 +56,13 @@ impl TryFrom<Describe> for BytesMut {
     type Error = Error;
 
     fn try_from(describe: Describe) -> Result<BytesMut, Error> {
-        let mut bytes = BytesMut::new();
-
-        let name = CString::new(describe.name.as_str())?;
-        let name = name.as_bytes_with_nul();
-
-        let len = SIZE_I32 + SIZE_U8 + name.len();
-
-        bytes.put_u8(FrontendCode::Describe.into());
-        bytes.put_i32(len as i32);
-        bytes.put_u8(describe.target.into());
-        bytes.put_slice(name);
-
-        Ok(bytes)
+        let target = match describe.target {
+            Target::Statement => DescribeTarget::Statement,
+            Target::Portal => DescribeTarget::Portal,
+        };
+        encode_frontend_message(&FrontendMessage::Describe(PgDescribe {
+            target,
+            name: Bytes::copy_from_slice(describe.name.as_str().as_bytes()),
+        }))
     }
 }

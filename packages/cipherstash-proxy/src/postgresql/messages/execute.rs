@@ -1,9 +1,9 @@
-use super::{FrontendCode, Name};
+use super::Name;
 use crate::error::{Error, ProtocolError};
-use crate::postgresql::protocol::BytesMutReadString;
-use bytes::{Buf, BytesMut};
+use crate::postgresql::protocol::decode_frontend_frame;
+use bytes::BytesMut;
+use pg_proto::codec::FrontendMessage;
 use std::convert::TryFrom;
-use std::io::Cursor;
 
 #[derive(Debug, Clone)]
 pub(crate) struct Execute {
@@ -15,22 +15,15 @@ impl TryFrom<&BytesMut> for Execute {
     type Error = Error;
 
     fn try_from(bytes: &BytesMut) -> Result<Execute, Self::Error> {
-        let mut cursor = Cursor::new(bytes);
-        let code = cursor.get_u8();
-
-        if FrontendCode::from(code) != FrontendCode::Execute {
+        let FrontendMessage::Execute(execute) = decode_frontend_frame(bytes)? else {
             return Err(ProtocolError::UnexpectedMessageCode {
-                expected: FrontendCode::Execute.into(),
-                received: code as char,
+                expected: 'E',
+                received: bytes.first().copied().unwrap_or_default() as char,
             }
             .into());
-        }
-
-        let _len = cursor.get_i32(); // read and progress cursor
-
-        let portal = cursor.read_string()?;
-        let portal = Name::from(portal);
-        let max_rows = cursor.get_i32();
+        };
+        let portal = Name::from(String::from_utf8_lossy(&execute.portal).into_owned());
+        let max_rows = execute.max_rows;
 
         Ok(Execute { portal, max_rows })
     }

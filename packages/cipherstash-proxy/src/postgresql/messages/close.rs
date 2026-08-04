@@ -1,14 +1,12 @@
 use crate::error::{Error, ProtocolError};
-use crate::postgresql::protocol::BytesMutReadString;
-use crate::{SIZE_I32, SIZE_U8};
+use crate::postgresql::protocol::{decode_frontend_frame, encode_frontend_message};
 
-use bytes::{Buf, BufMut, BytesMut};
+use bytes::{Bytes, BytesMut};
+use pg_proto::codec::{Close as PgClose, DescribeTarget, FrontendMessage};
 use std::convert::TryFrom;
-use std::ffi::CString;
-use std::io::Cursor;
 
 use super::target::Target;
-use super::{FrontendCode, Name};
+use super::Name;
 
 ///
 /// Close b'C' (Frontend) message.
@@ -37,22 +35,18 @@ impl TryFrom<&BytesMut> for Close {
     type Error = Error;
 
     fn try_from(bytes: &BytesMut) -> Result<Close, Self::Error> {
-        let mut cursor = Cursor::new(bytes);
-        let code = cursor.get_u8();
-
-        if FrontendCode::from(code) != FrontendCode::Close {
+        let FrontendMessage::Close(close) = decode_frontend_frame(bytes)? else {
             return Err(ProtocolError::UnexpectedMessageCode {
-                expected: FrontendCode::Close.into(),
-                received: code as char,
+                expected: 'C',
+                received: bytes.first().copied().unwrap_or_default() as char,
             }
             .into());
-        }
-
-        let _len = cursor.get_i32(); // read and progress cursor
-        let target = cursor.get_u8();
-        let target = Target::try_from(target)?;
-        let name = cursor.read_string()?;
-        let name = Name::from(name);
+        };
+        let target = match close.target {
+            DescribeTarget::Statement => Target::Statement,
+            DescribeTarget::Portal => Target::Portal,
+        };
+        let name = Name::from(String::from_utf8_lossy(&close.name).into_owned());
 
         Ok(Close { target, name })
     }
@@ -62,19 +56,14 @@ impl TryFrom<Close> for BytesMut {
     type Error = Error;
 
     fn try_from(close: Close) -> Result<BytesMut, Error> {
-        let mut bytes = BytesMut::new();
-
-        let name = CString::new(close.name.as_str())?;
-        let name = name.as_bytes_with_nul();
-
-        let len = SIZE_I32 + SIZE_U8 + name.len();
-
-        bytes.put_u8(FrontendCode::Close.into());
-        bytes.put_i32(len as i32);
-        bytes.put_u8(close.target.into());
-        bytes.put_slice(name);
-
-        Ok(bytes)
+        let target = match close.target {
+            Target::Statement => DescribeTarget::Statement,
+            Target::Portal => DescribeTarget::Portal,
+        };
+        encode_frontend_message(&FrontendMessage::Close(PgClose {
+            target,
+            name: Bytes::copy_from_slice(close.name.as_str().as_bytes()),
+        }))
     }
 }
 
