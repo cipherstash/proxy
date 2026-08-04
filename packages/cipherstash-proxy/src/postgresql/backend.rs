@@ -20,7 +20,6 @@ use crate::prometheus::{
 };
 use crate::proxy::EncryptionService;
 use crate::EqlCiphertext;
-use bytes::BytesMut;
 use metrics::{counter, histogram};
 use pg_proto::{
     codec::{Backend as BackendDirection, BackendMessage},
@@ -154,16 +153,25 @@ where
     /// error occurs that should terminate the connection.
     pub async fn rewrite(&mut self) -> Result<(), Error> {
         let read_start = Instant::now();
-        let (mut bytes, protocol_message) = protocol::read_backend_message(
+        let protocol_message = protocol::read_backend_message(
             &mut self.server_reader,
             self.context.connection_timeout(),
         )
         .await?;
+        let mut outbound_message = protocol_message.clone();
+
+        let session_item = self.server_reader.project_backend(protocol_message.clone());
+        if session_item.is_none() {
+            // The demux has recorded the asynchronous event and its ordering;
+            // forwarding still uses the original typed message below.
+            let _ = self.server_reader.demux_mut().pop_async_event();
+        }
 
         let read_duration = read_start.elapsed();
         self.context.record_execute_server_timing(read_duration);
 
-        let sent: u64 = bytes.len() as u64;
+        let frame = protocol_message.to_frame()?;
+        let sent: u64 = (frame.body.len() + 5) as u64;
         counter!(SERVER_BYTES_RECEIVED_TOTAL).increment(sent);
 
         // Log slow database responses (configurable threshold, default 100ms)
@@ -181,7 +189,7 @@ where
                 client_id = self.context.client_id,
                 msg = "Passthrough enabled"
             );
-            self.write_with_flush(bytes).await?;
+            self.write_with_flush(outbound_message).await?;
 
             // The frontend starts a session and enqueues an execute for every
             // statement (start_session / set_execute), regardless of whether
@@ -210,10 +218,10 @@ where
         debug!(target: CONTEXT, client_id = ?self.context.client_id, ?keyset_id);
 
         match protocol_message {
-            BackendMessage::DataRow(_) => {
+            BackendMessage::DataRow(row) => {
                 // Encrypted DataRows are added to the buffer and we return early
                 // Otherwise, continue and write
-                if self.data_row_handler(&bytes).await? {
+                if self.data_row_handler(DataRow::from(row)).await? {
                     return Ok(());
                 }
             }
@@ -237,9 +245,7 @@ where
                 self.context.finish_session();
             }
             BackendMessage::ErrorResponse(ref response) => {
-                if let Some(b) = self.error_response_handler(response, &bytes) {
-                    bytes = b
-                }
+                self.error_response_handler(response);
 
                 match self.flush().await {
                     Ok(_) => (),
@@ -255,9 +261,12 @@ where
             // Describe with Target:Statement
             // Returns a ParameterDescription followed by RowDescription
             // The Describe is complete after the RowDescription
-            BackendMessage::ParameterDescription(_) => {
-                if let Some(b) = self.parameter_description_handler(&bytes).await? {
-                    bytes = b
+            BackendMessage::ParameterDescription(types) => {
+                if let Some(message) = self
+                    .parameter_description_handler(ParamDescription::from(types))
+                    .await?
+                {
+                    outbound_message = message;
                 }
             }
             // Describe with Target:Statement or Target::Portal
@@ -265,9 +274,12 @@ where
             // Target::Portal returns a RowDescription
             // If no rows are returned, NoData is returned instead of a RowDescription
             // Complete the Describe
-            BackendMessage::RowDescription(_) => {
-                if let Some(b) = self.row_description_handler(&bytes).await? {
-                    bytes = b
+            BackendMessage::RowDescription(description) => {
+                if let Some(message) = self
+                    .row_description_handler(RowDescription::from(description))
+                    .await?
+                {
+                    outbound_message = message;
                 }
                 self.context.complete_describe();
             }
@@ -298,7 +310,7 @@ where
             }
         }
 
-        self.write_with_flush(bytes).await?;
+        self.write_with_flush(outbound_message).await?;
 
         Ok(())
     }
@@ -339,15 +351,10 @@ where
     ///
     /// Always returns `Some(bytes)` containing the original error response
     /// to forward to the client unchanged.
-    fn error_response_handler(
-        &mut self,
-        response: &pg_proto::codec::DiagnosticResponse,
-        bytes: &BytesMut,
-    ) -> Option<BytesMut> {
+    fn error_response_handler(&mut self, response: &pg_proto::codec::DiagnosticResponse) {
         let error_response = ErrorResponse::from(response);
         error!(msg = "PostgreSQL Error", error = ?error_response);
         info!(msg = "PostgreSQL Errors originate in the database");
-        Some(bytes.to_owned())
     }
 
     ///
@@ -370,7 +377,7 @@ where
     /// Write a message to the client
     /// Flushes all messages in the buffer before writing the message
     ///
-    pub async fn write_with_flush(&mut self, bytes: BytesMut) -> Result<(), Error> {
+    pub async fn write_with_flush(&mut self, message: BackendMessage) -> Result<(), Error> {
         debug!(target: DEVELOPMENT, client_id = self.context.client_id, msg = "Write");
 
         match self.flush().await {
@@ -381,20 +388,23 @@ where
             }
         }
 
-        self.write(bytes).await?;
+        self.write(message).await?;
         Ok(())
     }
 
     ///
     /// Write a message to the client
     ///
-    pub async fn write(&mut self, bytes: BytesMut) -> Result<(), Error> {
-        self.context.protocol_backend_forwarded(&bytes).await?;
-        let sent: u64 = bytes.len() as u64;
+    pub async fn write(&mut self, message: BackendMessage) -> Result<(), Error> {
+        self.context
+            .protocol_backend_forwarded(message.clone())
+            .await?;
+        let frame = message.to_frame()?;
+        let sent: u64 = (frame.body.len() + 5) as u64;
         counter!(CLIENTS_BYTES_SENT_TOTAL).increment(sent);
 
         let start = Instant::now();
-        self.client_sender.send(bytes)?;
+        self.client_sender.send(message)?;
         self.context.protocol_backend_sent();
         let duration = start.elapsed();
         self.context.add_client_write_duration_for_execute(duration);
@@ -533,8 +543,7 @@ where
 
             row.rewrite(&data)?;
 
-            let bytes = BytesMut::try_from(row)?;
-            self.write(bytes).await?;
+            self.write(BackendMessage::from(row)).await?;
         }
 
         Ok(())
@@ -575,10 +584,8 @@ where
 
     async fn parameter_description_handler(
         &self,
-        bytes: &BytesMut,
-    ) -> Result<Option<BytesMut>, Error> {
-        let mut description = ParamDescription::try_from(bytes)?;
-
+        mut description: ParamDescription,
+    ) -> Result<Option<BackendMessage>, Error> {
         debug!(target: PROTOCOL, client_id = self.context.client_id, ParamDescription = ?description);
 
         if let Some(statement) = self.context.get_statement_from_describe() {
@@ -613,9 +620,9 @@ where
         }
 
         if description.requires_rewrite() {
-            let bytes = BytesMut::try_from(description)?;
-            debug!(target: MAPPER, client_id = self.context.client_id, msg = "Rewrite ParamDescription", bytes = ?bytes);
-            Ok(Some(bytes))
+            let message = BackendMessage::from(description);
+            debug!(target: MAPPER, client_id = self.context.client_id, msg = "Rewrite ParamDescription", ?message);
+            Ok(Some(message))
         } else {
             Ok(None)
         }
@@ -630,10 +637,8 @@ where
     ///
     async fn row_description_handler(
         &mut self,
-        bytes: &BytesMut,
-    ) -> Result<Option<BytesMut>, Error> {
-        let mut description = RowDescription::try_from(bytes)?;
-
+        mut description: RowDescription,
+    ) -> Result<Option<BackendMessage>, Error> {
         debug!(target: PROTOCOL, client_id = self.context.client_id, RowDescription = ?description);
 
         if let Some(statement) = self.context.get_statement_for_row_decription() {
@@ -649,9 +654,9 @@ where
         }
 
         if description.requires_rewrite() {
-            let bytes = BytesMut::try_from(description)?;
-            debug!(target: MAPPER, client_id = self.context.client_id, msg = "Rewrite RowDescription", bytes = ?bytes);
-            Ok(Some(bytes))
+            let message = BackendMessage::from(description);
+            debug!(target: MAPPER, client_id = self.context.client_id, msg = "Rewrite RowDescription", ?message);
+            Ok(Some(message))
         } else {
             Ok(None)
         }
@@ -691,13 +696,12 @@ where
     ///
     /// Records metrics for both encrypted and passthrough row processing to
     /// track proxy performance and encryption usage patterns.
-    async fn data_row_handler(&mut self, bytes: &BytesMut) -> Result<bool, Error> {
+    async fn data_row_handler(&mut self, data_row: DataRow) -> Result<bool, Error> {
         counter!(ROWS_TOTAL).increment(1);
         match self.context.get_portal_from_execute().as_deref() {
             Some(Portal::Encrypted { .. }) => {
                 debug!(target: MAPPER, client_id = self.context.client_id, msg = "Encrypted");
 
-                let data_row = DataRow::try_from(bytes)?;
                 self.buffer(data_row).await?;
 
                 counter!(ROWS_ENCRYPTED_TOTAL).increment(1);
@@ -737,7 +741,7 @@ where
         // Ensure any buffered data is cleared before sending error
         self.buffer.clear();
 
-        let message = protocol::encode_backend_message(&error_response.into_backend_message())?;
+        let message = error_response.into_backend_message();
 
         debug!(
             target: "PROTOCOL",
@@ -746,7 +750,9 @@ where
             ?message,
         );
 
-        self.context.protocol_backend_forwarded(&message).await?;
+        self.context
+            .protocol_backend_forwarded(message.clone())
+            .await?;
         self.client_sender.send(message)?;
         self.context.protocol_backend_sent();
 
@@ -760,9 +766,9 @@ mod tests {
     use crate::config::{LogConfig, TandemConfig};
     use crate::log;
     use crate::postgresql::context::KeysetIdentifier;
-    use crate::postgresql::messages::Name;
     use crate::proxy::{EncryptConfig, EncryptionService};
-    use bytes::Bytes;
+    use bytes::Bytes as Name;
+    use bytes::{Bytes, BytesMut};
     use eql_mapper::Schema;
     use pg_proto::codec::FrontendMessage;
     use std::io::Cursor;
@@ -897,9 +903,7 @@ mod tests {
             for i in 0..STATEMENTS {
                 // Frontend: enqueue a session + execute for the statement.
                 let session_id = backend.context.start_session();
-                backend
-                    .context
-                    .set_execute(Name::unnamed(), Some(session_id));
+                backend.context.set_execute(Name::new(), Some(session_id));
                 backend
                     .context
                     .protocol_frontend_received(FrontendMessage::Execute(
@@ -921,13 +925,11 @@ mod tests {
                         .protocol_frontend_received(FrontendMessage::Sync)
                         .await
                         .unwrap();
-                    let ready = protocol::encode_backend_message(&BackendMessage::ReadyForQuery(
-                        pg_proto::codec::TransactionStatus::Idle,
-                    ))
-                    .unwrap();
+                    let ready =
+                        BackendMessage::ReadyForQuery(pg_proto::codec::TransactionStatus::Idle);
                     backend
                         .context
-                        .protocol_backend_forwarded(&ready)
+                        .protocol_backend_forwarded(ready)
                         .await
                         .unwrap();
                     backend.context.protocol_backend_sent();

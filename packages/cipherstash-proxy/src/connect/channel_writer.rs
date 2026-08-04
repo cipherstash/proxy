@@ -1,4 +1,7 @@
-use bytes::BytesMut;
+use pg_proto::{
+    codec::{BackendMessage, Frontend},
+    transport::Buffered,
+};
 use tokio::{
     io::{AsyncWrite, AsyncWriteExt},
     sync::mpsc::{self, UnboundedReceiver, UnboundedSender},
@@ -7,15 +10,15 @@ use tracing::{debug, error};
 
 use crate::log::PROTOCOL;
 
-pub type Receiver = UnboundedReceiver<BytesMut>;
-pub type Sender = UnboundedSender<BytesMut>;
+pub type Receiver = UnboundedReceiver<BackendMessage>;
+pub type Sender = UnboundedSender<BackendMessage>;
 
 #[derive(Debug)]
 pub struct ChannelWriter<W>
 where
     W: AsyncWrite + Unpin,
 {
-    writer: W,
+    writer: Buffered<W, Frontend>,
     receiver: Receiver,
     sender: Sender,
     client_id: i32,
@@ -26,11 +29,13 @@ where
     W: AsyncWrite + Unpin,
 {
     pub fn new(writer: W, client_id: i32) -> Self {
-        let (sender, receiver): (UnboundedSender<BytesMut>, UnboundedReceiver<BytesMut>) =
-            mpsc::unbounded_channel();
+        let (sender, receiver): (
+            UnboundedSender<BackendMessage>,
+            UnboundedReceiver<BackendMessage>,
+        ) = mpsc::unbounded_channel();
 
         ChannelWriter {
-            writer,
+            writer: Buffered::new_frontend(writer),
             receiver,
             sender,
             client_id,
@@ -48,14 +53,19 @@ where
         // but we're holding one of them ourselves!
         drop(self.sender);
 
-        while let Some(bytes) = self.receiver.recv().await {
+        while let Some(message) = self.receiver.recv().await {
             debug!(target: PROTOCOL,
                 client_id = self.client_id,
                 msg = "Writing",
-                ?bytes
+                ?message
             );
 
-            match self.writer.write_all(&bytes).await {
+            let result = message.to_frame().and_then(|frame| self.writer.push(frame));
+            let result = match result {
+                Ok(()) => self.writer.flush().await,
+                Err(error) => Err(error),
+            };
+            match result {
                 Ok(_) => {
                     debug!(target: PROTOCOL,
                         client_id = self.client_id,
@@ -89,7 +99,7 @@ where
         }
 
         // Shutdown the write half to send FIN and properly close the connection
-        if let Err(err) = self.writer.shutdown().await {
+        if let Err(err) = self.writer.into_inner().shutdown().await {
             error!(target: PROTOCOL,
                 client_id = self.client_id,
                 msg = "Error shutting down writer",
