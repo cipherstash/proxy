@@ -68,7 +68,10 @@ fn port_from_env(var: &str, default: u16) -> u16 {
         Ok(value) => value
             .parse()
             .unwrap_or_else(|_| panic!("{var} must be a port number, got: {value:?}")),
-        Err(_) => default,
+        Err(std::env::VarError::NotPresent) => default,
+        Err(std::env::VarError::NotUnicode(value)) => {
+            panic!("{var} must be a port number, got non-unicode value: {value:?}")
+        }
     }
 }
 
