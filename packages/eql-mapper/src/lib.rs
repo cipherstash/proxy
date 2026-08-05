@@ -1502,6 +1502,63 @@ mod test {
         }
     }
 
+    /// A comparison of two literals (`WHERE 1=1` — a common idiom for query
+    /// builders and cache-busting) must type-check: the literals ground each
+    /// other through the comparison, and neither reaches a projection, so the
+    /// fail-closed fallback must not reject them as unresolved. Regression:
+    /// caught by the Python integration suite (`test_disable_mapping`), where
+    /// the silently-unmapped statement returned raw ciphertext.
+    #[test]
+    fn literal_only_where_condition_type_checks() {
+        let schema = resolver(schema! {
+            tables: {
+                users: {
+                    id,
+                    email (EQL: Eq),
+                }
+            }
+        });
+
+        let statement = parse("SELECT email FROM users WHERE 1=1");
+
+        let typed = match type_check(schema, &statement) {
+            Ok(typed) => typed,
+            Err(err) => panic!("type check failed: {err}"),
+        };
+
+        assert!(typed.params.is_empty());
+    }
+
+    /// A param that appears both in a literal-only comparison and against an
+    /// encrypted column must resolve to the column's EQL type: the
+    /// literal-comparison marking (see `literal_only_where_condition_type_checks`)
+    /// defers grounding to the end of inference precisely so a later occurrence
+    /// can still make the param encrypted.
+    #[test]
+    fn param_shared_between_literal_and_encrypted_comparison_is_eql() {
+        let schema = resolver(schema! {
+            tables: {
+                users: {
+                    id,
+                    email (EQL: Eq),
+                }
+            }
+        });
+
+        let statement = parse("SELECT id FROM users WHERE $1 = 'x' AND email = $1");
+
+        let typed = match type_check(schema, &statement) {
+            Ok(typed) => typed,
+            Err(err) => panic!("type check failed: {err}"),
+        };
+
+        assert!(
+            matches!(typed.params.as_slice(), [(Param(1), Value::Eql(_))]),
+            "expected $1 to resolve to the encrypted column's type, got: {:?}",
+            typed.params
+        );
+    }
+
     /// `WHERE`, `HAVING` and join `ON` conditions are boolean expressions and
     /// booleans are always native, so a bare placeholder condition is pinned to
     /// `Native` where the clause is inferred — it must not depend on the late

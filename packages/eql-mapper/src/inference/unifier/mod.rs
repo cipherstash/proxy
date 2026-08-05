@@ -36,6 +36,10 @@ use tracing::{event, instrument, Level, Span};
 #[derive(Debug)]
 pub struct Unifier<'ast> {
     registry: Rc<RefCell<TypeRegistry<'ast>>>,
+
+    /// Type variables that may soundly default to native if still unresolved
+    /// when inference completes — see [`Self::mark_natively_groundable`].
+    natively_groundable: HashSet<TypeVar>,
 }
 
 impl<'ast> Unifier<'ast> {
@@ -43,6 +47,24 @@ impl<'ast> Unifier<'ast> {
     pub fn new(registry: impl Into<Rc<RefCell<TypeRegistry<'ast>>>>) -> Self {
         Self {
             registry: registry.into(),
+            natively_groundable: HashSet::new(),
+        }
+    }
+
+    /// Marks `ty` (if it is an unresolved variable) as safe to default to
+    /// native should it still be unresolved when inference completes.
+    ///
+    /// This is for positions an inference rule *did* constrain but could not
+    /// ground — the operands of a comparison, for instance, unify with each
+    /// other, and anything encrypted arriving in the pair later grounds it
+    /// concretely. A pair still unresolved at the end (`WHERE 1 = 1`) touched
+    /// nothing encrypted, so native is sound. The marked variable is followed
+    /// again at resolution time: if it grounded to a concrete type in the
+    /// meantime, the mark is simply irrelevant.
+    pub(crate) fn mark_natively_groundable(&mut self, ty: Arc<Type>) {
+        let ty = ty.follow_tvars(self);
+        if let Type::Var(Var(tvar, _)) = &*ty {
+            self.natively_groundable.insert(*tvar);
         }
     }
 
@@ -106,9 +128,29 @@ impl<'ast> Unifier<'ast> {
 
         let projection_reachable = self.projection_reachable_tvars();
 
+        // Follow each marked variable to its current root: unification since
+        // the mark may have collapsed it into another variable (or grounded it
+        // concretely, in which case it needs no defaulting).
+        let natively_groundable: HashSet<TypeVar> = self
+            .natively_groundable
+            .iter()
+            .filter_map(|tvar| match self.get_type(*tvar) {
+                // No substitution: the variable is its own root.
+                None => Some(*tvar),
+                Some(ty) => match &*ty.follow_tvars(self) {
+                    Type::Var(Var(root, _)) => Some(*root),
+                    // Grounded concretely in the meantime; nothing to default.
+                    _ => None,
+                },
+            })
+            .collect();
+
         for (node, ty) in unresolved_value_nodes {
             match &*ty {
-                Type::Var(Var(tvar, _)) if projection_reachable.contains(tvar) => {
+                Type::Var(Var(tvar, _))
+                    if projection_reachable.contains(tvar)
+                        || natively_groundable.contains(tvar) =>
+                {
                     self.unify(ty.clone(), Type::native().into())?;
                 }
                 _ => return Err(TypeError::UnresolvedValue(node.to_string())),

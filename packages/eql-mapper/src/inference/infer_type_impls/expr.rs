@@ -371,6 +371,20 @@ impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
                     };
 
                     get_sql_binop_rule(op).apply_constraints(self, lhs, rhs, expr_val)?;
+
+                    // A comparison's result is native regardless of its operand
+                    // type, so the operands (now unified with each other) may
+                    // stay unresolved when both are literals — `WHERE 1 = 1`.
+                    // Mark the pair as safe to default to native at the end of
+                    // inference: anything encrypted meeting it before then
+                    // grounds it concretely and the mark becomes irrelevant.
+                    // Eager grounding here would be wrong — a shared param
+                    // (`WHERE $1 = 1 AND enc = $1`) can still be made EQL by a
+                    // later occurrence.
+                    if comparison_capability(op).is_some() {
+                        let lhs_ty = self.get_node_type(lhs);
+                        self.unifier.borrow_mut().mark_natively_groundable(lhs_ty);
+                    }
                 }
 
                 // The operands of a predicate reach PostgreSQL as query
