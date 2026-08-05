@@ -63,7 +63,6 @@ impl<'ast> RewriteEqlComparisonOps<'ast> {
             )
         })
     }
-
 }
 
 impl<'ast> TransformationRule<'ast> for RewriteEqlComparisonOps<'ast> {

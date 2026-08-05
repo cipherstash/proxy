@@ -1591,9 +1591,7 @@ mod test {
             typed
                 .literals
                 .iter()
-                .find(|(_, value)| {
-                    matches!(value, ast::Value::SingleQuotedString(s) if s == plain)
-                })
+                .find(|(_, value)| matches!(value, ast::Value::SingleQuotedString(s) if s == plain))
                 .unwrap_or_else(|| panic!("no encrypted literal for {plain:?}"))
                 .1
                 .as_node_key()
