@@ -1303,6 +1303,204 @@ mod test {
         );
     }
 
+    /// In `UPDATE t1 SET x = ... FROM t2` the assignment target must resolve
+    /// against the table being updated, not through the lexical scope. The
+    /// scope also contains the `FROM` relations, so a same-named column there
+    /// used to make the target spuriously ambiguous (and could shadow it).
+    /// Here both tables have an `email` column; the assignment must get
+    /// `users.email` — the encrypted one.
+    #[test]
+    fn update_assignment_resolves_against_target_table_not_from_relation() {
+        let schema = resolver(schema! {
+            tables: {
+                users: {
+                    id,
+                    email (EQL: Eq),
+                }
+                aux: {
+                    id,
+                    email,
+                }
+            }
+        });
+
+        let statement = parse("UPDATE users SET email = $1 FROM aux WHERE users.id = aux.id");
+
+        let typed = match type_check(schema, &statement) {
+            Ok(typed) => typed,
+            Err(err) => panic!("type check failed: {err}"),
+        };
+
+        let target = Value::Eql(EqlTerm::Full(EqlValue::with_canonical_identity(
+            TableColumn {
+                table: id("users"),
+                column: id("email"),
+            },
+            EqlTraits::from(EqlTrait::Eq),
+        )));
+
+        assert_eq!(typed.params, vec![(Param(1), target)]);
+        assert_eq!(typed.projection, Projection(vec![]));
+    }
+
+    /// Proxy loads its schema from the database with *quoted* column idents
+    /// (`Ident::with_quote('"', ..)`) behind an editable resolver, while SQL
+    /// usually spells the same columns unquoted. A type identity derived from
+    /// an assignment target must still unify with one derived from the scope,
+    /// so the resolver has to return the schema's canonical idents rather than
+    /// echo the caller's spelling. With the caller's spelling,
+    /// `UPDATE t SET c = $1 WHERE c = $1` pinned the same param to
+    /// `EQL(t."c")` and `EQL(t.c)` and failed with "cannot unify EQL terms".
+    #[test]
+    fn update_reused_param_unifies_against_quoted_schema_idents() {
+        let eq = EqlTraits::from(EqlTrait::Eq);
+
+        let mut schema = Schema::new("public");
+        let mut table = crate::model::Table::new(Ident::new("encrypted"));
+        table.add_column(Arc::new(crate::model::Column::native(Ident::with_quote(
+            '"', "id",
+        ))));
+        table.add_column(Arc::new(crate::model::Column::eql(
+            Ident::with_quote('"', "encrypted_text"),
+            eq,
+            crate::unifier::DomainIdentity::canonical(crate::unifier::TokenType::Text, eq),
+        )));
+        schema.add_table(table);
+
+        // The editable resolver is the one Proxy uses at runtime; it resolves
+        // through `SchemaDelta`, not `Schema`.
+        let resolver = Arc::new(TableResolver::new_editable(Arc::new(schema)));
+
+        let statement = parse("UPDATE encrypted SET encrypted_text = $1 WHERE encrypted_text = $1");
+
+        let typed = match type_check(resolver, &statement) {
+            Ok(typed) => typed,
+            Err(err) => panic!("type check failed: {err}"),
+        };
+
+        // The param's identity is the canonical (quoted) schema spelling.
+        let target = Value::Eql(EqlTerm::Full(EqlValue::with_canonical_identity(
+            TableColumn {
+                table: id("encrypted"),
+                column: Ident::with_quote('"', "encrypted_text"),
+            },
+            eq,
+        )));
+
+        assert_eq!(typed.params, vec![(Param(1), target)]);
+    }
+
+    /// The row-count expressions in `LIMIT`/`OFFSET` can never be encrypted,
+    /// so placeholders there must be pinned to `Native` at inference time.
+    /// Previously they were left as unconstrained type variables and only
+    /// resolved to `Native` by the late unresolved-value fallback in
+    /// `Unifier::resolve_unresolved_value_nodes` — this pins the guarantee
+    /// where the clause is inferred instead of relying on that fallback.
+    #[test]
+    fn limit_and_offset_placeholders_infer_native() {
+        let schema = resolver(schema! {
+            tables: {
+                users: {
+                    id,
+                    email (EQL: Eq),
+                }
+            }
+        });
+
+        let statement = parse("SELECT id FROM users LIMIT $1 OFFSET $2");
+
+        let typed = match type_check(schema, &statement) {
+            Ok(typed) => typed,
+            Err(err) => panic!("type check failed: {err}"),
+        };
+
+        assert_eq!(
+            typed.params,
+            vec![
+                (Param(1), Value::Native(NativeValue(None))),
+                (Param(2), Value::Native(NativeValue(None))),
+            ]
+        );
+    }
+
+    /// Same as `limit_and_offset_placeholders_infer_native`, but for the
+    /// quantity in a `FETCH FIRST n ROWS ONLY` clause.
+    #[test]
+    fn fetch_first_placeholder_infers_native() {
+        let schema = resolver(schema! {
+            tables: {
+                users: {
+                    id,
+                    email (EQL: Eq),
+                }
+            }
+        });
+
+        let statement = parse("SELECT id FROM users FETCH FIRST $1 ROWS ONLY");
+
+        let typed = match type_check(schema, &statement) {
+            Ok(typed) => typed,
+            Err(err) => panic!("type check failed: {err}"),
+        };
+
+        assert_eq!(
+            typed.params,
+            vec![(Param(1), Value::Native(NativeValue(None)))]
+        );
+    }
+
+    /// Because `LIMIT` is pinned to `Native` at inference time, an encrypted
+    /// value can no longer flow into it silently — the mapper refuses the
+    /// statement instead of forwarding SQL that the database would reject
+    /// (or worse, that would leak a ciphertext into a row count).
+    #[test]
+    fn encrypted_column_in_limit_is_rejected() {
+        let schema = resolver(schema! {
+            tables: {
+                users: {
+                    id,
+                    email (EQL: Eq),
+                }
+            }
+        });
+
+        let statement = parse("SELECT id FROM users LIMIT email");
+
+        type_check(schema, &statement)
+            .expect_err("an encrypted column must not type check as a LIMIT row count");
+    }
+
+    /// A statement variant with no inference rule must fail closed with an
+    /// error stating the invariant, not traverse without constraining the
+    /// statement's top-level type. (`requires_type_check` never admits
+    /// `TRUNCATE`, so this can only be reached by calling `type_check`
+    /// directly — but if `requires_type_check` is ever widened without a
+    /// matching inference rule, this is the error that makes it loud.)
+    #[test]
+    fn statement_without_inference_rule_fails_closed() {
+        let schema = resolver(schema! {
+            tables: {
+                users: {
+                    id,
+                }
+            }
+        });
+
+        let statement = parse("TRUNCATE TABLE users");
+
+        match type_check(schema, &statement) {
+            Ok(_) => panic!("expected type check to fail"),
+            Err(err) => assert_eq!(
+                err.to_string(),
+                format!(
+                    "type inference has no rule for statement `{statement}`; \
+                     `requires_type_check` admits a statement variant that \
+                     `InferType<'_, Statement>` does not handle"
+                )
+            ),
+        }
+    }
+
     #[test]
     fn delete() {
         // init_tracing();

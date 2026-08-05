@@ -1,7 +1,13 @@
-use eql_mapper_macros::trace_infer;
-use sqltk::parser::ast::{AssignmentTarget, ObjectName, ObjectNamePart, Statement};
+use std::sync::Arc;
 
-use crate::{inference::infer_type::InferType, unifier::Type, TypeError, TypeInferencer};
+use eql_mapper_macros::trace_infer;
+use sqltk::parser::ast::{AssignmentTarget, ObjectName, ObjectNamePart, Statement, TableFactor};
+
+use crate::{
+    inference::infer_type::InferType,
+    unifier::{EqlTerm, EqlValue, NativeValue, Type, Value},
+    ColumnKind, TableColumn, TypeError, TypeInferencer,
+};
 
 #[trace_infer]
 impl<'ast> InferType<'ast, Statement> for TypeInferencer<'ast> {
@@ -20,19 +26,48 @@ impl<'ast> InferType<'ast, Statement> for TypeInferencer<'ast> {
             }
 
             Statement::Update {
-                // FIXME: use table to resolve the assignments (instead of looking up the columns names in the scope).
-                table: _,
+                table,
                 assignments,
                 returning,
                 ..
             } => {
+                // Assignment targets belong to the table being updated, so
+                // resolve them against `table` directly. Resolving through the
+                // lexical scope would also see every `FROM`-joined relation,
+                // letting a same-named column there shadow the target column
+                // (or make it spuriously ambiguous).
+                let target_table = match &table.relation {
+                    TableFactor::Table { name, .. } if table.joins.is_empty() => name,
+                    _ => {
+                        return Err(TypeError::UnsupportedSqlFeature(
+                            "UPDATE target that is not a plain table".into(),
+                        ))
+                    }
+                };
+
                 for assignment in assignments.iter() {
                     match &assignment.target {
                         AssignmentTarget::ColumnName(ObjectName(parts)) if parts.len() == 1 => {
                             let ObjectNamePart::Identifier(ident) = parts.last().unwrap();
+                            let stc = self
+                                .table_resolver
+                                .resolve_table_column(target_table, ident)?;
+
+                            let tc = TableColumn {
+                                table: stc.table.clone(),
+                                column: stc.column.clone(),
+                            };
+
+                            let value_ty = match &stc.kind {
+                                ColumnKind::Native => Value::Native(NativeValue(Some(tc))),
+                                ColumnKind::Eql(features, identity) => Value::Eql(EqlTerm::Full(
+                                    EqlValue(tc, identity.clone(), *features),
+                                )),
+                            };
+
                             self.unify_node_with_type(
                                 &assignment.value,
-                                self.resolve_ident(ident)?,
+                                Arc::new(Type::Value(value_ty)),
                             )?;
                         }
 
@@ -88,7 +123,20 @@ impl<'ast> InferType<'ast, Statement> for TypeInferencer<'ast> {
                 // EXPLAIN itself returns metadata, not the query results - give it empty projection
                 self.unify_node_with_type(statement, Type::empty_projection())?;
             }
-            _ => {}
+
+            // Invariant: every statement variant admitted by
+            // `requires_type_check` (see `eql_mapper.rs`) has an explicit arm
+            // above that constrains the statement's top-level type. This arm
+            // fails closed so that widening `requires_type_check` without
+            // adding a matching arm becomes a loud error instead of a
+            // silently-unconstrained statement.
+            unhandled => {
+                return Err(TypeError::InternalError(format!(
+                    "type inference has no rule for statement `{unhandled}`; \
+                     `requires_type_check` admits a statement variant that \
+                     `InferType<'_, Statement>` does not handle"
+                )))
+            }
         };
 
         Ok(())

@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **`UPDATE … SET … FROM` with same-named columns**: an `UPDATE` was rejected as ambiguous when a table in the `FROM` clause had a column with the same name as the column being assigned. The assignment now always refers to the table being updated, so these statements work and the assigned value gets the target column's type — encrypted or not.
+
+- **Encrypted values as row counts are rejected**: an encrypted column used in `LIMIT`, `OFFSET`, or `FETCH` (for example `LIMIT enc_col`) is now rejected with a type error instead of being forwarded to the database.
+
+- **Statements Proxy cannot type-check fail with a clear error**: a statement Proxy admits for type checking but has no support for is now rejected immediately with an error naming the statement, instead of surfacing later as an opaque resolution error. No currently-supported statement is affected.
+
 ## [3.0.0] - 2026-08-05
 
 ### Changed
