@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1785897889999,
+  "lastUpdate": 1785897932624,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -23058,6 +23058,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 40.592026,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "james@cipherstash.com",
+            "name": "James Sadler",
+            "username": "freshtonic"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "7c6342f074161ede0ffafe022694ec1b6160566e",
+          "message": "Merge pull request #440 from cipherstash/james/cip-3699-eql-mapper-inference-misses-ast-fields-on-type-checked\n\nfix(mapper): close inference gaps on AST fields of type-checked statements (CIP-3699)",
+          "timestamp": "2026-08-05T12:40:55+10:00",
+          "tree_id": "71626d49bef1c7d6305ca8d3a2727770f837b167",
+          "url": "https://github.com/cipherstash/proxy/commit/7c6342f074161ede0ffafe022694ec1b6160566e"
+        },
+        "date": 1785897931161,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 40.510358,
             "unit": "Number"
           }
         ]
