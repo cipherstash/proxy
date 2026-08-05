@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1785897541577,
+  "lastUpdate": 1785897889999,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -23029,6 +23029,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 39.198965,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "james@cipherstash.com",
+            "name": "James Sadler",
+            "username": "freshtonic"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "d3b4098b1eab11ddf2dec2f0bb2cdc38392c26a1",
+          "message": "Merge pull request #441 from cipherstash/james/cip-3678-protocol-desync-transformation-error-after-a-mapped\n\nfix(proxy): protocol desync on transformation error after a mapped statement (CIP-3678)",
+          "timestamp": "2026-08-05T12:40:26+10:00",
+          "tree_id": "ca23d080e08d22d3f1bf2bcb8ccb6e5584bf4d2f",
+          "url": "https://github.com/cipherstash/proxy/commit/d3b4098b1eab11ddf2dec2f0bb2cdc38392c26a1"
+        },
+        "date": 1785897888649,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 40.592026,
             "unit": "Number"
           }
         ]
