@@ -1,5 +1,5 @@
 use cipherstash_proxy::config::TandemConfig;
-use cipherstash_proxy::connect::{self, AsyncStream};
+use cipherstash_proxy::connect;
 use cipherstash_proxy::error::{ConfigError, Error};
 use cipherstash_proxy::prometheus::CLIENTS_ACTIVE_CONNECTIONS;
 use cipherstash_proxy::proxy::Proxy;
@@ -87,7 +87,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 info!(msg = "Received SIGTERM");
                 break;
             },
-            Ok(client_stream) = AsyncStream::accept(&listener) => {
+            Ok(client_stream) = connect::accept(&listener) => {
 
                     client_id += 1;
 

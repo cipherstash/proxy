@@ -822,7 +822,6 @@ version = "3.0.1"
 dependencies = [
  "arc-swap",
  "async-trait",
- "aws-lc-rs",
  "bigdecimal",
  "blake3",
  "bytes",
@@ -840,7 +839,6 @@ dependencies = [
  "metrics",
  "metrics-exporter-prometheus",
  "moka",
- "oid-registry",
  "pg-proto",
  "postgres-protocol",
  "postgres-types",
@@ -853,20 +851,17 @@ dependencies = [
  "rustls-platform-verifier 0.5.1",
  "serde",
  "serde_json",
- "socket2 0.5.8",
  "sqltk",
  "temp-env",
  "thiserror 2.0.18",
  "tokio",
  "tokio-postgres",
  "tokio-postgres-rustls",
- "tokio-rustls",
  "tokio-util",
  "tracing",
  "tracing-subscriber",
  "uuid",
  "vitaminc-protected 0.1.0-pre4.2",
- "x509-parser 0.17.0",
 ]
 
 [[package]]
@@ -3143,8 +3138,7 @@ checksum = "e3148f5046208a5d56bcfc03053e3ca6334e51da8dfb19b6cdc8b306fae3283e"
 [[package]]
 name = "pg-proto"
 version = "0.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6e850c5837b91e4dfd30bd4fb4923e4173f175b48d6d421bdfd3f5316b42a198"
+source = "git+https://github.com/freshtonic/pg-proto?rev=d9f201097f70f6b98b89f72d71728812463c860e#d9f201097f70f6b98b89f72d71728812463c860e"
 dependencies = [
  "base64",
  "bytes",
@@ -3154,19 +3148,19 @@ dependencies = [
  "rand 0.10.2",
  "rustls",
  "sha2 0.11.0",
+ "socket2 0.6.5",
  "stringprep",
  "subtle",
  "tokio",
  "tokio-rustls",
  "tokio-util",
- "x509-parser 0.18.1",
+ "x509-parser",
 ]
 
 [[package]]
 name = "pg-proto-fsm"
-version = "0.2.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "af49ce51ac27499ddbd2741609d99514d7bf5850d3a10b7fdf0a0709cb1178f1"
+version = "0.2.1"
+source = "git+https://github.com/freshtonic/pg-proto?rev=d9f201097f70f6b98b89f72d71728812463c860e#d9f201097f70f6b98b89f72d71728812463c860e"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -6306,23 +6300,6 @@ dependencies = [
  "der",
  "spki",
  "tls_codec",
-]
-
-[[package]]
-name = "x509-parser"
-version = "0.17.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4569f339c0c402346d4a75a9e39cf8dad310e287eef1ff56d4c68e5067f53460"
-dependencies = [
- "asn1-rs",
- "data-encoding",
- "der-parser",
- "lazy_static",
- "nom 7.1.3",
- "oid-registry",
- "rusticata-macros",
- "thiserror 2.0.18",
- "time",
 ]
 
 [[package]]
