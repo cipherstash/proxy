@@ -11,7 +11,23 @@ use sqltk::parser::{
 };
 use sqltk::NodeKey;
 
-use crate::unifier::{EqlTerm, Type, Value};
+use crate::unifier::{DomainIdentity, EqlTerm, Type, Value};
+
+/// The term function for comparison operator `op` on a column with `identity`,
+/// or `None` if the domain provides no term for that operator.
+///
+/// Shared by [`super::RewriteEqlComparisonOps`] and
+/// [`super::RewriteEqlAnyAllOps`], which rewrite the same comparison in its
+/// scalar and array-quantified spellings.
+pub(crate) fn term_fn_for(op: &BinaryOperator, identity: &DomainIdentity) -> Option<&'static str> {
+    match op {
+        BinaryOperator::Eq | BinaryOperator::NotEq => identity.eq_term_fn(),
+        BinaryOperator::Lt | BinaryOperator::LtEq | BinaryOperator::Gt | BinaryOperator::GtEq => {
+            identity.ord_term_fn()
+        }
+        _ => None,
+    }
+}
 
 /// The v3 domain an encrypted **query operand** — the value side of a
 /// predicate — casts to, or `None` if it takes no cast.

@@ -3,7 +3,7 @@ use std::mem;
 use std::sync::Arc;
 
 use sqltk::parser::ast::Value as SqltkValue;
-use sqltk::parser::ast::{BinaryOperator, Expr, ValueWithSpan};
+use sqltk::parser::ast::{Expr, ValueWithSpan};
 use sqltk::parser::tokenizer::Span;
 use sqltk::{NodeKey, NodePath, Visitable};
 
@@ -11,7 +11,7 @@ use crate::unifier::{DomainIdentity, EqlTerm, Type, Value};
 use crate::EqlMapperError;
 
 use super::helpers::{
-    cast_encrypted_operand, eql_v3_term_call, is_comparison_op, query_operand_domain,
+    cast_encrypted_operand, eql_v3_term_call, is_comparison_op, query_operand_domain, term_fn_for,
 };
 use super::TransformationRule;
 
@@ -64,18 +64,6 @@ impl<'ast> RewriteEqlComparisonOps<'ast> {
         })
     }
 
-    /// The term function for `op` on a column with `identity`, or `None` if the
-    /// domain provides no term for that operator.
-    fn term_fn_for(op: &BinaryOperator, identity: &DomainIdentity) -> Option<&'static str> {
-        match op {
-            BinaryOperator::Eq | BinaryOperator::NotEq => identity.eq_term_fn(),
-            BinaryOperator::Lt
-            | BinaryOperator::LtEq
-            | BinaryOperator::Gt
-            | BinaryOperator::GtEq => identity.ord_term_fn(),
-            _ => None,
-        }
-    }
 }
 
 impl<'ast> TransformationRule<'ast> for RewriteEqlComparisonOps<'ast> {
@@ -104,7 +92,7 @@ impl<'ast> TransformationRule<'ast> for RewriteEqlComparisonOps<'ast> {
             return Ok(false);
         };
 
-        let Some(term_fn) = Self::term_fn_for(op, &identity) else {
+        let Some(term_fn) = term_fn_for(op, &identity) else {
             return Err(EqlMapperError::Transform(format!(
                 "encrypted column {} does not support operator {op} (domain {})",
                 identity.token, identity.domain.value

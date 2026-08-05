@@ -491,13 +491,55 @@ impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
                 right,
             } => {
                 self.unify_node_with_type(expr_val, Type::native())?;
-                self.unify_nodes(&**left, &**right)?;
 
-                // `x <op> ANY/ALL (…)` applies `<op>` to every element, so the
-                // capability is the operator's. Discarding `compare_op` left
-                // both `= ANY` and `> ANY` unconstrained.
+                // `x <op> ANY/ALL (rhs)` applies `<op>` between `x` and every
+                // ELEMENT of `rhs`, so when `rhs` resolved to an array its
+                // element type is what `x` unifies with — unifying with the
+                // array itself made `1 = ANY(ARRAY[1, 2])` type `1` as an
+                // array (and made `enc = ANY(ARRAY[…])` a conflict). Any other
+                // right-hand shape (a cast like `$1::int[]`, which is opaquely
+                // native; a subquery, whose single-column projection unifies
+                // with a scalar) keeps the direct unification.
+                let right_ty = self.get_node_type(&**right);
+                let rhs_is_array = matches!(&*right_ty, Type::Value(Value::Array(_)));
+                if let Type::Value(Value::Array(crate::unifier::Array(elem_ty))) = &*right_ty {
+                    self.unify_node_with_type(&**left, elem_ty.clone())?;
+                } else {
+                    self.unify_nodes(&**left, &**right)?;
+                }
+
+                // As for a binary comparison, the operator decides the
+                // capability the operands must carry: `= ANY` needs `Eq`,
+                // `< ALL` needs `Ord`.
                 if let Some(eql_trait) = comparison_capability(compare_op) {
                     self.unify_node_with_bound(&**left, eql_trait)?;
+                }
+
+                // Encrypted operands are supported only in the ARRAY-literal
+                // shape, which `RewriteEqlAnyAllOps` rewrites to the term form
+                // elementwise. A subquery projection or a bare array param has
+                // no rewrite: emitted as-is it would compare the raw jsonb
+                // payloads — whose ciphertext is randomised per row — and
+                // silently match nothing, so refuse loudly instead. (Checked on
+                // both sides: after the scalar-with-projection special case the
+                // encrypted type can be recorded against either node.)
+                if !rhs_is_array
+                    && (self.get_node_type(&**left).contains_eql()
+                        || self.get_node_type(&**right).contains_eql())
+                {
+                    return Err(TypeError::UnsupportedSqlFeature(
+                        "ANY/ALL over an encrypted subquery or array parameter (use ARRAY[...])"
+                            .into(),
+                    ));
+                }
+
+                // The operands of the predicate reach PostgreSQL as query
+                // operands — terms only, never a ciphertext — exactly as for a
+                // binary comparison.
+                if let Expr::Array(ast::Array { elem, .. }) = &**right {
+                    self.record_query_operands(std::iter::once(&**left).chain(elem.iter()));
+                } else {
+                    self.record_query_operands([&**left]);
                 }
 
                 // The result is native regardless of the operand type, so a
