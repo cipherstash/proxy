@@ -254,6 +254,18 @@ pub enum EncryptError {
     #[error("InvalidIndexTerm")]
     InvalidIndexTerm,
 
+    /// `EqlTermVariant::JsonExtracted` types the RESULT of an encrypted JSON
+    /// extraction, which is read back and decrypted — it is never a plaintext
+    /// operand on its way to the database, so it should never reach the encrypt
+    /// path.
+    ///
+    /// Refused rather than defaulted to `EqlOperation::Store`: storing would
+    /// encrypt a value with a payload shape the query does not expect and
+    /// silently return the wrong rows, which is the class of bug this term
+    /// exists to eliminate.
+    #[error("Internal: an extracted encrypted JSON value reached the encrypt path")]
+    JsonExtractedIsNotAnOperand,
+
     /// EQL v3 orders encrypted jsonb entries by the CLLW-OPE (`op`) term and has
     /// no representation for CLLW-ORE (`oc`), so a column configured for
     /// Standard-mode ste_vec cannot be encrypted. The column has to be

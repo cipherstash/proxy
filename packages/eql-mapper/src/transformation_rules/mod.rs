@@ -6,12 +6,13 @@
 //! - [`DryRun`] is a type for checking if a `TransformationRule` will mutate the AST without actually mutating the AST.
 //!   It is useful as a performance optimisation to avoid rebuilding an AST if no changes are required.
 //!
-//! This module implements `TransformationRule` for tuples of size 1 to 16 where all of their elements implement
+//! This module implements `TransformationRule` for tuples of size 1 to 24 where all of their elements implement
 //! `TransformationRule`. This facilitates composition of rules into single rules.
 
 mod helpers;
 
 mod cast_full_payload_operands;
+mod collapse_json_accessor_chain;
 mod fail_on_placeholder_change;
 mod preserve_effective_aliases;
 mod rewrite_containment_ops;
@@ -31,6 +32,7 @@ mod substitute_encrypted_literals;
 use std::marker::PhantomData;
 
 pub(crate) use cast_full_payload_operands::*;
+pub(crate) use collapse_json_accessor_chain::*;
 pub(crate) use fail_on_placeholder_change::*;
 pub(crate) use preserve_effective_aliases::*;
 pub(crate) use rewrite_containment_ops::*;
@@ -177,7 +179,7 @@ impl<'ast, T: TransformationRule<'ast>> Transform<'ast> for DryRunnable<'ast, T>
     }
 }
 
-#[impl_for_tuples(1, 16)]
+#[impl_for_tuples(1, 24)]
 impl<'ast> TransformationRule<'ast> for Tuple {
     fn apply<N: Visitable>(
         &mut self,

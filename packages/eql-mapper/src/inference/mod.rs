@@ -9,18 +9,21 @@ pub mod unifier;
 
 use unifier::{Unifier, *};
 
-use std::{cell::RefCell, fmt::Debug, marker::PhantomData, ops::ControlFlow, rc::Rc, sync::Arc};
+use std::{
+    cell::RefCell, collections::HashSet, fmt::Debug, marker::PhantomData, ops::ControlFlow, rc::Rc,
+    sync::Arc,
+};
 
 use infer_type::InferType;
 use sqltk::parser::ast::{
     Delete, Expr, Function, FunctionArgExpr, Ident, Insert, ObjectName, Query, Select, SelectItem,
     SetExpr, Statement, ValueWithSpan, Values, WindowSpec,
 };
-use sqltk::{into_control_flow, AsNodeKey, Break, Visitable, Visitor};
+use sqltk::{into_control_flow, AsNodeKey, Break, NodeKey, Visitable, Visitor};
 
 use crate::{
-    JsonSelectorSource, JsonValueSelectors, Param, QueryOperands, ScopeError, ScopeTracker,
-    TableResolver,
+    JsonAccessorPaths, JsonSelectorSource, JsonValueSelectors, Param, QueryOperands, ScopeError,
+    ScopeTracker, TableResolver,
 };
 
 pub(crate) use registry::*;
@@ -61,11 +64,35 @@ pub struct TypeInferencer<'ast> {
     /// the path for which value ([`crate::JsonValueSelectors`]).
     json_value_selectors: RefCell<JsonValueSelectors<'ast>>,
 
+    /// The composed paths of the multi-step accessor chains that survive into the
+    /// rewritten SQL as a single accessor ([`crate::JsonAccessorPaths`]).
+    ///
+    /// The surviving selector operand's own text is one segment of the path it
+    /// must key, so the proxy cannot derive the rest from what it is handed.
+    json_accessor_paths: RefCell<JsonAccessorPaths<'ast>>,
+
     /// The operands that appear in a query position, so the proxy can project
     /// their payloads to query operands ([`crate::QueryOperands`]). Recorded
     /// here rather than derived later because it is a fact about the statement's
     /// shape, and the proxy needs it before it encrypts anything.
     query_operands: RefCell<QueryOperands<'ast>>,
+
+    /// The JSON accessor chains that a fusable comparison sits above, recorded
+    /// on the way DOWN the tree.
+    ///
+    /// Typing is post-order, so when a chain's outermost `->` is typed its
+    /// parent does not exist yet — and the parent is what decides which of the
+    /// two channels the chain's path belongs in. `j -> 'a' -> 'b' = $1` fuses
+    /// the path into the equality's needle and the accessor disappears
+    /// altogether; the same chain anywhere else survives as a single accessor
+    /// whose selector must key the composed path. Both are correct, and they
+    /// want DIFFERENT records — so the comparison marks the chain before any of
+    /// it is typed, and the `->` rule then records into the right channel.
+    ///
+    /// Purely syntactic — at enter time no child has a type yet. Whether the
+    /// chain's root is really an encrypted document is still checked on the way
+    /// back up.
+    fusable_json_chains: RefCell<HashSet<NodeKey<'ast>>>,
 
     _ast: PhantomData<&'ast ()>,
 }
@@ -82,7 +109,9 @@ impl<'ast> TypeInferencer<'ast> {
             scope_tracker: scope.into(),
             unifier: unifier.into(),
             json_value_selectors: RefCell::new(JsonValueSelectors::default()),
+            json_accessor_paths: RefCell::new(JsonAccessorPaths::default()),
             query_operands: RefCell::new(QueryOperands::default()),
+            fusable_json_chains: RefCell::new(HashSet::new()),
             _ast: PhantomData,
         }
     }
@@ -93,9 +122,33 @@ impl<'ast> TypeInferencer<'ast> {
         std::mem::take(&mut self.json_value_selectors.borrow_mut())
     }
 
+    /// Takes the composed accessor-chain paths accumulated during inference,
+    /// leaving the inferencer's set empty.
+    pub(crate) fn take_json_accessor_paths(&self) -> JsonAccessorPaths<'ast> {
+        std::mem::take(&mut self.json_accessor_paths.borrow_mut())
+    }
+
     /// Takes the recorded query operands, leaving the inferencer's set empty.
     pub(crate) fn take_query_operands(&self) -> QueryOperands<'ast> {
         std::mem::take(&mut self.query_operands.borrow_mut())
+    }
+
+    /// Marks a JSON accessor chain as sitting under a comparison that will fuse
+    /// it, before any of it has been typed.
+    pub(crate) fn mark_fusable_json_chain<N: AsNodeKey>(&self, node: &'ast N) {
+        self.fusable_json_chains
+            .borrow_mut()
+            .insert(node.as_node_key());
+    }
+
+    /// Whether this node is the outermost accessor of a chain a comparison will
+    /// fuse into its own needle — in which case the accessor is discarded and its
+    /// path belongs in [`crate::JsonValueSelectors`], not
+    /// [`crate::JsonAccessorPaths`].
+    pub(crate) fn is_fusable_json_chain<N: AsNodeKey>(&self, node: &'ast N) -> bool {
+        self.fusable_json_chains
+            .borrow()
+            .contains(&node.as_node_key())
     }
 
     pub(crate) fn record_query_operand_param(&self, param: Param) {
@@ -110,10 +163,11 @@ impl<'ast> TypeInferencer<'ast> {
         &self,
         param: Param,
         source: JsonSelectorSource,
-    ) {
+    ) -> Result<(), TypeError> {
         self.json_value_selectors
             .borrow_mut()
-            .record_param(param, source);
+            .record_param(param, source)
+            .map_err(|_| TypeError::AmbiguousJsonSelectorPath(param.0))
     }
 
     pub(crate) fn record_json_value_selector_literal(
@@ -122,6 +176,27 @@ impl<'ast> TypeInferencer<'ast> {
         source: JsonSelectorSource,
     ) {
         self.json_value_selectors
+            .borrow_mut()
+            .record_literal(node, source);
+    }
+
+    pub(crate) fn record_json_accessor_path_param(
+        &self,
+        param: Param,
+        source: JsonSelectorSource,
+    ) -> Result<(), TypeError> {
+        self.json_accessor_paths
+            .borrow_mut()
+            .record_param(param, source)
+            .map_err(|_| TypeError::AmbiguousJsonSelectorPath(param.0))
+    }
+
+    pub(crate) fn record_json_accessor_path_literal(
+        &self,
+        node: &'ast sqltk::parser::ast::Value,
+        source: JsonSelectorSource,
+    ) {
+        self.json_accessor_paths
             .borrow_mut()
             .record_literal(node, source);
     }

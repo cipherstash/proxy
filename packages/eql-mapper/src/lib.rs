@@ -47,7 +47,8 @@ mod test {
             EqlTerm, EqlTrait, EqlTraits, EqlValue, InstantiateType, NativeValue, Projection,
             ProjectionColumn, Type, Value,
         },
-        JsonSelectorSource, OutputParamSource, Param, Schema, TableColumn, TableResolver,
+        JsonSelectorSegment, JsonSelectorSource, OutputParamSource, Param, Schema, TableColumn,
+        TableResolver, TypeCheckedStatement,
     };
     use eql_mapper_macros::concrete_ty;
     use pretty_assertions::assert_eq;
@@ -2598,7 +2599,7 @@ mod test {
         assert_eq!(
             transformed.params.outputs()[0].source,
             OutputParamSource::JsonValueSelector {
-                path: JsonSelectorSource::Param(Param(1)),
+                path: JsonSelectorSource::param(Param(1)),
                 value: Param(2),
             }
         );
@@ -2642,7 +2643,7 @@ mod test {
         assert_eq!(
             outputs[1].source,
             OutputParamSource::JsonValueSelector {
-                path: JsonSelectorSource::Param(Param(2)),
+                path: JsonSelectorSource::param(Param(2)),
                 value: Param(3),
             }
         );
@@ -3225,12 +3226,11 @@ mod test {
         })
     }
 
-    /// Transforms `sql` with every encrypted literal replaced by `'<CT>'`.
-    fn transform_with_dummy_literals(schema: Arc<TableResolver>, sql: &str) -> String {
-        let statement = parse(sql);
-        let typed = type_check(schema, &statement).unwrap();
-
-        let encrypted = typed
+    /// Every encrypted literal of `typed`, replaced by `'<CT>'`.
+    fn dummy_encrypted_literals<'ast>(
+        typed: &TypeCheckedStatement<'ast>,
+    ) -> HashMap<NodeKey<'ast>, ast::Value> {
+        typed
             .literals
             .iter()
             .map(|(_, v)| {
@@ -3239,7 +3239,14 @@ mod test {
                     ast::Value::SingleQuotedString("<CT>".to_string()),
                 )
             })
-            .collect::<HashMap<_, _>>();
+            .collect()
+    }
+
+    /// Transforms `sql` with every encrypted literal replaced by `'<CT>'`.
+    fn transform_with_dummy_literals(schema: Arc<TableResolver>, sql: &str) -> String {
+        let statement = parse(sql);
+        let typed = type_check(schema, &statement).unwrap();
+        let encrypted = dummy_encrypted_literals(&typed);
 
         typed.transform(encrypted).unwrap().to_string()
     }
@@ -3377,30 +3384,37 @@ mod test {
         assert_eq!(vec![false, true], roles);
     }
 
-    /// A chained JSON accessor must not leave the intermediate selector in the
-    /// statement, nor apply native `->` to the encrypted payload.
-    ///
-    /// The container is cloned from the *original* AST, so `-> 'nested'`
-    /// survives untouched: the plaintext field name ships in the SQL text and
-    /// native jsonb `->` runs on the encrypted column, which also makes the
-    /// predicate match nothing.
-    #[test]
-    #[ignore = "Chained JSON accessor clones its container from the original AST, so the inner \
-                selector stays plaintext in the SQL and native jsonb -> is applied to the \
-                encrypted payload. See rewrite_json_value_selector_eq.rs."]
-    fn chained_json_accessor_does_not_emit_the_plaintext_selector() {
-        let schema = resolver(schema! {
+    /// A column that can be both traversed and compared for JSON equality.
+    fn chained_json_schema() -> Arc<TableResolver> {
+        resolver(schema! {
             tables: {
                 t: {
                     id,
                     j (EQL("eql_v3_json_search"): Eq + Ord + JsonLike + Contain),
                 }
             }
-        });
+        })
+    }
 
+    /// A chained JSON accessor must not leave the intermediate selector in the
+    /// statement, nor apply native `->` to the encrypted payload.
+    ///
+    /// The chain collapses into a single containment against the ROOT column:
+    /// `j -> 'nested' -> 'string'` is the path `$.nested.string` of one
+    /// document, and the needle is keyed on that whole path. Keeping the inner
+    /// accessor (the container was cloned from the original AST) shipped the
+    /// plaintext field name in the SQL text AND ran native jsonb `->` over an
+    /// encrypted payload, so the predicate matched nothing either.
+    #[test]
+    fn chained_json_accessor_does_not_emit_the_plaintext_selector() {
         let rewritten = transform_with_dummy_literals(
-            schema,
+            chained_json_schema(),
             "SELECT id FROM t WHERE j -> 'nested' -> 'string' = '\"world\"'",
+        );
+
+        assert_eq!(
+            rewritten,
+            "SELECT id FROM t WHERE eql_v3.jsonb_contains(j, '<CT>'::JSONB::eql_v3.query_json)"
         );
 
         assert!(
@@ -3410,6 +3424,466 @@ mod test {
         assert!(
             !rewritten.contains("j -> "),
             "native jsonb -> must not be applied to the encrypted column: {rewritten}"
+        );
+    }
+
+    /// A JSON operation on the RESULT of a JSON operation must be refused when
+    /// the two are not in the same expression.
+    ///
+    /// `->` yields `EqlTerm::JsonExtracted` — one SteVec entry, which carries no
+    /// `sv` array and so cannot be traversed. A chain written in one expression
+    /// is collapsed into a single path against the document instead, but once the
+    /// halves are separated by a subquery the selectors cannot be composed: the
+    /// walker sees only `a -> 'foo'` and has no way to learn that `a` is already
+    /// `$.bar`. It used to emit a second entry-scoped accessor over an entry and
+    /// return NULL, silently, or fuse a needle keyed on `$.foo` when the real
+    /// path was `$.bar.foo` — wrong rows, no error (CIP-3682).
+    ///
+    /// This one is impossible rather than unimplemented, and stays refused even
+    /// though a chain in one expression now works everywhere: `JsonExtracted` does
+    /// not carry the path that produced it, and the root column is not in scope in
+    /// the outer query, so there is nothing to root a composed path at.
+    ///
+    /// A type crosses a subquery boundary where a syntactic pattern does not,
+    /// which is why this is carried in the type system rather than by the walker.
+    #[test]
+    fn json_operation_on_an_extracted_value_is_refused() {
+        let schema = chained_json_schema();
+
+        for sql in [
+            // The reported shape: the chain split across a subquery.
+            "SELECT a -> 'foo' FROM (SELECT j -> 'bar' AS a FROM t) s",
+            // The same split, but where the outer half is a fusable predicate.
+            // The fusion must NOT claim this: its root is an entry, not a
+            // document, so the path it would compose is wrong.
+            "SELECT id FROM (SELECT j -> 'bar' AS a, id FROM t) s WHERE a -> 'foo' = '\"x\"'",
+            // The `->>` spelling is the same operation.
+            "SELECT a ->> 'foo' FROM (SELECT j -> 'bar' AS a FROM t) s",
+        ] {
+            let statement = parse(sql);
+            let err = type_check(schema.clone(), &statement)
+                .expect_err(&format!("`{sql}` must not type check"));
+
+            assert!(
+                err.to_string()
+                    .contains("result of an encrypted JSON operation"),
+                "expected an unqueryable-extraction error for `{sql}`, got: {err}"
+            );
+        }
+    }
+
+    /// A multi-step chain collapses to a SINGLE accessor on the root document,
+    /// in every context — not only under an equality.
+    ///
+    /// A chain cannot be two hops: `eql_v3."->"` searches the document's `sv`
+    /// array and returns one entry, which has no `sv` of its own, so an accessor
+    /// over an accessor finds nothing and returns NULL. The emission that IS
+    /// correct is one accessor carrying the composed path, and it is correct
+    /// wherever a single access is — so a projection, an ordering comparison and a
+    /// mixed spelling all produce exactly the shape the equivalent single access
+    /// would.
+    ///
+    /// The plaintext selectors of the discarded inner accessors must go with them:
+    /// leaving one behind ships a field name to PostgreSQL in the clear
+    /// (CIP-3682) and applies native jsonb `->` to an encrypted payload.
+    #[test]
+    fn a_multi_step_chain_collapses_to_one_accessor_in_every_context() {
+        let schema = chained_json_schema();
+
+        // Each case pairs a chain with the emission expected of it. The selector
+        // is `'<CT>'` in every one: the whole path is keyed into that single
+        // encrypted operand, so the SQL cannot show how many steps there were.
+        for (sql, expected) in [
+            // A projection, which has no comparison to fuse into.
+            (
+                "SELECT j -> 'foo' -> 'bar' FROM t",
+                "SELECT eql_v3.\"->\"(j, '<CT>') FROM t",
+            ),
+            // Brackets are not meaning: the same query, the same emission.
+            (
+                "SELECT (j -> 'foo') -> 'bar' FROM t",
+                "SELECT eql_v3.\"->\"(j, '<CT>') FROM t",
+            ),
+            // Mixed spellings. The OUTERMOST step decides the call, exactly as it
+            // would for a single access: `->>` yields text.
+            (
+                "SELECT j -> 'foo' ->> 'bar' FROM t",
+                "SELECT eql_v3.\"->>\"(j, '<CT>') FROM t",
+            ),
+            // Depth beyond two.
+            (
+                "SELECT j -> 'a' -> 'b' -> 'c' FROM t",
+                "SELECT eql_v3.\"->\"(j, '<CT>') FROM t",
+            ),
+            // The function spelling as a step of the chain.
+            (
+                "SELECT jsonb_path_query_first(j, '$.a') -> 'b' FROM t",
+                "SELECT eql_v3.\"->\"(j, '<CT>') FROM t",
+            ),
+            // Ordering. The accessor survives here — the comparison wraps it in
+            // `ord_term` rather than absorbing it — so it must be the collapsed
+            // single-accessor form.
+            (
+                "SELECT id FROM t WHERE j -> 'foo' -> 'bar' < '\"x\"'",
+                "SELECT id FROM t WHERE eql_v3.ord_term(eql_v3.\"->\"(j, '<CT>')) < \
+                 eql_v3.ord_term('<CT>'::JSONB::eql_v3.query_integer_ord)",
+            ),
+            (
+                "SELECT id FROM t WHERE j -> 'foo' -> 'bar' >= '\"x\"'",
+                "SELECT id FROM t WHERE eql_v3.ord_term(eql_v3.\"->\"(j, '<CT>')) >= \
+                 eql_v3.ord_term('<CT>'::JSONB::eql_v3.query_integer_ord)",
+            ),
+        ] {
+            let rewritten = transform_with_dummy_literals(schema.clone(), sql);
+
+            assert_eq!(rewritten, expected, "unexpected rewrite for `{sql}`");
+
+            for selector in ["'foo'", "'bar'", "'a'", "'b'", "'$.a'"] {
+                assert!(
+                    !rewritten.contains(selector),
+                    "selector {selector} must not reach the database in plaintext for `{sql}`: {rewritten}"
+                );
+            }
+            assert!(
+                !rewritten.contains("j -> "),
+                "native jsonb -> must not be applied to the encrypted column for `{sql}`: {rewritten}"
+            );
+        }
+    }
+
+    /// A chain collapsed outside an equality records its composed path against
+    /// the SURVIVING selector operand, which is the outermost step.
+    ///
+    /// That operand's own text is one segment (`'c'`); the selector it must key is
+    /// the whole path (`$.a.<$1>.c`). Nothing the proxy is handed at encryption
+    /// time could recover the difference, so the record is the only way the inner
+    /// steps reach the needle — and every step is an input the plan must consume,
+    /// or the client would bind a param that goes nowhere.
+    #[test]
+    fn a_collapsed_chain_records_its_composed_path_against_the_surviving_selector() {
+        // The outermost step is the param, so the whole path resolves at Bind.
+        let statement = parse("SELECT j -> 'a' -> $1 FROM t");
+
+        let typed = type_check(chained_json_schema(), &statement).unwrap();
+        let transformed = typed.transform(dummy_encrypted_literals(&typed)).unwrap();
+
+        assert_eq!(
+            transformed.to_string(),
+            "SELECT eql_v3.\"->\"(j, $1) FROM t"
+        );
+
+        let source = OutputParamSource::JsonAccessorPath {
+            path: JsonSelectorSource::new(vec![
+                JsonSelectorSegment::Literal("a".to_owned()),
+                JsonSelectorSegment::Param(Param(1)),
+            ]),
+            selector: Param(1),
+        };
+
+        assert_eq!(transformed.params.outputs()[0].source, source);
+        assert_eq!(source.inputs(), vec![Param(1)]);
+
+        // The selector is a query operand: it reaches PostgreSQL as a search term
+        // and never as a decryptable ciphertext.
+        assert!(transformed.params.outputs()[0].query_operand);
+    }
+
+    /// An EQUALITY over a chain must keep fusing, not degrade to an accessor plus
+    /// a comparison.
+    ///
+    /// The fused needle keys the path and the value together into one MAC, and its
+    /// presence in the stored `sv` IS the match. An accessor followed by `eq_term`
+    /// would be two operations where one suffices, and `eql_v3.eq_term` has no
+    /// overload for a JSON query operand anyway. The chain-collapsing rule fires
+    /// on the accessor below the comparison, and the equality rule then discards
+    /// its result and re-roots the containment at the bare column.
+    #[test]
+    fn equality_over_a_chain_still_fuses_rather_than_collapsing_to_an_accessor() {
+        let schema = chained_json_schema();
+
+        for (sql, expected) in [
+            (
+                "SELECT id FROM t WHERE j -> 'a' -> 'b' = '\"v\"'",
+                "SELECT id FROM t WHERE \
+                 eql_v3.jsonb_contains(j, '<CT>'::JSONB::eql_v3.query_json)",
+            ),
+            (
+                "SELECT id FROM t WHERE j -> 'a' -> 'b' <> '\"v\"'",
+                "SELECT id FROM t WHERE \
+                 NOT (eql_v3.jsonb_contains(j, '<CT>'::JSONB::eql_v3.query_json))",
+            ),
+        ] {
+            let rewritten = transform_with_dummy_literals(schema.clone(), sql);
+
+            assert_eq!(rewritten, expected, "unexpected rewrite for `{sql}`");
+            assert!(
+                !rewritten.contains("eql_v3.\"->\""),
+                "equality must fuse, not emit an accessor, for `{sql}`: {rewritten}"
+            );
+        }
+    }
+
+    /// A fused equality records its path in the value-selector channel ONLY.
+    ///
+    /// Recording it in both would be worse than recording it in neither: the
+    /// accessor channel is resolved at Parse time for a literal operand, and
+    /// `j -> $1 -> 'b' = $2` has a placeholder step in front of a literal
+    /// selector, which cannot resolve then. Writing the path to both channels
+    /// would refuse a query that works.
+    #[test]
+    fn a_fused_chain_records_no_accessor_path() {
+        let statement = parse("SELECT id FROM t WHERE j -> 'a' -> 'b' = $1");
+        let typed = type_check(chained_json_schema(), &statement).unwrap();
+
+        assert!(
+            typed.json_accessor_paths.is_empty(),
+            "a chain the equality absorbs has no surviving selector to key"
+        );
+        assert!(!typed.json_value_selectors.is_empty());
+    }
+
+    /// Every step of a collapsed chain must be resolvable to path text.
+    ///
+    /// The chain is collapsed either way, so a step the proxy cannot resolve — a
+    /// column reference, a function call — would simply vanish from the statement
+    /// and the query would read a different field. Unlike the fused-equality case
+    /// there is no capability check to fall through to, so it is refused outright.
+    #[test]
+    fn a_collapsed_chain_with_an_unresolvable_step_is_refused() {
+        let statement = parse("SELECT j -> 'a' -> id FROM t");
+
+        let err = type_check(chained_json_schema(), &statement)
+            .expect_err("a path step that is not a literal or a placeholder must be refused");
+
+        assert!(
+            err.to_string()
+                .contains("must be a literal or a placeholder"),
+            "expected an uncomposable-path error, got: {err}"
+        );
+    }
+
+    /// One placeholder cannot be the selector of two chains with different paths.
+    ///
+    /// The path is recorded against the param it arrives in, because at Bind time
+    /// the param number is all the proxy has. Two different paths for one param
+    /// cannot both be honoured, and silently keeping either would answer one of
+    /// the two projections from the wrong field.
+    #[test]
+    fn one_placeholder_cannot_key_two_different_paths() {
+        let statement = parse("SELECT j -> 'a' -> $1, j -> 'b' -> $1 FROM t");
+
+        let err = type_check(chained_json_schema(), &statement)
+            .expect_err("one param cannot carry two different paths");
+
+        assert!(
+            err.to_string().contains("two different"),
+            "expected an ambiguous-path error, got: {err}"
+        );
+
+        // The same path twice is not a conflict — it is one path.
+        let statement = parse("SELECT j -> 'a' -> $1, j -> 'a' -> $1 FROM t");
+        type_check(chained_json_schema(), &statement).unwrap();
+    }
+
+    /// Sorting by an extracted JSON field sorts by its ordering term.
+    ///
+    /// An extracted SteVec entry carries ordering and equality terms, so
+    /// `ORDER BY col -> 'field'` is legitimate — it sorts by
+    /// `ord_term(eql_v3."->"(col, sel))`. This pins the capability grant on
+    /// `EqlTerm::JsonExtracted`: when it briefly had NO capabilities at all,
+    /// this exact shape failed the `Ord` bound, and with mapping errors
+    /// disabled (the container default) the statement was forwarded unmapped —
+    /// native `->` over ciphertext, zero rows, silently. The showcase's
+    /// "active Aspirin prescriptions" query was the first thing to notice.
+    #[test]
+    fn order_by_an_extracted_json_field_sorts_by_its_ordering_term() {
+        let rewritten = transform_with_dummy_literals(
+            chained_json_schema(),
+            "SELECT id FROM t ORDER BY j -> 'email'",
+        );
+
+        assert_eq!(
+            rewritten,
+            "SELECT id FROM t ORDER BY eql_v3.ord_term(eql_v3.\"->\"(j, '<CT>'))"
+        );
+    }
+
+    /// A SINGLE access is legal anywhere, fused or not.
+    ///
+    /// The declaration handles it: `-> <T as JsonLike>::Output` yields an
+    /// extracted entry, which is projectable and decryptable. Only *traversing*
+    /// that result is refused, so ordinary field access and single-field
+    /// comparisons are unaffected.
+    #[test]
+    fn a_single_json_access_is_legal_anywhere() {
+        let schema = chained_json_schema();
+
+        for sql in [
+            "SELECT j -> 'foo' FROM t",
+            "SELECT j ->> 'foo' FROM t",
+            "SELECT id FROM t WHERE j -> 'foo' = '\"x\"'",
+            "SELECT id FROM t WHERE j -> 'foo' < '\"x\"'",
+        ] {
+            let statement = parse(sql);
+            type_check(schema.clone(), &statement)
+                .unwrap_or_else(|e| panic!("`{sql}` should type check, got: {e}"));
+        }
+    }
+
+    /// Extracting one field, and projecting an extracted field, both still work.
+    ///
+    /// The point of `JsonExtracted` is to forbid *traversing* an extracted entry,
+    /// not to make extraction useless: a single access is the common case, and
+    /// the result is projectable and decryptable exactly as before.
+    #[test]
+    fn extracting_and_projecting_one_json_field_still_works() {
+        let schema = chained_json_schema();
+
+        assert_eq!(
+            transform_with_dummy_literals(schema.clone(), "SELECT j -> 'foo' FROM t"),
+            "SELECT eql_v3.\"->\"(j, '<CT>') FROM t"
+        );
+
+        // An extracted entry crossing a subquery boundary is fine as long as
+        // nothing traverses it on the far side.
+        assert_eq!(
+            transform_with_dummy_literals(
+                schema,
+                "SELECT a FROM (SELECT j -> 'bar' AS a FROM t) s"
+            ),
+            "SELECT a FROM (SELECT eql_v3.\"->\"(j, '<CT>') AS a FROM t) AS s"
+        );
+    }
+
+    /// Parentheses must not defeat the chain walker.
+    ///
+    /// `(j -> 'foo') -> 'bar'` is `j -> 'foo' -> 'bar'` with redundant brackets,
+    /// and must fuse to the same needle rooted at the same bare column. Before
+    /// the walker saw through `Expr::Nested` it stopped at the bracket, treated
+    /// the parenthesised accessor as the ROOT container, and emitted
+    /// `eql_v3.jsonb_contains((j -> 'foo'), …)` — shipping the plaintext selector
+    /// `'foo'` to PostgreSQL and applying native jsonb `->` to the encrypted
+    /// payload. The same CIP-3682 leak, reachable with one pair of brackets.
+    #[test]
+    fn parenthesised_json_accessor_chains_fuse_identically() {
+        let schema = chained_json_schema();
+
+        // Every spelling below is the same query, so every one must produce the
+        // same fused containment against the bare root column.
+        let expected =
+            "SELECT id FROM t WHERE eql_v3.jsonb_contains(j, '<CT>'::JSONB::eql_v3.query_json)";
+
+        for sql in [
+            "SELECT id FROM t WHERE j -> 'foo' -> 'bar' = '\"x\"'",
+            "SELECT id FROM t WHERE (j -> 'foo') -> 'bar' = '\"x\"'",
+            "SELECT id FROM t WHERE ((j -> 'foo') -> 'bar') = '\"x\"'",
+            "SELECT id FROM t WHERE (((j -> 'foo')) -> 'bar') = '\"x\"'",
+            "SELECT id FROM t WHERE (j) -> 'foo' -> 'bar' = '\"x\"'",
+            "SELECT id FROM t WHERE j -> ('foo') -> 'bar' = '\"x\"'",
+        ] {
+            let rewritten = transform_with_dummy_literals(schema.clone(), sql);
+
+            assert_eq!(rewritten, expected, "unexpected rewrite for `{sql}`");
+
+            assert!(
+                !rewritten.contains("'foo'"),
+                "the intermediate selector must not reach the database in plaintext for `{sql}`: {rewritten}"
+            );
+            assert!(
+                !rewritten.contains("j -> "),
+                "native jsonb -> must not be applied to the encrypted column for `{sql}`: {rewritten}"
+            );
+        }
+    }
+
+    /// Every spelling and depth of chain collapses the same way, and none of
+    /// them leaves a selector behind.
+    #[test]
+    fn chained_json_accessor_spellings_all_collapse_to_root_containment() {
+        let cases = [
+            // Depth 3, and deeper.
+            "j -> 'a' -> 'b' -> 'c' = '\"v\"'",
+            "j -> 'a' -> 'b' -> 'c' -> 'd' = '\"v\"'",
+            // The `->>` spelling, and mixed with `->`.
+            "j ->> 'a' = '\"v\"'",
+            "j -> 'a' ->> 'b' = '\"v\"'",
+            "j ->> 'a' ->> 'b' = '\"v\"'",
+            // The function spelling, rooted and chained.
+            "jsonb_path_query_first(j, '$.a') = '\"v\"'",
+            "jsonb_path_query_first(j, '$.a') -> 'b' = '\"v\"'",
+            // The value operand written on the left.
+            "'\"v\"' = j -> 'a' -> 'b'",
+        ];
+
+        for case in cases {
+            let rewritten = transform_with_dummy_literals(
+                chained_json_schema(),
+                &format!("SELECT id FROM t WHERE {case}"),
+            );
+
+            assert_eq!(
+                rewritten,
+                "SELECT id FROM t WHERE eql_v3.jsonb_contains(j, '<CT>'::JSONB::eql_v3.query_json)",
+                "unexpected rewrite for `{case}`"
+            );
+        }
+    }
+
+    /// `<>` on a chain is the same containment, negated — the selectors are
+    /// discarded there too.
+    #[test]
+    fn chained_json_accessor_not_eq_rewrites_to_negated_containment() {
+        let rewritten = transform_with_dummy_literals(
+            chained_json_schema(),
+            "SELECT id FROM t WHERE j -> 'nested' -> 'string' <> '\"world\"'",
+        );
+
+        assert_eq!(
+            rewritten,
+            "SELECT id FROM t WHERE NOT (eql_v3.jsonb_contains(j, '<CT>'::JSONB::eql_v3.query_json))"
+        );
+    }
+
+    /// The path a chain composes is recorded step by step, so the proxy can
+    /// build `$.a.<$1>.c` once the placeholder steps are bound. Every step is an
+    /// input the plan must consume — dropping one would leave the client binding
+    /// a param that never reaches the needle.
+    #[test]
+    fn chained_json_accessor_records_every_path_step() {
+        let statement = parse("SELECT id FROM t WHERE j -> 'a' -> $1 -> 'c' = $2");
+
+        let typed = type_check(chained_json_schema(), &statement).unwrap();
+        let transformed = typed.transform(dummy_encrypted_literals(&typed)).unwrap();
+
+        assert_eq!(
+            transformed.to_string(),
+            "SELECT id FROM t WHERE eql_v3.jsonb_contains(j, $1::JSONB::eql_v3.query_json)"
+        );
+
+        let source = OutputParamSource::JsonValueSelector {
+            path: JsonSelectorSource::new(vec![
+                JsonSelectorSegment::Literal("a".to_owned()),
+                JsonSelectorSegment::Param(Param(1)),
+                JsonSelectorSegment::Literal("c".to_owned()),
+            ]),
+            value: Param(2),
+        };
+
+        assert_eq!(transformed.params.outputs()[0].source, source);
+        assert_eq!(source.inputs(), vec![Param(1), Param(2)]);
+    }
+
+    /// A chain with a step that is neither a literal nor a placeholder cannot
+    /// be composed into a path, so the fusion is declined and the comparison
+    /// falls through to the ordinary capability check — an error, not a
+    /// half-built needle and not a leak.
+    #[test]
+    fn chained_json_accessor_with_an_unresolvable_step_is_rejected() {
+        let statement = parse("SELECT id FROM t WHERE j -> 'a' -> id = '\"v\"'");
+
+        assert!(
+            type_check(chained_json_schema(), &statement).is_err(),
+            "a path step that is not a literal or a placeholder must not fuse"
         );
     }
 
@@ -3842,6 +4316,17 @@ mod test {
             .map_err(|err| err.to_string())
             .unwrap();
 
+        // A path query still yields the column's own type, NOT `JsonExtracted`.
+        //
+        // `->`/`->>` return `<T as JsonLike>::Output` so a second traversal of an
+        // encrypted result is refused. The path-query functions deliberately do
+        // NOT, because two supported shapes depend on the old typing:
+        // `jsonb_array_elements`/`jsonb_array_length` consume an extracted entry
+        // rather than traversing it, and the rewrite that retargets these
+        // functions and encrypts their Path operand keys off the result type —
+        // changing it sent the caller's literal jsonpath to PostgreSQL
+        // unencrypted. Closing that needs the array functions taught to accept
+        // an extracted value first.
         assert_eq!(
             typed.projection,
             projection![(EQL(patients.notes: JsonLike) as notes)]

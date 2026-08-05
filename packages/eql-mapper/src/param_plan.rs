@@ -25,14 +25,26 @@ pub enum OutputParamSource {
     /// encrypted if the param is EQL-typed).
     Input(Param),
 
-    /// Fused from two operands into one encrypted value-selector needle: the
-    /// JSON path and the value it must equal. The path may itself be a param or
-    /// a literal in the SQL; the value is always the param carrying this output.
+    /// Fused from several operands into one encrypted value-selector needle:
+    /// the JSON path and the value it must equal. Each step of the path is
+    /// itself a param or a literal in the SQL; the value is always the param
+    /// carrying this output.
     ///
     /// See [`crate::JsonValueSelectors`].
     JsonValueSelector {
         path: JsonSelectorSource,
         value: Param,
+    },
+
+    /// The composed path of a collapsed multi-step accessor chain. The whole
+    /// value of this output param is the eJSONPath the chain traverses, built
+    /// from every step of it — of which `selector`, the param this output
+    /// occupies, supplies only the outermost.
+    ///
+    /// See [`crate::JsonAccessorPaths`].
+    JsonAccessorPath {
+        path: JsonSelectorSource,
+        selector: Param,
     },
 }
 
@@ -41,10 +53,20 @@ impl OutputParamSource {
     pub fn inputs(&self) -> Vec<Param> {
         match self {
             OutputParamSource::Input(param) => vec![*param],
-            OutputParamSource::JsonValueSelector { path, value } => match path {
-                JsonSelectorSource::Param(path_param) => vec![*path_param, *value],
-                JsonSelectorSource::Literal(_) => vec![*value],
-            },
+            OutputParamSource::JsonValueSelector { path, value } => {
+                path.params().chain([*value]).collect()
+            }
+            OutputParamSource::JsonAccessorPath { path, selector } => {
+                // The selector is the chain's outermost step, so it is normally
+                // already among the path's params. Added explicitly rather than
+                // relying on that, and deduplicated so this reads as the set it
+                // is.
+                let mut inputs: Vec<Param> = path.params().collect();
+                if !inputs.contains(selector) {
+                    inputs.push(*selector);
+                }
+                inputs
+            }
         }
     }
 }

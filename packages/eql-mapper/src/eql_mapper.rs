@@ -181,6 +181,7 @@ impl<'ast> EqlMapper<'ast> {
                     params,
                     literals,
                     self.inferencer.borrow().take_json_value_selectors(),
+                    self.inferencer.borrow().take_json_accessor_paths(),
                     self.inferencer.borrow().take_query_operands(),
                     Arc::new(node_types),
                 ))

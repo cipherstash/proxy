@@ -215,6 +215,39 @@ pub enum EqlTerm {
     /// from* ([`crate::JsonSelectorSource`]); the proxy composes and encrypts.
     #[display("EQL:JsonValueSelector({})", _0)]
     JsonValueSelector(EqlValue),
+
+    /// The **result** of an encrypted JSON extraction — one SteVec entry pulled
+    /// out of a document by `->`, `->>`, or `jsonb_path_query{,_first}`.
+    ///
+    /// It is deliberately unqueryable: [`EqlTerm::effective_bounds`] gives it no
+    /// capabilities at all, so no operator or function can require anything of
+    /// it, and any attempt to traverse it further fails the type check.
+    ///
+    /// Why it has to exist. An extracted entry is not a document — it carries no
+    /// `sv` array — so applying an entry-scoped accessor to it selects nothing
+    /// and yields NULL. Before this variant, `->` returned the *same* type as
+    /// the column (`<T>(T -> …) -> T`), which made an extracted entry
+    /// indistinguishable from the whole document. Nothing in the type system
+    /// objected to traversing one, and the only thing preventing a wrong answer
+    /// was a syntactic walker — which a subquery boundary defeats:
+    ///
+    /// ```sql
+    /// SELECT a -> 'foo' FROM (SELECT j -> 'bar' AS a FROM t) s
+    /// ```
+    ///
+    /// `a` is syntactically far from the `->` that produced it, so the walker
+    /// cannot compose `$.bar.foo`; it emitted a second entry-scoped accessor
+    /// over an entry and returned NULL, silently. Carrying "already extracted"
+    /// in the type is what closes that, because a type crosses a subquery
+    /// boundary and a syntactic pattern does not.
+    ///
+    /// A chain written in one expression is still fused into one path against
+    /// the root document — see the `Arrow`/`LongArrow` branch in
+    /// `InferType for Expr`, which consults the chain rather than only the type
+    /// of its immediate operand. Fusion is why this variant does not simply fall
+    /// out of the operator declaration.
+    #[display("EQL:JsonExtracted({})", _0)]
+    JsonExtracted(EqlValue),
 }
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Display, Hash)]
@@ -233,6 +266,8 @@ pub enum EqlTermVariant {
     JsonOrd,
     #[display("EQL:JsonValueSelector")]
     JsonValueSelector,
+    #[display("EQL:JsonExtracted")]
+    JsonExtracted,
 }
 
 impl EqlTerm {
@@ -250,7 +285,8 @@ impl EqlTerm {
             | EqlTerm::JsonPath(eql_value)
             | EqlTerm::Tokenized(eql_value)
             | EqlTerm::JsonOrd(eql_value)
-            | EqlTerm::JsonValueSelector(eql_value) => eql_value,
+            | EqlTerm::JsonValueSelector(eql_value)
+            | EqlTerm::JsonExtracted(eql_value) => eql_value,
         }
     }
 
@@ -263,6 +299,7 @@ impl EqlTerm {
             EqlTerm::Tokenized(_) => EqlTermVariant::Tokenized,
             EqlTerm::JsonOrd(_) => EqlTermVariant::JsonOrd,
             EqlTerm::JsonValueSelector(_) => EqlTermVariant::JsonValueSelector,
+            EqlTerm::JsonExtracted(_) => EqlTermVariant::JsonExtracted,
         }
     }
 }

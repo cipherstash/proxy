@@ -76,7 +76,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     insert_test_data().await;
     create_enhanced_jsonb_test_data().await;
 
-    let client = connect_with_tls(PROXY).await;
+    let client = connect_with_tls(*PROXY).await;
 
     // Query 1: Get the Aspirin medication ID
     let aspirin_id_sql = "SELECT id FROM medications WHERE name = 'Aspirin';";
@@ -165,7 +165,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// Tests field access operations (-> and ->>).
 async fn test_field_access_operations() -> Result<(), Box<dyn std::error::Error>> {
     println!("\n🔍 === Testing Field Access Operations (-> and ->>) ===");
-    let client = connect_with_tls(PROXY).await;
+    let client = connect_with_tls(*PROXY).await;
 
     // Test 1: Extract nested object with -> operator (returns JSONB)
     println!("📝 Test 1: Extract medical_history with -> operator");
@@ -216,7 +216,7 @@ async fn test_field_access_operations() -> Result<(), Box<dyn std::error::Error>
 /// Tests containment operations (@> and <@).
 async fn test_containment_operations() -> Result<(), Box<dyn std::error::Error>> {
     println!("\n🔍 === Testing Containment Operations (@> and <@) ===");
-    let client = connect_with_tls(PROXY).await;
+    let client = connect_with_tls(*PROXY).await;
 
     // Test 1: @> operator (contains) - find patients with specific insurance provider
     println!("📝 Test 1: Find patients with HealthCorp insurance using @>");
@@ -260,7 +260,7 @@ async fn test_containment_operations() -> Result<(), Box<dyn std::error::Error>>
 /// Tests JSONPath functions (jsonb_path_query_first, jsonb_path_query, jsonb_path_exists).
 async fn test_jsonpath_functions() -> Result<(), Box<dyn std::error::Error>> {
     println!("\n🔍 === Testing JSONPath Functions ===");
-    let client = connect_with_tls(PROXY).await;
+    let client = connect_with_tls(*PROXY).await;
 
     // Test 1: jsonb_path_exists - check if path exists
     println!("📝 Test 1: Check if insurance.coverage path exists");
@@ -327,7 +327,7 @@ async fn test_jsonpath_functions() -> Result<(), Box<dyn std::error::Error>> {
 /// Tests comparison operations on extracted fields.
 async fn test_comparison_operations() -> Result<(), Box<dyn std::error::Error>> {
     println!("\n🔍 === Testing Comparison Operations ===");
-    let client = connect_with_tls(PROXY).await;
+    let client = connect_with_tls(*PROXY).await;
 
     // Test 1: Numeric comparison on extracted integer field
     println!("📝 Test 1: Find patients with group_id >= 2000");
@@ -382,7 +382,7 @@ async fn test_comparison_operations() -> Result<(), Box<dyn std::error::Error>> 
 /// Tests complex nested queries combining multiple JSONB operations.
 async fn test_complex_nested_queries() -> Result<(), Box<dyn std::error::Error>> {
     println!("\n🔍 === Testing Complex Nested Queries ===");
-    let client = connect_with_tls(PROXY).await;
+    let client = connect_with_tls(*PROXY).await;
 
     // Test 1: Complex query with JOIN, containment, and field extraction
     println!("📝 Test 1: Find patients with specific insurance AND active prescriptions");

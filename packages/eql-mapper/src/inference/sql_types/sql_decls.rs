@@ -20,8 +20,14 @@ static SQL_BINARY_OPERATORS: LazyLock<HashMap<BinaryOperator, BinaryOpDecl>> =
             <T>(T >= T) -> Native where T: Ord;
             <T>(T < T) -> Native where T: Ord;
             <T>(T > T) -> Native where T: Ord;
-            <T>(T -> <T as JsonLike>::Accessor) -> T where T: JsonLike;
-            <T>(T ->> <T as JsonLike>::Accessor) -> T where T: JsonLike;
+            // `Output` rather than `T`: traversing native `jsonb` yields
+            // traversable `jsonb`, but traversing an ENCRYPTED document yields a
+            // single SteVec entry with no `sv` of its own, so it cannot be
+            // traversed again. The trait decides which, so a second traversal of
+            // an encrypted result fails the type check instead of silently
+            // returning NULL.
+            <T>(T -> <T as JsonLike>::Accessor) -> <T as JsonLike>::Output where T: JsonLike;
+            <T>(T ->> <T as JsonLike>::Accessor) -> <T as JsonLike>::Output where T: JsonLike;
             <T>(T @> T) -> Native where T: Contain;
             <T>(T <@ T) -> Native where T: Contain;
             <T>(T ~~ <T as TokenMatch>::Tokenized) -> Native where T: TokenMatch; // LIKE
@@ -60,6 +66,15 @@ static SQL_FUNCTION_TYPES: LazyLock<HashMap<IdentCase<ObjectName>, FunctionDecl>
             pg_catalog.count<T>(T) -> Native;
             pg_catalog.min<T>(T) -> T where T: Ord;
             pg_catalog.max<T>(T) -> T where T: Ord;
+            // NOT `Output`, deliberately — see the note on `->` above.
+            // Returning the extracted type here breaks two supported shapes:
+            // `jsonb_array_elements`/`jsonb_array_length` CONSUME an extracted
+            // entry rather than traversing it, and the rewrite rule that
+            // retargets these functions and encrypts their Path operand keys off
+            // the result type, so changing it sent the caller's literal jsonpath
+            // to PostgreSQL unencrypted (`@ is not allowed in root expressions`).
+            // Making these unqueryable needs the array functions taught to accept
+            // an extracted value first.
             pg_catalog.jsonb_path_query<T>(T, <T as JsonLike>::Path) -> T where T: JsonLike;
             pg_catalog.jsonb_path_query_first<T>(T, <T as JsonLike>::Path) -> T where T: JsonLike;
             pg_catalog.jsonb_path_exists<T>(T, <T as JsonLike>::Path) -> Native where T: JsonLike;
@@ -68,6 +83,15 @@ static SQL_FUNCTION_TYPES: LazyLock<HashMap<IdentCase<ObjectName>, FunctionDecl>
             pg_catalog.jsonb_array_elements_text<T>(T) -> SetOf<T> where T: JsonLike;
             eql_v3.min<T>(T) -> T where T: Ord;
             eql_v3.max<T>(T) -> T where T: Ord;
+            // NOT `Output`, deliberately — see the note on `->` above.
+            // Returning the extracted type here breaks two supported shapes:
+            // `jsonb_array_elements`/`jsonb_array_length` CONSUME an extracted
+            // entry rather than traversing it, and the rewrite rule that
+            // retargets these functions and encrypts their Path operand keys off
+            // the result type, so changing it sent the caller's literal jsonpath
+            // to PostgreSQL unencrypted (`@ is not allowed in root expressions`).
+            // Making these unqueryable needs the array functions taught to accept
+            // an extracted value first.
             eql_v3.jsonb_path_query<T>(T, <T as JsonLike>::Path) -> T where T: JsonLike;
             eql_v3.jsonb_path_query_first<T>(T, <T as JsonLike>::Path) -> T where T: JsonLike;
             eql_v3.jsonb_path_exists<T>(T, <T as JsonLike>::Path) -> Native where T: JsonLike;

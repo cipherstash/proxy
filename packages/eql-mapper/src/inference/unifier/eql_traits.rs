@@ -34,7 +34,7 @@ const ASSOC_TYPES_ORD: &EqlTraitAssociatedTypes = &EqlTraitAssociatedTypes(&["On
 const ASSOC_TYPES_TOKEN_MATCH: &EqlTraitAssociatedTypes = &EqlTraitAssociatedTypes(&["Tokenized"]);
 
 const ASSOC_TYPES_JSON_LIKE: &EqlTraitAssociatedTypes =
-    &EqlTraitAssociatedTypes(&["Path", "Accessor"]);
+    &EqlTraitAssociatedTypes(&["Path", "Accessor", "Output"]);
 
 const ASSOC_TYPES_CONTAIN: &EqlTraitAssociatedTypes = &EqlTraitAssociatedTypes(&["Only"]);
 
@@ -70,6 +70,10 @@ impl EqlTrait {
                     | (EqlTrait::TokenMatch, "Tokenized")
                     | (EqlTrait::JsonLike, "Accessor")
                     | (EqlTrait::JsonLike, "Path")
+                    // Traversing native `jsonb` yields native `jsonb`, which is
+                    // itself traversable — plaintext chains are legitimate SQL
+                    // and must keep working.
+                    | (EqlTrait::JsonLike, "Output")
                     | (EqlTrait::Contain, "Only") => Ok(ty.clone()),
                     (_, unknown_associated_type) => Err(TypeError::InternalError(format!(
                         "Unknown associated type {self}::{unknown_associated_type}"
@@ -98,6 +102,17 @@ impl EqlTrait {
                     }
                     (EqlTrait::JsonLike, "Path") => Ok(Arc::new(Type::Value(Value::Eql(EqlTerm::JsonPath(eql_col.clone()))),
                     )),
+                    // The result of traversing an ENCRYPTED document is one
+                    // SteVec entry, which carries no `sv` and so cannot be
+                    // traversed again. This is where native and encrypted JSON
+                    // diverge: `Output` is the type the operator declaration
+                    // returns, so the difference lives in the trait rather than
+                    // in a special case at the call site.
+                    (EqlTrait::JsonLike, "Output") => {
+                        Ok(Arc::new(Type::Value(Value::Eql(
+                            EqlTerm::JsonExtracted(eql_col.clone()),
+                        ))))
+                    }
                     (EqlTrait::Contain, "Only") => {
                         Ok(Arc::new(Type::Value(Value::Eql(
                             EqlTerm::Partial(eql_col.clone(), EqlTraits::from(EqlTrait::Contain)),
@@ -328,6 +343,23 @@ impl EqlTerm {
             EqlTerm::Tokenized(_) => EqlTraits::none(),
             EqlTerm::JsonOrd(_) => EqlTraits::none(),
             EqlTerm::JsonValueSelector(_) => EqlTraits::none(),
+            // An extracted SteVec entry is not a document, but it is not inert
+            // either: entries carry ordering and equality terms, which is what
+            // lets `ORDER BY col -> 'field'` sort by `ord_term(...)` and a
+            // comparison run over the extracted value. What an entry cannot do
+            // is be TRAVERSED — it has no `sv` — so the JSON capabilities are
+            // masked off while `eq`/`ord` are inherited from the column.
+            //
+            // Masked, not granted: a JSON domain that carries no ordering term
+            // must not gain one by extraction.
+            EqlTerm::JsonExtracted(eql_value) => {
+                let column = eql_value.effective_bounds();
+                EqlTraits {
+                    eq: column.eq,
+                    ord: column.ord,
+                    ..EqlTraits::none()
+                }
+            }
         }
     }
 }
