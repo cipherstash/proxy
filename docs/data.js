@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1785914324952,
+  "lastUpdate": 1785914370635,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -23553,6 +23553,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 39.315966,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "james@cipherstash.com",
+            "name": "James Sadler",
+            "username": "freshtonic"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "73c6b2e0a978f227a56d0e0a1094f4cbab1591ac",
+          "message": "Merge pull request #437 from cipherstash/james/cip-3688-v2-column-plaintext-passthrough\n\nfix(proxy): refuse statements on a legacy eql_v2_encrypted column instead of serving it as plaintext (CIP-3688)",
+          "timestamp": "2026-08-05T17:14:38+10:00",
+          "tree_id": "d3b5e47777ab2633b956c6b4ee4390ae7f7bb1f2",
+          "url": "https://github.com/cipherstash/proxy/commit/73c6b2e0a978f227a56d0e0a1094f4cbab1591ac"
+        },
+        "date": 1785914369222,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 40.411554,
             "unit": "Number"
           }
         ]
