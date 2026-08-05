@@ -105,8 +105,14 @@ impl<'ast> InferType<'ast, Query> for TypeInferencer<'ast> {
                     if let Some(Offset { value, .. }) = offset {
                         self.unify_node_with_type(value, Type::native())?;
                     }
-                    for expr in limit_by {
-                        self.unify_node_with_type(expr, Type::native())?;
+                    // `LIMIT n BY expr, …` (ClickHouse syntax) — the BY
+                    // expressions are per-group keys, not row counts, so
+                    // `Native` would be the wrong constraint, and grouping on
+                    // an encrypted column would need its equality term.
+                    // PostgreSQL rejects the syntax anyway; rejecting it here
+                    // keeps the keys from passing through unconstrained.
+                    if !limit_by.is_empty() {
+                        return Err(TypeError::UnsupportedSqlFeature("LIMIT ... BY".into()));
                     }
                 }
                 LimitClause::OffsetCommaLimit { offset, limit } => {
