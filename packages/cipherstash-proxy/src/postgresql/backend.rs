@@ -915,12 +915,13 @@ mod tests {
                 backend.context.set_execute(Name::new(), Some(session_id));
                 backend
                     .context
-                    .protocol_frontend_received(FrontendMessage::Execute(
-                        pg_proto::codec::Execute {
+                    .protocol_frontend_received(
+                        FrontendMessage::Execute(pg_proto::codec::Execute {
                             portal: Bytes::new(),
                             max_rows: 0,
-                        },
-                    ))
+                        }),
+                        pg_proto::pipeline::FrontendHandling::Forward,
+                    )
                     .await
                     .unwrap();
 
@@ -931,7 +932,10 @@ mod tests {
                 if label == "ErrorResponse" {
                     backend
                         .context
-                        .protocol_frontend_received(FrontendMessage::Sync)
+                        .protocol_frontend_received(
+                            FrontendMessage::Sync,
+                            pg_proto::pipeline::FrontendHandling::Forward,
+                        )
                         .await
                         .unwrap();
                     let ready =
