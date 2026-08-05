@@ -8,6 +8,7 @@ mod select_items;
 mod set_expr;
 mod value;
 mod values;
+mod window_spec;
 
 // Statements
 mod delete_statement;

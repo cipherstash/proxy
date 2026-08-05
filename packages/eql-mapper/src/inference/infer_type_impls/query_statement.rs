@@ -53,19 +53,28 @@ impl<'ast> InferType<'ast, Query> for TypeInferencer<'ast> {
         // term. Without this the clause is never given a type at all, and
         // `ORDER BY 1` over an encrypted column sorts on the raw jsonb payload —
         // whose ciphertext is randomised, so the order differs on every insert.
-        if let Some(OrderBy {
-            kind: OrderByKind::Expressions(exprs),
-            ..
-        }) = order_by
-        {
-            let select = match body.as_ref() {
-                SetExpr::Select(select) => Some(&**select),
-                _ => None,
-            };
+        if let Some(OrderBy { kind, .. }) = order_by {
+            match kind {
+                OrderByKind::Expressions(exprs) => {
+                    let select = match body.as_ref() {
+                        SetExpr::Select(select) => Some(&**select),
+                        _ => None,
+                    };
 
-            for order_by_expr in exprs {
-                let key = resolve_positional_key(select, &order_by_expr.expr);
-                self.unify_node_with_bound(key, EqlTrait::Ord)?;
+                    for order_by_expr in exprs {
+                        let key = resolve_positional_key(select, &order_by_expr.expr);
+                        self.unify_node_with_bound(key, EqlTrait::Ord)?;
+                    }
+                }
+
+                // `ORDER BY ALL` (DuckDB/ClickHouse syntax) names every
+                // projected column without listing any, so there is no
+                // expression to bound. PostgreSQL rejects the syntax anyway;
+                // rejecting it here keeps the clause from ever passing through
+                // unconstrained.
+                OrderByKind::All(_) => {
+                    return Err(TypeError::UnsupportedSqlFeature("ORDER BY ALL".into()));
+                }
             }
         }
 

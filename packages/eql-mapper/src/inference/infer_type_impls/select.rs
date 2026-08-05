@@ -13,6 +13,24 @@ impl<'ast> InferType<'ast, Select> for TypeInferencer<'ast> {
     fn infer_exit(&mut self, select: &'ast Select) -> Result<(), TypeError> {
         self.unify_nodes(select, &select.projection)?;
 
+        // `SELECT ... INTO` copies the projection into a brand-new table the
+        // schema knows nothing about. An encrypted column landing there would
+        // be raw ciphertext in a table the mapper can never resolve — no
+        // decryption on read, no term rewrites on query — so reject it rather
+        // than let the data silently escape the schema. A projection of only
+        // native columns is passed through untouched.
+        if select.into.is_some() {
+            let ty = self.get_node_type(&select.projection);
+            let ty = ty.follow_tvars(&self.unifier.borrow());
+            if let Type::Value(Value::Projection(projection)) = &*ty {
+                if Self::projection_contains_eql(projection) {
+                    return Err(TypeError::UnsupportedSqlFeature(
+                        "SELECT INTO with an encrypted column".into(),
+                    ));
+                }
+            }
+        }
+
         // Deduplication is equality, so every expression `DISTINCT` dedupes on
         // must support it. For an encrypted column that means its domain has to
         // carry an equality term — `eql_v3_boolean`, for instance, is
@@ -65,6 +83,19 @@ impl<'ast> InferType<'ast, Select> for TypeInferencer<'ast> {
 }
 
 impl<'ast> TypeInferencer<'ast> {
+    /// Whether any column of `projection` — including the columns of a nested
+    /// projection, as produced by a wildcard — is an encrypted column.
+    ///
+    /// Callers must have followed type variables first (via
+    /// [`Type::follow_tvars`]), which resolves column types recursively.
+    fn projection_contains_eql(projection: &Projection) -> bool {
+        projection.columns().iter().any(|column| match &*column.ty {
+            Type::Value(Value::Projection(nested)) => Self::projection_contains_eql(nested),
+            Type::Value(Value::Eql(_)) => true,
+            _ => false,
+        })
+    }
+
     /// Constrains `node` to a type that implements [`EqlTrait::Eq`].
     ///
     /// A native type satisfies this trivially; the bound only bites for an

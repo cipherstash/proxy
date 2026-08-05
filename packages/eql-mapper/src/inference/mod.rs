@@ -14,7 +14,7 @@ use std::{cell::RefCell, fmt::Debug, marker::PhantomData, ops::ControlFlow, rc::
 use infer_type::InferType;
 use sqltk::parser::ast::{
     Delete, Expr, Function, FunctionArgExpr, Ident, Insert, ObjectName, Query, Select, SelectItem,
-    SetExpr, Statement, ValueWithSpan, Values,
+    SetExpr, Statement, ValueWithSpan, Values, WindowSpec,
 };
 use sqltk::{into_control_flow, AsNodeKey, Break, Visitable, Visitor};
 
@@ -43,6 +43,7 @@ pub(crate) use type_error::*;
 /// - [`Function`]
 /// - [`Values`]
 /// - [`Value`]
+/// - [`WindowSpec`]
 #[derive(Debug)]
 pub struct TypeInferencer<'ast> {
     /// A snapshot of the the database schema - used by `TypeInferencer`'s [`InferType`] impls.
@@ -276,6 +277,7 @@ macro_rules! dispatch_all {
         dispatch!($self, $method, $node, Values);
         dispatch!($self, $method, $node, ValueWithSpan);
         dispatch!($self, $method, $node, sqltk::parser::ast::Value);
+        dispatch!($self, $method, $node, WindowSpec);
     };
 }
 

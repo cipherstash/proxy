@@ -46,6 +46,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - **`LIKE`/`ILIKE` capability checking**: `LIKE` and `ILIKE` on an encrypted column are now gated by the column's token-match capability. Previously these predicates bypassed capability checking and were silently accepted on columns that do not support fuzzy match; they are now rejected with a capability error.
 
+- **Upserts with `ON CONFLICT DO UPDATE` now encrypt the update path**: `INSERT … ON CONFLICT (…) DO UPDATE SET enc = …` previously left the `DO UPDATE` assignments untouched, so a plaintext value landed in the encrypted column unencrypted whenever the conflict path ran. Assignments are now typed and encrypted exactly like a plain `UPDATE … SET`, `excluded.<col>` references resolve to the column's encrypted type, and comparisons in the `DO UPDATE … WHERE` predicate are rewritten to their search terms. A conflict target naming an encrypted column (`ON CONFLICT (enc)`) is rejected: uniqueness there would be judged on the randomised ciphertext, so the conflict would never fire.
+
+- **Window functions over an encrypted column**: the window's `ORDER BY` is now checked against the column's ordering capability (previously it was silently left ordering on raw ciphertext, whose order differs on every insert), and named window definitions (`OVER w` with `WINDOW w AS (PARTITION BY enc …)`) get the same equality-term and ordering-term treatment as inline `OVER (…)` clauses, which previously escaped both checking and rewriting. `RANGE` frames with an offset over an encrypted sort key are rejected, since no search term supports the arithmetic they need; `ROWS` and `GROUPS` frames work.
+
+- **`count(DISTINCT enc)` now counts distinct plaintexts**: the deduplication previously ran on whole encrypted payloads, whose ciphertext is randomised per row, so every value looked distinct and the count silently equalled the row count. The argument is now rewritten to the column's equality term. `DISTINCT` with an encrypted argument in any other aggregate is rejected (the substitution would change that aggregate's result), as is an aggregate-internal `ORDER BY` (`array_agg(x ORDER BY enc)`) on a column with no ordering term — where the capability exists, the key is rewritten to its ordering term.
+
+- **`WITHIN GROUP (ORDER BY enc)` is now rejected**: an ordered-set aggregate (`percentile_disc`, `mode`, …) computes its result from the sort key, so on an encrypted column it would hand the client an opaque search term. Previously the clause escaped type checking entirely.
+
+- **`SELECT … INTO` an encrypted column is now rejected**: the statement copies data into a table the encryption schema has never seen, leaving unreachable ciphertext there. Native-only projections pass through as before.
+
 ## [2.2.4] - 2026-06-18
 
 ### Fixed

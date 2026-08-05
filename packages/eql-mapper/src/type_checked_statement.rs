@@ -11,9 +11,9 @@ use crate::QueryOperands;
 use crate::{
     CastFullPayloadOperands, DryRunnable, EqlMapperError, FailOnPlaceholderChange,
     JsonValueSelectors, OutputParam, OutputParamSource, Param, ParamPlan, PreserveEffectiveAliases,
-    RenumberParams, RewriteContainmentOps, RewriteEqlComparisonOps, RewriteEqlDistinct,
-    RewriteEqlDistinctOrderBy, RewriteEqlGroupBy, RewriteEqlMatchOps, RewriteEqlOrderBy,
-    RewriteEqlOrdinalOrderBy, RewriteEqlPartitionBy, RewriteJsonValueSelectorEq,
+    RenumberParams, RewriteContainmentOps, RewriteEqlAggregateDistinct, RewriteEqlComparisonOps,
+    RewriteEqlDistinct, RewriteEqlDistinctOrderBy, RewriteEqlGroupBy, RewriteEqlMatchOps,
+    RewriteEqlOrderBy, RewriteEqlOrdinalOrderBy, RewriteEqlPartitionBy, RewriteJsonValueSelectorEq,
     RewriteStandardSqlFnsOnEqlTypes, SubstituteEncryptedLiterals, TransformationRule,
 };
 
@@ -301,6 +301,7 @@ impl<'ast> TypeCheckedStatement<'ast> {
             RewriteEqlOrderBy::new(Arc::clone(&self.node_types)),
             RewriteEqlOrdinalOrderBy::new(Arc::clone(&self.node_types)),
             RewriteEqlPartitionBy::new(Arc::clone(&self.node_types)),
+            RewriteEqlAggregateDistinct::new(Arc::clone(&self.node_types)),
             RewriteEqlDistinct::new(Arc::clone(&self.node_types)),
             RewriteEqlDistinctOrderBy::new(Arc::clone(&self.node_types)),
             RewriteEqlGroupBy::new(Arc::clone(&self.node_types)),

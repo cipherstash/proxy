@@ -1010,7 +1010,7 @@ mod test {
                     first_name,
                     last_name,
                     department_name,
-                    salary (EQL),
+                    salary (EQL: Ord),
                 }
             }
         });
@@ -1040,7 +1040,7 @@ mod test {
                 (NATIVE(employees.first_name) as first_name),
                 (NATIVE(employees.last_name) as last_name),
                 (NATIVE(employees.department_name) as department_name),
-                (EQL(employees.salary) as salary),
+                (EQL(employees.salary: Ord) as salary),
                 (NATIVE as rank)
             ]
         );
@@ -1057,7 +1057,7 @@ mod test {
                     first_name,
                     last_name,
                     department_name,
-                    salary (EQL),
+                    salary (EQL: Ord),
                 }
             }
         });
@@ -1092,7 +1092,7 @@ mod test {
                 (NATIVE(employees.first_name) as first_name),
                 (NATIVE(employees.last_name) as last_name),
                 (NATIVE(employees.department_name) as department_name),
-                (EQL(employees.salary) as salary),
+                (EQL(employees.salary: Ord) as salary),
                 (NATIVE as rank)
             ]
         );
@@ -3738,5 +3738,568 @@ mod test {
         );
 
         type_check(schema, &statement).unwrap();
+    }
+
+    // -----------------------------------------------------------------------
+    // CIP-3699: clauses that previously escaped inference on statements that
+    // pass `requires_type_check`. Each test either proves the new bound plus
+    // rewrite, or proves the explicit rejection.
+    // -----------------------------------------------------------------------
+
+    /// `ON CONFLICT DO UPDATE SET enc = <literal>` is the upsert path: the
+    /// assignment value must be typed as the column's EQL type so the literal
+    /// is encrypted, exactly as in a plain `UPDATE ... SET`.
+    #[test]
+    fn insert_on_conflict_do_update_encrypts_assignment_literal() {
+        let schema = resolver(schema! {
+            tables: {
+                employees: {
+                    id,
+                    salary (EQL),
+                }
+            }
+        });
+
+        let statement = parse(
+            "INSERT INTO employees (id, salary) VALUES (1, 20000) \
+             ON CONFLICT (id) DO UPDATE SET salary = 30000",
+        );
+
+        let typed = match type_check(schema, &statement) {
+            Ok(typed) => typed,
+            Err(err) => panic!("type check failed: {err:#?}"),
+        };
+
+        // Both the inserted literal AND the conflict-path literal are EQL
+        // literals to encrypt.
+        assert_eq!(typed.literals.len(), 2);
+
+        let encrypted = typed
+            .literals
+            .iter()
+            .map(|(_, node)| {
+                (
+                    node.as_node_key(),
+                    ast::Value::SingleQuotedString(format!("ENCRYPTED_{node}")),
+                )
+            })
+            .collect::<HashMap<_, _>>();
+
+        match typed.transform(encrypted) {
+            Ok(transformed_statement) => assert_eq!(
+                transformed_statement.to_string(),
+                "INSERT INTO employees (id, salary) VALUES (1, 'ENCRYPTED_20000'::JSONB::public.eql_v3_text) \
+                 ON CONFLICT(id) DO UPDATE SET salary = 'ENCRYPTED_30000'::JSONB::public.eql_v3_text"
+            ),
+            Err(err) => panic!("statement transformation failed: {err}"),
+        }
+    }
+
+    /// The `excluded` pseudo-table projects the target table's columns, so
+    /// `SET enc = excluded.enc` resolves and the param feeding the insert
+    /// value gets the column's EQL type.
+    #[test]
+    fn insert_on_conflict_do_update_with_excluded_reference() {
+        let schema = resolver(schema! {
+            tables: {
+                employees: {
+                    id,
+                    salary (EQL),
+                }
+            }
+        });
+
+        let statement = parse(
+            "INSERT INTO employees (id, salary) VALUES ($1, $2) \
+             ON CONFLICT (id) DO UPDATE SET salary = excluded.salary",
+        );
+
+        let typed = match type_check(schema, &statement) {
+            Ok(typed) => typed,
+            Err(err) => panic!("type check failed: {err:#?}"),
+        };
+
+        assert!(
+            matches!(
+                &typed.params[..],
+                [(_, Value::Native(_)), (_, Value::Eql(EqlTerm::Full(_)))]
+            ),
+            "expected $1 native and $2 EQL full payload, got: {:?}",
+            typed.params
+        );
+
+        match typed.transform(HashMap::new()) {
+            Ok(transformed_statement) => assert_eq!(
+                transformed_statement.to_string(),
+                "INSERT INTO employees (id, salary) VALUES ($1, $2::JSONB::public.eql_v3_text) \
+                 ON CONFLICT(id) DO UPDATE SET salary = excluded.salary"
+            ),
+            Err(err) => panic!("statement transformation failed: {err}"),
+        }
+    }
+
+    /// The `DO UPDATE ... WHERE` predicate is an ordinary predicate: a
+    /// comparison over the encrypted column (on either the existing row or
+    /// `excluded`) is rewritten through the ordering term.
+    #[test]
+    fn insert_on_conflict_do_update_where_rewrites_predicate() {
+        let schema = resolver(schema! {
+            tables: {
+                employees: {
+                    id,
+                    salary (EQL: Ord),
+                }
+            }
+        });
+
+        let statement = parse(
+            "INSERT INTO employees (id, salary) VALUES ($1, $2) \
+             ON CONFLICT (id) DO UPDATE SET salary = excluded.salary \
+             WHERE excluded.salary > employees.salary",
+        );
+
+        let typed = match type_check(schema, &statement) {
+            Ok(typed) => typed,
+            Err(err) => panic!("type check failed: {err:#?}"),
+        };
+
+        match typed.transform(HashMap::new()) {
+            Ok(transformed_statement) => assert_eq!(
+                transformed_statement.to_string(),
+                "INSERT INTO employees (id, salary) VALUES ($1, $2::JSONB::public.eql_v3_text_ord) \
+                 ON CONFLICT(id) DO UPDATE SET salary = excluded.salary \
+                 WHERE eql_v3.ord_term(excluded.salary) > eql_v3.ord_term(employees.salary)"
+            ),
+            Err(err) => panic!("statement transformation failed: {err}"),
+        }
+    }
+
+    /// A conflict only fires off a unique index, and uniqueness of an
+    /// encrypted column would be judged on the randomised ciphertext — the
+    /// conflict would never fire. Rejected explicitly.
+    #[test]
+    fn insert_on_conflict_target_on_encrypted_column_is_rejected() {
+        let schema = resolver(schema! {
+            tables: {
+                employees: {
+                    id,
+                    salary (EQL: Eq),
+                }
+            }
+        });
+
+        let statement = parse(
+            "INSERT INTO employees (id, salary) VALUES (1, 2) \
+             ON CONFLICT (salary) DO NOTHING",
+        );
+
+        assert!(
+            type_check(schema, &statement).is_err(),
+            "an encrypted conflict-target column should fail type checking"
+        );
+    }
+
+    /// A window's `ORDER BY` sorts the partition, so an encrypted key is
+    /// rewritten to its ordering term (`RewriteEqlOrderBy` fires on the
+    /// `OrderByExpr` inside the window spec).
+    #[test]
+    fn window_order_by_encrypted_column_uses_ord_term() {
+        let schema = resolver(schema! {
+            tables: {
+                employees: {
+                    id,
+                    salary (EQL("eql_v3_integer_ord"): Ord),
+                }
+            }
+        });
+
+        let statement = parse("SELECT rank() OVER (ORDER BY salary) FROM employees");
+
+        let typed = match type_check(schema, &statement) {
+            Ok(typed) => typed,
+            Err(err) => panic!("type check failed: {err:#?}"),
+        };
+
+        match typed.transform(HashMap::new()) {
+            Ok(transformed_statement) => assert_eq!(
+                transformed_statement.to_string(),
+                "SELECT rank() OVER (ORDER BY eql_v3.ord_term(salary)) FROM employees"
+            ),
+            Err(err) => panic!("statement transformation failed: {err}"),
+        }
+    }
+
+    /// The `Ord` bound on a window's `ORDER BY` key must reject a column whose
+    /// domain carries no ordering term.
+    #[test]
+    fn window_order_by_requires_ord() {
+        let schema = resolver(schema! {
+            tables: {
+                employees: {
+                    id,
+                    salary (EQL: Eq),
+                }
+            }
+        });
+
+        let statement = parse("SELECT rank() OVER (ORDER BY salary) FROM employees");
+
+        assert!(
+            type_check(schema, &statement).is_err(),
+            "window ORDER BY over an Eq-only column should fail type checking"
+        );
+    }
+
+    /// A named window definition (`WINDOW w AS (...)`) contains the same
+    /// `WindowSpec` node as an inline `OVER (...)`, so `PARTITION BY` on an
+    /// encrypted column is rewritten at the definition site and `OVER w` needs
+    /// nothing of its own.
+    #[test]
+    fn named_window_partition_by_encrypted_column_uses_eq_term() {
+        let schema = resolver(schema! {
+            tables: {
+                employees: {
+                    id,
+                    salary (EQL: Eq),
+                }
+            }
+        });
+
+        let statement =
+            parse("SELECT rank() OVER w FROM employees WINDOW w AS (PARTITION BY salary)");
+
+        let typed = match type_check(schema, &statement) {
+            Ok(typed) => typed,
+            Err(err) => panic!("type check failed: {err:#?}"),
+        };
+
+        match typed.transform(HashMap::new()) {
+            Ok(transformed_statement) => assert_eq!(
+                transformed_statement.to_string(),
+                "SELECT rank() OVER w FROM employees WINDOW w AS (PARTITION BY eql_v3.eq_term(salary))"
+            ),
+            Err(err) => panic!("statement transformation failed: {err}"),
+        }
+    }
+
+    /// The `Eq` bound applies inside a named window definition too. (`Ord`
+    /// implies `Eq` in this model, so the rejection needs a storage-only
+    /// domain.)
+    #[test]
+    fn named_window_partition_by_requires_eq() {
+        let schema = resolver(schema! {
+            tables: {
+                employees: {
+                    id,
+                    active (EQL("eql_v3_boolean")),
+                }
+            }
+        });
+
+        let statement =
+            parse("SELECT rank() OVER w FROM employees WINDOW w AS (PARTITION BY active)");
+
+        assert!(
+            type_check(schema, &statement).is_err(),
+            "named-window PARTITION BY over a storage-only column should fail type checking"
+        );
+    }
+
+    /// A `RANGE` frame with an offset needs arithmetic on the sort key, which
+    /// no term supports — rejected when the key is encrypted.
+    #[test]
+    fn range_offset_frame_over_encrypted_order_by_key_is_rejected() {
+        let schema = resolver(schema! {
+            tables: {
+                employees: {
+                    id,
+                    salary (EQL: Ord),
+                }
+            }
+        });
+
+        let statement = parse(
+            "SELECT sum(id) OVER (ORDER BY salary RANGE BETWEEN 1 PRECEDING AND CURRENT ROW) \
+             FROM employees",
+        );
+
+        assert!(
+            type_check(schema, &statement).is_err(),
+            "RANGE offset frame over an encrypted sort key should fail type checking"
+        );
+    }
+
+    /// A `ROWS` frame counts rows, needing only the ordering the term
+    /// provides — allowed, with the key rewritten.
+    #[test]
+    fn rows_offset_frame_over_encrypted_order_by_key_is_allowed() {
+        let schema = resolver(schema! {
+            tables: {
+                employees: {
+                    id,
+                    salary (EQL("eql_v3_integer_ord"): Ord),
+                }
+            }
+        });
+
+        let statement = parse(
+            "SELECT sum(id) OVER (ORDER BY salary ROWS BETWEEN 1 PRECEDING AND CURRENT ROW) \
+             FROM employees",
+        );
+
+        let typed = match type_check(schema, &statement) {
+            Ok(typed) => typed,
+            Err(err) => panic!("type check failed: {err:#?}"),
+        };
+
+        match typed.transform(HashMap::new()) {
+            Ok(transformed_statement) => assert_eq!(
+                transformed_statement.to_string(),
+                "SELECT sum(id) OVER (ORDER BY eql_v3.ord_term(salary) ROWS BETWEEN 1 PRECEDING AND CURRENT ROW) \
+                 FROM employees"
+            ),
+            Err(err) => panic!("statement transformation failed: {err}"),
+        }
+    }
+
+    /// `count(DISTINCT enc)` dedupes by equality: the argument is rewritten to
+    /// its equality term, which is deterministic per plaintext, so distinct
+    /// terms count distinct plaintexts.
+    #[test]
+    fn count_distinct_encrypted_column_uses_eq_term() {
+        let schema = resolver(schema! {
+            tables: {
+                employees: {
+                    id,
+                    salary (EQL: Eq),
+                }
+            }
+        });
+
+        let statement = parse("SELECT count(DISTINCT salary) FROM employees");
+
+        let typed = match type_check(schema, &statement) {
+            Ok(typed) => typed,
+            Err(err) => panic!("type check failed: {err:#?}"),
+        };
+
+        match typed.transform(HashMap::new()) {
+            Ok(transformed_statement) => assert_eq!(
+                transformed_statement.to_string(),
+                "SELECT count(DISTINCT eql_v3.eq_term(salary)) FROM employees"
+            ),
+            Err(err) => panic!("statement transformation failed: {err}"),
+        }
+    }
+
+    /// The `Eq` bound on `DISTINCT` aggregate arguments must reject a column
+    /// whose domain carries no equality term at all. (`Ord` implies `Eq` in
+    /// this model — equality falls back to the ordering term — so the
+    /// rejection needs a storage-only domain.)
+    #[test]
+    fn count_distinct_requires_eq() {
+        let schema = resolver(schema! {
+            tables: {
+                employees: {
+                    id,
+                    active (EQL("eql_v3_boolean")),
+                }
+            }
+        });
+
+        let statement = parse("SELECT count(DISTINCT active) FROM employees");
+
+        assert!(
+            type_check(schema, &statement).is_err(),
+            "count(DISTINCT ...) over a storage-only column should fail type checking"
+        );
+    }
+
+    /// The equality-term substitution is only sound for `count`, which
+    /// discards its argument values. Any other aggregate would have its result
+    /// changed by the substitution, so it is rejected rather than silently
+    /// miscomputed.
+    #[test]
+    fn min_distinct_encrypted_column_is_rejected() {
+        let schema = resolver(schema! {
+            tables: {
+                employees: {
+                    id,
+                    salary (EQL: Eq + Ord),
+                }
+            }
+        });
+
+        let statement = parse("SELECT min(DISTINCT salary) FROM employees");
+
+        let typed = match type_check(schema, &statement) {
+            Ok(typed) => typed,
+            Err(err) => panic!("type check failed: {err:#?}"),
+        };
+
+        assert!(
+            matches!(
+                typed.transform(HashMap::new()),
+                Err(crate::EqlMapperError::Transform(_))
+            ),
+            "min(DISTINCT enc) should be rejected at transformation"
+        );
+    }
+
+    /// An `ORDER BY` inside an aggregate's argument list sorts the values fed
+    /// to the aggregate — the encrypted key is rewritten to its ordering term.
+    #[test]
+    fn aggregate_argument_order_by_encrypted_column_uses_ord_term() {
+        let schema = resolver(schema! {
+            tables: {
+                employees: {
+                    id,
+                    salary (EQL("eql_v3_integer_ord"): Ord),
+                }
+            }
+        });
+
+        let statement = parse("SELECT array_agg(id ORDER BY salary) FROM employees");
+
+        let typed = match type_check(schema, &statement) {
+            Ok(typed) => typed,
+            Err(err) => panic!("type check failed: {err:#?}"),
+        };
+
+        match typed.transform(HashMap::new()) {
+            Ok(transformed_statement) => assert_eq!(
+                transformed_statement.to_string(),
+                "SELECT array_agg(id ORDER BY eql_v3.ord_term(salary)) FROM employees"
+            ),
+            Err(err) => panic!("statement transformation failed: {err}"),
+        }
+    }
+
+    /// The `Ord` bound applies to the aggregate's argument-list `ORDER BY`.
+    #[test]
+    fn aggregate_argument_order_by_requires_ord() {
+        let schema = resolver(schema! {
+            tables: {
+                employees: {
+                    id,
+                    salary (EQL: Eq),
+                }
+            }
+        });
+
+        let statement = parse("SELECT array_agg(id ORDER BY salary) FROM employees");
+
+        assert!(
+            type_check(schema, &statement).is_err(),
+            "aggregate ORDER BY over an Eq-only column should fail type checking"
+        );
+    }
+
+    /// An ordered-set aggregate computes its result *from* the sort key, so an
+    /// encrypted key cannot be rewritten to a term without handing the client
+    /// the term itself. Rejected explicitly.
+    #[test]
+    fn within_group_on_encrypted_column_is_rejected() {
+        let schema = resolver(schema! {
+            tables: {
+                employees: {
+                    id,
+                    salary (EQL: Ord),
+                }
+            }
+        });
+
+        let statement =
+            parse("SELECT percentile_disc(0.5) WITHIN GROUP (ORDER BY salary) FROM employees");
+
+        assert!(
+            type_check(schema, &statement).is_err(),
+            "WITHIN GROUP over an encrypted column should fail type checking"
+        );
+    }
+
+    /// `WITHIN GROUP` over a native column remains supported.
+    #[test]
+    fn within_group_on_native_column_is_allowed() {
+        let schema = resolver(schema! {
+            tables: {
+                employees: {
+                    id,
+                    salary (EQL: Ord),
+                }
+            }
+        });
+
+        let statement =
+            parse("SELECT percentile_disc(0.5) WITHIN GROUP (ORDER BY id) FROM employees");
+
+        assert!(type_check(schema, &statement).is_ok());
+    }
+
+    /// `SELECT ... INTO` copies the projection into a table the schema has
+    /// never seen: an encrypted column landing there would be unreachable
+    /// ciphertext, so it is rejected.
+    #[test]
+    fn select_into_with_encrypted_column_is_rejected() {
+        let schema = resolver(schema! {
+            tables: {
+                employees: {
+                    id,
+                    salary (EQL),
+                }
+            }
+        });
+
+        let statement = parse("SELECT salary INTO tmp_table FROM employees");
+
+        assert!(
+            type_check(schema, &statement).is_err(),
+            "SELECT INTO projecting an encrypted column should fail type checking"
+        );
+    }
+
+    /// `SELECT ... INTO` with only native columns passes through untouched.
+    #[test]
+    fn select_into_with_native_columns_is_allowed() {
+        let schema = resolver(schema! {
+            tables: {
+                employees: {
+                    id,
+                    salary (EQL),
+                }
+            }
+        });
+
+        let statement = parse("SELECT id INTO tmp_table FROM employees");
+
+        assert!(type_check(schema, &statement).is_ok());
+    }
+
+    /// `ORDER BY ALL` (DuckDB/ClickHouse syntax) names every projected column
+    /// without listing any expression to bound — rejected rather than left
+    /// unconstrained. (The PostgreSQL dialect never parses it; this guards the
+    /// AST shape itself.)
+    #[test]
+    fn order_by_all_is_rejected() {
+        let schema = resolver(schema! {
+            tables: {
+                employees: {
+                    id,
+                    salary (EQL: Ord),
+                }
+            }
+        });
+
+        let statement = sqltk::parser::parser::Parser::parse_sql(
+            &sqltk::parser::dialect::DuckDbDialect {},
+            "SELECT id, salary FROM employees ORDER BY ALL",
+        )
+        .unwrap()[0]
+            .clone();
+
+        assert!(
+            type_check(schema, &statement).is_err(),
+            "ORDER BY ALL should fail type checking"
+        );
     }
 }
