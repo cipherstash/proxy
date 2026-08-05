@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1785907663543,
+  "lastUpdate": 1785909205502,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -23241,6 +23241,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 40.740369,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "james@cipherstash.com",
+            "name": "James Sadler",
+            "username": "freshtonic"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "5fbfee7ca89a858b8a660fe974041e5b0f38f449",
+          "message": "Merge pull request #434 from cipherstash/chore/test-ports-from-env\n\ntest(integration): take the suite's ports from the environment",
+          "timestamp": "2026-08-05T15:48:47+10:00",
+          "tree_id": "8c2453288698ec0bf21068e308ed4847a9ede7b4",
+          "url": "https://github.com/cipherstash/proxy/commit/5fbfee7ca89a858b8a660fe974041e5b0f38f449"
+        },
+        "date": 1785909204090,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 40.617394,
             "unit": "Number"
           }
         ]
