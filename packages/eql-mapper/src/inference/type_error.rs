@@ -102,4 +102,41 @@ pub enum TypeError {
 
     #[error("{}", _0)]
     TypeSignature(String),
+
+    /// A referenced table has a column declared with an encrypted-column type
+    /// this build cannot map (see [`crate::ColumnKind::UnmappableEncrypted`]).
+    ///
+    /// This is a refusal, not a coverage gap: serving the statement would mean
+    /// treating the column as plaintext.
+    #[error(
+        "Column `{}.{}` is declared as `{}`, which this build of CipherStash Proxy cannot encrypt or decrypt. Statements referencing `{}` are refused so that plaintext is never written to it. Migrate the column to an EQL v3 domain type.",
+        table,
+        column,
+        column_type,
+        table
+    )]
+    UnmappableEncryptedColumn {
+        table: String,
+        column: String,
+        column_type: String,
+    },
+}
+
+impl TypeError {
+    /// Returns `(table, column, column_type)` when this error is the
+    /// unmappable-encrypted-column refusal.
+    ///
+    /// Callers use this to tell a refusal apart from an ordinary type-check
+    /// failure, because the two must not be handled the same way: a type-check
+    /// failure may fall back to passthrough, a refusal never may.
+    pub fn as_unmappable_encrypted_column(&self) -> Option<(&str, &str, &str)> {
+        match self {
+            TypeError::UnmappableEncryptedColumn {
+                table,
+                column,
+                column_type,
+            } => Some((table, column, column_type)),
+            _ => None,
+        }
+    }
 }

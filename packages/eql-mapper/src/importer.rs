@@ -45,7 +45,7 @@ impl<'ast> Importer<'ast> {
         {
             let table = self.table_resolver.resolve_table(table_name)?;
 
-            let projection = Projection::new_from_schema_table(table.clone());
+            let projection = Projection::new_from_schema_table(table.clone())?;
 
             // The relation is named — by its alias when one is written, by the
             // table name otherwise — so that qualified references (`t.col` in
@@ -138,7 +138,7 @@ impl<'ast> Importer<'ast> {
                 if scope_tracker.resolve_relation(name).is_err() {
                     let table = self.table_resolver.resolve_table(name)?;
 
-                    let projection = Projection::new_from_schema_table(table.clone());
+                    let projection = Projection::new_from_schema_table(table.clone())?;
 
                     scope_tracker.add_relation(Relation {
                         name: record_as.cloned().ok(),

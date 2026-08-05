@@ -13,7 +13,12 @@ use sqltk::parser::ast::{
 
 /// The type of the value stored in a schema column: the column's EQL type when
 /// it is encrypted, its native identity otherwise.
-fn stored_value_type(stc: &SchemaTableColumn) -> (Value, TableColumn) {
+///
+/// Naming a column as a write target (an INSERT column list, or an
+/// `ON CONFLICT DO UPDATE` assignment) is the path the unmappable-column
+/// refusal exists for: there is no way to encrypt the incoming value, so
+/// accepting it would store plaintext. (CIP-3688)
+fn stored_value_type(stc: &SchemaTableColumn) -> Result<(Value, TableColumn), TypeError> {
     let tc = TableColumn {
         table: stc.table.clone(),
         column: stc.column.clone(),
@@ -26,9 +31,18 @@ fn stored_value_type(stc: &SchemaTableColumn) -> (Value, TableColumn) {
             identity.clone(),
             *features,
         ))),
+        ColumnKind::UnmappableEncrypted(column_type) => {
+            return Err(TypeError::UnmappableEncryptedColumn {
+                table: stc.table.value.clone(),
+                // `.value` rather than `.to_string()` — see the matching note
+                // in `Projection`.
+                column: stc.column.value.clone(),
+                column_type: column_type.clone(),
+            });
+        }
     };
 
-    (value_ty, tc)
+    Ok((value_ty, tc))
 }
 
 #[trace_infer]
@@ -68,10 +82,10 @@ impl<'ast> InferType<'ast, Insert> for TypeInferencer<'ast> {
                 &table_columns
                     .into_iter()
                     .map(|stc| {
-                        let (value_ty, tc) = stored_value_type(&stc);
-                        (Arc::new(Type::Value(value_ty)), Some(tc.column))
+                        let (value_ty, tc) = stored_value_type(&stc)?;
+                        Ok((Arc::new(Type::Value(value_ty)), Some(tc.column)))
                     })
-                    .collect::<Vec<_>>(),
+                    .collect::<Result<Vec<_>, TypeError>>()?,
             );
 
             if let Some(source) = source {
@@ -187,7 +201,7 @@ impl<'ast> TypeInferencer<'ast> {
                             let stc = self
                                 .table_resolver
                                 .resolve_table_column(table_name, ident)?;
-                            let (value_ty, _) = stored_value_type(&stc);
+                            let (value_ty, _) = stored_value_type(&stc)?;
                             self.unify_node_with_type(&assignment.value, Type::Value(value_ty))?;
                         }
 

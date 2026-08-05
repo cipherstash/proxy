@@ -32,6 +32,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - **A NULL JSON selector forwarded the compared value to the database in plaintext**: `WHERE col -> $1 = $2` with `$1` bound NULL builds no needle, so `$2` was never encrypted — and it was then sent to PostgreSQL exactly as the client bound it, putting the plaintext comparand on the wire and into the server log when the column's domain CHECK rejected it. An encrypted operand that produced no ciphertext is now bound NULL, which is also what the SQL means: a comparison against NULL is NULL, so the query returns no rows.
 
+- **A surviving `eql_v2_encrypted` column was served as plaintext**: after migrating to EQL v3, a column still declared with EQL v2's `eql_v2_encrypted` type had no v3 domain identity, so Proxy fell back to treating it as an ordinary plaintext column — no encryption on writes, no decryption on reads. An application writing to such a column stored plaintext in a database it believed was encrypted, and saw no error doing so; the only signal was a single warning at startup. This is the shape of a partly-completed migration, where most columns move to v3 domains and one is left behind.
+
+  Proxy now refuses every statement referencing a table that has such a column, with an error naming the column, its type and the need to migrate it. Other tables are unaffected, so one unmigrated column no longer costs you a deployment. The refusal is not subject to the `mapping_errors_enabled` passthrough — it applies whatever `CS_DEVELOPMENT__ENABLE_MAPPING_ERRORS` is set to. See [Unmappable encrypted column](docs/errors.md#mapping-unmappable-encrypted-column).
+
 ## [3.0.0] - 2026-08-05
 
 ### Changed

@@ -8,6 +8,7 @@ mod encryption_sanity;
 mod eql_regression;
 mod extended_protocol_error_messages;
 mod insert;
+mod legacy_v2_column;
 mod map_concat;
 mod map_literals;
 mod map_match_index;

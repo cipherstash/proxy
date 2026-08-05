@@ -50,6 +50,21 @@ pub enum ColumnKind {
     /// domain name.
     #[display("Eql({})", _0)]
     Eql(EqlTraits, DomainIdentity),
+    /// A column whose declared type says "this holds encrypted data", but which
+    /// this build of Proxy cannot map. Today that is only the legacy EQL v2
+    /// `eql_v2_encrypted` type, which carries no v3 domain identity.
+    ///
+    /// It is deliberately **not** [`ColumnKind::Native`]. A native column is a
+    /// plaintext passthrough — no encryption on write, no decryption on read —
+    /// so classifying an unmigrated v2 column that way makes Proxy quietly write
+    /// new plaintext into a column its operator believes is encrypted
+    /// (CIP-3688). Instead the type checker refuses any statement that brings
+    /// the owning table into scope, so the failure is loud and names the column.
+    ///
+    /// The payload is the declared type name, purely so the refusal can quote it
+    /// back to the operator.
+    #[display("Unmappable({})", _0)]
+    UnmappableEncrypted(String),
 }
 
 impl Column {
@@ -64,6 +79,15 @@ impl Column {
         Self {
             name,
             kind: ColumnKind::Native,
+        }
+    }
+
+    /// A column declared with an encrypted-column type this build cannot map.
+    /// See [`ColumnKind::UnmappableEncrypted`].
+    pub fn unmappable_encrypted(name: Ident, column_type: impl Into<String>) -> Self {
+        Self {
+            name,
+            kind: ColumnKind::UnmappableEncrypted(column_type.into()),
         }
     }
 }
@@ -307,6 +331,14 @@ macro_rules! schema {
                 $crate::unifier::DomainIdentity::canonical($crate::unifier::TokenType::Text, __traits),
             )));
         }
+    };
+    // A column whose encrypted type this build cannot map, e.g. one left behind
+    // by a partial EQL v2 -> v3 migration: `col (UNMAPPABLE("eql_v2_encrypted"))`.
+    (@add_column $table:ident $column_name:ident (UNMAPPABLE($column_type:literal)) ) => {
+        $table.add_column(std::sync::Arc::new($crate::model::Column::unmappable_encrypted(
+            ::sqltk::parser::ast::Ident::new(stringify!($column_name)),
+            $column_type,
+        )));
     };
     (@add_column $table:ident $column_name:ident (PK) ) => {
         $table.add_column(

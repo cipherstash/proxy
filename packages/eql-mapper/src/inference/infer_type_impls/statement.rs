@@ -63,6 +63,18 @@ impl<'ast> InferType<'ast, Statement> for TypeInferencer<'ast> {
                                 ColumnKind::Eql(features, identity) => Value::Eql(EqlTerm::Full(
                                     EqlValue(tc, identity.clone(), *features),
                                 )),
+                                // An UPDATE assignment is a write path: there is
+                                // no way to encrypt the incoming value, so
+                                // accepting it would store plaintext. (CIP-3688)
+                                ColumnKind::UnmappableEncrypted(column_type) => {
+                                    return Err(TypeError::UnmappableEncryptedColumn {
+                                        table: stc.table.value.clone(),
+                                        // `.value` rather than `.to_string()` —
+                                        // see the matching note in `Projection`.
+                                        column: stc.column.value.clone(),
+                                        column_type: column_type.clone(),
+                                    });
+                                }
                             };
 
                             self.unify_node_with_type(

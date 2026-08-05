@@ -825,28 +825,47 @@ impl Projection {
         Self(columns)
     }
 
-    pub(crate) fn new_from_schema_table(table: Arc<Table>) -> Self {
-        Self(
-            table
-                .columns
-                .iter()
-                .map(|col| {
-                    let tc = TableColumn {
-                        table: table.name.clone(),
-                        column: col.name.clone(),
-                    };
+    /// Builds the projection a schema table contributes when it is brought into
+    /// scope.
+    ///
+    /// Fallible because of [`ColumnKind::UnmappableEncrypted`]: a table with such
+    /// a column has no safe projection. There is no type to give it — modelling
+    /// it as native would make Proxy serve ciphertext as plaintext and accept
+    /// plaintext writes into it — so the whole statement is refused here, at the
+    /// single point where schema columns enter the type system. (CIP-3688)
+    pub(crate) fn new_from_schema_table(table: Arc<Table>) -> Result<Self, TypeError> {
+        table
+            .columns
+            .iter()
+            .map(|col| {
+                let tc = TableColumn {
+                    table: table.name.clone(),
+                    column: col.name.clone(),
+                };
 
-                    let value_ty = match &col.kind {
-                        ColumnKind::Native => Type::Value(Value::Native(NativeValue(Some(tc)))),
-                        ColumnKind::Eql(features, identity) => Type::Value(Value::Eql(
-                            EqlTerm::Full(EqlValue(tc, identity.clone(), *features)),
-                        )),
-                    };
+                let value_ty = match &col.kind {
+                    ColumnKind::Native => Type::Value(Value::Native(NativeValue(Some(tc)))),
+                    ColumnKind::Eql(features, identity) => Type::Value(Value::Eql(EqlTerm::Full(
+                        EqlValue(tc, identity.clone(), *features),
+                    ))),
+                    ColumnKind::UnmappableEncrypted(column_type) => {
+                        return Err(TypeError::UnmappableEncryptedColumn {
+                            table: table.name.value.clone(),
+                            // `.value`, not `.to_string()`: the schema loader
+                            // builds column idents with `Ident::with_quote`, so
+                            // `to_string` would render `"col"` and the operator
+                            // would be told to migrate a column whose name
+                            // appears to include quote characters.
+                            column: col.name.value.clone(),
+                            column_type: column_type.clone(),
+                        });
+                    }
+                };
 
-                    ProjectionColumn::new(value_ty, Some(col.name.clone()))
-                })
-                .collect(),
-        )
+                Ok(ProjectionColumn::new(value_ty, Some(col.name.clone())))
+            })
+            .collect::<Result<Vec<_>, _>>()
+            .map(Self)
     }
 
     pub fn len(&self) -> usize {

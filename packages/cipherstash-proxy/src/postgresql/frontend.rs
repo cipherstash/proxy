@@ -472,7 +472,12 @@ where
             let typed_statement = match self.type_check(statement) {
                 Ok(ts) => ts,
                 Err(err) => {
-                    if self.context.mapping_errors_enabled() {
+                    // `must_fail_closed` errors are refusals: passing the
+                    // original statement to the database is the harm they exist
+                    // to prevent, so they ignore the passthrough fallback. This
+                    // holds today, independently of CIP-3680 removing that
+                    // fallback altogether.
+                    if self.context.mapping_errors_enabled() || err.must_fail_closed() {
                         return Err(err);
                     } else {
                         return Ok(None);
@@ -848,7 +853,9 @@ where
         let typed_statement = match self.type_check(&statement) {
             Ok(ts) => ts,
             Err(err) => {
-                if self.context.mapping_errors_enabled() {
+                // See the matching comment on the simple-protocol path: a
+                // refusal is never downgraded to a passthrough.
+                if self.context.mapping_errors_enabled() || err.must_fail_closed() {
                     return Err(err);
                 } else {
                     return Ok(None);
@@ -1210,6 +1217,26 @@ where
                 );
 
                 Ok(typed_statement)
+            }
+            // A column this build cannot map is a refusal, not a coverage gap,
+            // so it gets its own error: `must_fail_closed` keys off it to stop
+            // the passthrough fallback from serving the statement anyway.
+            Err(err) if err.as_unmappable_encrypted_column().is_some() => {
+                let (table, column, column_type) = err.as_unmappable_encrypted_column().unwrap();
+                warn!(
+                    client_id = self.context.client_id,
+                    msg = "Statement refused: it references a column declared with a legacy EQL v2 type that this build cannot encrypt or decrypt. Migrate the column to an EQL v3 domain type.",
+                    table,
+                    column,
+                    column_type,
+                );
+                counter!(STATEMENTS_UNMAPPABLE_TOTAL).increment(1);
+                Err(MappingError::UnmappableEncryptedColumn {
+                    table: table.to_string(),
+                    column: column.to_string(),
+                    column_type: column_type.to_string(),
+                }
+                .into())
             }
             Err(EqlMapperError::InternalError(str)) => {
                 warn!(

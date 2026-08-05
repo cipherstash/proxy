@@ -96,6 +96,31 @@ pub enum EqlMapperError {
     Param(#[from] ParamError),
 }
 
+impl EqlMapperError {
+    /// Returns `(table, column, column_type)` when this error is the refusal
+    /// raised for a column whose encrypted type this build cannot map
+    /// ([`crate::ColumnKind::UnmappableEncrypted`]).
+    ///
+    /// The refusal surfaces either directly as a [`TypeError`] or wrapped in an
+    /// [`ImportError`], depending on whether the table entered the type system
+    /// via an INSERT target list or a FROM clause; callers should not have to
+    /// know which.
+    ///
+    /// This exists so a caller can tell a *refusal* apart from a type-check
+    /// *failure*. Those must not be handled alike: a failure may be answered by
+    /// forwarding the original statement unchanged, a refusal never may — doing
+    /// so is exactly the plaintext write the refusal prevents.
+    pub fn as_unmappable_encrypted_column(&self) -> Option<(&str, &str, &str)> {
+        match self {
+            EqlMapperError::Type(err) => err.as_unmappable_encrypted_column(),
+            EqlMapperError::Import(ImportError::TypeError(err)) => {
+                err.as_unmappable_encrypted_column()
+            }
+            _ => None,
+        }
+    }
+}
+
 /// `EqlMapper` can safely convert a SQL statement into an equivalent statement where all of the plaintext literals have
 /// been converted to EQL payloads containing the encrypted literal and/or encrypted representations of those literals.
 struct EqlMapper<'ast> {

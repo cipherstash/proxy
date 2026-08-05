@@ -12,6 +12,7 @@
   - [Invalid SQL statement](#mapping-invalid-sql-statement)
   - [Unsupported parameter type](#mapping-unsupported-parameter-type)
   - [Statement could not be type checked](#mapping-statement-could-not-be-type-checked)
+  - [Unmappable encrypted column](#mapping-unmappable-encrypted-column)
   - [Internal Error](#mapping-internal-error)
 
 - Encrypt errors:
@@ -245,6 +246,60 @@ In most cases, this error will occur if the statement contains invalid or unsupp
 Check if you are running the latest version of CipherStash Proxy, and update to the latest version if not.
 
 If the error persists, please contact CipherStash [support](https://cipherstash.com/support).
+
+
+
+<!-- ---------------------------------------------------------------------------------------------------- -->
+
+
+## Unmappable encrypted column <a id='mapping-unmappable-encrypted-column'></a>
+
+A table referenced by the statement has a column declared with the legacy EQL v2
+`eql_v2_encrypted` type. This version of Proxy targets EQL v3 and cannot encrypt or
+decrypt that type, so it refuses the statement rather than serve the column.
+
+### Error message
+
+```
+Column '{table}.{column}' is declared as 'eql_v2_encrypted', a legacy EQL v2 type that this
+version of CipherStash Proxy cannot encrypt or decrypt. Statements referencing '{table}' are
+refused so that plaintext is never written to the column. Migrate '{table}.{column}' to an
+EQL v3 domain type.
+```
+
+### Notes
+
+This is the signature of a partly-completed EQL v2 to v3 migration: most columns moved to
+v3 domain types, and one was left behind.
+
+Proxy identifies encrypted columns by their type. An EQL v3 encrypted column is a
+`jsonb`-backed domain whose name encodes its scalar type and searchable capabilities
+(`eql_v3_text_search`, `eql_v3_integer_ord`, and so on). EQL v2's `eql_v2_encrypted` carries
+none of that information, so Proxy has no way to encrypt a value written to such a column,
+and no way to decrypt one read back.
+
+**Every statement referencing the table is refused, not only those naming the column.** This
+is deliberate. A statement can reach a column it never names — through `SELECT *`, column
+defaults, `RETURNING`, triggers or rules — and getting that analysis wrong would mean writing
+plaintext into a column you believe is encrypted. Refusing on the table needs no such
+analysis. Other tables are unaffected, and Proxy continues to serve them normally.
+
+Unlike a type-check failure, this refusal is **not** subject to the `mapping_errors_enabled`
+passthrough. That fallback exists for statements Proxy does not understand, on the reasoning
+that they probably touch nothing encrypted. Here Proxy understands the statement exactly, and
+forwarding it is the specific harm the error exists to prevent, so the statement is refused
+whatever `CS_DEVELOPMENT__ENABLE_MAPPING_ERRORS` is set to.
+
+Proxy also logs a warning naming each such column when it loads the schema at startup.
+
+### How to fix
+
+Migrate the column to the EQL v3 domain type matching the data it holds and the operations
+you run against it — for example `eql_v3_text_search` for searchable text, or
+`eql_v3_integer_ord` for an orderable integer. Existing v2 ciphertext must be decrypted and
+re-encrypted as part of that migration; it cannot be reinterpreted in place.
+
+If the column is no longer used, dropping it also resolves the error.
 
 
 

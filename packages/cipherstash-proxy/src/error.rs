@@ -58,6 +58,27 @@ pub enum Error {
     SendError(#[from] tokio::sync::mpsc::error::SendError<BytesMut>),
 }
 
+impl Error {
+    /// Whether this error must be returned to the client even when the proxy is
+    /// configured to fall back to forwarding statements it could not map.
+    ///
+    /// That fallback exists for mapper *coverage gaps*: a statement Proxy does
+    /// not understand is passed through unchanged, on the reasoning that it
+    /// probably touches nothing encrypted. Some errors are not coverage gaps but
+    /// deliberate refusals, where forwarding the statement is the very harm the
+    /// error was raised to prevent. Those are listed here and are never
+    /// downgraded to a passthrough.
+    pub fn must_fail_closed(&self) -> bool {
+        matches!(
+            self,
+            // Forwarding a statement that references a legacy EQL v2 column
+            // stores plaintext in a column its operator believes is encrypted
+            // (CIP-3688). No configuration may turn that back on.
+            Error::Mapping(MappingError::UnmappableEncryptedColumn { .. })
+        )
+    }
+}
+
 #[derive(Error, Debug)]
 pub enum ContextError {
     #[error("Portal could not be found in context")]
@@ -97,6 +118,13 @@ pub enum MappingError {
 
     #[error("Statement could not be type checked: {}. For help visit {}#mapping-statement-could-not-be-type-checked", _0, ERROR_DOC_BASE_URL)]
     StatementCouldNotBeTypeChecked(String),
+
+    #[error("Column '{table}.{column}' is declared as '{column_type}', a legacy EQL v2 type that this version of CipherStash Proxy cannot encrypt or decrypt. Statements referencing '{table}' are refused so that plaintext is never written to the column. Migrate '{table}.{column}' to an EQL v3 domain type. For help visit {}#mapping-unmappable-encrypted-column", ERROR_DOC_BASE_URL)]
+    UnmappableEncryptedColumn {
+        table: String,
+        column: String,
+        column_type: String,
+    },
 
     #[error("Statement could not be transformed: {0}")]
     StatementCouldNotBeTransformed(String),
