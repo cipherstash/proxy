@@ -3138,7 +3138,7 @@ checksum = "e3148f5046208a5d56bcfc03053e3ca6334e51da8dfb19b6cdc8b306fae3283e"
 [[package]]
 name = "pg-proto"
 version = "0.2.1"
-source = "git+https://github.com/freshtonic/pg-proto?rev=d9f201097f70f6b98b89f72d71728812463c860e#d9f201097f70f6b98b89f72d71728812463c860e"
+source = "git+https://github.com/freshtonic/pg-proto?rev=dc30c3c86a364262b9b95e036cfac2f25b39e688#dc30c3c86a364262b9b95e036cfac2f25b39e688"
 dependencies = [
  "base64",
  "bytes",
@@ -3160,7 +3160,7 @@ dependencies = [
 [[package]]
 name = "pg-proto-fsm"
 version = "0.2.1"
-source = "git+https://github.com/freshtonic/pg-proto?rev=d9f201097f70f6b98b89f72d71728812463c860e#d9f201097f70f6b98b89f72d71728812463c860e"
+source = "git+https://github.com/freshtonic/pg-proto?rev=dc30c3c86a364262b9b95e036cfac2f25b39e688#dc30c3c86a364262b9b95e036cfac2f25b39e688"
 dependencies = [
  "proc-macro2",
  "quote",
