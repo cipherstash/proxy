@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1785899906586,
+  "lastUpdate": 1785901139345,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -23112,6 +23112,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 40.037914,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "james@cipherstash.com",
+            "name": "James Sadler",
+            "username": "freshtonic"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "e2198c7a0ee037395a7ed03dee42d6b8ca2fb342",
+          "message": "Merge pull request #439 from cipherstash/james/cip-3700-eql-mapper-inference-hardening-unconstrained-limitfetch\n\nfix(mapper): inference hardening — LIMIT/FETCH, UPDATE targets, unmatched statements (CIP-3700)",
+          "timestamp": "2026-08-05T13:34:23+10:00",
+          "tree_id": "81764edb65f3140844d894e6345cdb1be83104ff",
+          "url": "https://github.com/cipherstash/proxy/commit/e2198c7a0ee037395a7ed03dee42d6b8ca2fb342"
+        },
+        "date": 1785901137978,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 40.11324,
             "unit": "Number"
           }
         ]
