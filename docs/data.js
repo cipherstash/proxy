@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1785910554853,
+  "lastUpdate": 1785910988498,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -23374,6 +23374,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 40.898334,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "0d0084dbb4126da209b5ed7f00ab014a2dd0ffac",
+          "message": "fix(proxy): refuse statements on a legacy eql_v2_encrypted column instead of serving it as plaintext (CIP-3688)",
+          "timestamp": "2026-08-05T06:03:34Z",
+          "url": "https://github.com/cipherstash/proxy/pull/437/commits/0d0084dbb4126da209b5ed7f00ab014a2dd0ffac"
+        },
+        "date": 1785910987021,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 39.603711,
             "unit": "Number"
           }
         ]
