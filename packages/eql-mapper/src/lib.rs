@@ -1529,6 +1529,41 @@ mod test {
         assert!(typed.params.is_empty());
     }
 
+    /// Like `literal_only_where_condition_type_checks`, but for every other
+    /// comparison form whose operands unify with each other without being
+    /// grounded: `IN`, `BETWEEN`, `IS DISTINCT FROM`, `ANY`/`ALL`, and the
+    /// simple-`CASE` operand. Each is a valid native condition and must not be
+    /// rejected by the fail-closed fallback.
+    #[test]
+    fn literal_only_comparison_forms_type_check() {
+        let schema = resolver(schema! {
+            tables: {
+                users: {
+                    id,
+                    email (EQL: Eq),
+                }
+            }
+        });
+
+        // `1 = ANY(ARRAY[1, 2])` is absent: the operand unifies with the whole
+        // array type, which the Eq bound then rejects (`Array[?] does not
+        // satisfy bounds Eq`) — a pre-existing limitation of AnyOp/AllOp
+        // inference, unrelated to the fallback. The cast-param spelling
+        // (`= ANY($1::int[])`) grounds through the cast and is covered by
+        // existing tests.
+        for sql in [
+            "SELECT email FROM users WHERE 1 IN (1, 2)",
+            "SELECT email FROM users WHERE 1 BETWEEN 0 AND 2",
+            "SELECT email FROM users WHERE 1 IS DISTINCT FROM 2",
+            "SELECT email FROM users WHERE (CASE 1 WHEN 1 THEN 'a' ELSE 'b' END) = 'a'",
+        ] {
+            let statement = parse(sql);
+            if let Err(err) = type_check(schema.clone(), &statement) {
+                panic!("type check failed for `{sql}`: {err}");
+            }
+        }
+    }
+
     /// A param that appears both in a literal-only comparison and against an
     /// encrypted column must resolve to the column's EQL type: the
     /// literal-comparison marking (see `literal_only_where_condition_type_checks`)

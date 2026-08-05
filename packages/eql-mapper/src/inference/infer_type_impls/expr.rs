@@ -136,6 +136,12 @@ impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
                 self.unify_node_with_type(&**b, ty.clone())?;
                 self.unify_node_with_type(expr_val, Type::native())?;
                 self.unify_nodes(&**a, &**b)?;
+
+                // The result is native regardless of the operand type, so a
+                // literal-only operand pair (`1 IS DISTINCT FROM 2`) may stay
+                // unresolved — mark it groundable, as for `=` (see BinaryOp).
+                let a_ty = self.get_node_type(&**a);
+                self.unifier.borrow_mut().mark_natively_groundable(a_ty);
             }
 
             Expr::InList {
@@ -158,6 +164,12 @@ impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
                 // inconsistent with `=` on the same column, which is caught
                 // here.
                 self.unify_node_with_bound(&**expr, EqlTrait::Eq)?;
+
+                // The result is native regardless of the operand type, so a
+                // literal-only operand group (`1 IN (1, 2)`) may stay
+                // unresolved — mark it groundable, as for `=` (see BinaryOp).
+                let expr_ty = self.get_node_type(&**expr);
+                self.unifier.borrow_mut().mark_natively_groundable(expr_ty);
             }
 
             Expr::InSubquery {
@@ -191,6 +203,11 @@ impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
                 self.unify_node_with_type(&**expr, ty.clone())?;
                 self.unify_node_with_type(&**low, ty.clone())?;
                 self.unify_node_with_type(&**high, ty.clone())?;
+
+                // The result is native regardless of the operand type, so a
+                // literal-only operand group (`1 BETWEEN 0 AND 2`) may stay
+                // unresolved — mark it groundable, as for `=` (see BinaryOp).
+                self.unifier.borrow_mut().mark_natively_groundable(ty);
             }
 
             Expr::BinaryOp { left, op, right } => {
@@ -482,6 +499,12 @@ impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
                 if let Some(eql_trait) = comparison_capability(compare_op) {
                     self.unify_node_with_bound(&**left, eql_trait)?;
                 }
+
+                // The result is native regardless of the operand type, so a
+                // literal-only operand group (`1 = ANY(ARRAY[1])`) may stay
+                // unresolved — mark it groundable, as for `=` (see BinaryOp).
+                let left_ty = self.get_node_type(&**left);
+                self.unifier.borrow_mut().mark_natively_groundable(left_ty);
             }
 
             Expr::Ceil { expr, .. }
@@ -626,6 +649,15 @@ impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
                         // The comparison is equality, so the operand's domain
                         // has to carry an equality term.
                         self.unify_node_with_bound(&**operand, EqlTrait::Eq)?;
+
+                        // The CASE's own type is the results', independent of
+                        // the operand's, so a literal-only operand group
+                        // (`CASE 1 WHEN 1 …`) may stay unresolved — mark it
+                        // groundable, as for `=` (see BinaryOp).
+                        let operand_ty = self.get_node_type(&**operand);
+                        self.unifier
+                            .borrow_mut()
+                            .mark_natively_groundable(operand_ty);
                     }
                     None => {
                         for cond_when in conditions {
