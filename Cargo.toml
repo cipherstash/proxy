@@ -3,7 +3,7 @@ resolver = "2"
 members = ["packages/*"]
 
 [workspace.package]
-version = "3.0.0"
+version = "3.0.1"
 edition = "2021"
 
 [profile.dev]

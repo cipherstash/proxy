@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [3.0.1] - 2026-08-05
+
 ### Added
 
 - **Multi-step JSON paths on encrypted columns, everywhere**: `col -> 'a' -> 'b'` now works wherever a single field access does — in the select list, in an ordering comparison (`<`, `<=`, `>`, `>=`), and in the `->`, `->>` and `jsonb_path_query_first` spellings mixed freely, to any depth, with each step written as a literal or a placeholder. Previously only exact equality accepted a multi-step path and everything else was rejected. A chain is a single path into a single document, so it is now rewritten to one field access keyed on the whole composed path (`$.a.b`) instead of the nested accessors that would search an already-extracted entry and return NULL. Exact equality continues to fold the path and the value into one needle, which remains the stronger match.
@@ -353,7 +355,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Integration with CipherStash ZeroKMS.
 - Encrypt Query Language (EQL) for indexing and searching encrypted data.
 
-[Unreleased]: https://github.com/cipherstash/proxy/compare/v2.2.4...HEAD
+[Unreleased]: https://github.com/cipherstash/proxy/compare/v3.0.1...HEAD
+[3.0.1]: https://github.com/cipherstash/proxy/compare/v3.0.0...v3.0.1
+[3.0.0]: https://github.com/cipherstash/proxy/compare/v2.2.4...v3.0.0
 [2.2.4]: https://github.com/cipherstash/proxy/compare/v2.2.3...v2.2.4
 [2.2.3]: https://github.com/cipherstash/proxy/compare/v2.2.2...v2.2.3
 [2.2.2]: https://github.com/cipherstash/proxy/compare/v2.2.1...v2.2.2
