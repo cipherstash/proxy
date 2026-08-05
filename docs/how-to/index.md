@@ -35,7 +35,10 @@ services:
   db:
     # Your Postgres container config
   proxy:
-    image: cipherstash/proxy:latest
+    # Pin a Proxy 3.x release — see https://github.com/cipherstash/proxy/releases
+    # for the latest. `latest` may point at a newer major version whose
+    # configuration differs from this guide.
+    image: cipherstash/proxy:3.0.0
     container_name: proxy
     ports:
       - 6432:6432
