@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1785910512931,
+  "lastUpdate": 1785910554853,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -23349,6 +23349,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 31.338726,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "f59772cf24e3b98b02838c5d3ce474a8c5fd0619",
+          "message": "docs: clarify EQL v3 configuration and Bloom defaults",
+          "timestamp": "2026-08-05T06:03:34Z",
+          "url": "https://github.com/cipherstash/proxy/pull/445/commits/f59772cf24e3b98b02838c5d3ce474a8c5fd0619"
+        },
+        "date": 1785910553304,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 40.898334,
             "unit": "Number"
           }
         ]
