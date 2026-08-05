@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1785909205502,
+  "lastUpdate": 1785909598637,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -23270,6 +23270,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 40.617394,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "ea2212b9e5df2d62e7ece6cf655ad83453f308c2",
+          "message": "fix(proxy): stop the JSON selector fusion leaking plaintext (CIP-3682)",
+          "timestamp": "2026-08-05T05:49:09Z",
+          "url": "https://github.com/cipherstash/proxy/pull/435/commits/ea2212b9e5df2d62e7ece6cf655ad83453f308c2"
+        },
+        "date": 1785909597205,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 40.72618,
             "unit": "Number"
           }
         ]
