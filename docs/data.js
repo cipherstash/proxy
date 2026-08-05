@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1785931662995,
+  "lastUpdate": 1785935386320,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -23657,6 +23657,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 29.882324,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "james@cipherstash.com",
+            "name": "James Sadler",
+            "username": "freshtonic"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "355108add9c1d517928c4f31835bcf8671723c08",
+          "message": "Merge pull request #447 from cipherstash/chore/prepare-3.0.1\n\nchore: prepare release v3.0.1",
+          "timestamp": "2026-08-05T23:04:03+10:00",
+          "tree_id": "e8b592f9945b06b74abebe4abf40c8e0284bde59",
+          "url": "https://github.com/cipherstash/proxy/commit/355108add9c1d517928c4f31835bcf8671723c08"
+        },
+        "date": 1785935384745,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 37.271119,
             "unit": "Number"
           }
         ]
