@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1785907472469,
+  "lastUpdate": 1785907663543,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -23216,6 +23216,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 40.70498,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "e4fc642aee5bfff7467f074bc14411d4e698076d",
+          "message": "fix(mapper): make the late native fallback for unresolved value nodes fail closed (CIP-3715)",
+          "timestamp": "2026-08-05T03:34:48Z",
+          "url": "https://github.com/cipherstash/proxy/pull/442/commits/e4fc642aee5bfff7467f074bc14411d4e698076d"
+        },
+        "date": 1785907662056,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 40.740369,
             "unit": "Number"
           }
         ]
