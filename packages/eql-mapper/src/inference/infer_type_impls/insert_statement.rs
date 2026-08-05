@@ -38,7 +38,7 @@ fn stored_value_type(stc: &SchemaTableColumn) -> Result<(Value, TableColumn), Ty
                 // in `Projection`.
                 column: stc.column.value.clone(),
                 column_type: column_type.clone(),
-            })
+            });
         }
     };
 

@@ -73,7 +73,7 @@ impl<'ast> InferType<'ast, Statement> for TypeInferencer<'ast> {
                                         // see the matching note in `Projection`.
                                         column: stc.column.value.clone(),
                                         column_type: column_type.clone(),
-                                    })
+                                    });
                                 }
                             };
 
