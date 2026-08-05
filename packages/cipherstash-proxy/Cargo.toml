@@ -28,7 +28,7 @@ md-5 = "0.10.6"
 metrics = "0.24.3"
 metrics-exporter-prometheus = "0.17"
 moka = { version = "0.12", features = ["future"] }
-pg-proto = { git = "https://github.com/freshtonic/pg-proto", rev = "d9f201097f70f6b98b89f72d71728812463c860e" }
+pg-proto = { git = "https://github.com/freshtonic/pg-proto", rev = "dc30c3c86a364262b9b95e036cfac2f25b39e688" }
 postgres-protocol = "0.6.7"
 postgres-types = { version = "0.2.8", features = ["with-serde_json-1"] }
 rand = "0.9"
