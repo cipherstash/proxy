@@ -71,6 +71,16 @@ impl<'ast> InferType<'ast, Query> for TypeInferencer<'ast> {
                     for order_by_expr in exprs {
                         let key = resolve_positional_key(select, &order_by_expr.expr);
                         self.unify_node_with_bound(key, EqlTrait::Ord)?;
+
+                        // A key written as a literal (`ORDER BY 1`) reaches the
+                        // database as a plain constant — PostgreSQL only accepts
+                        // integer ordinals here — so the literal itself is always
+                        // native, independently of the projected column it selects.
+                        // This also covers ordinals that cannot be resolved against a
+                        // projection, e.g. `ORDER BY 1` after a set operation.
+                        if matches!(&order_by_expr.expr, Expr::Value(_)) {
+                            self.unify_node_with_type(&order_by_expr.expr, Type::native())?;
+                        }
                     }
                 }
 

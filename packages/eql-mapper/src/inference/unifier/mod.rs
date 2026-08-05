@@ -1,4 +1,9 @@
-use std::{cell::RefCell, collections::HashMap, rc::Rc, sync::Arc};
+use std::{
+    cell::RefCell,
+    collections::{HashMap, HashSet},
+    rc::Rc,
+    sync::Arc,
+};
 
 mod eql_traits;
 mod instantiated_type_env;
@@ -31,6 +36,10 @@ use tracing::{event, instrument, Level, Span};
 #[derive(Debug)]
 pub struct Unifier<'ast> {
     registry: Rc<RefCell<TypeRegistry<'ast>>>,
+
+    /// Type variables that may soundly default to native if still unresolved
+    /// when inference completes — see [`Self::mark_natively_groundable`].
+    natively_groundable: HashSet<TypeVar>,
 }
 
 impl<'ast> Unifier<'ast> {
@@ -38,6 +47,24 @@ impl<'ast> Unifier<'ast> {
     pub fn new(registry: impl Into<Rc<RefCell<TypeRegistry<'ast>>>>) -> Self {
         Self {
             registry: registry.into(),
+            natively_groundable: HashSet::new(),
+        }
+    }
+
+    /// Marks `ty` (if it is an unresolved variable) as safe to default to
+    /// native should it still be unresolved when inference completes.
+    ///
+    /// This is for positions an inference rule *did* constrain but could not
+    /// ground — the operands of a comparison, for instance, unify with each
+    /// other, and anything encrypted arriving in the pair later grounds it
+    /// concretely. A pair still unresolved at the end (`WHERE 1 = 1`) touched
+    /// nothing encrypted, so native is sound. The marked variable is followed
+    /// again at resolution time: if it grounded to a concrete type in the
+    /// meantime, the mark is simply irrelevant.
+    pub(crate) fn mark_natively_groundable(&mut self, ty: Arc<Type>) {
+        let ty = ty.follow_tvars(self);
+        if let Type::Var(Var(tvar, _)) = &*ty {
+            self.natively_groundable.insert(*tvar);
         }
     }
 
@@ -71,13 +98,20 @@ impl<'ast> Unifier<'ast> {
         self.registry.borrow_mut().get_param_type(param)
     }
 
-    /// [`sqltk::parser::ast::Value`] nodes with type `Type::Var(_)` after the inference phase is complete will be unified
-    /// with [`NativeValue`].
+    /// Resolves [`sqltk::parser::ast::Value`] nodes (literals and params) whose type is still an
+    /// unresolved `Type::Var(_)` after the inference phase is complete.
     ///
-    /// This can happen when a literal or param is never used in an expression that would constrain its type.
+    /// A value's type can legitimately remain unconstrained in exactly one situation: it escapes
+    /// the statement only through a projection. Either it is selected straight to the client
+    /// (`SELECT 'lit'`, `SELECT $1`) or it belongs to a projection that nothing consumes (an
+    /// unreferenced derived-table column, the projection of an `EXISTS (...)` subquery). Such a
+    /// value cannot be an EQL type — every EQL-typed position is constrained during inference —
+    /// so it is resolved to [`NativeValue`].
     ///
-    /// In that case, it is safe to resolve its type as native because it cannot possibly be an EQL type, which are
-    /// always correctly inferred.
+    /// Any other unresolved value node means an inference rule failed to constrain the position
+    /// that owns it. Falling back to native there would be fail-open: a value in an unvisited
+    /// clause could relate to an encrypted column and silently skip encryption. Those nodes fail
+    /// closed with [`TypeError::UnresolvedValue`].
     pub(crate) fn resolve_unresolved_value_nodes(&mut self) -> Result<(), TypeError> {
         let unresolved_value_nodes: Vec<_> = self
             .registry
@@ -88,11 +122,101 @@ impl<'ast> Unifier<'ast> {
             .filter(|(_, ty)| matches!(&**ty, Type::Var(_)))
             .collect();
 
-        for (_, ty) in unresolved_value_nodes {
-            self.unify(ty, Type::native().into())?;
+        if unresolved_value_nodes.is_empty() {
+            return Ok(());
+        }
+
+        let projection_reachable = self.projection_reachable_tvars();
+
+        // Follow each marked variable to its current root: unification since
+        // the mark may have collapsed it into another variable (or grounded it
+        // concretely, in which case it needs no defaulting).
+        let natively_groundable: HashSet<TypeVar> = self
+            .natively_groundable
+            .iter()
+            .filter_map(|tvar| match self.get_type(*tvar) {
+                // No substitution: the variable is its own root.
+                None => Some(*tvar),
+                Some(ty) => match &*ty.follow_tvars(self) {
+                    Type::Var(Var(root, _)) => Some(*root),
+                    // Grounded concretely in the meantime; nothing to default.
+                    _ => None,
+                },
+            })
+            .collect();
+
+        for (node, ty) in unresolved_value_nodes {
+            match &*ty {
+                Type::Var(Var(tvar, _))
+                    if projection_reachable.contains(tvar)
+                        || natively_groundable.contains(tvar) =>
+                {
+                    self.unify(ty.clone(), Type::native().into())?;
+                }
+                _ => return Err(TypeError::UnresolvedValue(node.to_string())),
+            }
         }
 
         Ok(())
+    }
+
+    /// The set of type variables reachable from the type of any [`sqltk::parser::ast::Query`] or
+    /// [`sqltk::parser::ast::Statement`] node — i.e. from some projection in the statement.
+    ///
+    /// These are the positions whose types escape to the client (or are discarded, as with the
+    /// projection of an `EXISTS` subquery or an unreferenced derived-table column) rather than
+    /// relating to any other expression, which is what makes defaulting them to native sound.
+    fn projection_reachable_tvars(&self) -> HashSet<TypeVar> {
+        let mut types: Vec<Arc<Type>> = Vec::new();
+
+        {
+            let registry = self.registry.borrow();
+            types.extend(
+                registry
+                    .get_nodes_and_types::<sqltk::parser::ast::Query>()
+                    .into_iter()
+                    .map(|(_, ty)| ty),
+            );
+            types.extend(
+                registry
+                    .get_nodes_and_types::<sqltk::parser::ast::Statement>()
+                    .into_iter()
+                    .map(|(_, ty)| ty),
+            );
+        }
+
+        let mut tvars = HashSet::new();
+        for ty in types {
+            Self::collect_tvars(&ty.follow_tvars(self), &mut tvars);
+        }
+
+        tvars
+    }
+
+    /// Collects every [`TypeVar`] occurring in `ty` (which must already have had its type
+    /// variables followed via [`Type::follow_tvars`]) into `tvars`.
+    fn collect_tvars(ty: &Type, tvars: &mut HashSet<TypeVar>) {
+        match ty {
+            Type::Var(Var(tvar, _)) => {
+                tvars.insert(*tvar);
+            }
+            Type::Value(Value::Projection(projection)) => {
+                for column in projection.columns() {
+                    Self::collect_tvars(&column.ty, tvars);
+                }
+            }
+            Type::Value(Value::Array(Array(element_ty))) => {
+                Self::collect_tvars(element_ty, tvars);
+            }
+            Type::Value(Value::SetOf(set_of)) => {
+                Self::collect_tvars(&set_of.inner_ty(), tvars);
+            }
+            Type::Value(Value::Eql(_) | Value::Native(_)) => {}
+            Type::Associated(associated) => {
+                Self::collect_tvars(&associated.impl_ty, tvars);
+                Self::collect_tvars(&associated.resolved_ty, tvars);
+            }
+        }
     }
 
     pub(crate) fn resolve_unresolved_associated_types(&mut self) -> Result<(), TypeError> {
@@ -375,9 +499,30 @@ pub(crate) mod test_util {
 mod test {
     use eql_mapper_macros::shallow_init_types;
 
+    use crate::inference::TypeError;
     use crate::unifier::Unifier;
     use crate::unifier::{EqlTraits, InstantiateType};
     use crate::{DepMut, TypeRegistry};
+
+    /// A value node whose type variable is not reachable from any projection has escaped
+    /// inference: no rule constrained the position that owns it. Resolving it to native would
+    /// be fail-open (the value could relate to an encrypted column and silently skip
+    /// encryption), so it must be a type error instead.
+    #[test]
+    fn unresolved_value_node_not_reachable_from_a_projection_fails_closed() {
+        let value = sqltk::parser::ast::Value::Boolean(true);
+
+        let mut unifier = Unifier::new(DepMut::new(TypeRegistry::new()));
+
+        // Registers the node with a fresh, unconstrained type variable — simulating a value
+        // node that was traversed but never constrained by any inference rule.
+        let _ = unifier.get_node_type(&value);
+
+        assert_eq!(
+            unifier.resolve_unresolved_value_nodes(),
+            Err(TypeError::UnresolvedValue("true".to_string()))
+        );
+    }
 
     #[test]
     fn eq_native() {

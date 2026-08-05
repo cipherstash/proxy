@@ -71,6 +71,13 @@ pub enum TypeError {
     #[error("unified type contains unresolved type variable: {}", _0)]
     Incomplete(String),
 
+    #[error(
+        "the type of value `{}` was never constrained during type inference; \
+         refusing to assume it is native",
+        _0
+    )]
+    UnresolvedValue(String),
+
     #[error("{}", _0)]
     Expected(String),
 

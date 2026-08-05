@@ -136,6 +136,12 @@ impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
                 self.unify_node_with_type(&**b, ty.clone())?;
                 self.unify_node_with_type(expr_val, Type::native())?;
                 self.unify_nodes(&**a, &**b)?;
+
+                // The result is native regardless of the operand type, so a
+                // literal-only operand pair (`1 IS DISTINCT FROM 2`) may stay
+                // unresolved — mark it groundable, as for `=` (see BinaryOp).
+                let a_ty = self.get_node_type(&**a);
+                self.unifier.borrow_mut().mark_natively_groundable(a_ty);
             }
 
             Expr::InList {
@@ -158,6 +164,12 @@ impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
                 // inconsistent with `=` on the same column, which is caught
                 // here.
                 self.unify_node_with_bound(&**expr, EqlTrait::Eq)?;
+
+                // The result is native regardless of the operand type, so a
+                // literal-only operand group (`1 IN (1, 2)`) may stay
+                // unresolved — mark it groundable, as for `=` (see BinaryOp).
+                let expr_ty = self.get_node_type(&**expr);
+                self.unifier.borrow_mut().mark_natively_groundable(expr_ty);
             }
 
             Expr::InSubquery {
@@ -191,6 +203,11 @@ impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
                 self.unify_node_with_type(&**expr, ty.clone())?;
                 self.unify_node_with_type(&**low, ty.clone())?;
                 self.unify_node_with_type(&**high, ty.clone())?;
+
+                // The result is native regardless of the operand type, so a
+                // literal-only operand group (`1 BETWEEN 0 AND 2`) may stay
+                // unresolved — mark it groundable, as for `=` (see BinaryOp).
+                self.unifier.borrow_mut().mark_natively_groundable(ty);
             }
 
             Expr::BinaryOp { left, op, right } => {
@@ -371,6 +388,20 @@ impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
                     };
 
                     get_sql_binop_rule(op).apply_constraints(self, lhs, rhs, expr_val)?;
+
+                    // A comparison's result is native regardless of its operand
+                    // type, so the operands (now unified with each other) may
+                    // stay unresolved when both are literals — `WHERE 1 = 1`.
+                    // Mark the pair as safe to default to native at the end of
+                    // inference: anything encrypted meeting it before then
+                    // grounds it concretely and the mark becomes irrelevant.
+                    // Eager grounding here would be wrong — a shared param
+                    // (`WHERE $1 = 1 AND enc = $1`) can still be made EQL by a
+                    // later occurrence.
+                    if comparison_capability(op).is_some() {
+                        let lhs_ty = self.get_node_type(lhs);
+                        self.unifier.borrow_mut().mark_natively_groundable(lhs_ty);
+                    }
                 }
 
                 // The operands of a predicate reach PostgreSQL as query
@@ -460,14 +491,62 @@ impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
                 right,
             } => {
                 self.unify_node_with_type(expr_val, Type::native())?;
-                self.unify_nodes(&**left, &**right)?;
 
-                // `x <op> ANY/ALL (…)` applies `<op>` to every element, so the
-                // capability is the operator's. Discarding `compare_op` left
-                // both `= ANY` and `> ANY` unconstrained.
+                // `x <op> ANY/ALL (rhs)` applies `<op>` between `x` and every
+                // ELEMENT of `rhs`, so when `rhs` resolved to an array its
+                // element type is what `x` unifies with — unifying with the
+                // array itself made `1 = ANY(ARRAY[1, 2])` type `1` as an
+                // array (and made `enc = ANY(ARRAY[…])` a conflict). Any other
+                // right-hand shape (a cast like `$1::int[]`, which is opaquely
+                // native; a subquery, whose single-column projection unifies
+                // with a scalar) keeps the direct unification.
+                let right_ty = self.get_node_type(&**right);
+                let rhs_is_array = matches!(&*right_ty, Type::Value(Value::Array(_)));
+                if let Type::Value(Value::Array(crate::unifier::Array(elem_ty))) = &*right_ty {
+                    self.unify_node_with_type(&**left, elem_ty.clone())?;
+                } else {
+                    self.unify_nodes(&**left, &**right)?;
+                }
+
+                // As for a binary comparison, the operator decides the
+                // capability the operands must carry: `= ANY` needs `Eq`,
+                // `< ALL` needs `Ord`.
                 if let Some(eql_trait) = comparison_capability(compare_op) {
                     self.unify_node_with_bound(&**left, eql_trait)?;
                 }
+
+                // Encrypted operands are supported only in the ARRAY-literal
+                // shape, which `RewriteEqlAnyAllOps` rewrites to the term form
+                // elementwise. A subquery projection or a bare array param has
+                // no rewrite: emitted as-is it would compare the raw jsonb
+                // payloads — whose ciphertext is randomised per row — and
+                // silently match nothing, so refuse loudly instead. (Checked on
+                // both sides: after the scalar-with-projection special case the
+                // encrypted type can be recorded against either node.)
+                if !rhs_is_array
+                    && (self.get_node_type(&**left).contains_eql()
+                        || self.get_node_type(&**right).contains_eql())
+                {
+                    return Err(TypeError::UnsupportedSqlFeature(
+                        "ANY/ALL over an encrypted subquery or array parameter (use ARRAY[...])"
+                            .into(),
+                    ));
+                }
+
+                // The operands of the predicate reach PostgreSQL as query
+                // operands — terms only, never a ciphertext — exactly as for a
+                // binary comparison.
+                if let Expr::Array(ast::Array { elem, .. }) = &**right {
+                    self.record_query_operands(std::iter::once(&**left).chain(elem.iter()));
+                } else {
+                    self.record_query_operands([&**left]);
+                }
+
+                // The result is native regardless of the operand type, so a
+                // literal-only operand group (`1 = ANY(ARRAY[1])`) may stay
+                // unresolved — mark it groundable, as for `=` (see BinaryOp).
+                let left_ty = self.get_node_type(&**left);
+                self.unifier.borrow_mut().mark_natively_groundable(left_ty);
             }
 
             Expr::Ceil { expr, .. }
@@ -612,6 +691,15 @@ impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
                         // The comparison is equality, so the operand's domain
                         // has to carry an equality term.
                         self.unify_node_with_bound(&**operand, EqlTrait::Eq)?;
+
+                        // The CASE's own type is the results', independent of
+                        // the operand's, so a literal-only operand group
+                        // (`CASE 1 WHEN 1 …`) may stay unresolved — mark it
+                        // groundable, as for `=` (see BinaryOp).
+                        let operand_ty = self.get_node_type(&**operand);
+                        self.unifier
+                            .borrow_mut()
+                            .mark_natively_groundable(operand_ty);
                     }
                     None => {
                         for cond_when in conditions {

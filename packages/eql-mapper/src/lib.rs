@@ -1502,6 +1502,319 @@ mod test {
         }
     }
 
+    /// A comparison of two literals (`WHERE 1=1` — a common idiom for query
+    /// builders and cache-busting) must type-check: the literals ground each
+    /// other through the comparison, and neither reaches a projection, so the
+    /// fail-closed fallback must not reject them as unresolved. Regression:
+    /// caught by the Python integration suite (`test_disable_mapping`), where
+    /// the silently-unmapped statement returned raw ciphertext.
+    #[test]
+    fn literal_only_where_condition_type_checks() {
+        let schema = resolver(schema! {
+            tables: {
+                users: {
+                    id,
+                    email (EQL: Eq),
+                }
+            }
+        });
+
+        let statement = parse("SELECT email FROM users WHERE 1=1");
+
+        let typed = match type_check(schema, &statement) {
+            Ok(typed) => typed,
+            Err(err) => panic!("type check failed: {err}"),
+        };
+
+        assert!(typed.params.is_empty());
+    }
+
+    /// Like `literal_only_where_condition_type_checks`, but for every other
+    /// comparison form whose operands unify with each other without being
+    /// grounded: `IN`, `BETWEEN`, `IS DISTINCT FROM`, `ANY`/`ALL`, and the
+    /// simple-`CASE` operand. Each is a valid native condition and must not be
+    /// rejected by the fail-closed fallback.
+    #[test]
+    fn literal_only_comparison_forms_type_check() {
+        let schema = resolver(schema! {
+            tables: {
+                users: {
+                    id,
+                    email (EQL: Eq),
+                }
+            }
+        });
+
+        for sql in [
+            "SELECT email FROM users WHERE 1 IN (1, 2)",
+            "SELECT email FROM users WHERE 1 BETWEEN 0 AND 2",
+            "SELECT email FROM users WHERE 1 IS DISTINCT FROM 2",
+            "SELECT email FROM users WHERE 1 = ANY(ARRAY[1, 2])",
+            "SELECT email FROM users WHERE 1 < ALL(ARRAY[1, 2])",
+            "SELECT email FROM users WHERE id = ANY(ARRAY[1, 2])",
+            "SELECT email FROM users WHERE (CASE 1 WHEN 1 THEN 'a' ELSE 'b' END) = 'a'",
+        ] {
+            let statement = parse(sql);
+            if let Err(err) = type_check(schema.clone(), &statement) {
+                panic!("type check failed for `{sql}`: {err}");
+            }
+        }
+    }
+
+    /// `= ANY(ARRAY[…])` on an encrypted column with `Eq` is a quantified
+    /// equality: each array element is an encrypted literal, and the comparison
+    /// is rewritten to the term form elementwise — the same rewrite `=` gets,
+    /// distributed over the array.
+    #[test]
+    fn any_over_encrypted_array_literal_rewrites_to_terms() {
+        let schema = resolver(schema! {
+            tables: {
+                users: {
+                    id,
+                    email (EQL: Eq),
+                }
+            }
+        });
+
+        let statement = parse("SELECT id FROM users WHERE email = ANY(ARRAY['a', 'b'])");
+
+        let typed = match type_check(schema, &statement) {
+            Ok(typed) => typed,
+            Err(err) => panic!("type check failed: {err}"),
+        };
+
+        assert_eq!(typed.literals.len(), 2, "both elements must be encrypted");
+
+        // `typed.literals` carries no ordering guarantee, so key each
+        // replacement off the literal it replaces.
+        let literal_key = |plain: &str| {
+            typed
+                .literals
+                .iter()
+                .find(|(_, value)| matches!(value, ast::Value::SingleQuotedString(s) if s == plain))
+                .unwrap_or_else(|| panic!("no encrypted literal for {plain:?}"))
+                .1
+                .as_node_key()
+        };
+
+        match typed.transform(HashMap::from_iter([
+            (
+                literal_key("a"),
+                ast::Value::SingleQuotedString("ENC_A".into()),
+            ),
+            (
+                literal_key("b"),
+                ast::Value::SingleQuotedString("ENC_B".into()),
+            ),
+        ])) {
+            Ok(transformed) => assert_eq!(
+                transformed.to_string(),
+                "SELECT id FROM users WHERE eql_v3.eq_term(email) = \
+                 ANY(ARRAY[eql_v3.eq_term('ENC_A'::JSONB::eql_v3.query_text_eq), \
+                 eql_v3.eq_term('ENC_B'::JSONB::eql_v3.query_text_eq)])"
+            ),
+            Err(err) => panic!("transformation failed: {err}"),
+        };
+    }
+
+    /// The encrypted spellings of `ANY`/`ALL` that have no elementwise rewrite —
+    /// a subquery projection and a bare array param — must be refused loudly:
+    /// emitted as-is they would compare the raw jsonb payloads, whose ciphertext
+    /// is randomised per row, and silently match nothing. (The subquery form
+    /// previously type-checked and passed through unrewritten.)
+    #[test]
+    fn any_all_over_encrypted_non_array_shapes_are_rejected() {
+        let schema = resolver(schema! {
+            tables: {
+                users: {
+                    id,
+                    email (EQL: Eq),
+                }
+            }
+        });
+
+        for sql in [
+            "SELECT id FROM users WHERE 'a' = ANY(SELECT email FROM users)",
+            "SELECT id FROM users WHERE email = ANY(SELECT email FROM users)",
+            "SELECT id FROM users WHERE email = ANY($1)",
+        ] {
+            let statement = parse(sql);
+            match type_check(schema.clone(), &statement) {
+                Ok(_) => panic!("expected type check to fail for `{sql}`"),
+                Err(err) => assert!(
+                    err.to_string()
+                        .contains("ANY/ALL over an encrypted subquery or array parameter"),
+                    "unexpected error for `{sql}`: {err}"
+                ),
+            }
+        }
+    }
+
+    /// A param that appears both in a literal-only comparison and against an
+    /// encrypted column must resolve to the column's EQL type: the
+    /// literal-comparison marking (see `literal_only_where_condition_type_checks`)
+    /// defers grounding to the end of inference precisely so a later occurrence
+    /// can still make the param encrypted.
+    #[test]
+    fn param_shared_between_literal_and_encrypted_comparison_is_eql() {
+        let schema = resolver(schema! {
+            tables: {
+                users: {
+                    id,
+                    email (EQL: Eq),
+                }
+            }
+        });
+
+        let statement = parse("SELECT id FROM users WHERE $1 = 'x' AND email = $1");
+
+        let typed = match type_check(schema, &statement) {
+            Ok(typed) => typed,
+            Err(err) => panic!("type check failed: {err}"),
+        };
+
+        assert!(
+            matches!(typed.params.as_slice(), [(Param(1), Value::Eql(_))]),
+            "expected $1 to resolve to the encrypted column's type, got: {:?}",
+            typed.params
+        );
+    }
+
+    /// `WHERE`, `HAVING` and join `ON` conditions are boolean expressions and
+    /// booleans are always native, so a bare placeholder condition is pinned to
+    /// `Native` where the clause is inferred — it must not depend on the late
+    /// unresolved-value fallback (which is now fail-closed).
+    #[test]
+    fn where_condition_placeholder_infers_native() {
+        let schema = resolver(schema! {
+            tables: {
+                users: {
+                    id,
+                    email (EQL: Eq),
+                }
+            }
+        });
+
+        let statement = parse("SELECT id FROM users WHERE $1");
+
+        let typed = match type_check(schema, &statement) {
+            Ok(typed) => typed,
+            Err(err) => panic!("type check failed: {err}"),
+        };
+
+        assert_eq!(
+            typed.params,
+            vec![(Param(1), Value::Native(NativeValue(None)))]
+        );
+    }
+
+    /// Same as `where_condition_placeholder_infers_native`, but for a literal
+    /// condition in `HAVING`.
+    #[test]
+    fn having_constant_condition_type_checks() {
+        let schema = resolver(schema! {
+            tables: {
+                users: {
+                    id,
+                }
+            }
+        });
+
+        let statement = parse("SELECT id FROM users GROUP BY id HAVING true");
+
+        if let Err(err) = type_check(schema, &statement) {
+            panic!("type check failed: {err}");
+        }
+    }
+
+    /// Same as `where_condition_placeholder_infers_native`, but for a literal
+    /// join `ON` condition (common in lateral joins: `JOIN ... ON true`).
+    #[test]
+    fn join_on_constant_condition_type_checks() {
+        let schema = resolver(schema! {
+            tables: {
+                users: {
+                    id,
+                }
+                aux: {
+                    id,
+                }
+            }
+        });
+
+        let statement = parse("SELECT u.id FROM users AS u JOIN aux AS a ON true");
+
+        if let Err(err) = type_check(schema, &statement) {
+            panic!("type check failed: {err}");
+        }
+    }
+
+    /// Because a `WHERE` condition is pinned to `Native`, an encrypted column
+    /// cannot itself be the condition — the mapper refuses the statement
+    /// instead of forwarding SQL that would compare against the raw jsonb
+    /// payload.
+    #[test]
+    fn encrypted_column_as_bare_where_condition_is_rejected() {
+        let schema = resolver(schema! {
+            tables: {
+                users: {
+                    id,
+                    email (EQL: Eq),
+                }
+            }
+        });
+
+        let statement = parse("SELECT id FROM users WHERE email");
+
+        type_check(schema, &statement)
+            .expect_err("an encrypted column must not type check as a WHERE condition");
+    }
+
+    /// An `ORDER BY` ordinal after a set operation cannot be resolved against a
+    /// single `SELECT`'s projection, but the literal is still a plain constant
+    /// to the database and is pinned to `Native` where the clause is inferred.
+    #[test]
+    fn order_by_ordinal_after_set_operation_type_checks() {
+        let schema = resolver(schema! {
+            tables: {
+                users: {
+                    id,
+                }
+            }
+        });
+
+        let statement = parse("SELECT id FROM users UNION ALL SELECT id FROM users ORDER BY 1");
+
+        if let Err(err) = type_check(schema, &statement) {
+            panic!("type check failed: {err}");
+        }
+    }
+
+    /// A literal in a derived-table column that the outer query never
+    /// references relates to nothing — its type escapes only through the
+    /// subquery's projection, so it resolves to `Native` rather than being
+    /// treated as an inference gap.
+    #[test]
+    fn unreferenced_derived_table_value_column_type_checks() {
+        let schema = resolver(schema! {
+            tables: {
+                users: {
+                    id,
+                    email (EQL: Eq),
+                }
+            }
+        });
+
+        let statement = parse("SELECT id FROM (SELECT id, 'lit' AS unused FROM users) AS sub");
+
+        let typed = match type_check(schema, &statement) {
+            Ok(typed) => typed,
+            Err(err) => panic!("type check failed: {err}"),
+        };
+
+        assert_eq!(typed.projection, projection![(NATIVE(users.id) as id)]);
+    }
+
     #[test]
     fn delete() {
         // init_tracing();
