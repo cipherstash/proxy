@@ -14,7 +14,7 @@
 //! ```rust
 //! #[tokio::test]
 //! async fn my_test() {
-//!     let client = connect_with_tls(PROXY).await;
+//!     let client = connect_with_tls(*PROXY).await;
 //!     clear_with_client(&client).await;
 //!     insert_with_client(sql, params, &client).await;
 //!     query_by_with_client(sql, param, &client).await;
@@ -41,26 +41,39 @@ use rustls::{
     pki_types::CertificateDer, ClientConfig,
 };
 use serde_json::Value;
-use std::sync::{Arc, Once};
+use std::sync::{Arc, LazyLock, Once};
 use tokio_postgres::{types::ToSql, Client, NoTls, Row, SimpleQueryMessage};
 use tracing::info;
 use tracing_subscriber::{filter::Directive, EnvFilter, FmtSubscriber};
 
-pub const PROXY: u16 = 6432;
-
-/// Proxy port for tests: `CS_PROXY__PORT` if set, otherwise [`PROXY`].
+/// The ports the suite connects to, defaulting to the standard dev ports.
 ///
-/// Lets a local run target a proxy on a non-default port without patching the
-/// test source (mirrors [`get_database_port`] for `CS_DATABASE__PORT`).
-pub fn proxy_port() -> u16 {
-    std::env::var("CS_PROXY__PORT")
-        .ok()
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(PROXY)
+/// Each is overridable by environment variable so that several copies of this
+/// suite can run at once, each against its own Proxy and PostgreSQL. Set these
+/// to match the `CS_SERVER__PORT` and `CS_DATABASE__PORT` the Proxy under test
+/// was started with — nothing here starts anything, it only decides where to
+/// connect.
+pub static PROXY: LazyLock<u16> = LazyLock::new(|| port_from_env("CS_TEST_PROXY_PORT", 6432));
+pub static PROXY_METRICS_PORT: LazyLock<u16> =
+    LazyLock::new(|| port_from_env("CS_TEST_PROXY_METRICS_PORT", 9930));
+pub static PG_PORT: LazyLock<u16> = LazyLock::new(|| port_from_env("CS_TEST_PG_PORT", 5532));
+pub static PG_TLS_PORT: LazyLock<u16> =
+    LazyLock::new(|| port_from_env("CS_TEST_PG_TLS_PORT", 5617));
+
+/// Panics rather than falling back to the default: a typo'd port would
+/// otherwise send the whole suite at whatever is already listening on 6432,
+/// which is the one outcome that looks like a pass and isn't.
+fn port_from_env(var: &str, default: u16) -> u16 {
+    match std::env::var(var) {
+        Ok(value) => value
+            .parse()
+            .unwrap_or_else(|_| panic!("{var} must be a port number, got: {value:?}")),
+        Err(std::env::VarError::NotPresent) => default,
+        Err(std::env::VarError::NotUnicode(value)) => {
+            panic!("{var} must be a port number, got non-unicode value: {value:?}")
+        }
+    }
 }
-pub const PROXY_METRICS_PORT: u16 = 9930;
-pub const PG_PORT: u16 = 5532;
-pub const PG_TLS_PORT: u16 = 5617;
 
 pub const TEST_SCHEMA_SQL: &str = include_str!(concat!("../../../tests/sql/schema.sql"));
 
@@ -88,7 +101,7 @@ pub fn random_string() -> String {
 }
 
 pub async fn clear() {
-    clear_with_client(&connect_with_tls(PROXY).await).await;
+    clear_with_client(&connect_with_tls(*PROXY).await).await;
 }
 
 pub async fn clear_with_client(client: &Client) {
@@ -108,13 +121,13 @@ pub async fn clear_table_with_client(client: &Client, table: &str) {
 }
 
 pub async fn clear_table(table: &str) {
-    clear_table_with_client(&connect_with_tls(PROXY).await, table).await;
+    clear_table_with_client(&connect_with_tls(*PROXY).await, table).await;
 }
 
 pub async fn reset_schema() {
     let port = std::env::var("CS_DATABASE__PORT")
         .map(|s| s.parse().unwrap())
-        .unwrap_or(PG_PORT);
+        .unwrap_or(*PG_PORT);
 
     let client = connect_with_tls(port).await;
     client.simple_query(TEST_SCHEMA_SQL).await.unwrap();
@@ -123,7 +136,7 @@ pub async fn reset_schema() {
 pub async fn reset_schema_to(schema: &'static str) {
     let port = std::env::var("CS_DATABASE__PORT")
         .map(|s| s.parse().unwrap())
-        .unwrap_or(PG_PORT);
+        .unwrap_or(*PG_PORT);
 
     let client = connect_with_tls(port).await;
     client.simple_query(schema).await.unwrap();
@@ -143,7 +156,7 @@ pub async fn table_exists(table: &str) -> bool {
 
     let port = std::env::var("CS_DATABASE__PORT")
         .map(|s| s.parse().unwrap())
-        .unwrap_or(PG_PORT);
+        .unwrap_or(*PG_PORT);
 
     let client = connect_with_tls(port).await;
     let messages = client.simple_query(&query).await.unwrap();
@@ -226,19 +239,19 @@ pub async fn connect(port: u16) -> Client {
 }
 
 pub async fn execute_query(sql: &str, params: &[&(dyn ToSql + Sync)]) {
-    let client = connect_with_tls(PROXY).await;
+    let client = connect_with_tls(*PROXY).await;
     client.query(sql, params).await.unwrap();
 }
 
 pub async fn execute_simple_query(sql: &str) {
-    let client = connect_with_tls(PROXY).await;
+    let client = connect_with_tls(*PROXY).await;
     client.simple_query(sql).await.unwrap();
 }
 
 pub async fn query<T: for<'a> tokio_postgres::types::FromSql<'a> + Send + Sync>(
     sql: &str,
 ) -> Vec<T> {
-    let client = connect_with_tls(PROXY).await;
+    let client = connect_with_tls(*PROXY).await;
     query_with_client(sql, &client).await
 }
 
@@ -278,7 +291,7 @@ pub async fn query_by_params<T>(sql: &str, params: &[&(dyn ToSql + Sync)]) -> Ve
 where
     T: for<'a> tokio_postgres::types::FromSql<'a> + Send + Sync,
 {
-    let client = connect_with_tls(PROXY).await;
+    let client = connect_with_tls(*PROXY).await;
     query_by_params_with_client(sql, params, &client).await
 }
 
@@ -299,7 +312,7 @@ pub fn get_database_port() -> u16 {
     std::env::var("CS_DATABASE__PORT")
         .ok()
         .and_then(|s| s.parse().ok())
-        .unwrap_or(PG_PORT)
+        .unwrap_or(*PG_PORT)
 }
 
 pub async fn query_direct_by<T>(sql: &str, param: &(dyn ToSql + Sync)) -> Vec<T>
@@ -318,7 +331,7 @@ pub async fn simple_query<T: std::str::FromStr>(sql: &str) -> Vec<T>
 where
     <T as std::str::FromStr>::Err: std::fmt::Debug,
 {
-    let client = connect_with_tls(PROXY).await;
+    let client = connect_with_tls(*PROXY).await;
     simple_query_with_client(sql, &client).await
 }
 
@@ -352,7 +365,7 @@ where
 // Returns a vector of `Option<String>` for each row in the result set.
 // Nulls are represented as `None`, and non-null values are converted to `Some(String)`.
 pub async fn simple_query_with_null(sql: &str) -> Vec<Option<String>> {
-    let client = connect_with_tls(PROXY).await;
+    let client = connect_with_tls(*PROXY).await;
     let rows = client.simple_query(sql).await.unwrap();
     rows.iter()
         .filter_map(|row| {
@@ -366,7 +379,7 @@ pub async fn simple_query_with_null(sql: &str) -> Vec<Option<String>> {
 }
 
 pub async fn insert(sql: &str, params: &[&(dyn ToSql + Sync)]) {
-    let client = connect_with_tls(PROXY).await;
+    let client = connect_with_tls(*PROXY).await;
     insert_with_client(sql, params, &client).await;
 }
 
@@ -375,7 +388,7 @@ pub async fn insert_with_client(sql: &str, params: &[&(dyn ToSql + Sync)], clien
 }
 
 pub async fn insert_jsonb() -> Value {
-    let client = connect_with_tls(PROXY).await;
+    let client = connect_with_tls(*PROXY).await;
     insert_jsonb_with_client(&client).await
 }
 

@@ -2,9 +2,7 @@
 mod tests {
     use tracing::{debug, info};
 
-    use crate::common::{
-        clear, connect_with_tls, proxy_port, random_id, reset_schema, trace, PROXY,
-    };
+    use crate::common::{clear, connect_with_tls, random_id, reset_schema, trace, PROXY};
 
     /// A statement that always fails inside the proxy, at Parse, in every
     /// configuration: the proxy's SQL parser rejects it before it reaches the
@@ -40,7 +38,7 @@ mod tests {
 
         let id = random_id();
 
-        let client = connect_with_tls(PROXY).await;
+        let client = connect_with_tls(*PROXY).await;
 
         let encrypted_text = "hello@cipherstash.com";
 
@@ -76,7 +74,7 @@ mod tests {
 
         reset_schema().await;
 
-        let client = connect_with_tls(PROXY).await;
+        let client = connect_with_tls(*PROXY).await;
 
         let _reset = Reset;
 
@@ -103,7 +101,7 @@ mod tests {
     async fn mapper_unsupported_parameter_type_with_date() {
         trace();
 
-        let client = connect_with_tls(PROXY).await;
+        let client = connect_with_tls(*PROXY).await;
 
         let id = random_id();
         // let encrypted_date = NaiveDate::parse_from_str("2025-01-01", "%Y-%m-%d").unwrap();
@@ -132,7 +130,7 @@ mod tests {
     async fn proxy_error_after_mapped_statement() {
         trace();
 
-        let client = connect_with_tls(proxy_port()).await;
+        let client = connect_with_tls(*PROXY).await;
 
         // Mapped warm-up: an encrypted statement that parses, binds and
         // executes successfully.
@@ -171,7 +169,7 @@ mod tests {
     async fn proxy_error_after_passthrough_statement() {
         trace();
 
-        let client = connect_with_tls(proxy_port()).await;
+        let client = connect_with_tls(*PROXY).await;
 
         // Passthrough warm-up.
         client.query("SELECT 1::int4", &[]).await.unwrap();
@@ -200,7 +198,7 @@ mod tests {
 
         reset_schema().await;
 
-        let client = connect_with_tls(PROXY).await;
+        let client = connect_with_tls(*PROXY).await;
 
         let _reset = Reset;
 

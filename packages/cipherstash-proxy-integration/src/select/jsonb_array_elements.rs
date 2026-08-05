@@ -27,7 +27,7 @@ mod tests {
     #[tokio::test]
     async fn select_jsonb_array_elements_with_string() {
         trace();
-        let client = connect_with_tls(PROXY).await;
+        let client = connect_with_tls(*PROXY).await;
 
         clear_with_client(&client).await;
         insert_jsonb_with_client(&client).await;
@@ -39,7 +39,7 @@ mod tests {
     #[tokio::test]
     async fn select_jsonb_array_elements_with_numeric() {
         trace();
-        let client = connect_with_tls(PROXY).await;
+        let client = connect_with_tls(*PROXY).await;
 
         clear_with_client(&client).await;
         insert_jsonb_with_client(&client).await;
@@ -51,7 +51,7 @@ mod tests {
     #[tokio::test]
     async fn select_jsonb_array_elements_with_unknown_field() {
         trace();
-        let client = connect_with_tls(PROXY).await;
+        let client = connect_with_tls(*PROXY).await;
 
         clear_with_client(&client).await;
         insert_jsonb_with_client(&client).await;

@@ -24,7 +24,7 @@ mod tests {
 
         clear().await;
 
-        let client = connect_with_tls(PROXY).await;
+        let client = connect_with_tls(*PROXY).await;
 
         let id = random_id();
         let encrypted_text = "hello".to_string();
@@ -74,7 +74,7 @@ mod tests {
 
         clear().await;
 
-        let client = connect_with_tls(PROXY).await;
+        let client = connect_with_tls(*PROXY).await;
 
         let id = random_id();
 
@@ -143,7 +143,7 @@ mod tests {
         let sql = "INSERT INTO encrypted (id, encrypted_text) VALUES ($1, $2)";
         execute_query(sql, &[&id, &encrypted_text]).await;
 
-        let client = connect_with_tls(PROXY).await;
+        let client = connect_with_tls(*PROXY).await;
         let sql = "SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING = true";
         client.query(sql, &[]).await.unwrap();
 
@@ -151,7 +151,7 @@ mod tests {
 
         // Mapping is NOT disabled for these queries
         for _ in 1..5 {
-            let client = connect_with_tls(PROXY).await;
+            let client = connect_with_tls(*PROXY).await;
 
             let actual = query_with_client::<String>(select_sql, &client).await;
 

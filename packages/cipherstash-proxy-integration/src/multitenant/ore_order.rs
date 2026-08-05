@@ -17,7 +17,7 @@ mod tests {
     async fn connect_as_tenant(keyset_id: &str) -> tokio_postgres::Client {
         uuid::Uuid::parse_str(keyset_id)
             .unwrap_or_else(|_| panic!("invalid UUID for keyset_id: {keyset_id}"));
-        let client = connect_with_tls(PROXY).await;
+        let client = connect_with_tls(*PROXY).await;
         let sql = format!("SET CIPHERSTASH.KEYSET_ID = '{keyset_id}'");
         client.execute(&sql, &[]).await.unwrap();
         client

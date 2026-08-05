@@ -10,7 +10,7 @@ mod tests {
 
         clear().await;
 
-        let client = connect_with_tls(PROXY).await;
+        let client = connect_with_tls(*PROXY).await;
 
         let id = random_id();
         let plaintext = "plaintext";
@@ -59,7 +59,7 @@ mod tests {
 
         clear().await;
 
-        let client = connect_with_tls(PROXY).await;
+        let client = connect_with_tls(*PROXY).await;
 
         let id = random_id();
         let plaintext = "plaintext";
@@ -101,7 +101,7 @@ mod tests {
 
         clear().await;
 
-        let client = connect_with_tls(PROXY).await;
+        let client = connect_with_tls(*PROXY).await;
 
         let id = random_id();
         let plaintext = "plaintext";

@@ -22,7 +22,7 @@ mod tests {
         clear().await;
         insert_jsonb().await;
 
-        let client = connect_with_tls(PROXY).await;
+        let client = connect_with_tls(*PROXY).await;
         let selector = JsonPath::new("$.number");
 
         let sql = "SELECT jsonb_path_exists(encrypted_jsonb, $1) FROM encrypted";
@@ -42,7 +42,7 @@ mod tests {
         clear().await;
         insert_jsonb().await;
 
-        let client = connect_with_tls(PROXY).await;
+        let client = connect_with_tls(*PROXY).await;
         let selector = JsonPath::new("$.string");
 
         let sql = "SELECT jsonb_path_query_first(encrypted_jsonb, $1) FROM encrypted";
@@ -61,7 +61,7 @@ mod tests {
         clear().await;
         insert_jsonb().await;
 
-        let client = connect_with_tls(PROXY).await;
+        let client = connect_with_tls(*PROXY).await;
 
         let sql = "SELECT encrypted_jsonb -> $1 FROM encrypted";
         let stmt = client

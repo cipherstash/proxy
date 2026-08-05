@@ -40,7 +40,7 @@ mod tests {
 
         let sql = "INSERT INTO encrypted (id, plaintext_domain, encrypted_text) VALUES ($1, $2, $3) RETURNING id, plaintext_domain, encrypted_text";
 
-        let client = connect_with_tls(PROXY).await;
+        let client = connect_with_tls(*PROXY).await;
         let result = client
             .query(sql, &[&id, &encrypted_domain, &encrypted_text])
             .await

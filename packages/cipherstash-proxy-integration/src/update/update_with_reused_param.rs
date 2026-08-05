@@ -30,7 +30,7 @@ mod tests {
         )
         .await;
 
-        let client = connect_with_tls(PROXY).await;
+        let client = connect_with_tls(*PROXY).await;
 
         // The same placeholder is the stored value and the predicate operand.
         let sql = "UPDATE encrypted SET encrypted_text = $1 WHERE encrypted_text = $1";
@@ -59,7 +59,7 @@ mod tests {
         )
         .await;
 
-        let client = connect_with_tls(PROXY).await;
+        let client = connect_with_tls(*PROXY).await;
 
         // `$1` stores, `$2` queries; the reverse of the pairing above.
         let updated = "goodbye@cipherstash.com".to_string();

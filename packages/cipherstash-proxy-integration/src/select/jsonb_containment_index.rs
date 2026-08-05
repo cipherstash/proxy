@@ -203,7 +203,7 @@ mod tests {
                 trace();
                 ensure_fixture_data().await;
 
-                let client = connect_with_tls(PROXY).await;
+                let client = connect_with_tls(*PROXY).await;
                 let test_case = ContainmentTestCase::new(OperandType::$lhs, OperandType::$rhs);
                 let search_value = test_case.search_value();
                 test_case.run(&client, &search_value).await;
@@ -217,7 +217,7 @@ mod tests {
     /// Does NOT call clear() - preserves data from other tests.
     /// Only inserts if the fixture data is missing.
     async fn ensure_fixture_data() {
-        let client = connect_with_tls(PROXY).await;
+        let client = connect_with_tls(*PROXY).await;
 
         // Check if fixture data already exists
         let sql = format!(
@@ -303,7 +303,7 @@ mod tests {
         trace();
         ensure_fixture_data().await;
 
-        let client = connect_with_tls(PROXY).await;
+        let client = connect_with_tls(*PROXY).await;
 
         // Use extended query protocol with parameterized query
         // Filter by fixture ID range to isolate from other test data

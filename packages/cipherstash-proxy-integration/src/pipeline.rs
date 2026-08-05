@@ -16,7 +16,7 @@ mod tests {
 
         clear().await;
 
-        let client = connect_with_tls(PROXY).await;
+        let client = connect_with_tls(*PROXY).await;
 
         let counter = AtomicUsize::new(0);
 

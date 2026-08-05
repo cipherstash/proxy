@@ -4,7 +4,7 @@ mod tests {
 
     #[tokio::test]
     async fn schema_change_reloads_schema() {
-        let client = connect_with_tls(PROXY).await;
+        let client = connect_with_tls(*PROXY).await;
 
         let id = random_id();
 

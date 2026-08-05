@@ -57,7 +57,7 @@ mod tests {
         clear().await;
         let id = insert_nested().await;
 
-        let client = connect_with_tls(PROXY).await;
+        let client = connect_with_tls(*PROXY).await;
 
         let sql = "SELECT id FROM encrypted WHERE encrypted_jsonb -> 'nested' -> 'string' = $1";
         let rows = client
@@ -89,7 +89,7 @@ mod tests {
         clear().await;
         insert_nested().await;
 
-        let client = connect_with_tls(PROXY).await;
+        let client = connect_with_tls(*PROXY).await;
 
         let selector: Option<String> = None;
         let sql = "SELECT id FROM encrypted WHERE encrypted_jsonb -> $1 = $2";

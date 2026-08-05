@@ -28,7 +28,7 @@ mod tests {
     async fn set_keyset_id_with_default_config_error() {
         trace();
 
-        let client = connect_with_tls(PROXY).await;
+        let client = connect_with_tls(*PROXY).await;
 
         let sql = "SET CIPHERSTASH.KEYSET_ID = '2cace9db-3a2a-4b46-a184-ba412b3e0730'";
 
@@ -49,7 +49,7 @@ mod tests {
     async fn set_keyset_name_with_default_config_error() {
         trace();
 
-        let client = connect_with_tls(PROXY).await;
+        let client = connect_with_tls(*PROXY).await;
 
         let sql = "SET CIPHERSTASH.KEYSET_NAME = 'tenant-1'";
 

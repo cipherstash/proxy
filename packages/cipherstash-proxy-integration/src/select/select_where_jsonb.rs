@@ -63,7 +63,7 @@ mod tests {
 
         insert_jsonb().await;
 
-        let client = connect_with_tls(PROXY).await;
+        let client = connect_with_tls(*PROXY).await;
 
         let selector = "number";
         let value = Value::from(1);

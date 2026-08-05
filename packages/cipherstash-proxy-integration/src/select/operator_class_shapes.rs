@@ -62,7 +62,7 @@ mod tests {
         clear().await;
         insert_fixture().await;
 
-        let client = connect_with_tls(PROXY).await;
+        let client = connect_with_tls(*PROXY).await;
 
         let sql = "SELECT DISTINCT ON (encrypted_text) encrypted_text FROM encrypted";
         let rows = client.query(sql, &[]).await.unwrap();
@@ -81,7 +81,7 @@ mod tests {
         clear().await;
         insert_fixture().await;
 
-        let client = connect_with_tls(PROXY).await;
+        let client = connect_with_tls(*PROXY).await;
 
         let sql = "SELECT encrypted_text FROM encrypted ORDER BY 1";
         let rows = client.query(sql, &[]).await.unwrap();
@@ -97,7 +97,7 @@ mod tests {
         clear().await;
         insert_fixture().await;
 
-        let client = connect_with_tls(PROXY).await;
+        let client = connect_with_tls(*PROXY).await;
 
         let sql = "SELECT encrypted_text FROM encrypted GROUP BY 1";
         let rows = client.query(sql, &[]).await.unwrap();
@@ -113,7 +113,7 @@ mod tests {
         clear().await;
         insert_fixture().await;
 
-        let client = connect_with_tls(PROXY).await;
+        let client = connect_with_tls(*PROXY).await;
 
         // Two 'apple' rows and two 'banana' rows, so each of those partitions
         // must produce a rank 2. Every rank being 1 means no partitioning.
@@ -140,7 +140,7 @@ mod tests {
         clear().await;
         insert_fixture().await;
 
-        let client = connect_with_tls(PROXY).await;
+        let client = connect_with_tls(*PROXY).await;
 
         let sql =
             "SELECT encrypted_text FROM encrypted UNION ALL SELECT encrypted_text FROM encrypted";
