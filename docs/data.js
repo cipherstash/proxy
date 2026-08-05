@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1785913494779,
+  "lastUpdate": 1785914324952,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -23524,6 +23524,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 31.056453,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "james@cipherstash.com",
+            "name": "James Sadler",
+            "username": "freshtonic"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "75f5106085957867fc7eca67c6679b5fefb1c8a1",
+          "message": "Merge pull request #442 from cipherstash/james/cip-3715-unifiers-late-native-fallback-for-unresolved-value-nodes-is\n\nfix(mapper): make the late native fallback for unresolved value nodes fail closed (CIP-3715)",
+          "timestamp": "2026-08-05T17:13:52+10:00",
+          "tree_id": "579e8e46b41cedad3a883314ebf066bf6685432b",
+          "url": "https://github.com/cipherstash/proxy/commit/75f5106085957867fc7eca67c6679b5fefb1c8a1"
+        },
+        "date": 1785914323483,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 39.315966,
             "unit": "Number"
           }
         ]
