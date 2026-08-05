@@ -21,7 +21,7 @@ use metrics::{counter, histogram};
 use pg_proto::{
     codec::{BackendMessage, Describe, DescribeTarget, FrontendMessage},
     intermediary::Intermediary,
-    pipeline::{BackendAction, BoundedPipeline, FrontendAction, FrontendHandling},
+    pipeline::{BackendAction, BoundedPipeline, FrontendAction, FrontendHandling, OperationId},
 };
 use serde_json::json;
 use sqltk::parser::ast::{Expr, Ident, ObjectName, ObjectNamePart, Set, Value, ValueWithSpan};
@@ -233,7 +233,8 @@ where
     pub async fn protocol_frontend_received(
         &self,
         mut message: FrontendMessage,
-    ) -> Result<(), Error> {
+        handling: FrontendHandling,
+    ) -> Result<OperationId, Error> {
         loop {
             let notified = self.protocol_changed.notified();
             tokio::pin!(notified);
@@ -243,11 +244,13 @@ where
                 protocol
                     .sides
                     .pipeline_mut()
-                    .frontend_action(message, FrontendHandling::Forward)
+                    .frontend_action(message, handling)
                     .map_err(protocol_transition_error)?
             };
             match action {
-                FrontendAction::Forward { .. } | FrontendAction::Discard { .. } => return Ok(()),
+                FrontendAction::Forward { id, .. } | FrontendAction::Discard { id } => {
+                    return Ok(id);
+                }
                 FrontendAction::Backpressure(returned) => {
                     message = returned;
                     notified.await;
@@ -280,6 +283,34 @@ where
                     .sides
                     .pipeline_mut()
                     .accept_backend(message)
+                    .map_err(protocol_transition_error)?
+            };
+            match action {
+                BackendAction::Emit(_) => return Ok(()),
+                BackendAction::Deferred(returned) => {
+                    message = returned;
+                    notified.await;
+                }
+            }
+        }
+    }
+
+    /// Emits a response synthesized for one locally handled frontend operation.
+    pub async fn protocol_backend_local(
+        &self,
+        id: OperationId,
+        mut message: BackendMessage,
+    ) -> Result<(), Error> {
+        loop {
+            let notified = self.protocol_changed.notified();
+            tokio::pin!(notified);
+            notified.as_mut().enable();
+            let action = {
+                let mut protocol = self.protocol.lock().map_err(protocol_lock_error)?;
+                protocol
+                    .sides
+                    .pipeline_mut()
+                    .try_emit_local(id, message)
                     .map_err(protocol_transition_error)?
             };
             match action {
@@ -1169,7 +1200,8 @@ mod tests {
     use cipherstash_client::IdentifiedBy;
     use eql_mapper::Schema;
     use pg_proto::codec::{
-        BackendMessage, Bind, DescribeTarget, Execute, FrontendMessage, Parse, TransactionStatus,
+        BackendMessage, Bind, DescribeTarget, DiagnosticResponse, Execute, FrontendMessage, Parse,
+        TransactionStatus,
     };
     use pg_proto::pipeline::{BackendAction, FrontendAction, FrontendHandling, PipelineState};
     use sqltk::parser::{dialect::PostgreSqlDialect, parser::Parser};
@@ -1177,6 +1209,7 @@ mod tests {
     use tokio::sync::mpsc;
     use uuid::Uuid;
 
+    #[derive(Clone)]
     struct TestService {}
 
     #[async_trait::async_trait]
@@ -1332,6 +1365,70 @@ mod tests {
 
         assert!(protocol.sides.pipeline().is_empty());
         assert_eq!(protocol.sides.pipeline().state(), PipelineState::Ready);
+    }
+
+    #[tokio::test]
+    async fn local_extended_error_waits_for_earlier_forwarded_response() {
+        let context = create_context();
+        context
+            .protocol_frontend_received(
+                FrontendMessage::Parse(Parse {
+                    statement: Bytes::new(),
+                    query: Bytes::from_static(b"select $1"),
+                    parameter_types: vec![23],
+                }),
+                FrontendHandling::Forward,
+            )
+            .await
+            .unwrap();
+        let bind_id = context
+            .protocol_frontend_received(
+                FrontendMessage::Bind(Bind {
+                    portal: Bytes::new(),
+                    statement: Bytes::new(),
+                    parameter_formats: vec![0],
+                    parameters: vec![Some(Bytes::from_static(b"1"))],
+                    result_formats: vec![0],
+                }),
+                FrontendHandling::Local,
+            )
+            .await
+            .unwrap();
+
+        let local_context = context.clone();
+        let local_error = tokio::spawn(async move {
+            local_context
+                .protocol_backend_local(
+                    bind_id,
+                    BackendMessage::ErrorResponse(DiagnosticResponse { fields: vec![] }),
+                )
+                .await
+        });
+        tokio::task::yield_now().await;
+        assert!(!local_error.is_finished());
+
+        context
+            .protocol_backend_forwarded(BackendMessage::ParseComplete)
+            .await
+            .unwrap();
+        context.protocol_backend_sent();
+        local_error.await.unwrap().unwrap();
+
+        let sync_id = context
+            .protocol_frontend_received(FrontendMessage::Sync, FrontendHandling::Local)
+            .await
+            .unwrap();
+        context
+            .protocol_backend_local(
+                sync_id,
+                BackendMessage::ReadyForQuery(TransactionStatus::Idle),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            context.protocol.lock().unwrap().sides.pipeline().state(),
+            PipelineState::Ready
+        );
     }
 
     fn statement() -> Statement {

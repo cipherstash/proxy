@@ -34,6 +34,7 @@ use pg_proto::{
         Backend as BackendDirection, BackendMessage, Close, Describe, DescribeTarget, Execute,
         Frontend as FrontendDirection, FrontendMessage, TransactionStatus,
     },
+    pipeline::{FrontendHandling, OperationId},
     transport::Buffered,
 };
 use serde::Serialize;
@@ -174,15 +175,14 @@ where
         let mut outbound_message = protocol_message.clone();
 
         let recovering_from_extended_error = self.context.protocol_in_extended_error()?;
-        self.context
-            .protocol_frontend_received(protocol_message.clone())
-            .await?;
-
         let frame = protocol_message.to_frame()?;
         let sent: u64 = (frame.body.len() + 5) as u64;
         counter!(CLIENTS_BYTES_RECEIVED_TOTAL).increment(sent);
 
         if self.context.mapping_disabled() {
+            self.context
+                .protocol_frontend_received(protocol_message.clone(), FrontendHandling::Forward)
+                .await?;
             self.write_to_server(outbound_message).await?;
             return Ok(());
         }
@@ -195,10 +195,14 @@ where
                 message = ?protocol_message,
             );
             if !matches!(protocol_message, FrontendMessage::Sync) {
+                self.context
+                    .protocol_frontend_received(protocol_message, FrontendHandling::Local)
+                    .await?;
                 return Ok(());
             }
         }
 
+        let tracking_message = protocol_message.clone();
         match protocol_message {
             FrontendMessage::Query(query) => {
                 match self.query_handler(Query::from(query)).await {
@@ -211,8 +215,12 @@ where
                             msg = "Query Handler Error",
                             error = ?err.to_string(),
                         );
-                        self.send_error_response(err).await?;
-                        self.send_ready_for_query().await?;
+                        let id = self
+                            .context
+                            .protocol_frontend_received(tracking_message, FrontendHandling::Local)
+                            .await?;
+                        self.send_error_response(id, err).await?;
+                        self.send_ready_for_query(id).await?;
                         return Ok(());
                     }
                 }
@@ -234,7 +242,11 @@ where
                             msg = "Parse Handler Error",
                             error = ?err.to_string(),
                         );
-                        self.send_error_response(err).await?;
+                        let id = self
+                            .context
+                            .protocol_frontend_received(tracking_message, FrontendHandling::Local)
+                            .await?;
+                        self.send_error_response(id, err).await?;
                         return Ok(());
                     }
                 }
@@ -244,33 +256,39 @@ where
                     Ok(Some(mapped)) => outbound_message = mapped,
                     // No mapping needed, don't change the bytes
                     Ok(None) => (),
-                    Err(err) => match err {
-                        Error::Mapping(MappingError::InvalidParameter(_)) => {
-                            warn!(target: PROTOCOL,
-                                client_id = self.context.client_id,
-                                msg = "EncryptError::InvalidParameter",
-                            );
-                            self.send_error_response(err).await?;
-                            return Ok(());
+                    Err(err) => {
+                        let id = self
+                            .context
+                            .protocol_frontend_received(tracking_message, FrontendHandling::Local)
+                            .await?;
+                        match err {
+                            Error::Mapping(MappingError::InvalidParameter(_)) => {
+                                warn!(target: PROTOCOL,
+                                    client_id = self.context.client_id,
+                                    msg = "EncryptError::InvalidParameter",
+                                );
+                                self.send_error_response(id, err).await?;
+                                return Ok(());
+                            }
+                            Error::Encrypt(EncryptError::UnknownKeysetIdentifier { .. }) => {
+                                warn!(target: PROTOCOL,
+                                    client_id = self.context.client_id,
+                                    msg = "EncryptError::UnknownKeysetIdentifier",
+                                );
+                                self.send_error_response(id, err).await?;
+                                return Ok(());
+                            }
+                            _ => {
+                                warn!(target: PROTOCOL,
+                                    client_id = self.context.client_id,
+                                    msg = "Bind Error",
+                                    err = err.to_string()
+                                );
+                                self.send_error_response(id, err).await?;
+                                return Ok(());
+                            }
                         }
-                        Error::Encrypt(EncryptError::UnknownKeysetIdentifier { .. }) => {
-                            warn!(target: PROTOCOL,
-                                client_id = self.context.client_id,
-                                msg = "EncryptError::UnknownKeysetIdentifier",
-                            );
-                            self.send_error_response(err).await?;
-                            return Ok(());
-                        }
-                        _ => {
-                            warn!(target: PROTOCOL,
-                                client_id = self.context.client_id,
-                                msg = "Bind Error",
-                                err = err.to_string()
-                            );
-                            self.send_error_response(err).await?;
-                            return Ok(());
-                        }
-                    },
+                    }
                 }
             }
             FrontendMessage::Sync => {
@@ -286,7 +304,11 @@ where
                         client_id = self.context.client_id,
                         msg = "Ready for Query",
                     );
-                    self.send_ready_for_query().await?;
+                    let id = self
+                        .context
+                        .protocol_frontend_received(tracking_message, FrontendHandling::Local)
+                        .await?;
+                    self.send_ready_for_query(id).await?;
                     return Ok(());
                 }
             }
@@ -302,6 +324,9 @@ where
             }
         }
 
+        self.context
+            .protocol_frontend_received(tracking_message, FrontendHandling::Forward)
+            .await?;
         self.write_to_server(outbound_message).await?;
         Ok(())
     }
@@ -1230,7 +1255,7 @@ where
     /// Send a ReadyForQuery to the client, answering a Sync (or simple Query)
     /// for a batch of which nothing reached the server.
     ///
-    async fn send_ready_for_query(&mut self) -> Result<(), Error> {
+    async fn send_ready_for_query(&mut self, id: OperationId) -> Result<(), Error> {
         let message = BackendMessage::ReadyForQuery(TransactionStatus::Idle);
 
         debug!(target: PROTOCOL,
@@ -1240,7 +1265,7 @@ where
         );
 
         self.context
-            .protocol_backend_forwarded(message.clone())
+            .protocol_backend_local(id, message.clone())
             .await?;
         self.client_sender.send(message)?;
         self.context.protocol_backend_sent();
@@ -1433,7 +1458,7 @@ where
     W: AsyncWrite + Unpin,
     S: EncryptionService,
 {
-    async fn send_error_response(&mut self, err: Error) -> Result<(), Error> {
+    async fn send_error_response(&mut self, id: OperationId, err: Error) -> Result<(), Error> {
         let error_response = self.error_to_response(err);
         let message = error_response.into_backend_message();
 
@@ -1444,7 +1469,7 @@ where
         );
 
         self.context
-            .protocol_backend_forwarded(message.clone())
+            .protocol_backend_local(id, message.clone())
             .await?;
         self.client_sender.send(message)?;
         self.context.protocol_backend_sent();
