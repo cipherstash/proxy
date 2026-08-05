@@ -47,6 +47,17 @@ use tracing::info;
 use tracing_subscriber::{filter::Directive, EnvFilter, FmtSubscriber};
 
 pub const PROXY: u16 = 6432;
+
+/// Proxy port for tests: `CS_PROXY__PORT` if set, otherwise [`PROXY`].
+///
+/// Lets a local run target a proxy on a non-default port without patching the
+/// test source (mirrors [`get_database_port`] for `CS_DATABASE__PORT`).
+pub fn proxy_port() -> u16 {
+    std::env::var("CS_PROXY__PORT")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(PROXY)
+}
 pub const PROXY_METRICS_PORT: u16 = 9930;
 pub const PG_PORT: u16 = 5532;
 pub const PG_TLS_PORT: u16 = 5617;

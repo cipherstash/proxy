@@ -90,6 +90,14 @@ impl ErrorResponse {
         }
     }
 
+    /// Whether this error carries FATAL severity — the client abandons the
+    /// connection on receipt.
+    pub fn is_fatal(&self) -> bool {
+        self.fields
+            .iter()
+            .any(|field| field.code == ErrorResponseCode::Severity && field.value == "FATAL")
+    }
+
     pub fn invalid_password(message: String) -> Self {
         Self {
             fields: vec![

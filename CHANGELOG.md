@@ -24,6 +24,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **Statement errors no longer desync the connection**: when a statement failed inside the proxy (an unsupported operation on an encrypted column, for instance), the error was written straight to the client and could overtake responses still in flight from the server — with connection pools and prepared-statement caching, the client then saw a protocol error (`unexpected message from server` in tokio_postgres) instead of the proxy's message, typically right after an encrypted statement had run on the same connection. The proxy now delivers statement errors through the server, so clients always receive the proxy's actual error message, in order, and the connection remains usable.
+
 - **A param bound as both a stored value and a query operand**: `UPDATE t SET enc = $1 WHERE enc = $1` failed with a domain CHECK violation. The two occurrences need different payloads — the stored one carries the ciphertext, the query one only search terms — but the role was tracked per input param, so marking the param as a query operand stripped the ciphertext from the value being stored. The role is now taken from the rewritten statement, per occurrence.
 
 - **JSON selector params when the client declares its own types**: a client that sends param OIDs in Parse (pgx in `cache_describe` mode, for example) got `function eql_v3.jsonb_path_exists(eql_v3_json_search, jsonb) does not exist`. A JSON field selector is passed to the rewritten function as bare text, but was being declared as `jsonb` like every other encrypted operand. Affects `->`, `->>`, `jsonb_path_exists`, `jsonb_path_query` and `jsonb_path_query_first`.
