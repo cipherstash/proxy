@@ -2,6 +2,12 @@
 
 This document outlines the supported JSONB functions and operators in CipherStash Proxy for encrypted data.
 
+> [!IMPORTANT]
+> This page is for Proxy 3.x and EQL v3. Proxy 2.x requires a separate EQL v2
+> `ste_vec` search configuration; follow the
+> [Proxy 2.2 searchable JSON documentation](https://github.com/cipherstash/proxy/blob/v2.2.4/docs/reference/searchable-json.md)
+> for a 2.x deployment.
+
 
 ## Table of Contents
 
@@ -36,76 +42,14 @@ This document outlines the supported JSONB functions and operators in CipherStas
 
 EQL v3 encrypted-JSON columns are self-configuring: the `eql_v3_json_search`
 domain type is the SteVec (searchable encrypted JSON) configuration, so the
-column type alone enables JSON search. There is no separate
-`add_search_config` call as in EQL v2.
+column type alone enables JSON search. Do not create a separate search
+configuration for this column.
 
 > **Note:** JSONB literals in INSERT and UPDATE statements work directly without explicit `::jsonb` type casts. The proxy infers the JSONB type from the target column and handles encryption transparently.
 
-#### Configuration options
-
-> **EQL v2 legacy:** In EQL v2 the `ste_vec` index was configured explicitly via
-> `add_search_config`, and the options below (and the `add_search_config` examples
-> in this section) describe that mechanism. In EQL v3 the `eql_v3_json_search`
-> domain type carries a fixed default configuration, so these options are not
-> set per-column via SQL. The descriptions are retained to explain the indexing
-> behaviour.
-
-The `ste_vec` index configuration accepts the following options:
-
-| Option | Type | Default | Description |
-|--------|------|---------|-------------|
-| `prefix` | string | (required) | Unique prefix for the index, typically `table/column` |
-| `term_filters` | array | `[]` | Filters applied to indexed terms (e.g., `[{"kind": "downcase"}]`) |
-| `array_index_mode` | string or object | `"all"` | Controls which array selectors are generated during indexing |
-
-#### Array index mode
-
-The `array_index_mode` option controls how arrays within JSONB documents are indexed. This affects which JSONPath selectors can be used to query array data.
-
-**Preset values:**
-
-- `"all"` (default) - Generates all selector types. This is backwards compatible with existing configurations.
-- `"none"` - Disables array indexing entirely.
-
-**Object form for fine-grained control:**
-
-```json
-{
-  "item": true,
-  "wildcard": true,
-  "position": false
-}
-```
-
-| Selector | JSONPath | Description |
-|----------|----------|-------------|
-| `item` | `[@]` | EQL array element selector for functions like `jsonb_array_length` |
-| `wildcard` | `[*]` | Standard JSONPath wildcard for iterating array elements |
-| `position` | `[0]`, `[1]`, etc. | Positional access to specific array indices |
-
-**Example with array_index_mode:**
-
-```sql
-SELECT eql_v2.add_search_config(
-  'cipherstash',
-  'encrypted_jsonb',
-  'ste_vec',
-  'jsonb',
-  '{"prefix": "cipherstash/encrypted_jsonb", "array_index_mode": "all"}'
-);
-```
-
-**Example disabling positional indexing:**
-
-```sql
-SELECT eql_v2.add_search_config(
-  'events',
-  'payload',
-  'ste_vec',
-  'jsonb',
-  '{"prefix": "events/payload", "array_index_mode": {"item": true, "wildcard": true, "position": false}}'
-);
-```
+Proxy derives a unique `table/column` selector prefix, applies no term filters,
+and indexes array item, wildcard, and positional selectors. These settings are
+fixed in EQL v3 and are not configured per column.
 
 ### JSON document structure
 

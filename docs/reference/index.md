@@ -2,6 +2,11 @@
 
 This page contains reference documentation for configuring CipherStash Proxy and its features.
 
+> [!IMPORTANT]
+> This reference describes Proxy 3.x and EQL v3. For a Proxy 2.x deployment,
+> use the [Proxy 2.2 reference](https://github.com/cipherstash/proxy/tree/v2.2.4/docs/reference);
+> EQL v2 configuration is not compatible with EQL v3 domain types.
+
 ## Table of contents
 
 - [Proxy config options](#proxy-config-options)
@@ -118,9 +123,9 @@ connection_timeout = "300000"
 # Env: CS_DATABASE__WITH_TLS_VERIFICATION
 with_tls_verification = "false"
 
-# Encrypt configuration reload interval in sec
-# Sets how frequently Encrypted index configuration should be reloaded
-# The configuration specifies the encrypted columns in the database
+# EQL domain/schema reload interval in sec
+# Sets how frequently Proxy refreshes the encryption configuration it derives
+# from EQL v3 column domain types in the database schema
 # Optional
 # Default: `60`
 # Env: CS_DATABASE__CONFIG_RELOAD_INTERVAL
