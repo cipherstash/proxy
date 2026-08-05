@@ -28,6 +28,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - **A NULL JSON selector forwarded the compared value to the database in plaintext**: `WHERE col -> $1 = $2` with `$1` bound NULL builds no needle, so `$2` was never encrypted — and it was then sent to PostgreSQL exactly as the client bound it, putting the plaintext comparand on the wire and into the server log when the column's domain CHECK rejected it. An encrypted operand that produced no ciphertext is now bound NULL, which is also what the SQL means: a comparison against NULL is NULL, so the query returns no rows.
 
+- **A surviving `eql_v2_encrypted` column was served as plaintext**: after migrating to EQL v3, a column still declared with EQL v2's `eql_v2_encrypted` type had no v3 domain identity, so Proxy fell back to treating it as an ordinary plaintext column — no encryption on writes, no decryption on reads. An application writing to such a column stored plaintext in a database it believed was encrypted, and saw no error doing so; the only signal was a single warning at startup. This is the shape of a partly-completed migration, where most columns move to v3 domains and one is left behind.
+
+  Proxy now refuses every statement referencing a table that has such a column, with an error naming the column, its type and the need to migrate it. Other tables are unaffected, so one unmigrated column no longer costs you a deployment. The refusal is not subject to the `mapping_errors_enabled` passthrough — it applies whatever `CS_DEVELOPMENT__ENABLE_MAPPING_ERRORS` is set to. See [Unmappable encrypted column](docs/errors.md#mapping-unmappable-encrypted-column).
+
 ## [3.0.0] - 2026-08-05
 
 ### Changed
@@ -43,12 +47,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **`SELECT DISTINCT` ordered by an encrypted column**: `SELECT DISTINCT … ORDER BY <encrypted column>` now works. Ordering an encrypted column requires its ordering term, which PostgreSQL will not accept under `DISTINCT` unless it also appears in the select list, so the query is rewritten to project the term from a subquery and order the outer query by it. The term is never returned to the client and column names are preserved. Two shapes remain unsupported and are reported as such: `SELECT DISTINCT ON (…)` and `SELECT DISTINCT *`, both when combined with `ORDER BY` on an encrypted column — list the columns explicitly for the latter.
 
 - **Equality on encrypted JSON fields**: `WHERE col -> 'field' = 'value'` now works on encrypted JSON columns, in both the simple and extended query protocols, and in the `->>` and `jsonb_path_query_first(col, path) = value` spellings. `<>` is supported as the negation. The field and the value are combined into a single encrypted value-selector needle and matched by containment, so a query never reveals the field and value separately. Matching is exact and case-sensitive; the value must be a JSON scalar (comparing a whole object or array to a field is rejected — use containment with `@>` instead).
-
-### Security
-
-- **A surviving `eql_v2_encrypted` column was served as plaintext**: after migrating to EQL v3, a column still declared with EQL v2's `eql_v2_encrypted` type had no v3 domain identity, so Proxy fell back to treating it as an ordinary plaintext column — no encryption on writes, no decryption on reads. An application writing to such a column stored plaintext in a database it believed was encrypted, and saw no error doing so; the only signal was a single warning at startup. This is the shape of a partly-completed migration, where most columns move to v3 domains and one is left behind.
-
-  Proxy now refuses every statement referencing a table that has such a column, with an error naming the column, its type and the need to migrate it. Other tables are unaffected, so one unmigrated column no longer costs you a deployment. The refusal is not subject to the `mapping_errors_enabled` passthrough — it applies whatever `CS_DEVELOPMENT__ENABLE_MAPPING_ERRORS` is set to. See [Unmappable encrypted column](docs/errors.md#mapping-unmappable-encrypted-column).
 
 ### Fixed
 
