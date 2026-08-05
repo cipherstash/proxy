@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1785909598637,
+  "lastUpdate": 1785910017458,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -23295,6 +23295,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 40.72618,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "james@cipherstash.com",
+            "name": "James Sadler",
+            "username": "freshtonic"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "ecc6b0e31a9c07e2a4a22d35ab3393bcb3883029",
+          "message": "Merge pull request #435 from cipherstash/james/cip-3682-json-selector-fusion-plaintext-leak\n\nfix(proxy): stop the JSON selector fusion leaking plaintext (CIP-3682)",
+          "timestamp": "2026-08-05T16:02:06+10:00",
+          "tree_id": "369550f194a8fc4410819acd04f8439d6b51b800",
+          "url": "https://github.com/cipherstash/proxy/commit/ecc6b0e31a9c07e2a4a22d35ab3393bcb3883029"
+        },
+        "date": 1785910015982,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 40.784872,
             "unit": "Number"
           }
         ]
