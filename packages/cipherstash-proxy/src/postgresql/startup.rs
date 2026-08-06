@@ -1,5 +1,10 @@
 use pg_proto::{
-    codec::Backend, net::NetworkStream, pre_startup::Negotiation, transport::Buffered, Conn,
+    codec::Backend,
+    middleware::{Identity, Middleware, TypedReceiveError},
+    net::NetworkStream,
+    pre_startup::Negotiation,
+    transport::Buffered,
+    Conn,
 };
 use std::sync::Arc;
 use tokio::net::TcpStream;
@@ -23,7 +28,21 @@ pub async fn with_tls(
 
     let mut request = Conn::new(Buffered::<_, Backend>::new(stream)).request_ssl();
     request.flush().await?;
-    match request.receive_ssl_reply().await? {
+    let mut middleware = Middleware::new((), Identity);
+    let reply = request
+        .receive_encryption_reply_typed(&mut middleware)
+        .await
+        .map_err(|error| match error {
+            TypedReceiveError::Io(error) => Error::from(error),
+            TypedReceiveError::Illegal(reply) | TypedReceiveError::InvalidWire(reply) => {
+                Error::from(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!("invalid PostgreSQL encryption reply: {reply:?}"),
+                ))
+            }
+            TypedReceiveError::Middleware(never) => match never {},
+        })?;
+    match request.receive_reply(reply.into_wire()) {
         Negotiation::Accepted(conn) => {
             let stream = conn
                 .into_transport()
