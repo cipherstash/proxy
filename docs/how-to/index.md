@@ -2,6 +2,13 @@
 
 This page contains how-to documentation for installing, configuring, and running CipherStash Proxy.
 
+> [!IMPORTANT]
+> This guide is for Proxy 3.x and EQL v3. Proxy 2.x uses EQL v2's separate
+> encrypted-column and search-index configuration; use the
+> [Proxy 2.2 documentation](https://github.com/cipherstash/proxy/tree/v2.2.4/docs)
+> when operating a 2.x deployment. Do not mix configuration instructions from
+> the two versions.
+
 ## Table of contents
 
 - [Installing Proxy](#installing-proxy)
@@ -11,6 +18,7 @@ This page contains how-to documentation for installing, configuring, and running
 - [Running Proxy locally](#running-proxy-locally)
 - [Setting up the database schema](#setting-up-the-database-schema)
   - [Creating columns with the right types](#creating-columns-with-the-right-types)
+  - [Bloom-filter text matching](#bloom-filter-text-matching)
 - [Encrypting data in an existing database](#encrypting-data-in-an-existing-database)
 
 ## Installing Proxy
@@ -27,7 +35,10 @@ services:
   db:
     # Your Postgres container config
   proxy:
-    image: cipherstash/proxy:latest
+    # Pin a Proxy 3.0 release — see https://hub.docker.com/r/cipherstash/proxy/tags
+    # for available releases. `latest` may point at a newer major or minor version
+    # whose configuration differs from this guide.
+    image: cipherstash/proxy:3.0
     container_name: proxy
     ports:
       - 6432:6432
@@ -226,6 +237,34 @@ To learn how to use encrypted indexes for other encrypted data types like `text`
 When deploying CipherStash Proxy into production environments with real data, we recommend that you apply these database schema changes with the normal tools and process you use for making changes to your database schema.
 
 To see more examples of how to modify your database schema, check out [the example schema](../sql/schema-example.sql) from [Getting started](#getting-started).
+
+### Bloom-filter text matching
+
+The `eql_v3_text_match`, `eql_v3_text_search`, and
+`eql_v3_text_search_ore` domains carry a Bloom-filter (`bf`) term for fuzzy
+text matching. Proxy derives the match-index configuration from the domain;
+there is no separate search-config row or per-column SQL configuration in EQL
+v3.
+
+Proxy currently uses these fixed parameters:
+
+| Parameter | Value | Effect |
+|-----------|-------|--------|
+| n-gram length | `3` | Text is tokenized into overlapping three-character tokens. Inputs shorter than three characters do not produce a match token. |
+| Bloom filter size (`m`) | `2048` bits | Sets the size of the probabilistic match term. |
+| Hash count (`k`) | `6` | Sets how many Bloom-filter positions each token occupies. |
+
+Before tokenization, Proxy strips a leading or trailing `%` and then a leading
+or trailing `_`. It applies this preprocessing to stored values as well as
+query operands, even when those characters are literal data. Proxy then
+generates overlapping three-character tokens and downcases each token.
+Wildcard characters within the input are not interpreted specially.
+
+Bloom matching is probabilistic: matching rows contain every bit set by the
+query term, but unrelated values can occasionally be false positives. Changing
+the token length, `m`, or `k` would make existing stored and query terms
+incompatible, so EQL v3 does not expose those values as per-column tuning
+options.
 
 ## Encrypting data in an existing database
 
