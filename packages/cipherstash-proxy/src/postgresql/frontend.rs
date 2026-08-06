@@ -34,6 +34,7 @@ use pg_proto::{
         Backend as BackendDirection, BackendMessage, Close, Describe, DescribeTarget, Execute,
         Frontend as FrontendDirection, FrontendMessage, TransactionStatus,
     },
+    middleware::{MessageMiddleware, Middleware},
     pipeline::{FrontendHandling, OperationId},
     transport::Buffered,
 };
@@ -118,6 +119,40 @@ where
     context: Context<S>,
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+enum FrontendDisposition {
+    #[default]
+    Forward,
+    Local,
+}
+
+struct FrontendInterceptor<'a, R, W, S>
+where
+    R: AsyncRead + Unpin,
+    W: AsyncWrite + Unpin,
+    S: EncryptionService,
+{
+    frontend: &'a mut Frontend<R, W, S>,
+}
+
+impl<R, W, S> MessageMiddleware<FrontendMessage, FrontendDisposition>
+    for FrontendInterceptor<'_, R, W, S>
+where
+    R: AsyncRead + Unpin,
+    W: AsyncWrite + Unpin,
+    S: EncryptionService,
+{
+    type Error = Error;
+
+    async fn intercept(
+        &mut self,
+        disposition: &mut FrontendDisposition,
+        message: FrontendMessage,
+    ) -> Result<FrontendMessage, Self::Error> {
+        self.frontend.intercept_frontend(disposition, message).await
+    }
+}
+
 impl<R, W, S> Frontend<R, W, S>
 where
     R: AsyncRead + Unpin,
@@ -172,20 +207,42 @@ where
     pub async fn rewrite(&mut self) -> Result<(), Error> {
         let protocol_message =
             receive_frontend(&mut self.client_reader, self.context.connection_timeout()).await?;
-        let mut outbound_message = protocol_message.clone();
-
-        let recovering_from_extended_error = self.context.protocol_in_extended_error()?;
         let frame = protocol_message.to_frame()?;
         let sent: u64 = (frame.body.len() + 5) as u64;
         counter!(CLIENTS_BYTES_RECEIVED_TOTAL).increment(sent);
 
-        if self.context.mapping_disabled() {
+        let tracking_message = protocol_message.clone();
+        let (outbound_message, disposition) = {
+            let mut middleware = Middleware::new(
+                FrontendDisposition::Forward,
+                FrontendInterceptor { frontend: self },
+            );
+            let outbound_message = middleware.intercept(protocol_message).await?;
+            (outbound_message, *middleware.state())
+        };
+
+        if disposition == FrontendDisposition::Forward {
             self.context
-                .protocol_frontend_received(protocol_message.clone(), FrontendHandling::Forward)
+                .protocol_frontend_received(tracking_message, FrontendHandling::Forward)
                 .await?;
             self.write_to_server(outbound_message).await?;
-            return Ok(());
         }
+
+        Ok(())
+    }
+
+    async fn intercept_frontend(
+        &mut self,
+        disposition: &mut FrontendDisposition,
+        protocol_message: FrontendMessage,
+    ) -> Result<FrontendMessage, Error> {
+        let mut outbound_message = protocol_message.clone();
+
+        if self.context.mapping_disabled() {
+            return Ok(outbound_message);
+        }
+
+        let recovering_from_extended_error = self.context.protocol_in_extended_error()?;
 
         // When an error is detected while processing any extended-query message, the backend issues ErrorResponse, then reads and discards messages until a Sync is reached,
         // https://www.postgresql.org/docs/current/protocol-flow.html#PROTOCOL-FLOW-EXT-QUERY
@@ -198,7 +255,8 @@ where
                 self.context
                     .protocol_frontend_received(protocol_message, FrontendHandling::Local)
                     .await?;
-                return Ok(());
+                *disposition = FrontendDisposition::Local;
+                return Ok(outbound_message);
             }
         }
 
@@ -221,7 +279,8 @@ where
                             .await?;
                         self.send_error_response(id, err).await?;
                         self.send_ready_for_query(id).await?;
-                        return Ok(());
+                        *disposition = FrontendDisposition::Local;
+                        return Ok(outbound_message);
                     }
                 }
             }
@@ -247,7 +306,8 @@ where
                             .protocol_frontend_received(tracking_message, FrontendHandling::Local)
                             .await?;
                         self.send_error_response(id, err).await?;
-                        return Ok(());
+                        *disposition = FrontendDisposition::Local;
+                        return Ok(outbound_message);
                     }
                 }
             }
@@ -268,7 +328,6 @@ where
                                     msg = "EncryptError::InvalidParameter",
                                 );
                                 self.send_error_response(id, err).await?;
-                                return Ok(());
                             }
                             Error::Encrypt(EncryptError::UnknownKeysetIdentifier { .. }) => {
                                 warn!(target: PROTOCOL,
@@ -276,7 +335,6 @@ where
                                     msg = "EncryptError::UnknownKeysetIdentifier",
                                 );
                                 self.send_error_response(id, err).await?;
-                                return Ok(());
                             }
                             _ => {
                                 warn!(target: PROTOCOL,
@@ -285,9 +343,10 @@ where
                                     err = err.to_string()
                                 );
                                 self.send_error_response(id, err).await?;
-                                return Ok(());
                             }
                         }
+                        *disposition = FrontendDisposition::Local;
+                        return Ok(outbound_message);
                     }
                 }
             }
@@ -309,7 +368,8 @@ where
                         .protocol_frontend_received(tracking_message, FrontendHandling::Local)
                         .await?;
                     self.send_ready_for_query(id).await?;
-                    return Ok(());
+                    *disposition = FrontendDisposition::Local;
+                    return Ok(outbound_message);
                 }
             }
             FrontendMessage::Close(close) => {
@@ -324,11 +384,7 @@ where
             }
         }
 
-        self.context
-            .protocol_frontend_received(tracking_message, FrontendHandling::Forward)
-            .await?;
-        self.write_to_server(outbound_message).await?;
-        Ok(())
+        Ok(outbound_message)
     }
 
     pub async fn write_to_server(&mut self, message: FrontendMessage) -> Result<(), Error> {
