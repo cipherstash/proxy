@@ -1,8 +1,24 @@
 # pg-proto follow-ups
 
 The proxy migration delegates framing, typed messages, startup/authentication
-state, demultiplexing, and bounded pipeline scheduling to `pg-proto` 0.2.1.
-Two remaining adapters would be better eliminated in `pg-proto` itself.
+state, typed startup middleware, demultiplexing, and bounded pipeline scheduling
+to `pg-proto` 0.2.3. The remaining adapters below would be better eliminated in
+`pg-proto` itself.
+
+## Support asynchronous typed middleware for pipelined runtime sessions
+
+CipherStash query mapping, encryption, and batched decryption are asynchronous.
+`TypedMiddleware::intercept_typed` is synchronous, and its phase index is derived
+from a compile-time `Conn` typestate. After startup, the proxy deliberately runs
+client-to-server and server-to-client processing concurrently through
+`BoundedPipeline`, whose exact projected phases are runtime-selected.
+
+The proxy therefore uses typed middleware throughout pre-startup, TLS,
+authentication, and startup completion, but retains its asynchronous runtime
+rewrite handlers behind the bounded pipeline's legality checks. An asynchronous
+typed middleware interface integrated with `Pipeline` admissions and responses
+would let those handlers receive and return phase-legal generated message types
+without serializing the two traffic directions.
 
 ## Preserve buffered transport state across a split
 
