@@ -15,10 +15,11 @@ use bytes::Bytes;
 use md5::{Digest, Md5};
 use pg_proto::pre_startup::PreStartupMessage;
 use pg_proto::{
-    auth::{AuthCompletion, AuthEvent, AuthOffer, SaslEvent},
+    auth::{AuthCompletion, AuthEvent, AuthOffer, AwaitingStartupReady, SaslEvent},
     codec::{
         Backend as BackendDirection, BackendMessage, Frontend as FrontendDirection, FrontendMessage,
     },
+    middleware::{Identity, Middleware, ServerRole, TypedPhase, TypedReceiveError},
     net::NetworkStream,
     pre_startup::{PreStartup, PreStartupOffer},
     server_auth::{ServerPassword, ServerProtocolOffer},
@@ -39,9 +40,33 @@ use tracing::{debug, error, info, warn};
 const SCRAM_SHA_256_PLUS: &[u8] = b"SCRAM-SHA-256-PLUS";
 const SCRAM_SHA_256: &[u8] = b"SCRAM-SHA-256";
 type PgStream = NetworkStream<TcpStream>;
+type ProtocolMiddleware = Middleware<(), Identity>;
+
+fn typed_receive_error<Message>(
+    error: TypedReceiveError<std::convert::Infallible, Message>,
+) -> Error
+where
+    Message: std::fmt::Debug,
+{
+    match error {
+        TypedReceiveError::Io(error) => error.into(),
+        TypedReceiveError::Illegal(message) => std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("message is illegal in the current PostgreSQL phase: {message:?}"),
+        )
+        .into(),
+        TypedReceiveError::Middleware(never) => match never {},
+        TypedReceiveError::InvalidWire(message) => std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("middleware produced an invalid PostgreSQL message: {message:?}"),
+        )
+        .into(),
+    }
+}
 
 async fn receive_pre_startup<S: AsyncRead + Unpin>(
     mut conn: Conn<Buffered<S, FrontendDirection>, PreStartup>,
+    middleware: &mut ProtocolMiddleware,
     connection_timeout: Option<Duration>,
 ) -> Result<
     (
@@ -51,20 +76,22 @@ async fn receive_pre_startup<S: AsyncRead + Unpin>(
     (Conn<Buffered<S, FrontendDirection>, PreStartup>, Error),
 > {
     let received = match connection_timeout {
-        Some(duration) => match timeout(duration, conn.receive_pre_startup_wire()).await {
+        Some(duration) => match timeout(duration, conn.receive_pre_startup_typed(middleware)).await
+        {
             Ok(received) => received,
             Err(_) => return Err((conn, Error::ConnectionTimeout { duration })),
         },
-        None => conn.receive_pre_startup_wire().await,
+        None => conn.receive_pre_startup_typed(middleware).await,
     };
     match received {
-        Ok(message) => Ok((conn, message)),
-        Err(error) => Err((conn, error.into())),
+        Ok(message) => Ok((conn, message.into_wire())),
+        Err(error) => Err((conn, typed_receive_error(error))),
     }
 }
 
 async fn receive_frontend_auth<S: AsyncRead + Unpin>(
     mut conn: Conn<Buffered<S, FrontendDirection>, ServerPassword>,
+    middleware: &mut ProtocolMiddleware,
     connection_timeout: Option<Duration>,
 ) -> Result<
     (
@@ -74,38 +101,43 @@ async fn receive_frontend_auth<S: AsyncRead + Unpin>(
     (Conn<Buffered<S, FrontendDirection>, ServerPassword>, Error),
 > {
     let received = match connection_timeout {
-        Some(duration) => match timeout(duration, conn.receive_frontend_wire()).await {
+        Some(duration) => match timeout(duration, conn.receive_frontend_typed(middleware)).await {
             Ok(received) => received,
             Err(_) => return Err((conn, Error::ConnectionTimeout { duration })),
         },
-        None => conn.receive_frontend_wire().await,
+        None => conn.receive_frontend_typed(middleware).await,
     };
     match received {
-        Ok(message) => Ok((conn, message)),
-        Err(error) => Err((conn, error.into())),
+        Ok(message) => Ok((conn, message.into_wire())),
+        Err(error) => Err((conn, typed_receive_error(error))),
     }
 }
 
 async fn receive_backend_conn<S, Phase>(
     mut conn: Conn<Buffered<S, BackendDirection>, Phase>,
+    middleware: &mut ProtocolMiddleware,
 ) -> Result<(Conn<Buffered<S, BackendDirection>, Phase>, BackendMessage), Error>
 where
     S: AsyncRead + Unpin,
+    Phase: TypedPhase<ServerRole, BackendMessage>,
+    <Phase as TypedPhase<ServerRole, BackendMessage>>::Message: Into<BackendMessage>,
 {
     let duration = Duration::from_secs(10);
-    let message = timeout(duration, conn.receive_backend_wire())
+    let message = timeout(duration, conn.receive_backend_typed(middleware))
         .await
-        .map_err(|_| Error::ConnectionTimeout { duration })??;
-    Ok((conn, message))
+        .map_err(|_| Error::ConnectionTimeout { duration })?
+        .map_err(typed_receive_error)?;
+    Ok((conn, message.into()))
 }
 
 async fn authenticate_upstream(
     startup: Conn<Buffered<PgStream, BackendDirection>, pg_proto::pre_startup::Startup>,
     context: &Context<ZeroKms>,
-) -> Result<Buffered<PgStream, BackendDirection>, Error> {
+    middleware: &mut ProtocolMiddleware,
+) -> Result<Conn<Buffered<PgStream, BackendDirection>, AwaitingStartupReady>, Error> {
     let mut auth = startup.authentication();
     let offer = loop {
-        let (current, message) = receive_backend_conn(auth).await?;
+        let (current, message) = receive_backend_conn(auth, middleware).await?;
         match current.offer_backend(message) {
             Ok(AuthEvent::Authentication(offer)) => break offer,
             Ok(AuthEvent::Negotiate { conn, .. }) => auth = conn,
@@ -128,12 +160,12 @@ async fn authenticate_upstream(
     };
 
     match offer {
-        AuthOffer::Ok(conn) => Ok(conn.into_transport()),
+        AuthOffer::Ok(conn) => Ok(conn),
         AuthOffer::Cleartext(conn) => {
             let (mut awaiting, frame) = conn.password(context.database_password().as_bytes())?;
             awaiting.push_frame(frame)?;
             awaiting.flush().await?;
-            complete_upstream_auth(awaiting).await
+            complete_upstream_auth(awaiting, middleware).await
         }
         AuthOffer::Md5 { conn, salt } => {
             let hash = md5_hash(
@@ -144,7 +176,7 @@ async fn authenticate_upstream(
             let (mut awaiting, frame) = conn.password(hash.as_bytes())?;
             awaiting.push_frame(frame)?;
             awaiting.flush().await?;
-            complete_upstream_auth(awaiting).await
+            complete_upstream_auth(awaiting, middleware).await
         }
         AuthOffer::Sasl { conn, mechanisms } => {
             let mechanism = sasl_mechanism(&mechanisms)?;
@@ -164,7 +196,7 @@ async fn authenticate_upstream(
             sasl.push_frame(frame)?;
             sasl.flush().await?;
 
-            let (sasl, message) = receive_backend_conn(sasl).await?;
+            let (sasl, message) = receive_backend_conn(sasl, middleware).await?;
             let BackendMessage::Authentication(authentication) = message else {
                 sasl.into_transport();
                 return Err(ProtocolError::UnexpectedStartupMessage.into());
@@ -184,7 +216,7 @@ async fn authenticate_upstream(
             sasl.push_frame(frame)?;
             sasl.flush().await?;
 
-            let (sasl, message) = receive_backend_conn(sasl).await?;
+            let (sasl, message) = receive_backend_conn(sasl, middleware).await?;
             let BackendMessage::Authentication(authentication) = message else {
                 sasl.into_transport();
                 return Err(ProtocolError::UnexpectedStartupMessage.into());
@@ -200,7 +232,7 @@ async fn authenticate_upstream(
                 return Err(ProtocolError::AuthenticationFailed.into());
             };
             scram.finish(&server_final)?;
-            complete_upstream_auth(final_state.verified()).await
+            complete_upstream_auth(final_state.verified(), middleware).await
         }
         AuthOffer::Gss(conn) | AuthOffer::Sspi(conn) | AuthOffer::KerberosV5(conn) => {
             conn.into_transport();
@@ -211,10 +243,11 @@ async fn authenticate_upstream(
 
 async fn complete_upstream_auth(
     awaiting: Conn<Buffered<PgStream, BackendDirection>, pg_proto::auth::AwaitingAuthOk>,
-) -> Result<Buffered<PgStream, BackendDirection>, Error> {
-    let (awaiting, message) = receive_backend_conn(awaiting).await?;
+    middleware: &mut ProtocolMiddleware,
+) -> Result<Conn<Buffered<PgStream, BackendDirection>, AwaitingStartupReady>, Error> {
+    let (awaiting, message) = receive_backend_conn(awaiting, middleware).await?;
     match awaiting.offer(message) {
-        Ok(AuthCompletion::Ok(conn)) => Ok(conn.into_transport()),
+        Ok(AuthCompletion::Ok(conn)) => Ok(conn),
         Ok(AuthCompletion::Error { conn, .. }) => {
             conn.into_transport();
             Err(ProtocolError::AuthenticationFailed.into())
@@ -227,16 +260,23 @@ async fn complete_upstream_auth(
 }
 
 async fn drain_upstream_startup(
-    database: &mut Buffered<PgStream, BackendDirection>,
+    mut database: Conn<Buffered<PgStream, BackendDirection>, AwaitingStartupReady>,
     client: &mut Buffered<PgStream, FrontendDirection>,
-) -> Result<(), Error> {
+    middleware: &mut ProtocolMiddleware,
+) -> Result<Buffered<PgStream, BackendDirection>, Error> {
     loop {
-        let message = database.receive_backend().await?;
-        let ready = matches!(message, BackendMessage::ReadyForQuery(_));
-        let _ = database.project_backend(message.clone());
+        let typed = database
+            .receive_backend_typed(middleware)
+            .await
+            .map_err(typed_receive_error)?;
+        let message: BackendMessage = typed.into();
+        let session_item = database.project_backend(message.clone());
         send_backend_message(client, message).await?;
-        if ready {
-            return Ok(());
+        if let Some(item) = session_item {
+            match database.offer_ready(item) {
+                Ok(ready) => return Ok(ready.into_transport()),
+                Err((conn, _)) => database = conn,
+            }
         }
     }
 }
@@ -251,6 +291,8 @@ enum SaslMechanism {
 /// Negotiation and message validation are delegated to `pg-proto`; this function
 /// retains the proxy-specific TLS policy, authentication policy, and forwarding.
 pub async fn handler(client_stream: PgStream, context: Context<ZeroKms>) -> Result<(), Error> {
+    let mut downstream_middleware = Middleware::new((), Identity);
+    let mut upstream_middleware = Middleware::new((), Identity);
     let mut client_is_tls = client_stream.is_tls();
     let mut client = Conn::new(Buffered::<_, FrontendDirection>::new_frontend(
         client_stream,
@@ -267,19 +309,24 @@ pub async fn handler(client_stream: PgStream, context: Context<ZeroKms>) -> Resu
     );
 
     let (client_startup, startup_message) = loop {
-        let (pre_startup, startup_message) =
-            match receive_pre_startup(client, context.connection_timeout()).await {
-                Ok(result) => result,
-                Err((conn, err @ Error::ConnectionTimeout { .. })) => {
-                    let mut transport = conn.into_transport();
-                    send_timeout_error(&mut transport, &err).await;
-                    return Err(err);
-                }
-                Err((conn, err)) => {
-                    conn.into_transport();
-                    return Err(err);
-                }
-            };
+        let (pre_startup, startup_message) = match receive_pre_startup(
+            client,
+            &mut downstream_middleware,
+            context.connection_timeout(),
+        )
+        .await
+        {
+            Ok(result) => result,
+            Err((conn, err @ Error::ConnectionTimeout { .. })) => {
+                let mut transport = conn.into_transport();
+                send_timeout_error(&mut transport, &err).await;
+                return Err(err);
+            }
+            Err((conn, err)) => {
+                conn.into_transport();
+                return Err(err);
+            }
+        };
 
         match pre_startup.offer_pre_startup(startup_message) {
             PreStartupOffer::Ssl(decision) => {
@@ -338,7 +385,8 @@ pub async fn handler(client_stream: PgStream, context: Context<ZeroKms>) -> Resu
             .startup(&startup_message)?;
     database_startup.push_startup_packet(&startup_packet);
     database_startup.flush().await?;
-    let mut database_stream = authenticate_upstream(database_startup, &context).await?;
+    let database_startup =
+        authenticate_upstream(database_startup, &context, &mut upstream_middleware).await?;
 
     // Proxy -> Client Authentication
     // Uses MD5
@@ -371,19 +419,24 @@ pub async fn handler(client_stream: PgStream, context: Context<ZeroKms>) -> Resu
         password_state.flush().await?;
 
         let connection_timeout = context.connection_timeout();
-        let (password_state, message) =
-            match receive_frontend_auth(password_state, connection_timeout).await {
-                Ok(result) => result,
-                Err((conn, err @ Error::ConnectionTimeout { .. })) => {
-                    let mut transport = conn.into_transport();
-                    send_timeout_error(&mut transport, &err).await;
-                    return Err(err);
-                }
-                Err((conn, err)) => {
-                    conn.into_transport();
-                    return Err(err);
-                }
-            };
+        let (password_state, message) = match receive_frontend_auth(
+            password_state,
+            &mut downstream_middleware,
+            connection_timeout,
+        )
+        .await
+        {
+            Ok(result) => result,
+            Err((conn, err @ Error::ConnectionTimeout { .. })) => {
+                let mut transport = conn.into_transport();
+                send_timeout_error(&mut transport, &err).await;
+                return Err(err);
+            }
+            Err((conn, err)) => {
+                conn.into_transport();
+                return Err(err);
+            }
+        };
 
         let (auth_state, password) =
             password_state
@@ -419,7 +472,12 @@ pub async fn handler(client_stream: PgStream, context: Context<ZeroKms>) -> Resu
         return Err(ConfigError::TlsRequired.into());
     }
 
-    drain_upstream_startup(&mut database_stream, &mut client_stream).await?;
+    let database_stream = drain_upstream_startup(
+        database_startup,
+        &mut client_stream,
+        &mut upstream_middleware,
+    )
+    .await?;
 
     let (client_reader, client_writer) = client_stream.into_inner().split();
     let (server_reader, server_writer) = database_stream.into_inner().split();
