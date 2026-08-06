@@ -22,6 +22,7 @@ use crate::EqlCiphertext;
 use metrics::{counter, histogram};
 use pg_proto::{
     codec::{Backend as BackendDirection, BackendMessage},
+    middleware::{MessageMiddleware, Middleware},
     transport::Buffered,
 };
 use std::time::Instant;
@@ -100,6 +101,37 @@ where
     buffer: MessageBuffer,
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+enum BackendDisposition {
+    #[default]
+    Emit,
+    Suppress,
+}
+
+struct BackendInterceptor<'a, R, S>
+where
+    R: AsyncRead + Unpin,
+    S: EncryptionService,
+{
+    backend: &'a mut Backend<R, S>,
+}
+
+impl<R, S> MessageMiddleware<BackendMessage, BackendDisposition> for BackendInterceptor<'_, R, S>
+where
+    R: AsyncRead + Unpin,
+    S: EncryptionService,
+{
+    type Error = Error;
+
+    async fn intercept(
+        &mut self,
+        disposition: &mut BackendDisposition,
+        message: BackendMessage,
+    ) -> Result<BackendMessage, Self::Error> {
+        self.backend.intercept_backend(disposition, message).await
+    }
+}
+
 impl<R, S> Backend<R, S>
 where
     R: AsyncRead + Unpin,
@@ -167,8 +199,6 @@ where
         let read_start = Instant::now();
         let protocol_message =
             receive_backend(&mut self.server_reader, self.context.connection_timeout()).await?;
-        let mut outbound_message = protocol_message.clone();
-
         let session_item = self.server_reader.project_backend(protocol_message.clone());
         if session_item.is_none() {
             // The demux has recorded the asynchronous event and its ordering;
@@ -193,6 +223,29 @@ where
             );
         }
 
+        let (outbound_message, disposition) = {
+            let mut middleware = Middleware::new(
+                BackendDisposition::Emit,
+                BackendInterceptor { backend: self },
+            );
+            let outbound_message = middleware.intercept(protocol_message).await?;
+            (outbound_message, *middleware.state())
+        };
+
+        if disposition == BackendDisposition::Emit {
+            self.write_with_flush(outbound_message).await?;
+        }
+
+        Ok(())
+    }
+
+    async fn intercept_backend(
+        &mut self,
+        disposition: &mut BackendDisposition,
+        protocol_message: BackendMessage,
+    ) -> Result<BackendMessage, Error> {
+        let mut outbound_message = protocol_message.clone();
+
         if self.context.is_passthrough() {
             debug!(target: DEVELOPMENT,
                 client_id = self.context.client_id,
@@ -207,8 +260,6 @@ where
             if matches!(&protocol_message, BackendMessage::ReadyForQuery(_)) {
                 self.context.reload_schema_if_changed().await;
             }
-
-            self.write_with_flush(outbound_message).await?;
 
             // The frontend starts a session and enqueues an execute for every
             // statement (start_session / set_execute), regardless of whether
@@ -230,7 +281,7 @@ where
                 _ => {}
             }
 
-            return Ok(());
+            return Ok(outbound_message);
         }
 
         let keyset_id = self.context.keyset_identifier();
@@ -241,7 +292,8 @@ where
                 // Encrypted DataRows are added to the buffer and we return early
                 // Otherwise, continue and write
                 if self.data_row_handler(DataRow::from(row)).await? {
-                    return Ok(());
+                    *disposition = BackendDisposition::Suppress;
+                    return Ok(outbound_message);
                 }
             }
 
@@ -327,9 +379,7 @@ where
             }
         }
 
-        self.write_with_flush(outbound_message).await?;
-
-        Ok(())
+        Ok(outbound_message)
     }
 
     /// Handles PostgreSQL ErrorResponse messages from the server.
