@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1785978492950,
+  "lastUpdate": 1785978497255,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -23711,6 +23711,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 34.439016,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "james@cipherstash.com",
+            "name": "James Sadler",
+            "username": "freshtonic"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "771b6fc8a68b12413b91678b58eaafca020858d1",
+          "message": "Merge pull request #445 from cipherstash/james/cip-3714\n\ndocs: clarify EQL v3 configuration and Bloom defaults",
+          "timestamp": "2026-08-06T11:02:26+10:00",
+          "tree_id": "a52d9c293652db3f7373ec00947d4abb4cc5ac1b",
+          "url": "https://github.com/cipherstash/proxy/commit/771b6fc8a68b12413b91678b58eaafca020858d1"
+        },
+        "date": 1785978495853,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 39.034209,
             "unit": "Number"
           }
         ]
