@@ -242,7 +242,7 @@ where
             return Ok(outbound_message);
         }
 
-        let recovering_from_extended_error = self.context.protocol_in_extended_error()?;
+        let recovering_from_extended_error = self.context.protocol_in_extended_error().await;
 
         // When an error is detected while processing any extended-query message, the backend issues ErrorResponse, then reads and discards messages until a Sync is reached,
         // https://www.postgresql.org/docs/current/protocol-flow.html#PROTOCOL-FLOW-EXT-QUERY
