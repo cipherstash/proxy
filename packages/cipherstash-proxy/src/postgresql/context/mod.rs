@@ -21,7 +21,11 @@ use metrics::{counter, histogram};
 use pg_proto::{
     codec::{BackendMessage, Describe, DescribeTarget, FrontendMessage},
     intermediary::Intermediary,
-    pipeline::{BackendAction, BoundedPipeline, FrontendAction, FrontendHandling, OperationId},
+    middleware::{Identity, Middleware},
+    pipeline::{
+        BackendAction, BoundedPipeline, FrontendAction, FrontendHandling, FrontendProjectionError,
+        OperationId, PipelineMiddlewareError,
+    },
 };
 use serde_json::json;
 use sqltk::parser::ast::{Expr, Ident, ObjectName, ObjectNamePart, Set, Value, ValueWithSpan};
@@ -30,11 +34,11 @@ use std::{
     collections::{HashMap, VecDeque},
     sync::{
         atomic::{AtomicBool, AtomicU64, Ordering},
-        Arc, LazyLock, Mutex, RwLock,
+        Arc, LazyLock, RwLock,
     },
     time::{Duration, Instant},
 };
-use tokio::sync::{oneshot, Notify};
+use tokio::sync::{oneshot, Mutex, Notify};
 use tracing::{debug, error, warn};
 use uuid::Uuid;
 
@@ -42,10 +46,6 @@ type DescribeQueue = Queue<Describe>;
 type ExecuteQueue = Queue<ExecuteContext>;
 type SessionMetricsQueue = Queue<SessionMetricsContext>;
 type PortalQueue = Queue<Arc<Portal>>;
-
-fn protocol_lock_error<T>(_: std::sync::PoisonError<T>) -> Error {
-    std::io::Error::other("PostgreSQL protocol state lock poisoned").into()
-}
 
 fn protocol_transition_error(error: impl std::fmt::Debug) -> Error {
     std::io::Error::new(std::io::ErrorKind::InvalidData, format!("{error:?}")).into()
@@ -239,19 +239,27 @@ where
             let notified = self.protocol_changed.notified();
             tokio::pin!(notified);
             notified.as_mut().enable();
-            let action = {
-                let mut protocol = self.protocol.lock().map_err(protocol_lock_error)?;
-                protocol
+            let admission = {
+                let mut protocol = self.protocol.lock().await;
+                let mut middleware = Middleware::new((), Identity);
+                match protocol
                     .sides
                     .pipeline_mut()
-                    .frontend_action(message, handling)
-                    .map_err(protocol_transition_error)?
+                    .accept_frontend_typed(&mut middleware, message, handling)
+                    .await
+                {
+                    Ok(admission) => Ok(admission.into_action()),
+                    Err(PipelineMiddlewareError::Projection(
+                        FrontendProjectionError::Capacity(returned),
+                    )) => Err(*returned),
+                    Err(error) => return Err(protocol_transition_error(error)),
+                }
             };
-            match action {
-                FrontendAction::Forward { id, .. } | FrontendAction::Discard { id } => {
+            match admission {
+                Ok(FrontendAction::Forward { id, .. } | FrontendAction::Discard { id }) => {
                     return Ok(id);
                 }
-                FrontendAction::Backpressure(returned) => {
+                Err(returned) => {
                     message = returned;
                     notified.await;
                 }
@@ -259,12 +267,12 @@ where
         }
     }
 
-    pub fn protocol_in_extended_error(&self) -> Result<bool, Error> {
-        let protocol = self.protocol.lock().map_err(protocol_lock_error)?;
-        Ok(matches!(
+    pub async fn protocol_in_extended_error(&self) -> bool {
+        let protocol = self.protocol.lock().await;
+        matches!(
             protocol.sides.pipeline().state(),
             pg_proto::pipeline::PipelineState::ExtendedError
-        ))
+        )
     }
 
     /// Records a message accepted from the upstream database.
@@ -278,11 +286,13 @@ where
             tokio::pin!(notified);
             notified.as_mut().enable();
             let action = {
-                let mut protocol = self.protocol.lock().map_err(protocol_lock_error)?;
+                let mut protocol = self.protocol.lock().await;
+                let mut middleware = Middleware::new((), Identity);
                 protocol
                     .sides
                     .pipeline_mut()
-                    .accept_backend(message)
+                    .accept_backend_typed(&mut middleware, message)
+                    .await
                     .map_err(protocol_transition_error)?
             };
             match action {
@@ -306,11 +316,13 @@ where
             tokio::pin!(notified);
             notified.as_mut().enable();
             let action = {
-                let mut protocol = self.protocol.lock().map_err(protocol_lock_error)?;
+                let mut protocol = self.protocol.lock().await;
+                let mut middleware = Middleware::new((), Identity);
                 protocol
                     .sides
                     .pipeline_mut()
-                    .try_emit_local(id, message)
+                    .try_emit_local_typed(&mut middleware, id, message)
+                    .await
                     .map_err(protocol_transition_error)?
             };
             match action {
@@ -1203,6 +1215,7 @@ mod tests {
         BackendMessage, Bind, DescribeTarget, DiagnosticResponse, Execute, FrontendMessage, Parse,
         TransactionStatus,
     };
+    use pg_proto::middleware::{Identity, Middleware};
     use pg_proto::pipeline::{BackendAction, FrontendAction, FrontendHandling, PipelineState};
     use sqltk::parser::{dialect::PostgreSqlDialect, parser::Parser};
     use std::sync::Arc;
@@ -1314,9 +1327,10 @@ mod tests {
         assert!(context.take_schema_changed());
     }
 
-    #[test]
-    fn pg_proto_ledger_tracks_pipelined_extended_messages_in_processing_order() {
+    #[tokio::test]
+    async fn pg_proto_ledger_tracks_pipelined_extended_messages_in_processing_order() {
         let mut protocol = ProtocolState::new();
+        let mut middleware = Middleware::new((), Identity);
         let messages = [
             FrontendMessage::Parse(Parse {
                 statement: Bytes::new(),
@@ -1341,9 +1355,13 @@ mod tests {
                 protocol
                     .sides
                     .pipeline_mut()
-                    .frontend_action(message, FrontendHandling::Forward)
+                    .accept_frontend_typed(&mut middleware, message, FrontendHandling::Forward,)
+                    .await
                     .unwrap(),
-                FrontendAction::Forward { .. }
+                pg_proto::pipeline::FrontendAdmission::Immediate(FrontendAction::Forward { .. })
+                    | pg_proto::pipeline::FrontendAdmission::Waiting(
+                        FrontendAction::Forward { .. }
+                    )
             ));
         }
 
@@ -1357,7 +1375,8 @@ mod tests {
                 protocol
                     .sides
                     .pipeline_mut()
-                    .accept_backend(response)
+                    .accept_backend_typed(&mut middleware, response)
+                    .await
                     .unwrap(),
                 BackendAction::Emit(_)
             ));
@@ -1426,7 +1445,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(
-            context.protocol.lock().unwrap().sides.pipeline().state(),
+            context.protocol.lock().await.sides.pipeline().state(),
             PipelineState::Ready
         );
     }
