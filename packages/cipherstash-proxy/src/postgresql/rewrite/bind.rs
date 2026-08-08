@@ -1,3 +1,4 @@
+//! CipherStash Bind parameter rewriting.
 use super::{maybe_json, maybe_jsonb, Name, NULL};
 use crate::error::{Error, MappingError, ProtocolError};
 use crate::log::MAPPER;
@@ -600,7 +601,7 @@ mod tests {
         config::LogConfig,
         log,
         postgresql::{
-            context::column::Column, format_code::FormatCode, messages::bind::Bind, messages::Name,
+            context::column::Column, format_code::FormatCode, rewrite::bind::Bind, rewrite::Name,
         },
         Identifier,
     };

@@ -4,7 +4,7 @@ pub mod portal;
 pub mod statement;
 pub mod statement_metadata;
 pub use self::{phase_timing::PhaseTiming, portal::Portal, statement::Statement};
-use super::{column_mapper::ColumnMapper, messages::Name, Column};
+use super::{column_mapper::ColumnMapper, rewrite::Name, Column};
 use crate::{
     config::TandemConfig,
     error::{EncryptError, Error},
@@ -1200,7 +1200,7 @@ mod tests {
         config::LogConfig,
         error::Error,
         log,
-        postgresql::{messages::Name, Column},
+        postgresql::{rewrite::Name, Column},
         proxy::{EncryptConfig, EncryptionService},
         TandemConfig,
     };

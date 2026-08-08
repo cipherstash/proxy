@@ -1,3 +1,4 @@
+//! CipherStash ParameterDescription rewriting.
 use crate::log::MAPPER;
 #[cfg(test)]
 use crate::{

@@ -1,10 +1,10 @@
-use super::context::phase_timing::PhaseTimer;
-use super::context::{Context, SessionId, Statement};
-use super::error_handler::PostgreSqlErrorHandler;
-use super::messages::bind::Bind;
-use super::messages::parse::Parse;
-use super::messages::query::Query;
-use super::parser::SqlParser;
+use super::super::context::phase_timing::PhaseTimer;
+use super::super::context::{Context, SessionId, Statement};
+use super::super::error_handler::PostgreSqlErrorHandler;
+use super::super::parser::SqlParser;
+use super::super::rewrite::bind::Bind;
+use super::super::rewrite::parse::Parse;
+use super::super::rewrite::query::Query;
 use crate::connect::Sender;
 use crate::error::{EncryptError, Error, MappingError};
 use crate::log::{MAPPER, PROTOCOL};
@@ -17,12 +17,12 @@ use crate::postgresql::context::Portal;
 use crate::postgresql::data::{
     compose_json_selector_path, json_value_selector_plaintext, literal_from_sql, literal_json_value,
 };
-use crate::postgresql::messages::Name;
+use crate::postgresql::rewrite::Name;
 use crate::prometheus::{
-    CLIENTS_BYTES_RECEIVED_TOTAL, ENCRYPTED_VALUES_TOTAL, ENCRYPTION_DURATION_SECONDS,
-    ENCRYPTION_ERROR_TOTAL, ENCRYPTION_REQUESTS_TOTAL, SERVER_BYTES_SENT_TOTAL,
-    STATEMENTS_ENCRYPTED_TOTAL, STATEMENTS_PASSTHROUGH_MAPPING_DISABLED_TOTAL,
-    STATEMENTS_PASSTHROUGH_TOTAL, STATEMENTS_UNMAPPABLE_TOTAL,
+    ENCRYPTED_VALUES_TOTAL, ENCRYPTION_DURATION_SECONDS, ENCRYPTION_ERROR_TOTAL,
+    ENCRYPTION_REQUESTS_TOTAL, STATEMENTS_ENCRYPTED_TOTAL,
+    STATEMENTS_PASSTHROUGH_MAPPING_DISABLED_TOTAL, STATEMENTS_PASSTHROUGH_TOTAL,
+    STATEMENTS_UNMAPPABLE_TOTAL,
 };
 use crate::proxy::EncryptionService;
 use crate::{EqlOutput, EqlQueryPayload};
@@ -31,34 +31,19 @@ use eql_mapper::{self, EqlMapperError, EqlTermVariant, JsonSelectorSegment, Type
 use metrics::{counter, histogram};
 use pg_proto::{
     codec::{
-        Backend as BackendDirection, BackendMessage, Close, Describe, DescribeTarget, Execute,
-        Frontend as FrontendDirection, FrontendMessage, TransactionStatus,
+        BackendMessage, Close, Describe, DescribeTarget, Execute, FrontendMessage,
+        TransactionStatus,
     },
-    middleware::{MessageMiddleware, Middleware},
+    middleware::MessageMiddleware,
     pipeline::{FrontendHandling, OperationId},
-    transport::Buffered,
 };
 use serde::Serialize;
 use sqltk::parser::ast::{self, Value};
 use sqltk::NodeKey;
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
-use tokio::io::{AsyncRead, AsyncWrite};
+use std::time::Instant;
 use tracing::{debug, info, warn};
-
-async fn receive_frontend<S: AsyncRead + Unpin>(
-    reader: &mut Buffered<S, FrontendDirection>,
-    connection_timeout: Option<Duration>,
-) -> Result<FrontendMessage, Error> {
-    match connection_timeout {
-        Some(duration) => tokio::time::timeout(duration, reader.receive_wire())
-            .await
-            .map_err(|_| Error::ConnectionTimeout { duration })?
-            .map_err(Into::into),
-        None => reader.receive_wire().await.map_err(Into::into),
-    }
-}
 
 /// The PostgreSQL proxy frontend that handles client-to-server message processing.
 ///
@@ -103,45 +88,21 @@ async fn receive_frontend<S: AsyncRead + Unpin>(
 /// Encryption and mapping errors are converted to appropriate PostgreSQL error responses
 /// and sent back to the client. The frontend maintains error state to properly handle
 /// the PostgreSQL extended query error recovery protocol.
-pub struct Frontend<R, W, S>
-where
-    R: AsyncRead + Unpin,
-    W: AsyncWrite + Unpin,
-    S: EncryptionService,
-{
-    /// Reader for incoming client messages
-    client_reader: Buffered<R, FrontendDirection>,
+pub struct Frontend<S: EncryptionService> {
     /// Sender for outgoing messages to client
     client_sender: Sender,
-    /// Writer for forwarding messages to server
-    server_writer: Buffered<W, BackendDirection>,
     /// Session context tracking statements, portals, and keyset IDs
     context: Context<S>,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-enum FrontendDisposition {
+pub(crate) enum FrontendDisposition {
     #[default]
     Forward,
     Local,
 }
 
-struct FrontendInterceptor<'a, R, W, S>
-where
-    R: AsyncRead + Unpin,
-    W: AsyncWrite + Unpin,
-    S: EncryptionService,
-{
-    frontend: &'a mut Frontend<R, W, S>,
-}
-
-impl<R, W, S> MessageMiddleware<FrontendMessage, FrontendDisposition>
-    for FrontendInterceptor<'_, R, W, S>
-where
-    R: AsyncRead + Unpin,
-    W: AsyncWrite + Unpin,
-    S: EncryptionService,
-{
+impl<S: EncryptionService> MessageMiddleware<FrontendMessage, FrontendDisposition> for Frontend<S> {
     type Error = Error;
 
     async fn intercept(
@@ -149,16 +110,11 @@ where
         disposition: &mut FrontendDisposition,
         message: FrontendMessage,
     ) -> Result<FrontendMessage, Self::Error> {
-        self.frontend.intercept_frontend(disposition, message).await
+        self.intercept_frontend(disposition, message).await
     }
 }
 
-impl<R, W, S> Frontend<R, W, S>
-where
-    R: AsyncRead + Unpin,
-    W: AsyncWrite + Unpin,
-    S: EncryptionService,
-{
+impl<S: EncryptionService> Frontend<S> {
     /// Creates a new Frontend instance.
     ///
     /// # Arguments
@@ -167,68 +123,11 @@ where
     /// * `client_sender` - Channel sender for sending messages back to client
     /// * `server_writer` - Stream for writing messages to the PostgreSQL server
     /// * `context` - Session context for tracking statements and portals with service access
-    pub fn new(
-        client_reader: R,
-        client_sender: Sender,
-        server_writer: W,
-        context: Context<S>,
-    ) -> Self {
+    pub fn new(client_sender: Sender, context: Context<S>) -> Self {
         Frontend {
-            client_reader: Buffered::new_frontend(client_reader),
             client_sender,
-            server_writer: Buffered::new(server_writer),
             context,
         }
-    }
-
-    /// Main message processing loop for handling client messages.
-    ///
-    /// Reads a message from the client, processes it based on the PostgreSQL message type,
-    /// performs any necessary encryption/transformation, and forwards it to the server.
-    ///
-    /// # Message Processing Flow
-    ///
-    /// 1. **Read Message**: Read and parse the PostgreSQL wire protocol message
-    /// 2. **Check Mapping**: Skip processing if mapping is disabled
-    /// 3. **Handle by Type**: Route to appropriate handler based on message type
-    /// 4. **Error Recovery**: Handle extended query protocol error states
-    /// 5. **Forward**: Send processed message to PostgreSQL server
-    ///
-    /// # Error States
-    ///
-    /// When an error occurs during extended query processing, the frontend enters
-    /// error state and discards messages until a Sync message is received, following
-    /// the PostgreSQL protocol specification.
-    ///
-    /// # Returns
-    ///
-    /// Returns `Ok(())` on successful message processing, or an `Error` if a fatal
-    /// error occurs that should terminate the connection.
-    pub async fn rewrite(&mut self) -> Result<(), Error> {
-        let protocol_message =
-            receive_frontend(&mut self.client_reader, self.context.connection_timeout()).await?;
-        let frame = protocol_message.to_frame()?;
-        let sent: u64 = (frame.body.len() + 5) as u64;
-        counter!(CLIENTS_BYTES_RECEIVED_TOTAL).increment(sent);
-
-        let tracking_message = protocol_message.clone();
-        let (outbound_message, disposition) = {
-            let mut middleware = Middleware::new(
-                FrontendDisposition::Forward,
-                FrontendInterceptor { frontend: self },
-            );
-            let outbound_message = middleware.intercept(protocol_message).await?;
-            (outbound_message, *middleware.state())
-        };
-
-        if disposition == FrontendDisposition::Forward {
-            self.context
-                .protocol_frontend_received(tracking_message, FrontendHandling::Forward)
-                .await?;
-            self.write_to_server(outbound_message).await?;
-        }
-
-        Ok(())
     }
 
     async fn intercept_frontend(
@@ -385,29 +284,6 @@ where
         }
 
         Ok(outbound_message)
-    }
-
-    pub async fn write_to_server(&mut self, message: FrontendMessage) -> Result<(), Error> {
-        debug!(target: PROTOCOL, msg = "Write to server", ?message);
-        let frame = message.to_frame()?;
-        let sent: u64 = (frame.body.len() + 5) as u64;
-        counter!(SERVER_BYTES_SENT_TOTAL).increment(sent);
-
-        let start = Instant::now();
-        self.server_writer.push(frame)?;
-        self.server_writer.flush().await?;
-        let duration = start.elapsed();
-        if let Some(session_id) = self.context.latest_session_id() {
-            self.context.add_server_write_duration(session_id, duration);
-        }
-
-        Ok(())
-    }
-
-    pub async fn terminate(&mut self) -> Result<(), Error> {
-        debug!(target: PROTOCOL, msg = "Terminate server connection");
-        self.write_to_server(FrontendMessage::Terminate).await?;
-        Ok(())
     }
 
     async fn describe_handler(&mut self, describe: Describe) -> Result<(), Error> {
@@ -1493,12 +1369,7 @@ where
 }
 
 /// Implementation of PostgreSQL error handling for the Frontend component.
-impl<R, W, S> PostgreSqlErrorHandler for Frontend<R, W, S>
-where
-    R: AsyncRead + Unpin,
-    W: AsyncWrite + Unpin,
-    S: EncryptionService,
-{
+impl<S: EncryptionService> PostgreSqlErrorHandler for Frontend<S> {
     fn client_sender(&mut self) -> &mut Sender {
         &mut self.client_sender
     }
@@ -1508,12 +1379,7 @@ where
     }
 }
 
-impl<R, W, S> Frontend<R, W, S>
-where
-    R: AsyncRead + Unpin,
-    W: AsyncWrite + Unpin,
-    S: EncryptionService,
-{
+impl<S: EncryptionService> Frontend<S> {
     async fn send_error_response(&mut self, id: OperationId, err: Error) -> Result<(), Error> {
         let error_response = self.error_to_response(err);
         let message = error_response.into_backend_message();

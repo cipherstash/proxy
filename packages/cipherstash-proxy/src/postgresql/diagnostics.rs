@@ -1,3 +1,4 @@
+//! CipherStash diagnostic response factories.
 use bytes::Bytes;
 use core::fmt;
 use pg_proto::codec::{BackendMessage, DiagnosticField, DiagnosticResponse};
@@ -461,7 +462,7 @@ impl From<u8> for ErrorResponseCode {
 #[cfg(test)]
 mod tests {
     use super::ErrorResponseCode;
-    use crate::postgresql::messages::error_response::ErrorResponse;
+    use crate::postgresql::diagnostics::ErrorResponse;
     use crate::postgresql::test_codec::{decode_backend_frame, encode_backend_message};
     use bytes::BytesMut;
     use pg_proto::codec::BackendMessage;
