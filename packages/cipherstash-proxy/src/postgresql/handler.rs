@@ -19,7 +19,7 @@ use pg_proto::{
     codec::{
         Backend as BackendDirection, BackendMessage, Frontend as FrontendDirection, FrontendMessage,
     },
-    middleware::{Identity, Middleware, ServerRole, TypedPhase, TypedReceiveError},
+    middleware::{Identity, Inbound, Middleware, PhaseAssociation, ServerRole, TypedReceiveError},
     net::NetworkStream,
     pre_startup::{PreStartup, PreStartupOffer},
     server_auth::{ServerPassword, ServerProtocolOffer},
@@ -119,8 +119,8 @@ async fn receive_backend_conn<S, Phase>(
 ) -> Result<(Conn<Buffered<S, BackendDirection>, Phase>, BackendMessage), Error>
 where
     S: AsyncRead + Unpin,
-    Phase: TypedPhase<ServerRole, BackendMessage>,
-    <Phase as TypedPhase<ServerRole, BackendMessage>>::Message: Into<BackendMessage>,
+    Phase: PhaseAssociation<Inbound, ServerRole, BackendMessage>,
+    <Phase as PhaseAssociation<Inbound, ServerRole, BackendMessage>>::Message: Into<BackendMessage>,
 {
     let duration = Duration::from_secs(10);
     let message = timeout(duration, conn.receive_backend_typed(middleware))
