@@ -25,3 +25,16 @@ to extract and restore `Demux` state would retain startup parameter status,
 cancellation-key, and readiness state without application bookkeeping.
 
 This may naturally be solved by the buffer-preserving transport-parts API above.
+
+## Publish the example proxy driver as a library API
+
+`pg-proto` demonstrates a clean `Buffered` + `Middleware` forwarding loop in
+`examples/proxy_support`, but does not expose a configurable proxy driver from
+the crate. CipherStash therefore still owns connection orchestration, concurrent
+forwarding, and the small amount of glue that invokes middleware.
+
+A library-level proxy builder should accept downstream/upstream transports,
+startup and authentication policy, typed frontend/backend middleware, timeout
+policy, and an output strategy. It should own framing, phase transitions,
+bounded pipeline dispatch, demultiplexing, and shutdown. Applications would then
+only supply policy and message transformations.
