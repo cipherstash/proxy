@@ -1,20 +1,22 @@
-use super::{FrontendCode, Name, UNSPECIFIED_TYPE_OID};
+//! CipherStash Parse rewriting.
+use super::{Name, UNSPECIFIED_TYPE_OID};
+use crate::postgresql::context::statement::OutputParam;
+#[cfg(test)]
 use crate::{
     error::{Error, ProtocolError},
-    postgresql::{context::statement::OutputParam, protocol::BytesMutReadString},
-    SIZE_I16, SIZE_I32,
+    postgresql::test_codec::{decode_frontend_frame, encode_frontend_message},
 };
-use bytes::{Buf, BufMut, BytesMut};
+use bytes::Bytes;
+#[cfg(test)]
+use bytes::BytesMut;
 use eql_mapper::EqlTermVariant;
+use pg_proto::codec::{FrontendMessage, Parse as PgParse};
 use postgres_types::Type;
-use std::{ffi::CString, io::Cursor};
 
 #[derive(Debug, Clone)]
 pub struct Parse {
-    pub code: char,
     pub name: Name,
     pub statement: String,
-    pub num_params: i16,
     pub param_types: Vec<i32>,
     dirty: bool,
 }
@@ -76,7 +78,6 @@ impl Parse {
             .collect::<Vec<_>>();
 
         if param_types != self.param_types {
-            self.num_params = param_types.len() as i16;
             self.param_types = param_types;
             self.dirty = true;
         }
@@ -88,72 +89,78 @@ impl Parse {
     }
 }
 
+impl From<PgParse> for Parse {
+    fn from(parse: PgParse) -> Self {
+        Self {
+            name: parse.statement,
+            statement: String::from_utf8_lossy(&parse.query).into_owned(),
+            param_types: parse
+                .parameter_types
+                .into_iter()
+                .map(|oid| oid as i32)
+                .collect(),
+            dirty: false,
+        }
+    }
+}
+
+#[cfg(test)]
 impl TryFrom<&BytesMut> for Parse {
     type Error = Error;
 
     fn try_from(buf: &BytesMut) -> Result<Parse, Error> {
-        let mut cursor = Cursor::new(buf);
-        let code = cursor.get_u8() as char;
-
-        if FrontendCode::from(code) != FrontendCode::Parse {
+        let FrontendMessage::Parse(parse) = decode_frontend_frame(buf)? else {
             return Err(ProtocolError::UnexpectedMessageCode {
-                expected: FrontendCode::Parse.into(),
-                received: code,
+                expected: 'P',
+                received: buf.first().copied().unwrap_or_default() as char,
             }
             .into());
-        }
-
-        let _len = cursor.get_i32();
-        let name = cursor.read_string()?;
-        let name = Name::from(name);
-
-        let statement = cursor.read_string()?;
-        let num_params = cursor.get_i16();
-        let mut param_types = Vec::new();
-
-        for _ in 0..num_params {
-            param_types.push(cursor.get_i32());
-        }
+        };
+        let name = parse.statement;
+        let statement = String::from_utf8_lossy(&parse.query).into_owned();
+        let param_types = parse
+            .parameter_types
+            .iter()
+            .map(|oid| *oid as i32)
+            .collect::<Vec<_>>();
 
         Ok(Parse {
-            code,
             name,
             statement,
-            num_params,
             param_types,
             dirty: false,
         })
     }
 }
 
+#[cfg(test)]
 impl TryFrom<Parse> for BytesMut {
     type Error = Error;
 
     fn try_from(parse: Parse) -> Result<BytesMut, Error> {
-        let mut bytes = BytesMut::new();
+        encode_frontend_message(&FrontendMessage::Parse(PgParse {
+            statement: parse.name,
+            query: Bytes::from(parse.statement),
+            parameter_types: parse
+                .param_types
+                .into_iter()
+                .map(|oid| oid as u32)
+                .collect(),
+        }))
+    }
+}
 
-        let name = CString::new(parse.name.as_str())?;
-        let name = name.as_bytes_with_nul();
-
-        let statement = CString::new(parse.statement)?;
-        let statement = statement.as_bytes_with_nul();
-
-        let len = SIZE_I32 // len
-                + name.len()
-                + statement.len()
-                + SIZE_I16 // num_params
-                + SIZE_I32 * parse.param_types.len();
-
-        bytes.put_u8(FrontendCode::Parse.into());
-        bytes.put_i32(len as i32);
-        bytes.put_slice(name);
-        bytes.put_slice(statement);
-        bytes.put_i16(parse.num_params);
-        for param in parse.param_types {
-            bytes.put_i32(param);
-        }
-
-        Ok(bytes)
+impl From<Parse> for FrontendMessage {
+    fn from(parse: Parse) -> Self {
+        Self::Parse(PgParse {
+            statement: parse.name,
+            query: Bytes::from(parse.statement),
+            parameter_types: parse
+                .param_types
+                .into_iter()
+                .map(|oid| oid as u32)
+                .collect(),
+        })
     }
 }
 
@@ -164,7 +171,7 @@ mod tests {
         log,
         postgresql::{
             context::statement::{OutputParam, OutputParamSource},
-            messages::parse::Parse,
+            rewrite::parse::Parse,
             Column,
         },
         Identifier,
@@ -250,7 +257,7 @@ mod tests {
 
         parse.rewrite_param_types(&output_params);
         assert!(parse.requires_rewrite());
-        assert_eq!(parse.num_params, 1);
+        assert_eq!(parse.param_types.len(), 1);
         assert_eq!(
             parse.param_types,
             vec![postgres_types::Type::INT2.oid() as i32]

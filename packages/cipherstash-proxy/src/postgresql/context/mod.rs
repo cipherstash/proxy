@@ -4,11 +4,7 @@ pub mod portal;
 pub mod statement;
 pub mod statement_metadata;
 pub use self::{phase_timing::PhaseTiming, portal::Portal, statement::Statement};
-use super::{
-    column_mapper::ColumnMapper,
-    messages::{describe::Describe, Name, Target},
-    Column,
-};
+use super::{column_mapper::ColumnMapper, rewrite::Name, Column};
 use crate::{
     config::TandemConfig,
     error::{EncryptError, Error},
@@ -22,6 +18,15 @@ use crate::{
 use cipherstash_client::IdentifiedBy;
 use eql_mapper::{Schema, TableResolver};
 use metrics::{counter, histogram};
+use pg_proto::{
+    codec::{BackendMessage, Describe, DescribeTarget, FrontendMessage},
+    intermediary::Intermediary,
+    middleware::{Identity, Middleware},
+    pipeline::{
+        BackendAction, BoundedPipeline, FrontendAction, FrontendHandling, FrontendProjectionError,
+        OperationId, PipelineMiddlewareError,
+    },
+};
 use serde_json::json;
 use sqltk::parser::ast::{Expr, Ident, ObjectName, ObjectNamePart, Set, Value, ValueWithSpan};
 pub use statement_metadata::StatementMetadata;
@@ -33,7 +38,7 @@ use std::{
     },
     time::{Duration, Instant},
 };
-use tokio::sync::oneshot;
+use tokio::sync::{oneshot, Mutex, Notify};
 use tracing::{debug, error, warn};
 use uuid::Uuid;
 
@@ -41,6 +46,25 @@ type DescribeQueue = Queue<Describe>;
 type ExecuteQueue = Queue<ExecuteContext>;
 type SessionMetricsQueue = Queue<SessionMetricsContext>;
 type PortalQueue = Queue<Arc<Portal>>;
+
+fn protocol_transition_error(error: impl std::fmt::Debug) -> Error {
+    std::io::Error::new(std::io::ErrorKind::InvalidData, format!("{error:?}")).into()
+}
+
+#[derive(Debug)]
+struct ProtocolState {
+    sides: Intermediary<(), (), BoundedPipeline>,
+}
+
+impl ProtocolState {
+    fn new() -> Self {
+        Self {
+            sides: Intermediary::new((), ()).with_pipeline(
+                BoundedPipeline::new(256).expect("non-zero PostgreSQL pipeline limit"),
+            ),
+        }
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct SessionId(u64);
@@ -76,6 +100,8 @@ where
     unsafe_disable_mapping: bool,
     keyset_id: Arc<RwLock<Option<KeysetIdentifier>>>,
     session_id_counter: Arc<AtomicU64>,
+    protocol: Arc<Mutex<ProtocolState>>,
+    protocol_changed: Arc<Notify>,
 }
 
 /// Context for tracking an in-flight Execute operation.
@@ -197,7 +223,120 @@ where
             unsafe_disable_mapping: false,
             keyset_id: Arc::new(RwLock::new(None)),
             session_id_counter: Arc::new(AtomicU64::new(1)),
+            protocol: Arc::new(Mutex::new(ProtocolState::new())),
+            protocol_changed: Arc::new(Notify::new()),
         }
+    }
+
+    /// Records a message accepted from the downstream client. The downstream
+    /// server-role state advances even when proxy policy intercepts the message.
+    pub async fn protocol_frontend_received(
+        &self,
+        mut message: FrontendMessage,
+        handling: FrontendHandling,
+    ) -> Result<OperationId, Error> {
+        loop {
+            let notified = self.protocol_changed.notified();
+            tokio::pin!(notified);
+            notified.as_mut().enable();
+            let admission = {
+                let mut protocol = self.protocol.lock().await;
+                let mut middleware = Middleware::new((), Identity);
+                match protocol
+                    .sides
+                    .pipeline_mut()
+                    .accept_frontend_typed(&mut middleware, message, handling)
+                    .await
+                {
+                    Ok(admission) => Ok(admission.into_action()),
+                    Err(PipelineMiddlewareError::Projection(
+                        FrontendProjectionError::Capacity(returned),
+                    )) => Err(*returned),
+                    Err(error) => return Err(protocol_transition_error(error)),
+                }
+            };
+            match admission {
+                Ok(FrontendAction::Forward { id, .. } | FrontendAction::Discard { id }) => {
+                    return Ok(id);
+                }
+                Err(returned) => {
+                    message = returned;
+                    notified.await;
+                }
+            }
+        }
+    }
+
+    pub async fn protocol_in_extended_error(&self) -> bool {
+        let protocol = self.protocol.lock().await;
+        matches!(
+            protocol.sides.pipeline().state(),
+            pg_proto::pipeline::PipelineState::ExtendedError
+        )
+    }
+
+    /// Records a message accepted from the upstream database.
+    /// Records a backend response actually emitted to the downstream client.
+    pub async fn protocol_backend_forwarded(
+        &self,
+        mut message: BackendMessage,
+    ) -> Result<(), Error> {
+        loop {
+            let notified = self.protocol_changed.notified();
+            tokio::pin!(notified);
+            notified.as_mut().enable();
+            let action = {
+                let mut protocol = self.protocol.lock().await;
+                let mut middleware = Middleware::new((), Identity);
+                protocol
+                    .sides
+                    .pipeline_mut()
+                    .accept_backend_typed(&mut middleware, message)
+                    .await
+                    .map_err(protocol_transition_error)?
+            };
+            match action {
+                BackendAction::Emit(_) => return Ok(()),
+                BackendAction::Deferred(returned) => {
+                    message = returned;
+                    notified.await;
+                }
+            }
+        }
+    }
+
+    /// Emits a response synthesized for one locally handled frontend operation.
+    pub async fn protocol_backend_local(
+        &self,
+        id: OperationId,
+        mut message: BackendMessage,
+    ) -> Result<(), Error> {
+        loop {
+            let notified = self.protocol_changed.notified();
+            tokio::pin!(notified);
+            notified.as_mut().enable();
+            let action = {
+                let mut protocol = self.protocol.lock().await;
+                let mut middleware = Middleware::new((), Identity);
+                protocol
+                    .sides
+                    .pipeline_mut()
+                    .try_emit_local_typed(&mut middleware, id, message)
+                    .await
+                    .map_err(protocol_transition_error)?
+            };
+            match action {
+                BackendAction::Emit(_) => return Ok(()),
+                BackendAction::Deferred(returned) => {
+                    message = returned;
+                    notified.await;
+                }
+            }
+        }
+    }
+
+    pub fn protocol_backend_sent(&self) {
+        self.protocol_changed.notify_waiters();
     }
 
     pub fn set_describe(&mut self, describe: Describe) {
@@ -387,7 +526,7 @@ where
             )
             .record(execute.duration());
 
-            if execute.name.is_unnamed() {
+            if execute.name.is_empty() {
                 self.close_portal(&execute.name);
             }
         }
@@ -462,7 +601,7 @@ where
             warn!(
                 target: CONTEXT,
                 client_id = self.client_id,
-                prepared_statement = %name.as_str(),
+                prepared_statement = %String::from_utf8_lossy(name),
                 msg = "Session lookup failed for prepared statement, using latest session"
             );
         }
@@ -532,11 +671,11 @@ where
         match describe {
             Describe {
                 ref name,
-                target: Target::Portal,
+                target: DescribeTarget::Portal,
             } => self.get_portal_statement(name),
             Describe {
                 ref name,
-                target: Target::Statement,
+                target: DescribeTarget::Statement,
             } => self.get_statement(name),
         }
     }
@@ -1056,25 +1195,30 @@ impl<T> Queue<T> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Context, Describe, KeysetIdentifier, Portal, Statement};
+    use super::{Context, Describe, KeysetIdentifier, Portal, ProtocolState, Statement};
     use crate::{
         config::LogConfig,
         error::Error,
         log,
-        postgresql::{
-            messages::{Name, Target},
-            Column,
-        },
+        postgresql::{rewrite::Name, Column},
         proxy::{EncryptConfig, EncryptionService},
         TandemConfig,
     };
+    use bytes::Bytes;
     use cipherstash_client::IdentifiedBy;
     use eql_mapper::Schema;
+    use pg_proto::codec::{
+        BackendMessage, Bind, DescribeTarget, DiagnosticResponse, Execute, FrontendMessage, Parse,
+        TransactionStatus,
+    };
+    use pg_proto::middleware::{Identity, Middleware};
+    use pg_proto::pipeline::{BackendAction, FrontendAction, FrontendHandling, PipelineState};
     use sqltk::parser::{dialect::PostgreSqlDialect, parser::Parser};
     use std::sync::Arc;
     use tokio::sync::mpsc;
     use uuid::Uuid;
 
+    #[derive(Clone)]
     struct TestService {}
 
     #[async_trait::async_trait]
@@ -1117,6 +1261,129 @@ mod tests {
         )
     }
 
+    #[tokio::test]
+    async fn pg_proto_ledger_tracks_pipelined_extended_messages_in_processing_order() {
+        let mut protocol = ProtocolState::new();
+        let mut middleware = Middleware::new((), Identity);
+        let messages = [
+            FrontendMessage::Parse(Parse {
+                statement: Bytes::new(),
+                query: Bytes::from_static(b"select $1"),
+                parameter_types: vec![23],
+            }),
+            FrontendMessage::Bind(Bind {
+                portal: Bytes::new(),
+                statement: Bytes::new(),
+                parameter_formats: vec![0],
+                parameters: vec![Some(Bytes::from_static(b"1"))],
+                result_formats: vec![0],
+            }),
+            FrontendMessage::Execute(Execute {
+                portal: Bytes::new(),
+                max_rows: 0,
+            }),
+            FrontendMessage::Sync,
+        ];
+        for message in messages {
+            assert!(matches!(
+                protocol
+                    .sides
+                    .pipeline_mut()
+                    .accept_frontend_typed(&mut middleware, message, FrontendHandling::Forward,)
+                    .await
+                    .unwrap(),
+                pg_proto::pipeline::FrontendAdmission::Immediate(FrontendAction::Forward { .. })
+                    | pg_proto::pipeline::FrontendAdmission::Waiting(
+                        FrontendAction::Forward { .. }
+                    )
+            ));
+        }
+
+        for response in [
+            BackendMessage::ParseComplete,
+            BackendMessage::BindComplete,
+            BackendMessage::CommandComplete(Bytes::from_static(b"SELECT 1")),
+            BackendMessage::ReadyForQuery(TransactionStatus::Idle),
+        ] {
+            assert!(matches!(
+                protocol
+                    .sides
+                    .pipeline_mut()
+                    .accept_backend_typed(&mut middleware, response)
+                    .await
+                    .unwrap(),
+                BackendAction::Emit(_)
+            ));
+        }
+
+        assert!(protocol.sides.pipeline().is_empty());
+        assert_eq!(protocol.sides.pipeline().state(), PipelineState::Ready);
+    }
+
+    #[tokio::test]
+    async fn local_extended_error_waits_for_earlier_forwarded_response() {
+        let context = create_context();
+        context
+            .protocol_frontend_received(
+                FrontendMessage::Parse(Parse {
+                    statement: Bytes::new(),
+                    query: Bytes::from_static(b"select $1"),
+                    parameter_types: vec![23],
+                }),
+                FrontendHandling::Forward,
+            )
+            .await
+            .unwrap();
+        let bind_id = context
+            .protocol_frontend_received(
+                FrontendMessage::Bind(Bind {
+                    portal: Bytes::new(),
+                    statement: Bytes::new(),
+                    parameter_formats: vec![0],
+                    parameters: vec![Some(Bytes::from_static(b"1"))],
+                    result_formats: vec![0],
+                }),
+                FrontendHandling::Local,
+            )
+            .await
+            .unwrap();
+
+        let local_context = context.clone();
+        let local_error = tokio::spawn(async move {
+            local_context
+                .protocol_backend_local(
+                    bind_id,
+                    BackendMessage::ErrorResponse(DiagnosticResponse { fields: vec![] }),
+                )
+                .await
+        });
+        tokio::task::yield_now().await;
+        assert!(!local_error.is_finished());
+
+        context
+            .protocol_backend_forwarded(BackendMessage::ParseComplete)
+            .await
+            .unwrap();
+        context.protocol_backend_sent();
+        local_error.await.unwrap().unwrap();
+
+        let sync_id = context
+            .protocol_frontend_received(FrontendMessage::Sync, FrontendHandling::Local)
+            .await
+            .unwrap();
+        context
+            .protocol_backend_local(
+                sync_id,
+                BackendMessage::ReadyForQuery(TransactionStatus::Idle),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            context.protocol.lock().await.sides.pipeline().state(),
+            PipelineState::Ready
+        );
+    }
+
     fn statement() -> Statement {
         Statement {
             param_columns: vec![],
@@ -1154,7 +1421,7 @@ mod tests {
 
         let describe = Describe {
             name,
-            target: Target::Statement,
+            target: DescribeTarget::Statement,
         };
         context.set_describe(describe);
 
@@ -1223,7 +1490,7 @@ mod tests {
         for _ in 0..1000 {
             // Frontend: a session + execute are enqueued for every statement.
             let session_id = context.start_session();
-            context.set_execute(Name::unnamed(), Some(session_id));
+            context.set_execute(Name::new(), Some(session_id));
 
             // Drain primitives, normally called by the backend on an
             // execute-terminating message (CommandComplete / ErrorResponse / …).
@@ -1290,10 +1557,10 @@ mod tests {
         let mut context = create_context();
 
         let statement_name_1 = Name::from("statement_1");
-        let portal_name_1 = Name::unnamed();
+        let portal_name_1 = Name::new();
 
         let statement_name_2 = Name::from("statement_2");
-        let portal_name_2 = Name::unnamed();
+        let portal_name_2 = Name::new();
 
         let statement_name_3 = Name::from("statement_3");
         let portal_name_3 = Name::from("portal_3");

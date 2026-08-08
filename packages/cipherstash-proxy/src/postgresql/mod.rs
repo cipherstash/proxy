@@ -1,28 +1,17 @@
-mod backend;
 mod column_mapper;
 mod context;
 mod data;
+mod diagnostics;
+mod driver;
 mod error_handler;
 mod format_code;
-mod frontend;
-mod handler;
-mod message_buffer;
-mod messages;
+mod middleware;
 mod parser;
-mod protocol;
-mod startup;
+mod rewrite;
+#[cfg(test)]
+mod test_codec;
 
 pub use context::column::Column;
 pub use context::Context;
 pub use context::KeysetIdentifier;
-pub use handler::handler;
-
-pub const PROTOCOL_VERSION_NUMBER: i32 = 196608;
-
-pub const SSL_REQUEST: i32 = 80877103;
-
-pub const CANCEL_REQUEST: i32 = 80877102;
-
-pub const SSL_RESPONSE_NO: u8 = b'N';
-
-pub const SSL_RESPONSE_YES: u8 = b'S';
+pub use driver::handler;

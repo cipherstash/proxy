@@ -6,7 +6,7 @@
 use crate::{
     connect::Sender,
     error::{EncryptError, Error, MappingError},
-    postgresql::messages::error_response::ErrorResponse,
+    postgresql::diagnostics::ErrorResponse,
 };
 
 /// Trait for components that can send PostgreSQL error responses to clients.
@@ -57,22 +57,12 @@ pub trait PostgreSqlErrorHandler {
             _ => ErrorResponse::system_error(err.to_string()),
         }
     }
-
-    /// Send an ErrorResponse message to the client.
-    ///
-    /// Converts the error to a PostgreSQL ErrorResponse and sends it
-    /// to the client via the component's sender channel.
-    ///
-    /// # Arguments
-    ///
-    /// * `error_response` - The ErrorResponse to send to the client
-    fn send_error_response(&mut self, err: Error) -> Result<(), Error>;
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::postgresql::messages::error_response::{
+    use crate::postgresql::diagnostics::{
         ErrorResponseCode, CODE_IDLE_SESSION_TIMEOUT, CODE_SYSTEM_ERROR,
     };
     use std::time::Duration;
@@ -87,10 +77,6 @@ mod tests {
 
         fn client_id(&self) -> i32 {
             0
-        }
-
-        fn send_error_response(&mut self, _err: Error) -> Result<(), Error> {
-            unimplemented!("not needed for error_to_response tests")
         }
     }
 

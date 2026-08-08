@@ -1,3 +1,4 @@
+//! CipherStash Bind parameter rewriting.
 use super::{maybe_json, maybe_jsonb, Name, NULL};
 use crate::error::{Error, MappingError, ProtocolError};
 use crate::log::MAPPER;
@@ -10,29 +11,25 @@ use crate::postgresql::data::{
     json_value_selector_plaintext,
 };
 use crate::postgresql::format_code::FormatCode;
-use crate::postgresql::protocol::BytesMutReadString;
+#[cfg(test)]
+use crate::postgresql::test_codec::{decode_frontend_frame, encode_frontend_message};
 use crate::{EqlOutput, EqlQueryPayload};
-use crate::{SIZE_I16, SIZE_I32};
-use bytes::{Buf, BufMut, BytesMut};
+use bytes::{BufMut, BytesMut};
 use cipherstash_client::encryption::Plaintext;
+use pg_proto::codec::{Bind as PgBind, FrontendMessage};
 use postgres_types::Type;
+use std::convert::TryFrom;
 use std::fmt::{self, Display, Formatter};
-use std::io::Cursor;
-use std::{convert::TryFrom, ffi::CString};
 use tracing::debug;
 
 /// Bind (B) message.
 /// See: <https://www.postgresql.org/docs/current/protocol-message-formats.html>
 #[derive(Clone, Debug)]
 pub struct Bind {
-    pub code: char,
     pub portal: Name,
     pub prepared_statement: Name,
-    pub num_param_format_codes: i16,
     pub param_format_codes: Vec<FormatCode>,
-    pub num_param_values: i16,
     pub param_values: Vec<BindParam>,
-    pub num_result_column_format_codes: i16,
     pub result_columns_format_codes: Vec<FormatCode>,
     /// Set when the param list was rebuilt because the rewrite reshaped the
     /// params. The message must then be re-sent even if no individual param was
@@ -44,6 +41,7 @@ pub struct Bind {
 pub struct BindParam {
     pub format_code: FormatCode,
     pub bytes: BytesMut,
+    null: bool,
     dirty: bool,
 }
 
@@ -250,8 +248,6 @@ impl Bind {
         }
 
         self.param_format_codes = param_values.iter().map(|param| param.format_code).collect();
-        self.num_param_format_codes = self.param_format_codes.len() as i16;
-        self.num_param_values = param_values.len() as i16;
         self.param_values = param_values;
         self.reshaped = true;
 
@@ -306,6 +302,55 @@ impl Bind {
     }
 }
 
+impl TryFrom<PgBind> for Bind {
+    type Error = Error;
+
+    fn try_from(bind: PgBind) -> Result<Self, Self::Error> {
+        let portal = bind.portal;
+        let prepared_statement = bind.statement;
+        let param_format_codes = bind
+            .parameter_formats
+            .iter()
+            .copied()
+            .map(FormatCode::from)
+            .collect::<Vec<_>>();
+        let num_param_values = bind.parameters.len();
+        let mut param_values = Vec::with_capacity(num_param_values);
+        for (idx, parameter) in bind.parameters.into_iter().enumerate() {
+            let format_code = match param_format_codes.len() {
+                0 => FormatCode::Text,
+                1 => param_format_codes[0],
+                len if len == num_param_values => param_format_codes[idx],
+                _ => {
+                    return Err(ProtocolError::ParameterFormatCodesMismatch {
+                        expected: num_param_values,
+                        received: param_format_codes.len(),
+                    }
+                    .into());
+                }
+            };
+            match parameter {
+                None => param_values.push(BindParam::null_with_format(format_code)),
+                Some(bytes) => {
+                    param_values.push(BindParam::new(format_code, BytesMut::from(&bytes[..])));
+                }
+            }
+        }
+        Ok(Self {
+            portal,
+            prepared_statement,
+            param_format_codes,
+            param_values,
+            result_columns_format_codes: bind
+                .result_formats
+                .into_iter()
+                .map(FormatCode::from)
+                .collect(),
+            reshaped: false,
+        })
+    }
+}
+
 ///
 /// Param type is either provided with Parse message or the column type
 /// Column type is the cast of the encrypted column
@@ -322,6 +367,7 @@ impl BindParam {
         Self {
             format_code,
             bytes,
+            null: false,
             dirty: false,
         }
     }
@@ -330,6 +376,16 @@ impl BindParam {
         Self {
             format_code: FormatCode::Text,
             bytes: BytesMut::new(),
+            null: true,
+            dirty: false,
+        }
+    }
+
+    fn null_with_format(format_code: FormatCode) -> Self {
+        Self {
+            format_code,
+            bytes: BytesMut::new(),
+            null: true,
             dirty: false,
         }
     }
@@ -357,6 +413,7 @@ impl BindParam {
 
     pub fn rewrite(&mut self, bytes: &[u8]) {
         self.bytes.clear();
+        self.null = false;
 
         if self.is_binary() {
             self.bytes.put_u8(1);
@@ -376,6 +433,7 @@ impl BindParam {
     /// stop `->` from matching any stored entry.
     pub fn rewrite_text(&mut self, bytes: Vec<u8>) {
         self.bytes.clear();
+        self.null = false;
         self.bytes.extend_from_slice(&bytes);
         self.dirty = true;
     }
@@ -392,6 +450,7 @@ impl BindParam {
         }
 
         self.bytes.clear();
+        self.null = true;
         self.dirty = true;
     }
 
@@ -415,7 +474,7 @@ impl BindParam {
     }
 
     pub fn is_null(&self) -> bool {
-        self.bytes.is_empty()
+        self.null
     }
 
     pub fn is_text(&self) -> bool {
@@ -434,144 +493,105 @@ impl Display for BindParam {
     }
 }
 
+#[cfg(test)]
 impl TryFrom<&BytesMut> for Bind {
     type Error = Error;
 
     fn try_from(buf: &BytesMut) -> Result<Bind, Self::Error> {
-        let mut cursor = Cursor::new(buf);
-        let code = cursor.get_u8() as char;
-        let _len = cursor.get_i32();
-
-        let portal = cursor.read_string()?;
-        let portal = Name::from(portal);
-
-        let prepared_statement = cursor.read_string()?;
-        let prepared_statement = Name::from(prepared_statement);
-
-        let num_param_format_codes = cursor.get_i16();
-        let mut param_format_codes = Vec::new();
-
-        for _ in 0..num_param_format_codes {
-            param_format_codes.push(cursor.get_i16().into());
-        }
-
-        let num_param_values = cursor.get_i16();
-        let mut param_values = Vec::new();
-
-        for idx in 0..num_param_values as usize {
-            let param_len = cursor.get_i32();
-
-            let format_code = match num_param_format_codes {
+        let FrontendMessage::Bind(bind) = decode_frontend_frame(buf)? else {
+            return Err(ProtocolError::UnexpectedMessageCode {
+                expected: 'B',
+                received: buf.first().copied().unwrap_or_default() as char,
+            }
+            .into());
+        };
+        let portal = bind.portal;
+        let prepared_statement = bind.statement;
+        let param_format_codes = bind
+            .parameter_formats
+            .iter()
+            .copied()
+            .map(FormatCode::from)
+            .collect::<Vec<_>>();
+        let num_param_values = bind.parameters.len();
+        let mut param_values = Vec::with_capacity(bind.parameters.len());
+        for (idx, parameter) in bind.parameters.into_iter().enumerate() {
+            let format_code = match param_format_codes.len() {
                 0 => FormatCode::Text,
                 1 => param_format_codes[0],
-                _ => param_format_codes[idx],
-            };
-
-            // NULL parameters have a length of -1 and no bytes
-            match param_len {
-                NULL => {
-                    param_values.push(BindParam::null());
-                }
+                len if len == num_param_values => param_format_codes[idx],
                 _ => {
-                    let mut bytes = BytesMut::with_capacity(param_len as usize);
-                    bytes.resize(param_len as usize, b'0');
-                    cursor.copy_to_slice(&mut bytes);
-                    param_values.push(BindParam::new(format_code, bytes));
+                    return Err(ProtocolError::ParameterFormatCodesMismatch {
+                        expected: num_param_values,
+                        received: param_format_codes.len(),
+                    }
+                    .into())
+                }
+            };
+            match parameter {
+                None => param_values.push(BindParam::null_with_format(format_code)),
+                Some(bytes) => {
+                    param_values.push(BindParam::new(format_code, BytesMut::from(&bytes[..])))
                 }
             }
         }
-
-        let num_result_column_format_codes = cursor.get_i16();
-        let mut result_columns_format_codes = Vec::new();
-
-        for _ in 0..num_result_column_format_codes {
-            result_columns_format_codes.push(cursor.get_i16().into());
-        }
-
+        let result_columns_format_codes = bind
+            .result_formats
+            .iter()
+            .copied()
+            .map(FormatCode::from)
+            .collect::<Vec<_>>();
         Ok(Bind {
-            code,
             portal,
             prepared_statement,
-            num_param_format_codes,
             param_format_codes,
-            num_param_values,
             param_values,
-            num_result_column_format_codes,
             result_columns_format_codes,
             reshaped: false,
         })
     }
 }
 
+#[cfg(test)]
 impl TryFrom<Bind> for BytesMut {
     type Error = Error;
 
     fn try_from(bind: Bind) -> Result<BytesMut, Self::Error> {
-        let mut bytes = BytesMut::new();
+        encode_frontend_message(&FrontendMessage::Bind(PgBind {
+            portal: bind.portal,
+            statement: bind.prepared_statement,
+            parameter_formats: bind.param_format_codes.into_iter().map(i16::from).collect(),
+            parameters: bind
+                .param_values
+                .into_iter()
+                .map(|param| (!param.null).then(|| param.bytes.freeze()))
+                .collect(),
+            result_formats: bind
+                .result_columns_format_codes
+                .into_iter()
+                .map(i16::from)
+                .collect(),
+        }))
+    }
+}
 
-        let portal_binding = CString::new(&*bind.portal)?;
-        let portal = portal_binding.as_bytes_with_nul();
-
-        let prepared_statement_binding = CString::new(&*bind.prepared_statement)?;
-        let prepared_statement = prepared_statement_binding.as_bytes_with_nul();
-
-        if bind.num_param_format_codes != bind.param_format_codes.len() as i16 {
-            let err = ProtocolError::ParameterFormatCodesMismatch {
-                expected: bind.num_param_format_codes as usize,
-                received: bind.param_format_codes.len(),
-            };
-            return Err(err.into());
-        }
-
-        if bind.num_result_column_format_codes != bind.result_columns_format_codes.len() as i16 {
-            let err = ProtocolError::ParameterResultFormatCodesMismatch {
-                expected: bind.num_result_column_format_codes as usize,
-                received: bind.result_columns_format_codes.len(),
-            };
-            return Err(err.into());
-        }
-
-        // sum of param byte_lens (the *actual* byte lengths of the parameters)
-        let param_byte_len = &bind
-            .param_values
-            .iter()
-            .fold(0, |acc, param| acc + SIZE_I32 + param.byte_len());
-
-        let len = SIZE_I32 // self/len of len
-            + portal.len()
-            + prepared_statement.len()
-            + SIZE_I16 // num_param_format_codes
-            + SIZE_I16 * bind.num_param_format_codes as usize // num_param_format_codes
-            + SIZE_I16  // num_param_values
-            + param_byte_len // parameter bytes
-            + SIZE_I16 // num_result_column_format_codes
-            + SIZE_I16 * bind.num_result_column_format_codes as usize;
-
-        bytes.put_u8(bind.code as u8);
-        bytes.put_i32(len as i32);
-        bytes.put_slice(portal);
-        bytes.put_slice(prepared_statement);
-        bytes.put_i16(bind.num_param_format_codes);
-        for param_format_code in bind.param_format_codes {
-            bytes.put_i16(param_format_code.into());
-        }
-
-        let num_param_values = bind.param_values.len() as i16;
-        bytes.put_i16(num_param_values);
-
-        for p in bind.param_values {
-            // len is not the same as byte_len
-            // A NULL param len is -1
-            bytes.put_i32(p.len());
-            bytes.put_slice(&p.bytes);
-        }
-
-        bytes.put_i16(bind.num_result_column_format_codes);
-        for result_column_format_code in bind.result_columns_format_codes {
-            bytes.put_i16(result_column_format_code.into());
-        }
-
-        Ok(bytes)
+impl From<Bind> for FrontendMessage {
+    fn from(bind: Bind) -> Self {
+        Self::Bind(PgBind {
+            portal: bind.portal,
+            statement: bind.prepared_statement,
+            parameter_formats: bind.param_format_codes.into_iter().map(i16::from).collect(),
+            parameters: bind
+                .param_values
+                .into_iter()
+                .map(|param| (!param.null).then(|| param.bytes.freeze()))
+                .collect(),
+            result_formats: bind
+                .result_columns_format_codes
+                .into_iter()
+                .map(i16::from)
+                .collect(),
+        })
     }
 }
 
@@ -582,7 +602,7 @@ mod tests {
         config::LogConfig,
         log,
         postgresql::{
-            context::column::Column, format_code::FormatCode, messages::bind::Bind, messages::Name,
+            context::column::Column, format_code::FormatCode, rewrite::bind::Bind, rewrite::Name,
         },
         Identifier,
     };
@@ -630,6 +650,19 @@ mod tests {
     }
 
     #[test]
+    pub fn preserves_empty_and_null_params_distinctly() {
+        let bytes = to_message(b"B\0\0\0\x14\0\0\0\0\0\x02\0\0\0\0\xff\xff\xff\xff\0\0");
+        let expected = bytes.clone();
+
+        let bind = Bind::try_from(&bytes).unwrap();
+
+        assert!(!bind.param_values[0].is_null());
+        assert_eq!(bind.param_values[0].byte_len(), 0);
+        assert!(bind.param_values[1].is_null());
+        assert_eq!(BytesMut::try_from(bind).unwrap(), expected);
+    }
+
+    #[test]
     fn bind_should_rewrite() {
         log::init(LogConfig::default());
 
@@ -662,14 +695,10 @@ mod tests {
 
     fn bind_with(param_values: Vec<BindParam>) -> Bind {
         Bind {
-            code: 'B',
-            portal: Name::unnamed(),
-            prepared_statement: Name::unnamed(),
-            num_param_format_codes: param_values.len() as i16,
+            portal: Name::new(),
+            prepared_statement: Name::new(),
             param_format_codes: param_values.iter().map(|p| p.format_code).collect(),
-            num_param_values: param_values.len() as i16,
             param_values,
-            num_result_column_format_codes: 0,
             result_columns_format_codes: vec![],
             reshaped: false,
         }

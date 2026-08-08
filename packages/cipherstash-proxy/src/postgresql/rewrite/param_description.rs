@@ -1,12 +1,14 @@
-use super::BackendCode;
+//! CipherStash ParameterDescription rewriting.
+use crate::log::MAPPER;
+#[cfg(test)]
 use crate::{
     error::{Error, ProtocolError},
-    log::MAPPER,
-    SIZE_I16, SIZE_I32,
+    postgresql::test_codec::{decode_backend_frame, encode_backend_message},
 };
-use bytes::{Buf, BufMut, BytesMut};
+#[cfg(test)]
+use bytes::BytesMut;
+use pg_proto::codec::BackendMessage;
 use postgres_types::Type;
-use std::io::Cursor;
 use tracing::debug;
 
 ///
@@ -66,58 +68,58 @@ impl ParamDescription {
     }
 }
 
+#[cfg(test)]
 impl TryFrom<&BytesMut> for ParamDescription {
     type Error = Error;
 
     fn try_from(bytes: &BytesMut) -> Result<ParamDescription, Error> {
-        let mut cursor = Cursor::new(bytes);
-
-        let code = cursor.get_u8();
-
-        if BackendCode::from(code) != BackendCode::ParameterDescription {
+        let BackendMessage::ParameterDescription(types) = decode_backend_frame(bytes)? else {
             return Err(ProtocolError::UnexpectedMessageCode {
-                expected: BackendCode::ParameterDescription.into(),
-                received: code as char,
+                expected: 't',
+                received: bytes.first().copied().unwrap_or_default() as char,
             }
             .into());
-        }
-
-        let _len = cursor.get_i32(); // move the cursor
-        let count = cursor.get_i16() as usize;
-
-        let mut types = vec![];
-        for _idx in 0..count {
-            let type_oid = cursor.get_i32();
-            types.push(type_oid)
-        }
+        };
 
         Ok(ParamDescription {
-            types,
+            types: types.into_iter().map(|oid| oid as i32).collect(),
             dirty: false,
         })
     }
 }
 
+impl From<Vec<u32>> for ParamDescription {
+    fn from(types: Vec<u32>) -> Self {
+        Self {
+            types: types.into_iter().map(|oid| oid as i32).collect(),
+            dirty: false,
+        }
+    }
+}
+
+#[cfg(test)]
 impl TryFrom<ParamDescription> for BytesMut {
     type Error = Error;
 
     fn try_from(parameter_description: ParamDescription) -> Result<BytesMut, Error> {
-        let mut bytes = BytesMut::new();
+        let types = parameter_description
+            .types
+            .into_iter()
+            .map(|oid| oid as u32)
+            .collect();
+        encode_backend_message(&BackendMessage::ParameterDescription(types))
+    }
+}
 
-        let count = parameter_description.types.len();
-        let size_of_types = count * SIZE_I32;
-
-        let len = SIZE_I32 + SIZE_I16 + size_of_types;
-
-        bytes.put_u8(BackendCode::ParameterDescription.into());
-        bytes.put_i32(len as i32);
-        bytes.put_i16(count as i16);
-
-        for type_oid in parameter_description.types.into_iter() {
-            bytes.put_i32(type_oid);
-        }
-
-        Ok(bytes)
+impl From<ParamDescription> for BackendMessage {
+    fn from(parameter_description: ParamDescription) -> Self {
+        Self::ParameterDescription(
+            parameter_description
+                .types
+                .into_iter()
+                .map(|oid| oid as u32)
+                .collect(),
+        )
     }
 }
 
