@@ -450,6 +450,7 @@ impl BindParam {
         }
 
         self.bytes.clear();
+        self.null = true;
         self.dirty = true;
     }
 
@@ -694,14 +695,10 @@ mod tests {
 
     fn bind_with(param_values: Vec<BindParam>) -> Bind {
         Bind {
-            code: 'B',
-            portal: Name::unnamed(),
-            prepared_statement: Name::unnamed(),
-            num_param_format_codes: param_values.len() as i16,
+            portal: Name::new(),
+            prepared_statement: Name::new(),
             param_format_codes: param_values.iter().map(|p| p.format_code).collect(),
-            num_param_values: param_values.len() as i16,
             param_values,
-            num_result_column_format_codes: 0,
             result_columns_format_codes: vec![],
             reshaped: false,
         }
