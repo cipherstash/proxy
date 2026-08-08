@@ -6,7 +6,7 @@
 use crate::{
     connect::Sender,
     error::{EncryptError, Error, MappingError},
-    postgresql::messages::error_response::ErrorResponse,
+    postgresql::diagnostics::ErrorResponse,
 };
 
 /// Trait for components that can send PostgreSQL error responses to clients.
@@ -62,7 +62,7 @@ pub trait PostgreSqlErrorHandler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::postgresql::messages::error_response::{
+    use crate::postgresql::diagnostics::{
         ErrorResponseCode, CODE_IDLE_SESSION_TIMEOUT, CODE_SYSTEM_ERROR,
     };
     use std::time::Duration;

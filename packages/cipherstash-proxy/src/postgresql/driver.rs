@@ -1,18 +1,20 @@
-use super::backend::Backend;
-use super::frontend::Frontend;
+use super::middleware::{Backend, BackendDisposition, Frontend, FrontendDisposition};
 use crate::connect::{self, ChannelWriter};
 use crate::error::ConfigError;
 use crate::log::AUTHENTICATION;
-use crate::postgresql::messages::error_response::ErrorResponse;
-use crate::postgresql::startup;
+use crate::postgresql::diagnostics::ErrorResponse;
+use crate::prometheus::{
+    CLIENTS_BYTES_RECEIVED_TOTAL, SERVER_BYTES_RECEIVED_TOTAL, SERVER_BYTES_SENT_TOTAL,
+};
 use crate::proxy::ZeroKms;
 use crate::{
     error::{Error, ProtocolError},
     postgresql::context::Context,
-    tls,
+    tls, TandemConfig,
 };
 use bytes::Bytes;
 use md5::{Digest, Md5};
+use metrics::counter;
 use pg_proto::pre_startup::PreStartupMessage;
 use pg_proto::{
     auth::{AuthCompletion, AuthEvent, AuthOffer, AwaitingStartupReady, SaslEvent},
@@ -21,7 +23,7 @@ use pg_proto::{
     },
     middleware::{Identity, Inbound, Middleware, PhaseAssociation, ServerRole, TypedReceiveError},
     net::NetworkStream,
-    pre_startup::{PreStartup, PreStartupOffer},
+    pre_startup::{Negotiation, PreStartup, PreStartupOffer},
     server_auth::{ServerPassword, ServerProtocolOffer},
     startup::ProtocolVersion,
     transport::Buffered,
@@ -29,7 +31,10 @@ use pg_proto::{
 };
 use postgres_protocol::authentication::sasl::{ChannelBinding, ScramSha256};
 use rand::Rng;
-use std::time::Duration;
+use std::{
+    sync::Arc,
+    time::{Duration, Instant},
+};
 use tokio::{
     io::{AsyncRead, AsyncWrite, AsyncWriteExt},
     net::TcpStream,
@@ -301,7 +306,7 @@ pub async fn handler(client_stream: PgStream, context: Context<ZeroKms>) -> Resu
 
     // Connect to the database server, using TLS if configured
     let stream = connect::connect(&context.database_socket_address()).await?;
-    let mut database_stream = startup::with_tls(stream, context.config()).await?;
+    let mut database_stream = connect_upstream_tls(stream, context.config()).await?;
     info!(
         msg = "Client connected",
         database = context.database_socket_address(),
@@ -484,13 +489,17 @@ pub async fn handler(client_stream: PgStream, context: Context<ZeroKms>) -> Resu
 
     let channel_writer = ChannelWriter::new(client_writer, client_id);
 
-    let mut frontend = Frontend::new(
-        client_reader,
-        channel_writer.sender(),
-        server_writer,
-        context.clone(),
+    let mut client_reader: Buffered<_, FrontendDirection> = Buffered::new_frontend(client_reader);
+    let mut server_writer: Buffered<_, BackendDirection> = Buffered::new(server_writer);
+    let mut server_reader: Buffered<_, BackendDirection> = Buffered::new(server_reader);
+    let mut frontend = Middleware::new(
+        FrontendDisposition::Forward,
+        Frontend::new(channel_writer.sender(), context.clone()),
     );
-    let mut backend = Backend::new(channel_writer.sender(), server_reader, context.clone());
+    let mut backend = Middleware::new(
+        BackendDisposition::Emit,
+        Backend::new(channel_writer.sender(), context.clone()),
+    );
 
     if context.is_passthrough() {
         if context.use_structured_logging() {
@@ -506,26 +515,76 @@ pub async fn handler(client_stream: PgStream, context: Context<ZeroKms>) -> Resu
 
     let timeout_sender = channel_writer.sender();
     let channel_writer_task = tokio::spawn(channel_writer.receive());
+    let client_context = context.clone();
+    let mut backend_context = context.clone();
+    let mut server_write_context = context.clone();
 
     let client_to_server = async {
         loop {
-            let result = frontend.rewrite().await;
-            // Ensure the connection is terminated if the client closes the connection
-            // The client ConnectionClosed error is triggered before the terminate message is passed through
-            if matches!(result, Err(Error::ConnectionClosed)) {
-                frontend.terminate().await?
+            let message = match receive_frontend_runtime(
+                &mut client_reader,
+                client_context.connection_timeout(),
+            )
+            .await
+            {
+                Ok(message) => message,
+                Err(Error::ConnectionClosed) => {
+                    write_to_server(
+                        &mut server_writer,
+                        &mut server_write_context,
+                        FrontendMessage::Terminate,
+                    )
+                    .await?;
+                    return Ok::<(), Error>(());
+                }
+                Err(error) => return Err(error),
+            };
+
+            let frame = message.to_frame()?;
+            counter!(CLIENTS_BYTES_RECEIVED_TOTAL).increment((frame.body.len() + 5) as u64);
+
+            let tracking_message = message.clone();
+            *frontend.state_mut() = FrontendDisposition::Forward;
+            let outbound = frontend.intercept(message).await?;
+            if *frontend.state() == FrontendDisposition::Forward {
+                client_context
+                    .protocol_frontend_received(
+                        tracking_message,
+                        pg_proto::pipeline::FrontendHandling::Forward,
+                    )
+                    .await?;
+                write_to_server(&mut server_writer, &mut server_write_context, outbound).await?;
             }
-            result?;
         }
-        // Unreachable, but helps the compiler understand the return type
-        // TODO: extract into a function or something with type
-        #[allow(unreachable_code)]
-        Ok::<(), Error>(())
     };
 
     let server_to_client = async {
         loop {
-            backend.rewrite().await?;
+            let read_start = Instant::now();
+            let message =
+                receive_backend_runtime(&mut server_reader, backend_context.connection_timeout())
+                    .await?;
+            if server_reader.project_backend(message.clone()).is_none() {
+                let _ = server_reader.demux_mut().pop_async_event();
+            }
+            let read_duration = read_start.elapsed();
+            backend_context.record_execute_server_timing(read_duration);
+            let frame = message.to_frame()?;
+            counter!(SERVER_BYTES_RECEIVED_TOTAL).increment((frame.body.len() + 5) as u64);
+            if read_duration > backend_context.slow_db_response_min_duration() {
+                warn!(
+                    client_id = backend_context.client_id,
+                    msg = "Slow database response",
+                    duration_ms = read_duration.as_millis(),
+                    message = ?message,
+                );
+            }
+
+            *backend.state_mut() = BackendDisposition::Emit;
+            let outbound = backend.intercept(message).await?;
+            if *backend.state() == BackendDisposition::Emit {
+                backend.handler_mut().write_with_flush(outbound).await?;
+            }
         }
         #[allow(unreachable_code)]
         Ok::<(), Error>(())
@@ -561,6 +620,104 @@ pub async fn handler(client_stream: PgStream, context: Context<ZeroKms>) -> Resu
     }
 
     result?;
+    Ok(())
+}
+
+/// Applies CipherStash's upstream TLS policy while pg-proto owns negotiation.
+async fn connect_upstream_tls(
+    stream: NetworkStream<TcpStream>,
+    config: &TandemConfig,
+) -> Result<NetworkStream<TcpStream>, Error> {
+    if config.database_tls_disabled() {
+        warn!(msg = "Connecting to database without Transport Layer Security (TLS)");
+        return Ok(stream);
+    }
+
+    let mut request = Conn::new(Buffered::<_, BackendDirection>::new(stream)).request_ssl();
+    request.flush().await?;
+    let mut middleware = Middleware::new((), Identity);
+    let reply = request
+        .receive_encryption_reply_typed(&mut middleware)
+        .await
+        .map_err(|error| match error {
+            TypedReceiveError::Io(error) => Error::from(error),
+            TypedReceiveError::Illegal(reply) | TypedReceiveError::InvalidWire(reply) => {
+                Error::from(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!("invalid PostgreSQL encryption reply: {reply:?}"),
+                ))
+            }
+            TypedReceiveError::Middleware(never) => match never {},
+        })?;
+    match request.receive_reply(reply.into_wire()) {
+        Negotiation::Accepted(conn) => {
+            let stream = conn
+                .into_transport()
+                .into_inner()
+                .into_plain()
+                .map_err(|_| ProtocolError::UnexpectedStartupMessage)?;
+            let tls = pg_proto::tls::connect(
+                stream,
+                config.database.server_name()?.to_owned(),
+                Arc::new(tls::configure_client(&config.database)),
+            )
+            .await?;
+            Ok(NetworkStream::client_tls(tls))
+        }
+        Negotiation::Rejected(conn) => {
+            warn!(msg = "Connecting to database without Transport Layer Security (TLS)");
+            Ok(conn.into_transport().into_inner())
+        }
+        Negotiation::LegacyError(conn) => {
+            conn.into_transport();
+            Err(ProtocolError::UnexpectedStartupMessage.into())
+        }
+    }
+}
+
+async fn receive_frontend_runtime<S: AsyncRead + Unpin>(
+    reader: &mut Buffered<S, FrontendDirection>,
+    connection_timeout: Option<Duration>,
+) -> Result<FrontendMessage, Error> {
+    match connection_timeout {
+        Some(duration) => timeout(duration, reader.receive_wire())
+            .await
+            .map_err(|_| Error::ConnectionTimeout { duration })?
+            .map_err(Into::into),
+        None => reader.receive_wire().await.map_err(Into::into),
+    }
+}
+
+async fn receive_backend_runtime<S: AsyncRead + Unpin>(
+    reader: &mut Buffered<S, BackendDirection>,
+    connection_timeout: Option<Duration>,
+) -> Result<BackendMessage, Error> {
+    match connection_timeout {
+        Some(duration) => timeout(duration, reader.receive_backend())
+            .await
+            .map_err(|_| Error::ConnectionTimeout { duration })?
+            .map_err(Into::into),
+        None => reader.receive_backend().await.map_err(Into::into),
+    }
+}
+
+async fn write_to_server<S: AsyncWrite + Unpin, E>(
+    writer: &mut Buffered<S, BackendDirection>,
+    context: &mut Context<E>,
+    message: FrontendMessage,
+) -> Result<(), Error>
+where
+    E: crate::proxy::EncryptionService,
+{
+    debug!(target: crate::log::PROTOCOL, msg = "Write to server", ?message);
+    let frame = message.to_frame()?;
+    counter!(SERVER_BYTES_SENT_TOTAL).increment((frame.body.len() + 5) as u64);
+    let start = Instant::now();
+    writer.push(frame)?;
+    writer.flush().await?;
+    if let Some(session_id) = context.latest_session_id() {
+        context.add_server_write_duration(session_id, start.elapsed());
+    }
     Ok(())
 }
 

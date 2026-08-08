@@ -1,3 +1,4 @@
+//! CipherStash RowDescription rewriting.
 use bytes::Bytes;
 #[cfg(test)]
 use bytes::BytesMut;
@@ -157,7 +158,7 @@ impl From<RowDescription> for BackendMessage {
 #[cfg(test)]
 mod tests {
 
-    use crate::{config::LogConfig, log, postgresql::messages::row_description::RowDescription};
+    use crate::{config::LogConfig, log, postgresql::rewrite::row_description::RowDescription};
     use bytes::BytesMut;
     use tracing::info;
 

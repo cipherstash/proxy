@@ -1,3 +1,4 @@
+//! CipherStash Parse rewriting.
 use super::{Name, UNSPECIFIED_TYPE_OID};
 use crate::postgresql::context::statement::OutputParam;
 #[cfg(test)]
@@ -170,7 +171,7 @@ mod tests {
         log,
         postgresql::{
             context::statement::{OutputParam, OutputParamSource},
-            messages::parse::Parse,
+            rewrite::parse::Parse,
             Column,
         },
         Identifier,

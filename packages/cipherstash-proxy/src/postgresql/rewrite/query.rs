@@ -1,3 +1,4 @@
+//! CipherStash simple Query rewriting.
 #[cfg(test)]
 use crate::error::{Error, ProtocolError};
 #[cfg(test)]
