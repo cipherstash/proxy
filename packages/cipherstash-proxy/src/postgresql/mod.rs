@@ -1,19 +1,17 @@
-mod backend;
 mod column_mapper;
 mod context;
 mod data;
+mod diagnostics;
+mod driver;
 mod error_handler;
 mod format_code;
-mod frontend;
-mod handler;
-mod message_buffer;
-mod messages;
+mod middleware;
 mod parser;
-mod startup;
+mod rewrite;
 #[cfg(test)]
 mod test_codec;
 
 pub use context::column::Column;
 pub use context::Context;
 pub use context::KeysetIdentifier;
-pub use handler::handler;
+pub use driver::handler;

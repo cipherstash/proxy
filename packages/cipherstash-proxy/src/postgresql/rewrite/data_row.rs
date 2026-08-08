@@ -1,3 +1,4 @@
+//! CipherStash DataRow rewriting.
 use crate::EqlCiphertext;
 #[cfg(test)]
 use crate::{
@@ -265,7 +266,7 @@ mod tests {
     use crate::{
         config::{LogConfig, LogLevel},
         log,
-        postgresql::{messages::data_row::DataColumn, Column},
+        postgresql::{rewrite::data_row::DataColumn, Column},
     };
     use bytes::BytesMut;
     use cipherstash_client::schema::{ColumnConfig, ColumnType};

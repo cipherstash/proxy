@@ -1,46 +1,27 @@
-use super::context::Context;
-use super::data::to_sql;
-use super::error_handler::PostgreSqlErrorHandler;
-use super::message_buffer::MessageBuffer;
-use super::messages::error_response::ErrorResponse;
-use super::messages::row_description::RowDescription;
-use super::messages::UNSPECIFIED_TYPE_OID;
-use super::Column;
+use super::super::context::Context;
+use super::super::data::to_sql;
+use super::super::diagnostics::ErrorResponse;
+use super::super::error_handler::PostgreSqlErrorHandler;
+use super::super::rewrite::row_description::RowDescription;
+use super::super::rewrite::UNSPECIFIED_TYPE_OID;
+use super::super::Column;
 use crate::connect::Sender;
 use crate::error::{EncryptError, Error};
 use crate::log::{CONTEXT, DEVELOPMENT, MAPPER, PROTOCOL};
 use crate::postgresql::context::Portal;
-use crate::postgresql::messages::data_row::DataRow;
-use crate::postgresql::messages::param_description::ParamDescription;
+use crate::postgresql::rewrite::data_row::DataRow;
+use crate::postgresql::rewrite::param_description::ParamDescription;
 use crate::prometheus::{
     CLIENTS_BYTES_SENT_TOTAL, DECRYPTED_VALUES_TOTAL, DECRYPTION_DURATION_SECONDS,
     DECRYPTION_ERROR_TOTAL, DECRYPTION_REQUESTS_TOTAL, ROWS_ENCRYPTED_TOTAL,
-    ROWS_PASSTHROUGH_TOTAL, ROWS_TOTAL, SERVER_BYTES_RECEIVED_TOTAL,
+    ROWS_PASSTHROUGH_TOTAL, ROWS_TOTAL,
 };
 use crate::proxy::EncryptionService;
 use crate::EqlCiphertext;
 use metrics::{counter, histogram};
-use pg_proto::{
-    codec::{Backend as BackendDirection, BackendMessage},
-    middleware::{MessageMiddleware, Middleware},
-    transport::Buffered,
-};
+use pg_proto::{codec::BackendMessage, middleware::MessageMiddleware};
 use std::time::Instant;
-use tokio::io::AsyncRead;
 use tracing::{debug, error, info, warn};
-
-async fn receive_backend<S: AsyncRead + Unpin>(
-    reader: &mut Buffered<S, BackendDirection>,
-    connection_timeout: Option<std::time::Duration>,
-) -> Result<BackendMessage, Error> {
-    match connection_timeout {
-        Some(duration) => tokio::time::timeout(duration, reader.receive_backend())
-            .await
-            .map_err(|_| Error::ConnectionTimeout { duration })?
-            .map_err(Into::into),
-        None => reader.receive_backend().await.map_err(Into::into),
-    }
-}
 
 /// The PostgreSQL proxy backend that handles server-to-client message processing.
 ///
@@ -86,41 +67,23 @@ async fn receive_backend<S: AsyncRead + Unpin>(
 /// - `RowDescription`: Result column metadata (modified for encrypted columns)
 /// - `ParameterDescription`: Parameter metadata (modified for encrypted parameters)
 /// - `ReadyForQuery`: Session ready state (triggers schema reload if needed)
-pub struct Backend<R, S>
-where
-    R: AsyncRead + Unpin,
-    S: EncryptionService,
-{
+pub struct Backend<S: EncryptionService> {
     /// Sender for outgoing messages to client
     client_sender: Sender,
-    /// Reader for incoming messages from server
-    server_reader: Buffered<R, BackendDirection>,
     /// Session context with portal and statement metadata
     context: Context<S>,
     /// Buffer for batching DataRow messages before decryption
-    buffer: MessageBuffer,
+    buffer: Vec<DataRow>,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-enum BackendDisposition {
+pub(crate) enum BackendDisposition {
     #[default]
     Emit,
     Suppress,
 }
 
-struct BackendInterceptor<'a, R, S>
-where
-    R: AsyncRead + Unpin,
-    S: EncryptionService,
-{
-    backend: &'a mut Backend<R, S>,
-}
-
-impl<R, S> MessageMiddleware<BackendMessage, BackendDisposition> for BackendInterceptor<'_, R, S>
-where
-    R: AsyncRead + Unpin,
-    S: EncryptionService,
-{
+impl<S: EncryptionService> MessageMiddleware<BackendMessage, BackendDisposition> for Backend<S> {
     type Error = Error;
 
     async fn intercept(
@@ -128,15 +91,13 @@ where
         disposition: &mut BackendDisposition,
         message: BackendMessage,
     ) -> Result<BackendMessage, Self::Error> {
-        self.backend.intercept_backend(disposition, message).await
+        self.intercept_backend(disposition, message).await
     }
 }
 
-impl<R, S> Backend<R, S>
-where
-    R: AsyncRead + Unpin,
-    S: EncryptionService,
-{
+impl<S: EncryptionService> Backend<S> {
+    const RESPONSE_BUFFER_SIZE: usize = 4096;
+
     /// Creates a new Backend instance.
     ///
     /// # Arguments
@@ -145,98 +106,13 @@ where
     /// * `server_reader` - Stream for reading messages from the PostgreSQL server
     /// * `encrypt` - Encryption service for handling column decryption
     /// * `context` - Session context shared with the frontend
-    pub fn new(client_sender: Sender, server_reader: R, context: Context<S>) -> Self {
-        let buffer = MessageBuffer::new();
+    pub fn new(client_sender: Sender, context: Context<S>) -> Self {
+        let buffer = Vec::with_capacity(Self::RESPONSE_BUFFER_SIZE);
         Backend {
             client_sender,
-            server_reader: Buffered::new(server_reader),
             context,
             buffer,
         }
-    }
-
-    /// Main message processing loop for handling server messages.
-    ///
-    /// Reads messages from the PostgreSQL server, processes them based on message type,
-    /// performs decryption for encrypted result data, and forwards messages to the client.
-    ///
-    /// # PostgreSQL Protocol Phases
-    ///
-    /// ## Execute Phase
-    /// Execute operations produce a stream of DataRow messages followed by exactly one of:
-    /// - `CommandComplete` - Successful completion
-    /// - `EmptyQueryResponse` - Empty query completed
-    /// - `ErrorResponse` - Error occurred
-    /// - `PortalSuspended` - Portal execution suspended (LIMIT reached)
-    ///
-    /// ## Describe Phase
-    /// Describe operations return metadata about statements or portals:
-    /// - `ParameterDescription` - Parameter metadata (for statements)
-    /// - `RowDescription` - Result column metadata
-    /// - `NoData` - No result columns
-    ///
-    /// # Message Processing Flow
-    ///
-    /// 1. **Read Message**: Read and parse PostgreSQL wire protocol message
-    /// 2. **Check Passthrough**: Skip processing if encryption is disabled
-    /// 3. **Handle by Type**: Route to appropriate handler based on message code
-    /// 4. **Buffer Management**: Buffer DataRows, flush on completion/errors
-    /// 5. **Forward**: Send processed message to PostgreSQL client
-    ///
-    /// # Buffering Behavior
-    ///
-    /// DataRow messages are buffered for batch decryption to improve performance.
-    /// The buffer is automatically flushed when:
-    /// - Buffer reaches capacity
-    /// - Execute phase completes (CommandComplete, ErrorResponse, etc.)
-    /// - Non-DataRow message is encountered
-    ///
-    /// # Returns
-    ///
-    /// Returns `Ok(())` on successful message processing, or an `Error` if a fatal
-    /// error occurs that should terminate the connection.
-    pub async fn rewrite(&mut self) -> Result<(), Error> {
-        let read_start = Instant::now();
-        let protocol_message =
-            receive_backend(&mut self.server_reader, self.context.connection_timeout()).await?;
-        let session_item = self.server_reader.project_backend(protocol_message.clone());
-        if session_item.is_none() {
-            // The demux has recorded the asynchronous event and its ordering;
-            // forwarding still uses the original typed message below.
-            let _ = self.server_reader.demux_mut().pop_async_event();
-        }
-
-        let read_duration = read_start.elapsed();
-        self.context.record_execute_server_timing(read_duration);
-
-        let frame = protocol_message.to_frame()?;
-        let sent: u64 = (frame.body.len() + 5) as u64;
-        counter!(SERVER_BYTES_RECEIVED_TOTAL).increment(sent);
-
-        // Log slow database responses (configurable threshold, default 100ms)
-        if read_duration > self.context.slow_db_response_min_duration() {
-            warn!(
-                client_id = self.context.client_id,
-                msg = "Slow database response",
-                duration_ms = read_duration.as_millis(),
-                message = ?protocol_message,
-            );
-        }
-
-        let (outbound_message, disposition) = {
-            let mut middleware = Middleware::new(
-                BackendDisposition::Emit,
-                BackendInterceptor { backend: self },
-            );
-            let outbound_message = middleware.intercept(protocol_message).await?;
-            (outbound_message, *middleware.state())
-        };
-
-        if disposition == BackendDisposition::Emit {
-            self.write_with_flush(outbound_message).await?;
-        }
-
-        Ok(())
     }
 
     async fn intercept_backend(
@@ -425,7 +301,7 @@ where
     ///
     async fn buffer(&mut self, data_row: DataRow) -> Result<(), Error> {
         self.buffer.push(data_row);
-        if self.buffer.at_capacity() {
+        if self.buffer.len() >= Self::RESPONSE_BUFFER_SIZE {
             debug!(target: DEVELOPMENT, client_id = self.context.client_id, msg = "Flush message buffer");
             self.flush().await?;
         }
@@ -530,7 +406,7 @@ where
             }
         };
 
-        let mut rows: Vec<DataRow> = self.buffer.drain().into_iter().collect();
+        let mut rows: Vec<DataRow> = self.buffer.drain(..).collect();
         debug!(target: DEVELOPMENT, client_id = self.context.client_id, rows = rows.len());
 
         let result_column_count = match rows.first() {
@@ -776,11 +652,7 @@ where
 }
 
 /// Implementation of PostgreSQL error handling for the Backend component.
-impl<R, S> PostgreSqlErrorHandler for Backend<R, S>
-where
-    R: AsyncRead + Unpin,
-    S: EncryptionService,
-{
+impl<S: EncryptionService> PostgreSqlErrorHandler for Backend<S> {
     fn client_sender(&mut self) -> &mut Sender {
         &mut self.client_sender
     }
@@ -790,11 +662,7 @@ where
     }
 }
 
-impl<R, S> Backend<R, S>
-where
-    R: AsyncRead + Unpin,
-    S: EncryptionService,
-{
+impl<S: EncryptionService> Backend<S> {
     async fn send_error_response(&mut self, err: Error) -> Result<(), Error> {
         let error_response = self.error_to_response(err);
         // Ensure any buffered data is cleared before sending error
@@ -825,12 +693,12 @@ mod tests {
     use crate::config::{LogConfig, TandemConfig};
     use crate::log;
     use crate::postgresql::context::KeysetIdentifier;
+    use crate::postgresql::test_codec::decode_backend_frame;
     use crate::proxy::{EncryptConfig, EncryptionService};
     use bytes::Bytes as Name;
     use bytes::{Bytes, BytesMut};
     use eql_mapper::Schema;
     use pg_proto::codec::FrontendMessage;
-    use std::io::Cursor;
     use std::sync::Arc;
     use tokio::sync::mpsc;
 
@@ -946,18 +814,11 @@ mod tests {
                 "test context must be in passthrough mode"
             );
 
-            // A stream of identical terminating messages — one per statement —
-            // that the backend reads from the "server".
-            let message = encode();
-            let mut server_bytes = BytesMut::new();
-            for _ in 0..STATEMENTS {
-                server_bytes.extend_from_slice(&message);
-            }
+            let message = decode_backend_frame(&encode()).unwrap();
 
             // Keep the client receiver alive so write_with_flush succeeds.
             let (client_sender, _client_receiver) = mpsc::unbounded_channel();
-            let reader = Cursor::new(server_bytes.to_vec());
-            let mut backend = Backend::new(client_sender, reader, context);
+            let mut backend = Backend::new(client_sender, context);
 
             for i in 0..STATEMENTS {
                 // Frontend: enqueue a session + execute for the statement.
@@ -975,9 +836,14 @@ mod tests {
                     .await
                     .unwrap();
 
-                // Backend: process the terminating message via the passthrough
-                // path, which must drain the queues.
-                backend.rewrite().await.unwrap();
+                let mut disposition = BackendDisposition::Emit;
+                backend
+                    .intercept_backend(&mut disposition, message.clone())
+                    .await
+                    .unwrap();
+                if disposition == BackendDisposition::Emit {
+                    backend.write_with_flush(message.clone()).await.unwrap();
+                }
 
                 if label == "ErrorResponse" {
                     backend
