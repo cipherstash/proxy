@@ -2,7 +2,7 @@ use super::{middleware::CipherStashMiddlewareFactory, Context};
 use crate::{
     connect,
     error::{Error, ProtocolError},
-    proxy::ZeroKms,
+    proxy::EncryptionService,
     tls,
 };
 use bytes::Bytes;
@@ -261,7 +261,10 @@ impl ClientTlsProvider for UpstreamTls {
     }
 }
 
-pub async fn handler(client_stream: TcpStream, context: Context<ZeroKms>) -> Result<(), Error> {
+pub async fn handler<S>(client_stream: TcpStream, context: Context<S>) -> Result<(), Error>
+where
+    S: EncryptionService + Clone,
+{
     let address = context.database_socket_address();
     let downstream_auth = DownstreamAuth {
         username: context.database_username().to_owned(),
@@ -338,11 +341,7 @@ pub async fn handler(client_stream: TcpStream, context: Context<ZeroKms>) -> Res
                 let provider = UpstreamTls {
                     server_name: context.config().database.server_name()?.to_owned(),
                 };
-                let mode = if context.config().database.with_tls_verification {
-                    SslMode::VerifyFull
-                } else {
-                    SslMode::Require
-                };
+                let mode = upstream_ssl_mode(context.config());
                 let client = Client::builder()
                     .connector(|target: &ConnectTarget| {
                         let address = target.name().to_owned();
@@ -391,6 +390,16 @@ fn invalid_data(error: impl std::fmt::Display) -> Error {
     std::io::Error::new(std::io::ErrorKind::InvalidData, error.to_string()).into()
 }
 
+fn upstream_ssl_mode(config: &crate::TandemConfig) -> SslMode {
+    if config.database.with_tls_verification {
+        SslMode::VerifyFull
+    } else {
+        // Preserve the proxy's historical opportunistic-TLS policy: attempt
+        // SSL, but continue in plaintext when the database rejects it.
+        SslMode::Prefer
+    }
+}
+
 pub fn md5_hash(username: &[u8], password: &[u8], salt: &[u8; 4]) -> String {
     let mut md5 = Md5::new();
     md5.update(password);
@@ -399,4 +408,15 @@ pub fn md5_hash(username: &[u8], password: &[u8], salt: &[u8; 4]) -> String {
     md5.update(format!("{output:x}"));
     md5.update(salt);
     format!("md5{:x}", md5.finalize())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn upstream_tls_without_verification_is_opportunistic() {
+        let config = crate::TandemConfig::for_testing();
+        assert_eq!(upstream_ssl_mode(&config), SslMode::Prefer);
+    }
 }
