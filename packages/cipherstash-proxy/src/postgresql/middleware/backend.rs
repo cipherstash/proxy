@@ -5,21 +5,19 @@ use super::super::error_handler::PostgreSqlErrorHandler;
 use super::super::rewrite::row_description::RowDescription;
 use super::super::rewrite::UNSPECIFIED_TYPE_OID;
 use super::super::Column;
-use crate::connect::Sender;
 use crate::error::{EncryptError, Error};
 use crate::log::{CONTEXT, DEVELOPMENT, MAPPER, PROTOCOL};
 use crate::postgresql::context::Portal;
 use crate::postgresql::rewrite::data_row::DataRow;
 use crate::postgresql::rewrite::param_description::ParamDescription;
 use crate::prometheus::{
-    CLIENTS_BYTES_SENT_TOTAL, DECRYPTED_VALUES_TOTAL, DECRYPTION_DURATION_SECONDS,
-    DECRYPTION_ERROR_TOTAL, DECRYPTION_REQUESTS_TOTAL, ROWS_ENCRYPTED_TOTAL,
-    ROWS_PASSTHROUGH_TOTAL, ROWS_TOTAL,
+    DECRYPTED_VALUES_TOTAL, DECRYPTION_DURATION_SECONDS, DECRYPTION_ERROR_TOTAL,
+    DECRYPTION_REQUESTS_TOTAL, ROWS_ENCRYPTED_TOTAL, ROWS_PASSTHROUGH_TOTAL, ROWS_TOTAL,
 };
 use crate::proxy::EncryptionService;
 use crate::EqlCiphertext;
 use metrics::{counter, histogram};
-use pg_proto::{codec::BackendMessage, middleware::MessageMiddleware};
+use pg_proto::{BackendBatchOutput, BackendMessage, BackendMiddlewareOutput, HeldBackendMessages};
 use std::time::Instant;
 use tracing::{debug, error, info, warn};
 
@@ -68,12 +66,11 @@ use tracing::{debug, error, info, warn};
 /// - `ParameterDescription`: Parameter metadata (modified for encrypted parameters)
 /// - `ReadyForQuery`: Session ready state (triggers schema reload if needed)
 pub struct Backend<S: EncryptionService> {
-    /// Sender for outgoing messages to client
-    client_sender: Sender,
     /// Session context with portal and statement metadata
     context: Context<S>,
     /// Buffer for batching DataRow messages before decryption
     buffer: Vec<DataRow>,
+    emitted: Vec<BackendMessage>,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -81,18 +78,6 @@ pub(crate) enum BackendDisposition {
     #[default]
     Emit,
     Suppress,
-}
-
-impl<S: EncryptionService> MessageMiddleware<BackendMessage, BackendDisposition> for Backend<S> {
-    type Error = Error;
-
-    async fn intercept(
-        &mut self,
-        disposition: &mut BackendDisposition,
-        message: BackendMessage,
-    ) -> Result<BackendMessage, Self::Error> {
-        self.intercept_backend(disposition, message).await
-    }
 }
 
 impl<S: EncryptionService> Backend<S> {
@@ -106,13 +91,42 @@ impl<S: EncryptionService> Backend<S> {
     /// * `server_reader` - Stream for reading messages from the PostgreSQL server
     /// * `encrypt` - Encryption service for handling column decryption
     /// * `context` - Session context shared with the frontend
-    pub fn new(client_sender: Sender, context: Context<S>) -> Self {
+    pub fn new(context: Context<S>) -> Self {
         let buffer = Vec::with_capacity(Self::RESPONSE_BUFFER_SIZE);
         Backend {
-            client_sender,
             context,
             buffer,
+            emitted: Vec::new(),
         }
+    }
+
+    pub async fn intercept(
+        &mut self,
+        message: BackendMessage,
+    ) -> Result<BackendMiddlewareOutput, Error> {
+        let mut disposition = BackendDisposition::Emit;
+        let message = self.intercept_backend(&mut disposition, message).await?;
+        Ok(if disposition == BackendDisposition::Suppress {
+            BackendMiddlewareOutput::Hold
+        } else {
+            BackendMiddlewareOutput::Forward(message)
+        })
+    }
+
+    pub async fn flush_held(
+        &mut self,
+        held: HeldBackendMessages<'_>,
+    ) -> Result<BackendBatchOutput, Error> {
+        self.flush().await?;
+        let messages = std::mem::take(&mut self.emitted);
+        if messages.len() != held.len() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "decrypted DataRow batch length changed",
+            )
+            .into());
+        }
+        Ok(BackendBatchOutput::ReplaceOneToOne(messages))
     }
 
     async fn intercept_backend(
@@ -286,7 +300,7 @@ impl<S: EncryptionService> Backend<S> {
     ///
     /// Always returns `Some(bytes)` containing the original error response
     /// to forward to the client unchanged.
-    fn error_response_handler(&mut self, response: &pg_proto::codec::DiagnosticResponse) {
+    fn error_response_handler(&mut self, response: &pg_proto::DiagnosticResponse) {
         let error_response = ErrorResponse::from(response);
         error!(msg = "PostgreSQL Error", error = ?error_response);
         info!(msg = "PostgreSQL Errors originate in the database");
@@ -331,16 +345,8 @@ impl<S: EncryptionService> Backend<S> {
     /// Write a message to the client
     ///
     pub async fn write(&mut self, message: BackendMessage) -> Result<(), Error> {
-        self.context
-            .protocol_backend_forwarded(message.clone())
-            .await?;
-        let frame = message.to_frame()?;
-        let sent: u64 = (frame.body.len() + 5) as u64;
-        counter!(CLIENTS_BYTES_SENT_TOTAL).increment(sent);
-
         let start = Instant::now();
-        self.client_sender.send(message)?;
-        self.context.protocol_backend_sent();
+        self.emitted.push(message);
         let duration = start.elapsed();
         self.context.add_client_write_duration_for_execute(duration);
 
@@ -653,10 +659,6 @@ impl<S: EncryptionService> Backend<S> {
 
 /// Implementation of PostgreSQL error handling for the Backend component.
 impl<S: EncryptionService> PostgreSqlErrorHandler for Backend<S> {
-    fn client_sender(&mut self) -> &mut Sender {
-        &mut self.client_sender
-    }
-
     fn client_id(&self) -> i32 {
         self.context.client_id
     }
@@ -677,11 +679,7 @@ impl<S: EncryptionService> Backend<S> {
             ?message,
         );
 
-        self.context
-            .protocol_backend_forwarded(message.clone())
-            .await?;
-        self.client_sender.send(message)?;
-        self.context.protocol_backend_sent();
+        self.emitted.push(message);
 
         Ok(())
     }
@@ -693,12 +691,11 @@ mod tests {
     use crate::config::{LogConfig, TandemConfig};
     use crate::log;
     use crate::postgresql::context::KeysetIdentifier;
-    use crate::postgresql::test_codec::decode_backend_frame;
     use crate::proxy::{EncryptConfig, EncryptionService};
     use bytes::Bytes as Name;
-    use bytes::{Bytes, BytesMut};
+    use bytes::Bytes;
     use eql_mapper::Schema;
-    use pg_proto::codec::FrontendMessage;
+    use pg_proto::DiagnosticResponse;
     use std::sync::Arc;
     use tokio::sync::mpsc;
 
@@ -743,41 +740,30 @@ mod tests {
     }
 
     /// Encodes a backend message as wire bytes (one per execute-terminating code).
-    type MessageEncoder = fn() -> BytesMut;
+    type MessageFactory = fn() -> BackendMessage;
 
     /// Frame a backend message on the wire: 1-byte code + Int32 length
     /// (body length + 4) + body. Sufficient for the passthrough path, which
     /// matches on the code only and does not parse the body.
-    fn backend_message(code: u8, body: &[u8]) -> BytesMut {
-        let len = (body.len() + 4) as i32;
-
-        let mut bytes = BytesMut::new();
-        bytes.extend_from_slice(&[code]);
-        bytes.extend_from_slice(&len.to_be_bytes());
-        bytes.extend_from_slice(body);
-        bytes
-    }
-
-    /// `'C'` CommandComplete, carrying a command tag.
-    fn command_complete_bytes() -> BytesMut {
-        backend_message(b'C', b"SELECT 1\0")
+    fn command_complete() -> BackendMessage {
+        BackendMessage::CommandComplete(Bytes::from_static(b"SELECT 1"))
     }
 
     /// `'I'` EmptyQueryResponse — no body.
-    fn empty_query_response_bytes() -> BytesMut {
-        backend_message(b'I', b"")
+    fn empty_query_response() -> BackendMessage {
+        BackendMessage::EmptyQueryResponse
     }
 
     /// `'s'` PortalSuspended — no body.
-    fn portal_suspended_bytes() -> BytesMut {
-        backend_message(b's', b"")
+    fn portal_suspended() -> BackendMessage {
+        BackendMessage::PortalSuspended
     }
 
     /// `'E'` ErrorResponse — a sequence of (field-type, C-string) pairs
     /// terminated by a zero byte. Content is irrelevant here: the passthrough
     /// path forwards the bytes and matches on the code without parsing them.
-    fn error_response_bytes() -> BytesMut {
-        backend_message(b'E', b"SERROR\0CXX000\0Mboom\0\0")
+    fn error_response() -> BackendMessage {
+        BackendMessage::ErrorResponse(DiagnosticResponse { fields: vec![] })
     }
 
     /// Regression test for BUG-300 (passthrough memory leak).
@@ -800,11 +786,11 @@ mod tests {
         const STATEMENTS: usize = 256;
 
         // Every code that terminates the execute phase must drain the queues.
-        let cases: [(&str, MessageEncoder); 4] = [
-            ("CommandComplete", command_complete_bytes),
-            ("EmptyQueryResponse", empty_query_response_bytes),
-            ("PortalSuspended", portal_suspended_bytes),
-            ("ErrorResponse", error_response_bytes),
+        let cases: [(&str, MessageFactory); 4] = [
+            ("CommandComplete", command_complete),
+            ("EmptyQueryResponse", empty_query_response),
+            ("PortalSuspended", portal_suspended),
+            ("ErrorResponse", error_response),
         ];
 
         for (label, encode) in cases {
@@ -814,28 +800,13 @@ mod tests {
                 "test context must be in passthrough mode"
             );
 
-            let message = decode_backend_frame(&encode()).unwrap();
-
-            // Keep the client receiver alive so write_with_flush succeeds.
-            let (client_sender, _client_receiver) = mpsc::unbounded_channel();
-            let mut backend = Backend::new(client_sender, context);
+            let message = encode();
+            let mut backend = Backend::new(context);
 
             for i in 0..STATEMENTS {
                 // Frontend: enqueue a session + execute for the statement.
                 let session_id = backend.context.start_session();
                 backend.context.set_execute(Name::new(), Some(session_id));
-                backend
-                    .context
-                    .protocol_frontend_received(
-                        FrontendMessage::Execute(pg_proto::codec::Execute {
-                            portal: Bytes::new(),
-                            max_rows: 0,
-                        }),
-                        pg_proto::pipeline::FrontendHandling::Forward,
-                    )
-                    .await
-                    .unwrap();
-
                 let mut disposition = BackendDisposition::Emit;
                 backend
                     .intercept_backend(&mut disposition, message.clone())
@@ -843,25 +814,6 @@ mod tests {
                     .unwrap();
                 if disposition == BackendDisposition::Emit {
                     backend.write_with_flush(message.clone()).await.unwrap();
-                }
-
-                if label == "ErrorResponse" {
-                    backend
-                        .context
-                        .protocol_frontend_received(
-                            FrontendMessage::Sync,
-                            pg_proto::pipeline::FrontendHandling::Forward,
-                        )
-                        .await
-                        .unwrap();
-                    let ready =
-                        BackendMessage::ReadyForQuery(pg_proto::codec::TransactionStatus::Idle);
-                    backend
-                        .context
-                        .protocol_backend_forwarded(ready)
-                        .await
-                        .unwrap();
-                    backend.context.protocol_backend_sent();
                 }
 
                 // The queues must be drained every iteration — not grow by one

@@ -54,7 +54,7 @@ pub enum Error {
     Unknown,
 
     #[error(transparent)]
-    SendError(#[from] tokio::sync::mpsc::error::SendError<pg_proto::codec::BackendMessage>),
+    SendError(#[from] tokio::sync::mpsc::error::SendError<pg_proto::BackendMessage>),
 }
 
 impl Error {

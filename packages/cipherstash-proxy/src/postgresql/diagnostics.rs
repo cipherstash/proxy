@@ -1,7 +1,7 @@
 //! CipherStash diagnostic response factories.
 use bytes::Bytes;
 use core::fmt;
-use pg_proto::codec::{BackendMessage, DiagnosticField, DiagnosticResponse};
+use pg_proto::{BackendMessage, DiagnosticField, DiagnosticResponse};
 use regex::Regex;
 use std::sync::LazyLock;
 ///
@@ -463,31 +463,35 @@ impl From<u8> for ErrorResponseCode {
 mod tests {
     use super::ErrorResponseCode;
     use crate::postgresql::diagnostics::ErrorResponse;
-    use crate::postgresql::test_codec::{decode_backend_frame, encode_backend_message};
-    use bytes::BytesMut;
-    use pg_proto::codec::BackendMessage;
-
-    fn to_message(s: &[u8]) -> BytesMut {
-        BytesMut::from(s)
-    }
+    use bytes::Bytes;
+    use pg_proto::{BackendMessage, DiagnosticField, DiagnosticResponse};
 
     #[test]
     pub fn parse_error_response_message() {
-        let message = to_message(b"E\0\0\0kSERROR\0VERROR\0C26000\0Mprepared statement \"a37\" does not exist\0Fprepare.c\0L454\0RFetchPreparedStatement\0\0Z\0\0\0\x05I");
-
-        let BackendMessage::ErrorResponse(response) = decode_backend_frame(&message).unwrap()
-        else {
-            panic!("expected ErrorResponse")
+        let response = DiagnosticResponse {
+            fields: vec![
+                (b'S', "ERROR"),
+                (b'V', "ERROR"),
+                (b'C', "26000"),
+                (b'M', "prepared statement \"a37\" does not exist"),
+                (b'F', "prepare.c"),
+                (b'L', "454"),
+                (b'R', "FetchPreparedStatement"),
+            ]
+            .into_iter()
+            .map(|(code, value)| DiagnosticField {
+                code,
+                value: Bytes::from(value),
+            })
+            .collect(),
         };
         let error_response = ErrorResponse::from(&response);
         assert_eq!(error_response.fields.len(), 7);
-
-        // let next = cursor.get_u8() as char;
-        // assert_eq!(next, 'Z');
-
-        let bytes = encode_backend_message(&error_response.into_backend_message()).unwrap();
-        let message = to_message(b"E\0\0\0kSERROR\0VERROR\0C26000\0Mprepared statement \"a37\" does not exist\0Fprepare.c\0L454\0RFetchPreparedStatement\0\0");
-        assert_eq!(bytes, message);
+        let BackendMessage::ErrorResponse(round_trip) = error_response.into_backend_message()
+        else {
+            panic!("expected ErrorResponse")
+        };
+        assert_eq!(round_trip, response);
     }
 
     #[test]

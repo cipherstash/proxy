@@ -1,18 +1,11 @@
 //! CipherStash RowDescription rewriting.
 use bytes::Bytes;
-#[cfg(test)]
-use bytes::BytesMut;
-use pg_proto::codec::{
+use pg_proto::{
     BackendMessage, FieldDescription as PgFieldDescription, RowDescription as PgRowDescription,
 };
 use postgres_types::Type;
 
 use crate::postgresql::format_code::FormatCode;
-#[cfg(test)]
-use crate::{
-    error::{Error, ProtocolError},
-    postgresql::test_codec::{decode_backend_frame, encode_backend_message},
-};
 
 #[derive(Debug)]
 pub struct RowDescription {
@@ -59,38 +52,6 @@ impl RowDescriptionField {
     }
 }
 
-#[cfg(test)]
-impl TryFrom<&BytesMut> for RowDescription {
-    type Error = Error;
-
-    fn try_from(bytes: &BytesMut) -> Result<RowDescription, Error> {
-        let BackendMessage::RowDescription(description) = decode_backend_frame(bytes)? else {
-            return Err(ProtocolError::UnexpectedMessageCode {
-                expected: 'T',
-                received: bytes.first().copied().unwrap_or_default() as char,
-            }
-            .into());
-        };
-
-        let fields = description
-            .fields
-            .into_iter()
-            .map(|field| RowDescriptionField {
-                name: String::from_utf8_lossy(&field.name).into_owned(),
-                table_oid: field.table_oid as i32,
-                table_column: field.column,
-                type_oid: field.type_oid as i32,
-                type_size: field.type_size,
-                type_modifier: field.type_modifier,
-                format_code: field.format.into(),
-                dirty: false,
-            })
-            .collect();
-
-        Ok(RowDescription { fields })
-    }
-}
-
 impl From<PgRowDescription> for RowDescription {
     fn from(description: PgRowDescription) -> Self {
         Self {
@@ -109,29 +70,6 @@ impl From<PgRowDescription> for RowDescription {
                 })
                 .collect(),
         }
-    }
-}
-
-#[cfg(test)]
-impl TryFrom<RowDescription> for BytesMut {
-    type Error = Error;
-
-    fn try_from(row_description: RowDescription) -> Result<BytesMut, Error> {
-        let fields = row_description
-            .fields
-            .into_iter()
-            .map(|field| PgFieldDescription {
-                name: Bytes::from(field.name),
-                table_oid: field.table_oid as u32,
-                column: field.table_column,
-                type_oid: field.type_oid as u32,
-                type_size: field.type_size,
-                type_modifier: field.type_modifier,
-                format: field.format_code.into(),
-            })
-            .collect();
-
-        encode_backend_message(&BackendMessage::RowDescription(PgRowDescription { fields }))
     }
 }
 
@@ -159,11 +97,26 @@ impl From<RowDescription> for BackendMessage {
 mod tests {
 
     use crate::{config::LogConfig, log, postgresql::rewrite::row_description::RowDescription};
-    use bytes::BytesMut;
+    use bytes::Bytes;
+    use pg_proto::{BackendMessage, FieldDescription, RowDescription as PgRowDescription};
     use tracing::info;
 
-    fn to_message(s: &[u8]) -> BytesMut {
-        BytesMut::from(s)
+    fn field(
+        name: &'static [u8],
+        table_oid: u32,
+        column: i16,
+        type_oid: u32,
+        type_size: i16,
+    ) -> FieldDescription {
+        FieldDescription {
+            name: Bytes::from_static(name),
+            table_oid,
+            column,
+            type_oid,
+            type_size,
+            type_modifier: -1,
+            format: 0,
+        }
     }
 
     #[test]
@@ -198,40 +151,42 @@ mod tests {
     #[test]
     pub fn parse_row_description() {
         log::init(LogConfig::default());
-        let bytes = to_message(
-            b"T\0\0\0!\0\x01TimeZone\0\0\0\0\0\0\0\0\0\0\x19\xff\xff\xff\xff\xff\xff\0\0",
-        );
-
-        let expected = bytes.clone();
-
-        let row_description = RowDescription::try_from(&bytes).unwrap();
+        let expected = PgRowDescription {
+            fields: vec![field(b"TimeZone", 0, 0, 25, -1)],
+        };
+        let row_description = RowDescription::from(expected.clone());
 
         info!("{:?}", row_description);
 
         assert_eq!(row_description.fields.len(), 1);
         assert_eq!(row_description.fields[0].name, "TimeZone");
 
-        let bytes = BytesMut::try_from(row_description).unwrap();
-        assert_eq!(bytes, expected);
+        let BackendMessage::RowDescription(actual) = row_description.into() else {
+            panic!("expected RowDescription")
+        };
+        assert_eq!(actual, expected);
     }
 
     #[test]
     pub fn parse_row_description_with_many_fields() {
         log::init(LogConfig::default());
-        let bytes = to_message(
-             b"T\0\0\0J\0\x03id\0\0\0h,\0\x01\0\0\0\x14\0\x08\xff\xff\xff\xff\0\0name\0\0\0h,\0\x02\0\0\0\x19\xff\xff\xff\xff\xff\xff\0\0email\0\0\0h,\0\x03\0\0\x0e\xda\xff\xff\xff\xff\xff\xff\0\0"
-        );
-
-        let expected = bytes.clone();
-
-        let row_description = RowDescription::try_from(&bytes).unwrap();
+        let expected = PgRowDescription {
+            fields: vec![
+                field(b"id", 26_668, 1, 20, 8),
+                field(b"name", 26_668, 2, 25, -1),
+                field(b"email", 26_668, 3, 3802, -1),
+            ],
+        };
+        let row_description = RowDescription::from(expected.clone());
 
         assert_eq!(row_description.fields.len(), 3);
         assert_eq!(row_description.fields[0].name, "id");
         assert_eq!(row_description.fields[1].name, "name");
         assert_eq!(row_description.fields[2].name, "email");
 
-        let bytes = BytesMut::try_from(row_description).unwrap();
-        assert_eq!(bytes, expected);
+        let BackendMessage::RowDescription(actual) = row_description.into() else {
+            panic!("expected RowDescription")
+        };
+        assert_eq!(actual, expected);
     }
 }

@@ -1,9 +1,4 @@
-mod channel_writer;
-
-pub use channel_writer::{ChannelWriter, Sender};
-
 use crate::{config::ServerConfig, error::Error, tls, DatabaseConfig};
-use pg_proto::net::{ConnectRetry, NetworkStream, TcpSettings};
 use std::time::Duration;
 use tokio::{
     net::{TcpListener, TcpStream},
@@ -20,39 +15,38 @@ const TCP_KEEPALIVE_TIME: Duration = Duration::from_secs(5);
 const TCP_KEEPALIVE_RETRIES: u32 = 5;
 
 fn configure_tcp(stream: &TcpStream) {
-    let settings = TcpSettings {
-        no_delay: true,
-        user_timeout: Some(TCP_USER_TIMEOUT),
-        keepalive_time: Some(TCP_KEEPALIVE_TIME),
-        keepalive_interval: Some(TCP_KEEPALIVE_INTERVAL),
-        keepalive_retries: Some(TCP_KEEPALIVE_RETRIES),
-    };
-    for error in pg_proto::net::configure_tcp(stream, settings) {
-        warn!(msg = "Error configuring connection", error = %error);
+    if let Err(error) = stream.set_nodelay(true) {
+        warn!(msg = "Error configuring TCP_NODELAY", error = %error);
     }
 }
 
-pub async fn accept(listener: &TcpListener) -> Result<NetworkStream<TcpStream>, Error> {
+pub async fn accept(listener: &TcpListener) -> Result<TcpStream, Error> {
     let (stream, _) = listener.accept().await?;
     configure_tcp(&stream);
-    Ok(NetworkStream::plain(stream))
+    Ok(stream)
 }
 
-pub async fn connect(address: &str) -> Result<NetworkStream<TcpStream>, Error> {
+pub async fn connect(address: &str) -> Result<TcpStream, Error> {
     debug!(msg = "Connecting to database");
-    let retry = ConnectRetry {
-        max_retries: MAX_RETRY_COUNT,
-        initial_delay: Duration::from_millis(100),
-        max_delay: MAX_RETRY_DELAY,
-    };
-    let stream = pg_proto::net::connect_with_retry(address, retry)
-        .await
-        .map_err(|error| {
-            error!(msg = "Could not connect to database", error = %error);
-            Error::DatabaseConnection
-        })?;
-    configure_tcp(&stream);
-    Ok(NetworkStream::plain(stream))
+    let mut delay = Duration::from_millis(100);
+    for attempt in 0..=MAX_RETRY_COUNT {
+        match TcpStream::connect(address).await {
+            Ok(stream) => {
+                configure_tcp(&stream);
+                return Ok(stream);
+            }
+            Err(error) if attempt < MAX_RETRY_COUNT => {
+                warn!(msg = "Database connection failed; retrying", %error, attempt);
+                time::sleep(delay).await;
+                delay = (delay * 2).min(MAX_RETRY_DELAY);
+            }
+            Err(error) => {
+                error!(msg = "Could not connect to database", error = %error);
+                return Err(Error::DatabaseConnection);
+            }
+        }
+    }
+    unreachable!()
 }
 
 pub async fn database(config: &DatabaseConfig) -> Result<Client, Error> {

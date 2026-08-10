@@ -5,7 +5,6 @@ use super::super::parser::SqlParser;
 use super::super::rewrite::bind::Bind;
 use super::super::rewrite::parse::Parse;
 use super::super::rewrite::query::Query;
-use crate::connect::Sender;
 use crate::error::{EncryptError, Error, MappingError};
 use crate::log::{MAPPER, PROTOCOL};
 use crate::postgresql::context::column::Column;
@@ -30,12 +29,8 @@ use cipherstash_client::encryption::Plaintext;
 use eql_mapper::{self, EqlMapperError, EqlTermVariant, JsonSelectorSegment, TypeCheckedStatement};
 use metrics::{counter, histogram};
 use pg_proto::{
-    codec::{
-        BackendMessage, Close, Describe, DescribeTarget, Execute, FrontendMessage,
-        TransactionStatus,
-    },
-    middleware::MessageMiddleware,
-    pipeline::{FrontendHandling, OperationId},
+    BackendMessage, Close, Describe, DescribeTarget, Execute, FrontendMessage,
+    FrontendMiddlewareOutput, TransactionStatus,
 };
 use serde::Serialize;
 use sqltk::parser::ast::{self, Value};
@@ -89,10 +84,10 @@ use tracing::{debug, info, warn};
 /// and sent back to the client. The frontend maintains error state to properly handle
 /// the PostgreSQL extended query error recovery protocol.
 pub struct Frontend<S: EncryptionService> {
-    /// Sender for outgoing messages to client
-    client_sender: Sender,
     /// Session context tracking statements, portals, and keyset IDs
     context: Context<S>,
+    local_responses: Vec<BackendMessage>,
+    extended_error: bool,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -100,18 +95,7 @@ pub(crate) enum FrontendDisposition {
     #[default]
     Forward,
     Local,
-}
-
-impl<S: EncryptionService> MessageMiddleware<FrontendMessage, FrontendDisposition> for Frontend<S> {
-    type Error = Error;
-
-    async fn intercept(
-        &mut self,
-        disposition: &mut FrontendDisposition,
-        message: FrontendMessage,
-    ) -> Result<FrontendMessage, Self::Error> {
-        self.intercept_frontend(disposition, message).await
-    }
+    Suppress,
 }
 
 impl<S: EncryptionService> Frontend<S> {
@@ -123,10 +107,30 @@ impl<S: EncryptionService> Frontend<S> {
     /// * `client_sender` - Channel sender for sending messages back to client
     /// * `server_writer` - Stream for writing messages to the PostgreSQL server
     /// * `context` - Session context for tracking statements and portals with service access
-    pub fn new(client_sender: Sender, context: Context<S>) -> Self {
+    pub fn new(context: Context<S>) -> Self {
         Frontend {
-            client_sender,
             context,
+            local_responses: Vec::new(),
+            extended_error: false,
+        }
+    }
+
+    pub async fn intercept(
+        &mut self,
+        protocol_message: FrontendMessage,
+    ) -> Result<FrontendMiddlewareOutput, Error> {
+        let request = protocol_message.clone();
+        let mut disposition = FrontendDisposition::Forward;
+        let message = self
+            .intercept_frontend(&mut disposition, protocol_message)
+            .await?;
+        match disposition {
+            FrontendDisposition::Local => Ok(FrontendMiddlewareOutput::Respond {
+                request,
+                responses: std::mem::take(&mut self.local_responses),
+            }),
+            FrontendDisposition::Suppress => Ok(FrontendMiddlewareOutput::Suppress(request)),
+            FrontendDisposition::Forward => Ok(FrontendMiddlewareOutput::Forward(message)),
         }
     }
 
@@ -141,7 +145,7 @@ impl<S: EncryptionService> Frontend<S> {
             return Ok(outbound_message);
         }
 
-        let recovering_from_extended_error = self.context.protocol_in_extended_error().await;
+        let recovering_from_extended_error = self.extended_error;
 
         // When an error is detected while processing any extended-query message, the backend issues ErrorResponse, then reads and discards messages until a Sync is reached,
         // https://www.postgresql.org/docs/current/protocol-flow.html#PROTOCOL-FLOW-EXT-QUERY
@@ -151,15 +155,11 @@ impl<S: EncryptionService> Frontend<S> {
                 message = ?protocol_message,
             );
             if !matches!(protocol_message, FrontendMessage::Sync) {
-                self.context
-                    .protocol_frontend_received(protocol_message, FrontendHandling::Local)
-                    .await?;
-                *disposition = FrontendDisposition::Local;
+                *disposition = FrontendDisposition::Suppress;
                 return Ok(outbound_message);
             }
         }
 
-        let tracking_message = protocol_message.clone();
         match protocol_message {
             FrontendMessage::Query(query) => {
                 match self.query_handler(Query::from(query)).await {
@@ -172,12 +172,8 @@ impl<S: EncryptionService> Frontend<S> {
                             msg = "Query Handler Error",
                             error = ?err.to_string(),
                         );
-                        let id = self
-                            .context
-                            .protocol_frontend_received(tracking_message, FrontendHandling::Local)
-                            .await?;
-                        self.send_error_response(id, err).await?;
-                        self.send_ready_for_query(id).await?;
+                        self.send_error_response(err)?;
+                        self.send_ready_for_query();
                         *disposition = FrontendDisposition::Local;
                         return Ok(outbound_message);
                     }
@@ -200,11 +196,8 @@ impl<S: EncryptionService> Frontend<S> {
                             msg = "Parse Handler Error",
                             error = ?err.to_string(),
                         );
-                        let id = self
-                            .context
-                            .protocol_frontend_received(tracking_message, FrontendHandling::Local)
-                            .await?;
-                        self.send_error_response(id, err).await?;
+                        self.send_error_response(err)?;
+                        self.extended_error = true;
                         *disposition = FrontendDisposition::Local;
                         return Ok(outbound_message);
                     }
@@ -216,24 +209,20 @@ impl<S: EncryptionService> Frontend<S> {
                     // No mapping needed, don't change the bytes
                     Ok(None) => (),
                     Err(err) => {
-                        let id = self
-                            .context
-                            .protocol_frontend_received(tracking_message, FrontendHandling::Local)
-                            .await?;
                         match err {
                             Error::Mapping(MappingError::InvalidParameter(_)) => {
                                 warn!(target: PROTOCOL,
                                     client_id = self.context.client_id,
                                     msg = "EncryptError::InvalidParameter",
                                 );
-                                self.send_error_response(id, err).await?;
+                                self.send_error_response(err)?;
                             }
                             Error::Encrypt(EncryptError::UnknownKeysetIdentifier { .. }) => {
                                 warn!(target: PROTOCOL,
                                     client_id = self.context.client_id,
                                     msg = "EncryptError::UnknownKeysetIdentifier",
                                 );
-                                self.send_error_response(id, err).await?;
+                                self.send_error_response(err)?;
                             }
                             _ => {
                                 warn!(target: PROTOCOL,
@@ -241,9 +230,10 @@ impl<S: EncryptionService> Frontend<S> {
                                     msg = "Bind Error",
                                     err = err.to_string()
                                 );
-                                self.send_error_response(id, err).await?;
+                                self.send_error_response(err)?;
                             }
                         }
+                        self.extended_error = true;
                         *disposition = FrontendDisposition::Local;
                         return Ok(outbound_message);
                     }
@@ -262,11 +252,8 @@ impl<S: EncryptionService> Frontend<S> {
                         client_id = self.context.client_id,
                         msg = "Ready for Query",
                     );
-                    let id = self
-                        .context
-                        .protocol_frontend_received(tracking_message, FrontendHandling::Local)
-                        .await?;
-                    self.send_ready_for_query(id).await?;
+                    self.send_ready_for_query();
+                    self.extended_error = false;
                     *disposition = FrontendDisposition::Local;
                     return Ok(outbound_message);
                 }
@@ -1187,7 +1174,7 @@ impl<S: EncryptionService> Frontend<S> {
     /// Send a ReadyForQuery to the client, answering a Sync (or simple Query)
     /// for a batch of which nothing reached the server.
     ///
-    async fn send_ready_for_query(&mut self, id: OperationId) -> Result<(), Error> {
+    fn send_ready_for_query(&mut self) {
         let message = BackendMessage::ReadyForQuery(TransactionStatus::Idle);
 
         debug!(target: PROTOCOL,
@@ -1196,12 +1183,7 @@ impl<S: EncryptionService> Frontend<S> {
             ?message,
         );
 
-        self.context
-            .protocol_backend_local(id, message.clone())
-            .await?;
-        self.client_sender.send(message)?;
-        self.context.protocol_backend_sent();
-        Ok(())
+        self.local_responses.push(message);
     }
 }
 
@@ -1370,17 +1352,13 @@ where
 
 /// Implementation of PostgreSQL error handling for the Frontend component.
 impl<S: EncryptionService> PostgreSqlErrorHandler for Frontend<S> {
-    fn client_sender(&mut self) -> &mut Sender {
-        &mut self.client_sender
-    }
-
     fn client_id(&self) -> i32 {
         self.context.client_id
     }
 }
 
 impl<S: EncryptionService> Frontend<S> {
-    async fn send_error_response(&mut self, id: OperationId, err: Error) -> Result<(), Error> {
+    fn send_error_response(&mut self, err: Error) -> Result<(), Error> {
         let error_response = self.error_to_response(err);
         let message = error_response.into_backend_message();
 
@@ -1390,11 +1368,7 @@ impl<S: EncryptionService> Frontend<S> {
             ?message,
         );
 
-        self.context
-            .protocol_backend_local(id, message.clone())
-            .await?;
-        self.client_sender.send(message)?;
-        self.context.protocol_backend_sent();
+        self.local_responses.push(message);
         Ok(())
     }
 }
