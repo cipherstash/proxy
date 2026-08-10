@@ -1,4 +1,4 @@
-use super::{middleware::CipherStashMiddlewareFactory, Context};
+use super::{diagnostics::ErrorResponse, middleware::CipherStashMiddlewareFactory, Context};
 use crate::{
     connect,
     error::{Error, ProtocolError},
@@ -8,13 +8,15 @@ use crate::{
 use bytes::Bytes;
 use md5::{Digest, Md5};
 use pg_proto::{
-    BackendHoldLimits, BoundedPipeline, CancelKey, CancellationPolicy, CancellationRoute, Client,
-    ClientAuthentication, ClientAuthenticationChallenge, ClientAuthenticationResponse,
-    ClientAuthenticationSession, ClientTlsConfig, ClientTlsPolicy, ClientTlsProvider,
-    ConnectTarget, ForwardedMessage, FrontendMessage, InitialServerContext, Intermediary,
-    IntermediaryCancellationRegistry, Server, ServerAuthentication, ServerAuthenticationAction,
-    ServerAuthenticationFuture, ServerAuthenticationProvider, ServerAuthenticationRequest,
-    ServerAuthenticationResponse, ServerIdentity, ServerIdentityProvider, ServerTlsPolicy, SslMode,
+    Authentication, BackendHoldLimits, BackendMessage, BoundedPipeline, CancelKey,
+    CancellationPolicy, CancellationRoute, Client, ClientAuthentication,
+    ClientAuthenticationChallenge, ClientAuthenticationResponse, ClientAuthenticationSession,
+    ClientTlsConfig, ClientTlsPolicy, ClientTlsProvider, ConnectTarget, ForwardedMessage,
+    FrontendMessage, InitialServerContext, Intermediary, IntermediaryCancellationRegistry,
+    MiddlewareFactory, NegotiatedServerTls, Server, ServerAuthentication,
+    ServerAuthenticationAction, ServerAuthenticationFuture, ServerAuthenticationProvider,
+    ServerAuthenticationRequest, ServerAuthenticationResponse, ServerConnectionContext,
+    ServerIdentity, ServerIdentityProvider, ServerMiddleware, ServerTlsPolicy, SslMode,
     StartupParameters, StartupRouteResolver,
 };
 use postgres_protocol::authentication::sasl::{ChannelBinding, ScramSha256};
@@ -237,6 +239,45 @@ impl ServerIdentityProvider for DownstreamIdentity {
     }
 }
 
+#[derive(Clone, Copy)]
+struct RequireTlsDiagnostic;
+
+impl<Peer, Identity> MiddlewareFactory<ServerConnectionContext<Peer, Identity>>
+    for RequireTlsDiagnostic
+{
+    type Handler = Self;
+
+    fn create(&self, _: &ServerConnectionContext<Peer, Identity>) -> Self::Handler {
+        *self
+    }
+}
+
+impl<State, Peer, Identity> ServerMiddleware<State, ServerConnectionContext<Peer, Identity>>
+    for RequireTlsDiagnostic
+{
+    fn backend(
+        &mut self,
+        context: &ServerConnectionContext<Peer, Identity>,
+        _: &mut State,
+        message: BackendMessage,
+    ) -> BackendMessage {
+        require_tls_diagnostic(context.tls(), message)
+    }
+}
+
+fn require_tls_diagnostic(tls: &NegotiatedServerTls, message: BackendMessage) -> BackendMessage {
+    if matches!(tls, NegotiatedServerTls::Plaintext)
+        && matches!(
+            message,
+            BackendMessage::Authentication(Authentication::Md5Password { .. })
+        )
+    {
+        ErrorResponse::tls_required().into_backend_message()
+    } else {
+        message
+    }
+}
+
 #[derive(Clone)]
 struct UpstreamTls {
     server_name: rustls_pki_types::ServerName<'static>,
@@ -364,16 +405,16 @@ where
     if let Some(tls_config) = context.tls_config() {
         let (config, leaf) = tls::configure_server_with_leaf(tls_config)?;
         let identity = DownstreamIdentity(ServerIdentity::new(Arc::new(config), leaf));
-        let server = if context.require_tls() {
-            Server::builder().tls(ServerTlsPolicy::Required(identity))
-        } else {
+        if context.require_tls() {
             return run_client!(Server::builder()
                 .tls(ServerTlsPolicy::Optional(identity))
                 .authentication(downstream_auth)
+                .middleware(RequireTlsDiagnostic)
                 .build()
                 .map_err(invalid_data)?);
-        };
-        return run_client!(server
+        }
+        return run_client!(Server::builder()
+            .tls(ServerTlsPolicy::Optional(identity))
             .authentication(downstream_auth)
             .build()
             .map_err(invalid_data)?);
@@ -418,5 +459,25 @@ mod tests {
     fn upstream_tls_without_verification_is_opportunistic() {
         let config = crate::TandemConfig::for_testing();
         assert_eq!(upstream_ssl_mode(&config), SslMode::Prefer);
+    }
+
+    #[test]
+    fn required_tls_plaintext_connection_receives_diagnostic() {
+        let challenge =
+            BackendMessage::Authentication(Authentication::Md5Password { salt: [1, 2, 3, 4] });
+        assert!(matches!(
+            require_tls_diagnostic(&NegotiatedServerTls::Plaintext, challenge),
+            BackendMessage::ErrorResponse(_)
+        ));
+    }
+
+    #[test]
+    fn required_tls_encrypted_connection_authenticates_normally() {
+        let challenge =
+            BackendMessage::Authentication(Authentication::Md5Password { salt: [1, 2, 3, 4] });
+        let tls = NegotiatedServerTls::Tls {
+            server_end_point: Bytes::new(),
+        };
+        assert_eq!(require_tls_diagnostic(&tls, challenge.clone()), challenge);
     }
 }
