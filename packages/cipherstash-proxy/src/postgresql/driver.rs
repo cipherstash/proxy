@@ -353,7 +353,10 @@ where
                         .map_err(|_| Error::ConnectionTimeout { duration })?,
                     None => forward.await,
                 }
-                .map_err(invalid_data)?;
+                .map_err(|error| match error {
+                    pg_proto::ForwardError::Middleware(error) => error,
+                    error => invalid_data(error),
+                })?;
                 if matches!(
                     forwarded,
                     ForwardedMessage::Frontend(FrontendMessage::Terminate)
