@@ -451,6 +451,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
 
 [[package]]
+name = "base64"
+version = "0.23.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ac07cdecf99051d9a5238b80f35af32cdeba5b336e55d957b318b50137e18da5"
+
+[[package]]
 name = "base64ct"
 version = "1.7.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -738,7 +744,7 @@ dependencies = [
  "async-mutex",
  "async-trait",
  "base16ct",
- "base64",
+ "base64 0.22.1",
  "base64ct",
  "base85",
  "blake3",
@@ -847,6 +853,7 @@ dependencies = [
  "regex",
  "rust_decimal",
  "rustls",
+ "rustls-native-certs",
  "rustls-pki-types",
  "rustls-platform-verifier 0.5.1",
  "serde",
@@ -2201,7 +2208,7 @@ version = "0.1.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "727805d60e7938b76b826a6ef209eb70eaa1812794f9424d4a4e2d740662df5f"
 dependencies = [
- "base64",
+ "base64 0.22.1",
  "bytes",
  "futures-channel",
  "futures-core",
@@ -2624,7 +2631,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "eba32bfb4ffdeaca3e34431072faf01745c9b26d25504aa7a6cf5684334fc4fc"
 dependencies = [
  "aws-lc-rs",
- "base64",
+ "base64 0.22.1",
  "getrandom 0.2.15",
  "js-sys",
  "pem",
@@ -2773,7 +2780,7 @@ version = "0.17.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "df88858cd28baaaf2cfc894e37789ed4184be0e1351157aec7bf3c2266c793fd"
 dependencies = [
- "base64",
+ "base64 0.22.1",
  "http-body-util",
  "hyper",
  "hyper-rustls",
@@ -3137,7 +3144,7 @@ version = "3.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1d30c53c26bc5b31a98cd02d20f25a7c8567146caf63ed593a9d87b2775291be"
 dependencies = [
- "base64",
+ "base64 0.22.1",
  "serde_core",
 ]
 
@@ -3149,11 +3156,11 @@ checksum = "e3148f5046208a5d56bcfc03053e3ca6334e51da8dfb19b6cdc8b306fae3283e"
 
 [[package]]
 name = "pg-proto"
-version = "0.5.0"
+version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5275df13ca49c9ef28ad5d63006b6d93a38d6f1ab9f9655475b305be0a8c4e58"
+checksum = "19739a23eee632c816a94a9913f4ebc8f7313d67f9fdd4a1ae371c16774a5db7"
 dependencies = [
- "base64",
+ "base64 0.23.1",
  "bytes",
  "hmac 0.13.0",
  "pg-proto-fsm",
@@ -3172,9 +3179,9 @@ dependencies = [
 
 [[package]]
 name = "pg-proto-fsm"
-version = "0.5.0"
+version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3574ed461ac3cbc508cb2c0d44e8280c346a46856e3760bb544c0bc7ec4bcc64"
+checksum = "08e770eaa8edf9222baef9f827d994337c1c1459355c3076022ac2754dcba85f"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3254,7 +3261,7 @@ version = "0.6.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "08808e3c483c46e999108051c78334f473d5adb59d78bb80a1268c7e6aa6c514"
 dependencies = [
- "base64",
+ "base64 0.22.1",
  "byteorder",
  "bytes",
  "fallible-iterator",
@@ -3791,7 +3798,7 @@ version = "0.13.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "219c5811de6525e5416c7d5d53bb656d3afdbc6c5af816e0802bcfa42dbdc1c3"
 dependencies = [
- "base64",
+ "base64 0.22.1",
  "bytes",
  "encoding_rs",
  "futures-core",
@@ -4528,7 +4535,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f1a9ac43060af7605899754daa3de2e26302c2ab4d9249a8bc16157bc53dad65"
 dependencies = [
  "aquamarine",
- "base64",
+ "base64 0.22.1",
  "cts-common",
  "jsonwebtoken",
  "miette",
@@ -6450,7 +6457,7 @@ version = "0.12.28"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "29486723fdd2bdb0c234174dc242051a46ac0c82935ccaa39e9781dbf7bcc6d2"
 dependencies = [
- "base64",
+ "base64 0.22.1",
  "cipherstash-config",
  "const-hex",
  "cts-common",

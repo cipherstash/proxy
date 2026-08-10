@@ -8,8 +8,6 @@ mod format_code;
 mod middleware;
 mod parser;
 mod rewrite;
-#[cfg(test)]
-mod test_codec;
 
 pub use context::column::Column;
 pub use context::Context;

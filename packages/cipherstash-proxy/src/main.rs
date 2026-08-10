@@ -49,7 +49,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     });
 
-    runtime.block_on(async move {
+    let local = tokio::task::LocalSet::new();
+    runtime.block_on(local.run_until(async move {
         let shutdown_timeout = &config.server.shutdown_timeout();
 
         let mut proxy = init(config).await;
@@ -93,16 +94,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                     let context = proxy.context(client_id);
 
-                    tracker.spawn(async move {
+                    tracker.spawn_local(async move {
 
                         gauge!(CLIENTS_ACTIVE_CONNECTIONS).increment(1);
 
-                        match pg::handler(client_stream,context).await {
+                        let result = pg::handler(client_stream,context).await;
+                        gauge!(CLIENTS_ACTIVE_CONNECTIONS).decrement(1);
+
+                        match result {
                             Ok(_) => (),
                             Err(err) => {
-
-                                gauge!(CLIENTS_ACTIVE_CONNECTIONS).decrement(1);
-
                                 match err {
                                     Error::ConnectionClosed => {
                                         info!(msg = "Database connection closed by client");
@@ -136,7 +137,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         if (tokio::time::timeout(*shutdown_timeout, tracker.wait()).await).is_err() {
             warn!(msg = "Terminated client connections", count = tracker.len());
         }
-    });
+    }));
     Ok(())
 }
 

@@ -11,12 +11,10 @@ use crate::postgresql::data::{
     json_value_selector_plaintext,
 };
 use crate::postgresql::format_code::FormatCode;
-#[cfg(test)]
-use crate::postgresql::test_codec::{decode_frontend_frame, encode_frontend_message};
 use crate::{EqlOutput, EqlQueryPayload};
 use bytes::{BufMut, BytesMut};
 use cipherstash_client::encryption::Plaintext;
-use pg_proto::codec::{Bind as PgBind, FrontendMessage};
+use pg_proto::{Bind as PgBind, FrontendMessage};
 use postgres_types::Type;
 use std::convert::TryFrom;
 use std::fmt::{self, Display, Formatter};
@@ -493,88 +491,6 @@ impl Display for BindParam {
     }
 }
 
-#[cfg(test)]
-impl TryFrom<&BytesMut> for Bind {
-    type Error = Error;
-
-    fn try_from(buf: &BytesMut) -> Result<Bind, Self::Error> {
-        let FrontendMessage::Bind(bind) = decode_frontend_frame(buf)? else {
-            return Err(ProtocolError::UnexpectedMessageCode {
-                expected: 'B',
-                received: buf.first().copied().unwrap_or_default() as char,
-            }
-            .into());
-        };
-        let portal = bind.portal;
-        let prepared_statement = bind.statement;
-        let param_format_codes = bind
-            .parameter_formats
-            .iter()
-            .copied()
-            .map(FormatCode::from)
-            .collect::<Vec<_>>();
-        let num_param_values = bind.parameters.len();
-        let mut param_values = Vec::with_capacity(bind.parameters.len());
-        for (idx, parameter) in bind.parameters.into_iter().enumerate() {
-            let format_code = match param_format_codes.len() {
-                0 => FormatCode::Text,
-                1 => param_format_codes[0],
-                len if len == num_param_values => param_format_codes[idx],
-                _ => {
-                    return Err(ProtocolError::ParameterFormatCodesMismatch {
-                        expected: num_param_values,
-                        received: param_format_codes.len(),
-                    }
-                    .into())
-                }
-            };
-            match parameter {
-                None => param_values.push(BindParam::null_with_format(format_code)),
-                Some(bytes) => {
-                    param_values.push(BindParam::new(format_code, BytesMut::from(&bytes[..])))
-                }
-            }
-        }
-        let result_columns_format_codes = bind
-            .result_formats
-            .iter()
-            .copied()
-            .map(FormatCode::from)
-            .collect::<Vec<_>>();
-        Ok(Bind {
-            portal,
-            prepared_statement,
-            param_format_codes,
-            param_values,
-            result_columns_format_codes,
-            reshaped: false,
-        })
-    }
-}
-
-#[cfg(test)]
-impl TryFrom<Bind> for BytesMut {
-    type Error = Error;
-
-    fn try_from(bind: Bind) -> Result<BytesMut, Self::Error> {
-        encode_frontend_message(&FrontendMessage::Bind(PgBind {
-            portal: bind.portal,
-            statement: bind.prepared_statement,
-            parameter_formats: bind.param_format_codes.into_iter().map(i16::from).collect(),
-            parameters: bind
-                .param_values
-                .into_iter()
-                .map(|param| (!param.null).then(|| param.bytes.freeze()))
-                .collect(),
-            result_formats: bind
-                .result_columns_format_codes
-                .into_iter()
-                .map(i16::from)
-                .collect(),
-        }))
-    }
-}
-
 impl From<Bind> for FrontendMessage {
     fn from(bind: Bind) -> Self {
         Self::Bind(PgBind {
@@ -606,29 +522,30 @@ mod tests {
         },
         Identifier,
     };
-    use bytes::BytesMut;
+    use bytes::{Bytes, BytesMut};
     use cipherstash_client::schema::{ColumnConfig, ColumnMode, ColumnType};
     use eql_mapper::EqlTermVariant;
-
-    fn to_message(s: &[u8]) -> BytesMut {
-        BytesMut::from(s)
-    }
+    use pg_proto::{Bind as PgBind, FrontendMessage};
 
     #[test]
     pub fn parse_bind() {
         log::init(LogConfig::default());
-        let bytes =
-            to_message(b"B\0\0\0\x18\0\0\0\x01\0\x01\0\x01\0\0\0\x04.\xbe\x8a\xd4\0\x01\0\x01");
-
-        let expected = bytes.clone();
-
-        let bind = Bind::try_from(&bytes).unwrap();
+        let expected = PgBind {
+            portal: Bytes::new(),
+            statement: Bytes::new(),
+            parameter_formats: vec![1],
+            parameters: vec![Some(Bytes::from_static(b".\xbe\x8a\xd4"))],
+            result_formats: vec![1],
+        };
+        let bind = Bind::try_from(expected.clone()).unwrap();
 
         assert_eq!(bind.param_values.len(), 1);
         assert_eq!(bind.result_columns_format_codes[0], FormatCode::Binary);
 
-        let bytes = BytesMut::try_from(bind).unwrap();
-        assert_eq!(bytes, expected);
+        let FrontendMessage::Bind(actual) = bind.into() else {
+            panic!("expected Bind")
+        };
+        assert_eq!(actual, expected);
     }
 
     #[test]
@@ -636,30 +553,46 @@ mod tests {
         log::init(LogConfig::default());
 
         // Bind message from statement INSERT INTO encrypted (id, plaintext, plaintext_date, encrypted_text) VALUES ($1, $2, $3, $4)
-        let bytes =
-            to_message(b"B\0\0\0N\0s0\0\0\x04\0\x01\0\x01\0\x01\0\x01\0\x04\0\0\0\x084\xd8\x1d@\x83U\x0em\0\0\0\tplaintext\xff\xff\xff\xff\0\0\0\x15hello@cipherstash.com\0\x01\0\x01");
-
-        let expected = bytes.clone();
-
-        let bind = Bind::try_from(&bytes).unwrap();
+        let expected = PgBind {
+            portal: Bytes::new(),
+            statement: Bytes::from_static(b"s0"),
+            parameter_formats: vec![1, 1, 1, 1],
+            parameters: vec![
+                Some(Bytes::from_static(b"4\xd8\x1d@\x83U\x0em")),
+                Some(Bytes::from_static(b"plaintext")),
+                None,
+                Some(Bytes::from_static(b"hello@cipherstash.com")),
+            ],
+            result_formats: vec![1],
+        };
+        let bind = Bind::try_from(expected.clone()).unwrap();
 
         assert_eq!(bind.param_values.len(), 4);
 
-        let bytes = BytesMut::try_from(bind).unwrap();
-        assert_eq!(bytes, expected);
+        let FrontendMessage::Bind(actual) = bind.into() else {
+            panic!("expected Bind")
+        };
+        assert_eq!(actual, expected);
     }
 
     #[test]
     pub fn preserves_empty_and_null_params_distinctly() {
-        let bytes = to_message(b"B\0\0\0\x14\0\0\0\0\0\x02\0\0\0\0\xff\xff\xff\xff\0\0");
-        let expected = bytes.clone();
-
-        let bind = Bind::try_from(&bytes).unwrap();
+        let expected = PgBind {
+            portal: Bytes::new(),
+            statement: Bytes::new(),
+            parameter_formats: vec![],
+            parameters: vec![Some(Bytes::new()), None],
+            result_formats: vec![],
+        };
+        let bind = Bind::try_from(expected.clone()).unwrap();
 
         assert!(!bind.param_values[0].is_null());
         assert_eq!(bind.param_values[0].byte_len(), 0);
         assert!(bind.param_values[1].is_null());
-        assert_eq!(BytesMut::try_from(bind).unwrap(), expected);
+        let FrontendMessage::Bind(actual) = bind.into() else {
+            panic!("expected Bind")
+        };
+        assert_eq!(actual, expected);
     }
 
     #[test]

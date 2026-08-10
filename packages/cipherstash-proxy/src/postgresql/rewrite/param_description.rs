@@ -1,13 +1,6 @@
 //! CipherStash ParameterDescription rewriting.
 use crate::log::MAPPER;
-#[cfg(test)]
-use crate::{
-    error::{Error, ProtocolError},
-    postgresql::test_codec::{decode_backend_frame, encode_backend_message},
-};
-#[cfg(test)]
-use bytes::BytesMut;
-use pg_proto::codec::BackendMessage;
+use pg_proto::BackendMessage;
 use postgres_types::Type;
 use tracing::debug;
 
@@ -68,46 +61,12 @@ impl ParamDescription {
     }
 }
 
-#[cfg(test)]
-impl TryFrom<&BytesMut> for ParamDescription {
-    type Error = Error;
-
-    fn try_from(bytes: &BytesMut) -> Result<ParamDescription, Error> {
-        let BackendMessage::ParameterDescription(types) = decode_backend_frame(bytes)? else {
-            return Err(ProtocolError::UnexpectedMessageCode {
-                expected: 't',
-                received: bytes.first().copied().unwrap_or_default() as char,
-            }
-            .into());
-        };
-
-        Ok(ParamDescription {
-            types: types.into_iter().map(|oid| oid as i32).collect(),
-            dirty: false,
-        })
-    }
-}
-
 impl From<Vec<u32>> for ParamDescription {
     fn from(types: Vec<u32>) -> Self {
         Self {
             types: types.into_iter().map(|oid| oid as i32).collect(),
             dirty: false,
         }
-    }
-}
-
-#[cfg(test)]
-impl TryFrom<ParamDescription> for BytesMut {
-    type Error = Error;
-
-    fn try_from(parameter_description: ParamDescription) -> Result<BytesMut, Error> {
-        let types = parameter_description
-            .types
-            .into_iter()
-            .map(|oid| oid as u32)
-            .collect();
-        encode_backend_message(&BackendMessage::ParameterDescription(types))
     }
 }
 
@@ -126,16 +85,12 @@ impl From<ParamDescription> for BackendMessage {
 #[cfg(test)]
 mod tests {
 
-    use bytes::BytesMut;
+    use pg_proto::BackendMessage;
     use tracing::info;
 
     use crate::{config::LogConfig, log};
 
     use super::ParamDescription;
-
-    fn to_message(s: &[u8]) -> BytesMut {
-        BytesMut::from(s)
-    }
 
     #[test]
     pub fn map_parameter_types() {
@@ -175,11 +130,8 @@ mod tests {
     #[test]
     pub fn parse_parameter_description() {
         log::init(LogConfig::default());
-        let bytes = to_message(b"t\0\0\0\x0e\0\x02\0\0\0\x14\0\0\x0e\xda");
-
-        let expected = bytes.clone();
-
-        let description = ParamDescription::try_from(&bytes).unwrap();
+        let expected = vec![20, 3802];
+        let description = ParamDescription::from(expected.clone());
 
         info!("{:?}", description);
 
@@ -193,7 +145,9 @@ mod tests {
             postgres_types::Type::JSONB.oid() as i32
         );
 
-        let bytes = BytesMut::try_from(description).unwrap();
-        assert_eq!(bytes, expected);
+        let BackendMessage::ParameterDescription(actual) = description.into() else {
+            panic!("expected ParameterDescription")
+        };
+        assert_eq!(actual, expected);
     }
 }

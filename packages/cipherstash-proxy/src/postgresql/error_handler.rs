@@ -4,7 +4,6 @@
 /// components, ensuring that all errors are properly converted to PostgreSQL
 /// ErrorResponse messages and sent to clients in a protocol-compliant manner.
 use crate::{
-    connect::Sender,
     error::{EncryptError, Error, MappingError},
     postgresql::diagnostics::ErrorResponse,
 };
@@ -15,9 +14,6 @@ use crate::{
 /// frontend and backend components, providing consistent error conversion
 /// and client communication.
 pub trait PostgreSqlErrorHandler {
-    /// Get the client sender for this component
-    fn client_sender(&mut self) -> &mut Sender;
-
     /// Get the client ID for logging purposes
     fn client_id(&self) -> i32;
 
@@ -71,10 +67,6 @@ mod tests {
     struct TestHandler;
 
     impl PostgreSqlErrorHandler for TestHandler {
-        fn client_sender(&mut self) -> &mut Sender {
-            unimplemented!("not needed for error_to_response tests")
-        }
-
         fn client_id(&self) -> i32 {
             0
         }

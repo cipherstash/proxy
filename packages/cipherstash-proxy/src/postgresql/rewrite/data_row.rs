@@ -1,17 +1,12 @@
 //! CipherStash DataRow rewriting.
 use crate::EqlCiphertext;
-#[cfg(test)]
-use crate::{
-    error::ProtocolError,
-    postgresql::test_codec::{decode_backend_frame, encode_backend_message},
-};
 use crate::{
     error::{EncryptError, Error},
     log::DECRYPT,
     postgresql::Column,
 };
 use bytes::BytesMut;
-use pg_proto::codec::{BackendMessage, DataRow as PgDataRow};
+use pg_proto::{BackendMessage, DataRow as PgDataRow};
 use tracing::{debug, error};
 
 /// Leading byte of `jsonb`'s binary wire format. PostgreSQL has only ever
@@ -101,30 +96,6 @@ impl DataColumn {
     }
 }
 
-#[cfg(test)]
-impl TryFrom<&BytesMut> for DataRow {
-    type Error = Error;
-
-    fn try_from(buf: &BytesMut) -> Result<DataRow, Error> {
-        let BackendMessage::DataRow(row) = decode_backend_frame(buf)? else {
-            return Err(ProtocolError::UnexpectedMessageCode {
-                expected: 'D',
-                received: buf.first().copied().unwrap_or_default() as char,
-            }
-            .into());
-        };
-        let columns = row
-            .columns
-            .into_iter()
-            .map(|bytes| DataColumn {
-                bytes: bytes.map(BytesMut::from),
-            })
-            .collect();
-
-        Ok(DataRow { columns })
-    }
-}
-
 impl From<PgDataRow> for DataRow {
     fn from(row: PgDataRow) -> Self {
         Self {
@@ -136,21 +107,6 @@ impl From<PgDataRow> for DataRow {
                 })
                 .collect(),
         }
-    }
-}
-
-#[cfg(test)]
-impl TryFrom<DataRow> for BytesMut {
-    type Error = Error;
-
-    fn try_from(data_row: DataRow) -> Result<BytesMut, Error> {
-        encode_backend_message(&BackendMessage::DataRow(PgDataRow {
-            columns: data_row
-                .columns
-                .into_iter()
-                .map(|column| column.bytes.map(|bytes| bytes.freeze()))
-                .collect(),
-        }))
     }
 }
 
@@ -268,11 +224,26 @@ mod tests {
         log,
         postgresql::{rewrite::data_row::DataColumn, Column},
     };
-    use bytes::BytesMut;
+    use bytes::{Buf, Bytes, BytesMut};
     use cipherstash_client::schema::{ColumnConfig, ColumnType};
+    use pg_proto::{BackendMessage, DataRow as PgDataRow};
 
-    fn to_message(s: &[u8]) -> BytesMut {
-        BytesMut::from(s)
+    fn to_message(s: &[u8]) -> PgDataRow {
+        assert_eq!(s.first(), Some(&b'D'));
+        let mut body = &s[5..];
+        let count = body.get_i16() as usize;
+        let columns = (0..count)
+            .map(|_| {
+                let len = body.get_i32();
+                (len >= 0).then(|| {
+                    let len = len as usize;
+                    let value = Bytes::copy_from_slice(&body[..len]);
+                    body.advance(len);
+                    value
+                })
+            })
+            .collect();
+        PgDataRow { columns }
     }
 
     fn column_config(column: &str) -> Option<Column> {
@@ -304,7 +275,7 @@ mod tests {
         // `SELECT encrypted_text FROM encrypted WHERE id = $1` (extended/binary):
         // the jsonb column arrives as `0x01` + the v3 EqlCiphertextV3 JSON.
         let bytes = to_message(b"D\x00\x00\x03\x16\x00\x01\x00\x00\x03\x0c\x01{\"c\": \"mBbL3gJuL?E})+>NeOq5<7N279rs9aRhBwjz3>wOdg{d64myql`6cXIurM_?B|pR<+M8(SeOLoLt~axenSv%=hCOb&m`FC5F;fS-ykq76u4Qgxa(QrcWn^D;Wq5SN5EJ90LtnW_NroxKJj=JLK>\", \"i\": {\"c\": \"encrypted_text\", \"t\": \"encrypted\"}, \"v\": 3, \"bf\": [1512, 1681, 836, 288, 1837, 1131, 415, 1430, 60, 812, 1990, 1211, 1368, 343, 1473, 1980, 598, 1549, 457, 1389, 1557, 941, 494, 1009, 1604, 1033, 2046, 222, 2012, 671, 7, 1525, 265, 901, 743, 543, 1771, 1149, 890, 755, 1974, 1960, 387, 1947, 1298, 130, 1758, 1060, 268, 844, 1375, 746, 1251, 2040], \"hm\": \"96aeaf9852416229d6b33ceb018d9abc90d70cbe7632539d69ef1462c9aa86a0\", \"op\": \"00bf0281ccb68cc6fe496bb1c8277e3484f6392517d5b8425536af7ec00ad7cc40e17e6336568ac4ed98dd659f7581f8a113fe5669b89833d9dd8eadc587a8950b6bd94f872e7f4205a6859e071df47134d3cccf1e53295417\"}");
-        let mut data_row = DataRow::try_from(&bytes).unwrap();
+        let mut data_row = DataRow::from(bytes);
 
         let column_config = vec![column_config("encrypted_text")];
         let encrypted = data_row.as_ciphertext(&column_config);
@@ -324,7 +295,7 @@ mod tests {
         // `SELECT encrypted_text, encrypted_bool FROM encrypted WHERE id = $1`
         // (binary), encrypted_text set, encrypted_bool NULL.
         let bytes = to_message(b"D\x00\x00\x03\x1a\x00\x02\x00\x00\x03\x0c\x01{\"c\": \"mBbL3gJuL?E})+>NeOq5<7N279rs9aRhBwjz3>wOdg{d64myql`6cXIurM_?B|pR<+M8(SeOLoLt~axenSv%=hCOb&m`FC5F;fS-ykq76u4Qgxa(QrcWn^D;Wq5SN5EJ90LtnW_NroxKJj=JLK>\", \"i\": {\"c\": \"encrypted_text\", \"t\": \"encrypted\"}, \"v\": 3, \"bf\": [1512, 1681, 836, 288, 1837, 1131, 415, 1430, 60, 812, 1990, 1211, 1368, 343, 1473, 1980, 598, 1549, 457, 1389, 1557, 941, 494, 1009, 1604, 1033, 2046, 222, 2012, 671, 7, 1525, 265, 901, 743, 543, 1771, 1149, 890, 755, 1974, 1960, 387, 1947, 1298, 130, 1758, 1060, 268, 844, 1375, 746, 1251, 2040], \"hm\": \"96aeaf9852416229d6b33ceb018d9abc90d70cbe7632539d69ef1462c9aa86a0\", \"op\": \"00bf0281ccb68cc6fe496bb1c8277e3484f6392517d5b8425536af7ec00ad7cc40e17e6336568ac4ed98dd659f7581f8a113fe5669b89833d9dd8eadc587a8950b6bd94f872e7f4205a6859e071df47134d3cccf1e53295417\"}\xff\xff\xff\xff");
-        let mut data_row = DataRow::try_from(&bytes).unwrap();
+        let mut data_row = DataRow::from(bytes);
 
         let column_config = vec![
             column_config("encrypted_text"),
@@ -344,7 +315,7 @@ mod tests {
         // `SELECT encrypted_jsonb FROM encrypted WHERE id = 2` (simple/text): the
         // jsonb column arrives as bare JSON text, no version header.
         let bytes = to_message(b"D\x00\x00\x027\x00\x01\x00\x00\x02-{\"h\": \"l*AC8+7wO)sD**%APm>F3Bc9FAg#FNCmyISKh%bW{NbL}o`gZpBwFD}ye0IoZJ}<8La$|RV{&<LbY)~;YIARHV#E*=<D)}gxkyQdDaAa?x2iz\", \"i\": {\"c\": \"encrypted_jsonb\", \"t\": \"encrypted\"}, \"k\": \"sv\", \"v\": 3, \"sv\": [{\"c\": \"=)|^uOwqW#H)TqK3PNbj|0;X%JkdzdG4-n\", \"s\": \"4aea36922168767cc743f65936aca693\"}, {\"c\": \"x%zSLSuK0+1GBi+xNdO9%dFT^^Z\", \"s\": \"956c1af474fb873d521afac3f1fed11e\", \"op\": \"00edcfafe10ba38a5a106d2f12d2f7f57238\"}, {\"c\": \"b#r<7aRQs|X-ca_T!nIL<t}C\", \"s\": \"86bc88ee9ebbf7a7bdf1ca2f5289b175\"}, {\"c\": \"`v9`QIuYF_El2G2gz+I}vEv8\", \"s\": \"38e70163b339d6b3bb126618a630d624\"}]}");
-        let mut data_row = DataRow::try_from(&bytes).unwrap();
+        let mut data_row = DataRow::from(bytes);
 
         let column_config = vec![column_config("encrypted_jsonb")];
         let encrypted = data_row.as_ciphertext(&column_config);
@@ -364,7 +335,7 @@ mod tests {
         // `SELECT encrypted_text, encrypted_bool FROM encrypted WHERE id = 1`
         // (text), encrypted_text set, encrypted_bool NULL.
         let bytes = to_message(b"D\x00\x00\x03\x19\x00\x02\x00\x00\x03\x0b{\"c\": \"mBbL3gJuL?E})+>NeOq5<7N279rs9aRhBwjz3>wOdg{d64myql`6cXIurM_?B|pR<+M8(SeOLoLt~axenSv%=hCOb&m`FC5F;fS-ykq76u4Qgxa(QrcWn^D;Wq5SN5EJ90LtnW_NroxKJj=JLK>\", \"i\": {\"c\": \"encrypted_text\", \"t\": \"encrypted\"}, \"v\": 3, \"bf\": [1512, 1681, 836, 288, 1837, 1131, 415, 1430, 60, 812, 1990, 1211, 1368, 343, 1473, 1980, 598, 1549, 457, 1389, 1557, 941, 494, 1009, 1604, 1033, 2046, 222, 2012, 671, 7, 1525, 265, 901, 743, 543, 1771, 1149, 890, 755, 1974, 1960, 387, 1947, 1298, 130, 1758, 1060, 268, 844, 1375, 746, 1251, 2040], \"hm\": \"96aeaf9852416229d6b33ceb018d9abc90d70cbe7632539d69ef1462c9aa86a0\", \"op\": \"00bf0281ccb68cc6fe496bb1c8277e3484f6392517d5b8425536af7ec00ad7cc40e17e6336568ac4ed98dd659f7581f8a113fe5669b89833d9dd8eadc587a8950b6bd94f872e7f4205a6859e071df47134d3cccf1e53295417\"}\xff\xff\xff\xff");
-        let mut data_row = DataRow::try_from(&bytes).unwrap();
+        let mut data_row = DataRow::from(bytes);
 
         let column_config = vec![
             column_config("encrypted_text"),
@@ -390,10 +361,11 @@ mod tests {
         for bytes in messages {
             let expected = bytes.clone();
 
-            let data_row = DataRow::try_from(&bytes).unwrap();
-
-            let bytes = BytesMut::try_from(data_row).unwrap();
-            assert_eq!(bytes, expected);
+            let data_row = DataRow::from(bytes);
+            let BackendMessage::DataRow(actual) = data_row.into() else {
+                panic!("expected DataRow")
+            };
+            assert_eq!(actual, expected);
         }
     }
 
@@ -403,7 +375,7 @@ mod tests {
             b"D\0\0\09\0\x03\0\0\0\x08blahvtha\0\0\0\x0242\0\0\0\x1d2023-12-16 01:52:25.031985+00",
         );
 
-        let data_row = DataRow::try_from(&bytes).unwrap();
+        let data_row = DataRow::from(bytes);
 
         let data_col = data_row.columns.first().unwrap();
 
@@ -416,7 +388,7 @@ mod tests {
     pub fn parse_data_row_with_null_column() {
         let bytes = to_message(b"D\0\0\0\n\0\x01\xff\xff\xff\xff");
 
-        let data_row = DataRow::try_from(&bytes).unwrap();
+        let data_row = DataRow::from(bytes);
 
         let data_col = data_row.columns.first().unwrap();
 
