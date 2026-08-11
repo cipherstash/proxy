@@ -1,17 +1,15 @@
 mod backend;
 mod frontend;
 
+use super::Context;
 use crate::{error::Error, proxy::EncryptionService};
+use backend::Backend;
+use frontend::Frontend;
 use pg_proto::{
     BackendBatchOutput, BackendFlushReason, BackendMessage, BackendMiddlewareOutput,
     FrontendMessage, FrontendMiddlewareOutput, HeldBackendMessages, IntermediaryMiddleware,
     IntermediaryMiddlewareFactory,
 };
-use std::{future::Future, pin::Pin};
-
-use super::Context;
-use backend::Backend;
-use frontend::Frontend;
 
 pub struct CipherStashMiddleware<S: EncryptionService + Clone> {
     frontend: Frontend<S>,
@@ -48,34 +46,34 @@ where
 {
     type Error = Error;
 
-    fn frontend<'a>(
-        &'a mut self,
-        _: &'a ServerContext,
-        _: &'a ClientContext,
-        _: &'a mut (),
+    async fn frontend(
+        &mut self,
+        _: &ServerContext,
+        _: &ClientContext,
+        _: &mut (),
         message: FrontendMessage,
-    ) -> Pin<Box<dyn Future<Output = Result<FrontendMiddlewareOutput, Error>> + 'a>> {
-        Box::pin(async move { self.frontend.intercept(message).await })
+    ) -> Result<FrontendMiddlewareOutput, Error> {
+        self.frontend.intercept(message).await
     }
 
-    fn backend<'a>(
-        &'a mut self,
-        _: &'a ServerContext,
-        _: &'a ClientContext,
-        _: &'a mut (),
+    async fn backend(
+        &mut self,
+        _: &ServerContext,
+        _: &ClientContext,
+        _: &mut (),
         message: BackendMessage,
-    ) -> Pin<Box<dyn Future<Output = Result<BackendMiddlewareOutput, Error>> + 'a>> {
-        Box::pin(async move { self.backend.intercept(message).await })
+    ) -> Result<BackendMiddlewareOutput, Error> {
+        self.backend.intercept(message).await
     }
 
-    fn flush_backend<'a>(
-        &'a mut self,
-        _: &'a ServerContext,
-        _: &'a ClientContext,
-        _: &'a mut (),
-        held: HeldBackendMessages<'a>,
+    async fn flush_backend(
+        &mut self,
+        _: &ServerContext,
+        _: &ClientContext,
+        _: &mut (),
+        held: HeldBackendMessages<'_>,
         _: BackendFlushReason,
-    ) -> Pin<Box<dyn Future<Output = Result<BackendBatchOutput, Error>> + 'a>> {
-        Box::pin(async move { self.backend.flush_held(held).await })
+    ) -> Result<BackendBatchOutput, Error> {
+        self.backend.flush_held(held).await
     }
 }
