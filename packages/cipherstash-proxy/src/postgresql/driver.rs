@@ -352,11 +352,15 @@ where
                         .await
                         .map_err(|_| Error::ConnectionTimeout { duration })?,
                     None => forward.await,
-                }
-                .map_err(|error| match error {
-                    pg_proto::ForwardError::Middleware(error) => error,
-                    error => invalid_data(error),
-                })?;
+                };
+                let forwarded = match forwarded {
+                    Ok(forwarded) => forwarded,
+                    Err(pg_proto::ForwardError::Frontend(
+                        pg_proto::FrontendProjectionError::Capacity(_),
+                    )) => continue,
+                    Err(pg_proto::ForwardError::Middleware(error)) => return Err(error),
+                    Err(error) => return Err(invalid_data(error)),
+                };
                 if matches!(
                     forwarded,
                     ForwardedMessage::Frontend(FrontendMessage::Terminate)
