@@ -14,18 +14,15 @@ use pg_proto::{
     ClientTlsConfig, ClientTlsPolicy, ClientTlsProvider, ConnectTarget, ForwardedMessage,
     FrontendMessage, InitialServerContext, Intermediary, IntermediaryCancellationRegistry,
     MiddlewareFactory, NegotiatedServerTls, Server, ServerAuthentication,
-    ServerAuthenticationAction, ServerAuthenticationFuture, ServerAuthenticationProvider,
-    ServerAuthenticationRequest, ServerAuthenticationResponse, ServerConnectionContext,
-    ServerIdentity, ServerIdentityProvider, ServerMiddleware, ServerTlsPolicy, SslMode,
-    StartupParameters, StartupRouteResolver,
+    ServerAuthenticationAction, ServerAuthenticationProvider, ServerAuthenticationRequest,
+    ServerAuthenticationResponse, ServerConnectionContext, ServerIdentity, ServerIdentityProvider,
+    ServerMiddleware, ServerTlsPolicy, SslMode, StartupParameters, StartupRouteResolver,
 };
 use postgres_protocol::authentication::sasl::{ChannelBinding, ScramSha256};
 use rand::Rng;
 use std::{
     collections::HashMap,
     convert::Infallible,
-    future::Future,
-    pin::Pin,
     sync::{Arc, Mutex, OnceLock},
 };
 use tokio::net::TcpStream;
@@ -73,13 +70,12 @@ impl IntermediaryCancellationRegistry for CancellationRegistry {
 
 impl<Peer> StartupRouteResolver<Peer> for Route {
     type Error = Infallible;
-    fn resolve<'a>(
-        &'a self,
+    async fn resolve(
+        &self,
         _: StartupParameters,
-        _: InitialServerContext<'a, Peer>,
-    ) -> Pin<Box<dyn Future<Output = Result<ConnectTarget, Self::Error>> + 'a>> {
-        let address = self.0.clone();
-        Box::pin(async move { Ok(ConnectTarget::new(address)) })
+        _: InitialServerContext<'_, Peer>,
+    ) -> Result<ConnectTarget, Self::Error> {
+        Ok(ConnectTarget::new(self.0.clone()))
     }
 }
 
@@ -111,32 +107,29 @@ impl ServerAuthenticationProvider for DownstreamAuth {
 impl<Peer> ServerAuthentication<Peer> for DownstreamSession {
     type Identity = ();
     type Error = Error;
-    fn start<'a>(
-        &'a mut self,
-        _: ServerAuthenticationRequest<'a, Peer>,
-    ) -> ServerAuthenticationFuture<'a, ServerAuthenticationAction<()>, Error> {
-        let salt = self.salt;
-        Box::pin(async move { Ok(ServerAuthenticationAction::Md5Password { salt }) })
+    async fn start(
+        &mut self,
+        _: ServerAuthenticationRequest<'_, Peer>,
+    ) -> Result<ServerAuthenticationAction<()>, Error> {
+        Ok(ServerAuthenticationAction::Md5Password { salt: self.salt })
     }
-    fn respond<'a>(
-        &'a mut self,
-        _: ServerAuthenticationRequest<'a, Peer>,
+    async fn respond(
+        &mut self,
+        _: ServerAuthenticationRequest<'_, Peer>,
         response: ServerAuthenticationResponse,
-    ) -> ServerAuthenticationFuture<'a, ServerAuthenticationAction<()>, Error> {
-        Box::pin(async move {
-            let ServerAuthenticationResponse::Password(received) = response else {
-                return Err(ProtocolError::AuthenticationFailed.into());
-            };
-            let expected = md5_hash(
-                self.username.as_bytes(),
-                self.password.as_bytes(),
-                &self.salt,
-            );
-            if received.as_ref() != expected.as_bytes() {
-                return Err(ProtocolError::ClientAuthenticationFailed.into());
-            }
-            Ok(ServerAuthenticationAction::Accept(()))
-        })
+    ) -> Result<ServerAuthenticationAction<()>, Error> {
+        let ServerAuthenticationResponse::Password(received) = response else {
+            return Err(ProtocolError::AuthenticationFailed.into());
+        };
+        let expected = md5_hash(
+            self.username.as_bytes(),
+            self.password.as_bytes(),
+            &self.salt,
+        );
+        if received.as_ref() != expected.as_bytes() {
+            return Err(ProtocolError::ClientAuthenticationFailed.into());
+        }
+        Ok(ServerAuthenticationAction::Accept(()))
     }
 }
 
@@ -156,77 +149,69 @@ impl ClientAuthentication for UpstreamAuth {
     type Evidence = ();
     type Session = UpstreamSession;
     type Error = Error;
-    fn begin<'a>(
-        &'a self,
-        _: &'a ConnectTarget,
-    ) -> Pin<Box<dyn Future<Output = Result<UpstreamSession, Error>> + 'a>> {
-        let session = UpstreamSession {
+    async fn begin(&self, _: &ConnectTarget) -> Result<UpstreamSession, Error> {
+        Ok(UpstreamSession {
             username: self.username.clone(),
             password: self.password.clone(),
             scram: None,
-        };
-        Box::pin(async move { Ok(session) })
+        })
     }
 }
 
 impl ClientAuthenticationSession for UpstreamSession {
     type Evidence = ();
     type Error = Error;
-    fn respond<'a>(
-        &'a mut self,
+    async fn respond(
+        &mut self,
         challenge: ClientAuthenticationChallenge,
-    ) -> Pin<Box<dyn Future<Output = Result<ClientAuthenticationResponse, Error>> + 'a>> {
-        Box::pin(async move {
-            match challenge {
-                ClientAuthenticationChallenge::CleartextPassword => {
-                    Ok(ClientAuthenticationResponse::Password(
-                        Bytes::copy_from_slice(self.password.as_bytes()),
-                    ))
-                }
-                ClientAuthenticationChallenge::Md5Password(salt) => {
-                    Ok(ClientAuthenticationResponse::Password(Bytes::from(
-                        md5_hash(self.username.as_bytes(), self.password.as_bytes(), &salt),
-                    )))
-                }
-                ClientAuthenticationChallenge::Sasl(mechanisms) => {
-                    if !mechanisms.iter().any(|m| m.as_ref() == b"SCRAM-SHA-256") {
-                        return Err(
-                            ProtocolError::UnsupportedAuthentication { method_code: -1 }.into()
-                        );
-                    }
-                    let scram = self.scram.insert(ScramSha256::new(
-                        self.password.as_bytes(),
-                        ChannelBinding::unsupported(),
-                    ));
-                    Ok(ClientAuthenticationResponse::SaslInitial {
-                        mechanism: Bytes::from_static(b"SCRAM-SHA-256"),
-                        response: Bytes::copy_from_slice(scram.message()),
-                    })
-                }
-                ClientAuthenticationChallenge::SaslContinue(challenge) => {
-                    let scram = self
-                        .scram
-                        .as_mut()
-                        .ok_or(ProtocolError::AuthenticationFailed)?;
-                    scram.update(&challenge)?;
-                    Ok(ClientAuthenticationResponse::Sasl(Bytes::copy_from_slice(
-                        scram.message(),
-                    )))
-                }
-                ClientAuthenticationChallenge::SaslFinal(final_message) => {
-                    let scram = self
-                        .scram
-                        .as_mut()
-                        .ok_or(ProtocolError::AuthenticationFailed)?;
-                    scram.finish(&final_message)?;
-                    Ok(ClientAuthenticationResponse::Verified)
-                }
-                _ => Err(ProtocolError::UnsupportedAuthentication { method_code: -1 }.into()),
+    ) -> Result<ClientAuthenticationResponse, Error> {
+        match challenge {
+            ClientAuthenticationChallenge::CleartextPassword => {
+                Ok(ClientAuthenticationResponse::Password(
+                    Bytes::copy_from_slice(self.password.as_bytes()),
+                ))
             }
-        })
+            ClientAuthenticationChallenge::Md5Password(salt) => {
+                Ok(ClientAuthenticationResponse::Password(Bytes::from(
+                    md5_hash(self.username.as_bytes(), self.password.as_bytes(), &salt),
+                )))
+            }
+            ClientAuthenticationChallenge::Sasl(mechanisms) => {
+                if !mechanisms.iter().any(|m| m.as_ref() == b"SCRAM-SHA-256") {
+                    return Err(ProtocolError::UnsupportedAuthentication { method_code: -1 }.into());
+                }
+                let scram = self.scram.insert(ScramSha256::new(
+                    self.password.as_bytes(),
+                    ChannelBinding::unsupported(),
+                ));
+                Ok(ClientAuthenticationResponse::SaslInitial {
+                    mechanism: Bytes::from_static(b"SCRAM-SHA-256"),
+                    response: Bytes::copy_from_slice(scram.message()),
+                })
+            }
+            ClientAuthenticationChallenge::SaslContinue(challenge) => {
+                let scram = self
+                    .scram
+                    .as_mut()
+                    .ok_or(ProtocolError::AuthenticationFailed)?;
+                scram.update(&challenge)?;
+                Ok(ClientAuthenticationResponse::Sasl(Bytes::copy_from_slice(
+                    scram.message(),
+                )))
+            }
+            ClientAuthenticationChallenge::SaslFinal(final_message) => {
+                let scram = self
+                    .scram
+                    .as_mut()
+                    .ok_or(ProtocolError::AuthenticationFailed)?;
+                scram.finish(&final_message)?;
+                Ok(ClientAuthenticationResponse::Verified)
+            }
+            _ => Err(ProtocolError::UnsupportedAuthentication { method_code: -1 }.into()),
+        }
     }
-    fn authenticated(self) -> Pin<Box<dyn Future<Output = Result<(), Error>>>> {
-        Box::pin(async { Ok(()) })
+    async fn authenticated(self) -> Result<(), Error> {
+        Ok(())
     }
 }
 
@@ -284,21 +269,16 @@ struct UpstreamTls {
 }
 impl ClientTlsProvider for UpstreamTls {
     type Error = Error;
-    fn resolve<'a>(
-        &'a self,
-        _: &'a ConnectTarget,
-    ) -> Pin<Box<dyn Future<Output = Result<ClientTlsConfig, Error>> + 'a>> {
+    async fn resolve(&self, _: &ConnectTarget) -> Result<ClientTlsConfig, Error> {
         let name = self.server_name.clone();
-        Box::pin(async move {
-            let result = rustls_native_certs::load_native_certs();
-            let mut roots = rustls::RootCertStore::empty();
-            for certificate in result.certs {
-                roots
-                    .add(certificate)
-                    .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
-            }
-            Ok(ClientTlsConfig::new(name, roots))
-        })
+        let result = rustls_native_certs::load_native_certs();
+        let mut roots = rustls::RootCertStore::empty();
+        for certificate in result.certs {
+            roots
+                .add(certificate)
+                .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
+        }
+        Ok(ClientTlsConfig::new(name, roots))
     }
 }
 

@@ -3144,8 +3144,9 @@ checksum = "e3148f5046208a5d56bcfc03053e3ca6334e51da8dfb19b6cdc8b306fae3283e"
 
 [[package]]
 name = "pg-proto"
-version = "0.9.0"
-source = "git+https://github.com/freshtonic/pg-proto?rev=d9445db1f9fd19c64d5954b0e950d1a9eb555c17#d9445db1f9fd19c64d5954b0e950d1a9eb555c17"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d93ee031d14c1d9c6a1b22a6be4b28eca4735fe2c027523b8398809af7323a22"
 dependencies = [
  "base64 0.23.1",
  "bytes",
@@ -3166,8 +3167,9 @@ dependencies = [
 
 [[package]]
 name = "pg-proto-fsm"
-version = "0.9.0"
-source = "git+https://github.com/freshtonic/pg-proto?rev=d9445db1f9fd19c64d5954b0e950d1a9eb555c17#d9445db1f9fd19c64d5954b0e950d1a9eb555c17"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0b02efc01eee2ebf2ded11dd9f785d1b055b67b00146b724ba5bc3904894a2c4"
 dependencies = [
  "proc-macro2",
  "quote",
