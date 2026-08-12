@@ -42,7 +42,7 @@ strip = "none"
 debug = true
 
 [workspace.dependencies]
-sqltk = { version = "0.10.0" }
+sqltk = { version = "0.11.0" }
 cipherstash-client = { version = "=0.42.0" }
 cipherstash-config = { version = "=0.42.0" }
 cts-common = { version = "=0.42.0" }

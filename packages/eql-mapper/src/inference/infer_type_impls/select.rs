@@ -71,7 +71,7 @@ impl<'ast> InferType<'ast, Select> for TypeInferencer<'ast> {
                         constraint,
                     } => {
                         self.unify_node_with_type(match_condition, Type::native())?;
-                        Some(constraint)
+                        Some(constraint.as_ref())
                     }
 
                     JoinOperator::CrossJoin

@@ -68,11 +68,11 @@ impl<'ast> CastFullPayloadOperands<'ast> {
             | FunctionArg::Named {
                 arg: FunctionArgExpr::Expr(expr),
                 ..
-            }
-            | FunctionArg::ExprNamed {
-                arg: FunctionArgExpr::Expr(expr),
-                ..
-            } => Some(expr),
+            } => Some(expr.as_ref()),
+            FunctionArg::ExprNamed { arg, .. } => match arg.as_ref() {
+                FunctionArgExpr::Expr(expr) => Some(expr.as_ref()),
+                _ => None,
+            },
             _ => None,
         })
     }
@@ -88,11 +88,11 @@ impl<'ast> CastFullPayloadOperands<'ast> {
             | FunctionArg::Named {
                 arg: FunctionArgExpr::Expr(expr),
                 ..
-            }
-            | FunctionArg::ExprNamed {
-                arg: FunctionArgExpr::Expr(expr),
-                ..
-            } => Some(expr),
+            } => Some(expr.as_mut()),
+            FunctionArg::ExprNamed { arg, .. } => match arg.as_mut() {
+                FunctionArgExpr::Expr(expr) => Some(expr.as_mut()),
+                _ => None,
+            },
             _ => None,
         })
     }

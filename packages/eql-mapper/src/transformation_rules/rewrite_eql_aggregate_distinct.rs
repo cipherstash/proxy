@@ -72,11 +72,11 @@ impl<'ast> RewriteEqlAggregateDistinct<'ast> {
                 | FunctionArg::Named {
                     arg: FunctionArgExpr::Expr(expr),
                     ..
-                }
-                | FunctionArg::ExprNamed {
-                    arg: FunctionArgExpr::Expr(expr),
-                    ..
-                } => self.eql_identity_of(expr),
+                } => self.eql_identity_of(expr.as_ref()),
+                FunctionArg::ExprNamed { arg, .. } => match arg.as_ref() {
+                    FunctionArgExpr::Expr(expr) => self.eql_identity_of(expr.as_ref()),
+                    _ => None,
+                },
                 _ => None,
             })
             .collect()
@@ -143,16 +143,19 @@ impl<'ast> TransformationRule<'ast> for RewriteEqlAggregateDistinct<'ast> {
                 )));
             };
 
-            if let FunctionArg::Unnamed(FunctionArgExpr::Expr(expr))
-            | FunctionArg::Named {
-                arg: FunctionArgExpr::Expr(expr),
-                ..
-            }
-            | FunctionArg::ExprNamed {
-                arg: FunctionArgExpr::Expr(expr),
-                ..
-            } = arg
-            {
+            let expr = match arg {
+                FunctionArg::Unnamed(FunctionArgExpr::Expr(expr))
+                | FunctionArg::Named {
+                    arg: FunctionArgExpr::Expr(expr),
+                    ..
+                } => Some(expr.as_mut()),
+                FunctionArg::ExprNamed { arg, .. } => match arg.as_mut() {
+                    FunctionArgExpr::Expr(expr) => Some(expr.as_mut()),
+                    _ => None,
+                },
+                _ => None,
+            };
+            if let Some(expr) = expr {
                 let counted = mem::replace(expr, Expr::Value(SqltkValue::Null.into()));
                 *expr = eql_v3_term_call(term_fn, counted);
             }

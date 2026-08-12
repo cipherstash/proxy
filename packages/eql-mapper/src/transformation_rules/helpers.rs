@@ -164,7 +164,7 @@ pub(crate) fn eql_v3_term_call(fn_name: &str, arg: Expr) -> Expr {
         ]),
         uses_odbc_syntax: false,
         args: FunctionArguments::List(FunctionArgumentList {
-            args: vec![FunctionArg::Unnamed(FunctionArgExpr::Expr(arg))],
+            args: vec![FunctionArg::Unnamed(FunctionArgExpr::Expr(Box::new(arg)))],
             duplicate_treatment: None,
             clauses: vec![],
         }),

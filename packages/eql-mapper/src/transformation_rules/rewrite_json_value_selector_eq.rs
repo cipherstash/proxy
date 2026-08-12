@@ -108,8 +108,8 @@ impl<'ast> RewriteJsonValueSelectorEq<'ast> {
             uses_odbc_syntax: false,
             args: FunctionArguments::List(FunctionArgumentList {
                 args: vec![
-                    FunctionArg::Unnamed(FunctionArgExpr::Expr(container)),
-                    FunctionArg::Unnamed(FunctionArgExpr::Expr(needle)),
+                    FunctionArg::Unnamed(FunctionArgExpr::Expr(Box::new(container))),
+                    FunctionArg::Unnamed(FunctionArgExpr::Expr(Box::new(needle))),
                 ],
                 duplicate_treatment: None,
                 clauses: vec![],

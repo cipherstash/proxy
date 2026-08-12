@@ -34,9 +34,11 @@ impl<'ast> RewriteStandardSqlFnsOnEqlTypes<'ast> {
                 Some(Type::Value(Value::Eql(_)))
             ),
             FunctionArguments::List(list) => list.args.iter().any(|arg| match arg {
-                FunctionArg::Named { arg, .. }
-                | FunctionArg::ExprNamed { arg, .. }
-                | FunctionArg::Unnamed(arg) => matches!(
+                FunctionArg::Named { arg, .. } | FunctionArg::Unnamed(arg) => matches!(
+                    self.node_types.get(&arg.as_node_key()),
+                    Some(Type::Value(Value::Eql(_)))
+                ),
+                FunctionArg::ExprNamed { arg, .. } => matches!(
                     self.node_types.get(&arg.as_node_key()),
                     Some(Type::Value(Value::Eql(_)))
                 ),

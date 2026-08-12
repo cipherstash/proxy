@@ -5,8 +5,8 @@ use crate::{
     Relation, ScopeError, ScopeTracker,
 };
 use sqltk::parser::ast::{
-    Cte, Ident, Insert, ObjectNamePart, OnConflict, OnConflictAction, OnInsert, TableAlias,
-    TableFactor, TableObject,
+    Cte, Ident, Insert, ObjectNamePart, OnConflictAction, OnInsert, TableAlias, TableFactor,
+    TableObject,
 };
 use sqltk::{Break, Visitable, Visitor};
 use std::{cell::RefCell, fmt::Debug, marker::PhantomData, ops::ControlFlow, rc::Rc, sync::Arc};
@@ -69,15 +69,13 @@ impl<'ast> Importer<'ast> {
             // An unqualified column reference in the `DO UPDATE` expressions is
             // now ambiguous (both relations project it), which mirrors
             // PostgreSQL's own `column reference is ambiguous` error there.
-            if let Some(OnInsert::OnConflict(OnConflict {
-                action: OnConflictAction::DoUpdate(_),
-                ..
-            })) = on
-            {
-                self.scope_tracker.borrow_mut().add_relation(Relation {
-                    name: Some(Ident::new("excluded")),
-                    projection_type: Type::Value(Value::Projection(projection)).into(),
-                })?;
+            if let Some(OnInsert::OnConflict(on_conflict)) = on {
+                if matches!(on_conflict.action, OnConflictAction::DoUpdate(_)) {
+                    self.scope_tracker.borrow_mut().add_relation(Relation {
+                        name: Some(Ident::new("excluded")),
+                        projection_type: Type::Value(Value::Projection(projection)).into(),
+                    })?;
+                }
             }
 
             Ok(())
