@@ -4962,6 +4962,83 @@ mod test {
         }
     }
 
+    #[test]
+    fn insert_on_conflict_returning_cannot_reference_excluded() {
+        let schema = resolver(schema! {
+            tables: {
+                employees: {
+                    id,
+                    salary (EQL),
+                }
+            }
+        });
+
+        let statement = parse(
+            "INSERT INTO employees (id, salary) VALUES (1, 20000) \
+             ON CONFLICT (id) DO UPDATE SET salary = excluded.salary \
+             RETURNING excluded.salary",
+        );
+
+        assert!(
+            type_check(schema, &statement).is_err(),
+            "excluded must not be visible outside ON CONFLICT DO UPDATE"
+        );
+    }
+
+    #[test]
+    fn insert_on_conflict_returning_unqualified_column_is_not_ambiguous() {
+        let schema = resolver(schema! {
+            tables: {
+                employees: {
+                    id,
+                    salary (EQL),
+                }
+            }
+        });
+
+        let statement = parse(
+            "INSERT INTO employees (id, salary) VALUES (1, 20000) \
+             ON CONFLICT (id) DO UPDATE SET salary = excluded.salary \
+             RETURNING salary",
+        );
+
+        let typed = type_check(schema, &statement)
+            .expect("the target table must be the only relation visible to RETURNING");
+
+        assert_eq!(
+            typed.projection,
+            projection![(EQL(employees.salary) as salary)]
+        );
+    }
+
+    #[test]
+    fn insert_on_conflict_returning_wildcard_only_projects_target_table() {
+        let schema = resolver(schema! {
+            tables: {
+                employees: {
+                    id,
+                    salary (EQL),
+                }
+            }
+        });
+
+        let statement = parse(
+            "INSERT INTO employees (id, salary) VALUES (1, 20000) \
+             ON CONFLICT (id) DO UPDATE SET salary = excluded.salary \
+             RETURNING *",
+        );
+
+        let typed = type_check(schema, &statement).expect("RETURNING * must type check");
+
+        assert_eq!(
+            typed.projection,
+            projection![
+                (NATIVE(employees.id) as id),
+                (EQL(employees.salary) as salary)
+            ]
+        );
+    }
+
     /// A conflict only fires off a unique index, and uniqueness of an
     /// encrypted column would be judged on the randomised ciphertext — the
     /// conflict would never fire. Rejected explicitly.

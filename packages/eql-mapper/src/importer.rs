@@ -5,7 +5,7 @@ use crate::{
     Relation, ScopeError, ScopeTracker,
 };
 use sqltk::parser::ast::{
-    Cte, Ident, Insert, ObjectNamePart, OnConflictAction, OnInsert, TableAlias, TableFactor,
+    Cte, Ident, Insert, ObjectNamePart, OnConflict, OnConflictAction, TableAlias, TableFactor,
     TableObject,
 };
 use sqltk::{Break, Visitable, Visitor};
@@ -18,6 +18,7 @@ pub struct Importer<'ast> {
     table_resolver: Arc<TableResolver>,
     registry: Rc<RefCell<TypeRegistry<'ast>>>,
     scope_tracker: Rc<RefCell<ScopeTracker<'ast>>>,
+    insert_projections: Vec<Arc<Type>>,
     _ast: PhantomData<&'ast ()>,
 }
 
@@ -31,15 +32,18 @@ impl<'ast> Importer<'ast> {
             registry: registry.into(),
             table_resolver: table_resolver.into(),
             scope_tracker: scope.into(),
+            insert_projections: Vec::new(),
             _ast: PhantomData,
         }
     }
 
-    fn update_scope_for_insert_statement(&mut self, insert: &Insert) -> Result<(), ImportError> {
+    fn update_scope_for_insert_statement(
+        &mut self,
+        insert: &Insert,
+    ) -> Result<Arc<Type>, ImportError> {
         if let Insert {
             table: TableObject::TableName(table_name),
             table_alias,
-            on,
             ..
         } = insert
         {
@@ -60,25 +64,7 @@ impl<'ast> Importer<'ast> {
                 projection_type: Type::Value(Value::Projection(projection.clone())).into(),
             })?;
 
-            // `ON CONFLICT DO UPDATE` can read the row proposed for insertion
-            // through the `excluded` pseudo-table, which projects exactly the
-            // target table's columns. Bringing it into scope is what gives
-            // `excluded.<col>` a type — including the column's EQL type, so an
-            // upsert like `SET enc = excluded.enc` is fully constrained.
-            //
-            // An unqualified column reference in the `DO UPDATE` expressions is
-            // now ambiguous (both relations project it), which mirrors
-            // PostgreSQL's own `column reference is ambiguous` error there.
-            if let Some(OnInsert::OnConflict(on_conflict)) = on {
-                if matches!(on_conflict.action, OnConflictAction::DoUpdate(_)) {
-                    self.scope_tracker.borrow_mut().add_relation(Relation {
-                        name: Some(Ident::new("excluded")),
-                        projection_type: Type::Value(Value::Projection(projection)).into(),
-                    })?;
-                }
-            }
-
-            Ok(())
+            Ok(Type::Value(Value::Projection(projection)).into())
         } else {
             Err(ImportError::Unsupported(
                 "unsupported TableObject variant in Insert".to_string(),
@@ -340,8 +326,27 @@ impl<'ast> Visitor<'ast> for Importer<'ast> {
         // 2. Child nodes of the `Insert` need to resolve identifiers in the context of the scope, so exit would be too
         // late.
         if let Some(insert) = node.downcast_ref::<Insert>() {
-            if let Err(err) = self.update_scope_for_insert_statement(insert) {
-                return ControlFlow::Break(Break::Err(err));
+            match self.update_scope_for_insert_statement(insert) {
+                Ok(projection) => self.insert_projections.push(projection),
+                Err(err) => return ControlFlow::Break(Break::Err(err)),
+            }
+        }
+
+        // `excluded` exists only inside `ON CONFLICT DO UPDATE`. Adding it at
+        // the clause boundary keeps it visible to assignments and the WHERE
+        // predicate, but not to the INSERT source or RETURNING clause.
+        if let Some(on_conflict) = node.downcast_ref::<OnConflict>() {
+            if matches!(on_conflict.action, OnConflictAction::DoUpdate(_)) {
+                let Some(projection_type) = self.insert_projections.last().cloned() else {
+                    return ControlFlow::Break(Break::Err(ImportError::ExpectedProjection));
+                };
+
+                if let Err(err) = self.scope_tracker.borrow_mut().add_relation(Relation {
+                    name: Some(Ident::new("excluded")),
+                    projection_type,
+                }) {
+                    return ControlFlow::Break(Break::Err(err.into()));
+                }
             }
         }
 
@@ -349,6 +354,22 @@ impl<'ast> Visitor<'ast> for Importer<'ast> {
     }
 
     fn exit<N: Visitable>(&mut self, node: &'ast N) -> ControlFlow<Break<Self::Error>> {
+        if let Some(on_conflict) = node.downcast_ref::<OnConflict>() {
+            if matches!(on_conflict.action, OnConflictAction::DoUpdate(_)) {
+                if let Err(err) = self
+                    .scope_tracker
+                    .borrow_mut()
+                    .remove_relation(&Ident::new("excluded"))
+                {
+                    return ControlFlow::Break(Break::Err(err.into()));
+                }
+            }
+        }
+
+        if node.downcast_ref::<Insert>().is_some() && self.insert_projections.pop().is_none() {
+            return ControlFlow::Break(Break::Err(ImportError::ExpectedProjection));
+        }
+
         if let Some(cte) = node.downcast_ref::<Cte>() {
             if let Err(err) = self.update_scope_for_cte(cte) {
                 return ControlFlow::Break(Break::Err(err));
