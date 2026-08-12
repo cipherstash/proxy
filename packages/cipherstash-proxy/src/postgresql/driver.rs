@@ -1,72 +1,18 @@
-use super::{diagnostics::ErrorResponse, middleware::CipherStashMiddlewareFactory, Context};
-use crate::{
-    connect,
-    error::{Error, ProtocolError},
-    proxy::EncryptionService,
-    tls,
-};
-use bytes::Bytes;
-use md5::{Digest, Md5};
+use super::{middleware::CipherStashMiddlewareFactory, Context};
+use crate::{connect, error::Error, proxy::EncryptionService, tls};
 use pg_proto::{
-    Authentication, BackendHoldLimits, BackendMessage, BoundedPipeline, CancelKey,
-    CancellationPolicy, CancellationRoute, Client, ClientAuthentication,
-    ClientAuthenticationChallenge, ClientAuthenticationResponse, ClientAuthenticationSession,
-    ClientTlsConfig, ClientTlsPolicy, ClientTlsProvider, ConnectTarget, ForwardedMessage,
-    FrontendMessage, InitialServerContext, Intermediary, IntermediaryCancellationRegistry,
-    MiddlewareFactory, NegotiatedServerTls, Server, ServerAuthentication,
-    ServerAuthenticationAction, ServerAuthenticationProvider, ServerAuthenticationRequest,
-    ServerAuthenticationResponse, ServerConnectionContext, ServerIdentity, ServerIdentityProvider,
-    ServerMiddleware, ServerTlsPolicy, SslMode, StartupParameters, StartupRouteResolver,
+    BackendHoldLimits, BoundedPipeline, CancellationPolicy, Client, ClientTlsConfig,
+    ClientTlsPolicy, ClientTlsProvider, ConnectTarget, ForwardedMessage, FrontendMessage,
+    InMemoryCancellationRegistry, InitialServerContext, Intermediary, Server, ServerIdentity,
+    ServerIdentityProvider, ServerTlsPolicy, SslMode, StartupParameters, StartupRouteResolver,
+    StaticClientCredentials, StaticMd5ServerCredentials,
 };
-use postgres_protocol::authentication::sasl::{ChannelBinding, ScramSha256};
-use rand::Rng;
-use std::{
-    collections::HashMap,
-    convert::Infallible,
-    sync::{Arc, Mutex, OnceLock},
-};
+use std::{convert::Infallible, sync::Arc};
 use tokio::net::TcpStream;
 use tracing::info;
 
 #[derive(Clone)]
 struct Route(String);
-
-#[derive(Clone, Copy)]
-struct CancellationRegistry;
-
-fn cancellation_routes() -> &'static Mutex<HashMap<CancelKey, CancellationRoute>> {
-    static ROUTES: OnceLock<Mutex<HashMap<CancelKey, CancellationRoute>>> = OnceLock::new();
-    ROUTES.get_or_init(|| Mutex::new(HashMap::new()))
-}
-
-impl IntermediaryCancellationRegistry for CancellationRegistry {
-    type Error = std::io::Error;
-
-    fn register(&self, route: CancellationRoute) -> Result<CancelKey, Self::Error> {
-        // Keep the database-issued key unchanged. The proxy has one upstream per
-        // downstream connection, so no pool-level key translation is required.
-        let client_key = route.upstream_key().clone();
-        let mut routes = cancellation_routes()
-            .lock()
-            .map_err(|_| std::io::Error::other("cancellation registry lock poisoned"))?;
-        if routes.contains_key(&client_key) {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::AlreadyExists,
-                "duplicate PostgreSQL cancellation key",
-            ));
-        }
-        routes.insert(client_key.clone(), route);
-        Ok(client_key)
-    }
-
-    fn resolve(&self, client: &CancelKey) -> Option<CancellationRoute> {
-        cancellation_routes().lock().ok()?.get(client).cloned()
-    }
-
-    fn detach(&self, client: &CancelKey) -> Option<CancellationRoute> {
-        cancellation_routes().lock().ok()?.remove(client)
-    }
-}
 
 impl<Peer> StartupRouteResolver<Peer> for Route {
     type Error = Infallible;
@@ -80,186 +26,11 @@ impl<Peer> StartupRouteResolver<Peer> for Route {
 }
 
 #[derive(Clone)]
-struct DownstreamAuth {
-    username: String,
-    password: String,
-}
-
-struct DownstreamSession {
-    username: String,
-    password: String,
-    salt: [u8; 4],
-}
-
-impl ServerAuthenticationProvider for DownstreamAuth {
-    type Authentication = DownstreamSession;
-    fn create(&self) -> Self::Authentication {
-        let mut salt = [0; 4];
-        rand::rng().fill(&mut salt);
-        DownstreamSession {
-            username: self.username.clone(),
-            password: self.password.clone(),
-            salt,
-        }
-    }
-}
-
-impl<Peer> ServerAuthentication<Peer> for DownstreamSession {
-    type Identity = ();
-    type Error = Error;
-    async fn start(
-        &mut self,
-        _: ServerAuthenticationRequest<'_, Peer>,
-    ) -> Result<ServerAuthenticationAction<()>, Error> {
-        Ok(ServerAuthenticationAction::Md5Password { salt: self.salt })
-    }
-    async fn respond(
-        &mut self,
-        _: ServerAuthenticationRequest<'_, Peer>,
-        response: ServerAuthenticationResponse,
-    ) -> Result<ServerAuthenticationAction<()>, Error> {
-        let ServerAuthenticationResponse::Password(received) = response else {
-            return Err(ProtocolError::AuthenticationFailed.into());
-        };
-        let expected = md5_hash(
-            self.username.as_bytes(),
-            self.password.as_bytes(),
-            &self.salt,
-        );
-        if received.as_ref() != expected.as_bytes() {
-            return Err(ProtocolError::ClientAuthenticationFailed.into());
-        }
-        Ok(ServerAuthenticationAction::Accept(()))
-    }
-}
-
-#[derive(Clone)]
-struct UpstreamAuth {
-    username: String,
-    password: String,
-}
-
-struct UpstreamSession {
-    username: String,
-    password: String,
-    scram: Option<ScramSha256>,
-}
-
-impl ClientAuthentication for UpstreamAuth {
-    type Evidence = ();
-    type Session = UpstreamSession;
-    type Error = Error;
-    async fn begin(&self, _: &ConnectTarget) -> Result<UpstreamSession, Error> {
-        Ok(UpstreamSession {
-            username: self.username.clone(),
-            password: self.password.clone(),
-            scram: None,
-        })
-    }
-}
-
-impl ClientAuthenticationSession for UpstreamSession {
-    type Evidence = ();
-    type Error = Error;
-    async fn respond(
-        &mut self,
-        challenge: ClientAuthenticationChallenge,
-    ) -> Result<ClientAuthenticationResponse, Error> {
-        match challenge {
-            ClientAuthenticationChallenge::CleartextPassword => {
-                Ok(ClientAuthenticationResponse::Password(
-                    Bytes::copy_from_slice(self.password.as_bytes()),
-                ))
-            }
-            ClientAuthenticationChallenge::Md5Password(salt) => {
-                Ok(ClientAuthenticationResponse::Password(Bytes::from(
-                    md5_hash(self.username.as_bytes(), self.password.as_bytes(), &salt),
-                )))
-            }
-            ClientAuthenticationChallenge::Sasl(mechanisms) => {
-                if !mechanisms.iter().any(|m| m.as_ref() == b"SCRAM-SHA-256") {
-                    return Err(ProtocolError::UnsupportedAuthentication { method_code: -1 }.into());
-                }
-                let scram = self.scram.insert(ScramSha256::new(
-                    self.password.as_bytes(),
-                    ChannelBinding::unsupported(),
-                ));
-                Ok(ClientAuthenticationResponse::SaslInitial {
-                    mechanism: Bytes::from_static(b"SCRAM-SHA-256"),
-                    response: Bytes::copy_from_slice(scram.message()),
-                })
-            }
-            ClientAuthenticationChallenge::SaslContinue(challenge) => {
-                let scram = self
-                    .scram
-                    .as_mut()
-                    .ok_or(ProtocolError::AuthenticationFailed)?;
-                scram.update(&challenge)?;
-                Ok(ClientAuthenticationResponse::Sasl(Bytes::copy_from_slice(
-                    scram.message(),
-                )))
-            }
-            ClientAuthenticationChallenge::SaslFinal(final_message) => {
-                let scram = self
-                    .scram
-                    .as_mut()
-                    .ok_or(ProtocolError::AuthenticationFailed)?;
-                scram.finish(&final_message)?;
-                Ok(ClientAuthenticationResponse::Verified)
-            }
-            _ => Err(ProtocolError::UnsupportedAuthentication { method_code: -1 }.into()),
-        }
-    }
-    async fn authenticated(self) -> Result<(), Error> {
-        Ok(())
-    }
-}
-
-#[derive(Clone)]
 struct DownstreamIdentity(ServerIdentity);
 impl ServerIdentityProvider for DownstreamIdentity {
     type Error = Infallible;
     fn resolve(&self) -> Result<ServerIdentity, Infallible> {
         Ok(self.0.clone())
-    }
-}
-
-#[derive(Clone, Copy)]
-struct RequireTlsDiagnostic;
-
-impl<Peer, Identity> MiddlewareFactory<ServerConnectionContext<Peer, Identity>>
-    for RequireTlsDiagnostic
-{
-    type Handler = Self;
-
-    fn create(&self, _: &ServerConnectionContext<Peer, Identity>) -> Self::Handler {
-        *self
-    }
-}
-
-impl<State, Peer, Identity> ServerMiddleware<State, ServerConnectionContext<Peer, Identity>>
-    for RequireTlsDiagnostic
-{
-    fn backend(
-        &mut self,
-        context: &ServerConnectionContext<Peer, Identity>,
-        _: &mut State,
-        message: BackendMessage,
-    ) -> BackendMessage {
-        require_tls_diagnostic(context.tls(), message)
-    }
-}
-
-fn require_tls_diagnostic(tls: &NegotiatedServerTls, message: BackendMessage) -> BackendMessage {
-    if matches!(tls, NegotiatedServerTls::Plaintext)
-        && matches!(
-            message,
-            BackendMessage::Authentication(Authentication::Md5Password { .. })
-        )
-    {
-        ErrorResponse::tls_required().into_backend_message()
-    } else {
-        message
     }
 }
 
@@ -287,14 +58,14 @@ where
     S: EncryptionService + Clone,
 {
     let address = context.database_socket_address();
-    let downstream_auth = DownstreamAuth {
-        username: context.database_username().to_owned(),
-        password: context.database_password(),
-    };
-    let upstream_auth = UpstreamAuth {
-        username: context.database_username().to_owned(),
-        password: context.database_password(),
-    };
+    let downstream_auth = StaticMd5ServerCredentials::new(
+        context.database_username().to_owned(),
+        context.database_password(),
+    );
+    let upstream_auth = StaticClientCredentials::new(
+        context.database_username().to_owned(),
+        context.database_password(),
+    );
 
     macro_rules! run {
         ($server:expr, $client:expr) => {{
@@ -304,7 +75,7 @@ where
                 .client($client)
                 .startup_resolver(Route(address.clone()))
                 .cancellation(CancellationPolicy::Forward)
-                .cancellation_registry(CancellationRegistry)
+                .cancellation_registry(InMemoryCancellationRegistry::default())
                 .pipeline(BoundedPipeline::new(256).expect("non-zero pipeline bound"))
                 .backend_batching(
                     BackendHoldLimits::new(4096, 64 * 1024 * 1024)
@@ -394,9 +165,8 @@ where
         let identity = DownstreamIdentity(ServerIdentity::new(Arc::new(config), leaf));
         if context.require_tls() {
             return run_client!(Server::builder()
-                .tls(ServerTlsPolicy::Optional(identity))
+                .tls(ServerTlsPolicy::Required(identity))
                 .authentication(downstream_auth)
-                .middleware(RequireTlsDiagnostic)
                 .build()
                 .map_err(invalid_data)?);
         }
@@ -428,16 +198,6 @@ fn upstream_ssl_mode(config: &crate::TandemConfig) -> SslMode {
     }
 }
 
-pub fn md5_hash(username: &[u8], password: &[u8], salt: &[u8; 4]) -> String {
-    let mut md5 = Md5::new();
-    md5.update(password);
-    md5.update(username);
-    let output = md5.finalize_reset();
-    md5.update(format!("{output:x}"));
-    md5.update(salt);
-    format!("md5{:x}", md5.finalize())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -446,25 +206,5 @@ mod tests {
     fn upstream_tls_without_verification_is_opportunistic() {
         let config = crate::TandemConfig::for_testing();
         assert_eq!(upstream_ssl_mode(&config), SslMode::Prefer);
-    }
-
-    #[test]
-    fn required_tls_plaintext_connection_receives_diagnostic() {
-        let challenge =
-            BackendMessage::Authentication(Authentication::Md5Password { salt: [1, 2, 3, 4] });
-        assert!(matches!(
-            require_tls_diagnostic(&NegotiatedServerTls::Plaintext, challenge),
-            BackendMessage::ErrorResponse(_)
-        ));
-    }
-
-    #[test]
-    fn required_tls_encrypted_connection_authenticates_normally() {
-        let challenge =
-            BackendMessage::Authentication(Authentication::Md5Password { salt: [1, 2, 3, 4] });
-        let tls = NegotiatedServerTls::Tls {
-            server_end_point: Bytes::new(),
-        };
-        assert_eq!(require_tls_diagnostic(&tls, challenge.clone()), challenge);
     }
 }

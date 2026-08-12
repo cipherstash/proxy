@@ -5,8 +5,9 @@
 /// ErrorResponse messages and sent to clients in a protocol-compliant manner.
 use crate::{
     error::{EncryptError, Error, MappingError},
-    postgresql::diagnostics::ErrorResponse,
+    postgresql::diagnostics,
 };
+use pg_proto::DiagnosticResponse;
 
 /// Trait for components that can send PostgreSQL error responses to clients.
 ///
@@ -29,28 +30,28 @@ pub trait PostgreSqlErrorHandler {
     /// # Arguments
     ///
     /// * `err` - The error to be converted to a PostgreSQL ErrorResponse
-    fn error_to_response(&self, err: Error) -> ErrorResponse {
+    fn error_to_response(&self, err: Error) -> DiagnosticResponse {
         match err {
             Error::Mapping(MappingError::InvalidParameter(ref column)) => {
-                ErrorResponse::invalid_parameter(
+                diagnostics::invalid_parameter(
                     err.to_string(),
                     &column.table_name(),
                     &column.column_name(),
                 )
             }
-            Error::Mapping(err) => ErrorResponse::invalid_sql_statement(err.to_string()),
+            Error::Mapping(err) => diagnostics::invalid_sql_statement(err.to_string()),
             Error::Encrypt(EncryptError::UnknownColumn {
                 ref table,
                 ref column,
-            }) => ErrorResponse::unknown_column(err.to_string(), table, column),
+            }) => diagnostics::unknown_column(err.to_string(), table, column),
             Error::Encrypt(EncryptError::CouldNotDecryptDataForKeyset { .. }) => {
-                ErrorResponse::system_error(err.to_string())
+                diagnostics::system_error(err.to_string())
             }
             Error::Encrypt(EncryptError::UnknownKeysetIdentifier { .. }) => {
-                ErrorResponse::system_error(err.to_string())
+                diagnostics::system_error(err.to_string())
             }
-            Error::ConnectionTimeout { .. } => ErrorResponse::connection_timeout(err.to_string()),
-            _ => ErrorResponse::system_error(err.to_string()),
+            Error::ConnectionTimeout { .. } => diagnostics::connection_timeout(err.to_string()),
+            _ => diagnostics::system_error(err.to_string()),
         }
     }
 }
@@ -58,9 +59,7 @@ pub trait PostgreSqlErrorHandler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::postgresql::diagnostics::{
-        ErrorResponseCode, CODE_IDLE_SESSION_TIMEOUT, CODE_SYSTEM_ERROR,
-    };
+    use crate::postgresql::diagnostics::{CODE_IDLE_SESSION_TIMEOUT, CODE_SYSTEM_ERROR};
     use std::time::Duration;
 
     /// Minimal implementation of PostgreSqlErrorHandler for testing the default method.
@@ -72,20 +71,12 @@ mod tests {
         }
     }
 
-    fn error_code(response: &ErrorResponse) -> Option<&str> {
+    fn field(response: &DiagnosticResponse, code: u8) -> Option<&str> {
         response
             .fields
             .iter()
-            .find(|f| f.code == ErrorResponseCode::Code)
-            .map(|f| f.value.as_str())
-    }
-
-    fn error_message(response: &ErrorResponse) -> Option<&str> {
-        response
-            .fields
-            .iter()
-            .find(|f| f.code == ErrorResponseCode::Message)
-            .map(|f| f.value.as_str())
+            .find(|field| field.code == code)
+            .and_then(|field| std::str::from_utf8(&field.value).ok())
     }
 
     #[test]
@@ -95,9 +86,9 @@ mod tests {
             duration: Duration::from_millis(5000),
         };
         let response = handler.error_to_response(err);
-        assert_eq!(error_code(&response), Some(CODE_IDLE_SESSION_TIMEOUT));
+        assert_eq!(field(&response, b'C'), Some(CODE_IDLE_SESSION_TIMEOUT));
         assert_eq!(
-            error_message(&response),
+            field(&response, b'M'),
             Some("Connection timed out after 5000 ms")
         );
     }
@@ -107,6 +98,6 @@ mod tests {
         let handler = TestHandler;
         let err = Error::Unknown;
         let response = handler.error_to_response(err);
-        assert_eq!(error_code(&response), Some(CODE_SYSTEM_ERROR));
+        assert_eq!(field(&response, b'C'), Some(CODE_SYSTEM_ERROR));
     }
 }
