@@ -3,8 +3,6 @@ use super::super::context::{Context, SessionId, Statement};
 use super::super::error_handler::PostgreSqlErrorHandler;
 use super::super::parser::SqlParser;
 use super::super::rewrite::bind::Bind;
-use super::super::rewrite::parse::Parse;
-use super::super::rewrite::query::Query;
 use crate::error::{EncryptError, Error, MappingError};
 use crate::log::{MAPPER, PROTOCOL};
 use crate::postgresql::context::column::Column;
@@ -17,6 +15,7 @@ use crate::postgresql::data::{
     compose_json_selector_path, json_value_selector_plaintext, literal_from_sql, literal_json_value,
 };
 use crate::postgresql::rewrite::Name;
+use crate::postgresql::rewrite::UNSPECIFIED_TYPE_OID;
 use crate::prometheus::{
     ENCRYPTED_VALUES_TOTAL, ENCRYPTION_DURATION_SECONDS, ENCRYPTION_ERROR_TOTAL,
     ENCRYPTION_REQUESTS_TOTAL, STATEMENTS_ENCRYPTED_TOTAL,
@@ -30,7 +29,7 @@ use eql_mapper::{self, EqlMapperError, EqlTermVariant, JsonSelectorSegment, Type
 use metrics::{counter, histogram};
 use pg_proto::{
     BackendMessage, Close, Describe, DescribeTarget, Execute, FrontendMessage,
-    FrontendMiddlewareOutput, TransactionStatus,
+    FrontendMiddlewareOutput, Parse, TransactionStatus,
 };
 use serde::Serialize;
 use sqltk::parser::ast::{self, Value};
@@ -86,16 +85,6 @@ use tracing::{debug, info, warn};
 pub struct Frontend<S: EncryptionService> {
     /// Session context tracking statements, portals, and keyset IDs
     context: Context<S>,
-    local_responses: Vec<BackendMessage>,
-    extended_error: bool,
-}
-
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub(crate) enum FrontendDisposition {
-    #[default]
-    Forward,
-    Local,
-    Suppress,
 }
 
 impl<S: EncryptionService> Frontend<S> {
@@ -108,11 +97,7 @@ impl<S: EncryptionService> Frontend<S> {
     /// * `server_writer` - Stream for writing messages to the PostgreSQL server
     /// * `context` - Session context for tracking statements and portals with service access
     pub fn new(context: Context<S>) -> Self {
-        Frontend {
-            context,
-            local_responses: Vec::new(),
-            extended_error: false,
-        }
+        Frontend { context }
     }
 
     pub async fn intercept(
@@ -121,50 +106,15 @@ impl<S: EncryptionService> Frontend<S> {
         protocol_message: FrontendMessage,
     ) -> Result<FrontendMiddlewareOutput, Error> {
         let request = protocol_message.clone();
-        let mut disposition = FrontendDisposition::Forward;
-        let message = self
-            .intercept_frontend(operation, &mut disposition, protocol_message)
-            .await?;
-        match disposition {
-            FrontendDisposition::Local => Ok(FrontendMiddlewareOutput::Respond {
-                request,
-                responses: std::mem::take(&mut self.local_responses),
-            }),
-            FrontendDisposition::Suppress => Ok(FrontendMiddlewareOutput::Suppress(request)),
-            FrontendDisposition::Forward => Ok(FrontendMiddlewareOutput::Forward(message)),
-        }
-    }
-
-    async fn intercept_frontend(
-        &mut self,
-        operation: pg_proto::OperationId,
-        disposition: &mut FrontendDisposition,
-        protocol_message: FrontendMessage,
-    ) -> Result<FrontendMessage, Error> {
         let mut outbound_message = protocol_message.clone();
 
         if self.context.mapping_disabled() {
-            return Ok(outbound_message);
-        }
-
-        let recovering_from_extended_error = self.extended_error;
-
-        // When an error is detected while processing any extended-query message, the backend issues ErrorResponse, then reads and discards messages until a Sync is reached,
-        // https://www.postgresql.org/docs/current/protocol-flow.html#PROTOCOL-FLOW-EXT-QUERY
-        if recovering_from_extended_error {
-            warn!(target: PROTOCOL,
-                client_id = self.context.client_id,
-                message = ?protocol_message,
-            );
-            if !matches!(protocol_message, FrontendMessage::Sync) {
-                *disposition = FrontendDisposition::Suppress;
-                return Ok(outbound_message);
-            }
+            return Ok(FrontendMiddlewareOutput::Forward(outbound_message));
         }
 
         match protocol_message {
             FrontendMessage::Query(query) => {
-                match self.query_handler(operation, Query::from(query)).await {
+                match self.query_handler(operation, query).await {
                     Ok(Some(mapped)) => outbound_message = mapped,
                     // No mapping needed, don't change the bytes
                     Ok(None) => (),
@@ -174,10 +124,13 @@ impl<S: EncryptionService> Frontend<S> {
                             msg = "Query Handler Error",
                             error = ?err.to_string(),
                         );
-                        self.send_error_response(err)?;
-                        self.send_ready_for_query();
-                        *disposition = FrontendDisposition::Local;
-                        return Ok(outbound_message);
+                        return Ok(FrontendMiddlewareOutput::Respond {
+                            request,
+                            responses: vec![
+                                self.error_response(err),
+                                BackendMessage::ReadyForQuery(TransactionStatus::Idle),
+                            ],
+                        });
                     }
                 }
             }
@@ -188,7 +141,7 @@ impl<S: EncryptionService> Frontend<S> {
                 self.execute_handler(operation, execute).await?;
             }
             FrontendMessage::Parse(parse) => {
-                match self.parse_handler(Parse::from(parse)).await {
+                match self.parse_handler(parse).await {
                     Ok(Some(mapped)) => outbound_message = mapped,
                     // No mapping needed, don't change the bytes
                     Ok(None) => (),
@@ -198,10 +151,10 @@ impl<S: EncryptionService> Frontend<S> {
                             msg = "Parse Handler Error",
                             error = ?err.to_string(),
                         );
-                        self.send_error_response(err)?;
-                        self.extended_error = true;
-                        *disposition = FrontendDisposition::Local;
-                        return Ok(outbound_message);
+                        return Ok(FrontendMiddlewareOutput::Respond {
+                            request,
+                            responses: vec![self.error_response(err)],
+                        });
                     }
                 }
             }
@@ -210,35 +163,39 @@ impl<S: EncryptionService> Frontend<S> {
                     Ok(Some(mapped)) => outbound_message = mapped,
                     // No mapping needed, don't change the bytes
                     Ok(None) => (),
-                    Err(err) => {
-                        match err {
-                            Error::Mapping(MappingError::InvalidParameter(_)) => {
-                                warn!(target: PROTOCOL,
-                                    client_id = self.context.client_id,
-                                    msg = "EncryptError::InvalidParameter",
-                                );
-                                self.send_error_response(err)?;
-                            }
-                            Error::Encrypt(EncryptError::UnknownKeysetIdentifier { .. }) => {
-                                warn!(target: PROTOCOL,
-                                    client_id = self.context.client_id,
-                                    msg = "EncryptError::UnknownKeysetIdentifier",
-                                );
-                                self.send_error_response(err)?;
-                            }
-                            _ => {
-                                warn!(target: PROTOCOL,
-                                    client_id = self.context.client_id,
-                                    msg = "Bind Error",
-                                    err = err.to_string()
-                                );
-                                self.send_error_response(err)?;
-                            }
+                    Err(err) => match err {
+                        Error::Mapping(MappingError::InvalidParameter(_)) => {
+                            warn!(target: PROTOCOL,
+                                client_id = self.context.client_id,
+                                msg = "EncryptError::InvalidParameter",
+                            );
+                            return Ok(FrontendMiddlewareOutput::Respond {
+                                request,
+                                responses: vec![self.error_response(err)],
+                            });
                         }
-                        self.extended_error = true;
-                        *disposition = FrontendDisposition::Local;
-                        return Ok(outbound_message);
-                    }
+                        Error::Encrypt(EncryptError::UnknownKeysetIdentifier { .. }) => {
+                            warn!(target: PROTOCOL,
+                                client_id = self.context.client_id,
+                                msg = "EncryptError::UnknownKeysetIdentifier",
+                            );
+                            return Ok(FrontendMiddlewareOutput::Respond {
+                                request,
+                                responses: vec![self.error_response(err)],
+                            });
+                        }
+                        _ => {
+                            warn!(target: PROTOCOL,
+                                client_id = self.context.client_id,
+                                msg = "Bind Error",
+                                err = err.to_string()
+                            );
+                            return Ok(FrontendMiddlewareOutput::Respond {
+                                request,
+                                responses: vec![self.error_response(err)],
+                            });
+                        }
+                    },
                 }
             }
             FrontendMessage::Sync => {
@@ -248,17 +205,6 @@ impl<S: EncryptionService> Frontend<S> {
                 );
 
                 self.context.reload_schema_if_changed().await;
-
-                if recovering_from_extended_error {
-                    debug!(target: PROTOCOL,
-                        client_id = self.context.client_id,
-                        msg = "Ready for Query",
-                    );
-                    self.send_ready_for_query();
-                    self.extended_error = false;
-                    *disposition = FrontendDisposition::Local;
-                    return Ok(outbound_message);
-                }
             }
             FrontendMessage::Close(close) => {
                 self.close_handler(close).await?;
@@ -272,7 +218,7 @@ impl<S: EncryptionService> Frontend<S> {
             }
         }
 
-        Ok(outbound_message)
+        Ok(FrontendMiddlewareOutput::Forward(outbound_message))
     }
 
     async fn describe_handler(
@@ -340,7 +286,7 @@ impl<S: EncryptionService> Frontend<S> {
     async fn query_handler(
         &mut self,
         operation: pg_proto::OperationId,
-        mut query: Query,
+        query: bytes::Bytes,
     ) -> Result<Option<FrontendMessage>, Error> {
         let handler_start = Instant::now();
         let session_id = self.context.start_session();
@@ -353,7 +299,8 @@ impl<S: EncryptionService> Frontend<S> {
         let parse_timer = PhaseTimer::start();
 
         // Simple Query may contain many statements
-        let parsed_statements = SqlParser::parse_statements(&query.statement)?;
+        let query_text = String::from_utf8_lossy(&query).into_owned();
+        let parsed_statements = SqlParser::parse_statements(&query_text)?;
         let mut transformed_statements = vec![];
 
         debug!(target: MAPPER,
@@ -486,7 +433,7 @@ impl<S: EncryptionService> Frontend<S> {
 
         // Set query fingerprint
         self.context.update_statement_metadata(session_id, |m| {
-            m.set_query_fingerprint(&query.statement);
+            m.set_query_fingerprint(&query_text);
         });
 
         self.context.add_portal(Name::new(), portal);
@@ -500,9 +447,7 @@ impl<S: EncryptionService> Frontend<S> {
                 .collect::<Vec<_>>()
                 .join(";");
 
-            query.rewrite(transformed_statement.to_string());
-
-            let message = FrontendMessage::from(query);
+            let message = FrontendMessage::Query(bytes::Bytes::from(transformed_statement.clone()));
             let handler_duration = handler_start.elapsed();
             debug!(
                 target: MAPPER,
@@ -709,6 +654,7 @@ impl<S: EncryptionService> Frontend<S> {
         &mut self,
         mut message: Parse,
     ) -> Result<Option<FrontendMessage>, Error> {
+        let original_query = message.query.clone();
         let session_id = self.context.start_session();
 
         // Set protocol type
@@ -719,7 +665,7 @@ impl<S: EncryptionService> Frontend<S> {
         let parse_timer = PhaseTimer::start();
 
         self.context
-            .set_statement_session(message.name.to_owned(), session_id);
+            .set_statement_session(message.statement.to_owned(), session_id);
 
         debug!(
             target: PROTOCOL,
@@ -747,11 +693,12 @@ impl<S: EncryptionService> Frontend<S> {
         // BEFORE the new session is recorded — the other way around wipes the
         // mapping that was just written and every Bind falls back to the
         // latest-session guess.
-        self.context.close_statement(&message.name);
+        self.context.close_statement(&message.statement);
         self.context
-            .set_statement_session(message.name.to_owned(), session_id);
+            .set_statement_session(message.statement.to_owned(), session_id);
 
-        let statement = SqlParser::parse_statement(&message.statement)?;
+        let mut statement_text = String::from_utf8_lossy(&message.query).into_owned();
+        let statement = SqlParser::parse_statement(&statement_text)?;
 
         if let Some(mapping_disabled) = self.context.maybe_set_unsafe_disable_mapping(&statement) {
             warn!(
@@ -791,7 +738,8 @@ impl<S: EncryptionService> Frontend<S> {
 
         // Capture the parse message param_types
         // These override the underlying column type
-        let param_types = message.param_types.clone();
+        let client_param_types = message.parameter_types.clone();
+        let param_types = client_param_types.iter().map(|oid| *oid as i32).collect();
 
         let mut parse_duration_recorded = false;
 
@@ -826,15 +774,17 @@ impl<S: EncryptionService> Frontend<S> {
                         statement.output_params =
                             output_params_from_plan(&transformed_statement.params, output_columns);
 
-                        message.rewrite_statement(transformed_statement.statement.to_string());
+                        statement_text = transformed_statement.statement.to_string();
+                        message.query = bytes::Bytes::copy_from_slice(statement_text.as_bytes());
                     }
                 }
 
                 counter!(STATEMENTS_ENCRYPTED_TOTAL).increment(1);
 
-                message.rewrite_param_types(&statement.output_params);
+                message.parameter_types =
+                    rewrite_parse_param_types(&client_param_types, &statement.output_params);
                 self.context
-                    .add_statement(message.name.to_owned(), statement);
+                    .add_statement(message.statement.to_owned(), statement);
             }
             _ => {
                 debug!(target: MAPPER,
@@ -854,11 +804,11 @@ impl<S: EncryptionService> Frontend<S> {
         // Set statement type and fingerprint
         self.context.update_statement_metadata(session_id, |m| {
             m.statement_type = Some(StatementType::from_statement(&statement));
-            m.set_query_fingerprint(&message.statement);
+            m.set_query_fingerprint(&statement_text);
         });
 
-        if message.requires_rewrite() {
-            let message = FrontendMessage::from(message);
+        if message.query != original_query || message.parameter_types != client_param_types {
+            let message = FrontendMessage::Parse(message);
 
             debug!(target: MAPPER,
                 client_id = self.context.client_id,
@@ -1184,22 +1134,28 @@ impl<S: EncryptionService> Frontend<S> {
             }
         }
     }
+}
 
-    ///
-    /// Send a ReadyForQuery to the client, answering a Sync (or simple Query)
-    /// for a batch of which nothing reached the server.
-    ///
-    fn send_ready_for_query(&mut self) {
-        let message = BackendMessage::ReadyForQuery(TransactionStatus::Idle);
-
-        debug!(target: PROTOCOL,
-            client_id = self.context.client_id,
-            msg = "send_ready_for_query",
-            ?message,
-        );
-
-        self.local_responses.push(message);
+fn rewrite_parse_param_types(client_types: &[u32], output_params: &[OutputParam]) -> Vec<u32> {
+    if client_types.is_empty() {
+        return Vec::new();
     }
+
+    output_params
+        .iter()
+        .map(|output| match &output.column {
+            Some(column) => match column.eql_term {
+                EqlTermVariant::JsonAccessor | EqlTermVariant::JsonPath => {
+                    postgres_types::Type::TEXT.oid()
+                }
+                _ => postgres_types::Type::JSONB.oid(),
+            },
+            None => client_types
+                .get(output.source.primary_input())
+                .copied()
+                .unwrap_or(UNSPECIFIED_TYPE_OID as u32),
+        })
+        .collect()
 }
 
 /// Projects a stored payload into its query operand when the value is bound in
@@ -1373,9 +1329,9 @@ impl<S: EncryptionService> PostgreSqlErrorHandler for Frontend<S> {
 }
 
 impl<S: EncryptionService> Frontend<S> {
-    fn send_error_response(&mut self, err: Error) -> Result<(), Error> {
+    fn error_response(&self, err: Error) -> BackendMessage {
         let error_response = self.error_to_response(err);
-        let message = error_response.into_backend_message();
+        let message = BackendMessage::ErrorResponse(error_response);
 
         debug!(target: PROTOCOL,
             client_id = self.context.client_id,
@@ -1383,7 +1339,6 @@ impl<S: EncryptionService> Frontend<S> {
             ?message,
         );
 
-        self.local_responses.push(message);
-        Ok(())
+        message
     }
 }

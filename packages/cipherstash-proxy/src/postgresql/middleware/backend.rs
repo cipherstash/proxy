@@ -1,15 +1,12 @@
 use super::super::context::Context;
 use super::super::data::to_sql;
-use super::super::diagnostics::ErrorResponse;
 use super::super::error_handler::PostgreSqlErrorHandler;
-use super::super::rewrite::row_description::RowDescription;
 use super::super::rewrite::UNSPECIFIED_TYPE_OID;
 use super::super::Column;
 use crate::error::{EncryptError, Error};
 use crate::log::{CONTEXT, DEVELOPMENT, MAPPER, PROTOCOL};
 use crate::postgresql::context::Portal;
-use crate::postgresql::rewrite::data_row::DataRow;
-use crate::postgresql::rewrite::param_description::ParamDescription;
+use crate::postgresql::rewrite::data_row;
 use crate::prometheus::{
     DECRYPTED_VALUES_TOTAL, DECRYPTION_DURATION_SECONDS, DECRYPTION_ERROR_TOTAL,
     DECRYPTION_REQUESTS_TOTAL, ROWS_ENCRYPTED_TOTAL, ROWS_PASSTHROUGH_TOTAL, ROWS_TOTAL,
@@ -22,7 +19,7 @@ use pg_proto::{
     OperationId,
 };
 use std::time::Instant;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info};
 
 /// The PostgreSQL proxy backend that handles server-to-client message processing.
 ///
@@ -71,17 +68,6 @@ use tracing::{debug, error, info, warn};
 pub struct Backend<S: EncryptionService> {
     /// Session context with portal and statement metadata
     context: Context<S>,
-    /// Buffer for batching DataRow messages before decryption
-    buffer: Vec<DataRow>,
-    buffer_operation: Option<OperationId>,
-    emitted: Vec<BackendMessage>,
-}
-
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub(crate) enum BackendDisposition {
-    #[default]
-    Emit,
-    Suppress,
 }
 
 impl<S: EncryptionService> Backend<S> {
@@ -96,13 +82,7 @@ impl<S: EncryptionService> Backend<S> {
     /// * `encrypt` - Encryption service for handling column decryption
     /// * `context` - Session context shared with the frontend
     pub fn new(context: Context<S>) -> Self {
-        let buffer = Vec::with_capacity(Self::RESPONSE_BUFFER_SIZE);
-        Backend {
-            context,
-            buffer,
-            buffer_operation: None,
-            emitted: Vec::new(),
-        }
+        Backend { context }
     }
 
     pub async fn intercept(
@@ -110,40 +90,21 @@ impl<S: EncryptionService> Backend<S> {
         operation: Option<OperationId>,
         message: BackendMessage,
     ) -> Result<BackendMiddlewareOutput, Error> {
-        let mut disposition = BackendDisposition::Emit;
-        let message = self
-            .intercept_backend(operation, &mut disposition, message)
-            .await?;
-        Ok(if disposition == BackendDisposition::Suppress {
-            BackendMiddlewareOutput::Hold
-        } else {
-            BackendMiddlewareOutput::Forward(message)
-        })
+        self.intercept_backend(operation, message).await
     }
 
     pub async fn flush_held(
         &mut self,
         held: AttributedBackendMessages<'_>,
     ) -> Result<BackendBatchOutput, Error> {
-        let operation = held.iter().find_map(|(operation, _)| operation);
-        self.flush(operation).await?;
-        let messages = std::mem::take(&mut self.emitted);
-        if messages.len() != held.iter().len() {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                "decrypted DataRow batch length changed",
-            )
-            .into());
-        }
-        Ok(BackendBatchOutput::ReplaceOneToOne(messages))
+        self.decrypt_held(held).await
     }
 
     async fn intercept_backend(
         &mut self,
         operation: Option<OperationId>,
-        disposition: &mut BackendDisposition,
         protocol_message: BackendMessage,
-    ) -> Result<BackendMessage, Error> {
+    ) -> Result<BackendMiddlewareOutput, Error> {
         let mut outbound_message = protocol_message.clone();
 
         if self.context.is_passthrough() {
@@ -176,19 +137,18 @@ impl<S: EncryptionService> Backend<S> {
                 _ => {}
             }
 
-            return Ok(outbound_message);
+            return Ok(BackendMiddlewareOutput::Forward(outbound_message));
         }
 
         let keyset_id = self.context.keyset_identifier();
         debug!(target: CONTEXT, client_id = ?self.context.client_id, ?keyset_id);
 
         match protocol_message {
-            BackendMessage::DataRow(row) => {
+            BackendMessage::DataRow(_) => {
                 // Encrypted DataRows are added to the buffer and we return early
                 // Otherwise, continue and write
-                if self.data_row_handler(operation, DataRow::from(row)).await? {
-                    *disposition = BackendDisposition::Suppress;
-                    return Ok(outbound_message);
+                if self.data_row_handler(operation).await? {
+                    return Ok(BackendMiddlewareOutput::Hold);
                 }
             }
 
@@ -199,14 +159,6 @@ impl<S: EncryptionService> Backend<S> {
             | BackendMessage::PortalSuspended => {
                 debug!(target: PROTOCOL, client_id = self.context.client_id, msg = "CommandComplete | EmptyQueryResponse | PortalSuspended");
 
-                match self.flush(operation).await {
-                    Ok(_) => (),
-                    Err(err) => {
-                        warn!(client_id = self.client_id(), error = err.to_string());
-                        self.send_error_response(err).await?;
-                    }
-                }
-
                 if let Some(operation) = operation {
                     let session = self.context.complete_execution(operation);
                     self.context.finish_session(session);
@@ -214,14 +166,6 @@ impl<S: EncryptionService> Backend<S> {
             }
             BackendMessage::ErrorResponse(ref response) => {
                 self.error_response_handler(response);
-
-                match self.flush(operation).await {
-                    Ok(_) => (),
-                    Err(err) => {
-                        warn!(client_id = self.client_id(), error = err.to_string());
-                        self.send_error_response(err).await?;
-                    }
-                }
 
                 if let Some(operation) = operation {
                     let session = self.context.complete_execution(operation);
@@ -232,10 +176,7 @@ impl<S: EncryptionService> Backend<S> {
             // Returns a ParameterDescription followed by RowDescription
             // The Describe is complete after the RowDescription
             BackendMessage::ParameterDescription(types) => {
-                if let Some(message) = self
-                    .parameter_description_handler(operation, ParamDescription::from(types))
-                    .await?
-                {
+                if let Some(message) = self.parameter_description_handler(operation, types).await? {
                     outbound_message = message;
                 }
             }
@@ -245,10 +186,7 @@ impl<S: EncryptionService> Backend<S> {
             // If no rows are returned, NoData is returned instead of a RowDescription
             // Complete the Describe
             BackendMessage::RowDescription(description) => {
-                if let Some(message) = self
-                    .row_description_handler(operation, RowDescription::from(description))
-                    .await?
-                {
+                if let Some(message) = self.row_description_handler(operation, description).await? {
                     outbound_message = message;
                 }
                 if let Some(operation) = operation {
@@ -282,7 +220,7 @@ impl<S: EncryptionService> Backend<S> {
             }
         }
 
-        Ok(outbound_message)
+        Ok(BackendMiddlewareOutput::Forward(outbound_message))
     }
 
     /// Handles PostgreSQL ErrorResponse messages from the server.
@@ -322,8 +260,7 @@ impl<S: EncryptionService> Backend<S> {
     /// Always returns `Some(bytes)` containing the original error response
     /// to forward to the client unchanged.
     fn error_response_handler(&mut self, response: &pg_proto::DiagnosticResponse) {
-        let error_response = ErrorResponse::from(response);
-        error!(msg = "PostgreSQL Error", error = ?error_response);
+        error!(msg = "PostgreSQL Error", fields = ?response.fields);
         info!(msg = "PostgreSQL Errors originate in the database");
     }
 
@@ -334,50 +271,6 @@ impl<S: EncryptionService> Backend<S> {
     ///  - when the buffer is full
     ///  - when any other message type is written
     ///
-    async fn buffer(&mut self, operation: OperationId, data_row: DataRow) -> Result<(), Error> {
-        if self
-            .buffer_operation
-            .is_some_and(|current| current != operation)
-        {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                "DataRow batch spans operations",
-            )
-            .into());
-        }
-        self.buffer_operation = Some(operation);
-        self.buffer.push(data_row);
-        Ok(())
-    }
-
-    ///
-    /// Write a message to the client
-    /// Flushes all messages in the buffer before writing the message
-    ///
-    pub async fn write_with_flush(&mut self, message: BackendMessage) -> Result<(), Error> {
-        debug!(target: DEVELOPMENT, client_id = self.context.client_id, msg = "Write");
-
-        match self.flush(None).await {
-            Ok(_) => (),
-            Err(err) => {
-                warn!(client_id = self.client_id(), error = err.to_string());
-                self.send_error_response(err).await?;
-            }
-        }
-
-        self.write(message).await?;
-        Ok(())
-    }
-
-    ///
-    /// Write a message to the client
-    ///
-    pub async fn write(&mut self, message: BackendMessage) -> Result<(), Error> {
-        self.emitted.push(message);
-
-        Ok(())
-    }
-
     /// Flushes all buffered DataRow messages by performing batch decryption.
     ///
     /// This is the core decryption logic that processes buffered DataRow messages,
@@ -417,35 +310,57 @@ impl<S: EncryptionService> Backend<S> {
     /// appropriate error responses and recorded in metrics. The error mapping
     /// implemented in the encryption service ensures proper keyset ID context
     /// is preserved in error messages.
-    async fn flush(&mut self, operation: Option<OperationId>) -> Result<(), Error> {
-        if self.buffer.is_empty() {
-            debug!(target: MAPPER, client_id = self.context.client_id, msg = "Empty buffer");
+    async fn decrypt_held(
+        &mut self,
+        held: AttributedBackendMessages<'_>,
+    ) -> Result<BackendBatchOutput, Error> {
+        let mut operation = None;
+        let mut rows = Vec::with_capacity(held.iter().len());
+        for (row_operation, message) in held.iter() {
+            let row_operation = row_operation.ok_or_else(|| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "held DataRow has no operation",
+                )
+            })?;
+            if operation
+                .replace(row_operation)
+                .is_some_and(|current| current != row_operation)
+            {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "held DataRow span crosses Execute operations",
+                )
+                .into());
+            }
+            let BackendMessage::DataRow(row) = message else {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "held backend span contains a non-DataRow message",
+                )
+                .into());
+            };
+            rows.push(row.clone());
         }
 
-        let operation = operation.or(self.buffer_operation);
         let portal =
             operation.and_then(|operation| self.context.get_portal_from_execute(operation));
         let portal = match portal.as_deref() {
             Some(Portal::Encrypted { .. }) => portal.unwrap(),
             _ => {
                 debug!(target: MAPPER, client_id = self.context.client_id, msg = "Passthrough portal");
-                if !self.buffer.is_empty() {
-                    error!(
-                        client_id = self.context.client_id,
-                        msg = "Buffer is not empty"
-                    );
-                }
-                return Ok(());
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "held DataRows do not belong to an encrypted portal",
+                )
+                .into());
             }
         };
-
-        let mut rows = std::mem::take(&mut self.buffer);
-        self.buffer_operation = None;
         debug!(target: DEVELOPMENT, client_id = self.context.client_id, rows = rows.len());
 
         let result_column_count = match rows.first() {
-            Some(row) => row.column_count(),
-            None => return Ok(()),
+            Some(row) => row.columns.len(),
+            None => return Ok(BackendBatchOutput::ReplaceOneToOne(Vec::new())),
         };
 
         // Result Column Format Codes are passed with the Bind message
@@ -459,7 +374,7 @@ impl<S: EncryptionService> Backend<S> {
         // Each row is converted into Vec<Option<CipherText>>
         let ciphertexts: Vec<Option<EqlCiphertext>> = rows
             .iter_mut()
-            .flat_map(|row| row.as_ciphertext(projection_columns))
+            .flat_map(|row| data_row::as_ciphertext(row, projection_columns))
             .collect::<Vec<_>>();
 
         let start = Instant::now();
@@ -503,6 +418,7 @@ impl<S: EncryptionService> Backend<S> {
 
         // Stitch Plaintext back into Rows encoded with the appropriate Format Code
         // Each chunk is written to the client
+        let mut messages = Vec::with_capacity(held.iter().len());
         for (chunk, mut row) in rows {
             let data = chunk
                 .iter()
@@ -513,12 +429,11 @@ impl<S: EncryptionService> Backend<S> {
                 })
                 .collect::<Result<Vec<_>, _>>()?;
 
-            row.rewrite(&data)?;
+            data_row::rewrite(&mut row, &data)?;
 
-            self.write(BackendMessage::from(row)).await?;
+            messages.push(BackendMessage::DataRow(row));
         }
-
-        Ok(())
+        Ok(BackendBatchOutput::ReplaceOneToOne(messages))
     }
 
     fn check_column_config(
@@ -557,7 +472,7 @@ impl<S: EncryptionService> Backend<S> {
     async fn parameter_description_handler(
         &self,
         operation: Option<OperationId>,
-        mut description: ParamDescription,
+        description: Vec<u32>,
     ) -> Result<Option<BackendMessage>, Error> {
         debug!(target: PROTOCOL, client_id = self.context.client_id, ParamDescription = ?description);
 
@@ -584,23 +499,25 @@ impl<S: EncryptionService> Backend<S> {
                         .output_params
                         .iter()
                         .position(|output| output.source.primary_input() == idx)
-                        .and_then(|output_idx| description.types.get(output_idx).copied())
+                        .and_then(|output_idx| description.get(output_idx).copied())
+                        .map(|oid| oid as i32)
                         .unwrap_or(UNSPECIFIED_TYPE_OID),
                 })
                 .collect::<Vec<_>>();
 
             debug!(target: MAPPER, client_id = self.context.client_id, param_types = ?param_types);
 
-            description.set_types(param_types);
+            let rewritten = param_types
+                .into_iter()
+                .map(|oid| oid as u32)
+                .collect::<Vec<_>>();
+            if rewritten != description {
+                let message = BackendMessage::ParameterDescription(rewritten);
+                debug!(target: MAPPER, client_id = self.context.client_id, msg = "Rewrite ParamDescription", ?message);
+                return Ok(Some(message));
+            }
         }
-
-        if description.requires_rewrite() {
-            let message = BackendMessage::from(description);
-            debug!(target: MAPPER, client_id = self.context.client_id, msg = "Rewrite ParamDescription", ?message);
-            Ok(Some(message))
-        } else {
-            Ok(None)
-        }
+        Ok(None)
     }
 
     ///
@@ -613,7 +530,7 @@ impl<S: EncryptionService> Backend<S> {
     async fn row_description_handler(
         &mut self,
         operation: Option<OperationId>,
-        mut description: RowDescription,
+        mut description: pg_proto::RowDescription,
     ) -> Result<Option<BackendMessage>, Error> {
         debug!(target: PROTOCOL, client_id = self.context.client_id, RowDescription = ?description);
 
@@ -628,16 +545,21 @@ impl<S: EncryptionService> Backend<S> {
 
             debug!(target: MAPPER, client_id = self.context.client_id, projection_types = ?projection_types);
 
-            description.map_types(&projection_types);
+            let mut rewritten = false;
+            for (field, postgres_type) in description.fields.iter_mut().zip(projection_types) {
+                if let Some(postgres_type) = postgres_type {
+                    let oid = postgres_type.oid();
+                    rewritten |= field.type_oid != oid;
+                    field.type_oid = oid;
+                }
+            }
+            if rewritten {
+                let message = BackendMessage::RowDescription(description);
+                debug!(target: MAPPER, client_id = self.context.client_id, msg = "Rewrite RowDescription", ?message);
+                return Ok(Some(message));
+            }
         }
-
-        if description.requires_rewrite() {
-            let message = BackendMessage::from(description);
-            debug!(target: MAPPER, client_id = self.context.client_id, msg = "Rewrite RowDescription", ?message);
-            Ok(Some(message))
-        } else {
-            Ok(None)
-        }
+        Ok(None)
     }
 
     /// Handles PostgreSQL DataRow messages containing query result data.
@@ -674,11 +596,7 @@ impl<S: EncryptionService> Backend<S> {
     ///
     /// Records metrics for both encrypted and passthrough row processing to
     /// track proxy performance and encryption usage patterns.
-    async fn data_row_handler(
-        &mut self,
-        operation: Option<OperationId>,
-        data_row: DataRow,
-    ) -> Result<bool, Error> {
+    async fn data_row_handler(&mut self, operation: Option<OperationId>) -> Result<bool, Error> {
         counter!(ROWS_TOTAL).increment(1);
         match operation
             .and_then(|operation| self.context.get_portal_from_execute(operation))
@@ -686,12 +604,6 @@ impl<S: EncryptionService> Backend<S> {
         {
             Some(Portal::Encrypted { .. }) => {
                 debug!(target: MAPPER, client_id = self.context.client_id, msg = "Encrypted");
-
-                self.buffer(
-                    operation.expect("encrypted DataRow has an operation"),
-                    data_row,
-                )
-                .await?;
 
                 counter!(ROWS_ENCRYPTED_TOTAL).increment(1);
                 Ok(true)
@@ -709,28 +621,6 @@ impl<S: EncryptionService> Backend<S> {
 impl<S: EncryptionService> PostgreSqlErrorHandler for Backend<S> {
     fn client_id(&self) -> i32 {
         self.context.client_id
-    }
-}
-
-impl<S: EncryptionService> Backend<S> {
-    async fn send_error_response(&mut self, err: Error) -> Result<(), Error> {
-        let error_response = self.error_to_response(err);
-        // Ensure any buffered data is cleared before sending error
-        self.buffer.clear();
-        self.buffer_operation = None;
-
-        let message = error_response.into_backend_message();
-
-        debug!(
-            target: "PROTOCOL",
-            client_id = self.context.client_id,
-            msg = "backend_send_error_response",
-            ?message,
-        );
-
-        self.emitted.push(message);
-
-        Ok(())
     }
 }
 
