@@ -117,12 +117,13 @@ impl<S: EncryptionService> Frontend<S> {
 
     pub async fn intercept(
         &mut self,
+        operation: pg_proto::OperationId,
         protocol_message: FrontendMessage,
     ) -> Result<FrontendMiddlewareOutput, Error> {
         let request = protocol_message.clone();
         let mut disposition = FrontendDisposition::Forward;
         let message = self
-            .intercept_frontend(&mut disposition, protocol_message)
+            .intercept_frontend(operation, &mut disposition, protocol_message)
             .await?;
         match disposition {
             FrontendDisposition::Local => Ok(FrontendMiddlewareOutput::Respond {
@@ -136,6 +137,7 @@ impl<S: EncryptionService> Frontend<S> {
 
     async fn intercept_frontend(
         &mut self,
+        operation: pg_proto::OperationId,
         disposition: &mut FrontendDisposition,
         protocol_message: FrontendMessage,
     ) -> Result<FrontendMessage, Error> {
@@ -162,7 +164,7 @@ impl<S: EncryptionService> Frontend<S> {
 
         match protocol_message {
             FrontendMessage::Query(query) => {
-                match self.query_handler(Query::from(query)).await {
+                match self.query_handler(operation, Query::from(query)).await {
                     Ok(Some(mapped)) => outbound_message = mapped,
                     // No mapping needed, don't change the bytes
                     Ok(None) => (),
@@ -180,10 +182,10 @@ impl<S: EncryptionService> Frontend<S> {
                 }
             }
             FrontendMessage::Describe(describe) => {
-                self.describe_handler(describe).await?;
+                self.describe_handler(operation, describe).await?;
             }
             FrontendMessage::Execute(execute) => {
-                self.execute_handler(execute).await?;
+                self.execute_handler(operation, execute).await?;
             }
             FrontendMessage::Parse(parse) => {
                 match self.parse_handler(Parse::from(parse)).await {
@@ -273,9 +275,13 @@ impl<S: EncryptionService> Frontend<S> {
         Ok(outbound_message)
     }
 
-    async fn describe_handler(&mut self, describe: Describe) -> Result<(), Error> {
+    async fn describe_handler(
+        &mut self,
+        operation: pg_proto::OperationId,
+        describe: Describe,
+    ) -> Result<(), Error> {
         debug!(target: PROTOCOL, client_id = self.context.client_id, ?describe);
-        self.context.set_describe(describe);
+        self.context.set_describe(operation, describe);
         Ok(())
     }
 
@@ -288,10 +294,14 @@ impl<S: EncryptionService> Frontend<S> {
         Ok(())
     }
 
-    async fn execute_handler(&mut self, execute: Execute) -> Result<(), Error> {
+    async fn execute_handler(
+        &mut self,
+        operation: pg_proto::OperationId,
+        execute: Execute,
+    ) -> Result<(), Error> {
         debug!(target: PROTOCOL, client_id = self.context.client_id, ?execute);
         self.context
-            .set_execute_for_portal(execute.portal.to_owned());
+            .set_execute_for_portal(operation, execute.portal.to_owned());
         Ok(())
     }
 
@@ -327,7 +337,11 @@ impl<S: EncryptionService> Frontend<S> {
     /// - `Ok(Some(bytes))` - Transformed query that should replace the original
     /// - `Ok(None)` - No transformation needed, forward original query
     /// - `Err(error)` - Processing failed, error should be sent to client
-    async fn query_handler(&mut self, mut query: Query) -> Result<Option<FrontendMessage>, Error> {
+    async fn query_handler(
+        &mut self,
+        operation: pg_proto::OperationId,
+        mut query: Query,
+    ) -> Result<Option<FrontendMessage>, Error> {
         let handler_start = Instant::now();
         let session_id = self.context.start_session();
 
@@ -476,7 +490,8 @@ impl<S: EncryptionService> Frontend<S> {
         });
 
         self.context.add_portal(Name::new(), portal);
-        self.context.set_execute(Name::new(), Some(session_id));
+        self.context
+            .set_execute(operation, Name::new(), Some(session_id));
 
         if encrypted {
             let transformed_statement = transformed_statements

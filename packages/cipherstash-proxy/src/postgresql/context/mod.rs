@@ -18,12 +18,12 @@ use crate::{
 use cipherstash_client::IdentifiedBy;
 use eql_mapper::{Schema, TableResolver};
 use metrics::{counter, histogram};
-use pg_proto::{Describe, DescribeTarget};
+use pg_proto::{Describe, DescribeTarget, OperationId};
 use serde_json::json;
 use sqltk::parser::ast::{Expr, Ident, ObjectName, ObjectNamePart, Set, Value, ValueWithSpan};
 pub use statement_metadata::StatementMetadata;
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::HashMap,
     sync::{
         atomic::{AtomicBool, AtomicU64, Ordering},
         Arc, LazyLock, RwLock,
@@ -34,12 +34,7 @@ use tokio::sync::oneshot;
 use tracing::{debug, error, warn};
 use uuid::Uuid;
 
-type DescribeQueue = Queue<Describe>;
-type ExecuteQueue = Queue<ExecuteContext>;
-type SessionMetricsQueue = Queue<SessionMetricsContext>;
-type PortalQueue = Queue<Arc<Portal>>;
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Ord, PartialOrd)]
 pub struct SessionId(u64);
 
 #[derive(Clone, Debug, PartialEq)]
@@ -64,11 +59,10 @@ where
     column_mapper: ColumnMapper,
     statements: Arc<RwLock<HashMap<Name, Arc<Statement>>>>,
     statement_sessions: Arc<RwLock<HashMap<Name, SessionId>>>,
-    portals: Arc<RwLock<HashMap<Name, PortalQueue>>>,
-    describe: Arc<RwLock<DescribeQueue>>,
-    execute: Arc<RwLock<ExecuteQueue>>,
+    portals: Arc<RwLock<HashMap<Name, Arc<Portal>>>>,
+    operations: Arc<RwLock<HashMap<OperationId, OperationContext>>>,
     schema_changed: Arc<AtomicBool>,
-    session_metrics: Arc<RwLock<SessionMetricsQueue>>,
+    session_metrics: Arc<RwLock<HashMap<SessionId, SessionMetricsContext>>>,
     table_resolver: Arc<TableResolver>,
     unsafe_disable_mapping: bool,
     keyset_id: Arc<RwLock<Option<KeysetIdentifier>>>,
@@ -77,13 +71,12 @@ where
 
 /// Context for tracking an in-flight Execute operation.
 ///
-/// Timing data is accumulated here during backend message processing because
-/// the backend operates on the execute queue rather than having direct access
-/// to the session metrics queue. On completion via `complete_execution()`,
-/// timing is transferred to the associated SessionMetricsContext.
+/// This stores only CipherStash metadata associated with pg-proto's operation;
+/// pg-proto owns protocol ordering and backpressure.
 #[derive(Clone, Debug)]
 pub struct ExecuteContext {
     name: Name,
+    portal: Option<Arc<Portal>>,
     start: Instant,
     session_id: Option<SessionId>,
     /// Server wait duration (time to first response byte).
@@ -95,9 +88,14 @@ pub struct ExecuteContext {
 }
 
 impl ExecuteContext {
-    fn new(name: Name, session_id: Option<SessionId>) -> ExecuteContext {
+    fn new(
+        name: Name,
+        portal: Option<Arc<Portal>>,
+        session_id: Option<SessionId>,
+    ) -> ExecuteContext {
         ExecuteContext {
             name,
+            portal,
             start: Instant::now(),
             session_id,
             server_wait_duration: None,
@@ -130,6 +128,12 @@ impl ExecuteContext {
     }
 }
 
+#[derive(Clone, Debug, Default)]
+struct OperationContext {
+    describe_statement: Option<Arc<Statement>>,
+    execute: Option<ExecuteContext>,
+}
+
 #[derive(Clone, Debug)]
 pub struct SessionMetricsContext {
     id: SessionId,
@@ -157,11 +161,6 @@ impl SessionMetricsContext {
     }
 }
 
-#[derive(Clone, Debug)]
-pub struct Queue<T> {
-    pub queue: VecDeque<T>,
-}
-
 impl<T> Context<T>
 where
     T: EncryptionService,
@@ -180,10 +179,9 @@ where
             statements: Arc::new(RwLock::new(HashMap::new())),
             statement_sessions: Arc::new(RwLock::new(HashMap::new())),
             portals: Arc::new(RwLock::new(HashMap::new())),
-            describe: Arc::new(RwLock::from(Queue::new())),
-            execute: Arc::new(RwLock::from(Queue::new())),
+            operations: Arc::new(RwLock::new(HashMap::new())),
             schema_changed: Arc::new(AtomicBool::new(false)),
-            session_metrics: Arc::new(RwLock::from(Queue::new())),
+            session_metrics: Arc::new(RwLock::new(HashMap::new())),
             table_resolver: Arc::new(TableResolver::new_editable(schema)),
             client_id,
             config,
@@ -197,30 +195,53 @@ where
         }
     }
 
-    pub fn set_describe(&mut self, describe: Describe) {
+    pub fn set_describe(&mut self, operation: OperationId, describe: Describe) {
         debug!(target: CONTEXT, client_id = self.client_id, describe = ?describe);
-        let _ = self.describe.write().map(|mut queue| queue.add(describe));
+        let statement = match &describe {
+            Describe {
+                name,
+                target: DescribeTarget::Portal,
+            } => self.get_portal_statement(name),
+            Describe {
+                name,
+                target: DescribeTarget::Statement,
+            } => self.get_statement(name),
+        };
+        let _ = self.operations.write().map(|mut operations| {
+            operations.entry(operation).or_default().describe_statement = statement;
+        });
     }
     ///
     /// Marks the current Describe as complete
     /// Removes the Describe from the Queue
     ///
-    pub fn complete_describe(&mut self) {
+    pub fn complete_describe(&mut self, operation: OperationId) {
         debug!(target: CONTEXT, client_id = self.client_id, msg = "Describe complete");
-        let _ = self.describe.write().map(|mut queue| queue.complete());
+        let _ = self.operations.write().map(|mut operations| {
+            if let Some(context) = operations.get_mut(&operation) {
+                context.describe_statement = None;
+                if context.execute.is_none() {
+                    operations.remove(&operation);
+                }
+            }
+        });
     }
 
     pub fn start_session(&mut self) -> SessionId {
         let id = SessionId(self.session_id_counter.fetch_add(1, Ordering::Relaxed));
         let ctx = SessionMetricsContext::new(id);
-        let _ = self.session_metrics.write().map(|mut queue| queue.add(ctx));
+        let _ = self
+            .session_metrics
+            .write()
+            .map(|mut sessions| sessions.insert(id, ctx));
         id
     }
 
-    pub fn finish_session(&mut self) {
+    pub fn finish_session(&mut self, session_id: Option<SessionId>) {
         debug!(target: CONTEXT, client_id = self.client_id, msg = "Session Metrics finished");
 
-        if let Some(session) = self.get_session_metrics() {
+        let session = session_id.and_then(|id| self.session_metrics.write().ok()?.remove(&id));
+        if let Some(session) = session {
             let duration = session.duration();
             let metadata = &session.metadata;
 
@@ -284,43 +305,27 @@ where
                 );
             }
         }
-
-        let _ = self
-            .session_metrics
-            .write()
-            .map(|mut queue| queue.complete());
     }
 
-    pub fn set_execute(&mut self, name: Name, session_id: Option<SessionId>) {
+    pub fn set_execute(
+        &mut self,
+        operation: OperationId,
+        name: Name,
+        session_id: Option<SessionId>,
+    ) {
         debug!(target: CONTEXT, client_id = self.client_id, execute = ?name);
 
-        let ctx = ExecuteContext::new(name, session_id);
-
-        let _ = self.execute.write().map(|mut queue| queue.add(ctx));
+        let portal = self.get_portal(&name);
+        let ctx = ExecuteContext::new(name, portal, session_id);
+        let _ = self.operations.write().map(|mut operations| {
+            operations.entry(operation).or_default().execute = Some(ctx);
+        });
     }
 
     /// Set execute state for portal, looking up session ID internally.
-    pub fn set_execute_for_portal(&mut self, name: Name) {
+    pub fn set_execute_for_portal(&mut self, operation: OperationId, name: Name) {
         let session_id = self.get_portal_session_id(&name);
-        self.set_execute(name, session_id);
-    }
-
-    /// Number of entries currently queued in the `execute` queue.
-    ///
-    /// Test-only accessor used by the BUG-300 regression tests to assert the
-    /// per-connection queues are drained (and do not grow unbounded).
-    #[cfg(test)]
-    pub(crate) fn execute_queue_len(&self) -> usize {
-        self.execute.read().unwrap().queue.len()
-    }
-
-    /// Number of entries currently queued in the `session_metrics` queue.
-    ///
-    /// Test-only accessor used by the BUG-300 regression tests to assert the
-    /// per-connection queues are drained (and do not grow unbounded).
-    #[cfg(test)]
-    pub(crate) fn session_metrics_queue_len(&self) -> usize {
-        self.session_metrics.read().unwrap().queue.len()
+        self.set_execute(operation, name, session_id);
     }
 
     /// Marks the current Execution as Complete.
@@ -329,9 +334,8 @@ where
     /// - `server_wait_duration` (time to first response byte) is recorded to the session
     /// - `server_response_duration` (time receiving response data) is added to the session
     ///
-    /// This two-phase timing pattern exists because the backend operates on the execute queue
-    /// rather than having direct access to the session. Timing is accumulated in ExecuteContext
-    /// during message processing, then transferred to the correct SessionMetricsContext here.
+    /// Timing is transferred to the session identified by this operation rather
+    /// than inferred from response order.
     ///
     /// If the associated portal is Unnamed, it is closed.
     ///
@@ -340,10 +344,20 @@ where
     ///     An unnamed portal is destroyed at the end of the transaction, or as soon as the next Bind statement specifying the unnamed portal as destination is issued
     ///
     /// https://www.postgresql.org/docs/current/protocol-flow.html#PROTOCOL-FLOW-EXT-QUERY
-    pub fn complete_execution(&mut self) {
+    pub fn complete_execution(&mut self, operation: OperationId) -> Option<SessionId> {
         debug!(target: CONTEXT, client_id = self.client_id, msg = "Execute complete");
 
-        if let Some(execute) = self.get_execute() {
+        let execute = self.operations.write().ok().and_then(|mut operations| {
+            let execute = operations.get_mut(&operation)?.execute.take();
+            if operations
+                .get(&operation)
+                .is_some_and(|context| context.describe_statement.is_none())
+            {
+                operations.remove(&operation);
+            }
+            execute
+        });
+        if let Some(execute) = execute {
             if let Some(session_id) = execute.session_id() {
                 if let Some(wait) = execute.server_wait_duration() {
                     self.record_server_wait_duration(session_id, wait);
@@ -355,25 +369,27 @@ where
             }
 
             // Get labels from current session metadata
-            let (statement_type, protocol, mapped, multi_statement) =
-                if let Some(session) = self.get_session_metrics() {
-                    let metadata = &session.metadata;
-                    (
-                        metadata
-                            .statement_type
-                            .map(|t| t.as_label())
-                            .unwrap_or("unknown"),
-                        metadata.protocol.map(|p| p.as_label()).unwrap_or("unknown"),
-                        if metadata.encrypted { "true" } else { "false" },
-                        if metadata.multi_statement {
-                            "true"
-                        } else {
-                            "false"
-                        },
-                    )
-                } else {
-                    ("unknown", "unknown", "false", "false")
-                };
+            let (statement_type, protocol, mapped, multi_statement) = if let Some(session) = execute
+                .session_id()
+                .and_then(|id| self.get_session_metrics(id))
+            {
+                let metadata = &session.metadata;
+                (
+                    metadata
+                        .statement_type
+                        .map(|t| t.as_label())
+                        .unwrap_or("unknown"),
+                    metadata.protocol.map(|p| p.as_label()).unwrap_or("unknown"),
+                    if metadata.encrypted { "true" } else { "false" },
+                    if metadata.multi_statement {
+                        "true"
+                    } else {
+                        "false"
+                    },
+                )
+            } else {
+                ("unknown", "unknown", "false", "false")
+            };
 
             histogram!(
                 STATEMENTS_EXECUTION_DURATION_SECONDS,
@@ -385,11 +401,11 @@ where
             .record(execute.duration());
 
             if execute.name.is_empty() {
-                self.close_portal(&execute.name);
+                self.close_portal_if_current(&execute.name, execute.portal.as_ref());
             }
+            return execute.session_id();
         }
-
-        let _ = self.execute.write().map(|mut queue| queue.complete());
+        None
     }
 
     pub fn add_statement(&mut self, name: Name, statement: Statement) {
@@ -422,12 +438,10 @@ where
 
     pub fn add_portal(&mut self, name: Name, portal: Portal) {
         debug!(target: CONTEXT, client_id = self.client_id, name = ?name, portal = ?portal);
-        let _ = self.portals.write().map(|mut portals| {
-            portals
-                .entry(name)
-                .or_insert_with(Queue::new)
-                .add(Arc::new(portal));
-        });
+        let _ = self
+            .portals
+            .write()
+            .map(|mut portals| portals.insert(name, Arc::new(portal)));
     }
 
     pub fn get_statement(&self, name: &Name) -> Option<Arc<Statement>> {
@@ -472,10 +486,18 @@ where
     ///
     pub fn close_portal(&mut self, name: &Name) {
         debug!(target: CONTEXT, client_id = self.client_id, msg = "Close Portal", name = ?name);
+        let _ = self.portals.write().map(|mut portals| portals.remove(name));
+    }
+
+    fn close_portal_if_current(&mut self, name: &Name, expected: Option<&Arc<Portal>>) {
         let _ = self.portals.write().map(|mut portals| {
-            portals
-                .entry(name.clone())
-                .and_modify(|queue| queue.complete());
+            if expected.is_some_and(|expected| {
+                portals
+                    .get(name)
+                    .is_some_and(|current| Arc::ptr_eq(current, expected))
+            }) {
+                portals.remove(name);
+            }
         });
     }
 
@@ -483,14 +505,12 @@ where
         debug!(target: CONTEXT, client_id = self.client_id, src = "Get Portal", portal = ?name);
         let portals = self.portals.read().ok()?;
 
-        let queue = portals.get(name)?;
-        queue.next().cloned()
+        portals.get(name).cloned()
     }
 
     pub fn get_portal_statement(&self, name: &Name) -> Option<Arc<Statement>> {
         let portals = self.portals.read().ok()?;
-        let queue = portals.get(name)?;
-        let portal = queue.next()?;
+        let portal = portals.get(name)?;
 
         debug!(target: CONTEXT, client_id = self.client_id, portal = ?portal);
 
@@ -502,59 +522,52 @@ where
 
     pub fn get_portal_session_id(&self, name: &Name) -> Option<SessionId> {
         let portals = self.portals.read().ok()?;
-        let queue = portals.get(name)?;
-        let portal = queue.next()?;
+        let portal = portals.get(name)?;
         portal.session_id()
     }
 
-    pub fn get_statement_for_row_decription(&self) -> Option<Arc<Statement>> {
-        if let Some(statement) = self.get_statement_from_describe() {
+    pub fn get_statement_for_operation(&self, operation: OperationId) -> Option<Arc<Statement>> {
+        let operations = self.operations.read().ok()?;
+        let context = operations.get(&operation)?;
+        if let Some(statement) = &context.describe_statement {
             return Some(statement.clone());
         }
-
-        if let Some(Portal::Encrypted { statement, .. }) = self.get_portal_from_execute().as_deref()
-        {
-            return Some(statement.clone());
-        };
-
-        None
-    }
-
-    pub fn get_statement_from_describe(&self) -> Option<Arc<Statement>> {
-        let queue = self.describe.read().ok()?;
-        let describe = queue.next()?;
-
-        debug!(target: CONTEXT, client_id = self.client_id, msg = "Get Statement", describe = ?describe);
-
-        match describe {
-            Describe {
-                ref name,
-                target: DescribeTarget::Portal,
-            } => self.get_portal_statement(name),
-            Describe {
-                ref name,
-                target: DescribeTarget::Statement,
-            } => self.get_statement(name),
+        match context.execute.as_ref()?.portal.as_deref()? {
+            Portal::Encrypted { statement, .. } => Some(statement.clone()),
+            Portal::Passthrough { .. } => None,
         }
     }
 
-    pub fn get_portal_from_execute(&self) -> Option<Arc<Portal>> {
-        let queue = self.execute.read().ok()?;
-        let execute_context = queue.next()?;
-        let name = &execute_context.name;
-        self.get_portal(name)
+    pub fn get_statement_from_describe(&self, operation: OperationId) -> Option<Arc<Statement>> {
+        self.operations
+            .read()
+            .ok()?
+            .get(&operation)?
+            .describe_statement
+            .clone()
     }
 
-    pub fn get_execute(&self) -> Option<ExecuteContext> {
-        let queue = self.execute.read().ok()?;
-        let execute_context = queue.next()?;
+    pub fn get_portal_from_execute(&self, operation: OperationId) -> Option<Arc<Portal>> {
+        self.operations
+            .read()
+            .ok()?
+            .get(&operation)?
+            .execute
+            .as_ref()?
+            .portal
+            .clone()
+    }
+
+    pub fn get_execute(&self, operation: OperationId) -> Option<ExecuteContext> {
+        let operations = self.operations.read().ok()?;
+        let execute_context = operations.get(&operation)?.execute.as_ref()?;
         debug!(target: CONTEXT, client_id = self.client_id, msg = "Get Execute", execute = ?execute_context);
         Some(execute_context.to_owned())
     }
 
-    pub fn get_session_metrics(&self) -> Option<SessionMetricsContext> {
-        let queue = self.session_metrics.read().ok()?;
-        let session_context = queue.next()?;
+    pub fn get_session_metrics(&self, session_id: SessionId) -> Option<SessionMetricsContext> {
+        let sessions = self.session_metrics.read().ok()?;
+        let session_context = sessions.get(&session_id)?;
         debug!(target: CONTEXT, client_id = self.client_id, msg = "Get Session Metrics", session_metrics = ?session_context);
         Some(session_context.to_owned())
     }
@@ -898,20 +911,16 @@ where
     where
         F: FnOnce(&mut SessionMetricsContext),
     {
-        if let Ok(mut queue) = self.session_metrics.write() {
-            if let Some(session) = queue
-                .queue
-                .iter_mut()
-                .find(|session| session.id() == session_id)
-            {
+        if let Ok(mut sessions) = self.session_metrics.write() {
+            if let Some(session) = sessions.get_mut(&session_id) {
                 f(session);
             }
         }
     }
 
     pub fn latest_session_id(&self) -> Option<SessionId> {
-        let queue = self.session_metrics.read().ok()?;
-        queue.queue.back().map(|session| session.id())
+        let sessions = self.session_metrics.read().ok()?;
+        sessions.keys().max().copied()
     }
 
     /// Record parse phase duration for the session (first write wins)
@@ -1005,59 +1014,45 @@ where
     }
 
     /// Record server wait for first response; otherwise accumulate response time for the current execute
-    pub fn record_execute_server_timing(&mut self, duration: Duration) {
-        if let Ok(mut queue) = self.execute.write() {
-            if let Some(execute) = queue.current_mut() {
+    pub fn record_execute_server_timing(&mut self, operation: OperationId, duration: Duration) {
+        if let Ok(mut operations) = self.operations.write() {
+            if let Some(execute) = operations
+                .get_mut(&operation)
+                .and_then(|op| op.execute.as_mut())
+            {
                 execute.record_server_wait_or_add_response(duration);
             }
         }
     }
 
     /// Add decrypt phase duration for the current execute session (if any)
-    pub fn add_decrypt_duration_for_execute(&mut self, duration: Duration) {
-        let session_id = self.get_execute().and_then(|execute| execute.session_id());
+    pub fn add_decrypt_duration_for_execute(&mut self, operation: OperationId, duration: Duration) {
+        let session_id = self
+            .get_execute(operation)
+            .and_then(|execute| execute.session_id());
         if let Some(session_id) = session_id {
             self.add_decrypt_duration(session_id, duration);
         }
     }
 
     /// Add client write duration for the current execute session (if any)
-    pub fn add_client_write_duration_for_execute(&mut self, duration: Duration) {
-        let session_id = self.get_execute().and_then(|execute| execute.session_id());
+    pub fn add_client_write_duration_for_execute(
+        &mut self,
+        operation: OperationId,
+        duration: Duration,
+    ) {
+        let session_id = self
+            .get_execute(operation)
+            .and_then(|execute| execute.session_id());
         if let Some(session_id) = session_id {
             self.add_client_write_duration(session_id, duration);
         }
     }
 }
 
-impl<T> Queue<T> {
-    pub fn new() -> Self {
-        Queue {
-            queue: VecDeque::new(),
-        }
-    }
-
-    pub fn complete(&mut self) {
-        let _ = self.queue.pop_front();
-    }
-
-    pub fn next(&self) -> Option<&T> {
-        self.queue.front()
-    }
-
-    pub fn add(&mut self, item: T) {
-        self.queue.push_back(item);
-    }
-
-    /// Get mutable reference to the current (first) item in the queue
-    pub fn current_mut(&mut self) -> Option<&mut T> {
-        self.queue.front_mut()
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{Context, Describe, KeysetIdentifier, Portal, Statement};
+    use super::{Context, KeysetIdentifier, Portal, Statement};
     use crate::{
         config::LogConfig,
         error::Error,
@@ -1068,7 +1063,6 @@ mod tests {
     };
     use cipherstash_client::IdentifiedBy;
     use eql_mapper::Schema;
-    use pg_proto::DescribeTarget;
     use sqltk::parser::{dialect::PostgreSqlDialect, parser::Parser};
     use std::sync::Arc;
     use tokio::sync::mpsc;
@@ -1203,101 +1197,6 @@ mod tests {
     }
 
     #[test]
-    pub fn get_statement_from_describe() {
-        log::init(LogConfig::default());
-
-        let mut context = create_context();
-
-        let name = Name::from("name");
-
-        context.add_statement(name.clone(), statement());
-
-        let statement = context.get_statement(&name).unwrap();
-
-        let describe = Describe {
-            name,
-            target: DescribeTarget::Statement,
-        };
-        context.set_describe(describe);
-
-        let s = context.get_statement_from_describe().unwrap();
-
-        assert_eq!(s, statement)
-    }
-
-    #[test]
-    pub fn execution_flow() {
-        log::init(LogConfig::default());
-
-        let mut context = create_context();
-
-        let statement_name = Name::from("statement");
-        let portal_name = Name::from("portal");
-
-        // Add statement to context
-        context.add_statement(statement_name.clone(), statement());
-
-        // Get statement from context
-        let statement = context.get_statement(&statement_name).unwrap();
-
-        // Add portal pointing to statement to context
-        context.add_portal(portal_name.clone(), portal(&statement));
-
-        // Add statement name to execute context
-        context.set_execute(portal_name.clone(), None);
-
-        // Portal statement should be the right statement
-        let portal = context.get_portal_from_execute().unwrap();
-
-        let statement = get_statement(portal);
-        assert_eq!(statement, statement);
-
-        // Complete the execution
-        context.complete_execution();
-
-        // Should be no portal for execute context
-        let portal = context.get_portal_from_execute();
-        assert!(portal.is_none());
-
-        // Unamed portal is closed on complete
-        let portal = context.get_portal(&portal_name);
-        assert!(portal.is_some());
-    }
-
-    /// Unit test for the queue-draining primitives.
-    ///
-    /// `complete_execution()` / `finish_session()` are the only drains for the
-    /// per-connection `execute` / `session_metrics` queues. This asserts that
-    /// calling them after enqueuing a session + execute leaves both queues
-    /// empty, across many iterations.
-    ///
-    /// Note: this exercises the primitives directly — it does *not* drive the
-    /// backend passthrough path that actually caused BUG-300 (that early
-    /// returned without calling these). The backend-level regression test for
-    /// BUG-300 lives in `backend.rs`
-    /// (`passthrough_drains_queues_on_execute_terminating_message`).
-    #[test]
-    pub fn complete_execution_and_finish_session_drain_queues() {
-        log::init(LogConfig::default());
-
-        let mut context = create_context();
-
-        for _ in 0..1000 {
-            // Frontend: a session + execute are enqueued for every statement.
-            let session_id = context.start_session();
-            context.set_execute(Name::new(), Some(session_id));
-
-            // Drain primitives, normally called by the backend on an
-            // execute-terminating message (CommandComplete / ErrorResponse / …).
-            context.complete_execution();
-            context.finish_session();
-        }
-
-        assert_eq!(context.execute_queue_len(), 0);
-        assert_eq!(context.session_metrics_queue_len(), 0);
-    }
-
-    #[test]
     pub fn add_and_close_portals() {
         log::init(LogConfig::default());
 
@@ -1311,9 +1210,6 @@ mod tests {
         context.add_statement(statement_name_1.clone(), statement());
         context.add_statement(statement_name_2.clone(), statement());
 
-        // Replicate pipelined execution
-        // Add multiple portals with the same name
-        // Pointing to different statements
         let portal_name = Name::from("portal");
 
         let statement_1 = context.get_statement(&statement_name_1).unwrap();
@@ -1322,88 +1218,10 @@ mod tests {
         let statement_2 = context.get_statement(&statement_name_2).unwrap();
         context.add_portal(portal_name.clone(), portal(&statement_2));
 
-        // Execute both portals
-        context.set_execute(portal_name.clone(), None);
-        context.set_execute(portal_name.clone(), None);
-
-        // Portal should point to first statement
-        let portal = context.get_portal_from_execute().unwrap();
-        let statement = get_statement(portal);
-        assert_eq!(statement, statement);
-
-        let portal = context.get_portal_from_execute().unwrap();
-        let statement = get_statement(portal);
-        assert_eq!(statement_1, statement);
-
-        // Complete execution
-        context.complete_execution();
-
-        // Portal should point to second statement
-        let portal = context.get_portal_from_execute().unwrap();
-
-        let statement = get_statement(portal);
-        assert_eq!(statement_1, statement);
-    }
-
-    #[test]
-    pub fn pipeline_execution() {
-        log::init(LogConfig::default());
-
-        let mut context = create_context();
-
-        let statement_name_1 = Name::from("statement_1");
-        let portal_name_1 = Name::new();
-
-        let statement_name_2 = Name::from("statement_2");
-        let portal_name_2 = Name::new();
-
-        let statement_name_3 = Name::from("statement_3");
-        let portal_name_3 = Name::from("portal_3");
-
-        // Add statement to context
-        context.add_statement(statement_name_1.clone(), statement());
-        context.add_statement(statement_name_2.clone(), statement());
-        context.add_statement(statement_name_3.clone(), statement());
-
-        // Create portals for each statement
-        let statement_1 = context.get_statement(&statement_name_1).unwrap();
-        context.add_portal(portal_name_1.clone(), portal(&statement_1));
-
-        let statement_2 = context.get_statement(&statement_name_2).unwrap();
-        context.add_portal(portal_name_2.clone(), portal(&statement_2));
-
-        let statement_3 = context.get_statement(&statement_name_3).unwrap();
-        context.add_portal(portal_name_3.clone(), portal(&statement_3));
-
-        // Add portals to execute context
-        context.set_execute(portal_name_1.clone(), None);
-        context.set_execute(portal_name_2.clone(), None);
-        context.set_execute(portal_name_3.clone(), None);
-
-        // Multiple calls return the portal for the first Execution context
-        let portal = context.get_portal_from_execute().unwrap();
-        let statement = get_statement(portal);
-        assert_eq!(statement_1, statement);
-
-        let portal = context.get_portal_from_execute().unwrap();
-        let statement = get_statement(portal);
-        assert_eq!(statement_1, statement);
-
-        // Complete the execution of the first portal
-        context.complete_execution();
-
-        // Returns the next portal
-        let portal = context.get_portal_from_execute().unwrap();
-        let statement = get_statement(portal);
-        assert_eq!(statement_2, statement);
-
-        // Complete the execution
-        context.complete_execution();
-
-        // Returns the next portal
-        let portal = context.get_portal_from_execute().unwrap();
-        let statement = get_statement(portal);
-        assert_eq!(statement_3, statement);
+        let portal = context.get_portal(&portal_name).unwrap();
+        assert_eq!(statement_2, get_statement(portal));
+        context.close_portal(&portal_name);
+        assert!(context.get_portal(&portal_name).is_none());
     }
 
     fn parse_statement(sql: &str) -> sqltk::parser::ast::Statement {
