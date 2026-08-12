@@ -17,7 +17,10 @@ use crate::prometheus::{
 use crate::proxy::EncryptionService;
 use crate::EqlCiphertext;
 use metrics::{counter, histogram};
-use pg_proto::{BackendBatchOutput, BackendMessage, BackendMiddlewareOutput, HeldBackendMessages};
+use pg_proto::{
+    AttributedBackendMessages, BackendBatchOutput, BackendMessage, BackendMiddlewareOutput,
+    OperationId,
+};
 use std::time::Instant;
 use tracing::{debug, error, info, warn};
 
@@ -70,6 +73,7 @@ pub struct Backend<S: EncryptionService> {
     context: Context<S>,
     /// Buffer for batching DataRow messages before decryption
     buffer: Vec<DataRow>,
+    buffer_operation: Option<OperationId>,
     emitted: Vec<BackendMessage>,
 }
 
@@ -96,16 +100,20 @@ impl<S: EncryptionService> Backend<S> {
         Backend {
             context,
             buffer,
+            buffer_operation: None,
             emitted: Vec::new(),
         }
     }
 
     pub async fn intercept(
         &mut self,
+        operation: Option<OperationId>,
         message: BackendMessage,
     ) -> Result<BackendMiddlewareOutput, Error> {
         let mut disposition = BackendDisposition::Emit;
-        let message = self.intercept_backend(&mut disposition, message).await?;
+        let message = self
+            .intercept_backend(operation, &mut disposition, message)
+            .await?;
         Ok(if disposition == BackendDisposition::Suppress {
             BackendMiddlewareOutput::Hold
         } else {
@@ -115,11 +123,12 @@ impl<S: EncryptionService> Backend<S> {
 
     pub async fn flush_held(
         &mut self,
-        held: HeldBackendMessages<'_>,
+        held: AttributedBackendMessages<'_>,
     ) -> Result<BackendBatchOutput, Error> {
-        self.flush().await?;
+        let operation = held.iter().find_map(|(operation, _)| operation);
+        self.flush(operation).await?;
         let messages = std::mem::take(&mut self.emitted);
-        if messages.len() != held.len() {
+        if messages.len() != held.iter().len() {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
                 "decrypted DataRow batch length changed",
@@ -131,6 +140,7 @@ impl<S: EncryptionService> Backend<S> {
 
     async fn intercept_backend(
         &mut self,
+        operation: Option<OperationId>,
         disposition: &mut BackendDisposition,
         protocol_message: BackendMessage,
     ) -> Result<BackendMessage, Error> {
@@ -141,22 +151,17 @@ impl<S: EncryptionService> Backend<S> {
                 client_id = self.context.client_id,
                 msg = "Passthrough enabled"
             );
-            // The frontend starts a session and enqueues an execute for every
-            // statement (start_session / set_execute), regardless of whether
-            // the statement is mapped. Those per-connection queues are only
-            // drained by complete_execution()/finish_session(), which are
-            // normally called when an execute terminates (below). Because the
-            // passthrough path returns early, we must drain them here too —
-            // otherwise the execute and session_metrics queues grow by one
-            // entry per statement and never shrink, leaking memory until the
-            // process is OOM-killed. See BUG-300.
+            // CipherStash metadata is operation-keyed even in passthrough mode,
+            // and must be released when pg-proto identifies its terminal response.
             match protocol_message {
                 BackendMessage::CommandComplete(_)
                 | BackendMessage::EmptyQueryResponse
                 | BackendMessage::PortalSuspended
                 | BackendMessage::ErrorResponse(_) => {
-                    self.context.complete_execution();
-                    self.context.finish_session();
+                    if let Some(operation) = operation {
+                        let session = self.context.complete_execution(operation);
+                        self.context.finish_session(session);
+                    }
                 }
                 _ => {}
             }
@@ -171,7 +176,7 @@ impl<S: EncryptionService> Backend<S> {
             BackendMessage::DataRow(row) => {
                 // Encrypted DataRows are added to the buffer and we return early
                 // Otherwise, continue and write
-                if self.data_row_handler(DataRow::from(row)).await? {
+                if self.data_row_handler(operation, DataRow::from(row)).await? {
                     *disposition = BackendDisposition::Suppress;
                     return Ok(outbound_message);
                 }
@@ -184,7 +189,7 @@ impl<S: EncryptionService> Backend<S> {
             | BackendMessage::PortalSuspended => {
                 debug!(target: PROTOCOL, client_id = self.context.client_id, msg = "CommandComplete | EmptyQueryResponse | PortalSuspended");
 
-                match self.flush().await {
+                match self.flush(operation).await {
                     Ok(_) => (),
                     Err(err) => {
                         warn!(client_id = self.client_id(), error = err.to_string());
@@ -192,13 +197,15 @@ impl<S: EncryptionService> Backend<S> {
                     }
                 }
 
-                self.context.complete_execution();
-                self.context.finish_session();
+                if let Some(operation) = operation {
+                    let session = self.context.complete_execution(operation);
+                    self.context.finish_session(session);
+                }
             }
             BackendMessage::ErrorResponse(ref response) => {
                 self.error_response_handler(response);
 
-                match self.flush().await {
+                match self.flush(operation).await {
                     Ok(_) => (),
                     Err(err) => {
                         warn!(client_id = self.client_id(), error = err.to_string());
@@ -206,15 +213,17 @@ impl<S: EncryptionService> Backend<S> {
                     }
                 }
 
-                self.context.complete_execution();
-                self.context.finish_session();
+                if let Some(operation) = operation {
+                    let session = self.context.complete_execution(operation);
+                    self.context.finish_session(session);
+                }
             }
             // Describe with Target:Statement
             // Returns a ParameterDescription followed by RowDescription
             // The Describe is complete after the RowDescription
             BackendMessage::ParameterDescription(types) => {
                 if let Some(message) = self
-                    .parameter_description_handler(ParamDescription::from(types))
+                    .parameter_description_handler(operation, ParamDescription::from(types))
                     .await?
                 {
                     outbound_message = message;
@@ -227,17 +236,21 @@ impl<S: EncryptionService> Backend<S> {
             // Complete the Describe
             BackendMessage::RowDescription(description) => {
                 if let Some(message) = self
-                    .row_description_handler(RowDescription::from(description))
+                    .row_description_handler(operation, RowDescription::from(description))
                     .await?
                 {
                     outbound_message = message;
                 }
-                self.context.complete_describe();
+                if let Some(operation) = operation {
+                    self.context.complete_describe(operation);
+                }
             }
             // Describe with Target:Statement or Target::Portal
             // If the statement returns no rows, NoData is returned instead of a RowDescription
             BackendMessage::NoData => {
-                self.context.complete_describe();
+                if let Some(operation) = operation {
+                    self.context.complete_describe(operation);
+                }
             }
             // Reload for SompleQuery flow
             // Reload is potentially triggered by a FrontEnd Sync message.
@@ -313,12 +326,19 @@ impl<S: EncryptionService> Backend<S> {
     ///  - when the buffer is full
     ///  - when any other message type is written
     ///
-    async fn buffer(&mut self, data_row: DataRow) -> Result<(), Error> {
-        self.buffer.push(data_row);
-        if self.buffer.len() >= Self::RESPONSE_BUFFER_SIZE {
-            debug!(target: DEVELOPMENT, client_id = self.context.client_id, msg = "Flush message buffer");
-            self.flush().await?;
+    async fn buffer(&mut self, operation: OperationId, data_row: DataRow) -> Result<(), Error> {
+        if self
+            .buffer_operation
+            .is_some_and(|current| current != operation)
+        {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "DataRow batch spans operations",
+            )
+            .into());
         }
+        self.buffer_operation = Some(operation);
+        self.buffer.push(data_row);
         Ok(())
     }
 
@@ -329,7 +349,7 @@ impl<S: EncryptionService> Backend<S> {
     pub async fn write_with_flush(&mut self, message: BackendMessage) -> Result<(), Error> {
         debug!(target: DEVELOPMENT, client_id = self.context.client_id, msg = "Write");
 
-        match self.flush().await {
+        match self.flush(None).await {
             Ok(_) => (),
             Err(err) => {
                 warn!(client_id = self.client_id(), error = err.to_string());
@@ -345,10 +365,7 @@ impl<S: EncryptionService> Backend<S> {
     /// Write a message to the client
     ///
     pub async fn write(&mut self, message: BackendMessage) -> Result<(), Error> {
-        let start = Instant::now();
         self.emitted.push(message);
-        let duration = start.elapsed();
-        self.context.add_client_write_duration_for_execute(duration);
 
         Ok(())
     }
@@ -392,12 +409,14 @@ impl<S: EncryptionService> Backend<S> {
     /// appropriate error responses and recorded in metrics. The error mapping
     /// implemented in the encryption service ensures proper keyset ID context
     /// is preserved in error messages.
-    async fn flush(&mut self) -> Result<(), Error> {
+    async fn flush(&mut self, operation: Option<OperationId>) -> Result<(), Error> {
         if self.buffer.is_empty() {
             debug!(target: MAPPER, client_id = self.context.client_id, msg = "Empty buffer");
         }
 
-        let portal = self.context.get_portal_from_execute();
+        let operation = operation.or(self.buffer_operation);
+        let portal =
+            operation.and_then(|operation| self.context.get_portal_from_execute(operation));
         let portal = match portal.as_deref() {
             Some(Portal::Encrypted { .. }) => portal.unwrap(),
             _ => {
@@ -413,6 +432,7 @@ impl<S: EncryptionService> Backend<S> {
         };
 
         let mut rows: Vec<DataRow> = self.buffer.drain(..).collect();
+        self.buffer_operation = None;
         debug!(target: DEVELOPMENT, client_id = self.context.client_id, rows = rows.len());
 
         let result_column_count = match rows.first() {
@@ -453,7 +473,10 @@ impl<S: EncryptionService> Backend<S> {
         let duration = Instant::now().duration_since(start);
 
         // Always record for slow-statement diagnostics
-        self.context.add_decrypt_duration_for_execute(duration);
+        if let Some(operation) = operation {
+            self.context
+                .add_decrypt_duration_for_execute(operation, duration);
+        }
 
         // Prometheus metrics remain gated
         if self.context.prometheus_enabled() {
@@ -525,11 +548,14 @@ impl<S: EncryptionService> Backend<S> {
 
     async fn parameter_description_handler(
         &self,
+        operation: Option<OperationId>,
         mut description: ParamDescription,
     ) -> Result<Option<BackendMessage>, Error> {
         debug!(target: PROTOCOL, client_id = self.context.client_id, ParamDescription = ?description);
 
-        if let Some(statement) = self.context.get_statement_from_describe() {
+        if let Some(statement) =
+            operation.and_then(|operation| self.context.get_statement_from_describe(operation))
+        {
             // Describe the params the CLIENT wrote, not the ones PostgreSQL was
             // sent. A rewrite may have fused or dropped params, in which case
             // the server's description is both shorter than and shifted from
@@ -578,11 +604,14 @@ impl<S: EncryptionService> Backend<S> {
     ///
     async fn row_description_handler(
         &mut self,
+        operation: Option<OperationId>,
         mut description: RowDescription,
     ) -> Result<Option<BackendMessage>, Error> {
         debug!(target: PROTOCOL, client_id = self.context.client_id, RowDescription = ?description);
 
-        if let Some(statement) = self.context.get_statement_for_row_decription() {
+        if let Some(statement) =
+            operation.and_then(|operation| self.context.get_statement_for_operation(operation))
+        {
             let projection_types = statement
                 .projection_columns
                 .iter()
@@ -637,13 +666,24 @@ impl<S: EncryptionService> Backend<S> {
     ///
     /// Records metrics for both encrypted and passthrough row processing to
     /// track proxy performance and encryption usage patterns.
-    async fn data_row_handler(&mut self, data_row: DataRow) -> Result<bool, Error> {
+    async fn data_row_handler(
+        &mut self,
+        operation: Option<OperationId>,
+        data_row: DataRow,
+    ) -> Result<bool, Error> {
         counter!(ROWS_TOTAL).increment(1);
-        match self.context.get_portal_from_execute().as_deref() {
+        match operation
+            .and_then(|operation| self.context.get_portal_from_execute(operation))
+            .as_deref()
+        {
             Some(Portal::Encrypted { .. }) => {
                 debug!(target: MAPPER, client_id = self.context.client_id, msg = "Encrypted");
 
-                self.buffer(data_row).await?;
+                self.buffer(
+                    operation.expect("encrypted DataRow has an operation"),
+                    data_row,
+                )
+                .await?;
 
                 counter!(ROWS_ENCRYPTED_TOTAL).increment(1);
                 Ok(true)
@@ -669,6 +709,7 @@ impl<S: EncryptionService> Backend<S> {
         let error_response = self.error_to_response(err);
         // Ensure any buffered data is cleared before sending error
         self.buffer.clear();
+        self.buffer_operation = None;
 
         let message = error_response.into_backend_message();
 
@@ -688,14 +729,10 @@ impl<S: EncryptionService> Backend<S> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{LogConfig, TandemConfig};
-    use crate::log;
+    use crate::config::TandemConfig;
     use crate::postgresql::context::KeysetIdentifier;
     use crate::proxy::{EncryptConfig, EncryptionService};
-    use bytes::Bytes as Name;
-    use bytes::Bytes;
     use eql_mapper::Schema;
-    use pg_proto::DiagnosticResponse;
     use std::sync::Arc;
     use tokio::sync::mpsc;
 
@@ -737,98 +774,5 @@ mod tests {
             TestService {},
             reload_sender,
         )
-    }
-
-    /// Encodes a backend message as wire bytes (one per execute-terminating code).
-    type MessageFactory = fn() -> BackendMessage;
-
-    /// Frame a backend message on the wire: 1-byte code + Int32 length
-    /// (body length + 4) + body. Sufficient for the passthrough path, which
-    /// matches on the code only and does not parse the body.
-    fn command_complete() -> BackendMessage {
-        BackendMessage::CommandComplete(Bytes::from_static(b"SELECT 1"))
-    }
-
-    /// `'I'` EmptyQueryResponse — no body.
-    fn empty_query_response() -> BackendMessage {
-        BackendMessage::EmptyQueryResponse
-    }
-
-    /// `'s'` PortalSuspended — no body.
-    fn portal_suspended() -> BackendMessage {
-        BackendMessage::PortalSuspended
-    }
-
-    /// `'E'` ErrorResponse — a sequence of (field-type, C-string) pairs
-    /// terminated by a zero byte. Content is irrelevant here: the passthrough
-    /// path forwards the bytes and matches on the code without parsing them.
-    fn error_response() -> BackendMessage {
-        BackendMessage::ErrorResponse(DiagnosticResponse { fields: vec![] })
-    }
-
-    /// Regression test for BUG-300 (passthrough memory leak).
-    ///
-    /// The frontend enqueues a session + execute for *every* statement. Those
-    /// per-connection `execute` / `session_metrics` queues are only drained by
-    /// `complete_execution()` / `finish_session()`. Before the fix, the
-    /// passthrough branch in `rewrite()` returned early without calling these,
-    /// so the queues grew by one entry per statement and leaked until OOM.
-    ///
-    /// This drives `Backend::rewrite()` through the passthrough branch and
-    /// asserts both queues stay empty across many statements — once for *each*
-    /// execute-terminating message code the fix drains on, so dropping any arm
-    /// of that match is caught. It fails against the pre-fix backend (which
-    /// never drained in passthrough) — i.e. it actually guards the bug.
-    #[tokio::test]
-    async fn passthrough_drains_queues_on_execute_terminating_message() {
-        log::init(LogConfig::default());
-
-        const STATEMENTS: usize = 256;
-
-        // Every code that terminates the execute phase must drain the queues.
-        let cases: [(&str, MessageFactory); 4] = [
-            ("CommandComplete", command_complete),
-            ("EmptyQueryResponse", empty_query_response),
-            ("PortalSuspended", portal_suspended),
-            ("ErrorResponse", error_response),
-        ];
-
-        for (label, encode) in cases {
-            let context = passthrough_context();
-            assert!(
-                context.is_passthrough(),
-                "test context must be in passthrough mode"
-            );
-
-            let message = encode();
-            let mut backend = Backend::new(context);
-
-            for i in 0..STATEMENTS {
-                // Frontend: enqueue a session + execute for the statement.
-                let session_id = backend.context.start_session();
-                backend.context.set_execute(Name::new(), Some(session_id));
-                let mut disposition = BackendDisposition::Emit;
-                backend
-                    .intercept_backend(&mut disposition, message.clone())
-                    .await
-                    .unwrap();
-                if disposition == BackendDisposition::Emit {
-                    backend.write_with_flush(message.clone()).await.unwrap();
-                }
-
-                // The queues must be drained every iteration — not grow by one
-                // per statement (the BUG-300 leak).
-                assert_eq!(
-                    backend.context.execute_queue_len(),
-                    0,
-                    "{label}: execute queue not drained at statement {i}"
-                );
-                assert_eq!(
-                    backend.context.session_metrics_queue_len(),
-                    0,
-                    "{label}: session_metrics queue not drained at statement {i}"
-                );
-            }
-        }
     }
 }

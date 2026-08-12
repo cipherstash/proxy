@@ -6,9 +6,9 @@ use crate::{error::Error, proxy::EncryptionService};
 use backend::Backend;
 use frontend::Frontend;
 use pg_proto::{
-    BackendBatchOutput, BackendFlushReason, BackendMessage, BackendMiddlewareOutput,
-    FrontendMessage, FrontendMiddlewareOutput, HeldBackendMessages, IntermediaryMiddleware,
-    IntermediaryMiddlewareFactory,
+    AttributedBackendMessages, BackendBatchOutput, BackendFlushReason, BackendMessage,
+    BackendMiddlewareOutput, FrontendMessage, FrontendMiddlewareOutput, IntermediaryMiddleware,
+    IntermediaryMiddlewareFactory, OperationId,
 };
 
 pub struct CipherStashMiddleware<S: EncryptionService + Clone> {
@@ -46,32 +46,34 @@ where
 {
     type Error = Error;
 
-    async fn frontend(
+    async fn frontend_operation(
         &mut self,
         _: &ServerContext,
         _: &ClientContext,
         _: &mut (),
+        operation: OperationId,
         message: FrontendMessage,
     ) -> Result<FrontendMiddlewareOutput, Error> {
-        self.frontend.intercept(message).await
+        self.frontend.intercept(operation, message).await
     }
 
-    async fn backend(
+    async fn backend_operation(
         &mut self,
         _: &ServerContext,
         _: &ClientContext,
         _: &mut (),
+        operation: Option<OperationId>,
         message: BackendMessage,
     ) -> Result<BackendMiddlewareOutput, Error> {
-        self.backend.intercept(message).await
+        self.backend.intercept(operation, message).await
     }
 
-    async fn flush_backend(
+    async fn flush_backend_operations(
         &mut self,
         _: &ServerContext,
         _: &ClientContext,
         _: &mut (),
-        held: HeldBackendMessages<'_>,
+        held: AttributedBackendMessages<'_>,
         _: BackendFlushReason,
     ) -> Result<BackendBatchOutput, Error> {
         self.backend.flush_held(held).await
