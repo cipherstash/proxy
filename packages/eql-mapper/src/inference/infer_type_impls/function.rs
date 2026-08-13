@@ -1,5 +1,8 @@
 use eql_mapper_macros::trace_infer;
-use sqltk::parser::ast::{DuplicateTreatment, Function, FunctionArgumentClause, FunctionArguments};
+use sqltk::parser::ast::{
+    DuplicateTreatment, Function, FunctionArg, FunctionArgumentClause, FunctionArguments,
+};
+use sqltk::NodeKey;
 
 use crate::{
     function_arg::function_arg_value,
@@ -22,6 +25,19 @@ use crate::{
 /// [`WindowSpec`]: sqltk::parser::ast::WindowSpec
 #[trace_infer]
 impl<'ast> InferType<'ast, Function> for TypeInferencer<'ast> {
+    fn infer_enter(&mut self, function: &'ast Function) -> Result<(), TypeError> {
+        if let FunctionArguments::List(list) = &function.args {
+            for arg in &list.args {
+                if let FunctionArg::ExprNamed { name, .. } = arg {
+                    self.named_function_arg_labels
+                        .borrow_mut()
+                        .insert(NodeKey::new(name.as_ref()));
+                }
+            }
+        }
+        Ok(())
+    }
+
     fn infer_exit(&mut self, function: &'ast Function) -> Result<(), TypeError> {
         if !matches!(function.parameters, FunctionArguments::None) {
             return Err(TypeError::UnsupportedSqlFeature(

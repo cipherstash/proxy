@@ -2452,6 +2452,31 @@ mod test {
     }
 
     #[test]
+    fn rewrite_standard_sql_fn_with_expr_named_args() {
+        let schema = resolver(schema! {
+            tables: {
+                employees: {
+                    eql_col (EQL: JsonLike),
+                }
+            }
+        });
+        let statement =
+            parse("SELECT jsonb_path_exists(value => eql_col, path => '$.secret') FROM employees");
+        let typed = type_check(schema, &statement).unwrap();
+        let transformed = typed
+            .transform(test_helpers::dummy_encrypted_json_selector(
+                &statement,
+                vec![ast::Value::SingleQuotedString("$.secret".into())],
+            ))
+            .unwrap();
+
+        assert_eq!(
+            transformed.to_string(),
+            "SELECT eql_v3.jsonb_path_exists(value => eql_col, path => '<encrypted-selector($.secret)>') FROM employees"
+        );
+    }
+
+    #[test]
     fn supports_named_arrays() {
         let schema = resolver(schema! {
             tables: {
@@ -2721,6 +2746,27 @@ mod test {
             ),
             Err(err) => panic!("transformation failed: {err}"),
         }
+    }
+
+    #[test]
+    fn eql_v3_function_with_expr_named_arg_casts_full_payload() {
+        let schema = resolver(schema! {
+            tables: {
+                patients: {
+                    id,
+                    notes (EQL: JsonLike + Contain),
+                }
+            }
+        });
+        let statement = parse(
+            "SELECT id FROM patients WHERE eql_v3.jsonb_contains(value => notes, query => $1)",
+        );
+        let typed = type_check(schema, &statement).unwrap();
+
+        assert_eq!(
+            typed.transform(HashMap::new()).unwrap().to_string(),
+            "SELECT id FROM patients WHERE eql_v3.jsonb_contains(value => notes, query => $1::JSONB::public.eql_v3_text_search)"
+        );
     }
 
     #[test]
@@ -5366,6 +5412,24 @@ mod test {
             ),
             Err(err) => panic!("statement transformation failed: {err}"),
         }
+    }
+
+    #[test]
+    fn count_distinct_expr_named_arg_uses_eq_term() {
+        let schema = resolver(schema! {
+            tables: {
+                employees: {
+                    salary (EQL: Eq),
+                }
+            }
+        });
+        let statement = parse("SELECT count(DISTINCT value => salary) FROM employees");
+        let typed = type_check(schema, &statement).unwrap();
+
+        assert_eq!(
+            typed.transform(HashMap::new()).unwrap().to_string(),
+            "SELECT count(DISTINCT value => eql_v3.eq_term(salary)) FROM employees"
+        );
     }
 
     /// The `Eq` bound on `DISTINCT` aggregate arguments must reject a column

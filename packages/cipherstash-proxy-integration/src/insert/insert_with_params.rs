@@ -1,9 +1,8 @@
 #[cfg(test)]
 mod tests {
-    use crate::common::{clear, insert, query, random_id, random_limited, trace};
+    use crate::common::{clear, insert, random_id, random_limited, trace};
     use chrono::NaiveDate;
     use rand::{seq::IndexedRandom, Rng};
-    use serde_json::Value;
     use tokio_postgres::types::ToSql;
     use tracing::info;
 
@@ -38,8 +37,8 @@ mod tests {
     /// Return as a tuple of two vecs:
     ///     - first vec contains column names
     ///     - second vec contains values of the corresponding column type
-    pub fn generate_columns_with_values() -> (Vec<String>, Vec<Box<(dyn ToSql + Sync)>>) {
-        let columns = vec![
+    pub fn generate_columns_with_values() -> (Vec<String>, Vec<Box<dyn ToSql + Sync>>) {
+        let columns = [
             ("i16", "int2"),
             ("i32", "int4"),
             ("i64", "int8"),
@@ -68,14 +67,6 @@ mod tests {
         (columns, values)
     }
 
-    pub async fn query<T: for<'a> tokio_postgres::types::FromSql<'a> + Send + Sync>(
-        sql: &str,
-    ) -> Vec<T> {
-        let client = connect_with_tls(*PROXY).await;
-        let rows = client.query(sql, &[]).await.unwrap();
-        rows.iter().map(|row| row.get(0)).collect::<Vec<T>>()
-    }
-
     #[tokio::test]
     pub async fn test_everything_all_at_once() {
         trace();
@@ -99,12 +90,6 @@ mod tests {
 
         info!(sql);
         insert(&sql, &params).await;
-
-        let sql = format!("SELECT {columns} FROM encrypted WHERE id = $1");
-
-        // let actual = query_by::<$type>(&sql, &id).await;
-
-        // assert_eq!(expected, actual);
     }
 
     // test_insert_with_params!(insert_with_params_int2, i16, int2);

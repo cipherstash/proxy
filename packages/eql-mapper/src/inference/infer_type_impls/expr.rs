@@ -87,6 +87,14 @@ impl<'ast> InferType<'ast, Expr> for TypeInferencer<'ast> {
             // Resolve an identifier using the scope, except if it happens to to be the DEFAULT keyword
             // in which case we resolve it to a fresh type variable.
             Expr::Identifier(ident) => {
+                if self
+                    .named_function_arg_labels
+                    .borrow()
+                    .contains(&sqltk::NodeKey::new(expr_val))
+                {
+                    self.unify_node_with_type(expr_val, Type::native())?;
+                    return Ok(());
+                }
                 // sqltk_parser treats the `DEFAULT` keyword in expression position as an identifier.
                 if IdentCase(ident) == IdentCase(&Ident::new("default")) {
                     self.unify_node_with_type(expr_val, self.fresh_tvar())?;
