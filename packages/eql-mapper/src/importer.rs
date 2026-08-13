@@ -19,6 +19,7 @@ pub struct Importer<'ast> {
     registry: Rc<RefCell<TypeRegistry<'ast>>>,
     scope_tracker: Rc<RefCell<ScopeTracker<'ast>>>,
     insert_projections: Vec<Arc<Type>>,
+    shadowed_excluded_relations: Vec<Option<Rc<Relation>>>,
     _ast: PhantomData<&'ast ()>,
 }
 
@@ -33,6 +34,7 @@ impl<'ast> Importer<'ast> {
             table_resolver: table_resolver.into(),
             scope_tracker: scope.into(),
             insert_projections: Vec::new(),
+            shadowed_excluded_relations: Vec::new(),
             _ast: PhantomData,
         }
     }
@@ -345,11 +347,15 @@ impl<'ast> Visitor<'ast> for Importer<'ast> {
                     )));
                 };
 
-                if let Err(err) = self.scope_tracker.borrow_mut().add_relation(Relation {
-                    name: Some(Ident::new("excluded")),
-                    projection_type,
-                }) {
-                    return ControlFlow::Break(Break::Err(err.into()));
+                match self
+                    .scope_tracker
+                    .borrow_mut()
+                    .add_shadowing_relation(Relation {
+                        name: Some(Ident::new("excluded")),
+                        projection_type,
+                    }) {
+                    Ok(shadowed) => self.shadowed_excluded_relations.push(shadowed),
+                    Err(err) => return ControlFlow::Break(Break::Err(err.into())),
                 }
             }
         }
@@ -361,11 +367,17 @@ impl<'ast> Visitor<'ast> for Importer<'ast> {
         if let Some(on_conflict) = node.downcast_ref::<OnConflict>() {
             if on_conflict_is_update(on_conflict) {
                 // Remove the pseudo-relation added on entry before traversal
-                // continues into the INSERT's RETURNING clause.
+                // continues into the INSERT's RETURNING clause, restoring a
+                // target table binding that it temporarily shadowed.
+                let Some(shadowed) = self.shadowed_excluded_relations.pop() else {
+                    return ControlFlow::Break(Break::Err(ImportError::TraversalInvariant(
+                        "ON CONFLICT DO UPDATE exited without a shadow record",
+                    )));
+                };
                 if let Err(err) = self
                     .scope_tracker
                     .borrow_mut()
-                    .remove_relation(&Ident::new("excluded"))
+                    .remove_shadowing_relation(&Ident::new("excluded"), shadowed)
                 {
                     return ControlFlow::Break(Break::Err(err.into()));
                 }

@@ -67,9 +67,26 @@ impl<'ast> ScopeTracker<'ast> {
         self.current_scope()?.borrow_mut().add_relation(relation)
     }
 
-    /// Remove the uniquely named relation from the current scope.
-    pub(crate) fn remove_relation(&mut self, name: &Ident) -> Result<(), ScopeError> {
-        self.current_scope()?.borrow_mut().remove_relation(name)
+    /// Add a relation that temporarily shadows the last relation with the same name.
+    pub(crate) fn add_shadowing_relation(
+        &mut self,
+        relation: Relation,
+    ) -> Result<Option<Rc<Relation>>, ScopeError> {
+        Ok(self
+            .current_scope()?
+            .borrow_mut()
+            .add_shadowing_relation(relation))
+    }
+
+    /// Remove a temporary relation and restore the relation it shadowed, if any.
+    pub(crate) fn remove_shadowing_relation(
+        &mut self,
+        name: &Ident,
+        shadowed: Option<Rc<Relation>>,
+    ) -> Result<(), ScopeError> {
+        self.current_scope()?
+            .borrow_mut()
+            .remove_shadowing_relation(name, shadowed)
     }
 
     pub(crate) fn resolve_relation(&self, name: &ObjectName) -> Result<Rc<Relation>, ScopeError> {
@@ -239,13 +256,34 @@ impl<'ast> Scope<'ast> {
         Ok(())
     }
 
-    fn remove_relation(&mut self, name: &Ident) -> Result<(), ScopeError> {
+    fn add_shadowing_relation(&mut self, relation: Relation) -> Option<Rc<Relation>> {
+        let shadowed = relation.name.as_ref().and_then(|name| {
+            let name = IdentCase(name);
+            self.relations
+                .iter()
+                .rposition(|relation| {
+                    relation.name.as_ref().map(IdentCase::from).as_ref() == Some(&name)
+                })
+                .map(|index| self.relations.remove(index))
+        });
+        self.relations.push(Rc::new(relation));
+        shadowed
+    }
+
+    fn remove_shadowing_relation(
+        &mut self,
+        name: &Ident,
+        shadowed: Option<Rc<Relation>>,
+    ) -> Result<(), ScopeError> {
         let name = IdentCase(name);
         match self.relations.iter().rposition(|relation| {
             relation.name.as_ref().map(IdentCase::from).as_ref() == Some(&name)
         }) {
             Some(index) => {
                 self.relations.remove(index);
+                if let Some(shadowed) = shadowed {
+                    self.relations.push(shadowed);
+                }
                 Ok(())
             }
             None => Err(ScopeError::NoMatch(name.to_string())),

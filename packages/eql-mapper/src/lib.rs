@@ -5094,7 +5094,7 @@ mod test {
         });
         let statement = parse(
             "INSERT INTO excluded (id, salary) VALUES (1, 20000) \
-             ON CONFLICT (id) DO UPDATE SET salary = 30000",
+             ON CONFLICT (id) DO UPDATE SET salary = excluded.salary",
         );
 
         type_check(schema, &statement).unwrap();
