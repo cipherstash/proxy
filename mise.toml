@@ -1,3 +1,12 @@
+[settings]
+# Config for test environments. Anchor these paths to this config so they are
+# trusted regardless of the task's working directory.
+trusted_config_paths = [
+  "{{config_root}}/tests/mise.toml",
+  "{{config_root}}/tests/mise.tcp.toml",
+  "{{config_root}}/tests/mise.tls.toml",
+]
+
 [task_config]
 includes = ["tests/tasks"]
 

@@ -49,7 +49,9 @@ impl<'ast> Importer<'ast> {
         {
             let table = self.table_resolver.resolve_table(table_name)?;
 
-            let projection = Projection::new_from_schema_table(table.clone())?;
+            let projection = Arc::new(Type::Value(Value::Projection(
+                Projection::new_from_schema_table(table.clone())?,
+            )));
 
             // The relation is named — by its alias when one is written, by the
             // table name otherwise — so that qualified references (`t.col` in
@@ -61,10 +63,10 @@ impl<'ast> Importer<'ast> {
 
             self.scope_tracker.borrow_mut().add_relation(Relation {
                 name,
-                projection_type: Type::Value(Value::Projection(projection.clone())).into(),
+                projection_type: Arc::clone(&projection),
             })?;
 
-            Ok(Type::Value(Value::Projection(projection)).into())
+            Ok(projection)
         } else {
             Err(ImportError::Unsupported(
                 "unsupported TableObject variant in Insert".to_string(),
@@ -306,8 +308,8 @@ pub enum ImportError {
     #[error(transparent)]
     ScopeError(#[from] ScopeError),
 
-    #[error("Expected projection")]
-    ExpectedProjection,
+    #[error("Importer traversal invariant failed: {0}")]
+    TraversalInvariant(&'static str),
 
     #[error(transparent)]
     TypeError(#[from] TypeError),
@@ -336,9 +338,11 @@ impl<'ast> Visitor<'ast> for Importer<'ast> {
         // the clause boundary keeps it visible to assignments and the WHERE
         // predicate, but not to the INSERT source or RETURNING clause.
         if let Some(on_conflict) = node.downcast_ref::<OnConflict>() {
-            if matches!(on_conflict.action, OnConflictAction::DoUpdate(_)) {
+            if on_conflict_is_update(on_conflict) {
                 let Some(projection_type) = self.insert_projections.last().cloned() else {
-                    return ControlFlow::Break(Break::Err(ImportError::ExpectedProjection));
+                    return ControlFlow::Break(Break::Err(ImportError::TraversalInvariant(
+                        "ON CONFLICT DO UPDATE has no enclosing INSERT projection",
+                    )));
                 };
 
                 if let Err(err) = self.scope_tracker.borrow_mut().add_relation(Relation {
@@ -355,7 +359,9 @@ impl<'ast> Visitor<'ast> for Importer<'ast> {
 
     fn exit<N: Visitable>(&mut self, node: &'ast N) -> ControlFlow<Break<Self::Error>> {
         if let Some(on_conflict) = node.downcast_ref::<OnConflict>() {
-            if matches!(on_conflict.action, OnConflictAction::DoUpdate(_)) {
+            if on_conflict_is_update(on_conflict) {
+                // Remove the pseudo-relation added on entry before traversal
+                // continues into the INSERT's RETURNING clause.
                 if let Err(err) = self
                     .scope_tracker
                     .borrow_mut()
@@ -366,8 +372,12 @@ impl<'ast> Visitor<'ast> for Importer<'ast> {
             }
         }
 
-        if node.downcast_ref::<Insert>().is_some() && self.insert_projections.pop().is_none() {
-            return ControlFlow::Break(Break::Err(ImportError::ExpectedProjection));
+        if let Some(_insert) = node.downcast_ref::<Insert>() {
+            if self.insert_projections.pop().is_none() {
+                return ControlFlow::Break(Break::Err(ImportError::TraversalInvariant(
+                    "INSERT exited without a matching projection",
+                )));
+            }
         }
 
         if let Some(cte) = node.downcast_ref::<Cte>() {
@@ -384,4 +394,8 @@ impl<'ast> Visitor<'ast> for Importer<'ast> {
 
         ControlFlow::Continue(())
     }
+}
+
+fn on_conflict_is_update(on_conflict: &OnConflict) -> bool {
+    matches!(on_conflict.action, OnConflictAction::DoUpdate(_))
 }

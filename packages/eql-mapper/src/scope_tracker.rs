@@ -241,25 +241,14 @@ impl<'ast> Scope<'ast> {
 
     fn remove_relation(&mut self, name: &Ident) -> Result<(), ScopeError> {
         let name = IdentCase(name);
-        let matches = self
-            .relations
-            .iter()
-            .enumerate()
-            .filter_map(|(index, relation)| {
-                (relation.name.as_ref().map(IdentCase::from).as_ref() == Some(&name))
-                    .then_some(index)
-            })
-            .collect::<Vec<_>>();
-
-        match matches.as_slice() {
-            [index] => {
-                self.relations.remove(*index);
+        match self.relations.iter().rposition(|relation| {
+            relation.name.as_ref().map(IdentCase::from).as_ref() == Some(&name)
+        }) {
+            Some(index) => {
+                self.relations.remove(index);
                 Ok(())
             }
-            [] => Err(ScopeError::NoMatch(name.to_string())),
-            _ => Err(ScopeError::InvariantFailed(format!(
-                "multiple relations named {name} in the current scope"
-            ))),
+            None => Err(ScopeError::NoMatch(name.to_string())),
         }
     }
 

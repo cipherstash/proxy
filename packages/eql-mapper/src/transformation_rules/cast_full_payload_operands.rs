@@ -1,11 +1,10 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use sqltk::parser::ast::{
-    Assignment, Expr, Function, FunctionArg, FunctionArgExpr, FunctionArguments, Values,
-};
+use sqltk::parser::ast::{Assignment, Expr, Function, FunctionArguments, Values};
 use sqltk::{NodeKey, NodePath, Visitable};
 
+use crate::function_arg::{function_arg_value, function_arg_value_mut};
 use crate::unifier::{Type, Value};
 use crate::EqlMapperError;
 
@@ -63,18 +62,7 @@ impl<'ast> CastFullPayloadOperands<'ast> {
             _ => None,
         };
 
-        args.into_iter().flatten().filter_map(|arg| match arg {
-            FunctionArg::Unnamed(FunctionArgExpr::Expr(expr))
-            | FunctionArg::Named {
-                arg: FunctionArgExpr::Expr(expr),
-                ..
-            } => Some(expr.as_ref()),
-            FunctionArg::ExprNamed { arg, .. } => match arg.as_ref() {
-                FunctionArgExpr::Expr(expr) => Some(expr.as_ref()),
-                _ => None,
-            },
-            _ => None,
-        })
+        args.into_iter().flatten().filter_map(function_arg_value)
     }
 
     fn args_mut(function: &mut Function) -> impl Iterator<Item = &mut Expr> {
@@ -83,18 +71,9 @@ impl<'ast> CastFullPayloadOperands<'ast> {
             _ => None,
         };
 
-        args.into_iter().flatten().filter_map(|arg| match arg {
-            FunctionArg::Unnamed(FunctionArgExpr::Expr(expr))
-            | FunctionArg::Named {
-                arg: FunctionArgExpr::Expr(expr),
-                ..
-            } => Some(expr.as_mut()),
-            FunctionArg::ExprNamed { arg, .. } => match arg.as_mut() {
-                FunctionArgExpr::Expr(expr) => Some(expr.as_mut()),
-                _ => None,
-            },
-            _ => None,
-        })
+        args.into_iter()
+            .flatten()
+            .filter_map(function_arg_value_mut)
     }
 
     /// Whether `function` is an `eql_v3.*` call — the only functions whose

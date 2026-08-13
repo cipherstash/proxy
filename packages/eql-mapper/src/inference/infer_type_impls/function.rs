@@ -1,10 +1,8 @@
 use eql_mapper_macros::trace_infer;
-use sqltk::parser::ast::{
-    DuplicateTreatment, Function, FunctionArg, FunctionArgExpr, FunctionArgumentClause,
-    FunctionArguments,
-};
+use sqltk::parser::ast::{DuplicateTreatment, Function, FunctionArgumentClause, FunctionArguments};
 
 use crate::{
+    function_arg::function_arg_value,
     get_sql_function,
     inference::infer_type::InferType,
     unifier::{Type, Value},
@@ -39,19 +37,7 @@ impl<'ast> InferType<'ast, Function> for TypeInferencer<'ast> {
             // silently returns the row count.
             if list.duplicate_treatment == Some(DuplicateTreatment::Distinct) {
                 for arg in &list.args {
-                    let expr = match arg {
-                        FunctionArg::Unnamed(FunctionArgExpr::Expr(expr))
-                        | FunctionArg::Named {
-                            arg: FunctionArgExpr::Expr(expr),
-                            ..
-                        } => Some(expr.as_ref()),
-                        FunctionArg::ExprNamed { arg, .. } => match arg.as_ref() {
-                            FunctionArgExpr::Expr(expr) => Some(expr.as_ref()),
-                            _ => None,
-                        },
-                        _ => None,
-                    };
-                    if let Some(expr) = expr {
+                    if let Some(expr) = function_arg_value(arg) {
                         self.unify_node_with_bound(expr, EqlTrait::Eq)?;
                     }
                 }

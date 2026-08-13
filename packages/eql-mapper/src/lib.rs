@@ -3,6 +3,7 @@
 mod dep;
 mod display_helpers;
 mod eql_mapper;
+mod function_arg;
 mod importer;
 mod inference;
 mod iterator_ext;
@@ -40,7 +41,7 @@ pub(crate) use transformation_rules::*;
 
 #[cfg(test)]
 mod test {
-    use super::{test_helpers::*, type_check};
+    use super::{test_helpers::*, type_check, EqlMapperError, ScopeError, TypeError};
     use crate::{
         projection, schema, test_helpers,
         unifier::{
@@ -4979,10 +4980,120 @@ mod test {
              RETURNING excluded.salary",
         );
 
-        assert!(
-            type_check(schema, &statement).is_err(),
-            "excluded must not be visible outside ON CONFLICT DO UPDATE"
+        assert_eq!(
+            type_check(schema, &statement).unwrap_err(),
+            EqlMapperError::Type(TypeError::ScopeError(ScopeError::NoMatch(
+                "excluded.salary".into()
+            )))
         );
+    }
+
+    #[test]
+    fn insert_source_cannot_reference_excluded() {
+        let schema = resolver(schema! {
+            tables: {
+                employees: {
+                    id,
+                    salary (EQL),
+                }
+            }
+        });
+        let statement = parse(
+            "INSERT INTO employees (id, salary) \
+             SELECT excluded.id, excluded.salary FROM employees \
+             ON CONFLICT (id) DO UPDATE SET salary = excluded.salary",
+        );
+
+        assert_eq!(
+            type_check(schema, &statement).unwrap_err(),
+            EqlMapperError::Type(TypeError::ScopeError(ScopeError::NoMatch(
+                "excluded.id".into()
+            )))
+        );
+    }
+
+    #[test]
+    fn insert_on_conflict_returning_cannot_reference_excluded_wildcard() {
+        let schema = resolver(schema! {
+            tables: {
+                employees: {
+                    id,
+                    salary (EQL),
+                }
+            }
+        });
+        let statement = parse(
+            "INSERT INTO employees (id, salary) VALUES (1, 20000) \
+             ON CONFLICT (id) DO UPDATE SET salary = excluded.salary \
+             RETURNING excluded.*",
+        );
+
+        assert_eq!(
+            type_check(schema, &statement).unwrap_err(),
+            EqlMapperError::Type(TypeError::ScopeError(ScopeError::NoMatch(
+                "excluded".into()
+            )))
+        );
+    }
+
+    #[test]
+    fn insert_into_table_named_excluded_is_valid() {
+        let schema = resolver(schema! {
+            tables: {
+                excluded: {
+                    id,
+                    salary,
+                }
+            }
+        });
+        let statement = parse(
+            "INSERT INTO excluded (id, salary) VALUES (1, 20000) \
+             ON CONFLICT (id) DO UPDATE SET salary = 30000",
+        );
+
+        type_check(schema, &statement).unwrap();
+    }
+
+    #[test]
+    fn insert_on_conflict_update_keeps_unqualified_columns_ambiguous() {
+        let schema = resolver(schema! {
+            tables: {
+                employees: {
+                    id,
+                    salary,
+                }
+            }
+        });
+        let statement = parse(
+            "INSERT INTO employees (id, salary) VALUES (1, 20000) \
+             ON CONFLICT (id) DO UPDATE SET salary = salary",
+        );
+
+        assert_eq!(
+            type_check(schema, &statement).unwrap_err(),
+            EqlMapperError::Type(TypeError::ScopeError(ScopeError::AmbiguousMatch(
+                "salary".into()
+            )))
+        );
+    }
+
+    #[test]
+    fn insert_on_conflict_do_nothing_does_not_add_excluded() {
+        let schema = resolver(schema! {
+            tables: {
+                employees: {
+                    id,
+                    salary,
+                }
+            }
+        });
+
+        for sql in [
+            "INSERT INTO employees (id, salary) VALUES (1, 20000) ON CONFLICT (id) DO NOTHING",
+            "INSERT INTO employees (id, salary) VALUES (1, 20000) ON CONFLICT (id) DO NOTHING RETURNING *",
+        ] {
+            type_check(Arc::clone(&schema), &parse(sql)).unwrap();
+        }
     }
 
     #[test]
