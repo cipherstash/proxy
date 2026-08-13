@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786598490606,
+  "lastUpdate": 1786598885467,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -24115,6 +24115,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 41.47751,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "893af9e8ab8b6864ef908761517562bd619baadd",
+          "message": "chore: upgrade sqltk to 0.11.0",
+          "timestamp": "2026-08-11T08:09:27Z",
+          "url": "https://github.com/cipherstash/proxy/pull/448/commits/893af9e8ab8b6864ef908761517562bd619baadd"
+        },
+        "date": 1786598883865,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 41.418346,
             "unit": "Number"
           }
         ]
