@@ -6,6 +6,9 @@ compile-time checked bounded pipeline dispatch to `pg-proto` 0.5.0. The
 remaining transport adapters below would be better eliminated in `pg-proto`
 itself.
 
+The 0.5.0 version above is the historical baseline when these follow-ups were
+written; the completed migration now uses pg-proto 0.10.5.
+
 ## Preserve buffered transport state across a split
 
 `Buffered::into_inner()` cannot return retained inbound bytes, pending outbound
@@ -38,3 +41,16 @@ startup and authentication policy, typed frontend/backend middleware, timeout
 policy, and an output strategy. It should own framing, phase transitions,
 bounded pipeline dispatch, demultiplexing, and shutdown. Applications would then
 only supply policy and message transformations.
+
+## Allow intermediary sessions to run on a multithreaded executor
+
+The async futures returned by pg-proto's intermediary TLS and middleware traits
+are not required to be `Send`. Proxy must consequently run the connection
+driver in a `LocalSet`; a single `LocalSet` is pinned to one runtime worker even
+when the Tokio runtime is configured with multiple worker threads.
+
+A `Send`-capable intermediary API (or equivalent bounds on the existing traits)
+would let proxy spawn each connection directly onto the multithreaded runtime
+and restore distribution across all configured workers. Until then, preserving
+the current API safely is preferable to asserting `Send` or creating an
+unbounded collection of per-thread runtimes.

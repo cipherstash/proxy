@@ -3,7 +3,7 @@ use super::super::data::to_sql;
 use super::super::error_handler::PostgreSqlErrorHandler;
 use super::super::rewrite::UNSPECIFIED_TYPE_OID;
 use super::super::Column;
-use crate::error::{EncryptError, Error};
+use crate::error::{EncryptError, Error, ProtocolError};
 use crate::log::{CONTEXT, DEVELOPMENT, MAPPER, PROTOCOL};
 use crate::postgresql::context::Portal;
 use crate::postgresql::rewrite::data_row;
@@ -134,6 +134,14 @@ impl<S: EncryptionService> Backend<S> {
                         self.context.finish_session(session);
                     }
                 }
+                BackendMessage::RowDescription(_) | BackendMessage::NoData => {
+                    if let Some(operation) = operation {
+                        self.context.complete_describe(operation);
+                    }
+                }
+                BackendMessage::ReadyForQuery(status) => {
+                    self.context.set_transaction_status(status);
+                }
                 _ => {}
             }
 
@@ -203,7 +211,8 @@ impl<S: EncryptionService> Backend<S> {
             // Reload for SompleQuery flow
             // Reload is potentially triggered by a FrontEnd Sync message.
             // However, the SimpleQuery flow does not use Sync so we check here as well
-            BackendMessage::ReadyForQuery(_) => {
+            BackendMessage::ReadyForQuery(status) => {
+                self.context.set_transaction_status(status);
                 debug!(target: PROTOCOL,
                     client_id = self.context.client_id,
                     msg = "ReadyForQuery"
@@ -317,28 +326,15 @@ impl<S: EncryptionService> Backend<S> {
         let mut operation = None;
         let mut rows = Vec::with_capacity(held.iter().len());
         for (row_operation, message) in held.iter() {
-            let row_operation = row_operation.ok_or_else(|| {
-                std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    "held DataRow has no operation",
-                )
-            })?;
+            let row_operation = row_operation.ok_or(ProtocolError::HeldDataRowMissingOperation)?;
             if operation
                 .replace(row_operation)
                 .is_some_and(|current| current != row_operation)
             {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    "held DataRow span crosses Execute operations",
-                )
-                .into());
+                return Err(ProtocolError::HeldDataRowOperationMismatch.into());
             }
             let BackendMessage::DataRow(row) = message else {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    "held backend span contains a non-DataRow message",
-                )
-                .into());
+                return Err(ProtocolError::HeldBackendMessageNotDataRow.into());
             };
             rows.push(row.clone());
         }
@@ -349,11 +345,7 @@ impl<S: EncryptionService> Backend<S> {
             Some(Portal::Encrypted { .. }) => portal.unwrap(),
             _ => {
                 debug!(target: MAPPER, client_id = self.context.client_id, msg = "Passthrough portal");
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    "held DataRows do not belong to an encrypted portal",
-                )
-                .into());
+                return Err(ProtocolError::HeldDataRowsNotEncrypted.into());
             }
         };
         debug!(target: DEVELOPMENT, client_id = self.context.client_id, rows = rows.len());

@@ -54,7 +54,7 @@ pub enum Error {
     Unknown,
 
     #[error(transparent)]
-    SendError(#[from] tokio::sync::mpsc::error::SendError<pg_proto::BackendMessage>),
+    Send(#[from] tokio::sync::mpsc::error::SendError<pg_proto::BackendMessage>),
 }
 
 impl Error {
@@ -472,6 +472,21 @@ pub enum ProtocolError {
 
     #[error("Client authentication failed. Check username and password. For help visit {}#authentication-failed-client", ERROR_DOC_BASE_URL)]
     ClientAuthenticationFailed,
+
+    #[error("A buffered PostgreSQL DataRow was not associated with an operation")]
+    HeldDataRowMissingOperation,
+
+    #[error("Buffered PostgreSQL DataRows crossed Execute operation boundaries")]
+    HeldDataRowOperationMismatch,
+
+    #[error("A buffered PostgreSQL response was not a DataRow")]
+    HeldBackendMessageNotDataRow,
+
+    #[error("Buffered PostgreSQL DataRows were not associated with an encrypted portal")]
+    HeldDataRowsNotEncrypted,
+
+    #[error("Expected {expected} DataRow columns, received {received}")]
+    DataRowColumnCountMismatch { expected: usize, received: usize },
 
     #[error("Expected {expected} parameter format codes, received {received}")]
     ParameterFormatCodesMismatch { expected: usize, received: usize },

@@ -1,5 +1,8 @@
 # pg-proto Migration
 
+> Historical plan: this records the migration's initial 0.2.1 baseline. The
+> completed implementation now uses pg-proto 0.10.5.
+
 ## Summary
 
 - Create `/Users/jamessadler/cipherstash/proxy-pg-proto` from current `main` (`15b7f996`) on branch `refactor/pg-proto`.

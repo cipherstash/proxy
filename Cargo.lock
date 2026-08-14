@@ -858,6 +858,7 @@ dependencies = [
  "rustls-platform-verifier 0.5.1",
  "serde",
  "serde_json",
+ "socket2 0.6.5",
  "sqltk",
  "temp-env",
  "thiserror 2.0.18",
