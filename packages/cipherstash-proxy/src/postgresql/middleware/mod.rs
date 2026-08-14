@@ -23,6 +23,8 @@ impl<S, ServerContext, ClientContext> IntermediaryMiddlewareFactory<ServerContex
     for CipherStashMiddlewareFactory<S>
 where
     S: EncryptionService + Clone,
+    ServerContext: Sync,
+    ClientContext: Sync,
 {
     type Handler = CipherStashMiddleware<S>;
     fn create(&self, _: &ServerContext, _: &ClientContext) -> Self::Handler {
@@ -43,6 +45,8 @@ impl<S, ServerContext, ClientContext> IntermediaryMiddleware<(), ServerContext, 
     for CipherStashMiddleware<S>
 where
     S: EncryptionService + Clone,
+    ServerContext: Sync,
+    ClientContext: Sync,
 {
     type Error = Error;
 
