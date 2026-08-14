@@ -67,7 +67,8 @@ run = """
 # Exit immediately if any command returns non-zero. Stops proxy from starting when the build fails
 set -e
 
-{% set target = arch() ~ "-unknown-linux-gnu" | replace(from="arm64", to="aarch64") | replace(from="x64", to="x86_64") %}
+{% set target_arch = arch() | replace(from="arm64", to="aarch64") | replace(from="x64", to="x86_64") %}
+{% set target = target_arch ~ "-unknown-linux-gnu" %}
 {% set docker_platform = "linux/" ~ arch() | replace(from="x64", to="amd64") %}
 
 # build a binary
@@ -232,7 +233,7 @@ run = "mise run test:nextest {{arg(name='test',default='')}}"
 dir = "{{config_root}}"
 run = """
 {% set default_host = get_env(name="CS_DATABASE__HOST",default="localhost") %}
-{% set default_port = get_env(name="CS_DATABASE__PORT",default=5432) %}
+{% set default_port = get_env(name="CS_DATABASE__PORT",default="5432") %}
 host={{option(name="host",default=default_host)}}
 port={{option(name="port",default=default_port)}}
 tls={{flag(name="tls")}}
@@ -244,12 +245,15 @@ echo "Testing presence of Postgres at ${host}:${port} with a maximum of ${max_re
 postgres_ready () {
   # tls test
   if [ "$1" = "true" ]; then
-    response="$(echo | openssl s_client -starttls postgres -connect $host:$port -state -no_ign_eof 2>&1)"
-    success=$?
+    # PostgreSQL SSLRequest: length (8) + request code (80877103). A TLS-capable
+    # server replies with a single `S` byte. This is portable to macOS, whose
+    # LibreSSL does not support `openssl s_client -starttls postgres`.
+    response="$(printf '\\x00\\x00\\x00\\x08\\x04\\xd2\\x16\\x2f' | nc -w 1 "$host" "$port" 2>/dev/null)"
     if [ -n "${DEBUG}" ]; then
       echo "response: ${response}"
     fi
-    return $success
+    [ "$response" = "S" ]
+    return $?
   else
     # plaintext test
     # We blackhole stderr (2>/dev/null) below because nc is echoing to stderr,
@@ -653,7 +657,7 @@ fi
 export CIPHERSTASH_CLIENT_SECONDARY_USER_AGENT="cipherstash-proxy/${BUILD_VERSION}"
 
 # cross-compile
-rustup update
+rustup toolchain install stable --profile minimal --no-self-update
 rustup target add --toolchain stable {{ target }}
 
 cargo build --locked --target {{ target }} --release --package cipherstash-proxy
