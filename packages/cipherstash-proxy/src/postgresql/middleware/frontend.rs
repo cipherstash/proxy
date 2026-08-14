@@ -700,6 +700,15 @@ impl<S: EncryptionService> Frontend<S> {
         let mut statement_text = String::from_utf8_lossy(&message.query).into_owned();
         let statement = SqlParser::parse_statement(&statement_text)?;
 
+        // Record diagnostics before any passthrough path can return early.
+        // Statements that do not require EQL type checking (for example,
+        // plaintext INSERTs and SELECT pg_sleep(...)) still need their real
+        // statement type and fingerprint in metrics.
+        self.context.update_statement_metadata(session_id, |m| {
+            m.statement_type = Some(StatementType::from_statement(&statement));
+            m.set_query_fingerprint(&statement_text);
+        });
+
         if let Some(mapping_disabled) = self.context.maybe_set_unsafe_disable_mapping(&statement) {
             warn!(
                 msg = "SET CIPHERSTASH.DISABLE_MAPPING = {mapping_disabled}",
@@ -800,12 +809,6 @@ impl<S: EncryptionService> Frontend<S> {
             self.context
                 .record_parse_duration(session_id, parse_timer.elapsed());
         }
-
-        // Set statement type and fingerprint
-        self.context.update_statement_metadata(session_id, |m| {
-            m.statement_type = Some(StatementType::from_statement(&statement));
-            m.set_query_fingerprint(&statement_text);
-        });
 
         if message.query != original_query || message.parameter_types != client_param_types {
             let message = FrontendMessage::Parse(message);
