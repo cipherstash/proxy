@@ -1,4 +1,5 @@
 use crate::{config::ServerConfig, error::Error, tls, DatabaseConfig};
+use socket2::{SockRef, TcpKeepalive};
 use std::time::Duration;
 use tokio::{
     net::{TcpListener, TcpStream},
@@ -17,6 +18,25 @@ const TCP_KEEPALIVE_RETRIES: u32 = 5;
 fn configure_tcp(stream: &TcpStream) {
     if let Err(error) = stream.set_nodelay(true) {
         warn!(msg = "Error configuring TCP_NODELAY", error = %error);
+    }
+
+    let socket = SockRef::from(stream);
+    #[cfg(target_os = "linux")]
+    if let Err(error) = socket.set_tcp_user_timeout(Some(TCP_USER_TIMEOUT)) {
+        warn!(msg = "Error configuring TCP_USER_TIMEOUT", error = %error);
+    }
+
+    if let Err(error) = socket.set_keepalive(true) {
+        warn!(msg = "Error enabling TCP keepalive", error = %error);
+        return;
+    }
+
+    let keepalive = TcpKeepalive::new()
+        .with_interval(TCP_KEEPALIVE_INTERVAL)
+        .with_time(TCP_KEEPALIVE_TIME)
+        .with_retries(TCP_KEEPALIVE_RETRIES);
+    if let Err(error) = socket.set_tcp_keepalive(&keepalive) {
+        warn!(msg = "Error configuring TCP keepalive", error = %error);
     }
 }
 

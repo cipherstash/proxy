@@ -18,7 +18,7 @@ use crate::{
 use cipherstash_client::IdentifiedBy;
 use eql_mapper::{Schema, TableResolver};
 use metrics::{counter, histogram};
-use pg_proto::{Describe, DescribeTarget, OperationId};
+use pg_proto::{Describe, DescribeTarget, OperationId, TransactionStatus};
 use serde_json::json;
 use sqltk::parser::ast::{Expr, Ident, ObjectName, ObjectNamePart, Set, Value, ValueWithSpan};
 pub use statement_metadata::StatementMetadata;
@@ -67,6 +67,7 @@ where
     unsafe_disable_mapping: bool,
     keyset_id: Arc<RwLock<Option<KeysetIdentifier>>>,
     session_id_counter: Arc<AtomicU64>,
+    transaction_status: Arc<RwLock<TransactionStatus>>,
 }
 
 /// Context for tracking an in-flight Execute operation.
@@ -192,6 +193,7 @@ where
             unsafe_disable_mapping: false,
             keyset_id: Arc::new(RwLock::new(None)),
             session_id_counter: Arc::new(AtomicU64::new(1)),
+            transaction_status: Arc::new(RwLock::new(TransactionStatus::Idle)),
         }
     }
 
@@ -424,10 +426,25 @@ where
             .write()
             .map(|mut guarded| guarded.remove(name));
 
-        let _ = self
+        let session_id = self
             .statement_sessions
             .write()
-            .map(|mut guarded| guarded.remove(name));
+            .ok()
+            .and_then(|mut guarded| guarded.remove(name));
+        self.finish_session(session_id);
+    }
+
+    pub fn transaction_status(&self) -> TransactionStatus {
+        self.transaction_status
+            .read()
+            .map(|status| *status)
+            .unwrap_or(TransactionStatus::Idle)
+    }
+
+    pub fn set_transaction_status(&mut self, status: TransactionStatus) {
+        if let Ok(mut current) = self.transaction_status.write() {
+            *current = status;
+        }
     }
 
     /// Close both statement and its associated portal.
@@ -1059,6 +1076,7 @@ mod tests {
     };
     use cipherstash_client::IdentifiedBy;
     use eql_mapper::Schema;
+    use pg_proto::TransactionStatus;
     use sqltk::parser::{dialect::PostgreSqlDialect, parser::Parser};
     use std::sync::Arc;
     use tokio::sync::mpsc;
@@ -1119,6 +1137,32 @@ mod tests {
 
     fn portal(statement: &Arc<Statement>) -> Portal {
         Portal::encrypted_with_format_codes(statement.clone(), vec![], None)
+    }
+
+    #[test]
+    fn closing_a_statement_finishes_its_metrics_session() {
+        let mut context = create_context();
+        let name = Name::default();
+        let session_id = context.start_session();
+        context.set_statement_session(name.clone(), session_id);
+
+        context.close_statement(&name);
+
+        assert!(context.get_session_metrics(session_id).is_none());
+        assert!(context.get_statement_session(&name).is_none());
+    }
+
+    #[test]
+    fn transaction_status_tracks_backend_ready_state() {
+        let mut context = create_context();
+        assert_eq!(context.transaction_status(), TransactionStatus::Idle);
+
+        context.set_transaction_status(TransactionStatus::InTransaction);
+
+        assert_eq!(
+            context.transaction_status(),
+            TransactionStatus::InTransaction
+        );
     }
 
     fn get_statement(portal: Arc<Portal>) -> Arc<Statement> {

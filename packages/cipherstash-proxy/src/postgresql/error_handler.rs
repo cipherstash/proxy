@@ -18,18 +18,21 @@ pub trait PostgreSqlErrorHandler {
     /// Get the client ID for logging purposes
     fn client_id(&self) -> i32;
 
-    /// Convert various error types into appropriate PostgreSQL ErrorResponse messages.
+    /// Convert various error types into PostgreSQL `DiagnosticResponse` messages.
     ///
     /// # Error Type Mapping
     ///
-    /// - `MappingError` -> InvalidSqlStatement error
+    /// - `MappingError::InvalidParameter` -> Invalid parameter error
+    /// - Other `MappingError` values -> Invalid SQL statement error
     /// - `EncryptError::UnknownColumn` -> Unknown column error
-    /// - `EncryptError::CouldNotRetrieveKey` -> Key retrieval error
+    /// - `EncryptError::CouldNotDecryptDataForKeyset` -> System error
+    /// - `EncryptError::UnknownKeysetIdentifier` -> System error
+    /// - `Error::ConnectionTimeout` -> Idle session timeout error
     /// - All others -> System error
     ///
     /// # Arguments
     ///
-    /// * `err` - The error to be converted to a PostgreSQL ErrorResponse
+    /// * `err` - The error to be converted to a `DiagnosticResponse`
     fn error_to_response(&self, err: Error) -> DiagnosticResponse {
         match err {
             Error::Mapping(MappingError::InvalidParameter(ref column)) => {

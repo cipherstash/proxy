@@ -1,7 +1,7 @@
 //! CipherStash DataRow rewriting.
 use crate::EqlCiphertext;
 use crate::{
-    error::{EncryptError, Error},
+    error::{EncryptError, Error, ProtocolError},
     log::DECRYPT,
     postgresql::Column,
 };
@@ -47,10 +47,17 @@ pub fn as_ciphertext(
 }
 
 pub fn rewrite(row: &mut DataRow, plaintexts: &[Option<BytesMut>]) -> Result<(), Error> {
+    if plaintexts.len() > row.columns.len() {
+        return Err(ProtocolError::DataRowColumnCountMismatch {
+            expected: plaintexts.len(),
+            received: row.columns.len(),
+        }
+        .into());
+    }
     for (idx, pt) in plaintexts.iter().enumerate() {
         if let Some(bytes) = pt {
-            if row.columns[idx].is_some() {
-                row.columns[idx] = Some(Bytes::copy_from_slice(bytes));
+            if let Some(column @ Some(_)) = row.columns.get_mut(idx) {
+                *column = Some(Bytes::copy_from_slice(bytes));
             }
         }
     }
@@ -150,13 +157,13 @@ fn log_deserialise_error(err: serde_json::Error) -> Error {
 
 #[cfg(test)]
 mod tests {
-    use super::as_ciphertext;
-    use crate::Identifier;
+    use super::{as_ciphertext, rewrite};
     use crate::{
         config::{LogConfig, LogLevel},
         log,
         postgresql::Column,
     };
+    use crate::{error::ProtocolError, Identifier};
     use bytes::{Buf, Bytes};
     use cipherstash_client::schema::{ColumnConfig, ColumnType};
     use pg_proto::DataRow as PgDataRow;
@@ -188,6 +195,24 @@ mod tests {
 
     fn column_config_with_id(column: &str) -> Vec<Option<Column>> {
         vec![None, column_config(column)]
+    }
+
+    #[test]
+    fn rewrite_rejects_more_plaintexts_than_columns() {
+        let mut row = PgDataRow {
+            columns: vec![Some(Bytes::from_static(b"one"))],
+        };
+        let plaintexts = vec![None, Some(bytes::BytesMut::from("two"))];
+
+        let error = rewrite(&mut row, &plaintexts).unwrap_err();
+
+        assert!(matches!(
+            error,
+            crate::error::Error::Protocol(ProtocolError::DataRowColumnCountMismatch {
+                expected: 2,
+                received: 1
+            })
+        ));
     }
 
     // The four `to_ciphertext_*` fixtures below are REAL EQL v3 wire captures

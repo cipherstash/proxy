@@ -29,7 +29,7 @@ use eql_mapper::{self, EqlMapperError, EqlTermVariant, JsonSelectorSegment, Type
 use metrics::{counter, histogram};
 use pg_proto::{
     BackendMessage, Close, Describe, DescribeTarget, Execute, FrontendMessage,
-    FrontendMiddlewareOutput, Parse, TransactionStatus,
+    FrontendMiddlewareOutput, Parse,
 };
 use serde::Serialize;
 use sqltk::parser::ast::{self, Value};
@@ -105,12 +105,11 @@ impl<S: EncryptionService> Frontend<S> {
         operation: pg_proto::OperationId,
         protocol_message: FrontendMessage,
     ) -> Result<FrontendMiddlewareOutput, Error> {
-        let request = protocol_message.clone();
-        let mut outbound_message = protocol_message.clone();
-
         if self.context.mapping_disabled() {
-            return Ok(FrontendMiddlewareOutput::Forward(outbound_message));
+            return Ok(FrontendMiddlewareOutput::Forward(protocol_message));
         }
+
+        let mut outbound_message = protocol_message.clone();
 
         match protocol_message {
             FrontendMessage::Query(query) => {
@@ -119,16 +118,18 @@ impl<S: EncryptionService> Frontend<S> {
                     // No mapping needed, don't change the bytes
                     Ok(None) => (),
                     Err(err) => {
+                        let session_id = self.context.latest_session_id();
+                        self.context.finish_session(session_id);
                         warn!(
                             client_id = self.context.client_id,
                             msg = "Query Handler Error",
                             error = ?err.to_string(),
                         );
                         return Ok(FrontendMiddlewareOutput::Respond {
-                            request,
+                            request: outbound_message,
                             responses: vec![
                                 self.error_response(err),
-                                BackendMessage::ReadyForQuery(TransactionStatus::Idle),
+                                BackendMessage::ReadyForQuery(self.context.transaction_status()),
                             ],
                         });
                     }
@@ -141,18 +142,20 @@ impl<S: EncryptionService> Frontend<S> {
                 self.execute_handler(operation, execute).await?;
             }
             FrontendMessage::Parse(parse) => {
+                let statement = parse.statement.clone();
                 match self.parse_handler(parse).await {
                     Ok(Some(mapped)) => outbound_message = mapped,
                     // No mapping needed, don't change the bytes
                     Ok(None) => (),
                     Err(err) => {
+                        self.context.close_statement(&statement);
                         warn!(
                             client_id = self.context.client_id,
                             msg = "Parse Handler Error",
                             error = ?err.to_string(),
                         );
                         return Ok(FrontendMiddlewareOutput::Respond {
-                            request,
+                            request: outbound_message,
                             responses: vec![self.error_response(err)],
                         });
                     }
@@ -170,7 +173,7 @@ impl<S: EncryptionService> Frontend<S> {
                                 msg = "EncryptError::InvalidParameter",
                             );
                             return Ok(FrontendMiddlewareOutput::Respond {
-                                request,
+                                request: outbound_message,
                                 responses: vec![self.error_response(err)],
                             });
                         }
@@ -180,7 +183,7 @@ impl<S: EncryptionService> Frontend<S> {
                                 msg = "EncryptError::UnknownKeysetIdentifier",
                             );
                             return Ok(FrontendMiddlewareOutput::Respond {
-                                request,
+                                request: outbound_message,
                                 responses: vec![self.error_response(err)],
                             });
                         }
@@ -191,7 +194,7 @@ impl<S: EncryptionService> Frontend<S> {
                                 err = err.to_string()
                             );
                             return Ok(FrontendMiddlewareOutput::Respond {
-                                request,
+                                request: outbound_message,
                                 responses: vec![self.error_response(err)],
                             });
                         }
@@ -663,9 +666,6 @@ impl<S: EncryptionService> Frontend<S> {
         });
 
         let parse_timer = PhaseTimer::start();
-
-        self.context
-            .set_statement_session(message.statement.to_owned(), session_id);
 
         debug!(
             target: PROTOCOL,
