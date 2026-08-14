@@ -14,7 +14,7 @@ use tracing::{info, warn};
 #[derive(Clone)]
 struct Route(String);
 
-impl<Peer> StartupRouteResolver<Peer> for Route {
+impl<Peer: Sync> StartupRouteResolver<Peer> for Route {
     type Error = Infallible;
     async fn resolve(
         &self,

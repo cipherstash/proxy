@@ -49,8 +49,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     });
 
-    let local = tokio::task::LocalSet::new();
-    runtime.block_on(local.run_until(async move {
+    runtime.block_on(async move {
         let shutdown_timeout = &config.server.shutdown_timeout();
 
         let mut proxy = init(config).await;
@@ -94,7 +93,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                     let context = proxy.context(client_id);
 
-                    tracker.spawn_local(async move {
+                    tracker.spawn(async move {
 
                         gauge!(CLIENTS_ACTIVE_CONNECTIONS).increment(1);
 
@@ -137,7 +136,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         if (tokio::time::timeout(*shutdown_timeout, tracker.wait()).await).is_err() {
             warn!(msg = "Terminated client connections", count = tracker.len());
         }
-    }));
+    });
     Ok(())
 }
 
