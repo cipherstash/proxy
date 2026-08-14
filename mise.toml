@@ -268,8 +268,14 @@ postgres_ready () {
     if [ -n "${DEBUG}" ]; then
       echo "response: ${response}"
     fi
-    [ "$response" = "S" ]
-    return $?
+    if [ "$response" = "S" ]; then
+      return 0
+    fi
+
+    # OpenBSD netcat on Linux can close the connection before reading the
+    # server's one-byte response. Fall back to OpenSSL there; macOS LibreSSL
+    # takes the raw-probe path above because it lacks PostgreSQL STARTTLS.
+    echo | openssl s_client -starttls postgres -connect "$host:$port" -no_ign_eof >/dev/null 2>&1
   else
     # plaintext test
     # We blackhole stderr (2>/dev/null) below because nc is echoing to stderr,
