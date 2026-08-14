@@ -3157,8 +3157,9 @@ checksum = "e3148f5046208a5d56bcfc03053e3ca6334e51da8dfb19b6cdc8b306fae3283e"
 
 [[package]]
 name = "pg-proto"
-version = "0.10.6"
-source = "git+https://github.com/freshtonic/pg-proto.git?rev=2cb11a4#2cb11a4fcfdcf73c31fda9fb3c83efa9b3041eeb"
+version = "0.10.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "090dec138252ccdd1768c0f69423faa28ea8a151a6405620e2b39006c37f8702"
 dependencies = [
  "base64 0.23.1",
  "bytes",
@@ -3179,8 +3180,9 @@ dependencies = [
 
 [[package]]
 name = "pg-proto-fsm"
-version = "0.10.6"
-source = "git+https://github.com/freshtonic/pg-proto.git?rev=2cb11a4#2cb11a4fcfdcf73c31fda9fb3c83efa9b3041eeb"
+version = "0.10.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "72884f9837a69af3a03ea338ce24011494a1f54e7217f151cadb0c135bc6c4c8"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -4047,7 +4049,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs 1.0.5",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
