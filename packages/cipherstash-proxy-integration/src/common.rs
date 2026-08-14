@@ -208,6 +208,11 @@ pub fn connection_config(port: u16) -> tokio_postgres::Config {
 }
 
 pub async fn connect_with_tls(port: u16) -> Client {
+    let (client, _connection_task) = connect_with_tls_and_task(port).await;
+    client
+}
+
+pub async fn connect_with_tls_and_task(port: u16) -> (Client, tokio::task::JoinHandle<()>) {
     let tls_config = configure_test_client();
     let tls = tokio_postgres_rustls::MakeRustlsConnect::new(tls_config);
 
@@ -217,12 +222,12 @@ pub async fn connect_with_tls(port: u16) -> Client {
         .await
         .expect("connection to database to succeed");
 
-    tokio::spawn(async move {
+    let connection_task = tokio::spawn(async move {
         if let Err(e) = connection.await {
             eprintln!("connection error: {e}");
         }
     });
-    client
+    (client, connection_task)
 }
 
 pub async fn connect(port: u16) -> Client {
