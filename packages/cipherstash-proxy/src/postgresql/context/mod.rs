@@ -421,10 +421,19 @@ where
     pub fn close_statement(&mut self, name: &Name) {
         debug!(target: CONTEXT, client_id = self.client_id, statement = ?name);
 
-        let _ = self
+        let statement = self
             .statements
             .write()
-            .map(|mut guarded| guarded.remove(name));
+            .ok()
+            .and_then(|mut guarded| guarded.remove(name));
+
+        if let Some(statement) = statement {
+            let _ = self.portals.write().map(|mut guarded| {
+                guarded.retain(|_, portal| {
+                    !matches!(portal.as_ref(), Portal::Encrypted { statement: portal_statement, .. } if Arc::ptr_eq(portal_statement, &statement))
+                });
+            });
+        }
 
         let session_id = self
             .statement_sessions
@@ -1216,6 +1225,30 @@ mod tests {
 
         assert!(context.get_session_metrics(session_id).is_none());
         assert!(context.get_statement_session(&name).is_none());
+    }
+
+    #[test]
+    fn closing_a_statement_invalidates_only_its_portals() {
+        let mut context = create_context();
+        let closed_statement_name = Name::from("closed_statement");
+        let retained_statement_name = Name::from("retained_statement");
+        context.add_statement(closed_statement_name.clone(), statement());
+        context.add_statement(retained_statement_name.clone(), statement());
+
+        let closed_statement = context.get_statement(&closed_statement_name).unwrap();
+        let retained_statement = context.get_statement(&retained_statement_name).unwrap();
+        let closed_portal_name = Name::from("differently_named_portal");
+        let retained_portal_name = Name::from("retained_portal");
+        let passthrough_portal_name = Name::from("passthrough_portal");
+        context.add_portal(closed_portal_name.clone(), portal(&closed_statement));
+        context.add_portal(retained_portal_name.clone(), portal(&retained_statement));
+        context.add_portal(passthrough_portal_name.clone(), Portal::passthrough(None));
+
+        context.close_statement(&closed_statement_name);
+
+        assert!(context.get_portal(&closed_portal_name).is_none());
+        assert!(context.get_portal(&retained_portal_name).is_some());
+        assert!(context.get_portal(&passthrough_portal_name).is_some());
     }
 
     #[test]

@@ -5,7 +5,8 @@ use metrics_exporter_prometheus::BuildError;
 use std::{io, time::Duration};
 use thiserror::Error;
 
-const ERROR_DOC_BASE_URL: &str = "https://github.com/cipherstash/proxy/blob/main/docs/errors.md";
+pub(crate) const ERROR_DOC_BASE_URL: &str =
+    "https://github.com/cipherstash/proxy/blob/main/docs/errors.md";
 const ERROR_DOC_CONFIG_URL: &str =
     "https://github.com/cipherstash/proxy/blob/main/docs/how-to/index.md#configuring-proxy";
 
