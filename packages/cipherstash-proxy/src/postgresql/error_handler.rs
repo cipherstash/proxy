@@ -4,7 +4,7 @@
 /// components, ensuring that all errors are properly converted to PostgreSQL
 /// ErrorResponse messages and sent to clients in a protocol-compliant manner.
 use crate::{
-    error::{EncryptError, Error, MappingError},
+    error::{EncryptError, Error, MappingError, ProtocolError, ERROR_DOC_BASE_URL},
     postgresql::diagnostics,
 };
 use pg_proto::DiagnosticResponse;
@@ -54,6 +54,14 @@ pub trait PostgreSqlErrorHandler {
                 diagnostics::system_error(err.to_string())
             }
             Error::ConnectionTimeout { .. } => diagnostics::connection_timeout(err.to_string()),
+            Error::Protocol(
+                ProtocolError::HeldDataRowMissingOperation
+                | ProtocolError::HeldDataRowOperationMismatch
+                | ProtocolError::HeldBackendMessageNotDataRow
+                | ProtocolError::HeldDataRowsNotEncrypted,
+            ) => diagnostics::system_error(format!(
+                "CipherStash Proxy encountered an internal PostgreSQL protocol error. For help visit {ERROR_DOC_BASE_URL}#protocol-internal-error"
+            )),
             _ => diagnostics::system_error(err.to_string()),
         }
     }
@@ -102,5 +110,22 @@ mod tests {
         let err = Error::Unknown;
         let response = handler.error_to_response(err);
         assert_eq!(field(&response, b'C'), Some(CODE_SYSTEM_ERROR));
+    }
+
+    #[test]
+    fn internal_protocol_error_does_not_expose_implementation_details() {
+        let handler = TestHandler;
+        let err = Error::Protocol(ProtocolError::HeldDataRowOperationMismatch);
+        let response = handler.error_to_response(err);
+
+        assert_eq!(field(&response, b'C'), Some(CODE_SYSTEM_ERROR));
+        assert_eq!(
+            field(&response, b'M'),
+            Some(concat!(
+                "CipherStash Proxy encountered an internal PostgreSQL protocol error. ",
+                "For help visit https://github.com/cipherstash/proxy/blob/main/docs/errors.md",
+                "#protocol-internal-error"
+            ))
+        );
     }
 }

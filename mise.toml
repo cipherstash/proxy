@@ -245,21 +245,11 @@ echo "Testing presence of Postgres at ${host}:${port} with a maximum of ${max_re
 postgres_ready () {
   # tls test
   if [ "$1" = "true" ]; then
-    # PostgreSQL SSLRequest: length (8) + request code (80877103). A TLS-capable
-    # server replies with a single `S` byte. This is portable to macOS, whose
-    # LibreSSL does not support `openssl s_client -starttls postgres`.
-    response="$(printf '\\x00\\x00\\x00\\x08\\x04\\xd2\\x16\\x2f' | nc -w 1 "$host" "$port" 2>/dev/null)"
-    if [ -n "${DEBUG}" ]; then
-      echo "response: ${response}"
-    fi
-    if [ "$response" = "S" ]; then
-      return 0
-    fi
-
-    # OpenBSD netcat on Linux can close the connection before reading the
-    # server's one-byte response. Fall back to OpenSSL there; macOS LibreSSL
-    # takes the raw-probe path above because it lacks PostgreSQL STARTTLS.
-    echo | openssl s_client -starttls postgres -connect "$host:$port" -no_ign_eof >/dev/null 2>&1
+    # Use psql so TLS negotiation and a real PostgreSQL connection both
+    # complete before the service is considered ready on Linux and macOS.
+    PGPASSWORD="$CS_DATABASE__PASSWORD" PGCONNECT_TIMEOUT=1 PGSSLMODE=require \
+      psql -h "$host" -p "$port" -d "$CS_DATABASE__NAME" \
+        -U "$CS_DATABASE__USERNAME" -c 'SELECT 1' >/dev/null 2>&1
   else
     # plaintext test
     # We blackhole stderr (2>/dev/null) below because nc is echoing to stderr,
