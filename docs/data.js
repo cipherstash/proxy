@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786950389135,
+  "lastUpdate": 1787007341040,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -24569,6 +24569,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 38.331176,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "toby@cipherstash.com",
+            "name": "Toby Hede",
+            "username": "tobyhede"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "b40c09a3356c41c3ce691f0ca5f011fdb9c81dfd",
+          "message": "Merge pull request #453 from cipherstash/fix-cip-3814-hickory-proto-patch\n\nfix(deps): patch hickory-proto to 0.26.1",
+          "timestamp": "2026-08-18T08:50:08+10:00",
+          "tree_id": "1f209f2e5761de1fb270420009d958859f4463fd",
+          "url": "https://github.com/cipherstash/proxy/commit/b40c09a3356c41c3ce691f0ca5f011fdb9c81dfd"
+        },
+        "date": 1787007339285,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 40.216843,
             "unit": "Number"
           }
         ]
