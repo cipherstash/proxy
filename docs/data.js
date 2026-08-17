@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786948611412,
+  "lastUpdate": 1786948627292,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -24519,6 +24519,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 39.932565,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "96d8d9af21066e8bd8fd99fba091e22b405763c2",
+          "message": "fix(deps): patch pytest to 9.0.3 (integration tests)",
+          "timestamp": "2026-08-17T05:20:23Z",
+          "url": "https://github.com/cipherstash/proxy/pull/454/commits/96d8d9af21066e8bd8fd99fba091e22b405763c2"
+        },
+        "date": 1786948625583,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 39.247517,
             "unit": "Number"
           }
         ]
