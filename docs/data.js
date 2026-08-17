@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786944364700,
+  "lastUpdate": 1786948611412,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -24494,6 +24494,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 40.1092,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "6ab953d02d675a4407036409e9a9c59d20d95645",
+          "message": "fix(deps): patch hickory-proto to 0.26.1",
+          "timestamp": "2026-08-17T05:20:23Z",
+          "url": "https://github.com/cipherstash/proxy/pull/453/commits/6ab953d02d675a4407036409e9a9c59d20d95645"
+        },
+        "date": 1786948609747,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 39.932565,
             "unit": "Number"
           }
         ]
