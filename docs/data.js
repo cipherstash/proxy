@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786926424990,
+  "lastUpdate": 1786927238163,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -24390,6 +24390,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 39.761015,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "df36dd5fde72320511acdd08d4b0a6129774af5f",
+          "message": "fix(deps): patch jackc/pgx/v5 to 5.10.0 and golang.org/x/crypto to 0.55.0 (integration tests)",
+          "timestamp": "2026-08-13T15:49:18Z",
+          "url": "https://github.com/cipherstash/proxy/pull/449/commits/df36dd5fde72320511acdd08d4b0a6129774af5f"
+        },
+        "date": 1786927236543,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 40.182371,
             "unit": "Number"
           }
         ]
