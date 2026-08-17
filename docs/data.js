@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786931995967,
+  "lastUpdate": 1786936360910,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -24440,6 +24440,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 41.251782,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "dcaec789bb04dac2e34303a1ebc4d70bfb5c6527",
+          "message": "fix(deps): patch rustls-webpki to 0.103.14 and diesel to 2.3.12",
+          "timestamp": "2026-08-13T15:49:18Z",
+          "url": "https://github.com/cipherstash/proxy/pull/450/commits/dcaec789bb04dac2e34303a1ebc4d70bfb5c6527"
+        },
+        "date": 1786936359230,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 40.707313,
             "unit": "Number"
           }
         ]
