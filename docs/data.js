@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786936360910,
+  "lastUpdate": 1786944364700,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -24465,6 +24465,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 40.707313,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "toby@cipherstash.com",
+            "name": "Toby Hede",
+            "username": "tobyhede"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "1fb46eb6ad5319984889f3e5d251f735d2d0b08c",
+          "message": "Merge pull request #450 from cipherstash/fix/cip-3789-cip-3790-rust-deps-patch\n\nfix(deps): patch rustls-webpki to 0.103.14 and diesel to 2.3.12",
+          "timestamp": "2026-08-17T15:20:12+10:00",
+          "tree_id": "979f66393d8e7557d509db2c4a7b905484eef681",
+          "url": "https://github.com/cipherstash/proxy/commit/1fb46eb6ad5319984889f3e5d251f735d2d0b08c"
+        },
+        "date": 1786944363052,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 40.1092,
             "unit": "Number"
           }
         ]
