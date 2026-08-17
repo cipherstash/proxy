@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1787007341040,
+  "lastUpdate": 1787007386997,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -24598,6 +24598,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 40.216843,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "toby@cipherstash.com",
+            "name": "Toby Hede",
+            "username": "tobyhede"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "b0ae2e8685e08aa9cb279599de204fbbfa8acdeb",
+          "message": "Merge pull request #454 from cipherstash/fix-cip-3813-pytest-patch\n\nfix(deps): patch pytest to 9.0.3 (integration tests)",
+          "timestamp": "2026-08-18T08:50:16+10:00",
+          "tree_id": "3351ddcc45101fac4dae6e4d8c564675e67e9aab",
+          "url": "https://github.com/cipherstash/proxy/commit/b0ae2e8685e08aa9cb279599de204fbbfa8acdeb"
+        },
+        "date": 1787007385122,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 39.016657,
             "unit": "Number"
           }
         ]
