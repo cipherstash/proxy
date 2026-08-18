@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1787027289542,
+  "lastUpdate": 1787030691015,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -24706,6 +24706,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 40.118414,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "toby@cipherstash.com",
+            "name": "Toby Hede",
+            "username": "tobyhede"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "0f31273e60fc944b993b66c35cf33050e43e8268",
+          "message": "Merge pull request #456 from cipherstash/fix-cip-3815-jsonwebtoken-patch\n\nfix(deps): bump cipherstash-client, cipherstash-config, and cts-common to 0.42.2",
+          "timestamp": "2026-08-18T15:19:52+10:00",
+          "tree_id": "e7c2a5a9e6027fea6c1afe1e9b9c7d196df14b15",
+          "url": "https://github.com/cipherstash/proxy/commit/0f31273e60fc944b993b66c35cf33050e43e8268"
+        },
+        "date": 1787030689226,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 40.874429,
             "unit": "Number"
           }
         ]
