@@ -26,6 +26,11 @@ echo "== 3b. npx <local> proxy --help (subcommand passthrough) =="
 
 echo "== 3c. exit codes are forwarded =="
 ( cd "${META}" && npx . proxy --version ) >/dev/null 2>&1; echo "  proxy --version -> exit $? (expect 0)"
-( cd "${META}" && npx . frobnicate ) >/dev/null 2>&1; echo "  unknown subcommand -> exit $? (expect non-zero)"
+if ( cd "${META}" && npx . frobnicate ) >/dev/null 2>&1; then
+  echo "  unknown subcommand unexpectedly succeeded" >&2
+  exit 1
+else
+  echo "  unknown subcommand -> non-zero exit (as expected)"
+fi
 
 echo "== done =="

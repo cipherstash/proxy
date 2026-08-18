@@ -13,7 +13,7 @@
 // launches psql connected to the proxy, and shuts the proxy down on exit.
 
 const { spawn, spawnSync } = require("child_process");
-const os = require("os");
+const { connectionInfo } = require("../lib/connection");
 const { resolveProxyBinary } = require("../lib/resolve");
 
 function usage() {
@@ -173,36 +173,6 @@ function launchRepl(port, conn, proxy) {
     });
 }
 
-// Extract user / password / dbname for the psql connection from --database-url
-// (preferred), individual --db-* flags, then CS_DATABASE__* env.
-function connectionInfo(args) {
-  const flag = (name) => {
-    const i = args.indexOf(name);
-    return i !== -1 ? args[i + 1] : undefined;
-  };
-
-  let fromUrl = {};
-  const url = flag("--database-url");
-  if (url) {
-    try {
-      const u = new URL(url);
-      fromUrl = {
-        user: decodeURIComponent(u.username) || undefined,
-        password: u.password ? decodeURIComponent(u.password) : undefined,
-        dbname: u.pathname.replace(/^\//, "") || undefined,
-      };
-    } catch {
-      process.stderr.write(`stash: could not parse --database-url for psql\n`);
-    }
-  }
-
-  return {
-    user: flag("--db-user") ?? fromUrl.user ?? process.env.CS_DATABASE__USERNAME,
-    password: flag("--db-password") ?? fromUrl.password ?? process.env.CS_DATABASE__PASSWORD,
-    dbname: fromUrl.dbname ?? process.env.CS_DATABASE__NAME,
-  };
-}
-
 // --- helpers -----------------------------------------------------------------
 
 // Branded psql prompt so a via-proxy session is visually distinct (e.g.
@@ -228,7 +198,7 @@ function stop(child) {
 }
 
 function forwardSignals(child) {
-  for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"]) {
+  for (const signal of ["SIGINT", "SIGTERM", "SIGHUP", "SIGQUIT"]) {
     process.on(signal, () => {
       if (!child.killed) child.kill(signal);
     });
@@ -237,7 +207,12 @@ function forwardSignals(child) {
 
 function exitFrom(code, signal) {
   if (signal) {
-    process.exit(128 + (os.constants.signals[signal] || 0));
+    // Exit by the same signal so parent processes observe signal termination,
+    // not merely an equivalent numeric status. Remove our forwarding handler
+    // first to avoid catching the signal again ourselves.
+    process.removeAllListeners(signal);
+    process.kill(process.pid, signal);
+    return;
   }
   process.exit(code ?? 0);
 }

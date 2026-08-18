@@ -45,6 +45,12 @@ the matching platform package), then runs `npx . proxy --version`,
 `... proxy --help`, and an unknown-subcommand case. The binaries are git-ignored
 build artifacts; `build-binaries.sh` regenerates them.
 
+The launcher's argument interpretation has dependency-free unit coverage:
+
+```bash
+(cd npm/packages/stash && npm test)
+```
+
 > Locally we use `file:` optionalDependencies and `npx .` so it works offline.
 > In production these become published, versioned packages and the command is
 > literally `npx stash proxy` (or `npx @cipherstash/stash proxy`).

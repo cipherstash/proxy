@@ -28,9 +28,10 @@ cp -f "${REPO_ROOT}/target/release/cipherstash-proxy" "${dest}/cipherstash-proxy
 chmod +x "${dest}/cipherstash-proxy"
 
 # macOS arm64 requires at least an ad-hoc signature to execute. Binaries linked
-# on macOS are ad-hoc-signed automatically, but re-assert it to be safe.
-if [[ "$(uname -s)" == "Darwin" ]]; then
-  codesign --force --sign - "${dest}/cipherstash-proxy" 2>/dev/null || true
+# on macOS are ad-hoc-signed automatically, but re-assert it and fail if the
+# staged artifact cannot be signed.
+if [[ "${pkg}" == "proxy-darwin-arm64" ]]; then
+  codesign --force --sign - "${dest}/cipherstash-proxy"
 fi
 
 echo "Installed $(du -h "${dest}/cipherstash-proxy" | cut -f1) binary into ${pkg}/bin/"
