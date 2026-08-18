@@ -43,9 +43,9 @@ debug = true
 
 [workspace.dependencies]
 sqltk = { version = "0.11.0" }
-cipherstash-client = { version = "=0.42.0" }
-cipherstash-config = { version = "=0.42.0" }
-cts-common = { version = "=0.42.0" }
+cipherstash-client = { version = "=0.42.2" }
+cipherstash-config = { version = "=0.42.2" }
+cts-common = { version = "=0.42.2" }
 # EQL v3 domain catalog: maps Postgres domain names to (token type, SEM terms).
 # The authoritative source for a column's domain identity (ADR-0002); only the
 # SchemaManager depends on it, keeping eql-mapper wire-format-agnostic.
