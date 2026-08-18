@@ -39,7 +39,7 @@ mod tests {
 
         let args = Args {
             config_file_path: "".to_string(),
-            log_level: LogLevel::Debug,
+            log_level: Some(LogLevel::Debug),
             log_format: LogFormat::Pretty,
             command: None,
             database_url: None,

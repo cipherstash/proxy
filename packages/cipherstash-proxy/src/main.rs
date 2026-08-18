@@ -27,13 +27,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // a log level was set explicitly (--log-level / CS_LOG__LEVEL), or a config
     // file is present. This keeps `proxy` clean to run by hand while leaving
     // production (which sets a level or ships a config) unchanged.
-    let log_explicitly_set = args.log_level != LogConfig::default_log_level()
+    let log_explicitly_set = args.log_level.is_some()
         || std::env::var("CS_LOG__LEVEL").is_ok()
         || std::path::Path::new(&args.config_file_path).exists();
-    let log_config = if args.debug {
-        LogConfig::with_level(LogLevel::Debug)
-    } else if log_explicitly_set {
+    let log_config = if log_explicitly_set {
         config.log.clone()
+    } else if args.debug {
+        LogConfig::with_level(LogLevel::Debug)
     } else {
         LogConfig::with_level(LogLevel::Error)
     };
