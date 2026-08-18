@@ -2,10 +2,21 @@
 
 This package drives deterministic conformance checks and a timed mixed CRUD workload through a
 real Proxy into PostgreSQL. The fixture schema and seed migration are copied from pg-proto's
-burn-in package so results and future benchmarks use the same type-lab and commerce model.
+burn-in package so results use the same type-lab and commerce model.
 
-The database and CipherStash credentials needed by Proxy must already be available in the
-environment. Start the test PostgreSQL service before either command.
+Start the test PostgreSQL service and configure the CipherStash credentials used by Proxy in
+`mise.local.toml`:
+
+```toml
+[env]
+CS_WORKSPACE_CRN = "crn:region:workspace-id"
+CS_CLIENT_ACCESS_KEY = "your-access-key"
+CS_DEFAULT_KEYSET_ID = "your-keyset-id"
+CS_CLIENT_ID = "your-client-id"
+CS_CLIENT_KEY = "your-client-key"
+```
+
+The commands inherit these values from the environment when they launch Proxy.
 
 ```bash
 cargo run -p cipherstash-proxy-burn-in -- conformance
@@ -19,13 +30,3 @@ hard failure, and `--concurrency` to adjust load.
 
 Override connection URLs with `--proxy-database-url` / `--direct-database-url` or the
 `BURN_IN_PROXY_DATABASE_URL` / `BURN_IN_DIRECT_DATABASE_URL` environment variables.
-
-The Proxy crate also exposes the same commerce workload as a Criterion target. With PostgreSQL
-and Proxy already running, execute:
-
-```bash
-cargo bench -p cipherstash-proxy --bench proxy_crud
-```
-
-Every measured iteration opens a realistic short-lived connection, performs transactional CRUD
-with joins and an aggregate, validates the returned values, and removes its rows.

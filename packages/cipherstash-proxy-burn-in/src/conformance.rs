@@ -46,27 +46,28 @@ pub async fn run(proxy_database_url: &str, direct_database_url: &str) -> Result<
         .transaction()
         .await
         .context("starting CRUD transaction")?;
+    let fixture_id = 900_001_i32;
     transaction
         .execute(
             "INSERT INTO burnin_commerce.customers (id, name) VALUES ($1, $2)",
-            &[&900_001_i32, &"conformance-customer"],
+            &[&fixture_id, &"conformance-customer"],
         )
         .await?;
     transaction
         .execute(
             "INSERT INTO burnin_commerce.products (id, sku, price_cents) VALUES ($1, $2, $3)",
-            &[&900_001_i32, &"CONF-900001", &2_499_i32],
+            &[&fixture_id, &"CONF-900001", &2_499_i32],
         )
         .await?;
     transaction
         .execute(
             "INSERT INTO burnin_commerce.orders (id, customer_id, status) VALUES ($1, $2, $3)",
-            &[&900_001_i32, &900_001_i32, &"open"],
+            &[&fixture_id, &fixture_id, &"open"],
         )
         .await?;
     transaction.execute(
         "INSERT INTO burnin_commerce.order_lines (order_id, line_number, product_id, quantity) VALUES ($1, 1, $2, 2)",
-        &[&900_001_i32, &900_001_i32],
+        &[&fixture_id, &fixture_id],
     ).await?;
     let total: i64 = transaction
         .query_one(
@@ -75,7 +76,7 @@ pub async fn run(proxy_database_url: &str, direct_database_url: &str) -> Result<
          JOIN burnin_commerce.order_lines l ON l.order_id = o.id \
          JOIN burnin_commerce.products p ON p.id = l.product_id \
          WHERE o.id = $1",
-            &[&900_001_i32],
+            &[&fixture_id],
         )
         .await?
         .get(0);
@@ -83,7 +84,7 @@ pub async fn run(proxy_database_url: &str, direct_database_url: &str) -> Result<
     transaction
         .execute(
             "UPDATE burnin_commerce.orders SET status = 'paid' WHERE id = $1",
-            &[&900_001_i32],
+            &[&fixture_id],
         )
         .await?;
     transaction
@@ -93,7 +94,7 @@ pub async fn run(proxy_database_url: &str, direct_database_url: &str) -> Result<
     let rolled_back: i64 = client
         .query_one(
             "SELECT count(*) FROM burnin_commerce.orders WHERE id = $1",
-            &[&900_001_i32],
+            &[&fixture_id],
         )
         .await?
         .get(0);
