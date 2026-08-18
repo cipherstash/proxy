@@ -84,8 +84,8 @@ pub struct Args {
     ///
     /// Optional log level.
     ///
-    #[arg(short, long, value_enum, default_value_t = LogConfig::default_log_level(), env = "CS_LOG__LEVEL", global = true)]
-    pub log_level: LogLevel,
+    #[arg(short, long, value_enum, env = "CS_LOG__LEVEL", global = true)]
+    pub log_level: Option<LogLevel>,
 
     ///
     /// Optional log format. Default level is "pretty" if running in a terminal session, otherwise "structured".
@@ -115,5 +115,24 @@ pub async fn run(args: Args, config: TandemConfig) -> Result<bool, Error> {
             Ok(true)
         }
         None => Ok(false),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Args;
+    use crate::config::LogLevel;
+    use clap::Parser;
+
+    #[test]
+    fn log_level_preserves_whether_it_was_explicitly_set() {
+        temp_env::with_var_unset("CS_LOG__LEVEL", || {
+            let omitted = Args::try_parse_from(["cipherstash-proxy"]).unwrap();
+            let explicit =
+                Args::try_parse_from(["cipherstash-proxy", "--log-level", "info"]).unwrap();
+
+            assert_eq!(omitted.log_level, None);
+            assert_eq!(explicit.log_level, Some(LogLevel::Info));
+        });
     }
 }

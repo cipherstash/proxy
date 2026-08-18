@@ -16,7 +16,6 @@ use regex::Regex;
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::env;
-use std::path::PathBuf;
 use std::sync::LazyLock;
 use uuid::Uuid;
 
@@ -88,19 +87,13 @@ impl TandemConfig {
     }
 
     pub fn load(args: &Args) -> Result<TandemConfig, Error> {
-        // Log a warning to user that config file is missing
-        if !PathBuf::from(&args.config_file_path).exists() {
-            println!(
-                "Configuration file was not found: {}",
-                args.config_file_path
-            );
-            println!("Loading config values from environment variables.");
-        }
         let mut config = TandemConfig::build(args)?;
 
         // If log level is default, it has not been set by the user in config
         if config.log.level == LogConfig::default_log_level() {
-            config.log.level = args.log_level;
+            if let Some(log_level) = args.log_level {
+                config.log.level = log_level;
+            }
         }
 
         // If log format is default, it has not been set by the user in config
@@ -111,9 +104,6 @@ impl TandemConfig {
         // --no-tls forces a plaintext inbound listener, ignoring any CS_TLS__*
         // env / config. (Does not affect the proxy -> database connection.)
         if args.no_tls {
-            if config.tls.is_some() {
-                println!("Disabling inbound TLS (--no-tls): the proxy will listen without TLS");
-            }
             config.tls = None;
             config.server.require_tls = false;
         }
@@ -133,7 +123,7 @@ impl TandemConfig {
             no_tls: false,
             tls: false,
             debug: false,
-            log_level: LogConfig::default_log_level(),
+            log_level: None,
             log_format: LogConfig::default_log_format(),
             command: None,
         };
@@ -189,32 +179,26 @@ impl TandemConfig {
         // A full connection string is applied first; individual flags below
         // then override matching parts of it.
         if let Some(url) = &args.database_url {
-            println!("Overriding database connection from --database-url");
             apply_database_url(url)?;
         }
 
         if let Some(db_host) = &args.db_host {
-            println!("Overriding database host from command line argument");
             env::set_var("CS_DATABASE__HOST", db_host);
         }
 
         if let Some(db_port) = &args.db_port {
-            println!("Overriding database port from command line argument");
             env::set_var("CS_DATABASE__PORT", db_port.to_string());
         }
 
         if let Some(dbname) = &args.db_name {
-            println!("Overriding database name from command line argument");
             env::set_var("CS_DATABASE__NAME", dbname);
         }
 
         if let Some(db_user) = &args.db_user {
-            println!("Overriding database user from command line argument");
             env::set_var("CS_DATABASE__USERNAME", db_user);
         }
 
         if let Some(db_password) = &args.db_password {
-            println!("Overriding database password from command line argument");
             env::set_var("CS_DATABASE__PASSWORD", db_password);
         }
 
