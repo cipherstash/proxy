@@ -1,10 +1,10 @@
 [settings]
-# Config for test environments
-# Can be invoked with: mise --env tcp run <task>
+# Config for test environments. Anchor these paths to this config so they are
+# trusted regardless of the task's working directory.
 trusted_config_paths = [
-  "./tests/mise.toml",
-  "./tests/mise.tcp.toml",
-  "./tests/mise.tls.toml",
+  "{{config_root}}/tests/mise.toml",
+  "{{config_root}}/tests/mise.tcp.toml",
+  "{{config_root}}/tests/mise.tls.toml",
 ]
 
 [task_config]

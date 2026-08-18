@@ -50,7 +50,7 @@ impl<'ast> InferType<'ast, Vec<SelectItem>> for TypeInferencer<'ast> {
                             opt_except: None,
                             opt_replace: None,
                             opt_rename: None,
-                        } = options
+                        } = options.as_ref()
                         else {
                             return Err(TypeError::UnsupportedSqlFeature(
                                 "options on wildcard".into(),

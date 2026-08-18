@@ -3,6 +3,7 @@
 mod dep;
 mod display_helpers;
 mod eql_mapper;
+mod function_arg;
 mod importer;
 mod inference;
 mod iterator_ext;
@@ -40,7 +41,7 @@ pub(crate) use transformation_rules::*;
 
 #[cfg(test)]
 mod test {
-    use super::{test_helpers::*, type_check};
+    use super::{test_helpers::*, type_check, EqlMapperError, ScopeError, TypeError};
     use crate::{
         projection, schema, test_helpers,
         unifier::{
@@ -2451,6 +2452,31 @@ mod test {
     }
 
     #[test]
+    fn rewrite_standard_sql_fn_with_expr_named_args() {
+        let schema = resolver(schema! {
+            tables: {
+                employees: {
+                    eql_col (EQL: JsonLike),
+                }
+            }
+        });
+        let statement =
+            parse("SELECT jsonb_path_exists(value => eql_col, path => '$.secret') FROM employees");
+        let typed = type_check(schema, &statement).unwrap();
+        let transformed = typed
+            .transform(test_helpers::dummy_encrypted_json_selector(
+                &statement,
+                vec![ast::Value::SingleQuotedString("$.secret".into())],
+            ))
+            .unwrap();
+
+        assert_eq!(
+            transformed.to_string(),
+            "SELECT eql_v3.jsonb_path_exists(value => eql_col, path => '<encrypted-selector($.secret)>') FROM employees"
+        );
+    }
+
+    #[test]
     fn supports_named_arrays() {
         let schema = resolver(schema! {
             tables: {
@@ -2720,6 +2746,27 @@ mod test {
             ),
             Err(err) => panic!("transformation failed: {err}"),
         }
+    }
+
+    #[test]
+    fn eql_v3_function_with_expr_named_arg_casts_full_payload() {
+        let schema = resolver(schema! {
+            tables: {
+                patients: {
+                    id,
+                    notes (EQL: JsonLike + Contain),
+                }
+            }
+        });
+        let statement = parse(
+            "SELECT id FROM patients WHERE eql_v3.jsonb_contains(value => notes, query => $1)",
+        );
+        let typed = type_check(schema, &statement).unwrap();
+
+        assert_eq!(
+            typed.transform(HashMap::new()).unwrap().to_string(),
+            "SELECT id FROM patients WHERE eql_v3.jsonb_contains(value => notes, query => $1::JSONB::public.eql_v3_text_search)"
+        );
     }
 
     #[test]
@@ -4962,6 +5009,193 @@ mod test {
         }
     }
 
+    #[test]
+    fn insert_on_conflict_returning_cannot_reference_excluded() {
+        let schema = resolver(schema! {
+            tables: {
+                employees: {
+                    id,
+                    salary (EQL),
+                }
+            }
+        });
+
+        let statement = parse(
+            "INSERT INTO employees (id, salary) VALUES (1, 20000) \
+             ON CONFLICT (id) DO UPDATE SET salary = excluded.salary \
+             RETURNING excluded.salary",
+        );
+
+        assert_eq!(
+            type_check(schema, &statement).unwrap_err(),
+            EqlMapperError::Type(TypeError::ScopeError(ScopeError::NoMatch(
+                "excluded.salary".into()
+            )))
+        );
+    }
+
+    #[test]
+    fn insert_source_cannot_reference_excluded() {
+        let schema = resolver(schema! {
+            tables: {
+                employees: {
+                    id,
+                    salary (EQL),
+                }
+            }
+        });
+        let statement = parse(
+            "INSERT INTO employees (id, salary) \
+             SELECT excluded.id, excluded.salary FROM employees \
+             ON CONFLICT (id) DO UPDATE SET salary = excluded.salary",
+        );
+
+        assert_eq!(
+            type_check(schema, &statement).unwrap_err(),
+            EqlMapperError::Type(TypeError::ScopeError(ScopeError::NoMatch(
+                "excluded.id".into()
+            )))
+        );
+    }
+
+    #[test]
+    fn insert_on_conflict_returning_cannot_reference_excluded_wildcard() {
+        let schema = resolver(schema! {
+            tables: {
+                employees: {
+                    id,
+                    salary (EQL),
+                }
+            }
+        });
+        let statement = parse(
+            "INSERT INTO employees (id, salary) VALUES (1, 20000) \
+             ON CONFLICT (id) DO UPDATE SET salary = excluded.salary \
+             RETURNING excluded.*",
+        );
+
+        assert_eq!(
+            type_check(schema, &statement).unwrap_err(),
+            EqlMapperError::Type(TypeError::ScopeError(ScopeError::NoMatch(
+                "excluded".into()
+            )))
+        );
+    }
+
+    #[test]
+    fn insert_into_table_named_excluded_is_valid() {
+        let schema = resolver(schema! {
+            tables: {
+                excluded: {
+                    id,
+                    salary,
+                }
+            }
+        });
+        let statement = parse(
+            "INSERT INTO excluded (id, salary) VALUES (1, 20000) \
+             ON CONFLICT (id) DO UPDATE SET salary = excluded.salary",
+        );
+
+        type_check(schema, &statement).unwrap();
+    }
+
+    #[test]
+    fn insert_on_conflict_update_keeps_unqualified_columns_ambiguous() {
+        let schema = resolver(schema! {
+            tables: {
+                employees: {
+                    id,
+                    salary,
+                }
+            }
+        });
+        let statement = parse(
+            "INSERT INTO employees (id, salary) VALUES (1, 20000) \
+             ON CONFLICT (id) DO UPDATE SET salary = salary",
+        );
+
+        assert_eq!(
+            type_check(schema, &statement).unwrap_err(),
+            EqlMapperError::Type(TypeError::ScopeError(ScopeError::AmbiguousMatch(
+                "salary".into()
+            )))
+        );
+    }
+
+    #[test]
+    fn insert_on_conflict_do_nothing_does_not_add_excluded() {
+        let schema = resolver(schema! {
+            tables: {
+                employees: {
+                    id,
+                    salary,
+                }
+            }
+        });
+
+        for sql in [
+            "INSERT INTO employees (id, salary) VALUES (1, 20000) ON CONFLICT (id) DO NOTHING",
+            "INSERT INTO employees (id, salary) VALUES (1, 20000) ON CONFLICT (id) DO NOTHING RETURNING *",
+        ] {
+            type_check(Arc::clone(&schema), &parse(sql)).unwrap();
+        }
+    }
+
+    #[test]
+    fn insert_on_conflict_returning_unqualified_column_is_not_ambiguous() {
+        let schema = resolver(schema! {
+            tables: {
+                employees: {
+                    id,
+                    salary (EQL),
+                }
+            }
+        });
+
+        let statement = parse(
+            "INSERT INTO employees (id, salary) VALUES (1, 20000) \
+             ON CONFLICT (id) DO UPDATE SET salary = excluded.salary \
+             RETURNING salary",
+        );
+
+        let typed = type_check(schema, &statement)
+            .expect("the target table must be the only relation visible to RETURNING");
+
+        assert_eq!(
+            typed.projection,
+            projection![(EQL(employees.salary) as salary)]
+        );
+    }
+
+    #[test]
+    fn insert_on_conflict_returning_wildcard_only_projects_target_table() {
+        let schema = resolver(schema! {
+            tables: {
+                employees: {
+                    id,
+                    salary (EQL),
+                }
+            }
+        });
+
+        let statement = parse(
+            "INSERT INTO employees (id, salary) VALUES (1, 20000) \
+             ON CONFLICT (id) DO UPDATE SET salary = excluded.salary \
+             RETURNING *",
+        );
+
+        let typed = type_check(schema, &statement).expect("RETURNING * must type check");
+
+        assert_eq!(
+            typed.projection,
+            projection![
+                (NATIVE(employees.id) as id),
+                (EQL(employees.salary) as salary)
+            ]
+        );
+    }
+
     /// A conflict only fires off a unique index, and uniqueness of an
     /// encrypted column would be judged on the randomised ciphertext — the
     /// conflict would never fire. Rejected explicitly.
@@ -5178,6 +5412,24 @@ mod test {
             ),
             Err(err) => panic!("statement transformation failed: {err}"),
         }
+    }
+
+    #[test]
+    fn count_distinct_expr_named_arg_uses_eq_term() {
+        let schema = resolver(schema! {
+            tables: {
+                employees: {
+                    salary (EQL: Eq),
+                }
+            }
+        });
+        let statement = parse("SELECT count(DISTINCT value => salary) FROM employees");
+        let typed = type_check(schema, &statement).unwrap();
+
+        assert_eq!(
+            typed.transform(HashMap::new()).unwrap().to_string(),
+            "SELECT count(DISTINCT value => eql_v3.eq_term(salary)) FROM employees"
+        );
     }
 
     /// The `Eq` bound on `DISTINCT` aggregate arguments must reject a column

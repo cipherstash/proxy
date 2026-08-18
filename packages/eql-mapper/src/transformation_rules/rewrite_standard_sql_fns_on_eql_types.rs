@@ -1,8 +1,9 @@
 use std::{collections::HashMap, sync::Arc};
 
-use sqltk::parser::ast::{Expr, Function, FunctionArg, FunctionArguments};
+use sqltk::parser::ast::{Expr, Function, FunctionArguments};
 use sqltk::{AsNodeKey, NodeKey, NodePath, Visitable};
 
+use crate::function_arg::function_arg_expr;
 use crate::unifier::{Type, Value};
 use crate::{get_eql_v3_function_name, get_sql_function, EqlMapperError};
 
@@ -33,13 +34,11 @@ impl<'ast> RewriteStandardSqlFnsOnEqlTypes<'ast> {
                 self.node_types.get(&query.as_node_key()),
                 Some(Type::Value(Value::Eql(_)))
             ),
-            FunctionArguments::List(list) => list.args.iter().any(|arg| match arg {
-                FunctionArg::Named { arg, .. }
-                | FunctionArg::ExprNamed { arg, .. }
-                | FunctionArg::Unnamed(arg) => matches!(
-                    self.node_types.get(&arg.as_node_key()),
+            FunctionArguments::List(list) => list.args.iter().any(|arg| {
+                matches!(
+                    self.node_types.get(&function_arg_expr(arg).as_node_key()),
                     Some(Type::Value(Value::Eql(_)))
-                ),
+                )
             }),
         }
     }

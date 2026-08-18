@@ -94,6 +94,10 @@ pub struct TypeInferencer<'ast> {
     /// back up.
     fusable_json_chains: RefCell<HashSet<NodeKey<'ast>>>,
 
+    /// Expressions used as PostgreSQL named-argument labels (`name => value`).
+    /// They are syntax, not value expressions, and must not resolve as columns.
+    named_function_arg_labels: RefCell<HashSet<NodeKey<'ast>>>,
+
     _ast: PhantomData<&'ast ()>,
 }
 
@@ -112,6 +116,7 @@ impl<'ast> TypeInferencer<'ast> {
             json_accessor_paths: RefCell::new(JsonAccessorPaths::default()),
             query_operands: RefCell::new(QueryOperands::default()),
             fusable_json_chains: RefCell::new(HashSet::new()),
+            named_function_arg_labels: RefCell::new(HashSet::new()),
             _ast: PhantomData,
         }
     }

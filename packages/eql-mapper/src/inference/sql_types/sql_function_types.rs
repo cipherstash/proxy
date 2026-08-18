@@ -1,8 +1,9 @@
 use std::sync::{Arc, LazyLock};
 
-use sqltk::parser::ast::{Function, FunctionArg, FunctionArgExpr, FunctionArguments, Ident};
+use sqltk::parser::ast::{Function, FunctionArguments, Ident};
 
 use crate::{
+    function_arg::function_arg_expr,
     unifier::{FunctionDecl, Type, Unifier},
     IdentCase, TypeError, TypeInferencer,
 };
@@ -24,14 +25,6 @@ impl SqlFunction {
             SqlFunction::Explicit(function_decl) => function_decl.name.starts_with(&PG_CATALOG),
             SqlFunction::Fallback => false,
         }
-    }
-}
-
-fn get_function_arg_expr(fn_arg: &FunctionArg) -> &FunctionArgExpr {
-    match fn_arg {
-        FunctionArg::Named { arg, .. } => arg,
-        FunctionArg::ExprNamed { arg, .. } => arg,
-        FunctionArg::Unnamed(arg) => arg,
     }
 }
 
@@ -61,7 +54,7 @@ impl SqlFunction {
                         let args: Vec<Arc<Type>> = list
                             .args
                             .iter()
-                            .map(|arg| inferencer.get_node_type(get_function_arg_expr(arg)))
+                            .map(|arg| inferencer.get_node_type(function_arg_expr(arg)))
                             .collect();
                         rule.inner
                             .apply(&mut inferencer.unifier.borrow_mut(), &args, ret_type)?
@@ -89,7 +82,7 @@ impl SqlFunction {
                         let args: Vec<Arc<Type>> = list
                             .args
                             .iter()
-                            .map(|arg| inferencer.get_node_type(get_function_arg_expr(arg)))
+                            .map(|arg| inferencer.get_node_type(function_arg_expr(arg)))
                             .collect();
                         NativeFunction::new(args.len() as u8).apply_constraints(
                             &mut inferencer.unifier.borrow_mut(),

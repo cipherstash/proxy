@@ -3,11 +3,12 @@ use std::mem;
 use std::sync::Arc;
 
 use sqltk::parser::ast::{
-    DuplicateTreatment, Expr, Function, FunctionArg, FunctionArgExpr, FunctionArguments,
-    ObjectName, ObjectNamePart, Value as SqltkValue,
+    DuplicateTreatment, Expr, Function, FunctionArguments, ObjectName, ObjectNamePart,
+    Value as SqltkValue,
 };
 use sqltk::{NodeKey, NodePath, Visitable};
 
+use crate::function_arg::{function_arg_value, function_arg_value_mut};
 use crate::unifier::{DomainIdentity, Type, Value};
 use crate::EqlMapperError;
 
@@ -67,18 +68,7 @@ impl<'ast> RewriteEqlAggregateDistinct<'ast> {
 
         list.args
             .iter()
-            .map(|arg| match arg {
-                FunctionArg::Unnamed(FunctionArgExpr::Expr(expr))
-                | FunctionArg::Named {
-                    arg: FunctionArgExpr::Expr(expr),
-                    ..
-                }
-                | FunctionArg::ExprNamed {
-                    arg: FunctionArgExpr::Expr(expr),
-                    ..
-                } => self.eql_identity_of(expr),
-                _ => None,
-            })
+            .map(|arg| function_arg_value(arg).and_then(|expr| self.eql_identity_of(expr)))
             .collect()
     }
 
@@ -143,16 +133,7 @@ impl<'ast> TransformationRule<'ast> for RewriteEqlAggregateDistinct<'ast> {
                 )));
             };
 
-            if let FunctionArg::Unnamed(FunctionArgExpr::Expr(expr))
-            | FunctionArg::Named {
-                arg: FunctionArgExpr::Expr(expr),
-                ..
-            }
-            | FunctionArg::ExprNamed {
-                arg: FunctionArgExpr::Expr(expr),
-                ..
-            } = arg
-            {
+            if let Some(expr) = function_arg_value_mut(arg) {
                 let counted = mem::replace(expr, Expr::Value(SqltkValue::Null.into()));
                 *expr = eql_v3_term_call(term_fn, counted);
             }

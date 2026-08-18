@@ -72,8 +72,8 @@ impl<'ast> RewriteContainmentOps<'ast> {
             uses_odbc_syntax: false,
             args: FunctionArguments::List(FunctionArgumentList {
                 args: vec![
-                    FunctionArg::Unnamed(FunctionArgExpr::Expr(left)),
-                    FunctionArg::Unnamed(FunctionArgExpr::Expr(right)),
+                    FunctionArg::Unnamed(FunctionArgExpr::Expr(Box::new(left))),
+                    FunctionArg::Unnamed(FunctionArgExpr::Expr(Box::new(right))),
                 ],
                 duplicate_treatment: None,
                 clauses: vec![],
