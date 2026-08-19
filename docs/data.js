@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1787055856614,
+  "lastUpdate": 1787105759236,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -24860,6 +24860,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 40.159475,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "482945013c2c12839cce72f15ef97f9862fa8a92",
+          "message": "fix(deps): patch quinn-proto to 0.11.15",
+          "timestamp": "2026-08-18T05:20:11Z",
+          "url": "https://github.com/cipherstash/proxy/pull/457/commits/482945013c2c12839cce72f15ef97f9862fa8a92"
+        },
+        "date": 1787105757405,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 39.726461,
             "unit": "Number"
           }
         ]
