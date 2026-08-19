@@ -6,6 +6,7 @@
 use std::{path::PathBuf, time::Duration};
 
 use anyhow::Result;
+use cipherstash_proxy_burn_in::database::DatabaseTarget;
 use clap::{Args, Parser, Subcommand};
 
 #[derive(Debug, Parser)]
@@ -32,16 +33,18 @@ struct DatabaseArgs {
     #[arg(
         long,
         env = "BURN_IN_PROXY_DATABASE_URL",
+        hide_env_values = true,
         default_value = "postgresql://cipherstash:p%40ssword@localhost:6432/cipherstash"
     )]
-    proxy_database_url: String,
+    proxy_database_url: DatabaseTarget,
     /// Direct PostgreSQL URL used only to install and seed the fixture schema.
     #[arg(
         long,
         env = "BURN_IN_DIRECT_DATABASE_URL",
+        hide_env_values = true,
         default_value = "postgresql://cipherstash:p%40ssword@localhost:5532/cipherstash"
     )]
-    direct_database_url: String,
+    direct_database_url: DatabaseTarget,
     /// EQL installation SQL used when the target database has no EQL domains.
     #[arg(
         long,
@@ -58,7 +61,7 @@ struct SoakArgs {
     /// Wall-clock duration of the stress workload.
     #[arg(long)]
     duration_seconds: u64,
-    /// Number of concurrent long-lived database sessions.
+    /// Number of concurrent long-lived database connections.
     #[arg(long, default_value_t = 8)]
     concurrency: usize,
     /// JSON report containing operation counts and one-second RSS samples.
@@ -81,6 +84,13 @@ async fn main() -> Result<()> {
             .await
         }
         Command::Soak(args) => {
+            let max_rss_growth_bytes = args
+                .max_rss_growth_mib
+                .map(|mib| {
+                    mib.checked_mul(1_048_576)
+                        .ok_or_else(|| anyhow::anyhow!("--max-rss-growth-mib is too large"))
+                })
+                .transpose()?;
             cipherstash_proxy_burn_in::soak::run(cipherstash_proxy_burn_in::soak::Config {
                 duration: Duration::from_secs(args.duration_seconds),
                 concurrency: args.concurrency,
@@ -88,7 +98,7 @@ async fn main() -> Result<()> {
                 direct_database_url: args.database.direct_database_url,
                 eql_path: args.database.eql_path,
                 output: args.output,
-                max_rss_growth_bytes: args.max_rss_growth_mib.map(|mib| mib * 1_048_576),
+                max_rss_growth_bytes,
             })
             .await
         }

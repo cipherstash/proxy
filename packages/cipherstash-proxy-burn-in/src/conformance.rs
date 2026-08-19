@@ -10,16 +10,17 @@ use std::path::Path;
 use anyhow::{Context, Result};
 use serde_json::Value;
 
-use crate::database;
+use crate::database::{self, DatabaseTarget};
 
 pub async fn run(
-    proxy_database_url: &str,
-    direct_database_url: &str,
+    proxy_database: &DatabaseTarget,
+    direct_database: &DatabaseTarget,
     eql_path: &Path,
 ) -> Result<()> {
-    database::ensure_eql_installed(direct_database_url, eql_path).await?;
-    database::migrate(proxy_database_url, direct_database_url).await?;
-    let mut client = database::connect(proxy_database_url).await?;
+    let _run_lock = database::acquire_run_lock(direct_database).await?;
+    database::ensure_eql_installed(direct_database, eql_path).await?;
+    database::migrate(proxy_database, direct_database).await?;
+    let mut client = database::connect(proxy_database).await?;
 
     client
         .simple_query("SELECT current_database(), current_user")
@@ -52,8 +53,8 @@ pub async fn run(
         "jsonb was corrupted"
     );
     anyhow::ensure!(
-        sample.get::<_, String>(5).len() > 400,
-        "wide text was truncated"
+        sample.get::<_, String>(5) == "wide-alpha-".repeat(40),
+        "wide text was corrupted"
     );
 
     let transaction = client
@@ -83,7 +84,7 @@ pub async fn run(
         "INSERT INTO burnin_commerce_order_lines (order_id, line_number, product_id, quantity) VALUES ($1, 1, $2, 2)",
         &[&fixture_id, &fixture_id],
     ).await?;
-    let total: i64 = transaction
+    let total: Option<i64> = transaction
         .query_one(
             "SELECT sum(p.price_cents * l.quantity)::bigint \
          FROM burnin_commerce_orders o \
@@ -93,8 +94,9 @@ pub async fn run(
             &[&fixture_id],
         )
         .await?
-        .get(0);
-    anyhow::ensure!(total == 4_998, "joined CRUD result was corrupted");
+        .try_get(0)
+        .context("decoding joined CRUD total")?;
+    anyhow::ensure!(total == Some(4_998), "joined CRUD result was corrupted");
     transaction
         .execute(
             "UPDATE burnin_commerce_orders SET status = 'paid' WHERE id = $1",
@@ -136,9 +138,9 @@ pub async fn run(
 
     let mut tasks = Vec::new();
     for worker in 0..8_i32 {
-        let url = proxy_database_url.to_owned();
+        let target = proxy_database.clone();
         tasks.push(tokio::spawn(async move {
-            let client = database::connect(&url).await?;
+            let client = database::connect(&target).await?;
             for iteration in 0..25_i32 {
                 let value: i32 = client
                     .query_one("SELECT $1::integer + $2::integer", &[&worker, &iteration])

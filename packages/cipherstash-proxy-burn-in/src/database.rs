@@ -6,18 +6,105 @@
 //! and seed use different Proxy connections because each connection snapshots
 //! those configurations when it opens.
 
-use std::path::Path;
+use std::{fmt, path::Path, str::FromStr};
 
 use anyhow::{Context, Result};
 use serde_json::{json, Value};
-use tokio_postgres::{Client, NoTls};
+use tokio_postgres::{config::Host, Client, NoTls};
 
 use crate::{SCHEMA_MIGRATION, SEED_MIGRATION};
 
-pub async fn connect(database_url: &str) -> Result<Client> {
-    let (client, connection) = tokio_postgres::connect(database_url, NoTls)
+const RUN_LOCK_ID: i64 = 0x4353_4255_524e_494e;
+
+#[derive(Clone)]
+pub struct DatabaseTarget {
+    config: tokio_postgres::Config,
+    identity: String,
+}
+
+impl DatabaseTarget {
+    pub fn hostname(&self) -> Result<&str> {
+        match self.config.get_hosts() {
+            [Host::Tcp(host)] => Ok(host),
+            _ => anyhow::bail!("burn-in requires exactly one TCP database host"),
+        }
+    }
+
+    pub fn port(&self) -> Result<u16> {
+        match self.config.get_ports() {
+            [] => Ok(5432),
+            [port] => Ok(*port),
+            _ => anyhow::bail!("burn-in requires exactly one database port"),
+        }
+    }
+
+    pub fn configure_proxy_upstream(&self, command: &mut tokio::process::Command) -> Result<()> {
+        command
+            .env("CS_DATABASE__HOST", self.hostname()?)
+            .env("CS_DATABASE__PORT", self.port()?.to_string())
+            .env(
+                "CS_DATABASE__NAME",
+                self.config.get_dbname().unwrap_or("postgres"),
+            )
+            .env(
+                "CS_DATABASE__USERNAME",
+                self.config.get_user().unwrap_or("postgres"),
+            );
+        if let Some(password) = self.config.get_password() {
+            command.env(
+                "CS_DATABASE__PASSWORD",
+                std::str::from_utf8(password).context("database password is not UTF-8")?,
+            );
+        } else {
+            command.env_remove("CS_DATABASE__PASSWORD");
+        }
+        Ok(())
+    }
+}
+
+impl FromStr for DatabaseTarget {
+    type Err = String;
+
+    fn from_str(value: &str) -> std::result::Result<Self, Self::Err> {
+        let config = value
+            .parse::<tokio_postgres::Config>()
+            .map_err(|_| "invalid PostgreSQL connection configuration".to_string())?;
+        let host = match config.get_hosts() {
+            [Host::Tcp(host)] => host.clone(),
+            [Host::Unix(path)] => path.to_str().unwrap_or("unix-socket").to_string(),
+            _ => "multiple-hosts".to_string(),
+        };
+        let port = config.get_ports().first().copied().unwrap_or(5432);
+        let user = config.get_user().unwrap_or("postgres").to_string();
+        let database = config.get_dbname().unwrap_or("postgres").to_string();
+        Ok(Self {
+            config,
+            identity: format!("postgresql://{user}@{host}:{port}/{database}"),
+        })
+    }
+}
+
+impl fmt::Debug for DatabaseTarget {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_tuple("DatabaseTarget")
+            .field(&self.identity)
+            .finish()
+    }
+}
+
+impl fmt::Display for DatabaseTarget {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(&self.identity)
+    }
+}
+
+pub async fn connect(target: &DatabaseTarget) -> Result<Client> {
+    let (client, connection) = target
+        .config
+        .connect(NoTls)
         .await
-        .with_context(|| format!("connecting to {database_url}"))?;
+        .with_context(|| format!("connecting to {target}"))?;
     tokio::spawn(async move {
         if let Err(error) = connection.await {
             eprintln!("database connection failed: {error}");
@@ -26,9 +113,23 @@ pub async fn connect(database_url: &str) -> Result<Client> {
     Ok(client)
 }
 
+pub async fn acquire_run_lock(target: &DatabaseTarget) -> Result<Client> {
+    let client = connect(target).await?;
+    let acquired: bool = client
+        .query_one("SELECT pg_try_advisory_lock($1)", &[&RUN_LOCK_ID])
+        .await
+        .context("acquiring the burn-in database lock")?
+        .get(0);
+    anyhow::ensure!(
+        acquired,
+        "another burn-in or conformance run already owns the database fixtures"
+    );
+    Ok(client)
+}
+
 /// Ensure the EQL domains exist before fixture DDL is sent through Proxy.
-pub async fn ensure_eql_installed(direct_database_url: &str, eql_path: &Path) -> Result<()> {
-    let client = connect(direct_database_url).await?;
+pub async fn ensure_eql_installed(direct_database: &DatabaseTarget, eql_path: &Path) -> Result<()> {
+    let client = connect(direct_database).await?;
     let installed: bool = client
         .query_one(
             "SELECT EXISTS (\
@@ -60,18 +161,21 @@ pub async fn ensure_eql_installed(direct_database_url: &str, eql_path: &Path) ->
 
 /// Create and seed fixtures through Proxy so DDL reloads its schema and every
 /// value assigned to an EQL domain traverses the encryption path.
-pub async fn migrate(proxy_database_url: &str, direct_database_url: &str) -> Result<()> {
+pub async fn migrate(
+    proxy_database: &DatabaseTarget,
+    direct_database: &DatabaseTarget,
+) -> Result<()> {
     // A connection snapshots Proxy's schema and encrypt config when it opens.
     // Apply DDL on one connection, let Proxy reload, then open a fresh
     // connection whose snapshot includes the new encrypted fixture columns.
-    let ddl_client = connect(proxy_database_url).await?;
+    let ddl_client = connect(proxy_database).await?;
     ddl_client
         .batch_execute(SCHEMA_MIGRATION)
         .await
         .context("applying burn-in schema migration through Proxy")?;
     drop(ddl_client);
 
-    let client = connect(proxy_database_url).await?;
+    let client = connect(proxy_database).await?;
     client
         .batch_execute(SEED_MIGRATION)
         .await
@@ -121,15 +225,15 @@ pub async fn migrate(proxy_database_url: &str, direct_database_url: &str) -> Res
         "wide-delta-".repeat(40),
     )
     .await?;
-    assert_seed_is_encrypted(direct_database_url).await?;
+    assert_seed_is_encrypted(direct_database).await?;
     Ok(())
 }
 
-async fn assert_seed_is_encrypted(direct_database_url: &str) -> Result<()> {
+async fn assert_seed_is_encrypted(direct_database: &DatabaseTarget) -> Result<()> {
     // Query around Proxy and inspect the JSON-backed domains themselves. A
     // successful round trip through Proxy is insufficient proof: an unmappable
     // statement can be passed through and appear correct while storing plaintext.
-    let client = connect(direct_database_url).await?;
+    let client = connect(direct_database).await?;
     let row = client
         .query_one(
             "SELECT scalar::jsonb, document::jsonb, wide_text::jsonb \
@@ -180,15 +284,16 @@ async fn seed_sample(
     Ok(())
 }
 
-pub async fn wait_until_ready(database_url: &str) -> Result<()> {
-    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(30);
-    loop {
-        match connect(database_url).await {
-            Ok(client) if client.simple_query("SELECT 1").await.is_ok() => return Ok(()),
-            _ if tokio::time::Instant::now() >= deadline => {
-                anyhow::bail!("proxy did not accept queries at {database_url} within 30 seconds")
-            }
-            _ => tokio::time::sleep(std::time::Duration::from_millis(250)).await,
-        }
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn database_target_redacts_password() {
+        let target: DatabaseTarget = "postgresql://alice:super-secret@localhost:5544/app"
+            .parse()
+            .unwrap();
+        assert_eq!(target.to_string(), "postgresql://alice@localhost:5544/app");
+        assert!(!format!("{target:?}").contains("super-secret"));
     }
 }
