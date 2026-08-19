@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1787111723508,
+  "lastUpdate": 1787113764636,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -24914,6 +24914,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 40.397661,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "87817d570c3ef2a313c12f39d397c14f0f7bdbc4",
+          "message": "test: add proxy burn-in tooling",
+          "timestamp": "2026-08-19T03:50:33Z",
+          "url": "https://github.com/cipherstash/proxy/pull/455/commits/87817d570c3ef2a313c12f39d397c14f0f7bdbc4"
+        },
+        "date": 1787113762928,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 40.154251,
             "unit": "Number"
           }
         ]
