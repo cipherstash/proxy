@@ -1,3 +1,8 @@
+//! CLI entry point for deterministic conformance and timed burn-in runs.
+//!
+//! Connection and EQL paths are explicit options with environment-variable
+//! equivalents so the same binary works in local mise environments and CI.
+
 use std::{path::PathBuf, time::Duration};
 
 use anyhow::Result;

@@ -60,3 +60,48 @@ jobs:
         with:
           channel: engineering
           webhook_url: ${{ secrets.SLACK_NOTIFICATION_WEBHOOK_URL }}
+
+  burn-in:
+    name: Encrypted burn-in (PostgreSQL 17)
+    runs-on: blacksmith-16vcpu-ubuntu-2204
+    timeout-minutes: 15
+    env:
+      PG_VERSION: 17
+      CS_ZEROKMS_HOST: https://us-east-1.aws.zerokms.cipherstashmanaged.net
+      CS_CTS_HOST: https://ap-southeast-2.aws.cts.cipherstashmanaged.net
+      RUST_BACKTRACE: "1"
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-test
+
+      - name: Decrypt secrets
+        uses: cipherstash/secrets-action@main
+        with:
+          secrets-file: .github/secrets.env.encrypted
+        env:
+          CS_CLIENT_ID: ${{ secrets.CS_VAULT_CLIENT_ID }}
+          CS_CLIENT_KEY: ${{ secrets.CS_VAULT_CLIENT_KEY }}
+          CS_CLIENT_ACCESS_KEY: ${{ secrets.CS_VAULT_CLIENT_ACCESS_KEY }}
+          CS_WORKSPACE_CRN: ${{ secrets.CS_VAULT_WORKSPACE_CRN }}
+
+      - name: Start PostgreSQL and install EQL
+        run: |
+          mise run postgres:up --extra-args "--detach --wait"
+          mise run postgres:setup
+
+      - name: Run encrypted burn-in
+        run: mise run test:burn-in
+
+      - name: Upload burn-in RSS report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: proxy-burn-in-pg17
+          path: target/burn-in/soak-report.json
+          if-no-files-found: warn
+
+      - uses: ./.github/actions/send-slack-notification
+        with:
+          channel: engineering
+          webhook_url: ${{ secrets.SLACK_NOTIFICATION_WEBHOOK_URL }}

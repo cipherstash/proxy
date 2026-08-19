@@ -1,3 +1,11 @@
+//! End-to-end correctness and soak workloads for CipherStash Proxy.
+//!
+//! The fixtures deliberately use EQL domains on uniquely named tables in
+//! `public`, and workload SQL deliberately leaves those table names
+//! unqualified. Proxy only loads schemas on its search path and EQL Mapper
+//! resolves a flat table namespace; changing either invariant can silently
+//! turn this into a passthrough workload that never exercises encryption.
+
 pub mod conformance;
 pub mod database;
 pub mod resource;

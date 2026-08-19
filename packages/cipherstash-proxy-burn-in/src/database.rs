@@ -1,3 +1,11 @@
+//! Database lifecycle for encrypted burn-in fixtures.
+//!
+//! EQL itself is installed directly because Proxy cannot map statements until
+//! its domains exist. Fixture DDL and seed writes then go through Proxy so DDL
+//! triggers schema/encrypt-config reloads and seed values are encrypted. DDL
+//! and seed use different Proxy connections because each connection snapshots
+//! those configurations when it opens.
+
 use std::path::Path;
 
 use anyhow::{Context, Result};
@@ -52,7 +60,7 @@ pub async fn ensure_eql_installed(direct_database_url: &str, eql_path: &Path) ->
 
 /// Create and seed fixtures through Proxy so DDL reloads its schema and every
 /// value assigned to an EQL domain traverses the encryption path.
-pub async fn migrate(proxy_database_url: &str) -> Result<()> {
+pub async fn migrate(proxy_database_url: &str, direct_database_url: &str) -> Result<()> {
     // A connection snapshots Proxy's schema and encrypt config when it opens.
     // Apply DDL on one connection, let Proxy reload, then open a fresh
     // connection whose snapshot includes the new encrypted fixture columns.
@@ -113,6 +121,31 @@ pub async fn migrate(proxy_database_url: &str) -> Result<()> {
         "wide-delta-".repeat(40),
     )
     .await?;
+    assert_seed_is_encrypted(direct_database_url).await?;
+    Ok(())
+}
+
+async fn assert_seed_is_encrypted(direct_database_url: &str) -> Result<()> {
+    // Query around Proxy and inspect the JSON-backed domains themselves. A
+    // successful round trip through Proxy is insufficient proof: an unmappable
+    // statement can be passed through and appear correct while storing plaintext.
+    let client = connect(direct_database_url).await?;
+    let row = client
+        .query_one(
+            "SELECT scalar::jsonb, document::jsonb, wide_text::jsonb \
+             FROM burnin_type_lab_samples WHERE id = 1",
+            &[],
+        )
+        .await
+        .context("reading seeded ciphertext directly from PostgreSQL")?;
+
+    for (index, column) in ["scalar", "document", "wide_text"].into_iter().enumerate() {
+        let ciphertext: Value = row.get(index);
+        anyhow::ensure!(
+            ciphertext.get("c").is_some() && ciphertext.get("v").is_some(),
+            "{column} was stored as plaintext instead of EQL ciphertext: {ciphertext}"
+        );
+    }
     Ok(())
 }
 

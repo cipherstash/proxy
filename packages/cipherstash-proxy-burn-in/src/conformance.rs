@@ -1,30 +1,16 @@
-use anyhow::{Context, Result};
+//! Deterministic protocol and encrypted-data conformance checks.
+//!
+//! Setup first proves representative fixture values are ciphertext at rest.
+//! The checks below then read those values through Proxy and cover typed
+//! decryption, transactional encrypted CRUD, rollback, SQL error recovery, and
+//! concurrent connections.
+
 use std::path::Path;
 
+use anyhow::{Context, Result};
 use serde_json::Value;
 
 use crate::database;
-
-async fn assert_seed_is_encrypted(direct_database_url: &str) -> Result<()> {
-    let client = database::connect(direct_database_url).await?;
-    let row = client
-        .query_one(
-            "SELECT scalar::jsonb, document::jsonb, wide_text::jsonb \
-             FROM burnin_type_lab_samples WHERE id = 1",
-            &[],
-        )
-        .await
-        .context("reading seeded ciphertext directly from PostgreSQL")?;
-
-    for (index, column) in ["scalar", "document", "wide_text"].into_iter().enumerate() {
-        let ciphertext: Value = row.get(index);
-        anyhow::ensure!(
-            ciphertext.get("c").is_some() && ciphertext.get("v").is_some(),
-            "{column} was stored as plaintext instead of EQL ciphertext: {ciphertext}"
-        );
-    }
-    Ok(())
-}
 
 pub async fn run(
     proxy_database_url: &str,
@@ -32,8 +18,7 @@ pub async fn run(
     eql_path: &Path,
 ) -> Result<()> {
     database::ensure_eql_installed(direct_database_url, eql_path).await?;
-    database::migrate(proxy_database_url).await?;
-    assert_seed_is_encrypted(direct_database_url).await?;
+    database::migrate(proxy_database_url, direct_database_url).await?;
     let mut client = database::connect(proxy_database_url).await?;
 
     client

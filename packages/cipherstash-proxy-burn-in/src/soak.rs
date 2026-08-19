@@ -1,3 +1,11 @@
+//! Timed encrypted CRUD workload with release-Proxy RSS sampling.
+//!
+//! This module builds and owns the exact Proxy process being measured. Every
+//! CRUD cycle writes and reads EQL-domain columns; fixture setup also verifies
+//! ciphertext directly in PostgreSQL before timing begins. Memory growth
+//! therefore includes the encryption/decryption path rather than passthrough
+//! SQL alone.
+
 use std::{
     path::{Path, PathBuf},
     process::Stdio,
@@ -63,7 +71,7 @@ pub async fn run(config: Config) -> Result<()> {
 
 async fn run_with_proxy(config: &Config, proxy_pid: u32) -> Result<()> {
     database::wait_until_ready(&config.proxy_database_url).await?;
-    database::migrate(&config.proxy_database_url).await?;
+    database::migrate(&config.proxy_database_url, &config.direct_database_url).await?;
     let started_at = Instant::now();
     let deadline = tokio::time::Instant::now() + config.duration;
     let operations = Arc::new(AtomicU64::new(0));
@@ -71,6 +79,8 @@ async fn run_with_proxy(config: &Config, proxy_pid: u32) -> Result<()> {
     let ids = Arc::new(AtomicU64::new(1_000_000));
     let mut workers = JoinSet::new();
 
+    // Workers keep connections open so the soak stresses repeated statement
+    // mapping and cipher use rather than connection establishment throughput.
     for _ in 0..config.concurrency {
         let url = config.proxy_database_url.clone();
         let operations = Arc::clone(&operations);

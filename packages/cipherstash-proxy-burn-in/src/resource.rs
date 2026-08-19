@@ -1,3 +1,8 @@
+//! Cross-platform resident-memory sampling for the spawned Proxy process.
+//!
+//! Linux reads `/proc` for CI while other platforms use `ps`, keeping report
+//! semantics identical for local and automated soak runs.
+
 use std::time::Instant;
 
 #[cfg(target_os = "linux")]

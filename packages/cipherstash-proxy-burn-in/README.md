@@ -35,3 +35,7 @@ and decryption work.
 
 Override connection URLs with `--proxy-database-url` / `--direct-database-url` or the
 `BURN_IN_PROXY_DATABASE_URL` / `BURN_IN_DIRECT_DATABASE_URL` environment variables.
+
+CI runs a bounded PostgreSQL 17 soak with `mise run test:burn-in` and uploads
+`target/burn-in/soak-report.json`. Override its defaults locally with
+`BURN_IN_DURATION_SECONDS` and `BURN_IN_CONCURRENCY`.
