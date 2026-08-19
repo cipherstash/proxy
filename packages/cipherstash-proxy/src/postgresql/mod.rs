@@ -6,6 +6,7 @@ mod error_handler;
 mod format_code;
 mod frontend;
 mod handler;
+mod inbound_eql;
 mod message_buffer;
 mod messages;
 mod parser;

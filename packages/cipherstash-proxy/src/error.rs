@@ -75,6 +75,7 @@ impl Error {
             // stores plaintext in a column its operator believes is encrypted
             // (CIP-3688). No configuration may turn that back on.
             Error::Mapping(MappingError::UnmappableEncryptedColumn { .. })
+                | Error::Encrypt(EncryptError::InvalidInboundCiphertext)
         )
     }
 }
@@ -255,6 +256,12 @@ pub enum TlsConfigError {
 
 #[derive(Error, Debug)]
 pub enum EncryptError {
+    /// Deliberately contains no payload or validation detail: inbound
+    /// ciphertext failures are attacker-controlled and detailed responses can
+    /// become an oracle.
+    #[error("Invalid encrypted value")]
+    InvalidInboundCiphertext,
+
     #[error(transparent)]
     CiphertextCouldNotBeSerialised(#[from] serde_json::Error),
 
