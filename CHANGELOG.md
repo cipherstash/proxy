@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- **Pre-encrypted EQL values in statements**: SQL literals and bound parameters may now carry EQL v3 storage payloads produced by an application. Proxy validates their wire shape, version, destination column and required SEM terms, authenticates their ciphertext with the connection's active keyset, and forwards them without encrypting them again. Invalid payloads fail closed with one generic error so validation details cannot be used as an oracle.
+
 ### Changed
 
 - **Upstream TLS verification for client traffic**: Connections with `with_tls_verification` enabled now use a cached snapshot of the system root certificates, loaded once when Proxy starts. Unlike Proxy's background database connections, pg-proto client-traffic connections do not apply operating-system revocation checks or enterprise verification policy. Restart Proxy after changing the system trust store.

@@ -14,6 +14,7 @@ use crate::postgresql::context::Portal;
 use crate::postgresql::data::{
     compose_json_selector_path, json_value_selector_plaintext, literal_from_sql, literal_json_value,
 };
+use crate::postgresql::inbound_eql;
 use crate::postgresql::rewrite::Name;
 use crate::postgresql::rewrite::UNSPECIFIED_TYPE_OID;
 use crate::prometheus::{
@@ -551,7 +552,18 @@ impl<S: EncryptionService> Frontend<S> {
             return Ok(vec![]);
         }
 
-        let plaintexts = literals_to_plaintext(typed_statement, literal_columns)?;
+        let inbound = literal_values
+            .iter()
+            .zip(literal_columns)
+            .map(|((_, literal), column)| {
+                let (Some(column), Some(value)) = (column, (*literal).clone().into_string()) else {
+                    return Ok(None);
+                };
+                inbound_eql::parse(value.as_bytes(), column).map_err(Error::from)
+            })
+            .collect::<Result<Vec<_>, Error>>()?;
+        let skip = inbound.iter().map(Option::is_some).collect::<Vec<_>>();
+        let plaintexts = literals_to_plaintext_skipping(typed_statement, literal_columns, &skip)?;
 
         let start = Instant::now();
 
@@ -562,6 +574,9 @@ impl<S: EncryptionService> Frontend<S> {
             .inspect_err(|_| {
                 counter!(ENCRYPTION_ERROR_TOTAL).increment(1);
             })?;
+
+        self.authenticate_and_merge_inbound(&mut encrypted, inbound)
+            .await?;
 
         for ((_, literal), encrypted) in literal_values.iter().zip(encrypted.iter_mut()) {
             project_query_operand(
@@ -1066,8 +1081,13 @@ impl<S: EncryptionService> Frontend<S> {
         bind: &Bind,
         statement: &Statement,
     ) -> Result<Vec<Option<crate::EqlOutput>>, Error> {
-        let plaintexts =
-            bind.to_plaintext(&statement.output_params, &statement.postgres_param_types)?;
+        let inbound = bind.inbound_ciphertexts(&statement.output_params)?;
+        let skip = inbound.iter().map(Option::is_some).collect::<Vec<_>>();
+        let plaintexts = bind.to_plaintext_skipping(
+            &statement.output_params,
+            &statement.postgres_param_types,
+            &skip,
+        )?;
 
         // Encryption is positional over the OUTPUT params — the values actually
         // sent — not over what the client bound.
@@ -1088,6 +1108,9 @@ impl<S: EncryptionService> Frontend<S> {
             .inspect_err(|_| {
                 counter!(ENCRYPTION_ERROR_TOTAL).increment(1);
             })?;
+
+        self.authenticate_and_merge_inbound(&mut encrypted, inbound)
+            .await?;
 
         for (output, encrypted) in statement.output_params.iter().zip(encrypted.iter_mut()) {
             project_query_operand(output.query_operand, encrypted);
@@ -1113,6 +1136,37 @@ impl<S: EncryptionService> Frontend<S> {
         }
 
         Ok(encrypted)
+    }
+
+    /// Authenticate inbound ciphertext with this connection's scoped cipher.
+    /// Any parse, metadata, key or AEAD failure is collapsed to one response.
+    async fn authenticate_and_merge_inbound(
+        &self,
+        encrypted: &mut [Option<EqlOutput>],
+        inbound: Vec<Option<crate::EqlCiphertext>>,
+    ) -> Result<(), Error> {
+        let positions = inbound
+            .iter()
+            .enumerate()
+            .filter_map(|(index, ciphertext)| ciphertext.as_ref().map(|ct| (index, ct.clone())))
+            .collect::<Vec<_>>();
+        if positions.is_empty() {
+            return Ok(());
+        }
+
+        let ciphertexts = positions
+            .iter()
+            .map(|(_, ciphertext)| Some(ciphertext.clone()))
+            .collect();
+        self.context
+            .decrypt(ciphertexts)
+            .await
+            .map_err(|_| EncryptError::InvalidInboundCiphertext)?;
+
+        for (index, ciphertext) in positions {
+            encrypted[index] = Some(EqlOutput::Store(ciphertext));
+        }
+        Ok(())
     }
 
     fn type_check<'a>(
@@ -1231,44 +1285,58 @@ fn literals_to_plaintext(
     typed_statement: &TypeCheckedStatement<'_>,
     literal_columns: &Vec<Option<Column>>,
 ) -> Result<Vec<Option<Plaintext>>, Error> {
+    literals_to_plaintext_skipping(typed_statement, literal_columns, &[])
+}
+
+fn literals_to_plaintext_skipping(
+    typed_statement: &TypeCheckedStatement<'_>,
+    literal_columns: &Vec<Option<Column>>,
+    skip: &[bool],
+) -> Result<Vec<Option<Plaintext>>, Error> {
     let literals = typed_statement.literal_values();
 
     let plaintexts = literals
         .iter()
         .zip(literal_columns)
-        .map(|((eql_term, val), col)| match col {
-            Some(col) => {
-                let plaintext = match eql_term.variant() {
-                    EqlTermVariant::JsonValueSelector => {
-                        json_value_selector_literal_plaintext(typed_statement, val)
-                    }
-                    // A selector that carries a collapsed chain keys the composed
-                    // path, not the one segment it spells. Only a selector the
-                    // mapper recorded a chain for: a single access has no record
-                    // and takes the ordinary single-segment route below.
-                    EqlTermVariant::JsonAccessor
-                        if typed_statement
-                            .json_accessor_paths
-                            .for_literal(val)
-                            .is_some() =>
-                    {
-                        json_accessor_path_literal_plaintext(typed_statement, val)
-                    }
-                    _ => literal_from_sql(val, col.eql_term(), col.cast_type()),
-                };
-
-                plaintext.map_err(|err| {
-                    debug!(
-                        target: MAPPER,
-                        msg = "Could not convert literal value",
-                        value = ?val,
-                        cast_type = ?col.cast_type(),
-                        error = err.to_string()
-                    );
-                    MappingError::InvalidParameter(Box::new(col.to_owned())).into()
-                })
+        .enumerate()
+        .map(|(index, ((eql_term, val), col))| {
+            if skip.get(index).copied().unwrap_or(false) {
+                return Ok(None);
             }
-            None => Ok(None),
+            match col {
+                Some(col) => {
+                    let plaintext = match eql_term.variant() {
+                        EqlTermVariant::JsonValueSelector => {
+                            json_value_selector_literal_plaintext(typed_statement, val)
+                        }
+                        // A selector that carries a collapsed chain keys the composed
+                        // path, not the one segment it spells. Only a selector the
+                        // mapper recorded a chain for: a single access has no record
+                        // and takes the ordinary single-segment route below.
+                        EqlTermVariant::JsonAccessor
+                            if typed_statement
+                                .json_accessor_paths
+                                .for_literal(val)
+                                .is_some() =>
+                        {
+                            json_accessor_path_literal_plaintext(typed_statement, val)
+                        }
+                        _ => literal_from_sql(val, col.eql_term(), col.cast_type()),
+                    };
+
+                    plaintext.map_err(|err| {
+                        debug!(
+                            target: MAPPER,
+                            msg = "Could not convert literal value",
+                            value = ?val,
+                            cast_type = ?col.cast_type(),
+                            error = err.to_string()
+                        );
+                        MappingError::InvalidParameter(Box::new(col.to_owned())).into()
+                    })
+                }
+                None => Ok(None),
+            }
         })
         .collect::<Result<Vec<_>, Error>>()?;
     Ok(plaintexts)
