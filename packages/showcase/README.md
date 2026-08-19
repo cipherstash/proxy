@@ -466,12 +466,24 @@ mise run test:integration:showcase
 
 The showcase will execute and display:
 
-1. **Original Healthcare Query**: Aspirin prescription lookup
-2. **Field Access Operations**: Testing `->` and `->>`
-3. **Containment Operations**: Testing `@>` and `<@`
-4. **JSONPath Functions**: Testing `jsonb_path_*` functions
-5. **Comparison Operations**: Numeric, string, date, and float comparisons
-6. **Complex Nested Queries**: JOINs, aggregations, and subqueries
+1. **Application-side Encryption**: Insert pre-encrypted EQL payloads as a bound parameter and a SQL literal
+2. **Original Healthcare Query**: Aspirin prescription lookup
+3. **Field Access Operations**: Testing `->` and `->>`
+4. **Containment Operations**: Testing `@>` and `<@`
+5. **JSONPath Functions**: Testing `jsonb_path_*` functions
+6. **Comparison Operations**: Numeric, string, date, and float comparisons
+7. **Complex Nested Queries**: JOINs, aggregations, and subqueries
+
+### Application-side Encryption
+
+The `pre_encrypted` example constructs the same `eql_v3_json_search` column configuration declared by `patients.pii`, encrypts patient PII with `cipherstash-client`, and sends the resulting EQL payload through Proxy. It demonstrates both supported input forms:
+
+```sql
+INSERT INTO patients (id, pii) VALUES ($1, $2); -- payload parameter
+INSERT INTO patients (id, pii) VALUES ('...', '{...}'); -- payload literal
+```
+
+Proxy parses and authenticates each payload, checks that its identifier and SEM shape match `patients.pii`, and forwards it without double encryption. Selecting the rows through Proxy returns the original plaintext JSON.
 
 Each test section provides detailed output showing:
 - ✅ Successful query execution
