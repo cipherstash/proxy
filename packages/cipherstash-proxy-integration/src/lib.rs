@@ -7,6 +7,7 @@ mod empty_result;
 mod encryption_sanity;
 mod eql_regression;
 mod extended_protocol_error_messages;
+mod inbound_ciphertext;
 mod insert;
 mod legacy_v2_column;
 mod map_concat;

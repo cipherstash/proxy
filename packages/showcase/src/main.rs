@@ -53,6 +53,7 @@
 mod common;
 mod data;
 mod model;
+mod pre_encrypted;
 mod schema;
 
 use common::{connect_with_tls, trace, PROXY};
@@ -75,6 +76,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     setup_schema().await;
     insert_test_data().await;
     create_enhanced_jsonb_test_data().await;
+    pre_encrypted::run_examples().await?;
 
     let client = connect_with_tls(*PROXY).await;
 
@@ -156,6 +158,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("   • Healthcare-compliant database schema with proper foreign keys");
     println!("   • Realistic medical data with nested objects, arrays, and mixed data types");
     println!("   • Secure querying of encrypted data while maintaining privacy");
+    println!("   • Application-side encryption passed through Proxy as parameters and literals");
     println!();
     println!("✨ EQL v3 provides comprehensive JSONB support for encrypted healthcare data!");
 
