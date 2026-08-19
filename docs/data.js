@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1787105759236,
+  "lastUpdate": 1787111723508,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -24885,6 +24885,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 39.726461,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "toby@cipherstash.com",
+            "name": "Toby Hede",
+            "username": "tobyhede"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "d495e0c6e159804bff3700608279e04aaa9604f6",
+          "message": "Merge pull request #457 from cipherstash/fix/cip-3838-vanta-high-batch\n\nfix(deps): patch quinn-proto to 0.11.15",
+          "timestamp": "2026-08-19T13:50:28+10:00",
+          "tree_id": "c8e7fb2e34af5372811c9bed74f9375f5e8ea4bf",
+          "url": "https://github.com/cipherstash/proxy/commit/d495e0c6e159804bff3700608279e04aaa9604f6"
+        },
+        "date": 1787111721818,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 40.397661,
             "unit": "Number"
           }
         ]
