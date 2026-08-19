@@ -1,10 +1,39 @@
 use anyhow::{Context, Result};
+use std::path::Path;
+
 use serde_json::Value;
 
 use crate::database;
 
-pub async fn run(proxy_database_url: &str, direct_database_url: &str) -> Result<()> {
-    database::migrate(direct_database_url).await?;
+async fn assert_seed_is_encrypted(direct_database_url: &str) -> Result<()> {
+    let client = database::connect(direct_database_url).await?;
+    let row = client
+        .query_one(
+            "SELECT scalar::jsonb, document::jsonb, wide_text::jsonb \
+             FROM burnin_type_lab_samples WHERE id = 1",
+            &[],
+        )
+        .await
+        .context("reading seeded ciphertext directly from PostgreSQL")?;
+
+    for (index, column) in ["scalar", "document", "wide_text"].into_iter().enumerate() {
+        let ciphertext: Value = row.get(index);
+        anyhow::ensure!(
+            ciphertext.get("c").is_some() && ciphertext.get("v").is_some(),
+            "{column} was stored as plaintext instead of EQL ciphertext: {ciphertext}"
+        );
+    }
+    Ok(())
+}
+
+pub async fn run(
+    proxy_database_url: &str,
+    direct_database_url: &str,
+    eql_path: &Path,
+) -> Result<()> {
+    database::ensure_eql_installed(direct_database_url, eql_path).await?;
+    database::migrate(proxy_database_url).await?;
+    assert_seed_is_encrypted(direct_database_url).await?;
     let mut client = database::connect(proxy_database_url).await?;
 
     client
@@ -15,7 +44,7 @@ pub async fn run(proxy_database_url: &str, direct_database_url: &str) -> Result<
     let sample = client
         .query_one(
             "SELECT scalar, nullable_text, binary_value, tags, document, wide_text \
-             FROM burnin_type_lab.samples WHERE id = $1",
+             FROM burnin_type_lab_samples WHERE id = $1",
             &[&1_i32],
         )
         .await
@@ -49,32 +78,32 @@ pub async fn run(proxy_database_url: &str, direct_database_url: &str) -> Result<
     let fixture_id = 900_001_i32;
     transaction
         .execute(
-            "INSERT INTO burnin_commerce.customers (id, name) VALUES ($1, $2)",
+            "INSERT INTO burnin_commerce_customers (id, name) VALUES ($1, $2)",
             &[&fixture_id, &"conformance-customer"],
         )
         .await?;
     transaction
         .execute(
-            "INSERT INTO burnin_commerce.products (id, sku, price_cents) VALUES ($1, $2, $3)",
+            "INSERT INTO burnin_commerce_products (id, sku, price_cents) VALUES ($1, $2, $3)",
             &[&fixture_id, &"CONF-900001", &2_499_i32],
         )
         .await?;
     transaction
         .execute(
-            "INSERT INTO burnin_commerce.orders (id, customer_id, status) VALUES ($1, $2, $3)",
+            "INSERT INTO burnin_commerce_orders (id, customer_id, status) VALUES ($1, $2, $3)",
             &[&fixture_id, &fixture_id, &"open"],
         )
         .await?;
     transaction.execute(
-        "INSERT INTO burnin_commerce.order_lines (order_id, line_number, product_id, quantity) VALUES ($1, 1, $2, 2)",
+        "INSERT INTO burnin_commerce_order_lines (order_id, line_number, product_id, quantity) VALUES ($1, 1, $2, 2)",
         &[&fixture_id, &fixture_id],
     ).await?;
     let total: i64 = transaction
         .query_one(
-            "SELECT sum(p.price_cents::bigint * l.quantity) \
-         FROM burnin_commerce.orders o \
-         JOIN burnin_commerce.order_lines l ON l.order_id = o.id \
-         JOIN burnin_commerce.products p ON p.id = l.product_id \
+            "SELECT sum(p.price_cents * l.quantity)::bigint \
+         FROM burnin_commerce_orders o \
+         JOIN burnin_commerce_order_lines l ON l.order_id = o.id \
+         JOIN burnin_commerce_products p ON p.id = l.product_id \
          WHERE o.id = $1",
             &[&fixture_id],
         )
@@ -83,7 +112,7 @@ pub async fn run(proxy_database_url: &str, direct_database_url: &str) -> Result<
     anyhow::ensure!(total == 4_998, "joined CRUD result was corrupted");
     transaction
         .execute(
-            "UPDATE burnin_commerce.orders SET status = 'paid' WHERE id = $1",
+            "UPDATE burnin_commerce_orders SET status = 'paid' WHERE id = $1",
             &[&fixture_id],
         )
         .await?;
@@ -93,7 +122,7 @@ pub async fn run(proxy_database_url: &str, direct_database_url: &str) -> Result<
         .context("rolling back CRUD transaction")?;
     let rolled_back: i64 = client
         .query_one(
-            "SELECT count(*) FROM burnin_commerce.orders WHERE id = $1",
+            "SELECT count(*) FROM burnin_commerce_orders WHERE id = $1",
             &[&fixture_id],
         )
         .await?
@@ -102,7 +131,7 @@ pub async fn run(proxy_database_url: &str, direct_database_url: &str) -> Result<
 
     let error = client
         .execute(
-            "INSERT INTO burnin_commerce.products (id, sku, price_cents) VALUES ($1, $2, $3)",
+            "INSERT INTO burnin_commerce_products (id, sku, price_cents) VALUES ($1, $2, $3)",
             &[&900_002_i32, &"INVALID-PRICE", &0_i32],
         )
         .await

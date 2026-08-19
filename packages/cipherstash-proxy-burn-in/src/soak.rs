@@ -26,6 +26,7 @@ pub struct Config {
     pub concurrency: usize,
     pub proxy_database_url: String,
     pub direct_database_url: String,
+    pub eql_path: PathBuf,
     pub output: PathBuf,
     pub max_rss_growth_bytes: Option<u64>,
 }
@@ -49,7 +50,7 @@ pub async fn run(config: Config) -> Result<()> {
         "--duration-seconds must be positive"
     );
     anyhow::ensure!(config.concurrency > 0, "--concurrency must be positive");
-    database::migrate(&config.direct_database_url).await?;
+    database::ensure_eql_installed(&config.direct_database_url, &config.eql_path).await?;
 
     build_release_proxy().await?;
     let mut proxy = spawn_release_proxy()?;
@@ -62,6 +63,7 @@ pub async fn run(config: Config) -> Result<()> {
 
 async fn run_with_proxy(config: &Config, proxy_pid: u32) -> Result<()> {
     database::wait_until_ready(&config.proxy_database_url).await?;
+    database::migrate(&config.proxy_database_url).await?;
     let started_at = Instant::now();
     let deadline = tokio::time::Instant::now() + config.duration;
     let operations = Arc::new(AtomicU64::new(0));
@@ -147,32 +149,32 @@ async fn crud_cycle(client: &mut tokio_postgres::Client, id: i32) -> Result<()> 
     let sku = format!("SOAK-{id}");
     transaction
         .execute(
-            "INSERT INTO burnin_commerce.customers (id, name) VALUES ($1, $2)",
+            "INSERT INTO burnin_commerce_customers (id, name) VALUES ($1, $2)",
             &[&id, &name],
         )
         .await?;
     transaction
         .execute(
-            "INSERT INTO burnin_commerce.products (id, sku, price_cents) VALUES ($1, $2, $3)",
+            "INSERT INTO burnin_commerce_products (id, sku, price_cents) VALUES ($1, $2, $3)",
             &[&id, &sku, &(100 + id % 10_000)],
         )
         .await?;
     transaction
         .execute(
-            "INSERT INTO burnin_commerce.orders (id, customer_id, status) VALUES ($1, $1, 'open')",
+            "INSERT INTO burnin_commerce_orders (id, customer_id, status) VALUES ($1, $1, 'open')",
             &[&id],
         )
         .await?;
     transaction.execute(
-        "INSERT INTO burnin_commerce.order_lines (order_id, line_number, product_id, quantity) VALUES ($1, 1, $1, 2)", &[&id]
+        "INSERT INTO burnin_commerce_order_lines (order_id, line_number, product_id, quantity) VALUES ($1, 1, $1, 2)", &[&id]
     ).await?;
     let row = transaction
         .query_one(
             "SELECT c.name, p.sku, p.price_cents * l.quantity \
-         FROM burnin_commerce.orders o \
-         JOIN burnin_commerce.customers c ON c.id = o.customer_id \
-         JOIN burnin_commerce.order_lines l ON l.order_id = o.id \
-         JOIN burnin_commerce.products p ON p.id = l.product_id WHERE o.id = $1",
+         FROM burnin_commerce_orders o \
+         JOIN burnin_commerce_customers c ON c.id = o.customer_id \
+         JOIN burnin_commerce_order_lines l ON l.order_id = o.id \
+         JOIN burnin_commerce_products p ON p.id = l.product_id WHERE o.id = $1",
             &[&id],
         )
         .await?;
@@ -182,25 +184,25 @@ async fn crud_cycle(client: &mut tokio_postgres::Client, id: i32) -> Result<()> 
     );
     transaction
         .execute(
-            "UPDATE burnin_commerce.orders SET status = 'fulfilled' WHERE id = $1",
+            "UPDATE burnin_commerce_orders SET status = 'fulfilled' WHERE id = $1",
             &[&id],
         )
         .await?;
     transaction
         .execute(
-            "DELETE FROM burnin_commerce.order_lines WHERE order_id = $1",
+            "DELETE FROM burnin_commerce_order_lines WHERE order_id = $1",
             &[&id],
         )
         .await?;
     transaction
-        .execute("DELETE FROM burnin_commerce.orders WHERE id = $1", &[&id])
+        .execute("DELETE FROM burnin_commerce_orders WHERE id = $1", &[&id])
         .await?;
     transaction
-        .execute("DELETE FROM burnin_commerce.products WHERE id = $1", &[&id])
+        .execute("DELETE FROM burnin_commerce_products WHERE id = $1", &[&id])
         .await?;
     transaction
         .execute(
-            "DELETE FROM burnin_commerce.customers WHERE id = $1",
+            "DELETE FROM burnin_commerce_customers WHERE id = $1",
             &[&id],
         )
         .await?;

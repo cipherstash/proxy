@@ -37,6 +37,13 @@ struct DatabaseArgs {
         default_value = "postgresql://cipherstash:p%40ssword@localhost:5532/cipherstash"
     )]
     direct_database_url: String,
+    /// EQL installation SQL used when the target database has no EQL domains.
+    #[arg(
+        long,
+        env = "BURN_IN_EQL_PATH",
+        default_value = "cipherstash-encrypt.sql"
+    )]
+    eql_path: PathBuf,
 }
 
 #[derive(Debug, Args)]
@@ -64,6 +71,7 @@ async fn main() -> Result<()> {
             cipherstash_proxy_burn_in::conformance::run(
                 &args.proxy_database_url,
                 &args.direct_database_url,
+                &args.eql_path,
             )
             .await
         }
@@ -73,6 +81,7 @@ async fn main() -> Result<()> {
                 concurrency: args.concurrency,
                 proxy_database_url: args.database.proxy_database_url,
                 direct_database_url: args.database.direct_database_url,
+                eql_path: args.database.eql_path,
                 output: args.output,
                 max_rss_growth_bytes: args.max_rss_growth_mib.map(|mib| mib * 1_048_576),
             })
