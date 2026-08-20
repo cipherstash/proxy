@@ -483,9 +483,13 @@ INSERT INTO patients (id, pii) VALUES ($1, $2); -- payload parameter
 INSERT INTO patients (id, pii) VALUES ('...', '{...}'); -- payload literal
 SELECT id FROM patients WHERE pii @> $1; -- query-only SEM parameter
 SELECT id FROM patients WHERE pii @> '{...}'; -- query-only SEM literal
+SELECT pii -> $1 FROM patients; -- bare selector-hash parameter
+SELECT jsonb_path_query_first(pii, '<hash>') FROM patients; -- selector-hash literal
 ```
 
-For stored payloads, Proxy authenticates the ciphertext, checks that its identifier and authenticated descriptor match `patients.pii`, and independently re-derives every SEM term from the decrypted plaintext. Query-only payloads deliberately contain no source ciphertext, so authentication is impossible and unnecessary: Proxy validates that their shape is valid for `patients.pii` and accepts them only in predicate positions, where incorrect terms can only produce incorrect query results and cannot poison stored data. Both forms are forwarded without double encryption.
+For stored payloads, Proxy authenticates the ciphertext, checks that its identifier and authenticated descriptor match `patients.pii`, and independently re-derives every SEM term from the decrypted plaintext. Query-only payloads deliberately contain no source ciphertext, so authentication is impossible and unnecessary: Proxy validates that their shape is valid for `patients.pii` and accepts them only in query positions, where incorrect terms can only produce incorrect query results and cannot poison stored data. Both forms are forwarded without double encryption.
+
+A SteVec path selector is a bare tokenized-selector hash matching `^[0-9a-f]{32}$`. In a JSON selector query position, Proxy treats a matching value as already hashed; anything not matching that format is treated as plaintext and encrypted normally. This is intentionally ambiguous: plaintext selectors are a superset of the hash format, so a genuine plaintext selector consisting of exactly 32 lowercase hexadecimal characters is also treated as already hashed. Applications with such a field name must currently query it using an application-generated selector hash.
 
 Each test section provides detailed output showing:
 - ✅ Successful query execution

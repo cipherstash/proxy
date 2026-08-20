@@ -101,6 +101,36 @@ pub async fn run_examples() -> Result<(), Box<dyn std::error::Error>> {
     });
     assert!(matched);
     println!("✅ Queried with application-generated SEM terms as a SQL literal");
+
+    // Example 5: SteVec path selectors are bare, 32-character lowercase hex
+    // query terms. Proxy recognises and forwards an application-generated hash
+    // instead of hashing it again.
+    let parameter_selector = query_patient_selector("$.first_name").await?;
+    let row = client
+        .query_one(
+            "SELECT pii -> $1 FROM patients WHERE id = $2",
+            &[&parameter_selector, &parameter_id],
+        )
+        .await?;
+    assert_eq!(row.get::<_, Value>(0), json!("Ada"));
+    println!("✅ Queried with an application-generated selector hash parameter");
+
+    // Example 6: selector hashes work as literals too. A plaintext selector
+    // matching the same format is ambiguous and is intentionally interpreted
+    // as already hashed; see the showcase README for the compatibility rule.
+    let literal_selector = query_patient_selector("$.first_name").await?;
+    let rows = client
+        .simple_query(&format!(
+            "SELECT jsonb_path_query_first(pii, '{literal_selector}') \
+             FROM patients WHERE id = '{literal_id}'"
+        ))
+        .await?;
+    let selected = rows.iter().find_map(|message| match message {
+        tokio_postgres::SimpleQueryMessage::Row(row) => row.get(0),
+        _ => None,
+    });
+    assert_eq!(selected, Some("\"Grace\""));
+    println!("✅ Queried with an application-generated selector hash literal");
     Ok(())
 }
 
@@ -143,6 +173,30 @@ async fn query_patient_pii(value: Value) -> Result<Value, Box<dyn std::error::Er
         return Err("query encryption returned a storage payload".into());
     };
     Ok(serde_json::to_value(query)?)
+}
+
+async fn query_patient_selector(path: &str) -> Result<String, Box<dyn std::error::Error>> {
+    let config = patient_pii_config();
+    let index_type = config.indexes[0].index_type.clone();
+    let prepared = PreparedPlaintext::new(
+        Cow::Owned(config),
+        Identifier::new("patients", "pii"),
+        Plaintext::from(path),
+        EqlOperation::Query(&index_type, QueryOp::SteVecSelector),
+    );
+    let mut outputs = encrypt_eql_v3(
+        scoped_cipher().await?,
+        vec![prepared],
+        &EqlEncryptOpts::default(),
+    )
+    .await?;
+    let EqlOutputV3::Query(query) = outputs.remove(0) else {
+        return Err("selector encryption returned a storage payload".into());
+    };
+    let Value::String(selector) = serde_json::to_value(query)? else {
+        return Err("selector encryption returned a non-selector query payload".into());
+    };
+    Ok(selector)
 }
 
 fn patient_pii_config() -> ColumnConfig {
