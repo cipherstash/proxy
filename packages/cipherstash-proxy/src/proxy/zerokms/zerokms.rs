@@ -16,7 +16,7 @@ use cipherstash_client::{
         PreparedPlaintext,
     },
     schema::column::IndexType,
-    zerokms::{Decryptable, EncryptedRecord, RecordWithNonce, RetrieveKeyPayload},
+    zerokms::{Decryptable, EncryptedRecord, IdentifiedBy, RecordWithNonce, RetrieveKeyPayload},
 };
 use eql_mapper::EqlTermVariant;
 use metrics::{counter, histogram};
@@ -164,7 +164,15 @@ impl ZeroKms {
         info!(target: ZEROKMS, msg = "Initializing ZeroKMS ScopedCipher (cache miss)", ?keyset_id);
         counter!(KEYSET_CIPHER_CACHE_MISS_TOTAL).increment(1);
 
-        let identified_by = keyset_id.as_ref().map(|id| id.0.clone());
+        // A connection-level keyset takes precedence. Otherwise, scope the
+        // cipher to Proxy's configured default instead of passing `None` and
+        // silently falling back to the ZeroKMS client's account default. The
+        // two defaults are not required to be the same, and using the account
+        // default would derive different searchable-encryption terms.
+        let identified_by = keyset_id
+            .as_ref()
+            .map(|id| id.0.clone())
+            .or_else(|| self.default_keyset_id.map(IdentifiedBy::Uuid));
 
         let start = Instant::now();
         let result = ScopedCipher::init(zerokms_client, identified_by).await;
