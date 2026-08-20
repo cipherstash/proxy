@@ -1,12 +1,12 @@
 use crate::{postgresql::Column, Identifier};
-use bytes::BytesMut;
 use cipherstash_client::{encryption, schema::ColumnType};
 use eql_mapper::{EqlMapperError, EqlTermVariant};
 use metrics_exporter_prometheus::BuildError;
 use std::{io, time::Duration};
 use thiserror::Error;
 
-const ERROR_DOC_BASE_URL: &str = "https://github.com/cipherstash/proxy/blob/main/docs/errors.md";
+pub(crate) const ERROR_DOC_BASE_URL: &str =
+    "https://github.com/cipherstash/proxy/blob/main/docs/errors.md";
 const ERROR_DOC_CONFIG_URL: &str =
     "https://github.com/cipherstash/proxy/blob/main/docs/how-to/index.md#configuring-proxy";
 
@@ -55,7 +55,7 @@ pub enum Error {
     Unknown,
 
     #[error(transparent)]
-    SendError(#[from] tokio::sync::mpsc::error::SendError<BytesMut>),
+    Send(#[from] tokio::sync::mpsc::error::SendError<pg_proto::BackendMessage>),
 }
 
 impl Error {
@@ -473,6 +473,21 @@ pub enum ProtocolError {
 
     #[error("Client authentication failed. Check username and password. For help visit {}#authentication-failed-client", ERROR_DOC_BASE_URL)]
     ClientAuthenticationFailed,
+
+    #[error("A buffered PostgreSQL DataRow was not associated with an operation")]
+    HeldDataRowMissingOperation,
+
+    #[error("Buffered PostgreSQL DataRows crossed Execute operation boundaries")]
+    HeldDataRowOperationMismatch,
+
+    #[error("A buffered PostgreSQL response was not a DataRow")]
+    HeldBackendMessageNotDataRow,
+
+    #[error("Buffered PostgreSQL DataRows were not associated with an encrypted portal")]
+    HeldDataRowsNotEncrypted,
+
+    #[error("Expected {expected} DataRow columns, received {received}")]
+    DataRowColumnCountMismatch { expected: usize, received: usize },
 
     #[error("Expected {expected} parameter format codes, received {received}")]
     ParameterFormatCodesMismatch { expected: usize, received: usize },

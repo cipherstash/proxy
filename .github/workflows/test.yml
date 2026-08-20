@@ -56,6 +56,12 @@ jobs:
         run: |
           mise run --output prefix test
 
+      - name: Show proxy logs on failure
+        if: failure()
+        run: |
+          docker logs --timestamps proxy 2>&1 || true
+          docker logs --timestamps proxy-tls 2>&1 || true
+
       - uses: ./.github/actions/send-slack-notification
         with:
           channel: engineering
