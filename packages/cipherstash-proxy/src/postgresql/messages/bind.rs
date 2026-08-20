@@ -128,12 +128,12 @@ impl Bind {
             .collect()
     }
 
-    /// Detect already-encrypted storage payloads before decoding parameters as
-    /// their configured plaintext PostgreSQL types.
-    pub fn inbound_ciphertexts(
+    /// Detect application-generated storage or query payloads before decoding
+    /// parameters as their configured plaintext PostgreSQL types.
+    pub fn inbound_eql(
         &self,
         output_params: &[OutputParam],
-    ) -> Result<Vec<Option<crate::EqlCiphertext>>, Error> {
+    ) -> Result<Vec<Option<inbound_eql::InboundEql>>, Error> {
         output_params
             .iter()
             .map(|output| {
@@ -154,7 +154,7 @@ impl Bind {
                 } else {
                     &param.bytes
                 };
-                inbound_eql::parse(bytes, column).map_err(Error::from)
+                inbound_eql::parse(bytes, column, output.query_operand).map_err(Error::from)
             })
             .collect()
     }

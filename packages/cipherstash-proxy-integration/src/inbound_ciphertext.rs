@@ -4,15 +4,16 @@
 mod tests {
     use crate::common::{clear_with_client, connect_with_tls, random_id, PROXY};
     use cipherstash_client::{
-        encryption::{Plaintext, ScopedCipher},
+        encryption::{Plaintext, QueryOp, ScopedCipher},
         eql::{
-            encrypt_eql_v3, EqlEncryptOpts, EqlOperation, EqlOutputV3, Identifier,
+            encrypt_eql_v3, EqlCiphertextV3, EqlEncryptOpts, EqlOperation, EqlOutputV3, Identifier,
             PreparedPlaintext,
         },
         schema::{column::Index, ColumnConfig, ColumnType},
         zerokms::{ClientKey, ZeroKMSBuilder},
         AutoStrategy, IdentifiedBy,
     };
+    use cipherstash_config::column::{ArrayIndexMode, IndexType, SteVecMode};
     use std::{borrow::Cow, sync::Arc};
     use uuid::Uuid;
 
@@ -52,6 +53,17 @@ mod tests {
             .add_index(Index::new_match())
     }
 
+    fn json_search_config(table: &str, column: &str) -> ColumnConfig {
+        ColumnConfig::build(format!("{table}/{column}"))
+            .casts_as(ColumnType::Json)
+            .add_index(Index::new(IndexType::SteVec {
+                prefix: format!("{table}/{column}"),
+                term_filters: Vec::new(),
+                array_index_mode: ArrayIndexMode::ALL,
+                mode: SteVecMode::default(),
+            }))
+    }
+
     async fn encrypt_text(table: &str, column: &str, plaintext: &str) -> String {
         let prepared = PreparedPlaintext::new(
             Cow::Owned(text_search_config(table, column)),
@@ -67,6 +79,35 @@ mod tests {
             panic!("store encryption must return a stored payload");
         };
         serde_json::to_string(&ciphertext).unwrap()
+    }
+
+    async fn query_text(table: &str, column: &str, plaintext: &str) -> String {
+        let stored: EqlCiphertextV3 =
+            serde_json::from_str(&encrypt_text(table, column, plaintext).await).unwrap();
+        serde_json::to_string(&stored.into_query_operand()).unwrap()
+    }
+
+    async fn query_json(
+        table: &str,
+        column: &str,
+        plaintext: serde_json::Value,
+    ) -> serde_json::Value {
+        let config = json_search_config(table, column);
+        let index_type = config.indexes[0].index_type.clone();
+        let prepared = PreparedPlaintext::new(
+            Cow::Owned(config),
+            Identifier::new(table, column),
+            Plaintext::Json(Some(plaintext)),
+            EqlOperation::Query(&index_type, QueryOp::Default),
+        );
+        let mut outputs =
+            encrypt_eql_v3(cipher().await, vec![prepared], &EqlEncryptOpts::default())
+                .await
+                .expect("application-side query encryption must succeed");
+        let EqlOutputV3::Query(query) = outputs.remove(0) else {
+            panic!("query encryption must return a query-only payload");
+        };
+        serde_json::to_value(query).unwrap()
     }
 
     #[tokio::test]
@@ -116,6 +157,115 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(row.get::<_, String>(0), plaintext);
+    }
+
+    #[tokio::test]
+    async fn accepts_query_only_parameter_for_search() {
+        let client = connect_with_tls(*PROXY).await;
+        clear_with_client(&client).await;
+        let id = random_id();
+        let plaintext = "queried with application SEM terms";
+
+        client
+            .execute(
+                "INSERT INTO encrypted (id, encrypted_text) VALUES ($1, $2)",
+                &[&id, &plaintext],
+            )
+            .await
+            .unwrap();
+
+        let payload = query_text("encrypted", "encrypted_text", plaintext).await;
+        let rows = client
+            .query(
+                "SELECT encrypted_text FROM encrypted WHERE encrypted_text = $1",
+                &[&payload],
+            )
+            .await
+            .unwrap();
+        assert_eq!(rows[0].get::<_, String>(0), plaintext);
+    }
+
+    #[tokio::test]
+    async fn accepts_query_only_literal_for_search() {
+        let client = connect_with_tls(*PROXY).await;
+        clear_with_client(&client).await;
+        let id = random_id();
+        let plaintext = "queried with literal SEM terms";
+
+        client
+            .execute(
+                "INSERT INTO encrypted (id, encrypted_text) VALUES ($1, $2)",
+                &[&id, &plaintext],
+            )
+            .await
+            .unwrap();
+
+        let payload = query_text("encrypted", "encrypted_text", plaintext)
+            .await
+            .replace('\'', "''");
+        let rows = client
+            .simple_query(&format!(
+                "SELECT encrypted_text FROM encrypted WHERE encrypted_text = '{payload}'"
+            ))
+            .await
+            .unwrap();
+        let row = rows
+            .iter()
+            .find_map(|message| match message {
+                tokio_postgres::SimpleQueryMessage::Row(row) => Some(row),
+                _ => None,
+            })
+            .expect("query-only literal must match one row");
+        assert_eq!(row.get(0), Some(plaintext));
+    }
+
+    #[tokio::test]
+    async fn rejects_query_only_parameter_for_storage() {
+        let client = connect_with_tls(*PROXY).await;
+        clear_with_client(&client).await;
+        let id = random_id();
+        let payload = query_text("encrypted", "encrypted_text", "not writable").await;
+
+        let error = client
+            .execute(
+                "INSERT INTO encrypted (id, encrypted_text) VALUES ($1, $2)",
+                &[&id, &payload],
+            )
+            .await
+            .expect_err("query-only payloads must not be accepted for storage");
+        assert_eq!(
+            error.as_db_error().unwrap().message(),
+            "Invalid encrypted value"
+        );
+    }
+
+    #[tokio::test]
+    async fn accepts_query_only_ste_vec_parameter_for_json_search() {
+        let client = connect_with_tls(*PROXY).await;
+        clear_with_client(&client).await;
+        let id = random_id();
+        let plaintext = serde_json::json!({
+            "patient": { "name": "Ada Lovelace" },
+            "active": true
+        });
+
+        client
+            .execute(
+                "INSERT INTO encrypted (id, encrypted_jsonb) VALUES ($1, $2)",
+                &[&id, &plaintext],
+            )
+            .await
+            .unwrap();
+
+        let payload = query_json("encrypted", "encrypted_jsonb", plaintext.clone()).await;
+        let rows = client
+            .query(
+                "SELECT encrypted_jsonb FROM encrypted WHERE encrypted_jsonb @> $1",
+                &[&payload],
+            )
+            .await
+            .unwrap();
+        assert_eq!(rows[0].get::<_, serde_json::Value>(0), plaintext);
     }
 
     #[tokio::test]

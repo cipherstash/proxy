@@ -1,11 +1,12 @@
-//! Application-side encryption examples for Stash-style ingestion.
+//! Application-side EQL examples for storage and search.
 //!
-//! Proxy accepts the resulting EQL storage payload as either a bound parameter
-//! or a SQL literal, authenticates it, and avoids encrypting it a second time.
+//! Proxy accepts storage and query-only payloads as either bound parameters or
+//! SQL literals, applies role-appropriate validation, and avoids encrypting
+//! them a second time.
 
 use crate::common::{connect_with_tls, PROXY};
 use cipherstash_client::{
-    encryption::{Plaintext, ScopedCipher},
+    encryption::{Plaintext, QueryOp, ScopedCipher},
     eql::{
         encrypt_eql_v3, EqlEncryptOpts, EqlOperation, EqlOutputV3, Identifier, PreparedPlaintext,
     },
@@ -57,25 +58,54 @@ pub async fn run_examples() -> Result<(), Box<dyn std::error::Error>> {
     println!("✅ Inserted application-encrypted PII as a SQL literal");
 
     // Both rows still decrypt normally when selected through Proxy.
-    for (id, expected) in [(parameter_id, parameter_pii), (literal_id, literal_pii)] {
+    for (id, expected) in [
+        (parameter_id, parameter_pii.clone()),
+        (literal_id, literal_pii.clone()),
+    ] {
         let row = client
             .query_one("SELECT pii FROM patients WHERE id = $1", &[&id])
             .await?;
         assert_eq!(row.get::<_, Value>(0), expected);
     }
     println!("✅ Proxy authenticated and decrypted both application-encrypted values");
+
+    // Example 3: a query-only EQL payload contains SteVec SEM terms but no
+    // source ciphertext. Proxy validates its query role and forwards it without
+    // attempting authentication or encrypting it a second time.
+    let parameter_query = query_patient_pii(parameter_pii).await?;
+    let row = client
+        .query_one(
+            "SELECT id FROM patients WHERE pii @> $1",
+            &[&parameter_query],
+        )
+        .await?;
+    assert_eq!(row.get::<_, Uuid>(0), parameter_id);
+    println!("✅ Queried with application-generated SEM terms as a bound parameter");
+
+    // Example 4: query-only payloads are also accepted as SQL literals in
+    // predicate positions.
+    let literal_query = query_patient_pii(literal_pii)
+        .await?
+        .to_string()
+        .replace('\'', "''");
+    let rows = client
+        .simple_query(&format!(
+            "SELECT id FROM patients WHERE pii @> '{literal_query}'"
+        ))
+        .await?;
+    let matched = rows.iter().any(|message| match message {
+        tokio_postgres::SimpleQueryMessage::Row(row) => {
+            row.get(0) == Some(literal_id.to_string().as_str())
+        }
+        _ => false,
+    });
+    assert!(matched);
+    println!("✅ Queried with application-generated SEM terms as a SQL literal");
     Ok(())
 }
 
 async fn encrypt_patient_pii(value: Value) -> Result<Value, Box<dyn std::error::Error>> {
-    let config = ColumnConfig::build("patients/pii")
-        .casts_as(ColumnType::Json)
-        .add_index(Index::new(IndexType::SteVec {
-            prefix: "patients/pii".into(),
-            term_filters: Vec::new(),
-            array_index_mode: ArrayIndexMode::ALL,
-            mode: SteVecMode::default(),
-        }));
+    let config = patient_pii_config();
     let prepared = PreparedPlaintext::new(
         Cow::Owned(config),
         Identifier::new("patients", "pii"),
@@ -92,6 +122,38 @@ async fn encrypt_patient_pii(value: Value) -> Result<Value, Box<dyn std::error::
         return Err("store encryption returned a query payload".into());
     };
     Ok(serde_json::to_value(ciphertext)?)
+}
+
+async fn query_patient_pii(value: Value) -> Result<Value, Box<dyn std::error::Error>> {
+    let config = patient_pii_config();
+    let index_type = config.indexes[0].index_type.clone();
+    let prepared = PreparedPlaintext::new(
+        Cow::Owned(config),
+        Identifier::new("patients", "pii"),
+        Plaintext::Json(Some(value)),
+        EqlOperation::Query(&index_type, QueryOp::Default),
+    );
+    let mut outputs = encrypt_eql_v3(
+        scoped_cipher().await?,
+        vec![prepared],
+        &EqlEncryptOpts::default(),
+    )
+    .await?;
+    let EqlOutputV3::Query(query) = outputs.remove(0) else {
+        return Err("query encryption returned a storage payload".into());
+    };
+    Ok(serde_json::to_value(query)?)
+}
+
+fn patient_pii_config() -> ColumnConfig {
+    ColumnConfig::build("patients/pii")
+        .casts_as(ColumnType::Json)
+        .add_index(Index::new(IndexType::SteVec {
+            prefix: "patients/pii".into(),
+            term_filters: Vec::new(),
+            array_index_mode: ArrayIndexMode::ALL,
+            mode: SteVecMode::default(),
+        }))
 }
 
 async fn scoped_cipher() -> Result<Arc<ScopedCipher<AutoStrategy>>, Box<dyn std::error::Error>> {

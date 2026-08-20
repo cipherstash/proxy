@@ -8,7 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
-- **Pre-encrypted EQL values in statements**: SQL literals and bound parameters may now carry EQL v3 storage payloads produced by an application. Proxy validates their wire shape and version, requires the authenticated ciphertext descriptor to name the inferred destination column, authenticates the ciphertext with the connection's active keyset, and independently re-derives every SEM term from the plaintext before forwarding it without encrypting it again. Invalid payloads fail closed with one generic error so validation details cannot be used as an oracle.
+- **Application-generated EQL values in statements**: SQL literals and bound parameters may now carry EQL v3 storage payloads or query-only SEM operands produced by an application. Proxy authenticates stored ciphertext, requires its authenticated descriptor to name the inferred destination column, and independently re-derives every SEM term before forwarding it without double encryption. Query-only operands contain no ciphertext to authenticate, so Proxy instead validates their version, identifier, term shape, column capabilities, and syntactic query role; they are rejected in storage positions. Invalid payloads fail closed with one generic error so validation details cannot be used as an oracle.
 
 ## [3.0.1] - 2026-08-05
 

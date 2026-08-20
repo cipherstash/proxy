@@ -753,6 +753,12 @@ where
         plaintexts: Vec<Option<cipherstash_client::encryption::Plaintext>>,
         columns: &[Option<Column>],
     ) -> Result<Vec<Option<crate::EqlOutput>>, Error> {
+        if plaintexts.iter().all(Option::is_none) {
+            return Ok(std::iter::repeat_with(|| None)
+                .take(plaintexts.len())
+                .collect());
+        }
+
         let keyset_id = self.keyset_identifier();
 
         self.encryption
@@ -1115,6 +1121,18 @@ mod tests {
             service,
             reload_sender,
         )
+    }
+
+    #[tokio::test]
+    async fn empty_plaintext_batch_does_not_call_encryption_service() {
+        let context = create_context();
+        let output = context
+            .encrypt(vec![None, None], &[None, None])
+            .await
+            .unwrap();
+
+        assert_eq!(output.len(), 2);
+        assert!(output.iter().all(Option::is_none));
     }
 
     fn statement() -> Statement {

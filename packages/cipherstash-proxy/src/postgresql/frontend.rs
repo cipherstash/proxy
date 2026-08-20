@@ -656,7 +656,12 @@ where
                 let (Some(column), Some(value)) = (column, (*literal).clone().into_string()) else {
                     return Ok(None);
                 };
-                inbound_eql::parse(value.as_bytes(), column).map_err(Error::from)
+                inbound_eql::parse(
+                    value.as_bytes(),
+                    column,
+                    typed_statement.query_operands.contains_literal(literal),
+                )
+                .map_err(Error::from)
             })
             .collect::<Result<Vec<_>, Error>>()?;
         let skip = inbound.iter().map(Option::is_some).collect::<Vec<_>>();
@@ -672,7 +677,7 @@ where
                 counter!(ENCRYPTION_ERROR_TOTAL).increment(1);
             })?;
 
-        self.authenticate_and_merge_inbound(&mut encrypted, inbound, literal_columns)
+        self.merge_inbound_eql(&mut encrypted, inbound, literal_columns)
             .await?;
 
         for ((_, literal), encrypted) in literal_values.iter().zip(encrypted.iter_mut()) {
@@ -1171,7 +1176,7 @@ where
         bind: &Bind,
         statement: &Statement,
     ) -> Result<Vec<Option<crate::EqlOutput>>, Error> {
-        let inbound = bind.inbound_ciphertexts(&statement.output_params)?;
+        let inbound = bind.inbound_eql(&statement.output_params)?;
         let skip = inbound.iter().map(Option::is_some).collect::<Vec<_>>();
         let plaintexts = bind.to_plaintext_skipping(
             &statement.output_params,
@@ -1199,7 +1204,7 @@ where
                 counter!(ENCRYPTION_ERROR_TOTAL).increment(1);
             })?;
 
-        self.authenticate_and_merge_inbound(&mut encrypted, inbound, &output_param_columns)
+        self.merge_inbound_eql(&mut encrypted, inbound, &output_param_columns)
             .await?;
 
         for (output, encrypted) in statement.output_params.iter().zip(encrypted.iter_mut()) {
@@ -1228,22 +1233,31 @@ where
         Ok(encrypted)
     }
 
-    /// Authenticate inbound ciphertext with this connection's scoped cipher.
-    /// Any parse, metadata, key or AEAD failure is collapsed to one response.
-    async fn authenticate_and_merge_inbound(
+    /// Merge application-generated EQL values into the encryption output.
+    /// Stored payloads are authenticated and independently verified. Query-only
+    /// payloads have no ciphertext to authenticate and are accepted only after
+    /// role-aware structural validation in `inbound_eql::parse`.
+    async fn merge_inbound_eql(
         &self,
         encrypted: &mut [Option<EqlOutput>],
-        inbound: Vec<Option<crate::EqlCiphertext>>,
+        inbound: Vec<Option<inbound_eql::InboundEql>>,
         columns: &[Option<Column>],
     ) -> Result<(), Error> {
-        let positions = inbound
-            .into_iter()
-            .zip(columns)
-            .enumerate()
-            .filter_map(|(index, (ciphertext, column))| {
-                Some((index, ciphertext?, column.as_ref()?.clone()))
-            })
-            .collect::<Vec<_>>();
+        let mut positions = Vec::new();
+        for (index, (payload, column)) in inbound.into_iter().zip(columns).enumerate() {
+            match payload {
+                Some(inbound_eql::InboundEql::Query(query)) => {
+                    encrypted[index] = Some(EqlOutput::Query(query));
+                }
+                Some(inbound_eql::InboundEql::Store(ciphertext)) => {
+                    let Some(column) = column else {
+                        return Err(EncryptError::InvalidInboundCiphertext.into());
+                    };
+                    positions.push((index, ciphertext, column.clone()));
+                }
+                None => {}
+            }
+        }
         if positions.is_empty() {
             return Ok(());
         }

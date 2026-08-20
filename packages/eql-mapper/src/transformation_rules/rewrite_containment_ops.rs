@@ -13,7 +13,7 @@ use sqltk::{NodeKey, NodePath, Visitable};
 use crate::unifier::{Type, Value};
 use crate::EqlMapperError;
 
-use super::helpers::{cast_encrypted_operand, full_payload_domain};
+use super::helpers::{cast_encrypted_operand, query_operand_domain};
 use super::TransformationRule;
 
 /// Rewrites JSON binary operators on encrypted columns to `eql_v3` function
@@ -115,17 +115,15 @@ impl<'ast> TransformationRule<'ast> for RewriteContainmentOps<'ast> {
                     _ => return Ok(false),
                 };
 
-                // A containment needle is a whole encrypted document, so it
-                // casts to the column domain, not to a query twin. A `->`/`->>`
-                // selector takes no cast at all — `full_payload_domain` returns
-                // `None` for it — because `eql_v3."->"(json, text)` wants the
-                // bare encrypted selector text.
-                cast_encrypted_operand(&self.node_types, original_left, left, full_payload_domain);
+                // Containment uses a term-only SteVec query needle. A `->`/`->>`
+                // selector also remains query-only but takes no cast because
+                // `eql_v3."->"(json, text)` wants the bare encrypted selector.
+                cast_encrypted_operand(&self.node_types, original_left, left, query_operand_domain);
                 cast_encrypted_operand(
                     &self.node_types,
                     original_right,
                     right,
-                    full_payload_domain,
+                    query_operand_domain,
                 );
 
                 // Use mem::replace to move (not copy) the original nodes,
