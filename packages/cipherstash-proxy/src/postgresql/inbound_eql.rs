@@ -67,13 +67,42 @@ fn validate_metadata(ciphertext: &EqlCiphertext, column: &Column) -> Result<(), 
 /// Compare all searchable metadata after the plaintext has been authenticated
 /// and independently re-encrypted for the inferred destination column.
 /// `into_query_operand` removes only record ciphertext/key material, leaving
-/// the identifier and every scalar or SteVec SEM term for an exact comparison.
+/// the identifier and every scalar or SteVec SEM term. Bloom-filter positions
+/// are compared without regard to order; all other terms compare exactly.
 pub fn sem_terms_match(inbound: &EqlCiphertext, derived: EqlCiphertext) -> bool {
+    if let (EqlCiphertext::Encrypted(inbound), EqlCiphertext::Encrypted(derived)) =
+        (inbound, &derived)
+    {
+        return inbound.version == derived.version
+            && inbound.identifier == derived.identifier
+            && inbound.hmac_256 == derived.hmac_256
+            && bloom_filters_match(&inbound.bloom_filter, &derived.bloom_filter)
+            && inbound.ore_block_u64_8_256 == derived.ore_block_u64_8_256
+            && inbound.ope_cllw == derived.ope_cllw;
+    }
+
     match (
         serde_json::to_value(inbound.clone().into_query_operand()),
         serde_json::to_value(derived.into_query_operand()),
     ) {
         (Ok(inbound), Ok(derived)) => inbound == derived,
+        _ => false,
+    }
+}
+
+fn bloom_filters_match(inbound: &Option<Vec<i16>>, derived: &Option<Vec<i16>>) -> bool {
+    match (inbound, derived) {
+        (Some(inbound), Some(derived)) => {
+            // Bloom-filter positions are a set. Their generation order is not
+            // stable, so comparing the serialized arrays directly rejects
+            // equivalent terms produced by independent encryptions.
+            let mut inbound = inbound.clone();
+            let mut derived = derived.clone();
+            inbound.sort_unstable();
+            derived.sort_unstable();
+            inbound == derived
+        }
+        (None, None) => true,
         _ => false,
     }
 }
@@ -214,5 +243,19 @@ mod tests {
         payload.hmac_256 = Some("term from another plaintext".into());
 
         assert!(!sem_terms_match(&spliced, derived));
+    }
+
+    #[test]
+    fn bloom_filter_order_does_not_affect_sem_term_matching() {
+        let mut inbound = payload(crate::Identifier::new("users", "email"));
+        let mut derived = inbound.clone();
+        if let EqlCiphertext::Encrypted(payload) = &mut inbound {
+            payload.bloom_filter = Some(vec![3, 1, 2]);
+        }
+        if let EqlCiphertext::Encrypted(payload) = &mut derived {
+            payload.bloom_filter = Some(vec![1, 2, 3]);
+        }
+
+        assert!(sem_terms_match(&inbound, derived));
     }
 }
