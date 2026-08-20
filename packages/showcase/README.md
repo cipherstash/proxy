@@ -466,7 +466,7 @@ mise run test:integration:showcase
 
 The showcase will execute and display:
 
-1. **Application-side Encryption**: Insert pre-encrypted EQL payloads as a bound parameter and a SQL literal
+1. **Application-side EQL**: Insert pre-encrypted storage payloads and search with query-only SEM payloads, using both parameters and SQL literals
 2. **Original Healthcare Query**: Aspirin prescription lookup
 3. **Field Access Operations**: Testing `->` and `->>`
 4. **Containment Operations**: Testing `@>` and `<@`
@@ -476,14 +476,16 @@ The showcase will execute and display:
 
 ### Application-side Encryption
 
-The `pre_encrypted` example constructs the same `eql_v3_json_search` column configuration declared by `patients.pii`, encrypts patient PII with `cipherstash-client`, and sends the resulting EQL payload through Proxy. The application-side `ColumnConfig` uses the canonical `patients/pii` descriptor; this authenticated descriptor binds the ciphertext to its destination. The example demonstrates both supported input forms:
+The `pre_encrypted` example constructs the same `eql_v3_json_search` column configuration declared by `patients.pii`, encrypts patient PII or its query SEM terms with `cipherstash-client`, and sends the resulting EQL payload through Proxy. The application-side `ColumnConfig` uses the canonical `patients/pii` descriptor; this authenticated descriptor binds stored ciphertext to its destination. The example demonstrates both supported input forms and both payload roles:
 
 ```sql
 INSERT INTO patients (id, pii) VALUES ($1, $2); -- payload parameter
 INSERT INTO patients (id, pii) VALUES ('...', '{...}'); -- payload literal
+SELECT id FROM patients WHERE pii @> $1; -- query-only SEM parameter
+SELECT id FROM patients WHERE pii @> '{...}'; -- query-only SEM literal
 ```
 
-Proxy parses and authenticates each payload, checks that its identifier and authenticated descriptor match `patients.pii`, and independently re-derives every SEM term from the decrypted plaintext before forwarding it without double encryption. Selecting the rows through Proxy returns the original plaintext JSON.
+For stored payloads, Proxy authenticates the ciphertext, checks that its identifier and authenticated descriptor match `patients.pii`, and independently re-derives every SEM term from the decrypted plaintext. Query-only payloads deliberately contain no source ciphertext, so authentication is impossible and unnecessary: Proxy validates that their shape is valid for `patients.pii` and accepts them only in predicate positions, where incorrect terms can only produce incorrect query results and cannot poison stored data. Both forms are forwarded without double encryption.
 
 Each test section provides detailed output showing:
 - ✅ Successful query execution

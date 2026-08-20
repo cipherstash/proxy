@@ -1,14 +1,31 @@
-use crate::{error::EncryptError, postgresql::Column, EqlCiphertext};
+use crate::{error::EncryptError, postgresql::Column, EqlCiphertext, EqlQueryPayload};
 use cipherstash_client::{
     eql::{EncryptedPayloadV3, EQL_SCHEMA_VERSION_V3},
     schema::column::IndexType,
 };
+use eql_mapper::EqlTermVariant;
 use serde_json::Value;
 
-/// Parse a value only when its version, identifier, and storage fields advertise
-/// it as an EQL payload. Ordinary JSON (including an object with a `c` key)
-/// remains plaintext; malformed advertised payloads fail closed.
-pub fn parse(bytes: &[u8], column: &Column) -> Result<Option<EqlCiphertext>, EncryptError> {
+/// An application-generated EQL value entering Proxy.
+#[derive(Debug)]
+pub enum InboundEql {
+    /// A stored payload carrying source ciphertext. This must be authenticated
+    /// and have its SEM terms independently verified before it can be used.
+    Store(EqlCiphertext),
+    /// A query operand carrying SEM terms only. It can never be written and has
+    /// no source ciphertext with which to authenticate its metadata.
+    Query(EqlQueryPayload),
+}
+
+/// Parse a value only when its fields advertise it as an EQL storage payload or
+/// query operand. Query-only payloads are valid exclusively in syntactic query
+/// positions. Ordinary JSON (including an object with a `c` key) remains
+/// plaintext; malformed advertised payloads fail closed.
+pub fn parse(
+    bytes: &[u8],
+    column: &Column,
+    query_operand: bool,
+) -> Result<Option<InboundEql>, EncryptError> {
     let Ok(value) = serde_json::from_slice::<Value>(bytes) else {
         return Ok(None);
     };
@@ -16,20 +33,39 @@ pub fn parse(bytes: &[u8], column: &Column) -> Result<Option<EqlCiphertext>, Enc
         return Ok(None);
     };
 
-    let payload_shaped = object.contains_key("v")
+    let storage_shaped = object.contains_key("v")
         && object.contains_key("i")
         && (object.contains_key("c") || object.contains_key("h") || object.contains_key("sv"));
-    if !payload_shaped {
-        return Ok(None);
+    if storage_shaped {
+        let ciphertext: EqlCiphertext =
+            serde_json::from_value(value).map_err(|_| EncryptError::InvalidInboundCiphertext)?;
+        validate_storage_metadata(&ciphertext, column)?;
+        return Ok(Some(InboundEql::Store(ciphertext)));
     }
 
-    let ciphertext: EqlCiphertext =
+    let scalar_query_shaped = object.contains_key("v")
+        && object.contains_key("i")
+        && ["hm", "bf", "ob", "op"]
+            .iter()
+            .any(|term| object.contains_key(*term));
+    let ste_vec_query_shaped = object.len() == 1 && object.contains_key("sv");
+    if !scalar_query_shaped && !ste_vec_query_shaped {
+        return Ok(None);
+    }
+    if !query_operand {
+        return Err(EncryptError::InvalidInboundCiphertext);
+    }
+
+    let query: EqlQueryPayload =
         serde_json::from_value(value).map_err(|_| EncryptError::InvalidInboundCiphertext)?;
-    validate_metadata(&ciphertext, column)?;
-    Ok(Some(ciphertext))
+    validate_query_metadata(&query, column)?;
+    Ok(Some(InboundEql::Query(query)))
 }
 
-fn validate_metadata(ciphertext: &EqlCiphertext, column: &Column) -> Result<(), EncryptError> {
+fn validate_storage_metadata(
+    ciphertext: &EqlCiphertext,
+    column: &Column,
+) -> Result<(), EncryptError> {
     if ciphertext.version() != EQL_SCHEMA_VERSION_V3
         || ciphertext.identifier() != &column.identifier
     {
@@ -61,6 +97,64 @@ fn validate_metadata(ciphertext: &EqlCiphertext, column: &Column) -> Result<(), 
             }
             Ok(())
         }
+    }
+}
+
+fn validate_query_metadata(query: &EqlQueryPayload, column: &Column) -> Result<(), EncryptError> {
+    match query {
+        EqlQueryPayload::Encrypted(payload) => {
+            if payload.version != EQL_SCHEMA_VERSION_V3 || payload.identifier != column.identifier {
+                return Err(EncryptError::InvalidInboundCiphertext);
+            }
+
+            match column.eql_term {
+                EqlTermVariant::Full | EqlTermVariant::Partial | EqlTermVariant::Tokenized => {
+                    validate_scalar_term_presence(
+                        payload.hmac_256.is_some(),
+                        payload.bloom_filter.is_some(),
+                        payload.ore_block_u64_8_256.is_some(),
+                        payload.ope_cllw.is_some(),
+                        column,
+                    )
+                }
+                EqlTermVariant::JsonOrd => {
+                    let ste_vec_configured = column
+                        .config
+                        .indexes
+                        .iter()
+                        .any(|index| matches!(index.index_type, IndexType::SteVec { .. }));
+                    if !ste_vec_configured
+                        || payload.hmac_256.is_some()
+                        || payload.bloom_filter.is_some()
+                        || payload.ore_block_u64_8_256.is_some()
+                        || payload.ope_cllw.is_none()
+                    {
+                        return Err(EncryptError::InvalidInboundCiphertext);
+                    }
+                    Ok(())
+                }
+                _ => Err(EncryptError::InvalidInboundCiphertext),
+            }
+        }
+        EqlQueryPayload::SteVec(payload) => {
+            let configured = column
+                .config
+                .indexes
+                .iter()
+                .any(|index| matches!(index.index_type, IndexType::SteVec { .. }));
+            let query_shape = matches!(
+                column.eql_term,
+                EqlTermVariant::Full | EqlTermVariant::Partial | EqlTermVariant::JsonValueSelector
+            );
+            if !configured || !query_shape || payload.ste_vec.is_empty() {
+                return Err(EncryptError::InvalidInboundCiphertext);
+            }
+            Ok(())
+        }
+        // Bare selector hashes are indistinguishable from ordinary plaintext
+        // text on the PostgreSQL wire, so they cannot safely advertise
+        // themselves as pre-computed query operands.
+        EqlQueryPayload::Selector(_) => Err(EncryptError::InvalidInboundCiphertext),
     }
 }
 
@@ -111,6 +205,22 @@ fn validate_scalar_terms(
     payload: &EncryptedPayloadV3,
     column: &Column,
 ) -> Result<(), EncryptError> {
+    validate_scalar_term_presence(
+        payload.hmac_256.is_some(),
+        payload.bloom_filter.is_some(),
+        payload.ore_block_u64_8_256.is_some(),
+        payload.ope_cllw.is_some(),
+        column,
+    )
+}
+
+fn validate_scalar_term_presence(
+    has_hmac: bool,
+    has_bloom: bool,
+    has_ore: bool,
+    has_ope: bool,
+    column: &Column,
+) -> Result<(), EncryptError> {
     let mut hmac = false;
     let mut bloom = false;
     let mut ore = false;
@@ -125,11 +235,7 @@ fn validate_scalar_terms(
         }
     }
 
-    if payload.hmac_256.is_some() != hmac
-        || payload.bloom_filter.is_some() != bloom
-        || payload.ore_block_u64_8_256.is_some() != ore
-        || payload.ope_cllw.is_some() != ope
-    {
+    if has_hmac != hmac || has_bloom != bloom || has_ore != ore || has_ope != ope {
         return Err(EncryptError::InvalidInboundCiphertext);
     }
     Ok(())
@@ -140,6 +246,7 @@ mod tests {
     use super::*;
     use cipherstash_client::schema::{ColumnConfig, ColumnMode, ColumnType};
     use cipherstash_client::zerokms::EncryptedRecord;
+    use cipherstash_config::column::{ArrayIndexMode, Index, SteVecMode};
     use eql_mapper::EqlTermVariant;
     use uuid::Uuid;
 
@@ -177,14 +284,29 @@ mod tests {
         })
     }
 
+    fn ste_vec_column() -> Column {
+        let mut column = column();
+        column.config.cast_type = ColumnType::Json;
+        column.config.indexes.push(Index::new(IndexType::SteVec {
+            prefix: "users/email".into(),
+            term_filters: Vec::new(),
+            array_index_mode: ArrayIndexMode::ALL,
+            mode: SteVecMode::default(),
+        }));
+        column.postgres_type = postgres_types::Type::JSONB;
+        column
+    }
+
     #[test]
     fn ordinary_json_is_plaintext() {
-        assert!(parse(br#"{"name":"Ada"}"#, &column()).unwrap().is_none());
+        assert!(parse(br#"{"name":"Ada"}"#, &column(), false)
+            .unwrap()
+            .is_none());
     }
 
     #[test]
     fn ordinary_json_with_a_c_key_is_plaintext() {
-        assert!(parse(br#"{"c":"customer code"}"#, &column())
+        assert!(parse(br#"{"c":"customer code"}"#, &column(), false)
             .unwrap()
             .is_none());
     }
@@ -192,7 +314,7 @@ mod tests {
     #[test]
     fn malformed_payload_shape_fails_closed() {
         assert!(matches!(
-            parse(br#"{"v":3,"i":"users.email","c":"bad"}"#, &column()),
+            parse(br#"{"v":3,"i":"users.email","c":"bad"}"#, &column(), false),
             Err(EncryptError::InvalidInboundCiphertext)
         ));
     }
@@ -201,7 +323,7 @@ mod tests {
     fn destination_identifier_must_match() {
         let ciphertext = payload(crate::Identifier::new("users", "phone"));
         assert!(matches!(
-            validate_metadata(&ciphertext, &column()),
+            validate_storage_metadata(&ciphertext, &column()),
             Err(EncryptError::InvalidInboundCiphertext)
         ));
     }
@@ -214,7 +336,7 @@ mod tests {
         };
         payload.ciphertext.descriptor = "accounts/email".into();
         assert!(matches!(
-            validate_metadata(&ciphertext, &column()),
+            validate_storage_metadata(&ciphertext, &column()),
             Err(EncryptError::InvalidInboundCiphertext)
         ));
     }
@@ -228,7 +350,7 @@ mod tests {
             .push(cipherstash_client::schema::column::Index::new_unique());
         let ciphertext = payload(column.identifier.clone());
         assert!(matches!(
-            validate_metadata(&ciphertext, &column),
+            validate_storage_metadata(&ciphertext, &column),
             Err(EncryptError::InvalidInboundCiphertext)
         ));
     }
@@ -257,5 +379,102 @@ mod tests {
         }
 
         assert!(sem_terms_match(&inbound, derived));
+    }
+
+    #[test]
+    fn query_only_scalar_payload_is_accepted_for_a_query_operand() {
+        let mut column = column();
+        column
+            .config
+            .indexes
+            .push(cipherstash_client::schema::column::Index::new_unique());
+        let mut ciphertext = payload(column.identifier.clone());
+        let EqlCiphertext::Encrypted(payload) = &mut ciphertext else {
+            unreachable!()
+        };
+        payload.hmac_256 = Some("application-generated SEM term".into());
+        let query = serde_json::to_vec(&ciphertext.into_query_operand()).unwrap();
+
+        assert!(matches!(
+            parse(&query, &column, true),
+            Ok(Some(InboundEql::Query(_)))
+        ));
+    }
+
+    #[test]
+    fn query_only_scalar_payload_is_rejected_for_storage() {
+        let mut column = column();
+        column
+            .config
+            .indexes
+            .push(cipherstash_client::schema::column::Index::new_unique());
+        let mut ciphertext = payload(column.identifier.clone());
+        let EqlCiphertext::Encrypted(payload) = &mut ciphertext else {
+            unreachable!()
+        };
+        payload.hmac_256 = Some("application-generated SEM term".into());
+        let query = serde_json::to_vec(&ciphertext.into_query_operand()).unwrap();
+
+        assert!(matches!(
+            parse(&query, &column, false),
+            Err(EncryptError::InvalidInboundCiphertext)
+        ));
+    }
+
+    #[test]
+    fn query_only_scalar_identifier_must_match_destination() {
+        let mut column = column();
+        column
+            .config
+            .indexes
+            .push(cipherstash_client::schema::column::Index::new_unique());
+        let mut ciphertext = payload(crate::Identifier::new("users", "phone"));
+        let EqlCiphertext::Encrypted(payload) = &mut ciphertext else {
+            unreachable!()
+        };
+        payload.hmac_256 = Some("application-generated SEM term".into());
+        let query = serde_json::to_vec(&ciphertext.into_query_operand()).unwrap();
+
+        assert!(matches!(
+            parse(&query, &column, true),
+            Err(EncryptError::InvalidInboundCiphertext)
+        ));
+    }
+
+    #[test]
+    fn query_only_json_ordering_term_is_accepted() {
+        let mut column = ste_vec_column();
+        column.eql_term = EqlTermVariant::JsonOrd;
+        let query = serde_json::to_vec(&serde_json::json!({
+            "v": EQL_SCHEMA_VERSION_V3,
+            "i": { "t": "users", "c": "email" },
+            "op": "application-generated ordering term"
+        }))
+        .unwrap();
+
+        assert!(matches!(
+            parse(&query, &column, true),
+            Ok(Some(InboundEql::Query(EqlQueryPayload::Encrypted(_))))
+        ));
+    }
+
+    #[test]
+    fn query_only_ste_vec_payload_is_accepted_for_a_query_operand() {
+        let query = br#"{"sv":[{"s":"application-generated selector"}]}"#;
+
+        assert!(matches!(
+            parse(query, &ste_vec_column(), true),
+            Ok(Some(InboundEql::Query(EqlQueryPayload::SteVec(_))))
+        ));
+    }
+
+    #[test]
+    fn query_only_ste_vec_payload_is_rejected_for_storage() {
+        let query = br#"{"sv":[{"s":"application-generated selector"}]}"#;
+
+        assert!(matches!(
+            parse(query, &ste_vec_column(), false),
+            Err(EncryptError::InvalidInboundCiphertext)
+        ));
     }
 }
