@@ -68,7 +68,7 @@ pub async fn run_examples() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 async fn encrypt_patient_pii(value: Value) -> Result<Value, Box<dyn std::error::Error>> {
-    let config = ColumnConfig::build("pii")
+    let config = ColumnConfig::build("patients/pii")
         .casts_as(ColumnType::Json)
         .add_index(Index::new(IndexType::SteVec {
             prefix: "patients/pii".into(),

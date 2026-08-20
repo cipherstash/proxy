@@ -476,14 +476,14 @@ The showcase will execute and display:
 
 ### Application-side Encryption
 
-The `pre_encrypted` example constructs the same `eql_v3_json_search` column configuration declared by `patients.pii`, encrypts patient PII with `cipherstash-client`, and sends the resulting EQL payload through Proxy. It demonstrates both supported input forms:
+The `pre_encrypted` example constructs the same `eql_v3_json_search` column configuration declared by `patients.pii`, encrypts patient PII with `cipherstash-client`, and sends the resulting EQL payload through Proxy. The application-side `ColumnConfig` uses the canonical `patients/pii` descriptor; this authenticated descriptor binds the ciphertext to its destination. The example demonstrates both supported input forms:
 
 ```sql
 INSERT INTO patients (id, pii) VALUES ($1, $2); -- payload parameter
 INSERT INTO patients (id, pii) VALUES ('...', '{...}'); -- payload literal
 ```
 
-Proxy parses and authenticates each payload, checks that its identifier and SEM shape match `patients.pii`, and forwards it without double encryption. Selecting the rows through Proxy returns the original plaintext JSON.
+Proxy parses and authenticates each payload, checks that its identifier and authenticated descriptor match `patients.pii`, and independently re-derives every SEM term from the decrypted plaintext before forwarding it without double encryption. Selecting the rows through Proxy returns the original plaintext JSON.
 
 Each test section provides detailed output showing:
 - ✅ Successful query execution
