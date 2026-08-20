@@ -5,8 +5,9 @@ use cipherstash_client::{
 };
 use serde_json::Value;
 
-/// Parse a value only when it advertises itself as an EQL storage payload.
-/// Ordinary JSON remains plaintext; malformed payload-shaped JSON fails closed.
+/// Parse a value only when its version, identifier, and storage fields advertise
+/// it as an EQL payload. Ordinary JSON (including an object with a `c` key)
+/// remains plaintext; malformed advertised payloads fail closed.
 pub fn parse(bytes: &[u8], column: &Column) -> Result<Option<EqlCiphertext>, EncryptError> {
     let Ok(value) = serde_json::from_slice::<Value>(bytes) else {
         return Ok(None);
@@ -15,9 +16,9 @@ pub fn parse(bytes: &[u8], column: &Column) -> Result<Option<EqlCiphertext>, Enc
         return Ok(None);
     };
 
-    let payload_shaped = object.contains_key("c")
-        || object.contains_key("h")
-        || object.contains_key("sv") && object.contains_key("i");
+    let payload_shaped = object.contains_key("v")
+        && object.contains_key("i")
+        && (object.contains_key("c") || object.contains_key("h") || object.contains_key("sv"));
     if !payload_shaped {
         return Ok(None);
     }
@@ -35,6 +36,18 @@ fn validate_metadata(ciphertext: &EqlCiphertext, column: &Column) -> Result<(), 
         return Err(EncryptError::InvalidInboundCiphertext);
     }
 
+    // The descriptor is covered by the encrypted record's AEAD tag. Requiring
+    // the canonical table/column descriptor cryptographically binds a payload
+    // to its claimed destination, unlike the self-reported `i` field alone.
+    let expected_descriptor = format!("{}/{}", column.identifier.table, column.identifier.column);
+    let descriptor = match ciphertext {
+        EqlCiphertext::Encrypted(payload) => &payload.ciphertext.descriptor,
+        EqlCiphertext::SteVec(payload) => &payload.key_header.descriptor,
+    };
+    if descriptor != &expected_descriptor {
+        return Err(EncryptError::InvalidInboundCiphertext);
+    }
+
     match ciphertext {
         EqlCiphertext::Encrypted(payload) => validate_scalar_terms(payload, column),
         EqlCiphertext::SteVec(payload) => {
@@ -48,6 +61,20 @@ fn validate_metadata(ciphertext: &EqlCiphertext, column: &Column) -> Result<(), 
             }
             Ok(())
         }
+    }
+}
+
+/// Compare all searchable metadata after the plaintext has been authenticated
+/// and independently re-encrypted for the inferred destination column.
+/// `into_query_operand` removes only record ciphertext/key material, leaving
+/// the identifier and every scalar or SteVec SEM term for an exact comparison.
+pub fn sem_terms_match(inbound: &EqlCiphertext, derived: EqlCiphertext) -> bool {
+    match (
+        serde_json::to_value(inbound.clone().into_query_operand()),
+        serde_json::to_value(derived.into_query_operand()),
+    ) {
+        (Ok(inbound), Ok(derived)) => inbound == derived,
+        _ => false,
     }
 }
 
@@ -110,7 +137,7 @@ mod tests {
                 iv: Default::default(),
                 ciphertext: vec![1; 16],
                 tag: vec![2; 16],
-                descriptor: "email".into(),
+                descriptor: "users/email".into(),
                 keyset_id: Some(Uuid::nil()),
                 decryption_policy: None,
             },
@@ -124,6 +151,13 @@ mod tests {
     #[test]
     fn ordinary_json_is_plaintext() {
         assert!(parse(br#"{"name":"Ada"}"#, &column()).unwrap().is_none());
+    }
+
+    #[test]
+    fn ordinary_json_with_a_c_key_is_plaintext() {
+        assert!(parse(br#"{"c":"customer code"}"#, &column())
+            .unwrap()
+            .is_none());
     }
 
     #[test]
@@ -144,6 +178,19 @@ mod tests {
     }
 
     #[test]
+    fn authenticated_descriptor_must_match_destination() {
+        let mut ciphertext = payload(crate::Identifier::new("users", "email"));
+        let EqlCiphertext::Encrypted(payload) = &mut ciphertext else {
+            unreachable!()
+        };
+        payload.ciphertext.descriptor = "accounts/email".into();
+        assert!(matches!(
+            validate_metadata(&ciphertext, &column()),
+            Err(EncryptError::InvalidInboundCiphertext)
+        ));
+    }
+
+    #[test]
     fn configured_sem_terms_must_be_present() {
         let mut column = column();
         column
@@ -155,5 +202,17 @@ mod tests {
             validate_metadata(&ciphertext, &column),
             Err(EncryptError::InvalidInboundCiphertext)
         ));
+    }
+
+    #[test]
+    fn independently_derived_sem_terms_must_match() {
+        let derived = payload(crate::Identifier::new("users", "email"));
+        let mut spliced = derived.clone();
+        let EqlCiphertext::Encrypted(payload) = &mut spliced else {
+            unreachable!()
+        };
+        payload.hmac_256 = Some("term from another plaintext".into());
+
+        assert!(!sem_terms_match(&spliced, derived));
     }
 }

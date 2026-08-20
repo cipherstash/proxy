@@ -11,7 +11,7 @@ use super::parser::SqlParser;
 use super::protocol::{self};
 use crate::connect::Sender;
 use crate::error::{EncryptError, Error, MappingError};
-use crate::log::{MAPPER, PROTOCOL};
+use crate::log::{ENCRYPT, MAPPER, PROTOCOL};
 use crate::postgresql::context::column::Column;
 use crate::postgresql::context::statement::{
     output_params_from_plan, OutputParam, OutputParamSource,
@@ -672,7 +672,7 @@ where
                 counter!(ENCRYPTION_ERROR_TOTAL).increment(1);
             })?;
 
-        self.authenticate_and_merge_inbound(&mut encrypted, inbound)
+        self.authenticate_and_merge_inbound(&mut encrypted, inbound, literal_columns)
             .await?;
 
         for ((_, literal), encrypted) in literal_values.iter().zip(encrypted.iter_mut()) {
@@ -1199,7 +1199,7 @@ where
                 counter!(ENCRYPTION_ERROR_TOTAL).increment(1);
             })?;
 
-        self.authenticate_and_merge_inbound(&mut encrypted, inbound)
+        self.authenticate_and_merge_inbound(&mut encrypted, inbound, &output_param_columns)
             .await?;
 
         for (output, encrypted) in statement.output_params.iter().zip(encrypted.iter_mut()) {
@@ -1234,11 +1234,15 @@ where
         &self,
         encrypted: &mut [Option<EqlOutput>],
         inbound: Vec<Option<crate::EqlCiphertext>>,
+        columns: &[Option<Column>],
     ) -> Result<(), Error> {
         let positions = inbound
-            .iter()
+            .into_iter()
+            .zip(columns)
             .enumerate()
-            .filter_map(|(index, ciphertext)| ciphertext.as_ref().map(|ct| (index, ct.clone())))
+            .filter_map(|(index, (ciphertext, column))| {
+                Some((index, ciphertext?, column.as_ref()?.clone()))
+            })
             .collect::<Vec<_>>();
         if positions.is_empty() {
             return Ok(());
@@ -1246,14 +1250,57 @@ where
 
         let ciphertexts = positions
             .iter()
-            .map(|(_, ciphertext)| Some(ciphertext.clone()))
+            .map(|(_, ciphertext, _)| Some(ciphertext.clone()))
             .collect();
-        self.context
-            .decrypt(ciphertexts)
-            .await
-            .map_err(|_| EncryptError::InvalidInboundCiphertext)?;
+        let plaintexts = self.context.decrypt(ciphertexts).await.map_err(|err| {
+            warn!(
+                target: ENCRYPT,
+                client_id = self.context.client_id,
+                msg = "Inbound EQL ciphertext authentication failed",
+                error = ?err,
+            );
+            EncryptError::InvalidInboundCiphertext
+        })?;
 
-        for (index, ciphertext) in positions {
+        // Re-encrypt the authenticated plaintext for the inferred destination
+        // and compare every derived SEM term. This detects term splicing: the
+        // AEAD tag authenticates `c`, but the searchable metadata sits outside
+        // it in the EQL envelope.
+        let verification_columns = positions
+            .iter()
+            .map(|(_, _, column)| Some(column.clone()))
+            .collect::<Vec<_>>();
+        let derived = self
+            .context
+            .encrypt(plaintexts, &verification_columns)
+            .await
+            .map_err(|err| {
+                warn!(
+                    target: ENCRYPT,
+                    client_id = self.context.client_id,
+                    msg = "Inbound EQL ciphertext metadata verification failed",
+                    error = ?err,
+                );
+                EncryptError::InvalidInboundCiphertext
+            })?;
+
+        for ((index, ciphertext, _), derived) in positions.into_iter().zip(derived) {
+            let Some(EqlOutput::Store(derived)) = derived else {
+                warn!(
+                    target: ENCRYPT,
+                    client_id = self.context.client_id,
+                    msg = "Inbound EQL ciphertext SEM terms did not match plaintext",
+                );
+                return Err(EncryptError::InvalidInboundCiphertext.into());
+            };
+            if !inbound_eql::sem_terms_match(&ciphertext, derived) {
+                warn!(
+                    target: ENCRYPT,
+                    client_id = self.context.client_id,
+                    msg = "Inbound EQL ciphertext SEM terms did not match plaintext",
+                );
+                return Err(EncryptError::InvalidInboundCiphertext.into());
+            }
             encrypted[index] = Some(EqlOutput::Store(ciphertext));
         }
         Ok(())

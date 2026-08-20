@@ -44,8 +44,8 @@ mod tests {
             .unwrap_or_else(|_| panic!("{primary} must be configured"))
     }
 
-    fn text_search_config(column: &str) -> ColumnConfig {
-        ColumnConfig::build(column)
+    fn text_search_config(table: &str, column: &str) -> ColumnConfig {
+        ColumnConfig::build(format!("{table}/{column}"))
             .casts_as(ColumnType::Text)
             .add_index(Index::new_unique())
             .add_index(Index::new_ope())
@@ -54,7 +54,7 @@ mod tests {
 
     async fn encrypt_text(table: &str, column: &str, plaintext: &str) -> String {
         let prepared = PreparedPlaintext::new(
-            Cow::Owned(text_search_config(column)),
+            Cow::Owned(text_search_config(table, column)),
             Identifier::new(table, column),
             Plaintext::from(plaintext),
             EqlOperation::Store,
@@ -124,6 +124,9 @@ mod tests {
         clear_with_client(&client).await;
         let id = random_id();
         let payload = encrypt_text("some_other_table", "encrypted_text", "secret").await;
+        let mut payload: serde_json::Value = serde_json::from_str(&payload).unwrap();
+        payload["i"]["t"] = "encrypted".into();
+        let payload = payload.to_string();
 
         let error = client
             .execute(
@@ -132,6 +135,39 @@ mod tests {
             )
             .await
             .expect_err("destination mismatch must fail closed");
+        assert_eq!(
+            error.as_db_error().unwrap().message(),
+            "Invalid encrypted value"
+        );
+    }
+
+    #[tokio::test]
+    async fn rejects_sem_terms_spliced_from_another_plaintext() {
+        let client = connect_with_tls(*PROXY).await;
+        clear_with_client(&client).await;
+        let id = random_id();
+        let x: serde_json::Value = serde_json::from_str(
+            &encrypt_text("encrypted", "encrypted_text", "indexed as x").await,
+        )
+        .unwrap();
+        let mut y: serde_json::Value = serde_json::from_str(
+            &encrypt_text("encrypted", "encrypted_text", "decrypts as y").await,
+        )
+        .unwrap();
+        for term in ["hm", "bf", "ob", "op"] {
+            if let Some(value) = x.get(term) {
+                y[term] = value.clone();
+            }
+        }
+        let payload = y.to_string();
+
+        let error = client
+            .execute(
+                "INSERT INTO encrypted (id, encrypted_text) VALUES ($1, $2)",
+                &[&id, &payload],
+            )
+            .await
+            .expect_err("spliced SEM terms must fail closed");
         assert_eq!(
             error.as_db_error().unwrap().message(),
             "Invalid encrypted value"
