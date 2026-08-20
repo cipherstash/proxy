@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1787203691583,
+  "lastUpdate": 1787204158469,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -25264,6 +25264,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 38.417662,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "b72a0e897ead3247a8f23564373a56034c6d83f9",
+          "message": "CIP-3849: Document local agent ownership of PR CI failures",
+          "timestamp": "2026-08-19T03:50:33Z",
+          "url": "https://github.com/cipherstash/proxy/pull/459/commits/b72a0e897ead3247a8f23564373a56034c6d83f9"
+        },
+        "date": 1787204156806,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 39.074655,
             "unit": "Number"
           }
         ]
