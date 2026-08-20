@@ -11,6 +11,11 @@ architecture, domain boundaries, request flow, and vocabulary.
 
 ## Development workflow
 
+Before setting up a local environment; starting or stopping Proxy or
+PostgreSQL; running tests or benchmarks; configuring logging; building; or
+releasing, read `DEVELOPMENT.md`. It owns the development procedures and
+operational gotchas for those workflows.
+
 Use `mise tasks` to discover the current build, test, database, proxy, and
 cross-compilation commands instead of duplicating that reference here. Run the
 smallest relevant validation while iterating and the broader applicable checks
