@@ -1,252 +1,38 @@
-# AGENTS.md
+# Agent guidance
 
-This file provides guidance to coding agents working in this repository.
+CipherStash Proxy is a Rust workspace providing transparent, searchable
+encryption between applications and PostgreSQL.
 
-## Project Overview
+## Domain context
 
-CipherStash Proxy is a PostgreSQL proxy that provides **transparent, searchable encryption** for existing applications. It sits between applications and PostgreSQL databases, automatically encrypting sensitive data while preserving the ability to query encrypted values using equality, comparison, and ordering operations.
+Before exploring or changing package code, read `CONTEXT-MAP.md` and the
+applicable package `CONTEXT.md`. Treat those files as the source of truth for
+architecture, domain boundaries, request flow, and vocabulary.
 
-Key capabilities:
-- Zero-change SQL queries - applications connect to Proxy instead of directly to PostgreSQL
-- EQL v3 (Encrypt Query Language) for searchable encryption using CipherStash ZeroKMS
-- Support for encrypted equality, comparison, ordering, and grouping operations
-- Written in Rust for performance with strongly-typed SQL statement mapping
+## Development workflow
 
-## Architecture
+Use `mise tasks` to discover the current build, test, database, proxy, and
+cross-compilation commands instead of duplicating that reference here. Run the
+smallest relevant validation while iterating and the broader applicable checks
+before completion.
 
-### High-Level Components
+### Coding conventions
 
-**Core Proxy (`packages/cipherstash-proxy/`):**
-- `postgresql/` - PostgreSQL wire protocol implementation, message parsing, and client handling
-- `proxy/zerokms/` - ZeroKMS client initialization and key management
-- `config/` - Configuration management for database connections, TLS, and encryption settings
-- `proxy/encrypt_config/` - Encryption configuration and schema management
+- Define errors in `packages/cipherstash-proxy/src/error.rs`, grouped by
+  problem domain rather than module. Use descriptive variant names without an
+  `Error` suffix and give customer-facing errors helpful messages and
+  documentation links.
+- In tests, prefer `unwrap()` over `expect()` unless the expectation adds
+  meaningful context. Prefer `assert_eq!` for equality checks.
 
-**EQL Mapper (`packages/eql-mapper/`):**
-- SQL parsing and type inference engine
-- Transformation rules for converting plaintext SQL to encrypted operations
-- Schema analysis and column mapping for encryption
+### Release documentation
 
-**Integration Tests (`packages/cipherstash-proxy-integration/`):**
-- Comprehensive test suite covering encryption scenarios
+For user-facing or notable changes, update the `CHANGELOG.md` `[Unreleased]`
+section using Keep a Changelog categories and user-facing language. For a
+significant release, prepare `ANNOUNCEMENT.md` for GitHub Discussions and
+remove that temporary file after publishing it.
 
-**Language Integration Tests (`tests/python/`, `tests/integration/golang/`):**
-- Language-specific integration tests (Python, Go)
-
-**Showcase (`packages/showcase/`):**
-- Healthcare data model demonstrating EQL v3 encryption
-- Example of realistic encrypted application with foreign keys and relationships
-
-### Request Flow
-
-1. Application connects to Proxy (port 6432) using standard PostgreSQL protocol
-2. Proxy intercepts SQL statements and uses EQL Mapper to analyze query structure
-3. For encrypted columns, Proxy transforms SQL using EQL v3 operations
-4. Encrypted queries are sent to actual PostgreSQL database
-5. Results are decrypted before returning to application
-
-## Development Commands
-
-### Prerequisites Setup
-```bash
-# Install mise (required for all development)
-brew install mise  # macOS
-mise trust --yes && mise install
-
-# Start PostgreSQL containers
-mise run postgres:up --extra-args "--detach --wait"
-mise run postgres:setup  # Install EQL and schema
-```
-
-> **macOS Note:** If you hit file descriptor limits during development (e.g. "Too many open files"), you may need to increase the limit:
-> ```bash
-> ulimit -n 10240
-> ```
-> To make this persistent, add it to your shell profile (e.g. `~/.zshrc`).
-
-### Core Development Workflow
-```bash
-# Build and run Proxy as a process (development)
-mise run proxy
-
-# Run Proxy in container (integration testing)
-mise run proxy:up --extra-args "--detach --wait"
-
-# Kill running processes
-mise run proxy:kill
-
-# Reset database state
-mise run reset
-```
-
-### Testing
-```bash
-# Full test suite (hygiene + unit + integration)
-mise run test
-
-# Hygiene checks (compilation, formatting, clippy)
-mise run check
-
-# Unit tests only
-mise run test:unit [test_name]
-
-# Integration tests
-mise run test:integration
-
-# Language-specific integration tests
-mise run test:integration:lang:python
-mise run test:integration:lang:golang
-
-# Individual test packages
-mise run test:local:integration  # cipherstash-proxy-integration
-mise run test:local:mapper       # eql-mapper
-```
-
-### Database Management
-```bash
-# Connect to Proxy interactively
-mise run proxy:psql
-
-# Connect directly to PostgreSQL (bypassing Proxy)
-mise run postgres:psql
-
-# Clean shutdown
-mise run postgres:down
-```
-
-## Configuration
-
-### Authentication & Encryption
-Proxy requires CipherStash credentials configured in `mise.local.toml`:
-```toml
-[env]
-CS_WORKSPACE_CRN = "crn:region:workspace-id"
-CS_CLIENT_ACCESS_KEY = "your-access-key"
-CS_DEFAULT_KEYSET_ID = "your-keyset-id"
-CS_CLIENT_ID = "your-client-id"
-CS_CLIENT_KEY = "your-client-key"
-```
-
-### PostgreSQL Port Conventions
-- `5532` - PostgreSQL latest (non-TLS)
-- `5617` - PostgreSQL 17 (TLS)
-- `6432` - CipherStash Proxy
-
-Container names: `postgres`, `postgres-tls`, `proxy`, `proxy-tls`
-
-### Logging Configuration
-Set granular log levels by target:
-```bash
-CS_LOG__MAPPER_LEVEL=debug
-CS_LOG__AUTHENTICATION_LEVEL=debug
-CS_LOG__ENCRYPT_LEVEL=debug
-CS_LOG__ZEROKMS_LEVEL=debug
-```
-
-Available targets: `DEVELOPMENT`, `AUTHENTICATION`, `CONFIG`, `CONTEXT`, `ENCODING`, `ENCRYPT`, `DECRYPT`, `ENCRYPT_CONFIG`, `ZEROKMS`, `MIGRATE`, `PROTOCOL`, `MAPPER`, `SCHEMA`, `SLOW_STATEMENTS`
-
-## Key Development Patterns
-
-### Error Handling
-- All errors defined in `packages/cipherstash-proxy/src/error.rs`
-- Errors grouped by problem domain (not module structure)
-- Customer-facing errors include friendly messages and documentation links
-- Use descriptive variant names without "Error" suffix
-
-### Testing Patterns
-- Use `unwrap()` instead of `expect()` unless providing meaningful context
-- Prefer `assert_eq!` over `assert!` for equality checks
-- Integration tests use Docker containers for reproducible environments
-
-### SQL Transformation
-- EQL Mapper handles SQL parsing and type inference
-- Transformation rules in `packages/eql-mapper/src/transformation_rules/`
-- Schema analysis determines which columns require encryption
-- Supports complex queries including JOINs, subqueries, and aggregations
-
-## EQL Integration
-
-CipherStash Proxy uses EQL v3 for searchable encryption. Key concepts:
-
-- **Plaintext columns** - standard PostgreSQL data types
-- **Encrypted columns** - use a self-configuring EQL v3 domain type in the schema
-  (e.g. `eql_v3_text_search`, `eql_v3_integer_ord`, `eql_v3_json_search`); the
-  domain encodes the token type and searchable capabilities, so there is no
-  separate `add_search_config` call
-- **Searchable operations** - equality, comparison, ordering, text match, and JSON
-  traversal work on encrypted data, gated by the column's domain capability
-- **Index support** - functional indexes over the term-extraction functions
-  (e.g. `CREATE INDEX ON t (eql_v3.ord_term(col))`)
-
-EQL is automatically downloaded and installed during setup. Use `CS_EQL_PATH` to point to local EQL development version.
-
-## Cross-Compilation & Building
-
-```bash
-# Build binary for current platform
-mise run build:binary
-
-# Cross-compile for Linux (from macOS)
-mise run build:binary --target aarch64-unknown-linux-gnu
-
-# Build Docker image
-mise run build:docker --platform linux/arm64
-```
-
-The build system supports cross-compilation from macOS to Linux using MaterializeInc/crosstools.
-
-## Release Documentation
-
-### Changelog
-
-The project maintains a `CHANGELOG.md` following [Keep a Changelog](https://keepachangelog.com/) format. When making changes that are user-facing or notable, update the changelog:
-
-1. Add entries under an `## [Unreleased]` section at the top
-2. Use appropriate subsections: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Security`
-3. Write entries from the user's perspective, not implementation details
-4. When a release is cut, rename `[Unreleased]` to the version number and date
-
-Example entry:
-```markdown
-## [Unreleased]
-
-### Added
-
-- **Feature name**: Brief description of what users can now do.
-
-### Fixed
-
-- Description of bug that was fixed.
-```
-
-### Release Announcements
-
-For significant releases, write an `ANNOUNCEMENT.md` for the GitHub Discussions page:
-
-1. **Title**: `CipherStash Proxy X.Y.Z Released - Brief Feature Summary`
-2. **Structure**:
-   - Opening paragraph summarizing the release
-   - H2 sections for each major feature with examples
-   - Configuration tables where applicable
-   - Code examples (SQL, JSON, PromQL as relevant)
-   - "Other Changes" section for minor updates
-   - "Upgrade" section linking to the releases page
-3. **Callouts**: Use GitHub callout syntax for important notes:
-   ```markdown
-   > [!NOTE]
-   > Helpful context or clarification.
-
-   > [!TIP]
-   > Recommended best practices.
-
-   > [!IMPORTANT]
-   > Critical information users must know.
-   ```
-4. After copying content to GitHub Discussions, delete `ANNOUNCEMENT.md` from the repo
-
-## Agent skills
-
-### Pull request CI ownership
+## Pull request CI ownership
 
 When a task authorizes pushing changes to a pull request, use passing required
 GitHub checks as the completion criterion unless the user explicitly says not
@@ -270,14 +56,12 @@ After every push:
 The main agent may finish only when all required checks pass or when it reports
 a genuine external blocker that it cannot resolve from the local worktree.
 
-### Issue tracker
+## Work tracking
 
-Issues are tracked in **Linear** (team: Product Engineering, key `CIP-`), not GitHub Issues. GitHub holds code and PRs only. See `docs/agents/issue-tracker.md`.
-
-### Triage labels
-
-**Defaults** — the five canonical roles, each label string equal to its name. Only `wontfix` exists in Linear today; the rest are created on demand. See `docs/agents/triage-labels.md`.
-
-### Domain docs
-
-**Multi-context** — the root `CONTEXT-MAP.md` points at per-package `CONTEXT.md` files under `packages/*/`. See `docs/agents/domain.md`.
+- Issues live in Linear under Product Engineering (`CIP-`), not GitHub Issues.
+  Read `docs/agents/issue-tracker.md` before creating, updating, or linking an
+  issue.
+- Read `docs/agents/triage-labels.md` before assigning or changing triage
+  labels.
+- Read `docs/agents/domain.md` when creating or maintaining domain context
+  documentation.
