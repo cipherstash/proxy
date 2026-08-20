@@ -27,9 +27,9 @@ use crate::Param;
 ///
 /// Membership is decided syntactically, by the predicate an operand belongs to
 /// — the same contexts whose rewrite rules cast to a `eql_v3.query_*` twin:
-/// comparisons (`=`, `<>`, `<`, `<=`, `>`, `>=`), `LIKE`/`ILIKE` and `@@`.
-/// Everything else — `INSERT` values, `UPDATE` assignments, containment needles
-/// — is a stored value and keeps its full payload.
+/// comparisons (`=`, `<>`, `<`, `<=`, `>`, `>=`), containment (`@>`/`<@`),
+/// `LIKE`/`ILIKE` and `@@`. Everything else — including `INSERT` values and
+/// `UPDATE` assignments — is a stored value and keeps its full payload.
 #[derive(Debug, Default)]
 pub struct QueryOperands<'ast> {
     params: HashSet<Param>,
