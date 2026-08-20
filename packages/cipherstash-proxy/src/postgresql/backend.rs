@@ -280,9 +280,7 @@ where
                     client_id = self.context.client_id,
                     msg = "ReadyForQuery"
                 );
-                if self.context.schema_changed() {
-                    self.context.reload_schema().await;
-                }
+                self.context.reload_schema_if_changed().await;
             }
 
             code => {

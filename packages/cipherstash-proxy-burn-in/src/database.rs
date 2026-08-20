@@ -15,6 +15,7 @@ use tokio_postgres::{config::Host, Client, NoTls};
 use crate::{SCHEMA_MIGRATION, SEED_MIGRATION};
 
 const RUN_LOCK_ID: i64 = 0x4353_4255_524e_494e;
+pub const MIGRATION_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 
 #[derive(Clone)]
 pub struct DatabaseTarget {

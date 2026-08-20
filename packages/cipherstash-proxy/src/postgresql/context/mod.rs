@@ -28,7 +28,7 @@ pub use statement_metadata::StatementMetadata;
 use std::{
     collections::{HashMap, VecDeque},
     sync::{
-        atomic::{AtomicU64, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
         Arc, LazyLock, RwLock,
     },
     time::{Duration, Instant},
@@ -70,7 +70,7 @@ where
     portals: Arc<RwLock<HashMap<Name, PortalQueue>>>,
     describe: Arc<RwLock<DescribeQueue>>,
     execute: Arc<RwLock<ExecuteQueue>>,
-    schema_changed: Arc<RwLock<bool>>,
+    schema_changed: Arc<AtomicBool>,
     session_metrics: Arc<RwLock<SessionMetricsQueue>>,
     table_resolver: Arc<TableResolver>,
     unsafe_disable_mapping: bool,
@@ -185,7 +185,7 @@ where
             portals: Arc::new(RwLock::new(HashMap::new())),
             describe: Arc::new(RwLock::from(Queue::new())),
             execute: Arc::new(RwLock::from(Queue::new())),
-            schema_changed: Arc::new(RwLock::from(false)),
+            schema_changed: Arc::new(AtomicBool::new(false)),
             session_metrics: Arc::new(RwLock::from(Queue::new())),
             table_resolver: Arc::new(TableResolver::new_editable(schema)),
             client_id,
@@ -567,11 +567,11 @@ where
             client_id = self.client_id,
             msg = "Schema changed"
         );
-        let _ = self.schema_changed.write().map(|mut guard| *guard = true);
+        self.schema_changed.store(true, Ordering::Release);
     }
 
-    pub fn schema_changed(&self) -> bool {
-        self.schema_changed.read().ok().is_some_and(|s| *s)
+    pub fn take_schema_changed(&self) -> bool {
+        self.schema_changed.swap(false, Ordering::AcqRel)
     }
 
     pub fn get_table_resolver(&self) -> Arc<TableResolver> {
@@ -768,7 +768,7 @@ where
         self.encryption.decrypt(keyset_id, ciphertexts).await
     }
 
-    pub async fn reload_schema(&self) {
+    pub async fn reload_schema(&self) -> bool {
         let (responder, receiver) = oneshot::channel();
         match self
             .reload_sender
@@ -780,18 +780,22 @@ where
                     msg = "Database schema could not be reloaded",
                     error = err.to_string()
                 );
+                return false;
             }
         }
 
         debug!(target: CONTEXT, msg = "Waiting for schema reload");
         let response = receiver.await;
         debug!(target: CONTEXT, msg = "Database schema reloaded", ?response);
+        response.is_ok()
     }
 
     /// Reload schema if it has changed since last check.
     pub async fn reload_schema_if_changed(&self) {
-        if self.schema_changed() {
-            self.reload_schema().await;
+        if self.take_schema_changed() && !self.reload_schema().await {
+            // Preserve the dirty state when the reload task is unavailable so
+            // a later statement can retry instead of silently losing the DDL.
+            self.set_schema_changed();
         }
     }
 
@@ -1065,7 +1069,7 @@ mod tests {
             messages::{Name, Target},
             Column,
         },
-        proxy::{EncryptConfig, EncryptionService},
+        proxy::{EncryptConfig, EncryptionService, ReloadCommand},
         TandemConfig,
     };
     use cipherstash_client::IdentifiedBy;
@@ -1115,6 +1119,39 @@ mod tests {
             service,
             reload_sender,
         )
+    }
+
+    #[tokio::test]
+    async fn successful_schema_reload_consumes_change_flag_once() {
+        let config = Arc::new(TandemConfig::for_testing());
+        let encrypt_config = Arc::new(EncryptConfig::default());
+        let schema = Arc::new(Schema::new("public"));
+        let (reload_sender, mut reload_receiver) = mpsc::unbounded_channel();
+        let context = Context::new(
+            1,
+            config,
+            encrypt_config,
+            schema,
+            TestService {},
+            reload_sender,
+        );
+        let reload_task = tokio::spawn(async move {
+            let Some(ReloadCommand::DatabaseSchema(responder)) = reload_receiver.recv().await
+            else {
+                panic!("expected database schema reload");
+            };
+            responder.send(()).expect("reload receiver is alive");
+            tokio::time::timeout(std::time::Duration::from_millis(20), reload_receiver.recv())
+                .await
+                .is_err()
+        });
+
+        context.set_schema_changed();
+        context.reload_schema_if_changed().await;
+        context.reload_schema_if_changed().await;
+
+        assert!(!context.take_schema_changed());
+        assert!(reload_task.await.expect("reload task did not panic"));
     }
 
     fn statement() -> Statement {

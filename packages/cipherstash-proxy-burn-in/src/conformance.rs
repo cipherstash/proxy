@@ -9,6 +9,7 @@ use std::path::Path;
 
 use anyhow::{Context, Result};
 use serde_json::Value;
+use tokio::time::timeout;
 
 use crate::database::{self, DatabaseTarget};
 
@@ -19,7 +20,12 @@ pub async fn run(
 ) -> Result<()> {
     let _run_lock = database::acquire_run_lock(direct_database).await?;
     database::ensure_eql_installed(direct_database, eql_path).await?;
-    database::migrate(proxy_database, direct_database).await?;
+    timeout(
+        database::MIGRATION_TIMEOUT,
+        database::migrate(proxy_database, direct_database),
+    )
+    .await
+    .context("fixture migration timed out")??;
     let mut client = database::connect(proxy_database).await?;
 
     client

@@ -509,8 +509,8 @@ run = """
 #!/bin/bash
 cd tests
 mise run postgres:fail_if_not_running
-cat sql/schema-uninstall.sql | docker exec -i postgres${CONTAINER_SUFFIX} psql postgresql://${CS_DATABASE__USERNAME}:${CS_DATABASE__PASSWORD_ESCAPED_FOR_TESTS}@${CS_DATABASE__HOST}:${CS_DATABASE__PORT}/${CS_DATABASE__NAME} -f-
-cat ../cipherstash-encrypt-uninstall.sql | docker exec -i postgres${CONTAINER_SUFFIX} psql postgresql://${CS_DATABASE__USERNAME}:${CS_DATABASE__PASSWORD_ESCAPED_FOR_TESTS}@${CS_DATABASE__HOST}:${CS_DATABASE__PORT}/${CS_DATABASE__NAME} -f-
+cat sql/schema-uninstall.sql | docker exec -i postgres${CONTAINER_SUFFIX} psql -v ON_ERROR_STOP=1 postgresql://${CS_DATABASE__USERNAME}:${CS_DATABASE__PASSWORD_ESCAPED_FOR_TESTS}@${CS_DATABASE__HOST}:${CS_DATABASE__PORT}/${CS_DATABASE__NAME} -f-
+cat ../cipherstash-encrypt-uninstall.sql | docker exec -i postgres${CONTAINER_SUFFIX} psql -v ON_ERROR_STOP=1 postgresql://${CS_DATABASE__USERNAME}:${CS_DATABASE__PASSWORD_ESCAPED_FOR_TESTS}@${CS_DATABASE__HOST}:${CS_DATABASE__PORT}/${CS_DATABASE__NAME} -f-
 cat ../cipherstash-encrypt.sql | docker exec -i postgres${CONTAINER_SUFFIX} psql postgresql://${CS_DATABASE__USERNAME}:${CS_DATABASE__PASSWORD_ESCAPED_FOR_TESTS}@${CS_DATABASE__HOST}:${CS_DATABASE__PORT}/${CS_DATABASE__NAME} -f-
 cat sql/schema.sql | docker exec -i postgres${CONTAINER_SUFFIX} psql postgresql://${CS_DATABASE__USERNAME}:${CS_DATABASE__PASSWORD_ESCAPED_FOR_TESTS}@${CS_DATABASE__HOST}:${CS_DATABASE__PORT}/${CS_DATABASE__NAME} -f-
 """
@@ -522,8 +522,8 @@ run = """
 #!/bin/bash
 cd tests
 mise run postgres:fail_if_not_running
-cat sql/schema-uninstall.sql | docker exec -i postgres${CONTAINER_SUFFIX} psql postgresql://${CS_DATABASE__USERNAME}:${CS_DATABASE__PASSWORD_ESCAPED_FOR_TESTS}@${CS_DATABASE__HOST}:${CS_DATABASE__PORT}/${CS_DATABASE__NAME} -f-
-cat ../cipherstash-encrypt-uninstall.sql | docker exec -i postgres${CONTAINER_SUFFIX} psql postgresql://${CS_DATABASE__USERNAME}:${CS_DATABASE__PASSWORD_ESCAPED_FOR_TESTS}@${CS_DATABASE__HOST}:${CS_DATABASE__PORT}/${CS_DATABASE__NAME} -f-
+cat sql/schema-uninstall.sql | docker exec -i postgres${CONTAINER_SUFFIX} psql -v ON_ERROR_STOP=1 postgresql://${CS_DATABASE__USERNAME}:${CS_DATABASE__PASSWORD_ESCAPED_FOR_TESTS}@${CS_DATABASE__HOST}:${CS_DATABASE__PORT}/${CS_DATABASE__NAME} -f-
+cat ../cipherstash-encrypt-uninstall.sql | docker exec -i postgres${CONTAINER_SUFFIX} psql -v ON_ERROR_STOP=1 postgresql://${CS_DATABASE__USERNAME}:${CS_DATABASE__PASSWORD_ESCAPED_FOR_TESTS}@${CS_DATABASE__HOST}:${CS_DATABASE__PORT}/${CS_DATABASE__NAME} -f-
 """
 
 [tasks."postgres:up"]

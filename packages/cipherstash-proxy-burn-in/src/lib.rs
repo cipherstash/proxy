@@ -32,4 +32,25 @@ mod tests {
         assert!(!workload.contains("burnin_type_lab."));
         assert!(!workload.contains("burnin_commerce."));
     }
+
+    #[test]
+    fn ci_starts_proxy_against_a_database_without_encrypted_columns() {
+        let workflow = include_str!("../../../.github/workflows/test.yml");
+        let burn_in_job = workflow.split("  burn-in:").nth(1).expect("burn-in CI job");
+
+        assert!(burn_in_job.contains("mise run eql:download"));
+        assert!(burn_in_job.contains("mise run postgres:eql:teardown"));
+        assert!(!burn_in_job.contains("mise run postgres:setup"));
+    }
+
+    #[test]
+    fn eql_teardown_stops_on_sql_errors() {
+        let tasks = include_str!("../../../mise.toml");
+        let teardown = tasks
+            .split("[tasks.\"postgres:eql:teardown\"]")
+            .nth(1)
+            .expect("EQL teardown task");
+
+        assert!(teardown.contains("ON_ERROR_STOP=1"));
+    }
 }

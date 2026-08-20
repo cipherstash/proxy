@@ -136,7 +136,7 @@ async fn run_with_proxy(config: &Config, proxy: &mut Child, report: &mut Report)
     wait_until_ready(&config.proxy_database_url, proxy).await?;
     ensure_child_running(proxy, "fixture migration")?;
     timeout(
-        OPERATION_TIMEOUT,
+        database::MIGRATION_TIMEOUT,
         database::migrate(&config.proxy_database_url, &config.direct_database_url),
     )
     .await
@@ -199,8 +199,7 @@ async fn run_with_proxy(config: &Config, proxy: &mut Child, report: &mut Report)
         let sample = resource::sample(proxy_pid, started_at)?;
         anyhow::ensure!(sample.rss_bytes > 0, "Proxy RSS sample was zero");
         report.memory_samples.push(sample);
-        report.operations = operations.load(Ordering::Relaxed);
-        report.errors = errors.load(Ordering::Relaxed);
+        refresh_counters(report, &operations, &errors);
     }
     ensure_child_running(proxy, "worker shutdown")?;
     let worker_result = timeout(WORKER_SHUTDOWN_TIMEOUT, async {
@@ -211,8 +210,11 @@ async fn run_with_proxy(config: &Config, proxy: &mut Child, report: &mut Report)
     })
     .await;
     if worker_result.is_err() {
-        workers.abort_all();
+        workers.shutdown().await;
     }
+    // Snapshot after aborting timed-out workers and before propagating the
+    // timeout, so failure reports do not retain the previous ticker's counts.
+    refresh_counters(report, &operations, &errors);
     let worker_result = worker_result.context("workers did not stop within 15 seconds")?;
     let final_sample = resource::sample(proxy_pid, started_at)?;
     anyhow::ensure!(
@@ -221,8 +223,7 @@ async fn run_with_proxy(config: &Config, proxy: &mut Child, report: &mut Report)
     );
     report.memory_samples.push(final_sample);
 
-    report.operations = operations.load(Ordering::Relaxed);
-    report.errors = errors.load(Ordering::Relaxed);
+    refresh_counters(report, &operations, &errors);
     worker_result?;
     Ok(())
 }
@@ -445,6 +446,11 @@ fn refresh_rss_summary(report: &mut Report) {
     report.rss_growth_bytes = resource::growth_bytes(&report.memory_samples);
 }
 
+fn refresh_counters(report: &mut Report, operations: &AtomicU64, errors: &AtomicU64) {
+    report.operations = operations.load(Ordering::Relaxed);
+    report.errors = errors.load(Ordering::Relaxed);
+}
+
 async fn preflight_output(path: &Path) -> Result<()> {
     if let Some(parent) = path.parent().filter(|path| !path.as_os_str().is_empty()) {
         tokio::fs::create_dir_all(parent).await?;
@@ -509,7 +515,7 @@ mod tests {
 
     #[test]
     fn report_requires_work_and_live_rss() {
-        let report = Report {
+        let mut report = Report {
             status: "failed",
             terminal_error: None,
             requested_duration_seconds: 1,
@@ -529,5 +535,11 @@ mod tests {
             memory_samples: vec![],
         };
         assert!(validate_report(&report, None).is_err());
+
+        let operations = AtomicU64::new(7);
+        let errors = AtomicU64::new(2);
+        refresh_counters(&mut report, &operations, &errors);
+        assert_eq!(report.operations, 7);
+        assert_eq!(report.errors, 2);
     }
 }

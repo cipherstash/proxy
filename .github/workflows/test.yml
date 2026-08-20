@@ -85,10 +85,11 @@ jobs:
           CS_CLIENT_ACCESS_KEY: ${{ secrets.CS_VAULT_CLIENT_ACCESS_KEY }}
           CS_WORKSPACE_CRN: ${{ secrets.CS_VAULT_WORKSPACE_CRN }}
 
-      - name: Start PostgreSQL and install EQL
+      - name: Start bare PostgreSQL and download EQL
         run: |
           mise run postgres:up --extra-args "--detach --wait"
-          mise run postgres:setup
+          mise run eql:download
+          mise run postgres:eql:teardown
 
       - name: Run encrypted burn-in
         run: mise run test:burn-in
