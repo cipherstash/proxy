@@ -562,7 +562,7 @@ impl<S: EncryptionService> Frontend<S> {
                 inbound_eql::parse(
                     value.as_bytes(),
                     column,
-                    typed_statement.query_operands.contains_literal(literal),
+                    literal_is_query_operand(typed_statement, literal, column),
                 )
                 .map_err(Error::from)
             })
@@ -583,11 +583,15 @@ impl<S: EncryptionService> Frontend<S> {
         self.merge_inbound_eql(&mut encrypted, inbound, literal_columns)
             .await?;
 
-        for ((_, literal), encrypted) in literal_values.iter().zip(encrypted.iter_mut()) {
-            project_query_operand(
-                typed_statement.query_operands.contains_literal(literal),
-                encrypted,
-            );
+        for (((_, literal), column), encrypted) in literal_values
+            .iter()
+            .zip(literal_columns)
+            .zip(encrypted.iter_mut())
+        {
+            let query_operand = column
+                .as_ref()
+                .is_some_and(|column| literal_is_query_operand(typed_statement, literal, column));
+            project_query_operand(query_operand, encrypted);
         }
 
         debug!(target: MAPPER,
@@ -1340,6 +1344,20 @@ fn project_query_operand(query_operand: bool, encrypted: &mut Option<EqlOutput>)
         }
         already_query_shaped => *encrypted = already_query_shaped,
     }
+}
+
+/// JSON path/accessor literals are query operands even though they are passed
+/// as bare text and therefore need no query-domain cast. All other literals
+/// use the predicate roles recorded by EQL Mapper.
+fn literal_is_query_operand(
+    typed_statement: &TypeCheckedStatement<'_>,
+    literal: &ast::Value,
+    column: &Column,
+) -> bool {
+    matches!(
+        column.eql_term,
+        EqlTermVariant::JsonAccessor | EqlTermVariant::JsonPath
+    ) || typed_statement.query_operands.contains_literal(literal)
 }
 
 fn literals_to_plaintext(

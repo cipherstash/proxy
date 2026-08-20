@@ -110,6 +110,28 @@ mod tests {
         serde_json::to_value(query).unwrap()
     }
 
+    async fn query_json_selector(table: &str, column: &str, path: &str) -> String {
+        let config = json_search_config(table, column);
+        let index_type = config.indexes[0].index_type.clone();
+        let prepared = PreparedPlaintext::new(
+            Cow::Owned(config),
+            Identifier::new(table, column),
+            Plaintext::from(path),
+            EqlOperation::Query(&index_type, QueryOp::SteVecSelector),
+        );
+        let mut outputs =
+            encrypt_eql_v3(cipher().await, vec![prepared], &EqlEncryptOpts::default())
+                .await
+                .expect("application-side selector encryption must succeed");
+        let EqlOutputV3::Query(query) = outputs.remove(0) else {
+            panic!("selector encryption must return a query-only payload");
+        };
+        let serde_json::Value::String(selector) = serde_json::to_value(query).unwrap() else {
+            panic!("selector encryption must return a bare selector hash");
+        };
+        selector
+    }
+
     #[tokio::test]
     async fn accepts_pre_encrypted_parameter_for_storage_and_search() {
         let client = connect_with_tls(*PROXY).await;
@@ -266,6 +288,52 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(rows[0].get::<_, serde_json::Value>(0), plaintext);
+    }
+
+    #[tokio::test]
+    async fn accepts_bare_selector_hashes_as_parameters_and_literals() {
+        let client = connect_with_tls(*PROXY).await;
+        clear_with_client(&client).await;
+        let id = random_id();
+        let plaintext = serde_json::json!({
+            "patient": { "name": "Ada Lovelace" }
+        });
+
+        client
+            .execute(
+                "INSERT INTO encrypted (id, encrypted_jsonb) VALUES ($1, $2)",
+                &[&id, &plaintext],
+            )
+            .await
+            .unwrap();
+
+        let selector = query_json_selector("encrypted", "encrypted_jsonb", "$.patient.name").await;
+        let row = client
+            .query_one(
+                "SELECT encrypted_jsonb -> $1 FROM encrypted WHERE id = $2",
+                &[&selector, &id],
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            row.get::<_, serde_json::Value>(0),
+            serde_json::json!("Ada Lovelace")
+        );
+
+        let row = client
+            .simple_query(&format!(
+                "SELECT jsonb_path_query_first(encrypted_jsonb, '{selector}') \
+                 FROM encrypted WHERE id = '{id}'"
+            ))
+            .await
+            .unwrap()
+            .into_iter()
+            .find_map(|message| match message {
+                tokio_postgres::SimpleQueryMessage::Row(row) => row.get(0).map(str::to_owned),
+                _ => None,
+            })
+            .expect("bare selector literal must return an extracted value");
+        assert_eq!(row, "\"Ada Lovelace\"");
     }
 
     #[tokio::test]

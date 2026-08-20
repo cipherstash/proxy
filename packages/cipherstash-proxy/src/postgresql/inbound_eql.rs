@@ -6,6 +6,13 @@ use cipherstash_client::{
 use eql_mapper::EqlTermVariant;
 use serde_json::Value;
 
+/// Tokenized SteVec selectors are 16 bytes rendered as lowercase hexadecimal.
+///
+/// Plaintext selectors can also match this format. In a JSON selector query
+/// position that ambiguity is intentionally resolved in favour of treating a
+/// match as an application-generated query operand.
+const SELECTOR_HASH_LEN: usize = 32;
+
 /// An application-generated EQL value entering Proxy.
 #[derive(Debug)]
 pub enum InboundEql {
@@ -26,6 +33,20 @@ pub fn parse(
     column: &Column,
     query_operand: bool,
 ) -> Result<Option<InboundEql>, EncryptError> {
+    if query_operand
+        && matches!(
+            column.eql_term,
+            EqlTermVariant::JsonAccessor | EqlTermVariant::JsonPath
+        )
+        && is_selector_hash(bytes)
+    {
+        let selector = String::from_utf8(bytes.to_vec())
+            .map_err(|_| EncryptError::InvalidInboundCiphertext)?;
+        let query = EqlQueryPayload::Selector(selector);
+        validate_query_metadata(&query, column)?;
+        return Ok(Some(InboundEql::Query(query)));
+    }
+
     let Ok(value) = serde_json::from_slice::<Value>(bytes) else {
         return Ok(None);
     };
@@ -60,6 +81,14 @@ pub fn parse(
         serde_json::from_value(value).map_err(|_| EncryptError::InvalidInboundCiphertext)?;
     validate_query_metadata(&query, column)?;
     Ok(Some(InboundEql::Query(query)))
+}
+
+/// Equivalent to the static selector-hash regex `^[0-9a-f]{32}$`.
+fn is_selector_hash(bytes: &[u8]) -> bool {
+    bytes.len() == SELECTOR_HASH_LEN
+        && bytes
+            .iter()
+            .all(|byte| byte.is_ascii_digit() || matches!(byte, b'a'..=b'f'))
 }
 
 fn validate_storage_metadata(
@@ -151,10 +180,21 @@ fn validate_query_metadata(query: &EqlQueryPayload, column: &Column) -> Result<(
             }
             Ok(())
         }
-        // Bare selector hashes are indistinguishable from ordinary plaintext
-        // text on the PostgreSQL wire, so they cannot safely advertise
-        // themselves as pre-computed query operands.
-        EqlQueryPayload::Selector(_) => Err(EncryptError::InvalidInboundCiphertext),
+        EqlQueryPayload::Selector(selector) => {
+            let configured = column
+                .config
+                .indexes
+                .iter()
+                .any(|index| matches!(index.index_type, IndexType::SteVec { .. }));
+            let query_shape = matches!(
+                column.eql_term,
+                EqlTermVariant::JsonAccessor | EqlTermVariant::JsonPath
+            );
+            if !configured || !query_shape || !is_selector_hash(selector.as_bytes()) {
+                return Err(EncryptError::InvalidInboundCiphertext);
+            }
+            Ok(())
+        }
     }
 }
 
@@ -476,5 +516,28 @@ mod tests {
             parse(query, &ste_vec_column(), false),
             Err(EncryptError::InvalidInboundCiphertext)
         ));
+    }
+
+    #[test]
+    fn bare_selector_hash_is_accepted_for_a_json_accessor_query_operand() {
+        let mut column = ste_vec_column();
+        column.eql_term = EqlTermVariant::JsonAccessor;
+
+        assert!(matches!(
+            parse(b"0123456789abcdef0123456789abcdef", &column, true),
+            Ok(Some(InboundEql::Query(EqlQueryPayload::Selector(selector))))
+                if selector == "0123456789abcdef0123456789abcdef"
+        ));
+    }
+
+    #[test]
+    fn selector_that_does_not_match_hash_format_remains_plaintext() {
+        let mut column = ste_vec_column();
+        column.eql_term = EqlTermVariant::JsonAccessor;
+
+        assert!(parse(b"patient.name", &column, true).unwrap().is_none());
+        assert!(parse(b"0123456789ABCDEF0123456789ABCDEF", &column, true)
+            .unwrap()
+            .is_none());
     }
 }
