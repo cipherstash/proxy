@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1787289969466,
+  "lastUpdate": 1787293679635,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -25414,6 +25414,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 40.824441,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "james@cipherstash.com",
+            "name": "James Sadler",
+            "username": "freshtonic"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "192fbb3e9af0caff6d571f13cdf010da5f817504",
+          "message": "Merge pull request #455 from cipherstash/feat/proxy-burn-in\n\ntest: add proxy burn-in tooling",
+          "timestamp": "2026-08-21T16:21:54+10:00",
+          "tree_id": "2b8a6eb4873c72f81a0dc72ac68293b091520171",
+          "url": "https://github.com/cipherstash/proxy/commit/192fbb3e9af0caff6d571f13cdf010da5f817504"
+        },
+        "date": 1787293677969,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 40.471149,
             "unit": "Number"
           }
         ]
