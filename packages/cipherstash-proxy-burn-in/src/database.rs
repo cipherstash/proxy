@@ -10,12 +10,27 @@ use std::{fmt, path::Path, str::FromStr};
 
 use anyhow::{Context, Result};
 use serde_json::{json, Value};
-use tokio_postgres::{config::Host, Client, NoTls};
+use tokio_postgres::{config::Host, types::Type, Client, NoTls};
 
 use crate::{SCHEMA_MIGRATION, SEED_MIGRATION};
 
 const RUN_LOCK_ID: i64 = 0x4353_4255_524e_494e;
 pub const MIGRATION_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+const SEED_SAMPLE_SQL: &str = "INSERT INTO burnin_type_lab_samples \
+             (id, scalar, nullable_text, binary_value, tags, document, wide_text) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7)";
+
+fn seed_parameter_types() -> [Type; 7] {
+    [
+        Type::INT4,
+        Type::INT4,
+        Type::TEXT,
+        Type::BYTEA,
+        Type::TEXT_ARRAY,
+        Type::JSONB,
+        Type::TEXT,
+    ]
+}
 
 #[derive(Clone)]
 pub struct DatabaseTarget {
@@ -265,21 +280,18 @@ async fn seed_sample(
     document: Value,
     wide_text: String,
 ) -> Result<()> {
+    let values: [&(dyn tokio_postgres::types::ToSql + Sync); 7] = [
+        &id,
+        &scalar,
+        &nullable_text,
+        &binary_value,
+        &tags,
+        &document,
+        &wide_text,
+    ];
+    let parameters: Vec<_> = values.into_iter().zip(seed_parameter_types()).collect();
     client
-        .execute(
-            "INSERT INTO burnin_type_lab_samples \
-             (id, scalar, nullable_text, binary_value, tags, document, wide_text) \
-             VALUES ($1, $2, $3, $4, $5, $6, $7)",
-            &[
-                &id,
-                &scalar,
-                &nullable_text,
-                &binary_value,
-                &tags,
-                &document,
-                &wide_text,
-            ],
-        )
+        .query_typed(SEED_SAMPLE_SQL, &parameters)
         .await
         .with_context(|| format!("seeding burn-in sample {id} through Proxy"))?;
     Ok(())
@@ -296,5 +308,21 @@ mod tests {
             .unwrap();
         assert_eq!(target.to_string(), "postgresql://alice@localhost:5544/app");
         assert!(!format!("{target:?}").contains("super-secret"));
+    }
+
+    #[test]
+    fn seed_parameters_use_native_types_before_proxy_encryption() {
+        assert_eq!(
+            seed_parameter_types(),
+            [
+                Type::INT4,
+                Type::INT4,
+                Type::TEXT,
+                Type::BYTEA,
+                Type::TEXT_ARRAY,
+                Type::JSONB,
+                Type::TEXT,
+            ]
+        );
     }
 }

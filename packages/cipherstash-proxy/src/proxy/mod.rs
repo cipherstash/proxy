@@ -23,7 +23,7 @@ pub type ReloadSender = UnboundedSender<ReloadCommand>;
 
 type ReloadReceiver = UnboundedReceiver<ReloadCommand>;
 
-pub type ReloadResponder = Sender<()>;
+pub type ReloadResponder = Sender<bool>;
 
 /// SQL Statement for loading database schema.
 ///
@@ -114,13 +114,13 @@ impl Proxy {
                 debug!(msg = "ReloadCommand received", ?command);
                 match command {
                     ReloadCommand::DatabaseSchema(responder) => {
-                        schema_manager.reload().await;
-                        encrypt_config_manager.reload().await;
-                        let _ = responder.send(());
+                        let schema_reloaded = schema_manager.reload().await;
+                        let encrypt_config_reloaded = encrypt_config_manager.reload().await;
+                        let _ = responder.send(schema_reloaded && encrypt_config_reloaded);
                     }
                     ReloadCommand::EncryptSchema(responder) => {
-                        encrypt_config_manager.reload().await;
-                        let _ = responder.send(());
+                        let reloaded = encrypt_config_manager.reload().await;
+                        let _ = responder.send(reloaded);
                     }
                 }
             }

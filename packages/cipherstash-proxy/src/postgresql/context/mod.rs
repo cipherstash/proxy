@@ -787,7 +787,7 @@ where
         debug!(target: CONTEXT, msg = "Waiting for schema reload");
         let response = receiver.await;
         debug!(target: CONTEXT, msg = "Database schema reloaded", ?response);
-        response.is_ok()
+        matches!(response, Ok(true))
     }
 
     /// Reload schema if it has changed since last check.
@@ -1140,7 +1140,7 @@ mod tests {
             else {
                 panic!("expected database schema reload");
             };
-            responder.send(()).expect("reload receiver is alive");
+            responder.send(true).expect("reload receiver is alive");
             tokio::time::timeout(std::time::Duration::from_millis(20), reload_receiver.recv())
                 .await
                 .is_err()
@@ -1152,6 +1152,35 @@ mod tests {
 
         assert!(!context.take_schema_changed());
         assert!(reload_task.await.expect("reload task did not panic"));
+    }
+
+    #[tokio::test]
+    async fn failed_schema_reload_keeps_change_flag_for_retry() {
+        let config = Arc::new(TandemConfig::for_testing());
+        let encrypt_config = Arc::new(EncryptConfig::default());
+        let schema = Arc::new(Schema::new("public"));
+        let (reload_sender, mut reload_receiver) = mpsc::unbounded_channel();
+        let context = Context::new(
+            1,
+            config,
+            encrypt_config,
+            schema,
+            TestService {},
+            reload_sender,
+        );
+        let reload_task = tokio::spawn(async move {
+            let Some(ReloadCommand::DatabaseSchema(responder)) = reload_receiver.recv().await
+            else {
+                panic!("expected database schema reload");
+            };
+            responder.send(false).expect("reload receiver is alive");
+        });
+
+        context.set_schema_changed();
+        context.reload_schema_if_changed().await;
+
+        reload_task.await.expect("reload task did not panic");
+        assert!(context.take_schema_changed());
     }
 
     fn statement() -> Statement {
