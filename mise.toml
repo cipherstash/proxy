@@ -173,6 +173,22 @@ run = """
 cargo nextest run --no-fail-fast --nocapture -p cipherstash-proxy-integration
 """
 
+[tasks."test:burn-in"]
+description = "Run a bounded encrypted CRUD soak against a release Proxy"
+run = """
+set -e
+duration="${BURN_IN_DURATION_SECONDS:-30}"
+concurrency="${BURN_IN_CONCURRENCY:-4}"
+
+# The burn-in owns its Proxy process. Disable the optional metrics listener so
+# shared developer and CI environments cannot collide on its separate port.
+CS_PROMETHEUS__ENABLED=false cargo run --locked -p cipherstash-proxy-burn-in -- \
+  soak \
+  --duration-seconds "${duration}" \
+  --concurrency "${concurrency}" \
+  --output target/burn-in/soak-report.json
+"""
+
 [tasks."test:integration:setup:tls"]
 description = "Setup for TLS integration tests: preflight, postgres, proxy"
 run = """
@@ -493,8 +509,8 @@ run = """
 #!/bin/bash
 cd tests
 mise run postgres:fail_if_not_running
-cat sql/schema-uninstall.sql | docker exec -i postgres${CONTAINER_SUFFIX} psql postgresql://${CS_DATABASE__USERNAME}:${CS_DATABASE__PASSWORD_ESCAPED_FOR_TESTS}@${CS_DATABASE__HOST}:${CS_DATABASE__PORT}/${CS_DATABASE__NAME} -f-
-cat ../cipherstash-encrypt-uninstall.sql | docker exec -i postgres${CONTAINER_SUFFIX} psql postgresql://${CS_DATABASE__USERNAME}:${CS_DATABASE__PASSWORD_ESCAPED_FOR_TESTS}@${CS_DATABASE__HOST}:${CS_DATABASE__PORT}/${CS_DATABASE__NAME} -f-
+cat sql/schema-uninstall.sql | docker exec -i postgres${CONTAINER_SUFFIX} psql -v ON_ERROR_STOP=1 postgresql://${CS_DATABASE__USERNAME}:${CS_DATABASE__PASSWORD_ESCAPED_FOR_TESTS}@${CS_DATABASE__HOST}:${CS_DATABASE__PORT}/${CS_DATABASE__NAME} -f-
+cat ../cipherstash-encrypt-uninstall.sql | docker exec -i postgres${CONTAINER_SUFFIX} psql -v ON_ERROR_STOP=1 postgresql://${CS_DATABASE__USERNAME}:${CS_DATABASE__PASSWORD_ESCAPED_FOR_TESTS}@${CS_DATABASE__HOST}:${CS_DATABASE__PORT}/${CS_DATABASE__NAME} -f-
 cat ../cipherstash-encrypt.sql | docker exec -i postgres${CONTAINER_SUFFIX} psql postgresql://${CS_DATABASE__USERNAME}:${CS_DATABASE__PASSWORD_ESCAPED_FOR_TESTS}@${CS_DATABASE__HOST}:${CS_DATABASE__PORT}/${CS_DATABASE__NAME} -f-
 cat sql/schema.sql | docker exec -i postgres${CONTAINER_SUFFIX} psql postgresql://${CS_DATABASE__USERNAME}:${CS_DATABASE__PASSWORD_ESCAPED_FOR_TESTS}@${CS_DATABASE__HOST}:${CS_DATABASE__PORT}/${CS_DATABASE__NAME} -f-
 """
@@ -506,8 +522,8 @@ run = """
 #!/bin/bash
 cd tests
 mise run postgres:fail_if_not_running
-cat sql/schema-uninstall.sql | docker exec -i postgres${CONTAINER_SUFFIX} psql postgresql://${CS_DATABASE__USERNAME}:${CS_DATABASE__PASSWORD_ESCAPED_FOR_TESTS}@${CS_DATABASE__HOST}:${CS_DATABASE__PORT}/${CS_DATABASE__NAME} -f-
-cat ../cipherstash-encrypt-uninstall.sql | docker exec -i postgres${CONTAINER_SUFFIX} psql postgresql://${CS_DATABASE__USERNAME}:${CS_DATABASE__PASSWORD_ESCAPED_FOR_TESTS}@${CS_DATABASE__HOST}:${CS_DATABASE__PORT}/${CS_DATABASE__NAME} -f-
+cat sql/schema-uninstall.sql | docker exec -i postgres${CONTAINER_SUFFIX} psql -v ON_ERROR_STOP=1 postgresql://${CS_DATABASE__USERNAME}:${CS_DATABASE__PASSWORD_ESCAPED_FOR_TESTS}@${CS_DATABASE__HOST}:${CS_DATABASE__PORT}/${CS_DATABASE__NAME} -f-
+cat ../cipherstash-encrypt-uninstall.sql | docker exec -i postgres${CONTAINER_SUFFIX} psql -v ON_ERROR_STOP=1 postgresql://${CS_DATABASE__USERNAME}:${CS_DATABASE__PASSWORD_ESCAPED_FOR_TESTS}@${CS_DATABASE__HOST}:${CS_DATABASE__PORT}/${CS_DATABASE__NAME} -f-
 """
 
 [tasks."postgres:up"]

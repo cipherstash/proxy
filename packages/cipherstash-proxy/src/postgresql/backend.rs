@@ -177,6 +177,17 @@ where
                 client_id = self.context.client_id,
                 msg = "Passthrough enabled"
             );
+
+            // A Proxy started against a database with no encrypted columns is
+            // initially in passthrough mode. DDL on that connection is how an
+            // encrypted schema can first appear, so publish the reload before
+            // forwarding ReadyForQuery. This ordering also guarantees that a
+            // client opening its next connection after ReadyForQuery observes
+            // the newly loaded schema and encrypt configuration.
+            if matches!(code.into(), BackendCode::ReadyForQuery) {
+                self.context.reload_schema_if_changed().await;
+            }
+
             self.write_with_flush(bytes).await?;
 
             // The frontend starts a session and enqueues an execute for every
@@ -280,9 +291,7 @@ where
                     client_id = self.context.client_id,
                     msg = "ReadyForQuery"
                 );
-                if self.context.schema_changed() {
-                    self.context.reload_schema().await;
-                }
+                self.context.reload_schema_if_changed().await;
             }
 
             code => {
@@ -830,6 +839,49 @@ mod tests {
     /// path forwards the bytes and matches on the code without parsing them.
     fn error_response_bytes() -> BytesMut {
         backend_message(b'E', b"SERROR\0CXX000\0Mboom\0\0")
+    }
+
+    /// `'Z'` ReadyForQuery, with an idle transaction status.
+    fn ready_for_query_bytes() -> BytesMut {
+        backend_message(b'Z', b"I")
+    }
+
+    #[tokio::test]
+    async fn passthrough_reloads_changed_schema_before_ready_for_query() {
+        let config = Arc::new(TandemConfig::for_testing());
+        let encrypt_config = Arc::new(EncryptConfig::default());
+        let schema = Arc::new(Schema::new("public"));
+        let (reload_sender, mut reload_receiver) = mpsc::unbounded_channel();
+        let context = Context::new(
+            1,
+            config,
+            encrypt_config,
+            schema,
+            TestService {},
+            reload_sender,
+        );
+        context.set_schema_changed();
+
+        let reload_task = tokio::spawn(async move {
+            let Some(crate::proxy::ReloadCommand::DatabaseSchema(responder)) =
+                reload_receiver.recv().await
+            else {
+                panic!("expected a database schema reload command");
+            };
+            responder.send(true).expect("reload receiver must be open");
+        });
+
+        let (client_sender, mut client_receiver) = mpsc::unbounded_channel();
+        let reader = Cursor::new(ready_for_query_bytes().to_vec());
+        let mut backend = Backend::new(client_sender, reader, context);
+
+        backend.rewrite().await.unwrap();
+        reload_task.await.unwrap();
+        assert_eq!(
+            client_receiver.recv().await.unwrap(),
+            ready_for_query_bytes()
+        );
+        assert!(!backend.context.take_schema_changed());
     }
 
     /// Regression test for BUG-300 (passthrough memory leak).

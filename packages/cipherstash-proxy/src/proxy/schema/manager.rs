@@ -28,19 +28,21 @@ impl SchemaManager {
         self.schema.load().clone()
     }
 
-    pub async fn reload(&self) {
+    pub async fn reload(&self) -> bool {
         match load_schema_with_retry(&self.config).await {
             Ok(reloaded) => {
                 debug!(target: SCHEMA, msg = "Reloaded database schema");
                 self.schema.swap(Arc::new(reloaded));
+                true
             }
             Err(err) => {
                 warn!(
                     msg = "Error reloading database schema",
                     error = err.to_string()
                 );
+                false
             }
-        };
+        }
     }
 }
 

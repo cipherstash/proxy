@@ -355,8 +355,8 @@ mod tests {
         // Test cases that should potentially fail or be handled gracefully
         let invalid = vec![
             format!("SET CIPHERSTASH.KEYSET_ID = {tenant_keyset_id_1}"), // unquoted string
-            format!("SET CIPHERSTASH.KEYSET_ID = NULL"),
-            format!("SET CIPHERSTASH.KEYSET_ID = 123"),
+            "SET CIPHERSTASH.KEYSET_ID = NULL".to_string(),
+            "SET CIPHERSTASH.KEYSET_ID = 123".to_string(),
         ];
 
         for sql in invalid {

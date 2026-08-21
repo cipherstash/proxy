@@ -67,19 +67,21 @@ impl EncryptConfigManager {
         self.encrypt_config.load().is_empty()
     }
 
-    pub async fn reload(&self) {
+    pub async fn reload(&self) -> bool {
         match load_encrypt_config_with_retry(&self.config).await {
             Ok(reloaded) => {
                 debug!(target: ENCRYPT_CONFIG, msg = "Reloaded encrypt configuration");
                 self.encrypt_config.swap(Arc::new(reloaded));
+                true
             }
             Err(err) => {
                 warn!(
                     msg = "Error reloading encrypt configuration",
                     error = err.to_string()
                 );
+                false
             }
-        };
+        }
     }
 }
 
