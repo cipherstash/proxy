@@ -1,20 +1,117 @@
 use super::eql_domains;
 use crate::config::DatabaseConfig;
 use crate::error::Error;
+use crate::proxy::encrypt_config::from_domain::column_config_from_domain;
+use crate::proxy::EncryptConfig;
 use crate::proxy::{AGGREGATE_QUERY, SCHEMA_QUERY};
 use crate::{connect, log::SCHEMA};
 use arc_swap::ArcSwap;
+use cipherstash_client::eql::Identifier;
 use eql_mapper::{Column, Schema, Table};
 use sqltk::parser::ast::Ident;
-use std::sync::Arc;
+use std::future::Future;
+use std::sync::{
+    atomic::{AtomicU64, Ordering},
+    Arc,
+};
 use std::time::Duration;
-use tokio::{task::JoinHandle, time};
+use tokio::{sync::Mutex, task::JoinHandle, time};
 use tracing::{debug, info, warn};
+
+#[derive(Clone, Debug)]
+pub struct CommittedSchemaSnapshot {
+    version: u64,
+    schema: Arc<Schema>,
+    encrypt_config: Arc<EncryptConfig>,
+}
+
+#[derive(Clone, Debug)]
+pub struct CommittedSchemaStore {
+    snapshot: Arc<ArcSwap<CommittedSchemaSnapshot>>,
+    requested_publication: Arc<AtomicU64>,
+    published_publication: Arc<AtomicU64>,
+}
+
+impl CommittedSchemaStore {
+    pub(crate) fn from_parts(schema: Schema, encrypt_config: EncryptConfig) -> Self {
+        Self {
+            snapshot: Arc::new(ArcSwap::new(Arc::new(CommittedSchemaSnapshot::new(
+                1,
+                schema,
+                encrypt_config,
+            )))),
+            requested_publication: Arc::new(AtomicU64::new(0)),
+            published_publication: Arc::new(AtomicU64::new(0)),
+        }
+    }
+
+    pub fn load(&self) -> Arc<CommittedSchemaSnapshot> {
+        self.snapshot.load().clone()
+    }
+
+    pub fn publication_pending(&self) -> bool {
+        self.requested_publication.load(Ordering::Acquire)
+            > self.published_publication.load(Ordering::Acquire)
+    }
+
+    pub fn mark_publication_pending(&self) {
+        self.requested_publication.fetch_add(1, Ordering::AcqRel);
+    }
+
+    pub(crate) fn publication_succeeded(&self) {
+        self.published_publication.store(
+            self.requested_publication.load(Ordering::Acquire),
+            Ordering::Release,
+        );
+    }
+
+    #[cfg(test)]
+    pub fn for_testing(schema: Schema, encrypt_config: EncryptConfig) -> Self {
+        Self::from_parts(schema, encrypt_config)
+    }
+
+    #[cfg(test)]
+    pub fn publish_for_testing(&self, schema: Schema, encrypt_config: EncryptConfig) {
+        let version = self.load().version() + 1;
+        self.snapshot.store(Arc::new(CommittedSchemaSnapshot::new(
+            version,
+            schema,
+            encrypt_config,
+        )));
+        self.publication_succeeded();
+    }
+}
+
+impl CommittedSchemaSnapshot {
+    fn new(version: u64, schema: Schema, encrypt_config: EncryptConfig) -> Self {
+        Self {
+            version,
+            schema: Arc::new(schema),
+            encrypt_config: Arc::new(encrypt_config),
+        }
+    }
+
+    pub fn version(&self) -> u64 {
+        self.version
+    }
+
+    pub fn schema(&self) -> Arc<Schema> {
+        self.schema.clone()
+    }
+
+    pub fn encrypt_config(&self) -> Arc<EncryptConfig> {
+        self.encrypt_config.clone()
+    }
+}
 
 #[derive(Clone, Debug)]
 pub struct SchemaManager {
     config: DatabaseConfig,
-    schema: Arc<ArcSwap<Schema>>,
+    snapshot: Arc<ArcSwap<CommittedSchemaSnapshot>>,
+    requested_generation: Arc<AtomicU64>,
+    requested_publication: Arc<AtomicU64>,
+    published_publication: Arc<AtomicU64>,
+    reload_lock: Arc<Mutex<()>>,
     _reload_handle: Arc<JoinHandle<()>>,
 }
 
@@ -24,37 +121,110 @@ impl SchemaManager {
         init_reloader(config).await
     }
 
-    pub fn load(&self) -> Arc<Schema> {
-        self.schema.load().clone()
+    pub fn load(&self) -> Arc<CommittedSchemaSnapshot> {
+        self.snapshot.load().clone()
+    }
+
+    pub fn store(&self) -> CommittedSchemaStore {
+        CommittedSchemaStore {
+            snapshot: self.snapshot.clone(),
+            requested_publication: self.requested_publication.clone(),
+            published_publication: self.published_publication.clone(),
+        }
     }
 
     pub async fn reload(&self) -> bool {
-        match load_schema_with_retry(&self.config).await {
-            Ok(reloaded) => {
-                debug!(target: SCHEMA, msg = "Reloaded database schema");
-                self.schema.swap(Arc::new(reloaded));
-                true
-            }
-            Err(err) => {
-                warn!(
-                    msg = "Error reloading database schema",
-                    error = err.to_string()
-                );
-                false
-            }
+        coalesced_reload(
+            self.snapshot.clone(),
+            self.requested_generation.clone(),
+            self.requested_publication.clone(),
+            self.published_publication.clone(),
+            self.reload_lock.clone(),
+            || load_snapshot_with_retry(&self.config),
+        )
+        .await
+    }
+}
+
+async fn coalesced_reload<F, Fut>(
+    snapshot: Arc<ArcSwap<CommittedSchemaSnapshot>>,
+    requested_generation: Arc<AtomicU64>,
+    requested_publication: Arc<AtomicU64>,
+    published_publication: Arc<AtomicU64>,
+    reload_lock: Arc<Mutex<()>>,
+    load: F,
+) -> bool
+where
+    F: FnOnce() -> Fut,
+    Fut: Future<Output = Result<(Schema, EncryptConfig), Error>>,
+{
+    let requested = requested_generation.fetch_add(1, Ordering::AcqRel) + 1;
+    let _guard = reload_lock.lock().await;
+    let publication_generation = requested_publication.load(Ordering::Acquire);
+
+    if snapshot.load().version() >= requested {
+        published_publication.fetch_max(publication_generation, Ordering::AcqRel);
+        return true;
+    }
+
+    // A catalog read can only satisfy requests already visible when the read
+    // begins. A request arriving while it is in progress must trigger a later
+    // read, because PostgreSQL may have committed that DDL after this read's
+    // transaction snapshot was established.
+    let loaded_generation = requested_generation.load(Ordering::Acquire);
+
+    match load().await {
+        Ok((schema, encrypt_config)) => {
+            debug!(target: SCHEMA, msg = "Reloaded committed schema snapshot", version = loaded_generation);
+            publish_if_newer(
+                &snapshot,
+                CommittedSchemaSnapshot::new(loaded_generation, schema, encrypt_config),
+            );
+            published_publication.fetch_max(publication_generation, Ordering::AcqRel);
+            true
+        }
+        Err(err) => {
+            warn!(
+                msg = "Error reloading committed schema snapshot",
+                error = err.to_string()
+            );
+            false
         }
     }
 }
 
+fn publish_if_newer(
+    store: &ArcSwap<CommittedSchemaSnapshot>,
+    candidate: CommittedSchemaSnapshot,
+) -> bool {
+    if candidate.version() <= store.load().version() {
+        return false;
+    }
+    store.store(Arc::new(candidate));
+    true
+}
+
 async fn init_reloader(config: DatabaseConfig) -> Result<SchemaManager, Error> {
     // Skip retries on startup as the likely failure mode is configuration
-    let schema = load_schema(&config).await?;
-    info!(msg = "Loaded database schema");
+    let (schema, encrypt_config) = load_snapshot(&config).await?;
+    info!(msg = "Loaded committed schema snapshot");
 
-    let schema = Arc::new(ArcSwap::new(Arc::new(schema)));
+    let snapshot = Arc::new(ArcSwap::new(Arc::new(CommittedSchemaSnapshot::new(
+        1,
+        schema,
+        encrypt_config,
+    ))));
+    let requested_generation = Arc::new(AtomicU64::new(1));
+    let requested_publication = Arc::new(AtomicU64::new(0));
+    let published_publication = Arc::new(AtomicU64::new(0));
+    let reload_lock = Arc::new(Mutex::new(()));
 
     let config_ref = config.clone();
-    let schema_ref = schema.clone();
+    let snapshot_ref = snapshot.clone();
+    let generation_ref = requested_generation.clone();
+    let requested_publication_ref = requested_publication.clone();
+    let published_publication_ref = published_publication.clone();
+    let reload_lock_ref = reload_lock.clone();
 
     let reload_handle = tokio::spawn(async move {
         let reload_interval = tokio::time::Duration::from_secs(config_ref.config_reload_interval);
@@ -67,23 +237,25 @@ async fn init_reloader(config: DatabaseConfig) -> Result<SchemaManager, Error> {
         loop {
             interval.tick().await;
 
-            match load_schema_with_retry(&config_ref).await {
-                Ok(reloaded) => {
-                    schema_ref.swap(Arc::new(reloaded));
-                }
-                Err(err) => {
-                    warn!(
-                        msg = "Error loading database schema",
-                        error = err.to_string()
-                    );
-                }
-            }
+            coalesced_reload(
+                snapshot_ref.clone(),
+                generation_ref.clone(),
+                requested_publication_ref.clone(),
+                published_publication_ref.clone(),
+                reload_lock_ref.clone(),
+                || load_snapshot_with_retry(&config_ref),
+            )
+            .await;
         }
     });
 
     Ok(SchemaManager {
         config,
-        schema,
+        snapshot,
+        requested_generation,
+        requested_publication,
+        published_publication,
+        reload_lock,
         _reload_handle: Arc::new(reload_handle),
     })
 }
@@ -93,15 +265,17 @@ async fn init_reloader(config: DatabaseConfig) -> Result<SchemaManager, Error> {
 /// When databases and the proxy start up at the same time they might not be ready to accept connections before the
 /// proxy tries to query the schema. To give the proxy the best chance of initialising correctly this method will
 /// retry the query a few times before passing on the error.
-async fn load_schema_with_retry(config: &DatabaseConfig) -> Result<Schema, Error> {
+async fn load_snapshot_with_retry(
+    config: &DatabaseConfig,
+) -> Result<(Schema, EncryptConfig), Error> {
     let mut retry_count = 0;
     let max_retry_count = 10;
     let max_backoff = Duration::from_secs(2);
 
     loop {
-        match load_schema(config).await {
-            Ok(schema) => {
-                return Ok(schema);
+        match load_snapshot(config).await {
+            Ok(snapshot) => {
+                return Ok(snapshot);
             }
 
             Err(e) => {
@@ -178,16 +352,23 @@ fn classify_column(
 }
 
 pub async fn load_schema(config: &DatabaseConfig) -> Result<Schema, Error> {
+    load_snapshot(config).await.map(|(schema, _)| schema)
+}
+
+async fn load_snapshot(config: &DatabaseConfig) -> Result<(Schema, EncryptConfig), Error> {
     let client = connect::database(config).await?;
+    client
+        .batch_execute("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY")
+        .await?;
 
     let tables = client.query(SCHEMA_QUERY, &[]).await?;
 
     let mut schema = Schema::new("public");
+    let mut encrypt_config = EncryptConfig::new();
 
     if tables.is_empty() {
         warn!(msg = "Database schema contains no tables");
-        return Ok(schema);
-    };
+    }
 
     for table in tables {
         let table_name: String = table.get("table_name");
@@ -210,6 +391,13 @@ pub async fn load_schema(config: &DatabaseConfig) -> Result<Schema, Error> {
                 );
 
                 table.add_column(Arc::new(column));
+
+                if let Some(domain) = column_domain_name.as_deref() {
+                    if let Some(config) = column_config_from_domain(&table_name, col, domain) {
+                        encrypt_config
+                            .insert(Identifier::new(table_name.clone(), col.clone()), config);
+                    }
+                }
             });
 
         schema.add_table(table);
@@ -224,13 +412,16 @@ pub async fn load_schema(config: &DatabaseConfig) -> Result<Schema, Error> {
         })
         .collect();
 
-    Ok(schema)
+    client.batch_execute("COMMIT").await?;
+    Ok((schema, encrypt_config))
 }
 
 #[cfg(test)]
 mod test {
     use super::*;
     use eql_mapper::ColumnKind;
+    use std::sync::atomic::AtomicUsize;
+    use tokio::sync::Notify;
 
     /// The shape `information_schema.columns` reports for a column declared with
     /// the EQL v2 composite type, verified against PostgreSQL 17: `udt_name` is
@@ -291,5 +482,99 @@ mod test {
             kind(Some("eql_v2_encrypted_backup"), None),
             ColumnKind::Native
         );
+    }
+
+    #[test]
+    fn an_older_generation_cannot_replace_a_newer_snapshot() {
+        let snapshot = ArcSwap::new(Arc::new(CommittedSchemaSnapshot::new(
+            3,
+            Schema::new("public"),
+            EncryptConfig::new(),
+        )));
+
+        assert!(!publish_if_newer(
+            &snapshot,
+            CommittedSchemaSnapshot::new(2, Schema::new("stale"), EncryptConfig::new(),),
+        ));
+        assert_eq!(snapshot.load().version(), 3);
+    }
+
+    #[tokio::test]
+    async fn requests_arriving_during_a_reload_are_coalesced_into_one_follow_up() {
+        let snapshot = Arc::new(ArcSwap::new(Arc::new(CommittedSchemaSnapshot::new(
+            1,
+            Schema::new("public"),
+            EncryptConfig::new(),
+        ))));
+        let requested_generation = Arc::new(AtomicU64::new(1));
+        let requested_publication = Arc::new(AtomicU64::new(1));
+        let published_publication = Arc::new(AtomicU64::new(0));
+        let reload_lock = Arc::new(Mutex::new(()));
+        let loads = Arc::new(AtomicUsize::new(0));
+        let started = Arc::new(Notify::new());
+        let release = Arc::new(Notify::new());
+
+        let first = tokio::spawn(coalesced_reload(
+            snapshot.clone(),
+            requested_generation.clone(),
+            requested_publication.clone(),
+            published_publication.clone(),
+            reload_lock.clone(),
+            {
+                let loads = loads.clone();
+                let started = started.clone();
+                let release = release.clone();
+                move || async move {
+                    loads.fetch_add(1, Ordering::AcqRel);
+                    started.notify_one();
+                    release.notified().await;
+                    Ok((Schema::new("public"), EncryptConfig::new()))
+                }
+            },
+        ));
+
+        started.notified().await;
+        requested_publication.fetch_add(1, Ordering::AcqRel);
+        let second = tokio::spawn(coalesced_reload(
+            snapshot.clone(),
+            requested_generation.clone(),
+            requested_publication.clone(),
+            published_publication.clone(),
+            reload_lock.clone(),
+            {
+                let loads = loads.clone();
+                move || async move {
+                    loads.fetch_add(1, Ordering::AcqRel);
+                    Ok((Schema::new("public"), EncryptConfig::new()))
+                }
+            },
+        ));
+
+        let third = tokio::spawn(coalesced_reload(
+            snapshot.clone(),
+            requested_generation.clone(),
+            requested_publication.clone(),
+            published_publication.clone(),
+            reload_lock.clone(),
+            {
+                let loads = loads.clone();
+                move || async move {
+                    loads.fetch_add(1, Ordering::AcqRel);
+                    Ok((Schema::new("public"), EncryptConfig::new()))
+                }
+            },
+        ));
+
+        while requested_generation.load(Ordering::Acquire) < 4 {
+            tokio::task::yield_now().await;
+        }
+        release.notify_one();
+
+        assert!(first.await.unwrap());
+        assert!(second.await.unwrap());
+        assert!(third.await.unwrap());
+        assert_eq!(loads.load(Ordering::Acquire), 2);
+        assert_eq!(snapshot.load().version(), 4);
+        assert_eq!(published_publication.load(Ordering::Acquire), 2);
     }
 }

@@ -39,6 +39,19 @@ use std::sync::Arc;
 use std::time::Instant;
 use tracing::{debug, info, warn};
 
+fn is_schema_ddl(statement: &ast::Statement) -> bool {
+    matches!(
+        statement,
+        ast::Statement::CreateTable(_)
+            | ast::Statement::CreateView { .. }
+            | ast::Statement::AlterTable { .. }
+            | ast::Statement::Drop {
+                object_type: ast::ObjectType::Table | ast::ObjectType::View,
+                ..
+            }
+    )
+}
+
 /// The PostgreSQL proxy frontend that handles client-to-server message processing.
 ///
 /// The Frontend intercepts messages from PostgreSQL clients, analyzes SQL statements for
@@ -116,6 +129,7 @@ impl<S: EncryptionService> Frontend<S> {
         if self.failed_extended_batch {
             if matches!(protocol_message, FrontendMessage::Sync) {
                 self.failed_extended_batch = false;
+                self.context.mark_schema_protocol_boundary();
                 return Ok(FrontendMiddlewareOutput::Forward(protocol_message));
             }
             self.context.discard_operation(operation);
@@ -141,6 +155,7 @@ impl<S: EncryptionService> Frontend<S> {
                         self.context
                             .set_operation_error(operation, response.clone());
                         self.context.set_execute(operation, Name::new(), session_id);
+                        self.context.mark_schema_protocol_boundary();
                         outbound_message = self.simple_error_query(&response);
                     }
                 }
@@ -242,6 +257,7 @@ impl<S: EncryptionService> Frontend<S> {
                     client_id = self.context.client_id,
                     message = ?protocol_message,
                 );
+                self.context.mark_schema_protocol_boundary();
             }
             FrontendMessage::Close(close) => {
                 self.close_handler(close).await?;
@@ -283,6 +299,7 @@ impl<S: EncryptionService> Frontend<S> {
         execute: Execute,
     ) -> Result<(), Error> {
         debug!(target: PROTOCOL, client_id = self.context.client_id, ?execute);
+        self.context.execute_schema_portal(&execute.portal);
         self.context
             .set_execute_for_portal(operation, execute.portal.to_owned());
         Ok(())
@@ -338,6 +355,23 @@ impl<S: EncryptionService> Frontend<S> {
         // Simple Query may contain many statements
         let query_text = String::from_utf8_lossy(&query).into_owned();
         let parsed_statements = SqlParser::parse_statements(&query_text)?;
+        self.context.prepare_schema_for_statement().await?;
+        if let Some(ddl_index) = parsed_statements.iter().position(is_schema_ddl) {
+            if parsed_statements
+                .iter()
+                .skip(ddl_index + 1)
+                .any(eql_mapper::requires_type_check)
+            {
+                return Err(MappingError::DependentStatementAfterDdl.into());
+            }
+        }
+        if parsed_statements
+            .iter()
+            .any(eql_mapper::requires_type_check)
+        {
+            self.context.wait_for_schema_execution().await;
+            self.context.ensure_schema_modelled()?;
+        }
         let mut transformed_statements = vec![];
 
         debug!(target: MAPPER,
@@ -366,8 +400,6 @@ impl<S: EncryptionService> Frontend<S> {
             }
 
             self.handle_set_keyset(statement)?;
-
-            self.check_for_schema_change(statement);
 
             if !eql_mapper::requires_type_check(statement) {
                 counter!(STATEMENTS_PASSTHROUGH_TOTAL).increment(1);
@@ -476,6 +508,9 @@ impl<S: EncryptionService> Frontend<S> {
         self.context.add_portal(Name::new(), portal);
         self.context
             .set_execute(operation, Name::new(), Some(session_id));
+
+        self.context
+            .execute_simple_schema_statements(&parsed_statements);
 
         if encrypted {
             let transformed_statement = transformed_statements
@@ -757,6 +792,14 @@ impl<S: EncryptionService> Frontend<S> {
         let mut statement_text = String::from_utf8_lossy(&message.query).into_owned();
         let statement = SqlParser::parse_statement(&statement_text)?;
 
+        self.context.prepare_schema_for_statement().await?;
+        if eql_mapper::requires_type_check(&statement) {
+            self.context.wait_for_schema_execution().await;
+            self.context.ensure_schema_modelled()?;
+        }
+        self.context
+            .prepare_schema_statement(message.statement.to_owned(), statement.clone());
+
         // Record diagnostics before any passthrough path can return early.
         // Statements that do not require EQL type checking (for example,
         // plaintext INSERTs and SELECT pg_sleep(...)) still need their real
@@ -781,8 +824,6 @@ impl<S: EncryptionService> Frontend<S> {
         }
 
         self.handle_set_keyset(&statement)?;
-
-        self.check_for_schema_change(&statement);
 
         if !eql_mapper::requires_type_check(&statement) {
             counter!(STATEMENTS_PASSTHROUGH_TOTAL).increment(1);
@@ -878,19 +919,6 @@ impl<S: EncryptionService> Frontend<S> {
             Ok(Some(message))
         } else {
             Ok(None)
-        }
-    }
-
-    ///
-    /// Check the Statement AST for DDL
-    /// Sets a schema changed flag in the Context
-    ///
-    ///
-    fn check_for_schema_change(&self, statement: &ast::Statement) {
-        let schema_changed = eql_mapper::collect_ddl(self.context.get_table_resolver(), statement);
-
-        if schema_changed {
-            self.context.set_schema_changed();
         }
     }
 
@@ -1021,6 +1049,8 @@ impl<S: EncryptionService> Frontend<S> {
     /// - `Ok(None)` - No parameter encryption needed, forward original message
     /// - `Err(error)` - Processing failed, error should be sent to client
     async fn bind_handler(&mut self, mut bind: Bind) -> Result<Option<FrontendMessage>, Error> {
+        self.context
+            .bind_schema_statement(bind.portal.to_owned(), &bind.prepared_statement);
         if self.context.unsafe_disable_mapping() {
             warn!(msg = "Encrypted statement mapping is not enabled");
             counter!(STATEMENTS_PASSTHROUGH_MAPPING_DISABLED_TOTAL).increment(1);

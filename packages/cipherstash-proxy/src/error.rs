@@ -74,7 +74,11 @@ impl Error {
             // Forwarding a statement that references a legacy EQL v2 column
             // stores plaintext in a column its operator believes is encrypted
             // (CIP-3688). No configuration may turn that back on.
-            Error::Mapping(MappingError::UnmappableEncryptedColumn { .. })
+            Error::Mapping(
+                MappingError::UnmappableEncryptedColumn { .. }
+                    | MappingError::DependentStatementAfterDdl
+                    | MappingError::UnmodelledDdl
+            )
                 | Error::Encrypt(EncryptError::InvalidInboundEqlPayload)
         )
     }
@@ -100,6 +104,12 @@ pub enum ZeroKMSError {
 
 #[derive(Error, Debug)]
 pub enum MappingError {
+    #[error("A simple-query batch cannot contain a schema-dependent statement after DDL. Send the DDL and dependent statement as separate queries. For help visit {}#mapping-dependent-statement-after-ddl", ERROR_DOC_BASE_URL)]
+    DependentStatementAfterDdl,
+
+    #[error("A successful schema change in this transaction cannot be modelled safely. Roll back the transaction before issuing schema-dependent statements. For help visit {}#mapping-unmodelled-ddl", ERROR_DOC_BASE_URL)]
+    UnmodelledDdl,
+
     #[error("Invalid parameter for column '{}' of type '{}' in table '{}' (OID {}). For help visit {}#mapping-invalid-parameter",
     _0.column_name(), _0.cast_type(), _0.table_name(), _0.oid(), ERROR_DOC_BASE_URL)]
     InvalidParameter(Box<Column>),

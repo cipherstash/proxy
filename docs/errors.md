@@ -12,6 +12,8 @@
   - [Invalid SQL statement](#mapping-invalid-sql-statement)
   - [Unsupported parameter type](#mapping-unsupported-parameter-type)
   - [Statement could not be type checked](#mapping-statement-could-not-be-type-checked)
+  - [Dependent statement after DDL](#mapping-dependent-statement-after-ddl)
+  - [Unmodelled DDL](#mapping-unmodelled-ddl)
   - [Unmappable encrypted column](#mapping-unmappable-encrypted-column)
   - [Internal Error](#mapping-internal-error)
 
@@ -262,6 +264,36 @@ Check if you are running the latest version of CipherStash Proxy, and update to 
 
 If the error persists, please contact CipherStash [support](https://cipherstash.com/support).
 
+
+
+<!-- ---------------------------------------------------------------------------------------------------- -->
+
+
+## Dependent statement after DDL <a id='mapping-dependent-statement-after-ddl'></a>
+
+A simple-query batch contains a schema-dependent statement after DDL. Proxy cannot observe the
+DDL execution result between statements in one simple-query message, so it refuses the complete
+batch before PostgreSQL executes any part of it.
+
+### How to fix
+
+Send the DDL and the dependent statement as separate queries. Extended-protocol clients may
+pipeline them; Proxy defers dependent mapping until PostgreSQL reports the DDL outcome.
+
+
+<!-- ---------------------------------------------------------------------------------------------------- -->
+
+
+## Unmodelled DDL <a id='mapping-unmodelled-ddl'></a>
+
+PostgreSQL successfully executed a schema change whose connection-local effect Proxy cannot model
+safely, such as conditional or cascading DDL. Schema-dependent statements are refused for the
+rest of that transaction.
+
+### How to fix
+
+Roll back the transaction, or commit it and wait for Proxy to publish an authoritative catalog
+snapshot before issuing schema-dependent statements.
 
 
 <!-- ---------------------------------------------------------------------------------------------------- -->

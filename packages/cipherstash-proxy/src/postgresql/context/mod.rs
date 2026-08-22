@@ -7,13 +7,16 @@ pub use self::{phase_timing::PhaseTiming, portal::Portal, statement::Statement};
 use super::{column_mapper::ColumnMapper, rewrite::Name, Column};
 use crate::{
     config::TandemConfig,
-    error::{EncryptError, Error},
+    error::{ConfigError, EncryptError, Error},
     log::{CONTEXT, SLOW_STATEMENTS},
     prometheus::{
         SLOW_STATEMENTS_TOTAL, STATEMENTS_EXECUTION_DURATION_SECONDS,
         STATEMENTS_SESSION_DURATION_SECONDS,
     },
-    proxy::{EncryptConfig, EncryptionService, ReloadCommand, ReloadSender},
+    proxy::{
+        schema::{CommittedSchemaStore, SchemaMiddleware},
+        EncryptConfig, EncryptionService, ReloadCommand, ReloadSender,
+    },
 };
 use cipherstash_client::IdentifiedBy;
 use eql_mapper::{Schema, TableResolver};
@@ -25,7 +28,7 @@ pub use statement_metadata::StatementMetadata;
 use std::{
     collections::HashMap,
     sync::{
-        atomic::{AtomicBool, AtomicU64, Ordering},
+        atomic::{AtomicU64, Ordering},
         Arc, LazyLock, RwLock,
     },
     time::{Duration, Instant},
@@ -53,17 +56,14 @@ where
 {
     pub client_id: i32,
     config: Arc<TandemConfig>,
-    encrypt_config: Arc<EncryptConfig>,
     encryption: T,
     reload_sender: ReloadSender,
-    column_mapper: ColumnMapper,
+    schema_middleware: SchemaMiddleware,
     statements: Arc<RwLock<HashMap<Name, Arc<Statement>>>>,
     statement_sessions: Arc<RwLock<HashMap<Name, SessionId>>>,
     portals: Arc<RwLock<HashMap<Name, Arc<Portal>>>>,
     operations: Arc<RwLock<HashMap<OperationId, OperationContext>>>,
-    schema_changed: Arc<AtomicBool>,
     session_metrics: Arc<RwLock<HashMap<SessionId, SessionMetricsContext>>>,
-    table_resolver: Arc<TableResolver>,
     upstream_tls_roots: Arc<rustls::RootCertStore>,
     unsafe_disable_mapping: bool,
     keyset_id: Arc<RwLock<Option<KeysetIdentifier>>>,
@@ -153,21 +153,38 @@ where
         encryption: T,
         reload_sender: ReloadSender,
     ) -> Context<T> {
-        let column_mapper = ColumnMapper::new(encrypt_config.clone());
+        let schema_store =
+            CommittedSchemaStore::from_parts((*schema).clone(), (*encrypt_config).clone());
+        Self::new_with_schema_store(
+            client_id,
+            config,
+            schema_store,
+            upstream_tls_roots,
+            encryption,
+            reload_sender,
+        )
+    }
+
+    pub fn new_with_schema_store(
+        client_id: i32,
+        config: Arc<TandemConfig>,
+        schema_store: CommittedSchemaStore,
+        upstream_tls_roots: Arc<rustls::RootCertStore>,
+        encryption: T,
+        reload_sender: ReloadSender,
+    ) -> Context<T> {
+        let schema_middleware = SchemaMiddleware::from_store(schema_store);
 
         Context {
             statements: Arc::new(RwLock::new(HashMap::new())),
             statement_sessions: Arc::new(RwLock::new(HashMap::new())),
             portals: Arc::new(RwLock::new(HashMap::new())),
             operations: Arc::new(RwLock::new(HashMap::new())),
-            schema_changed: Arc::new(AtomicBool::new(false)),
             session_metrics: Arc::new(RwLock::new(HashMap::new())),
-            table_resolver: Arc::new(TableResolver::new_editable(schema)),
             upstream_tls_roots,
             client_id,
             config,
-            encrypt_config,
-            column_mapper,
+            schema_middleware,
             encryption,
             reload_sender,
             unsafe_disable_mapping: false,
@@ -588,20 +605,74 @@ where
         Some(session_context.to_owned())
     }
 
-    pub fn set_schema_changed(&self) {
-        debug!(target: CONTEXT,
-            client_id = self.client_id,
-            msg = "Schema changed"
-        );
-        self.schema_changed.store(true, Ordering::Release);
-    }
-
-    pub fn take_schema_changed(&self) -> bool {
-        self.schema_changed.swap(false, Ordering::AcqRel)
-    }
-
     pub fn get_table_resolver(&self) -> Arc<TableResolver> {
-        self.table_resolver.clone()
+        self.schema_middleware.resolver()
+    }
+
+    pub fn prepare_schema_statement(&self, name: Name, statement: sqltk::parser::ast::Statement) {
+        self.schema_middleware.prepare(name, statement);
+    }
+
+    pub fn bind_schema_statement(&self, portal: Name, prepared_statement: &Name) {
+        self.schema_middleware.bind(portal, prepared_statement);
+    }
+
+    pub fn execute_schema_portal(&self, portal: &Name) {
+        self.schema_middleware.execute(portal);
+    }
+
+    pub fn execute_simple_schema_statements(&self, statements: &[sqltk::parser::ast::Statement]) {
+        self.schema_middleware.simple_query(statements);
+    }
+
+    pub fn mark_schema_protocol_boundary(&self) {
+        self.schema_middleware.protocol_boundary();
+    }
+
+    pub fn schema_execution_succeeded(&self) {
+        self.schema_middleware.execution_succeeded();
+    }
+
+    pub fn schema_execution_failed(&self) {
+        self.schema_middleware.execution_failed();
+    }
+
+    pub async fn wait_for_schema_execution(&self) {
+        self.schema_middleware.wait_for_ddl().await;
+    }
+
+    pub fn ensure_schema_modelled(&self) -> Result<(), Error> {
+        if self.schema_middleware.has_unmodelled_ddl() {
+            return Err(crate::error::MappingError::UnmodelledDdl.into());
+        }
+        Ok(())
+    }
+
+    pub fn adopt_latest_schema(&self) {
+        self.schema_middleware.adopt_latest();
+    }
+
+    pub async fn prepare_schema_for_statement(&self) -> Result<(), Error> {
+        if self
+            .schema_middleware
+            .requires_publication_before_statement()
+        {
+            if !self.reload_schema().await {
+                return Err(ConfigError::SchemaCouldNotBeLoaded.into());
+            }
+            self.schema_middleware.publication_succeeded();
+        }
+        self.schema_middleware.before_statement();
+        Ok(())
+    }
+
+    pub fn schema_ready_for_query(&self, status: TransactionStatus) {
+        let status = match status {
+            TransactionStatus::Idle => b'I',
+            TransactionStatus::InTransaction => b'T',
+            TransactionStatus::FailedTransaction => b'E',
+        };
+        self.schema_middleware.ready_for_query(status);
     }
 
     /// Examines a [`sqltk::parser::ast::Statement`] and if it is precisely equal to `SET UNSAFE_DISABLE_MAPPING = {boolean};`
@@ -833,16 +904,26 @@ where
     }
 
     /// Reload schema if it has changed since last check.
-    pub async fn reload_schema_if_changed(&self) {
-        if self.take_schema_changed() && !self.reload_schema().await {
-            // Preserve the dirty state when the reload task is unavailable so
-            // a later statement can retry instead of silently losing the DDL.
-            self.set_schema_changed();
+    pub async fn publish_schema_if_changed(&self) -> Result<(), Error> {
+        if !self.schema_middleware.needs_publication() {
+            self.adopt_latest_schema();
+            return Ok(());
         }
+
+        if self.schema_middleware.has_local_changes() {
+            self.schema_middleware.mark_publication_pending();
+        }
+
+        if !self.reload_schema().await {
+            return Err(ConfigError::SchemaCouldNotBeLoaded.into());
+        }
+
+        self.schema_middleware.publication_succeeded();
+        Ok(())
     }
 
     pub fn is_passthrough(&self) -> bool {
-        self.encrypt_config.is_empty() || self.config.mapping_disabled()
+        self.schema_middleware.encrypt_config().is_empty() || self.config.mapping_disabled()
     }
 
     // Column processing delegation methods
@@ -850,28 +931,31 @@ where
         &self,
         typed_statement: &eql_mapper::TypeCheckedStatement<'_>,
     ) -> Result<Vec<Option<Column>>, Error> {
-        self.column_mapper.get_projection_columns(typed_statement)
+        ColumnMapper::new(self.schema_middleware.encrypt_config())
+            .get_projection_columns(typed_statement)
     }
 
     pub fn get_param_columns(
         &self,
         typed_statement: &eql_mapper::TypeCheckedStatement<'_>,
     ) -> Result<Vec<Option<Column>>, Error> {
-        self.column_mapper.get_param_columns(typed_statement)
+        ColumnMapper::new(self.schema_middleware.encrypt_config())
+            .get_param_columns(typed_statement)
     }
 
     pub fn get_output_param_columns(
         &self,
         plan: &eql_mapper::ParamPlan,
     ) -> Result<Vec<Option<Column>>, Error> {
-        self.column_mapper.get_output_param_columns(plan)
+        ColumnMapper::new(self.schema_middleware.encrypt_config()).get_output_param_columns(plan)
     }
 
     pub fn get_literal_columns(
         &self,
         typed_statement: &eql_mapper::TypeCheckedStatement<'_>,
     ) -> Result<Vec<Option<Column>>, Error> {
-        self.column_mapper.get_literal_columns(typed_statement)
+        ColumnMapper::new(self.schema_middleware.encrypt_config())
+            .get_literal_columns(typed_statement)
     }
 
     // Direct config access methods
@@ -1019,7 +1103,7 @@ mod tests {
         error::Error,
         log,
         postgresql::{rewrite::Name, Column},
-        proxy::{EncryptConfig, EncryptionService, ReloadCommand},
+        proxy::{EncryptConfig, EncryptionService},
         TandemConfig,
     };
     use cipherstash_client::IdentifiedBy;
@@ -1083,70 +1167,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn successful_schema_reload_consumes_change_flag_once() {
-        let config = Arc::new(TandemConfig::for_testing());
-        let encrypt_config = Arc::new(EncryptConfig::default());
-        let schema = Arc::new(Schema::new("public"));
-        let (reload_sender, mut reload_receiver) = mpsc::unbounded_channel();
-        let context = Context::new(
-            1,
-            config,
-            encrypt_config,
-            schema,
-            Arc::new(rustls::RootCertStore::empty()),
-            TestService {},
-            reload_sender,
-        );
-        let reload_task = tokio::spawn(async move {
-            let Some(ReloadCommand::DatabaseSchema(responder)) = reload_receiver.recv().await
-            else {
-                panic!("expected database schema reload");
-            };
-            responder.send(true).expect("reload receiver is alive");
-            tokio::time::timeout(std::time::Duration::from_millis(20), reload_receiver.recv())
-                .await
-                .is_err()
-        });
-
-        context.set_schema_changed();
-        context.reload_schema_if_changed().await;
-        context.reload_schema_if_changed().await;
-
-        assert!(!context.take_schema_changed());
-        assert!(reload_task.await.expect("reload task did not panic"));
-    }
-
-    #[tokio::test]
-    async fn failed_schema_reload_keeps_change_flag_for_retry() {
-        let config = Arc::new(TandemConfig::for_testing());
-        let encrypt_config = Arc::new(EncryptConfig::default());
-        let schema = Arc::new(Schema::new("public"));
-        let (reload_sender, mut reload_receiver) = mpsc::unbounded_channel();
-        let context = Context::new(
-            1,
-            config,
-            encrypt_config,
-            schema,
-            Arc::new(rustls::RootCertStore::empty()),
-            TestService {},
-            reload_sender,
-        );
-        let reload_task = tokio::spawn(async move {
-            let Some(ReloadCommand::DatabaseSchema(responder)) = reload_receiver.recv().await
-            else {
-                panic!("expected database schema reload");
-            };
-            responder.send(false).expect("reload receiver is alive");
-        });
-
-        context.set_schema_changed();
-        context.reload_schema_if_changed().await;
-
-        reload_task.await.expect("reload task did not panic");
-        assert!(context.take_schema_changed());
-    }
-
-    #[tokio::test]
     async fn empty_plaintext_batch_does_not_call_encryption_service() {
         let context = create_context();
         let output = context
@@ -1157,7 +1177,6 @@ mod tests {
         assert_eq!(output.len(), 2);
         assert!(output.iter().all(Option::is_none));
     }
-
     fn statement() -> Statement {
         Statement {
             param_columns: vec![],

@@ -15,7 +15,7 @@ use tracing::{debug, error, info, warn};
 ///
 type EncryptConfigMap = HashMap<eql::Identifier, ColumnConfig>;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct EncryptConfig {
     config: EncryptConfigMap,
 }
@@ -37,6 +37,44 @@ impl EncryptConfig {
 
     pub fn get_column_config(&self, identifier: &eql::Identifier) -> Option<ColumnConfig> {
         self.config.get(identifier).cloned()
+    }
+
+    pub(crate) fn insert(&mut self, identifier: eql::Identifier, config: ColumnConfig) {
+        self.config.insert(identifier, config);
+    }
+
+    pub(crate) fn remove_column(&mut self, table: &str, column: &str) {
+        self.config
+            .remove(&eql::Identifier::new(table.to_owned(), column.to_owned()));
+    }
+
+    pub(crate) fn remove_table(&mut self, table: &str) {
+        self.config
+            .retain(|identifier, _| identifier.table != table);
+    }
+
+    pub(crate) fn rename_column(&mut self, table: &str, from: &str, to: &str) {
+        let from = eql::Identifier::new(table.to_owned(), from.to_owned());
+        if let Some(config) = self.config.remove(&from) {
+            self.config.insert(
+                eql::Identifier::new(table.to_owned(), to.to_owned()),
+                config,
+            );
+        }
+    }
+
+    pub(crate) fn rename_table(&mut self, from: &str, to: &str) {
+        let renamed = self
+            .config
+            .iter()
+            .filter(|(identifier, _)| identifier.table == from)
+            .map(|(identifier, config)| (identifier.column.clone(), config.clone()))
+            .collect::<Vec<_>>();
+        self.remove_table(from);
+        for (column, config) in renamed {
+            self.config
+                .insert(eql::Identifier::new(to.to_owned(), column), config);
+        }
     }
 }
 

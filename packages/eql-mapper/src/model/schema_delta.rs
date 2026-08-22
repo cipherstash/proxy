@@ -23,7 +23,7 @@ use super::{
 ///
 /// All table and column lookups during EQL mapping will go through via the overlay scheme, falling back to the
 /// loaded schema.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct SchemaWithEdits {
     schema: Arc<Schema>,
     overlays: HashMap<ObjectName, Overlay>,
@@ -114,7 +114,7 @@ impl SchemaWithEdits {
 }
 
 /// Acts like a mask over a table or an existing table that has been dropped in the current transaction.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 enum Overlay {
     /// Hides the existence of table in the main [`Schema`] causing resolution of that table to fail.
     Dropped,
@@ -190,10 +190,24 @@ impl From<&OverlayTable> for Table {
 ///
 /// Returns `true` if `statement` contained relevant DDL (regardless of `TableResolver` variant).
 pub fn collect_ddl(table_resolver: Arc<TableResolver>, statement: &Statement) -> bool {
+    collect_ddl_with_column_kind(table_resolver, statement, &|_| ColumnKind::Native)
+}
+
+/// Applies DDL using the caller's classification for newly declared columns.
+///
+/// The mapper itself defaults columns to native because PostgreSQL domain
+/// identity belongs to Proxy. Proxy supplies the catalog-backed classifier so
+/// a transaction-local EQL domain has the same type as its eventual catalog row.
+pub fn collect_ddl_with_column_kind(
+    table_resolver: Arc<TableResolver>,
+    statement: &Statement,
+    classify: &dyn Fn(&ColumnDef) -> ColumnKind,
+) -> bool {
     if let Some(schema_with_edits) = table_resolver.as_schema_with_edits() {
         let mut visitor = DdlCollector {
             schema: schema_with_edits,
             changed: false,
+            classify,
         };
         let _ = statement.accept(&mut visitor);
         return visitor.changed;
@@ -202,12 +216,13 @@ pub fn collect_ddl(table_resolver: Arc<TableResolver>, statement: &Statement) ->
     table_resolver.has_schema_changed()
 }
 
-struct DdlCollector {
+struct DdlCollector<'a> {
     schema: Arc<RwLock<SchemaWithEdits>>,
     changed: bool,
+    classify: &'a dyn Fn(&ColumnDef) -> ColumnKind,
 }
 
-impl DdlCollector {
+impl DdlCollector<'_> {
     fn capture_create_view(&self, name: &ObjectName, columns: &[ViewColumnDef]) {
         let name = name.clone();
         let mut table = OverlayTable::new(name.clone());
@@ -228,7 +243,7 @@ impl DdlCollector {
         for def in columns {
             table.add_column(Column {
                 name: def.name.clone(),
-                kind: ColumnKind::Native,
+                kind: (self.classify)(def),
             });
         }
 
@@ -244,7 +259,7 @@ impl DdlCollector {
                     if let Overlay::Table(table) = overlay {
                         table.add_column(Column {
                             name: column_def.name.clone(),
-                            kind: ColumnKind::Native,
+                            kind: (self.classify)(column_def),
                         });
                     }
                 }
@@ -317,7 +332,7 @@ impl DdlCollector {
     }
 }
 
-impl<'ast> Visitor<'ast> for DdlCollector {
+impl<'ast> Visitor<'ast> for DdlCollector<'_> {
     type Error = Infallible;
 
     fn enter<N: Visitable>(&mut self, node: &'ast N) -> ControlFlow<Break<Self::Error>> {

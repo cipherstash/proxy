@@ -1,4 +1,4 @@
-mod from_domain;
+pub(crate) mod from_domain;
 mod manager;
 
-pub use manager::{EncryptConfig, EncryptConfigManager};
+pub use manager::EncryptConfig;

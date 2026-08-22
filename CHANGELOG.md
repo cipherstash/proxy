@@ -22,6 +22,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - **PostgreSQL protocol error handling after the pg-proto migration**: Proxy now rejects `require_tls` configurations that omit a certificate, preserves PostgreSQL transaction state when statement mapping fails, returns decryption failures as PostgreSQL errors without dropping the connection, and reloads changed schemas only after PostgreSQL confirms the transaction boundary. Prepared-statement replacement also preserves existing portals and overlapping statement metrics.
 
+### Security
+
+- **DDL now updates encryption metadata transactionally**: Proxy applies schema changes only after PostgreSQL confirms execution, keeps successful changes connection-local until commit, and atomically publishes schema and EQL domain metadata before reporting idle readiness. Extended-protocol DDL, explicit transactions, savepoints, rollbacks, pipelining, and already-open connections now observe the correct schema generation. Unmodelled DDL, dependent simple-query batches, and failed catalog publication fail closed instead of risking plaintext writes through stale metadata.
+
 ## [3.0.1] - 2026-08-05
 
 ### Added
