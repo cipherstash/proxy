@@ -103,8 +103,39 @@ Proxy's in-band control API, intercepted rather than forwarded — `KEYSET_ID`,
 that print `CIPHERSTASH.DISABLE_MAPPING` are wrong.
 
 **Reload**:
-Re-reading state from the database after observed DDL. Two independent things reload: the
-database schema, and the column encrypt config.
+Re-reading authoritative schema state from PostgreSQL after observed DDL. A reload produces
+one **committed schema snapshot**; it does not merge Proxy's inferred DDL effects into shared
+state.
+
+**Committed schema snapshot**:
+An immutable, monotonically versioned pair of database structure and column encryption
+metadata loaded from PostgreSQL. The pair is published atomically because a table without its
+encryption policy (or an encryption policy without its table) is not a valid observable state.
+
+**Transaction schema overlay**:
+The confirmed effects of successful DDL executions in one connection's current transaction.
+It is checkpointed by savepoints, restored by `ROLLBACK TO SAVEPOINT`, and discarded by a full
+rollback. Parsed or prepared DDL is only intent; it enters the overlay after PostgreSQL reports
+successful execution.
+
+**Effective schema**:
+The committed schema snapshot pinned when a transaction starts, with that transaction's schema
+overlay applied. EQL Mapper type-checks and transforms against this view. An idle connection
+adopts the latest committed snapshot before its next transaction.
+
+**Schema publication**:
+Atomically replacing the shared committed schema snapshot after the outermost transaction
+containing DDL commits and an authoritative catalog reload succeeds. Proxy completes publication
+before forwarding `ReadyForQuery(I)`, so a connection opened after readiness observes the new
+schema and encryption metadata. Failed publication is fail-closed: the affected connection is
+closed without forwarding readiness, and the dirty publication remains eligible for retry.
+
+**Schema middleware**:
+The owner of transactional schema state. Frontend and Backend report protocol lifecycle events;
+they do not directly change overlays, dirty flags, or reload managers. The middleware owns DDL
+detection, prepared DDL effects, successful-execution activation, savepoint and transaction
+transitions, effective-schema resolution, reload coordination, and schema publication. See
+`docs/adr/0001-transaction-aware-schema-middleware.md`.
 
 ## Note on `session`
 
