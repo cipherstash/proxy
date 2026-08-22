@@ -39,12 +39,18 @@ mod tests {
 
         let args = Args {
             config_file_path: "".to_string(),
-            log_level: LogLevel::Debug,
+            log_level: Some(LogLevel::Debug),
             log_format: LogFormat::Pretty,
             command: None,
+            database_url: None,
             db_host: None,
+            db_port: None,
             db_name: None,
             db_user: None,
+            db_password: None,
+            no_tls: false,
+            tls: false,
+            debug: false,
         };
 
         let config = match TandemConfig::load(&args) {
