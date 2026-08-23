@@ -46,9 +46,9 @@ enum V3Record {
     /// A scalar payload's `c` — self-describing, nonce derived from the data
     /// key's IV, nothing bound into the AAD.
     Scalar(EncryptedRecord),
-    /// A SteVec document's root entry, reassembled from the document's `h`
-    /// header. Nonce and AAD both derive from the entry's selector.
-    SteVecRoot(RecordWithNonce),
+    /// A SteVec entry, reassembled from the document's `h` header. Nonce and
+    /// AAD both derive from the entry's selector.
+    SteVecEntry(RecordWithNonce),
 }
 
 impl Decryptable for V3Record {
@@ -57,35 +57,35 @@ impl Decryptable for V3Record {
     fn keyset_id(&self) -> Option<Uuid> {
         match self {
             V3Record::Scalar(record) => record.keyset_id(),
-            V3Record::SteVecRoot(record) => record.keyset_id(),
+            V3Record::SteVecEntry(record) => record.keyset_id(),
         }
     }
 
     fn retrieve_key_payload(&self) -> Result<RetrieveKeyPayload<'_>, Self::Error> {
         match self {
             V3Record::Scalar(record) => record.retrieve_key_payload(),
-            V3Record::SteVecRoot(record) => record.retrieve_key_payload(),
+            V3Record::SteVecEntry(record) => record.retrieve_key_payload(),
         }
     }
 
     fn into_encrypted_record(self) -> Result<EncryptedRecord, Self::Error> {
         match self {
             V3Record::Scalar(record) => record.into_encrypted_record(),
-            V3Record::SteVecRoot(record) => record.into_encrypted_record(),
+            V3Record::SteVecEntry(record) => record.into_encrypted_record(),
         }
     }
 
     fn nonce_override(&self) -> Option<[u8; 12]> {
         match self {
             V3Record::Scalar(_) => None,
-            V3Record::SteVecRoot(record) => record.nonce_override(),
+            V3Record::SteVecEntry(record) => record.nonce_override(),
         }
     }
 
     fn aad_selector(&self) -> Option<[u8; 16]> {
         match self {
             V3Record::Scalar(_) => None,
-            V3Record::SteVecRoot(record) => record.aad_selector(),
+            V3Record::SteVecEntry(record) => record.aad_selector(),
         }
     }
 }
@@ -379,7 +379,8 @@ impl EncryptionService for ZeroKms {
 
         let cipher = self.init_cipher(keyset_id.clone()).await?;
 
-        // Collect indices and the root records for non-None values.
+        // Collect decryptable records and identify which decrypted records
+        // contain the plaintext returned to the caller.
         //
         // cipherstash-client has no `decrypt_eql_v3` counterpart to
         // `encrypt_eql_v3` — the v2 `decrypt_eql` only accepts `EqlCiphertext`.
@@ -390,36 +391,39 @@ impl EncryptionService for ZeroKms {
         // unwrapped, and `EncryptedRecord` is `Decryptable`.
         //
         // SteVec: the document holds the key material once in the `h` header
-        // and each entry carries only raw AEAD bytes, so the record has to be
-        // reassembled from the header plus the ROOT entry (`sv[0]`, the same
-        // decryption-root invariant v2 had). The selector is the AEAD binding —
-        // its first 12 bytes are the nonce and all 16 go into the AAD — which is
-        // why the reassembled record is a `RecordWithNonce`.
-        let mut indices: Vec<usize> = Vec::new();
+        // and each entry carries only raw AEAD bytes, so every record has to be
+        // reassembled from the header plus that entry. The selector is the AEAD
+        // binding — its first 12 bytes are the nonce and all 16 go into the AAD
+        // — which is why the records are `RecordWithNonce`. All entries are
+        // decrypted to authenticate them, but only the root entry (`sv[0]`)
+        // contains the complete plaintext returned to the caller. Value entries
+        // intentionally decrypt to a sentinel that is not a legal `Plaintext`.
+        let mut result_positions: Vec<Option<usize>> = Vec::new();
         let mut records_to_decrypt: Vec<V3Record> = Vec::new();
 
         for (idx, ct_opt) in ciphertexts.iter().enumerate() {
             if let Some(ct) = ct_opt {
-                let record = match ct {
+                match ct {
                     EqlCiphertextV3::Encrypted(payload) => {
-                        V3Record::Scalar(payload.ciphertext.clone())
+                        records_to_decrypt.push(V3Record::Scalar(payload.ciphertext.clone()));
+                        result_positions.push(Some(idx));
                     }
                     EqlCiphertextV3::SteVec(document) => {
-                        let root = document
-                            .ste_vec
-                            .first()
-                            .ok_or(EncryptError::SteVecMissingRootEntry)?;
+                        if document.ste_vec.is_empty() {
+                            return Err(EncryptError::SteVecMissingRootEntry.into());
+                        }
 
-                        let selector = decode_ste_vec_selector(&root.selector)?;
-                        V3Record::SteVecRoot(
-                            document
-                                .key_header
-                                .record_with_selector(root.ciphertext.clone(), selector),
-                        )
+                        for (entry_index, entry) in document.ste_vec.iter().enumerate() {
+                            let selector = decode_ste_vec_selector(&entry.selector)?;
+                            records_to_decrypt.push(V3Record::SteVecEntry(
+                                document
+                                    .key_header
+                                    .record_with_selector(entry.ciphertext.clone(), selector),
+                            ));
+                            result_positions.push((entry_index == 0).then_some(idx));
+                        }
                     }
-                };
-                indices.push(idx);
-                records_to_decrypt.push(record);
+                }
             }
         }
 
@@ -437,18 +441,17 @@ impl EncryptionService for ZeroKms {
         let decrypted = cipher
             .decrypt(records_to_decrypt, &opts)
             .await
-            .map_err(ZeroKMSError::from)?
-            .into_iter()
-            .map(|bytes| Plaintext::from_slice(&bytes))
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(EncryptError::from)?;
+            .map_err(ZeroKMSError::from)?;
         let decrypt_duration = decrypt_start.elapsed();
         debug!(target: ENCRYPT, msg="Decrypt completed", count = decrypted.len(), duration_ms = decrypt_duration.as_millis());
 
-        // Reconstruct the result vector with None values in the right places
+        // Reconstruct the result vector from scalar and SteVec-root plaintexts.
+        // Non-root SteVec bytes were decrypted only to authenticate them.
         let mut result: Vec<Option<Plaintext>> = vec![None; ciphertexts.len()];
-        for (idx, plaintext) in indices.into_iter().zip(decrypted.into_iter()) {
-            result[idx] = Some(plaintext);
+        for (result_position, bytes) in result_positions.into_iter().zip(decrypted) {
+            if let Some(idx) = result_position {
+                result[idx] = Some(Plaintext::from_slice(&bytes).map_err(EncryptError::from)?);
+            }
         }
 
         Ok(result)

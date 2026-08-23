@@ -24,7 +24,7 @@ use crate::prometheus::{
     STATEMENTS_UNMAPPABLE_TOTAL,
 };
 use crate::proxy::EncryptionService;
-use crate::{EqlCiphertext, EqlOutput, EqlQueryPayload};
+use crate::{EqlOutput, EqlQueryPayload};
 use cipherstash_client::encryption::Plaintext;
 use eql_mapper::{self, EqlMapperError, EqlTermVariant, JsonSelectorSegment, TypeCheckedStatement};
 use metrics::{counter, histogram};
@@ -1189,42 +1189,6 @@ impl<S: EncryptionService> Frontend<S> {
             );
             EncryptError::InvalidInboundCiphertext
         })?;
-
-        // A SteVec document's root entry decrypts to the complete plaintext,
-        // but every other entry carries independent AEAD ciphertext. Verify
-        // those entries too before accepting the document for storage. Making
-        // each entry the sole member of a cloned envelope reuses the ordinary
-        // SteVec decrypt path, which binds its selector as nonce and AAD.
-        let non_root_entries = positions
-            .iter()
-            .flat_map(|(_, ciphertext, _)| match ciphertext {
-                EqlCiphertext::SteVec(document) => document
-                    .ste_vec
-                    .iter()
-                    .skip(1)
-                    .map(|entry| {
-                        let mut document = document.clone();
-                        document.ste_vec = vec![entry.clone()];
-                        Some(EqlCiphertext::SteVec(document))
-                    })
-                    .collect::<Vec<_>>(),
-                EqlCiphertext::Encrypted(_) => Vec::new(),
-            })
-            .collect::<Vec<_>>();
-        if !non_root_entries.is_empty() {
-            self.context
-                .decrypt(non_root_entries)
-                .await
-                .map_err(|err| {
-                    warn!(
-                        target: ENCRYPT,
-                        client_id = self.context.client_id,
-                        msg = "Inbound EQL SteVec entry authentication failed",
-                        error = ?err,
-                    );
-                    EncryptError::InvalidInboundCiphertext
-                })?;
-        }
 
         // Re-encrypt the authenticated plaintext for the inferred destination
         // and compare every derived SEM term. This detects term splicing: the
