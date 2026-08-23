@@ -259,7 +259,10 @@ pub enum EncryptError {
     /// Deliberately contains no payload or validation detail: inbound
     /// ciphertext failures are attacker-controlled and detailed responses can
     /// become an oracle.
-    #[error("Invalid encrypted value")]
+    #[error(
+        "Invalid encrypted value. For help visit {}#encrypt-invalid-inbound-ciphertext",
+        ERROR_DOC_BASE_URL
+    )]
     InvalidInboundCiphertext,
 
     #[error(transparent)]

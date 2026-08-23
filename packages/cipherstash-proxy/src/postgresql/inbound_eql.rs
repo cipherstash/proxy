@@ -116,12 +116,7 @@ fn validate_storage_metadata(
     match ciphertext {
         EqlCiphertext::Encrypted(payload) => validate_scalar_terms(payload, column),
         EqlCiphertext::SteVec(payload) => {
-            let configured = column
-                .config
-                .indexes
-                .iter()
-                .any(|index| matches!(index.index_type, IndexType::SteVec { .. }));
-            if !configured || payload.ste_vec.is_empty() {
+            if !has_ste_vec_terms(column) || payload.ste_vec.is_empty() {
                 return Err(EncryptError::InvalidInboundCiphertext);
             }
             Ok(())
@@ -147,12 +142,7 @@ fn validate_query_metadata(query: &EqlQueryPayload, column: &Column) -> Result<(
                     )
                 }
                 EqlTermVariant::JsonOrd => {
-                    let ste_vec_configured = column
-                        .config
-                        .indexes
-                        .iter()
-                        .any(|index| matches!(index.index_type, IndexType::SteVec { .. }));
-                    if !ste_vec_configured
+                    if !has_ste_vec_terms(column)
                         || payload.hmac_256.is_some()
                         || payload.bloom_filter.is_some()
                         || payload.ore_block_u64_8_256.is_some()
@@ -166,36 +156,35 @@ fn validate_query_metadata(query: &EqlQueryPayload, column: &Column) -> Result<(
             }
         }
         EqlQueryPayload::SteVec(payload) => {
-            let configured = column
-                .config
-                .indexes
-                .iter()
-                .any(|index| matches!(index.index_type, IndexType::SteVec { .. }));
             let query_shape = matches!(
                 column.eql_term,
                 EqlTermVariant::Full | EqlTermVariant::Partial | EqlTermVariant::JsonValueSelector
             );
-            if !configured || !query_shape || payload.ste_vec.is_empty() {
+            if !has_ste_vec_terms(column) || !query_shape || payload.ste_vec.is_empty() {
                 return Err(EncryptError::InvalidInboundCiphertext);
             }
             Ok(())
         }
         EqlQueryPayload::Selector(selector) => {
-            let configured = column
-                .config
-                .indexes
-                .iter()
-                .any(|index| matches!(index.index_type, IndexType::SteVec { .. }));
             let query_shape = matches!(
                 column.eql_term,
                 EqlTermVariant::JsonAccessor | EqlTermVariant::JsonPath
             );
-            if !configured || !query_shape || !is_selector_hash(selector.as_bytes()) {
+            if !has_ste_vec_terms(column) || !query_shape || !is_selector_hash(selector.as_bytes())
+            {
                 return Err(EncryptError::InvalidInboundCiphertext);
             }
             Ok(())
         }
     }
+}
+
+fn has_ste_vec_terms(column: &Column) -> bool {
+    column
+        .config
+        .indexes
+        .iter()
+        .any(|index| matches!(index.index_type, IndexType::SteVec { .. }))
 }
 
 /// Compare all searchable metadata after the plaintext has been authenticated

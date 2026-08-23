@@ -15,7 +15,11 @@ mod tests {
     };
     use cipherstash_config::column::{ArrayIndexMode, IndexType, SteVecMode};
     use std::{borrow::Cow, sync::Arc};
+    use tokio_postgres::error::SqlState;
     use uuid::Uuid;
+
+    const INVALID_INBOUND_PAYLOAD: &str = "Invalid encrypted value. For help visit \
+        https://github.com/cipherstash/proxy/blob/main/docs/errors.md#encrypt-invalid-inbound-ciphertext";
 
     async fn cipher() -> Arc<ScopedCipher<AutoStrategy>> {
         let client_id = env("CS_CLIENT_ID", "CS_ENCRYPT__CLIENT_ID")
@@ -79,6 +83,27 @@ mod tests {
             panic!("store encryption must return a stored payload");
         };
         serde_json::to_string(&ciphertext).unwrap()
+    }
+
+    async fn encrypt_json(
+        table: &str,
+        column: &str,
+        plaintext: serde_json::Value,
+    ) -> serde_json::Value {
+        let prepared = PreparedPlaintext::new(
+            Cow::Owned(json_search_config(table, column)),
+            Identifier::new(table, column),
+            Plaintext::Json(Some(plaintext)),
+            EqlOperation::Store,
+        );
+        let mut outputs =
+            encrypt_eql_v3(cipher().await, vec![prepared], &EqlEncryptOpts::default())
+                .await
+                .expect("application-side JSON encryption must succeed");
+        let EqlOutputV3::Store(ciphertext) = outputs.remove(0) else {
+            panic!("JSON encryption must return a stored payload");
+        };
+        serde_json::to_value(ciphertext).unwrap()
     }
 
     async fn query_text(table: &str, column: &str, plaintext: &str) -> String {
@@ -257,7 +282,7 @@ mod tests {
             .expect_err("query-only payloads must not be accepted for storage");
         assert_eq!(
             error.as_db_error().unwrap().message(),
-            "Invalid encrypted value"
+            INVALID_INBOUND_PAYLOAD
         );
     }
 
@@ -337,6 +362,83 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn rejects_a_ste_vec_payload_with_tampered_non_root_ciphertext() {
+        let client = connect_with_tls(*PROXY).await;
+        clear_with_client(&client).await;
+        let id = random_id();
+        let mut payload = encrypt_json(
+            "encrypted",
+            "encrypted_jsonb",
+            serde_json::json!({
+                "patient": { "name": "Ada Lovelace", "active": true }
+            }),
+        )
+        .await;
+
+        let entries = payload["sv"].as_array_mut().unwrap();
+        assert!(entries.len() > 1);
+        let mut ciphertext = entries[1]["c"]
+            .as_str()
+            .unwrap()
+            .chars()
+            .collect::<Vec<_>>();
+        let different = ciphertext
+            .iter()
+            .position(|candidate| *candidate != ciphertext[0])
+            .unwrap();
+        ciphertext.swap(0, different);
+        entries[1]["c"] = ciphertext.into_iter().collect::<String>().into();
+
+        let error = client
+            .execute(
+                "INSERT INTO encrypted (id, encrypted_jsonb) VALUES ($1, $2)",
+                &[&id, &payload],
+            )
+            .await
+            .expect_err("tampered non-root ciphertext must be rejected");
+        assert_eq!(
+            error.as_db_error().unwrap().message(),
+            INVALID_INBOUND_PAYLOAD
+        );
+    }
+
+    #[tokio::test]
+    async fn invalid_payload_aborts_only_the_current_transaction() {
+        let mut client = connect_with_tls(*PROXY).await;
+        clear_with_client(&client).await;
+        let id = random_id();
+        let malformed = serde_json::json!({
+            "v": 3,
+            "i": { "t": "encrypted", "c": "encrypted_jsonb" },
+            "c": "not a ciphertext"
+        });
+        let transaction = client.transaction().await.unwrap();
+
+        let error = transaction
+            .execute(
+                "INSERT INTO encrypted (id, encrypted_jsonb) VALUES ($1, $2)",
+                &[&id, &malformed],
+            )
+            .await
+            .expect_err("invalid payload must abort the statement");
+        assert_eq!(error.code(), Some(&SqlState::INVALID_TEXT_REPRESENTATION));
+        assert_eq!(
+            error.as_db_error().unwrap().message(),
+            INVALID_INBOUND_PAYLOAD
+        );
+
+        let aborted = transaction
+            .query_one("SELECT 1", &[])
+            .await
+            .expect_err("transaction must remain aborted until rollback");
+        assert_eq!(aborted.code(), Some(&SqlState::IN_FAILED_SQL_TRANSACTION));
+        transaction.rollback().await.unwrap();
+
+        let row = client.query_one("SELECT 1", &[]).await.unwrap();
+        assert_eq!(row.get::<_, i32>(0), 1);
+    }
+
+    #[tokio::test]
     async fn rejects_payload_for_a_different_destination_with_generic_error() {
         let client = connect_with_tls(*PROXY).await;
         clear_with_client(&client).await;
@@ -355,7 +457,7 @@ mod tests {
             .expect_err("destination mismatch must fail closed");
         assert_eq!(
             error.as_db_error().unwrap().message(),
-            "Invalid encrypted value"
+            INVALID_INBOUND_PAYLOAD
         );
     }
 
@@ -388,7 +490,7 @@ mod tests {
             .expect_err("spliced SEM terms must fail closed");
         assert_eq!(
             error.as_db_error().unwrap().message(),
-            "Invalid encrypted value"
+            INVALID_INBOUND_PAYLOAD
         );
     }
 }

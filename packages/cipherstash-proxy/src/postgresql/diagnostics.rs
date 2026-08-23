@@ -70,6 +70,15 @@ pub fn invalid_parameter(message: String, table: &str, column: &str) -> Diagnost
     ])
 }
 
+/// Invalid application-generated EQL payload.
+///
+/// This is a statement error rather than a connection failure: PostgreSQL
+/// aborts the current transaction, while the connection remains usable after
+/// the client rolls it back.
+pub fn invalid_encrypted_value(message: String) -> DiagnosticResponse {
+    standard("ERROR", CODE_INVALID_TEXT_REPRESENTATION, message)
+}
+
 pub fn unknown_column(message: String, table: &str, column: &str) -> DiagnosticResponse {
     response([
         (b'S', "ERROR".to_owned()),

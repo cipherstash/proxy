@@ -16,6 +16,7 @@
   - [Internal Error](#mapping-internal-error)
 
 - Encrypt errors:
+  - [Invalid encrypted value](#encrypt-invalid-inbound-ciphertext)
   - [Column could not be encrypted](#encrypt-column-could-not-be-encrypted)
   - [Could not decrypt data for keyset](#encrypt-could-not-decrypt-data-for-keyset)
   - [KeysetId could not be parsed](#encrypt-keyset-id-could-not-be-parsed)
@@ -343,6 +344,53 @@ If the error persists, please contact CipherStash [support](https://cipherstash.
 
 
 # Encrypt errors
+
+
+## Invalid encrypted value <a id='encrypt-invalid-inbound-ciphertext'></a>
+
+CipherStash Proxy rejected an application-generated EQL storage payload or
+query operand because it was malformed, unauthentic, intended for another
+column, carried unexpected searchable encrypted metadata (SEM), or appeared in
+an invalid statement position. The response deliberately does not identify
+which validation failed.
+
+### Error message
+
+```
+Invalid encrypted value. For help visit https://github.com/cipherstash/proxy/blob/main/docs/errors.md#encrypt-invalid-inbound-ciphertext
+```
+
+### How to fix
+
+Regenerate the payload using the same column configuration, keyset, and
+credentials as Proxy. Storage payloads must target the inferred destination
+column and carry ciphertext plus exactly its configured SEM terms. Query-only
+payloads must be used only in query positions.
+
+### Plaintext compatibility
+
+On an encrypted column, Proxy treats a JSON object as an advertised EQL storage
+payload when it has top-level `v` and `i` keys together with at least one of
+`c`, `h`, or `sv`. An object matching that key pattern which is not a valid EQL
+payload is rejected rather than encrypted as plaintext. There is no opt-out for
+this fail-closed check.
+
+Before upgrading, audit JSON values supplied as plaintext to encrypted columns.
+For a `jsonb` source column named `value`, this predicate identifies the
+ambiguous shape:
+
+```sql
+WHERE value ? 'v'
+  AND value ? 'i'
+  AND value ?| ARRAY['c', 'h', 'sv']
+```
+
+For text sources, first restrict the scan to values that your application knows
+are valid JSON, then apply the same predicate after casting them to `jsonb`.
+Rename one of these top-level keys or generate the value as an EQL payload
+before sending it through Proxy.
+
+<!-- ---------------------------------------------------------------------------------------------------- -->
 
 
 ## Column could not be encrypted <a id='encrypt-column-could-not-be-encrypted'></a>
