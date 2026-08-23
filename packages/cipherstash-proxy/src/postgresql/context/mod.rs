@@ -165,6 +165,7 @@ where
         )
     }
 
+    /// Constructs a connection context over the shared committed schema store.
     pub fn new_with_schema_store(
         client_id: i32,
         config: Arc<TandemConfig>,
@@ -605,42 +606,61 @@ where
         Some(session_context.to_owned())
     }
 
+    /// Returns the resolver for this connection's effective schema snapshot.
     pub fn get_table_resolver(&self) -> Arc<TableResolver> {
         self.schema_middleware.resolver()
     }
 
+    /// Records schema intent for a parsed prepared statement.
     pub fn prepare_schema_statement(&self, name: Name, statement: sqltk::parser::ast::Statement) {
         self.schema_middleware.prepare(name, statement);
     }
 
+    /// Associates a bound portal with its prepared statement's schema intent.
     pub fn bind_schema_statement(&self, portal: Name, prepared_statement: &Name) {
         self.schema_middleware.bind(portal, prepared_statement);
     }
 
+    /// Records a portal execution awaiting its backend result.
     pub fn execute_schema_portal(&self, portal: &Name) {
         self.schema_middleware.execute(portal);
     }
 
+    /// Records statements in one simple-query protocol message.
     pub fn execute_simple_schema_statements(&self, statements: &[sqltk::parser::ast::Statement]) {
         self.schema_middleware.simple_query(statements);
     }
 
+    /// Returns whether a simple-query batch must be rejected to protect encryption.
+    pub fn simple_query_requires_fail_closed(
+        &self,
+        statements: &[sqltk::parser::ast::Statement],
+    ) -> bool {
+        self.schema_middleware
+            .simple_query_requires_fail_closed(statements)
+    }
+
+    /// Records an extended-protocol synchronization boundary.
     pub fn mark_schema_protocol_boundary(&self) {
         self.schema_middleware.protocol_boundary();
     }
 
+    /// Reports successful execution of the next queued statement.
     pub fn schema_execution_succeeded(&self) {
         self.schema_middleware.execution_succeeded();
     }
 
+    /// Reports failed execution of the next queued statement.
     pub fn schema_execution_failed(&self) {
         self.schema_middleware.execution_failed();
     }
 
+    /// Waits for preceding schema-changing executions to resolve.
     pub async fn wait_for_schema_execution(&self) {
         self.schema_middleware.wait_for_ddl().await;
     }
 
+    /// Refuses schema-dependent work after confirmed unmodelled DDL.
     pub fn ensure_schema_modelled(&self) -> Result<(), Error> {
         if self.schema_middleware.has_unmodelled_ddl() {
             return Err(crate::error::MappingError::UnmodelledDdl.into());
@@ -648,10 +668,12 @@ where
         Ok(())
     }
 
+    /// Replaces idle connection-local state with the latest committed snapshot.
     pub fn adopt_latest_schema(&self) {
         self.schema_middleware.adopt_latest();
     }
 
+    /// Publishes pending shared state, then prepares the effective schema for mapping.
     pub async fn prepare_schema_for_statement(&self) -> Result<(), Error> {
         if self
             .schema_middleware
@@ -666,6 +688,7 @@ where
         Ok(())
     }
 
+    /// Reports a readiness boundary and PostgreSQL transaction status.
     pub fn schema_ready_for_query(&self, status: TransactionStatus) {
         let status = match status {
             TransactionStatus::Idle => b'I',

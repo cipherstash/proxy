@@ -39,19 +39,6 @@ use std::sync::Arc;
 use std::time::Instant;
 use tracing::{debug, info, warn};
 
-fn is_schema_ddl(statement: &ast::Statement) -> bool {
-    matches!(
-        statement,
-        ast::Statement::CreateTable(_)
-            | ast::Statement::CreateView { .. }
-            | ast::Statement::AlterTable { .. }
-            | ast::Statement::Drop {
-                object_type: ast::ObjectType::Table | ast::ObjectType::View,
-                ..
-            }
-    )
-}
-
 /// The PostgreSQL proxy frontend that handles client-to-server message processing.
 ///
 /// The Frontend intercepts messages from PostgreSQL clients, analyzes SQL statements for
@@ -356,14 +343,11 @@ impl<S: EncryptionService> Frontend<S> {
         let query_text = String::from_utf8_lossy(&query).into_owned();
         let parsed_statements = SqlParser::parse_statements(&query_text)?;
         self.context.prepare_schema_for_statement().await?;
-        if let Some(ddl_index) = parsed_statements.iter().position(is_schema_ddl) {
-            if parsed_statements
-                .iter()
-                .skip(ddl_index + 1)
-                .any(eql_mapper::requires_type_check)
-            {
-                return Err(MappingError::DependentStatementAfterDdl.into());
-            }
+        if self
+            .context
+            .simple_query_requires_fail_closed(&parsed_statements)
+        {
+            return Err(MappingError::DependentStatementAfterDdl.into());
         }
         if parsed_statements
             .iter()

@@ -19,6 +19,7 @@ use tokio::{sync::Mutex, task::JoinHandle, time};
 use tracing::{debug, info, warn};
 
 #[derive(Clone, Debug)]
+/// An immutable, atomically published schema and encryption-metadata generation.
 pub struct CommittedSchemaSnapshot {
     version: u64,
     schema: Arc<Schema>,
@@ -26,6 +27,7 @@ pub struct CommittedSchemaSnapshot {
 }
 
 #[derive(Clone, Debug)]
+/// Shared access to committed snapshots and their publication generations.
 pub struct CommittedSchemaStore {
     snapshot: Arc<ArcSwap<CommittedSchemaSnapshot>>,
     requested_publication: Arc<AtomicU64>,
@@ -33,6 +35,7 @@ pub struct CommittedSchemaStore {
 }
 
 impl CommittedSchemaStore {
+    /// Creates the initial committed generation from aligned schema metadata.
     pub(crate) fn from_parts(schema: Schema, encrypt_config: EncryptConfig) -> Self {
         Self {
             snapshot: Arc::new(ArcSwap::new(Arc::new(CommittedSchemaSnapshot::new(
@@ -45,19 +48,23 @@ impl CommittedSchemaStore {
         }
     }
 
+    /// Loads one internally consistent committed snapshot.
     pub fn load(&self) -> Arc<CommittedSchemaSnapshot> {
         self.snapshot.load().clone()
     }
 
+    /// Returns whether a requested publication has not yet completed.
     pub fn publication_pending(&self) -> bool {
         self.requested_publication.load(Ordering::Acquire)
             > self.published_publication.load(Ordering::Acquire)
     }
 
+    /// Advances the requested publication generation.
     pub fn mark_publication_pending(&self) {
         self.requested_publication.fetch_add(1, Ordering::AcqRel);
     }
 
+    /// Marks all currently requested publication generations as satisfied.
     pub(crate) fn publication_succeeded(&self) {
         self.published_publication.store(
             self.requested_publication.load(Ordering::Acquire),
@@ -66,11 +73,13 @@ impl CommittedSchemaStore {
     }
 
     #[cfg(test)]
+    /// Creates a committed store without connecting to PostgreSQL.
     pub fn for_testing(schema: Schema, encrypt_config: EncryptConfig) -> Self {
         Self::from_parts(schema, encrypt_config)
     }
 
     #[cfg(test)]
+    /// Publishes an aligned test snapshot as the next version.
     pub fn publish_for_testing(&self, schema: Schema, encrypt_config: EncryptConfig) {
         let version = self.load().version() + 1;
         self.snapshot.store(Arc::new(CommittedSchemaSnapshot::new(
@@ -83,6 +92,7 @@ impl CommittedSchemaStore {
 }
 
 impl CommittedSchemaSnapshot {
+    /// Creates an immutable snapshot at an explicit monotonic version.
     fn new(version: u64, schema: Schema, encrypt_config: EncryptConfig) -> Self {
         Self {
             version,
@@ -91,14 +101,17 @@ impl CommittedSchemaSnapshot {
         }
     }
 
+    /// Returns the monotonic snapshot version.
     pub fn version(&self) -> u64 {
         self.version
     }
 
+    /// Returns the structural schema from this generation.
     pub fn schema(&self) -> Arc<Schema> {
         self.schema.clone()
     }
 
+    /// Returns encryption metadata from the same generation as the schema.
     pub fn encrypt_config(&self) -> Arc<EncryptConfig> {
         self.encrypt_config.clone()
     }
@@ -121,10 +134,12 @@ impl SchemaManager {
         init_reloader(config).await
     }
 
+    /// Loads the current atomic committed snapshot.
     pub fn load(&self) -> Arc<CommittedSchemaSnapshot> {
         self.snapshot.load().clone()
     }
 
+    /// Returns a cloneable store for per-connection schema middleware.
     pub fn store(&self) -> CommittedSchemaStore {
         CommittedSchemaStore {
             snapshot: self.snapshot.clone(),
@@ -146,6 +161,7 @@ impl SchemaManager {
     }
 }
 
+/// Coalesces concurrent reload requests while preserving generation ordering.
 async fn coalesced_reload<F, Fut>(
     snapshot: Arc<ArcSwap<CommittedSchemaSnapshot>>,
     requested_generation: Arc<AtomicU64>,
@@ -193,6 +209,7 @@ where
     }
 }
 
+/// Publishes a candidate only when it advances the committed version.
 fn publish_if_newer(
     store: &ArcSwap<CommittedSchemaSnapshot>,
     candidate: CommittedSchemaSnapshot,
@@ -204,6 +221,7 @@ fn publish_if_newer(
     true
 }
 
+/// Loads the initial snapshot and starts periodic authoritative refreshes.
 async fn init_reloader(config: DatabaseConfig) -> Result<SchemaManager, Error> {
     // Skip retries on startup as the likely failure mode is configuration
     let (schema, encrypt_config) = load_snapshot(&config).await?;
@@ -260,7 +278,7 @@ async fn init_reloader(config: DatabaseConfig) -> Result<SchemaManager, Error> {
     })
 }
 
-/// Fetch the dataset and retry on any error
+/// Fetches an atomic snapshot and retries transient catalog-read failures.
 ///
 /// When databases and the proxy start up at the same time they might not be ready to accept connections before the
 /// proxy tries to query the schema. To give the proxy the best chance of initialising correctly this method will
@@ -355,6 +373,7 @@ pub async fn load_schema(config: &DatabaseConfig) -> Result<Schema, Error> {
     load_snapshot(config).await.map(|(schema, _)| schema)
 }
 
+/// Reads schema and encryption metadata in one repeatable-read transaction.
 async fn load_snapshot(config: &DatabaseConfig) -> Result<(Schema, EncryptConfig), Error> {
     let client = connect::database(config).await?;
     client

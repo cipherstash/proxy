@@ -1,3 +1,60 @@
+//! Transaction-aware coordination between PostgreSQL protocol events and schema mapping.
+//!
+//! # Principles of operation
+//!
+//! PostgreSQL is the authority. Proxy never publishes a schema inferred from client SQL to
+//! other connections. Instead, [`CommittedSchemaStore`] exposes immutable, monotonically
+//! versioned snapshots loaded from PostgreSQL. Each snapshot contains both structural schema
+//! and encryption metadata, so a mapper can never observe a table definition from one catalog
+//! generation and encryption rules from another.
+//!
+//! A connection adopts a committed snapshot while idle and pins it when work begins. Confirmed
+//! DDL is applied to a connection-local overlay, producing the connection's effective schema:
+//! the pinned committed snapshot plus successful changes in the current transaction. Savepoints
+//! checkpoint both the structural overlay and encryption metadata. Full rollback discards the
+//! overlay; rollback to a savepoint restores its checkpoint; release keeps the changes in the
+//! enclosing transaction.
+//!
+//! Protocol events, rather than parsing alone, drive state changes:
+//!
+//! 1. `Parse` records DDL intent under the prepared-statement name.
+//! 2. `Bind` associates that intent with a portal.
+//! 3. `Execute` queues the intent and marks DDL as in flight.
+//! 4. Backend success activates the change; backend failure discards it.
+//! 5. `Sync` and simple-query boundaries segment the execution queue because PostgreSQL skips
+//!    the rest of an extended-protocol batch after an error.
+//!
+//! Schema-dependent work waits behind in-flight DDL, which makes pipelining correct without
+//! guessing whether PostgreSQL will accept the change. At outermost commit, the connection asks
+//! the schema manager to reload PostgreSQL before successful idle readiness reaches the client.
+//! Publication requests are shared, coalesced, and generation ordered. If publication fails,
+//! the committed database transaction cannot be undone; Proxy therefore retains the pending
+//! publication, withholds successful readiness, and closes that client connection.
+//!
+//! # Trade-offs and limitations
+//!
+//! * The overlay intentionally models a small, deterministic DDL subset. Conditional DDL,
+//!   cascading changes, `CREATE TABLE AS`/`LIKE`/`CLONE`/`INHERITS`, views, and unsupported
+//!   `ALTER TABLE` operations are treated as unmodelled. After such DDL succeeds, later
+//!   schema-dependent statements fail closed until rollback or authoritative publication.
+//! * A simple-query message has one PostgreSQL response boundary, so Proxy cannot safely remap a
+//!   later statement after observing an earlier statement's result. Batches that may change
+//!   encryption metadata and then perform schema-dependent work are rejected. Explicitly native
+//!   table DDL remains compatible because it cannot create an encryption obligation.
+//! * Temporary and other connection-local catalog objects are invisible to the separate
+//!   publication connection. Native temporary-table batches may pass through, but encrypted
+//!   temporary objects cannot be represented or authoritatively published and are unsupported.
+//! * SQL executed indirectly by procedures, extensions, or dynamic SQL cannot be inferred from
+//!   the wire statement. Periodic authoritative reloads eventually discover committed global
+//!   changes; a transaction still keeps its pinned view for consistency.
+//! * Prepared-statement and portal intents are retained for the connection lifetime. Reusing a
+//!   protocol name replaces its entry, but closing many unique names can retain bounded metadata
+//!   until the client disconnects.
+//!
+//! For supported schema changes, these conservative refusals trade some PostgreSQL surface-area
+//! compatibility for the core invariant: Proxy must never forward plaintext because it
+//! speculated about uncommitted or incompletely modelled schema state.
+
 use super::eql_domains;
 use super::manager::CommittedSchemaStore;
 use crate::postgresql::Name;
@@ -17,6 +74,7 @@ use std::sync::{
 use tokio::sync::Notify;
 
 #[derive(Clone, Debug)]
+/// The schema-relevant meaning recorded for a parsed statement.
 struct Intent {
     statement: Statement,
     ddl: bool,
@@ -24,12 +82,16 @@ struct Intent {
 }
 
 #[derive(Clone, Debug)]
+/// One execution or synchronization boundary awaiting a backend outcome.
 enum PendingExecution {
+    /// An execution, optionally carrying schema intent.
     Execute(Option<Box<Intent>>),
+    /// The boundary terminated by the next `ReadyForQuery` message.
     ReadyBoundary,
 }
 
 #[derive(Clone, Debug)]
+/// A transaction savepoint and its corresponding schema checkpoint.
 struct Savepoint {
     name: Ident,
     schema: SchemaWithEdits,
@@ -61,6 +123,7 @@ pub struct SchemaMiddleware {
 
 impl SchemaMiddleware {
     #[cfg(test)]
+    /// Constructs middleware around a schema-only snapshot for unit tests.
     pub fn new(schema: Arc<Schema>) -> Self {
         Self::from_store(CommittedSchemaStore::for_testing(
             (*schema).clone(),
@@ -68,6 +131,7 @@ impl SchemaMiddleware {
         ))
     }
 
+    /// Constructs connection-local middleware backed by the shared committed store.
     pub fn from_store(store: CommittedSchemaStore) -> Self {
         let snapshot = store.load();
         let schema = snapshot.schema();
@@ -89,14 +153,17 @@ impl SchemaMiddleware {
         }
     }
 
+    /// Returns the resolver for the connection's current effective schema.
     pub fn resolver(&self) -> Arc<TableResolver> {
         self.resolver.read().unwrap().clone()
     }
 
+    /// Returns encryption metadata aligned with the current effective schema.
     pub fn encrypt_config(&self) -> Arc<EncryptConfig> {
         self.encrypt_config.read().unwrap().clone()
     }
 
+    /// Replaces connection-local state with the latest committed snapshot.
     pub fn adopt_latest(&self) {
         let snapshot = self.store.load();
         let schema = snapshot.schema();
@@ -109,33 +176,40 @@ impl SchemaMiddleware {
         self.unmodelled.store(false, Ordering::Release);
     }
 
+    /// Returns whether authoritative catalog publication is still required.
     pub fn needs_publication(&self) -> bool {
         self.dirty.load(Ordering::Acquire) || self.store.publication_pending()
     }
 
+    /// Returns whether this connection has confirmed, unpublished DDL changes.
     pub fn has_local_changes(&self) -> bool {
         self.dirty.load(Ordering::Acquire)
     }
 
+    /// Records a shared publication request for the connection's committed DDL.
     pub fn mark_publication_pending(&self) {
         self.store.mark_publication_pending();
     }
 
+    /// Returns whether an idle connection must publish pending catalog state before use.
     pub fn requires_publication_before_statement(&self) -> bool {
         !self.transaction_active.load(Ordering::Acquire)
             && !self.has_local_changes()
             && self.store.publication_pending()
     }
 
+    /// Clears local dirty state and adopts the newly published snapshot.
     pub fn publication_succeeded(&self) {
         self.dirty.store(false, Ordering::Release);
         self.adopt_latest();
     }
 
+    /// Returns whether confirmed DDL cannot be represented by the local overlay.
     pub fn has_unmodelled_ddl(&self) -> bool {
         self.unmodelled.load(Ordering::Acquire)
     }
 
+    /// Adopts a newer committed snapshot before an idle connection starts work.
     pub fn before_statement(&self) {
         if !self.transaction_active.load(Ordering::Acquire)
             && !self.has_local_changes()
@@ -146,6 +220,7 @@ impl SchemaMiddleware {
         }
     }
 
+    /// Applies a PostgreSQL readiness boundary and its transaction status.
     pub fn ready_for_query(&self, status: u8) {
         self.discard_skipped_executions();
         self.transaction_active
@@ -155,6 +230,7 @@ impl SchemaMiddleware {
         }
     }
 
+    /// Records schema intent for a named prepared statement.
     pub fn prepare(&self, name: Name, statement: Statement) {
         self.prepared.write().unwrap().insert(
             name,
@@ -166,6 +242,7 @@ impl SchemaMiddleware {
         );
     }
 
+    /// Associates a portal with the schema intent of its prepared statement.
     pub fn bind(&self, portal: Name, prepared_statement: &Name) {
         let intent = self
             .prepared
@@ -184,6 +261,7 @@ impl SchemaMiddleware {
         }
     }
 
+    /// Records a portal execution awaiting a backend success or failure response.
     pub fn execute(&self, portal: &Name) {
         let intent = self.portals.read().unwrap().get(portal).cloned();
         self.transaction_active.store(true, Ordering::Release);
@@ -196,6 +274,7 @@ impl SchemaMiddleware {
             .push_back(PendingExecution::Execute(intent.map(Box::new)));
     }
 
+    /// Records every statement and readiness boundary in a simple-query message.
     pub fn simple_query(&self, statements: &[Statement]) {
         self.transaction_active.store(true, Ordering::Release);
         let mut executions = self.executions.write().unwrap();
@@ -213,6 +292,64 @@ impl SchemaMiddleware {
         executions.push_back(PendingExecution::ReadyBoundary);
     }
 
+    /// Returns whether mapping a later statement in this simple-query batch
+    /// could observe encryption metadata changed by an earlier DDL statement.
+    pub fn simple_query_requires_fail_closed(&self, statements: &[Statement]) -> bool {
+        let mut encryption_changing_ddl_seen = false;
+
+        for statement in statements {
+            if encryption_changing_ddl_seen && eql_mapper::requires_type_check(statement) {
+                return true;
+            }
+            encryption_changing_ddl_seen |= self.ddl_may_change_encryption(statement);
+        }
+
+        false
+    }
+
+    /// Conservatively classifies DDL that can change encryption metadata.
+    fn ddl_may_change_encryption(&self, statement: &Statement) -> bool {
+        match statement {
+            Statement::CreateTable(create) => {
+                create.query.is_some()
+                    || create.like.is_some()
+                    || create.clone.is_some()
+                    || create.inherits.is_some()
+                    || create
+                        .columns
+                        .iter()
+                        .any(|column| matches!(column_kind(column), ColumnKind::Eql(_, _)))
+            }
+            Statement::AlterTable {
+                name, operations, ..
+            } => {
+                self.encrypt_config().contains_table(object_name(name))
+                    || operations.iter().any(|operation| match operation {
+                        AlterTableOperation::AddColumn { column_def, .. } => {
+                            matches!(column_kind(column_def), ColumnKind::Eql(_, _))
+                        }
+                        AlterTableOperation::DropColumn { .. }
+                        | AlterTableOperation::RenameColumn { .. }
+                        | AlterTableOperation::RenameTable { .. } => false,
+                        _ => true,
+                    })
+            }
+            Statement::Drop {
+                object_type: ObjectType::Table,
+                names,
+                ..
+            } => names
+                .iter()
+                .any(|name| self.encrypt_config().contains_table(object_name(name))),
+            Statement::CreateView { .. }
+            | Statement::Drop {
+                object_type: ObjectType::View,
+                ..
+            } => true,
+            _ => false,
+        }
+    }
+
     /// Marks the `Sync` boundary whose `ReadyForQuery` terminates an extended
     /// protocol batch. PostgreSQL skips the remaining executions in that batch
     /// after an error, but may already have a later batch queued behind it.
@@ -223,6 +360,7 @@ impl SchemaMiddleware {
             .push_back(PendingExecution::ReadyBoundary);
     }
 
+    /// Waits until all earlier schema-changing executions have resolved.
     pub async fn wait_for_ddl(&self) {
         loop {
             let notified = self.execution_finished.notified();
@@ -234,6 +372,7 @@ impl SchemaMiddleware {
     }
 
     #[cfg(test)]
+    /// Records a direct statement execution for state-machine tests.
     pub fn execution_started(&self, statement: Statement) {
         let ddl = is_schema_ddl(&statement);
         if ddl {
@@ -249,6 +388,7 @@ impl SchemaMiddleware {
             }))));
     }
 
+    /// Applies the next queued execution after PostgreSQL confirms success.
     pub fn execution_succeeded(&self) {
         if let Some(Some(intent)) = self.pop_execution() {
             let statement = intent.statement;
@@ -328,6 +468,7 @@ impl SchemaMiddleware {
         }
     }
 
+    /// Applies modelled DDL to schema and encryption overlays as one operation.
     fn apply_ddl(&self, statement: &Statement) {
         eql_mapper::collect_ddl_with_column_kind(self.resolver(), statement, &|column| {
             column_kind(column)
@@ -338,6 +479,7 @@ impl SchemaMiddleware {
         *self.encrypt_config.write().unwrap() = Arc::new(config);
     }
 
+    /// Discards the next queued execution after PostgreSQL reports failure.
     pub fn execution_failed(&self) {
         if let Some(Some(intent)) = self.pop_execution() {
             if intent.ddl {
@@ -347,6 +489,7 @@ impl SchemaMiddleware {
         }
     }
 
+    /// Removes the next execution without crossing a readiness boundary.
     fn pop_execution(&self) -> Option<Option<Intent>> {
         let mut executions = self.executions.write().unwrap();
         if matches!(executions.front(), Some(PendingExecution::Execute(_))) {
@@ -359,6 +502,7 @@ impl SchemaMiddleware {
         }
     }
 
+    /// Discards executions PostgreSQL skipped after an error up to readiness.
     fn discard_skipped_executions(&self) {
         let mut discarded_ddl = 0;
         let mut executions = self.executions.write().unwrap();
@@ -379,6 +523,7 @@ impl SchemaMiddleware {
     }
 }
 
+/// Returns the unqualified PostgreSQL domain name declared for a column.
 fn column_domain(column: &ColumnDef) -> String {
     column
         .data_type
@@ -390,12 +535,14 @@ fn column_domain(column: &ColumnDef) -> String {
         .to_owned()
 }
 
+/// Classifies a declared column as native or as an EQL domain.
 fn column_kind(column: &ColumnDef) -> ColumnKind {
     eql_domains::resolve(&column_domain(column))
         .map(|(identity, traits)| ColumnKind::Eql(traits, identity))
         .unwrap_or(ColumnKind::Native)
 }
 
+/// Returns the final identifier component of a PostgreSQL object name.
 fn object_name(name: &ObjectName) -> &str {
     match name.0.last() {
         Some(ObjectNamePart::Identifier(name)) => &name.value,
@@ -403,6 +550,7 @@ fn object_name(name: &ObjectName) -> &str {
     }
 }
 
+/// Adds inferred encryption metadata for one newly declared column.
 fn add_column_config(config: &mut EncryptConfig, table: &str, column: &ColumnDef) {
     let domain = column_domain(column);
     if let Some(column_config) = column_config_from_domain(table, &column.name.value, &domain) {
@@ -413,6 +561,7 @@ fn add_column_config(config: &mut EncryptConfig, table: &str, column: &ColumnDef
     }
 }
 
+/// Applies modelled DDL to a mutable encryption-metadata overlay.
 fn apply_encrypt_config(config: &mut EncryptConfig, statement: &Statement) {
     match statement {
         Statement::CreateTable(create) => {
@@ -460,6 +609,7 @@ fn apply_encrypt_config(config: &mut EncryptConfig, statement: &Statement) {
     }
 }
 
+/// Returns whether a statement changes schema state tracked by the middleware.
 fn is_schema_ddl(statement: &Statement) -> bool {
     matches!(
         statement,
@@ -473,6 +623,7 @@ fn is_schema_ddl(statement: &Statement) -> bool {
     )
 }
 
+/// Returns whether a DDL statement can be represented exactly by the overlay.
 fn is_modelled_ddl(statement: &Statement) -> bool {
     match statement {
         Statement::CreateTable(create) => {
@@ -791,6 +942,28 @@ mod tests {
         assert!(!is_modelled_ddl(&parse(
             "alter table reports add column if not exists account_id bigint",
         )));
+    }
+
+    #[test]
+    fn native_temporary_table_batch_does_not_fail_closed() {
+        let middleware = SchemaMiddleware::new(Arc::new(Schema::new("public")));
+        let statements = vec![
+            parse("create temporary table names (name text)"),
+            parse("insert into names (name) values ('Ada')"),
+        ];
+
+        assert!(!middleware.simple_query_requires_fail_closed(&statements));
+    }
+
+    #[test]
+    fn encrypted_table_batch_fails_closed_before_dependent_insert() {
+        let middleware = SchemaMiddleware::new(Arc::new(Schema::new("public")));
+        let statements = vec![
+            parse("create table secrets (value eql_v3_text_search)"),
+            parse("insert into secrets (value) values ('classified')"),
+        ];
+
+        assert!(middleware.simple_query_requires_fail_closed(&statements));
     }
 
     #[tokio::test]

@@ -39,20 +39,31 @@ impl EncryptConfig {
         self.config.get(identifier).cloned()
     }
 
+    /// Returns whether any encrypted column belongs to `table`.
+    pub(crate) fn contains_table(&self, table: &str) -> bool {
+        self.config
+            .keys()
+            .any(|identifier| identifier.table == table)
+    }
+
+    /// Inserts or replaces encryption metadata for one column.
     pub(crate) fn insert(&mut self, identifier: eql::Identifier, config: ColumnConfig) {
         self.config.insert(identifier, config);
     }
 
+    /// Removes encryption metadata for one column.
     pub(crate) fn remove_column(&mut self, table: &str, column: &str) {
         self.config
             .remove(&eql::Identifier::new(table.to_owned(), column.to_owned()));
     }
 
+    /// Removes all encryption metadata for a table.
     pub(crate) fn remove_table(&mut self, table: &str) {
         self.config
             .retain(|identifier, _| identifier.table != table);
     }
 
+    /// Moves encryption metadata to a renamed column identifier.
     pub(crate) fn rename_column(&mut self, table: &str, from: &str, to: &str) {
         let from = eql::Identifier::new(table.to_owned(), from.to_owned());
         if let Some(config) = self.config.remove(&from) {
@@ -63,6 +74,7 @@ impl EncryptConfig {
         }
     }
 
+    /// Moves all encryption metadata to a renamed table identifier.
     pub(crate) fn rename_table(&mut self, from: &str, to: &str) {
         let renamed = self
             .config

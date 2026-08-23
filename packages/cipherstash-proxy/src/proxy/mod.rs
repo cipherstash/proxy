@@ -14,6 +14,7 @@ use tokio::sync::oneshot::Sender;
 use tracing::{debug, warn};
 
 mod encrypt_config;
+/// Transaction-aware schema snapshots, overlays, and publication.
 pub(crate) mod schema;
 mod zerokms;
 
@@ -110,6 +111,7 @@ impl Proxy {
         Ok(version)
     }
 
+    /// Starts the asynchronous coordinator for schema reload requests.
     pub fn receive(mut reload_receiver: ReloadReceiver, schema_manager: SchemaManager) {
         tokio::task::spawn(async move {
             while let Some(command) = reload_receiver.recv().await {

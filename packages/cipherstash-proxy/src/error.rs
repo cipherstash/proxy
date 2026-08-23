@@ -104,9 +104,11 @@ pub enum ZeroKMSError {
 
 #[derive(Error, Debug)]
 pub enum MappingError {
+    /// A simple-query batch would map against schema changed earlier in the batch.
     #[error("A simple-query batch cannot contain a schema-dependent statement after DDL. Send the DDL and dependent statement as separate queries. For help visit {}#mapping-dependent-statement-after-ddl", ERROR_DOC_BASE_URL)]
     DependentStatementAfterDdl,
 
+    /// Confirmed DDL cannot be represented safely by the transaction overlay.
     #[error("A successful schema change in this transaction cannot be modelled safely. Roll back the transaction before issuing schema-dependent statements. For help visit {}#mapping-unmodelled-ddl", ERROR_DOC_BASE_URL)]
     UnmodelledDdl,
 
