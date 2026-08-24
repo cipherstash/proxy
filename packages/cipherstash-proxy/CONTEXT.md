@@ -132,10 +132,11 @@ closed without forwarding readiness, and the dirty publication remains eligible 
 
 **Schema middleware**:
 The owner of transactional schema state. Frontend and Backend report protocol lifecycle events;
-they do not directly change overlays, dirty flags, or reload managers. The middleware owns DDL
-detection, prepared DDL effects, successful-execution activation, savepoint and transaction
-transitions, effective-schema resolution, reload coordination, and schema publication. See
-`docs/adr/0001-transaction-aware-schema-middleware.md`.
+they do not directly change overlays or dirty flags. The middleware owns DDL detection, prepared
+DDL effects, successful-execution activation, savepoint and transaction transitions,
+effective-schema resolution, and the decision that publication is required. `Context` performs the
+authoritative reload round trip, while `SchemaManager` coalesces reloads and orders their
+generations. See `docs/adr/0001-transaction-aware-schema-middleware.md`.
 
 ## Note on `session`
 

@@ -8,4 +8,4 @@ mod manager;
 mod middleware;
 
 pub use manager::{CommittedSchemaStore, SchemaManager};
-pub use middleware::SchemaMiddleware;
+pub use middleware::{SchemaMiddleware, TransactionStatus};

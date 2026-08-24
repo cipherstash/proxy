@@ -47,11 +47,16 @@ reload managers directly.
 
 After a DDL `Execute` is forwarded, protocol-control messages required to complete that execution
 continue to flow, but later schema-dependent operations wait until its success or failure is known.
-This avoids both speculative mapping and a deadlock in the extended-protocol prepare flow.
+Proxy injects `Flush` after the DDL `Execute`, allowing PostgreSQL to return `CommandComplete`
+without waiting for a client `Sync`. The client's `Sync` remains the sole synchronization boundary,
+so it still receives exactly one `ReadyForQuery`. This supports clients that pipeline DDL and a
+dependent `Parse` in one batch without speculative mapping or a protocol deadlock.
 
-A simple-query message containing DDL followed by a schema-dependent statement fails closed for
-the initial implementation. Supporting that case requires preserving PostgreSQL's response
-semantics while introducing an execution boundary and will be tracked separately.
+A simple-query message fails closed when DDL may change encryption metadata and a later statement
+requires that metadata for mapping. Native DDL and native temporary-table batches continue to pass
+through because they introduce no encryption obligation. Proxy derives execution intents from the
+statements it actually forwards, including when a mapping error uses the compatibility passthrough
+fallback, so backend outcomes cannot become misaligned with phantom intents.
 
 ### Publication
 
@@ -75,6 +80,14 @@ commit cannot be undone, but Proxy must not imply that stale encryption metadata
 - Every transaction maps against a stable schema and encryption-policy generation.
 - Frontend and Backend become protocol adapters around a testable schema state machine.
 - Extended-protocol pipelining requires bounded deferral after DDL execution.
+- Native temporary tables are connection-local and absent from authoritative reloads. Proxy ignores
+  them only when they cannot shadow an encrypted table or introduce EQL columns; unsafe cases fail
+  closed for the rest of the connection (unless rollback to an earlier savepoint removes the
+  object), because a global catalog reload cannot prove connection-local state disappeared.
+- The local overlay deliberately models only deterministic schema changes. Encryption-neutral
+  constraints, defaults, nullability, ownership, trigger/rule state, and row-level-security state
+  are accepted, while conditional, cascading, table-rewriting, view, and type-changing operations
+  remain unmodelled within a transaction.
 - Availability is intentionally sacrificed when committed schema state cannot be published safely.
 - Schema and encryption managers can no longer publish independent observable states.
 
@@ -83,5 +96,7 @@ commit cannot be undone, but Proxy must not imply that stale encryption metadata
 State-machine tests cover successful execution, execution failure, explicit commit, full rollback,
 savepoint rollback, generation ordering, deferral, unmodelled DDL, and reload failure. Database-backed
 tests cover extended-protocol autocommit, explicit transactions, an already-open second connection,
-pipelining, direct ciphertext verification, and failure before readiness. The existing simple-query
-behaviour remains covered, with dependent post-DDL batches asserted to fail closed.
+pipelining with a single client `Sync`, direct ciphertext verification, safe `ALTER TABLE`, native
+temporary tables, compatibility fallback bookkeeping, and failure before readiness. Simple-query
+coverage proves both that encryption-dependent post-DDL batches fail closed and native batches
+continue to work.

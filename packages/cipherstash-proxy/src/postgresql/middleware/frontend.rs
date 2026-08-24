@@ -124,6 +124,7 @@ impl<S: EncryptionService> Frontend<S> {
         }
 
         let mut outbound_message = protocol_message.clone();
+        let mut flush_after_forward = false;
 
         match protocol_message {
             FrontendMessage::Query(query) => {
@@ -151,7 +152,7 @@ impl<S: EncryptionService> Frontend<S> {
                 self.describe_handler(operation, describe).await?;
             }
             FrontendMessage::Execute(execute) => {
-                self.execute_handler(operation, execute).await?;
+                flush_after_forward = self.execute_handler(operation, execute).await?;
             }
             FrontendMessage::Parse(parse) => {
                 let statement = parse.statement.clone();
@@ -258,7 +259,11 @@ impl<S: EncryptionService> Frontend<S> {
             }
         }
 
-        Ok(FrontendMiddlewareOutput::Forward(outbound_message))
+        if flush_after_forward {
+            Ok(FrontendMiddlewareOutput::ForwardThenFlush(outbound_message))
+        } else {
+            Ok(FrontendMiddlewareOutput::Forward(outbound_message))
+        }
     }
 
     async fn describe_handler(
@@ -284,12 +289,12 @@ impl<S: EncryptionService> Frontend<S> {
         &mut self,
         operation: pg_proto::OperationId,
         execute: Execute,
-    ) -> Result<(), Error> {
+    ) -> Result<bool, Error> {
         debug!(target: PROTOCOL, client_id = self.context.client_id, ?execute);
-        self.context.execute_schema_portal(&execute.portal);
+        let executes_ddl = self.context.execute_schema_portal(&execute.portal);
         self.context
             .set_execute_for_portal(operation, execute.portal.to_owned());
-        Ok(())
+        Ok(executes_ddl)
     }
 
     /// Handles PostgreSQL Query messages (simple query protocol).
@@ -356,7 +361,7 @@ impl<S: EncryptionService> Frontend<S> {
             self.context.wait_for_schema_execution().await;
             self.context.ensure_schema_modelled()?;
         }
-        let mut transformed_statements = vec![];
+        let mut forwarded_statements = vec![];
 
         debug!(target: MAPPER,
             client_id = self.context.client_id,
@@ -380,6 +385,7 @@ impl<S: EncryptionService> Frontend<S> {
                 warn!(msg = "Encrypted statement mapping is not enabled");
                 counter!(STATEMENTS_PASSTHROUGH_MAPPING_DISABLED_TOTAL).increment(1);
                 counter!(STATEMENTS_PASSTHROUGH_TOTAL).increment(1);
+                forwarded_statements.push(statement.clone());
                 continue;
             }
 
@@ -387,6 +393,7 @@ impl<S: EncryptionService> Frontend<S> {
 
             if !eql_mapper::requires_type_check(statement) {
                 counter!(STATEMENTS_PASSTHROUGH_TOTAL).increment(1);
+                forwarded_statements.push(statement.clone());
                 continue;
             }
 
@@ -401,6 +408,12 @@ impl<S: EncryptionService> Frontend<S> {
                     if self.context.mapping_errors_enabled() || err.must_fail_closed() {
                         return Err(err);
                     } else {
+                        self.record_simple_schema_execution(
+                            operation,
+                            session_id,
+                            Portal::passthrough(Some(session_id)),
+                            &parsed_statements,
+                        );
                         return Ok(None);
                     };
                 }
@@ -413,6 +426,7 @@ impl<S: EncryptionService> Frontend<S> {
                         msg = "Encryptable Statement",
                     );
 
+                    let mut transformed = false;
                     if typed_statement.requires_transform() {
                         // Record parse duration before encryption work starts
                         if !parse_duration_recorded {
@@ -440,9 +454,14 @@ impl<S: EncryptionService> Frontend<S> {
 
                             // The simple protocol has no params, so the plan is
                             // always empty here — only the SQL is needed.
-                            transformed_statements.push(transformed_statement.statement);
+                            forwarded_statements.push(transformed_statement.statement);
                             encrypted = true;
+                            transformed = true;
                         }
+                    }
+
+                    if !transformed {
+                        forwarded_statements.push(typed_statement.statement.clone());
                     }
 
                     counter!(STATEMENTS_ENCRYPTED_TOTAL).increment(1);
@@ -459,7 +478,7 @@ impl<S: EncryptionService> Frontend<S> {
                         msg = "Passthrough Statement"
                     );
                     counter!(STATEMENTS_PASSTHROUGH_TOTAL).increment(1);
-                    transformed_statements.push(statement.clone());
+                    forwarded_statements.push(statement.clone());
                 }
             };
         }
@@ -489,15 +508,10 @@ impl<S: EncryptionService> Frontend<S> {
             m.set_query_fingerprint(&query_text);
         });
 
-        self.context.add_portal(Name::new(), portal);
-        self.context
-            .set_execute(operation, Name::new(), Some(session_id));
-
-        self.context
-            .execute_simple_schema_statements(&parsed_statements);
+        self.record_simple_schema_execution(operation, session_id, portal, &forwarded_statements);
 
         if encrypted {
-            let transformed_statement = transformed_statements
+            let transformed_statement = forwarded_statements
                 .iter()
                 .map(|s| s.to_string())
                 .collect::<Vec<_>>()
@@ -532,6 +546,20 @@ impl<S: EncryptionService> Frontend<S> {
             }
             Ok(None)
         }
+    }
+
+    /// Records the portal and schema intents for the statements actually sent to PostgreSQL.
+    fn record_simple_schema_execution(
+        &mut self,
+        operation: pg_proto::OperationId,
+        session_id: SessionId,
+        portal: Portal,
+        statements: &[ast::Statement],
+    ) {
+        self.context.add_portal(Name::new(), portal);
+        self.context
+            .set_execute(operation, Name::new(), Some(session_id));
+        self.context.execute_simple_schema_statements(statements);
     }
 
     /// Encrypts literal values found in SQL statements.

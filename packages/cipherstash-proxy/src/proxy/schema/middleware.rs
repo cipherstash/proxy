@@ -44,6 +44,9 @@
 //! * Temporary and other connection-local catalog objects are invisible to the separate
 //!   publication connection. Native temporary-table batches may pass through, but encrypted
 //!   temporary objects cannot be represented or authoritatively published and are unsupported.
+//!   A temporary table that could shadow encrypted metadata leaves the connection fail-closed
+//!   until an earlier savepoint removes it or the connection ends; an authoritative global reload
+//!   cannot prove that a connection-local object disappeared.
 //! * SQL executed indirectly by procedures, extensions, or dynamic SQL cannot be inferred from
 //!   the wire statement. Periodic authoritative reloads eventually discover committed global
 //!   changes; a transaction still keeps its pinned view for consistency.
@@ -55,6 +58,8 @@
 //! compatibility for the core invariant: Proxy must never forward plaintext because it
 //! speculated about uncommitted or incompletely modelled schema state.
 
+#![deny(missing_docs)]
+
 use super::eql_domains;
 use super::manager::CommittedSchemaStore;
 use crate::postgresql::Name;
@@ -63,8 +68,8 @@ use crate::proxy::EncryptConfig;
 use cipherstash_client::eql::Identifier;
 use eql_mapper::{ColumnKind, Schema, SchemaWithEdits, TableResolver};
 use sqltk::parser::ast::{
-    AlterTableOperation, ColumnDef, DropBehavior, Ident, ObjectName, ObjectNamePart, ObjectType,
-    Statement,
+    AlterColumnOperation, AlterTableOperation, ColumnDef, DataType, DropBehavior, Ident,
+    ObjectName, ObjectNamePart, ObjectType, Statement,
 };
 use std::collections::{HashMap, VecDeque};
 use std::sync::{
@@ -97,6 +102,38 @@ struct Savepoint {
     schema: SchemaWithEdits,
     encrypt_config: EncryptConfig,
     unmodelled: bool,
+    local_unmodelled: bool,
+}
+
+/// PostgreSQL's transaction state carried by a `ReadyForQuery` message.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum TransactionStatus {
+    /// The connection is outside a transaction block.
+    Idle,
+    /// The connection is inside a transaction block that can accept commands.
+    InTransaction,
+    /// The connection is inside a failed transaction block awaiting rollback.
+    FailedTransaction,
+    /// An unrecognized protocol status, treated conservatively as non-idle.
+    Unknown(u8),
+}
+
+impl TransactionStatus {
+    /// Returns whether PostgreSQL is outside a transaction block.
+    pub fn is_idle(self) -> bool {
+        self == Self::Idle
+    }
+}
+
+impl From<u8> for TransactionStatus {
+    fn from(status: u8) -> Self {
+        match status {
+            b'I' => Self::Idle,
+            b'T' => Self::InTransaction,
+            b'E' => Self::FailedTransaction,
+            status => Self::Unknown(status),
+        }
+    }
 }
 
 /// Connection-local owner of the effective database schema.
@@ -117,6 +154,7 @@ pub struct SchemaMiddleware {
     execution_finished: Arc<Notify>,
     dirty: Arc<AtomicBool>,
     unmodelled: Arc<AtomicBool>,
+    local_unmodelled: Arc<AtomicBool>,
     transaction_active: Arc<AtomicBool>,
     savepoints: Arc<RwLock<Vec<Savepoint>>>,
 }
@@ -148,6 +186,7 @@ impl SchemaMiddleware {
             execution_finished: Arc::new(Notify::new()),
             dirty: Arc::new(AtomicBool::new(false)),
             unmodelled: Arc::new(AtomicBool::new(false)),
+            local_unmodelled: Arc::new(AtomicBool::new(false)),
             transaction_active: Arc::new(AtomicBool::new(false)),
             savepoints: Arc::new(RwLock::new(Vec::new())),
         }
@@ -206,7 +245,7 @@ impl SchemaMiddleware {
 
     /// Returns whether confirmed DDL cannot be represented by the local overlay.
     pub fn has_unmodelled_ddl(&self) -> bool {
-        self.unmodelled.load(Ordering::Acquire)
+        self.unmodelled.load(Ordering::Acquire) || self.local_unmodelled.load(Ordering::Acquire)
     }
 
     /// Adopts a newer committed snapshot before an idle connection starts work.
@@ -221,11 +260,11 @@ impl SchemaMiddleware {
     }
 
     /// Applies a PostgreSQL readiness boundary and its transaction status.
-    pub fn ready_for_query(&self, status: u8) {
+    pub fn ready_for_query(&self, status: TransactionStatus) {
         self.discard_skipped_executions();
         self.transaction_active
-            .store(status != b'I', Ordering::Release);
-        if status == b'I' && !self.needs_publication() {
+            .store(!status.is_idle(), Ordering::Release);
+        if status.is_idle() && !self.needs_publication() {
             self.adopt_latest();
         }
     }
@@ -235,7 +274,7 @@ impl SchemaMiddleware {
         self.prepared.write().unwrap().insert(
             name,
             Intent {
-                ddl: is_schema_ddl(&statement),
+                ddl: self.is_schema_ddl(&statement),
                 modelled: is_modelled_ddl(&statement),
                 statement,
             },
@@ -261,17 +300,20 @@ impl SchemaMiddleware {
         }
     }
 
-    /// Records a portal execution awaiting a backend success or failure response.
-    pub fn execute(&self, portal: &Name) {
+    /// Records a portal execution awaiting a backend result and returns whether
+    /// the protocol adapter must flush DDL immediately to unblock dependent work.
+    pub fn execute(&self, portal: &Name) -> bool {
         let intent = self.portals.read().unwrap().get(portal).cloned();
+        let executes_ddl = intent.as_ref().is_some_and(|intent| intent.ddl);
         self.transaction_active.store(true, Ordering::Release);
-        if intent.as_ref().is_some_and(|intent| intent.ddl) {
+        if executes_ddl {
             self.in_flight_ddl.fetch_add(1, Ordering::AcqRel);
         }
         self.executions
             .write()
             .unwrap()
             .push_back(PendingExecution::Execute(intent.map(Box::new)));
+        executes_ddl
     }
 
     /// Records every statement and readiness boundary in a simple-query message.
@@ -280,7 +322,7 @@ impl SchemaMiddleware {
         let mut executions = self.executions.write().unwrap();
         for statement in statements {
             let intent = Intent {
-                ddl: is_schema_ddl(statement),
+                ddl: self.is_schema_ddl(statement),
                 modelled: is_modelled_ddl(statement),
                 statement: statement.clone(),
             };
@@ -311,7 +353,9 @@ impl SchemaMiddleware {
     fn ddl_may_change_encryption(&self, statement: &Statement) -> bool {
         match statement {
             Statement::CreateTable(create) => {
-                create.query.is_some()
+                self.encrypt_config()
+                    .contains_table(&postgres_object_name(&create.name))
+                    || create.query.is_some()
                     || create.like.is_some()
                     || create.clone.is_some()
                     || create.inherits.is_some()
@@ -323,30 +367,58 @@ impl SchemaMiddleware {
             Statement::AlterTable {
                 name, operations, ..
             } => {
-                self.encrypt_config().contains_table(object_name(name))
-                    || operations.iter().any(|operation| match operation {
-                        AlterTableOperation::AddColumn { column_def, .. } => {
-                            matches!(column_kind(column_def), ColumnKind::Eql(_, _))
-                        }
-                        AlterTableOperation::DropColumn { .. }
-                        | AlterTableOperation::RenameColumn { .. }
-                        | AlterTableOperation::RenameTable { .. } => false,
-                        _ => true,
-                    })
+                let table = postgres_object_name(name);
+                let encrypt_config = self.encrypt_config();
+                operations.iter().any(|operation| match operation {
+                    AlterTableOperation::AddColumn { column_def, .. } => {
+                        matches!(column_kind(column_def), ColumnKind::Eql(_, _))
+                    }
+                    operation if is_encryption_neutral_alter_operation(operation) => false,
+                    AlterTableOperation::DropColumn { column_name, .. }
+                    | AlterTableOperation::RenameColumn {
+                        old_column_name: column_name,
+                        ..
+                    } => encrypt_config
+                        .get_column_config(&Identifier::new(
+                            table.clone(),
+                            postgres_identifier(column_name),
+                        ))
+                        .is_some(),
+                    AlterTableOperation::RenameTable { .. } => {
+                        encrypt_config.contains_table(&table)
+                    }
+                    _ => true,
+                })
             }
             Statement::Drop {
                 object_type: ObjectType::Table,
                 names,
                 ..
-            } => names
-                .iter()
-                .any(|name| self.encrypt_config().contains_table(object_name(name))),
+            } => names.iter().any(|name| {
+                self.encrypt_config()
+                    .contains_table(&postgres_object_name(name))
+            }),
             Statement::CreateView { .. }
             | Statement::Drop {
                 object_type: ObjectType::View,
                 ..
             } => true,
             _ => false,
+        }
+    }
+
+    /// Returns whether a statement changes tracked schema state for this connection.
+    ///
+    /// Native temporary tables are connection-local and cannot be published from the
+    /// manager's catalog connection, so they are ignored unless they could shadow an
+    /// encrypted table or introduce an encryption domain. Those unsafe cases remain DDL
+    /// and therefore fail closed as unmodelled changes after successful execution.
+    fn is_schema_ddl(&self, statement: &Statement) -> bool {
+        match statement {
+            Statement::CreateTable(create) if create.temporary => {
+                self.ddl_may_change_encryption(statement)
+            }
+            _ => is_catalog_schema_ddl(statement),
         }
     }
 
@@ -374,7 +446,7 @@ impl SchemaMiddleware {
     #[cfg(test)]
     /// Records a direct statement execution for state-machine tests.
     pub fn execution_started(&self, statement: Statement) {
-        let ddl = is_schema_ddl(&statement);
+        let ddl = self.is_schema_ddl(&statement);
         if ddl {
             self.in_flight_ddl.fetch_add(1, Ordering::AcqRel);
         }
@@ -401,16 +473,19 @@ impl SchemaMiddleware {
                         name,
                         schema: checkpoint,
                         encrypt_config: (*self.encrypt_config()).clone(),
-                        unmodelled: self.has_unmodelled_ddl(),
+                        unmodelled: self.unmodelled.load(Ordering::Acquire),
+                        local_unmodelled: self.local_unmodelled.load(Ordering::Acquire),
                     });
                 }
                 Statement::ReleaseSavepoint { name } => {
                     let mut savepoints = self.savepoints.write().unwrap();
                     if let Some(index) = savepoints
                         .iter()
-                        .rposition(|savepoint| savepoint.name == name)
+                        .rposition(|savepoint| identifiers_equal(&savepoint.name, &name))
                     {
                         savepoints.truncate(index);
+                    } else {
+                        self.mark_unmodelled(false);
                     }
                 }
                 Statement::Rollback {
@@ -420,21 +495,26 @@ impl SchemaMiddleware {
                     let mut savepoints = self.savepoints.write().unwrap();
                     if let Some(index) = savepoints
                         .iter()
-                        .rposition(|savepoint| savepoint.name == name)
+                        .rposition(|savepoint| identifiers_equal(&savepoint.name, &name))
                     {
                         let checkpoint = savepoints[index].schema.clone();
                         let encrypt_config = savepoints[index].encrypt_config.clone();
                         let unmodelled = savepoints[index].unmodelled;
+                        let local_unmodelled = savepoints[index].local_unmodelled;
                         savepoints.truncate(index + 1);
                         let resolver = self.resolver();
                         let overlay = resolver.as_schema_with_edits().unwrap();
                         *overlay.write().unwrap() = checkpoint;
                         *self.encrypt_config.write().unwrap() = Arc::new(encrypt_config);
                         self.unmodelled.store(unmodelled, Ordering::Release);
+                        self.local_unmodelled
+                            .store(local_unmodelled, Ordering::Release);
                         self.dirty.store(
                             unmodelled || resolver.has_schema_changed(),
                             Ordering::Release,
                         );
+                    } else {
+                        self.mark_unmodelled(false);
                     }
                 }
                 Statement::Rollback {
@@ -449,17 +529,22 @@ impl SchemaMiddleware {
                     self.dirty.store(false, Ordering::Release);
                     self.unmodelled.store(false, Ordering::Release);
                 }
-                statement => {
-                    if intent.ddl && !intent.modelled {
-                        self.unmodelled.store(true, Ordering::Release);
+                statement if intent.ddl => {
+                    if !intent.modelled {
+                        let local_only = matches!(
+                            statement,
+                            Statement::CreateTable(ref create) if create.temporary
+                        );
+                        self.mark_unmodelled(local_only);
                     } else {
                         self.apply_ddl(&statement);
                     }
                 }
+                _ => {}
             }
             if intent.ddl {
                 self.dirty.store(
-                    self.has_unmodelled_ddl() || self.resolver().has_schema_changed(),
+                    self.unmodelled.load(Ordering::Acquire) || self.resolver().has_schema_changed(),
                     Ordering::Release,
                 );
                 self.in_flight_ddl.fetch_sub(1, Ordering::AcqRel);
@@ -521,18 +606,24 @@ impl SchemaMiddleware {
             self.execution_finished.notify_waiters();
         }
     }
+
+    /// Prevents subsequent mapping when local state cannot be reconstructed exactly.
+    fn mark_unmodelled(&self, connection_local: bool) {
+        if connection_local {
+            self.local_unmodelled.store(true, Ordering::Release);
+        } else {
+            self.unmodelled.store(true, Ordering::Release);
+            self.dirty.store(true, Ordering::Release);
+        }
+    }
 }
 
 /// Returns the unqualified PostgreSQL domain name declared for a column.
 fn column_domain(column: &ColumnDef) -> String {
-    column
-        .data_type
-        .to_string()
-        .split('.')
-        .next_back()
-        .unwrap_or_default()
-        .trim_matches('"')
-        .to_owned()
+    match &column.data_type {
+        DataType::Custom(name, _) => postgres_object_name(name),
+        data_type => data_type.to_string().to_ascii_lowercase(),
+    }
 }
 
 /// Classifies a declared column as native or as an EQL domain.
@@ -542,20 +633,35 @@ fn column_kind(column: &ColumnDef) -> ColumnKind {
         .unwrap_or(ColumnKind::Native)
 }
 
-/// Returns the final identifier component of a PostgreSQL object name.
-fn object_name(name: &ObjectName) -> &str {
-    match name.0.last() {
-        Some(ObjectNamePart::Identifier(name)) => &name.value,
-        _ => "",
+/// Returns an identifier exactly as PostgreSQL stores it in the catalog.
+fn postgres_identifier(identifier: &Ident) -> String {
+    if identifier.quote_style.is_some() {
+        identifier.value.clone()
+    } else {
+        identifier.value.to_ascii_lowercase()
     }
+}
+
+/// Returns the catalog spelling of the final component of an object name.
+fn postgres_object_name(name: &ObjectName) -> String {
+    match name.0.last() {
+        Some(ObjectNamePart::Identifier(name)) => postgres_identifier(name),
+        _ => String::new(),
+    }
+}
+
+/// Compares identifiers according to PostgreSQL's quoted-identifier rules.
+fn identifiers_equal(left: &Ident, right: &Ident) -> bool {
+    postgres_identifier(left) == postgres_identifier(right)
 }
 
 /// Adds inferred encryption metadata for one newly declared column.
 fn add_column_config(config: &mut EncryptConfig, table: &str, column: &ColumnDef) {
     let domain = column_domain(column);
-    if let Some(column_config) = column_config_from_domain(table, &column.name.value, &domain) {
+    let column_name = postgres_identifier(&column.name);
+    if let Some(column_config) = column_config_from_domain(table, &column_name, &domain) {
         config.insert(
-            Identifier::new(table.to_owned(), column.name.value.clone()),
+            Identifier::new(table.to_owned(), column_name),
             column_config,
         );
     }
@@ -565,32 +671,36 @@ fn add_column_config(config: &mut EncryptConfig, table: &str, column: &ColumnDef
 fn apply_encrypt_config(config: &mut EncryptConfig, statement: &Statement) {
     match statement {
         Statement::CreateTable(create) => {
-            let table = object_name(&create.name);
-            config.remove_table(table);
+            let table = postgres_object_name(&create.name);
+            config.remove_table(&table);
             for column in &create.columns {
-                add_column_config(config, table, column);
+                add_column_config(config, &table, column);
             }
         }
         Statement::AlterTable {
             name, operations, ..
         } => {
-            let table = object_name(name);
+            let table = postgres_object_name(name);
             for operation in operations {
                 match operation {
                     AlterTableOperation::AddColumn { column_def, .. } => {
-                        add_column_config(config, table, column_def);
+                        add_column_config(config, &table, column_def);
                     }
                     AlterTableOperation::DropColumn { column_name, .. } => {
-                        config.remove_column(table, &column_name.value);
+                        config.remove_column(&table, &postgres_identifier(column_name));
                     }
                     AlterTableOperation::RenameColumn {
                         old_column_name,
                         new_column_name,
                     } => {
-                        config.rename_column(table, &old_column_name.value, &new_column_name.value);
+                        config.rename_column(
+                            &table,
+                            &postgres_identifier(old_column_name),
+                            &postgres_identifier(new_column_name),
+                        );
                     }
                     AlterTableOperation::RenameTable { table_name } => {
-                        config.rename_table(table, object_name(table_name));
+                        config.rename_table(&table, &postgres_object_name(table_name));
                     }
                     _ => {}
                 }
@@ -602,7 +712,7 @@ fn apply_encrypt_config(config: &mut EncryptConfig, statement: &Statement) {
             ..
         } => {
             for name in names {
-                config.remove_table(object_name(name));
+                config.remove_table(&postgres_object_name(name));
             }
         }
         _ => {}
@@ -610,7 +720,7 @@ fn apply_encrypt_config(config: &mut EncryptConfig, statement: &Statement) {
 }
 
 /// Returns whether a statement changes schema state tracked by the middleware.
-fn is_schema_ddl(statement: &Statement) -> bool {
+fn is_catalog_schema_ddl(statement: &Statement) -> bool {
     matches!(
         statement,
         Statement::CreateTable(_)
@@ -618,6 +728,38 @@ fn is_schema_ddl(statement: &Statement) -> bool {
             | Statement::AlterTable { .. }
             | Statement::Drop {
                 object_type: ObjectType::Table | ObjectType::View,
+                ..
+            }
+    )
+}
+
+/// Returns whether an `ALTER TABLE` operation cannot affect encryption metadata.
+fn is_encryption_neutral_alter_operation(operation: &AlterTableOperation) -> bool {
+    matches!(
+        operation,
+        AlterTableOperation::AddConstraint(_)
+            | AlterTableOperation::DropConstraint {
+                drop_behavior: None | Some(DropBehavior::Restrict),
+                ..
+            }
+            | AlterTableOperation::RenameConstraint { .. }
+            | AlterTableOperation::DisableRowLevelSecurity
+            | AlterTableOperation::DisableRule { .. }
+            | AlterTableOperation::DisableTrigger { .. }
+            | AlterTableOperation::EnableAlwaysRule { .. }
+            | AlterTableOperation::EnableAlwaysTrigger { .. }
+            | AlterTableOperation::EnableReplicaRule { .. }
+            | AlterTableOperation::EnableReplicaTrigger { .. }
+            | AlterTableOperation::EnableRowLevelSecurity
+            | AlterTableOperation::EnableRule { .. }
+            | AlterTableOperation::EnableTrigger { .. }
+            | AlterTableOperation::OwnerTo { .. }
+            | AlterTableOperation::AlterColumn {
+                op: AlterColumnOperation::SetNotNull
+                    | AlterColumnOperation::DropNotNull
+                    | AlterColumnOperation::SetDefault { .. }
+                    | AlterColumnOperation::DropDefault
+                    | AlterColumnOperation::AddGenerated { .. },
                 ..
             }
     )
@@ -644,7 +786,7 @@ fn is_modelled_ddl(statement: &Statement) -> bool {
                 AlterTableOperation::DropColumn { drop_behavior, .. } => {
                     *drop_behavior != Some(DropBehavior::Cascade)
                 }
-                _ => false,
+                operation => is_encryption_neutral_alter_operation(operation),
             })
         }
         Statement::Drop {
@@ -658,6 +800,7 @@ fn is_modelled_ddl(statement: &Statement) -> bool {
 }
 
 #[cfg(test)]
+/// Unit coverage for transaction and protocol state transitions.
 mod tests {
     use super::*;
     use eql_mapper::Table;
@@ -729,10 +872,10 @@ mod tests {
         middleware.execution_succeeded();
         middleware.execution_started(parse("create table reports (id bigint)"));
         middleware.execution_succeeded();
-        middleware.ready_for_query(b'T');
+        middleware.ready_for_query(TransactionStatus::InTransaction);
         middleware.simple_query(&[parse("commit")]);
         middleware.execution_succeeded();
-        middleware.ready_for_query(b'I');
+        middleware.ready_for_query(TransactionStatus::Idle);
 
         assert!(middleware.needs_publication());
         middleware.publication_succeeded();
@@ -837,7 +980,7 @@ mod tests {
             .resolver()
             .resolve_table(&table("reports"))
             .is_err());
-        middleware.ready_for_query(b'I');
+        middleware.ready_for_query(TransactionStatus::Idle);
         assert!(middleware
             .resolver()
             .resolve_table(&table("reports"))
@@ -852,7 +995,7 @@ mod tests {
         let portal = Name::from("portal");
         middleware.prepare(statement.clone(), parse("select 1"));
         middleware.bind(portal.clone(), &statement);
-        middleware.execute(&portal);
+        assert!(!middleware.execute(&portal));
 
         let mut published = Schema::new("public");
         published.add_table(Table::new(Ident::new("reports")));
@@ -865,11 +1008,22 @@ mod tests {
             .is_err());
         middleware.execution_succeeded();
         middleware.protocol_boundary();
-        middleware.ready_for_query(b'I');
+        middleware.ready_for_query(TransactionStatus::Idle);
         assert!(middleware
             .resolver()
             .resolve_table(&table("reports"))
             .is_ok());
+    }
+
+    #[test]
+    fn extended_ddl_execution_requests_an_immediate_flush() {
+        let middleware = SchemaMiddleware::new(Arc::new(Schema::new("public")));
+        let statement = Name::from("statement");
+        let portal = Name::from("portal");
+        middleware.prepare(statement.clone(), parse("create table reports (id bigint)"));
+        middleware.bind(portal.clone(), &statement);
+
+        assert!(middleware.execute(&portal));
     }
 
     #[test]
@@ -945,6 +1099,161 @@ mod tests {
     }
 
     #[test]
+    fn unquoted_domain_names_follow_postgresql_case_folding() {
+        let middleware = SchemaMiddleware::new(Arc::new(Schema::new("public")));
+        let statements = vec![
+            parse("create table secrets (value EQL_V3_TEXT_SEARCH)"),
+            parse("insert into secrets (value) values ('classified')"),
+        ];
+
+        assert!(matches!(
+            column_kind(match &statements[0] {
+                Statement::CreateTable(create) => &create.columns[0],
+                _ => unreachable!(),
+            }),
+            ColumnKind::Eql(_, _)
+        ));
+        assert!(middleware.simple_query_requires_fail_closed(&statements));
+    }
+
+    #[test]
+    fn encryption_overlay_uses_catalog_spelling_for_unquoted_identifiers() {
+        let middleware = SchemaMiddleware::new(Arc::new(Schema::new("public")));
+        middleware.execution_started(parse("create table Secrets (Secret EQL_V3_TEXT_SEARCH)"));
+        middleware.execution_succeeded();
+
+        assert!(middleware
+            .encrypt_config()
+            .get_column_config(&Identifier::new("secrets", "secret"))
+            .is_some());
+    }
+
+    #[test]
+    fn quoted_domain_names_preserve_case() {
+        let column = match parse("create table secrets (value \"EQL_V3_TEXT_SEARCH\")") {
+            Statement::CreateTable(create) => create.columns.into_iter().next().unwrap(),
+            _ => unreachable!(),
+        };
+
+        assert!(matches!(column_kind(&column), ColumnKind::Native));
+    }
+
+    #[test]
+    fn savepoint_names_follow_postgresql_case_folding() {
+        let middleware = SchemaMiddleware::new(Arc::new(Schema::new("public")));
+        middleware.execution_started(parse(
+            "create table users (id bigint, secret eql_v3_text_search)",
+        ));
+        middleware.execution_succeeded();
+        middleware.execution_started(parse("savepoint Foo"));
+        middleware.execution_succeeded();
+        middleware.execution_started(parse("alter table users drop column secret"));
+        middleware.execution_succeeded();
+        middleware.execution_started(parse("rollback to savepoint foo"));
+        middleware.execution_succeeded();
+
+        assert!(middleware
+            .resolver()
+            .resolve_table_column(&table("users"), &Ident::new("secret"))
+            .is_ok());
+    }
+
+    #[test]
+    fn savepoint_state_desynchronization_fails_closed() {
+        let middleware = SchemaMiddleware::new(Arc::new(Schema::new("public")));
+        middleware.execution_started(parse("rollback to savepoint missing"));
+        middleware.execution_succeeded();
+
+        assert!(middleware.has_unmodelled_ddl());
+        assert!(middleware.needs_publication());
+    }
+
+    #[test]
+    fn encryption_neutral_alter_table_operations_are_modelled() {
+        for sql in [
+            "alter table users add constraint users_email_uq unique (email)",
+            "alter table users alter column email set not null",
+            "alter table users alter column email drop not null",
+            "alter table users alter column email set default 'unknown'",
+            "alter table users alter column email drop default",
+            "alter table users owner to current_user",
+            "alter table users enable row level security",
+        ] {
+            assert!(is_modelled_ddl(&parse(sql)), "not modelled: {sql}");
+        }
+    }
+
+    #[test]
+    fn encryption_neutral_alter_on_encrypted_table_allows_a_dependent_batch_statement() {
+        let mut encrypt_config = EncryptConfig::new();
+        let column = match parse("create table users (secret eql_v3_text_search)") {
+            Statement::CreateTable(create) => create.columns.into_iter().next().unwrap(),
+            _ => unreachable!(),
+        };
+        add_column_config(&mut encrypt_config, "users", &column);
+        let store = CommittedSchemaStore::for_testing(Schema::new("public"), encrypt_config);
+        let middleware = SchemaMiddleware::from_store(store);
+        let statements = vec![
+            parse("alter table users alter column secret set not null"),
+            parse("insert into users (secret) values ('classified')"),
+        ];
+
+        assert!(!middleware.simple_query_requires_fail_closed(&statements));
+    }
+
+    #[test]
+    fn native_temporary_table_execution_does_not_dirty_schema_state() {
+        let middleware = SchemaMiddleware::new(Arc::new(Schema::new("public")));
+        middleware.execution_started(parse("create temporary table names (name text)"));
+        middleware.execution_succeeded();
+
+        assert!(!middleware.has_unmodelled_ddl());
+        assert!(!middleware.needs_publication());
+        assert!(middleware
+            .resolver()
+            .resolve_table(&table("names"))
+            .is_err());
+    }
+
+    #[test]
+    fn temporary_table_cannot_shadow_an_encrypted_table_in_a_batch() {
+        let middleware = SchemaMiddleware::new(Arc::new(Schema::new("public")));
+        middleware.execution_started(parse(
+            "create table users (id bigint, email eql_v3_text_search)",
+        ));
+        middleware.execution_succeeded();
+        let statements = vec![
+            parse("create temporary table users (id bigint, email text)"),
+            parse("insert into users (id, email) values (1, 'alice@example.com')"),
+        ];
+
+        assert!(middleware.simple_query_requires_fail_closed(&statements));
+    }
+
+    #[test]
+    fn temporary_shadowing_remains_fail_closed_after_global_publication() {
+        let mut encrypt_config = EncryptConfig::new();
+        let column = match parse("create table users (email eql_v3_text_search)") {
+            Statement::CreateTable(create) => create.columns.into_iter().next().unwrap(),
+            _ => unreachable!(),
+        };
+        add_column_config(&mut encrypt_config, "users", &column);
+        let store = CommittedSchemaStore::for_testing(Schema::new("public"), encrypt_config);
+        let middleware = SchemaMiddleware::from_store(store);
+
+        middleware.execution_started(parse("create temporary table users (email text)"));
+        middleware.execution_succeeded();
+        assert!(middleware.has_unmodelled_ddl());
+        assert!(!middleware.needs_publication());
+
+        middleware.protocol_boundary();
+        middleware.ready_for_query(TransactionStatus::Idle);
+        middleware.publication_succeeded();
+
+        assert!(middleware.has_unmodelled_ddl());
+    }
+
+    #[test]
     fn native_temporary_table_batch_does_not_fail_closed() {
         let middleware = SchemaMiddleware::new(Arc::new(Schema::new("public")));
         let statements = vec![
@@ -1000,7 +1309,7 @@ mod tests {
         middleware.protocol_boundary();
 
         middleware.execution_failed();
-        middleware.ready_for_query(b'I');
+        middleware.ready_for_query(TransactionStatus::Idle);
 
         tokio::time::timeout(
             std::time::Duration::from_millis(20),
@@ -1024,7 +1333,7 @@ mod tests {
         middleware.protocol_boundary();
 
         middleware.execution_failed();
-        middleware.ready_for_query(b'I');
+        middleware.ready_for_query(TransactionStatus::Idle);
 
         assert!(tokio::time::timeout(
             std::time::Duration::from_millis(20),
@@ -1033,7 +1342,7 @@ mod tests {
         .await
         .is_err());
         middleware.execution_succeeded();
-        middleware.ready_for_query(b'I');
+        middleware.ready_for_query(TransactionStatus::Idle);
         middleware.wait_for_ddl().await;
         assert!(middleware
             .resolver()

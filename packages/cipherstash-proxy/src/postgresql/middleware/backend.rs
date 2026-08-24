@@ -357,7 +357,16 @@ impl<S: EncryptionService> Backend<S> {
         if status == pg_proto::TransactionStatus::Idle {
             self.context.publish_schema_if_changed().await?;
         }
-        self.context.schema_ready_for_query(status);
+        let schema_status = match status {
+            pg_proto::TransactionStatus::Idle => crate::proxy::schema::TransactionStatus::Idle,
+            pg_proto::TransactionStatus::InTransaction => {
+                crate::proxy::schema::TransactionStatus::InTransaction
+            }
+            pg_proto::TransactionStatus::FailedTransaction => {
+                crate::proxy::schema::TransactionStatus::FailedTransaction
+            }
+        };
+        self.context.schema_ready_for_query(schema_status);
         Ok(())
     }
 

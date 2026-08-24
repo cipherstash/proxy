@@ -1,3 +1,5 @@
+#![deny(missing_docs)]
+
 use super::eql_domains;
 use crate::config::DatabaseConfig;
 use crate::error::Error;
@@ -118,6 +120,7 @@ impl CommittedSchemaSnapshot {
 }
 
 #[derive(Clone, Debug)]
+/// Loads, versions, and atomically publishes authoritative committed snapshots.
 pub struct SchemaManager {
     config: DatabaseConfig,
     snapshot: Arc<ArcSwap<CommittedSchemaSnapshot>>,
@@ -129,6 +132,7 @@ pub struct SchemaManager {
 }
 
 impl SchemaManager {
+    /// Loads the initial snapshot and starts periodic authoritative refreshes.
     pub async fn init(config: &DatabaseConfig) -> Result<Self, Error> {
         let config = config.clone();
         init_reloader(config).await
@@ -148,6 +152,7 @@ impl SchemaManager {
         }
     }
 
+    /// Requests a coalesced authoritative reload and reports whether it published safely.
     pub async fn reload(&self) -> bool {
         coalesced_reload(
             self.snapshot.clone(),
@@ -225,6 +230,11 @@ fn publish_if_newer(
 async fn init_reloader(config: DatabaseConfig) -> Result<SchemaManager, Error> {
     // Skip retries on startup as the likely failure mode is configuration
     let (schema, encrypt_config) = load_snapshot(&config).await?;
+    if encrypt_config.is_empty() {
+        warn!(msg = "ENCRYPT CONFIGURATION NOT LOADED");
+        warn!(msg = "No active Encrypt configuration found in database.");
+        warn!(msg = "Data is not protected with encryption");
+    }
     info!(msg = "Loaded committed schema snapshot");
 
     let snapshot = Arc::new(ArcSwap::new(Arc::new(CommittedSchemaSnapshot::new(
@@ -369,6 +379,7 @@ fn classify_column(
     Column::native(ident)
 }
 
+/// Loads the current structural schema without exposing encryption metadata.
 pub async fn load_schema(config: &DatabaseConfig) -> Result<Schema, Error> {
     load_snapshot(config).await.map(|(schema, _)| schema)
 }

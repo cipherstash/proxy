@@ -621,9 +621,9 @@ where
         self.schema_middleware.bind(portal, prepared_statement);
     }
 
-    /// Records a portal execution awaiting its backend result.
-    pub fn execute_schema_portal(&self, portal: &Name) {
-        self.schema_middleware.execute(portal);
+    /// Records a portal execution and returns whether its DDL needs an injected flush.
+    pub fn execute_schema_portal(&self, portal: &Name) -> bool {
+        self.schema_middleware.execute(portal)
     }
 
     /// Records statements in one simple-query protocol message.
@@ -689,12 +689,7 @@ where
     }
 
     /// Reports a readiness boundary and PostgreSQL transaction status.
-    pub fn schema_ready_for_query(&self, status: TransactionStatus) {
-        let status = match status {
-            TransactionStatus::Idle => b'I',
-            TransactionStatus::InTransaction => b'T',
-            TransactionStatus::FailedTransaction => b'E',
-        };
+    pub fn schema_ready_for_query(&self, status: crate::proxy::schema::TransactionStatus) {
         self.schema_middleware.ready_for_query(status);
     }
 

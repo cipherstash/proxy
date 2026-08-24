@@ -1,4 +1,5 @@
 #[cfg(test)]
+/// End-to-end schema-change tests through Proxy and directly against PostgreSQL.
 mod tests {
     use crate::common::{connect, connect_with_tls, get_database_port, random_id, PROXY};
     use tokio_postgres::Client;
@@ -72,6 +73,28 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn encryption_neutral_alter_table_keeps_transaction_mappable() {
+        let client = connect_for_test(*PROXY).await;
+        let table = table("bug_308_safe_alter");
+
+        client
+            .execute(&create_encrypted_table(&table), &[])
+            .await
+            .unwrap();
+        client.batch_execute("BEGIN").await.unwrap();
+        client
+            .batch_execute(&format!(
+                "ALTER TABLE {table} ALTER COLUMN secret SET NOT NULL"
+            ))
+            .await
+            .unwrap();
+        insert_secret(&client, &table, 1, "after safe alter").await;
+        client.batch_execute("COMMIT").await.unwrap();
+
+        assert_ciphertext_at_rest(&table, 1, "after safe alter").await;
+    }
+
+    #[tokio::test]
     async fn pipelined_statement_waits_for_extended_ddl_activation() {
         let client = connect_for_test(*PROXY).await;
         let table = table("bug_308_pipeline");
@@ -123,7 +146,7 @@ mod tests {
             .await
             .unwrap();
         client
-            .batch_execute("SAVEPOINT before_reverted")
+            .batch_execute("SAVEPOINT Before_Reverted")
             .await
             .unwrap();
         client

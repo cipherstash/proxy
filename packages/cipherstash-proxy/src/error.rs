@@ -104,8 +104,8 @@ pub enum ZeroKMSError {
 
 #[derive(Error, Debug)]
 pub enum MappingError {
-    /// A simple-query batch would map against schema changed earlier in the batch.
-    #[error("A simple-query batch cannot contain a schema-dependent statement after DDL. Send the DDL and dependent statement as separate queries. For help visit {}#mapping-dependent-statement-after-ddl", ERROR_DOC_BASE_URL)]
+    /// A simple-query batch would map against encryption metadata changed earlier in the batch.
+    #[error("A simple-query batch cannot contain a schema-dependent statement after DDL that may change encryption metadata. Send the DDL and dependent statement as separate queries. For help visit {}#mapping-dependent-statement-after-ddl", ERROR_DOC_BASE_URL)]
     DependentStatementAfterDdl,
 
     /// Confirmed DDL cannot be represented safely by the transaction overlay.
