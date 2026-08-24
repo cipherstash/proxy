@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1787538108775,
+  "lastUpdate": 1787538353892,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -25593,6 +25593,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 42.329491,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "james@cipherstash.com",
+            "name": "James Sadler",
+            "username": "freshtonic"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "5c560988992a29fd1733b643ba8b6a8e82b802e8",
+          "message": "Merge pull request #459 from cipherstash/cip-3849-local-agent-pr-ci-ownership\n\nCIP-3849: Document local agent ownership of PR CI failures",
+          "timestamp": "2026-08-24T12:20:58+10:00",
+          "tree_id": "e197cceb61d8fc637636998e2486b3b866dd852a",
+          "url": "https://github.com/cipherstash/proxy/commit/5c560988992a29fd1733b643ba8b6a8e82b802e8"
+        },
+        "date": 1787538352246,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 41.039446,
             "unit": "Number"
           }
         ]
