@@ -5,6 +5,11 @@
 >  - [mise](https://mise.jdx.dev/) — see the [installing mise](#installing-mise) instructions
 >  - [Docker](https://www.docker.com/) — see Docker's [documentation for installing](https://docs.docker.com/get-started/get-docker/) and ensure that your Docker daemon is running. On *macOS* and *Linux* you can do this by running Docker Desktop.  See: [Docker Desktop docs](https://docs.docker.com/get-started/introduction/get-docker-desktop/). If you have installed Docker without Docker Desktop then you will need to launch `dockerd` manually.
 
+> [!NOTE]
+> On macOS, if development fails with `Too many open files`, raise the limit
+> for the current shell with `ulimit -n 10240`. Add the command to your shell
+> profile if you need the setting to persist.
+
 Local development quickstart:
 
 ```shell
@@ -797,4 +802,3 @@ git push origin :refs/tags/v2.1.9
 # Create the release again
 mise run release v2.1.9
 ```
-
