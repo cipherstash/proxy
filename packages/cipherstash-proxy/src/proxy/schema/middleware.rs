@@ -847,8 +847,10 @@ fn is_modelled_ddl(statement: &Statement) -> bool {
 mod tests {
     use super::*;
     use eql_mapper::Table;
+    use proptest::prelude::*;
     use sqltk::parser::ast::{Ident, ObjectName, ObjectNamePart};
     use sqltk::parser::{dialect::PostgreSqlDialect, parser::Parser};
+    use std::collections::HashSet;
 
     fn parse(sql: &str) -> Statement {
         Parser::new(&PostgreSqlDialect {})
@@ -860,6 +862,86 @@ mod tests {
 
     fn table(name: &str) -> ObjectName {
         ObjectName(vec![ObjectNamePart::Identifier(Ident::new(name))])
+    }
+
+    #[derive(Clone, Debug)]
+    enum GeneratedEvent {
+        CreateSucceeded(u8),
+        CreateFailed(u8),
+        Rollback,
+        FailedTransactionBoundary,
+    }
+
+    fn generated_events() -> impl Strategy<Value = Vec<GeneratedEvent>> {
+        prop::collection::vec(
+            prop_oneof![
+                (0_u8..8).prop_map(GeneratedEvent::CreateSucceeded),
+                (0_u8..8).prop_map(GeneratedEvent::CreateFailed),
+                Just(GeneratedEvent::Rollback),
+                Just(GeneratedEvent::FailedTransactionBoundary),
+            ],
+            1..80,
+        )
+    }
+
+    fn execute_prepared(middleware: &SchemaMiddleware, name: String, statement: Statement) {
+        let statement_name = Name::from(format!("statement_{name}"));
+        let portal_name = Name::from(format!("portal_{name}"));
+        middleware.prepare(statement_name.clone(), statement);
+        middleware.bind(portal_name.clone(), &statement_name);
+        middleware.execute(&portal_name);
+    }
+
+    proptest! {
+        #[test]
+        fn generated_lifecycle_matches_an_independent_schema_model(events in generated_events()) {
+            let middleware = SchemaMiddleware::new(Arc::new(Schema::new("public")));
+            let mut expected_tables = HashSet::new();
+
+            for event in events {
+                match event {
+                    GeneratedEvent::CreateSucceeded(id) => {
+                        let name = format!("generated_{id}");
+                        execute_prepared(
+                            &middleware,
+                            format!("create_{id}"),
+                            parse(&format!(
+                                "create table {name} (id bigint, secret eql_v3_text_search)"
+                            )),
+                        );
+                        middleware.execution_succeeded();
+                        expected_tables.insert(name);
+                    }
+                    GeneratedEvent::CreateFailed(id) => {
+                        let name = format!("generated_{id}");
+                        execute_prepared(
+                            &middleware,
+                            format!("create_{id}"),
+                            parse(&format!(
+                                "create table {name} (id bigint, secret eql_v3_text_search)"
+                            )),
+                        );
+                        middleware.execution_failed();
+                    }
+                    GeneratedEvent::Rollback => {
+                        execute_prepared(&middleware, "rollback".to_owned(), parse("rollback"));
+                        middleware.execution_succeeded();
+                        expected_tables.clear();
+                    }
+                    GeneratedEvent::FailedTransactionBoundary => {
+                        middleware.ready_for_query(TransactionStatus::FailedTransaction)
+                    }
+                }
+
+                for id in 0_u8..8 {
+                    let name = format!("generated_{id}");
+                    let schema_has_table = middleware.resolver().resolve_table(&table(&name)).is_ok();
+                    let config_has_table = middleware.encrypt_config().contains_table(&name);
+                    prop_assert_eq!(schema_has_table, expected_tables.contains(&name));
+                    prop_assert_eq!(config_has_table, expected_tables.contains(&name));
+                }
+            }
+        }
     }
 
     #[test]
