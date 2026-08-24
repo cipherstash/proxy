@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1787538353892,
+  "lastUpdate": 1787538483505,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -25622,6 +25622,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 41.039446,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "dc7a97d56bd0c8239ebe8190250c6613e70df34a",
+          "message": "feat(proxy): accept inbound EQL ciphertext payloads",
+          "timestamp": "2026-08-24T02:21:42Z",
+          "url": "https://github.com/cipherstash/proxy/pull/458/commits/dc7a97d56bd0c8239ebe8190250c6613e70df34a"
+        },
+        "date": 1787538481823,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 41.932893,
             "unit": "Number"
           }
         ]
