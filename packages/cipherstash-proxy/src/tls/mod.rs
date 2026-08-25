@@ -1,10 +1,31 @@
 use crate::DatabaseConfig;
 use crate::{config::TlsConfig, error::Error};
 use rustls::client::danger::ServerCertVerifier;
-use rustls::ClientConfig;
+use rustls::{ClientConfig, RootCertStore};
 use rustls_pki_types::{pem::PemObject, CertificateDer, PrivateKeyDer, ServerName};
 use rustls_platform_verifier::ConfigVerifierExt;
 use std::sync::Arc;
+use tracing::warn;
+
+/// Load the native certificate roots used by pg-proto client-traffic connections.
+///
+/// The caller caches this store for the lifetime of the Proxy so certificate
+/// discovery never runs on a connection-handling task.
+pub(crate) fn load_native_root_store() -> Result<RootCertStore, Error> {
+    let result = rustls_native_certs::load_native_certs();
+    for error in result.errors {
+        warn!(msg = "Could not load a native TLS certificate", %error);
+    }
+
+    let mut roots = RootCertStore::empty();
+    for certificate in result.certs {
+        roots
+            .add(certificate)
+            .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
+    }
+
+    Ok(roots)
+}
 
 ///
 /// Configure the server TLS settings

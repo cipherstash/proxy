@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+
+- **Upstream TLS verification for client traffic**: Connections with `with_tls_verification` enabled now use a cached snapshot of the system root certificates, loaded once when Proxy starts. Unlike Proxy's background database connections, pg-proto client-traffic connections do not apply operating-system revocation checks or enterprise verification policy. Restart Proxy after changing the system trust store.
+
 ## [3.0.1] - 2026-08-05
 
 ### Added

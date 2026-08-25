@@ -64,6 +64,7 @@ where
     schema_changed: Arc<AtomicBool>,
     session_metrics: Arc<RwLock<HashMap<SessionId, SessionMetricsContext>>>,
     table_resolver: Arc<TableResolver>,
+    upstream_tls_roots: Arc<rustls::RootCertStore>,
     unsafe_disable_mapping: bool,
     keyset_id: Arc<RwLock<Option<KeysetIdentifier>>>,
     session_id_counter: Arc<AtomicU64>,
@@ -80,12 +81,6 @@ pub struct ExecuteContext {
     portal: Option<Arc<Portal>>,
     start: Instant,
     session_id: Option<SessionId>,
-    /// Server wait duration (time to first response byte).
-    /// Accumulated here during execution, transferred to SessionMetricsContext on completion.
-    server_wait_duration: Option<Duration>,
-    /// Server response duration (time spent receiving response data after first byte).
-    /// Accumulated here during execution, transferred to SessionMetricsContext on completion.
-    server_response_duration: Duration,
 }
 
 impl ExecuteContext {
@@ -99,29 +94,11 @@ impl ExecuteContext {
             portal,
             start: Instant::now(),
             session_id,
-            server_wait_duration: None,
-            server_response_duration: Duration::from_secs(0),
         }
     }
 
     fn duration(&self) -> Duration {
         Instant::now().duration_since(self.start)
-    }
-
-    fn record_server_wait_or_add_response(&mut self, duration: Duration) {
-        if self.server_wait_duration.is_none() {
-            self.server_wait_duration = Some(duration);
-        } else {
-            self.server_response_duration += duration;
-        }
-    }
-
-    fn server_wait_duration(&self) -> Option<Duration> {
-        self.server_wait_duration
-    }
-
-    fn server_response_duration(&self) -> Duration {
-        self.server_response_duration
     }
 
     fn session_id(&self) -> Option<SessionId> {
@@ -171,6 +148,7 @@ where
         config: Arc<TandemConfig>,
         encrypt_config: Arc<EncryptConfig>,
         schema: Arc<Schema>,
+        upstream_tls_roots: Arc<rustls::RootCertStore>,
         encryption: T,
         reload_sender: ReloadSender,
     ) -> Context<T> {
@@ -184,6 +162,7 @@ where
             schema_changed: Arc::new(AtomicBool::new(false)),
             session_metrics: Arc::new(RwLock::new(HashMap::new())),
             table_resolver: Arc::new(TableResolver::new_editable(schema)),
+            upstream_tls_roots,
             client_id,
             config,
             encrypt_config,
@@ -282,10 +261,6 @@ where
                 let breakdown = json!({
                     "parse_ms": timing.parse_duration.map(|d| d.as_millis()),
                     "encrypt_ms": timing.encrypt_duration.map(|d| d.as_millis()),
-                    "server_write_ms": timing.server_write_duration.map(|d| d.as_millis()),
-                    "server_wait_ms": timing.server_wait_duration.map(|d| d.as_millis()),
-                    "server_response_ms": timing.server_response_duration.map(|d| d.as_millis()),
-                    "client_write_ms": timing.client_write_duration.map(|d| d.as_millis()),
                     "decrypt_ms": timing.decrypt_duration.map(|d| d.as_millis()),
                 });
 
@@ -332,13 +307,6 @@ where
 
     /// Marks the current Execution as Complete.
     ///
-    /// Transfers accumulated timing data from ExecuteContext to SessionMetricsContext.phase_timing:
-    /// - `server_wait_duration` (time to first response byte) is recorded to the session
-    /// - `server_response_duration` (time receiving response data) is added to the session
-    ///
-    /// Timing is transferred to the session identified by this operation rather
-    /// than inferred from response order.
-    ///
     /// If the associated portal is Unnamed, it is closed.
     ///
     /// From the PostgreSQL Extended Query docs:
@@ -360,16 +328,6 @@ where
             execute
         });
         if let Some(execute) = execute {
-            if let Some(session_id) = execute.session_id() {
-                if let Some(wait) = execute.server_wait_duration() {
-                    self.record_server_wait_duration(session_id, wait);
-                }
-                let response = execute.server_response_duration();
-                if !response.is_zero() {
-                    self.add_server_response_duration(session_id, response);
-                }
-            }
-
             // Get labels from current session metadata
             let (statement_type, protocol, mapped, multi_statement) = if let Some(session) = execute
                 .session_id()
@@ -933,6 +891,10 @@ where
         &self.config
     }
 
+    pub(crate) fn upstream_tls_roots(&self) -> Arc<rustls::RootCertStore> {
+        self.upstream_tls_roots.clone()
+    }
+
     fn with_session_metrics_mut<F>(&mut self, session_id: SessionId, f: F)
     where
         F: FnOnce(&mut SessionMetricsContext),
@@ -963,55 +925,6 @@ where
         });
     }
 
-    /// Record server write phase duration
-    pub fn record_server_write_duration(&mut self, session_id: SessionId, duration: Duration) {
-        self.with_session_metrics_mut(session_id, |session| {
-            session.phase_timing.record_server_write(duration);
-        });
-    }
-
-    /// Add server write phase duration (accumulate)
-    pub fn add_server_write_duration(&mut self, session_id: SessionId, duration: Duration) {
-        self.with_session_metrics_mut(session_id, |session| {
-            session.phase_timing.add_server_write(duration);
-        });
-    }
-
-    /// Record server wait phase duration (time to first response byte)
-    pub fn record_server_wait_duration(&mut self, session_id: SessionId, duration: Duration) {
-        self.with_session_metrics_mut(session_id, |session| {
-            session.phase_timing.record_server_wait(duration);
-        });
-    }
-
-    /// Record server response phase duration
-    pub fn record_server_response_duration(&mut self, session_id: SessionId, duration: Duration) {
-        self.with_session_metrics_mut(session_id, |session| {
-            session.phase_timing.record_server_response(duration);
-        });
-    }
-
-    /// Add server response phase duration (accumulate)
-    pub fn add_server_response_duration(&mut self, session_id: SessionId, duration: Duration) {
-        self.with_session_metrics_mut(session_id, |session| {
-            session.phase_timing.add_server_response(duration);
-        });
-    }
-
-    /// Record client write phase duration
-    pub fn record_client_write_duration(&mut self, session_id: SessionId, duration: Duration) {
-        self.with_session_metrics_mut(session_id, |session| {
-            session.phase_timing.record_client_write(duration);
-        });
-    }
-
-    /// Add client write phase duration (accumulate)
-    pub fn add_client_write_duration(&mut self, session_id: SessionId, duration: Duration) {
-        self.with_session_metrics_mut(session_id, |session| {
-            session.phase_timing.add_client_write(duration);
-        });
-    }
-
     /// Add decrypt phase duration (accumulate)
     pub fn add_decrypt_duration(&mut self, session_id: SessionId, duration: Duration) {
         self.with_session_metrics_mut(session_id, |session| {
@@ -1039,18 +952,6 @@ where
         }
     }
 
-    /// Record server wait for first response; otherwise accumulate response time for the current execute
-    pub fn record_execute_server_timing(&mut self, operation: OperationId, duration: Duration) {
-        if let Ok(mut operations) = self.operations.write() {
-            if let Some(execute) = operations
-                .get_mut(&operation)
-                .and_then(|op| op.execute.as_mut())
-            {
-                execute.record_server_wait_or_add_response(duration);
-            }
-        }
-    }
-
     /// Add decrypt phase duration for the current execute session (if any)
     pub fn add_decrypt_duration_for_execute(&mut self, operation: OperationId, duration: Duration) {
         let session_id = self
@@ -1058,20 +959,6 @@ where
             .and_then(|execute| execute.session_id());
         if let Some(session_id) = session_id {
             self.add_decrypt_duration(session_id, duration);
-        }
-    }
-
-    /// Add client write duration for the current execute session (if any)
-    pub fn add_client_write_duration_for_execute(
-        &mut self,
-        operation: OperationId,
-        duration: Duration,
-    ) {
-        let session_id = self
-            .get_execute(operation)
-            .and_then(|execute| execute.session_id());
-        if let Some(session_id) = session_id {
-            self.add_client_write_duration(session_id, duration);
         }
     }
 }
@@ -1133,6 +1020,7 @@ mod tests {
             config,
             encrypt_config,
             schema,
+            Arc::new(rustls::RootCertStore::empty()),
             service,
             reload_sender,
         )
@@ -1149,6 +1037,7 @@ mod tests {
             config,
             encrypt_config,
             schema,
+            Arc::new(rustls::RootCertStore::empty()),
             TestService {},
             reload_sender,
         );
@@ -1182,6 +1071,7 @@ mod tests {
             config,
             encrypt_config,
             schema,
+            Arc::new(rustls::RootCertStore::empty()),
             TestService {},
             reload_sender,
         );

@@ -71,8 +71,6 @@ pub struct Backend<S: EncryptionService> {
 }
 
 impl<S: EncryptionService> Backend<S> {
-    const RESPONSE_BUFFER_SIZE: usize = 4096;
-
     /// Creates a new Backend instance.
     ///
     /// # Arguments
@@ -659,6 +657,7 @@ mod tests {
             config,
             encrypt_config,
             schema,
+            Arc::new(rustls::RootCertStore::empty()),
             TestService {},
             reload_sender,
         );

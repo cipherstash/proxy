@@ -7,7 +7,7 @@ remaining transport adapters below would be better eliminated in `pg-proto`
 itself.
 
 The 0.5.0 version above is the historical baseline when these follow-ups were
-written; the completed migration now uses pg-proto 0.10.6.
+written; the completed migration now uses pg-proto 0.11.1.
 
 ## Preserve buffered transport state across a split
 

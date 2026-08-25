@@ -3,9 +3,10 @@ use std::sync::Arc;
 use crate::{
     config::TandemConfig,
     connect,
-    error::Error,
+    error::{ConfigError, Error, TlsConfigError},
     postgresql::{Column, Context, KeysetIdentifier},
     proxy::{encrypt_config::EncryptConfigManager, schema::SchemaManager},
+    tls,
 };
 use cipherstash_client::encryption::Plaintext;
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
@@ -49,12 +50,25 @@ pub struct Proxy {
     pub schema_manager: SchemaManager,
     /// The EQL version installed in the database or `None` if it was not present
     pub eql_version: Option<String>,
+    upstream_tls_roots: Arc<rustls::RootCertStore>,
     zerokms: ZeroKms,
     reload_sender: ReloadSender,
 }
 
 impl Proxy {
     pub async fn init(config: TandemConfig) -> Result<Proxy, Error> {
+        let upstream_tls_roots = if config.database_tls_disabled() {
+            Arc::new(rustls::RootCertStore::empty())
+        } else {
+            let roots = tokio::task::spawn_blocking(tls::load_native_root_store)
+                .await
+                .map_err(|error| std::io::Error::other(error.to_string()))??;
+            if config.database.with_tls_verification && roots.is_empty() {
+                return Err(ConfigError::from(TlsConfigError::InvalidCertificate).into());
+            }
+            Arc::new(roots)
+        };
+
         let zerokms = ZeroKms::init(&config)?;
 
         // Attempt to connect to default keyset
@@ -81,6 +95,7 @@ impl Proxy {
             encrypt_config_manager,
             schema_manager,
             eql_version,
+            upstream_tls_roots,
             reload_sender,
         })
     }
@@ -142,6 +157,7 @@ impl Proxy {
             config,
             encrypt_config,
             schema,
+            self.upstream_tls_roots.clone(),
             encryption,
             reload_sender,
         )

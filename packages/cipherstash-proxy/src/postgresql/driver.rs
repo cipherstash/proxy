@@ -9,7 +9,7 @@ use pg_proto::{
 };
 use std::{convert::Infallible, sync::Arc};
 use tokio::net::TcpStream;
-use tracing::{info, warn};
+use tracing::info;
 
 #[derive(Clone)]
 struct Route(String);
@@ -37,29 +37,15 @@ impl ServerIdentityProvider for DownstreamIdentity {
 #[derive(Clone)]
 struct UpstreamTls {
     server_name: rustls_pki_types::ServerName<'static>,
-    verify: bool,
+    roots: Arc<rustls::RootCertStore>,
 }
 impl ClientTlsProvider for UpstreamTls {
     type Error = Error;
     async fn resolve(&self, _: &ConnectTarget) -> Result<ClientTlsConfig, Error> {
-        let name = self.server_name.clone();
-        let result = rustls_native_certs::load_native_certs();
-        for error in result.errors {
-            warn!(msg = "Could not load a native TLS certificate", %error);
-        }
-        let mut roots = rustls::RootCertStore::empty();
-        for certificate in result.certs {
-            roots
-                .add(certificate)
-                .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
-        }
-        if self.verify && roots.is_empty() {
-            return Err(crate::error::ConfigError::from(
-                crate::error::TlsConfigError::InvalidCertificate,
-            )
-            .into());
-        }
-        Ok(ClientTlsConfig::new(name, roots))
+        Ok(ClientTlsConfig::new(
+            self.server_name.clone(),
+            (*self.roots).clone(),
+        ))
     }
 }
 
@@ -149,7 +135,7 @@ where
             } else {
                 let provider = UpstreamTls {
                     server_name: context.config().database.server_name()?.to_owned(),
-                    verify: context.config().database.with_tls_verification,
+                    roots: context.upstream_tls_roots(),
                 };
                 let mode = upstream_ssl_mode(context.config());
                 let client = Client::builder()

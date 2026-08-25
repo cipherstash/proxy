@@ -1,7 +1,7 @@
 # pg-proto Migration
 
 > Historical plan: this records the migration's initial 0.2.1 baseline. The
-> completed implementation now uses pg-proto 0.10.6.
+> completed implementation now uses pg-proto 0.11.1.
 
 ## Summary
 
