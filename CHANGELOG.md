@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+
+- **Upstream TLS verification for client traffic**: Connections with `with_tls_verification` enabled now use a cached snapshot of the system root certificates, loaded once when Proxy starts. Unlike Proxy's background database connections, pg-proto client-traffic connections do not apply operating-system revocation checks or enterprise verification policy. Restart Proxy after changing the system trust store.
+
+### Fixed
+
+- **PostgreSQL protocol error handling after the pg-proto migration**: Proxy now rejects `require_tls` configurations that omit a certificate, preserves PostgreSQL transaction state when statement mapping fails, returns decryption failures as PostgreSQL errors without dropping the connection, and reloads changed schemas only after PostgreSQL confirms the transaction boundary. Prepared-statement replacement also preserves existing portals and overlapping statement metrics.
+
 ## [3.0.1] - 2026-08-05
 
 ### Added

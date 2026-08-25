@@ -226,9 +226,17 @@ impl TandemConfig {
                 }
             })?;
 
+        config.validate()?;
         config.encrypt.build_client_key()?;
 
         Ok(config)
+    }
+
+    fn validate(&self) -> Result<(), Error> {
+        if self.server.require_tls && self.tls.is_none() {
+            return Err(ConfigError::TlsConfigurationRequired.into());
+        }
+        Ok(())
     }
 
     pub fn database_tls_disabled(&self) -> bool {
@@ -409,7 +417,7 @@ mod tests {
     use crate::test_helpers::with_no_cs_vars;
     use crate::{
         config::{tandem::extract_missing_field_and_key, TandemConfig},
-        error::Error,
+        error::{ConfigError, Error},
     };
     use cipherstash_client::config::vars::{
         CS_CLIENT_ACCESS_KEY, CS_CLIENT_ID, CS_CLIENT_KEY, CS_DEFAULT_KEYSET_ID,
@@ -418,6 +426,18 @@ mod tests {
     use uuid::Uuid;
 
     const CS_PREFIX: &str = "CS_TEST";
+
+    #[test]
+    fn require_tls_needs_server_tls_configuration() {
+        let mut config = TandemConfig::for_testing();
+        config.server.require_tls = true;
+        config.tls = None;
+
+        assert!(matches!(
+            config.validate(),
+            Err(Error::Config(ConfigError::TlsConfigurationRequired))
+        ));
+    }
 
     #[test]
     /// the env vars from stash setup should be the preferred option

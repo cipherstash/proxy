@@ -42,6 +42,20 @@
 
 <!-- ---------------------------------------------------------------------------------------------------- -->
 
+## Internal PostgreSQL protocol error <a id='protocol-internal-error'></a>
+
+CipherStash Proxy encountered an unexpected internal protocol state while processing a PostgreSQL response.
+
+### Error message
+
+```
+CipherStash Proxy encountered an internal PostgreSQL protocol error.
+```
+
+### How to fix
+
+Retry the operation. If the error persists, collect the proxy logs and report the issue to CipherStash support. The logs retain the detailed internal error needed for diagnosis.
+
 <!-- ---------------------------------------------------------------------------------------------------- -->
 
 # Authentication errors

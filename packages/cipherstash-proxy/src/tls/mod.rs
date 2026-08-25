@@ -1,39 +1,30 @@
+use crate::DatabaseConfig;
 use crate::{config::TlsConfig, error::Error};
-use crate::{DatabaseConfig, TandemConfig};
 use rustls::client::danger::ServerCertVerifier;
-use rustls::ClientConfig;
+use rustls::{ClientConfig, RootCertStore};
 use rustls_pki_types::{pem::PemObject, CertificateDer, PrivateKeyDer, ServerName};
 use rustls_platform_verifier::ConfigVerifierExt;
 use std::sync::Arc;
-use tokio::net::TcpStream;
-use tokio_rustls::{TlsAcceptor, TlsConnector, TlsStream};
+use tracing::warn;
 
+/// Load the native certificate roots used by pg-proto client-traffic connections.
 ///
-/// Create a Server TLS connection
-/// The returned type is the higher-level TlsStream that wraps both Client & Server variants
-///
-pub async fn client(
-    stream: TcpStream,
-    config: &TandemConfig,
-) -> Result<TlsStream<TcpStream>, Error> {
-    let tls_config = configure_client(&config.database);
-    let connector = TlsConnector::from(Arc::new(tls_config));
-    let domain = config.database.server_name()?.to_owned();
-    let tls_stream = connector.connect(domain, stream).await?;
+/// The caller caches this store for the lifetime of the Proxy so certificate
+/// discovery never runs on a connection-handling task.
+pub(crate) fn load_native_root_store() -> Result<RootCertStore, Error> {
+    let result = rustls_native_certs::load_native_certs();
+    for error in result.errors {
+        warn!(msg = "Could not load a native TLS certificate", %error);
+    }
 
-    Ok(tls_stream.into())
-}
+    let mut roots = RootCertStore::empty();
+    for certificate in result.certs {
+        roots
+            .add(certificate)
+            .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
+    }
 
-///
-/// Create a Server TLS connection
-/// The returned type is the higher-level TlsStream that wraps both Client & Server variants
-///
-pub async fn server(stream: TcpStream, config: &TlsConfig) -> Result<TlsStream<TcpStream>, Error> {
-    let server_config = configure_server(config)?;
-    let acceptor = TlsAcceptor::from(Arc::new(server_config));
-    let tls_stream = acceptor.accept(stream).await?;
-
-    Ok(tls_stream.into())
+    Ok(roots)
 }
 
 ///
@@ -44,6 +35,14 @@ pub async fn server(stream: TcpStream, config: &TlsConfig) -> Result<TlsStream<T
 /// private_key from the string contents or the file contents.
 ///
 pub fn configure_server(config: &TlsConfig) -> Result<rustls::ServerConfig, Error> {
+    configure_server_with_leaf(config).map(|(config, _)| config)
+}
+
+/// Builds the server TLS configuration and returns its leaf certificate for
+/// pg-proto's RFC 5929 channel-binding transport.
+pub fn configure_server_with_leaf(
+    config: &TlsConfig,
+) -> Result<(rustls::ServerConfig, CertificateDer<'static>), Error> {
     let certs = match config {
         TlsConfig::Pem {
             certificate_pem: certificate,
@@ -68,11 +67,15 @@ pub fn configure_server(config: &TlsConfig) -> Result<rustls::ServerConfig, Erro
         } => PrivateKeyDer::from_pem_file(private_key),
     }?;
 
+    let leaf = certs
+        .first()
+        .cloned()
+        .ok_or(rustls::Error::NoCertificatesPresented)?;
     let server_config = rustls::ServerConfig::builder()
         .with_no_client_auth()
         .with_single_cert(certs, key)?;
 
-    Ok(server_config)
+    Ok((server_config, leaf))
 }
 
 ///

@@ -1,30 +1,22 @@
-use super::context::Context;
-use super::data::to_sql;
-use super::error_handler::PostgreSqlErrorHandler;
-use super::message_buffer::MessageBuffer;
-use super::messages::error_response::ErrorResponse;
-use super::messages::row_description::RowDescription;
-use super::messages::{BackendCode, UNSPECIFIED_TYPE_OID};
-use super::Column;
-use crate::connect::Sender;
-use crate::error::{EncryptError, Error};
+use super::super::context::Context;
+use super::super::data::to_sql;
+use super::super::error_handler::PostgreSqlErrorHandler;
+use super::super::rewrite::UNSPECIFIED_TYPE_OID;
+use super::super::Column;
+use crate::error::{EncryptError, Error, ProtocolError};
 use crate::log::{CONTEXT, DEVELOPMENT, MAPPER, PROTOCOL};
 use crate::postgresql::context::Portal;
-use crate::postgresql::messages::data_row::DataRow;
-use crate::postgresql::messages::param_description::ParamDescription;
-use crate::postgresql::protocol::{self};
+use crate::postgresql::rewrite::data_row;
 use crate::prometheus::{
-    CLIENTS_BYTES_SENT_TOTAL, DECRYPTED_VALUES_TOTAL, DECRYPTION_DURATION_SECONDS,
-    DECRYPTION_ERROR_TOTAL, DECRYPTION_REQUESTS_TOTAL, ROWS_ENCRYPTED_TOTAL,
-    ROWS_PASSTHROUGH_TOTAL, ROWS_TOTAL, SERVER_BYTES_RECEIVED_TOTAL,
+    DECRYPTED_VALUES_TOTAL, DECRYPTION_DURATION_SECONDS, DECRYPTION_ERROR_TOTAL,
+    DECRYPTION_REQUESTS_TOTAL, ROWS_ENCRYPTED_TOTAL, ROWS_PASSTHROUGH_TOTAL, ROWS_TOTAL,
 };
 use crate::proxy::EncryptionService;
 use crate::EqlCiphertext;
-use bytes::BytesMut;
 use metrics::{counter, histogram};
+use pg_proto::{BackendMessage, BackendMiddlewareOutput, DataRow, OperationId};
 use std::time::Instant;
-use tokio::io::AsyncRead;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info};
 
 /// The PostgreSQL proxy backend that handles server-to-client message processing.
 ///
@@ -70,26 +62,31 @@ use tracing::{debug, error, info, warn};
 /// - `RowDescription`: Result column metadata (modified for encrypted columns)
 /// - `ParameterDescription`: Parameter metadata (modified for encrypted parameters)
 /// - `ReadyForQuery`: Session ready state (triggers schema reload if needed)
-pub struct Backend<R, S>
-where
-    R: AsyncRead + Unpin,
-    S: EncryptionService,
-{
-    /// Sender for outgoing messages to client
-    client_sender: Sender,
-    /// Reader for incoming messages from server
-    server_reader: R,
+pub struct Backend<S: EncryptionService> {
     /// Session context with portal and statement metadata
     context: Context<S>,
-    /// Buffer for batching DataRow messages before decryption
-    buffer: MessageBuffer,
+    encrypted_rows: Vec<DataRow>,
+    encrypted_rows_operation: Option<OperationId>,
+    encrypted_rows_bytes: usize,
+    discard_execution: bool,
 }
 
-impl<R, S> Backend<R, S>
-where
-    R: AsyncRead + Unpin,
-    S: EncryptionService,
-{
+const MAX_ENCRYPTED_ROWS: usize = 4096;
+const MAX_ENCRYPTED_ROW_BYTES: usize = 64 * 1024 * 1024;
+
+impl<S: EncryptionService> Backend<S> {
+    fn error_response(&self, err: Error) -> BackendMessage {
+        BackendMessage::ErrorResponse(self.error_to_response(err))
+    }
+
+    fn decryption_failure(&mut self, err: Error) -> BackendMiddlewareOutput {
+        self.encrypted_rows.clear();
+        self.encrypted_rows_operation = None;
+        self.encrypted_rows_bytes = 0;
+        self.discard_execution = true;
+        BackendMiddlewareOutput::Expand(vec![self.error_response(err)])
+    }
+
     /// Creates a new Backend instance.
     ///
     /// # Arguments
@@ -98,78 +95,35 @@ where
     /// * `server_reader` - Stream for reading messages from the PostgreSQL server
     /// * `encrypt` - Encryption service for handling column decryption
     /// * `context` - Session context shared with the frontend
-    pub fn new(client_sender: Sender, server_reader: R, context: Context<S>) -> Self {
-        let buffer = MessageBuffer::new();
+    pub fn new(context: Context<S>) -> Self {
         Backend {
-            client_sender,
-            server_reader,
             context,
-            buffer,
+            encrypted_rows: Vec::new(),
+            encrypted_rows_operation: None,
+            encrypted_rows_bytes: 0,
+            discard_execution: false,
         }
     }
 
-    /// Main message processing loop for handling server messages.
-    ///
-    /// Reads messages from the PostgreSQL server, processes them based on message type,
-    /// performs decryption for encrypted result data, and forwards messages to the client.
-    ///
-    /// # PostgreSQL Protocol Phases
-    ///
-    /// ## Execute Phase
-    /// Execute operations produce a stream of DataRow messages followed by exactly one of:
-    /// - `CommandComplete` - Successful completion
-    /// - `EmptyQueryResponse` - Empty query completed
-    /// - `ErrorResponse` - Error occurred
-    /// - `PortalSuspended` - Portal execution suspended (LIMIT reached)
-    ///
-    /// ## Describe Phase
-    /// Describe operations return metadata about statements or portals:
-    /// - `ParameterDescription` - Parameter metadata (for statements)
-    /// - `RowDescription` - Result column metadata
-    /// - `NoData` - No result columns
-    ///
-    /// # Message Processing Flow
-    ///
-    /// 1. **Read Message**: Read and parse PostgreSQL wire protocol message
-    /// 2. **Check Passthrough**: Skip processing if encryption is disabled
-    /// 3. **Handle by Type**: Route to appropriate handler based on message code
-    /// 4. **Buffer Management**: Buffer DataRows, flush on completion/errors
-    /// 5. **Forward**: Send processed message to PostgreSQL client
-    ///
-    /// # Buffering Behavior
-    ///
-    /// DataRow messages are buffered for batch decryption to improve performance.
-    /// The buffer is automatically flushed when:
-    /// - Buffer reaches capacity
-    /// - Execute phase completes (CommandComplete, ErrorResponse, etc.)
-    /// - Non-DataRow message is encountered
-    ///
-    /// # Returns
-    ///
-    /// Returns `Ok(())` on successful message processing, or an `Error` if a fatal
-    /// error occurs that should terminate the connection.
-    pub async fn rewrite(&mut self) -> Result<(), Error> {
-        let read_start = Instant::now();
-        let (code, mut bytes) = protocol::read_message(
-            &mut self.server_reader,
-            self.context.client_id,
-            self.context.connection_timeout(),
-        )
-        .await?;
-        let read_duration = read_start.elapsed();
-        self.context.record_execute_server_timing(read_duration);
+    pub async fn intercept(
+        &mut self,
+        operation: Option<OperationId>,
+        message: BackendMessage,
+    ) -> Result<BackendMiddlewareOutput, Error> {
+        self.intercept_backend(operation, message).await
+    }
 
-        let sent: u64 = bytes.len() as u64;
-        counter!(SERVER_BYTES_RECEIVED_TOTAL).increment(sent);
+    async fn intercept_backend(
+        &mut self,
+        operation: Option<OperationId>,
+        protocol_message: BackendMessage,
+    ) -> Result<BackendMiddlewareOutput, Error> {
+        let mut outbound_message = protocol_message.clone();
 
-        // Log slow database responses (configurable threshold, default 100ms)
-        if read_duration > self.context.slow_db_response_min_duration() {
-            warn!(
-                client_id = self.context.client_id,
-                msg = "Slow database response",
-                duration_ms = read_duration.as_millis(),
-                message_code = ?code,
-            );
+        if matches!(protocol_message, BackendMessage::ErrorResponse(_)) {
+            if let Some(response) = operation.and_then(|id| self.context.take_operation_error(id)) {
+                outbound_message = BackendMessage::ErrorResponse(response);
+            }
         }
 
         if self.context.is_passthrough() {
@@ -177,94 +131,169 @@ where
                 client_id = self.context.client_id,
                 msg = "Passthrough enabled"
             );
-
             // A Proxy started against a database with no encrypted columns is
             // initially in passthrough mode. DDL on that connection is how an
             // encrypted schema can first appear, so publish the reload before
             // forwarding ReadyForQuery. This ordering also guarantees that a
             // client opening its next connection after ReadyForQuery observes
             // the newly loaded schema and encrypt configuration.
-            if matches!(code.into(), BackendCode::ReadyForQuery) {
+            if matches!(&protocol_message, BackendMessage::ReadyForQuery(_)) {
                 self.context.reload_schema_if_changed().await;
             }
 
-            self.write_with_flush(bytes).await?;
-
-            // The frontend starts a session and enqueues an execute for every
-            // statement (start_session / set_execute), regardless of whether
-            // the statement is mapped. Those per-connection queues are only
-            // drained by complete_execution()/finish_session(), which are
-            // normally called when an execute terminates (below). Because the
-            // passthrough path returns early, we must drain them here too —
-            // otherwise the execute and session_metrics queues grow by one
-            // entry per statement and never shrink, leaking memory until the
-            // process is OOM-killed. See BUG-300.
-            match code.into() {
-                BackendCode::CommandComplete
-                | BackendCode::EmptyQueryResponse
-                | BackendCode::PortalSuspended
-                | BackendCode::ErrorResponse => {
-                    self.context.complete_execution();
-                    self.context.finish_session();
+            // CipherStash metadata is operation-keyed even in passthrough mode,
+            // and must be released when pg-proto identifies its terminal response.
+            match protocol_message {
+                BackendMessage::CommandComplete(_)
+                | BackendMessage::EmptyQueryResponse
+                | BackendMessage::PortalSuspended => {
+                    if let Some(operation) = operation {
+                        let session = self.context.complete_execution(operation);
+                        self.context.discard_operation(operation);
+                        self.context.finish_session(session);
+                    }
+                }
+                BackendMessage::ErrorResponse(_) => {
+                    if let Some(operation) = operation {
+                        let session = self.context.complete_execution(operation);
+                        self.context.discard_operation(operation);
+                        self.context.finish_session(session);
+                    }
+                }
+                BackendMessage::RowDescription(_) | BackendMessage::NoData => {
+                    if let Some(operation) = operation {
+                        self.context.complete_describe(operation);
+                    }
+                }
+                BackendMessage::ReadyForQuery(status) => {
+                    self.context.set_transaction_status(status);
                 }
                 _ => {}
             }
 
-            return Ok(());
+            return Ok(BackendMiddlewareOutput::Forward(outbound_message));
         }
+
+        if self.discard_execution {
+            match protocol_message {
+                BackendMessage::CommandComplete(_)
+                | BackendMessage::EmptyQueryResponse
+                | BackendMessage::PortalSuspended => {
+                    if let Some(operation) = operation {
+                        let session = self.context.complete_execution(operation);
+                        self.context.discard_operation(operation);
+                        self.context.finish_session(session);
+                    }
+                }
+                BackendMessage::ErrorResponse(_) => {
+                    if let Some(operation) = operation {
+                        let session = self.context.complete_execution(operation);
+                        self.context.discard_operation(operation);
+                        self.context.finish_session(session);
+                    }
+                }
+                BackendMessage::ReadyForQuery(status) => {
+                    self.discard_execution = false;
+                    self.context.set_transaction_status(status);
+                    self.context.reload_schema_if_changed().await;
+                    return Ok(BackendMiddlewareOutput::Forward(
+                        BackendMessage::ReadyForQuery(status),
+                    ));
+                }
+                _ => {}
+            }
+            return Ok(BackendMiddlewareOutput::Suppress(protocol_message));
+        }
+
+        let mut prefix = if !matches!(protocol_message, BackendMessage::DataRow(_))
+            && !self.encrypted_rows.is_empty()
+        {
+            match self.flush_encrypted_rows().await {
+                Ok(messages) => messages,
+                Err(err) => {
+                    self.discard_execution = true;
+                    if let Some(operation) = operation {
+                        let session = self.context.complete_execution(operation);
+                        self.context.discard_operation(operation);
+                        self.context.finish_session(session);
+                    }
+                    return Ok(self.decryption_failure(err));
+                }
+            }
+        } else {
+            Vec::new()
+        };
 
         let keyset_id = self.context.keyset_identifier();
         debug!(target: CONTEXT, client_id = ?self.context.client_id, ?keyset_id);
 
-        match code.into() {
-            BackendCode::DataRow => {
+        match protocol_message {
+            BackendMessage::DataRow(row) => {
                 // Encrypted DataRows are added to the buffer and we return early
                 // Otherwise, continue and write
-                if self.data_row_handler(&bytes).await? {
-                    return Ok(());
+                if self.data_row_handler(operation).await? {
+                    let Some(operation) = operation else {
+                        return Ok(self.decryption_failure(
+                            ProtocolError::HeldDataRowMissingOperation.into(),
+                        ));
+                    };
+                    if self
+                        .encrypted_rows_operation
+                        .replace(operation)
+                        .is_some_and(|current| current != operation)
+                    {
+                        return Ok(self.decryption_failure(
+                            ProtocolError::HeldDataRowOperationMismatch.into(),
+                        ));
+                    }
+                    self.encrypted_rows_bytes += row
+                        .columns
+                        .iter()
+                        .flatten()
+                        .map(bytes::Bytes::len)
+                        .sum::<usize>();
+                    self.encrypted_rows.push(row.clone());
+                    if self.encrypted_rows.len() < MAX_ENCRYPTED_ROWS
+                        && self.encrypted_rows_bytes < MAX_ENCRYPTED_ROW_BYTES
+                    {
+                        return Ok(BackendMiddlewareOutput::Suppress(BackendMessage::DataRow(
+                            row,
+                        )));
+                    }
+                    return match self.flush_encrypted_rows().await {
+                        Ok(messages) => Ok(BackendMiddlewareOutput::Expand(messages)),
+                        Err(err) => Ok(self.decryption_failure(err)),
+                    };
                 }
             }
 
             // Execute phase is always terminated by the appearance of exactly one of these messages:
             //      CommandComplete, EmptyQueryResponse (if the portal was created from an empty query string), ErrorResponse, or PortalSuspended.
-            BackendCode::CommandComplete
-            | BackendCode::EmptyQueryResponse
-            | BackendCode::PortalSuspended => {
+            BackendMessage::CommandComplete(_)
+            | BackendMessage::EmptyQueryResponse
+            | BackendMessage::PortalSuspended => {
                 debug!(target: PROTOCOL, client_id = self.context.client_id, msg = "CommandComplete | EmptyQueryResponse | PortalSuspended");
 
-                match self.flush().await {
-                    Ok(_) => (),
-                    Err(err) => {
-                        warn!(client_id = self.client_id(), error = err.to_string());
-                        self.send_error_response(err)?;
-                    }
+                if let Some(operation) = operation {
+                    let session = self.context.complete_execution(operation);
+                    self.context.discard_operation(operation);
+                    self.context.finish_session(session);
                 }
-
-                self.context.complete_execution();
-                self.context.finish_session();
             }
-            BackendCode::ErrorResponse => {
-                if let Some(b) = self.error_response_handler(&bytes)? {
-                    bytes = b
-                }
+            BackendMessage::ErrorResponse(ref response) => {
+                self.error_response_handler(response);
 
-                match self.flush().await {
-                    Ok(_) => (),
-                    Err(err) => {
-                        warn!(client_id = self.client_id(), error = err.to_string());
-                        self.send_error_response(err)?;
-                    }
+                if let Some(operation) = operation {
+                    let session = self.context.complete_execution(operation);
+                    self.context.finish_session(session);
                 }
-
-                self.context.complete_execution();
-                self.context.finish_session();
             }
             // Describe with Target:Statement
             // Returns a ParameterDescription followed by RowDescription
             // The Describe is complete after the RowDescription
-            BackendCode::ParameterDescription => {
-                if let Some(b) = self.parameter_description_handler(&bytes).await? {
-                    bytes = b
+            BackendMessage::ParameterDescription(types) => {
+                if let Some(message) = self.parameter_description_handler(operation, types).await? {
+                    outbound_message = message;
                 }
             }
             // Describe with Target:Statement or Target::Portal
@@ -272,21 +301,26 @@ where
             // Target::Portal returns a RowDescription
             // If no rows are returned, NoData is returned instead of a RowDescription
             // Complete the Describe
-            BackendCode::RowDescription => {
-                if let Some(b) = self.row_description_handler(&bytes).await? {
-                    bytes = b
+            BackendMessage::RowDescription(description) => {
+                if let Some(message) = self.row_description_handler(operation, description).await? {
+                    outbound_message = message;
                 }
-                self.context.complete_describe();
+                if let Some(operation) = operation {
+                    self.context.complete_describe(operation);
+                }
             }
             // Describe with Target:Statement or Target::Portal
             // If the statement returns no rows, NoData is returned instead of a RowDescription
-            BackendCode::NoData => {
-                self.context.complete_describe();
+            BackendMessage::NoData => {
+                if let Some(operation) = operation {
+                    self.context.complete_describe(operation);
+                }
             }
             // Reload for SompleQuery flow
             // Reload is potentially triggered by a FrontEnd Sync message.
             // However, the SimpleQuery flow does not use Sync so we check here as well
-            BackendCode::ReadyForQuery => {
+            BackendMessage::ReadyForQuery(status) => {
+                self.context.set_transaction_status(status);
                 debug!(target: PROTOCOL,
                     client_id = self.context.client_id,
                     msg = "ReadyForQuery"
@@ -294,18 +328,21 @@ where
                 self.context.reload_schema_if_changed().await;
             }
 
-            code => {
+            _ => {
                 debug!(target: PROTOCOL,
                     client_id = self.context.client_id,
                     msg = "Passthrough",
-                    ?code,
+                    message = ?protocol_message,
                 );
             }
         }
 
-        self.write_with_flush(bytes).await?;
-
-        Ok(())
+        if prefix.is_empty() {
+            Ok(BackendMiddlewareOutput::Forward(outbound_message))
+        } else {
+            prefix.push(outbound_message);
+            Ok(BackendMiddlewareOutput::Expand(prefix))
+        }
     }
 
     /// Handles PostgreSQL ErrorResponse messages from the server.
@@ -344,11 +381,9 @@ where
     ///
     /// Always returns `Some(bytes)` containing the original error response
     /// to forward to the client unchanged.
-    fn error_response_handler(&mut self, bytes: &BytesMut) -> Result<Option<BytesMut>, Error> {
-        let error_response = ErrorResponse::try_from(bytes)?;
-        error!(msg = "PostgreSQL Error", error = ?error_response);
+    fn error_response_handler(&mut self, response: &pg_proto::DiagnosticResponse) {
+        error!(msg = "PostgreSQL Error", fields = ?response.fields);
         info!(msg = "PostgreSQL Errors originate in the database");
-        Ok(Some(bytes.to_owned()))
     }
 
     ///
@@ -358,49 +393,6 @@ where
     ///  - when the buffer is full
     ///  - when any other message type is written
     ///
-    async fn buffer(&mut self, data_row: DataRow) -> Result<(), Error> {
-        self.buffer.push(data_row);
-        if self.buffer.at_capacity() {
-            debug!(target: DEVELOPMENT, client_id = self.context.client_id, msg = "Flush message buffer");
-            self.flush().await?;
-        }
-        Ok(())
-    }
-
-    ///
-    /// Write a message to the client
-    /// Flushes all messages in the buffer before writing the message
-    ///
-    pub async fn write_with_flush(&mut self, bytes: BytesMut) -> Result<(), Error> {
-        debug!(target: DEVELOPMENT, client_id = self.context.client_id, msg = "Write");
-
-        match self.flush().await {
-            Ok(_) => (),
-            Err(err) => {
-                warn!(client_id = self.client_id(), error = err.to_string());
-                self.send_error_response(err)?;
-            }
-        }
-
-        self.write(bytes).await?;
-        Ok(())
-    }
-
-    ///
-    /// Write a message to the client
-    ///
-    pub async fn write(&mut self, bytes: BytesMut) -> Result<(), Error> {
-        let sent: u64 = bytes.len() as u64;
-        counter!(CLIENTS_BYTES_SENT_TOTAL).increment(sent);
-
-        let start = Instant::now();
-        self.client_sender.send(bytes)?;
-        let duration = start.elapsed();
-        self.context.add_client_write_duration_for_execute(duration);
-
-        Ok(())
-    }
-
     /// Flushes all buffered DataRow messages by performing batch decryption.
     ///
     /// This is the core decryption logic that processes buffered DataRow messages,
@@ -440,32 +432,25 @@ where
     /// appropriate error responses and recorded in metrics. The error mapping
     /// implemented in the encryption service ensures proper keyset ID context
     /// is preserved in error messages.
-    async fn flush(&mut self) -> Result<(), Error> {
-        if self.buffer.is_empty() {
-            debug!(target: MAPPER, client_id = self.context.client_id, msg = "Empty buffer");
-        }
+    async fn flush_encrypted_rows(&mut self) -> Result<Vec<BackendMessage>, Error> {
+        let operation = self.encrypted_rows_operation.take();
+        let mut rows = std::mem::take(&mut self.encrypted_rows);
+        self.encrypted_rows_bytes = 0;
 
-        let portal = self.context.get_portal_from_execute();
+        let portal =
+            operation.and_then(|operation| self.context.get_portal_from_execute(operation));
         let portal = match portal.as_deref() {
             Some(Portal::Encrypted { .. }) => portal.unwrap(),
             _ => {
                 debug!(target: MAPPER, client_id = self.context.client_id, msg = "Passthrough portal");
-                if !self.buffer.is_empty() {
-                    error!(
-                        client_id = self.context.client_id,
-                        msg = "Buffer is not empty"
-                    );
-                }
-                return Ok(());
+                return Err(ProtocolError::HeldDataRowsNotEncrypted.into());
             }
         };
-
-        let mut rows: Vec<DataRow> = self.buffer.drain().into_iter().collect();
         debug!(target: DEVELOPMENT, client_id = self.context.client_id, rows = rows.len());
 
         let result_column_count = match rows.first() {
-            Some(row) => row.column_count(),
-            None => return Ok(()),
+            Some(row) => row.columns.len(),
+            None => return Ok(Vec::new()),
         };
 
         // Result Column Format Codes are passed with the Bind message
@@ -479,7 +464,7 @@ where
         // Each row is converted into Vec<Option<CipherText>>
         let ciphertexts: Vec<Option<EqlCiphertext>> = rows
             .iter_mut()
-            .flat_map(|row| row.as_ciphertext(projection_columns))
+            .flat_map(|row| data_row::as_ciphertext(row, projection_columns))
             .collect::<Vec<_>>();
 
         let start = Instant::now();
@@ -501,7 +486,10 @@ where
         let duration = Instant::now().duration_since(start);
 
         // Always record for slow-statement diagnostics
-        self.context.add_decrypt_duration_for_execute(duration);
+        if let Some(operation) = operation {
+            self.context
+                .add_decrypt_duration_for_execute(operation, duration);
+        }
 
         // Prometheus metrics remain gated
         if self.context.prometheus_enabled() {
@@ -520,6 +508,7 @@ where
 
         // Stitch Plaintext back into Rows encoded with the appropriate Format Code
         // Each chunk is written to the client
+        let mut messages = Vec::with_capacity(rows.len());
         for (chunk, mut row) in rows {
             let data = chunk
                 .iter()
@@ -530,13 +519,11 @@ where
                 })
                 .collect::<Result<Vec<_>, _>>()?;
 
-            row.rewrite(&data)?;
+            data_row::rewrite(&mut row, &data)?;
 
-            let bytes = BytesMut::try_from(row)?;
-            self.write(bytes).await?;
+            messages.push(BackendMessage::DataRow(row));
         }
-
-        Ok(())
+        Ok(messages)
     }
 
     fn check_column_config(
@@ -574,13 +561,14 @@ where
 
     async fn parameter_description_handler(
         &self,
-        bytes: &BytesMut,
-    ) -> Result<Option<BytesMut>, Error> {
-        let mut description = ParamDescription::try_from(bytes)?;
-
+        operation: Option<OperationId>,
+        description: Vec<u32>,
+    ) -> Result<Option<BackendMessage>, Error> {
         debug!(target: PROTOCOL, client_id = self.context.client_id, ParamDescription = ?description);
 
-        if let Some(statement) = self.context.get_statement_from_describe() {
+        if let Some(statement) =
+            operation.and_then(|operation| self.context.get_statement_from_describe(operation))
+        {
             // Describe the params the CLIENT wrote, not the ones PostgreSQL was
             // sent. A rewrite may have fused or dropped params, in which case
             // the server's description is both shorter than and shifted from
@@ -601,23 +589,25 @@ where
                         .output_params
                         .iter()
                         .position(|output| output.source.primary_input() == idx)
-                        .and_then(|output_idx| description.types.get(output_idx).copied())
+                        .and_then(|output_idx| description.get(output_idx).copied())
+                        .map(|oid| oid as i32)
                         .unwrap_or(UNSPECIFIED_TYPE_OID),
                 })
                 .collect::<Vec<_>>();
 
             debug!(target: MAPPER, client_id = self.context.client_id, param_types = ?param_types);
 
-            description.set_types(param_types);
+            let rewritten = param_types
+                .into_iter()
+                .map(|oid| oid as u32)
+                .collect::<Vec<_>>();
+            if rewritten != description {
+                let message = BackendMessage::ParameterDescription(rewritten);
+                debug!(target: MAPPER, client_id = self.context.client_id, msg = "Rewrite ParamDescription", ?message);
+                return Ok(Some(message));
+            }
         }
-
-        if description.requires_rewrite() {
-            let bytes = BytesMut::try_from(description)?;
-            debug!(target: MAPPER, client_id = self.context.client_id, msg = "Rewrite ParamDescription", bytes = ?bytes);
-            Ok(Some(bytes))
-        } else {
-            Ok(None)
-        }
+        Ok(None)
     }
 
     ///
@@ -629,13 +619,14 @@ where
     ///
     async fn row_description_handler(
         &mut self,
-        bytes: &BytesMut,
-    ) -> Result<Option<BytesMut>, Error> {
-        let mut description = RowDescription::try_from(bytes)?;
-
+        operation: Option<OperationId>,
+        mut description: pg_proto::RowDescription,
+    ) -> Result<Option<BackendMessage>, Error> {
         debug!(target: PROTOCOL, client_id = self.context.client_id, RowDescription = ?description);
 
-        if let Some(statement) = self.context.get_statement_for_row_decription() {
+        if let Some(statement) =
+            operation.and_then(|operation| self.context.get_statement_for_operation(operation))
+        {
             let projection_types = statement
                 .projection_columns
                 .iter()
@@ -644,16 +635,21 @@ where
 
             debug!(target: MAPPER, client_id = self.context.client_id, projection_types = ?projection_types);
 
-            description.map_types(&projection_types);
+            let mut rewritten = false;
+            for (field, postgres_type) in description.fields.iter_mut().zip(projection_types) {
+                if let Some(postgres_type) = postgres_type {
+                    let oid = postgres_type.oid();
+                    rewritten |= field.type_oid != oid;
+                    field.type_oid = oid;
+                }
+            }
+            if rewritten {
+                let message = BackendMessage::RowDescription(description);
+                debug!(target: MAPPER, client_id = self.context.client_id, msg = "Rewrite RowDescription", ?message);
+                return Ok(Some(message));
+            }
         }
-
-        if description.requires_rewrite() {
-            let bytes = BytesMut::try_from(description)?;
-            debug!(target: MAPPER, client_id = self.context.client_id, msg = "Rewrite RowDescription", bytes = ?bytes);
-            Ok(Some(bytes))
-        } else {
-            Ok(None)
-        }
+        Ok(None)
     }
 
     /// Handles PostgreSQL DataRow messages containing query result data.
@@ -690,14 +686,14 @@ where
     ///
     /// Records metrics for both encrypted and passthrough row processing to
     /// track proxy performance and encryption usage patterns.
-    async fn data_row_handler(&mut self, bytes: &BytesMut) -> Result<bool, Error> {
+    async fn data_row_handler(&mut self, operation: Option<OperationId>) -> Result<bool, Error> {
         counter!(ROWS_TOTAL).increment(1);
-        match self.context.get_portal_from_execute().as_deref() {
+        match operation
+            .and_then(|operation| self.context.get_portal_from_execute(operation))
+            .as_deref()
+        {
             Some(Portal::Encrypted { .. }) => {
                 debug!(target: MAPPER, client_id = self.context.client_id, msg = "Encrypted");
-
-                let data_row = DataRow::try_from(bytes)?;
-                self.buffer(data_row).await?;
 
                 counter!(ROWS_ENCRYPTED_TOTAL).increment(1);
                 Ok(true)
@@ -712,54 +708,19 @@ where
 }
 
 /// Implementation of PostgreSQL error handling for the Backend component.
-impl<R, S> PostgreSqlErrorHandler for Backend<R, S>
-where
-    R: AsyncRead + Unpin,
-    S: EncryptionService,
-{
-    fn client_sender(&mut self) -> &mut Sender {
-        &mut self.client_sender
-    }
-
+impl<S: EncryptionService> PostgreSqlErrorHandler for Backend<S> {
     fn client_id(&self) -> i32 {
         self.context.client_id
-    }
-
-    /// Backend-specific error response handling.
-    ///
-    /// Unlike the frontend, the backend doesn't need to set an error state
-    /// since errors during result processing should immediately terminate
-    /// the current query execution.
-    fn send_error_response(&mut self, err: Error) -> Result<(), Error> {
-        let error_response = self.error_to_response(err);
-        // Ensure any buffered data is cleared before sending error
-        self.buffer.clear();
-
-        let message = BytesMut::try_from(error_response)?;
-
-        debug!(
-            target: "PROTOCOL",
-            client_id = self.context.client_id,
-            msg = "backend_send_error_response",
-            ?message,
-        );
-
-        self.client_sender.send(message)?;
-
-        Ok(())
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{LogConfig, TandemConfig};
-    use crate::log;
+    use crate::config::TandemConfig;
     use crate::postgresql::context::KeysetIdentifier;
-    use crate::postgresql::messages::Name;
     use crate::proxy::{EncryptConfig, EncryptionService};
     use eql_mapper::Schema;
-    use std::io::Cursor;
     use std::sync::Arc;
     use tokio::sync::mpsc;
 
@@ -785,65 +746,35 @@ mod tests {
         }
     }
 
-    /// Builds a Context in passthrough mode (empty encrypt config), which is the
-    /// configuration that triggers BUG-300.
-    fn passthrough_context() -> Context<TestService> {
+    fn create_backend() -> Backend<TestService> {
         let config = Arc::new(TandemConfig::for_testing());
         let encrypt_config = Arc::new(EncryptConfig::default());
         let schema = Arc::new(Schema::new("public"));
-        let (reload_sender, _reload_receiver) = mpsc::unbounded_channel();
-
-        Context::new(
+        let (reload_sender, _) = mpsc::unbounded_channel();
+        let context = Context::new(
             1,
             config,
             encrypt_config,
             schema,
+            Arc::new(rustls::RootCertStore::empty()),
             TestService {},
             reload_sender,
-        )
+        );
+        Backend::new(context)
     }
 
-    /// Encodes a backend message as wire bytes (one per execute-terminating code).
-    type MessageEncoder = fn() -> BytesMut;
+    #[test]
+    fn decryption_failure_is_returned_as_a_postgresql_error() {
+        let mut backend = create_backend();
 
-    /// Frame a backend message on the wire: 1-byte code + Int32 length
-    /// (body length + 4) + body. Sufficient for the passthrough path, which
-    /// matches on the code only and does not parse the body.
-    fn backend_message(code: u8, body: &[u8]) -> BytesMut {
-        let len = (body.len() + 4) as i32;
+        let output = backend.decryption_failure(Error::Unknown);
 
-        let mut bytes = BytesMut::new();
-        bytes.extend_from_slice(&[code]);
-        bytes.extend_from_slice(&len.to_be_bytes());
-        bytes.extend_from_slice(body);
-        bytes
-    }
-
-    /// `'C'` CommandComplete, carrying a command tag.
-    fn command_complete_bytes() -> BytesMut {
-        backend_message(b'C', b"SELECT 1\0")
-    }
-
-    /// `'I'` EmptyQueryResponse — no body.
-    fn empty_query_response_bytes() -> BytesMut {
-        backend_message(b'I', b"")
-    }
-
-    /// `'s'` PortalSuspended — no body.
-    fn portal_suspended_bytes() -> BytesMut {
-        backend_message(b's', b"")
-    }
-
-    /// `'E'` ErrorResponse — a sequence of (field-type, C-string) pairs
-    /// terminated by a zero byte. Content is irrelevant here: the passthrough
-    /// path forwards the bytes and matches on the code without parsing them.
-    fn error_response_bytes() -> BytesMut {
-        backend_message(b'E', b"SERROR\0CXX000\0Mboom\0\0")
-    }
-
-    /// `'Z'` ReadyForQuery, with an idle transaction status.
-    fn ready_for_query_bytes() -> BytesMut {
-        backend_message(b'Z', b"I")
+        assert!(matches!(
+            output,
+            BackendMiddlewareOutput::Expand(messages)
+                if matches!(messages.as_slice(), [BackendMessage::ErrorResponse(_)])
+        ));
+        assert!(backend.discard_execution);
     }
 
     #[tokio::test]
@@ -857,6 +788,7 @@ mod tests {
             config,
             encrypt_config,
             schema,
+            Arc::new(rustls::RootCertStore::empty()),
             TestService {},
             reload_sender,
         );
@@ -871,90 +803,14 @@ mod tests {
             responder.send(true).expect("reload receiver must be open");
         });
 
-        let (client_sender, mut client_receiver) = mpsc::unbounded_channel();
-        let reader = Cursor::new(ready_for_query_bytes().to_vec());
-        let mut backend = Backend::new(client_sender, reader, context);
-
-        backend.rewrite().await.unwrap();
+        let mut backend = Backend::new(context);
+        let ready = BackendMessage::ReadyForQuery(pg_proto::TransactionStatus::Idle);
+        let output = backend.intercept(None, ready.clone()).await.unwrap();
         reload_task.await.unwrap();
-        assert_eq!(
-            client_receiver.recv().await.unwrap(),
-            ready_for_query_bytes()
-        );
+        assert!(matches!(
+            output,
+            BackendMiddlewareOutput::Forward(message) if message == ready
+        ));
         assert!(!backend.context.take_schema_changed());
-    }
-
-    /// Regression test for BUG-300 (passthrough memory leak).
-    ///
-    /// The frontend enqueues a session + execute for *every* statement. Those
-    /// per-connection `execute` / `session_metrics` queues are only drained by
-    /// `complete_execution()` / `finish_session()`. Before the fix, the
-    /// passthrough branch in `rewrite()` returned early without calling these,
-    /// so the queues grew by one entry per statement and leaked until OOM.
-    ///
-    /// This drives `Backend::rewrite()` through the passthrough branch and
-    /// asserts both queues stay empty across many statements — once for *each*
-    /// execute-terminating message code the fix drains on, so dropping any arm
-    /// of that match is caught. It fails against the pre-fix backend (which
-    /// never drained in passthrough) — i.e. it actually guards the bug.
-    #[tokio::test]
-    async fn passthrough_drains_queues_on_execute_terminating_message() {
-        log::init(LogConfig::default());
-
-        const STATEMENTS: usize = 256;
-
-        // Every code that terminates the execute phase must drain the queues.
-        let cases: [(&str, MessageEncoder); 4] = [
-            ("CommandComplete", command_complete_bytes),
-            ("EmptyQueryResponse", empty_query_response_bytes),
-            ("PortalSuspended", portal_suspended_bytes),
-            ("ErrorResponse", error_response_bytes),
-        ];
-
-        for (label, encode) in cases {
-            let context = passthrough_context();
-            assert!(
-                context.is_passthrough(),
-                "test context must be in passthrough mode"
-            );
-
-            // A stream of identical terminating messages — one per statement —
-            // that the backend reads from the "server".
-            let message = encode();
-            let mut server_bytes = BytesMut::new();
-            for _ in 0..STATEMENTS {
-                server_bytes.extend_from_slice(&message);
-            }
-
-            // Keep the client receiver alive so write_with_flush succeeds.
-            let (client_sender, _client_receiver) = mpsc::unbounded_channel();
-            let reader = Cursor::new(server_bytes.to_vec());
-            let mut backend = Backend::new(client_sender, reader, context);
-
-            for i in 0..STATEMENTS {
-                // Frontend: enqueue a session + execute for the statement.
-                let session_id = backend.context.start_session();
-                backend
-                    .context
-                    .set_execute(Name::unnamed(), Some(session_id));
-
-                // Backend: process the terminating message via the passthrough
-                // path, which must drain the queues.
-                backend.rewrite().await.unwrap();
-
-                // The queues must be drained every iteration — not grow by one
-                // per statement (the BUG-300 leak).
-                assert_eq!(
-                    backend.context.execute_queue_len(),
-                    0,
-                    "{label}: execute queue not drained at statement {i}"
-                );
-                assert_eq!(
-                    backend.context.session_metrics_queue_len(),
-                    0,
-                    "{label}: session_metrics queue not drained at statement {i}"
-                );
-            }
-        }
     }
 }

@@ -1,15 +1,8 @@
-use super::context::phase_timing::PhaseTimer;
-use super::context::{Context, SessionId, Statement};
-use super::error_handler::PostgreSqlErrorHandler;
-use super::messages::bind::Bind;
-use super::messages::describe::Describe;
-use super::messages::execute::Execute;
-use super::messages::parse::Parse;
-use super::messages::query::Query;
-use super::messages::FrontendCode as Code;
-use super::parser::SqlParser;
-use super::protocol::{self};
-use crate::connect::Sender;
+use super::super::context::phase_timing::PhaseTimer;
+use super::super::context::{Context, SessionId, Statement};
+use super::super::error_handler::PostgreSqlErrorHandler;
+use super::super::parser::SqlParser;
+use super::super::rewrite::bind::Bind;
 use crate::error::{EncryptError, Error, MappingError};
 use crate::log::{MAPPER, PROTOCOL};
 use crate::postgresql::context::column::Column;
@@ -21,32 +14,29 @@ use crate::postgresql::context::Portal;
 use crate::postgresql::data::{
     compose_json_selector_path, json_value_selector_plaintext, literal_from_sql, literal_json_value,
 };
-use crate::postgresql::messages::close::Close;
-use crate::postgresql::messages::error_response::ErrorResponseCode;
-use crate::postgresql::messages::ready_for_query::ReadyForQuery;
-use crate::postgresql::messages::terminate::Terminate;
-use crate::postgresql::messages::{Name, Target};
+use crate::postgresql::rewrite::Name;
+use crate::postgresql::rewrite::UNSPECIFIED_TYPE_OID;
 use crate::prometheus::{
-    CLIENTS_BYTES_RECEIVED_TOTAL, ENCRYPTED_VALUES_TOTAL, ENCRYPTION_DURATION_SECONDS,
-    ENCRYPTION_ERROR_TOTAL, ENCRYPTION_REQUESTS_TOTAL, SERVER_BYTES_SENT_TOTAL,
-    STATEMENTS_ENCRYPTED_TOTAL, STATEMENTS_PASSTHROUGH_MAPPING_DISABLED_TOTAL,
-    STATEMENTS_PASSTHROUGH_TOTAL, STATEMENTS_UNMAPPABLE_TOTAL,
+    ENCRYPTED_VALUES_TOTAL, ENCRYPTION_DURATION_SECONDS, ENCRYPTION_ERROR_TOTAL,
+    ENCRYPTION_REQUESTS_TOTAL, STATEMENTS_ENCRYPTED_TOTAL,
+    STATEMENTS_PASSTHROUGH_MAPPING_DISABLED_TOTAL, STATEMENTS_PASSTHROUGH_TOTAL,
+    STATEMENTS_UNMAPPABLE_TOTAL,
 };
 use crate::proxy::EncryptionService;
 use crate::{EqlOutput, EqlQueryPayload};
-use bytes::BytesMut;
 use cipherstash_client::encryption::Plaintext;
 use eql_mapper::{self, EqlMapperError, EqlTermVariant, JsonSelectorSegment, TypeCheckedStatement};
 use metrics::{counter, histogram};
-use pg_escape::quote_literal;
+use pg_proto::{
+    Close, Describe, DescribeTarget, Execute, FrontendMessage, FrontendMiddlewareOutput, Parse,
+};
 use serde::Serialize;
 use sqltk::parser::ast::{self, Value};
 use sqltk::NodeKey;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Instant;
-use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
-use tracing::{debug, error, info, warn};
+use tracing::{debug, info, warn};
 
 /// The PostgreSQL proxy frontend that handles client-to-server message processing.
 ///
@@ -91,43 +81,13 @@ use tracing::{debug, error, info, warn};
 /// Encryption and mapping errors are converted to appropriate PostgreSQL error responses
 /// and sent back to the client. The frontend maintains error state to properly handle
 /// the PostgreSQL extended query error recovery protocol.
-pub struct Frontend<R, W, S>
-where
-    R: AsyncRead + Unpin,
-    W: AsyncWrite + Unpin,
-    S: EncryptionService,
-{
-    /// Reader for incoming client messages
-    client_reader: R,
-    /// Sender for outgoing messages to client
-    client_sender: Sender,
-    /// Writer for forwarding messages to server
-    server_writer: W,
+pub struct Frontend<S: EncryptionService> {
     /// Session context tracking statements, portals, and keyset IDs
     context: Context<S>,
-    /// Error state flag for extended query protocol error handling
-    error_state: Option<ErrorState>,
+    failed_extended_batch: bool,
 }
 
-/// How a frontend failure was delivered, which determines how the batch's
-/// Sync must be answered.
-#[derive(Debug)]
-enum ErrorState {
-    /// An exception statement was forwarded to the server in place of the
-    /// failed message. The server produces the ErrorResponse and ReadyForQuery
-    /// for this batch, so the client's Sync is discarded.
-    ExceptionInjected,
-    /// A FATAL error was written directly to the client; nothing was forwarded
-    /// to the server, so the proxy answers the Sync with its own ReadyForQuery.
-    ErrorResponseSent,
-}
-
-impl<R, W, S> Frontend<R, W, S>
-where
-    R: AsyncRead + Unpin,
-    W: AsyncWrite + Unpin,
-    S: EncryptionService,
-{
+impl<S: EncryptionService> Frontend<S> {
     /// Creates a new Frontend instance.
     ///
     /// # Arguments
@@ -136,253 +96,194 @@ where
     /// * `client_sender` - Channel sender for sending messages back to client
     /// * `server_writer` - Stream for writing messages to the PostgreSQL server
     /// * `context` - Session context for tracking statements and portals with service access
-    pub fn new(
-        client_reader: R,
-        client_sender: Sender,
-        server_writer: W,
-        context: Context<S>,
-    ) -> Self {
+    pub fn new(context: Context<S>) -> Self {
         Frontend {
-            client_reader,
-            client_sender,
-            server_writer,
             context,
-            error_state: None,
+            failed_extended_batch: false,
         }
     }
 
-    /// Main message processing loop for handling client messages.
-    ///
-    /// Reads a message from the client, processes it based on the PostgreSQL message type,
-    /// performs any necessary encryption/transformation, and forwards it to the server.
-    ///
-    /// # Message Processing Flow
-    ///
-    /// 1. **Read Message**: Read and parse the PostgreSQL wire protocol message
-    /// 2. **Check Mapping**: Skip processing if mapping is disabled
-    /// 3. **Handle by Type**: Route to appropriate handler based on message type
-    /// 4. **Error Recovery**: Handle extended query protocol error states
-    /// 5. **Forward**: Send processed message to PostgreSQL server
-    ///
-    /// # Error States
-    ///
-    /// When an error occurs during extended query processing, the frontend enters
-    /// error state and discards messages until a Sync message is received, following
-    /// the PostgreSQL protocol specification.
-    ///
-    /// # Returns
-    ///
-    /// Returns `Ok(())` on successful message processing, or an `Error` if a fatal
-    /// error occurs that should terminate the connection.
-    pub async fn rewrite(&mut self) -> Result<(), Error> {
-        let (code, mut bytes) = protocol::read_message(
-            &mut self.client_reader,
-            self.context.client_id,
-            self.context.connection_timeout(),
-        )
-        .await?;
-
-        let sent: u64 = bytes.len() as u64;
-        counter!(CLIENTS_BYTES_RECEIVED_TOTAL).increment(sent);
-
+    pub async fn intercept(
+        &mut self,
+        operation: pg_proto::OperationId,
+        protocol_message: FrontendMessage,
+    ) -> Result<FrontendMiddlewareOutput, Error> {
         if self.context.mapping_disabled() {
-            self.write_to_server(bytes).await?;
-            return Ok(());
+            return Ok(FrontendMiddlewareOutput::Forward(protocol_message));
         }
 
-        let code = Code::from(code);
-
-        // When an error is detected while processing any extended-query message, the backend issues ErrorResponse, then reads and discards messages until a Sync is reached,
-        // https://www.postgresql.org/docs/current/protocol-flow.html#PROTOCOL-FLOW-EXT-QUERY
-        if self.error_state.is_some() {
-            warn!(target: PROTOCOL,
-                client_id = self.context.client_id,
-                error_state = ?self.error_state,
-                ?code,
-            );
-            if code != Code::Sync {
-                return Ok(());
+        if self.failed_extended_batch {
+            if matches!(protocol_message, FrontendMessage::Sync) {
+                self.failed_extended_batch = false;
+                return Ok(FrontendMiddlewareOutput::Forward(protocol_message));
             }
+            self.context.discard_operation(operation);
+            return Ok(FrontendMiddlewareOutput::Suppress(protocol_message));
         }
 
-        match code {
-            Code::Query => {
-                match self.query_handler(&bytes).await {
-                    Ok(Some(mapped)) => bytes = mapped,
+        let mut outbound_message = protocol_message.clone();
+
+        match protocol_message {
+            FrontendMessage::Query(query) => {
+                match self.query_handler(operation, query).await {
+                    Ok(Some(mapped)) => outbound_message = mapped,
                     // No mapping needed, don't change the bytes
                     Ok(None) => (),
                     Err(err) => {
+                        let session_id = self.context.latest_session_id();
                         warn!(
                             client_id = self.context.client_id,
                             msg = "Query Handler Error",
                             error = ?err.to_string(),
                         );
-                        // Replace the failed Query with an exception statement.
-                        // The server's ErrorResponse and ReadyForQuery answer
-                        // the client's Query in order. See handle_statement_error.
-                        match self.handle_statement_error(err)? {
-                            Some(exception) => bytes = exception,
-                            // FATAL error written directly to the client; the
-                            // simple protocol still expects a ReadyForQuery.
-                            None => {
-                                self.send_ready_for_query()?;
-                                return Ok(());
-                            }
-                        }
+                        let response = self.error_to_response(err);
+                        self.context
+                            .set_operation_error(operation, response.clone());
+                        self.context.set_execute(operation, Name::new(), session_id);
+                        outbound_message = self.simple_error_query(&response);
                     }
                 }
             }
-            Code::Describe => {
-                self.describe_handler(&bytes).await?;
+            FrontendMessage::Describe(describe) => {
+                self.describe_handler(operation, describe).await?;
             }
-            Code::Execute => {
-                self.execute_handler(&bytes).await?;
+            FrontendMessage::Execute(execute) => {
+                self.execute_handler(operation, execute).await?;
             }
-            Code::Parse => {
-                match self.parse_handler(&bytes).await {
-                    Ok(Some(mapped)) => bytes = mapped,
+            FrontendMessage::Parse(parse) => {
+                let statement = parse.statement.clone();
+                let failed_parse = parse.clone();
+                match self.parse_handler(parse).await {
+                    Ok(Some(mapped)) => outbound_message = mapped,
                     // No mapping needed, don't change the bytes
                     Ok(None) => (),
                     Err(err) => {
+                        self.context.close_statement(&statement);
                         warn!(
                             client_id = self.context.client_id,
                             msg = "Parse Handler Error",
                             error = ?err.to_string(),
                         );
-                        // Replace the failed Parse with an exception statement
-                        // and drop the rest of the batch until Sync. The
-                        // server's ErrorResponse and ReadyForQuery answer the
-                        // client's batch in order. See handle_statement_error.
-                        match self.handle_statement_error(err)? {
-                            Some(exception) => {
-                                self.error_state = Some(ErrorState::ExceptionInjected);
-                                bytes = exception;
-                            }
-                            None => {
-                                self.error_state = Some(ErrorState::ErrorResponseSent);
-                                return Ok(());
-                            }
-                        }
+                        let response = self.error_to_response(err);
+                        self.context
+                            .set_operation_error(operation, response.clone());
+                        self.context.set_execute(
+                            operation,
+                            Name::new(),
+                            self.context.latest_session_id(),
+                        );
+                        self.failed_extended_batch = true;
+                        outbound_message = self.extended_parse_error(failed_parse, &response);
                     }
                 }
             }
-            Code::Bind => {
-                match self.bind_handler(&bytes).await {
-                    Ok(Some(mapped)) => bytes = mapped,
+            FrontendMessage::Bind(bind) => {
+                let failed_bind = bind.clone();
+                match self.bind_handler(Bind::try_from(bind)?).await {
+                    Ok(Some(mapped)) => outbound_message = mapped,
                     // No mapping needed, don't change the bytes
                     Ok(None) => (),
-                    Err(err) => {
-                        warn!(target: PROTOCOL,
-                            client_id = self.context.client_id,
-                            msg = "Bind Handler Error",
-                            error = ?err.to_string(),
-                        );
-                        // Replace the failed Bind with an exception statement
-                        // and drop the rest of the batch until Sync. The
-                        // server's ErrorResponse and ReadyForQuery answer the
-                        // client's batch in order. See handle_statement_error.
-                        match self.handle_statement_error(err)? {
-                            Some(exception) => {
-                                self.error_state = Some(ErrorState::ExceptionInjected);
-                                bytes = exception;
-                            }
-                            None => {
-                                self.error_state = Some(ErrorState::ErrorResponseSent);
-                                return Ok(());
-                            }
+                    Err(err) => match err {
+                        Error::Mapping(MappingError::InvalidParameter(_)) => {
+                            warn!(target: PROTOCOL,
+                                client_id = self.context.client_id,
+                                msg = "EncryptError::InvalidParameter",
+                            );
+                            let response = self.error_to_response(err);
+                            self.context
+                                .set_operation_error(operation, response.clone());
+                            self.context.set_execute(
+                                operation,
+                                Name::new(),
+                                self.context.latest_session_id(),
+                            );
+                            self.failed_extended_batch = true;
+                            outbound_message = self.extended_bind_error(failed_bind, &response);
                         }
-                    }
+                        Error::Encrypt(EncryptError::UnknownKeysetIdentifier { .. }) => {
+                            warn!(target: PROTOCOL,
+                                client_id = self.context.client_id,
+                                msg = "EncryptError::UnknownKeysetIdentifier",
+                            );
+                            let response = self.error_to_response(err);
+                            self.context
+                                .set_operation_error(operation, response.clone());
+                            self.context.set_execute(
+                                operation,
+                                Name::new(),
+                                self.context.latest_session_id(),
+                            );
+                            self.failed_extended_batch = true;
+                            outbound_message = self.extended_bind_error(failed_bind, &response);
+                        }
+                        _ => {
+                            warn!(target: PROTOCOL,
+                                client_id = self.context.client_id,
+                                msg = "Bind Error",
+                                err = err.to_string()
+                            );
+                            let response = self.error_to_response(err);
+                            self.context
+                                .set_operation_error(operation, response.clone());
+                            self.context.set_execute(
+                                operation,
+                                Name::new(),
+                                self.context.latest_session_id(),
+                            );
+                            self.failed_extended_batch = true;
+                            outbound_message = self.extended_bind_error(failed_bind, &response);
+                        }
+                    },
                 }
             }
-            Code::Sync => {
+            FrontendMessage::Sync => {
                 debug!(target: PROTOCOL,
                     client_id = self.context.client_id,
-                    ?code,
+                    message = ?protocol_message,
                 );
-
-                self.context.reload_schema_if_changed().await;
-
-                match self.error_state.take() {
-                    Some(ErrorState::ExceptionInjected) => {
-                        // The exception statement injected on failure already
-                        // elicits the ErrorResponse and ReadyForQuery for this
-                        // batch from the server. Forwarding the Sync would
-                        // produce a second ReadyForQuery and desync the client.
-                        debug!(target: PROTOCOL,
-                            client_id = self.context.client_id,
-                            msg = "Discard Sync for failed batch",
-                        );
-                        return Ok(());
-                    }
-                    Some(ErrorState::ErrorResponseSent) => {
-                        // Nothing was forwarded to the server for this batch;
-                        // answer the Sync directly.
-                        self.send_ready_for_query()?;
-                        return Ok(());
-                    }
-                    None => {}
-                }
             }
-            Code::Close => {
-                self.close_handler(&bytes).await?;
+            FrontendMessage::Close(close) => {
+                self.close_handler(close).await?;
             }
-            code => {
+            _ => {
                 debug!(target: PROTOCOL,
                     client_id = self.context.client_id,
                     msg = "Passthrough",
-                    ?code,
+                    message = ?protocol_message,
                 );
             }
         }
 
-        self.write_to_server(bytes).await?;
-        Ok(())
+        Ok(FrontendMiddlewareOutput::Forward(outbound_message))
     }
 
-    pub async fn write_to_server(&mut self, bytes: BytesMut) -> Result<(), Error> {
-        debug!(target: PROTOCOL, msg = "Write to server", ?bytes);
-        let sent: u64 = bytes.len() as u64;
-        counter!(SERVER_BYTES_SENT_TOTAL).increment(sent);
-
-        let start = Instant::now();
-        self.server_writer.write_all(&bytes).await?;
-        let duration = start.elapsed();
-        if let Some(session_id) = self.context.latest_session_id() {
-            self.context.add_server_write_duration(session_id, duration);
-        }
-
-        Ok(())
-    }
-
-    pub async fn terminate(&mut self) -> Result<(), Error> {
-        debug!(target: PROTOCOL, msg = "Terminate server connection");
-        let bytes = Terminate::message();
-        self.write_to_server(bytes).await?;
-        Ok(())
-    }
-
-    async fn describe_handler(&mut self, bytes: &BytesMut) -> Result<(), Error> {
-        let describe = Describe::try_from(bytes)?;
+    async fn describe_handler(
+        &mut self,
+        operation: pg_proto::OperationId,
+        describe: Describe,
+    ) -> Result<(), Error> {
         debug!(target: PROTOCOL, client_id = self.context.client_id, ?describe);
-        self.context.set_describe(describe);
+        self.context.set_describe(operation, describe);
         Ok(())
     }
 
-    async fn close_handler(&mut self, bytes: &BytesMut) -> Result<(), Error> {
-        let close = Close::try_from(bytes)?;
+    async fn close_handler(&mut self, close: Close) -> Result<(), Error> {
         debug!(target: PROTOCOL, client_id = self.context.client_id, ?close);
         match close.target {
-            Target::Portal => self.context.close_portal(&close.name),
-            Target::Statement => self.context.close_statement_and_portal(&close.name),
+            DescribeTarget::Portal => self.context.close_portal(&close.name),
+            DescribeTarget::Statement => self.context.close_statement_explicit(&close.name),
         }
         Ok(())
     }
 
-    async fn execute_handler(&mut self, bytes: &BytesMut) -> Result<(), Error> {
-        let execute = Execute::try_from(bytes)?;
+    async fn execute_handler(
+        &mut self,
+        operation: pg_proto::OperationId,
+        execute: Execute,
+    ) -> Result<(), Error> {
         debug!(target: PROTOCOL, client_id = self.context.client_id, ?execute);
         self.context
-            .set_execute_for_portal(execute.portal.to_owned());
+            .set_execute_for_portal(operation, execute.portal.to_owned());
         Ok(())
     }
 
@@ -418,7 +319,11 @@ where
     /// - `Ok(Some(bytes))` - Transformed query that should replace the original
     /// - `Ok(None)` - No transformation needed, forward original query
     /// - `Err(error)` - Processing failed, error should be sent to client
-    async fn query_handler(&mut self, bytes: &BytesMut) -> Result<Option<BytesMut>, Error> {
+    async fn query_handler(
+        &mut self,
+        operation: pg_proto::OperationId,
+        query: bytes::Bytes,
+    ) -> Result<Option<FrontendMessage>, Error> {
         let handler_start = Instant::now();
         let session_id = self.context.start_session();
 
@@ -429,10 +334,9 @@ where
 
         let parse_timer = PhaseTimer::start();
 
-        let mut query = Query::try_from(bytes)?;
-
         // Simple Query may contain many statements
-        let parsed_statements = SqlParser::parse_statements(&query.statement)?;
+        let query_text = String::from_utf8_lossy(&query).into_owned();
+        let parsed_statements = SqlParser::parse_statements(&query_text)?;
         let mut transformed_statements = vec![];
 
         debug!(target: MAPPER,
@@ -565,11 +469,12 @@ where
 
         // Set query fingerprint
         self.context.update_statement_metadata(session_id, |m| {
-            m.set_query_fingerprint(&query.statement);
+            m.set_query_fingerprint(&query_text);
         });
 
-        self.context.add_portal(Name::unnamed(), portal);
-        self.context.set_execute(Name::unnamed(), Some(session_id));
+        self.context.add_portal(Name::new(), portal);
+        self.context
+            .set_execute(operation, Name::new(), Some(session_id));
 
         if encrypted {
             let transformed_statement = transformed_statements
@@ -578,9 +483,7 @@ where
                 .collect::<Vec<_>>()
                 .join(";");
 
-            query.rewrite(transformed_statement.to_string());
-
-            let bytes = BytesMut::try_from(query)?;
+            let message = FrontendMessage::Query(bytes::Bytes::from(transformed_statement.clone()));
             let handler_duration = handler_start.elapsed();
             debug!(
                 target: MAPPER,
@@ -588,7 +491,7 @@ where
                 msg = "Rewrite Query",
                 transformed_statement = transformed_statement.to_string(),
                 duration_ms = handler_duration.as_millis(),
-                bytes = ?bytes,
+                ?message,
             );
             if handler_duration.as_millis() > 100 {
                 warn!(
@@ -597,7 +500,7 @@ where
                     duration_ms = handler_duration.as_millis(),
                 );
             }
-            Ok(Some(bytes))
+            Ok(Some(message))
         } else {
             let handler_duration = handler_start.elapsed();
             if handler_duration.as_millis() > 50 {
@@ -783,7 +686,11 @@ where
     /// - `Ok(Some(bytes))` - Modified Parse message with transformed SQL/parameters
     /// - `Ok(None)` - No transformation needed, forward original message
     /// - `Err(error)` - Processing failed, error should be sent to client
-    async fn parse_handler(&mut self, bytes: &BytesMut) -> Result<Option<BytesMut>, Error> {
+    async fn parse_handler(
+        &mut self,
+        mut message: Parse,
+    ) -> Result<Option<FrontendMessage>, Error> {
+        let original_query = message.query.clone();
         let session_id = self.context.start_session();
 
         // Set protocol type
@@ -792,8 +699,6 @@ where
         });
 
         let parse_timer = PhaseTimer::start();
-
-        let mut message = Parse::try_from(bytes)?;
 
         debug!(
             target: PROTOCOL,
@@ -821,11 +726,21 @@ where
         // BEFORE the new session is recorded — the other way around wipes the
         // mapping that was just written and every Bind falls back to the
         // latest-session guess.
-        self.context.close_statement(&message.name);
+        self.context.close_statement(&message.statement);
         self.context
-            .set_statement_session(message.name.to_owned(), session_id);
+            .set_statement_session(message.statement.to_owned(), session_id);
 
-        let statement = SqlParser::parse_statement(&message.statement)?;
+        let mut statement_text = String::from_utf8_lossy(&message.query).into_owned();
+        let statement = SqlParser::parse_statement(&statement_text)?;
+
+        // Record diagnostics before any passthrough path can return early.
+        // Statements that do not require EQL type checking (for example,
+        // plaintext INSERTs and SELECT pg_sleep(...)) still need their real
+        // statement type and fingerprint in metrics.
+        self.context.update_statement_metadata(session_id, |m| {
+            m.statement_type = Some(StatementType::from_statement(&statement));
+            m.set_query_fingerprint(&statement_text);
+        });
 
         if let Some(mapping_disabled) = self.context.maybe_set_unsafe_disable_mapping(&statement) {
             warn!(
@@ -865,7 +780,8 @@ where
 
         // Capture the parse message param_types
         // These override the underlying column type
-        let param_types = message.param_types.clone();
+        let client_param_types = message.parameter_types.clone();
+        let param_types = client_param_types.iter().map(|oid| *oid as i32).collect();
 
         let mut parse_duration_recorded = false;
 
@@ -900,15 +816,17 @@ where
                         statement.output_params =
                             output_params_from_plan(&transformed_statement.params, output_columns);
 
-                        message.rewrite_statement(transformed_statement.statement.to_string());
+                        statement_text = transformed_statement.statement.to_string();
+                        message.query = bytes::Bytes::copy_from_slice(statement_text.as_bytes());
                     }
                 }
 
                 counter!(STATEMENTS_ENCRYPTED_TOTAL).increment(1);
 
-                message.rewrite_param_types(&statement.output_params);
+                message.parameter_types =
+                    rewrite_parse_param_types(&client_param_types, &statement.output_params);
                 self.context
-                    .add_statement(message.name.to_owned(), statement);
+                    .add_statement(message.statement.to_owned(), statement);
             }
             _ => {
                 debug!(target: MAPPER,
@@ -925,21 +843,15 @@ where
                 .record_parse_duration(session_id, parse_timer.elapsed());
         }
 
-        // Set statement type and fingerprint
-        self.context.update_statement_metadata(session_id, |m| {
-            m.statement_type = Some(StatementType::from_statement(&statement));
-            m.set_query_fingerprint(&message.statement);
-        });
-
-        if message.requires_rewrite() {
-            let bytes = BytesMut::try_from(message)?;
+        if message.query != original_query || message.parameter_types != client_param_types {
+            let message = FrontendMessage::Parse(message);
 
             debug!(target: MAPPER,
                 client_id = self.context.client_id,
                 msg = "Rewrite Parse",
-                bytes = ?bytes);
+                ?message);
 
-            Ok(Some(bytes))
+            Ok(Some(message))
         } else {
             Ok(None)
         }
@@ -1084,15 +996,13 @@ where
     /// - `Ok(Some(bytes))` - Modified Bind message with encrypted parameter values
     /// - `Ok(None)` - No parameter encryption needed, forward original message
     /// - `Err(error)` - Processing failed, error should be sent to client
-    async fn bind_handler(&mut self, bytes: &BytesMut) -> Result<Option<BytesMut>, Error> {
+    async fn bind_handler(&mut self, mut bind: Bind) -> Result<Option<FrontendMessage>, Error> {
         if self.context.unsafe_disable_mapping() {
             warn!(msg = "Encrypted statement mapping is not enabled");
             counter!(STATEMENTS_PASSTHROUGH_MAPPING_DISABLED_TOTAL).increment(1);
             counter!(STATEMENTS_PASSTHROUGH_TOTAL).increment(1);
             return Ok(None);
         }
-
-        let mut bind = Bind::try_from(bytes)?;
 
         let session_id = self
             .context
@@ -1129,15 +1039,15 @@ where
         self.context.add_portal(bind.portal.to_owned(), portal);
 
         if bind.requires_rewrite() {
-            let bytes = BytesMut::try_from(bind)?;
+            let message = FrontendMessage::from(bind);
             debug!(
                 target: MAPPER,
                 client_id = self.context.client_id,
                 msg = "Rewrite Bind",
-                bytes = ?bytes
+                ?message
             );
 
-            Ok(Some(bytes))
+            Ok(Some(message))
         } else {
             Ok(None)
         }
@@ -1260,108 +1170,37 @@ where
             }
         }
     }
+}
 
-    ///
-    /// Send a ReadyForQuery to the client, answering a Sync (or simple Query)
-    /// for a batch of which nothing reached the server.
-    ///
-    fn send_ready_for_query(&mut self) -> Result<(), Error> {
-        let message = BytesMut::from(ReadyForQuery);
+fn quote_literal(value: &str) -> String {
+    let escaped = value.replace('\\', "\\\\").replace('\'', "''");
+    if value.contains('\\') {
+        format!("E'{escaped}'")
+    } else {
+        format!("'{escaped}'")
+    }
+}
 
-        debug!(target: PROTOCOL,
-            client_id = self.context.client_id,
-            msg = "send_ready_for_query",
-            ?message,
-        );
-
-        self.client_sender.send(message)?;
-
-        Ok(())
+fn rewrite_parse_param_types(client_types: &[u32], output_params: &[OutputParam]) -> Vec<u32> {
+    if client_types.is_empty() {
+        return Vec::new();
     }
 
-    /// Converts a frontend failure into a `DO ... RAISE EXCEPTION` statement
-    /// that is sent to the server IN PLACE of the failed message.
-    ///
-    /// The proxy must not reply to the client directly: responses to earlier
-    /// pipelined requests (for example the Close + Sync issued when a client
-    /// drops a cached prepared statement) may still be in flight from the
-    /// server, and a direct reply would overtake them — every subsequent
-    /// response then answers the wrong request and the client observes a
-    /// protocol desync (CIP-3678). Sending the error THROUGH the server keeps
-    /// the response stream ordered: the injected statement is a request like
-    /// any other, so its ErrorResponse and ReadyForQuery arrive exactly where
-    /// the client expects them, and the transaction state the client observes
-    /// (aborted on error) matches what PostgreSQL itself would produce.
-    ///
-    /// The ErrorResponse fields the proxy would have produced are carried as
-    /// `RAISE ... USING` options, so the client still receives the proxy's
-    /// message, SQLSTATE and hints. `RAISE` has no `POSITION` option; parse
-    /// errors already embed line/column in the message.
-    ///
-    /// The exception body is a plain single-quoted literal (no dollar quoting)
-    /// built with `quote_literal` at both nesting levels, so error text
-    /// containing quotes, `%` or `$$` cannot escape the statement.
-    ///
-    /// Returns `None` for FATAL errors, which are written directly to the
-    /// client instead: `RAISE` cannot produce a FATAL response, and ordering
-    /// no longer matters because the client abandons the connection — and any
-    /// pipelined requests on it — as soon as it reads a FATAL error.
-    fn handle_statement_error(&mut self, err: Error) -> Result<Option<BytesMut>, Error> {
-        error!(client_id = self.context.client_id, msg = err.to_string(), error = ?err);
-
-        let error_response = self.error_to_response(err);
-
-        if error_response.is_fatal() {
-            let message = BytesMut::try_from(error_response)?;
-
-            debug!(target: PROTOCOL,
-                client_id = self.context.client_id,
-                msg = "send_error_response",
-                ?message,
-            );
-
-            self.client_sender.send(message)?;
-            return Ok(None);
-        }
-
-        let options = error_response
-            .fields
-            .iter()
-            .filter_map(|field| {
-                let option = match field.code {
-                    ErrorResponseCode::Message => "MESSAGE",
-                    ErrorResponseCode::Code => "ERRCODE",
-                    ErrorResponseCode::Detail => "DETAIL",
-                    ErrorResponseCode::Hint => "HINT",
-                    ErrorResponseCode::Schema => "SCHEMA",
-                    ErrorResponseCode::Table => "TABLE",
-                    ErrorResponseCode::Column => "COLUMN",
-                    ErrorResponseCode::DataType => "DATATYPE",
-                    ErrorResponseCode::Constraint => "CONSTRAINT",
-                    // Severity is implied by RAISE EXCEPTION; the remaining
-                    // fields have no RAISE equivalent.
-                    _ => return None,
-                };
-                Some(format!("{option} = {}", quote_literal(&field.value)))
-            })
-            .collect::<Vec<_>>()
-            .join(", ");
-
-        let body = format!("BEGIN RAISE EXCEPTION USING {options}; END;");
-        let content = format!("DO {};", quote_literal(&body));
-
-        debug!(
-            target: MAPPER,
-            client_id = self.context.client_id,
-            msg = "Frontend exception",
-            content = content.as_str(),
-        );
-
-        let query = Query::new(content);
-        let bytes = BytesMut::try_from(query)?;
-
-        Ok(Some(bytes))
-    }
+    output_params
+        .iter()
+        .map(|output| match &output.column {
+            Some(column) => match column.eql_term {
+                EqlTermVariant::JsonAccessor | EqlTermVariant::JsonPath => {
+                    postgres_types::Type::TEXT.oid()
+                }
+                _ => postgres_types::Type::JSONB.oid(),
+            },
+            None => client_types
+                .get(output.source.primary_input())
+                .copied()
+                .unwrap_or(UNSPECIFIED_TYPE_OID as u32),
+        })
+        .collect()
 }
 
 /// Projects a stored payload into its query operand when the value is bound in
@@ -1528,40 +1367,177 @@ where
 }
 
 /// Implementation of PostgreSQL error handling for the Frontend component.
-impl<R, W, S> PostgreSqlErrorHandler for Frontend<R, W, S>
-where
-    R: AsyncRead + Unpin,
-    W: AsyncWrite + Unpin,
-    S: EncryptionService,
-{
-    fn client_sender(&mut self) -> &mut Sender {
-        &mut self.client_sender
-    }
-
+impl<S: EncryptionService> PostgreSqlErrorHandler for Frontend<S> {
     fn client_id(&self) -> i32 {
         self.context.client_id
     }
+}
 
-    /// Write an ErrorResponse directly to the client.
-    ///
-    /// Statement failures must NOT use this — they go through the server via
-    /// [`Frontend::handle_statement_error`] so the error is sequenced after any
-    /// in-flight responses (CIP-3678). A direct write is only safe when the
-    /// connection is being abandoned.
-    fn send_error_response(&mut self, err: Error) -> Result<(), Error> {
-        let error_response = self.error_to_response(err);
-        let message = BytesMut::try_from(error_response)?;
+impl<S: EncryptionService> Frontend<S> {
+    fn simple_error_query(&self, response: &pg_proto::DiagnosticResponse) -> FrontendMessage {
+        let options = response
+            .fields
+            .iter()
+            .filter_map(|field| {
+                let option = match field.code {
+                    b'M' => "MESSAGE",
+                    b'C' => "ERRCODE",
+                    b'D' => "DETAIL",
+                    b'H' => "HINT",
+                    b's' => "SCHEMA",
+                    b't' => "TABLE",
+                    b'c' => "COLUMN",
+                    b'd' => "DATATYPE",
+                    b'n' => "CONSTRAINT",
+                    _ => return None,
+                };
+                Some(format!(
+                    "{option} = {}",
+                    quote_literal(&String::from_utf8_lossy(&field.value))
+                ))
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
+        let body = format!("BEGIN RAISE EXCEPTION USING {options}; END;");
+        FrontendMessage::Query(bytes::Bytes::from(format!("DO {};", quote_literal(&body))))
+    }
 
-        debug!(target: PROTOCOL,
-            client_id = self.context.client_id,
-            msg = "send_error_response",
-            ?message,
+    fn extended_parse_error(
+        &self,
+        mut parse: Parse,
+        response: &pg_proto::DiagnosticResponse,
+    ) -> FrontendMessage {
+        let marker = self.extended_error_marker(response);
+        parse.query =
+            bytes::Bytes::from(format!("SELECT NULL::\"{}\"", marker.replace('"', "\"\"")));
+        parse.parameter_types.clear();
+        FrontendMessage::Parse(parse)
+    }
+
+    fn extended_bind_error(
+        &self,
+        mut bind: pg_proto::Bind,
+        response: &pg_proto::DiagnosticResponse,
+    ) -> FrontendMessage {
+        bind.statement = bytes::Bytes::from(self.extended_error_marker(response));
+        FrontendMessage::Bind(bind)
+    }
+
+    fn extended_error_marker(&self, response: &pg_proto::DiagnosticResponse) -> String {
+        let code = response
+            .fields
+            .iter()
+            .find(|field| field.code == b'C')
+            .map(|field| String::from_utf8_lossy(&field.value))
+            .unwrap_or_default();
+        let message = response
+            .fields
+            .iter()
+            .find(|field| field.code == b'M')
+            .map(|field| String::from_utf8_lossy(&field.value))
+            .unwrap_or_default();
+        let message = message
+            .chars()
+            .filter(|character| character.is_ascii_graphic() || *character == ' ')
+            .take(40)
+            .collect::<String>();
+        format!("__cipherstash_proxy_error_{code}_{message}")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{quote_literal, Frontend};
+    use crate::config::TandemConfig;
+    use crate::error::{Error, MappingError};
+    use crate::postgresql::context::{Context, KeysetIdentifier};
+    use crate::postgresql::error_handler::PostgreSqlErrorHandler;
+    use crate::postgresql::Column;
+    use crate::proxy::{EncryptConfig, EncryptionService};
+    use eql_mapper::Schema;
+    use pg_proto::{Bind, FrontendMessage, Parse};
+    use std::sync::Arc;
+    use tokio::sync::mpsc;
+
+    struct TestService;
+
+    #[async_trait::async_trait]
+    impl EncryptionService for TestService {
+        async fn encrypt(
+            &self,
+            _keyset_id: Option<KeysetIdentifier>,
+            _plaintexts: Vec<Option<cipherstash_client::encryption::Plaintext>>,
+            _columns: &[Option<Column>],
+        ) -> Result<Vec<Option<crate::EqlOutput>>, Error> {
+            Ok(Vec::new())
+        }
+
+        async fn decrypt(
+            &self,
+            _keyset_id: Option<KeysetIdentifier>,
+            _ciphertexts: Vec<Option<crate::EqlCiphertext>>,
+        ) -> Result<Vec<Option<cipherstash_client::encryption::Plaintext>>, Error> {
+            Ok(Vec::new())
+        }
+    }
+
+    fn frontend() -> Frontend<TestService> {
+        let (reload_sender, _) = mpsc::unbounded_channel();
+        let context = Context::new(
+            1,
+            Arc::new(TandemConfig::for_testing()),
+            Arc::new(EncryptConfig::default()),
+            Arc::new(Schema::new("public")),
+            Arc::new(rustls::RootCertStore::empty()),
+            TestService,
+            reload_sender,
         );
+        Frontend::new(context)
+    }
 
-        self.client_sender.send(message)?;
-        // Frontend-specific: set error state for extended query protocol
-        self.error_state = Some(ErrorState::ErrorResponseSent);
+    #[test]
+    fn exception_literals_escape_quotes_and_backslashes() {
+        assert_eq!(quote_literal("can't"), "'can''t'");
+        assert_eq!(quote_literal(r"path\file"), r"E'path\\file'");
+    }
 
-        Ok(())
+    #[test]
+    fn simple_errors_are_forwarded_as_exception_queries() {
+        let frontend = frontend();
+        let response = frontend.error_to_response(MappingError::CouldNotParseParameter.into());
+        let output = frontend.simple_error_query(&response);
+
+        assert!(matches!(
+            output,
+            FrontendMessage::Query(query)
+                if String::from_utf8_lossy(&query).contains("RAISE EXCEPTION")
+        ));
+    }
+
+    #[test]
+    fn extended_errors_preserve_the_original_protocol_message_kind() {
+        let frontend = frontend();
+        let parse = Parse {
+            statement: bytes::Bytes::from_static(b"statement"),
+            query: bytes::Bytes::from_static(b"select 1"),
+            parameter_types: Vec::new(),
+        };
+        let bind = Bind {
+            portal: bytes::Bytes::from_static(b"portal"),
+            statement: bytes::Bytes::from_static(b"statement"),
+            parameter_formats: Vec::new(),
+            parameters: Vec::new(),
+            result_formats: Vec::new(),
+        };
+        let response = frontend.error_to_response(MappingError::CouldNotParseParameter.into());
+
+        assert!(matches!(
+            frontend.extended_parse_error(parse, &response),
+            FrontendMessage::Parse(_)
+        ));
+        assert!(matches!(
+            frontend.extended_bind_error(bind, &response),
+            FrontendMessage::Bind(_)
+        ));
     }
 }

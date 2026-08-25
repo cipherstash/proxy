@@ -69,8 +69,15 @@ mod tests {
         let result = client.query(&sql, &[]).await;
         assert!(result.is_ok());
 
+        // A decryption failure is connection-fatal, so verify tenant isolation on
+        // a disposable connection while preserving this connection for the
+        // TENANT_1 -> TENANT_2 -> TENANT_1 switch under test.
+        let tenant_2_client = connect_with_tls(*PROXY).await;
+        let sql = format!("SET CIPHERSTASH.KEYSET_ID = '{tenant_keyset_id_2}'");
+        tenant_2_client.query(&sql, &[]).await.unwrap();
+
         // SELECT data created by TENANT_1 AS TENANT_2
-        let result = client.query(select_sql, &[&tenant_1_id]).await;
+        let result = tenant_2_client.query(select_sql, &[&tenant_1_id]).await;
         assert!(result.is_err());
 
         //  --------
@@ -150,9 +157,16 @@ mod tests {
         let result = client.simple_query(&sql).await;
         assert!(result.is_ok());
 
+        // A decryption failure is connection-fatal, so verify tenant isolation on
+        // a disposable connection while preserving this connection for the
+        // TENANT_1 -> TENANT_2 -> TENANT_1 switch under test.
+        let tenant_2_client = connect_with_tls(*PROXY).await;
+        let sql = format!("SET CIPHERSTASH.KEYSET_ID = '{tenant_keyset_id_2}'");
+        tenant_2_client.simple_query(&sql).await.unwrap();
+
         // SELECT data created by TENANT_1 AS TENANT_2
         let sql = format!("SELECT id, encrypted_text FROM encrypted WHERE id = {tenant_1_id}");
-        let result = client.simple_query(&sql).await;
+        let result = tenant_2_client.simple_query(&sql).await;
         assert!(result.is_err());
 
         //  --------

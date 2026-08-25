@@ -4,10 +4,10 @@
 /// components, ensuring that all errors are properly converted to PostgreSQL
 /// ErrorResponse messages and sent to clients in a protocol-compliant manner.
 use crate::{
-    connect::Sender,
-    error::{EncryptError, Error, MappingError},
-    postgresql::messages::error_response::ErrorResponse,
+    error::{EncryptError, Error, MappingError, ProtocolError, ERROR_DOC_BASE_URL},
+    postgresql::diagnostics,
 };
+use pg_proto::DiagnosticResponse;
 
 /// Trait for components that can send PostgreSQL error responses to clients.
 ///
@@ -15,99 +15,79 @@ use crate::{
 /// frontend and backend components, providing consistent error conversion
 /// and client communication.
 pub trait PostgreSqlErrorHandler {
-    /// Get the client sender for this component
-    fn client_sender(&mut self) -> &mut Sender;
-
     /// Get the client ID for logging purposes
     fn client_id(&self) -> i32;
 
-    /// Convert various error types into appropriate PostgreSQL ErrorResponse messages.
+    /// Convert various error types into PostgreSQL `DiagnosticResponse` messages.
     ///
     /// # Error Type Mapping
     ///
-    /// - `MappingError` -> InvalidSqlStatement error
+    /// - `MappingError::InvalidParameter` -> Invalid parameter error
+    /// - Other `MappingError` values -> Invalid SQL statement error
     /// - `EncryptError::UnknownColumn` -> Unknown column error
-    /// - `EncryptError::CouldNotRetrieveKey` -> Key retrieval error
+    /// - `EncryptError::CouldNotDecryptDataForKeyset` -> System error
+    /// - `EncryptError::UnknownKeysetIdentifier` -> System error
+    /// - `Error::ConnectionTimeout` -> Idle session timeout error
     /// - All others -> System error
     ///
     /// # Arguments
     ///
-    /// * `err` - The error to be converted to a PostgreSQL ErrorResponse
-    fn error_to_response(&self, err: Error) -> ErrorResponse {
+    /// * `err` - The error to be converted to a `DiagnosticResponse`
+    fn error_to_response(&self, err: Error) -> DiagnosticResponse {
         match err {
             Error::Mapping(MappingError::InvalidParameter(ref column)) => {
-                ErrorResponse::invalid_parameter(
+                diagnostics::invalid_parameter(
                     err.to_string(),
                     &column.table_name(),
                     &column.column_name(),
                 )
             }
-            Error::Mapping(err) => ErrorResponse::invalid_sql_statement(err.to_string()),
+            Error::Mapping(err) => diagnostics::invalid_sql_statement(err.to_string()),
             Error::Encrypt(EncryptError::UnknownColumn {
                 ref table,
                 ref column,
-            }) => ErrorResponse::unknown_column(err.to_string(), table, column),
+            }) => diagnostics::unknown_column(err.to_string(), table, column),
             Error::Encrypt(EncryptError::CouldNotDecryptDataForKeyset { .. }) => {
-                ErrorResponse::system_error(err.to_string())
+                diagnostics::system_error(err.to_string())
             }
             Error::Encrypt(EncryptError::UnknownKeysetIdentifier { .. }) => {
-                ErrorResponse::system_error(err.to_string())
+                diagnostics::system_error(err.to_string())
             }
-            Error::ConnectionTimeout { .. } => ErrorResponse::connection_timeout(err.to_string()),
-            _ => ErrorResponse::system_error(err.to_string()),
+            Error::ConnectionTimeout { .. } => diagnostics::connection_timeout(err.to_string()),
+            Error::Protocol(
+                ProtocolError::HeldDataRowMissingOperation
+                | ProtocolError::HeldDataRowOperationMismatch
+                | ProtocolError::HeldBackendMessageNotDataRow
+                | ProtocolError::HeldDataRowsNotEncrypted,
+            ) => diagnostics::system_error(format!(
+                "CipherStash Proxy encountered an internal PostgreSQL protocol error. For help visit {ERROR_DOC_BASE_URL}#protocol-internal-error"
+            )),
+            _ => diagnostics::system_error(err.to_string()),
         }
     }
-
-    /// Send an ErrorResponse message to the client.
-    ///
-    /// Converts the error to a PostgreSQL ErrorResponse and sends it
-    /// to the client via the component's sender channel.
-    ///
-    /// # Arguments
-    ///
-    /// * `error_response` - The ErrorResponse to send to the client
-    fn send_error_response(&mut self, err: Error) -> Result<(), Error>;
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::postgresql::messages::error_response::{
-        ErrorResponseCode, CODE_IDLE_SESSION_TIMEOUT, CODE_SYSTEM_ERROR,
-    };
+    use crate::postgresql::diagnostics::{CODE_IDLE_SESSION_TIMEOUT, CODE_SYSTEM_ERROR};
     use std::time::Duration;
 
     /// Minimal implementation of PostgreSqlErrorHandler for testing the default method.
     struct TestHandler;
 
     impl PostgreSqlErrorHandler for TestHandler {
-        fn client_sender(&mut self) -> &mut Sender {
-            unimplemented!("not needed for error_to_response tests")
-        }
-
         fn client_id(&self) -> i32 {
             0
         }
-
-        fn send_error_response(&mut self, _err: Error) -> Result<(), Error> {
-            unimplemented!("not needed for error_to_response tests")
-        }
     }
 
-    fn error_code(response: &ErrorResponse) -> Option<&str> {
+    fn field(response: &DiagnosticResponse, code: u8) -> Option<&str> {
         response
             .fields
             .iter()
-            .find(|f| f.code == ErrorResponseCode::Code)
-            .map(|f| f.value.as_str())
-    }
-
-    fn error_message(response: &ErrorResponse) -> Option<&str> {
-        response
-            .fields
-            .iter()
-            .find(|f| f.code == ErrorResponseCode::Message)
-            .map(|f| f.value.as_str())
+            .find(|field| field.code == code)
+            .and_then(|field| std::str::from_utf8(&field.value).ok())
     }
 
     #[test]
@@ -117,9 +97,9 @@ mod tests {
             duration: Duration::from_millis(5000),
         };
         let response = handler.error_to_response(err);
-        assert_eq!(error_code(&response), Some(CODE_IDLE_SESSION_TIMEOUT));
+        assert_eq!(field(&response, b'C'), Some(CODE_IDLE_SESSION_TIMEOUT));
         assert_eq!(
-            error_message(&response),
+            field(&response, b'M'),
             Some("Connection timed out after 5000 ms")
         );
     }
@@ -129,6 +109,23 @@ mod tests {
         let handler = TestHandler;
         let err = Error::Unknown;
         let response = handler.error_to_response(err);
-        assert_eq!(error_code(&response), Some(CODE_SYSTEM_ERROR));
+        assert_eq!(field(&response, b'C'), Some(CODE_SYSTEM_ERROR));
+    }
+
+    #[test]
+    fn internal_protocol_error_does_not_expose_implementation_details() {
+        let handler = TestHandler;
+        let err = Error::Protocol(ProtocolError::HeldDataRowOperationMismatch);
+        let response = handler.error_to_response(err);
+
+        assert_eq!(field(&response, b'C'), Some(CODE_SYSTEM_ERROR));
+        assert_eq!(
+            field(&response, b'M'),
+            Some(concat!(
+                "CipherStash Proxy encountered an internal PostgreSQL protocol error. ",
+                "For help visit https://github.com/cipherstash/proxy/blob/main/docs/errors.md",
+                "#protocol-internal-error"
+            ))
+        );
     }
 }
