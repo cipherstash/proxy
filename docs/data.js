@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1787623003447,
+  "lastUpdate": 1787632670202,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -25722,6 +25722,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 40.884642,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "0963f9a8f1857ee35d0bfc0ee09aa43d4e9f8d24",
+          "message": "refactor(proxy): migrate PostgreSQL protocol to pg-proto",
+          "timestamp": "2026-08-24T02:21:42Z",
+          "url": "https://github.com/cipherstash/proxy/pull/443/commits/0963f9a8f1857ee35d0bfc0ee09aa43d4e9f8d24"
+        },
+        "date": 1787632668589,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 37.326053,
             "unit": "Number"
           }
         ]
