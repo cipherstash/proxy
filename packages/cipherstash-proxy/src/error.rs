@@ -219,8 +219,8 @@ pub enum ConfigError {
     #[error("Database schema could not be loaded")]
     SchemaCouldNotBeLoaded,
 
-    #[error("Client must connect with Transport Layer Security (TLS)")]
-    TlsRequired,
+    #[error("Server requires Transport Layer Security (TLS), but no [tls] certificate and private key are configured. For help visit {}#config-missing-or-invalid-tls", ERROR_DOC_BASE_URL)]
+    TlsConfigurationRequired,
 
     #[error(transparent)]
     TlsConfigError(#[from] TlsConfigError),

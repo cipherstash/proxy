@@ -6,9 +6,8 @@ use crate::{error::Error, proxy::EncryptionService};
 use backend::Backend;
 use frontend::Frontend;
 use pg_proto::{
-    AttributedBackendMessages, BackendBatchOutput, BackendFlushReason, BackendMessage,
-    BackendMiddlewareOutput, FrontendMessage, FrontendMiddlewareOutput, IntermediaryMiddleware,
-    IntermediaryMiddlewareFactory, OperationId,
+    BackendMessage, BackendMiddlewareOutput, FrontendMessage, FrontendMiddlewareOutput,
+    IntermediaryMiddleware, IntermediaryMiddlewareFactory, OperationId,
 };
 
 pub struct CipherStashMiddleware<S: EncryptionService + Clone> {
@@ -70,16 +69,5 @@ where
         message: BackendMessage,
     ) -> Result<BackendMiddlewareOutput, Error> {
         self.backend.intercept(operation, message).await
-    }
-
-    async fn flush_backend_operations(
-        &mut self,
-        _: &ServerContext,
-        _: &ClientContext,
-        _: &mut (),
-        held: AttributedBackendMessages<'_>,
-        _: BackendFlushReason,
-    ) -> Result<BackendBatchOutput, Error> {
-        self.backend.flush_held(held).await
     }
 }

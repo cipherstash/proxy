@@ -1,11 +1,16 @@
 use super::{middleware::CipherStashMiddlewareFactory, Context};
-use crate::{connect, error::Error, proxy::EncryptionService, tls};
+use crate::{
+    connect,
+    error::{ConfigError, Error},
+    proxy::EncryptionService,
+    tls,
+};
 use pg_proto::{
-    BackendHoldLimits, BoundedPipeline, CancellationPolicy, Client, ClientTlsConfig,
-    ClientTlsPolicy, ClientTlsProvider, ConnectTarget, ForwardedMessage, FrontendMessage,
-    InMemoryCancellationRegistry, InitialServerContext, Intermediary, Server, ServerIdentity,
-    ServerIdentityProvider, ServerTlsPolicy, SslMode, StartupParameters, StartupRouteResolver,
-    StaticClientCredentials, StaticMd5ServerCredentials,
+    BackendForwarding, BoundedPipeline, CancellationPolicy, Client, ClientTlsConfig,
+    ClientTlsPolicy, ClientTlsProvider, ConnectTarget, ForwardedMessage, FrontendForwarding,
+    FrontendMessage, InMemoryCancellationRegistry, InitialServerContext, Intermediary, Server,
+    ServerIdentity, ServerIdentityProvider, ServerTlsPolicy, SslMode, StartupParameters,
+    StartupRouteResolver, StaticClientCredentials, StaticMd5ServerCredentials,
 };
 use std::{convert::Infallible, sync::Arc};
 use tokio::net::TcpStream;
@@ -53,6 +58,7 @@ pub async fn handler<S>(client_stream: TcpStream, context: Context<S>) -> Result
 where
     S: EncryptionService + Clone,
 {
+    validate_downstream_tls(context.require_tls(), context.tls_config().is_some())?;
     let address = context.database_socket_address();
     let downstream_auth = StaticMd5ServerCredentials::new(
         context.database_username().to_owned(),
@@ -73,10 +79,6 @@ where
                 .cancellation(CancellationPolicy::Forward)
                 .cancellation_registry(InMemoryCancellationRegistry::default())
                 .pipeline(BoundedPipeline::new(256).expect("non-zero pipeline bound"))
-                .backend_batching(
-                    BackendHoldLimits::new(4096, 64 * 1024 * 1024)
-                        .expect("non-zero backend hold limits"),
-                )
                 .middleware(CipherStashMiddlewareFactory(context.clone()))
                 .build()
                 .map_err(invalid_data)?;
@@ -92,7 +94,7 @@ where
                 pg_proto::IntermediaryAccept::Session(session) => session,
                 pg_proto::IntermediaryAccept::CancellationForwarded => return Ok(()),
             };
-            loop {
+            'session: loop {
                 let forward = session.forward_next();
                 let forwarded = match connection_timeout {
                     Some(duration) => tokio::time::timeout(duration, forward)
@@ -104,7 +106,57 @@ where
                     Ok(forwarded) => forwarded,
                     Err(pg_proto::ForwardError::Frontend(
                         pg_proto::FrontendProjectionError::Capacity(_),
-                    )) => continue,
+                    )) => {
+                        // pg-proto retains the rejected frontend message. Drain
+                        // one upstream response at a time to release pipeline
+                        // capacity, then retry that exact message through the
+                        // dedicated frontend path. In particular, this lets a
+                        // retained Sync reach PostgreSQL instead of waiting for
+                        // responses that PostgreSQL may buffer until Sync.
+                        loop {
+                            let backend = session.forward_backend();
+                            let drained = match connection_timeout {
+                                Some(duration) => tokio::time::timeout(duration, backend)
+                                    .await
+                                    .map_err(|_| Error::ConnectionTimeout { duration })?,
+                                None => backend.await,
+                            };
+                            match drained {
+                                Ok(
+                                    BackendForwarding::Forwarded(_)
+                                    | BackendForwarding::Expanded { .. }
+                                    | BackendForwarding::Suppressed(_)
+                                    | BackendForwarding::Held,
+                                ) => {}
+                                Err(pg_proto::ForwardError::Middleware(error)) => {
+                                    return Err(error)
+                                }
+                                Err(error) => return Err(invalid_data(error)),
+                            }
+
+                            let retry = session.forward_frontend();
+                            let retried = match connection_timeout {
+                                Some(duration) => tokio::time::timeout(duration, retry)
+                                    .await
+                                    .map_err(|_| Error::ConnectionTimeout { duration })?,
+                                None => retry.await,
+                            };
+                            match retried {
+                                Ok(FrontendForwarding::Forwarded(FrontendMessage::Terminate)) => {
+                                    break 'session;
+                                }
+                                Ok(_) => break,
+                                Err(pg_proto::ForwardError::Frontend(
+                                    pg_proto::FrontendProjectionError::Capacity(_),
+                                )) => {}
+                                Err(pg_proto::ForwardError::Middleware(error)) => {
+                                    return Err(error)
+                                }
+                                Err(error) => return Err(invalid_data(error)),
+                            }
+                        }
+                        continue;
+                    }
                     Err(pg_proto::ForwardError::Middleware(error)) => return Err(error),
                     Err(error) => return Err(invalid_data(error)),
                 };
@@ -181,6 +233,13 @@ where
         .map_err(invalid_data)?)
 }
 
+fn validate_downstream_tls(require_tls: bool, tls_configured: bool) -> Result<(), Error> {
+    if require_tls && !tls_configured {
+        return Err(ConfigError::TlsConfigurationRequired.into());
+    }
+    Ok(())
+}
+
 fn invalid_data(error: impl std::fmt::Display) -> Error {
     std::io::Error::new(std::io::ErrorKind::InvalidData, error.to_string()).into()
 }
@@ -203,5 +262,13 @@ mod tests {
     fn upstream_tls_without_verification_is_opportunistic() {
         let config = crate::TandemConfig::for_testing();
         assert_eq!(upstream_ssl_mode(&config), SslMode::Prefer);
+    }
+
+    #[test]
+    fn required_downstream_tls_rejects_missing_tls_configuration() {
+        assert!(matches!(
+            validate_downstream_tls(true, false),
+            Err(Error::Config(ConfigError::TlsConfigurationRequired))
+        ));
     }
 }

@@ -379,26 +379,33 @@ where
     pub fn close_statement(&mut self, name: &Name) {
         debug!(target: CONTEXT, client_id = self.client_id, statement = ?name);
 
-        let statement = self
+        let session_id = self.get_statement_session(name);
+        let _ = self
             .statements
             .write()
-            .ok()
-            .and_then(|mut guarded| guarded.remove(name));
-
-        if let Some(statement) = statement {
-            let _ = self.portals.write().map(|mut guarded| {
-                guarded.retain(|_, portal| {
-                    !matches!(portal.as_ref(), Portal::Encrypted { statement: portal_statement, .. } if Arc::ptr_eq(portal_statement, &statement))
-                });
-            });
-        }
-
-        let session_id = self
+            .map(|mut guarded| guarded.remove(name));
+        let _ = self
             .statement_sessions
             .write()
-            .ok()
-            .and_then(|mut guarded| guarded.remove(name));
-        self.finish_session(session_id);
+            .map(|mut guarded| guarded.remove(name));
+
+        let session_in_use = session_id.is_some_and(|session_id| {
+            self.portals.read().is_ok_and(|portals| {
+                portals
+                    .values()
+                    .any(|portal| portal.session_id() == Some(session_id))
+            }) || self.operations.read().is_ok_and(|operations| {
+                operations.values().any(|operation| {
+                    operation
+                        .execute
+                        .as_ref()
+                        .is_some_and(|execute| execute.session_id() == Some(session_id))
+                })
+            })
+        });
+        if !session_in_use {
+            self.finish_session(session_id);
+        }
     }
 
     pub fn transaction_status(&self) -> TransactionStatus {
@@ -414,10 +421,19 @@ where
         }
     }
 
-    /// Close both statement and its associated portal.
-    pub fn close_statement_and_portal(&mut self, name: &Name) {
-        self.close_portal(name);
+    /// Close a statement explicitly requested by the client.
+    ///
+    /// PostgreSQL portals retain the parsed statement they reference and remain
+    /// valid after the statement name is closed, so they must not be removed.
+    pub fn close_statement_explicit(&mut self, name: &Name) {
         self.close_statement(name);
+    }
+
+    pub fn discard_operation(&mut self, operation: OperationId) {
+        let _ = self
+            .operations
+            .write()
+            .map(|mut operations| operations.remove(&operation));
     }
 
     pub fn add_portal(&mut self, name: Name, portal: Portal) {
@@ -1105,20 +1121,36 @@ mod tests {
     }
 
     #[test]
-    fn closing_a_statement_finishes_its_metrics_session() {
+    fn replacing_a_statement_does_not_finish_an_overlapping_execution_session() {
+        let mut context = create_context();
+        let name = Name::default();
+        let session_id = context.start_session();
+        context.set_statement_session(name.clone(), session_id);
+        context.add_portal(
+            Name::from("active_portal"),
+            Portal::passthrough(Some(session_id)),
+        );
+
+        context.close_statement(&name);
+
+        assert!(context.get_session_metrics(session_id).is_some());
+        assert!(context.get_statement_session(&name).is_none());
+    }
+
+    #[test]
+    fn closing_an_unreferenced_statement_finishes_its_metrics_session() {
         let mut context = create_context();
         let name = Name::default();
         let session_id = context.start_session();
         context.set_statement_session(name.clone(), session_id);
 
-        context.close_statement(&name);
+        context.close_statement_explicit(&name);
 
         assert!(context.get_session_metrics(session_id).is_none());
-        assert!(context.get_statement_session(&name).is_none());
     }
 
     #[test]
-    fn closing_a_statement_invalidates_only_its_portals() {
+    fn replacing_a_statement_retains_existing_portals() {
         let mut context = create_context();
         let closed_statement_name = Name::from("closed_statement");
         let retained_statement_name = Name::from("retained_statement");
@@ -1136,7 +1168,7 @@ mod tests {
 
         context.close_statement(&closed_statement_name);
 
-        assert!(context.get_portal(&closed_portal_name).is_none());
+        assert!(context.get_portal(&closed_portal_name).is_some());
         assert!(context.get_portal(&retained_portal_name).is_some());
         assert!(context.get_portal(&passthrough_portal_name).is_some());
     }

@@ -28,8 +28,7 @@ use cipherstash_client::encryption::Plaintext;
 use eql_mapper::{self, EqlMapperError, EqlTermVariant, JsonSelectorSegment, TypeCheckedStatement};
 use metrics::{counter, histogram};
 use pg_proto::{
-    BackendMessage, Close, Describe, DescribeTarget, Execute, FrontendMessage,
-    FrontendMiddlewareOutput, Parse,
+    Close, Describe, DescribeTarget, Execute, FrontendMessage, FrontendMiddlewareOutput, Parse,
 };
 use serde::Serialize;
 use sqltk::parser::ast::{self, Value};
@@ -85,6 +84,7 @@ use tracing::{debug, info, warn};
 pub struct Frontend<S: EncryptionService> {
     /// Session context tracking statements, portals, and keyset IDs
     context: Context<S>,
+    failed_extended_batch: bool,
 }
 
 impl<S: EncryptionService> Frontend<S> {
@@ -97,7 +97,10 @@ impl<S: EncryptionService> Frontend<S> {
     /// * `server_writer` - Stream for writing messages to the PostgreSQL server
     /// * `context` - Session context for tracking statements and portals with service access
     pub fn new(context: Context<S>) -> Self {
-        Frontend { context }
+        Frontend {
+            context,
+            failed_extended_batch: false,
+        }
     }
 
     pub async fn intercept(
@@ -107,6 +110,15 @@ impl<S: EncryptionService> Frontend<S> {
     ) -> Result<FrontendMiddlewareOutput, Error> {
         if self.context.mapping_disabled() {
             return Ok(FrontendMiddlewareOutput::Forward(protocol_message));
+        }
+
+        if self.failed_extended_batch {
+            if matches!(protocol_message, FrontendMessage::Sync) {
+                self.failed_extended_batch = false;
+                return Ok(FrontendMiddlewareOutput::Forward(protocol_message));
+            }
+            self.context.discard_operation(operation);
+            return Ok(FrontendMiddlewareOutput::Suppress(protocol_message));
         }
 
         let mut outbound_message = protocol_message.clone();
@@ -119,19 +131,13 @@ impl<S: EncryptionService> Frontend<S> {
                     Ok(None) => (),
                     Err(err) => {
                         let session_id = self.context.latest_session_id();
-                        self.context.finish_session(session_id);
                         warn!(
                             client_id = self.context.client_id,
                             msg = "Query Handler Error",
                             error = ?err.to_string(),
                         );
-                        return Ok(FrontendMiddlewareOutput::Respond {
-                            request: outbound_message,
-                            responses: vec![
-                                self.error_response(err),
-                                BackendMessage::ReadyForQuery(self.context.transaction_status()),
-                            ],
-                        });
+                        self.context.set_execute(operation, Name::new(), session_id);
+                        outbound_message = self.simple_error_query(err);
                     }
                 }
             }
@@ -143,6 +149,7 @@ impl<S: EncryptionService> Frontend<S> {
             }
             FrontendMessage::Parse(parse) => {
                 let statement = parse.statement.clone();
+                let failed_parse = parse.clone();
                 match self.parse_handler(parse).await {
                     Ok(Some(mapped)) => outbound_message = mapped,
                     // No mapping needed, don't change the bytes
@@ -154,14 +161,18 @@ impl<S: EncryptionService> Frontend<S> {
                             msg = "Parse Handler Error",
                             error = ?err.to_string(),
                         );
-                        return Ok(FrontendMiddlewareOutput::Respond {
-                            request: outbound_message,
-                            responses: vec![self.error_response(err)],
-                        });
+                        self.context.set_execute(
+                            operation,
+                            Name::new(),
+                            self.context.latest_session_id(),
+                        );
+                        self.failed_extended_batch = true;
+                        outbound_message = self.extended_parse_error(failed_parse, err);
                     }
                 }
             }
             FrontendMessage::Bind(bind) => {
+                let failed_bind = bind.clone();
                 match self.bind_handler(Bind::try_from(bind)?).await {
                     Ok(Some(mapped)) => outbound_message = mapped,
                     // No mapping needed, don't change the bytes
@@ -172,20 +183,26 @@ impl<S: EncryptionService> Frontend<S> {
                                 client_id = self.context.client_id,
                                 msg = "EncryptError::InvalidParameter",
                             );
-                            return Ok(FrontendMiddlewareOutput::Respond {
-                                request: outbound_message,
-                                responses: vec![self.error_response(err)],
-                            });
+                            self.context.set_execute(
+                                operation,
+                                Name::new(),
+                                self.context.latest_session_id(),
+                            );
+                            self.failed_extended_batch = true;
+                            outbound_message = self.extended_bind_error(failed_bind, err);
                         }
                         Error::Encrypt(EncryptError::UnknownKeysetIdentifier { .. }) => {
                             warn!(target: PROTOCOL,
                                 client_id = self.context.client_id,
                                 msg = "EncryptError::UnknownKeysetIdentifier",
                             );
-                            return Ok(FrontendMiddlewareOutput::Respond {
-                                request: outbound_message,
-                                responses: vec![self.error_response(err)],
-                            });
+                            self.context.set_execute(
+                                operation,
+                                Name::new(),
+                                self.context.latest_session_id(),
+                            );
+                            self.failed_extended_batch = true;
+                            outbound_message = self.extended_bind_error(failed_bind, err);
                         }
                         _ => {
                             warn!(target: PROTOCOL,
@@ -193,10 +210,13 @@ impl<S: EncryptionService> Frontend<S> {
                                 msg = "Bind Error",
                                 err = err.to_string()
                             );
-                            return Ok(FrontendMiddlewareOutput::Respond {
-                                request: outbound_message,
-                                responses: vec![self.error_response(err)],
-                            });
+                            self.context.set_execute(
+                                operation,
+                                Name::new(),
+                                self.context.latest_session_id(),
+                            );
+                            self.failed_extended_batch = true;
+                            outbound_message = self.extended_bind_error(failed_bind, err);
                         }
                     },
                 }
@@ -206,8 +226,6 @@ impl<S: EncryptionService> Frontend<S> {
                     client_id = self.context.client_id,
                     message = ?protocol_message,
                 );
-
-                self.context.reload_schema_if_changed().await;
             }
             FrontendMessage::Close(close) => {
                 self.close_handler(close).await?;
@@ -238,7 +256,7 @@ impl<S: EncryptionService> Frontend<S> {
         debug!(target: PROTOCOL, client_id = self.context.client_id, ?close);
         match close.target {
             DescribeTarget::Portal => self.context.close_portal(&close.name),
-            DescribeTarget::Statement => self.context.close_statement_and_portal(&close.name),
+            DescribeTarget::Statement => self.context.close_statement_explicit(&close.name),
         }
         Ok(())
     }
@@ -1139,6 +1157,15 @@ impl<S: EncryptionService> Frontend<S> {
     }
 }
 
+fn quote_literal(value: &str) -> String {
+    let escaped = value.replace('\\', "\\\\").replace('\'', "''");
+    if value.contains('\\') {
+        format!("E'{escaped}'")
+    } else {
+        format!("'{escaped}'")
+    }
+}
+
 fn rewrite_parse_param_types(client_types: &[u32], output_params: &[OutputParam]) -> Vec<u32> {
     if client_types.is_empty() {
         return Vec::new();
@@ -1332,16 +1359,160 @@ impl<S: EncryptionService> PostgreSqlErrorHandler for Frontend<S> {
 }
 
 impl<S: EncryptionService> Frontend<S> {
-    fn error_response(&self, err: Error) -> BackendMessage {
-        let error_response = self.error_to_response(err);
-        let message = BackendMessage::ErrorResponse(error_response);
+    fn simple_error_query(&self, err: Error) -> FrontendMessage {
+        let response = self.error_to_response(err);
+        let options = response
+            .fields
+            .iter()
+            .filter_map(|field| {
+                let option = match field.code {
+                    b'M' => "MESSAGE",
+                    b'C' => "ERRCODE",
+                    b'D' => "DETAIL",
+                    b'H' => "HINT",
+                    b's' => "SCHEMA",
+                    b't' => "TABLE",
+                    b'c' => "COLUMN",
+                    b'd' => "DATATYPE",
+                    b'n' => "CONSTRAINT",
+                    _ => return None,
+                };
+                Some(format!(
+                    "{option} = {}",
+                    quote_literal(&String::from_utf8_lossy(&field.value))
+                ))
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
+        let body = format!("BEGIN RAISE EXCEPTION USING {options}; END;");
+        FrontendMessage::Query(bytes::Bytes::from(format!("DO {};", quote_literal(&body))))
+    }
 
-        debug!(target: PROTOCOL,
-            client_id = self.context.client_id,
-            msg = "send_error_response",
-            ?message,
+    fn extended_parse_error(&self, mut parse: Parse, err: Error) -> FrontendMessage {
+        let marker = self.extended_error_marker(err);
+        parse.query =
+            bytes::Bytes::from(format!("SELECT NULL::\"{}\"", marker.replace('"', "\"\"")));
+        parse.parameter_types.clear();
+        FrontendMessage::Parse(parse)
+    }
+
+    fn extended_bind_error(&self, mut bind: pg_proto::Bind, err: Error) -> FrontendMessage {
+        bind.statement = bytes::Bytes::from(self.extended_error_marker(err));
+        FrontendMessage::Bind(bind)
+    }
+
+    fn extended_error_marker(&self, err: Error) -> String {
+        let response = self.error_to_response(err);
+        let code = response
+            .fields
+            .iter()
+            .find(|field| field.code == b'C')
+            .map(|field| String::from_utf8_lossy(&field.value))
+            .unwrap_or_default();
+        let message = response
+            .fields
+            .iter()
+            .find(|field| field.code == b'M')
+            .map(|field| String::from_utf8_lossy(&field.value))
+            .unwrap_or_default();
+        let message = message
+            .chars()
+            .filter(|character| character.is_ascii_graphic() || *character == ' ')
+            .take(40)
+            .collect::<String>();
+        format!("__cipherstash_proxy_error_{code}_{message}")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{quote_literal, Frontend};
+    use crate::config::TandemConfig;
+    use crate::error::{Error, MappingError};
+    use crate::postgresql::context::{Context, KeysetIdentifier};
+    use crate::postgresql::Column;
+    use crate::proxy::{EncryptConfig, EncryptionService};
+    use eql_mapper::Schema;
+    use pg_proto::{Bind, FrontendMessage, Parse};
+    use std::sync::Arc;
+    use tokio::sync::mpsc;
+
+    struct TestService;
+
+    #[async_trait::async_trait]
+    impl EncryptionService for TestService {
+        async fn encrypt(
+            &self,
+            _keyset_id: Option<KeysetIdentifier>,
+            _plaintexts: Vec<Option<cipherstash_client::encryption::Plaintext>>,
+            _columns: &[Option<Column>],
+        ) -> Result<Vec<Option<crate::EqlOutput>>, Error> {
+            Ok(Vec::new())
+        }
+
+        async fn decrypt(
+            &self,
+            _keyset_id: Option<KeysetIdentifier>,
+            _ciphertexts: Vec<Option<crate::EqlCiphertext>>,
+        ) -> Result<Vec<Option<cipherstash_client::encryption::Plaintext>>, Error> {
+            Ok(Vec::new())
+        }
+    }
+
+    fn frontend() -> Frontend<TestService> {
+        let (reload_sender, _) = mpsc::unbounded_channel();
+        let context = Context::new(
+            1,
+            Arc::new(TandemConfig::for_testing()),
+            Arc::new(EncryptConfig::default()),
+            Arc::new(Schema::new("public")),
+            Arc::new(rustls::RootCertStore::empty()),
+            TestService,
+            reload_sender,
         );
+        Frontend::new(context)
+    }
 
-        message
+    #[test]
+    fn exception_literals_escape_quotes_and_backslashes() {
+        assert_eq!(quote_literal("can't"), "'can''t'");
+        assert_eq!(quote_literal(r"path\file"), r"E'path\\file'");
+    }
+
+    #[test]
+    fn simple_errors_are_forwarded_as_exception_queries() {
+        let output = frontend().simple_error_query(MappingError::CouldNotParseParameter.into());
+
+        assert!(matches!(
+            output,
+            FrontendMessage::Query(query)
+                if String::from_utf8_lossy(&query).contains("RAISE EXCEPTION")
+        ));
+    }
+
+    #[test]
+    fn extended_errors_preserve_the_original_protocol_message_kind() {
+        let frontend = frontend();
+        let parse = Parse {
+            statement: bytes::Bytes::from_static(b"statement"),
+            query: bytes::Bytes::from_static(b"select 1"),
+            parameter_types: Vec::new(),
+        };
+        let bind = Bind {
+            portal: bytes::Bytes::from_static(b"portal"),
+            statement: bytes::Bytes::from_static(b"statement"),
+            parameter_formats: Vec::new(),
+            parameters: Vec::new(),
+            result_formats: Vec::new(),
+        };
+
+        assert!(matches!(
+            frontend.extended_parse_error(parse, MappingError::CouldNotParseParameter.into()),
+            FrontendMessage::Parse(_)
+        ));
+        assert!(matches!(
+            frontend.extended_bind_error(bind, MappingError::CouldNotParseParameter.into()),
+            FrontendMessage::Bind(_)
+        ));
     }
 }

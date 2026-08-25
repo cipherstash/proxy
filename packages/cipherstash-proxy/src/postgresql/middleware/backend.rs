@@ -14,10 +14,7 @@ use crate::prometheus::{
 use crate::proxy::EncryptionService;
 use crate::EqlCiphertext;
 use metrics::{counter, histogram};
-use pg_proto::{
-    AttributedBackendMessages, BackendBatchOutput, BackendMessage, BackendMiddlewareOutput,
-    OperationId,
-};
+use pg_proto::{BackendMessage, BackendMiddlewareOutput, DataRow, OperationId};
 use std::time::Instant;
 use tracing::{debug, error, info};
 
@@ -68,9 +65,28 @@ use tracing::{debug, error, info};
 pub struct Backend<S: EncryptionService> {
     /// Session context with portal and statement metadata
     context: Context<S>,
+    encrypted_rows: Vec<DataRow>,
+    encrypted_rows_operation: Option<OperationId>,
+    encrypted_rows_bytes: usize,
+    discard_execution: bool,
 }
 
+const MAX_ENCRYPTED_ROWS: usize = 4096;
+const MAX_ENCRYPTED_ROW_BYTES: usize = 64 * 1024 * 1024;
+
 impl<S: EncryptionService> Backend<S> {
+    fn error_response(&self, err: Error) -> BackendMessage {
+        BackendMessage::ErrorResponse(self.error_to_response(err))
+    }
+
+    fn decryption_failure(&mut self, err: Error) -> BackendMiddlewareOutput {
+        self.encrypted_rows.clear();
+        self.encrypted_rows_operation = None;
+        self.encrypted_rows_bytes = 0;
+        self.discard_execution = true;
+        BackendMiddlewareOutput::Expand(vec![self.error_response(err)])
+    }
+
     /// Creates a new Backend instance.
     ///
     /// # Arguments
@@ -80,7 +96,13 @@ impl<S: EncryptionService> Backend<S> {
     /// * `encrypt` - Encryption service for handling column decryption
     /// * `context` - Session context shared with the frontend
     pub fn new(context: Context<S>) -> Self {
-        Backend { context }
+        Backend {
+            context,
+            encrypted_rows: Vec::new(),
+            encrypted_rows_operation: None,
+            encrypted_rows_bytes: 0,
+            discard_execution: false,
+        }
     }
 
     pub async fn intercept(
@@ -89,13 +111,6 @@ impl<S: EncryptionService> Backend<S> {
         message: BackendMessage,
     ) -> Result<BackendMiddlewareOutput, Error> {
         self.intercept_backend(operation, message).await
-    }
-
-    pub async fn flush_held(
-        &mut self,
-        held: AttributedBackendMessages<'_>,
-    ) -> Result<BackendBatchOutput, Error> {
-        self.decrypt_held(held).await
     }
 
     async fn intercept_backend(
@@ -125,10 +140,17 @@ impl<S: EncryptionService> Backend<S> {
             match protocol_message {
                 BackendMessage::CommandComplete(_)
                 | BackendMessage::EmptyQueryResponse
-                | BackendMessage::PortalSuspended
-                | BackendMessage::ErrorResponse(_) => {
+                | BackendMessage::PortalSuspended => {
                     if let Some(operation) = operation {
                         let session = self.context.complete_execution(operation);
+                        self.context.discard_operation(operation);
+                        self.context.finish_session(session);
+                    }
+                }
+                BackendMessage::ErrorResponse(_) => {
+                    if let Some(operation) = operation {
+                        let session = self.context.complete_execution(operation);
+                        self.context.discard_operation(operation);
                         self.context.finish_session(session);
                     }
                 }
@@ -146,15 +168,96 @@ impl<S: EncryptionService> Backend<S> {
             return Ok(BackendMiddlewareOutput::Forward(outbound_message));
         }
 
+        if self.discard_execution {
+            match protocol_message {
+                BackendMessage::CommandComplete(_)
+                | BackendMessage::EmptyQueryResponse
+                | BackendMessage::PortalSuspended => {
+                    if let Some(operation) = operation {
+                        let session = self.context.complete_execution(operation);
+                        self.context.discard_operation(operation);
+                        self.context.finish_session(session);
+                    }
+                }
+                BackendMessage::ErrorResponse(_) => {
+                    if let Some(operation) = operation {
+                        let session = self.context.complete_execution(operation);
+                        self.context.discard_operation(operation);
+                        self.context.finish_session(session);
+                    }
+                }
+                BackendMessage::ReadyForQuery(status) => {
+                    self.discard_execution = false;
+                    self.context.set_transaction_status(status);
+                    self.context.reload_schema_if_changed().await;
+                    return Ok(BackendMiddlewareOutput::Forward(
+                        BackendMessage::ReadyForQuery(status),
+                    ));
+                }
+                _ => {}
+            }
+            return Ok(BackendMiddlewareOutput::Suppress(protocol_message));
+        }
+
+        let mut prefix = if !matches!(protocol_message, BackendMessage::DataRow(_))
+            && !self.encrypted_rows.is_empty()
+        {
+            match self.flush_encrypted_rows().await {
+                Ok(messages) => messages,
+                Err(err) => {
+                    self.discard_execution = true;
+                    if let Some(operation) = operation {
+                        let session = self.context.complete_execution(operation);
+                        self.context.discard_operation(operation);
+                        self.context.finish_session(session);
+                    }
+                    return Ok(self.decryption_failure(err));
+                }
+            }
+        } else {
+            Vec::new()
+        };
+
         let keyset_id = self.context.keyset_identifier();
         debug!(target: CONTEXT, client_id = ?self.context.client_id, ?keyset_id);
 
         match protocol_message {
-            BackendMessage::DataRow(_) => {
+            BackendMessage::DataRow(row) => {
                 // Encrypted DataRows are added to the buffer and we return early
                 // Otherwise, continue and write
                 if self.data_row_handler(operation).await? {
-                    return Ok(BackendMiddlewareOutput::Hold);
+                    let Some(operation) = operation else {
+                        return Ok(self.decryption_failure(
+                            ProtocolError::HeldDataRowMissingOperation.into(),
+                        ));
+                    };
+                    if self
+                        .encrypted_rows_operation
+                        .replace(operation)
+                        .is_some_and(|current| current != operation)
+                    {
+                        return Ok(self.decryption_failure(
+                            ProtocolError::HeldDataRowOperationMismatch.into(),
+                        ));
+                    }
+                    self.encrypted_rows_bytes += row
+                        .columns
+                        .iter()
+                        .flatten()
+                        .map(bytes::Bytes::len)
+                        .sum::<usize>();
+                    self.encrypted_rows.push(row.clone());
+                    if self.encrypted_rows.len() < MAX_ENCRYPTED_ROWS
+                        && self.encrypted_rows_bytes < MAX_ENCRYPTED_ROW_BYTES
+                    {
+                        return Ok(BackendMiddlewareOutput::Suppress(BackendMessage::DataRow(
+                            row,
+                        )));
+                    }
+                    return match self.flush_encrypted_rows().await {
+                        Ok(messages) => Ok(BackendMiddlewareOutput::Expand(messages)),
+                        Err(err) => Ok(self.decryption_failure(err)),
+                    };
                 }
             }
 
@@ -167,6 +270,7 @@ impl<S: EncryptionService> Backend<S> {
 
                 if let Some(operation) = operation {
                     let session = self.context.complete_execution(operation);
+                    self.context.discard_operation(operation);
                     self.context.finish_session(session);
                 }
             }
@@ -227,7 +331,12 @@ impl<S: EncryptionService> Backend<S> {
             }
         }
 
-        Ok(BackendMiddlewareOutput::Forward(outbound_message))
+        if prefix.is_empty() {
+            Ok(BackendMiddlewareOutput::Forward(outbound_message))
+        } else {
+            prefix.push(outbound_message);
+            Ok(BackendMiddlewareOutput::Expand(prefix))
+        }
     }
 
     /// Handles PostgreSQL ErrorResponse messages from the server.
@@ -317,25 +426,10 @@ impl<S: EncryptionService> Backend<S> {
     /// appropriate error responses and recorded in metrics. The error mapping
     /// implemented in the encryption service ensures proper keyset ID context
     /// is preserved in error messages.
-    async fn decrypt_held(
-        &mut self,
-        held: AttributedBackendMessages<'_>,
-    ) -> Result<BackendBatchOutput, Error> {
-        let mut operation = None;
-        let mut rows = Vec::with_capacity(held.iter().len());
-        for (row_operation, message) in held.iter() {
-            let row_operation = row_operation.ok_or(ProtocolError::HeldDataRowMissingOperation)?;
-            if operation
-                .replace(row_operation)
-                .is_some_and(|current| current != row_operation)
-            {
-                return Err(ProtocolError::HeldDataRowOperationMismatch.into());
-            }
-            let BackendMessage::DataRow(row) = message else {
-                return Err(ProtocolError::HeldBackendMessageNotDataRow.into());
-            };
-            rows.push(row.clone());
-        }
+    async fn flush_encrypted_rows(&mut self) -> Result<Vec<BackendMessage>, Error> {
+        let operation = self.encrypted_rows_operation.take();
+        let mut rows = std::mem::take(&mut self.encrypted_rows);
+        self.encrypted_rows_bytes = 0;
 
         let portal =
             operation.and_then(|operation| self.context.get_portal_from_execute(operation));
@@ -350,7 +444,7 @@ impl<S: EncryptionService> Backend<S> {
 
         let result_column_count = match rows.first() {
             Some(row) => row.columns.len(),
-            None => return Ok(BackendBatchOutput::ReplaceOneToOne(Vec::new())),
+            None => return Ok(Vec::new()),
         };
 
         // Result Column Format Codes are passed with the Bind message
@@ -408,7 +502,7 @@ impl<S: EncryptionService> Backend<S> {
 
         // Stitch Plaintext back into Rows encoded with the appropriate Format Code
         // Each chunk is written to the client
-        let mut messages = Vec::with_capacity(held.iter().len());
+        let mut messages = Vec::with_capacity(rows.len());
         for (chunk, mut row) in rows {
             let data = chunk
                 .iter()
@@ -423,7 +517,7 @@ impl<S: EncryptionService> Backend<S> {
 
             messages.push(BackendMessage::DataRow(row));
         }
-        Ok(BackendBatchOutput::ReplaceOneToOne(messages))
+        Ok(messages)
     }
 
     fn check_column_config(
@@ -644,6 +738,37 @@ mod tests {
         ) -> Result<Vec<Option<cipherstash_client::encryption::Plaintext>>, Error> {
             Ok(vec![])
         }
+    }
+
+    fn create_backend() -> Backend<TestService> {
+        let config = Arc::new(TandemConfig::for_testing());
+        let encrypt_config = Arc::new(EncryptConfig::default());
+        let schema = Arc::new(Schema::new("public"));
+        let (reload_sender, _) = mpsc::unbounded_channel();
+        let context = Context::new(
+            1,
+            config,
+            encrypt_config,
+            schema,
+            Arc::new(rustls::RootCertStore::empty()),
+            TestService {},
+            reload_sender,
+        );
+        Backend::new(context)
+    }
+
+    #[test]
+    fn decryption_failure_is_returned_as_a_postgresql_error() {
+        let mut backend = create_backend();
+
+        let output = backend.decryption_failure(Error::Unknown);
+
+        assert!(matches!(
+            output,
+            BackendMiddlewareOutput::Expand(messages)
+                if matches!(messages.as_slice(), [BackendMessage::ErrorResponse(_)])
+        ));
+        assert!(backend.discard_execution);
     }
 
     #[tokio::test]
