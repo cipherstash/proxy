@@ -136,8 +136,11 @@ impl<S: EncryptionService> Frontend<S> {
                             msg = "Query Handler Error",
                             error = ?err.to_string(),
                         );
+                        let response = self.error_to_response(err);
+                        self.context
+                            .set_operation_error(operation, response.clone());
                         self.context.set_execute(operation, Name::new(), session_id);
-                        outbound_message = self.simple_error_query(err);
+                        outbound_message = self.simple_error_query(&response);
                     }
                 }
             }
@@ -161,13 +164,16 @@ impl<S: EncryptionService> Frontend<S> {
                             msg = "Parse Handler Error",
                             error = ?err.to_string(),
                         );
+                        let response = self.error_to_response(err);
+                        self.context
+                            .set_operation_error(operation, response.clone());
                         self.context.set_execute(
                             operation,
                             Name::new(),
                             self.context.latest_session_id(),
                         );
                         self.failed_extended_batch = true;
-                        outbound_message = self.extended_parse_error(failed_parse, err);
+                        outbound_message = self.extended_parse_error(failed_parse, &response);
                     }
                 }
             }
@@ -183,26 +189,32 @@ impl<S: EncryptionService> Frontend<S> {
                                 client_id = self.context.client_id,
                                 msg = "EncryptError::InvalidParameter",
                             );
+                            let response = self.error_to_response(err);
+                            self.context
+                                .set_operation_error(operation, response.clone());
                             self.context.set_execute(
                                 operation,
                                 Name::new(),
                                 self.context.latest_session_id(),
                             );
                             self.failed_extended_batch = true;
-                            outbound_message = self.extended_bind_error(failed_bind, err);
+                            outbound_message = self.extended_bind_error(failed_bind, &response);
                         }
                         Error::Encrypt(EncryptError::UnknownKeysetIdentifier { .. }) => {
                             warn!(target: PROTOCOL,
                                 client_id = self.context.client_id,
                                 msg = "EncryptError::UnknownKeysetIdentifier",
                             );
+                            let response = self.error_to_response(err);
+                            self.context
+                                .set_operation_error(operation, response.clone());
                             self.context.set_execute(
                                 operation,
                                 Name::new(),
                                 self.context.latest_session_id(),
                             );
                             self.failed_extended_batch = true;
-                            outbound_message = self.extended_bind_error(failed_bind, err);
+                            outbound_message = self.extended_bind_error(failed_bind, &response);
                         }
                         _ => {
                             warn!(target: PROTOCOL,
@@ -210,13 +222,16 @@ impl<S: EncryptionService> Frontend<S> {
                                 msg = "Bind Error",
                                 err = err.to_string()
                             );
+                            let response = self.error_to_response(err);
+                            self.context
+                                .set_operation_error(operation, response.clone());
                             self.context.set_execute(
                                 operation,
                                 Name::new(),
                                 self.context.latest_session_id(),
                             );
                             self.failed_extended_batch = true;
-                            outbound_message = self.extended_bind_error(failed_bind, err);
+                            outbound_message = self.extended_bind_error(failed_bind, &response);
                         }
                     },
                 }
@@ -1359,8 +1374,7 @@ impl<S: EncryptionService> PostgreSqlErrorHandler for Frontend<S> {
 }
 
 impl<S: EncryptionService> Frontend<S> {
-    fn simple_error_query(&self, err: Error) -> FrontendMessage {
-        let response = self.error_to_response(err);
+    fn simple_error_query(&self, response: &pg_proto::DiagnosticResponse) -> FrontendMessage {
         let options = response
             .fields
             .iter()
@@ -1388,21 +1402,28 @@ impl<S: EncryptionService> Frontend<S> {
         FrontendMessage::Query(bytes::Bytes::from(format!("DO {};", quote_literal(&body))))
     }
 
-    fn extended_parse_error(&self, mut parse: Parse, err: Error) -> FrontendMessage {
-        let marker = self.extended_error_marker(err);
+    fn extended_parse_error(
+        &self,
+        mut parse: Parse,
+        response: &pg_proto::DiagnosticResponse,
+    ) -> FrontendMessage {
+        let marker = self.extended_error_marker(response);
         parse.query =
             bytes::Bytes::from(format!("SELECT NULL::\"{}\"", marker.replace('"', "\"\"")));
         parse.parameter_types.clear();
         FrontendMessage::Parse(parse)
     }
 
-    fn extended_bind_error(&self, mut bind: pg_proto::Bind, err: Error) -> FrontendMessage {
-        bind.statement = bytes::Bytes::from(self.extended_error_marker(err));
+    fn extended_bind_error(
+        &self,
+        mut bind: pg_proto::Bind,
+        response: &pg_proto::DiagnosticResponse,
+    ) -> FrontendMessage {
+        bind.statement = bytes::Bytes::from(self.extended_error_marker(response));
         FrontendMessage::Bind(bind)
     }
 
-    fn extended_error_marker(&self, err: Error) -> String {
-        let response = self.error_to_response(err);
+    fn extended_error_marker(&self, response: &pg_proto::DiagnosticResponse) -> String {
         let code = response
             .fields
             .iter()
@@ -1430,6 +1451,7 @@ mod tests {
     use crate::config::TandemConfig;
     use crate::error::{Error, MappingError};
     use crate::postgresql::context::{Context, KeysetIdentifier};
+    use crate::postgresql::error_handler::PostgreSqlErrorHandler;
     use crate::postgresql::Column;
     use crate::proxy::{EncryptConfig, EncryptionService};
     use eql_mapper::Schema;
@@ -1481,7 +1503,9 @@ mod tests {
 
     #[test]
     fn simple_errors_are_forwarded_as_exception_queries() {
-        let output = frontend().simple_error_query(MappingError::CouldNotParseParameter.into());
+        let frontend = frontend();
+        let response = frontend.error_to_response(MappingError::CouldNotParseParameter.into());
+        let output = frontend.simple_error_query(&response);
 
         assert!(matches!(
             output,
@@ -1505,13 +1529,14 @@ mod tests {
             parameters: Vec::new(),
             result_formats: Vec::new(),
         };
+        let response = frontend.error_to_response(MappingError::CouldNotParseParameter.into());
 
         assert!(matches!(
-            frontend.extended_parse_error(parse, MappingError::CouldNotParseParameter.into()),
+            frontend.extended_parse_error(parse, &response),
             FrontendMessage::Parse(_)
         ));
         assert!(matches!(
-            frontend.extended_bind_error(bind, MappingError::CouldNotParseParameter.into()),
+            frontend.extended_bind_error(bind, &response),
             FrontendMessage::Bind(_)
         ));
     }

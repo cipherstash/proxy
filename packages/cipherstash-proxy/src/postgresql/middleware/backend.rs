@@ -120,6 +120,12 @@ impl<S: EncryptionService> Backend<S> {
     ) -> Result<BackendMiddlewareOutput, Error> {
         let mut outbound_message = protocol_message.clone();
 
+        if matches!(protocol_message, BackendMessage::ErrorResponse(_)) {
+            if let Some(response) = operation.and_then(|id| self.context.take_operation_error(id)) {
+                outbound_message = BackendMessage::ErrorResponse(response);
+            }
+        }
+
         if self.context.is_passthrough() {
             debug!(target: DEVELOPMENT,
                 client_id = self.context.client_id,

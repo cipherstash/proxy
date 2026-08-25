@@ -18,7 +18,7 @@ use crate::{
 use cipherstash_client::IdentifiedBy;
 use eql_mapper::{Schema, TableResolver};
 use metrics::{counter, histogram};
-use pg_proto::{Describe, DescribeTarget, OperationId, TransactionStatus};
+use pg_proto::{Describe, DescribeTarget, DiagnosticResponse, OperationId, TransactionStatus};
 use serde_json::json;
 use sqltk::parser::ast::{Expr, Ident, ObjectName, ObjectNamePart, Set, Value, ValueWithSpan};
 pub use statement_metadata::StatementMetadata;
@@ -110,6 +110,7 @@ impl ExecuteContext {
 struct OperationContext {
     describe_statement: Option<Arc<Statement>>,
     execute: Option<ExecuteContext>,
+    error_response: Option<DiagnosticResponse>,
 }
 
 #[derive(Clone, Debug)]
@@ -434,6 +435,21 @@ where
             .operations
             .write()
             .map(|mut operations| operations.remove(&operation));
+    }
+
+    pub fn set_operation_error(&mut self, operation: OperationId, response: DiagnosticResponse) {
+        let _ = self.operations.write().map(|mut operations| {
+            operations.entry(operation).or_default().error_response = Some(response);
+        });
+    }
+
+    pub fn take_operation_error(&mut self, operation: OperationId) -> Option<DiagnosticResponse> {
+        self.operations
+            .write()
+            .ok()?
+            .get_mut(&operation)?
+            .error_response
+            .take()
     }
 
     pub fn add_portal(&mut self, name: Name, portal: Portal) {
