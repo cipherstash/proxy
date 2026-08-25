@@ -94,9 +94,9 @@ commit cannot be undone, but Proxy must not imply that stale encryption metadata
 ## Verification
 
 State-machine tests cover successful execution, execution failure, explicit commit, full rollback,
-savepoint rollback, generation ordering, deferral, unmodelled DDL, and reload failure. Database-backed
-tests cover extended-protocol autocommit, explicit transactions, an already-open second connection,
-pipelining with a single client `Sync`, direct ciphertext verification, safe `ALTER TABLE`, native
-temporary tables, compatibility fallback bookkeeping, and failure before readiness. Simple-query
-coverage proves both that encryption-dependent post-DDL batches fail closed and native batches
-continue to work.
+savepoint rollback, generation ordering, deferral, unmodelled DDL, reload failure, and safe native
+batches. Database-backed tests cover extended-protocol autocommit, explicit transactions, an
+already-open second connection, pipelining with a single client `Sync`, direct ciphertext
+verification, safe `ALTER TABLE`, native temporary tables, and both compatibility-fallback and
+rewritten-batch intent bookkeeping. Backend-adapter tests prove that publication failure closes
+the connection before idle readiness.

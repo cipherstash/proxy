@@ -271,9 +271,11 @@ If the error persists, please contact CipherStash [support](https://cipherstash.
 
 ## Dependent statement after DDL <a id='mapping-dependent-statement-after-ddl'></a>
 
-A simple-query batch contains a schema-dependent statement after DDL. Proxy cannot observe the
-DDL execution result between statements in one simple-query message, so it refuses the complete
-batch before PostgreSQL executes any part of it.
+A simple-query batch contains a schema-dependent statement after DDL that may change encryption
+metadata. Proxy cannot observe the DDL execution result between statements in one simple-query
+message, so it refuses the complete batch before PostgreSQL executes any part of it. Native DDL
+and native temporary-table batches continue to pass through because they introduce no encryption
+obligation.
 
 ### How to fix
 

@@ -188,4 +188,56 @@ mod tests {
             .get(0);
         assert!(!exists);
     }
+
+    #[tokio::test]
+    async fn compatibility_fallback_tracks_native_ddl_for_a_later_encrypted_alter() {
+        let client = connect_for_test(*PROXY).await;
+        let table = table("bug_308_fallback");
+
+        client
+            .batch_execute(&format!(
+                "CREATE TABLE {table} (id bigint PRIMARY KEY); \
+                 INSERT INTO {table} (id) VALUES (1)"
+            ))
+            .await
+            .unwrap();
+        client
+            .execute(
+                &format!("ALTER TABLE {table} ADD COLUMN secret eql_v3_text_search"),
+                &[],
+            )
+            .await
+            .unwrap();
+
+        insert_secret(&client, &table, 2, "after fallback").await;
+        assert_ciphertext_at_rest(&table, 2, "after fallback").await;
+    }
+
+    #[tokio::test]
+    async fn rewritten_simple_query_preserves_native_ddl_and_its_intent() {
+        let client = connect_for_test(*PROXY).await;
+        let encrypted = table("bug_308_rewritten");
+        let staging = table("bug_308_staging");
+
+        client
+            .execute(&create_encrypted_table(&encrypted), &[])
+            .await
+            .unwrap();
+        client
+            .batch_execute(&format!(
+                "CREATE TABLE {staging} (id bigint PRIMARY KEY); \
+                 INSERT INTO {encrypted} (id, secret) VALUES (1, 'preserved batch secret')"
+            ))
+            .await
+            .unwrap();
+
+        let postgres = connect_for_test(get_database_port()).await;
+        let exists: bool = postgres
+            .query_one("SELECT to_regclass($1) IS NOT NULL", &[&staging])
+            .await
+            .unwrap()
+            .get(0);
+        assert!(exists);
+        assert_ciphertext_at_rest(&encrypted, 1, "preserved batch secret").await;
+    }
 }

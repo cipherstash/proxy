@@ -78,8 +78,7 @@ impl Error {
                 MappingError::UnmappableEncryptedColumn { .. }
                     | MappingError::DependentStatementAfterDdl
                     | MappingError::UnmodelledDdl
-            )
-                | Error::Encrypt(EncryptError::InvalidInboundEqlPayload)
+            ) | Error::Encrypt(EncryptError::InvalidInboundEqlPayload)
         )
     }
 }
