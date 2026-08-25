@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1787632802719,
+  "lastUpdate": 1787634088746,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -25772,6 +25772,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 37.093205,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "james@cipherstash.com",
+            "name": "James Sadler",
+            "username": "freshtonic"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "2f67325583d4f4a438717dce0934cb23fb2c5cca",
+          "message": "Merge pull request #443 from cipherstash/refactor/pg-proto\n\nrefactor(proxy): migrate PostgreSQL protocol to pg-proto",
+          "timestamp": "2026-08-25T14:55:16+10:00",
+          "tree_id": "c107fa25331a6ea089d8abbfc15935f206deaff1",
+          "url": "https://github.com/cipherstash/proxy/commit/2f67325583d4f4a438717dce0934cb23fb2c5cca"
+        },
+        "date": 1787634087126,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 41.148687,
             "unit": "Number"
           }
         ]
