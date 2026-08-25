@@ -683,5 +683,4 @@ mod tests {
         ));
         assert!(!backend.context.take_schema_changed());
     }
-
 }
