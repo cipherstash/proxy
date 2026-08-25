@@ -443,6 +443,11 @@ impl SchemaMiddleware {
         }
     }
 
+    /// Returns whether a schema-changing execution is awaiting a backend outcome.
+    pub fn ddl_in_flight(&self) -> bool {
+        self.in_flight_ddl.load(Ordering::Acquire) != 0
+    }
+
     #[cfg(test)]
     /// Records a direct statement execution for state-machine tests.
     pub fn execution_started(&self, statement: Statement) {
@@ -1126,6 +1131,24 @@ mod tests {
             .encrypt_config()
             .get_column_config(&Identifier::new("secrets", "secret"))
             .is_some());
+    }
+
+    #[test]
+    fn dependent_insert_transforms_against_encryption_overlay() {
+        let middleware = SchemaMiddleware::new(Arc::new(Schema::new("public")));
+        middleware.execution_started(parse(
+            "create table secrets (id bigint, secret eql_v3_text_search)",
+        ));
+        middleware.execution_succeeded();
+
+        let statement = parse("insert into secrets (id, secret) values ($1, $2)");
+        let typed = eql_mapper::type_check(middleware.resolver(), &statement).unwrap();
+        let transformed = typed.transform(Default::default()).unwrap();
+
+        assert_eq!(
+            transformed.statement.to_string(),
+            "INSERT INTO secrets (id, secret) VALUES ($1, $2::JSONB::public.eql_v3_text_search)"
+        );
     }
 
     #[test]

@@ -443,9 +443,8 @@ impl<S: EncryptionService> Frontend<S> {
                             )
                             .await?;
 
-                        if let Some(transformed_statement) = self
-                            .transform_statement(&typed_statement, &encrypted_literals)
-                            .await?
+                        if let Some(transformed_statement) =
+                            self.transform_statement(&typed_statement, &encrypted_literals)?
                         {
                             debug!(target: MAPPER,
                                 client_id = self.context.client_id,
@@ -671,7 +670,7 @@ impl<S: EncryptionService> Frontend<S> {
     ///  - rewrites any encrypted literal values
     ///  - wraps any nodes in appropriate EQL function
     ///
-    async fn transform_statement(
+    fn transform_statement(
         &mut self,
         typed_statement: &TypeCheckedStatement<'_>,
         encrypted_literals: &Vec<Option<EqlOutput>>,
@@ -874,9 +873,8 @@ impl<S: EncryptionService> Frontend<S> {
                         .encrypt_literals(session_id, &typed_statement, &statement.literal_columns)
                         .await?;
 
-                    if let Some(transformed_statement) = self
-                        .transform_statement(&typed_statement, &encrypted_literals)
-                        .await?
+                    if let Some(transformed_statement) =
+                        self.transform_statement(&typed_statement, &encrypted_literals)?
                     {
                         debug!(target: MAPPER,
                             client_id = self.context.client_id,

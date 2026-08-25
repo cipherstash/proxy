@@ -660,6 +660,11 @@ where
         self.schema_middleware.wait_for_ddl().await;
     }
 
+    /// Returns whether a schema-changing execution is awaiting a backend outcome.
+    pub fn schema_ddl_in_flight(&self) -> bool {
+        self.schema_middleware.ddl_in_flight()
+    }
+
     /// Refuses schema-dependent work after confirmed unmodelled DDL.
     pub fn ensure_schema_modelled(&self) -> Result<(), Error> {
         if self.schema_middleware.has_unmodelled_ddl() {

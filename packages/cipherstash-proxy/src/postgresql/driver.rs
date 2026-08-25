@@ -160,6 +160,40 @@ where
                     Err(pg_proto::ForwardError::Middleware(error)) => return Err(error),
                     Err(error) => return Err(invalid_data(error)),
                 };
+                if matches!(&forwarded, ForwardedMessage::FrontendExpanded { .. }) {
+                    // A DDL Execute is expanded to Execute + Flush so PostgreSQL can
+                    // report its outcome before later schema-dependent frontend work.
+                    // Keep the single-task intermediary progressing on the backend
+                    // leg until that DDL resolves; otherwise a later frontend mapping
+                    // call can wait for an outcome this task has not read yet.
+                    // Box the whole secondary forwarding state machine so it
+                    // does not enlarge the normal frontend driver's stack frame.
+                    Box::pin(async {
+                        while context.schema_ddl_in_flight() {
+                            let backend = session.forward_backend();
+                            let drained = match connection_timeout {
+                                Some(duration) => tokio::time::timeout(duration, backend)
+                                    .await
+                                    .map_err(|_| Error::ConnectionTimeout { duration })?,
+                                None => backend.await,
+                            };
+                            match drained {
+                                Ok(
+                                    BackendForwarding::Forwarded(_)
+                                    | BackendForwarding::Expanded { .. }
+                                    | BackendForwarding::Suppressed(_)
+                                    | BackendForwarding::Held,
+                                ) => {}
+                                Err(pg_proto::ForwardError::Middleware(error)) => {
+                                    return Err(error)
+                                }
+                                Err(error) => return Err(invalid_data(error)),
+                            }
+                        }
+                        Ok(())
+                    })
+                    .await?;
+                }
                 if matches!(
                     forwarded,
                     ForwardedMessage::Frontend(FrontendMessage::Terminate)
