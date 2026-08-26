@@ -141,7 +141,10 @@ mod tests {
         let err = Error::Encrypt(EncryptError::InvalidInboundCiphertext);
         let response = handler.error_to_response(err);
 
-        assert_eq!(field(&response, b'C'), Some(CODE_INVALID_TEXT_REPRESENTATION));
+        assert_eq!(
+            field(&response, b'C'),
+            Some(CODE_INVALID_TEXT_REPRESENTATION)
+        );
         assert!(!diagnostics::is_fatal(&response));
     }
 }
