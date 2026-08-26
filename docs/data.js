@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1787722757858,
+  "lastUpdate": 1787726729745,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -25955,6 +25955,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 39.424332,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "6aae9f871e2eae1d649a485026985c634d8f644a",
+          "message": "fix(proxy): make schema changes transaction aware (BUG-308)",
+          "timestamp": "2026-08-26T05:34:59Z",
+          "url": "https://github.com/cipherstash/proxy/pull/460/commits/6aae9f871e2eae1d649a485026985c634d8f644a"
+        },
+        "date": 1787726728101,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 39.463391,
             "unit": "Number"
           }
         ]
