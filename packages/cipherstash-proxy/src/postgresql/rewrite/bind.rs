@@ -11,6 +11,7 @@ use crate::postgresql::data::{
     json_value_selector_plaintext,
 };
 use crate::postgresql::format_code::FormatCode;
+use crate::postgresql::inbound_eql;
 use crate::{EqlOutput, EqlQueryPayload};
 use bytes::{BufMut, BytesMut};
 use cipherstash_client::encryption::Plaintext;
@@ -65,9 +66,22 @@ impl Bind {
         output_params: &[OutputParam],
         param_types: &[i32],
     ) -> Result<Vec<Option<Plaintext>>, Error> {
+        self.to_plaintext_skipping(output_params, param_types, &[])
+    }
+
+    pub fn to_plaintext_skipping(
+        &self,
+        output_params: &[OutputParam],
+        param_types: &[i32],
+        skip: &[bool],
+    ) -> Result<Vec<Option<Plaintext>>, Error> {
         output_params
             .iter()
-            .map(|output| {
+            .enumerate()
+            .map(|(output_index, output)| {
+                if skip.get(output_index).copied().unwrap_or(false) {
+                    return Ok(None);
+                }
                 let Some(col) = &output.column else {
                     // Native param: forwarded verbatim, nothing to encrypt.
                     return Ok(None);
@@ -106,6 +120,37 @@ impl Bind {
                         self.json_accessor_path_plaintext(path)
                     }
                 }
+            })
+            .collect()
+    }
+
+    /// Detect application-generated storage or query payloads before decoding
+    /// parameters as their configured plaintext PostgreSQL types.
+    pub fn inbound_eql(
+        &self,
+        output_params: &[OutputParam],
+    ) -> Result<Vec<Option<inbound_eql::InboundEql>>, Error> {
+        output_params
+            .iter()
+            .map(|output| {
+                let Some(column) = &output.column else {
+                    return Ok(None);
+                };
+                let OutputParamSource::Input(input) = output.source else {
+                    return Ok(None);
+                };
+                let Some(param) = self.param_values.get(input) else {
+                    return Ok(None);
+                };
+                if param.is_null() {
+                    return Ok(None);
+                }
+                let bytes = if param.is_binary() && param.bytes.first() == Some(&1) {
+                    param.json_bytes()
+                } else {
+                    &param.bytes
+                };
+                inbound_eql::parse(bytes, column, output.query_operand).map_err(Error::from)
             })
             .collect()
     }

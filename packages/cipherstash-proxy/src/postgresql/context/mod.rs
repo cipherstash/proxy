@@ -779,6 +779,12 @@ where
         plaintexts: Vec<Option<cipherstash_client::encryption::Plaintext>>,
         columns: &[Option<Column>],
     ) -> Result<Vec<Option<crate::EqlOutput>>, Error> {
+        if plaintexts.iter().all(Option::is_none) {
+            return Ok(std::iter::repeat_with(|| None)
+                .take(plaintexts.len())
+                .collect());
+        }
+
         let keyset_id = self.keyset_identifier();
 
         self.encryption
@@ -792,6 +798,16 @@ where
     ) -> Result<Vec<Option<cipherstash_client::encryption::Plaintext>>, Error> {
         let keyset_id = self.keyset_identifier();
         self.encryption.decrypt(keyset_id, ciphertexts).await
+    }
+
+    pub async fn decrypt_inbound_eql(
+        &self,
+        ciphertexts: Vec<Option<crate::EqlCiphertext>>,
+    ) -> Result<Vec<Option<cipherstash_client::encryption::Plaintext>>, Error> {
+        let keyset_id = self.keyset_identifier();
+        self.encryption
+            .decrypt_inbound_eql(keyset_id, ciphertexts)
+            .await
     }
 
     pub async fn reload_schema(&self) -> bool {
@@ -1035,6 +1051,14 @@ mod tests {
         ) -> Result<Vec<Option<cipherstash_client::encryption::Plaintext>>, Error> {
             Ok(vec![])
         }
+
+        async fn decrypt_inbound_eql(
+            &self,
+            _keyset_id: Option<KeysetIdentifier>,
+            _ciphertexts: Vec<Option<crate::EqlCiphertext>>,
+        ) -> Result<Vec<Option<cipherstash_client::encryption::Plaintext>>, Error> {
+            Ok(vec![])
+        }
     }
 
     fn create_context() -> Context<TestService> {
@@ -1120,6 +1144,18 @@ mod tests {
 
         reload_task.await.expect("reload task did not panic");
         assert!(context.take_schema_changed());
+    }
+
+    #[tokio::test]
+    async fn empty_plaintext_batch_does_not_call_encryption_service() {
+        let context = create_context();
+        let output = context
+            .encrypt(vec![None, None], &[None, None])
+            .await
+            .unwrap();
+
+        assert_eq!(output.len(), 2);
+        assert!(output.iter().all(Option::is_none));
     }
 
     fn statement() -> Statement {

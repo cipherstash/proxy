@@ -4,7 +4,7 @@ use super::super::error_handler::PostgreSqlErrorHandler;
 use super::super::parser::SqlParser;
 use super::super::rewrite::bind::Bind;
 use crate::error::{EncryptError, Error, MappingError};
-use crate::log::{MAPPER, PROTOCOL};
+use crate::log::{ENCRYPT, MAPPER, PROTOCOL};
 use crate::postgresql::context::column::Column;
 use crate::postgresql::context::statement::{
     output_params_from_plan, OutputParam, OutputParamSource,
@@ -14,6 +14,7 @@ use crate::postgresql::context::Portal;
 use crate::postgresql::data::{
     compose_json_selector_path, json_value_selector_plaintext, literal_from_sql, literal_json_value,
 };
+use crate::postgresql::inbound_eql;
 use crate::postgresql::rewrite::Name;
 use crate::postgresql::rewrite::UNSPECIFIED_TYPE_OID;
 use crate::prometheus::{
@@ -551,7 +552,23 @@ impl<S: EncryptionService> Frontend<S> {
             return Ok(vec![]);
         }
 
-        let plaintexts = literals_to_plaintext(typed_statement, literal_columns)?;
+        let inbound = literal_values
+            .iter()
+            .zip(literal_columns)
+            .map(|((_, literal), column)| {
+                let (Some(column), Some(value)) = (column, (*literal).clone().into_string()) else {
+                    return Ok(None);
+                };
+                inbound_eql::parse(
+                    value.as_bytes(),
+                    column,
+                    literal_is_query_operand(typed_statement, literal, column),
+                )
+                .map_err(Error::from)
+            })
+            .collect::<Result<Vec<_>, Error>>()?;
+        let skip = inbound.iter().map(Option::is_some).collect::<Vec<_>>();
+        let plaintexts = literals_to_plaintext_skipping(typed_statement, literal_columns, &skip)?;
 
         let start = Instant::now();
 
@@ -563,11 +580,18 @@ impl<S: EncryptionService> Frontend<S> {
                 counter!(ENCRYPTION_ERROR_TOTAL).increment(1);
             })?;
 
-        for ((_, literal), encrypted) in literal_values.iter().zip(encrypted.iter_mut()) {
-            project_query_operand(
-                typed_statement.query_operands.contains_literal(literal),
-                encrypted,
-            );
+        self.merge_inbound_eql(&mut encrypted, inbound, literal_columns)
+            .await?;
+
+        for (((_, literal), column), encrypted) in literal_values
+            .iter()
+            .zip(literal_columns)
+            .zip(encrypted.iter_mut())
+        {
+            let query_operand = column
+                .as_ref()
+                .is_some_and(|column| literal_is_query_operand(typed_statement, literal, column));
+            project_query_operand(query_operand, encrypted);
         }
 
         debug!(target: MAPPER,
@@ -1066,8 +1090,13 @@ impl<S: EncryptionService> Frontend<S> {
         bind: &Bind,
         statement: &Statement,
     ) -> Result<Vec<Option<crate::EqlOutput>>, Error> {
-        let plaintexts =
-            bind.to_plaintext(&statement.output_params, &statement.postgres_param_types)?;
+        let inbound = bind.inbound_eql(&statement.output_params)?;
+        let skip = inbound.iter().map(Option::is_some).collect::<Vec<_>>();
+        let plaintexts = bind.to_plaintext_skipping(
+            &statement.output_params,
+            &statement.postgres_param_types,
+            &skip,
+        )?;
 
         // Encryption is positional over the OUTPUT params — the values actually
         // sent — not over what the client bound.
@@ -1088,6 +1117,9 @@ impl<S: EncryptionService> Frontend<S> {
             .inspect_err(|_| {
                 counter!(ENCRYPTION_ERROR_TOTAL).increment(1);
             })?;
+
+        self.merge_inbound_eql(&mut encrypted, inbound, &output_param_columns)
+            .await?;
 
         for (output, encrypted) in statement.output_params.iter().zip(encrypted.iter_mut()) {
             project_query_operand(output.query_operand, encrypted);
@@ -1113,6 +1145,97 @@ impl<S: EncryptionService> Frontend<S> {
         }
 
         Ok(encrypted)
+    }
+
+    /// Merge application-generated EQL values into the encryption output.
+    /// Stored payloads are authenticated and independently verified. Query-only
+    /// payloads have no ciphertext to authenticate and are accepted only after
+    /// role-aware structural validation in `inbound_eql::parse`.
+    async fn merge_inbound_eql(
+        &self,
+        encrypted: &mut [Option<EqlOutput>],
+        inbound: Vec<Option<inbound_eql::InboundEql>>,
+        columns: &[Option<Column>],
+    ) -> Result<(), Error> {
+        let mut positions = Vec::new();
+        for (index, (payload, column)) in inbound.into_iter().zip(columns).enumerate() {
+            match payload {
+                Some(inbound_eql::InboundEql::Query(query)) => {
+                    encrypted[index] = Some(EqlOutput::Query(query));
+                }
+                Some(inbound_eql::InboundEql::Store(ciphertext)) => {
+                    let Some(column) = column else {
+                        return Err(EncryptError::InvalidInboundEqlPayload.into());
+                    };
+                    positions.push((index, ciphertext, column.clone()));
+                }
+                None => {}
+            }
+        }
+        if positions.is_empty() {
+            return Ok(());
+        }
+
+        let ciphertexts = positions
+            .iter()
+            .map(|(_, ciphertext, _)| Some(ciphertext.clone()))
+            .collect();
+        let plaintexts = self
+            .context
+            .decrypt_inbound_eql(ciphertexts)
+            .await
+            .map_err(|err| {
+                warn!(
+                    target: ENCRYPT,
+                    client_id = self.context.client_id,
+                    msg = "Inbound EQL ciphertext authentication failed",
+                    error = ?err,
+                );
+                EncryptError::InvalidInboundEqlPayload
+            })?;
+
+        // Re-encrypt the authenticated plaintext for the inferred destination
+        // and compare every derived SEM term. This detects term splicing: the
+        // AEAD tag authenticates `c`, but the searchable metadata sits outside
+        // it in the EQL envelope.
+        let verification_columns = positions
+            .iter()
+            .map(|(_, _, column)| Some(column.clone()))
+            .collect::<Vec<_>>();
+        let derived = self
+            .context
+            .encrypt(plaintexts, &verification_columns)
+            .await
+            .map_err(|err| {
+                warn!(
+                    target: ENCRYPT,
+                    client_id = self.context.client_id,
+                    msg = "Inbound EQL ciphertext metadata verification failed",
+                    error = ?err,
+                );
+                EncryptError::InvalidInboundEqlPayload
+            })?;
+
+        for ((index, ciphertext, _), derived) in positions.into_iter().zip(derived) {
+            let Some(EqlOutput::Store(derived)) = derived else {
+                warn!(
+                    target: ENCRYPT,
+                    client_id = self.context.client_id,
+                    msg = "Inbound EQL ciphertext SEM terms did not match plaintext",
+                );
+                return Err(EncryptError::InvalidInboundEqlPayload.into());
+            };
+            if !inbound_eql::sem_terms_match(&ciphertext, derived) {
+                warn!(
+                    target: ENCRYPT,
+                    client_id = self.context.client_id,
+                    msg = "Inbound EQL ciphertext SEM terms did not match plaintext",
+                );
+                return Err(EncryptError::InvalidInboundEqlPayload.into());
+            }
+            encrypted[index] = Some(EqlOutput::Store(ciphertext));
+        }
+        Ok(())
     }
 
     fn type_check<'a>(
@@ -1227,48 +1350,69 @@ fn project_query_operand(query_operand: bool, encrypted: &mut Option<EqlOutput>)
     }
 }
 
-fn literals_to_plaintext(
+/// JSON path/accessor literals are query operands even though they are passed
+/// as bare text and therefore need no query-domain cast. All other literals
+/// use the predicate roles recorded by EQL Mapper.
+fn literal_is_query_operand(
+    typed_statement: &TypeCheckedStatement<'_>,
+    literal: &ast::Value,
+    column: &Column,
+) -> bool {
+    matches!(
+        column.eql_term,
+        EqlTermVariant::JsonAccessor | EqlTermVariant::JsonPath
+    ) || typed_statement.query_operands.contains_literal(literal)
+}
+
+fn literals_to_plaintext_skipping(
     typed_statement: &TypeCheckedStatement<'_>,
     literal_columns: &Vec<Option<Column>>,
+    skip: &[bool],
 ) -> Result<Vec<Option<Plaintext>>, Error> {
     let literals = typed_statement.literal_values();
 
     let plaintexts = literals
         .iter()
         .zip(literal_columns)
-        .map(|((eql_term, val), col)| match col {
-            Some(col) => {
-                let plaintext = match eql_term.variant() {
-                    EqlTermVariant::JsonValueSelector => {
-                        json_value_selector_literal_plaintext(typed_statement, val)
-                    }
-                    // A selector that carries a collapsed chain keys the composed
-                    // path, not the one segment it spells. Only a selector the
-                    // mapper recorded a chain for: a single access has no record
-                    // and takes the ordinary single-segment route below.
-                    EqlTermVariant::JsonAccessor
-                        if typed_statement
-                            .json_accessor_paths
-                            .for_literal(val)
-                            .is_some() =>
-                    {
-                        json_accessor_path_literal_plaintext(typed_statement, val)
-                    }
-                    _ => literal_from_sql(val, col.eql_term(), col.cast_type()),
-                };
-
-                plaintext.map_err(|err| {
-                    debug!(
-                        target: MAPPER,
-                        msg = "Could not convert literal value",
-                        value = ?val,
-                        cast_type = ?col.cast_type(),
-                        error = err.to_string()
-                    );
-                    MappingError::InvalidParameter(Box::new(col.to_owned())).into()
-                })
+        .enumerate()
+        .map(|(index, ((eql_term, val), col))| {
+            if skip.get(index).copied().unwrap_or(false) {
+                return Ok(None);
             }
-            None => Ok(None),
+            match col {
+                Some(col) => {
+                    let plaintext = match eql_term.variant() {
+                        EqlTermVariant::JsonValueSelector => {
+                            json_value_selector_literal_plaintext(typed_statement, val)
+                        }
+                        // A selector that carries a collapsed chain keys the composed
+                        // path, not the one segment it spells. Only a selector the
+                        // mapper recorded a chain for: a single access has no record
+                        // and takes the ordinary single-segment route below.
+                        EqlTermVariant::JsonAccessor
+                            if typed_statement
+                                .json_accessor_paths
+                                .for_literal(val)
+                                .is_some() =>
+                        {
+                            json_accessor_path_literal_plaintext(typed_statement, val)
+                        }
+                        _ => literal_from_sql(val, col.eql_term(), col.cast_type()),
+                    };
+
+                    plaintext.map_err(|err| {
+                        debug!(
+                            target: MAPPER,
+                            msg = "Could not convert literal value",
+                            value = ?val,
+                            cast_type = ?col.cast_type(),
+                            error = err.to_string()
+                        );
+                        MappingError::InvalidParameter(Box::new(col.to_owned())).into()
+                    })
+                }
+                None => Ok(None),
+            }
         })
         .collect::<Result<Vec<_>, Error>>()?;
     Ok(plaintexts)
@@ -1449,11 +1593,14 @@ impl<S: EncryptionService> Frontend<S> {
 mod tests {
     use super::{quote_literal, Frontend};
     use crate::config::TandemConfig;
-    use crate::error::{Error, MappingError};
+    use crate::error::{EncryptError, Error, MappingError};
     use crate::postgresql::context::{Context, KeysetIdentifier};
     use crate::postgresql::error_handler::PostgreSqlErrorHandler;
+    use crate::postgresql::inbound_eql::InboundEql;
     use crate::postgresql::Column;
     use crate::proxy::{EncryptConfig, EncryptionService};
+    use cipherstash_client::eql::{EncryptedPayloadV3, EQL_SCHEMA_VERSION_V3};
+    use cipherstash_client::zerokms::EncryptedRecord;
     use eql_mapper::Schema;
     use pg_proto::{Bind, FrontendMessage, Parse};
     use std::sync::Arc;
@@ -1479,6 +1626,14 @@ mod tests {
         ) -> Result<Vec<Option<cipherstash_client::encryption::Plaintext>>, Error> {
             Ok(Vec::new())
         }
+
+        async fn decrypt_inbound_eql(
+            &self,
+            _keyset_id: Option<KeysetIdentifier>,
+            _ciphertexts: Vec<Option<crate::EqlCiphertext>>,
+        ) -> Result<Vec<Option<cipherstash_client::encryption::Plaintext>>, Error> {
+            Ok(Vec::new())
+        }
     }
 
     fn frontend() -> Frontend<TestService> {
@@ -1493,6 +1648,25 @@ mod tests {
             reload_sender,
         );
         Frontend::new(context)
+    }
+
+    fn inbound_storage_payload() -> crate::EqlCiphertext {
+        crate::EqlCiphertext::Encrypted(EncryptedPayloadV3 {
+            version: EQL_SCHEMA_VERSION_V3,
+            identifier: crate::Identifier::new("users", "email"),
+            ciphertext: EncryptedRecord {
+                iv: Default::default(),
+                ciphertext: vec![1; 16],
+                tag: vec![2; 16],
+                descriptor: "users/email".into(),
+                keyset_id: Some(uuid::Uuid::nil()),
+                decryption_policy: None,
+            },
+            hmac_256: None,
+            bloom_filter: None,
+            ore_block_u64_8_256: None,
+            ope_cllw: None,
+        })
     }
 
     #[test]
@@ -1538,6 +1712,23 @@ mod tests {
         assert!(matches!(
             frontend.extended_bind_error(bind, &response),
             FrontendMessage::Bind(_)
+        ));
+    }
+
+    #[tokio::test]
+    async fn stored_inbound_eql_without_a_destination_column_fails_closed() {
+        let mut encrypted = vec![None];
+        let result = frontend()
+            .merge_inbound_eql(
+                &mut encrypted,
+                vec![Some(InboundEql::Store(inbound_storage_payload()))],
+                &[None],
+            )
+            .await;
+
+        assert!(matches!(
+            result,
+            Err(Error::Encrypt(EncryptError::InvalidInboundEqlPayload))
         ));
     }
 }

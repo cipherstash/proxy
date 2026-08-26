@@ -27,6 +27,7 @@ pub trait PostgreSqlErrorHandler {
     /// - `EncryptError::UnknownColumn` -> Unknown column error
     /// - `EncryptError::CouldNotDecryptDataForKeyset` -> System error
     /// - `EncryptError::UnknownKeysetIdentifier` -> System error
+    /// - `EncryptError::InvalidInboundEqlPayload` -> Invalid encrypted value error
     /// - `Error::ConnectionTimeout` -> Idle session timeout error
     /// - All others -> System error
     ///
@@ -53,6 +54,9 @@ pub trait PostgreSqlErrorHandler {
             Error::Encrypt(EncryptError::UnknownKeysetIdentifier { .. }) => {
                 diagnostics::system_error(err.to_string())
             }
+            Error::Encrypt(EncryptError::InvalidInboundEqlPayload) => {
+                diagnostics::invalid_encrypted_value(err.to_string())
+            }
             Error::ConnectionTimeout { .. } => diagnostics::connection_timeout(err.to_string()),
             Error::Protocol(
                 ProtocolError::HeldDataRowMissingOperation
@@ -70,7 +74,9 @@ pub trait PostgreSqlErrorHandler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::postgresql::diagnostics::{CODE_IDLE_SESSION_TIMEOUT, CODE_SYSTEM_ERROR};
+    use crate::postgresql::diagnostics::{
+        self, CODE_IDLE_SESSION_TIMEOUT, CODE_INVALID_TEXT_REPRESENTATION, CODE_SYSTEM_ERROR,
+    };
     use std::time::Duration;
 
     /// Minimal implementation of PostgreSqlErrorHandler for testing the default method.
@@ -127,5 +133,18 @@ mod tests {
                 "#protocol-internal-error"
             ))
         );
+    }
+
+    #[test]
+    fn invalid_inbound_eql_payload_maps_to_a_nonfatal_statement_error() {
+        let handler = TestHandler;
+        let err = Error::Encrypt(EncryptError::InvalidInboundEqlPayload);
+        let response = handler.error_to_response(err);
+
+        assert_eq!(
+            field(&response, b'C'),
+            Some(CODE_INVALID_TEXT_REPRESENTATION)
+        );
+        assert!(!diagnostics::is_fatal(&response));
     }
 }

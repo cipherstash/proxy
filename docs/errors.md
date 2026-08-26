@@ -16,6 +16,7 @@
   - [Internal Error](#mapping-internal-error)
 
 - Encrypt errors:
+  - [Invalid encrypted value](#encrypt-invalid-inbound-eql-payload)
   - [Column could not be encrypted](#encrypt-column-could-not-be-encrypted)
   - [Could not decrypt data for keyset](#encrypt-could-not-decrypt-data-for-keyset)
   - [KeysetId could not be parsed](#encrypt-keyset-id-could-not-be-parsed)
@@ -343,6 +344,72 @@ If the error persists, please contact CipherStash [support](https://cipherstash.
 
 
 # Encrypt errors
+
+
+## Invalid encrypted value <a id='encrypt-invalid-inbound-eql-payload'></a>
+
+CipherStash Proxy rejected an application-generated EQL storage payload or
+query operand because it was malformed, unauthentic, intended for another
+column, carried unexpected searchable encrypted metadata (SEM), or appeared in
+an invalid statement position. The response deliberately does not identify
+which validation failed.
+
+### Error message
+
+```
+Invalid encrypted value. For help visit https://github.com/cipherstash/proxy/blob/main/docs/errors.md#encrypt-invalid-inbound-eql-payload
+```
+
+### How to fix
+
+Regenerate the payload using the same column configuration, keyset, and
+credentials as Proxy. Storage payloads must target the inferred destination
+column and carry ciphertext plus exactly its configured SEM terms. Query-only
+payloads must be used only in query positions.
+
+### Plaintext compatibility
+
+On every encrypted column type, Proxy reserves three JSON object shapes for
+application-generated EQL:
+
+- a storage payload with top-level `v` and `i` keys plus at least one of `c`,
+  `h`, or `sv`;
+- a scalar query payload with top-level `v` and `i` keys plus at least one of
+  `hm`, `bf`, `ob`, or `op`; or
+- a SteVec query payload whose only top-level key is `sv`.
+
+An object matching one of these patterns is validated as EQL rather than
+encrypted as plaintext. Invalid EQL is rejected, and query-only payloads are
+rejected in storage positions. There is no opt-out for this fail-closed check.
+
+Before upgrading, audit JSON values supplied as plaintext to encrypted columns.
+For a `jsonb` source column named `value`, this predicate identifies all three
+reserved shapes:
+
+```sql
+WHERE CASE
+  WHEN jsonb_typeof(value) <> 'object' THEN false
+  ELSE (
+    value ? 'v'
+    AND value ? 'i'
+    AND value ?| ARRAY['c', 'h', 'sv', 'hm', 'bf', 'ob', 'op']
+  ) OR (
+    value ? 'sv'
+    AND NOT EXISTS (
+      SELECT 1
+      FROM jsonb_object_keys(value) AS keys(candidate_key)
+      WHERE candidate_key <> 'sv'
+    )
+  )
+END
+```
+
+For text sources, first restrict the scan to values that your application knows
+are valid JSON, then apply the same predicate after casting them to `jsonb`.
+Rename one of these top-level keys or generate the value as an EQL payload
+before sending it through Proxy.
+
+<!-- ---------------------------------------------------------------------------------------------------- -->
 
 
 ## Column could not be encrypted <a id='encrypt-column-could-not-be-encrypted'></a>
