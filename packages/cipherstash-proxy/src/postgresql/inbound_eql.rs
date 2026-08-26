@@ -41,7 +41,7 @@ pub fn parse(
         && is_selector_hash(bytes)
     {
         let selector = String::from_utf8(bytes.to_vec())
-            .map_err(|_| EncryptError::InvalidInboundCiphertext)?;
+            .map_err(|_| EncryptError::InvalidInboundEqlPayload)?;
         let query = EqlQueryPayload::Selector(selector);
         validate_query_metadata(&query, column)?;
         return Ok(Some(InboundEql::Query(query)));
@@ -59,7 +59,7 @@ pub fn parse(
         && (object.contains_key("c") || object.contains_key("h") || object.contains_key("sv"));
     if storage_shaped {
         let ciphertext: EqlCiphertext =
-            serde_json::from_value(value).map_err(|_| EncryptError::InvalidInboundCiphertext)?;
+            serde_json::from_value(value).map_err(|_| EncryptError::InvalidInboundEqlPayload)?;
         validate_storage_metadata(&ciphertext, column)?;
         return Ok(Some(InboundEql::Store(ciphertext)));
     }
@@ -74,11 +74,11 @@ pub fn parse(
         return Ok(None);
     }
     if !query_operand {
-        return Err(EncryptError::InvalidInboundCiphertext);
+        return Err(EncryptError::InvalidInboundEqlPayload);
     }
 
     let query: EqlQueryPayload =
-        serde_json::from_value(value).map_err(|_| EncryptError::InvalidInboundCiphertext)?;
+        serde_json::from_value(value).map_err(|_| EncryptError::InvalidInboundEqlPayload)?;
     validate_query_metadata(&query, column)?;
     Ok(Some(InboundEql::Query(query)))
 }
@@ -98,7 +98,7 @@ fn validate_storage_metadata(
     if ciphertext.version() != EQL_SCHEMA_VERSION_V3
         || ciphertext.identifier() != &column.identifier
     {
-        return Err(EncryptError::InvalidInboundCiphertext);
+        return Err(EncryptError::InvalidInboundEqlPayload);
     }
 
     // The descriptor is covered by the encrypted record's AEAD tag. Requiring
@@ -110,14 +110,14 @@ fn validate_storage_metadata(
         EqlCiphertext::SteVec(payload) => &payload.key_header.descriptor,
     };
     if descriptor != &expected_descriptor {
-        return Err(EncryptError::InvalidInboundCiphertext);
+        return Err(EncryptError::InvalidInboundEqlPayload);
     }
 
     match ciphertext {
         EqlCiphertext::Encrypted(payload) => validate_scalar_terms(payload, column),
         EqlCiphertext::SteVec(payload) => {
             if !has_ste_vec_terms(column) || payload.ste_vec.is_empty() {
-                return Err(EncryptError::InvalidInboundCiphertext);
+                return Err(EncryptError::InvalidInboundEqlPayload);
             }
             Ok(())
         }
@@ -128,7 +128,7 @@ fn validate_query_metadata(query: &EqlQueryPayload, column: &Column) -> Result<(
     match query {
         EqlQueryPayload::Encrypted(payload) => {
             if payload.version != EQL_SCHEMA_VERSION_V3 || payload.identifier != column.identifier {
-                return Err(EncryptError::InvalidInboundCiphertext);
+                return Err(EncryptError::InvalidInboundEqlPayload);
             }
 
             match column.eql_term {
@@ -148,11 +148,11 @@ fn validate_query_metadata(query: &EqlQueryPayload, column: &Column) -> Result<(
                         || payload.ore_block_u64_8_256.is_some()
                         || payload.ope_cllw.is_none()
                     {
-                        return Err(EncryptError::InvalidInboundCiphertext);
+                        return Err(EncryptError::InvalidInboundEqlPayload);
                     }
                     Ok(())
                 }
-                _ => Err(EncryptError::InvalidInboundCiphertext),
+                _ => Err(EncryptError::InvalidInboundEqlPayload),
             }
         }
         EqlQueryPayload::SteVec(payload) => {
@@ -161,7 +161,7 @@ fn validate_query_metadata(query: &EqlQueryPayload, column: &Column) -> Result<(
                 EqlTermVariant::Full | EqlTermVariant::Partial | EqlTermVariant::JsonValueSelector
             );
             if !has_ste_vec_terms(column) || !query_shape || payload.ste_vec.is_empty() {
-                return Err(EncryptError::InvalidInboundCiphertext);
+                return Err(EncryptError::InvalidInboundEqlPayload);
             }
             Ok(())
         }
@@ -172,7 +172,7 @@ fn validate_query_metadata(query: &EqlQueryPayload, column: &Column) -> Result<(
             );
             if !has_ste_vec_terms(column) || !query_shape || !is_selector_hash(selector.as_bytes())
             {
-                return Err(EncryptError::InvalidInboundCiphertext);
+                return Err(EncryptError::InvalidInboundEqlPayload);
             }
             Ok(())
         }
@@ -189,25 +189,42 @@ fn has_ste_vec_terms(column: &Column) -> bool {
 
 /// Compare all searchable metadata after the plaintext has been authenticated
 /// and independently re-encrypted for the inferred destination column.
-/// `into_query_operand` removes only record ciphertext/key material, leaving
-/// the identifier and every scalar or SteVec SEM term. Bloom-filter positions
-/// are compared without regard to order; all other terms compare exactly.
+/// Record ciphertext and key material are excluded. The identifier, every SEM
+/// term, and the SteVec array marker are compared. Bloom-filter positions are
+/// compared without regard to order; all other metadata compares exactly.
 pub fn sem_terms_match(inbound: &EqlCiphertext, derived: EqlCiphertext) -> bool {
-    if let (EqlCiphertext::Encrypted(inbound), EqlCiphertext::Encrypted(derived)) =
-        (inbound, &derived)
-    {
-        return inbound.version == derived.version
-            && inbound.identifier == derived.identifier
-            && inbound.hmac_256 == derived.hmac_256
-            && bloom_filters_match(&inbound.bloom_filter, &derived.bloom_filter)
-            && inbound.ore_block_u64_8_256 == derived.ore_block_u64_8_256
-            && inbound.ope_cllw == derived.ope_cllw;
+    match (inbound, derived) {
+        (EqlCiphertext::Encrypted(inbound), EqlCiphertext::Encrypted(derived)) => {
+            inbound.version == derived.version
+                && inbound.identifier == derived.identifier
+                && inbound.hmac_256 == derived.hmac_256
+                && bloom_filters_match(&inbound.bloom_filter, &derived.bloom_filter)
+                && inbound.ore_block_u64_8_256 == derived.ore_block_u64_8_256
+                && inbound.ope_cllw == derived.ope_cllw
+        }
+        (EqlCiphertext::SteVec(inbound), EqlCiphertext::SteVec(derived)) => {
+            inbound.version == derived.version
+                && inbound.identifier == derived.identifier
+                && inbound.ste_vec.len() == derived.ste_vec.len()
+                && inbound
+                    .ste_vec
+                    .iter()
+                    .zip(derived.ste_vec)
+                    .all(|(inbound, derived)| {
+                        inbound.selector == derived.selector
+                            && inbound.is_array == derived.is_array
+                            && ste_vec_terms_match(&inbound.term, &derived.term)
+                    })
+        }
+        _ => false,
     }
+}
 
-    match (
-        serde_json::to_value(inbound.clone().into_query_operand()),
-        serde_json::to_value(derived.into_query_operand()),
-    ) {
+fn ste_vec_terms_match(
+    inbound: &Option<cipherstash_client::eql::SteVecEntryTermV3>,
+    derived: &Option<cipherstash_client::eql::SteVecEntryTermV3>,
+) -> bool {
+    match (serde_json::to_value(inbound), serde_json::to_value(derived)) {
         (Ok(inbound), Ok(derived)) => inbound == derived,
         _ => false,
     }
@@ -260,12 +277,12 @@ fn validate_scalar_term_presence(
             IndexType::Match { .. } => bloom = true,
             IndexType::Ore => ore = true,
             IndexType::Ope => ope = true,
-            IndexType::SteVec { .. } => return Err(EncryptError::InvalidInboundCiphertext),
+            IndexType::SteVec { .. } => return Err(EncryptError::InvalidInboundEqlPayload),
         }
     }
 
     if has_hmac != hmac || has_bloom != bloom || has_ore != ore || has_ope != ope {
-        return Err(EncryptError::InvalidInboundCiphertext);
+        return Err(EncryptError::InvalidInboundEqlPayload);
     }
     Ok(())
 }
@@ -273,8 +290,9 @@ fn validate_scalar_term_presence(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use cipherstash_client::eql::{SteVecEntryV3, SteVecKind, SteVecPayloadV3};
     use cipherstash_client::schema::{ColumnConfig, ColumnMode, ColumnType};
-    use cipherstash_client::zerokms::EncryptedRecord;
+    use cipherstash_client::zerokms::{EncryptedRecord, KeyHeader};
     use cipherstash_config::column::{ArrayIndexMode, Index, SteVecMode};
     use eql_mapper::EqlTermVariant;
     use uuid::Uuid;
@@ -326,6 +344,27 @@ mod tests {
         column
     }
 
+    fn ste_vec_payload(is_array: Option<bool>) -> EqlCiphertext {
+        EqlCiphertext::SteVec(SteVecPayloadV3 {
+            version: EQL_SCHEMA_VERSION_V3,
+            kind: SteVecKind::SteVec,
+            identifier: crate::Identifier::new("users", "email"),
+            key_header: KeyHeader {
+                iv: Default::default(),
+                tag: vec![2; 16],
+                descriptor: "users/email".into(),
+                keyset_id: Some(Uuid::nil()),
+                decryption_policy: None,
+            },
+            ste_vec: vec![SteVecEntryV3 {
+                selector: "0123456789abcdef0123456789abcdef".into(),
+                ciphertext: vec![1; 16],
+                is_array,
+                term: None,
+            }],
+        })
+    }
+
     #[test]
     fn ordinary_json_is_plaintext() {
         assert!(parse(br#"{"name":"Ada"}"#, &column(), false)
@@ -344,7 +383,7 @@ mod tests {
     fn malformed_payload_shape_fails_closed() {
         assert!(matches!(
             parse(br#"{"v":3,"i":"users.email","c":"bad"}"#, &column(), false),
-            Err(EncryptError::InvalidInboundCiphertext)
+            Err(EncryptError::InvalidInboundEqlPayload)
         ));
     }
 
@@ -353,7 +392,7 @@ mod tests {
         let ciphertext = payload(crate::Identifier::new("users", "phone"));
         assert!(matches!(
             validate_storage_metadata(&ciphertext, &column()),
-            Err(EncryptError::InvalidInboundCiphertext)
+            Err(EncryptError::InvalidInboundEqlPayload)
         ));
     }
 
@@ -366,7 +405,7 @@ mod tests {
         payload.ciphertext.descriptor = "accounts/email".into();
         assert!(matches!(
             validate_storage_metadata(&ciphertext, &column()),
-            Err(EncryptError::InvalidInboundCiphertext)
+            Err(EncryptError::InvalidInboundEqlPayload)
         ));
     }
 
@@ -380,7 +419,7 @@ mod tests {
         let ciphertext = payload(column.identifier.clone());
         assert!(matches!(
             validate_storage_metadata(&ciphertext, &column),
-            Err(EncryptError::InvalidInboundCiphertext)
+            Err(EncryptError::InvalidInboundEqlPayload)
         ));
     }
 
@@ -408,6 +447,36 @@ mod tests {
         }
 
         assert!(sem_terms_match(&inbound, derived));
+    }
+
+    #[test]
+    fn bloom_filter_presence_mismatch_does_not_match() {
+        let mut inbound = payload(crate::Identifier::new("users", "email"));
+        let derived = inbound.clone();
+        let EqlCiphertext::Encrypted(payload) = &mut inbound else {
+            unreachable!()
+        };
+        payload.bloom_filter = Some(vec![1, 2, 3]);
+
+        assert!(!sem_terms_match(&inbound, derived));
+    }
+
+    #[test]
+    fn ste_vec_array_marker_must_match_independent_derivation() {
+        let inbound = ste_vec_payload(Some(true));
+        let derived = ste_vec_payload(None);
+
+        assert!(!sem_terms_match(&inbound, derived));
+    }
+
+    #[test]
+    fn scalar_storage_payload_is_rejected_for_a_ste_vec_column() {
+        let ciphertext = payload(crate::Identifier::new("users", "email"));
+
+        assert!(matches!(
+            validate_storage_metadata(&ciphertext, &ste_vec_column()),
+            Err(EncryptError::InvalidInboundEqlPayload)
+        ));
     }
 
     #[test]
@@ -446,7 +515,7 @@ mod tests {
 
         assert!(matches!(
             parse(&query, &column, false),
-            Err(EncryptError::InvalidInboundCiphertext)
+            Err(EncryptError::InvalidInboundEqlPayload)
         ));
     }
 
@@ -466,7 +535,7 @@ mod tests {
 
         assert!(matches!(
             parse(&query, &column, true),
-            Err(EncryptError::InvalidInboundCiphertext)
+            Err(EncryptError::InvalidInboundEqlPayload)
         ));
     }
 
@@ -488,6 +557,45 @@ mod tests {
     }
 
     #[test]
+    fn query_only_json_ordering_term_rejects_stray_scalar_terms() {
+        let mut column = ste_vec_column();
+        column.eql_term = EqlTermVariant::JsonOrd;
+        let query = serde_json::to_vec(&serde_json::json!({
+            "v": EQL_SCHEMA_VERSION_V3,
+            "i": { "t": "users", "c": "email" },
+            "hm": "unexpected scalar term",
+            "op": "ordering term"
+        }))
+        .unwrap();
+
+        assert!(matches!(
+            parse(&query, &column, true),
+            Err(EncryptError::InvalidInboundEqlPayload)
+        ));
+    }
+
+    #[test]
+    fn query_only_scalar_payload_rejects_unsupported_eql_term() {
+        let mut column = column();
+        column
+            .config
+            .indexes
+            .push(cipherstash_client::schema::column::Index::new_unique());
+        column.eql_term = EqlTermVariant::JsonValueSelector;
+        let mut ciphertext = payload(column.identifier.clone());
+        let EqlCiphertext::Encrypted(payload) = &mut ciphertext else {
+            unreachable!()
+        };
+        payload.hmac_256 = Some("application-generated SEM term".into());
+        let query = serde_json::to_vec(&ciphertext.into_query_operand()).unwrap();
+
+        assert!(matches!(
+            parse(&query, &column, true),
+            Err(EncryptError::InvalidInboundEqlPayload)
+        ));
+    }
+
+    #[test]
     fn query_only_ste_vec_payload_is_accepted_for_a_query_operand() {
         let query = br#"{"sv":[{"s":"application-generated selector"}]}"#;
 
@@ -503,7 +611,15 @@ mod tests {
 
         assert!(matches!(
             parse(query, &ste_vec_column(), false),
-            Err(EncryptError::InvalidInboundCiphertext)
+            Err(EncryptError::InvalidInboundEqlPayload)
+        ));
+    }
+
+    #[test]
+    fn query_only_ste_vec_payload_rejects_empty_terms() {
+        assert!(matches!(
+            parse(br#"{"sv":[]}"#, &ste_vec_column(), true),
+            Err(EncryptError::InvalidInboundEqlPayload)
         ));
     }
 

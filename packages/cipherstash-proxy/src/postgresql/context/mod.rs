@@ -800,6 +800,16 @@ where
         self.encryption.decrypt(keyset_id, ciphertexts).await
     }
 
+    pub async fn decrypt_inbound_eql(
+        &self,
+        ciphertexts: Vec<Option<crate::EqlCiphertext>>,
+    ) -> Result<Vec<Option<cipherstash_client::encryption::Plaintext>>, Error> {
+        let keyset_id = self.keyset_identifier();
+        self.encryption
+            .decrypt_inbound_eql(keyset_id, ciphertexts)
+            .await
+    }
+
     pub async fn reload_schema(&self) -> bool {
         let (responder, receiver) = oneshot::channel();
         match self
@@ -1035,6 +1045,14 @@ mod tests {
         }
 
         async fn decrypt(
+            &self,
+            _keyset_id: Option<KeysetIdentifier>,
+            _ciphertexts: Vec<Option<crate::EqlCiphertext>>,
+        ) -> Result<Vec<Option<cipherstash_client::encryption::Plaintext>>, Error> {
+            Ok(vec![])
+        }
+
+        async fn decrypt_inbound_eql(
             &self,
             _keyset_id: Option<KeysetIdentifier>,
             _ciphertexts: Vec<Option<crate::EqlCiphertext>>,

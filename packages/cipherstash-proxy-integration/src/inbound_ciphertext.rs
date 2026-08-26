@@ -19,7 +19,7 @@ mod tests {
     use uuid::Uuid;
 
     const INVALID_INBOUND_PAYLOAD: &str = "Invalid encrypted value. For help visit \
-        https://github.com/cipherstash/proxy/blob/main/docs/errors.md#encrypt-invalid-inbound-ciphertext";
+        https://github.com/cipherstash/proxy/blob/main/docs/errors.md#encrypt-invalid-inbound-eql-payload";
 
     async fn cipher() -> Arc<ScopedCipher<AutoStrategy>> {
         let client_id = env("CS_CLIENT_ID", "CS_ENCRYPT__CLIENT_ID")
@@ -158,7 +158,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn accepts_pre_encrypted_parameter_for_storage_and_search() {
+    async fn accepts_pre_encrypted_parameter_with_the_configured_default_keyset() {
         let client = connect_with_tls(*PROXY).await;
         clear_with_client(&client).await;
         let id = random_id();
@@ -181,6 +181,35 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(rows[0].get::<_, String>(0), plaintext);
+    }
+
+    #[tokio::test]
+    async fn accepts_pre_encrypted_ste_vec_parameter_for_storage_and_readback() {
+        let client = connect_with_tls(*PROXY).await;
+        clear_with_client(&client).await;
+        let id = random_id();
+        let plaintext = serde_json::json!({
+            "patient": { "name": "Ada Lovelace" },
+            "allergies": ["pollen", "latex"]
+        });
+        let payload = encrypt_json("encrypted", "encrypted_jsonb", plaintext.clone()).await;
+
+        client
+            .execute(
+                "INSERT INTO encrypted (id, encrypted_jsonb) VALUES ($1, $2)",
+                &[&id, &payload],
+            )
+            .await
+            .unwrap();
+
+        let row = client
+            .query_one(
+                "SELECT encrypted_jsonb FROM encrypted WHERE id = $1",
+                &[&id],
+            )
+            .await
+            .unwrap();
+        assert_eq!(row.get::<_, serde_json::Value>(0), plaintext);
     }
 
     #[tokio::test]
@@ -398,6 +427,142 @@ mod tests {
             .expect_err("tampered non-root ciphertext must be rejected");
         assert_eq!(
             error.as_db_error().unwrap().message(),
+            INVALID_INBOUND_PAYLOAD
+        );
+    }
+
+    #[tokio::test]
+    async fn rejects_a_ste_vec_payload_with_a_tampered_array_marker() {
+        let client = connect_with_tls(*PROXY).await;
+        clear_with_client(&client).await;
+        let id = random_id();
+        let mut payload = encrypt_json(
+            "encrypted",
+            "encrypted_jsonb",
+            serde_json::json!({ "allergies": ["pollen", "latex"] }),
+        )
+        .await;
+        let entry = payload["sv"]
+            .as_array_mut()
+            .unwrap()
+            .iter_mut()
+            .find(|entry| entry.get("a").is_some())
+            .expect("an array value must produce an array-marked SteVec entry");
+        entry["a"] = false.into();
+
+        let error = client
+            .execute(
+                "INSERT INTO encrypted (id, encrypted_jsonb) VALUES ($1, $2)",
+                &[&id, &payload],
+            )
+            .await
+            .expect_err("tampered SteVec array metadata must be rejected");
+        assert_eq!(
+            error.as_db_error().unwrap().message(),
+            INVALID_INBOUND_PAYLOAD
+        );
+    }
+
+    #[tokio::test]
+    async fn rejects_ste_vec_terms_spliced_from_another_plaintext() {
+        let client = connect_with_tls(*PROXY).await;
+        clear_with_client(&client).await;
+        let id = random_id();
+        let x = encrypt_json(
+            "encrypted",
+            "encrypted_jsonb",
+            serde_json::json!({ "patient": { "name": "indexed as x" } }),
+        )
+        .await;
+        let mut y = encrypt_json(
+            "encrypted",
+            "encrypted_jsonb",
+            serde_json::json!({ "patient": { "name": "decrypts as y" } }),
+        )
+        .await;
+        let x_term = x["sv"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find_map(|entry| entry.get("op").cloned())
+            .expect("ordered string entries must carry an ordering term");
+        let y_entry = y["sv"]
+            .as_array_mut()
+            .unwrap()
+            .iter_mut()
+            .find(|entry| entry.get("op").is_some())
+            .expect("ordered string entries must carry an ordering term");
+        y_entry["op"] = x_term;
+
+        let error = client
+            .execute(
+                "INSERT INTO encrypted (id, encrypted_jsonb) VALUES ($1, $2)",
+                &[&id, &y],
+            )
+            .await
+            .expect_err("spliced SteVec SEM terms must be rejected");
+        assert_eq!(
+            error.as_db_error().unwrap().message(),
+            INVALID_INBOUND_PAYLOAD
+        );
+    }
+
+    #[tokio::test]
+    async fn rejects_mismatched_keyset_metadata_for_scalar_and_ste_vec_payloads() {
+        let client = connect_with_tls(*PROXY).await;
+        clear_with_client(&client).await;
+
+        let mut scalar: EqlCiphertextV3 = serde_json::from_str(
+            &encrypt_text(
+                "encrypted",
+                "encrypted_text",
+                "wrong scalar keyset metadata",
+            )
+            .await,
+        )
+        .unwrap();
+        let EqlCiphertextV3::Encrypted(scalar) = &mut scalar else {
+            unreachable!()
+        };
+        scalar.ciphertext.keyset_id = Some(Uuid::new_v4());
+        let scalar = serde_json::to_string(&scalar).unwrap();
+
+        let scalar_error = client
+            .execute(
+                "INSERT INTO encrypted (id, encrypted_text) VALUES ($1, $2)",
+                &[&random_id(), &scalar],
+            )
+            .await
+            .expect_err("false scalar keyset metadata must be rejected");
+        assert_eq!(
+            scalar_error.as_db_error().unwrap().message(),
+            INVALID_INBOUND_PAYLOAD
+        );
+
+        let mut ste_vec: EqlCiphertextV3 = serde_json::from_value(
+            encrypt_json(
+                "encrypted",
+                "encrypted_jsonb",
+                serde_json::json!({ "patient": { "name": "wrong SteVec keyset metadata" } }),
+            )
+            .await,
+        )
+        .unwrap();
+        let EqlCiphertextV3::SteVec(payload) = &mut ste_vec else {
+            unreachable!()
+        };
+        payload.key_header.keyset_id = Some(Uuid::new_v4());
+        let ste_vec = serde_json::to_value(&ste_vec).unwrap();
+
+        let ste_vec_error = client
+            .execute(
+                "INSERT INTO encrypted (id, encrypted_jsonb) VALUES ($1, $2)",
+                &[&random_id(), &ste_vec],
+            )
+            .await
+            .expect_err("false SteVec keyset metadata must be rejected");
+        assert_eq!(
+            ste_vec_error.as_db_error().unwrap().message(),
             INVALID_INBOUND_PAYLOAD
         );
     }

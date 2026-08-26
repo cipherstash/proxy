@@ -13,7 +13,7 @@ use cipherstash_client::{
     encryption::{DecryptOptions, Plaintext, QueryOp},
     eql::{
         encrypt_eql_v3, EqlCiphertextV3, EqlEncryptOpts, EqlOperation, EqlOutputV3,
-        PreparedPlaintext,
+        PreparedPlaintext, SteVecEntryV3,
     },
     schema::column::IndexType,
     zerokms::{Decryptable, EncryptedRecord, IdentifiedBy, RecordWithNonce, RetrieveKeyPayload},
@@ -49,6 +49,12 @@ enum V3Record {
     /// A SteVec entry, reassembled from the document's `h` header. Nonce and
     /// AAD both derive from the entry's selector.
     SteVecEntry(RecordWithNonce),
+}
+
+#[derive(Clone, Copy)]
+enum SteVecAuthentication {
+    RootOnly,
+    AllEntries,
 }
 
 impl Decryptable for V3Record {
@@ -370,72 +376,83 @@ impl EncryptionService for ZeroKms {
         keyset_id: Option<KeysetIdentifier>,
         ciphertexts: Vec<Option<EqlCiphertextV3>>,
     ) -> Result<Vec<Option<Plaintext>>, Error> {
+        self.decrypt_eql(keyset_id, ciphertexts, SteVecAuthentication::RootOnly)
+            .await
+    }
+
+    async fn decrypt_inbound_eql(
+        &self,
+        keyset_id: Option<KeysetIdentifier>,
+        ciphertexts: Vec<Option<EqlCiphertextV3>>,
+    ) -> Result<Vec<Option<Plaintext>>, Error> {
+        self.decrypt_eql(keyset_id, ciphertexts, SteVecAuthentication::AllEntries)
+            .await
+    }
+}
+
+impl ZeroKms {
+    async fn decrypt_eql(
+        &self,
+        keyset_id: Option<KeysetIdentifier>,
+        ciphertexts: Vec<Option<EqlCiphertextV3>>,
+        ste_vec_authentication: SteVecAuthentication,
+    ) -> Result<Vec<Option<Plaintext>>, Error> {
         debug!(target: ENCRYPT, msg="Decrypt", ?keyset_id, default_keyset_id = ?self.default_keyset_id);
 
-        // A keyset is required if no default keyset has been configured
         if self.default_keyset_id.is_none() && keyset_id.is_none() {
             return Err(EncryptError::MissingKeysetIdentifier.into());
         }
 
-        let cipher = self.init_cipher(keyset_id.clone()).await?;
+        let cipher = self.init_cipher(keyset_id).await?;
+        if matches!(ste_vec_authentication, SteVecAuthentication::AllEntries)
+            && ciphertexts
+                .iter()
+                .flatten()
+                .any(|ciphertext| ciphertext_keyset_id(ciphertext) != Some(cipher.keyset_id()))
+        {
+            return Err(EncryptError::InvalidInboundEqlPayload.into());
+        }
 
-        // Collect decryptable records and identify which decrypted records
-        // contain the plaintext returned to the caller.
-        //
-        // cipherstash-client has no `decrypt_eql_v3` counterpart to
-        // `encrypt_eql_v3` — the v2 `decrypt_eql` only accepts `EqlCiphertext`.
-        // We assemble the decryptable record ourselves, which is what
-        // protect-ffi does too (`encrypted_record_from_value`).
-        //
-        // Scalar: `c` is already the `EncryptedRecord` the v2 path would have
-        // unwrapped, and `EncryptedRecord` is `Decryptable`.
-        //
-        // SteVec: the document holds the key material once in the `h` header
-        // and each entry carries only raw AEAD bytes, so every record has to be
-        // reassembled from the header plus that entry. The selector is the AEAD
-        // binding — its first 12 bytes are the nonce and all 16 go into the AAD
-        // — which is why the records are `RecordWithNonce`. All entries are
-        // decrypted to authenticate them, but only the root entry (`sv[0]`)
-        // contains the complete plaintext returned to the caller. Value entries
-        // intentionally decrypt to a sentinel that is not a legal `Plaintext`.
+        // `decryption_policy` needs no parallel structural check here. For
+        // tag-version 1 records ZeroKMS supplies and verifies the policy MAC
+        // during key retrieval, so a forged policy fails authentication below.
+
+        // Ordinary database reads authenticate only the root SteVec entry,
+        // whose ciphertext contains the complete plaintext. Inbound storage
+        // validation authenticates every entry because the whole application-
+        // supplied document is about to become stored state.
         let mut result_positions: Vec<Option<usize>> = Vec::new();
         let mut records_to_decrypt: Vec<V3Record> = Vec::new();
 
-        for (idx, ct_opt) in ciphertexts.iter().enumerate() {
-            if let Some(ct) = ct_opt {
-                match ct {
-                    EqlCiphertextV3::Encrypted(payload) => {
-                        records_to_decrypt.push(V3Record::Scalar(payload.ciphertext.clone()));
-                        result_positions.push(Some(idx));
-                    }
-                    EqlCiphertextV3::SteVec(document) => {
-                        if document.ste_vec.is_empty() {
-                            return Err(EncryptError::SteVecMissingRootEntry.into());
-                        }
-
-                        for (entry_index, entry) in document.ste_vec.iter().enumerate() {
-                            let selector = decode_ste_vec_selector(&entry.selector)?;
-                            records_to_decrypt.push(V3Record::SteVecEntry(
-                                document
-                                    .key_header
-                                    .record_with_selector(entry.ciphertext.clone(), selector),
-                            ));
-                            result_positions.push((entry_index == 0).then_some(idx));
-                        }
+        for (idx, ciphertext) in ciphertexts.iter().enumerate() {
+            match ciphertext {
+                Some(EqlCiphertextV3::Encrypted(payload)) => {
+                    records_to_decrypt.push(V3Record::Scalar(payload.ciphertext.clone()));
+                    result_positions.push(Some(idx));
+                }
+                Some(EqlCiphertextV3::SteVec(document)) => {
+                    let entries =
+                        ste_vec_entries_to_authenticate(&document.ste_vec, ste_vec_authentication)?;
+                    for (entry_index, entry) in entries.iter().enumerate() {
+                        let selector = decode_ste_vec_selector(&entry.selector)?;
+                        records_to_decrypt.push(V3Record::SteVecEntry(
+                            document
+                                .key_header
+                                .record_with_selector(entry.ciphertext.clone(), selector),
+                        ));
+                        result_positions.push((entry_index == 0).then_some(idx));
                     }
                 }
+                None => {}
             }
         }
 
-        // If no ciphertexts to decrypt, return all None
         if records_to_decrypt.is_empty() {
             return Ok(vec![None; ciphertexts.len()]);
         }
 
-        // Default opts: the cipher is already scoped to the right keyset, and
-        // Proxy does not set a lock context.
+        // The cipher is already scoped to the active keyset.
         let opts = DecryptOptions::default();
-
         debug!(target: ENCRYPT, msg="Decrypting EQL v3 records", count = records_to_decrypt.len());
         let decrypt_start = Instant::now();
         let decrypted = cipher
@@ -445,8 +462,8 @@ impl EncryptionService for ZeroKms {
         let decrypt_duration = decrypt_start.elapsed();
         debug!(target: ENCRYPT, msg="Decrypt completed", count = decrypted.len(), duration_ms = decrypt_duration.as_millis());
 
-        // Reconstruct the result vector from scalar and SteVec-root plaintexts.
-        // Non-root SteVec bytes were decrypted only to authenticate them.
+        // Non-root entries are authenticated but intentionally have no output
+        // position: their decrypted sentinels are not legal Plaintext values.
         let mut result: Vec<Option<Plaintext>> = vec![None; ciphertexts.len()];
         for (result_position, bytes) in result_positions.into_iter().zip(decrypted) {
             if let Some(idx) = result_position {
@@ -455,5 +472,63 @@ impl EncryptionService for ZeroKms {
         }
 
         Ok(result)
+    }
+}
+
+fn ste_vec_entries_to_authenticate(
+    entries: &[SteVecEntryV3],
+    authentication: SteVecAuthentication,
+) -> Result<&[SteVecEntryV3], EncryptError> {
+    let root = entries
+        .first()
+        .ok_or(EncryptError::SteVecMissingRootEntry)?;
+    Ok(match authentication {
+        SteVecAuthentication::RootOnly => std::slice::from_ref(root),
+        SteVecAuthentication::AllEntries => entries,
+    })
+}
+
+fn ciphertext_keyset_id(ciphertext: &EqlCiphertextV3) -> Option<Uuid> {
+    match ciphertext {
+        EqlCiphertextV3::Encrypted(payload) => payload.ciphertext.keyset_id,
+        EqlCiphertextV3::SteVec(document) => document.key_header.keyset_id,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn ste_vec_entry(selector: &str) -> SteVecEntryV3 {
+        SteVecEntryV3 {
+            selector: selector.into(),
+            ciphertext: vec![1; 16],
+            is_array: None,
+            term: None,
+        }
+    }
+
+    #[test]
+    fn ordinary_decryption_authenticates_only_the_ste_vec_root() {
+        let entries = vec![ste_vec_entry("root"), ste_vec_entry("nested")];
+
+        assert_eq!(
+            ste_vec_entries_to_authenticate(&entries, SteVecAuthentication::RootOnly)
+                .unwrap()
+                .len(),
+            1
+        );
+    }
+
+    #[test]
+    fn inbound_validation_authenticates_every_ste_vec_entry() {
+        let entries = vec![ste_vec_entry("root"), ste_vec_entry("nested")];
+
+        assert_eq!(
+            ste_vec_entries_to_authenticate(&entries, SteVecAuthentication::AllEntries)
+                .unwrap()
+                .len(),
+            entries.len()
+        );
     }
 }

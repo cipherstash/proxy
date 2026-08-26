@@ -180,6 +180,14 @@ pub trait EncryptionService: Send + Sync {
         keyset_id: Option<KeysetIdentifier>,
         ciphertexts: Vec<Option<crate::EqlCiphertext>>,
     ) -> Result<Vec<Option<Plaintext>>, Error>;
+
+    /// Authenticate every ciphertext component of application-generated EQL
+    /// storage payloads and return their root plaintexts for SEM verification.
+    async fn decrypt_inbound_eql(
+        &self,
+        keyset_id: Option<KeysetIdentifier>,
+        ciphertexts: Vec<Option<crate::EqlCiphertext>>,
+    ) -> Result<Vec<Option<Plaintext>>, Error>;
 }
 
 #[cfg(test)]

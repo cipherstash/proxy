@@ -27,7 +27,7 @@ pub trait PostgreSqlErrorHandler {
     /// - `EncryptError::UnknownColumn` -> Unknown column error
     /// - `EncryptError::CouldNotDecryptDataForKeyset` -> System error
     /// - `EncryptError::UnknownKeysetIdentifier` -> System error
-    /// - `EncryptError::InvalidInboundCiphertext` -> Invalid encrypted value error
+    /// - `EncryptError::InvalidInboundEqlPayload` -> Invalid encrypted value error
     /// - `Error::ConnectionTimeout` -> Idle session timeout error
     /// - All others -> System error
     ///
@@ -54,7 +54,7 @@ pub trait PostgreSqlErrorHandler {
             Error::Encrypt(EncryptError::UnknownKeysetIdentifier { .. }) => {
                 diagnostics::system_error(err.to_string())
             }
-            Error::Encrypt(EncryptError::InvalidInboundCiphertext) => {
+            Error::Encrypt(EncryptError::InvalidInboundEqlPayload) => {
                 diagnostics::invalid_encrypted_value(err.to_string())
             }
             Error::ConnectionTimeout { .. } => diagnostics::connection_timeout(err.to_string()),
@@ -136,9 +136,9 @@ mod tests {
     }
 
     #[test]
-    fn invalid_inbound_ciphertext_maps_to_a_nonfatal_statement_error() {
+    fn invalid_inbound_eql_payload_maps_to_a_nonfatal_statement_error() {
         let handler = TestHandler;
-        let err = Error::Encrypt(EncryptError::InvalidInboundCiphertext);
+        let err = Error::Encrypt(EncryptError::InvalidInboundEqlPayload);
         let response = handler.error_to_response(err);
 
         assert_eq!(

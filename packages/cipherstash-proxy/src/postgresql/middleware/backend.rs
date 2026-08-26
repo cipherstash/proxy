@@ -744,6 +744,14 @@ mod tests {
         ) -> Result<Vec<Option<cipherstash_client::encryption::Plaintext>>, Error> {
             Ok(vec![])
         }
+
+        async fn decrypt_inbound_eql(
+            &self,
+            _keyset_id: Option<KeysetIdentifier>,
+            _ciphertexts: Vec<Option<crate::EqlCiphertext>>,
+        ) -> Result<Vec<Option<cipherstash_client::encryption::Plaintext>>, Error> {
+            Ok(vec![])
+        }
     }
 
     fn create_backend() -> Backend<TestService> {

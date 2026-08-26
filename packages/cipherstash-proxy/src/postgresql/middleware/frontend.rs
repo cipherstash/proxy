@@ -1165,7 +1165,7 @@ impl<S: EncryptionService> Frontend<S> {
                 }
                 Some(inbound_eql::InboundEql::Store(ciphertext)) => {
                     let Some(column) = column else {
-                        return Err(EncryptError::InvalidInboundCiphertext.into());
+                        return Err(EncryptError::InvalidInboundEqlPayload.into());
                     };
                     positions.push((index, ciphertext, column.clone()));
                 }
@@ -1180,15 +1180,19 @@ impl<S: EncryptionService> Frontend<S> {
             .iter()
             .map(|(_, ciphertext, _)| Some(ciphertext.clone()))
             .collect();
-        let plaintexts = self.context.decrypt(ciphertexts).await.map_err(|err| {
-            warn!(
-                target: ENCRYPT,
-                client_id = self.context.client_id,
-                msg = "Inbound EQL ciphertext authentication failed",
-                error = ?err,
-            );
-            EncryptError::InvalidInboundCiphertext
-        })?;
+        let plaintexts = self
+            .context
+            .decrypt_inbound_eql(ciphertexts)
+            .await
+            .map_err(|err| {
+                warn!(
+                    target: ENCRYPT,
+                    client_id = self.context.client_id,
+                    msg = "Inbound EQL ciphertext authentication failed",
+                    error = ?err,
+                );
+                EncryptError::InvalidInboundEqlPayload
+            })?;
 
         // Re-encrypt the authenticated plaintext for the inferred destination
         // and compare every derived SEM term. This detects term splicing: the
@@ -1209,7 +1213,7 @@ impl<S: EncryptionService> Frontend<S> {
                     msg = "Inbound EQL ciphertext metadata verification failed",
                     error = ?err,
                 );
-                EncryptError::InvalidInboundCiphertext
+                EncryptError::InvalidInboundEqlPayload
             })?;
 
         for ((index, ciphertext, _), derived) in positions.into_iter().zip(derived) {
@@ -1219,7 +1223,7 @@ impl<S: EncryptionService> Frontend<S> {
                     client_id = self.context.client_id,
                     msg = "Inbound EQL ciphertext SEM terms did not match plaintext",
                 );
-                return Err(EncryptError::InvalidInboundCiphertext.into());
+                return Err(EncryptError::InvalidInboundEqlPayload.into());
             };
             if !inbound_eql::sem_terms_match(&ciphertext, derived) {
                 warn!(
@@ -1227,7 +1231,7 @@ impl<S: EncryptionService> Frontend<S> {
                     client_id = self.context.client_id,
                     msg = "Inbound EQL ciphertext SEM terms did not match plaintext",
                 );
-                return Err(EncryptError::InvalidInboundCiphertext.into());
+                return Err(EncryptError::InvalidInboundEqlPayload.into());
             }
             encrypted[index] = Some(EqlOutput::Store(ciphertext));
         }
@@ -1358,13 +1362,6 @@ fn literal_is_query_operand(
         column.eql_term,
         EqlTermVariant::JsonAccessor | EqlTermVariant::JsonPath
     ) || typed_statement.query_operands.contains_literal(literal)
-}
-
-fn literals_to_plaintext(
-    typed_statement: &TypeCheckedStatement<'_>,
-    literal_columns: &Vec<Option<Column>>,
-) -> Result<Vec<Option<Plaintext>>, Error> {
-    literals_to_plaintext_skipping(typed_statement, literal_columns, &[])
 }
 
 fn literals_to_plaintext_skipping(
@@ -1596,11 +1593,14 @@ impl<S: EncryptionService> Frontend<S> {
 mod tests {
     use super::{quote_literal, Frontend};
     use crate::config::TandemConfig;
-    use crate::error::{Error, MappingError};
+    use crate::error::{EncryptError, Error, MappingError};
     use crate::postgresql::context::{Context, KeysetIdentifier};
     use crate::postgresql::error_handler::PostgreSqlErrorHandler;
+    use crate::postgresql::inbound_eql::InboundEql;
     use crate::postgresql::Column;
     use crate::proxy::{EncryptConfig, EncryptionService};
+    use cipherstash_client::eql::{EncryptedPayloadV3, EQL_SCHEMA_VERSION_V3};
+    use cipherstash_client::zerokms::EncryptedRecord;
     use eql_mapper::Schema;
     use pg_proto::{Bind, FrontendMessage, Parse};
     use std::sync::Arc;
@@ -1626,6 +1626,14 @@ mod tests {
         ) -> Result<Vec<Option<cipherstash_client::encryption::Plaintext>>, Error> {
             Ok(Vec::new())
         }
+
+        async fn decrypt_inbound_eql(
+            &self,
+            _keyset_id: Option<KeysetIdentifier>,
+            _ciphertexts: Vec<Option<crate::EqlCiphertext>>,
+        ) -> Result<Vec<Option<cipherstash_client::encryption::Plaintext>>, Error> {
+            Ok(Vec::new())
+        }
     }
 
     fn frontend() -> Frontend<TestService> {
@@ -1640,6 +1648,25 @@ mod tests {
             reload_sender,
         );
         Frontend::new(context)
+    }
+
+    fn inbound_storage_payload() -> crate::EqlCiphertext {
+        crate::EqlCiphertext::Encrypted(EncryptedPayloadV3 {
+            version: EQL_SCHEMA_VERSION_V3,
+            identifier: crate::Identifier::new("users", "email"),
+            ciphertext: EncryptedRecord {
+                iv: Default::default(),
+                ciphertext: vec![1; 16],
+                tag: vec![2; 16],
+                descriptor: "users/email".into(),
+                keyset_id: Some(uuid::Uuid::nil()),
+                decryption_policy: None,
+            },
+            hmac_256: None,
+            bloom_filter: None,
+            ore_block_u64_8_256: None,
+            ope_cllw: None,
+        })
     }
 
     #[test]
@@ -1685,6 +1712,23 @@ mod tests {
         assert!(matches!(
             frontend.extended_bind_error(bind, &response),
             FrontendMessage::Bind(_)
+        ));
+    }
+
+    #[tokio::test]
+    async fn stored_inbound_eql_without_a_destination_column_fails_closed() {
+        let mut encrypted = vec![None];
+        let result = frontend()
+            .merge_inbound_eql(
+                &mut encrypted,
+                vec![Some(InboundEql::Store(inbound_storage_payload()))],
+                &[None],
+            )
+            .await;
+
+        assert!(matches!(
+            result,
+            Err(Error::Encrypt(EncryptError::InvalidInboundEqlPayload))
         ));
     }
 }

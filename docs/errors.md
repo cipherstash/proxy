@@ -16,7 +16,7 @@
   - [Internal Error](#mapping-internal-error)
 
 - Encrypt errors:
-  - [Invalid encrypted value](#encrypt-invalid-inbound-ciphertext)
+  - [Invalid encrypted value](#encrypt-invalid-inbound-eql-payload)
   - [Column could not be encrypted](#encrypt-column-could-not-be-encrypted)
   - [Could not decrypt data for keyset](#encrypt-could-not-decrypt-data-for-keyset)
   - [KeysetId could not be parsed](#encrypt-keyset-id-could-not-be-parsed)
@@ -346,7 +346,7 @@ If the error persists, please contact CipherStash [support](https://cipherstash.
 # Encrypt errors
 
 
-## Invalid encrypted value <a id='encrypt-invalid-inbound-ciphertext'></a>
+## Invalid encrypted value <a id='encrypt-invalid-inbound-eql-payload'></a>
 
 CipherStash Proxy rejected an application-generated EQL storage payload or
 query operand because it was malformed, unauthentic, intended for another
@@ -357,7 +357,7 @@ which validation failed.
 ### Error message
 
 ```
-Invalid encrypted value. For help visit https://github.com/cipherstash/proxy/blob/main/docs/errors.md#encrypt-invalid-inbound-ciphertext
+Invalid encrypted value. For help visit https://github.com/cipherstash/proxy/blob/main/docs/errors.md#encrypt-invalid-inbound-eql-payload
 ```
 
 ### How to fix
@@ -369,20 +369,39 @@ payloads must be used only in query positions.
 
 ### Plaintext compatibility
 
-On an encrypted column, Proxy treats a JSON object as an advertised EQL storage
-payload when it has top-level `v` and `i` keys together with at least one of
-`c`, `h`, or `sv`. An object matching that key pattern which is not a valid EQL
-payload is rejected rather than encrypted as plaintext. There is no opt-out for
-this fail-closed check.
+On every encrypted column type, Proxy reserves three JSON object shapes for
+application-generated EQL:
+
+- a storage payload with top-level `v` and `i` keys plus at least one of `c`,
+  `h`, or `sv`;
+- a scalar query payload with top-level `v` and `i` keys plus at least one of
+  `hm`, `bf`, `ob`, or `op`; or
+- a SteVec query payload whose only top-level key is `sv`.
+
+An object matching one of these patterns is validated as EQL rather than
+encrypted as plaintext. Invalid EQL is rejected, and query-only payloads are
+rejected in storage positions. There is no opt-out for this fail-closed check.
 
 Before upgrading, audit JSON values supplied as plaintext to encrypted columns.
-For a `jsonb` source column named `value`, this predicate identifies the
-ambiguous shape:
+For a `jsonb` source column named `value`, this predicate identifies all three
+reserved shapes:
 
 ```sql
-WHERE value ? 'v'
-  AND value ? 'i'
-  AND value ?| ARRAY['c', 'h', 'sv']
+WHERE CASE
+  WHEN jsonb_typeof(value) <> 'object' THEN false
+  ELSE (
+    value ? 'v'
+    AND value ? 'i'
+    AND value ?| ARRAY['c', 'h', 'sv', 'hm', 'bf', 'ob', 'op']
+  ) OR (
+    value ? 'sv'
+    AND NOT EXISTS (
+      SELECT 1
+      FROM jsonb_object_keys(value) AS keys(candidate_key)
+      WHERE candidate_key <> 'sv'
+    )
+  )
+END
 ```
 
 For text sources, first restrict the scan to values that your application knows
