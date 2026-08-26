@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1787718968633,
+  "lastUpdate": 1787722757858,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -25926,6 +25926,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 39.075095,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "james@cipherstash.com",
+            "name": "James Sadler",
+            "username": "freshtonic"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "d4475dbad4b0f3cdf5c8618d23e23f2be5df2f4c",
+          "message": "Merge pull request #458 from cipherstash/feat/cip-3822-inbound-eql-payloads\n\nfeat(proxy): accept inbound EQL ciphertext payloads",
+          "timestamp": "2026-08-26T15:34:17+10:00",
+          "tree_id": "34c6b8bd04a19a2e80752087dd4b90ba58aa2160",
+          "url": "https://github.com/cipherstash/proxy/commit/d4475dbad4b0f3cdf5c8618d23e23f2be5df2f4c"
+        },
+        "date": 1787722756208,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 39.424332,
             "unit": "Number"
           }
         ]
