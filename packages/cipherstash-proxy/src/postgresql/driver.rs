@@ -12,9 +12,17 @@ use pg_proto::{
     ServerIdentity, ServerIdentityProvider, ServerTlsPolicy, SslMode, StartupParameters,
     StartupRouteResolver, StaticClientCredentials, StaticMd5ServerCredentials,
 };
-use std::{convert::Infallible, sync::Arc};
+use std::{
+    convert::Infallible,
+    sync::{Arc, LazyLock},
+};
 use tokio::net::TcpStream;
 use tracing::info;
+
+/// Cancellation requests arrive on a new connection, so every intermediary
+/// must share the registry that maps client cancellation keys to upstream keys.
+static CANCELLATION_REGISTRY: LazyLock<InMemoryCancellationRegistry> =
+    LazyLock::new(InMemoryCancellationRegistry::default);
 
 #[derive(Clone)]
 struct Route(String);
@@ -77,7 +85,7 @@ where
                 .client($client)
                 .startup_resolver(Route(address.clone()))
                 .cancellation(CancellationPolicy::Forward)
-                .cancellation_registry(InMemoryCancellationRegistry::default())
+                .cancellation_registry(CANCELLATION_REGISTRY.clone())
                 .pipeline(BoundedPipeline::new(256).expect("non-zero pipeline bound"))
                 .middleware(CipherStashMiddlewareFactory(context.clone()))
                 .build()
