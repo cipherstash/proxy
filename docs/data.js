@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788156471408,
+  "lastUpdate": 1788159625321,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -26005,6 +26005,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 41.562902,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "james@cipherstash.com",
+            "name": "James Sadler",
+            "username": "freshtonic"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "f5a76254a61e02da2fc54d5bfbfef6e11e83081f",
+          "message": "Merge pull request #460 from cipherstash/docs/bug-308-design\n\nfix(proxy): make schema changes transaction aware (BUG-308)",
+          "timestamp": "2026-08-31T16:55:36+10:00",
+          "tree_id": "9628276e4a8f0544b0b467962daae56ca22bbf75",
+          "url": "https://github.com/cipherstash/proxy/commit/f5a76254a61e02da2fc54d5bfbfef6e11e83081f"
+        },
+        "date": 1788159623598,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 40.395785,
             "unit": "Number"
           }
         ]
