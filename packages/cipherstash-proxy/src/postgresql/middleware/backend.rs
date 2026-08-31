@@ -137,8 +137,8 @@ impl<S: EncryptionService> Backend<S> {
             // forwarding ReadyForQuery. This ordering also guarantees that a
             // client opening its next connection after ReadyForQuery observes
             // the newly loaded schema and encrypt configuration.
-            if matches!(&protocol_message, BackendMessage::ReadyForQuery(_)) {
-                self.context.reload_schema_if_changed().await;
+            if let BackendMessage::ReadyForQuery(status) = &protocol_message {
+                self.handle_ready_for_query(*status).await?;
             }
 
             // CipherStash metadata is operation-keyed even in passthrough mode,
@@ -147,6 +147,7 @@ impl<S: EncryptionService> Backend<S> {
                 BackendMessage::CommandComplete(_)
                 | BackendMessage::EmptyQueryResponse
                 | BackendMessage::PortalSuspended => {
+                    self.context.schema_execution_succeeded();
                     if let Some(operation) = operation {
                         let session = self.context.complete_execution(operation);
                         self.context.discard_operation(operation);
@@ -154,6 +155,7 @@ impl<S: EncryptionService> Backend<S> {
                     }
                 }
                 BackendMessage::ErrorResponse(_) => {
+                    self.context.schema_execution_failed();
                     if let Some(operation) = operation {
                         let session = self.context.complete_execution(operation);
                         self.context.discard_operation(operation);
@@ -165,9 +167,7 @@ impl<S: EncryptionService> Backend<S> {
                         self.context.complete_describe(operation);
                     }
                 }
-                BackendMessage::ReadyForQuery(status) => {
-                    self.context.set_transaction_status(status);
-                }
+                BackendMessage::ReadyForQuery(_) => {}
                 _ => {}
             }
 
@@ -179,6 +179,7 @@ impl<S: EncryptionService> Backend<S> {
                 BackendMessage::CommandComplete(_)
                 | BackendMessage::EmptyQueryResponse
                 | BackendMessage::PortalSuspended => {
+                    self.context.schema_execution_succeeded();
                     if let Some(operation) = operation {
                         let session = self.context.complete_execution(operation);
                         self.context.discard_operation(operation);
@@ -186,6 +187,7 @@ impl<S: EncryptionService> Backend<S> {
                     }
                 }
                 BackendMessage::ErrorResponse(_) => {
+                    self.context.schema_execution_failed();
                     if let Some(operation) = operation {
                         let session = self.context.complete_execution(operation);
                         self.context.discard_operation(operation);
@@ -194,8 +196,7 @@ impl<S: EncryptionService> Backend<S> {
                 }
                 BackendMessage::ReadyForQuery(status) => {
                     self.discard_execution = false;
-                    self.context.set_transaction_status(status);
-                    self.context.reload_schema_if_changed().await;
+                    self.handle_ready_for_query(status).await?;
                     return Ok(BackendMiddlewareOutput::Forward(
                         BackendMessage::ReadyForQuery(status),
                     ));
@@ -279,8 +280,10 @@ impl<S: EncryptionService> Backend<S> {
                     self.context.discard_operation(operation);
                     self.context.finish_session(session);
                 }
+                self.context.schema_execution_succeeded();
             }
             BackendMessage::ErrorResponse(ref response) => {
+                self.context.schema_execution_failed();
                 self.error_response_handler(response);
 
                 if let Some(operation) = operation {
@@ -320,12 +323,11 @@ impl<S: EncryptionService> Backend<S> {
             // Reload is potentially triggered by a FrontEnd Sync message.
             // However, the SimpleQuery flow does not use Sync so we check here as well
             BackendMessage::ReadyForQuery(status) => {
-                self.context.set_transaction_status(status);
                 debug!(target: PROTOCOL,
                     client_id = self.context.client_id,
                     msg = "ReadyForQuery"
                 );
-                self.context.reload_schema_if_changed().await;
+                self.handle_ready_for_query(status).await?;
             }
 
             _ => {
@@ -343,6 +345,29 @@ impl<S: EncryptionService> Backend<S> {
             prefix.push(outbound_message);
             Ok(BackendMiddlewareOutput::Expand(prefix))
         }
+    }
+
+    /// Publishes committed DDL before exposing idle readiness, then updates
+    /// connection-local transaction state from the same authoritative boundary.
+    async fn handle_ready_for_query(
+        &mut self,
+        status: pg_proto::TransactionStatus,
+    ) -> Result<(), Error> {
+        self.context.set_transaction_status(status);
+        if status == pg_proto::TransactionStatus::Idle {
+            self.context.publish_schema_if_changed().await?;
+        }
+        let schema_status = match status {
+            pg_proto::TransactionStatus::Idle => crate::proxy::schema::TransactionStatus::Idle,
+            pg_proto::TransactionStatus::InTransaction => {
+                crate::proxy::schema::TransactionStatus::InTransaction
+            }
+            pg_proto::TransactionStatus::FailedTransaction => {
+                crate::proxy::schema::TransactionStatus::FailedTransaction
+            }
+        };
+        self.context.schema_ready_for_query(schema_status);
+        Ok(())
     }
 
     /// Handles PostgreSQL ErrorResponse messages from the server.
@@ -719,6 +744,7 @@ mod tests {
     use super::*;
     use crate::config::TandemConfig;
     use crate::postgresql::context::KeysetIdentifier;
+    use crate::postgresql::parser::SqlParser;
     use crate::proxy::{EncryptConfig, EncryptionService};
     use eql_mapper::Schema;
     use std::sync::Arc;
@@ -786,7 +812,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn passthrough_reloads_changed_schema_before_ready_for_query() {
+    async fn publication_failure_closes_connection_before_idle_readiness() {
         let config = Arc::new(TandemConfig::for_testing());
         let encrypt_config = Arc::new(EncryptConfig::default());
         let schema = Arc::new(Schema::new("public"));
@@ -800,7 +826,9 @@ mod tests {
             TestService {},
             reload_sender,
         );
-        context.set_schema_changed();
+        let ddl = SqlParser::parse_statement("create table reports (id bigint)").unwrap();
+        context.execute_simple_schema_statements(&[ddl]);
+        context.schema_execution_succeeded();
 
         let reload_task = tokio::spawn(async move {
             let Some(crate::proxy::ReloadCommand::DatabaseSchema(responder)) =
@@ -808,17 +836,13 @@ mod tests {
             else {
                 panic!("expected a database schema reload command");
             };
-            responder.send(true).expect("reload receiver must be open");
+            responder.send(false).unwrap();
         });
 
         let mut backend = Backend::new(context);
         let ready = BackendMessage::ReadyForQuery(pg_proto::TransactionStatus::Idle);
-        let output = backend.intercept(None, ready.clone()).await.unwrap();
+        let result = backend.intercept(None, ready).await;
         reload_task.await.unwrap();
-        assert!(matches!(
-            output,
-            BackendMiddlewareOutput::Forward(message) if message == ready
-        ));
-        assert!(!backend.context.take_schema_changed());
+        assert!(result.is_err());
     }
 }

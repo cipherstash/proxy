@@ -14,3 +14,4 @@ pub use context::column::Column;
 pub use context::Context;
 pub use context::KeysetIdentifier;
 pub use driver::handler;
+pub(crate) use rewrite::Name;

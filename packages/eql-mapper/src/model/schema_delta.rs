@@ -23,7 +23,7 @@ use super::{
 ///
 /// All table and column lookups during EQL mapping will go through via the overlay scheme, falling back to the
 /// loaded schema.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct SchemaWithEdits {
     schema: Arc<Schema>,
     overlays: HashMap<ObjectName, Overlay>,
@@ -41,29 +41,58 @@ impl SchemaWithEdits {
         !self.overlays.is_empty()
     }
 
+    /// Returns the canonical overlay identity of a table or view name.
+    ///
+    /// Every overlay read and write goes through this one identity so that
+    /// the spellings PostgreSQL treats as the same table share one overlay
+    /// entry: unquoted identifiers fold to their catalog spelling, and a
+    /// qualifier naming this schema is dropped, so `public.secrets`,
+    /// `SECRETS`, and `secrets` are one table. The encryption-metadata
+    /// overlay maintained by the proxy keys tables the same way.
+    fn canonical_key(&self, name: &ObjectName) -> ObjectName {
+        let mut idents: Vec<&Ident> = name
+            .0
+            .iter()
+            .map(|ObjectNamePart::Identifier(ident)| ident)
+            .collect();
+
+        if idents.len() == 2 && IdentCase(idents[0]) == IdentCase(&self.schema.name) {
+            idents.remove(0);
+        }
+
+        ObjectName(
+            idents
+                .into_iter()
+                .map(|ident| ObjectNamePart::Identifier(canonical_ident(ident)))
+                .collect(),
+        )
+    }
+
     /// Gets or creates a [`TableOverlay`] for a table named `table_name`.
     ///
     /// If there is no existing overlay for the table, then a new overlay will be created using
     /// `TableOverlay::Table(_)` where the table is copied from the [`Schema`].
     fn get_overlay_mut(&mut self, table_name: &ObjectName) -> &mut Overlay {
+        let key = self.canonical_key(table_name);
         let overlay = {
-            let schema_table = self.schema.resolve_table(table_name);
+            let schema_table = self.schema.resolve_table(&key);
             match schema_table {
                 Ok(schema_table) => Overlay::Table(OverlayTable::from(&*schema_table)),
-                Err(_) => Overlay::Table(OverlayTable::new(table_name.clone())),
+                Err(_) => Overlay::Table(OverlayTable::new(key.clone())),
             }
         };
 
-        self.overlays.entry(table_name.clone()).or_insert(overlay)
+        self.overlays.entry(key).or_insert(overlay)
     }
 
     pub(crate) fn resolve_table(&self, name: &ObjectName) -> Result<Arc<Table>, SchemaError> {
-        match self.overlays.get(name) {
+        let key = self.canonical_key(name);
+        match self.overlays.get(&key) {
             Some(overlay) => match overlay {
                 Overlay::Dropped => Err(SchemaError::TableNotFound(name.to_string())),
                 Overlay::Table(overlay_table) => Ok(Arc::new(overlay_table.into())),
             },
-            None => self.schema.resolve_table(name),
+            None => self.schema.resolve_table(&key),
         }
     }
 
@@ -113,8 +142,29 @@ impl SchemaWithEdits {
     }
 }
 
+/// Returns the catalog spelling of one identifier.
+///
+/// PostgreSQL folds an unquoted identifier to lower case (ASCII only) and
+/// stores a quoted identifier exactly. The result keeps a quote only when the
+/// spelling needs one to survive folding, so `secrets`, `SECRETS`, and
+/// `"secrets"` produce one identical [`Ident`], while `"Secrets"` stays
+/// quoted and distinct.
+fn canonical_ident(ident: &Ident) -> Ident {
+    let value = if ident.quote_style.is_some() {
+        ident.value.clone()
+    } else {
+        ident.value.to_ascii_lowercase()
+    };
+
+    if value == value.to_ascii_lowercase() {
+        Ident::new(value)
+    } else {
+        Ident::with_quote('"', value)
+    }
+}
+
 /// Acts like a mask over a table or an existing table that has been dropped in the current transaction.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 enum Overlay {
     /// Hides the existence of table in the main [`Schema`] causing resolution of that table to fail.
     Dropped,
@@ -143,18 +193,17 @@ impl OverlayTable {
     }
 
     fn remove_column(&mut self, name: &Ident) {
-        if self.columns.iter().any(|col| col.name == *name) {
-            self.columns.retain(|col| col.name != *name);
-        }
+        self.columns
+            .retain(|col| IdentCase(&col.name) != IdentCase(name));
     }
 
     fn rename_column(&mut self, old_column_name: &Ident, new_column_name: &Ident) {
         if let Some(col) = self
             .columns
             .iter_mut()
-            .find(|col| col.name == *old_column_name)
+            .find(|col| IdentCase(&col.name) == IdentCase(old_column_name))
         {
-            col.name = new_column_name.clone();
+            col.name = canonical_ident(new_column_name);
         }
     }
 
@@ -190,10 +239,24 @@ impl From<&OverlayTable> for Table {
 ///
 /// Returns `true` if `statement` contained relevant DDL (regardless of `TableResolver` variant).
 pub fn collect_ddl(table_resolver: Arc<TableResolver>, statement: &Statement) -> bool {
+    collect_ddl_with_column_kind(table_resolver, statement, &|_| ColumnKind::Native)
+}
+
+/// Applies DDL using the caller's classification for newly declared columns.
+///
+/// The mapper itself defaults columns to native because PostgreSQL domain
+/// identity belongs to Proxy. Proxy supplies the catalog-backed classifier so
+/// a transaction-local EQL domain has the same type as its eventual catalog row.
+pub fn collect_ddl_with_column_kind(
+    table_resolver: Arc<TableResolver>,
+    statement: &Statement,
+    classify: &dyn Fn(&ColumnDef) -> ColumnKind,
+) -> bool {
     if let Some(schema_with_edits) = table_resolver.as_schema_with_edits() {
         let mut visitor = DdlCollector {
             schema: schema_with_edits,
             changed: false,
+            classify,
         };
         let _ = statement.accept(&mut visitor);
         return visitor.changed;
@@ -202,37 +265,39 @@ pub fn collect_ddl(table_resolver: Arc<TableResolver>, statement: &Statement) ->
     table_resolver.has_schema_changed()
 }
 
-struct DdlCollector {
+struct DdlCollector<'a> {
     schema: Arc<RwLock<SchemaWithEdits>>,
     changed: bool,
+    classify: &'a dyn Fn(&ColumnDef) -> ColumnKind,
 }
 
-impl DdlCollector {
+impl DdlCollector<'_> {
     fn capture_create_view(&self, name: &ObjectName, columns: &[ViewColumnDef]) {
-        let name = name.clone();
-        let mut table = OverlayTable::new(name.clone());
+        let mut overlay_schema = self.schema.write().unwrap();
+        let mut table = OverlayTable::new(overlay_schema.canonical_key(name));
 
         for def in columns {
             table.add_column(Column {
-                name: def.name.clone(),
+                name: canonical_ident(&def.name),
                 kind: ColumnKind::Native,
             });
         }
 
-        *self.schema.write().unwrap().get_overlay_mut(&name) = Overlay::Table(table)
+        *overlay_schema.get_overlay_mut(name) = Overlay::Table(table)
     }
 
     fn capture_create_table(&self, name: &ObjectName, columns: &[ColumnDef]) {
-        let mut table = OverlayTable::new(name.clone());
+        let mut overlay_schema = self.schema.write().unwrap();
+        let mut table = OverlayTable::new(overlay_schema.canonical_key(name));
 
         for def in columns {
             table.add_column(Column {
-                name: def.name.clone(),
-                kind: ColumnKind::Native,
+                name: canonical_ident(&def.name),
+                kind: (self.classify)(def),
             });
         }
 
-        *self.schema.write().unwrap().get_overlay_mut(name) = Overlay::Table(table)
+        *overlay_schema.get_overlay_mut(name) = Overlay::Table(table)
     }
 
     fn capture_alter_table(&self, name: &ObjectName, operations: &[AlterTableOperation]) {
@@ -243,8 +308,8 @@ impl DdlCollector {
                     let overlay = overlay_schema.get_overlay_mut(name);
                     if let Overlay::Table(table) = overlay {
                         table.add_column(Column {
-                            name: column_def.name.clone(),
-                            kind: ColumnKind::Native,
+                            name: canonical_ident(&column_def.name),
+                            kind: (self.classify)(column_def),
                         });
                     }
                 }
@@ -282,7 +347,7 @@ impl DdlCollector {
                     if let Some(mut table_to_rename) = table {
                         // Mark old table name as dropped so it no longer resolves
                         *overlay = Overlay::Dropped;
-                        table_to_rename.rename(new_name_ident.clone());
+                        table_to_rename.rename(canonical_ident(new_name_ident));
                         // Appease the borrow checker: relinquish the borrow, then reborrow.
                         drop(overlay_schema);
                         let mut overlay_schema = self.schema.write().unwrap();
@@ -317,7 +382,7 @@ impl DdlCollector {
     }
 }
 
-impl<'ast> Visitor<'ast> for DdlCollector {
+impl<'ast> Visitor<'ast> for DdlCollector<'_> {
     type Error = Infallible;
 
     fn enter<N: Visitable>(&mut self, node: &'ast N) -> ControlFlow<Break<Self::Error>> {
@@ -362,12 +427,134 @@ impl<'ast> Visitor<'ast> for DdlCollector {
 mod test {
     use std::sync::Arc;
 
+    use sqltk::parser::ast::{Ident, ObjectName, ObjectNamePart};
+
     use crate::{
         schema,
         test_helpers::{id, object_name, parse},
         unifier::{DomainIdentity, EqlTraits, TokenType},
         ColumnKind, SchemaError, SchemaTableColumn, TableResolver,
     };
+
+    fn qualified(schema_name: &str, table_name: &str) -> ObjectName {
+        ObjectName(vec![
+            ObjectNamePart::Identifier(Ident::new(schema_name)),
+            ObjectNamePart::Identifier(Ident::new(table_name)),
+        ])
+    }
+
+    #[test]
+    fn schema_qualified_create_resolves_by_bare_name() {
+        let schema = Arc::new(schema! { tables: {} });
+        let resolver = Arc::new(TableResolver::new_editable(schema));
+
+        crate::collect_ddl(
+            resolver.clone(),
+            &parse("create table public.secrets (id int, secret text)"),
+        );
+
+        assert!(resolver.resolve_table(&object_name("secrets")).is_ok());
+        assert!(resolver
+            .resolve_table_column(&object_name("secrets"), &id("secret"))
+            .is_ok());
+    }
+
+    #[test]
+    fn bare_create_resolves_by_schema_qualified_name() {
+        let schema = Arc::new(schema! { tables: {} });
+        let resolver = Arc::new(TableResolver::new_editable(schema));
+
+        crate::collect_ddl(resolver.clone(), &parse("create table reports (id int)"));
+
+        assert!(resolver
+            .resolve_table(&qualified("public", "reports"))
+            .is_ok());
+    }
+
+    #[test]
+    fn foreign_schema_qualified_create_does_not_shadow_the_bare_name() {
+        let schema = Arc::new(schema! {
+            tables: {
+                users: {
+                    id,
+                    email (EQL),
+                }
+            }
+        });
+        let resolver = Arc::new(TableResolver::new_editable(schema));
+
+        crate::collect_ddl(
+            resolver.clone(),
+            &parse("create table staging.users (id int, email text)"),
+        );
+
+        let column = resolver
+            .resolve_table_column(&object_name("users"), &id("email"))
+            .unwrap();
+        assert!(matches!(column.kind, ColumnKind::Eql(_, _)));
+    }
+
+    #[test]
+    fn unquoted_identifiers_fold_to_their_catalog_spelling() {
+        let schema = Arc::new(schema! { tables: {} });
+        let resolver = Arc::new(TableResolver::new_editable(schema));
+
+        crate::collect_ddl(
+            resolver.clone(),
+            &parse("create table Secrets (Secret text)"),
+        );
+
+        let column = resolver
+            .resolve_table_column(&object_name("secrets"), &id("secret"))
+            .unwrap();
+        assert_eq!(column.table.value, "secrets");
+        assert_eq!(column.column.value, "secret");
+    }
+
+    #[test]
+    fn column_edits_follow_postgresql_identifier_folding() {
+        let schema = Arc::new(schema! { tables: {} });
+        let resolver = Arc::new(TableResolver::new_editable(schema));
+
+        crate::collect_ddl(
+            resolver.clone(),
+            &parse("create table users (id int, Email text)"),
+        );
+        crate::collect_ddl(
+            resolver.clone(),
+            &parse("alter table users drop column email"),
+        );
+
+        assert_eq!(
+            resolver.resolve_table_column(&object_name("users"), &id("email")),
+            Err(SchemaError::ColumnNotFound("users".into(), "email".into()))
+        );
+    }
+
+    #[test]
+    fn schema_qualified_alter_edits_the_known_table() {
+        let schema = Arc::new(schema! {
+            tables: {
+                users: {
+                    id,
+                    email,
+                }
+            }
+        });
+        let resolver = Arc::new(TableResolver::new_editable(schema));
+
+        crate::collect_ddl(
+            resolver.clone(),
+            &parse("alter table public.users add age int"),
+        );
+
+        assert!(resolver
+            .resolve_table_column(&object_name("users"), &id("age"))
+            .is_ok());
+        assert!(resolver
+            .resolve_table_column(&object_name("users"), &id("email"))
+            .is_ok());
+    }
 
     #[test]
     fn add_column() {

@@ -5,7 +5,7 @@ use crate::{
     connect,
     error::{ConfigError, Error, TlsConfigError},
     postgresql::{Column, Context, KeysetIdentifier},
-    proxy::{encrypt_config::EncryptConfigManager, schema::SchemaManager},
+    proxy::schema::SchemaManager,
     tls,
 };
 use cipherstash_client::encryption::Plaintext;
@@ -14,7 +14,8 @@ use tokio::sync::oneshot::Sender;
 use tracing::{debug, warn};
 
 mod encrypt_config;
-mod schema;
+/// Transaction-aware schema snapshots, overlays, and publication.
+pub(crate) mod schema;
 mod zerokms;
 
 pub use encrypt_config::EncryptConfig;
@@ -38,7 +39,6 @@ const AGGREGATE_QUERY: &str = include_str!("./sql/select_aggregates.sql");
 #[derive(Debug)]
 pub enum ReloadCommand {
     DatabaseSchema(ReloadResponder),
-    EncryptSchema(ReloadResponder),
 }
 
 ///
@@ -46,7 +46,6 @@ pub enum ReloadCommand {
 ///
 pub struct Proxy {
     pub config: Arc<TandemConfig>,
-    pub encrypt_config_manager: EncryptConfigManager,
     pub schema_manager: SchemaManager,
     /// The EQL version installed in the database or `None` if it was not present
     pub eql_version: Option<String>,
@@ -75,24 +74,17 @@ impl Proxy {
         // Ensures error on start if credential or network issue
         zerokms.init_cipher(None).await?;
 
-        let encrypt_config_manager = EncryptConfigManager::init(&config.database).await?;
-
         let schema_manager = SchemaManager::init(&config.database).await?;
 
         let eql_version = Proxy::eql_version(&config).await?;
 
         let (reload_sender, reload_receiver) = mpsc::unbounded_channel();
 
-        Proxy::receive(
-            reload_receiver,
-            schema_manager.clone(),
-            encrypt_config_manager.clone(),
-        );
+        Proxy::receive(reload_receiver, schema_manager.clone());
 
         Ok(Proxy {
             config: Arc::new(config),
             zerokms,
-            encrypt_config_manager,
             schema_manager,
             eql_version,
             upstream_tls_roots,
@@ -119,23 +111,17 @@ impl Proxy {
         Ok(version)
     }
 
-    pub fn receive(
-        mut reload_receiver: ReloadReceiver,
-        schema_manager: SchemaManager,
-        encrypt_config_manager: EncryptConfigManager,
-    ) {
+    /// Starts the asynchronous coordinator for schema reload requests.
+    pub fn receive(mut reload_receiver: ReloadReceiver, schema_manager: SchemaManager) {
         tokio::task::spawn(async move {
             while let Some(command) = reload_receiver.recv().await {
                 debug!(msg = "ReloadCommand received", ?command);
                 match command {
                     ReloadCommand::DatabaseSchema(responder) => {
-                        let schema_reloaded = schema_manager.reload().await;
-                        let encrypt_config_reloaded = encrypt_config_manager.reload().await;
-                        let _ = responder.send(schema_reloaded && encrypt_config_reloaded);
-                    }
-                    ReloadCommand::EncryptSchema(responder) => {
-                        let reloaded = encrypt_config_manager.reload().await;
-                        let _ = responder.send(reloaded);
+                        let schema_manager = schema_manager.clone();
+                        tokio::task::spawn(async move {
+                            let _ = responder.send(schema_manager.reload().await);
+                        });
                     }
                 }
             }
@@ -147,16 +133,13 @@ impl Proxy {
     ///
     pub fn context(&self, client_id: i32) -> Context<ZeroKms> {
         let config = self.config.clone();
-        let encrypt_config = self.encrypt_config_manager.load();
-        let schema = self.schema_manager.load();
         let reload_sender = self.reload_sender.clone();
         let encryption = self.zerokms.clone();
 
-        Context::new(
+        Context::new_with_schema_store(
             client_id,
             config,
-            encrypt_config,
-            schema,
+            self.schema_manager.store(),
             self.upstream_tls_roots.clone(),
             encryption,
             reload_sender,

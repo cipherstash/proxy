@@ -25,6 +25,7 @@ mod multitenant;
 mod ore_order_helpers;
 mod passthrough;
 mod pipeline;
+/// Database-backed transaction-aware schema middleware regressions.
 mod schema_change;
 mod select;
 mod set_keyset_error;

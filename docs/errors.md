@@ -12,6 +12,8 @@
   - [Invalid SQL statement](#mapping-invalid-sql-statement)
   - [Unsupported parameter type](#mapping-unsupported-parameter-type)
   - [Statement could not be type checked](#mapping-statement-could-not-be-type-checked)
+  - [Dependent statement after DDL](#mapping-dependent-statement-after-ddl)
+  - [Unmodelled DDL](#mapping-unmodelled-ddl)
   - [Unmappable encrypted column](#mapping-unmappable-encrypted-column)
   - [Internal Error](#mapping-internal-error)
 
@@ -262,6 +264,47 @@ Check if you are running the latest version of CipherStash Proxy, and update to 
 
 If the error persists, please contact CipherStash [support](https://cipherstash.com/support).
 
+
+
+<!-- ---------------------------------------------------------------------------------------------------- -->
+
+
+## Dependent statement after DDL <a id='mapping-dependent-statement-after-ddl'></a>
+
+A simple-query batch contains a schema-dependent statement after DDL that may change encryption
+metadata. Proxy cannot observe the DDL execution result between statements in one simple-query
+message, so it refuses the complete batch before PostgreSQL executes any part of it. Native DDL
+and native temporary-table batches continue to pass through because they introduce no encryption
+obligation.
+
+### How to fix
+
+Send the DDL and the dependent statement as separate queries. Extended-protocol clients may
+pipeline them; Proxy defers dependent mapping until PostgreSQL reports the DDL outcome.
+
+
+<!-- ---------------------------------------------------------------------------------------------------- -->
+
+
+## Unmodelled DDL <a id='mapping-unmodelled-ddl'></a>
+
+PostgreSQL successfully executed a schema change whose connection-local effect Proxy cannot model
+safely. Examples are conditional or cascading DDL, DDL that targets a table in a schema other
+than the one Proxy models, and a temporary table that can shadow an encrypted table.
+Schema-dependent statements are refused until the change is provably gone.
+
+### How to fix
+
+For a transaction-scoped change, do one of the following:
+
+- Roll back to a savepoint that you set before the schema change.
+- Roll back the transaction.
+- Commit the transaction and wait for Proxy to publish an authoritative catalog snapshot.
+
+A connection-local change, such as a temporary table that can shadow an encrypted table, is not
+cleared by rollback or by catalog publication, because Proxy cannot prove from the shared catalog
+that the object is gone. Roll back to a savepoint that you set before the change, or open a new
+connection.
 
 
 <!-- ---------------------------------------------------------------------------------------------------- -->
