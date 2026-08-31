@@ -108,7 +108,7 @@ pub enum MappingError {
     DependentStatementAfterDdl,
 
     /// Confirmed DDL cannot be represented safely by the transaction overlay.
-    #[error("A successful schema change in this transaction cannot be modelled safely. Roll back the transaction before issuing schema-dependent statements. For help visit {}#mapping-unmodelled-ddl", ERROR_DOC_BASE_URL)]
+    #[error("A successful schema change on this connection cannot be modelled safely. Roll back to a savepoint set before the change, or roll back the transaction. If the change created a connection-local object such as a temporary table, rollback does not clear this state; open a new connection. For help visit {}#mapping-unmodelled-ddl", ERROR_DOC_BASE_URL)]
     UnmodelledDdl,
 
     #[error("Invalid parameter for column '{}' of type '{}' in table '{}' (OID {}). For help visit {}#mapping-invalid-parameter",

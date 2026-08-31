@@ -289,13 +289,22 @@ pipeline them; Proxy defers dependent mapping until PostgreSQL reports the DDL o
 ## Unmodelled DDL <a id='mapping-unmodelled-ddl'></a>
 
 PostgreSQL successfully executed a schema change whose connection-local effect Proxy cannot model
-safely, such as conditional or cascading DDL. Schema-dependent statements are refused for the
-rest of that transaction.
+safely. Examples are conditional or cascading DDL, DDL that targets a table in a schema other
+than the one Proxy models, and a temporary table that can shadow an encrypted table.
+Schema-dependent statements are refused until the change is provably gone.
 
 ### How to fix
 
-Roll back the transaction, or commit it and wait for Proxy to publish an authoritative catalog
-snapshot before issuing schema-dependent statements.
+For a transaction-scoped change, do one of the following:
+
+- Roll back to a savepoint that you set before the schema change.
+- Roll back the transaction.
+- Commit the transaction and wait for Proxy to publish an authoritative catalog snapshot.
+
+A connection-local change, such as a temporary table that can shadow an encrypted table, is not
+cleared by rollback or by catalog publication, because Proxy cannot prove from the shared catalog
+that the object is gone. Roll back to a savepoint that you set before the change, or open a new
+connection.
 
 
 <!-- ---------------------------------------------------------------------------------------------------- -->

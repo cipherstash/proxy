@@ -34,8 +34,9 @@
 //! # Trade-offs and limitations
 //!
 //! * The overlay intentionally models a small, deterministic DDL subset. Conditional DDL,
-//!   cascading changes, `CREATE TABLE AS`/`LIKE`/`CLONE`/`INHERITS`, views, and unsupported
-//!   `ALTER TABLE` operations are treated as unmodelled. After such DDL succeeds, later
+//!   cascading changes, `CREATE TABLE AS`/`LIKE`/`CLONE`/`INHERITS`, views, unsupported
+//!   `ALTER TABLE` operations, and DDL that targets a table qualified with a schema other
+//!   than the modelled one are treated as unmodelled. After such DDL succeeds, later
 //!   schema-dependent statements fail closed until rollback or authoritative publication.
 //! * A simple-query message has one PostgreSQL response boundary, so Proxy cannot safely remap a
 //!   later statement after observing an earlier statement's result. Batches that may change
@@ -275,7 +276,7 @@ impl SchemaMiddleware {
             name,
             Intent {
                 ddl: self.is_schema_ddl(&statement),
-                modelled: is_modelled_ddl(&statement),
+                modelled: self.models_ddl(&statement),
                 statement,
             },
         );
@@ -323,7 +324,7 @@ impl SchemaMiddleware {
         for statement in statements {
             let intent = Intent {
                 ddl: self.is_schema_ddl(statement),
-                modelled: is_modelled_ddl(statement),
+                modelled: self.models_ddl(statement),
                 statement: statement.clone(),
             };
             if intent.ddl {
@@ -407,6 +408,43 @@ impl SchemaMiddleware {
         }
     }
 
+    /// Returns whether the connection-local overlay can represent this DDL exactly.
+    ///
+    /// Both overlays key tables by bare catalog name inside the one modelled
+    /// schema. DDL that targets a table qualified with any other schema names
+    /// a different table than those keys track, so modelling it would corrupt
+    /// the shared identity; it is treated as unmodelled instead.
+    fn models_ddl(&self, statement: &Statement) -> bool {
+        is_modelled_ddl(statement) && self.ddl_targets_in_model(statement)
+    }
+
+    /// Returns whether every table this DDL targets lies in the modelled schema.
+    fn ddl_targets_in_model(&self, statement: &Statement) -> bool {
+        let schema_name = postgres_identifier(&self.base.read().unwrap().name);
+        let in_model = |name: &ObjectName| match name.0.as_slice() {
+            [_] => true,
+            [ObjectNamePart::Identifier(qualifier), _] => {
+                postgres_identifier(qualifier) == schema_name
+            }
+            _ => false,
+        };
+
+        match statement {
+            Statement::CreateTable(create) => in_model(&create.name),
+            Statement::AlterTable {
+                name, operations, ..
+            } => {
+                in_model(name)
+                    && operations.iter().all(|operation| match operation {
+                        AlterTableOperation::RenameTable { table_name } => in_model(table_name),
+                        _ => true,
+                    })
+            }
+            Statement::Drop { names, .. } => names.iter().all(in_model),
+            _ => true,
+        }
+    }
+
     /// Returns whether a statement changes tracked schema state for this connection.
     ///
     /// Native temporary tables are connection-local and cannot be published from the
@@ -459,7 +497,7 @@ impl SchemaMiddleware {
             .write()
             .unwrap()
             .push_back(PendingExecution::Execute(Some(Box::new(Intent {
-                modelled: is_modelled_ddl(&statement),
+                modelled: self.models_ddl(&statement),
                 statement,
                 ddl,
             }))));
@@ -1149,6 +1187,90 @@ mod tests {
             transformed.statement.to_string(),
             "INSERT INTO secrets (id, secret) VALUES ($1, $2::JSONB::public.eql_v3_text_search)"
         );
+    }
+
+    #[test]
+    fn qualified_create_in_the_modelled_schema_shares_identity_with_bare_names() {
+        let middleware = SchemaMiddleware::new(Arc::new(Schema::new("public")));
+        middleware.execution_started(parse(
+            "create table public.secrets (id bigint, secret eql_v3_text_search)",
+        ));
+        middleware.execution_succeeded();
+
+        assert!(!middleware.has_unmodelled_ddl());
+
+        let statement = parse("insert into secrets (id, secret) values ($1, $2)");
+        let typed = eql_mapper::type_check(middleware.resolver(), &statement).unwrap();
+        let transformed = typed.transform(Default::default()).unwrap();
+
+        assert_eq!(
+            transformed.statement.to_string(),
+            "INSERT INTO secrets (id, secret) VALUES ($1, $2::JSONB::public.eql_v3_text_search)"
+        );
+        assert!(middleware
+            .encrypt_config()
+            .get_column_config(&Identifier::new("secrets", "secret"))
+            .is_some());
+    }
+
+    #[test]
+    fn mixed_case_unquoted_ddl_shares_identity_with_folded_references() {
+        let middleware = SchemaMiddleware::new(Arc::new(Schema::new("public")));
+        middleware.execution_started(parse(
+            "create table Secrets (Id bigint, Secret eql_v3_text_search)",
+        ));
+        middleware.execution_succeeded();
+
+        let statement = parse("insert into secrets (id, secret) values ($1, $2)");
+        let typed = eql_mapper::type_check(middleware.resolver(), &statement).unwrap();
+        let transformed = typed.transform(Default::default()).unwrap();
+
+        assert_eq!(
+            transformed.statement.to_string(),
+            "INSERT INTO secrets (id, secret) VALUES ($1, $2::JSONB::public.eql_v3_text_search)"
+        );
+    }
+
+    #[test]
+    fn foreign_schema_create_is_unmodelled_and_preserves_encryption_metadata() {
+        let mut encrypt_config = EncryptConfig::new();
+        let column = match parse("create table users (email eql_v3_text_search)") {
+            Statement::CreateTable(create) => create.columns.into_iter().next().unwrap(),
+            _ => unreachable!(),
+        };
+        add_column_config(&mut encrypt_config, "users", &column);
+        let store = CommittedSchemaStore::for_testing(Schema::new("public"), encrypt_config);
+        let middleware = SchemaMiddleware::from_store(store);
+
+        middleware.execution_started(parse("create table staging.users (id bigint, email text)"));
+        middleware.execution_succeeded();
+
+        assert!(middleware.has_unmodelled_ddl());
+        assert!(middleware
+            .encrypt_config()
+            .get_column_config(&Identifier::new("users", "email"))
+            .is_some());
+    }
+
+    #[test]
+    fn foreign_schema_drop_is_unmodelled_and_preserves_encryption_metadata() {
+        let mut encrypt_config = EncryptConfig::new();
+        let column = match parse("create table users (email eql_v3_text_search)") {
+            Statement::CreateTable(create) => create.columns.into_iter().next().unwrap(),
+            _ => unreachable!(),
+        };
+        add_column_config(&mut encrypt_config, "users", &column);
+        let store = CommittedSchemaStore::for_testing(Schema::new("public"), encrypt_config);
+        let middleware = SchemaMiddleware::from_store(store);
+
+        middleware.execution_started(parse("drop table staging.users"));
+        middleware.execution_succeeded();
+
+        assert!(middleware.has_unmodelled_ddl());
+        assert!(middleware
+            .encrypt_config()
+            .get_column_config(&Identifier::new("users", "email"))
+            .is_some());
     }
 
     #[test]

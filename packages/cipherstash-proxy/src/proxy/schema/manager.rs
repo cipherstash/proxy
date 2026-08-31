@@ -179,9 +179,15 @@ where
     F: FnOnce() -> Fut,
     Fut: Future<Output = Result<(Schema, EncryptConfig), Error>>,
 {
+    // The publication sample is taken before this reload request is
+    // registered. Only a catalog read that starts after the request can
+    // satisfy it, so every publication counted here was requested before
+    // that read began and is proven visible to it. A publication requested
+    // later — for example while a preceding reload holds the lock — must
+    // never be marked satisfied by this call.
+    let publication_generation = requested_publication.load(Ordering::Acquire);
     let requested = requested_generation.fetch_add(1, Ordering::AcqRel) + 1;
     let _guard = reload_lock.lock().await;
-    let publication_generation = requested_publication.load(Ordering::Acquire);
 
     if snapshot.load().version() >= requested {
         published_publication.fetch_max(publication_generation, Ordering::AcqRel);
@@ -424,8 +430,13 @@ async fn load_snapshot(config: &DatabaseConfig) -> Result<(Schema, EncryptConfig
 
                 if let Some(domain) = column_domain_name.as_deref() {
                     if let Some(config) = column_config_from_domain(&table_name, col, domain) {
-                        encrypt_config
-                            .insert(Identifier::new(table_name.clone(), col.clone()), config);
+                        let identifier = Identifier::new(table_name.clone(), col.clone());
+                        // The catalog query orders rows in search-path
+                        // precedence and requires consumers to keep the FIRST
+                        // row for a duplicate name.
+                        if encrypt_config.get_column_config(&identifier).is_none() {
+                            encrypt_config.insert(identifier, config);
+                        }
                     }
                 }
             });
@@ -527,6 +538,62 @@ mod test {
             CommittedSchemaSnapshot::new(2, Schema::new("stale"), EncryptConfig::new(),),
         ));
         assert_eq!(snapshot.load().version(), 3);
+    }
+
+    #[tokio::test]
+    async fn early_return_cannot_satisfy_a_publication_requested_after_entry() {
+        let snapshot = Arc::new(ArcSwap::new(Arc::new(CommittedSchemaSnapshot::new(
+            1,
+            Schema::new("public"),
+            EncryptConfig::new(),
+        ))));
+        let requested_generation = Arc::new(AtomicU64::new(1));
+        let requested_publication = Arc::new(AtomicU64::new(0));
+        let published_publication = Arc::new(AtomicU64::new(0));
+        let reload_lock = Arc::new(Mutex::new(()));
+        let loads = Arc::new(AtomicUsize::new(0));
+
+        // A preceding reload holds the lock while its catalog read runs.
+        let guard = reload_lock.clone().lock_owned().await;
+
+        let waiter = tokio::spawn(coalesced_reload(
+            snapshot.clone(),
+            requested_generation.clone(),
+            requested_publication.clone(),
+            published_publication.clone(),
+            reload_lock.clone(),
+            {
+                let loads = loads.clone();
+                move || async move {
+                    loads.fetch_add(1, Ordering::AcqRel);
+                    Ok((Schema::new("public"), EncryptConfig::new()))
+                }
+            },
+        ));
+
+        // The waiter samples the publication generation before it registers
+        // its reload request, so once the request is visible the sample is
+        // already bound.
+        while requested_generation.load(Ordering::Acquire) < 2 {
+            tokio::task::yield_now().await;
+        }
+
+        // A publication is requested during the preceding catalog read; that
+        // read began earlier and cannot prove this DDL visible.
+        requested_publication.fetch_add(1, Ordering::AcqRel);
+
+        // The preceding reload publishes a version that covers the waiter's
+        // generation, so the waiter takes the early return.
+        snapshot.store(Arc::new(CommittedSchemaSnapshot::new(
+            2,
+            Schema::new("public"),
+            EncryptConfig::new(),
+        )));
+        drop(guard);
+
+        assert!(waiter.await.unwrap());
+        assert_eq!(loads.load(Ordering::Acquire), 0);
+        assert_eq!(published_publication.load(Ordering::Acquire), 0);
     }
 
     #[tokio::test]

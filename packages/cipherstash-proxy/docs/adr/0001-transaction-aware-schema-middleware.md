@@ -87,7 +87,9 @@ commit cannot be undone, but Proxy must not imply that stale encryption metadata
 - The local overlay deliberately models only deterministic schema changes. Encryption-neutral
   constraints, defaults, nullability, ownership, trigger/rule state, and row-level-security state
   are accepted, while conditional, cascading, table-rewriting, view, and type-changing operations
-  remain unmodelled within a transaction.
+  remain unmodelled within a transaction. The overlay models exactly one schema — the one that
+  unqualified names resolve in — so DDL that targets a table qualified with another schema is also
+  unmodelled.
 - Availability is intentionally sacrificed when committed schema state cannot be published safely.
 - Schema and encryption managers can no longer publish independent observable states.
 

@@ -95,6 +95,28 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn schema_qualified_ddl_shares_identity_with_bare_name_references() {
+        let client = connect_for_test(*PROXY).await;
+        let table = table("bug_308_qualified");
+
+        client.batch_execute("BEGIN").await.unwrap();
+        client
+            .execute(
+                &format!(
+                    "CREATE TABLE public.{table} \
+                     (id bigint PRIMARY KEY, secret eql_v3_text_search NOT NULL)"
+                ),
+                &[],
+            )
+            .await
+            .unwrap();
+        insert_secret(&client, &table, 1, "qualified secret").await;
+        client.batch_execute("COMMIT").await.unwrap();
+
+        assert_ciphertext_at_rest(&table, 1, "qualified secret").await;
+    }
+
+    #[tokio::test]
     async fn pipelined_statement_waits_for_extended_ddl_activation() {
         let client = connect_for_test(*PROXY).await;
         let table = table("bug_308_pipeline");
