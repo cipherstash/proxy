@@ -894,7 +894,7 @@ mod tests {
 
     proptest! {
         #[test]
-        fn generated_lifecycle_matches_an_independent_schema_model(events in generated_events()) {
+        fn generated_create_outcomes_and_rollbacks_match_schema_overlay(events in generated_events()) {
             let middleware = SchemaMiddleware::new(Arc::new(Schema::new("public")));
             let mut expected_tables = HashSet::new();
 

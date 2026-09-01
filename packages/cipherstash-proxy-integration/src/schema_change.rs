@@ -86,7 +86,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn concurrent_schema_publications_are_both_visible_after_readiness() {
+    async fn concurrent_commits_are_both_visible_after_readiness() {
         let observer = connect_for_test(*PROXY).await;
         let first = connect_for_test(*PROXY).await;
         let second = connect_for_test(*PROXY).await;
@@ -257,6 +257,34 @@ mod tests {
         client.batch_execute("COMMIT").await.unwrap();
 
         assert_ciphertext_at_rest(&table, 1, "after safe alter").await;
+    }
+
+    #[tokio::test]
+    async fn native_temporary_table_remains_usable_without_blocking_encrypted_mapping() {
+        let client = connect_for_test(*PROXY).await;
+        let temporary = table("bug_308_native_temp");
+        let encrypted = table("bug_308_after_native_temp");
+
+        client
+            .batch_execute(&format!(
+                "CREATE TEMPORARY TABLE {temporary} (id bigint PRIMARY KEY, name text); \
+                 INSERT INTO {temporary} (id, name) VALUES (1, 'temporary')"
+            ))
+            .await
+            .unwrap();
+        let name: String = client
+            .query_one(&format!("SELECT name FROM {temporary} WHERE id = 1"), &[])
+            .await
+            .unwrap()
+            .get(0);
+        assert_eq!(name, "temporary");
+
+        client
+            .execute(&create_encrypted_table(&encrypted), &[])
+            .await
+            .unwrap();
+        insert_secret(&client, &encrypted, 1, "after native temporary table").await;
+        assert_ciphertext_at_rest(&encrypted, 1, "after native temporary table").await;
     }
 
     #[tokio::test]
