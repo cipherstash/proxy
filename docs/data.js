@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788159625321,
+  "lastUpdate": 1788259292733,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -26034,6 +26034,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 40.395785,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "c74d99004d8bca2559ab1989cf24c5d7a0c77461",
+          "message": "test(proxy): cover transactional schema edge cases",
+          "timestamp": "2026-09-01T03:34:16Z",
+          "url": "https://github.com/cipherstash/proxy/pull/461/commits/c74d99004d8bca2559ab1989cf24c5d7a0c77461"
+        },
+        "date": 1788259291029,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 40.879552,
             "unit": "Number"
           }
         ]
