@@ -102,114 +102,123 @@ where
                 pg_proto::IntermediaryAccept::Session(session) => session,
                 pg_proto::IntermediaryAccept::CancellationForwarded => return Ok(()),
             };
-            'session: loop {
-                let forward = session.forward_next();
-                let forwarded = match connection_timeout {
-                    Some(duration) => tokio::time::timeout(duration, forward)
-                        .await
-                        .map_err(|_| Error::ConnectionTimeout { duration })?,
-                    None => forward.await,
-                };
-                let forwarded = match forwarded {
-                    Ok(forwarded) => forwarded,
-                    Err(pg_proto::ForwardError::Frontend(
-                        pg_proto::FrontendProjectionError::Capacity(_),
-                    )) => {
-                        // pg-proto retains the rejected frontend message. Drain
-                        // one upstream response at a time to release pipeline
-                        // capacity, then retry that exact message through the
-                        // dedicated frontend path. In particular, this lets a
-                        // retained Sync reach PostgreSQL instead of waiting for
-                        // responses that PostgreSQL may buffer until Sync.
-                        loop {
-                            let backend = session.forward_backend();
-                            let drained = match connection_timeout {
-                                Some(duration) => tokio::time::timeout(duration, backend)
-                                    .await
-                                    .map_err(|_| Error::ConnectionTimeout { duration })?,
-                                None => backend.await,
-                            };
-                            match drained {
-                                Ok(
-                                    BackendForwarding::Forwarded(_)
-                                    | BackendForwarding::Expanded { .. }
-                                    | BackendForwarding::Suppressed(_)
-                                    | BackendForwarding::Held,
-                                ) => {}
-                                Err(pg_proto::ForwardError::Middleware(error)) => {
-                                    return Err(error)
+            let result = async {
+                'session: loop {
+                    let forward = session.forward_next();
+                    let forwarded = match connection_timeout {
+                        Some(duration) => tokio::time::timeout(duration, forward)
+                            .await
+                            .map_err(|_| Error::ConnectionTimeout { duration })?,
+                        None => forward.await,
+                    };
+                    let forwarded = match forwarded {
+                        Ok(forwarded) => forwarded,
+                        Err(pg_proto::ForwardError::Frontend(
+                            pg_proto::FrontendProjectionError::Capacity(_),
+                        )) => {
+                            // pg-proto retains the rejected frontend message. Drain
+                            // one upstream response at a time to release pipeline
+                            // capacity, then retry that exact message through the
+                            // dedicated frontend path. In particular, this lets a
+                            // retained Sync reach PostgreSQL instead of waiting for
+                            // responses that PostgreSQL may buffer until Sync.
+                            loop {
+                                let backend = session.forward_backend();
+                                let drained = match connection_timeout {
+                                    Some(duration) => tokio::time::timeout(duration, backend)
+                                        .await
+                                        .map_err(|_| Error::ConnectionTimeout { duration })?,
+                                    None => backend.await,
+                                };
+                                match drained {
+                                    Ok(
+                                        BackendForwarding::Forwarded(_)
+                                        | BackendForwarding::Expanded { .. }
+                                        | BackendForwarding::Suppressed(_)
+                                        | BackendForwarding::Held,
+                                    ) => {}
+                                    Err(pg_proto::ForwardError::Middleware(error)) => {
+                                        return Err(error)
+                                    }
+                                    Err(error) => return Err(invalid_data(error)),
                                 }
-                                Err(error) => return Err(invalid_data(error)),
-                            }
 
-                            let retry = session.forward_frontend();
-                            let retried = match connection_timeout {
-                                Some(duration) => tokio::time::timeout(duration, retry)
-                                    .await
-                                    .map_err(|_| Error::ConnectionTimeout { duration })?,
-                                None => retry.await,
-                            };
-                            match retried {
-                                Ok(FrontendForwarding::Forwarded(FrontendMessage::Terminate)) => {
-                                    break 'session;
+                                let retry = session.forward_frontend();
+                                let retried =
+                                    match connection_timeout {
+                                        Some(duration) => tokio::time::timeout(duration, retry)
+                                            .await
+                                            .map_err(|_| Error::ConnectionTimeout { duration })?,
+                                        None => retry.await,
+                                    };
+                                match retried {
+                                    Ok(FrontendForwarding::Forwarded(
+                                        FrontendMessage::Terminate,
+                                    )) => {
+                                        break 'session;
+                                    }
+                                    Ok(_) => break,
+                                    Err(pg_proto::ForwardError::Frontend(
+                                        pg_proto::FrontendProjectionError::Capacity(_),
+                                    )) => {}
+                                    Err(pg_proto::ForwardError::Middleware(error)) => {
+                                        return Err(error)
+                                    }
+                                    Err(error) => return Err(invalid_data(error)),
                                 }
-                                Ok(_) => break,
-                                Err(pg_proto::ForwardError::Frontend(
-                                    pg_proto::FrontendProjectionError::Capacity(_),
-                                )) => {}
-                                Err(pg_proto::ForwardError::Middleware(error)) => {
-                                    return Err(error)
-                                }
-                                Err(error) => return Err(invalid_data(error)),
                             }
+                            continue;
                         }
-                        continue;
+                        Err(pg_proto::ForwardError::Middleware(error)) => return Err(error),
+                        Err(error) => return Err(invalid_data(error)),
+                    };
+                    if matches!(&forwarded, ForwardedMessage::FrontendExpanded { .. }) {
+                        // A DDL Execute is expanded to Execute + Flush so PostgreSQL can
+                        // report its outcome before later schema-dependent frontend work.
+                        // Keep the single-task intermediary progressing on the backend
+                        // leg until that DDL resolves; otherwise a later frontend mapping
+                        // call can wait for an outcome this task has not read yet.
+                        // Box the whole secondary forwarding state machine so it
+                        // does not enlarge the normal frontend driver's stack frame.
+                        Box::pin(async {
+                            while context.schema_ddl_in_flight() {
+                                let backend = session.forward_backend();
+                                let drained = match connection_timeout {
+                                    Some(duration) => tokio::time::timeout(duration, backend)
+                                        .await
+                                        .map_err(|_| Error::ConnectionTimeout { duration })?,
+                                    None => backend.await,
+                                };
+                                match drained {
+                                    Ok(
+                                        BackendForwarding::Forwarded(_)
+                                        | BackendForwarding::Expanded { .. }
+                                        | BackendForwarding::Suppressed(_)
+                                        | BackendForwarding::Held,
+                                    ) => {}
+                                    Err(pg_proto::ForwardError::Middleware(error)) => {
+                                        return Err(error)
+                                    }
+                                    Err(error) => return Err(invalid_data(error)),
+                                }
+                            }
+                            Ok(())
+                        })
+                        .await?;
                     }
-                    Err(pg_proto::ForwardError::Middleware(error)) => return Err(error),
-                    Err(error) => return Err(invalid_data(error)),
-                };
-                if matches!(&forwarded, ForwardedMessage::FrontendExpanded { .. }) {
-                    // A DDL Execute is expanded to Execute + Flush so PostgreSQL can
-                    // report its outcome before later schema-dependent frontend work.
-                    // Keep the single-task intermediary progressing on the backend
-                    // leg until that DDL resolves; otherwise a later frontend mapping
-                    // call can wait for an outcome this task has not read yet.
-                    // Box the whole secondary forwarding state machine so it
-                    // does not enlarge the normal frontend driver's stack frame.
-                    Box::pin(async {
-                        while context.schema_ddl_in_flight() {
-                            let backend = session.forward_backend();
-                            let drained = match connection_timeout {
-                                Some(duration) => tokio::time::timeout(duration, backend)
-                                    .await
-                                    .map_err(|_| Error::ConnectionTimeout { duration })?,
-                                None => backend.await,
-                            };
-                            match drained {
-                                Ok(
-                                    BackendForwarding::Forwarded(_)
-                                    | BackendForwarding::Expanded { .. }
-                                    | BackendForwarding::Suppressed(_)
-                                    | BackendForwarding::Held,
-                                ) => {}
-                                Err(pg_proto::ForwardError::Middleware(error)) => {
-                                    return Err(error)
-                                }
-                                Err(error) => return Err(invalid_data(error)),
-                            }
-                        }
-                        Ok(())
-                    })
-                    .await?;
+                    if matches!(
+                        forwarded,
+                        ForwardedMessage::Frontend(FrontendMessage::Terminate)
+                    ) {
+                        break;
+                    }
                 }
-                if matches!(
-                    forwarded,
-                    ForwardedMessage::Frontend(FrontendMessage::Terminate)
-                ) {
-                    break;
-                }
+                Ok(())
             }
-            Ok(())
+            .await;
+            finish_connection(result, || {
+                let _ = session.detach_cancellation();
+            })
         }};
     }
 
@@ -286,6 +295,14 @@ fn invalid_data(error: impl std::fmt::Display) -> Error {
     std::io::Error::new(std::io::ErrorKind::InvalidData, error.to_string()).into()
 }
 
+fn finish_connection<T, E>(
+    result: Result<T, E>,
+    detach_cancellation: impl FnOnce(),
+) -> Result<T, E> {
+    detach_cancellation();
+    result
+}
+
 fn upstream_ssl_mode(config: &crate::TandemConfig) -> SslMode {
     if config.database.with_tls_verification {
         SslMode::VerifyFull
@@ -299,6 +316,35 @@ fn upstream_ssl_mode(config: &crate::TandemConfig) -> SslMode {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bytes::Bytes;
+    use pg_proto::{
+        CancelKey, CancellationRoute, InMemoryCancellationRegistryError,
+        IntermediaryCancellationRegistry,
+    };
+
+    #[test]
+    fn connection_exit_releases_its_cancellation_key() {
+        for result in [Ok(()), Err("connection failed")] {
+            let registry = InMemoryCancellationRegistry::default();
+            let key = CancelKey {
+                process_id: 42,
+                secret_key: Bytes::from_static(b"secret"),
+            };
+            let route = CancellationRoute::new(ConnectTarget::new("database"), key.clone());
+            assert_eq!(registry.register(route.clone()), Ok(key.clone()));
+            assert_eq!(
+                registry.register(route.clone()),
+                Err(InMemoryCancellationRegistryError::DuplicateKey)
+            );
+
+            let returned = finish_connection(result, || {
+                registry.detach(&key).unwrap();
+            });
+
+            assert_eq!(returned, result);
+            assert_eq!(registry.register(route), Ok(key));
+        }
+    }
 
     #[test]
     fn upstream_tls_without_verification_is_opportunistic() {
