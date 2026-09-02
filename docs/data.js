@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788259292733,
+  "lastUpdate": 1788323724357,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -26059,6 +26059,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 40.879552,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "1c657e4399f34049891327a6bd398b6b1096c74b",
+          "message": "test(proxy): harden transactional schema lifecycle coverage",
+          "timestamp": "2026-09-01T03:34:16Z",
+          "url": "https://github.com/cipherstash/proxy/pull/461/commits/1c657e4399f34049891327a6bd398b6b1096c74b"
+        },
+        "date": 1788323722651,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 40.558843,
             "unit": "Number"
           }
         ]
