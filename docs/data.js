@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788323724357,
+  "lastUpdate": 1788410290179,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -26084,6 +26084,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 40.558843,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "toby@cipherstash.com",
+            "name": "Toby Hede",
+            "username": "tobyhede"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "195344ec12da6ab6ddf8158264cf3f66002a0074",
+          "message": "Merge pull request #461 from cipherstash/test/bug-308-schema-lifecycle-coverage\n\ntest(proxy): harden transactional schema lifecycle coverage",
+          "timestamp": "2026-09-03T14:32:48+10:00",
+          "tree_id": "4876a6002eb23b358d0c3330474c8f41d935c4c5",
+          "url": "https://github.com/cipherstash/proxy/commit/195344ec12da6ab6ddf8158264cf3f66002a0074"
+        },
+        "date": 1788410288536,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 42.402874,
             "unit": "Number"
           }
         ]
