@@ -1,7 +1,13 @@
 #[cfg(test)]
 /// End-to-end schema-change tests through Proxy and directly against PostgreSQL.
 mod tests {
-    use crate::common::{connect, connect_with_tls, get_database_port, random_id, PROXY};
+    use crate::common::{
+        configure_test_client, connect, connect_with_tls, connection_config, get_database_port,
+        random_id, PROXY,
+    };
+    use std::sync::Arc;
+    use tokio::sync::Barrier;
+    use tokio::time::{timeout, Duration, Instant};
     use tokio_postgres::Client;
 
     async fn connect_for_test(port: u16) -> Client {
@@ -9,6 +15,24 @@ mod tests {
             connect(port).await
         } else {
             connect_with_tls(port).await
+        }
+    }
+
+    async fn connect_for_disconnect_test(port: u16) -> (Client, tokio::task::JoinHandle<()>) {
+        let config = connection_config(port);
+        if std::env::var("CS_TEST_USE_TLS").as_deref() == Ok("false") {
+            let (client, connection) = config.connect(tokio_postgres::NoTls).await.unwrap();
+            let task = tokio::spawn(async move {
+                let _ = connection.await;
+            });
+            (client, task)
+        } else {
+            let tls = tokio_postgres_rustls::MakeRustlsConnect::new(configure_test_client());
+            let (client, connection) = config.connect(tls).await.unwrap();
+            let task = tokio::spawn(async move {
+                let _ = connection.await;
+            });
+            (client, task)
         }
     }
 
@@ -39,6 +63,147 @@ mod tests {
     async fn insert_secret(client: &Client, table: &str, id: i64, plaintext: &str) {
         let sql = format!("INSERT INTO {table} (id, secret) VALUES ($1, $2)");
         assert_eq!(client.execute(&sql, &[&id, &plaintext]).await.unwrap(), 1);
+    }
+
+    async fn wait_until_alter_is_blocked(postgres: &Client, table: &str) {
+        wait_for_alter_lock_state(postgres, table, true).await;
+    }
+
+    async fn wait_for_alter_lock_state(postgres: &Client, table: &str, expected: bool) {
+        let sql = "SELECT EXISTS (SELECT 1 FROM pg_locks WHERE relation = to_regclass($1) AND NOT granted)";
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            let blocked: bool = postgres.query_one(sql, &[&table]).await.unwrap().get(0);
+            if blocked == expected {
+                return;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "ALTER TABLE lock state did not become {expected}"
+            );
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+    }
+
+    #[tokio::test]
+    async fn concurrent_commits_are_both_visible_after_readiness() {
+        let observer = connect_for_test(*PROXY).await;
+        let first = connect_for_test(*PROXY).await;
+        let second = connect_for_test(*PROXY).await;
+        let first_table = table("bug_308_concurrent_first");
+        let second_table = table("bug_308_concurrent_second");
+        first.batch_execute("BEGIN").await.unwrap();
+        second.batch_execute("BEGIN").await.unwrap();
+        first
+            .execute(&create_encrypted_table(&first_table), &[])
+            .await
+            .unwrap();
+        second
+            .execute(&create_encrypted_table(&second_table), &[])
+            .await
+            .unwrap();
+
+        let barrier = Arc::new(Barrier::new(3));
+        let first_commit = tokio::spawn({
+            let barrier = barrier.clone();
+            async move {
+                barrier.wait().await;
+                first.batch_execute("COMMIT").await.unwrap()
+            }
+        });
+        let second_commit = tokio::spawn({
+            let barrier = barrier.clone();
+            async move {
+                barrier.wait().await;
+                second.batch_execute("COMMIT").await.unwrap()
+            }
+        });
+        barrier.wait().await;
+        first_commit.await.unwrap();
+        second_commit.await.unwrap();
+
+        insert_secret(&observer, &first_table, 1, "first concurrent secret").await;
+        insert_secret(&observer, &second_table, 2, "second concurrent secret").await;
+        assert_ciphertext_at_rest(&first_table, 1, "first concurrent secret").await;
+        assert_ciphertext_at_rest(&second_table, 2, "second concurrent secret").await;
+    }
+
+    #[tokio::test]
+    async fn cancelling_blocked_ddl_does_not_activate_a_schema_change() {
+        timeout(Duration::from_secs(20), async {
+            let postgres = connect_for_test(get_database_port()).await;
+            let proxy = connect_for_test(*PROXY).await;
+            let table = table("bug_308_cancel");
+            proxy
+                .batch_execute(&format!("CREATE TABLE {table} (id bigint)"))
+                .await
+                .unwrap();
+            postgres
+                .batch_execute(&format!(
+                    "BEGIN; LOCK TABLE {table} IN ACCESS SHARE MODE"
+                ))
+                .await
+                .unwrap();
+
+            let cancel = proxy.cancel_token();
+            let alter = format!("ALTER TABLE {table} ADD COLUMN secret eql_v3_text_search");
+            let task = tokio::spawn(async move { proxy.batch_execute(&alter).await });
+            wait_until_alter_is_blocked(&postgres, &table).await;
+            if std::env::var("CS_TEST_USE_TLS").as_deref() == Ok("false") {
+                cancel.cancel_query(tokio_postgres::NoTls).await.unwrap();
+            } else {
+                let tls = tokio_postgres_rustls::MakeRustlsConnect::new(configure_test_client());
+                cancel.cancel_query(tls).await.unwrap();
+            }
+            assert!(task.await.unwrap().is_err());
+            postgres.batch_execute("ROLLBACK").await.unwrap();
+
+            let fresh = connect_for_test(*PROXY).await;
+            assert_eq!(fresh.execute(&format!("INSERT INTO {table} (id) VALUES (1)"), &[]).await.unwrap(), 1);
+            let exists: bool = postgres.query_one(
+                "SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = $1 AND column_name = 'secret')",
+                &[&table],
+            ).await.unwrap().get(0);
+            assert!(!exists);
+        }).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn disconnecting_during_blocked_ddl_does_not_cancel_the_upstream_schema_change() {
+        timeout(Duration::from_secs(20), async {
+            let postgres = connect_for_test(get_database_port()).await;
+            let (proxy, connection_task) = connect_for_disconnect_test(*PROXY).await;
+            let table = table("bug_308_disconnect");
+            proxy
+                .batch_execute(&format!("CREATE TABLE {table} (id bigint)"))
+                .await
+                .unwrap();
+            postgres
+                .batch_execute(&format!(
+                    "BEGIN; LOCK TABLE {table} IN ACCESS SHARE MODE"
+                ))
+                .await
+                .unwrap();
+
+            let alter = format!("ALTER TABLE {table} ADD COLUMN secret eql_v3_text_search");
+            let task = tokio::spawn(async move { proxy.batch_execute(&alter).await });
+            wait_until_alter_is_blocked(&postgres, &table).await;
+            connection_task.abort();
+            assert!(connection_task.await.unwrap_err().is_cancelled());
+            assert!(task.await.unwrap().is_err());
+
+            // Proxy has already forwarded the statement to PostgreSQL. Losing
+            // the client connection does not cancel that upstream execution.
+            postgres.batch_execute("ROLLBACK").await.unwrap();
+
+            let fresh = connect_for_test(*PROXY).await;
+            assert_eq!(fresh.execute(&format!("INSERT INTO {table} (id) VALUES (1)"), &[]).await.unwrap(), 1);
+            let exists: bool = postgres.query_one(
+                "SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = $1 AND column_name = 'secret')",
+                &[&table],
+            ).await.unwrap().get(0);
+            assert!(exists);
+        }).await.unwrap();
     }
 
     #[tokio::test]
@@ -92,6 +257,34 @@ mod tests {
         client.batch_execute("COMMIT").await.unwrap();
 
         assert_ciphertext_at_rest(&table, 1, "after safe alter").await;
+    }
+
+    #[tokio::test]
+    async fn native_temporary_table_remains_usable_without_blocking_encrypted_mapping() {
+        let client = connect_for_test(*PROXY).await;
+        let temporary = table("bug_308_native_temp");
+        let encrypted = table("bug_308_after_native_temp");
+
+        client
+            .batch_execute(&format!(
+                "CREATE TEMPORARY TABLE {temporary} (id bigint PRIMARY KEY, name text); \
+                 INSERT INTO {temporary} (id, name) VALUES (1, 'temporary')"
+            ))
+            .await
+            .unwrap();
+        let name: String = client
+            .query_one(&format!("SELECT name FROM {temporary} WHERE id = 1"), &[])
+            .await
+            .unwrap()
+            .get(0);
+        assert_eq!(name, "temporary");
+
+        client
+            .execute(&create_encrypted_table(&encrypted), &[])
+            .await
+            .unwrap();
+        insert_secret(&client, &encrypted, 1, "after native temporary table").await;
+        assert_ciphertext_at_rest(&encrypted, 1, "after native temporary table").await;
     }
 
     #[tokio::test]

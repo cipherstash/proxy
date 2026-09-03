@@ -812,6 +812,34 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn failed_transaction_readiness_is_forwarded_without_publishing_schema() {
+        let config = Arc::new(TandemConfig::for_testing());
+        let encrypt_config = Arc::new(EncryptConfig::default());
+        let schema = Arc::new(Schema::new("public"));
+        let (reload_sender, mut reload_receiver) = mpsc::unbounded_channel();
+        let context = Context::new(
+            1,
+            config,
+            encrypt_config,
+            schema,
+            Arc::new(rustls::RootCertStore::empty()),
+            TestService {},
+            reload_sender,
+        );
+        let ddl = SqlParser::parse_statement("create table reports (id bigint)").unwrap();
+        context.execute_simple_schema_statements(&[ddl]);
+        context.schema_execution_succeeded();
+
+        let mut backend = Backend::new(context);
+        let expected =
+            BackendMessage::ReadyForQuery(pg_proto::TransactionStatus::FailedTransaction);
+        let output = backend.intercept(None, expected.clone()).await.unwrap();
+
+        assert_eq!(output, BackendMiddlewareOutput::Forward(expected));
+        assert!(reload_receiver.try_recv().is_err());
+    }
+
+    #[tokio::test]
     async fn publication_failure_closes_connection_before_idle_readiness() {
         let config = Arc::new(TandemConfig::for_testing());
         let encrypt_config = Arc::new(EncryptConfig::default());

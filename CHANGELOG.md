@@ -18,6 +18,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **Query cancellation through Proxy**: Cancellation requests now reach the matching PostgreSQL connection, and their routing entries are removed when the client connection exits. Previously cancellation requests arrived on a separate connection that could not find the original route; retaining those routes globally without cleanup could also leak memory and eventually reject a new connection if PostgreSQL reused a cancellation key.
+
 - **Configured default keyset selection**: when a connection has not selected a keyset explicitly, Proxy now scopes encryption and decryption to `CS_DEFAULT_KEYSET_ID`. Previously it passed no keyset to ZeroKMS and could silently use the account default instead, deriving different searchable-encryption terms when the two defaults differed. Before upgrading, verify that the configured and account defaults are intentional; values written by an affected version under the unintended account default must be decrypted with that old keyset and re-encrypted under the configured default.
 
 - **PostgreSQL protocol error handling after the pg-proto migration**: Proxy now rejects `require_tls` configurations that omit a certificate, preserves PostgreSQL transaction state when statement mapping fails, returns decryption failures as PostgreSQL errors without dropping the connection, and reloads changed schemas only after PostgreSQL confirms the transaction boundary. Prepared-statement replacement also preserves existing portals and overlapping statement metrics.
