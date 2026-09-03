@@ -85,6 +85,18 @@ impl Error {
 
 #[derive(Error, Debug)]
 pub enum ContextError {
+    #[error("Operation has no in-flight Execute state")]
+    OperationWithoutExecute,
+
+    #[error("Connection protocol state is unavailable")]
+    ProtocolStateUnavailable,
+
+    #[error("Operation could not be found in connection protocol state")]
+    UnknownOperation,
+
+    #[error("Operation has no in-flight Describe state")]
+    UnknownDescribe,
+
     #[error("Portal could not be found in context")]
     UnknownPortal,
 }

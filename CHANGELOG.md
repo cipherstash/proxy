@@ -14,6 +14,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- **PostgreSQL execution lifecycle ownership**: Proxy now tracks prepared statements, portals, Describe operations, execution outcomes, and execution metrics as one connection-local protocol lifecycle. Suspended executions retain their original metrics scope until completion, repeated portal executions receive distinct scopes, and terminal errors replace upstream responses atomically while schema outcomes are reported exactly once.
+
 - **Upstream TLS verification for client traffic**: Connections with `with_tls_verification` enabled now use a cached snapshot of the system root certificates, loaded once when Proxy starts. Unlike Proxy's background database connections, pg-proto client-traffic connections do not apply operating-system revocation checks or enterprise verification policy. Restart Proxy after changing the system trust store.
 
 ### Fixed
