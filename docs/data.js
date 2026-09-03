@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788414708791,
+  "lastUpdate": 1788415246457,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -26188,6 +26188,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 40.698085,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "2117cf802c5c0e8f718b9f7337afb10a9e154c8d",
+          "message": "CIP-3933: Deepen Context protocol lifecycle ownership",
+          "timestamp": "2026-09-03T04:33:23Z",
+          "url": "https://github.com/cipherstash/proxy/pull/463/commits/2117cf802c5c0e8f718b9f7337afb10a9e154c8d"
+        },
+        "date": 1788415244729,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 40.519708,
             "unit": "Number"
           }
         ]
