@@ -284,7 +284,7 @@ struct ExecutionTransition {
 pub struct SessionMetricsContext {
     id: SessionId,
     start: Instant,
-    records_session: bool,
+    records_statement_metrics: bool,
     pub phase_timing: PhaseTiming,
     pub metadata: StatementMetadata,
 }
@@ -294,7 +294,7 @@ impl SessionMetricsContext {
         SessionMetricsContext {
             id,
             start: Instant::now(),
-            records_session: true,
+            records_statement_metrics: true,
             phase_timing: PhaseTiming::new(),
             metadata: StatementMetadata::new(),
         }
@@ -449,19 +449,19 @@ where
             .protocol_state
             .write()
             .map_err(|_| crate::error::ContextError::ProtocolStateUnavailable)?;
-        let session = session_id.and_then(|id| state.statement_metrics.remove(&id));
+        let metrics_scope = session_id.and_then(|id| state.statement_metrics.remove(&id));
         drop(state);
-        self.record_finished_session(session);
+        self.record_finished_metrics_scope(metrics_scope);
         Ok(())
     }
 
-    fn record_finished_session(&self, session: Option<SessionMetricsContext>) {
-        if let Some(session) = session {
-            if !session.records_session {
+    fn record_finished_metrics_scope(&self, metrics_scope: Option<SessionMetricsContext>) {
+        if let Some(metrics_scope) = metrics_scope {
+            if !metrics_scope.records_statement_metrics {
                 return;
             }
-            let duration = session.duration();
-            let metadata = &session.metadata;
+            let duration = metrics_scope.duration();
+            let metadata = &metrics_scope.metadata;
 
             // Get labels for metrics
             let statement_type = metadata
@@ -490,7 +490,7 @@ where
             if self.config.slow_statements_enabled()
                 && duration > self.config.slow_statement_min_duration()
             {
-                let timing = &session.phase_timing;
+                let timing = &metrics_scope.phase_timing;
 
                 // Increment slow statements counter
                 counter!(SLOW_STATEMENTS_TOTAL).increment(1);
@@ -556,7 +556,7 @@ where
         Ok(())
     }
 
-    /// Set execute state for portal, looking up session ID internally.
+    /// Set execute state for a portal, looking up its metrics scope ID internally.
     pub fn set_execute_for_portal(
         &mut self,
         operation: OperationId,
@@ -579,7 +579,7 @@ where
                     .unwrap_or_else(|| SessionMetricsContext::new(execution_id));
                 metrics.id = execution_id;
                 metrics.start = Instant::now();
-                metrics.records_session = true;
+                metrics.records_statement_metrics = true;
                 state.statement_metrics.insert(execution_id, metrics);
                 ExecuteContext::new(name, portal, Some(execution_id))
             });
@@ -612,7 +612,7 @@ where
                 }
             }
         }
-        self.record_finished_session(transition.finished_metrics);
+        self.record_finished_metrics_scope(transition.finished_metrics);
         Ok(transition.replacement_error)
     }
 
@@ -622,8 +622,8 @@ where
         metrics: Option<&SessionMetricsContext>,
     ) {
         let (statement_type, protocol, mapped, multi_statement) = metrics
-            .map(|session| {
-                let metadata = &session.metadata;
+            .map(|metrics_scope| {
+                let metadata = &metrics_scope.metadata;
                 (
                     metadata
                         .statement_type
@@ -665,21 +665,21 @@ where
     pub fn close_statement(&self, name: &Name) -> Result<(), Error> {
         debug!(target: CONTEXT, client_id = self.client_id, statement = ?name);
 
-        let finished_session = {
+        let finished_metrics_scope = {
             let mut state = self
                 .protocol_state
                 .write()
                 .map_err(|_| crate::error::ContextError::ProtocolStateUnavailable)?;
             let session_id = state.statement_metrics_scopes.remove(name);
             state.statements.remove(name);
-            let session_in_use = session_id.is_some_and(|id| state.metrics_referenced(id));
-            if !session_in_use {
+            let metrics_scope_in_use = session_id.is_some_and(|id| state.metrics_referenced(id));
+            if !metrics_scope_in_use {
                 session_id.and_then(|session_id| state.statement_metrics.remove(&session_id))
             } else {
                 None
             }
         };
-        self.record_finished_session(finished_session);
+        self.record_finished_metrics_scope(finished_metrics_scope);
         Ok(())
     }
 
@@ -703,7 +703,7 @@ where
             return Ok(());
         };
 
-        let (finished_executions, finished_sessions) = {
+        let (finished_executions, finished_metrics_scopes) = {
             let mut state = self
                 .protocol_state
                 .write()
@@ -772,8 +772,8 @@ where
                 self.close_portal_if_current(&execute.name, execute.portal.as_ref())?;
             }
         }
-        for session in finished_sessions {
-            self.record_finished_session(Some(session));
+        for metrics_scope in finished_metrics_scopes {
+            self.record_finished_metrics_scope(Some(metrics_scope));
         }
         Ok(())
     }
@@ -787,7 +787,7 @@ where
     }
 
     pub fn discard_operation(&mut self, operation: OperationId) -> Result<(), Error> {
-        let finished_session = {
+        let finished_metrics_scope = {
             let mut state = self
                 .protocol_state
                 .write()
@@ -799,7 +799,7 @@ where
                 .and_then(|execute| execute.session_id());
             session_id.and_then(|session_id| state.statement_metrics.remove(&session_id))
         };
-        self.record_finished_session(finished_session);
+        self.record_finished_metrics_scope(finished_metrics_scope);
         Ok(())
     }
 
@@ -848,7 +848,7 @@ where
             state.take_unreferenced_metrics(candidates)
         };
         for metrics in finished_metrics {
-            self.record_finished_session(Some(metrics));
+            self.record_finished_metrics_scope(Some(metrics));
         }
         Ok(())
     }
@@ -862,7 +862,7 @@ where
         Ok(state.statements.get(name).cloned())
     }
 
-    pub fn set_statement_session(
+    pub fn set_statement_metrics_scope(
         &mut self,
         name: Name,
         session_id: SessionId,
@@ -872,13 +872,13 @@ where
             .write()
             .map_err(|_| crate::error::ContextError::ProtocolStateUnavailable)?;
         if let Some(metrics) = state.statement_metrics.get_mut(&session_id) {
-            metrics.records_session = false;
+            metrics.records_statement_metrics = false;
         }
         state.statement_metrics_scopes.insert(name, session_id);
         Ok(())
     }
 
-    pub fn get_statement_session(&self, name: &Name) -> Result<Option<SessionId>, Error> {
+    pub fn get_statement_metrics_scope(&self, name: &Name) -> Result<Option<SessionId>, Error> {
         let state = self
             .protocol_state
             .read()
@@ -903,7 +903,7 @@ where
         };
         metrics.id = id;
         metrics.start = Instant::now();
-        metrics.records_session = false;
+        metrics.records_statement_metrics = false;
         state.statement_metrics.insert(id, metrics);
         Ok(Some(id))
     }
@@ -936,7 +936,7 @@ where
             state.take_unreferenced_metrics(candidates)
         };
         for metrics in finished_metrics {
-            self.record_finished_session(Some(metrics));
+            self.record_finished_metrics_scope(Some(metrics));
         }
         Ok(())
     }
@@ -988,7 +988,7 @@ where
         })
     }
 
-    pub fn get_portal_session_id(&self, name: &Name) -> Result<Option<SessionId>, Error> {
+    pub fn get_portal_metrics_scope_id(&self, name: &Name) -> Result<Option<SessionId>, Error> {
         let state = self
             .protocol_state
             .read()
@@ -1083,7 +1083,7 @@ where
         Ok(Some(execute_context.to_owned()))
     }
 
-    pub fn get_session_metrics(
+    pub fn get_metrics_scope(
         &self,
         session_id: SessionId,
     ) -> Result<Option<SessionMetricsContext>, Error> {
@@ -1091,11 +1091,11 @@ where
             .protocol_state
             .read()
             .map_err(|_| crate::error::ContextError::ProtocolStateUnavailable)?;
-        let Some(session_context) = state.statement_metrics.get(&session_id) else {
+        let Some(metrics_scope) = state.statement_metrics.get(&session_id) else {
             return Ok(None);
         };
-        debug!(target: CONTEXT, client_id = self.client_id, msg = "Get Session Metrics", session_metrics = ?session_context);
-        Ok(Some(session_context.to_owned()))
+        debug!(target: CONTEXT, client_id = self.client_id, msg = "Get statement metrics scope", statement_metrics = ?metrics_scope);
+        Ok(Some(metrics_scope.to_owned()))
     }
 
     #[cfg(test)]
@@ -1548,7 +1548,11 @@ where
         self.upstream_tls_roots.clone()
     }
 
-    fn with_session_metrics_mut<F>(&mut self, session_id: SessionId, f: F) -> Result<(), Error>
+    fn with_statement_metrics_scope_mut<F>(
+        &mut self,
+        session_id: SessionId,
+        f: F,
+    ) -> Result<(), Error>
     where
         F: FnOnce(&mut SessionMetricsContext),
     {
@@ -1556,31 +1560,31 @@ where
             .protocol_state
             .write()
             .map_err(|_| crate::error::ContextError::ProtocolStateUnavailable)?;
-        if let Some(session) = state.statement_metrics.get_mut(&session_id) {
-            f(session);
+        if let Some(metrics_scope) = state.statement_metrics.get_mut(&session_id) {
+            f(metrics_scope);
         }
         Ok(())
     }
 
-    /// Record parse phase duration for the session (first write wins)
+    /// Record parse phase duration for the statement metrics scope (first write wins)
     pub fn record_parse_duration(
         &mut self,
         session_id: SessionId,
         duration: Duration,
     ) -> Result<(), Error> {
-        self.with_session_metrics_mut(session_id, |session| {
-            session.phase_timing.record_parse(duration);
+        self.with_statement_metrics_scope_mut(session_id, |metrics_scope| {
+            metrics_scope.phase_timing.record_parse(duration);
         })
     }
 
-    /// Add encrypt phase duration for the session (accumulate)
+    /// Add encrypt phase duration for the statement metrics scope (accumulate)
     pub fn add_encrypt_duration(
         &mut self,
         session_id: SessionId,
         duration: Duration,
     ) -> Result<(), Error> {
-        self.with_session_metrics_mut(session_id, |session| {
-            session.phase_timing.add_encrypt(duration);
+        self.with_statement_metrics_scope_mut(session_id, |metrics_scope| {
+            metrics_scope.phase_timing.add_encrypt(duration);
         })
     }
 
@@ -1590,33 +1594,37 @@ where
         session_id: SessionId,
         duration: Duration,
     ) -> Result<(), Error> {
-        self.with_session_metrics_mut(session_id, |session| {
-            session.phase_timing.add_decrypt(duration);
+        self.with_statement_metrics_scope_mut(session_id, |metrics_scope| {
+            metrics_scope.phase_timing.add_decrypt(duration);
         })
     }
 
-    /// Update statement metadata for a session
+    /// Update metadata for a statement metrics scope.
     pub fn update_statement_metadata<F>(&mut self, session_id: SessionId, f: F) -> Result<(), Error>
     where
         F: FnOnce(&mut StatementMetadata),
     {
-        self.with_session_metrics_mut(session_id, |session| {
-            f(&mut session.metadata);
+        self.with_statement_metrics_scope_mut(session_id, |metrics_scope| {
+            f(&mut metrics_scope.metadata);
         })
     }
 
-    /// Update statement metadata if session ID is present, no-op otherwise.
-    pub fn with_session<F>(&mut self, session_id: Option<SessionId>, f: F) -> Result<(), Error>
+    /// Update statement metadata if a metrics scope ID is present, no-op otherwise.
+    pub fn with_metrics_scope<F>(
+        &mut self,
+        session_id: Option<SessionId>,
+        f: F,
+    ) -> Result<(), Error>
     where
         F: FnOnce(&mut SessionMetricsContext),
     {
         if let Some(sid) = session_id {
-            self.with_session_metrics_mut(sid, f)?;
+            self.with_statement_metrics_scope_mut(sid, f)?;
         }
         Ok(())
     }
 
-    /// Add decrypt phase duration for the current execute session (if any)
+    /// Add decrypt phase duration for the current execution metrics scope (if any)
     pub fn add_decrypt_duration_for_execute(
         &mut self,
         operation: OperationId,
@@ -1735,7 +1743,7 @@ mod tests {
         let portal = Name::from("portal");
         let template_scope = context.start_metrics_scope().unwrap();
         context
-            .set_statement_session(statement, template_scope)
+            .set_statement_metrics_scope(statement, template_scope)
             .unwrap();
         context
             .add_portal(
@@ -1756,10 +1764,10 @@ mod tests {
             .unwrap();
         assert!(
             context
-                .get_session_metrics(execution_scope)
+                .get_metrics_scope(execution_scope)
                 .unwrap()
                 .unwrap()
-                .records_session
+                .records_statement_metrics
         );
     }
 
@@ -1839,7 +1847,7 @@ mod tests {
         .join();
 
         assert!(matches!(
-            context.set_statement_session(Name::new(), SessionId(1)),
+            context.set_statement_metrics_scope(Name::new(), SessionId(1)),
             Err(Error::Context(
                 crate::error::ContextError::ProtocolStateUnavailable
             ))
@@ -2007,12 +2015,12 @@ mod tests {
     }
 
     #[test]
-    fn replacing_a_statement_does_not_finish_an_overlapping_execution_session() {
+    fn replacing_a_statement_does_not_finish_an_overlapping_execution_metrics_scope() {
         let mut context = create_context();
         let name = Name::default();
         let session_id = context.start_metrics_scope().unwrap();
         context
-            .set_statement_session(name.clone(), session_id)
+            .set_statement_metrics_scope(name.clone(), session_id)
             .unwrap();
         context
             .add_portal(
@@ -2024,8 +2032,8 @@ mod tests {
 
         context.close_statement(&name).unwrap();
 
-        assert!(context.get_session_metrics(session_id).is_some());
-        assert!(context.get_statement_session(&name).is_none());
+        assert!(context.get_metrics_scope(session_id).is_some());
+        assert!(context.get_statement_metrics_scope(&name).is_none());
     }
 
     #[test]
@@ -2034,7 +2042,7 @@ mod tests {
         let statement = Name::from("statement");
         let scope = context.start_metrics_scope().unwrap();
         context
-            .set_statement_session(statement.clone(), scope)
+            .set_statement_metrics_scope(statement.clone(), scope)
             .unwrap();
         let operation = operation_id();
         context
@@ -2046,7 +2054,7 @@ mod tests {
 
         context.close_statement(&statement).unwrap();
 
-        assert!(context.get_session_metrics(scope).is_some());
+        assert!(context.get_metrics_scope(scope).is_some());
     }
 
     #[test]
@@ -2055,7 +2063,7 @@ mod tests {
         let statement = Name::from("statement");
         let scope = context.start_metrics_scope().unwrap();
         context
-            .set_statement_session(statement.clone(), scope)
+            .set_statement_metrics_scope(statement.clone(), scope)
             .unwrap();
         context
             .add_portal(
@@ -2066,22 +2074,22 @@ mod tests {
             .unwrap();
 
         context.close_statement(&statement).unwrap();
-        assert!(context.get_session_metrics(scope).is_some());
+        assert!(context.get_metrics_scope(scope).is_some());
 
         context
             .ready_for_query(TransactionStatus::Idle, Some(operation_id()))
             .unwrap();
 
-        assert!(context.get_session_metrics(scope).is_none());
+        assert!(context.get_metrics_scope(scope).is_none());
     }
 
     #[test]
-    fn closing_an_unexecuted_statement_does_not_record_session_metrics() {
+    fn closing_an_unexecuted_statement_does_not_record_statement_metrics() {
         let mut context = create_context();
         let name = Name::default();
         let session_id = context.start_metrics_scope().unwrap();
         context
-            .set_statement_session(name.clone(), session_id)
+            .set_statement_metrics_scope(name.clone(), session_id)
             .unwrap();
         let recorder = metrics_exporter_prometheus::PrometheusBuilder::new().build_recorder();
         let handle = recorder.handle();
@@ -2090,7 +2098,7 @@ mod tests {
             context.close_statement_explicit(&name).unwrap();
         });
 
-        assert!(context.get_session_metrics(session_id).is_none());
+        assert!(context.get_metrics_scope(session_id).is_none());
         let rendered = handle.render();
         assert!(
             !rendered.contains("cipherstash_proxy_statements_session_duration_seconds_count"),
@@ -2192,7 +2200,7 @@ mod tests {
             .ready_for_query(TransactionStatus::Idle, Some(operation_id()))
             .unwrap();
 
-        assert!(context.get_session_metrics(execution_scope).is_none());
+        assert!(context.get_metrics_scope(execution_scope).is_none());
     }
 
     #[test]
@@ -2216,7 +2224,7 @@ mod tests {
         });
 
         assert!(context.get_execute(operation).is_none());
-        assert!(context.get_session_metrics(scope).is_none());
+        assert!(context.get_metrics_scope(scope).is_none());
         assert!(handle
             .render()
             .contains("cipherstash_proxy_statements_execution_duration_seconds_count"));
@@ -2255,7 +2263,7 @@ mod tests {
             .ready_for_query(TransactionStatus::Idle, Some(query_a))
             .unwrap();
 
-        assert!(context.get_session_metrics(query_a_scope).is_none());
+        assert!(context.get_metrics_scope(query_a_scope).is_none());
         assert!(context.get_portal(&portal_b).is_some());
         assert!(context.complete_describe(describe_b).is_ok());
         assert!(context.get_execute(execute_b).is_some());
@@ -2281,9 +2289,9 @@ mod tests {
             .unwrap();
 
         assert!(context.get_execute(query_a).is_none());
-        assert!(context.get_session_metrics(query_a_scope).is_none());
+        assert!(context.get_metrics_scope(query_a_scope).is_none());
         assert!(context.get_execute(query_b).is_some());
-        assert!(context.get_session_metrics(query_b_scope).is_some());
+        assert!(context.get_metrics_scope(query_b_scope).is_some());
     }
 
     #[test]
@@ -2292,7 +2300,7 @@ mod tests {
         let portal = Name::from("limited_portal");
         let template_scope = context.start_metrics_scope().unwrap();
         context
-            .set_statement_session(Name::from("statement"), template_scope)
+            .set_statement_metrics_scope(Name::from("statement"), template_scope)
             .unwrap();
         context
             .add_portal(
@@ -2320,7 +2328,7 @@ mod tests {
             context.close_portal(&portal).unwrap();
         });
 
-        assert!(context.get_session_metrics(execution_scope).is_none());
+        assert!(context.get_metrics_scope(execution_scope).is_none());
         let rendered = handle.render();
         let count = rendered
             .lines()
@@ -2376,7 +2384,7 @@ mod tests {
                 .and_then(|portal| portal.session_id()),
             Some(rebound_template)
         );
-        assert!(context.get_session_metrics(first_execution).is_none());
+        assert!(context.get_metrics_scope(first_execution).is_none());
     }
 
     #[test]
@@ -2420,7 +2428,7 @@ mod tests {
         context.discard_operation(operation).unwrap();
 
         assert!(context.get_execute(operation).is_none());
-        assert!(context.get_session_metrics(execution_scope).is_none());
+        assert!(context.get_metrics_scope(execution_scope).is_none());
     }
 
     #[test]
@@ -2446,7 +2454,7 @@ mod tests {
             .ready_for_query(TransactionStatus::Idle, Some(operation))
             .unwrap();
         assert!(context.get_execute(operation).is_none());
-        assert!(context.get_session_metrics(scope).is_none());
+        assert!(context.get_metrics_scope(scope).is_none());
     }
 
     fn get_statement(portal: Arc<Portal>) -> Arc<Statement> {

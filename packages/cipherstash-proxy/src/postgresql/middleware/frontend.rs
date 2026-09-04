@@ -119,20 +119,20 @@ impl<S: EncryptionService> Frontend<S> {
         if self.context.mapping_disabled() {
             match &protocol_message {
                 FrontendMessage::Query(_) => {
-                    let session = self.context.start_metrics_scope()?;
+                    let metrics_scope = self.context.start_metrics_scope()?;
                     self.context.add_portal(
                         operation,
                         Name::new(),
-                        Portal::passthrough(Some(session)),
+                        Portal::passthrough(Some(metrics_scope)),
                     )?;
                     self.context.set_simple_query_execute_until_ready(
                         operation,
                         Name::new(),
-                        Some(session),
+                        Some(metrics_scope),
                     )?;
                 }
                 FrontendMessage::Bind(bind) => {
-                    let session_id = self.context.get_statement_session(&bind.statement)?;
+                    let session_id = self.context.get_statement_metrics_scope(&bind.statement)?;
                     self.context.add_portal(
                         operation,
                         bind.portal.clone(),
@@ -825,13 +825,13 @@ impl<S: EncryptionService> Frontend<S> {
         // statement for every command, so the `END` at the close of a
         // transaction binds against the `SELECT` that preceded it.
         //
-        // Closing also drops the name's session mapping, so it must happen
-        // BEFORE the new session is recorded — the other way around wipes the
+        // Closing also drops the name's metrics scope mapping, so it must happen
+        // BEFORE the new scope is recorded — the other way around wipes the
         // mapping that was just written and every Bind falls back to the
-        // latest-session guess.
+        // latest-scope guess.
         self.context.close_statement(&message.statement)?;
         self.context
-            .set_statement_session(message.statement.to_owned(), session_id)?;
+            .set_statement_metrics_scope(message.statement.to_owned(), session_id)?;
 
         let mut statement_text = String::from_utf8_lossy(&message.query).into_owned();
         let statement = SqlParser::parse_statement(&statement_text)?;
@@ -1118,7 +1118,7 @@ impl<S: EncryptionService> Frontend<S> {
             // Track param bytes for diagnostics
             let param_bytes: usize = bind.param_values.iter().map(|p| p.bytes.len()).sum();
             self.context
-                .with_session(session_id, |m| m.metadata.set_param_bytes(param_bytes))?;
+                .with_metrics_scope(session_id, |m| m.metadata.set_param_bytes(param_bytes))?;
 
             debug!(target: PROTOCOL, client_id = self.context.client_id, bind = ?bind);
 
@@ -1138,7 +1138,7 @@ impl<S: EncryptionService> Frontend<S> {
                         session_id,
                     );
                     self.context
-                        .with_session(session_id, |m| m.metadata.encrypted = true)?;
+                        .with_metrics_scope(session_id, |m| m.metadata.encrypted = true)?;
                 }
             };
 
@@ -1221,7 +1221,7 @@ impl<S: EncryptionService> Frontend<S> {
 
         // Record timing and metadata for this encryption operation
         let encrypted_count = encrypted.iter().filter(|e| e.is_some()).count();
-        self.context.with_session(session_id, |m| {
+        self.context.with_metrics_scope(session_id, |m| {
             // Add to phase timing diagnostics (accumulate)
             m.phase_timing.add_encrypt(duration);
             // Always update metadata for slow-statement logging
@@ -1908,8 +1908,8 @@ mod tests {
             .await
             .unwrap();
 
-        assert!(context.get_statement_session(&statement).is_none());
-        assert!(context.get_portal_session_id(&portal).is_none());
+        assert!(context.get_statement_metrics_scope(&statement).is_none());
+        assert!(context.get_portal_metrics_scope_id(&portal).is_none());
         assert_eq!(context.active_metrics_scopes().unwrap(), 0);
     }
 
@@ -1954,17 +1954,17 @@ mod tests {
         }
 
         let first_scope = context
-            .get_portal_session_id(&first_portal)
+            .get_portal_metrics_scope_id(&first_portal)
             .unwrap()
             .unwrap();
         let second_scope = context
-            .get_portal_session_id(&second_portal)
+            .get_portal_metrics_scope_id(&second_portal)
             .unwrap()
             .unwrap();
         assert_ne!(first_scope, second_scope);
         assert_eq!(
             context
-                .get_session_metrics(first_scope)
+                .get_metrics_scope(first_scope)
                 .unwrap()
                 .unwrap()
                 .metadata
@@ -1973,7 +1973,7 @@ mod tests {
         );
         assert_eq!(
             context
-                .get_session_metrics(second_scope)
+                .get_metrics_scope(second_scope)
                 .unwrap()
                 .unwrap()
                 .metadata
@@ -2003,7 +2003,7 @@ mod tests {
         let statement_name = bytes::Bytes::from_static(b"statement");
         let template_scope = context.start_metrics_scope().unwrap();
         context
-            .set_statement_session(statement_name.clone(), template_scope)
+            .set_statement_metrics_scope(statement_name.clone(), template_scope)
             .unwrap();
         context
             .add_statement(

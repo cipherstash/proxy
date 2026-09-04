@@ -1160,7 +1160,7 @@ mod tests {
 
         assert_eq!(output, BackendMiddlewareOutput::Suppress(message));
         assert!(context.get_execute(operation).is_none());
-        assert!(context.get_session_metrics(scope).is_none());
+        assert!(context.get_metrics_scope(scope).is_none());
     }
 
     #[tokio::test]
@@ -1199,7 +1199,7 @@ mod tests {
         ));
         assert!(backend.discard_execution);
         assert!(context.get_execute(operation).is_none());
-        assert!(context.get_session_metrics(scope).is_none());
+        assert!(context.get_metrics_scope(scope).is_none());
         assert!(context.schema_ddl_in_flight());
     }
 
