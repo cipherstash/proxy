@@ -53,7 +53,11 @@ impl<T> ResultOptionTestExt for Result<Option<T>, Error> {
     }
 
     fn is_none(&self) -> bool {
-        self.as_ref().unwrap().is_none()
+        match self {
+            Ok(value) => value.is_none(),
+            Err(Error::Context(crate::error::ContextError::UnknownOperation)) => true,
+            Err(err) => panic!("unexpected protocol state error: {err}"),
+        }
     }
 }
 
@@ -879,6 +883,28 @@ where
         Ok(state.statement_metrics_scopes.get(name).copied())
     }
 
+    pub fn start_portal_metrics_scope(
+        &mut self,
+        statement: &Name,
+    ) -> Result<Option<SessionId>, Error> {
+        let id = SessionId(self.session_id_counter.fetch_add(1, Ordering::Relaxed));
+        let mut state = self
+            .protocol_state
+            .write()
+            .map_err(|_| crate::error::ContextError::ProtocolStateUnavailable)?;
+        let Some(template_id) = state.statement_metrics_scopes.get(statement).copied() else {
+            return Ok(None);
+        };
+        let Some(mut metrics) = state.statement_metrics.get(&template_id).cloned() else {
+            return Err(crate::error::ContextError::StatementMetricsUnavailable.into());
+        };
+        metrics.id = id;
+        metrics.start = Instant::now();
+        metrics.records_session = false;
+        state.statement_metrics.insert(id, metrics);
+        Ok(Some(id))
+    }
+
     ///
     /// Close the portal identified by `name`
     /// Portal is removed from  queue
@@ -979,7 +1005,7 @@ where
             .read()
             .map_err(|_| crate::error::ContextError::ProtocolStateUnavailable)?;
         let Some(context) = state.operations.get(&operation) else {
-            return Ok(None);
+            return Err(crate::error::ContextError::UnknownOperation.into());
         };
         if let Some(statement) = context
             .describe
@@ -1008,10 +1034,13 @@ where
             .protocol_state
             .read()
             .map_err(|_| crate::error::ContextError::ProtocolStateUnavailable)?;
-        Ok(state
+        let context = state
             .operations
             .get(&operation)
-            .and_then(|context| context.describe.as_ref())
+            .ok_or(crate::error::ContextError::UnknownOperation)?;
+        Ok(context
+            .describe
+            .as_ref()
             .and_then(|describe| describe.statement.clone()))
     }
 
@@ -1023,11 +1052,15 @@ where
             .protocol_state
             .read()
             .map_err(|_| crate::error::ContextError::ProtocolStateUnavailable)?;
-        Ok(state
+        let context = state
             .operations
             .get(&operation)
-            .and_then(|context| context.execute.as_ref())
-            .and_then(|execute| execute.portal.clone()))
+            .ok_or(crate::error::ContextError::UnknownOperation)?;
+        let execute = context
+            .execute
+            .as_ref()
+            .ok_or(crate::error::ContextError::OperationWithoutExecute)?;
+        Ok(execute.portal.clone())
     }
 
     pub fn get_execute(&self, operation: OperationId) -> Result<Option<ExecuteContext>, Error> {
@@ -1035,13 +1068,14 @@ where
             .protocol_state
             .read()
             .map_err(|_| crate::error::ContextError::ProtocolStateUnavailable)?;
-        let Some(execute_context) = state
+        let operation_context = state
             .operations
             .get(&operation)
-            .and_then(|operation| operation.execute.as_ref())
-        else {
-            return Ok(None);
-        };
+            .ok_or(crate::error::ContextError::UnknownOperation)?;
+        let execute_context = operation_context
+            .execute
+            .as_ref()
+            .ok_or(crate::error::ContextError::OperationWithoutExecute)?;
         debug!(target: CONTEXT, client_id = self.client_id, msg = "Get Execute", execute = ?execute_context);
         Ok(Some(execute_context.to_owned()))
     }

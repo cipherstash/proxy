@@ -1098,9 +1098,6 @@ impl<S: EncryptionService> Frontend<S> {
     ) -> Result<Option<FrontendMessage>, Error> {
         self.context
             .bind_schema_statement(bind.portal.to_owned(), &bind.prepared_statement);
-        let session_id = self
-            .context
-            .get_statement_session(&bind.prepared_statement)?;
         if self.context.unsafe_disable_mapping() {
             warn!(msg = "Encrypted statement mapping is not enabled");
             counter!(STATEMENTS_PASSTHROUGH_MAPPING_DISABLED_TOTAL).increment(1);
@@ -1108,10 +1105,14 @@ impl<S: EncryptionService> Frontend<S> {
             self.context.add_portal(
                 operation,
                 bind.portal.to_owned(),
-                Portal::passthrough(session_id),
+                Portal::passthrough(None),
             )?;
             return Ok(None);
         }
+
+        let session_id = self
+            .context
+            .start_portal_metrics_scope(&bind.prepared_statement)?;
 
         // Track param bytes for diagnostics
         let param_bytes: usize = bind.param_values.iter().map(|p| p.bytes.len()).sum();
@@ -1871,6 +1872,75 @@ mod tests {
         assert!(context.get_statement_session(&statement).is_none());
         assert!(context.get_portal_session_id(&portal).is_none());
         assert_eq!(context.active_metrics_scopes().unwrap(), 0);
+    }
+
+    #[tokio::test]
+    async fn portals_bound_from_one_statement_have_isolated_parameter_metrics() {
+        let (mut frontend, context) = frontend_with_config(TandemConfig::for_testing());
+        let statement = bytes::Bytes::from_static(b"statement");
+        let first_portal = bytes::Bytes::from_static(b"first_portal");
+        let second_portal = bytes::Bytes::from_static(b"second_portal");
+        frontend
+            .intercept(
+                operation_id(),
+                FrontendMessage::Parse(Parse {
+                    statement: statement.clone(),
+                    query: bytes::Bytes::from_static(b"select $1::text"),
+                    parameter_types: Vec::new(),
+                }),
+            )
+            .await
+            .unwrap();
+
+        for (portal, parameter) in [
+            (first_portal.clone(), bytes::Bytes::from_static(b"a")),
+            (
+                second_portal.clone(),
+                bytes::Bytes::from_static(b"different"),
+            ),
+        ] {
+            frontend
+                .intercept(
+                    operation_id(),
+                    FrontendMessage::Bind(Bind {
+                        portal,
+                        statement: statement.clone(),
+                        parameter_formats: Vec::new(),
+                        parameters: vec![Some(parameter)],
+                        result_formats: Vec::new(),
+                    }),
+                )
+                .await
+                .unwrap();
+        }
+
+        let first_scope = context
+            .get_portal_session_id(&first_portal)
+            .unwrap()
+            .unwrap();
+        let second_scope = context
+            .get_portal_session_id(&second_portal)
+            .unwrap()
+            .unwrap();
+        assert_ne!(first_scope, second_scope);
+        assert_eq!(
+            context
+                .get_session_metrics(first_scope)
+                .unwrap()
+                .unwrap()
+                .metadata
+                .param_bytes,
+            1
+        );
+        assert_eq!(
+            context
+                .get_session_metrics(second_scope)
+                .unwrap()
+                .unwrap()
+                .metadata
+                .param_bytes,
+            9
+        );
     }
 
     #[tokio::test]

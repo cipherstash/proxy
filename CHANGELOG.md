@@ -20,7 +20,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
-- **Extended-protocol execution lifecycle regressions**: statement duration and slow-statement metrics now describe each execution rather than the lifetime of its cached prepared statement; suspended executions retain their metrics until completion; untracked rows and terminal responses retain PostgreSQL passthrough behavior; decryption failures no longer report pending schema changes as successful; disabling mapping no longer creates empty statement metrics; and inaccessible connection protocol state now closes the connection instead of silently omitting metadata transitions.
+- **Extended-protocol execution lifecycle regressions**: statement duration and slow-statement metrics now describe each execution rather than the lifetime of its cached prepared statement; distinct portals keep isolated Bind measurements; suspended executions retain their metrics until completion; correlated stale responses and inaccessible connection protocol state close the connection instead of silently omitting metadata transitions; uncorrelated responses retain PostgreSQL passthrough behavior; decryption failures no longer report pending schema changes as successful; and disabling mapping no longer creates empty statement metrics.
 
 - **Query cancellation through Proxy**: Cancellation requests now reach the matching PostgreSQL connection, and their routing entries are removed when the client connection exits. Previously cancellation requests arrived on a separate connection that could not find the original route; retaining those routes globally without cleanup could also leak memory and eventually reject a new connection if PostgreSQL reused a cancellation key.
 

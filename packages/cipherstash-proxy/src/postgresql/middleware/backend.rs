@@ -17,7 +17,7 @@ use crate::EqlCiphertext;
 use metrics::{counter, histogram};
 use pg_proto::{BackendMessage, BackendMiddlewareOutput, DataRow, DiagnosticResponse};
 use std::time::Instant;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info};
 
 /// The PostgreSQL proxy backend that handles server-to-client message processing.
 ///
@@ -94,16 +94,7 @@ impl<S: EncryptionService> Backend<S> {
         let Some(operation) = operation else {
             return Ok(None);
         };
-        match self.context.finish_execution(operation, outcome) {
-            Err(Error::Context(
-                crate::error::ContextError::UnknownOperation
-                | crate::error::ContextError::OperationWithoutExecute,
-            )) => {
-                warn!(target: PROTOCOL, client_id = self.context.client_id, ?outcome, msg = "Ignoring terminal response for an untracked operation");
-                Ok(None)
-            }
-            result => result,
-        }
+        self.context.finish_execution(operation, outcome)
     }
 
     fn error_response(&self, err: Error) -> BackendMessage {
@@ -111,16 +102,7 @@ impl<S: EncryptionService> Backend<S> {
     }
 
     fn complete_describe(&self, operation: OperationId) -> Result<(), Error> {
-        match self.context.complete_describe(operation) {
-            Err(Error::Context(
-                crate::error::ContextError::UnknownOperation
-                | crate::error::ContextError::UnknownDescribe,
-            )) => {
-                warn!(target: PROTOCOL, client_id = self.context.client_id, msg = "Ignoring Describe response for an untracked operation");
-                Ok(())
-            }
-            result => result,
-        }
+        self.context.complete_describe(operation)
     }
 
     fn decryption_failure(&mut self, err: Error) -> BackendMiddlewareOutput {
@@ -944,50 +926,53 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn unexpected_terminal_message_is_forwarded() {
+    async fn correlated_terminal_message_for_an_unknown_operation_fails_closed() {
         let mut backend = create_backend();
         let message = BackendMessage::CommandComplete(bytes::Bytes::from_static(b"SELECT 1"));
 
-        let output = backend
+        let result = backend
             .intercept(Some(operation_id()), message.clone())
-            .await
-            .unwrap();
+            .await;
 
-        assert_eq!(output, BackendMiddlewareOutput::Forward(message));
+        assert!(matches!(
+            result,
+            Err(Error::Context(crate::error::ContextError::UnknownOperation))
+        ));
     }
 
     #[tokio::test]
-    async fn terminal_message_for_a_non_execution_operation_is_forwarded() {
+    async fn terminal_message_for_a_non_execution_operation_fails_closed() {
         let (mut backend, context) = create_backend_with_context();
         let operation = operation_id();
         context.set_non_execution(operation).unwrap();
         let message = BackendMessage::CommandComplete(bytes::Bytes::from_static(b"SELECT 1"));
 
-        let output = backend
-            .intercept(Some(operation), message.clone())
-            .await
-            .unwrap();
+        let result = backend.intercept(Some(operation), message.clone()).await;
 
-        assert_eq!(output, BackendMiddlewareOutput::Forward(message));
+        assert!(matches!(
+            result,
+            Err(Error::Context(
+                crate::error::ContextError::OperationWithoutExecute
+            ))
+        ));
     }
 
     #[tokio::test]
-    async fn no_data_for_an_untracked_describe_is_forwarded() {
+    async fn no_data_for_an_untracked_describe_fails_closed() {
         let mut backend = create_backend();
 
-        let output = backend
+        let result = backend
             .intercept(Some(operation_id()), BackendMessage::NoData)
-            .await
-            .unwrap();
+            .await;
 
-        assert_eq!(
-            output,
-            BackendMiddlewareOutput::Forward(BackendMessage::NoData)
-        );
+        assert!(matches!(
+            result,
+            Err(Error::Context(crate::error::ContextError::UnknownOperation))
+        ));
     }
 
     #[tokio::test]
-    async fn row_description_for_an_untracked_mapped_operation_is_forwarded() {
+    async fn row_description_for_an_untracked_mapped_operation_fails_closed() {
         let mut encrypt_config = EncryptConfig::default();
         encrypt_config.insert(
             crate::Identifier::new("records", "secret"),
@@ -996,16 +981,18 @@ mod tests {
         let (mut backend, _) = create_backend_with_encrypt_config(encrypt_config);
         let message = BackendMessage::RowDescription(pg_proto::RowDescription { fields: vec![] });
 
-        let output = backend
+        let result = backend
             .intercept(Some(operation_id()), message.clone())
-            .await
-            .unwrap();
+            .await;
 
-        assert_eq!(output, BackendMiddlewareOutput::Forward(message));
+        assert!(matches!(
+            result,
+            Err(Error::Context(crate::error::ContextError::UnknownOperation))
+        ));
     }
 
     #[tokio::test]
-    async fn data_row_without_mapped_execution_metadata_is_forwarded() {
+    async fn data_row_for_an_unknown_correlated_operation_fails_closed() {
         let mut encrypt_config = EncryptConfig::default();
         encrypt_config.insert(
             crate::Identifier::new("records", "secret"),
@@ -1016,12 +1003,14 @@ mod tests {
         let message = BackendMessage::DataRow(DataRow {
             columns: vec![Some(bytes::Bytes::from_static(b"ciphertext"))],
         });
-        let output = backend
+        let result = backend
             .intercept(Some(operation_id()), message.clone())
-            .await
-            .unwrap();
+            .await;
 
-        assert_eq!(output, BackendMiddlewareOutput::Forward(message));
+        assert!(matches!(
+            result,
+            Err(Error::Context(crate::error::ContextError::UnknownOperation))
+        ));
         assert!(!backend.discard_execution);
     }
 
@@ -1044,7 +1033,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn database_error_for_an_unregistered_operation_is_forwarded() {
+    async fn database_error_for_an_unregistered_operation_fails_closed() {
         let (mut backend, context) = create_backend_with_context();
         let ddl = SqlParser::parse_statement("create table reports (id bigint)").unwrap();
         context.execute_simple_schema_statements(&[ddl]);
@@ -1053,12 +1042,14 @@ mod tests {
             crate::postgresql::diagnostics::invalid_sql_statement("database error".to_owned()),
         );
 
-        let output = backend
+        let result = backend
             .intercept(Some(operation_id()), message.clone())
-            .await
-            .unwrap();
+            .await;
 
-        assert_eq!(output, BackendMiddlewareOutput::Forward(message));
+        assert!(matches!(
+            result,
+            Err(Error::Context(crate::error::ContextError::UnknownOperation))
+        ));
         assert!(!context.schema_ddl_in_flight());
     }
 

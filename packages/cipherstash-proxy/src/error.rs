@@ -97,6 +97,9 @@ pub enum ContextError {
     #[error("Operation has no in-flight Describe state")]
     UnknownDescribe,
 
+    #[error("Prepared statement has no metrics template")]
+    StatementMetricsUnavailable,
+
     #[error("Portal could not be found in context")]
     UnknownPortal,
 }
