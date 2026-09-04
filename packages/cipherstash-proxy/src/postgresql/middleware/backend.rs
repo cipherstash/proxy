@@ -788,7 +788,6 @@ mod tests {
     use super::*;
     use crate::config::TandemConfig;
     use crate::postgresql::context::KeysetIdentifier;
-    use crate::postgresql::context::ResultOptionTestExt as _;
     use crate::postgresql::parser::SqlParser;
     use crate::postgresql::rewrite::Name;
     use crate::postgresql::test_operation_id as operation_id;
@@ -1159,8 +1158,11 @@ mod tests {
             .unwrap();
 
         assert_eq!(output, BackendMiddlewareOutput::Suppress(message));
-        assert!(context.get_execute(operation).is_none());
-        assert!(context.get_metrics_scope(scope).is_none());
+        assert!(matches!(
+            context.get_execute(operation),
+            Err(Error::Context(crate::error::ContextError::UnknownOperation))
+        ));
+        assert!(context.get_metrics_scope(scope).unwrap().is_none());
     }
 
     #[tokio::test]
@@ -1198,8 +1200,11 @@ mod tests {
                 if matches!(messages.as_slice(), [BackendMessage::ErrorResponse(_)])
         ));
         assert!(backend.discard_execution);
-        assert!(context.get_execute(operation).is_none());
-        assert!(context.get_metrics_scope(scope).is_none());
+        assert!(matches!(
+            context.get_execute(operation),
+            Err(Error::Context(crate::error::ContextError::UnknownOperation))
+        ));
+        assert!(context.get_metrics_scope(scope).unwrap().is_none());
         assert!(context.schema_ddl_in_flight());
     }
 

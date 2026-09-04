@@ -40,27 +40,6 @@ use uuid::Uuid;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Ord, PartialOrd)]
 pub struct SessionId(u64);
 
-#[cfg(test)]
-pub trait ResultOptionTestExt {
-    fn is_some(&self) -> bool;
-    fn is_none(&self) -> bool;
-}
-
-#[cfg(test)]
-impl<T> ResultOptionTestExt for Result<Option<T>, Error> {
-    fn is_some(&self) -> bool {
-        self.as_ref().unwrap().is_some()
-    }
-
-    fn is_none(&self) -> bool {
-        match self {
-            Ok(value) => value.is_none(),
-            Err(Error::Context(crate::error::ContextError::UnknownOperation)) => true,
-            Err(err) => panic!("unexpected protocol state error: {err}"),
-        }
-    }
-}
-
 #[derive(Clone, Debug, PartialEq)]
 pub struct KeysetIdentifier(pub IdentifiedBy);
 
@@ -1644,8 +1623,7 @@ where
 mod tests {
     use super::{
         ConnectionProtocolState, Context, ExecuteContext, ExecutionOutcome, KeysetIdentifier,
-        OperationContext, Portal, ResultOptionTestExt as _, SessionId, SessionMetricsContext,
-        Statement,
+        OperationContext, Portal, SessionId, SessionMetricsContext, Statement,
     };
     use crate::{
         config::LogConfig,
@@ -1965,7 +1943,7 @@ mod tests {
 
         context.complete_describe(operation).unwrap();
 
-        assert!(context.get_execute(operation).is_some());
+        assert!(context.get_execute(operation).unwrap().is_some());
     }
 
     fn create_context() -> Context<TestService> {
@@ -2032,8 +2010,11 @@ mod tests {
 
         context.close_statement(&name).unwrap();
 
-        assert!(context.get_metrics_scope(session_id).is_some());
-        assert!(context.get_statement_metrics_scope(&name).is_none());
+        assert!(context.get_metrics_scope(session_id).unwrap().is_some());
+        assert!(context
+            .get_statement_metrics_scope(&name)
+            .unwrap()
+            .is_none());
     }
 
     #[test]
@@ -2054,7 +2035,7 @@ mod tests {
 
         context.close_statement(&statement).unwrap();
 
-        assert!(context.get_metrics_scope(scope).is_some());
+        assert!(context.get_metrics_scope(scope).unwrap().is_some());
     }
 
     #[test]
@@ -2074,13 +2055,13 @@ mod tests {
             .unwrap();
 
         context.close_statement(&statement).unwrap();
-        assert!(context.get_metrics_scope(scope).is_some());
+        assert!(context.get_metrics_scope(scope).unwrap().is_some());
 
         context
             .ready_for_query(TransactionStatus::Idle, Some(operation_id()))
             .unwrap();
 
-        assert!(context.get_metrics_scope(scope).is_none());
+        assert!(context.get_metrics_scope(scope).unwrap().is_none());
     }
 
     #[test]
@@ -2098,7 +2079,7 @@ mod tests {
             context.close_statement_explicit(&name).unwrap();
         });
 
-        assert!(context.get_metrics_scope(session_id).is_none());
+        assert!(context.get_metrics_scope(session_id).unwrap().is_none());
         let rendered = handle.render();
         assert!(
             !rendered.contains("cipherstash_proxy_statements_session_duration_seconds_count"),
@@ -2153,9 +2134,12 @@ mod tests {
 
         context.close_statement(&closed_statement_name).unwrap();
 
-        assert!(context.get_portal(&closed_portal_name).is_some());
-        assert!(context.get_portal(&retained_portal_name).is_some());
-        assert!(context.get_portal(&passthrough_portal_name).is_some());
+        assert!(context.get_portal(&closed_portal_name).unwrap().is_some());
+        assert!(context.get_portal(&retained_portal_name).unwrap().is_some());
+        assert!(context
+            .get_portal(&passthrough_portal_name)
+            .unwrap()
+            .is_some());
     }
 
     #[test]
@@ -2200,7 +2184,10 @@ mod tests {
             .ready_for_query(TransactionStatus::Idle, Some(operation_id()))
             .unwrap();
 
-        assert!(context.get_metrics_scope(execution_scope).is_none());
+        assert!(context
+            .get_metrics_scope(execution_scope)
+            .unwrap()
+            .is_none());
     }
 
     #[test]
@@ -2223,8 +2210,11 @@ mod tests {
                 .unwrap();
         });
 
-        assert!(context.get_execute(operation).is_none());
-        assert!(context.get_metrics_scope(scope).is_none());
+        assert!(matches!(
+            context.get_execute(operation),
+            Err(Error::Context(crate::error::ContextError::UnknownOperation))
+        ));
+        assert!(context.get_metrics_scope(scope).unwrap().is_none());
         assert!(handle
             .render()
             .contains("cipherstash_proxy_statements_execution_duration_seconds_count"));
@@ -2263,10 +2253,10 @@ mod tests {
             .ready_for_query(TransactionStatus::Idle, Some(query_a))
             .unwrap();
 
-        assert!(context.get_metrics_scope(query_a_scope).is_none());
-        assert!(context.get_portal(&portal_b).is_some());
+        assert!(context.get_metrics_scope(query_a_scope).unwrap().is_none());
+        assert!(context.get_portal(&portal_b).unwrap().is_some());
         assert!(context.complete_describe(describe_b).is_ok());
-        assert!(context.get_execute(execute_b).is_some());
+        assert!(context.get_execute(execute_b).unwrap().is_some());
     }
 
     #[test]
@@ -2288,10 +2278,13 @@ mod tests {
             .ready_for_query(TransactionStatus::InTransaction, Some(query_a))
             .unwrap();
 
-        assert!(context.get_execute(query_a).is_none());
-        assert!(context.get_metrics_scope(query_a_scope).is_none());
-        assert!(context.get_execute(query_b).is_some());
-        assert!(context.get_metrics_scope(query_b_scope).is_some());
+        assert!(matches!(
+            context.get_execute(query_a),
+            Err(Error::Context(crate::error::ContextError::UnknownOperation))
+        ));
+        assert!(context.get_metrics_scope(query_a_scope).unwrap().is_none());
+        assert!(context.get_execute(query_b).unwrap().is_some());
+        assert!(context.get_metrics_scope(query_b_scope).unwrap().is_some());
     }
 
     #[test]
@@ -2328,7 +2321,10 @@ mod tests {
             context.close_portal(&portal).unwrap();
         });
 
-        assert!(context.get_metrics_scope(execution_scope).is_none());
+        assert!(context
+            .get_metrics_scope(execution_scope)
+            .unwrap()
+            .is_none());
         let rendered = handle.render();
         let count = rendered
             .lines()
@@ -2384,7 +2380,10 @@ mod tests {
                 .and_then(|portal| portal.session_id()),
             Some(rebound_template)
         );
-        assert!(context.get_metrics_scope(first_execution).is_none());
+        assert!(context
+            .get_metrics_scope(first_execution)
+            .unwrap()
+            .is_none());
     }
 
     #[test]
@@ -2427,8 +2426,14 @@ mod tests {
 
         context.discard_operation(operation).unwrap();
 
-        assert!(context.get_execute(operation).is_none());
-        assert!(context.get_metrics_scope(execution_scope).is_none());
+        assert!(matches!(
+            context.get_execute(operation),
+            Err(Error::Context(crate::error::ContextError::UnknownOperation))
+        ));
+        assert!(context
+            .get_metrics_scope(execution_scope)
+            .unwrap()
+            .is_none());
     }
 
     #[test]
@@ -2443,18 +2448,21 @@ mod tests {
         context
             .finish_execution(operation, ExecutionOutcome::Completed)
             .unwrap();
-        assert!(context.get_execute(operation).is_some());
+        assert!(context.get_execute(operation).unwrap().is_some());
 
         context
             .finish_execution(operation, ExecutionOutcome::Completed)
             .unwrap();
-        assert!(context.get_execute(operation).is_some());
+        assert!(context.get_execute(operation).unwrap().is_some());
 
         context
             .ready_for_query(TransactionStatus::Idle, Some(operation))
             .unwrap();
-        assert!(context.get_execute(operation).is_none());
-        assert!(context.get_metrics_scope(scope).is_none());
+        assert!(matches!(
+            context.get_execute(operation),
+            Err(Error::Context(crate::error::ContextError::UnknownOperation))
+        ));
+        assert!(context.get_metrics_scope(scope).unwrap().is_none());
     }
 
     fn get_statement(portal: Arc<Portal>) -> Arc<Statement> {
@@ -2499,7 +2507,7 @@ mod tests {
         let portal = context.get_portal(&portal_name).unwrap().unwrap();
         assert_eq!(statement_2, get_statement(portal));
         context.close_portal(&portal_name).unwrap();
-        assert!(context.get_portal(&portal_name).is_none());
+        assert!(context.get_portal(&portal_name).unwrap().is_none());
     }
 
     fn parse_statement(sql: &str) -> sqltk::parser::ast::Statement {

@@ -1688,7 +1688,7 @@ mod tests {
     use crate::error::{EncryptError, Error, MappingError};
     use crate::postgresql::context::statement::{OutputParam, OutputParamSource};
     use crate::postgresql::context::Statement;
-    use crate::postgresql::context::{Context, KeysetIdentifier, ResultOptionTestExt as _};
+    use crate::postgresql::context::{Context, KeysetIdentifier};
     use crate::postgresql::error_handler::PostgreSqlErrorHandler;
     use crate::postgresql::inbound_eql::InboundEql;
     use crate::postgresql::test_operation_id as operation_id;
@@ -1908,8 +1908,14 @@ mod tests {
             .await
             .unwrap();
 
-        assert!(context.get_statement_metrics_scope(&statement).is_none());
-        assert!(context.get_portal_metrics_scope_id(&portal).is_none());
+        assert!(context
+            .get_statement_metrics_scope(&statement)
+            .unwrap()
+            .is_none());
+        assert!(context
+            .get_portal_metrics_scope_id(&portal)
+            .unwrap()
+            .is_none());
         assert_eq!(context.active_metrics_scopes().unwrap(), 0);
     }
 
@@ -1984,17 +1990,21 @@ mod tests {
 
     #[tokio::test]
     async fn failed_bind_releases_its_portal_metrics_scope() {
+        let column_config = ColumnConfig {
+            name: "secret".to_owned(),
+            in_place: false,
+            cast_type: ColumnType::Json,
+            indexes: vec![],
+            mode: ColumnMode::PlaintextDuplicate,
+        };
+        let column = Column {
+            identifier: Identifier::new("records", "secret"),
+            config: column_config.clone(),
+            postgres_type: postgres_types::Type::JSONB,
+            eql_term: EqlTermVariant::JsonValueSelector,
+        };
         let mut encrypt_config = EncryptConfig::default();
-        encrypt_config.insert(
-            Identifier::new("records", "secret"),
-            ColumnConfig {
-                name: "secret".to_owned(),
-                in_place: false,
-                cast_type: ColumnType::Json,
-                indexes: vec![],
-                mode: ColumnMode::PlaintextDuplicate,
-            },
-        );
+        encrypt_config.insert(Identifier::new("records", "secret"), column_config);
         let (mut frontend, mut context) = frontend_with_encrypt_config_and_service(
             TandemConfig::for_testing(),
             encrypt_config,
@@ -2009,31 +2019,9 @@ mod tests {
             .add_statement(
                 statement_name.clone(),
                 Statement::new(
-                    vec![Some(Column {
-                        identifier: Identifier::new("records", "secret"),
-                        config: ColumnConfig {
-                            name: "secret".to_owned(),
-                            in_place: false,
-                            cast_type: ColumnType::Json,
-                            indexes: vec![],
-                            mode: ColumnMode::PlaintextDuplicate,
-                        },
-                        postgres_type: postgres_types::Type::JSONB,
-                        eql_term: EqlTermVariant::JsonValueSelector,
-                    })],
+                    vec![Some(column.clone())],
                     vec![OutputParam {
-                        column: Some(Column {
-                            identifier: Identifier::new("records", "secret"),
-                            config: ColumnConfig {
-                                name: "secret".to_owned(),
-                                in_place: false,
-                                cast_type: ColumnType::Json,
-                                indexes: vec![],
-                                mode: ColumnMode::PlaintextDuplicate,
-                            },
-                            postgres_type: postgres_types::Type::JSONB,
-                            eql_term: EqlTermVariant::JsonValueSelector,
-                        }),
+                        column: Some(column),
                         source: OutputParamSource::Input(0),
                         query_operand: false,
                     }],
@@ -2179,7 +2167,7 @@ mod tests {
                 crate::postgresql::context::ExecutionOutcome::Completed,
             )
             .unwrap();
-        assert!(context.get_execute(operation).is_some());
+        assert!(context.get_execute(operation).unwrap().is_some());
 
         context
             .finish_execution(
@@ -2187,11 +2175,14 @@ mod tests {
                 crate::postgresql::context::ExecutionOutcome::Completed,
             )
             .unwrap();
-        assert!(context.get_execute(operation).is_some());
+        assert!(context.get_execute(operation).unwrap().is_some());
         context
             .ready_for_query(pg_proto::TransactionStatus::Idle, Some(operation))
             .unwrap();
-        assert!(context.get_execute(operation).is_none());
+        assert!(matches!(
+            context.get_execute(operation),
+            Err(Error::Context(crate::error::ContextError::UnknownOperation))
+        ));
     }
 
     #[tokio::test]
@@ -2217,12 +2208,15 @@ mod tests {
                 crate::postgresql::context::ExecutionOutcome::Completed,
             )
             .unwrap();
-        assert!(context.get_execute(operation).is_some());
+        assert!(context.get_execute(operation).unwrap().is_some());
 
         context
             .ready_for_query(pg_proto::TransactionStatus::Idle, Some(operation))
             .unwrap();
-        assert!(context.get_execute(operation).is_none());
+        assert!(matches!(
+            context.get_execute(operation),
+            Err(Error::Context(crate::error::ContextError::UnknownOperation))
+        ));
     }
 
     #[tokio::test]
