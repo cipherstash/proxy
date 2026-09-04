@@ -343,6 +343,15 @@ impl TandemConfig {
             development: None,
         }
     }
+
+    #[cfg(test)]
+    pub fn disable_mapping_for_testing(&mut self) {
+        self.development = Some(DevelopmentConfig {
+            disable_mapping: true,
+            disable_database_tls: false,
+            enable_mapping_errors: false,
+        });
+    }
 }
 
 impl EncryptConfig {

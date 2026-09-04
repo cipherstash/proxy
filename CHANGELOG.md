@@ -14,9 +14,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- **PostgreSQL execution lifecycle ownership**: Proxy now tracks prepared statements, portals, Describe operations, execution outcomes, and execution metrics as one connection-local protocol lifecycle. Suspended executions retain their original metrics scope until completion, repeated portal executions receive distinct scopes, and terminal errors replace upstream responses atomically while schema outcomes are reported exactly once.
+
 - **Upstream TLS verification for client traffic**: Connections with `with_tls_verification` enabled now use a cached snapshot of the system root certificates, loaded once when Proxy starts. Unlike Proxy's background database connections, pg-proto client-traffic connections do not apply operating-system revocation checks or enterprise verification policy. Restart Proxy after changing the system trust store.
 
 ### Fixed
+
+- **Extended-protocol execution lifecycle regressions**: statement duration and slow-statement metrics now describe each execution rather than the lifetime of its cached prepared statement; distinct portals keep isolated Bind measurements; suspended executions retain their metrics until completion; correlated stale responses and inaccessible connection protocol state close the connection instead of silently omitting metadata transitions; uncorrelated responses retain PostgreSQL passthrough behavior; decryption failures no longer report pending schema changes as successful; and disabling mapping no longer creates empty statement metrics.
 
 - **Query cancellation through Proxy**: Cancellation requests now reach the matching PostgreSQL connection, and their routing entries are removed when the client connection exits. Previously cancellation requests arrived on a separate connection that could not find the original route; retaining those routes globally without cleanup could also leak memory and eventually reject a new connection if PostgreSQL reused a cancellation key.
 

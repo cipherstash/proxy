@@ -57,7 +57,7 @@ where
         operation: OperationId,
         message: FrontendMessage,
     ) -> Result<FrontendMiddlewareOutput, Error> {
-        self.frontend.intercept(operation, message).await
+        self.frontend.intercept(operation.into(), message).await
     }
 
     async fn backend_operation(
@@ -68,6 +68,8 @@ where
         operation: Option<OperationId>,
         message: BackendMessage,
     ) -> Result<BackendMiddlewareOutput, Error> {
-        self.backend.intercept(operation, message).await
+        self.backend
+            .intercept(operation.map(Into::into), message)
+            .await
     }
 }

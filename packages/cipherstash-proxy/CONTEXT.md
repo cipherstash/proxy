@@ -34,8 +34,10 @@ A prepared statement bound to parameter values, ready to execute. Either `Encryp
 carrying the analysed statement, or `Passthrough` when nothing in it is encrypted.
 
 **Statement metrics scope**:
-The measurement window around a single statement — opened at Parse or Query, closed when
-the statement completes. Many of these occur per connection.
+The measurement window around one statement execution occurrence. A simple Query owns one;
+an extended-protocol Execute owns one from its first execution through any suspension and
+resumption until completion or failure, while Parse timing belongs to the prepared Statement
+and may be attributed to each execution occurrence.
 _Avoid_: session (`start_session`, `SessionId` and the
 `..._statements_session_duration_seconds` metric all use this sense and are misnamed).
 

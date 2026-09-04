@@ -455,4 +455,21 @@ mod tests {
         assert!(exists);
         assert_ciphertext_at_rest(&encrypted, 1, "preserved batch secret").await;
     }
+
+    #[tokio::test]
+    async fn multi_statement_simple_query_keeps_the_connection_usable() {
+        let client = connect_for_test(*PROXY).await;
+        let first = table("execution_lifecycle_first");
+        let second = table("execution_lifecycle_second");
+
+        client
+            .batch_execute(&format!(
+                "CREATE TABLE {first} (id bigint); CREATE TABLE {second} (id bigint)"
+            ))
+            .await
+            .unwrap();
+
+        let value: i32 = client.query_one("SELECT 1", &[]).await.unwrap().get(0);
+        assert_eq!(value, 1);
+    }
 }

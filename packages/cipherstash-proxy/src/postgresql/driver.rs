@@ -6,11 +6,12 @@ use crate::{
     tls,
 };
 use pg_proto::{
-    BackendForwarding, BoundedPipeline, CancellationPolicy, Client, ClientTlsConfig,
+    BackendForwarding, BoundedPipeline, CancelKey, CancellationPolicy, Client, ClientTlsConfig,
     ClientTlsPolicy, ClientTlsProvider, ConnectTarget, ForwardedMessage, FrontendForwarding,
-    FrontendMessage, InMemoryCancellationRegistry, InitialServerContext, Intermediary, Server,
-    ServerIdentity, ServerIdentityProvider, ServerTlsPolicy, SslMode, StartupParameters,
-    StartupRouteResolver, StaticClientCredentials, StaticMd5ServerCredentials,
+    FrontendMessage, InMemoryCancellationRegistry, InitialServerContext, Intermediary,
+    IntermediaryCancellationRegistry, Server, ServerIdentity, ServerIdentityProvider,
+    ServerTlsPolicy, SslMode, StartupParameters, StartupRouteResolver, StaticClientCredentials,
+    StaticMd5ServerCredentials,
 };
 use std::{
     convert::Infallible,
@@ -23,6 +24,25 @@ use tracing::info;
 /// must share the registry that maps client cancellation keys to upstream keys.
 static CANCELLATION_REGISTRY: LazyLock<InMemoryCancellationRegistry> =
     LazyLock::new(InMemoryCancellationRegistry::default);
+
+struct CancellationRegistrationGuard {
+    registry: InMemoryCancellationRegistry,
+    key: Option<CancelKey>,
+}
+
+impl CancellationRegistrationGuard {
+    fn new(registry: InMemoryCancellationRegistry, key: Option<CancelKey>) -> Self {
+        Self { registry, key }
+    }
+}
+
+impl Drop for CancellationRegistrationGuard {
+    fn drop(&mut self) {
+        if let Some(key) = self.key.take() {
+            let _ = self.registry.detach(&key);
+        }
+    }
+}
 
 #[derive(Clone)]
 struct Route(String);
@@ -102,6 +122,10 @@ where
                 pg_proto::IntermediaryAccept::Session(session) => session,
                 pg_proto::IntermediaryAccept::CancellationForwarded => return Ok(()),
             };
+            let _cancellation_guard = CancellationRegistrationGuard::new(
+                CANCELLATION_REGISTRY.clone(),
+                session.cancellation_key().cloned(),
+            );
             let result = async {
                 'session: loop {
                     let forward = session.forward_next();
@@ -216,9 +240,7 @@ where
                 Ok(())
             }
             .await;
-            finish_connection(result, || {
-                let _ = session.detach_cancellation();
-            })
+            result
         }};
     }
 
@@ -295,14 +317,6 @@ fn invalid_data(error: impl std::fmt::Display) -> Error {
     std::io::Error::new(std::io::ErrorKind::InvalidData, error.to_string()).into()
 }
 
-fn finish_connection<T, E>(
-    result: Result<T, E>,
-    detach_cancellation: impl FnOnce(),
-) -> Result<T, E> {
-    detach_cancellation();
-    result
-}
-
 fn upstream_ssl_mode(config: &crate::TandemConfig) -> SslMode {
     if config.database.with_tls_verification {
         SslMode::VerifyFull
@@ -317,13 +331,10 @@ fn upstream_ssl_mode(config: &crate::TandemConfig) -> SslMode {
 mod tests {
     use super::*;
     use bytes::Bytes;
-    use pg_proto::{
-        CancelKey, CancellationRoute, InMemoryCancellationRegistryError,
-        IntermediaryCancellationRegistry,
-    };
+    use pg_proto::{CancellationRoute, InMemoryCancellationRegistryError};
 
     #[test]
-    fn connection_exit_releases_its_cancellation_key() {
+    fn dropping_a_connection_guard_releases_its_cancellation_key() {
         for result in [Ok(()), Err("connection failed")] {
             let registry = InMemoryCancellationRegistry::default();
             let key = CancelKey {
@@ -337,11 +348,11 @@ mod tests {
                 Err(InMemoryCancellationRegistryError::DuplicateKey)
             );
 
-            let returned = finish_connection(result, || {
-                registry.detach(&key).unwrap();
-            });
-
-            assert_eq!(returned, result);
+            {
+                let _guard =
+                    CancellationRegistrationGuard::new(registry.clone(), Some(key.clone()));
+                let _ = result;
+            }
             assert_eq!(registry.register(route), Ok(key));
         }
     }
