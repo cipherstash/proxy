@@ -7,6 +7,7 @@ use crate::error::{EncryptError, Error, ProtocolError};
 use crate::log::{CONTEXT, DEVELOPMENT, MAPPER, PROTOCOL};
 use crate::postgresql::context::Portal;
 use crate::postgresql::rewrite::data_row;
+use crate::postgresql::OperationId;
 use crate::prometheus::{
     DECRYPTED_VALUES_TOTAL, DECRYPTION_DURATION_SECONDS, DECRYPTION_ERROR_TOTAL,
     DECRYPTION_REQUESTS_TOTAL, ROWS_ENCRYPTED_TOTAL, ROWS_PASSTHROUGH_TOTAL, ROWS_TOTAL,
@@ -14,7 +15,7 @@ use crate::prometheus::{
 use crate::proxy::EncryptionService;
 use crate::EqlCiphertext;
 use metrics::{counter, histogram};
-use pg_proto::{BackendMessage, BackendMiddlewareOutput, DataRow, DiagnosticResponse, OperationId};
+use pg_proto::{BackendMessage, BackendMiddlewareOutput, DataRow, DiagnosticResponse};
 use std::time::Instant;
 use tracing::{debug, error, info, warn};
 
@@ -94,7 +95,10 @@ impl<S: EncryptionService> Backend<S> {
             return Ok(None);
         };
         match self.context.finish_execution(operation, outcome) {
-            Err(Error::Context(crate::error::ContextError::UnknownOperation)) => {
+            Err(Error::Context(
+                crate::error::ContextError::UnknownOperation
+                | crate::error::ContextError::OperationWithoutExecute,
+            )) => {
                 warn!(target: PROTOCOL, client_id = self.context.client_id, ?outcome, msg = "Ignoring terminal response for an untracked operation");
                 Ok(None)
             }
@@ -160,18 +164,6 @@ impl<S: EncryptionService> Backend<S> {
     ) -> Result<BackendMiddlewareOutput, Error> {
         let mut outbound_message = protocol_message.clone();
 
-        match &protocol_message {
-            BackendMessage::CommandComplete(_)
-            | BackendMessage::EmptyQueryResponse
-            | BackendMessage::PortalSuspended => {
-                self.context.report_schema_execution_succeeded();
-            }
-            BackendMessage::ErrorResponse(_) => {
-                self.context.report_schema_execution_failed();
-            }
-            _ => {}
-        }
-
         if matches!(
             protocol_message,
             BackendMessage::ParseComplete | BackendMessage::BindComplete
@@ -182,6 +174,17 @@ impl<S: EncryptionService> Backend<S> {
         }
 
         if self.context.is_passthrough() {
+            match &protocol_message {
+                BackendMessage::CommandComplete(_)
+                | BackendMessage::EmptyQueryResponse
+                | BackendMessage::PortalSuspended => {
+                    self.context.report_schema_execution_succeeded();
+                }
+                BackendMessage::ErrorResponse(_) => {
+                    self.context.report_schema_execution_failed();
+                }
+                _ => {}
+            }
             debug!(target: DEVELOPMENT,
                 client_id = self.context.client_id,
                 msg = "Passthrough enabled"
@@ -232,7 +235,7 @@ impl<S: EncryptionService> Backend<S> {
                 | BackendMessage::PortalSuspended
                 | BackendMessage::ErrorResponse(_) => {
                     if let Some(operation) = operation {
-                        self.context.discard_operation(operation);
+                        self.context.discard_operation(operation)?;
                     }
                 }
                 BackendMessage::ReadyForQuery(status) => {
@@ -263,17 +266,23 @@ impl<S: EncryptionService> Backend<S> {
             Vec::new()
         };
 
+        match &protocol_message {
+            BackendMessage::CommandComplete(_)
+            | BackendMessage::EmptyQueryResponse
+            | BackendMessage::PortalSuspended => {
+                self.context.report_schema_execution_succeeded();
+            }
+            BackendMessage::ErrorResponse(_) => {
+                self.context.report_schema_execution_failed();
+            }
+            _ => {}
+        }
+
         let keyset_id = self.context.keyset_identifier();
         debug!(target: CONTEXT, client_id = ?self.context.client_id, ?keyset_id);
 
         match protocol_message {
             BackendMessage::DataRow(row) => {
-                if operation.is_none_or(|operation| {
-                    self.context.get_portal_from_execute(operation).is_none()
-                }) {
-                    return Ok(self
-                        .decryption_failure(crate::error::ContextError::UnknownOperation.into()));
-                }
                 // Encrypted DataRows are added to the buffer and we return early
                 // Otherwise, continue and write
                 if self.data_row_handler(operation).await? {
@@ -508,8 +517,10 @@ impl<S: EncryptionService> Backend<S> {
         let mut rows = std::mem::take(&mut self.encrypted_rows);
         self.encrypted_rows_bytes = 0;
 
-        let portal =
-            operation.and_then(|operation| self.context.get_portal_from_execute(operation));
+        let portal = operation
+            .map(|operation| self.context.get_portal_from_execute(operation))
+            .transpose()?
+            .flatten();
         let portal = match portal.as_deref() {
             Some(Portal::Encrypted { .. }) => portal.unwrap(),
             _ => {
@@ -559,7 +570,7 @@ impl<S: EncryptionService> Backend<S> {
         // Always record for slow-statement diagnostics
         if let Some(operation) = operation {
             self.context
-                .add_decrypt_duration_for_execute(operation, duration);
+                .add_decrypt_duration_for_execute(operation, duration)?;
         }
 
         // Prometheus metrics remain gated
@@ -637,9 +648,11 @@ impl<S: EncryptionService> Backend<S> {
     ) -> Result<Option<BackendMessage>, Error> {
         debug!(target: PROTOCOL, client_id = self.context.client_id, ParamDescription = ?description);
 
-        if let Some(statement) =
-            operation.and_then(|operation| self.context.get_statement_from_describe(operation))
-        {
+        let statement = operation
+            .map(|operation| self.context.get_statement_from_describe(operation))
+            .transpose()?
+            .flatten();
+        if let Some(statement) = statement {
             // Describe the params the CLIENT wrote, not the ones PostgreSQL was
             // sent. A rewrite may have fused or dropped params, in which case
             // the server's description is both shorter than and shifted from
@@ -695,9 +708,11 @@ impl<S: EncryptionService> Backend<S> {
     ) -> Result<Option<BackendMessage>, Error> {
         debug!(target: PROTOCOL, client_id = self.context.client_id, RowDescription = ?description);
 
-        if let Some(statement) =
-            operation.and_then(|operation| self.context.get_statement_for_operation(operation))
-        {
+        let statement = operation
+            .map(|operation| self.context.get_statement_for_operation(operation))
+            .transpose()?
+            .flatten();
+        if let Some(statement) = statement {
             let projection_types = statement
                 .projection_columns
                 .iter()
@@ -759,10 +774,11 @@ impl<S: EncryptionService> Backend<S> {
     /// track proxy performance and encryption usage patterns.
     async fn data_row_handler(&mut self, operation: Option<OperationId>) -> Result<bool, Error> {
         counter!(ROWS_TOTAL).increment(1);
-        match operation
-            .and_then(|operation| self.context.get_portal_from_execute(operation))
-            .as_deref()
-        {
+        let portal = operation
+            .map(|operation| self.context.get_portal_from_execute(operation))
+            .transpose()?
+            .flatten();
+        match portal.as_deref() {
             Some(Portal::Encrypted { .. }) => {
                 debug!(target: MAPPER, client_id = self.context.client_id, msg = "Encrypted");
 
@@ -790,6 +806,7 @@ mod tests {
     use super::*;
     use crate::config::TandemConfig;
     use crate::postgresql::context::KeysetIdentifier;
+    use crate::postgresql::context::ResultOptionTestExt as _;
     use crate::postgresql::parser::SqlParser;
     use crate::postgresql::rewrite::Name;
     use crate::postgresql::test_operation_id as operation_id;
@@ -940,6 +957,21 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn terminal_message_for_a_non_execution_operation_is_forwarded() {
+        let (mut backend, context) = create_backend_with_context();
+        let operation = operation_id();
+        context.set_non_execution(operation).unwrap();
+        let message = BackendMessage::CommandComplete(bytes::Bytes::from_static(b"SELECT 1"));
+
+        let output = backend
+            .intercept(Some(operation), message.clone())
+            .await
+            .unwrap();
+
+        assert_eq!(output, BackendMiddlewareOutput::Forward(message));
+    }
+
+    #[tokio::test]
     async fn no_data_for_an_untracked_describe_is_forwarded() {
         let mut backend = create_backend();
 
@@ -973,7 +1005,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn data_row_without_mapped_execution_metadata_fails_closed() {
+    async fn data_row_without_mapped_execution_metadata_is_forwarded() {
         let mut encrypt_config = EncryptConfig::default();
         encrypt_config.insert(
             crate::Identifier::new("records", "secret"),
@@ -981,22 +1013,16 @@ mod tests {
         );
         let (mut backend, _) = create_backend_with_encrypt_config(encrypt_config);
 
+        let message = BackendMessage::DataRow(DataRow {
+            columns: vec![Some(bytes::Bytes::from_static(b"ciphertext"))],
+        });
         let output = backend
-            .intercept(
-                Some(operation_id()),
-                BackendMessage::DataRow(DataRow {
-                    columns: vec![Some(bytes::Bytes::from_static(b"ciphertext"))],
-                }),
-            )
+            .intercept(Some(operation_id()), message.clone())
             .await
             .unwrap();
 
-        assert!(matches!(
-            output,
-            BackendMiddlewareOutput::Expand(messages)
-                if matches!(messages.as_slice(), [BackendMessage::ErrorResponse(_)])
-        ));
-        assert!(backend.discard_execution);
+        assert_eq!(output, BackendMiddlewareOutput::Forward(message));
+        assert!(!backend.discard_execution);
     }
 
     #[tokio::test]
@@ -1063,7 +1089,9 @@ mod tests {
         let operation = operation_id();
         let replacement =
             crate::postgresql::diagnostics::invalid_sql_statement("proxy parse error".to_owned());
-        context.set_operation_error(operation, replacement.clone());
+        context
+            .set_operation_error(operation, replacement.clone())
+            .unwrap();
         let database_error =
             BackendMessage::ErrorResponse(crate::postgresql::diagnostics::invalid_sql_statement(
                 "database parse error".to_owned(),
@@ -1084,14 +1112,16 @@ mod tests {
     async fn successful_execution_is_not_replaced_by_a_stored_error() {
         let (mut backend, mut context) = create_backend_with_context();
         let operation = operation_id();
-        let scope = context.start_metrics_scope();
+        let scope = context.start_metrics_scope().unwrap();
         context
             .set_execute(operation, Name::new(), Some(scope))
             .unwrap();
-        context.set_operation_error(
-            operation,
-            crate::postgresql::diagnostics::invalid_sql_statement("proxy error".to_owned()),
-        );
+        context
+            .set_operation_error(
+                operation,
+                crate::postgresql::diagnostics::invalid_sql_statement("proxy error".to_owned()),
+            )
+            .unwrap();
         let message = BackendMessage::CommandComplete(bytes::Bytes::from_static(b"SELECT 1"));
 
         let output = backend
@@ -1111,7 +1141,7 @@ mod tests {
         );
         let (mut backend, mut context) = create_backend_with_encrypt_config(encrypt_config);
         let operation = operation_id();
-        let scope = context.start_metrics_scope();
+        let scope = context.start_metrics_scope().unwrap();
         context
             .set_execute(operation, Name::new(), Some(scope))
             .unwrap();
@@ -1137,13 +1167,12 @@ mod tests {
         );
         let (mut backend, mut context) = create_backend_with_encrypt_config(encrypt_config);
         let operation = operation_id();
-        let scope = context.start_metrics_scope();
+        let scope = context.start_metrics_scope().unwrap();
         context
             .set_execute(operation, Name::new(), Some(scope))
             .unwrap();
-        let first = SqlParser::parse_statement("select 1").unwrap();
         let ddl = SqlParser::parse_statement("create table reports (id bigint)").unwrap();
-        context.execute_simple_schema_statements(&[first, ddl]);
+        context.execute_simple_schema_statements(&[ddl]);
         assert!(context.schema_ddl_in_flight());
         backend.encrypted_rows_operation = Some(operation);
         backend.encrypted_rows.push(DataRow {
@@ -1153,7 +1182,7 @@ mod tests {
         let output = backend
             .intercept(
                 None,
-                BackendMessage::ReadyForQuery(pg_proto::TransactionStatus::Idle),
+                BackendMessage::CommandComplete(bytes::Bytes::from_static(b"CREATE TABLE")),
             )
             .await
             .unwrap();

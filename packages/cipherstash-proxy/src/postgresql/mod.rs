@@ -16,17 +16,31 @@ pub use context::KeysetIdentifier;
 pub use driver::handler;
 pub(crate) use rewrite::Name;
 
+/// Proxy-owned identity for correlating PostgreSQL protocol operations.
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct OperationId(OperationIdInner);
+
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+enum OperationIdInner {
+    Protocol(pg_proto::OperationId),
+    #[cfg(test)]
+    Test(u64),
+}
+
+impl From<pg_proto::OperationId> for OperationId {
+    fn from(id: pg_proto::OperationId) -> Self {
+        Self(OperationIdInner::Protocol(id))
+    }
+}
+
 #[cfg(test)]
-pub(crate) fn test_operation_id() -> pg_proto::OperationId {
-    use std::num::NonZeroU64;
+pub(crate) fn test_operation_id() -> OperationId {
     use std::sync::atomic::{AtomicU64, Ordering};
 
     static NEXT_ID: AtomicU64 = AtomicU64::new(1);
-    let id = NonZeroU64::new(NEXT_ID.fetch_add(1, Ordering::Relaxed))
-        .expect("test operation IDs must not wrap");
-    // SAFETY: OperationId is an opaque u64 newtype in the pinned pg-proto version. Starting from
-    // NonZeroU64 also preserves validity if pg-proto strengthens that representation in future.
-    unsafe { std::mem::transmute(id) }
+    OperationId(OperationIdInner::Test(
+        NEXT_ID.fetch_add(1, Ordering::Relaxed),
+    ))
 }
 
 #[cfg(test)]

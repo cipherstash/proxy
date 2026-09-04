@@ -4,7 +4,7 @@ pub mod portal;
 pub mod statement;
 pub mod statement_metadata;
 pub use self::{phase_timing::PhaseTiming, portal::Portal, statement::Statement};
-use super::{column_mapper::ColumnMapper, rewrite::Name, Column};
+use super::{column_mapper::ColumnMapper, rewrite::Name, Column, OperationId};
 use crate::{
     config::TandemConfig,
     error::{ConfigError, EncryptError, Error},
@@ -21,7 +21,7 @@ use crate::{
 use cipherstash_client::IdentifiedBy;
 use eql_mapper::{Schema, TableResolver};
 use metrics::{counter, histogram};
-use pg_proto::{Describe, DescribeTarget, DiagnosticResponse, OperationId, TransactionStatus};
+use pg_proto::{Describe, DescribeTarget, DiagnosticResponse, TransactionStatus};
 use serde_json::json;
 use sqltk::parser::ast::{Expr, Ident, ObjectName, ObjectNamePart, Set, Value, ValueWithSpan};
 pub use statement_metadata::StatementMetadata;
@@ -39,6 +39,23 @@ use uuid::Uuid;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Ord, PartialOrd)]
 pub struct SessionId(u64);
+
+#[cfg(test)]
+pub trait ResultOptionTestExt {
+    fn is_some(&self) -> bool;
+    fn is_none(&self) -> bool;
+}
+
+#[cfg(test)]
+impl<T> ResultOptionTestExt for Result<Option<T>, Error> {
+    fn is_some(&self) -> bool {
+        self.as_ref().unwrap().is_some()
+    }
+
+    fn is_none(&self) -> bool {
+        self.as_ref().unwrap().is_none()
+    }
+}
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct KeysetIdentifier(pub IdentifiedBy);
@@ -407,27 +424,28 @@ where
         Ok(())
     }
 
-    pub fn start_metrics_scope(&mut self) -> SessionId {
+    pub fn start_metrics_scope(&mut self) -> Result<SessionId, Error> {
         let id = SessionId(self.session_id_counter.fetch_add(1, Ordering::Relaxed));
         let ctx = SessionMetricsContext::new(id);
-        let _ = self
-            .protocol_state
+        self.protocol_state
             .write()
-            .map(|mut state| state.statement_metrics.insert(id, ctx));
-        id
+            .map_err(|_| crate::error::ContextError::ProtocolStateUnavailable)?
+            .statement_metrics
+            .insert(id, ctx);
+        Ok(id)
     }
 
-    pub fn finish_metrics_scope(&mut self, session_id: Option<SessionId>) {
+    pub fn finish_metrics_scope(&mut self, session_id: Option<SessionId>) -> Result<(), Error> {
         debug!(target: CONTEXT, client_id = self.client_id, msg = "Session Metrics finished");
 
-        let session = session_id.and_then(|id| {
-            self.protocol_state
-                .write()
-                .ok()?
-                .statement_metrics
-                .remove(&id)
-        });
+        let mut state = self
+            .protocol_state
+            .write()
+            .map_err(|_| crate::error::ContextError::ProtocolStateUnavailable)?;
+        let session = session_id.and_then(|id| state.statement_metrics.remove(&id));
+        drop(state);
         self.record_finished_session(session);
+        Ok(())
     }
 
     fn record_finished_session(&self, session: Option<SessionMetricsContext>) {
@@ -554,7 +572,7 @@ where
                     .unwrap_or_else(|| SessionMetricsContext::new(execution_id));
                 metrics.id = execution_id;
                 metrics.start = Instant::now();
-                metrics.records_session = false;
+                metrics.records_session = true;
                 state.statement_metrics.insert(execution_id, metrics);
                 ExecuteContext::new(name, portal, Some(execution_id))
             });
@@ -583,7 +601,7 @@ where
                 self.record_execution_duration(execute, transition.metrics.as_ref());
 
                 if execute.name.is_empty() {
-                    self.close_portal_if_current(&execute.name, execute.portal.as_ref());
+                    self.close_portal_if_current(&execute.name, execute.portal.as_ref())?;
                 }
             }
         }
@@ -637,31 +655,25 @@ where
         Ok(())
     }
 
-    pub fn close_statement(&self, name: &Name) {
+    pub fn close_statement(&self, name: &Name) -> Result<(), Error> {
         debug!(target: CONTEXT, client_id = self.client_id, statement = ?name);
 
-        let finished_session = self.protocol_state.write().ok().and_then(|mut state| {
+        let finished_session = {
+            let mut state = self
+                .protocol_state
+                .write()
+                .map_err(|_| crate::error::ContextError::ProtocolStateUnavailable)?;
             let session_id = state.statement_metrics_scopes.remove(name);
             state.statements.remove(name);
-            let session_in_use = session_id.is_some_and(|session_id| {
-                state
-                    .portals
-                    .values()
-                    .any(|portal| portal.session_id() == Some(session_id))
-                    || state.operations.values().any(|operation| {
-                        operation
-                            .execute
-                            .as_ref()
-                            .is_some_and(|execute| execute.session_id() == Some(session_id))
-                    })
-            });
+            let session_in_use = session_id.is_some_and(|id| state.metrics_referenced(id));
             if !session_in_use {
                 session_id.and_then(|session_id| state.statement_metrics.remove(&session_id))
             } else {
                 None
             }
-        });
+        };
         self.record_finished_session(finished_session);
+        Ok(())
     }
 
     pub fn transaction_status(&self) -> TransactionStatus {
@@ -750,7 +762,7 @@ where
         for (execute, metrics) in finished_executions {
             self.record_execution_duration(&execute, metrics.as_ref());
             if execute.completes_at_readiness && execute.name.is_empty() {
-                self.close_portal_if_current(&execute.name, execute.portal.as_ref());
+                self.close_portal_if_current(&execute.name, execute.portal.as_ref())?;
             }
         }
         for session in finished_sessions {
@@ -763,30 +775,40 @@ where
     ///
     /// PostgreSQL portals retain the parsed statement they reference and remain
     /// valid after the statement name is closed, so they must not be removed.
-    pub fn close_statement_explicit(&self, name: &Name) {
-        self.close_statement(name);
+    pub fn close_statement_explicit(&self, name: &Name) -> Result<(), Error> {
+        self.close_statement(name)
     }
 
-    pub fn discard_operation(&mut self, operation: OperationId) {
-        let finished_session = self.protocol_state.write().ok().and_then(|mut state| {
+    pub fn discard_operation(&mut self, operation: OperationId) -> Result<(), Error> {
+        let finished_session = {
+            let mut state = self
+                .protocol_state
+                .write()
+                .map_err(|_| crate::error::ContextError::ProtocolStateUnavailable)?;
             let session_id = state
                 .operations
                 .remove(&operation)
                 .and_then(|operation| operation.execute)
                 .and_then(|execute| execute.session_id());
             session_id.and_then(|session_id| state.statement_metrics.remove(&session_id))
-        });
+        };
         self.record_finished_session(finished_session);
+        Ok(())
     }
 
-    pub fn set_operation_error(&mut self, operation: OperationId, response: DiagnosticResponse) {
-        let _ = self.protocol_state.write().map(|mut state| {
-            state
-                .operations
-                .entry(operation)
-                .or_default()
-                .error_response = Some(response);
-        });
+    pub fn set_operation_error(
+        &mut self,
+        operation: OperationId,
+        response: DiagnosticResponse,
+    ) -> Result<(), Error> {
+        self.protocol_state
+            .write()
+            .map_err(|_| crate::error::ContextError::ProtocolStateUnavailable)?
+            .operations
+            .entry(operation)
+            .or_default()
+            .error_response = Some(response);
+        Ok(())
     }
 
     pub fn add_portal(
@@ -824,10 +846,13 @@ where
         Ok(())
     }
 
-    pub fn get_statement(&self, name: &Name) -> Option<Arc<Statement>> {
+    pub fn get_statement(&self, name: &Name) -> Result<Option<Arc<Statement>>, Error> {
         debug!(target: CONTEXT, client_id = self.client_id, statement = ?name);
-        let state = self.protocol_state.read().ok()?;
-        state.statements.get(name).cloned()
+        let state = self
+            .protocol_state
+            .read()
+            .map_err(|_| crate::error::ContextError::ProtocolStateUnavailable)?;
+        Ok(state.statements.get(name).cloned())
     }
 
     pub fn set_statement_session(
@@ -835,17 +860,23 @@ where
         name: Name,
         session_id: SessionId,
     ) -> Result<(), Error> {
-        self.protocol_state
+        let mut state = self
+            .protocol_state
             .write()
-            .map_err(|_| crate::error::ContextError::ProtocolStateUnavailable)?
-            .statement_metrics_scopes
-            .insert(name, session_id);
+            .map_err(|_| crate::error::ContextError::ProtocolStateUnavailable)?;
+        if let Some(metrics) = state.statement_metrics.get_mut(&session_id) {
+            metrics.records_session = false;
+        }
+        state.statement_metrics_scopes.insert(name, session_id);
         Ok(())
     }
 
-    pub fn get_statement_session(&self, name: &Name) -> Option<SessionId> {
-        let state = self.protocol_state.read().ok()?;
-        state.statement_metrics_scopes.get(name).copied()
+    pub fn get_statement_session(&self, name: &Name) -> Result<Option<SessionId>, Error> {
+        let state = self
+            .protocol_state
+            .read()
+            .map_err(|_| crate::error::ContextError::ProtocolStateUnavailable)?;
+        Ok(state.statement_metrics_scopes.get(name).copied())
     }
 
     ///
@@ -881,104 +912,161 @@ where
         Ok(())
     }
 
-    fn close_portal_if_current(&self, name: &Name, expected: Option<&Arc<Portal>>) {
-        let _ = self.protocol_state.write().map(|mut state| {
-            if expected.is_some_and(|expected| {
-                state
-                    .portals
-                    .get(name)
-                    .is_some_and(|current| Arc::ptr_eq(current, expected))
-            }) {
-                state.portals.remove(name);
-                state.portal_operations.remove(name);
-            }
-        });
+    fn close_portal_if_current(
+        &self,
+        name: &Name,
+        expected: Option<&Arc<Portal>>,
+    ) -> Result<(), Error> {
+        let mut state = self
+            .protocol_state
+            .write()
+            .map_err(|_| crate::error::ContextError::ProtocolStateUnavailable)?;
+        if expected.is_some_and(|expected| {
+            state
+                .portals
+                .get(name)
+                .is_some_and(|current| Arc::ptr_eq(current, expected))
+        }) {
+            state.portals.remove(name);
+            state.portal_operations.remove(name);
+        }
+        Ok(())
     }
 
-    pub fn get_portal(&self, name: &Name) -> Option<Arc<Portal>> {
+    pub fn get_portal(&self, name: &Name) -> Result<Option<Arc<Portal>>, Error> {
         debug!(target: CONTEXT, client_id = self.client_id, src = "Get Portal", portal = ?name);
-        let state = self.protocol_state.read().ok()?;
-        state.portals.get(name).cloned()
+        let state = self
+            .protocol_state
+            .read()
+            .map_err(|_| crate::error::ContextError::ProtocolStateUnavailable)?;
+        Ok(state.portals.get(name).cloned())
     }
 
-    pub fn get_portal_statement(&self, name: &Name) -> Option<Arc<Statement>> {
-        let state = self.protocol_state.read().ok()?;
-        let portal = state.portals.get(name)?;
+    pub fn get_portal_statement(&self, name: &Name) -> Result<Option<Arc<Statement>>, Error> {
+        let state = self
+            .protocol_state
+            .read()
+            .map_err(|_| crate::error::ContextError::ProtocolStateUnavailable)?;
+        let Some(portal) = state.portals.get(name) else {
+            return Ok(None);
+        };
 
         debug!(target: CONTEXT, client_id = self.client_id, portal = ?portal);
 
-        match portal.as_ref() {
+        Ok(match portal.as_ref() {
             Portal::Encrypted { statement, .. } => Some(statement.clone()),
             Portal::Passthrough { .. } => None,
-        }
+        })
     }
 
-    pub fn get_portal_session_id(&self, name: &Name) -> Option<SessionId> {
-        let state = self.protocol_state.read().ok()?;
-        let portal = state.portals.get(name)?;
-        portal.session_id()
+    pub fn get_portal_session_id(&self, name: &Name) -> Result<Option<SessionId>, Error> {
+        let state = self
+            .protocol_state
+            .read()
+            .map_err(|_| crate::error::ContextError::ProtocolStateUnavailable)?;
+        Ok(state
+            .portals
+            .get(name)
+            .and_then(|portal| portal.session_id()))
     }
 
-    pub fn get_statement_for_operation(&self, operation: OperationId) -> Option<Arc<Statement>> {
-        let state = self.protocol_state.read().ok()?;
-        let context = state.operations.get(&operation)?;
+    pub fn get_statement_for_operation(
+        &self,
+        operation: OperationId,
+    ) -> Result<Option<Arc<Statement>>, Error> {
+        let state = self
+            .protocol_state
+            .read()
+            .map_err(|_| crate::error::ContextError::ProtocolStateUnavailable)?;
+        let Some(context) = state.operations.get(&operation) else {
+            return Ok(None);
+        };
         if let Some(statement) = context
             .describe
             .as_ref()
             .and_then(|describe| describe.statement.as_ref())
         {
-            return Some(statement.clone());
+            return Ok(Some(statement.clone()));
         }
-        match context.execute.as_ref()?.portal.as_deref()? {
-            Portal::Encrypted { statement, .. } => Some(statement.clone()),
-            Portal::Passthrough { .. } => None,
-        }
+        Ok(
+            match context
+                .execute
+                .as_ref()
+                .and_then(|execute| execute.portal.as_deref())
+            {
+                Some(Portal::Encrypted { statement, .. }) => Some(statement.clone()),
+                Some(Portal::Passthrough { .. }) | None => None,
+            },
+        )
     }
 
-    pub fn get_statement_from_describe(&self, operation: OperationId) -> Option<Arc<Statement>> {
-        self.protocol_state
+    pub fn get_statement_from_describe(
+        &self,
+        operation: OperationId,
+    ) -> Result<Option<Arc<Statement>>, Error> {
+        let state = self
+            .protocol_state
             .read()
-            .ok()?
+            .map_err(|_| crate::error::ContextError::ProtocolStateUnavailable)?;
+        Ok(state
             .operations
-            .get(&operation)?
-            .describe
-            .as_ref()?
-            .statement
-            .clone()
+            .get(&operation)
+            .and_then(|context| context.describe.as_ref())
+            .and_then(|describe| describe.statement.clone()))
     }
 
-    pub fn get_portal_from_execute(&self, operation: OperationId) -> Option<Arc<Portal>> {
-        self.protocol_state
+    pub fn get_portal_from_execute(
+        &self,
+        operation: OperationId,
+    ) -> Result<Option<Arc<Portal>>, Error> {
+        let state = self
+            .protocol_state
             .read()
-            .ok()?
+            .map_err(|_| crate::error::ContextError::ProtocolStateUnavailable)?;
+        Ok(state
             .operations
-            .get(&operation)?
-            .execute
-            .as_ref()?
-            .portal
-            .clone()
+            .get(&operation)
+            .and_then(|context| context.execute.as_ref())
+            .and_then(|execute| execute.portal.clone()))
     }
 
-    pub fn get_execute(&self, operation: OperationId) -> Option<ExecuteContext> {
-        let state = self.protocol_state.read().ok()?;
-        let execute_context = state.operations.get(&operation)?.execute.as_ref()?;
+    pub fn get_execute(&self, operation: OperationId) -> Result<Option<ExecuteContext>, Error> {
+        let state = self
+            .protocol_state
+            .read()
+            .map_err(|_| crate::error::ContextError::ProtocolStateUnavailable)?;
+        let Some(execute_context) = state
+            .operations
+            .get(&operation)
+            .and_then(|operation| operation.execute.as_ref())
+        else {
+            return Ok(None);
+        };
         debug!(target: CONTEXT, client_id = self.client_id, msg = "Get Execute", execute = ?execute_context);
-        Some(execute_context.to_owned())
+        Ok(Some(execute_context.to_owned()))
     }
 
-    pub fn get_session_metrics(&self, session_id: SessionId) -> Option<SessionMetricsContext> {
-        let state = self.protocol_state.read().ok()?;
-        let session_context = state.statement_metrics.get(&session_id)?;
+    pub fn get_session_metrics(
+        &self,
+        session_id: SessionId,
+    ) -> Result<Option<SessionMetricsContext>, Error> {
+        let state = self
+            .protocol_state
+            .read()
+            .map_err(|_| crate::error::ContextError::ProtocolStateUnavailable)?;
+        let Some(session_context) = state.statement_metrics.get(&session_id) else {
+            return Ok(None);
+        };
         debug!(target: CONTEXT, client_id = self.client_id, msg = "Get Session Metrics", session_metrics = ?session_context);
-        Some(session_context.to_owned())
+        Ok(Some(session_context.to_owned()))
     }
 
     #[cfg(test)]
-    pub fn active_metrics_scopes(&self) -> usize {
+    pub fn active_metrics_scopes(&self) -> Result<usize, Error> {
         self.protocol_state
             .read()
             .map(|state| state.statement_metrics.len())
-            .unwrap_or_default()
+            .map_err(|_| crate::error::ContextError::ProtocolStateUnavailable.into())
     }
 
     /// Returns the resolver for this connection's effective schema snapshot.
@@ -1423,66 +1511,87 @@ where
         self.upstream_tls_roots.clone()
     }
 
-    fn with_session_metrics_mut<F>(&mut self, session_id: SessionId, f: F)
+    fn with_session_metrics_mut<F>(&mut self, session_id: SessionId, f: F) -> Result<(), Error>
     where
         F: FnOnce(&mut SessionMetricsContext),
     {
-        if let Ok(mut state) = self.protocol_state.write() {
-            if let Some(session) = state.statement_metrics.get_mut(&session_id) {
-                f(session);
-            }
+        let mut state = self
+            .protocol_state
+            .write()
+            .map_err(|_| crate::error::ContextError::ProtocolStateUnavailable)?;
+        if let Some(session) = state.statement_metrics.get_mut(&session_id) {
+            f(session);
         }
+        Ok(())
     }
 
     /// Record parse phase duration for the session (first write wins)
-    pub fn record_parse_duration(&mut self, session_id: SessionId, duration: Duration) {
+    pub fn record_parse_duration(
+        &mut self,
+        session_id: SessionId,
+        duration: Duration,
+    ) -> Result<(), Error> {
         self.with_session_metrics_mut(session_id, |session| {
             session.phase_timing.record_parse(duration);
-        });
+        })
     }
 
     /// Add encrypt phase duration for the session (accumulate)
-    pub fn add_encrypt_duration(&mut self, session_id: SessionId, duration: Duration) {
+    pub fn add_encrypt_duration(
+        &mut self,
+        session_id: SessionId,
+        duration: Duration,
+    ) -> Result<(), Error> {
         self.with_session_metrics_mut(session_id, |session| {
             session.phase_timing.add_encrypt(duration);
-        });
+        })
     }
 
     /// Add decrypt phase duration (accumulate)
-    pub fn add_decrypt_duration(&mut self, session_id: SessionId, duration: Duration) {
+    pub fn add_decrypt_duration(
+        &mut self,
+        session_id: SessionId,
+        duration: Duration,
+    ) -> Result<(), Error> {
         self.with_session_metrics_mut(session_id, |session| {
             session.phase_timing.add_decrypt(duration);
-        });
+        })
     }
 
     /// Update statement metadata for a session
-    pub fn update_statement_metadata<F>(&mut self, session_id: SessionId, f: F)
+    pub fn update_statement_metadata<F>(&mut self, session_id: SessionId, f: F) -> Result<(), Error>
     where
         F: FnOnce(&mut StatementMetadata),
     {
         self.with_session_metrics_mut(session_id, |session| {
             f(&mut session.metadata);
-        });
+        })
     }
 
     /// Update statement metadata if session ID is present, no-op otherwise.
-    pub fn with_session<F>(&mut self, session_id: Option<SessionId>, f: F)
+    pub fn with_session<F>(&mut self, session_id: Option<SessionId>, f: F) -> Result<(), Error>
     where
         F: FnOnce(&mut SessionMetricsContext),
     {
         if let Some(sid) = session_id {
-            self.with_session_metrics_mut(sid, f);
+            self.with_session_metrics_mut(sid, f)?;
         }
+        Ok(())
     }
 
     /// Add decrypt phase duration for the current execute session (if any)
-    pub fn add_decrypt_duration_for_execute(&mut self, operation: OperationId, duration: Duration) {
+    pub fn add_decrypt_duration_for_execute(
+        &mut self,
+        operation: OperationId,
+        duration: Duration,
+    ) -> Result<(), Error> {
         let session_id = self
-            .get_execute(operation)
+            .get_execute(operation)?
             .and_then(|execute| execute.session_id());
         if let Some(session_id) = session_id {
-            self.add_decrypt_duration(session_id, duration);
+            self.add_decrypt_duration(session_id, duration)?;
         }
+        Ok(())
     }
 }
 
@@ -1490,7 +1599,8 @@ where
 mod tests {
     use super::{
         ConnectionProtocolState, Context, ExecuteContext, ExecutionOutcome, KeysetIdentifier,
-        OperationContext, Portal, SessionId, SessionMetricsContext, Statement,
+        OperationContext, Portal, ResultOptionTestExt as _, SessionId, SessionMetricsContext,
+        Statement,
     };
     use crate::{
         config::LogConfig,
@@ -1582,6 +1692,41 @@ mod tests {
     }
 
     #[test]
+    fn each_extended_execution_records_its_own_statement_metrics() {
+        let mut context = create_context();
+        let statement = Name::from("statement");
+        let portal = Name::from("portal");
+        let template_scope = context.start_metrics_scope().unwrap();
+        context
+            .set_statement_session(statement, template_scope)
+            .unwrap();
+        context
+            .add_portal(
+                operation_id(),
+                portal.clone(),
+                Portal::passthrough(Some(template_scope)),
+            )
+            .unwrap();
+        let operation = operation_id();
+
+        context.set_execute_for_portal(operation, portal).unwrap();
+
+        let execution_scope = context
+            .get_execute(operation)
+            .unwrap()
+            .unwrap()
+            .session_id()
+            .unwrap();
+        assert!(
+            context
+                .get_session_metrics(execution_scope)
+                .unwrap()
+                .unwrap()
+                .records_session
+        );
+    }
+
+    #[test]
     fn execution_transition_rejects_stale_and_non_execute_operations() {
         let mut state = ConnectionProtocolState::<u64>::default();
 
@@ -1665,6 +1810,78 @@ mod tests {
     }
 
     #[test]
+    fn starting_metrics_fails_when_protocol_state_is_unavailable() {
+        let mut context = create_context();
+        let protocol_state = context.protocol_state.clone();
+        let _ = std::thread::spawn(move || {
+            let _guard = protocol_state.write().unwrap();
+            panic!("poison protocol state");
+        })
+        .join();
+
+        assert!(matches!(
+            context.start_metrics_scope(),
+            Err(Error::Context(
+                crate::error::ContextError::ProtocolStateUnavailable
+            ))
+        ));
+    }
+
+    #[test]
+    fn finishing_metrics_fails_when_protocol_state_is_unavailable() {
+        let mut context = create_context();
+        let protocol_state = context.protocol_state.clone();
+        let _ = std::thread::spawn(move || {
+            let _guard = protocol_state.write().unwrap();
+            panic!("poison protocol state");
+        })
+        .join();
+
+        assert!(matches!(
+            context.finish_metrics_scope(None),
+            Err(Error::Context(
+                crate::error::ContextError::ProtocolStateUnavailable
+            ))
+        ));
+    }
+
+    #[test]
+    fn reading_protocol_metadata_fails_when_protocol_state_is_unavailable() {
+        let context = create_context();
+        let protocol_state = context.protocol_state.clone();
+        let _ = std::thread::spawn(move || {
+            let _guard = protocol_state.write().unwrap();
+            panic!("poison protocol state");
+        })
+        .join();
+
+        assert!(matches!(
+            context.get_statement(&Name::from("statement")),
+            Err(Error::Context(
+                crate::error::ContextError::ProtocolStateUnavailable
+            ))
+        ));
+    }
+
+    #[test]
+    fn closing_a_statement_fails_when_protocol_state_is_unavailable() {
+        let context = create_context();
+        let protocol_state = context.protocol_state.clone();
+        let _ = std::thread::spawn(move || {
+            let _guard = protocol_state.write().unwrap();
+            panic!("poison protocol state");
+        })
+        .join();
+
+        assert!(matches!(
+            context.close_statement(&Name::from("statement")),
+            Err(Error::Context(
+                crate::error::ContextError::ProtocolStateUnavailable
+            ))
+        ));
+    }
+
+    #[test]
     fn completing_an_unknown_describe_rejects_the_stale_operation() {
         let context = create_context();
 
@@ -1678,10 +1895,12 @@ mod tests {
     fn completing_an_operation_without_describe_rejects_and_removes_it() {
         let mut context = create_context();
         let operation = operation_id();
-        context.set_operation_error(
-            operation,
-            crate::postgresql::diagnostics::invalid_sql_statement("proxy error".to_owned()),
-        );
+        context
+            .set_operation_error(
+                operation,
+                crate::postgresql::diagnostics::invalid_sql_statement("proxy error".to_owned()),
+            )
+            .unwrap();
 
         assert!(matches!(
             context.complete_describe(operation),
@@ -1754,7 +1973,7 @@ mod tests {
     fn replacing_a_statement_does_not_finish_an_overlapping_execution_session() {
         let mut context = create_context();
         let name = Name::default();
-        let session_id = context.start_metrics_scope();
+        let session_id = context.start_metrics_scope().unwrap();
         context
             .set_statement_session(name.clone(), session_id)
             .unwrap();
@@ -1766,17 +1985,38 @@ mod tests {
             )
             .unwrap();
 
-        context.close_statement(&name);
+        context.close_statement(&name).unwrap();
 
         assert!(context.get_session_metrics(session_id).is_some());
         assert!(context.get_statement_session(&name).is_none());
     }
 
     #[test]
+    fn replacing_a_statement_does_not_finish_a_suspended_execution_scope() {
+        let mut context = create_context();
+        let statement = Name::from("statement");
+        let scope = context.start_metrics_scope().unwrap();
+        context
+            .set_statement_session(statement.clone(), scope)
+            .unwrap();
+        let operation = operation_id();
+        context
+            .set_execute(operation, Name::from("portal"), Some(scope))
+            .unwrap();
+        context
+            .finish_execution(operation, ExecutionOutcome::Suspended)
+            .unwrap();
+
+        context.close_statement(&statement).unwrap();
+
+        assert!(context.get_session_metrics(scope).is_some());
+    }
+
+    #[test]
     fn readiness_releases_reparsed_statement_metrics_after_their_portal_is_destroyed() {
         let mut context = create_context();
         let statement = Name::from("statement");
-        let scope = context.start_metrics_scope();
+        let scope = context.start_metrics_scope().unwrap();
         context
             .set_statement_session(statement.clone(), scope)
             .unwrap();
@@ -1788,7 +2028,7 @@ mod tests {
             )
             .unwrap();
 
-        context.close_statement(&statement);
+        context.close_statement(&statement).unwrap();
         assert!(context.get_session_metrics(scope).is_some());
 
         context
@@ -1799,10 +2039,10 @@ mod tests {
     }
 
     #[test]
-    fn closing_an_unreferenced_statement_finishes_its_metrics_session() {
+    fn closing_an_unexecuted_statement_does_not_record_session_metrics() {
         let mut context = create_context();
         let name = Name::default();
-        let session_id = context.start_metrics_scope();
+        let session_id = context.start_metrics_scope().unwrap();
         context
             .set_statement_session(name.clone(), session_id)
             .unwrap();
@@ -1810,13 +2050,13 @@ mod tests {
         let handle = recorder.handle();
 
         metrics::with_local_recorder(&recorder, || {
-            context.close_statement_explicit(&name);
+            context.close_statement_explicit(&name).unwrap();
         });
 
         assert!(context.get_session_metrics(session_id).is_none());
         let rendered = handle.render();
         assert!(
-            rendered.contains("cipherstash_proxy_statements_session_duration_seconds_count"),
+            !rendered.contains("cipherstash_proxy_statements_session_duration_seconds_count"),
             "{rendered}"
         );
     }
@@ -1833,8 +2073,14 @@ mod tests {
             .add_statement(retained_statement_name.clone(), statement())
             .unwrap();
 
-        let closed_statement = context.get_statement(&closed_statement_name).unwrap();
-        let retained_statement = context.get_statement(&retained_statement_name).unwrap();
+        let closed_statement = context
+            .get_statement(&closed_statement_name)
+            .unwrap()
+            .unwrap();
+        let retained_statement = context
+            .get_statement(&retained_statement_name)
+            .unwrap()
+            .unwrap();
         let closed_portal_name = Name::from("differently_named_portal");
         let retained_portal_name = Name::from("retained_portal");
         let passthrough_portal_name = Name::from("passthrough_portal");
@@ -1860,7 +2106,7 @@ mod tests {
             )
             .unwrap();
 
-        context.close_statement(&closed_statement_name);
+        context.close_statement(&closed_statement_name).unwrap();
 
         assert!(context.get_portal(&closed_portal_name).is_some());
         assert!(context.get_portal(&retained_portal_name).is_some());
@@ -1886,7 +2132,7 @@ mod tests {
     fn idle_readiness_finishes_abandoned_suspended_execution_metrics() {
         let mut context = create_context();
         let portal = Name::from("limited_portal");
-        let template_scope = context.start_metrics_scope();
+        let template_scope = context.start_metrics_scope().unwrap();
         context
             .add_portal(
                 operation_id(),
@@ -1898,6 +2144,7 @@ mod tests {
         context.set_execute_for_portal(operation, portal).unwrap();
         let execution_scope = context
             .get_execute(operation)
+            .unwrap()
             .and_then(|execute| execute.session_id())
             .unwrap();
         context
@@ -1915,7 +2162,7 @@ mod tests {
     fn idle_readiness_finishes_simple_query_execution() {
         let mut context = create_context();
         let operation = operation_id();
-        let scope = context.start_metrics_scope();
+        let scope = context.start_metrics_scope().unwrap();
         context
             .set_simple_query_execute_until_ready(operation, Name::new(), Some(scope))
             .unwrap();
@@ -1942,7 +2189,7 @@ mod tests {
     fn readiness_for_one_query_preserves_later_pipelined_work() {
         let mut context = create_context();
         let query_a = operation_id();
-        let query_a_scope = context.start_metrics_scope();
+        let query_a_scope = context.start_metrics_scope().unwrap();
         context
             .set_simple_query_execute_until_ready(query_a, Name::new(), Some(query_a_scope))
             .unwrap();
@@ -1981,13 +2228,13 @@ mod tests {
     fn transaction_readiness_finishes_one_query_and_preserves_later_pipelined_work() {
         let mut context = create_context();
         let query_a = operation_id();
-        let query_a_scope = context.start_metrics_scope();
+        let query_a_scope = context.start_metrics_scope().unwrap();
         context
             .set_simple_query_execute_until_ready(query_a, Name::new(), Some(query_a_scope))
             .unwrap();
 
         let query_b = operation_id();
-        let query_b_scope = context.start_metrics_scope();
+        let query_b_scope = context.start_metrics_scope().unwrap();
         context
             .set_simple_query_execute_until_ready(query_b, Name::new(), Some(query_b_scope))
             .unwrap();
@@ -2006,7 +2253,10 @@ mod tests {
     fn closing_a_suspended_portal_finishes_its_execution_metrics() {
         let mut context = create_context();
         let portal = Name::from("limited_portal");
-        let template_scope = context.start_metrics_scope();
+        let template_scope = context.start_metrics_scope().unwrap();
+        context
+            .set_statement_session(Name::from("statement"), template_scope)
+            .unwrap();
         context
             .add_portal(
                 operation_id(),
@@ -2020,6 +2270,7 @@ mod tests {
             .unwrap();
         let execution_scope = context
             .get_execute(operation)
+            .unwrap()
             .and_then(|execute| execute.session_id())
             .unwrap();
         context
@@ -2047,7 +2298,7 @@ mod tests {
     fn rebinding_a_suspended_portal_starts_a_new_execution_occurrence() {
         let mut context = create_context();
         let portal_name = Name::new();
-        let first_template = context.start_metrics_scope();
+        let first_template = context.start_metrics_scope().unwrap();
         context
             .add_portal(
                 operation_id(),
@@ -2062,13 +2313,14 @@ mod tests {
         let first_execution = context
             .get_execute(operation)
             .unwrap()
+            .unwrap()
             .session_id()
             .unwrap();
         context
             .finish_execution(operation, ExecutionOutcome::Suspended)
             .unwrap();
 
-        let rebound_template = context.start_metrics_scope();
+        let rebound_template = context.start_metrics_scope().unwrap();
         context
             .add_portal(
                 operation_id(),
@@ -2083,6 +2335,7 @@ mod tests {
         assert_eq!(
             context
                 .get_portal_from_execute(operation)
+                .unwrap()
                 .and_then(|portal| portal.session_id()),
             Some(rebound_template)
         );
@@ -2111,7 +2364,7 @@ mod tests {
     fn discarding_an_unfinished_operation_releases_its_execution_metrics() {
         let mut context = create_context();
         let portal = Name::from("skipped_portal");
-        let template_scope = context.start_metrics_scope();
+        let template_scope = context.start_metrics_scope().unwrap();
         context
             .add_portal(
                 operation_id(),
@@ -2123,10 +2376,11 @@ mod tests {
         context.set_execute_for_portal(operation, portal).unwrap();
         let execution_scope = context
             .get_execute(operation)
+            .unwrap()
             .and_then(|execute| execute.session_id())
             .unwrap();
 
-        context.discard_operation(operation);
+        context.discard_operation(operation).unwrap();
 
         assert!(context.get_execute(operation).is_none());
         assert!(context.get_session_metrics(execution_scope).is_none());
@@ -2136,7 +2390,7 @@ mod tests {
     fn simple_query_execution_finishes_only_at_readiness() {
         let mut context = create_context();
         let operation = operation_id();
-        let scope = context.start_metrics_scope();
+        let scope = context.start_metrics_scope().unwrap();
         context
             .set_simple_query_execute_until_ready(operation, Name::new(), Some(scope))
             .unwrap();
@@ -2187,17 +2441,17 @@ mod tests {
 
         let portal_name = Name::from("portal");
 
-        let statement_1 = context.get_statement(&statement_name_1).unwrap();
+        let statement_1 = context.get_statement(&statement_name_1).unwrap().unwrap();
         context
             .add_portal(operation_id(), portal_name.clone(), portal(&statement_1))
             .unwrap();
 
-        let statement_2 = context.get_statement(&statement_name_2).unwrap();
+        let statement_2 = context.get_statement(&statement_name_2).unwrap().unwrap();
         context
             .add_portal(operation_id(), portal_name.clone(), portal(&statement_2))
             .unwrap();
 
-        let portal = context.get_portal(&portal_name).unwrap();
+        let portal = context.get_portal(&portal_name).unwrap().unwrap();
         assert_eq!(statement_2, get_statement(portal));
         context.close_portal(&portal_name).unwrap();
         assert!(context.get_portal(&portal_name).is_none());
