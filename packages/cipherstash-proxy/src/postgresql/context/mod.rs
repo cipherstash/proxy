@@ -766,19 +766,21 @@ where
     }
 
     pub fn discard_operation(&mut self, operation: OperationId) -> Result<(), Error> {
-        let finished_metrics_scope = {
+        let finished_metrics_scopes = {
             let mut state = self
                 .protocol_state
                 .write()
                 .map_err(|_| crate::error::ContextError::ProtocolStateUnavailable)?;
-            let session_id = state
+            let metrics_scope_id = state
                 .operations
                 .remove(&operation)
                 .and_then(|operation| operation.execute)
                 .and_then(|execute| execute.session_id());
-            session_id.and_then(|session_id| state.statement_metrics.remove(&session_id))
+            state.take_unreferenced_metrics(metrics_scope_id)
         };
-        self.record_finished_metrics_scope(finished_metrics_scope);
+        for metrics_scope in finished_metrics_scopes {
+            self.record_finished_metrics_scope(Some(metrics_scope));
+        }
         Ok(())
     }
 
@@ -2434,6 +2436,28 @@ mod tests {
             .get_metrics_scope(execution_scope)
             .unwrap()
             .is_none());
+    }
+
+    #[test]
+    fn discarding_an_operation_preserves_a_metrics_scope_referenced_by_another_operation() {
+        let mut context = create_context();
+        let scope = context.start_metrics_scope().unwrap();
+        let first_operation = operation_id();
+        let second_operation = operation_id();
+        context
+            .set_execute(first_operation, Name::from("first"), Some(scope))
+            .unwrap();
+        context
+            .set_execute(second_operation, Name::from("second"), Some(scope))
+            .unwrap();
+
+        context.discard_operation(first_operation).unwrap();
+
+        assert!(context.get_metrics_scope(scope).unwrap().is_some());
+
+        context.discard_operation(second_operation).unwrap();
+
+        assert!(context.get_metrics_scope(scope).unwrap().is_none());
     }
 
     #[test]

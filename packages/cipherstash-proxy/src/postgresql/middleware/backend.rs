@@ -52,7 +52,7 @@ use tracing::{debug, error, info};
 ///
 /// DataRow messages containing encrypted data are buffered to enable batch decryption:
 /// - Buffer fills up to a configurable capacity
-/// - Flush occurs on buffer full, session end, or non-DataRow message
+/// - Flush occurs on buffer full, connection end, or non-DataRow message
 /// - Batching reduces encryption API round-trips and improves performance
 ///
 /// # Message Types Handled
@@ -214,8 +214,14 @@ impl<S: EncryptionService> Backend<S> {
             match protocol_message {
                 BackendMessage::CommandComplete(_)
                 | BackendMessage::EmptyQueryResponse
-                | BackendMessage::PortalSuspended
-                | BackendMessage::ErrorResponse(_) => {
+                | BackendMessage::PortalSuspended => {
+                    self.context.report_schema_execution_succeeded();
+                    if let Some(operation) = operation {
+                        self.context.discard_operation(operation)?;
+                    }
+                }
+                BackendMessage::ErrorResponse(_) => {
+                    self.context.report_schema_execution_failed();
                     if let Some(operation) = operation {
                         self.context.discard_operation(operation)?;
                     }
@@ -1163,6 +1169,34 @@ mod tests {
             Err(Error::Context(crate::error::ContextError::UnknownOperation))
         ));
         assert!(context.get_metrics_scope(scope).unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn discarded_execution_response_resolves_its_schema_execution() {
+        let mut encrypt_config = EncryptConfig::default();
+        encrypt_config.insert(
+            crate::Identifier::new("records", "secret"),
+            ColumnConfig::build("secret".to_owned()).casts_as(ColumnType::Text),
+        );
+        let (mut backend, mut context) = create_backend_with_encrypt_config(encrypt_config);
+        let operation = operation_id();
+        let scope = context.start_metrics_scope().unwrap();
+        context
+            .set_execute(operation, Name::new(), Some(scope))
+            .unwrap();
+        let ddl = SqlParser::parse_statement("create table reports (id bigint)").unwrap();
+        context.execute_simple_schema_statements(&[ddl]);
+        assert!(context.schema_ddl_in_flight());
+        backend.discard_execution = true;
+
+        let message = BackendMessage::CommandComplete(bytes::Bytes::from_static(b"CREATE TABLE"));
+        let output = backend
+            .intercept(Some(operation), message.clone())
+            .await
+            .unwrap();
+
+        assert_eq!(output, BackendMiddlewareOutput::Suppress(message));
+        assert!(!context.schema_ddl_in_flight());
     }
 
     #[tokio::test]

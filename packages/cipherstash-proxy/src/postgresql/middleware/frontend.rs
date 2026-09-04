@@ -67,7 +67,7 @@ use tracing::{debug, info, warn};
 /// - **Query Transformation**: Rewrite SQL to use EQL functions for encrypted operations
 /// - **Protocol Handling**: Manage PostgreSQL extended query protocol (Parse/Bind/Execute)
 /// - **Error Management**: Convert encryption errors to PostgreSQL-compatible error responses
-/// - **Context Management**: Track statements, portals, and session state
+/// - **Context Management**: Track statements, portals, and connection state
 ///
 /// # Supported PostgreSQL Messages
 ///
