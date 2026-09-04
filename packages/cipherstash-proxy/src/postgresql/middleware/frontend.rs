@@ -1114,50 +1114,59 @@ impl<S: EncryptionService> Frontend<S> {
             .context
             .start_portal_metrics_scope(&bind.prepared_statement)?;
 
-        // Track param bytes for diagnostics
-        let param_bytes: usize = bind.param_values.iter().map(|p| p.bytes.len()).sum();
-        self.context
-            .with_session(session_id, |m| m.metadata.set_param_bytes(param_bytes))?;
+        let result = async {
+            // Track param bytes for diagnostics
+            let param_bytes: usize = bind.param_values.iter().map(|p| p.bytes.len()).sum();
+            self.context
+                .with_session(session_id, |m| m.metadata.set_param_bytes(param_bytes))?;
 
-        debug!(target: PROTOCOL, client_id = self.context.client_id, bind = ?bind);
+            debug!(target: PROTOCOL, client_id = self.context.client_id, bind = ?bind);
 
-        let mut portal = Portal::passthrough(session_id);
+            let mut portal = Portal::passthrough(session_id);
 
-        if let Some(statement) = self.context.get_statement(&bind.prepared_statement)? {
-            debug!(target:MAPPER, client_id = self.context.client_id, ?statement);
+            if let Some(statement) = self.context.get_statement(&bind.prepared_statement)? {
+                debug!(target:MAPPER, client_id = self.context.client_id, ?statement);
 
-            if statement.has_params() {
-                let encrypted = self.encrypt_params(session_id, &bind, &statement).await?;
-                bind.rewrite(&statement.output_params, encrypted)?;
-            }
-            if statement.has_projection() {
-                portal = Portal::encrypted_with_format_codes(
-                    statement,
-                    bind.result_columns_format_codes.to_owned(),
-                    session_id,
+                if statement.has_params() {
+                    let encrypted = self.encrypt_params(session_id, &bind, &statement).await?;
+                    bind.rewrite(&statement.output_params, encrypted)?;
+                }
+                if statement.has_projection() {
+                    portal = Portal::encrypted_with_format_codes(
+                        statement,
+                        bind.result_columns_format_codes.to_owned(),
+                        session_id,
+                    );
+                    self.context
+                        .with_session(session_id, |m| m.metadata.encrypted = true)?;
+                }
+            };
+
+            debug!(target: MAPPER, client_id = self.context.client_id, portal = ?portal);
+            self.context
+                .add_portal(operation, bind.portal.to_owned(), portal)?;
+
+            if bind.requires_rewrite() {
+                let message = FrontendMessage::from(bind);
+                debug!(
+                    target: MAPPER,
+                    client_id = self.context.client_id,
+                    msg = "Rewrite Bind",
+                    ?message
                 );
-                self.context
-                    .with_session(session_id, |m| m.metadata.encrypted = true)?;
+
+                Ok(Some(message))
+            } else {
+                Ok(None)
             }
-        };
-
-        debug!(target: MAPPER, client_id = self.context.client_id, portal = ?portal);
-        self.context
-            .add_portal(operation, bind.portal.to_owned(), portal)?;
-
-        if bind.requires_rewrite() {
-            let message = FrontendMessage::from(bind);
-            debug!(
-                target: MAPPER,
-                client_id = self.context.client_id,
-                msg = "Rewrite Bind",
-                ?message
-            );
-
-            Ok(Some(message))
-        } else {
-            Ok(None)
         }
+        .await;
+
+        if result.is_err() {
+            self.context.finish_metrics_scope(session_id)?;
+        }
+
+        result
     }
 
     ///
@@ -1677,21 +1686,28 @@ mod tests {
     use super::{quote_literal, Frontend};
     use crate::config::TandemConfig;
     use crate::error::{EncryptError, Error, MappingError};
+    use crate::postgresql::context::statement::{OutputParam, OutputParamSource};
+    use crate::postgresql::context::Statement;
     use crate::postgresql::context::{Context, KeysetIdentifier, ResultOptionTestExt as _};
     use crate::postgresql::error_handler::PostgreSqlErrorHandler;
     use crate::postgresql::inbound_eql::InboundEql;
     use crate::postgresql::test_operation_id as operation_id;
     use crate::postgresql::Column;
     use crate::proxy::{EncryptConfig, EncryptionService};
+    use crate::Identifier;
     use cipherstash_client::eql::{EncryptedPayloadV3, EQL_SCHEMA_VERSION_V3};
+    use cipherstash_client::schema::{ColumnConfig, ColumnMode, ColumnType};
     use cipherstash_client::zerokms::EncryptedRecord;
+    use eql_mapper::EqlTermVariant;
     use eql_mapper::Schema;
     use pg_proto::{Bind, Describe, DescribeTarget, FrontendMessage, Parse};
     use std::sync::Arc;
     use tokio::sync::mpsc;
 
     #[derive(Clone)]
-    struct TestService;
+    struct TestService {
+        fail_encrypt: bool,
+    }
 
     #[async_trait::async_trait]
     impl EncryptionService for TestService {
@@ -1701,6 +1717,9 @@ mod tests {
             _plaintexts: Vec<Option<cipherstash_client::encryption::Plaintext>>,
             _columns: &[Option<Column>],
         ) -> Result<Vec<Option<crate::EqlOutput>>, Error> {
+            if self.fail_encrypt {
+                return Err(EncryptError::InvalidInboundEqlPayload.into());
+            }
             Ok(Vec::new())
         }
 
@@ -1726,14 +1745,34 @@ mod tests {
     }
 
     fn frontend_with_config(config: TandemConfig) -> (Frontend<TestService>, Context<TestService>) {
+        frontend_with_service(
+            config,
+            TestService {
+                fail_encrypt: false,
+            },
+        )
+    }
+
+    fn frontend_with_service(
+        config: TandemConfig,
+        service: TestService,
+    ) -> (Frontend<TestService>, Context<TestService>) {
+        frontend_with_encrypt_config_and_service(config, EncryptConfig::default(), service)
+    }
+
+    fn frontend_with_encrypt_config_and_service(
+        config: TandemConfig,
+        encrypt_config: EncryptConfig,
+        service: TestService,
+    ) -> (Frontend<TestService>, Context<TestService>) {
         let (reload_sender, _) = mpsc::unbounded_channel();
         let context = Context::new(
             1,
             Arc::new(config),
-            Arc::new(EncryptConfig::default()),
+            Arc::new(encrypt_config),
             Arc::new(Schema::new("public")),
             Arc::new(rustls::RootCertStore::empty()),
-            TestService,
+            service,
             reload_sender,
         );
         (Frontend::new(context.clone()), context)
@@ -1941,6 +1980,85 @@ mod tests {
                 .param_bytes,
             9
         );
+    }
+
+    #[tokio::test]
+    async fn failed_bind_releases_its_portal_metrics_scope() {
+        let mut encrypt_config = EncryptConfig::default();
+        encrypt_config.insert(
+            Identifier::new("records", "secret"),
+            ColumnConfig {
+                name: "secret".to_owned(),
+                in_place: false,
+                cast_type: ColumnType::Json,
+                indexes: vec![],
+                mode: ColumnMode::PlaintextDuplicate,
+            },
+        );
+        let (mut frontend, mut context) = frontend_with_encrypt_config_and_service(
+            TandemConfig::for_testing(),
+            encrypt_config,
+            TestService { fail_encrypt: true },
+        );
+        let statement_name = bytes::Bytes::from_static(b"statement");
+        let template_scope = context.start_metrics_scope().unwrap();
+        context
+            .set_statement_session(statement_name.clone(), template_scope)
+            .unwrap();
+        context
+            .add_statement(
+                statement_name.clone(),
+                Statement::new(
+                    vec![Some(Column {
+                        identifier: Identifier::new("records", "secret"),
+                        config: ColumnConfig {
+                            name: "secret".to_owned(),
+                            in_place: false,
+                            cast_type: ColumnType::Json,
+                            indexes: vec![],
+                            mode: ColumnMode::PlaintextDuplicate,
+                        },
+                        postgres_type: postgres_types::Type::JSONB,
+                        eql_term: EqlTermVariant::JsonValueSelector,
+                    })],
+                    vec![OutputParam {
+                        column: Some(Column {
+                            identifier: Identifier::new("records", "secret"),
+                            config: ColumnConfig {
+                                name: "secret".to_owned(),
+                                in_place: false,
+                                cast_type: ColumnType::Json,
+                                indexes: vec![],
+                                mode: ColumnMode::PlaintextDuplicate,
+                            },
+                            postgres_type: postgres_types::Type::JSONB,
+                            eql_term: EqlTermVariant::JsonValueSelector,
+                        }),
+                        source: OutputParamSource::Input(0),
+                        query_operand: false,
+                    }],
+                    vec![],
+                    vec![],
+                    vec![],
+                ),
+            )
+            .unwrap();
+
+        frontend
+            .intercept(
+                operation_id(),
+                FrontendMessage::Bind(Bind {
+                    portal: bytes::Bytes::from_static(b"portal"),
+                    statement: statement_name,
+                    parameter_formats: Vec::new(),
+                    parameters: vec![Some(bytes::Bytes::from_static(b"\"value\""))],
+                    result_formats: Vec::new(),
+                }),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(context.active_metrics_scopes().unwrap(), 1);
     }
 
     #[tokio::test]

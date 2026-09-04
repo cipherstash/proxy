@@ -1075,6 +1075,20 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn correlated_non_execution_completion_for_an_unknown_operation_fails_closed() {
+        for message in [BackendMessage::ParseComplete, BackendMessage::BindComplete] {
+            let mut backend = create_backend();
+
+            let result = backend.intercept(Some(operation_id()), message).await;
+
+            assert!(matches!(
+                result,
+                Err(Error::Context(crate::error::ContextError::UnknownOperation))
+            ));
+        }
+    }
+
+    #[tokio::test]
     async fn stored_proxy_error_replaces_a_non_execution_database_error() {
         let (mut backend, mut context) = create_backend_with_context();
         let operation = operation_id();

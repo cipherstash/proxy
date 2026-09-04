@@ -399,8 +399,11 @@ where
             .protocol_state
             .write()
             .map_err(|_| crate::error::ContextError::ProtocolStateUnavailable)?;
-        state.operations.remove(&operation);
-        Ok(())
+        state
+            .operations
+            .remove(&operation)
+            .map(|_| ())
+            .ok_or(crate::error::ContextError::UnknownOperation.into())
     }
     ///
     /// Marks the current Describe as complete
