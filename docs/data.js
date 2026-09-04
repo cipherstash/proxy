@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788486809505,
+  "lastUpdate": 1788487865856,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -26438,6 +26438,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 41.689835,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "toby@cipherstash.com",
+            "name": "Toby Hede",
+            "username": "tobyhede"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "ab8cd36546cb21492aa573808716e8b51333e4c5",
+          "message": "Merge pull request #463 from cipherstash/cip-3933-execution-lifecycle\n\nCIP-3933: Deepen Context protocol lifecycle ownership",
+          "timestamp": "2026-09-04T12:05:34+10:00",
+          "tree_id": "2a7a3becf95bb33f22f1e3af4a030fa583ae2d11",
+          "url": "https://github.com/cipherstash/proxy/commit/ab8cd36546cb21492aa573808716e8b51333e4c5"
+        },
+        "date": 1788487864185,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 42.220348,
             "unit": "Number"
           }
         ]
