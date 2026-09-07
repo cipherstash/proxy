@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788740709138,
+  "lastUpdate": 1788741526602,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -26517,6 +26517,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 41.64371,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "toby@cipherstash.com",
+            "name": "Toby Hede",
+            "username": "tobyhede"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "a11c26bc2dfd0c52e9ca0001b551e6cb85f89c0b",
+          "message": "Merge pull request #464 from cipherstash/fix-cip-3961-rand-patch\n\nfix(deps): patch rand to 0.9.3",
+          "timestamp": "2026-09-07T10:33:53+10:00",
+          "tree_id": "d573b9b97cc0cc1a499e223a295e242e356f1507",
+          "url": "https://github.com/cipherstash/proxy/commit/a11c26bc2dfd0c52e9ca0001b551e6cb85f89c0b"
+        },
+        "date": 1788741524959,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 40.800681,
             "unit": "Number"
           }
         ]
