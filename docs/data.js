@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788737420954,
+  "lastUpdate": 1788740709138,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -26492,6 +26492,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 39.680679,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "9a0bf22e0e155d72c876861f9fb42eef3fa27120",
+          "message": "fix(deps): patch rand to 0.9.3",
+          "timestamp": "2026-09-04T02:05:39Z",
+          "url": "https://github.com/cipherstash/proxy/pull/464/commits/9a0bf22e0e155d72c876861f9fb42eef3fa27120"
+        },
+        "date": 1788740707526,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 41.64371,
             "unit": "Number"
           }
         ]
