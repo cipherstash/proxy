@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788741526602,
+  "lastUpdate": 1789697256188,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -26546,6 +26546,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 40.800681,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "6e3c1e2615a4f621cf2776172f914e40daa2ce94",
+          "message": "fix(deps): bump tokio-postgres to 0.7.18",
+          "timestamp": "2026-09-07T00:33:58Z",
+          "url": "https://github.com/cipherstash/proxy/pull/465/commits/6e3c1e2615a4f621cf2776172f914e40daa2ce94"
+        },
+        "date": 1789697254598,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 41.015724,
             "unit": "Number"
           }
         ]
