@@ -2,7 +2,7 @@ use crate::{postgresql::Column, Identifier};
 use cipherstash_client::{encryption, schema::ColumnType};
 use eql_mapper::{EqlMapperError, EqlTermVariant};
 use metrics_exporter_prometheus::BuildError;
-use std::{io, time::Duration};
+use std::{fmt, io, time::Duration};
 use thiserror::Error;
 
 pub(crate) const ERROR_DOC_BASE_URL: &str =
@@ -171,18 +171,7 @@ pub enum ConfigError {
     #[error(transparent)]
     Certificate(#[from] rustls_pki_types::pem::Error),
 
-    /// Renders the tokio-postgres error *and* its cause.
-    ///
-    /// `tokio_postgres::Error`'s own `Display` is only the error kind — since
-    /// 0.7.18 it no longer appends the cause — so forwarding it transparently
-    /// would log a bare `db error` and drop the server's message, which is the
-    /// only part an operator can act on. Append the cause here so the logged
-    /// string stays as informative as it was.
-    #[error(
-        "{}{}",
-        _0,
-        std::error::Error::source(_0).map(|cause| format!(": {cause}")).unwrap_or_default()
-    )]
+    #[error(transparent)]
     Database(#[from] tokio_postgres::Error),
 
     #[error(transparent)]
@@ -663,6 +652,39 @@ impl From<chrono::ParseError> for Error {
     }
 }
 
+/// Renders an error and its full `source()` chain on one line: `a: b: c`.
+///
+/// Use this wherever an error is logged. `Display` on its own is not enough:
+/// by convention an error's `Display` describes only that error, and the cause
+/// is reached through `source()`. `tokio_postgres::Error` follows that
+/// convention from 0.7.18, so `err.to_string()` logs a bare `db error` and
+/// drops the server's message.
+///
+/// Recording the error as a `dyn Error` field does not help either: the
+/// `Structured` (JSON) log format renders only `Display`, and it is the default
+/// whenever stdout is not a terminal.
+///
+/// A cause whose text the rendered message already ends with is skipped, so an
+/// error that embeds its cause in `Display` (`"...: {0}"` with `#[from]`) is not
+/// printed twice.
+pub struct ErrorChain<'a>(pub &'a (dyn std::error::Error + 'static));
+
+impl fmt::Display for ErrorChain<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut rendered = self.0.to_string();
+        let mut source = self.0.source();
+        while let Some(cause) = source {
+            let cause_text = cause.to_string();
+            if !rendered.ends_with(&cause_text) {
+                rendered.push_str(": ");
+                rendered.push_str(&cause_text);
+            }
+            source = cause.source();
+        }
+        f.write_str(&rendered)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -681,5 +703,58 @@ mod tests {
             duration: Duration::from_millis(5000),
         };
         assert_eq!(error.to_string(), "Connection timed out after 5000 ms");
+    }
+
+    #[derive(Debug, Error)]
+    #[error("{message}")]
+    struct Leaf {
+        message: &'static str,
+    }
+
+    #[derive(Debug, Error)]
+    #[error("{message}")]
+    struct Wrapper {
+        message: &'static str,
+        #[source]
+        source: Leaf,
+    }
+
+    #[test]
+    fn error_chain_renders_an_error_without_a_source() {
+        let error = Leaf {
+            message: "db error",
+        };
+
+        assert_eq!(ErrorChain(&error).to_string(), "db error");
+    }
+
+    #[test]
+    fn error_chain_appends_each_cause() {
+        let error = Wrapper {
+            message: "db error",
+            source: Leaf {
+                message: "ERROR: permission denied for table encrypted",
+            },
+        };
+
+        assert_eq!(
+            ErrorChain(&error).to_string(),
+            "db error: ERROR: permission denied for table encrypted"
+        );
+    }
+
+    #[test]
+    fn error_chain_skips_a_cause_already_in_the_message() {
+        let error = Wrapper {
+            message: "Invalid encryption configuration: bad column",
+            source: Leaf {
+                message: "bad column",
+            },
+        };
+
+        assert_eq!(
+            ErrorChain(&error).to_string(),
+            "Invalid encryption configuration: bad column"
+        );
     }
 }

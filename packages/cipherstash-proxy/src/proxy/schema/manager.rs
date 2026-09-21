@@ -2,7 +2,7 @@
 
 use super::eql_domains;
 use crate::config::DatabaseConfig;
-use crate::error::Error;
+use crate::error::{Error, ErrorChain};
 use crate::proxy::encrypt_config::from_domain::column_config_from_domain;
 use crate::proxy::EncryptConfig;
 use crate::proxy::{AGGREGATE_QUERY, SCHEMA_QUERY};
@@ -213,7 +213,7 @@ where
         Err(err) => {
             warn!(
                 msg = "Error reloading committed schema snapshot",
-                error = err.to_string()
+                error = %ErrorChain(&err)
             );
             false
         }
