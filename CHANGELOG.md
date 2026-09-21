@@ -20,6 +20,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **Database error detail in Proxy's logs**: logged database errors again include the message PostgreSQL returned, not just the error kind. The upgraded PostgreSQL client library stopped appending the underlying cause when an error is rendered as text, which left entries such as `Database connection error` reading only `db error`. Proxy now renders the cause itself, so the server's message is back in the log line.
+
 - **Extended-protocol execution lifecycle regressions**: statement duration and slow-statement metrics now describe each execution rather than the lifetime of its cached prepared statement; distinct portals keep isolated Bind measurements; suspended executions retain their metrics until completion; correlated stale responses and inaccessible connection protocol state close the connection instead of silently omitting metadata transitions; uncorrelated responses retain PostgreSQL passthrough behavior; decryption failures no longer report pending schema changes as successful; and disabling mapping no longer creates empty statement metrics.
 
 - **Query cancellation through Proxy**: Cancellation requests now reach the matching PostgreSQL connection, and their routing entries are removed when the client connection exits. Previously cancellation requests arrived on a separate connection that could not find the original route; retaining those routes globally without cleanup could also leak memory and eventually reject a new connection if PostgreSQL reused a cancellation key.
@@ -29,6 +31,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **PostgreSQL protocol error handling after the pg-proto migration**: Proxy now rejects `require_tls` configurations that omit a certificate, preserves PostgreSQL transaction state when statement mapping fails, returns decryption failures as PostgreSQL errors without dropping the connection, and reloads changed schemas only after PostgreSQL confirms the transaction boundary. Prepared-statement replacement also preserves existing portals and overlapping statement metrics.
 
 ### Security
+
+- **Updated PostgreSQL client library**: Proxy is now built against `tokio-postgres` 0.7.18, which resolves [GHSA-3gjw-f78c-vvpw](https://github.com/advisories/GHSA-3gjw-f78c-vvpw). No configuration change is required.
 
 - **DDL now updates encryption metadata transactionally**: Proxy applies schema changes only after PostgreSQL confirms execution, keeps successful changes connection-local until commit, and atomically publishes schema and EQL domain metadata before reporting idle readiness. Extended-protocol DDL, explicit transactions, savepoints, rollbacks, one-`Sync` pipelining, and already-open connections now observe the correct schema generation. Unmodelled DDL, simple-query batches whose DDL may change encryption metadata before a dependent statement, and failed catalog publication fail closed instead of risking plaintext writes through stale metadata; encryption-neutral DDL and native temporary-table batches remain compatible.
 

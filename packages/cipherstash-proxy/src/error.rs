@@ -171,7 +171,18 @@ pub enum ConfigError {
     #[error(transparent)]
     Certificate(#[from] rustls_pki_types::pem::Error),
 
-    #[error(transparent)]
+    /// Renders the tokio-postgres error *and* its cause.
+    ///
+    /// `tokio_postgres::Error`'s own `Display` is only the error kind — since
+    /// 0.7.18 it no longer appends the cause — so forwarding it transparently
+    /// would log a bare `db error` and drop the server's message, which is the
+    /// only part an operator can act on. Append the cause here so the logged
+    /// string stays as informative as it was.
+    #[error(
+        "{}{}",
+        _0,
+        std::error::Error::source(_0).map(|cause| format!(": {cause}")).unwrap_or_default()
+    )]
     Database(#[from] tokio_postgres::Error),
 
     #[error(transparent)]
