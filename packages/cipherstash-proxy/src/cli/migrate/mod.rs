@@ -1,4 +1,4 @@
-use crate::error::Error;
+use crate::error::{Error, ErrorChain};
 use crate::log::MIGRATE;
 use crate::tls::NoCertificateVerification;
 use crate::TandemConfig;
@@ -136,7 +136,7 @@ impl Migrate {
             let rows = match client.simple_query(&sql).await {
                 Ok(rows) => rows,
                 Err(err) => {
-                    error!(target: MIGRATE, msg = "Error fetching records", table = self.table, error = err.to_string());
+                    error!(target: MIGRATE, msg = "Error fetching records", table = self.table, error = %ErrorChain(&err));
                     std::process::exit(exitcode::SOFTWARE);
                 }
             };
@@ -270,7 +270,7 @@ pub async fn connect_with_tls(
 
     tokio::spawn(async move {
         if let Err(err) = connection.await {
-            error!("Connection error: {}", err);
+            error!("Connection error: {}", ErrorChain(&err));
         }
     });
     Ok(client)
@@ -285,7 +285,7 @@ pub async fn connect_with_no_tls(connection_string: &str) -> Result<Client, Erro
 
     tokio::spawn(async move {
         if let Err(err) = connection.await {
-            error!("Connection error: {}", err);
+            error!("Connection error: {}", ErrorChain(&err));
         }
     });
     Ok(client)
