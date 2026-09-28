@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1789975940472,
+  "lastUpdate": 1790637999896,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -26646,6 +26646,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 40.952559,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "toby@cipherstash.com",
+            "name": "Toby Hede",
+            "username": "tobyhede"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "b9c6e29efa6e426ddde08058ff74d00f029d7ec8",
+          "message": "Merge pull request #465 from cipherstash/fix/cip-4104-tokio-postgres-patch\n\nfix(deps): bump tokio-postgres to 0.7.18",
+          "timestamp": "2026-09-29T09:20:09+10:00",
+          "tree_id": "d8de9cc797e89267d1ca52f0eb9faf94bb54cbc8",
+          "url": "https://github.com/cipherstash/proxy/commit/b9c6e29efa6e426ddde08058ff74d00f029d7ec8"
+        },
+        "date": 1790637998034,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 37.325406,
             "unit": "Number"
           }
         ]
