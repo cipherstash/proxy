@@ -1,6 +1,6 @@
 use cipherstash_proxy::config::TandemConfig;
 use cipherstash_proxy::connect;
-use cipherstash_proxy::error::{ConfigError, Error};
+use cipherstash_proxy::error::{ConfigError, Error, ErrorChain};
 use cipherstash_proxy::prometheus::CLIENTS_ACTIVE_CONNECTIONS;
 use cipherstash_proxy::proxy::Proxy;
 use cipherstash_proxy::{cli, log, postgresql as pg, prometheus, tls, Args};
@@ -43,7 +43,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
 
             Err(err) => {
-                error!(msg = "Error running command", error = err.to_string());
+                error!(msg = "Error running command", error = %ErrorChain(&err));
                 std::process::exit(exitcode::USAGE);
             }
         }
@@ -114,7 +114,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                         warn!(msg = "Database connection timeout", error = err.to_string());
                                     }
                                     _ => {
-                                        error!(msg = "Database connection error", error = err.to_string());
+                                        error!(msg = "Database connection error", error = %ErrorChain(&err));
                                     }
                                 }
                             },
@@ -236,7 +236,7 @@ async fn init(mut config: TandemConfig) -> Proxy {
         Err(err) => {
             error!(
                 msg = "Could not start CipherStash proxy",
-                error = err.to_string()
+                error = %ErrorChain(&err)
             );
             std::process::exit(exitcode::UNAVAILABLE);
         }

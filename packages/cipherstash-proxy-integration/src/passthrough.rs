@@ -1,8 +1,9 @@
 #[cfg(test)]
 mod tests {
-    use crate::common::{clear, connect_with_tls, random_id, random_string, PROXY};
+    use crate::common::{
+        assert_db_error, clear, connect_with_tls, random_id, random_string, PROXY,
+    };
     use rand::Rng;
-    use std::error::Error;
 
     #[tokio::test]
     async fn passthrough_statement() {
@@ -36,20 +37,7 @@ mod tests {
         let sql = "SELECT * FROM blahvtha";
         let result = client.query(sql, &[]).await;
 
-        assert!(result.is_err());
-
-        match result {
-            Ok(_) => unreachable!(),
-            Err(error) => match error.source() {
-                Some(db_error) => {
-                    assert_eq!(
-                        db_error.to_string(),
-                        "ERROR: relation \"blahvtha\" does not exist"
-                    );
-                }
-                None => unreachable!(),
-            },
-        }
+        assert_db_error(result, "ERROR", "relation \"blahvtha\" does not exist");
     }
 
     #[tokio::test]

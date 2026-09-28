@@ -1,4 +1,8 @@
-use crate::{config::ServerConfig, error::Error, tls, DatabaseConfig};
+use crate::{
+    config::ServerConfig,
+    error::{Error, ErrorChain},
+    tls, DatabaseConfig,
+};
 use socket2::{SockRef, TcpKeepalive};
 use std::time::Duration;
 use tokio::{
@@ -92,7 +96,7 @@ pub async fn database(config: &DatabaseConfig) -> Result<Client, Error> {
 
     tokio::spawn(async move {
         if let Err(err) = connection.await {
-            error!(msg = "Connection error", error = err.to_string());
+            error!(msg = "Connection error", error = %ErrorChain(&err));
         }
     });
     Ok(client)
