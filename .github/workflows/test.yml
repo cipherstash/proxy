@@ -197,3 +197,42 @@ jobs:
         with:
           channel: engineering
           webhook_url: ${{ secrets.SLACK_NOTIFICATION_WEBHOOK_URL }}
+
+  pooler-compatibility:
+    name: Supported pooler compatibility (PostgreSQL 17)
+    runs-on: blacksmith-16vcpu-ubuntu-2204
+    timeout-minutes: 45
+    env:
+      PG_VERSION: 17
+      CS_ZEROKMS_HOST: https://us-east-1.aws.zerokms.cipherstashmanaged.net
+      CS_CTS_HOST: https://ap-southeast-2.aws.cts.cipherstashmanaged.net
+      RUST_BACKTRACE: "1"
+      POOLERS_GOLANG: supported
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-test
+
+      - name: Decrypt secrets
+        uses: cipherstash/secrets-action@main
+        with:
+          secrets-file: .github/secrets.env.encrypted
+        env:
+          CS_CLIENT_ID: ${{ secrets.CS_VAULT_CLIENT_ID }}
+          CS_CLIENT_KEY: ${{ secrets.CS_VAULT_CLIENT_KEY }}
+          CS_CLIENT_ACCESS_KEY: ${{ secrets.CS_VAULT_CLIENT_ACCESS_KEY }}
+          CS_WORKSPACE_CRN: ${{ secrets.CS_VAULT_WORKSPACE_CRN }}
+
+      - name: Verify gate rejects incomplete runs and induced regressions
+        run: python3 tests/tasks/test/pooler_gate_test.py
+
+      - name: Build current Proxy and gate supported pooler behavior
+        run: mise run test:poolers
+
+      - name: Upload matrix and driver evidence
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: proxy-pooler-compatibility-pg17
+          path: target/pooler-results/
+          if-no-files-found: warn
