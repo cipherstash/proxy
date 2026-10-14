@@ -100,9 +100,16 @@ produces only the term needed to match. The statement's EQL term shape decides w
 ### Control plane
 
 **`SET CIPHERSTASH.*`**:
-Proxy's in-band control API, intercepted rather than forwarded — `KEYSET_ID`,
-`KEYSET_NAME`, `UNSAFE_DISABLE_MAPPING`. These are the supported spellings; log messages
-that print `CIPHERSTASH.DISABLE_MAPPING` are wrong.
+Proxy's in-band control API — `KEYSET_ID`, `KEYSET_NAME`, `UNSAFE_DISABLE_MAPPING` — whose
+effective values come from successfully executed commands, never preparation alone.
+Values have PostgreSQL transaction and savepoint scope: session values survive commit,
+local values end with the transaction, rollback restores earlier values, and successful
+`DISCARD ALL` resets them. Successful `RESET` restores the corresponding defaults while
+remaining subject to transaction and savepoint rollback.
+
+**Effective connection settings**:
+The keyset and mapping controls currently applicable to encryption and decryption on one Proxy
+connection, including any transaction-local overrides; behind a pooler their scope is a security boundary.
 
 **Reload**:
 Re-reading authoritative schema state from PostgreSQL after observed DDL. A reload produces

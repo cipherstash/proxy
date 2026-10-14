@@ -677,7 +677,7 @@ fn column_kind(column: &ColumnDef) -> ColumnKind {
 }
 
 /// Returns an identifier exactly as PostgreSQL stores it in the catalog.
-fn postgres_identifier(identifier: &Ident) -> String {
+pub(crate) fn postgres_identifier(identifier: &Ident) -> String {
     if identifier.quote_style.is_some() {
         identifier.value.clone()
     } else {

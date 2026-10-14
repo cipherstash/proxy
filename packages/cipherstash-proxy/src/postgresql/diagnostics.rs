@@ -41,6 +41,11 @@ pub fn invalid_password(message: String) -> DiagnosticResponse {
     standard("FATAL", CODE_INVALID_PASSWORD, message)
 }
 
+/// Ask drivers to discard stale prepared metadata and prepare again.
+pub fn prepared_statement_invalidated(message: String) -> DiagnosticResponse {
+    standard("ERROR", "26000", message)
+}
+
 pub fn invalid_sql_statement(message: String) -> DiagnosticResponse {
     let line = extract_line_from_parse_error(&message);
     let position = extract_position_from_parse_error(&message);

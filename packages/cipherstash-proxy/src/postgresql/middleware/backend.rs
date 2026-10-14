@@ -86,6 +86,18 @@ fn execution_outcome(message: &BackendMessage) -> Option<ExecutionOutcome> {
 }
 
 impl<S: EncryptionService> Backend<S> {
+    fn report_settings_outcome(
+        &self,
+        operation: Option<OperationId>,
+        message: &BackendMessage,
+    ) -> Result<(), Error> {
+        if let BackendMessage::CommandComplete(tag) = message {
+            self.context
+                .settings_execution_succeeded(operation, &String::from_utf8_lossy(tag))?;
+        }
+        Ok(())
+    }
+
     fn finish_execution(
         &self,
         operation: Option<OperationId>,
@@ -151,7 +163,14 @@ impl<S: EncryptionService> Backend<S> {
             BackendMessage::ParseComplete | BackendMessage::BindComplete
         ) {
             if let Some(operation) = operation {
+                self.context.settings_prepared_or_bound(operation)?;
                 self.context.complete_non_execution(operation)?;
+            }
+        }
+
+        if matches!(protocol_message, BackendMessage::CloseComplete) {
+            if let Some(operation) = operation {
+                self.context.settings_closed(operation)?;
             }
         }
 
@@ -160,9 +179,11 @@ impl<S: EncryptionService> Backend<S> {
                 BackendMessage::CommandComplete(_)
                 | BackendMessage::EmptyQueryResponse
                 | BackendMessage::PortalSuspended => {
+                    self.report_settings_outcome(operation, &protocol_message)?;
                     self.context.report_schema_execution_succeeded();
                 }
                 BackendMessage::ErrorResponse(_) => {
+                    self.context.settings_execution_failed(operation)?;
                     self.context.report_schema_execution_failed();
                 }
                 _ => {}
@@ -215,12 +236,14 @@ impl<S: EncryptionService> Backend<S> {
                 BackendMessage::CommandComplete(_)
                 | BackendMessage::EmptyQueryResponse
                 | BackendMessage::PortalSuspended => {
+                    self.report_settings_outcome(operation, &protocol_message)?;
                     self.context.report_schema_execution_succeeded();
                     if let Some(operation) = operation {
                         self.context.discard_operation(operation)?;
                     }
                 }
                 BackendMessage::ErrorResponse(_) => {
+                    self.context.settings_execution_failed(operation)?;
                     self.context.report_schema_execution_failed();
                     if let Some(operation) = operation {
                         self.context.discard_operation(operation)?;
@@ -258,16 +281,20 @@ impl<S: EncryptionService> Backend<S> {
             BackendMessage::CommandComplete(_)
             | BackendMessage::EmptyQueryResponse
             | BackendMessage::PortalSuspended => {
+                self.report_settings_outcome(operation, &protocol_message)?;
                 self.context.report_schema_execution_succeeded();
             }
             BackendMessage::ErrorResponse(_) => {
+                self.context.settings_execution_failed(operation)?;
                 self.context.report_schema_execution_failed();
             }
             _ => {}
         }
 
-        let keyset_id = self.context.keyset_identifier();
-        debug!(target: CONTEXT, client_id = ?self.context.client_id, ?keyset_id);
+        if tracing::enabled!(target: CONTEXT, tracing::Level::DEBUG) {
+            let keyset_id = self.context.keyset_identifier()?;
+            debug!(target: CONTEXT, client_id = ?self.context.client_id, ?keyset_id);
+        }
 
         match protocol_message {
             BackendMessage::DataRow(row) => {
@@ -541,7 +568,7 @@ impl<S: EncryptionService> Backend<S> {
 
         self.check_column_config(projection_columns, &ciphertexts)?;
 
-        let keyset_id = self.context.keyset_identifier();
+        let keyset_id = self.context.keyset_identifier()?;
 
         debug!(target: CONTEXT,
             client_id = self.context.client_id,

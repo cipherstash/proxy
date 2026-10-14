@@ -1,13 +1,16 @@
 pub mod column;
 pub mod phase_timing;
 pub mod portal;
+pub mod settings;
+mod settings_protocol;
 pub mod statement;
 pub mod statement_metadata;
+use self::settings::ConnectionSettings;
 pub use self::{phase_timing::PhaseTiming, portal::Portal, statement::Statement};
 use super::{column_mapper::ColumnMapper, rewrite::Name, Column, OperationId};
 use crate::{
     config::TandemConfig,
-    error::{ConfigError, EncryptError, Error},
+    error::{ConfigError, Error},
     log::{CONTEXT, SLOW_STATEMENTS},
     prometheus::{
         SLOW_STATEMENTS_TOTAL, STATEMENTS_EXECUTION_DURATION_SECONDS,
@@ -23,19 +26,17 @@ use eql_mapper::{Schema, TableResolver};
 use metrics::{counter, histogram};
 use pg_proto::{Describe, DescribeTarget, DiagnosticResponse, TransactionStatus};
 use serde_json::json;
-use sqltk::parser::ast::{Expr, Ident, ObjectName, ObjectNamePart, Set, Value, ValueWithSpan};
 pub use statement_metadata::StatementMetadata;
 use std::{
     collections::HashMap,
     sync::{
         atomic::{AtomicU64, Ordering},
-        Arc, LazyLock, RwLock,
+        Arc, RwLock,
     },
     time::{Duration, Instant},
 };
 use tokio::sync::oneshot;
 use tracing::{debug, error, warn};
-use uuid::Uuid;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Ord, PartialOrd)]
 pub struct SessionId(u64);
@@ -61,8 +62,6 @@ where
     schema_middleware: SchemaMiddleware,
     protocol_state: Arc<RwLock<ConnectionProtocolState>>,
     upstream_tls_roots: Arc<rustls::RootCertStore>,
-    unsafe_disable_mapping: bool,
-    keyset_id: Arc<RwLock<Option<KeysetIdentifier>>>,
     session_id_counter: Arc<AtomicU64>,
     transaction_status: Arc<RwLock<TransactionStatus>>,
 }
@@ -123,6 +122,8 @@ struct DescribeContext {
 
 #[derive(Debug)]
 struct ConnectionProtocolState<K = OperationId> {
+    settings: ConnectionSettings,
+    settings_protocol: settings_protocol::SettingsProtocol,
     operations: HashMap<K, OperationContext>,
     statement_metrics: HashMap<SessionId, SessionMetricsContext>,
     suspended_executions: HashMap<Name, (K, ExecuteContext)>,
@@ -135,6 +136,8 @@ struct ConnectionProtocolState<K = OperationId> {
 impl<K> Default for ConnectionProtocolState<K> {
     fn default() -> Self {
         Self {
+            settings: ConnectionSettings::default(),
+            settings_protocol: settings_protocol::SettingsProtocol::default(),
             operations: HashMap::new(),
             statement_metrics: HashMap::new(),
             suspended_executions: HashMap::new(),
@@ -150,10 +153,22 @@ impl<K> ConnectionProtocolState<K>
 where
     K: Copy + Eq + std::hash::Hash,
 {
+    fn remove_statement_metadata(&mut self, name: &Name) -> Option<SessionMetricsContext> {
+        let session_id = self.statement_metrics_scopes.remove(name);
+        self.statements.remove(name);
+        if session_id.is_some_and(|id| self.metrics_referenced(id)) {
+            None
+        } else {
+            session_id.and_then(|id| self.statement_metrics.remove(&id))
+        }
+    }
+
     fn metrics_referenced(&self, session_id: SessionId) -> bool {
-        self.statement_metrics_scopes
-            .values()
-            .any(|id| *id == session_id)
+        self.settings_protocol.references_metrics(session_id)
+            || self
+                .statement_metrics_scopes
+                .values()
+                .any(|id| *id == session_id)
             || self
                 .portals
                 .values()
@@ -332,8 +347,6 @@ where
             schema_middleware,
             encryption,
             reload_sender,
-            unsafe_disable_mapping: false,
-            keyset_id: Arc::new(RwLock::new(None)),
             session_id_counter: Arc::new(AtomicU64::new(1)),
             transaction_status: Arc::new(RwLock::new(TransactionStatus::Idle)),
         }
@@ -649,14 +662,35 @@ where
                 .protocol_state
                 .write()
                 .map_err(|_| crate::error::ContextError::ProtocolStateUnavailable)?;
-            let session_id = state.statement_metrics_scopes.remove(name);
-            state.statements.remove(name);
-            let metrics_scope_in_use = session_id.is_some_and(|id| state.metrics_referenced(id));
-            if !metrics_scope_in_use {
-                session_id.and_then(|session_id| state.statement_metrics.remove(&session_id))
-            } else {
-                None
-            }
+            state.remove_statement_metadata(name)
+        };
+        self.record_finished_metrics_scope(finished_metrics_scope);
+        Ok(())
+    }
+
+    /// Starts a speculative Parse replacement under the same lock as its
+    /// analysed statement and metrics. A rejected named replacement requires
+    /// fresh preparation rather than reusing incomplete encryption metadata.
+    pub fn begin_statement_preparation(
+        &self,
+        operation: OperationId,
+        name: &Name,
+    ) -> Result<(), Error> {
+        let finished_metrics_scope = {
+            let mut state = self
+                .protocol_state
+                .write()
+                .map_err(|_| crate::error::ContextError::ProtocolStateUnavailable)?;
+            let metadata = settings_protocol::MetadataSnapshot {
+                statement: state.statements.get(name).cloned(),
+                statement_metrics: state.statement_metrics_scopes.get(name).copied(),
+                ..Default::default()
+            };
+            state
+                .settings_protocol
+                .start_prepare(operation, name.clone());
+            state.settings_protocol.attach_metadata(operation, metadata);
+            state.remove_statement_metadata(name)
         };
         self.record_finished_metrics_scope(finished_metrics_scope);
         Ok(())
@@ -678,16 +712,18 @@ where
             .transaction_status
             .write()
             .map_err(|_| crate::error::ContextError::ProtocolStateUnavailable)? = status;
-        let Some(boundary) = boundary else {
-            return Ok(());
-        };
-
         let (finished_executions, finished_metrics_scopes) = {
             let mut state = self
                 .protocol_state
                 .write()
                 .map_err(|_| crate::error::ContextError::ProtocolStateUnavailable)?;
-            let mut candidates = Vec::new();
+            state.settings.ready_for_query(status);
+            let mut candidates = state
+                .settings_protocol
+                .ready(boundary, status == TransactionStatus::Idle);
+            let Some(boundary) = boundary else {
+                return Ok(());
+            };
             let mut executions = Vec::new();
             if status == TransactionStatus::Idle {
                 let portal_names = state
@@ -1177,173 +1213,308 @@ where
         self.schema_middleware.ready_for_query(status);
     }
 
-    /// Examines a [`sqltk::parser::ast::Statement`] and if it is precisely equal to `SET UNSAFE_DISABLE_MAPPING = {boolean};`
-    /// then it sets the flag [`Context::unsafe_disable_mapping`] to the provided `{boolean}`` value.
-    ///
-    ///
-    pub fn maybe_set_unsafe_disable_mapping(
-        &mut self,
+    pub fn prepare_settings_statement(
+        &self,
+        operation: OperationId,
+        name: Name,
         statement: &sqltk::parser::ast::Statement,
-    ) -> Option<bool> {
-        // The CIPHERSTASH. namespace prevents errors UNSAFE_DISABLE_MAPPING
-        // The constants avoid the need to allocate Vecs every time we examine the statement.
-        static SQL_SETTING_NAME_UNSAFE_DISABLE_MAPPING: LazyLock<ObjectName> =
-            LazyLock::new(|| {
-                ObjectName(vec![
-                    ObjectNamePart::Identifier(Ident::new("CIPHERSTASH")),
-                    ObjectNamePart::Identifier(Ident::new("UNSAFE_DISABLE_MAPPING")),
-                ])
-            });
+    ) -> Result<(), Error> {
+        let mut state = self
+            .protocol_state
+            .write()
+            .map_err(|_| crate::error::ContextError::ProtocolStateUnavailable)?;
+        let settings = settings_protocol::EffectiveSettings::new(&state.settings);
+        state
+            .settings_protocol
+            .prepare(operation, name, statement, settings);
+        Ok(())
+    }
 
-        if let sqltk::parser::ast::Statement::Set(Set::SingleAssignment {
-            variable, values, ..
-        }) = statement
-        {
-            if variable == &*SQL_SETTING_NAME_UNSAFE_DISABLE_MAPPING {
-                if let Some(Expr::Value(ValueWithSpan {
-                    value: Value::Boolean(value),
+    pub fn capture_prepared_settings(&self, name: &Name) -> Result<(), Error> {
+        let mut state = self
+            .protocol_state
+            .write()
+            .map_err(|_| crate::error::ContextError::ProtocolStateUnavailable)?;
+        let literal_sensitive = state
+            .statements
+            .get(name)
+            .is_some_and(|statement| statement.literal_columns.iter().any(Option::is_some));
+        state
+            .settings_protocol
+            .capture_literals(name, literal_sensitive);
+        Ok(())
+    }
+
+    pub fn bind_settings_statement(
+        &self,
+        operation: OperationId,
+        portal: Name,
+        name: &Name,
+    ) -> Result<(), Error> {
+        let mut state = self
+            .protocol_state
+            .write()
+            .map_err(|_| crate::error::ContextError::ProtocolStateUnavailable)?;
+        let settings = settings_protocol::EffectiveSettings::new(&state.settings);
+        let encrypted_values = state
+            .statements
+            .get(name)
+            .is_some_and(|statement| statement.param_columns.iter().any(Option::is_some));
+        let metadata = settings_protocol::MetadataSnapshot {
+            portal: state.portals.get(&portal).cloned(),
+            portal_operation: state.portal_operations.get(&portal).copied(),
+            suspended: state.suspended_executions.get(&portal).cloned(),
+            ..Default::default()
+        };
+        let accepted =
+            state
+                .settings_protocol
+                .bind(operation, portal, name, settings, encrypted_values);
+        state.settings_protocol.attach_metadata(operation, metadata);
+        if !accepted {
+            return Err(crate::error::MappingError::PreparedSettingsChanged.into());
+        }
+        Ok(())
+    }
+
+    pub fn execute_settings_portal(
+        &self,
+        operation: OperationId,
+        portal: &Name,
+    ) -> Result<bool, Error> {
+        let mut state = self
+            .protocol_state
+            .write()
+            .map_err(|_| crate::error::ContextError::ProtocolStateUnavailable)?;
+        let ConnectionProtocolState {
+            settings,
+            settings_protocol,
+            ..
+        } = &mut *state;
+        settings_protocol
+            .execute(operation, portal, settings)
+            .map_err(|_| crate::error::MappingError::PreparedSettingsChanged.into())
+    }
+
+    pub fn execute_simple_settings_statements(
+        &self,
+        operation: OperationId,
+        statements: &[sqltk::parser::ast::Statement],
+    ) -> Result<bool, Error> {
+        let mut state = self
+            .protocol_state
+            .write()
+            .map_err(|_| crate::error::ContextError::ProtocolStateUnavailable)?;
+        let ConnectionProtocolState {
+            settings,
+            settings_protocol,
+            ..
+        } = &mut *state;
+        Ok(settings_protocol.simple_query(operation, statements, settings))
+    }
+
+    pub fn settings_simple_query_requires_fail_closed(
+        &self,
+        statements: &[sqltk::parser::ast::Statement],
+    ) -> bool {
+        let Ok(state) = self.protocol_state.read() else {
+            return true;
+        };
+        let mut projected = state.settings.clone();
+        let mut changed = false;
+        for statement in statements {
+            if changed && eql_mapper::requires_type_check(statement) {
+                return true;
+            }
+            let command = settings::SettingsCommand::from_statement(statement);
+            changed |= command.may_change_effective(&projected);
+            projected.command_succeeded(&command, command.success_tag());
+        }
+        false
+    }
+
+    pub fn discarding_extended_messages(&self) -> Result<bool, Error> {
+        Ok(self
+            .protocol_state
+            .read()
+            .map_err(|_| crate::error::ContextError::ProtocolStateUnavailable)?
+            .settings_protocol
+            .discarding())
+    }
+
+    pub fn settings_protocol_boundary(&self, operation: OperationId) -> Result<(), Error> {
+        self.protocol_state
+            .write()
+            .map_err(|_| crate::error::ContextError::ProtocolStateUnavailable)?
+            .settings_protocol
+            .sync(operation);
+        Ok(())
+    }
+
+    pub fn settings_close_requested(
+        &self,
+        operation: OperationId,
+        close: &pg_proto::Close,
+    ) -> Result<(), Error> {
+        let mut state = self
+            .protocol_state
+            .write()
+            .map_err(|_| crate::error::ContextError::ProtocolStateUnavailable)?;
+        let metadata = match close.target {
+            DescribeTarget::Statement => settings_protocol::MetadataSnapshot {
+                statement: state.statements.get(&close.name).cloned(),
+                statement_metrics: state.statement_metrics_scopes.get(&close.name).copied(),
+                ..Default::default()
+            },
+            DescribeTarget::Portal => settings_protocol::MetadataSnapshot {
+                portal: state.portals.get(&close.name).cloned(),
+                portal_operation: state.portal_operations.get(&close.name).copied(),
+                suspended: state.suspended_executions.get(&close.name).cloned(),
+                ..Default::default()
+            },
+        };
+        state
+            .settings_protocol
+            .close(operation, close.name.clone(), close.target);
+        state.settings_protocol.attach_metadata(operation, metadata);
+        Ok(())
+    }
+
+    pub fn settings_closed(&self, operation: OperationId) -> Result<(), Error> {
+        self.settings_prepared_or_bound(operation)
+    }
+
+    pub fn settings_prepared_or_bound(&self, operation: OperationId) -> Result<(), Error> {
+        let finished = {
+            let mut state = self
+                .protocol_state
+                .write()
+                .map_err(|_| crate::error::ContextError::ProtocolStateUnavailable)?;
+            let metadata = state.settings_protocol.closed(operation);
+            state.take_unreferenced_metrics(metadata.iter().flat_map(|metadata| metadata.metrics()))
+        };
+        for metrics in finished {
+            self.record_finished_metrics_scope(Some(metrics));
+        }
+        Ok(())
+    }
+
+    pub fn settings_execution_succeeded(
+        &self,
+        operation: Option<OperationId>,
+        tag: &str,
+    ) -> Result<(), Error> {
+        let Some(operation) = operation else {
+            return Ok(());
+        };
+        let mut state = self
+            .protocol_state
+            .write()
+            .map_err(|_| crate::error::ContextError::ProtocolStateUnavailable)?;
+        let mut finished = Vec::new();
+        if let Some(statement) = state.settings_protocol.succeeded(operation) {
+            state.settings.command_succeeded(&statement, tag);
+            if matches!(
+                statement,
+                settings::SettingsCommand::Change(settings::SettingChange::DiscardAll)
+            ) {
+                let ConnectionProtocolState {
+                    settings_protocol,
+                    statements,
+                    statement_metrics_scopes,
+                    portals,
+                    portal_operations,
                     ..
-                })) = values.first()
-                {
-                    self.unsafe_disable_mapping = *value;
-                    return Some(*value);
+                } = &mut *state;
+                statements.retain(|name, _| settings_protocol.has_statement(name));
+                statement_metrics_scopes.retain(|name, _| settings_protocol.has_statement(name));
+                portals.retain(|name, _| settings_protocol.has_portal(name));
+                portal_operations.retain(|name, _| settings_protocol.has_portal(name));
+                let candidates = state.statement_metrics.keys().copied().collect::<Vec<_>>();
+                finished = state.take_unreferenced_metrics(candidates);
+            }
+        }
+        drop(state);
+        for metrics in finished {
+            self.record_finished_metrics_scope(Some(metrics));
+        }
+        Ok(())
+    }
+
+    pub fn settings_execution_failed(&self, operation: Option<OperationId>) -> Result<(), Error> {
+        let mut state = self
+            .protocol_state
+            .write()
+            .map_err(|_| crate::error::ContextError::ProtocolStateUnavailable)?;
+        let mut candidates = Vec::new();
+        for restore in state.settings_protocol.failed(operation) {
+            if restore.statement {
+                candidates.extend(state.statement_metrics_scopes.remove(&restore.name));
+                state.statements.remove(&restore.name);
+                if let Some(statement) = restore.metadata.statement {
+                    state.statements.insert(restore.name.clone(), statement);
+                }
+                if let Some(metrics) = restore.metadata.statement_metrics {
+                    state.statement_metrics_scopes.insert(restore.name, metrics);
+                }
+            } else {
+                candidates.extend(
+                    state
+                        .portals
+                        .remove(&restore.name)
+                        .and_then(|portal| portal.session_id()),
+                );
+                state.portal_operations.remove(&restore.name);
+                candidates.extend(
+                    state
+                        .suspended_executions
+                        .remove(&restore.name)
+                        .and_then(|(_, execute)| execute.session_id()),
+                );
+                if let Some(suspended) = restore.metadata.suspended {
+                    state
+                        .suspended_executions
+                        .insert(restore.name.clone(), suspended);
+                }
+                if let Some(portal) = restore.metadata.portal {
+                    state.portals.insert(restore.name.clone(), portal);
+                }
+                if let Some(operation) = restore.metadata.portal_operation {
+                    state.portal_operations.insert(restore.name, operation);
                 }
             }
         }
-        None
-    }
-
-    pub fn unsafe_disable_mapping(&mut self) -> bool {
-        self.unsafe_disable_mapping
-    }
-
-    /// Examines a [`sqltk::parser::ast::Statement`] and if it is precisely equal to `SET CIPHERSTASH.KEYSET_ID = {keyset_id};`
-    /// then it sets the [`Context::keyset_id`] to the provided `{keyset_id}`` value.
-    ///
-    ///
-    pub fn maybe_set_keyset_id(
-        &mut self,
-        statement: &sqltk::parser::ast::Statement,
-    ) -> Result<Option<KeysetIdentifier>, Error> {
-        // The CIPHERSTASH. namespace prevents errors KEYSET_ID
-        // The constants avoid the need to allocate Vecs every time we examine the statement.
-        static SQL_SETTING_NAME_KEYSET_ID: LazyLock<ObjectName> = LazyLock::new(|| {
-            ObjectName(vec![
-                ObjectNamePart::Identifier(Ident::new("CIPHERSTASH")),
-                ObjectNamePart::Identifier(Ident::new("KEYSET_ID")),
-            ])
-        });
-
-        if let sqltk::parser::ast::Statement::Set(Set::SingleAssignment {
-            variable, values, ..
-        }) = statement
-        {
-            if variable == &*SQL_SETTING_NAME_KEYSET_ID {
-                if let Some(Expr::Value(ValueWithSpan { value, .. })) = values.first() {
-                    let value_str = match value {
-                        Value::SingleQuotedString(s) | Value::DoubleQuotedString(s) => s.clone(),
-                        Value::Number(n, _) => n.to_string(),
-                        _ => {
-                            let err = EncryptError::KeysetIdCouldNotBeSet;
-                            warn!(target: CONTEXT, client_id = self.client_id, msg = err.to_string());
-                            return Ok(None);
-                        }
-                    };
-                    let keyset_id = Uuid::parse_str(&value_str).map_err(|_| {
-                        EncryptError::KeysetIdCouldNotBeParsed {
-                            id: value_str.to_owned(),
-                        }
-                    })?;
-
-                    debug!(target: CONTEXT, client_id = self.client_id, msg = "Set KeysetId", ?keyset_id);
-
-                    let identifier = KeysetIdentifier(IdentifiedBy::Uuid(keyset_id));
-                    let _ = self
-                        .keyset_id
-                        .write()
-                        .map(|mut guard| *guard = Some(identifier.clone()));
-
-                    return Ok(Some(identifier));
-                } else {
-                    let err = EncryptError::KeysetIdCouldNotBeSet;
-                    warn!(target: CONTEXT, client_id = self.client_id, msg = err.to_string());
-                    // We let the database handle any syntax errors to avoid complexifying the fronted flow (more)
-                }
-            }
+        state.settings.execution_failed();
+        candidates.extend(state.statement_metrics.keys().copied());
+        let finished = state.take_unreferenced_metrics(candidates);
+        drop(state);
+        for metrics in finished {
+            self.record_finished_metrics_scope(Some(metrics));
         }
-        Ok(None)
+        Ok(())
     }
 
-    /// Examines a [`sqltk::parser::ast::Statement`] and if it is precisely equal to `SET CIPHERSTASH.KEYSET_NAME = {keyset_name};`
-    /// then it sets the [`Context::keyset_id`] to the provided `{keyset_name}`` value.
-    ///
-    ///
-    pub fn maybe_set_keyset_name(
-        &mut self,
-        statement: &sqltk::parser::ast::Statement,
-    ) -> Result<Option<KeysetIdentifier>, Error> {
-        // The CIPHERSTASH. namespace prevents errors KEYSET_NAME
-        // The constants avoid the need to allocate Vecs every time we examine the statement.
-        static SQL_SETTING_NAME_KEYSET_NAME: LazyLock<ObjectName> = LazyLock::new(|| {
-            ObjectName(vec![
-                ObjectNamePart::Identifier(Ident::new("CIPHERSTASH")),
-                ObjectNamePart::Identifier(Ident::new("KEYSET_NAME")),
-            ])
-        });
-
-        if let sqltk::parser::ast::Statement::Set(Set::SingleAssignment {
-            variable, values, ..
-        }) = statement
-        {
-            if variable == &*SQL_SETTING_NAME_KEYSET_NAME {
-                // Try to extract keyset name from Value (quoted string/number) or Identifier (unquoted)
-                let keyset_name = match values.first() {
-                    Some(Expr::Value(ValueWithSpan { value, .. })) => match value {
-                        Value::SingleQuotedString(s) | Value::DoubleQuotedString(s) => {
-                            Some(s.clone())
-                        }
-                        Value::Number(n, _) => Some(n.to_string()),
-                        _ => None,
-                    },
-                    Some(Expr::Identifier(ident)) => Some(ident.value.clone()),
-                    _ => None,
-                };
-
-                if let Some(keyset_name) = keyset_name {
-                    debug!(target: CONTEXT, client_id = self.client_id, msg = "Set KeysetName", ?keyset_name);
-
-                    let identifier = KeysetIdentifier(IdentifiedBy::Name(keyset_name.into()));
-                    let _ = self
-                        .keyset_id
-                        .write()
-                        .map(|mut guard| *guard = Some(identifier.clone()));
-
-                    return Ok(Some(identifier));
-                } else {
-                    let err = EncryptError::KeysetNameCouldNotBeSet;
-                    warn!(target: CONTEXT, client_id = self.client_id, msg = err.to_string());
-                    // We let the database handle any syntax errors to avoid complexifying the frontend flow
-                }
-            }
-        }
-        Ok(None)
+    pub fn settings_in_flight(&self) -> bool {
+        self.protocol_state
+            .read()
+            .map(|state| state.settings_protocol.in_flight())
+            .unwrap_or(true)
     }
 
-    /// Single entry point for setting keyset identifiers by either ID or name.
-    /// Tries to set keyset_id first, then keyset_name if that doesn't match.
-    ///
-    pub fn maybe_set_keyset(
-        &mut self,
-        statement: &sqltk::parser::ast::Statement,
-    ) -> Result<Option<KeysetIdentifier>, Error> {
-        match self.maybe_set_keyset_id(statement)? {
-            Some(identifier) => Ok(Some(identifier)),
-            None => self.maybe_set_keyset_name(statement),
-        }
+    pub fn unsafe_disable_mapping(&self) -> Result<bool, Error> {
+        let state = self
+            .protocol_state
+            .read()
+            .map_err(|_| crate::error::ContextError::ProtocolStateUnavailable)?;
+        Ok(state.settings.unsafe_disable_mapping())
     }
 
-    pub fn keyset_identifier(&self) -> Option<KeysetIdentifier> {
-        self.keyset_id.read().ok().and_then(|k| k.clone())
+    pub fn keyset_identifier(&self) -> Result<Option<KeysetIdentifier>, Error> {
+        let state = self
+            .protocol_state
+            .read()
+            .map_err(|_| crate::error::ContextError::ProtocolStateUnavailable)?;
+        Ok(state.settings.keyset())
     }
 
     // Service delegation methods
@@ -1358,7 +1529,7 @@ where
                 .collect());
         }
 
-        let keyset_id = self.keyset_identifier();
+        let keyset_id = self.keyset_identifier()?;
 
         self.encryption
             .encrypt(keyset_id, plaintexts, columns)
@@ -1369,7 +1540,7 @@ where
         &self,
         ciphertexts: Vec<Option<crate::EqlCiphertext>>,
     ) -> Result<Vec<Option<cipherstash_client::encryption::Plaintext>>, Error> {
-        let keyset_id = self.keyset_identifier();
+        let keyset_id = self.keyset_identifier()?;
         self.encryption.decrypt(keyset_id, ciphertexts).await
     }
 
@@ -1377,7 +1548,7 @@ where
         &self,
         ciphertexts: Vec<Option<crate::EqlCiphertext>>,
     ) -> Result<Vec<Option<cipherstash_client::encryption::Plaintext>>, Error> {
-        let keyset_id = self.keyset_identifier();
+        let keyset_id = self.keyset_identifier()?;
         self.encryption
             .decrypt_inbound_eql(keyset_id, ciphertexts)
             .await
@@ -1635,13 +1806,10 @@ mod tests {
         proxy::{EncryptConfig, EncryptionService},
         TandemConfig,
     };
-    use cipherstash_client::IdentifiedBy;
     use eql_mapper::Schema;
     use pg_proto::{Describe, DescribeTarget, TransactionStatus};
-    use sqltk::parser::{dialect::PostgreSqlDialect, parser::Parser};
     use std::sync::Arc;
     use tokio::sync::mpsc;
-    use uuid::Uuid;
 
     #[derive(Clone)]
     struct TestService {}
@@ -1672,6 +1840,33 @@ mod tests {
         ) -> Result<Vec<Option<cipherstash_client::encryption::Plaintext>>, Error> {
             Ok(vec![])
         }
+    }
+
+    #[tokio::test]
+    async fn unavailable_settings_refuse_encryption_instead_of_using_default_keyset() {
+        let context = create_context();
+        let protocol_state = context.protocol_state.clone();
+        let _ = std::thread::spawn(move || {
+            let _guard = protocol_state.write().unwrap();
+            panic!("poison protocol state");
+        })
+        .join();
+        // The service fake succeeds if called; inaccessible settings must stop
+        // the request before it can encrypt under an unintended default keyset.
+        let result = context
+            .encrypt(
+                vec![Some(cipherstash_client::encryption::Plaintext::Text(Some(
+                    "secret".to_owned(),
+                )))],
+                &[None],
+            )
+            .await;
+        assert!(matches!(
+            result,
+            Err(Error::Context(
+                crate::error::ContextError::ProtocolStateUnavailable
+            ))
+        ));
     }
 
     #[test]
@@ -1967,6 +2162,122 @@ mod tests {
             service,
             reload_sender,
         )
+    }
+
+    #[test]
+    fn pipelined_batch_failure_rebases_analysed_metadata_without_replacing_later_work() {
+        let context = create_context();
+        let name = Name::from_static(b"same_name");
+        let install = || {
+            let operation = operation_id();
+            context
+                .begin_statement_preparation(operation, &name)
+                .unwrap();
+            context
+                .prepare_settings_statement(
+                    operation,
+                    name.clone(),
+                    &crate::postgresql::parser::SqlParser::parse_statement("SELECT 1").unwrap(),
+                )
+                .unwrap();
+            context.add_statement(name.clone(), statement()).unwrap();
+            (operation, context.get_statement(&name).unwrap().unwrap())
+        };
+        let (original, original_metadata) = install();
+        context.settings_prepared_or_bound(original).unwrap();
+        let (rejected, _) = install();
+        context.settings_protocol_boundary(operation_id()).unwrap();
+        let (later, later_metadata) = install();
+        context.settings_execution_failed(Some(rejected)).unwrap();
+        assert!(Arc::ptr_eq(
+            &context.get_statement(&name).unwrap().unwrap(),
+            &later_metadata
+        ));
+        assert!(!context.discarding_extended_messages().unwrap());
+        context.settings_execution_failed(Some(later)).unwrap();
+        assert!(Arc::ptr_eq(
+            &context.get_statement(&name).unwrap().unwrap(),
+            &original_metadata
+        ));
+    }
+
+    #[test]
+    fn rollback_batch_is_refused_when_it_can_restore_another_keyset() {
+        let context = create_context();
+        let parse = |sql| crate::postgresql::parser::SqlParser::parse_statement(sql).unwrap();
+        {
+            let mut state = context.protocol_state.write().unwrap();
+            state
+                .settings
+                .execution_succeeded(&parse("SET CIPHERSTASH.KEYSET_NAME = 'session'"), "SET");
+            state.settings.ready_for_query(TransactionStatus::Idle);
+            state.settings.execution_succeeded(&parse("BEGIN"), "BEGIN");
+            state
+                .settings
+                .execution_succeeded(&parse("SAVEPOINT before_local"), "SAVEPOINT");
+            state
+                .settings
+                .execution_succeeded(&parse("SET LOCAL CIPHERSTASH.KEYSET_NAME = 'local'"), "SET");
+        }
+        for sql in [
+            "ROLLBACK; SELECT 1",
+            "COMMIT; SELECT 1",
+            "ROLLBACK TO before_local; SELECT 1",
+            "RESET ALL; SELECT 1",
+        ] {
+            assert!(
+                context.settings_simple_query_requires_fail_closed(
+                    &crate::postgresql::parser::SqlParser::parse_statements(sql).unwrap()
+                ),
+                "{sql}"
+            );
+        }
+    }
+
+    #[test]
+    fn review_r03_rejected_parse_removes_its_analysed_metadata() {
+        let context = create_context();
+        let name = Name::from_static(b"named");
+        let parse_sql = |sql| crate::postgresql::parser::SqlParser::parse_statement(sql).unwrap();
+        let original = operation_id();
+        context
+            .begin_statement_preparation(original, &name)
+            .unwrap();
+        context
+            .prepare_settings_statement(original, name.clone(), &parse_sql("BEGIN"))
+            .unwrap();
+        context.settings_prepared_or_bound(original).unwrap();
+        let rejected = operation_id();
+        context
+            .begin_statement_preparation(rejected, &name)
+            .unwrap();
+        context
+            .prepare_settings_statement(rejected, name.clone(), &parse_sql("SELECT 1"))
+            .unwrap();
+        context.add_statement(name.clone(), statement()).unwrap();
+        context.settings_execution_failed(Some(rejected)).unwrap();
+        assert!(!context
+            .protocol_state
+            .read()
+            .unwrap()
+            .statements
+            .contains_key(&name));
+    }
+
+    #[test]
+    fn review_r05_plain_transaction_and_reset_batches_are_allowed() {
+        let context = create_context();
+        for sql in [
+            "ROLLBACK; SELECT now()",
+            "COMMIT; SELECT 1",
+            "RESET ALL; SELECT 1",
+        ] {
+            let statements = crate::postgresql::parser::SqlParser::parse_statements(sql).unwrap();
+            assert!(
+                !context.settings_simple_query_requires_fail_closed(&statements),
+                "{sql}"
+            );
+        }
     }
 
     #[tokio::test]
@@ -2532,249 +2843,5 @@ mod tests {
         assert_eq!(statement_2, get_statement(portal));
         context.close_portal(&portal_name).unwrap();
         assert!(context.get_portal(&portal_name).unwrap().is_none());
-    }
-
-    fn parse_statement(sql: &str) -> sqltk::parser::ast::Statement {
-        let statements = Parser::new(&PostgreSqlDialect {})
-            .try_with_sql(sql)
-            .unwrap()
-            .parse_statements()
-            .unwrap();
-
-        statements.first().unwrap().clone()
-    }
-
-    #[test]
-    pub fn disable_mapping() {
-        log::init(LogConfig::default());
-
-        let mut context = create_context();
-
-        let sql = "SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING = true";
-        let statement = parse_statement(sql);
-
-        context.maybe_set_unsafe_disable_mapping(&statement);
-        assert!(context.unsafe_disable_mapping());
-
-        let sql = "SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING = false";
-        let statement = parse_statement(sql);
-
-        context.maybe_set_unsafe_disable_mapping(&statement);
-        assert!(!context.unsafe_disable_mapping());
-
-        let sql = "SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING = 1";
-        let statement = parse_statement(sql);
-
-        context.maybe_set_unsafe_disable_mapping(&statement);
-        assert!(!context.unsafe_disable_mapping());
-
-        let sql = "SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING = '1'";
-        let statement = parse_statement(sql);
-
-        context.maybe_set_unsafe_disable_mapping(&statement);
-        assert!(!context.unsafe_disable_mapping());
-
-        let sql = "SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING = t";
-        let statement = parse_statement(sql);
-
-        context.maybe_set_unsafe_disable_mapping(&statement);
-        assert!(!context.unsafe_disable_mapping());
-    }
-
-    #[test]
-    pub fn set_keyset_id() {
-        log::init(LogConfig::default());
-
-        let uuid = Uuid::parse_str("7d4cbd7f-ba0d-4985-9ed2-ebe2ffe77590").unwrap();
-
-        let identifier = KeysetIdentifier(IdentifiedBy::Uuid(uuid));
-
-        let sql = vec![
-            "SET CIPHERSTASH.KEYSET_ID = '7d4cbd7f-ba0d-4985-9ed2-ebe2ffe77590'",
-            "SET SESSION CIPHERSTASH.KEYSET_ID = '7d4cbd7f-ba0d-4985-9ed2-ebe2ffe77590'",
-            "SET CIPHERSTASH.KEYSET_ID TO '7d4cbd7f-ba0d-4985-9ed2-ebe2ffe77590'",
-        ];
-
-        for s in sql {
-            let mut context = create_context();
-            assert!(context.keyset_identifier().is_none());
-
-            let statement = parse_statement(s);
-            let result = context.maybe_set_keyset_id(&statement);
-
-            // OK and has a value
-            assert!(result.is_ok());
-            assert!(result.unwrap().is_some());
-
-            // keyset id set
-            assert_eq!(Some(identifier.clone()), context.keyset_identifier());
-        }
-    }
-
-    #[test]
-    pub fn set_keyset_id_error_handling() {
-        log::init(LogConfig::default());
-
-        let mut context = create_context();
-
-        // Returns OK if unknown command
-        let sql = "SET CIPHERSTASH.BLAH = 'keyset_id'";
-        let statement = parse_statement(sql);
-
-        let result = context.maybe_set_keyset_id(&statement);
-        assert!(result.is_ok());
-
-        // Value is NONE as nothing was set
-        let value = result.unwrap();
-        assert!(value.is_none());
-
-        // Returns OK(None) if SET but badly formatted (no quotes)
-        let sql = "SET CIPHERSTASH.KEYSET_ID = d74cbd7fba0d49859ed2ebe2ffe77590";
-        let statement = parse_statement(sql);
-
-        let result = context.maybe_set_keyset_id(&statement);
-
-        assert!(result.is_ok());
-        assert!(result.unwrap().is_none());
-
-        // Returns ERROR if SET but not UUIOD
-        let sql = "SET CIPHERSTASH.KEYSET_ID = 'keyset_id'";
-        let statement = parse_statement(sql);
-
-        let result = context.maybe_set_keyset_id(&statement);
-
-        assert!(result.is_err());
-    }
-
-    #[test]
-    pub fn set_keyset_name() {
-        log::init(LogConfig::default());
-
-        let sql = vec![
-            "SET CIPHERSTASH.KEYSET_NAME = 'test-keyset'",
-            "SET SESSION CIPHERSTASH.KEYSET_NAME = 'test-keyset'",
-            "SET CIPHERSTASH.KEYSET_NAME TO 'test-keyset'",
-        ];
-
-        for s in sql {
-            let mut context = create_context();
-            assert!(context.keyset_identifier().is_none());
-
-            let statement = parse_statement(s);
-            let result = context.maybe_set_keyset_name(&statement);
-
-            let identifier = KeysetIdentifier(IdentifiedBy::Name("test-keyset".to_string().into()));
-
-            // OK and has a value
-            assert!(result.is_ok());
-            assert!(result.unwrap().is_some());
-
-            assert_eq!(Some(identifier.clone()), context.keyset_identifier());
-        }
-    }
-
-    #[test]
-    pub fn set_keyset_name_error_handling() {
-        log::init(LogConfig::default());
-
-        let mut context = create_context();
-
-        // Returns OK if unknown command
-        let sql = "SET CIPHERSTASH.BLAH = 'keyset_name'";
-        let statement = parse_statement(sql);
-
-        let result = context.maybe_set_keyset_name(&statement);
-        assert!(result.is_ok());
-
-        // Value is NONE as nothing was set
-        let value = result.unwrap();
-        assert!(value.is_none());
-
-        // Returns OK(None) if SET but badly formatted (unquoted)
-        let sql = "SET CIPHERSTASH.KEYSET_NAME = test-keyset";
-        let statement = parse_statement(sql);
-
-        let result = context.maybe_set_keyset_name(&statement);
-        assert!(result.is_ok());
-        assert!(result.unwrap().is_none());
-
-        // Returns OK(Some) if SET with number value (now supported)
-        let sql = "SET CIPHERSTASH.KEYSET_NAME = 123";
-        let statement = parse_statement(sql);
-
-        let identifier = KeysetIdentifier(IdentifiedBy::Name("123".to_string().into()));
-        let result = context.maybe_set_keyset_name(&statement);
-        assert!(result.is_ok());
-        assert!(result.unwrap().is_some());
-        assert_eq!(Some(identifier.clone()), context.keyset_identifier());
-    }
-
-    #[test]
-    pub fn set_keyset_supports_numbers() {
-        log::init(LogConfig::default());
-
-        // Test keyset name with number
-        let mut context = create_context();
-        let sql = "SET CIPHERSTASH.KEYSET_NAME = 12345";
-        let statement = parse_statement(sql);
-
-        let identifier = KeysetIdentifier(IdentifiedBy::Name("12345".to_string().into()));
-        let result = context.maybe_set_keyset_name(&statement);
-        assert!(result.is_ok());
-        assert!(result.unwrap().is_some());
-        assert_eq!(Some(identifier.clone()), context.keyset_identifier());
-
-        // Test keyset id with numeric UUID (should work if it's a valid UUID)
-        let mut context = create_context();
-        // This will fail because 123 is not a valid UUID, but it shows the number is processed
-        let sql = "SET CIPHERSTASH.KEYSET_ID = 123";
-        let statement = parse_statement(sql);
-        let result = context.maybe_set_keyset_id(&statement);
-
-        // Should return error because 123 is not a valid UUID
-        assert!(result.is_err());
-    }
-
-    #[test]
-    pub fn maybe_set_keyset_unified_function() {
-        log::init(LogConfig::default());
-
-        // Test that maybe_set_keyset handles both ID and name
-        let mut context = create_context();
-
-        // Test with keyset ID
-        let keyset_id_sql = "SET CIPHERSTASH.KEYSET_ID = '7d4cbd7f-ba0d-4985-9ed2-ebe2ffe77590'";
-        let statement = parse_statement(keyset_id_sql);
-
-        let uuid = Uuid::parse_str("7d4cbd7f-ba0d-4985-9ed2-ebe2ffe77590").unwrap();
-
-        let identifier = KeysetIdentifier(IdentifiedBy::Uuid(uuid));
-        let result = context.maybe_set_keyset(&statement);
-
-        assert!(result.is_ok());
-        assert!(result.unwrap().is_some());
-        assert_eq!(Some(identifier.clone()), context.keyset_identifier());
-
-        // Test with keyset name
-        let mut context = create_context();
-        let keyset_name_sql = "SET CIPHERSTASH.KEYSET_NAME = 'test-keyset'";
-        let statement = parse_statement(keyset_name_sql);
-
-        let identifier = KeysetIdentifier(IdentifiedBy::Name("test-keyset".to_string().into()));
-        let result = context.maybe_set_keyset(&statement);
-
-        assert!(result.is_ok());
-        assert!(result.unwrap().is_some());
-        assert_eq!(Some(identifier.clone()), context.keyset_identifier());
-
-        // Test with unknown command
-        let mut context = create_context();
-        let unknown_sql = "SET CIPHERSTASH.UNKNOWN = 'value'";
-        let statement = parse_statement(unknown_sql);
-        let result = context.maybe_set_keyset(&statement);
-
-        assert!(result.is_ok());
-        let identifier = result.unwrap();
-        assert!(identifier.is_none());
     }
 }
