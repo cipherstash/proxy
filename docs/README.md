@@ -10,6 +10,7 @@ This directory contains the documentation for the CipherStash Proxy.
 
 * [CipherStash Proxy reference](reference/index.md)
 * [Message handling flow diagrams](reference/message-flow.md)
+* [Connection poolers: supported topologies](reference/connection-poolers.md)
 * [Encrypt tool guide](reference/encrypt-tool.md)
 * [Searchable JSON Functions & Operators](reference/searchable-json.md)
 
