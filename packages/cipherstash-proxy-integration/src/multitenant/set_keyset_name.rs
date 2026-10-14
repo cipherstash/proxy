@@ -12,6 +12,69 @@ mod tests {
         trace, PROXY,
     };
 
+    /// Pipelined SET LOCAL must finish before the dependent Bind is encrypted,
+    /// so ciphertext and search terms use the transaction's local keyset.
+    #[tokio::test]
+    async fn pipelined_set_local_encrypts_bound_parameters_with_the_local_keyset() {
+        let local_keyset = std::env::var("CS_TENANT_KEYSET_ID_2")
+            .or_else(|_| std::env::var("CS_DEFAULT_KEYSET_ID"))
+            .expect("Set CS_TENANT_KEYSET_ID_2 or CS_DEFAULT_KEYSET_ID to an accessible keyset ID; run Proxy without a default keyset for this multitenant test");
+        let local_keyset = uuid::Uuid::parse_str(&local_keyset)
+            .expect("The pipeline test keyset ID must be a UUID");
+        // This session value is deliberately unavailable. If Bind runs before
+        // SET LOCAL succeeds, encryption fails instead of concealing stale state.
+        let session_keyset = uuid::Uuid::new_v4();
+        assert_ne!(session_keyset, local_keyset);
+        let client = connect_with_tls(*PROXY).await;
+        client
+            .batch_execute(&format!("SET CIPHERSTASH.KEYSET_ID = '{session_keyset}'"))
+            .await
+            .unwrap();
+        let begin = client.prepare("BEGIN").await.unwrap();
+        let local = client
+            .prepare(&format!(
+                "SET LOCAL CIPHERSTASH.KEYSET_ID = '{local_keyset}'"
+            ))
+            .await
+            .unwrap();
+        let insert = client
+            .prepare("INSERT INTO encrypted (id, encrypted_int4) VALUES ($1, $2)")
+            .await
+            .unwrap();
+        let id = random_id();
+        let value = 4922_i32;
+        let params: &[&(dyn tokio_postgres::types::ToSql + Sync)] = &[&id, &value];
+
+        // Each future is polled in wire order before any response is awaited.
+        // Prepared inputs ensure the dependent request already contains Bind.
+        let (began, changed, inserted) = tokio::join!(
+            biased;
+            client.execute(&begin, &[]),
+            client.execute(&local, &[]),
+            client.execute(&insert, params),
+        );
+        began.unwrap();
+        changed.unwrap();
+        assert_eq!(inserted.unwrap(), 1);
+        client.batch_execute("COMMIT").await.unwrap();
+
+        // A fresh connection must match the local tenant's encrypted search
+        // terms and decrypt the value, independently of the writer's state.
+        let reader = connect_with_tls(*PROXY).await;
+        reader
+            .batch_execute(&format!("SET CIPHERSTASH.KEYSET_ID = '{local_keyset}'"))
+            .await
+            .unwrap();
+        let row = reader
+            .query_one(
+                "SELECT encrypted_int4 FROM encrypted WHERE id = $1 AND encrypted_int4 = $2",
+                &[&id, &value],
+            )
+            .await
+            .unwrap();
+        assert_eq!(row.get::<_, i32>(0), value);
+    }
+
     ///
     /// Tests that the `SET CIPHERSTASH.KEYSET_NAME = 'keyset_name'` command is handled correctly
     /// Test both extended and simple query protocols

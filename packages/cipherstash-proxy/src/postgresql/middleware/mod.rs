@@ -1,5 +1,7 @@
 mod backend;
 mod frontend;
+#[cfg(test)]
+mod settings_rollback_tests;
 
 use super::Context;
 use crate::{error::Error, proxy::EncryptionService};
