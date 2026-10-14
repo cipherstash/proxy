@@ -3,6 +3,11 @@ name = "cipherstash-proxy-integration"
 version = "0.1.0"
 edition = "2021"
 
+[features]
+# Connection pooler compatibility matrix (src/pooler). Needs the services in
+# tests/docker-compose.poolers.yml; run with `mise run test:poolers`.
+pooler-tests = []
+
 [dependencies]
 bytes = "1.10.1"
 cipherstash-client = { workspace = true, features = ["tokio"] }

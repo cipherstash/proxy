@@ -1,0 +1,197 @@
+# Connection pooler compatibility matrix (`mise run test:poolers`).
+#
+# Layered on top of docker-compose.yml, which provides the `postgres` and
+# `proxy` services and the `postgres` network:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.poolers.yml up ...
+#
+# Topologies under test:
+#
+#   app -> pooler -> Proxy -> PostgreSQL   the pooler's upstream is `proxy` (default
+#                                          keyset) or `proxy-mt` (no default keyset)
+#   app -> Proxy -> pooler -> PostgreSQL   one `proxy-via-<pooler>` per pooler
+#
+# Each pooler serves both pool modes through database aliases; see
+# poolers/pgbouncer/pgbouncer.ini. Host ports:
+#
+#   6432 proxy                        6442 proxy-mt
+#   6461 pgbouncer-1-19               6451 proxy-via-pgbouncer-1-19
+#   6462 pgbouncer-1-24               6452 proxy-via-pgbouncer-1-24
+#   6463 pgbouncer-1-24-ps            6453 proxy-via-pgbouncer-1-24-ps
+#   6464 pgcat-1-2                    6454 proxy-via-pgcat-1-2
+#   6465 pgcat-1-2-ps                 6455 proxy-via-pgcat-1-2-ps
+
+x-proxy-environment: &proxy-environment
+  CS_DATABASE__NAME: ${CS_DATABASE__NAME}
+  CS_DATABASE__USERNAME: ${CS_DATABASE__USERNAME}
+  CS_DATABASE__PASSWORD: ${CS_DATABASE__PASSWORD}
+  CS_DATABASE__HOST: postgres
+  CS_DATABASE__PORT: "5532"
+  CS_CLIENT_ACCESS_KEY: ${CS_CLIENT_ACCESS_KEY}
+  CS_DEFAULT_KEYSET_ID: ${CS_DEFAULT_KEYSET_ID}
+  CS_CLIENT_KEY: ${CS_CLIENT_KEY}
+  CS_CLIENT_ID: ${CS_CLIENT_ID}
+  CS_WORKSPACE_CRN: ${CS_WORKSPACE_CRN}
+  CS_CTS_HOST: ${CS_CTS_HOST:-}
+  CS_ZEROKMS_HOST: ${CS_ZEROKMS_HOST:-}
+  CS_PROMETHEUS__ENABLED: "false"
+  CS_SERVER__WORKER_THREADS: "2"
+  CS_LOG__FORMAT: ${CS_LOG__FORMAT:-pretty}
+  CS_LOG__LEVEL: ${CS_LOG__LEVEL:-info}
+  CS_LOG__CONTEXT_LEVEL: ${CS_LOG__CONTEXT_LEVEL:-debug}
+
+x-proxy: &proxy
+  image: cipherstash/proxy:latest
+  # Never pull: the image is built from source by `mise run test:poolers`.
+  pull_policy: never
+  networks:
+    - postgres
+  stop_grace_period: 5s
+
+x-pgbouncer: &pgbouncer
+  networks:
+    - postgres
+
+x-pgcat: &pgcat
+  image: cipherstash/proxy-test-pgcat:1.2.0
+  build:
+    context: ./poolers/pgcat
+  pull_policy: never
+  entrypoint: ["/bin/sh", "-c"]
+  command:
+    - >-
+      sed "s/@PREPARED_STATEMENTS_CACHE_SIZE@/$${PGCAT_PREPARED_STATEMENTS_CACHE_SIZE}/"
+      /etc/pgcat/pgcat.toml.template > /tmp/pgcat.toml
+      && exec pgcat /tmp/pgcat.toml
+  volumes:
+    - ./poolers/pgcat/pgcat.toml.template:/etc/pgcat/pgcat.toml.template:ro
+  networks:
+    - postgres
+
+services:
+  # Proxy without a default keyset: clients must `SET CIPHERSTASH.KEYSET_*`.
+  proxy-mt:
+    <<: *proxy
+    container_name: proxy-mt
+    ports:
+      - 6442:6432
+    environment:
+      <<: *proxy-environment
+      CS_DEFAULT_KEYSET_ID: ""
+
+  pgbouncer-1-19:
+    <<: *pgbouncer
+    image: cipherstash/proxy-test-pgbouncer:1.19
+    build:
+      context: ./poolers/pgbouncer
+      args:
+        ALPINE_VERSION: "3.18"
+    container_name: pgbouncer-1-19
+    ports:
+      - 6461:6432
+
+  pgbouncer-1-24:
+    <<: *pgbouncer
+    image: cipherstash/proxy-test-pgbouncer:1.24
+    build:
+      context: ./poolers/pgbouncer
+      args:
+        ALPINE_VERSION: "3.22"
+    container_name: pgbouncer-1-24
+    environment:
+      PGBOUNCER_MAX_PREPARED_STATEMENTS: "0"
+    ports:
+      - 6462:6432
+
+  pgbouncer-1-24-ps:
+    <<: *pgbouncer
+    image: cipherstash/proxy-test-pgbouncer:1.24
+    build:
+      context: ./poolers/pgbouncer
+      args:
+        ALPINE_VERSION: "3.22"
+    container_name: pgbouncer-1-24-ps
+    environment:
+      PGBOUNCER_MAX_PREPARED_STATEMENTS: "200"
+    ports:
+      - 6463:6432
+
+  pgcat-1-2:
+    <<: *pgcat
+    container_name: pgcat-1-2
+    environment:
+      PGCAT_PREPARED_STATEMENTS_CACHE_SIZE: "0"
+    ports:
+      - 6464:6432
+
+  pgcat-1-2-ps:
+    <<: *pgcat
+    container_name: pgcat-1-2-ps
+    environment:
+      PGCAT_PREPARED_STATEMENTS_CACHE_SIZE: "500"
+    ports:
+      - 6465:6432
+
+  # app -> Proxy -> pooler -> PostgreSQL.
+  # Proxy forwards the client's startup `database` upstream unchanged, so a
+  # client selects the pool mode by connecting with dbname `pg_session` or
+  # `pg_txn`. Proxy's own schema loader uses `pg_schema`.
+  proxy-via-pgbouncer-1-19:
+    <<: *proxy
+    container_name: proxy-via-pgbouncer-1-19
+    depends_on: [pgbouncer-1-19]
+    ports:
+      - 6451:6432
+    environment:
+      <<: *proxy-environment
+      CS_DATABASE__HOST: pgbouncer-1-19
+      CS_DATABASE__PORT: "6432"
+      CS_DATABASE__NAME: pg_schema
+
+  proxy-via-pgbouncer-1-24:
+    <<: *proxy
+    container_name: proxy-via-pgbouncer-1-24
+    depends_on: [pgbouncer-1-24]
+    ports:
+      - 6452:6432
+    environment:
+      <<: *proxy-environment
+      CS_DATABASE__HOST: pgbouncer-1-24
+      CS_DATABASE__PORT: "6432"
+      CS_DATABASE__NAME: pg_schema
+
+  proxy-via-pgbouncer-1-24-ps:
+    <<: *proxy
+    container_name: proxy-via-pgbouncer-1-24-ps
+    depends_on: [pgbouncer-1-24-ps]
+    ports:
+      - 6453:6432
+    environment:
+      <<: *proxy-environment
+      CS_DATABASE__HOST: pgbouncer-1-24-ps
+      CS_DATABASE__PORT: "6432"
+      CS_DATABASE__NAME: pg_schema
+
+  proxy-via-pgcat-1-2:
+    <<: *proxy
+    container_name: proxy-via-pgcat-1-2
+    depends_on: [pgcat-1-2]
+    ports:
+      - 6454:6432
+    environment:
+      <<: *proxy-environment
+      CS_DATABASE__HOST: pgcat-1-2
+      CS_DATABASE__PORT: "6432"
+      CS_DATABASE__NAME: pg_schema
+
+  proxy-via-pgcat-1-2-ps:
+    <<: *proxy
+    container_name: proxy-via-pgcat-1-2-ps
+    depends_on: [pgcat-1-2-ps]
+    ports:
+      - 6455:6432
+    environment:
+      <<: *proxy-environment
+      CS_DATABASE__HOST: pgcat-1-2-ps
+      CS_DATABASE__PORT: "6432"
+      CS_DATABASE__NAME: pg_schema
