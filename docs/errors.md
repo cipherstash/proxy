@@ -286,6 +286,48 @@ pipeline them; Proxy defers dependent mapping until PostgreSQL reports the DDL o
 <!-- ---------------------------------------------------------------------------------------------------- -->
 
 
+## Dependent statement after settings <a id='mapping-dependent-statement-after-settings'></a>
+
+A simple-query batch changes CipherStash settings before a statement whose mapping depends on
+those settings. Proxy must know that the settings command succeeded before it encrypts the
+dependent statement. It refuses the batch rather than use an unconfirmed keyset or mapping mode.
+Transaction-control commands are relevant only when they can change the effective keyset or
+mapping mode. Ordinary transaction and reset batches that preserve these settings are allowed.
+
+### How to fix
+
+Send the settings or transaction-control command and the dependent statement as separate queries.
+Wait for the command to succeed before preparing or binding encrypted values under the new settings.
+
+
+<!-- ---------------------------------------------------------------------------------------------------- -->
+
+
+## Invalid keyset setting value <a id='encrypt-invalid-keyset-setting-value'></a>
+
+`CIPHERSTASH.KEYSET_ID` and `CIPHERSTASH.KEYSET_NAME` require a single value.
+Use a quoted UUID or keyset name, or `DEFAULT` to reset it. Unsupported values are
+rejected instead of silently retaining the previous keyset.
+
+## Prepared settings changed <a id='mapping-prepared-settings-changed'></a>
+
+The prepared statement or bound values no longer match confirmed connection settings. This can
+happen after a keyset or mapping-mode change, including one caused by transaction rollback.
+Proxy refuses reuse to avoid forwarding plaintext or values encrypted under stale settings.
+
+### How to fix
+
+The error uses SQLSTATE `26000`, allowing drivers such as PostgreSQL JDBC to invalidate cached
+preparations. Driver retry behavior still depends on transaction state and configuration.
+
+Select the intended keyset and mapping mode, close the old statement, then prepare and bind it
+again. Close, prepare, and bind may be pipelined. Prefer bound parameters over embedded encrypted
+literals when a prepared statement must be reused across keysets.
+
+
+<!-- ---------------------------------------------------------------------------------------------------- -->
+
+
 ## Unmodelled DDL <a id='mapping-unmodelled-ddl'></a>
 
 PostgreSQL successfully executed a schema change whose connection-local effect Proxy cannot model

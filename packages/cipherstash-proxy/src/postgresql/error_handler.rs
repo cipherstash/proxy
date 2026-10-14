@@ -43,6 +43,7 @@ pub trait PostgreSqlErrorHandler {
                     &column.column_name(),
                 )
             }
+            Error::Mapping(MappingError::PreparedSettingsChanged) => diagnostics::prepared_statement_invalidated(err.to_string()),
             Error::Mapping(err) => diagnostics::invalid_sql_statement(err.to_string()),
             Error::Encrypt(EncryptError::UnknownColumn {
                 ref table,
@@ -94,6 +95,12 @@ mod tests {
             .iter()
             .find(|field| field.code == code)
             .and_then(|field| std::str::from_utf8(&field.value).ok())
+    }
+
+    #[test]
+    fn review_r08_prepared_settings_change_signals_reprepare() {
+        let response = TestHandler.error_to_response(MappingError::PreparedSettingsChanged.into());
+        assert_eq!(field(&response, b'C'), Some("26000"));
     }
 
     #[test]

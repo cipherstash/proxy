@@ -12,6 +12,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
   Compatibility note: on every encrypted column type, Proxy reserves three JSON object shapes for application-generated EQL: storage payloads with top-level `v` and `i` plus at least one of `c`, `h`, or `sv`; scalar query payloads with `v` and `i` plus at least one of `hm`, `bf`, `ob`, or `op`; and SteVec query payloads whose only top-level key is `sv`. An object matching one of these shapes is validated as EQL rather than encrypted as plaintext, and there is no opt-out. Query-only shapes are rejected in storage positions. Before upgrading, audit plaintext application writes for these key combinations; [Invalid encrypted value](docs/errors.md#encrypt-invalid-inbound-eql-payload) includes a `jsonb` scan predicate.
 
+- **`SET LOCAL CIPHERSTASH.KEYSET_ID`, `KEYSET_NAME` and `UNSAFE_DISABLE_MAPPING`**: the setting lasts until the end of the current transaction, as `SET LOCAL` does in PostgreSQL. This is the safe way to select a tenant's keyset behind a connection pooler.
+
 ### Changed
 
 - **PostgreSQL execution lifecycle ownership**: Proxy now tracks prepared statements, portals, Describe operations, execution outcomes, and execution metrics as one connection-local protocol lifecycle. Suspended executions retain their original metrics scope until completion, repeated portal executions receive distinct scopes, and terminal errors replace upstream responses atomically while schema outcomes are reported exactly once.
@@ -19,6 +21,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **Upstream TLS verification for client traffic**: Connections with `with_tls_verification` enabled now use a cached snapshot of the system root certificates, loaded once when Proxy starts. Unlike Proxy's background database connections, pg-proto client-traffic connections do not apply operating-system revocation checks or enterprise verification policy. Restart Proxy after changing the system trust store.
 
 ### Fixed
+
+- **Prepared statement recovery and settings isolation**: failed or discarded protocol messages no longer replace encryption metadata for statements PostgreSQL retained. Pipelined close-and-reprepare recovers immediately, and refused operations use names that remain unpredictable within PostgreSQL's lookup limit. Unsupported keyset values fail explicitly, and stale prepared statements signal driver cache invalidation.
+
+- **Ordinary transaction and COPY traffic**: transaction and reset batches that do not change effective CipherStash settings remain usable, and COPY input can progress while transaction outcomes are pending. Settings tracking avoids unnecessary transaction barriers and repeated SQL tree copies.
+
+- **CipherStash settings execution and rollback**: preparing a settings command no longer changes the active keyset or mapping controls. Changes take effect after successful execution; transaction and savepoint rollback restore earlier settings, and rejected `DISCARD ALL` preserves them. Successful `RESET` commands also restore the corresponding settings without losing transaction rollback behavior. Proxy rejects unsafe mixed simple-query batches and reuse of prepared work whose encrypted values or mapping were made stale by a settings change, with guidance to issue separate queries or prepare and bind again.
 
 - **Database error detail in Proxy's logs**: logged database errors again include the message PostgreSQL returned, not just the error kind. The upgraded PostgreSQL client library stopped appending the underlying cause when an error is rendered as text, which left entries such as `Database connection error` reading only `db error`. Proxy now renders the cause itself, so the server's message is back in the log line.
 
@@ -31,6 +39,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **PostgreSQL protocol error handling after the pg-proto migration**: Proxy now rejects `require_tls` configurations that omit a certificate, preserves PostgreSQL transaction state when statement mapping fails, returns decryption failures as PostgreSQL errors without dropping the connection, and reloads changed schemas only after PostgreSQL confirms the transaction boundary. Prepared-statement replacement also preserves existing portals and overlapping statement metrics.
 
 ### Security
+
+- **Keyset and mapping settings no longer cross between clients of a session-mode pooler**: Proxy now clears `SET CIPHERSTASH.*` values after PostgreSQL successfully executes `DISCARD ALL`, which PgBouncer sends before giving a pooled connection to a new client in session mode. Previously the next client inherited the previous client's keyset or disabled mapping, so in multitenant deployments one tenant's keyset could be used for another tenant's queries. A session-level `SET CIPHERSTASH.KEYSET_*` remains unsafe behind a transaction-mode pooler and behind PgCat; use `SET LOCAL` there. See [Connection poolers](docs/reference/connection-poolers.md).
+
+- **`SET LOCAL CIPHERSTASH.*` is no longer promoted to the whole connection**: Proxy ignored the `LOCAL` modifier and kept the value for the rest of the connection. It now ends with the transaction. Applications that relied on a `SET LOCAL` keyset persisting after `COMMIT` must use `SET` instead.
 
 - **Updated PostgreSQL client library**: Proxy is now built against `tokio-postgres` 0.7.18, which resolves [GHSA-3gjw-f78c-vvpw](https://github.com/advisories/GHSA-3gjw-f78c-vvpw). No configuration change is required.
 

@@ -77,6 +77,8 @@ impl Error {
             Error::Mapping(
                 MappingError::UnmappableEncryptedColumn { .. }
                     | MappingError::DependentStatementAfterDdl
+                    | MappingError::DependentStatementAfterSettings
+                    | MappingError::PreparedSettingsChanged
                     | MappingError::UnmodelledDdl
             ) | Error::Encrypt(EncryptError::InvalidInboundEqlPayload)
         )
@@ -118,6 +120,11 @@ pub enum ZeroKMSError {
 
 #[derive(Error, Debug)]
 pub enum MappingError {
+    #[error("A simple-query batch cannot change CipherStash settings before a statement that needs mapping. Send the setting and dependent statement as separate queries. For help visit {}#mapping-dependent-statement-after-settings", ERROR_DOC_BASE_URL)]
+    DependentStatementAfterSettings,
+
+    #[error("The prepared statement or bound values no longer match confirmed connection state. Close the statement and prepare and bind it again before retrying. For help visit {}#mapping-prepared-settings-changed", ERROR_DOC_BASE_URL)]
+    PreparedSettingsChanged,
     /// A simple-query batch would map against encryption metadata changed earlier in the batch.
     #[error("A simple-query batch cannot contain a schema-dependent statement after DDL that may change encryption metadata. Send the DDL and dependent statement as separate queries. For help visit {}#mapping-dependent-statement-after-ddl", ERROR_DOC_BASE_URL)]
     DependentStatementAfterDdl,
@@ -352,6 +359,9 @@ pub enum EncryptError {
         ERROR_DOC_BASE_URL
     )]
     KeysetIdCouldNotBeParsed { id: String },
+
+    #[error("Setting '{setting}' requires one string value. Use a quoted UUID for KEYSET_ID or a quoted keyset name for KEYSET_NAME. For help visit {}#encrypt-invalid-keyset-setting-value", ERROR_DOC_BASE_URL)]
+    InvalidKeysetSettingValue { setting: String },
 
     #[error(
         "Keyset Id could not be set using `SET CIPHERSTASH.KEYSET_ID`. For help visit {}#encrypt-keyset-id-could-not-be-set",

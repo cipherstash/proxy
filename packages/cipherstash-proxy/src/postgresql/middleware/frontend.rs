@@ -38,7 +38,7 @@ use sqltk::NodeKey;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Instant;
-use tracing::{debug, info, warn};
+use tracing::{debug, warn};
 
 /// The PostgreSQL proxy frontend that handles client-to-server message processing.
 ///
@@ -110,6 +110,22 @@ impl<S: EncryptionService> Frontend<S> {
         operation: OperationId,
         protocol_message: FrontendMessage,
     ) -> Result<FrontendMiddlewareOutput, Error> {
+        // PostgreSQL processes Terminate even while ignoring a failed batch.
+        // Forward it so the driver can close both sides without waiting for Sync.
+        if matches!(protocol_message, FrontendMessage::Terminate) {
+            return Ok(FrontendMiddlewareOutput::Forward(protocol_message));
+        }
+        if self.failed_extended_batch || self.context.discarding_extended_messages()? {
+            if matches!(protocol_message, FrontendMessage::Sync) {
+                self.failed_extended_batch = false;
+                self.context.mark_schema_protocol_boundary();
+                self.context.settings_protocol_boundary(operation)?;
+                return Ok(FrontendMiddlewareOutput::Forward(protocol_message));
+            }
+            self.context.discard_operation(operation)?;
+            return Ok(FrontendMiddlewareOutput::Suppress(protocol_message));
+        }
+
         if matches!(
             protocol_message,
             FrontendMessage::Parse(_) | FrontendMessage::Bind(_)
@@ -159,16 +175,6 @@ impl<S: EncryptionService> Frontend<S> {
             return Ok(FrontendMiddlewareOutput::Forward(protocol_message));
         }
 
-        if self.failed_extended_batch {
-            if matches!(protocol_message, FrontendMessage::Sync) {
-                self.failed_extended_batch = false;
-                self.context.mark_schema_protocol_boundary();
-                return Ok(FrontendMiddlewareOutput::Forward(protocol_message));
-            }
-            self.context.discard_operation(operation)?;
-            return Ok(FrontendMiddlewareOutput::Suppress(protocol_message));
-        }
-
         let mut outbound_message = protocol_message.clone();
         let mut flush_after_forward = false;
 
@@ -190,6 +196,7 @@ impl<S: EncryptionService> Frontend<S> {
                         self.context
                             .set_operation_error(operation, response.clone())?;
                         self.context.set_execute(operation, Name::new(), None)?;
+                        self.context.settings_protocol_boundary(operation)?;
                         self.context.mark_schema_protocol_boundary();
                         outbound_message = self.simple_error_query(&response);
                     }
@@ -199,15 +206,35 @@ impl<S: EncryptionService> Frontend<S> {
                 self.describe_handler(operation, describe).await?;
             }
             FrontendMessage::Execute(execute) => {
-                flush_after_forward = self.execute_handler(operation, execute).await?;
+                match self.execute_handler(operation, execute.clone()).await {
+                    Ok(flush) => flush_after_forward = flush,
+                    Err(err) => {
+                        let response = self.error_to_response(err);
+                        self.context
+                            .set_operation_error(operation, response.clone())?;
+                        self.context.set_execute(operation, Name::new(), None)?;
+                        self.failed_extended_batch = true;
+                        outbound_message = FrontendMessage::Execute(Execute {
+                            // The client must not be able to pre-create the
+                            // refusal portal and turn an error into execution.
+                            portal: Self::refusal_name(),
+                            max_rows: execute.max_rows,
+                        });
+                        flush_after_forward = true;
+                    }
+                }
             }
             FrontendMessage::Parse(parse) => {
                 let statement = parse.statement.clone();
                 let failed_parse = parse.clone();
-                match self.parse_handler(parse).await {
-                    Ok(Some(mapped)) => outbound_message = mapped,
-                    // No mapping needed, don't change the bytes
-                    Ok(None) => (),
+                match self.parse_handler(operation, parse).await {
+                    Ok(Some(mapped)) => {
+                        self.context.capture_prepared_settings(&statement)?;
+                        outbound_message = mapped;
+                    }
+                    Ok(None) => {
+                        self.context.capture_prepared_settings(&statement)?;
+                    }
                     Err(err) => {
                         self.context.close_statement(&statement)?;
                         warn!(
@@ -273,8 +300,10 @@ impl<S: EncryptionService> Frontend<S> {
                     message = ?protocol_message,
                 );
                 self.context.mark_schema_protocol_boundary();
+                self.context.settings_protocol_boundary(operation)?;
             }
             FrontendMessage::Close(close) => {
+                self.context.settings_close_requested(operation, &close)?;
                 self.close_handler(close).await?;
             }
             _ => {
@@ -320,10 +349,13 @@ impl<S: EncryptionService> Frontend<S> {
         execute: Execute,
     ) -> Result<bool, Error> {
         debug!(target: PROTOCOL, client_id = self.context.client_id, ?execute);
+        let changes_settings = self
+            .context
+            .execute_settings_portal(operation, &execute.portal)?;
         let executes_ddl = self.context.execute_schema_portal(&execute.portal);
         self.context
             .set_execute_for_portal(operation, execute.portal.to_owned())?;
-        Ok(executes_ddl)
+        Ok(executes_ddl || changes_settings)
     }
 
     /// Handles PostgreSQL Query messages (simple query protocol).
@@ -376,6 +408,15 @@ impl<S: EncryptionService> Frontend<S> {
         // Simple Query may contain many statements
         let query_text = String::from_utf8_lossy(&query).into_owned();
         let parsed_statements = SqlParser::parse_statements(&query_text)?;
+        for statement in &parsed_statements {
+            self.validate_setting(statement)?;
+        }
+        if self
+            .context
+            .settings_simple_query_requires_fail_closed(&parsed_statements)
+        {
+            return Err(MappingError::DependentStatementAfterSettings.into());
+        }
         self.context.prepare_schema_for_statement().await?;
         if self
             .context
@@ -402,23 +443,13 @@ impl<S: EncryptionService> Frontend<S> {
         let mut parse_duration_recorded = false;
 
         for statement in &parsed_statements {
-            if let Some(mapping_disabled) = self.context.maybe_set_unsafe_disable_mapping(statement)
-            {
-                warn!(
-                    msg = "SET CIPHERSTASH.DISABLE_MAPPING = {mapping_disabled}",
-                    mapping_disabled
-                );
-            }
-
-            if self.context.unsafe_disable_mapping() {
+            if self.context.unsafe_disable_mapping()? {
                 warn!(msg = "Encrypted statement mapping is not enabled");
                 counter!(STATEMENTS_PASSTHROUGH_MAPPING_DISABLED_TOTAL).increment(1);
                 counter!(STATEMENTS_PASSTHROUGH_TOTAL).increment(1);
                 forwarded_statements.push(statement.clone());
                 continue;
             }
-
-            self.handle_set_keyset(statement)?;
 
             if !eql_mapper::requires_type_check(statement) {
                 counter!(STATEMENTS_PASSTHROUGH_TOTAL).increment(1);
@@ -541,7 +572,7 @@ impl<S: EncryptionService> Frontend<S> {
         if encrypted {
             let transformed_statement = forwarded_statements
                 .iter()
-                .map(|s| s.to_string())
+                .map(SqlParser::statement_sql)
                 .collect::<Vec<_>>()
                 .join(";");
 
@@ -591,6 +622,8 @@ impl<S: EncryptionService> Frontend<S> {
             Some(session_id),
         )?;
         self.context.execute_simple_schema_statements(statements);
+        self.context
+            .execute_simple_settings_statements(operation, statements)?;
         Ok(())
     }
 
@@ -791,6 +824,7 @@ impl<S: EncryptionService> Frontend<S> {
     /// - `Err(error)` - Processing failed, error should be sent to client
     async fn parse_handler(
         &mut self,
+        operation: OperationId,
         mut message: Parse,
     ) -> Result<Option<FrontendMessage>, Error> {
         let original_query = message.query.clone();
@@ -809,7 +843,9 @@ impl<S: EncryptionService> Frontend<S> {
             parse = ?message
         );
 
-        // A Parse rebinds the name: whatever it referred to before is gone.
+        // Parse speculatively replaces a name. Record the previous preparation
+        // before dropping its analysed metadata; a rejected named replacement
+        // must refuse subsequent reuse rather than forward unencrypted values.
         //
         // Dropping it here rather than only on the mapped path matters, because
         // every path below can return without caching anything — a statement
@@ -829,7 +865,8 @@ impl<S: EncryptionService> Frontend<S> {
         // BEFORE the new scope is recorded — the other way around wipes the
         // mapping that was just written and every Bind falls back to the
         // latest-scope guess.
-        self.context.close_statement(&message.statement)?;
+        self.context
+            .begin_statement_preparation(operation, &message.statement)?;
         self.context
             .set_statement_metrics_scope(message.statement.to_owned(), session_id)?;
 
@@ -853,21 +890,19 @@ impl<S: EncryptionService> Frontend<S> {
             m.set_query_fingerprint(&statement_text);
         })?;
 
-        if let Some(mapping_disabled) = self.context.maybe_set_unsafe_disable_mapping(&statement) {
-            warn!(
-                msg = "SET CIPHERSTASH.DISABLE_MAPPING = {mapping_disabled}",
-                mapping_disabled
-            );
-        }
+        self.validate_setting(&statement)?;
+        self.context.prepare_settings_statement(
+            operation,
+            message.statement.clone(),
+            &statement,
+        )?;
 
-        if self.context.unsafe_disable_mapping() {
+        if self.context.unsafe_disable_mapping()? {
             warn!(msg = "Encrypted statement mapping is not enabled");
             counter!(STATEMENTS_PASSTHROUGH_MAPPING_DISABLED_TOTAL).increment(1);
             counter!(STATEMENTS_PASSTHROUGH_TOTAL).increment(1);
             return Ok(None);
         }
-
-        self.handle_set_keyset(&statement)?;
 
         if !eql_mapper::requires_type_check(&statement) {
             counter!(STATEMENTS_PASSTHROUGH_TOTAL).increment(1);
@@ -971,24 +1006,15 @@ impl<S: EncryptionService> Frontend<S> {
     /// Returns an error if `SET CIPHERSTASH KEYSET_*` is called and proxy is configured with a `default_keyset_id`
     /// Returns an error if `SET CIPHERSTASH KEYSET_ID` cannot parse the value as a valid UUID
     ///
-    fn handle_set_keyset(&mut self, statement: &ast::Statement) -> Result<(), Error> {
-        if let Some(keyset_identifier) = self.context.maybe_set_keyset(statement)? {
-            debug!(client_id = self.context.client_id, ?keyset_identifier);
-
-            if self.context.default_keyset_id().is_some() {
-                debug!(target: MAPPER,
-                    client_id = self.context.client_id,
-                    default_keyset_id = ?self.context.default_keyset_id(),
-                    ?keyset_identifier
-                );
-                return Err(EncryptError::UnexpectedSetKeyset.into());
-            }
-            info!(
-                msg = "SET CIPHERSTASH.KEYSET",
-                keyset_identifier = keyset_identifier.to_string()
-            );
+    fn validate_setting(&self, statement: &ast::Statement) -> Result<(), Error> {
+        use crate::postgresql::context::settings::SettingChange;
+        if matches!(
+            SettingChange::parse(statement)?,
+            Some(SettingChange::Keyset(..))
+        ) && self.context.default_keyset_id().is_some()
+        {
+            return Err(EncryptError::UnexpectedSetKeyset.into());
         }
-
         Ok(())
     }
 
@@ -1096,9 +1122,14 @@ impl<S: EncryptionService> Frontend<S> {
         operation: OperationId,
         mut bind: Bind,
     ) -> Result<Option<FrontendMessage>, Error> {
+        self.context.bind_settings_statement(
+            operation,
+            bind.portal.clone(),
+            &bind.prepared_statement,
+        )?;
         self.context
             .bind_schema_statement(bind.portal.to_owned(), &bind.prepared_statement);
-        if self.context.unsafe_disable_mapping() {
+        if self.context.unsafe_disable_mapping()? {
             warn!(msg = "Encrypted statement mapping is not enabled");
             counter!(STATEMENTS_PASSTHROUGH_MAPPING_DISABLED_TOTAL).increment(1);
             counter!(STATEMENTS_PASSTHROUGH_TOTAL).increment(1);
@@ -1653,10 +1684,18 @@ impl<S: EncryptionService> Frontend<S> {
     fn extended_bind_error(
         &self,
         mut bind: pg_proto::Bind,
-        response: &pg_proto::DiagnosticResponse,
+        _response: &pg_proto::DiagnosticResponse,
     ) -> FrontendMessage {
-        bind.statement = bytes::Bytes::from(self.extended_error_marker(response));
+        // A predictable name could refer to a statement the client prepared,
+        // turning the intended refusal into a successful Bind.
+        bind.statement = Self::refusal_name();
         FrontendMessage::Bind(bind)
+    }
+
+    fn refusal_name() -> bytes::Bytes {
+        // PostgreSQL named objects use NAMEDATALEN-byte hash keys. Put all
+        // entropy inside the first 63 bytes, regardless of diagnostic length.
+        bytes::Bytes::from(format!("__cipherstash_{}", uuid::Uuid::new_v4()))
     }
 
     fn extended_error_marker(&self, response: &pg_proto::DiagnosticResponse) -> String {
@@ -1798,6 +1837,30 @@ mod tests {
     }
 
     #[test]
+    fn review_r02_refusal_names_differ_within_postgres_lookup_limit() {
+        let frontend = frontend();
+        let response = frontend.error_to_response(MappingError::PreparedSettingsChanged.into());
+        let bind = Bind {
+            portal: bytes::Bytes::new(),
+            statement: bytes::Bytes::new(),
+            parameter_formats: vec![],
+            parameters: vec![],
+            result_formats: vec![],
+        };
+        let FrontendMessage::Bind(first) = frontend.extended_bind_error(bind.clone(), &response)
+        else {
+            unreachable!()
+        };
+        let FrontendMessage::Bind(second) = frontend.extended_bind_error(bind, &response) else {
+            unreachable!()
+        };
+        assert_ne!(
+            &first.statement[..first.statement.len().min(63)],
+            &second.statement[..second.statement.len().min(63)]
+        );
+    }
+
+    #[test]
     fn exception_literals_escape_quotes_and_backslashes() {
         assert_eq!(quote_literal("can't"), "'can''t'");
         assert_eq!(quote_literal(r"path\file"), r"E'path\\file'");
@@ -1814,6 +1877,904 @@ mod tests {
             FrontendMessage::Query(query)
                 if String::from_utf8_lossy(&query).contains("RAISE EXCEPTION")
         ));
+    }
+
+    fn settings_frontend() -> (
+        Frontend<TestService>,
+        crate::postgresql::middleware::Backend<TestService>,
+    ) {
+        let mut config = TandemConfig::for_testing();
+        config.disable_mapping_for_testing();
+        config.development.as_mut().unwrap().disable_mapping = false;
+        config.development.as_mut().unwrap().enable_mapping_errors = true;
+        let (frontend, context) = frontend_with_config(config);
+        (
+            frontend,
+            crate::postgresql::middleware::Backend::new(context),
+        )
+    }
+
+    async fn settings_query_succeeds(
+        frontend: &mut Frontend<TestService>,
+        backend: &mut crate::postgresql::middleware::Backend<TestService>,
+        sql: &'static [u8],
+        tag: &'static [u8],
+        status: pg_proto::TransactionStatus,
+    ) {
+        let operation = operation_id();
+        frontend
+            .intercept(
+                operation,
+                FrontendMessage::Query(bytes::Bytes::from_static(sql)),
+            )
+            .await
+            .unwrap();
+        backend
+            .intercept(
+                Some(operation),
+                pg_proto::BackendMessage::CommandComplete(bytes::Bytes::from_static(tag)),
+            )
+            .await
+            .unwrap();
+        backend
+            .intercept(
+                Some(operation),
+                pg_proto::BackendMessage::ReadyForQuery(status),
+            )
+            .await
+            .unwrap();
+    }
+
+    async fn assert_mapping_enabled(frontend: &mut Frontend<TestService>, enabled: bool) {
+        let output = frontend
+            .intercept(
+                operation_id(),
+                FrontendMessage::Query(bytes::Bytes::from_static(
+                    b"SELECT secret FROM table_that_does_not_exist",
+                )),
+            )
+            .await
+            .unwrap();
+        let query = match output {
+            pg_proto::FrontendMiddlewareOutput::Forward(FrontendMessage::Query(query))
+            | pg_proto::FrontendMiddlewareOutput::ForwardThenFlush(FrontendMessage::Query(query)) => {
+                query
+            }
+            other => panic!("expected query output, got {other:?}"),
+        };
+        assert_eq!(
+            String::from_utf8_lossy(&query).contains("RAISE EXCEPTION"),
+            enabled
+        );
+    }
+
+    #[tokio::test]
+    async fn preparing_discard_does_not_reset_mapping_and_rejected_discard_preserves_it() {
+        let (mut frontend, mut backend) = settings_frontend();
+        settings_query_succeeds(
+            &mut frontend,
+            &mut backend,
+            b"SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING = true",
+            b"SET",
+            pg_proto::TransactionStatus::Idle,
+        )
+        .await;
+        frontend
+            .intercept(
+                operation_id(),
+                FrontendMessage::Parse(Parse {
+                    statement: bytes::Bytes::from_static(b"discard"),
+                    query: bytes::Bytes::from_static(b"DISCARD ALL"),
+                    parameter_types: vec![],
+                }),
+            )
+            .await
+            .unwrap();
+        assert_mapping_enabled(&mut frontend, false).await;
+        settings_query_succeeds(
+            &mut frontend,
+            &mut backend,
+            b"BEGIN",
+            b"BEGIN",
+            pg_proto::TransactionStatus::InTransaction,
+        )
+        .await;
+        let discard = operation_id();
+        frontend
+            .intercept(
+                discard,
+                FrontendMessage::Query(bytes::Bytes::from_static(b"DISCARD ALL")),
+            )
+            .await
+            .unwrap();
+        backend
+            .intercept(
+                Some(discard),
+                pg_proto::BackendMessage::ErrorResponse(
+                    crate::postgresql::diagnostics::invalid_sql_statement(
+                        "DISCARD ALL cannot run inside a transaction block".to_owned(),
+                    ),
+                ),
+            )
+            .await
+            .unwrap();
+        backend
+            .intercept(
+                Some(discard),
+                pg_proto::BackendMessage::ReadyForQuery(
+                    pg_proto::TransactionStatus::FailedTransaction,
+                ),
+            )
+            .await
+            .unwrap();
+        assert_mapping_enabled(&mut frontend, false).await;
+    }
+
+    #[tokio::test]
+    async fn successful_discard_restores_mapping() {
+        let (mut frontend, mut backend) = settings_frontend();
+        settings_query_succeeds(
+            &mut frontend,
+            &mut backend,
+            b"SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING = true",
+            b"SET",
+            pg_proto::TransactionStatus::Idle,
+        )
+        .await;
+        settings_query_succeeds(
+            &mut frontend,
+            &mut backend,
+            b"DISCARD ALL",
+            b"DISCARD ALL",
+            pg_proto::TransactionStatus::Idle,
+        )
+        .await;
+        assert_mapping_enabled(&mut frontend, true).await;
+    }
+
+    #[tokio::test]
+    async fn ordinary_transaction_batch_is_forwarded_but_setting_before_mapping_is_refused() {
+        let (mut frontend, _) = settings_frontend();
+        let ordinary = bytes::Bytes::from_static(b"BEGIN; SELECT 1; COMMIT");
+        let output = frontend
+            .intercept(operation_id(), FrontendMessage::Query(ordinary.clone()))
+            .await
+            .unwrap();
+        assert!(matches!(output,
+            pg_proto::FrontendMiddlewareOutput::Forward(FrontendMessage::Query(query))
+            | pg_proto::FrontendMiddlewareOutput::ForwardThenFlush(FrontendMessage::Query(query)) if query == ordinary));
+        let (mut frontend, _) = settings_frontend();
+        let output = frontend.intercept(operation_id(), FrontendMessage::Query(bytes::Bytes::from_static(
+            b"SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING = true; SELECT secret FROM table_that_does_not_exist"
+        ))).await.unwrap();
+        assert!(
+            matches!(output, pg_proto::FrontendMiddlewareOutput::Forward(FrontendMessage::Query(query))
+            if String::from_utf8_lossy(&query).contains("RAISE EXCEPTION"))
+        );
+    }
+
+    #[tokio::test]
+    async fn skipped_setting_after_parse_error_does_not_change_mapping() {
+        let (mut frontend, mut backend) = settings_frontend();
+        let parse = operation_id();
+        let name = bytes::Bytes::from_static(b"setting");
+        frontend
+            .intercept(
+                parse,
+                FrontendMessage::Parse(Parse {
+                    statement: name.clone(),
+                    query: bytes::Bytes::from_static(
+                        b"SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING = true",
+                    ),
+                    parameter_types: vec![],
+                }),
+            )
+            .await
+            .unwrap();
+        frontend
+            .intercept(
+                operation_id(),
+                FrontendMessage::Bind(Bind {
+                    portal: name.clone(),
+                    statement: name.clone(),
+                    parameter_formats: vec![],
+                    parameters: vec![],
+                    result_formats: vec![],
+                }),
+            )
+            .await
+            .unwrap();
+        let output = frontend
+            .intercept(
+                operation_id(),
+                FrontendMessage::Execute(pg_proto::Execute {
+                    portal: name,
+                    max_rows: 0,
+                }),
+            )
+            .await
+            .unwrap();
+        assert!(matches!(
+            output,
+            pg_proto::FrontendMiddlewareOutput::ForwardThenFlush(_)
+        ));
+        let sync = operation_id();
+        frontend
+            .intercept(sync, FrontendMessage::Sync)
+            .await
+            .unwrap();
+        backend
+            .intercept(
+                Some(parse),
+                pg_proto::BackendMessage::ErrorResponse(
+                    crate::postgresql::diagnostics::invalid_sql_statement(
+                        "prepared statement already exists".to_owned(),
+                    ),
+                ),
+            )
+            .await
+            .unwrap();
+        backend
+            .intercept(
+                Some(sync),
+                pg_proto::BackendMessage::ReadyForQuery(pg_proto::TransactionStatus::Idle),
+            )
+            .await
+            .unwrap();
+        assert_mapping_enabled(&mut frontend, true).await;
+    }
+
+    #[tokio::test]
+    async fn statement_prepared_without_mapping_is_refused_after_mapping_is_enabled() {
+        let (mut frontend, mut backend) = settings_frontend();
+        settings_query_succeeds(
+            &mut frontend,
+            &mut backend,
+            b"SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING = true",
+            b"SET",
+            pg_proto::TransactionStatus::Idle,
+        )
+        .await;
+        let name = bytes::Bytes::from_static(b"unmapped");
+        frontend
+            .intercept(
+                operation_id(),
+                FrontendMessage::Parse(Parse {
+                    statement: name.clone(),
+                    query: bytes::Bytes::from_static(
+                        b"SELECT secret FROM table_that_does_not_exist",
+                    ),
+                    parameter_types: vec![],
+                }),
+            )
+            .await
+            .unwrap();
+        settings_query_succeeds(
+            &mut frontend,
+            &mut backend,
+            b"SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING = false",
+            b"SET",
+            pg_proto::TransactionStatus::Idle,
+        )
+        .await;
+        let output = frontend
+            .intercept(
+                operation_id(),
+                FrontendMessage::Bind(Bind {
+                    portal: name.clone(),
+                    statement: name.clone(),
+                    parameter_formats: vec![],
+                    parameters: vec![],
+                    result_formats: vec![],
+                }),
+            )
+            .await
+            .unwrap();
+        assert!(
+            matches!(output, pg_proto::FrontendMiddlewareOutput::Forward(FrontendMessage::Bind(bind))
+            if bind.statement != name && String::from_utf8_lossy(&bind.statement).contains("cipherstash"))
+        );
+    }
+
+    #[tokio::test]
+    async fn stale_portal_execute_returns_a_reprepare_error_without_executing_it() {
+        let (mut frontend, mut backend) = settings_frontend();
+        for (name, sql) in [
+            (b"query".as_slice(), b"SELECT 1".as_slice()),
+            (
+                b"setting".as_slice(),
+                b"SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING = true".as_slice(),
+            ),
+        ] {
+            let parse = operation_id();
+            frontend
+                .intercept(
+                    parse,
+                    FrontendMessage::Parse(Parse {
+                        statement: bytes::Bytes::copy_from_slice(name),
+                        query: bytes::Bytes::copy_from_slice(sql),
+                        parameter_types: vec![],
+                    }),
+                )
+                .await
+                .unwrap();
+            backend
+                .intercept(Some(parse), pg_proto::BackendMessage::ParseComplete)
+                .await
+                .unwrap();
+            let bind = operation_id();
+            frontend
+                .intercept(
+                    bind,
+                    FrontendMessage::Bind(Bind {
+                        portal: bytes::Bytes::copy_from_slice(name),
+                        statement: bytes::Bytes::copy_from_slice(name),
+                        parameter_formats: vec![],
+                        parameters: vec![],
+                        result_formats: vec![],
+                    }),
+                )
+                .await
+                .unwrap();
+            backend
+                .intercept(Some(bind), pg_proto::BackendMessage::BindComplete)
+                .await
+                .unwrap();
+        }
+        let setting = operation_id();
+        frontend
+            .intercept(
+                setting,
+                FrontendMessage::Execute(pg_proto::Execute {
+                    portal: bytes::Bytes::from_static(b"setting"),
+                    max_rows: 0,
+                }),
+            )
+            .await
+            .unwrap();
+        backend
+            .intercept(
+                Some(setting),
+                pg_proto::BackendMessage::CommandComplete(bytes::Bytes::from_static(b"SET")),
+            )
+            .await
+            .unwrap();
+        let stale = operation_id();
+        let output = frontend
+            .intercept(
+                stale,
+                FrontendMessage::Execute(pg_proto::Execute {
+                    portal: bytes::Bytes::from_static(b"query"),
+                    max_rows: 0,
+                }),
+            )
+            .await
+            .unwrap();
+        assert!(
+            matches!(output, pg_proto::FrontendMiddlewareOutput::ForwardThenFlush(FrontendMessage::Execute(execute))
+            if execute.portal != bytes::Bytes::from_static(b"query"))
+        );
+        let output = backend
+            .intercept(
+                Some(stale),
+                pg_proto::BackendMessage::ErrorResponse(
+                    crate::postgresql::diagnostics::invalid_sql_statement(
+                        "portal does not exist".to_owned(),
+                    ),
+                ),
+            )
+            .await
+            .unwrap();
+        assert!(
+            matches!(output, pg_proto::BackendMiddlewareOutput::Forward(pg_proto::BackendMessage::ErrorResponse(response))
+            if response.fields.iter().any(|field| field.code == b'M' && String::from_utf8_lossy(&field.value).contains("prepare and bind it again")))
+        );
+    }
+
+    #[tokio::test]
+    async fn rejected_duplicate_parse_does_not_forward_plaintext_to_original_encrypted_statement() {
+        let mut schema = Schema::new("public");
+        let mut table = eql_mapper::Table::new(sqltk::parser::ast::Ident::new("encrypted"));
+        table.add_column(Arc::new(eql_mapper::Column::eql(
+            sqltk::parser::ast::Ident::new("secret"),
+            eql_mapper::EqlTraits::none(),
+            eql_mapper::DomainIdentity::from_domain_name("eql_v3_text").unwrap(),
+        )));
+        schema.add_table(table);
+        let mut encrypt_config = EncryptConfig::new();
+        encrypt_config.insert(
+            Identifier::new("encrypted", "secret"),
+            ColumnConfig::build("secret".to_owned()).casts_as(ColumnType::Text),
+        );
+        let (reload_sender, _) = mpsc::unbounded_channel();
+        let context = Context::new(
+            1,
+            Arc::new(TandemConfig::for_testing()),
+            Arc::new(encrypt_config),
+            Arc::new(schema),
+            Arc::new(rustls::RootCertStore::empty()),
+            TestService { fail_encrypt: true },
+            reload_sender,
+        );
+        let mut frontend = Frontend::new(context.clone());
+        let mut backend = crate::postgresql::middleware::Backend::new(context);
+        let name = bytes::Bytes::from_static(b"encrypted_insert");
+        let original = operation_id();
+        let output = frontend
+            .intercept(
+                original,
+                FrontendMessage::Parse(Parse {
+                    statement: name.clone(),
+                    query: bytes::Bytes::from_static(b"INSERT INTO encrypted(secret) VALUES ($1)"),
+                    parameter_types: vec![],
+                }),
+            )
+            .await
+            .unwrap();
+        assert!(matches!(
+            output,
+            pg_proto::FrontendMiddlewareOutput::Forward(FrontendMessage::Parse(_))
+        ));
+        backend
+            .intercept(Some(original), pg_proto::BackendMessage::ParseComplete)
+            .await
+            .unwrap();
+        let duplicate = operation_id();
+        frontend
+            .intercept(
+                duplicate,
+                FrontendMessage::Parse(Parse {
+                    statement: name.clone(),
+                    query: bytes::Bytes::from_static(b"SELECT 1"),
+                    parameter_types: vec![],
+                }),
+            )
+            .await
+            .unwrap();
+        backend
+            .intercept(
+                Some(duplicate),
+                pg_proto::BackendMessage::ErrorResponse(
+                    crate::postgresql::diagnostics::invalid_sql_statement(
+                        "prepared statement already exists".to_owned(),
+                    ),
+                ),
+            )
+            .await
+            .unwrap();
+        let sync = operation_id();
+        frontend
+            .intercept(sync, FrontendMessage::Sync)
+            .await
+            .unwrap();
+        backend
+            .intercept(
+                Some(sync),
+                pg_proto::BackendMessage::ReadyForQuery(pg_proto::TransactionStatus::Idle),
+            )
+            .await
+            .unwrap();
+        let bind = operation_id();
+        let output = frontend
+            .intercept(
+                bind,
+                FrontendMessage::Bind(Bind {
+                    portal: name.clone(),
+                    statement: name.clone(),
+                    parameter_formats: vec![],
+                    parameters: vec![Some(bytes::Bytes::from_static(b"private plaintext"))],
+                    result_formats: vec![],
+                }),
+            )
+            .await
+            .unwrap();
+        // With encryption metadata intact, the external cipher failure is
+        // surfaced as a protocol error. Refusing stale prepared work is also
+        // safe; forwarding this Bind to the original encrypted INSERT is not.
+        assert!(
+            matches!(output, pg_proto::FrontendMiddlewareOutput::Forward(FrontendMessage::Bind(bind))
+            if bind.statement != name)
+        );
+        let output = frontend
+            .intercept(
+                operation_id(),
+                FrontendMessage::Execute(pg_proto::Execute {
+                    portal: name,
+                    max_rows: 0,
+                }),
+            )
+            .await
+            .unwrap();
+        assert!(matches!(
+            output,
+            pg_proto::FrontendMiddlewareOutput::Suppress(FrontendMessage::Execute(_))
+        ));
+    }
+
+    #[tokio::test]
+    async fn terminate_is_forwarded_while_discarding_after_backend_or_local_error() {
+        for local_error in [false, true] {
+            let (mut frontend, mut backend) = settings_frontend();
+            if local_error {
+                frontend.failed_extended_batch = true;
+            } else {
+                let failed = operation_id();
+                frontend
+                    .context
+                    .set_execute(failed, bytes::Bytes::new(), None)
+                    .unwrap();
+                backend
+                    .intercept(
+                        Some(failed),
+                        pg_proto::BackendMessage::ErrorResponse(
+                            crate::postgresql::diagnostics::invalid_sql_statement(
+                                "execution failed".to_owned(),
+                            ),
+                        ),
+                    )
+                    .await
+                    .unwrap();
+            }
+            let output = frontend
+                .intercept(operation_id(), FrontendMessage::Terminate)
+                .await
+                .unwrap();
+            assert!(
+                matches!(
+                    output,
+                    pg_proto::FrontendMiddlewareOutput::Forward(FrontendMessage::Terminate)
+                ),
+                "local_error={local_error}: {output:?}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn review_r01_messages_after_backend_error_do_not_replace_statement() {
+        let mut schema = Schema::new("public");
+        let mut table = eql_mapper::Table::new(sqltk::parser::ast::Ident::new("encrypted"));
+        table.add_column(Arc::new(eql_mapper::Column::eql(
+            sqltk::parser::ast::Ident::new("secret"),
+            eql_mapper::EqlTraits::none(),
+            eql_mapper::DomainIdentity::from_domain_name("eql_v3_text").unwrap(),
+        )));
+        schema.add_table(table);
+        let mut encrypt_config = EncryptConfig::new();
+        encrypt_config.insert(
+            Identifier::new("encrypted", "secret"),
+            ColumnConfig::build("secret".to_owned()).casts_as(ColumnType::Text),
+        );
+        let (reload_sender, _) = mpsc::unbounded_channel();
+        let context = Context::new(
+            1,
+            Arc::new(TandemConfig::for_testing()),
+            Arc::new(encrypt_config),
+            Arc::new(schema),
+            Arc::new(rustls::RootCertStore::empty()),
+            TestService { fail_encrypt: true },
+            reload_sender,
+        );
+        let mut frontend = Frontend::new(context.clone());
+        let mut backend = crate::postgresql::middleware::Backend::new(context);
+        let name = bytes::Bytes::from_static(b"encrypted_insert");
+        let original = operation_id();
+        let output = frontend
+            .intercept(
+                original,
+                FrontendMessage::Parse(Parse {
+                    statement: name.clone(),
+                    query: bytes::Bytes::from_static(b"INSERT INTO encrypted(secret) VALUES ($1)"),
+                    parameter_types: vec![],
+                }),
+            )
+            .await
+            .unwrap();
+        assert!(matches!(
+            output,
+            pg_proto::FrontendMiddlewareOutput::Forward(FrontendMessage::Parse(_))
+        ));
+        backend
+            .intercept(Some(original), pg_proto::BackendMessage::ParseComplete)
+            .await
+            .unwrap();
+        let failed_execute = operation_id();
+        frontend
+            .context
+            .set_execute(failed_execute, bytes::Bytes::new(), None)
+            .unwrap();
+        backend
+            .intercept(
+                Some(failed_execute),
+                pg_proto::BackendMessage::ErrorResponse(
+                    crate::postgresql::diagnostics::invalid_sql_statement(
+                        "execution failed".to_owned(),
+                    ),
+                ),
+            )
+            .await
+            .unwrap();
+        frontend
+            .intercept(
+                operation_id(),
+                FrontendMessage::Close(pg_proto::Close {
+                    name: name.clone(),
+                    target: DescribeTarget::Statement,
+                }),
+            )
+            .await
+            .unwrap();
+        frontend
+            .intercept(
+                operation_id(),
+                FrontendMessage::Parse(Parse {
+                    statement: name.clone(),
+                    query: bytes::Bytes::from_static(b"SELECT 1"),
+                    parameter_types: vec![],
+                }),
+            )
+            .await
+            .unwrap();
+        let sync = operation_id();
+        frontend
+            .intercept(sync, FrontendMessage::Sync)
+            .await
+            .unwrap();
+        backend
+            .intercept(
+                Some(sync),
+                pg_proto::BackendMessage::ReadyForQuery(pg_proto::TransactionStatus::Idle),
+            )
+            .await
+            .unwrap();
+        let bind = operation_id();
+        let output = frontend
+            .intercept(
+                bind,
+                FrontendMessage::Bind(Bind {
+                    portal: name.clone(),
+                    statement: name.clone(),
+                    parameter_formats: vec![],
+                    parameters: vec![Some(bytes::Bytes::from_static(b"private plaintext"))],
+                    result_formats: vec![],
+                }),
+            )
+            .await
+            .unwrap();
+        // With encryption metadata intact, the external cipher failure is
+        // surfaced as a protocol error. Refusing stale prepared work is also
+        // safe; forwarding this Bind to the original encrypted INSERT is not.
+        assert!(
+            matches!(output, pg_proto::FrontendMiddlewareOutput::Forward(FrontendMessage::Bind(bind))
+            if bind.statement != name)
+        );
+        let output = frontend
+            .intercept(
+                operation_id(),
+                FrontendMessage::Execute(pg_proto::Execute {
+                    portal: name,
+                    max_rows: 0,
+                }),
+            )
+            .await
+            .unwrap();
+        assert!(matches!(
+            output,
+            pg_proto::FrontendMiddlewareOutput::Suppress(FrontendMessage::Execute(_))
+        ));
+    }
+
+    #[tokio::test]
+    async fn rejected_named_parse_keeps_the_previous_setting_command() {
+        let (mut frontend, mut backend) = settings_frontend();
+        let name = bytes::Bytes::from_static(b"setting");
+        let original = operation_id();
+        frontend
+            .intercept(
+                original,
+                FrontendMessage::Parse(Parse {
+                    statement: name.clone(),
+                    query: bytes::Bytes::from_static(
+                        b"SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING = true",
+                    ),
+                    parameter_types: vec![],
+                }),
+            )
+            .await
+            .unwrap();
+        backend
+            .intercept(Some(original), pg_proto::BackendMessage::ParseComplete)
+            .await
+            .unwrap();
+        let duplicate = operation_id();
+        frontend
+            .intercept(
+                duplicate,
+                FrontendMessage::Parse(Parse {
+                    statement: name.clone(),
+                    query: bytes::Bytes::from_static(
+                        b"SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING = false",
+                    ),
+                    parameter_types: vec![],
+                }),
+            )
+            .await
+            .unwrap();
+        backend
+            .intercept(
+                Some(duplicate),
+                pg_proto::BackendMessage::ErrorResponse(
+                    crate::postgresql::diagnostics::invalid_sql_statement(
+                        "prepared statement already exists".to_owned(),
+                    ),
+                ),
+            )
+            .await
+            .unwrap();
+        let sync = operation_id();
+        frontend
+            .intercept(sync, FrontendMessage::Sync)
+            .await
+            .unwrap();
+        backend
+            .intercept(
+                Some(sync),
+                pg_proto::BackendMessage::ReadyForQuery(pg_proto::TransactionStatus::Idle),
+            )
+            .await
+            .unwrap();
+        let bind = operation_id();
+        frontend
+            .intercept(
+                bind,
+                FrontendMessage::Bind(Bind {
+                    portal: name.clone(),
+                    statement: name.clone(),
+                    parameter_formats: vec![],
+                    parameters: vec![],
+                    result_formats: vec![],
+                }),
+            )
+            .await
+            .unwrap();
+        backend
+            .intercept(Some(bind), pg_proto::BackendMessage::BindComplete)
+            .await
+            .unwrap();
+        let execute = operation_id();
+        frontend
+            .intercept(
+                execute,
+                FrontendMessage::Execute(pg_proto::Execute {
+                    portal: name,
+                    max_rows: 0,
+                }),
+            )
+            .await
+            .unwrap();
+        backend
+            .intercept(
+                Some(execute),
+                pg_proto::BackendMessage::CommandComplete(bytes::Bytes::from_static(b"SET")),
+            )
+            .await
+            .unwrap();
+        let sync = operation_id();
+        let output = frontend
+            .intercept(sync, FrontendMessage::Sync)
+            .await
+            .unwrap();
+        assert!(matches!(
+            output,
+            pg_proto::FrontendMiddlewareOutput::Forward(FrontendMessage::Sync)
+        ));
+        backend
+            .intercept(
+                Some(sync),
+                pg_proto::BackendMessage::ReadyForQuery(pg_proto::TransactionStatus::Idle),
+            )
+            .await
+            .unwrap();
+        assert_mapping_enabled(&mut frontend, false).await;
+    }
+
+    #[tokio::test]
+    async fn executing_prepared_disable_mapping_changes_subsequent_queries() {
+        let mut config = TandemConfig::for_testing();
+        config.disable_mapping_for_testing();
+        config.development.as_mut().unwrap().disable_mapping = false;
+        config.development.as_mut().unwrap().enable_mapping_errors = true;
+        let (mut frontend, context) = frontend_with_config(config);
+        let mut backend = crate::postgresql::middleware::Backend::new(context);
+        let name = bytes::Bytes::from_static(b"disable_mapping");
+        frontend
+            .intercept(
+                operation_id(),
+                FrontendMessage::Parse(Parse {
+                    statement: name.clone(),
+                    query: bytes::Bytes::from_static(
+                        b"SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING = true",
+                    ),
+                    parameter_types: Vec::new(),
+                }),
+            )
+            .await
+            .unwrap();
+        frontend
+            .intercept(
+                operation_id(),
+                FrontendMessage::Bind(Bind {
+                    portal: name.clone(),
+                    statement: name.clone(),
+                    parameter_formats: Vec::new(),
+                    parameters: Vec::new(),
+                    result_formats: Vec::new(),
+                }),
+            )
+            .await
+            .unwrap();
+        let execute = operation_id();
+        frontend
+            .intercept(
+                execute,
+                FrontendMessage::Execute(pg_proto::Execute {
+                    portal: name,
+                    max_rows: 0,
+                }),
+            )
+            .await
+            .unwrap();
+        backend
+            .intercept(
+                Some(execute),
+                pg_proto::BackendMessage::CommandComplete(bytes::Bytes::from_static(b"SET")),
+            )
+            .await
+            .unwrap();
+        // A disabled connection forwards even SQL that the mapper cannot resolve.
+        let sql = bytes::Bytes::from_static(b"SELECT secret FROM table_that_does_not_exist");
+        let output = frontend
+            .intercept(operation_id(), FrontendMessage::Query(sql.clone()))
+            .await
+            .unwrap();
+        assert!(
+            matches!(output, pg_proto::FrontendMiddlewareOutput::Forward(FrontendMessage::Query(query)) if query == sql)
+        );
+    }
+
+    #[tokio::test]
+    async fn preparing_disable_mapping_does_not_bypass_statement_validation() {
+        let mut config = TandemConfig::for_testing();
+        config.disable_mapping_for_testing();
+        let development = config.development.as_mut().unwrap();
+        development.disable_mapping = false;
+        development.enable_mapping_errors = true;
+        let (mut frontend, _) = frontend_with_config(config);
+        frontend
+            .intercept(
+                operation_id(),
+                FrontendMessage::Parse(Parse {
+                    statement: bytes::Bytes::from_static(b"disable_mapping"),
+                    query: bytes::Bytes::from_static(
+                        b"SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING = true",
+                    ),
+                    parameter_types: Vec::new(),
+                }),
+            )
+            .await
+            .unwrap();
+        let output = frontend
+            .intercept(
+                operation_id(),
+                FrontendMessage::Query(bytes::Bytes::from_static(
+                    b"SELECT secret FROM table_that_does_not_exist",
+                )),
+            )
+            .await
+            .unwrap();
+        assert!(
+            matches!(output, pg_proto::FrontendMiddlewareOutput::Forward(FrontendMessage::Query(query))
+            if String::from_utf8_lossy(&query).contains("RAISE EXCEPTION"))
+        );
     }
 
     #[tokio::test]
@@ -2107,15 +3068,31 @@ mod tests {
 
     #[tokio::test]
     async fn connection_disabled_mapping_allows_bound_portals_to_be_described() {
-        let (mut frontend, _) = frontend_with_config(TandemConfig::for_testing());
+        let (mut frontend, context) = frontend_with_config(TandemConfig::for_testing());
+        let mut backend = crate::postgresql::middleware::Backend::new(context);
+        let setting = operation_id();
         let portal = bytes::Bytes::from_static(b"portal");
 
         frontend
             .intercept(
-                operation_id(),
+                setting,
                 FrontendMessage::Query(bytes::Bytes::from_static(
                     b"SET CIPHERSTASH.UNSAFE_DISABLE_MAPPING = true",
                 )),
+            )
+            .await
+            .unwrap();
+        backend
+            .intercept(
+                Some(setting),
+                pg_proto::BackendMessage::CommandComplete(bytes::Bytes::from_static(b"SET")),
+            )
+            .await
+            .unwrap();
+        backend
+            .intercept(
+                Some(setting),
+                pg_proto::BackendMessage::ReadyForQuery(pg_proto::TransactionStatus::Idle),
             )
             .await
             .unwrap();
@@ -2234,5 +3211,200 @@ mod tests {
             .await;
 
         assert!(result.is_ok());
+    }
+}
+
+#[cfg(test)]
+mod settings_reset_tests {
+    //! PostgreSQL setting resets must also reset Proxy encryption controls.
+    use super::Frontend;
+    use crate::config::TandemConfig;
+    use crate::error::{EncryptError, Error};
+    use crate::postgresql::context::{Context, KeysetIdentifier};
+    use crate::postgresql::middleware::Backend;
+    use crate::postgresql::test_operation_id as operation_id;
+    use crate::postgresql::Column;
+    use crate::proxy::{EncryptConfig, EncryptionService};
+    use bytes::Bytes;
+    use cipherstash_client::{encryption::Plaintext, IdentifiedBy};
+    use pg_proto::{BackendMessage, FrontendMessage, FrontendMiddlewareOutput, TransactionStatus};
+    use std::sync::{Arc, Mutex};
+
+    /// Records the keyset each encryption request asks for.
+    #[derive(Clone, Default)]
+    struct Recorder {
+        selected: Arc<Mutex<Vec<Option<KeysetIdentifier>>>>,
+    }
+
+    #[async_trait::async_trait]
+    impl EncryptionService for Recorder {
+        async fn encrypt(
+            &self,
+            keyset: Option<KeysetIdentifier>,
+            _: Vec<Option<Plaintext>>,
+            _: &[Option<Column>],
+        ) -> Result<Vec<Option<crate::EqlOutput>>, Error> {
+            self.selected.lock().unwrap().push(keyset);
+            Err(EncryptError::InvalidInboundEqlPayload.into())
+        }
+        async fn decrypt(
+            &self,
+            _: Option<KeysetIdentifier>,
+            _: Vec<Option<crate::EqlCiphertext>>,
+        ) -> Result<Vec<Option<Plaintext>>, Error> {
+            Ok(Vec::new())
+        }
+        async fn decrypt_inbound_eql(
+            &self,
+            _: Option<KeysetIdentifier>,
+            _: Vec<Option<crate::EqlCiphertext>>,
+        ) -> Result<Vec<Option<Plaintext>>, Error> {
+            Ok(Vec::new())
+        }
+    }
+
+    fn client() -> (Frontend<Recorder>, Backend<Recorder>, Recorder) {
+        let mut config = TandemConfig::for_testing();
+        config.encrypt.default_keyset_id = None;
+        let mut schema = eql_mapper::Schema::new("public");
+        let mut table = eql_mapper::Table::new(sqltk::parser::ast::Ident::new("encrypted"));
+        table.add_column(Arc::new(eql_mapper::Column::eql(
+            sqltk::parser::ast::Ident::new("secret"),
+            eql_mapper::EqlTraits::none(),
+            eql_mapper::DomainIdentity::from_domain_name("eql_v3_text").unwrap(),
+        )));
+        schema.add_table(table);
+        let mut encryption = EncryptConfig::new();
+        encryption.insert(
+            crate::Identifier::new("encrypted", "secret"),
+            cipherstash_client::schema::ColumnConfig::build("secret".to_owned())
+                .casts_as(cipherstash_client::schema::ColumnType::Text),
+        );
+        let recorder = Recorder::default();
+        let (sender, _) = tokio::sync::mpsc::unbounded_channel();
+        let context = Context::new(
+            1,
+            Arc::new(config),
+            Arc::new(encryption),
+            Arc::new(schema),
+            Arc::new(rustls::RootCertStore::empty()),
+            recorder.clone(),
+            sender,
+        );
+        (
+            Frontend::new(context.clone()),
+            Backend::new(context),
+            recorder,
+        )
+    }
+
+    fn named(name: &str) -> Option<KeysetIdentifier> {
+        Some(KeysetIdentifier(IdentifiedBy::Name(name.to_owned().into())))
+    }
+
+    async fn command(
+        frontend: &mut Frontend<Recorder>,
+        backend: &mut Backend<Recorder>,
+        sql: &str,
+        tag: &str,
+        status: TransactionStatus,
+    ) {
+        let operation = operation_id();
+        frontend
+            .intercept(
+                operation,
+                FrontendMessage::Query(Bytes::copy_from_slice(sql.as_bytes())),
+            )
+            .await
+            .unwrap();
+        backend
+            .intercept(
+                Some(operation),
+                BackendMessage::CommandComplete(Bytes::copy_from_slice(tag.as_bytes())),
+            )
+            .await
+            .unwrap();
+        backend
+            .intercept(Some(operation), BackendMessage::ReadyForQuery(status))
+            .await
+            .unwrap();
+    }
+
+    /// PgCat cleans a server connection on which a client ran `SET` by sending
+    /// `RESET ROLE;RESET ALL;` before giving it to another client. PostgreSQL
+    /// resets its own `cipherstash.*` GUCs; Proxy must reset its settings too, or
+    /// the next client inherits the previous tenant's keyset.
+    #[tokio::test]
+    async fn pgcat_reset_all_is_forwarded_and_clears_the_session_keyset() {
+        let (mut frontend, mut backend, _) = client();
+        command(
+            &mut frontend,
+            &mut backend,
+            "SET CIPHERSTASH.KEYSET_NAME = 'tenant-a'",
+            "SET",
+            TransactionStatus::Idle,
+        )
+        .await;
+        assert_eq!(
+            frontend.context.keyset_identifier().unwrap(),
+            named("tenant-a")
+        );
+
+        let reset = Bytes::from_static(b"RESET ROLE;RESET ALL;");
+        let operation = operation_id();
+        let output = frontend
+            .intercept(operation, FrontendMessage::Query(reset.clone()))
+            .await
+            .unwrap();
+        let forwarded = match output {
+            FrontendMiddlewareOutput::Forward(FrontendMessage::Query(query))
+            | FrontendMiddlewareOutput::ForwardThenFlush(FrontendMessage::Query(query)) => query,
+            other => panic!("expected a forwarded query, got {other:?}"),
+        };
+        assert_eq!(
+            String::from_utf8_lossy(&forwarded),
+            String::from_utf8_lossy(&reset)
+        );
+        for _ in 0..2 {
+            backend
+                .intercept(
+                    Some(operation),
+                    BackendMessage::CommandComplete(Bytes::from_static(b"RESET")),
+                )
+                .await
+                .unwrap();
+        }
+        backend
+            .intercept(
+                Some(operation),
+                BackendMessage::ReadyForQuery(TransactionStatus::Idle),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(frontend.context.keyset_identifier().unwrap(), None);
+    }
+
+    /// `RESET CIPHERSTASH.KEYSET_NAME` returns the keyset to its default.
+    #[tokio::test]
+    async fn reset_of_a_cipherstash_setting_clears_it() {
+        let (mut frontend, mut backend, _) = client();
+        command(
+            &mut frontend,
+            &mut backend,
+            "SET CIPHERSTASH.KEYSET_NAME = 'tenant-a'",
+            "SET",
+            TransactionStatus::Idle,
+        )
+        .await;
+        command(
+            &mut frontend,
+            &mut backend,
+            "RESET CIPHERSTASH.KEYSET_NAME",
+            "RESET",
+            TransactionStatus::Idle,
+        )
+        .await;
+        assert_eq!(frontend.context.keyset_identifier().unwrap(), None);
     }
 }
