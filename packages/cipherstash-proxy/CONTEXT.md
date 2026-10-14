@@ -17,7 +17,8 @@ codebase has used it for both a connection and a single statement.
 
 **Context**:
 The mutable state belonging to one connection — its prepared statements, portals,
-pending describes and executes, and keyset.
+pending describes and executes, and keyset. Context owns the correlated transitions of this
+metadata throughout preparation, execution, failure, and readiness.
 
 **Frontend** / **Backend**:
 The two halves of the proxy pipeline by direction of travel: Frontend carries client to
@@ -32,6 +33,10 @@ are different things; do not call either of them a Statement here.
 **Portal**:
 A prepared statement bound to parameter values, ready to execute. Either `Encrypted`,
 carrying the analysed statement, or `Passthrough` when nothing in it is encrypted.
+
+**Local preparation**:
+Proxy's speculative analysis of a Parse or Bind before PostgreSQL acknowledges it.
+Finishing local preparation neither confirms execution nor changes effective connection settings.
 
 **Statement metrics scope**:
 The measurement window around one statement execution occurrence. A simple Query owns one;
