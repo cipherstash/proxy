@@ -15,7 +15,6 @@ use crate::postgresql::data::{
     compose_json_selector_path, json_value_selector_plaintext, literal_from_sql, literal_json_value,
 };
 use crate::postgresql::inbound_eql;
-use crate::postgresql::rewrite::Name;
 use crate::postgresql::rewrite::UNSPECIFIED_TYPE_OID;
 use crate::postgresql::OperationId;
 use crate::prometheus::{
@@ -29,9 +28,7 @@ use crate::{EqlOutput, EqlQueryPayload};
 use cipherstash_client::encryption::Plaintext;
 use eql_mapper::{self, EqlMapperError, EqlTermVariant, JsonSelectorSegment, TypeCheckedStatement};
 use metrics::{counter, histogram};
-use pg_proto::{
-    Close, Describe, DescribeTarget, Execute, FrontendMessage, FrontendMiddlewareOutput, Parse,
-};
+use pg_proto::{Describe, Execute, FrontendMessage, FrontendMiddlewareOutput, Parse};
 use serde::Serialize;
 use sqltk::parser::ast::{self, Value};
 use sqltk::NodeKey;
@@ -118,57 +115,29 @@ impl<S: EncryptionService> Frontend<S> {
         if self.failed_extended_batch || self.context.discarding_extended_messages()? {
             if matches!(protocol_message, FrontendMessage::Sync) {
                 self.failed_extended_batch = false;
-                self.context.mark_schema_protocol_boundary();
-                self.context.settings_protocol_boundary(operation)?;
+                self.context.sync(operation)?;
                 return Ok(FrontendMiddlewareOutput::Forward(protocol_message));
             }
             self.context.discard_operation(operation)?;
             return Ok(FrontendMiddlewareOutput::Suppress(protocol_message));
         }
 
-        if matches!(
-            protocol_message,
-            FrontendMessage::Parse(_) | FrontendMessage::Bind(_)
-        ) {
-            self.context.set_non_execution(operation)?;
-        }
         if self.context.mapping_disabled() {
             match &protocol_message {
-                FrontendMessage::Query(_) => {
-                    let metrics_scope = self.context.start_metrics_scope()?;
-                    self.context.add_portal(
-                        operation,
-                        Name::new(),
-                        Portal::passthrough(Some(metrics_scope)),
-                    )?;
-                    self.context.set_simple_query_execute_until_ready(
-                        operation,
-                        Name::new(),
-                        Some(metrics_scope),
-                    )?;
-                }
+                FrontendMessage::Query(_) => self.context.unmapped_query(operation)?,
                 FrontendMessage::Bind(bind) => {
-                    let session_id = self.context.get_statement_metrics_scope(&bind.statement)?;
-                    self.context.add_portal(
-                        operation,
-                        bind.portal.clone(),
-                        Portal::passthrough(session_id),
-                    )?;
+                    self.context
+                        .unmapped_bind(operation, bind.portal.clone(), &bind.statement)?
                 }
-                FrontendMessage::Execute(execute) => self
-                    .context
-                    .set_execute_for_portal(operation, execute.portal.clone())?,
+                FrontendMessage::Execute(execute) => {
+                    self.context.execute(operation, &execute.portal)?;
+                }
                 FrontendMessage::Describe(describe) => {
-                    self.context.set_describe(operation, describe.clone())?;
+                    self.context.set_describe(operation, describe.clone())?
                 }
-                FrontendMessage::Close(close) => match close.target {
-                    DescribeTarget::Portal => self.context.close_portal(&close.name)?,
-                    DescribeTarget::Statement => {
-                        self.context.close_statement_explicit(&close.name)?;
-                    }
-                },
+                FrontendMessage::Close(close) => self.context.close(operation, close)?,
                 FrontendMessage::Parse(parse) => {
-                    self.context.close_statement(&parse.statement)?;
+                    self.context.unmapped_parse(operation, &parse.statement)?
                 }
                 _ => {}
             }
@@ -186,7 +155,6 @@ impl<S: EncryptionService> Frontend<S> {
                     // No mapping needed, don't change the bytes
                     Ok(None) => (),
                     Err(err) => {
-                        self.context.finish_metrics_scope(Some(session_id))?;
                         warn!(
                             client_id = self.context.client_id,
                             msg = "Query Handler Error",
@@ -194,10 +162,7 @@ impl<S: EncryptionService> Frontend<S> {
                         );
                         let response = self.error_to_response(err);
                         self.context
-                            .set_operation_error(operation, response.clone())?;
-                        self.context.set_execute(operation, Name::new(), None)?;
-                        self.context.settings_protocol_boundary(operation)?;
-                        self.context.mark_schema_protocol_boundary();
+                            .refuse_query(operation, session_id, response.clone())?;
                         outbound_message = self.simple_error_query(&response);
                     }
                 }
@@ -206,13 +171,11 @@ impl<S: EncryptionService> Frontend<S> {
                 self.describe_handler(operation, describe).await?;
             }
             FrontendMessage::Execute(execute) => {
-                match self.execute_handler(operation, execute.clone()).await {
+                match self.context.execute(operation, &execute.portal) {
                     Ok(flush) => flush_after_forward = flush,
                     Err(err) => {
                         let response = self.error_to_response(err);
-                        self.context
-                            .set_operation_error(operation, response.clone())?;
-                        self.context.set_execute(operation, Name::new(), None)?;
+                        self.context.refuse_execute(operation, response.clone())?;
                         self.failed_extended_batch = true;
                         outbound_message = FrontendMessage::Execute(Execute {
                             // The client must not be able to pre-create the
@@ -225,26 +188,20 @@ impl<S: EncryptionService> Frontend<S> {
                 }
             }
             FrontendMessage::Parse(parse) => {
-                let statement = parse.statement.clone();
                 let failed_parse = parse.clone();
                 match self.parse_handler(operation, parse).await {
                     Ok(Some(mapped)) => {
-                        self.context.capture_prepared_settings(&statement)?;
                         outbound_message = mapped;
                     }
-                    Ok(None) => {
-                        self.context.capture_prepared_settings(&statement)?;
-                    }
+                    Ok(None) => {}
                     Err(err) => {
-                        self.context.close_statement(&statement)?;
                         warn!(
                             client_id = self.context.client_id,
                             msg = "Parse Handler Error",
                             error = ?err.to_string(),
                         );
                         let response = self.error_to_response(err);
-                        self.context
-                            .set_operation_error(operation, response.clone())?;
+                        self.context.refuse_parse(operation, response.clone())?;
                         self.failed_extended_batch = true;
                         outbound_message = self.extended_parse_error(failed_parse, &response);
                     }
@@ -263,8 +220,7 @@ impl<S: EncryptionService> Frontend<S> {
                                 msg = "EncryptError::InvalidParameter",
                             );
                             let response = self.error_to_response(err);
-                            self.context
-                                .set_operation_error(operation, response.clone())?;
+                            self.context.refuse_bind(operation, response.clone())?;
                             self.failed_extended_batch = true;
                             outbound_message = self.extended_bind_error(failed_bind, &response);
                         }
@@ -274,8 +230,7 @@ impl<S: EncryptionService> Frontend<S> {
                                 msg = "EncryptError::UnknownKeysetIdentifier",
                             );
                             let response = self.error_to_response(err);
-                            self.context
-                                .set_operation_error(operation, response.clone())?;
+                            self.context.refuse_bind(operation, response.clone())?;
                             self.failed_extended_batch = true;
                             outbound_message = self.extended_bind_error(failed_bind, &response);
                         }
@@ -286,8 +241,7 @@ impl<S: EncryptionService> Frontend<S> {
                                 err = err.to_string()
                             );
                             let response = self.error_to_response(err);
-                            self.context
-                                .set_operation_error(operation, response.clone())?;
+                            self.context.refuse_bind(operation, response.clone())?;
                             self.failed_extended_batch = true;
                             outbound_message = self.extended_bind_error(failed_bind, &response);
                         }
@@ -299,12 +253,10 @@ impl<S: EncryptionService> Frontend<S> {
                     client_id = self.context.client_id,
                     message = ?protocol_message,
                 );
-                self.context.mark_schema_protocol_boundary();
-                self.context.settings_protocol_boundary(operation)?;
+                self.context.sync(operation)?;
             }
             FrontendMessage::Close(close) => {
-                self.context.settings_close_requested(operation, &close)?;
-                self.close_handler(close).await?;
+                self.context.close(operation, &close)?;
             }
             _ => {
                 debug!(target: PROTOCOL,
@@ -330,32 +282,6 @@ impl<S: EncryptionService> Frontend<S> {
         debug!(target: PROTOCOL, client_id = self.context.client_id, ?describe);
         self.context.set_describe(operation, describe)?;
         Ok(())
-    }
-
-    async fn close_handler(&mut self, close: Close) -> Result<(), Error> {
-        debug!(target: PROTOCOL, client_id = self.context.client_id, ?close);
-        match close.target {
-            DescribeTarget::Portal => self.context.close_portal(&close.name)?,
-            DescribeTarget::Statement => {
-                self.context.close_statement_explicit(&close.name)?;
-            }
-        }
-        Ok(())
-    }
-
-    async fn execute_handler(
-        &mut self,
-        operation: OperationId,
-        execute: Execute,
-    ) -> Result<bool, Error> {
-        debug!(target: PROTOCOL, client_id = self.context.client_id, ?execute);
-        let changes_settings = self
-            .context
-            .execute_settings_portal(operation, &execute.portal)?;
-        let executes_ddl = self.context.execute_schema_portal(&execute.portal);
-        self.context
-            .set_execute_for_portal(operation, execute.portal.to_owned())?;
-        Ok(executes_ddl || changes_settings)
     }
 
     /// Handles PostgreSQL Query messages (simple query protocol).
@@ -409,7 +335,7 @@ impl<S: EncryptionService> Frontend<S> {
         let query_text = String::from_utf8_lossy(&query).into_owned();
         let parsed_statements = SqlParser::parse_statements(&query_text)?;
         for statement in &parsed_statements {
-            self.validate_setting(statement)?;
+            self.context.validate_setting(statement)?;
         }
         if self
             .context
@@ -468,7 +394,7 @@ impl<S: EncryptionService> Frontend<S> {
                     if self.context.mapping_errors_enabled() || err.must_fail_closed() {
                         return Err(err);
                     } else {
-                        self.record_simple_schema_execution(
+                        self.context.register_query(
                             operation,
                             session_id,
                             Portal::passthrough(Some(session_id)),
@@ -567,7 +493,8 @@ impl<S: EncryptionService> Frontend<S> {
             m.set_query_fingerprint(&query_text);
         })?;
 
-        self.record_simple_schema_execution(operation, session_id, portal, &forwarded_statements)?;
+        self.context
+            .register_query(operation, session_id, portal, &forwarded_statements)?;
 
         if encrypted {
             let transformed_statement = forwarded_statements
@@ -605,26 +532,6 @@ impl<S: EncryptionService> Frontend<S> {
             }
             Ok(None)
         }
-    }
-
-    /// Records the portal and schema intents for the statements actually sent to PostgreSQL.
-    fn record_simple_schema_execution(
-        &mut self,
-        operation: OperationId,
-        session_id: SessionId,
-        portal: Portal,
-        statements: &[ast::Statement],
-    ) -> Result<(), Error> {
-        self.context.add_portal(operation, Name::new(), portal)?;
-        self.context.set_simple_query_execute_until_ready(
-            operation,
-            Name::new(),
-            Some(session_id),
-        )?;
-        self.context.execute_simple_schema_statements(statements);
-        self.context
-            .execute_simple_settings_statements(operation, statements)?;
-        Ok(())
     }
 
     /// Encrypts literal values found in SQL statements.
@@ -828,84 +735,29 @@ impl<S: EncryptionService> Frontend<S> {
         mut message: Parse,
     ) -> Result<Option<FrontendMessage>, Error> {
         let original_query = message.query.clone();
-        let session_id = self.context.start_metrics_scope()?;
-
-        // Set protocol type
-        self.context.update_statement_metadata(session_id, |m| {
-            m.protocol = Some(ProtocolType::Extended);
-        })?;
-
+        let session_id = self
+            .context
+            .begin_parse(operation, message.statement.clone())?;
         let parse_timer = PhaseTimer::start();
-
-        debug!(
-            target: PROTOCOL,
-            client_id = self.context.client_id,
-            parse = ?message
-        );
-
-        // Parse speculatively replaces a name. Record the previous preparation
-        // before dropping its analysed metadata; a rejected named replacement
-        // must refuse subsequent reuse rather than forward unencrypted values.
-        //
-        // Dropping it here rather than only on the mapped path matters, because
-        // every path below can return without caching anything — a statement
-        // that needs no type check (`BEGIN`, `END`), one parsed while mapping is
-        // disabled, or one that fails to type check. Leaving the previous entry
-        // in place means the next Bind for this name is rewritten against a
-        // statement the client never parsed, and the param counts do not line
-        // up:
-        //
-        //     FATAL: Rewritten statement binds parameter 1, but only 0 were provided
-        //
-        // pgbench in extended mode is exactly this shape: it reuses the unnamed
-        // statement for every command, so the `END` at the close of a
-        // transaction binds against the `SELECT` that preceded it.
-        //
-        // Closing also drops the name's metrics scope mapping, so it must happen
-        // BEFORE the new scope is recorded — the other way around wipes the
-        // mapping that was just written and every Bind falls back to the
-        // latest-scope guess.
-        self.context
-            .begin_statement_preparation(operation, &message.statement)?;
-        self.context
-            .set_statement_metrics_scope(message.statement.to_owned(), session_id)?;
 
         let mut statement_text = String::from_utf8_lossy(&message.query).into_owned();
         let statement = SqlParser::parse_statement(&statement_text)?;
 
-        self.context.prepare_schema_for_statement().await?;
-        if eql_mapper::requires_type_check(&statement) {
-            self.context.wait_for_schema_execution().await;
-            self.context.ensure_schema_modelled()?;
-        }
         self.context
-            .prepare_schema_statement(message.statement.to_owned(), statement.clone());
-
-        // Record diagnostics before any passthrough path can return early.
-        // Statements that do not require EQL type checking (for example,
-        // plaintext INSERTs and SELECT pg_sleep(...)) still need their real
-        // statement type and fingerprint in metrics.
-        self.context.update_statement_metadata(session_id, |m| {
-            m.statement_type = Some(StatementType::from_statement(&statement));
-            m.set_query_fingerprint(&statement_text);
-        })?;
-
-        self.validate_setting(&statement)?;
-        self.context.prepare_settings_statement(
-            operation,
-            message.statement.clone(),
-            &statement,
-        )?;
+            .prepare_parse(operation, &statement, &statement_text)
+            .await?;
 
         if self.context.unsafe_disable_mapping()? {
             warn!(msg = "Encrypted statement mapping is not enabled");
             counter!(STATEMENTS_PASSTHROUGH_MAPPING_DISABLED_TOTAL).increment(1);
             counter!(STATEMENTS_PASSTHROUGH_TOTAL).increment(1);
+            self.context.finish_parse(operation, None)?;
             return Ok(None);
         }
 
         if !eql_mapper::requires_type_check(&statement) {
             counter!(STATEMENTS_PASSTHROUGH_TOTAL).increment(1);
+            self.context.finish_parse(operation, None)?;
             return Ok(None);
         }
 
@@ -917,6 +769,7 @@ impl<S: EncryptionService> Frontend<S> {
                 if self.context.mapping_errors_enabled() || err.must_fail_closed() {
                     return Err(err);
                 } else {
+                    self.context.finish_parse(operation, None)?;
                     return Ok(None);
                 };
             }
@@ -968,10 +821,10 @@ impl<S: EncryptionService> Frontend<S> {
 
                 message.parameter_types =
                     rewrite_parse_param_types(&client_param_types, &statement.output_params);
-                self.context
-                    .add_statement(message.statement.to_owned(), statement)?;
+                self.context.finish_parse(operation, Some(statement))?;
             }
             _ => {
+                self.context.finish_parse(operation, None)?;
                 debug!(target: MAPPER,
                     client_id = self.context.client_id,
                     msg = "Passthrough Parse"
@@ -998,24 +851,6 @@ impl<S: EncryptionService> Frontend<S> {
         } else {
             Ok(None)
         }
-    }
-
-    ///
-    /// Handles `SET CIPHERSTASH KEYSET_*` statements
-    ///
-    /// Returns an error if `SET CIPHERSTASH KEYSET_*` is called and proxy is configured with a `default_keyset_id`
-    /// Returns an error if `SET CIPHERSTASH KEYSET_ID` cannot parse the value as a valid UUID
-    ///
-    fn validate_setting(&self, statement: &ast::Statement) -> Result<(), Error> {
-        use crate::postgresql::context::settings::SettingChange;
-        if matches!(
-            SettingChange::parse(statement)?,
-            Some(SettingChange::Keyset(..))
-        ) && self.context.default_keyset_id().is_some()
-        {
-            return Err(EncryptError::UnexpectedSetKeyset.into());
-        }
-        Ok(())
     }
 
     ///
@@ -1122,28 +957,18 @@ impl<S: EncryptionService> Frontend<S> {
         operation: OperationId,
         mut bind: Bind,
     ) -> Result<Option<FrontendMessage>, Error> {
-        self.context.bind_settings_statement(
-            operation,
-            bind.portal.clone(),
-            &bind.prepared_statement,
-        )?;
-        self.context
-            .bind_schema_statement(bind.portal.to_owned(), &bind.prepared_statement);
-        if self.context.unsafe_disable_mapping()? {
+        let knowledge =
+            self.context
+                .begin_bind(operation, bind.portal.clone(), &bind.prepared_statement)?;
+        if knowledge.mapping_disabled {
             warn!(msg = "Encrypted statement mapping is not enabled");
             counter!(STATEMENTS_PASSTHROUGH_MAPPING_DISABLED_TOTAL).increment(1);
             counter!(STATEMENTS_PASSTHROUGH_TOTAL).increment(1);
-            self.context.add_portal(
-                operation,
-                bind.portal.to_owned(),
-                Portal::passthrough(None),
-            )?;
+            self.context
+                .finish_bind(operation, Portal::passthrough(None))?;
             return Ok(None);
         }
-
-        let session_id = self
-            .context
-            .start_portal_metrics_scope(&bind.prepared_statement)?;
+        let session_id = knowledge.metrics;
 
         let result = async {
             // Track param bytes for diagnostics
@@ -1155,7 +980,7 @@ impl<S: EncryptionService> Frontend<S> {
 
             let mut portal = Portal::passthrough(session_id);
 
-            if let Some(statement) = self.context.get_statement(&bind.prepared_statement)? {
+            if let Some(statement) = knowledge.statement {
                 debug!(target:MAPPER, client_id = self.context.client_id, ?statement);
 
                 if statement.has_params() {
@@ -1174,8 +999,7 @@ impl<S: EncryptionService> Frontend<S> {
             };
 
             debug!(target: MAPPER, client_id = self.context.client_id, portal = ?portal);
-            self.context
-                .add_portal(operation, bind.portal.to_owned(), portal)?;
+            self.context.finish_bind(operation, portal)?;
 
             if bind.requires_rewrite() {
                 let message = FrontendMessage::from(bind);
@@ -1192,10 +1016,6 @@ impl<S: EncryptionService> Frontend<S> {
             }
         }
         .await;
-
-        if result.is_err() {
-            self.context.finish_metrics_scope(session_id)?;
-        }
 
         result
     }
@@ -2401,7 +2221,7 @@ mod tests {
                 let failed = operation_id();
                 frontend
                     .context
-                    .set_execute(failed, bytes::Bytes::new(), None)
+                    .test_set_execute(failed, bytes::Bytes::new(), None)
                     .unwrap();
                 backend
                     .intercept(
@@ -2480,7 +2300,7 @@ mod tests {
         let failed_execute = operation_id();
         frontend
             .context
-            .set_execute(failed_execute, bytes::Bytes::new(), None)
+            .test_set_execute(failed_execute, bytes::Bytes::new(), None)
             .unwrap();
         backend
             .intercept(
@@ -2870,7 +2690,7 @@ mod tests {
             .unwrap();
 
         assert!(context
-            .get_statement_metrics_scope(&statement)
+            .test_statement_metrics_scope(&statement)
             .unwrap()
             .is_none());
         assert!(context
@@ -2974,10 +2794,10 @@ mod tests {
         let statement_name = bytes::Bytes::from_static(b"statement");
         let template_scope = context.start_metrics_scope().unwrap();
         context
-            .set_statement_metrics_scope(statement_name.clone(), template_scope)
+            .test_set_statement_metrics_scope(statement_name.clone(), template_scope)
             .unwrap();
         context
-            .add_statement(
+            .test_add_statement(
                 statement_name.clone(),
                 Statement::new(
                     vec![Some(column.clone())],
@@ -3030,7 +2850,7 @@ mod tests {
             .unwrap();
 
         assert!(context
-            .finish_execution(
+            .test_finish_execution(
                 operation,
                 crate::postgresql::context::ExecutionOutcome::Failed,
             )
@@ -3059,7 +2879,7 @@ mod tests {
             .unwrap();
 
         assert!(context
-            .finish_execution(
+            .test_finish_execution(
                 operation,
                 crate::postgresql::context::ExecutionOutcome::Failed,
             )
@@ -3139,7 +2959,7 @@ mod tests {
             .unwrap();
 
         context
-            .finish_execution(
+            .test_finish_execution(
                 operation,
                 crate::postgresql::context::ExecutionOutcome::Completed,
             )
@@ -3147,14 +2967,14 @@ mod tests {
         assert!(context.get_execute(operation).unwrap().is_some());
 
         context
-            .finish_execution(
+            .test_finish_execution(
                 operation,
                 crate::postgresql::context::ExecutionOutcome::Completed,
             )
             .unwrap();
         assert!(context.get_execute(operation).unwrap().is_some());
         context
-            .ready_for_query(pg_proto::TransactionStatus::Idle, Some(operation))
+            .test_ready_for_query(pg_proto::TransactionStatus::Idle, Some(operation))
             .unwrap();
         assert!(matches!(
             context.get_execute(operation),
@@ -3180,7 +3000,7 @@ mod tests {
             .unwrap();
 
         context
-            .finish_execution(
+            .test_finish_execution(
                 operation,
                 crate::postgresql::context::ExecutionOutcome::Completed,
             )
@@ -3188,7 +3008,7 @@ mod tests {
         assert!(context.get_execute(operation).unwrap().is_some());
 
         context
-            .ready_for_query(pg_proto::TransactionStatus::Idle, Some(operation))
+            .test_ready_for_query(pg_proto::TransactionStatus::Idle, Some(operation))
             .unwrap();
         assert!(matches!(
             context.get_execute(operation),

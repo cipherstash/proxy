@@ -98,21 +98,21 @@ pub struct SettingsProtocol {
 }
 
 impl SettingsProtocol {
-    pub fn start_prepare(&mut self, operation: OperationId, name: Name) {
+    pub(super) fn start_prepare(
+        &mut self,
+        operation: OperationId,
+        name: Name,
+        metadata: MetadataSnapshot,
+    ) {
         self.journal.insert(
             operation,
             Mutation {
                 previous: Previous::Statement(self.prepared.get(&name).cloned()),
                 name,
-                metadata: MetadataSnapshot::default(),
+                metadata,
                 close: false,
             },
         );
-    }
-    pub(super) fn attach_metadata(&mut self, operation: OperationId, metadata: MetadataSnapshot) {
-        if let Some(mutation) = self.journal.get_mut(&operation) {
-            mutation.metadata = metadata;
-        }
     }
     pub fn references_metrics(&self, id: SessionId) -> bool {
         self.journal
@@ -155,6 +155,7 @@ impl SettingsProtocol {
         name: &Name,
         settings: EffectiveSettings,
         encrypted_values: bool,
+        metadata: MetadataSnapshot,
     ) -> bool {
         let previous = self.portals.remove(&portal);
         self.journal.insert(
@@ -162,7 +163,7 @@ impl SettingsProtocol {
             Mutation {
                 name: portal.clone(),
                 previous: Previous::Portal(previous),
-                metadata: MetadataSnapshot::default(),
+                metadata,
                 close: false,
             },
         );
@@ -432,7 +433,13 @@ impl SettingsProtocol {
     pub fn in_flight(&self) -> bool {
         self.pending.values().any(|pending| pending.barrier)
     }
-    pub fn close(&mut self, operation: OperationId, name: Name, target: pg_proto::DescribeTarget) {
+    pub(super) fn close(
+        &mut self,
+        operation: OperationId,
+        name: Name,
+        target: pg_proto::DescribeTarget,
+        metadata: MetadataSnapshot,
+    ) {
         let previous = match target {
             pg_proto::DescribeTarget::Statement => Previous::Statement(self.prepared.remove(&name)),
             pg_proto::DescribeTarget::Portal => Previous::Portal(self.portals.remove(&name)),
@@ -442,7 +449,7 @@ impl SettingsProtocol {
             Mutation {
                 name,
                 previous,
-                metadata: MetadataSnapshot::default(),
+                metadata,
                 close: true,
             },
         );
@@ -511,14 +518,29 @@ mod review_regressions {
             portal.clone(),
             &name,
             settings.clone(),
-            false
+            false,
+            Default::default()
         ));
         protocol.prepared_or_bound(original_bind);
         let rejected = operation_id();
-        assert!(protocol.bind(rejected, portal.clone(), &name, settings.clone(), false));
+        assert!(protocol.bind(
+            rejected,
+            portal.clone(),
+            &name,
+            settings.clone(),
+            false,
+            Default::default()
+        ));
         protocol.sync(operation_id());
         let later = operation_id();
-        assert!(protocol.bind(later, portal.clone(), &name, settings, false));
+        assert!(protocol.bind(
+            later,
+            portal.clone(),
+            &name,
+            settings,
+            false,
+            Default::default()
+        ));
         protocol.failed(Some(rejected));
         assert_eq!(protocol.portals[&portal].operation, later);
         protocol.failed(Some(later));
@@ -555,12 +577,26 @@ mod review_regressions {
         let settings = EffectiveSettings::new(&ConnectionSettings::default());
         prepare(&mut protocol, &name);
         let old = operation_id();
-        protocol.bind(old, portal.clone(), &name, settings.clone(), false);
+        protocol.bind(
+            old,
+            portal.clone(),
+            &name,
+            settings.clone(),
+            false,
+            Default::default(),
+        );
         protocol.prepared_or_bound(old);
         let sync = operation_id();
         protocol.sync(sync);
         let later = operation_id();
-        protocol.bind(later, portal.clone(), &name, settings, false);
+        protocol.bind(
+            later,
+            portal.clone(),
+            &name,
+            settings,
+            false,
+            Default::default(),
+        );
         protocol.ready(Some(sync), true);
         protocol.failed(Some(later));
         assert!(!protocol.portals.contains_key(&portal));
@@ -584,6 +620,7 @@ mod review_regressions {
             operation_id(),
             name.clone(),
             pg_proto::DescribeTarget::Statement,
+            Default::default(),
         );
         protocol.prepare(
             operation_id(),
@@ -596,7 +633,8 @@ mod review_regressions {
             Name::new(),
             &name,
             EffectiveSettings::new(&ConnectionSettings::default()),
-            false
+            false,
+            Default::default()
         ));
     }
     #[test]
@@ -607,10 +645,24 @@ mod review_regressions {
         let settings = EffectiveSettings::new(&ConnectionSettings::default());
         prepare(&mut protocol, &name);
         let first = operation_id();
-        assert!(protocol.bind(first, portal.clone(), &name, settings.clone(), false));
+        assert!(protocol.bind(
+            first,
+            portal.clone(),
+            &name,
+            settings.clone(),
+            false,
+            Default::default()
+        ));
         protocol.prepared_or_bound(first);
         let rejected = operation_id();
-        assert!(protocol.bind(rejected, portal.clone(), &name, settings.clone(), false));
+        assert!(protocol.bind(
+            rejected,
+            portal.clone(),
+            &name,
+            settings.clone(),
+            false,
+            Default::default()
+        ));
         protocol.failed(Some(rejected));
         protocol.ready(Some(operation_id()), true);
         assert!(protocol.bind(
@@ -618,7 +670,8 @@ mod review_regressions {
             portal.clone(),
             &name,
             settings.clone(),
-            false
+            false,
+            Default::default()
         ));
         assert_eq!(
             protocol.execute(operation_id(), &portal, &ConnectionSettings::default()),
