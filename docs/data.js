@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1791942768089,
+  "lastUpdate": 1791951797065,
   "repoUrl": "https://github.com/cipherstash/proxy",
   "entries": {
     "Benchmark": [
@@ -26825,6 +26825,31 @@ window.BENCHMARK_DATA = {
           {
             "name": "tps",
             "value": 42.565613,
+            "unit": "Number"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "committer": {
+            "name": "cipherstash",
+            "username": "cipherstash"
+          },
+          "id": "236757cda0bb5bce19a089e56adb0182447c13db",
+          "message": "fix(proxy): synchronize settings execution and gate pooler compatibility",
+          "timestamp": "2026-09-28T23:20:16Z",
+          "url": "https://github.com/cipherstash/proxy/pull/467/commits/236757cda0bb5bce19a089e56adb0182447c13db"
+        },
+        "date": 1791951795595,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tps",
+            "value": 28.692384,
             "unit": "Number"
           }
         ]
