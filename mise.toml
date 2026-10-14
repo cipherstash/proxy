@@ -222,12 +222,14 @@ mise --env tls run test:wait_for_postgres_to_quack --port 6432 --max-retries 20 
 """
 
 [tasks."test:integration:without_multitenant"]
+dir = "./tests"
 description = "Runs integration tests excluding multitenant (run test:integration:setup:tls first for standalone use)"
 run = """
 cargo nextest run --no-fail-fast --nocapture -E 'package(cipherstash-proxy-integration) and not test(multitenant)'
 """
 
 [tasks."test:integration:multitenant"]
+dir = "./tests"
 description = "Runs multitenant integration tests only"
 run = """
 cargo nextest run --no-fail-fast --nocapture -E 'package(cipherstash-proxy-integration) and test(multitenant)'
