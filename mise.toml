@@ -669,8 +669,8 @@ fi
 export CIPHERSTASH_CLIENT_SECONDARY_USER_AGENT="cipherstash-proxy/${BUILD_VERSION}"
 
 # cross-compile
-rustup toolchain install stable --profile minimal --no-self-update
-rustup target add --toolchain stable {{ target }}
+rustup toolchain install --no-self-update
+rustup target add {{ target }}
 
 cargo build --locked --target {{ target }} --release --package cipherstash-proxy
 

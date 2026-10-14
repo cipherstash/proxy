@@ -10,7 +10,8 @@ runs:
 
     - name: Install rust
       shell: /bin/bash -l {0}
-      run: rustup toolchain install stable --profile minimal --no-self-update
+      # Installs the toolchain pinned in rust-toolchain.toml
+      run: rustup toolchain install --no-self-update
     - name: Setup Rust cache
       uses: Swatinem/rust-cache@v2
       with:

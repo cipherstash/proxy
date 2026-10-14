@@ -359,7 +359,7 @@ impl EncryptionService for ZeroKms {
 
         // Reconstruct the result vector with None values in the right places
         let mut result: Vec<Option<EqlOutputV3>> = (0..plaintexts.len()).map(|_| None).collect();
-        for (idx, ciphertext) in indices.into_iter().zip(encrypted.into_iter()) {
+        for (idx, ciphertext) in indices.into_iter().zip(encrypted) {
             result[idx] = Some(ciphertext);
         }
 

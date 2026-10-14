@@ -6,7 +6,6 @@ mise.local.toml
 tests/pg/data**
 .vscode
 
-rust-toolchain.toml
 .cargo/config.toml
 
 # release artifacts
