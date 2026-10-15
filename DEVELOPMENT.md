@@ -137,6 +137,43 @@ Install development and testing dependencies (including `cargo-binstall`):
 mise install
 ```
 
+### Supported Rust versions
+
+CI uses three Rust toolchains:
+
+| Toolchain | Declared in | What CI runs on it |
+|---|---|---|
+| **Pinned** (currently 1.99.0) | `rust-toolchain.toml` | Formatting, Clippy, unit and integration tests across the full PostgreSQL matrix, burn-in, benchmarks, and release binaries (`mise run build:binary`). |
+| **Latest stable** | floating `stable` channel | `Quick check (Rust stable)`: formatting and Clippy only. |
+| **Minimum supported (MSRV)** (currently 1.89.0) | `rust-version` under `[workspace.package]` in `Cargo.toml` | `Quick check (Rust MSRV)`: builds the production binary with `cargo build --locked --release --package cipherstash-proxy`. |
+
+The quick checks need no PostgreSQL or credentials. Locally, rustup selects the pinned toolchain automatically from `rust-toolchain.toml`.
+
+Rust 1.88 cannot build Proxy: a transitive dependency (`stack-profile`, via `cipherstash-client`) uses `std::fs::File::lock`, which stabilized in 1.89, without declaring that requirement.
+
+To run the quick checks locally:
+
+```shell
+cargo +stable clippy --all --no-deps --all-targets --all-features -- -D warnings
+
+rustup toolchain install 1.89.0 --profile minimal
+cargo +1.89.0 build --locked --release --package cipherstash-proxy
+```
+
+#### Bumping the pinned toolchain
+
+When `Quick check (Rust stable)` fails after a new Rust release, fix the new warnings and update `channel` in `rust-toolchain.toml` to that release in the same pull request. The full matrix then confirms the new pin.
+
+#### Raising the MSRV
+
+The MSRV only goes up deliberately. If `Quick check (Rust MSRV)` fails because a change, or a dependency update in `Cargo.lock`, needs a newer compiler, either avoid the newer requirement (for example, keep the older dependency version) or raise the MSRV in the same pull request:
+
+1. Update `rust-version` in the root `Cargo.toml`. CI picks up the new value automatically.
+2. Update the current MSRV and the reason for it in this section.
+3. Add a `### Changed` entry to the `[Unreleased]` section of `CHANGELOG.md` naming the new minimum and why it changed, because it affects anyone building Proxy from source.
+
+Lowering the MSRV requires confirming that `Quick check (Rust MSRV)` passes on the lower version first.
+
 ### PostgreSQL
 
 > [!IMPORTANT]
